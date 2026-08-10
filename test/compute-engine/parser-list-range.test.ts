@@ -459,7 +459,15 @@ describe('Parser: list range ellipsis', () => {
 
   // Two-sample fusion over a NUMERIC start with an exact symbolic second
   // anchor (item 117, the `tpalesypcc` class): the step is the second sample
-  // itself (start 0) or `s1 - s0`, evaluated exactly at canonicalization.
+  // itself (start 0) or `s1 - s0`. `Range`'s canonical handler folds that step
+  // so a decimal progression stays exact — but ONLY when every symbol in it is
+  // a CONSTANT. Folding dereferences an assigned symbol, which baked its value
+  // into the canonical form: `[2a, 3a...9a]` with `a := 2` froze step `2`, so
+  // re-assigning `a := 3` produced an 11-element range of spacing 2 instead of
+  // the 8-element one of spacing 3 — the START moved with `a` while the STEP
+  // did not. A step over a non-constant symbol therefore stays unevaluated and
+  // re-reads its binding per use (`Range` has supported symbolic steps since
+  // item 117); `Pi/4` folds exactly as before.
   describe('two-sample form with exact symbolic second anchor', () => {
     test('`[0, \\frac{\\pi}{4}...2\\pi]` → Range(0, 2π, π/4)', () => {
       expect(parse('\\left[0,\\frac{\\pi}{4}...2\\pi\\right]')).toEqual([
@@ -471,14 +479,32 @@ describe('Parser: list range ellipsis', () => {
     });
 
     test('`[0, \\frac{2}{d}\\pi...(2-\\frac{2}{d})\\pi]` → Range with symbolic step', () => {
+      // The step carries `d`, so it is canonicalized but NOT folded (see the
+      // note above); the association differs from the folded form, the value
+      // does not.
       expect(
         parse('\\left[0,\\frac{2}{d}\\pi...(2-\\frac{2}{d})\\pi\\right]')
       ).toEqual([
         'Range',
         0,
         ['Multiply', 'Pi', ['Add', ['Divide', -2, 'd'], 2]],
-        ['Divide', ['Multiply', 2, 'Pi'], 'd'],
+        ['Multiply', 'Pi', ['Divide', 2, 'd']],
       ]);
+    });
+
+    test('a step over a NON-constant symbol re-reads its binding', () => {
+      const eng = new ComputeEngine();
+      eng.assign('a', 2);
+      const e = eng.parse('[2a, 3a...9a]');
+      expect(e.json).toEqual([
+        'Range',
+        ['Multiply', 2, 'a'],
+        ['Multiply', 9, 'a'],
+        'a',
+      ]);
+      expect(e.evaluate().toString()).toBe('[4,6,8,10,12,14,16,18]');
+      eng.assign('a', 3);
+      expect(e.evaluate().toString()).toBe('[6,9,12,15,18,21,24,27]');
     });
 
     test('`[0, \\frac{1}{1.5}...4]` (float-denominator fraction) fuses', () => {
@@ -995,9 +1021,28 @@ describe('compound first anchor outside a bracket', () => {
     expect(v.at(21)!.is(1)).toBe(true);
   });
 
-  // Pinned: `Divide` is not an anchor head, so broadcast division survives.
-  test('`1/2...5` stays Divide(1, Range(2, 5))', () => {
-    expect(parse('1/2...5')).toEqual(['Divide', 1, ['Range', 2, 5]]);
+  // FLIPPED (Tycho item 134 / D-17). `Divide` used to be the one operator that
+  // captured the ellipsis into its right operand: the prose ellipsis sat above
+  // the `/` rhs floor, so the anchor of `1/2...5` was the DENOMINATOR alone.
+  // Every other anchor shape — `+`, `*`, `^`, the implicit product, and
+  // `\frac` (a primary) — already took the whole preceding element, which made
+  // the same expression parse two ways depending on how the division was
+  // spelled: `[1+\frac{8}{d}...5]` anchored on `1+8/d`, `[1+8/d...5]` on `d`.
+  // The witness `[1+4/d_{iskdensity}, 1+8/d_{iskdensity}...5]` is exactly that
+  // shape, and it parsed as `1 + 8/Range(d_iskdensity, 5)`.
+  //
+  // The constraint this replaces — "must stay above the `/` rhs so `1/(2...5)`
+  // broadcast division is unchanged" — was about a PARENTHESIZED operand,
+  // which no precedence can reach; both forms are pinned below.
+  test('`1/2...5` anchors on the whole quotient', () => {
+    expect(parse('1/2...5')).toEqual(['Range', ['Rational', 1, 2], 5]);
+    // The slash and `\frac` spellings of one expression now agree.
+    expect(parse('1/2...5')).toEqual(parse('\\frac{1}{2}...5'));
+  });
+
+  test('a PARENTHESIZED range still divides (broadcast)', () => {
+    expect(parse('1/(2...5)')).toEqual(['Divide', 1, ['Range', 2, 5]]);
+    expect(parse('2/(1...3)')).toEqual(['Divide', 2, ['Range', 1, 3]]);
   });
 
   // Round-trips: the TEXT `n+1..10` now means `Range(n+1, 10)`, so a genuine

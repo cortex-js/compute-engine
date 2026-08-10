@@ -649,6 +649,86 @@ describe('Map fusion: closed-over variables', () => {
     // A top-level binding resolved on both paths; it must keep doing so.
     expect(expr.evaluate().toString()).toBe('[10,20]');
   });
+
+  // Tycho item 160. The recorded scope is the mapping function's BODY scope,
+  // and the drain must push its PARENT. Canonicalizing a nested literal
+  // auto-declares the free names of its body — including one the ENCLOSING
+  // lambda binds — into that body scope, valueless. Pushing the body scope
+  // therefore let the valueless shadow win over the binding that holds the
+  // value, and the element came back symbolic; the outer application's
+  // binding-keyed substitution then correctly refused to touch it, because it
+  // genuinely is a different binding.
+  //
+  // The general route never had the bug: `makeLambda` pushes the call's fresh
+  // scope and reaches the closure chain through its parent, so a body scope is
+  // not in its lookup path for a non-parameter name either.
+  describe('a nested Map that closes over the outer binder (item 160)', () => {
+    const nested = [
+      'Map',
+      ['List', 1, 2],
+      [
+        'Function',
+        [
+          'Max',
+          ['Map', ['List', 1, 3], ['Function', ['Multiply', 'j', 'k'], 'j']],
+        ],
+        'k',
+      ],
+    ];
+
+    test('the reducing drain substitutes the outer element', () => {
+      const ce = new ComputeEngine();
+      // min over k of (max over j of j·k) = min(3, 6) = 3
+      expect(ce.box(['Min', nested]).evaluate().toString()).toBe('3');
+    });
+
+    test('the materializing drain does too', () => {
+      const ce = new ComputeEngine();
+      expect(ce.box(['ListFrom', nested]).evaluate().toString()).toBe('[3,6]');
+    });
+
+    test('a partially-symbolic result keeps the substituted value', () => {
+      const ce = new ComputeEngine();
+      // The residue must be `x + 3`, never `x + Min(Max(k, 3k), …)`.
+      expect(
+        ce.box(['Add', 'x', ['Min', nested]]).evaluate().toString()
+      ).toBe('x + 3');
+    });
+
+    test('the capture resolves at three levels of nesting', () => {
+      const ce = new ComputeEngine();
+      // max over j of (max over i of i·j·k) at k = 2 → i=2, j=3 → 12
+      const inner3 = [
+        'Map',
+        ['List', 1, 2],
+        [
+          'Function',
+          ['Multiply', 'i', ['Multiply', 'j', 'k']],
+          'i',
+        ],
+      ];
+      const mid = [
+        'Map',
+        ['List', 1, 3],
+        ['Function', ['Max', inner3], 'j'],
+      ];
+      expect(
+        ce
+          .box(['ListFrom', ['Map', ['List', 2], ['Function', ['Max', mid], 'k']]])
+          .evaluate()
+          .toString()
+      ).toBe('[12]');
+    });
+
+    test('the LaTeX surface the item was filed from', () => {
+      const ce = new ComputeEngine();
+      const expr = ce.parse(
+        String.raw`\min(\operatorname{Map}([1,2],k\mapsto \max(\operatorname{Map}([1,3],j\mapsto jk))))`,
+        { strict: false } as any
+      );
+      expect(expr.evaluate().toString()).toBe('3');
+    });
+  });
 });
 
 describe('Map fusion: annotated parameters', () => {

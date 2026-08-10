@@ -1811,12 +1811,32 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (ops.length === 2)
         return ce._fn('Range', [ops[0].canonical, ops[1].canonical]);
 
-      // We have a range with a step. The step may be an expression, which
-      // we will evaluate... (when coming from the LaTeX parser, it is a Subtract expression)
+      // We have a range with a step. The step may be an expression — the
+      // LaTeX two-sample fusion hands us `Subtract(s1, s0)` — and folding it
+      // here is what keeps a decimal progression exact (`1.016 - 1.008` must
+      // become `0.008`, not the float-dust `0.008000000000000007`).
+      //
+      // But evaluating DEREFERENCES an assigned symbol, which bakes a value
+      // into the canonical form. A step built over a document constant
+      // (`[1+4/d, 1+8/d...5]` with `d := 500`) would freeze `1/125`, so
+      // re-assigning `d` moved the range's START while its STEP stayed at the
+      // old spacing — a silently wrong range, not a stale one. Only fold a
+      // step whose every symbol is a CONSTANT: `Pi/4` folds as before,
+      // `4/d` stays symbolic and re-evaluates per use (`Range` has supported
+      // symbolic bounds and steps since Tycho item 117).
+      const step = ops[2].canonical;
+      const foldable = step.symbols.every((name) => {
+        const def = ce.lookupDefinition(name);
+        return (
+          def !== undefined &&
+          'value' in def &&
+          def.value?.isConstant === true
+        );
+      });
       return ce._fn('Range', [
         ops[0].canonical,
         ops[1].canonical,
-        ops[2].canonical.evaluate(),
+        foldable ? step.evaluate() : step,
       ]);
     },
 

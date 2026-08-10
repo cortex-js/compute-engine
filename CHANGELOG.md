@@ -1,3 +1,57 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **The prose ellipsis no longer binds inside an inline `/`.** `1/2...5` is
+  `Range(1/2, 5)`, where it was `Divide(1, Range(2, 5))`. Division was the one
+  operator that captured the ellipsis into its right operand: `+`, `*`, `^`,
+  the implicit product and `\frac` (a primary) all took the whole preceding
+  element as the range anchor, so the SAME expression parsed two ways depending
+  on how its division was spelled — `[1+\frac{8}{d}...5]` anchored on `1+8/d`,
+  while `[1+8/d...5]` anchored on `d` alone and produced
+  `1 + 8/Range(d, 5)`. `[1/2, 1/3...0]` was `[1/2, 1/Range(3, 0)]`.
+
+  A PARENTHESIZED range still divides — `1/(2...5)` is unchanged, and pinned.
+  That form was the stated reason the ellipsis sat above the `/` right-operand
+  floor, but parentheses are not reachable by precedence, so the constraint
+  cost the anchor without buying anything.
+
+### Issues Resolved
+
+- **A `Range` step built over an assigned symbol no longer freezes its value.**
+  `[2a, 3a...9a]` with `a := 2` canonicalized to `Range(2a, 9a, 2)` — the step
+  folded to a literal while the bounds stayed symbolic. Re-assigning `a := 3`
+  then produced an 11-element range of spacing 2 instead of the 8-element one
+  of spacing 3: the start moved with `a` and the step did not, so the result
+  was silently wrong rather than merely stale. `Range`'s canonical handler
+  folds its step operand so a decimal progression stays exact (`1.016 - 1.008`
+  must become `0.008`, not `0.008000000000000007`); it now folds only when
+  every symbol in the step is a CONSTANT. `Pi/4` folds as before, and a step
+  over a document variable stays unevaluated and re-reads its binding per use
+  (`Range` has supported symbolic bounds and steps since 0.100.0).
+
+- **A nested `Map` that closes over the enclosing lambda's parameter now
+  substitutes it.** `Min(Map([1,2], k ↦ Max(Map([1,3], j ↦ j·k))))` evaluated to
+  `Min(Max(k, 3k), Max(k, 3k))` — the inner map reduced, but `k` stayed free —
+  where it is `3`; with a `+x` in the outer body the result went non-finite
+  instead of `3+x`.
+
+  The drain-time `Map` fusion bypasses `makeLambda` and evaluates the level
+  itself, so it pushes a scope to resolve operands the lambda closed over. It
+  pushed the mapping function's BODY scope; the chain those operands must
+  resolve in starts one level OUT. Canonicalizing a nested literal auto-declares
+  the free names of its body — including one the enclosing lambda binds — into
+  that body scope, VALUELESS, so pushing it let the valueless shadow win over
+  the binding that holds the value. The element then came back symbolic, and the
+  outer application's binding-keyed substitution correctly declined to touch it,
+  because it genuinely is a different binding. The drain now pushes the parent,
+  read at drain time (a body scope is re-parented for the duration of each call,
+  so a parent captured when the level was lowered would be a stale link into a
+  frame that has since returned). The general route never had the bug:
+  `makeLambda` pushes the call's fresh scope and reaches the closure chain
+  through its parent, so a body scope is not in its lookup path for a
+  non-parameter name either.
+
 ## 0.103.1 _2026-08-10_
 
 ### Breaking Changes

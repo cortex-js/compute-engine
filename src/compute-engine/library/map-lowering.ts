@@ -267,8 +267,31 @@ export function makeSpineRunner(
             // defining call has returned (a lazy `Map` outlives it). Levels
             // whose operands are all literals — the shape this fusion was built
             // for — record no scope and keep the original zero-scope-work path.
-            if (level.closureScope) {
-              ce.pushScope(level.closureScope);
+            //
+            // Push the body scope's PARENT, not the body scope: the chain the
+            // closed-over operand must resolve in starts one level OUT. The
+            // body scope's own bindings are the literal's parameters — which
+            // this path supplies positionally, never by name — plus whatever
+            // canonicalization auto-declared there, and both are VALUELESS. A
+            // free symbol of the body that the enclosing literal binds is
+            // auto-declared into the inner scope too, so pushing the body
+            // scope makes that valueless shadow win over the binding that
+            // actually holds the value, and the element comes back symbolic
+            // (Tycho item 160: `Min(Map(L, k ↦ Max(Map(M, j ↦ j·k))))`
+            // evaluated to `Min(Max(k, 3k), …)` with `k` free). This mirrors
+            // the general route, which pushes `freshScope` and reaches the
+            // closure chain through its parent — `bodyScope` is never in
+            // `makeLambda`'s lookup path for a non-parameter name either.
+            //
+            // Read at DRAIN time, not when the level was lowered: the spine is
+            // memoized on the `Map` instance, while `invoke` re-parents a body
+            // scope for the duration of each call (`bodyScope.parent =
+            // freshScope`, restored in its `finally`). A parent captured at
+            // lowering time would be a stale link into a frame that has since
+            // returned.
+            const closureParent = level.closureScope?.parent;
+            if (closureParent) {
+              ce.pushScope(closureParent);
               try {
                 v = ce._fn(level.op!, args).evaluate(opts);
               } finally {

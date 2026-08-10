@@ -57,7 +57,7 @@ export interface LoweredLevel {
   arity: number;
   /** The level's source operands (everything but the mapping function). */
   sources: ReadonlyArray<Expression>;
-  /** The mapping function's body scope, when a slot operand carries a FREE
+  /** The mapping function's BODY scope, when a slot operand carries a FREE
    * SYMBOL — a variable the lambda closed over rather than a literal.
    *
    * The lowered path evaluates in the AMBIENT scope, so such an operand only
@@ -66,6 +66,10 @@ export interface LoweredLevel {
    * by the caller resolved `k` to nothing and produced `[k+1, k+2]`. The
    * closure chain itself is intact (`captureClosures` rebinds the literal), so
    * the fix is for the drain to evaluate INSIDE it.
+   *
+   * The drain pushes this scope's **parent**, not the scope itself, and reads
+   * it at drain time rather than here — see `makeSpineRunner`. Both halves are
+   * load-bearing; the reasons are recorded there.
    *
    * `undefined` when every slot operand is a literal — the shape the fusion
    * work was built for (`1 + Mod(Range(0,899) + 29, 900)`), which keeps the

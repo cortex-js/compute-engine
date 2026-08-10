@@ -22,6 +22,7 @@ import {
   ADDITION_PRECEDENCE,
   ARROW_PRECEDENCE,
   ASSIGNMENT_PRECEDENCE,
+  DIVISION_PRECEDENCE,
   INVISIBLE_OP_PRECEDENCE,
   POSTFIX_PRECEDENCE,
   LatexDictionary,
@@ -2112,27 +2113,37 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // multiplication (650, rhs at 651) and the prefix-minus operand (703), so a
   // leading sign or coefficient attaches to the first sample: `[-9...9]` →
   // Range(-9, 9), `[-3N...3N]` → Range(-3N, 3N) — the Desmos comma-less
-  // range idiom. Must stay above the `/` rhs (601) so `1/(2...5)` broadcast
-  // division is unchanged, and above parseRange's rhs floor (270) so the
-  // stepped chain `a...b...c` still nests.
+  // range idiom. Also below the inline `/` rhs (601): `\frac` is a primary, so
+  // `[1+\frac{8}{d}...5]` always took the whole anchor, while the SLASH
+  // spelling of the same expression bound the ellipsis to the denominator
+  // alone — `[1+8/d...5]` parsed as `1 + 8/Range(d, 5)`, and `[1/2, 1/3...0]`
+  // as `[1/2, 1/Range(3, 0)]` (Tycho item 134 / D-17, whose witness
+  // `[1+4/d_{iskdensity}, 1+8/d_{iskdensity}...5]` is exactly this shape).
+  // Division is the ONLY operator that captured it: `+`, `*`, `^` and the
+  // implicit product all leave the whole preceding element as the anchor. The
+  // constraint this replaces — "must stay above the `/` rhs so `1/(2...5)`
+  // broadcast division is unchanged" — was about a PARENTHESIZED operand,
+  // which no precedence can reach; that form is pinned below either way.
+  // Still above parseRange's rhs floor (270), so the stepped chain
+  // `a...b...c` nests.
   {
     latexTrigger: ['.', '.', '.'],
     kind: 'infix',
-    precedence: INVISIBLE_OP_PRECEDENCE - 10,
+    precedence: DIVISION_PRECEDENCE,
     parse: (parser: Parser, lhs: MathJsonExpression) =>
       parseRange(parser, lhs, true),
   },
   {
     latexTrigger: ['\\ldots'],
     kind: 'infix',
-    precedence: INVISIBLE_OP_PRECEDENCE - 10,
+    precedence: DIVISION_PRECEDENCE,
     parse: (parser: Parser, lhs: MathJsonExpression) =>
       parseRange(parser, lhs, true),
   },
   {
     latexTrigger: ['\\dots'],
     kind: 'infix',
-    precedence: INVISIBLE_OP_PRECEDENCE - 10,
+    precedence: DIVISION_PRECEDENCE,
     parse: (parser: Parser, lhs: MathJsonExpression) =>
       parseRange(parser, lhs, true),
   },
@@ -3858,20 +3869,40 @@ function numericSampleValue(expr: MathJsonExpression): number | null {
 }
 
 /**
- * Two-sample fusion for exact symbolic anchors over a numerically KNOWN start:
- * `[0, \frac{2}{d}\pi ... end]` (the item-117 `tpalesypcc` class),
- * `[0, \frac{\pi}{4} ... 2\pi]`, `[0, \frac{1}{1.5} ... 4]`, and the compound
- * first anchors of item 134 (`[2+1, 2+2...9]`, `[1+0.008, 1+0.016...5]`,
- * `[1-0.1, 1-0.2...0]`). With exactly two samples there is no spacing to
- * validate; the step is `s1 - s0`, emitted symbolically — the `Range`
- * canonical handler evaluates its step operand, so an exact symbolic step
- * stays exact.
+ * Two-sample fusion for exact symbolic anchors: `[0, \frac{2}{d}\pi ... end]`
+ * (the item-117 `tpalesypcc` class), `[0, \frac{\pi}{4} ... 2\pi]`,
+ * `[0, \frac{1}{1.5} ... 4]`, the compound first anchors of item 134
+ * (`[2+1, 2+2...9]`, `[1+0.008, 1+0.016...5]`, `[1-0.1, 1-0.2...0]`), and its
+ * residue — a first anchor built from a BOUND document constant
+ * (`[1+\frac{4}{d}, 1+\frac{8}{d}...5]` with `d := 500`, the D-17 witness).
+ *
+ * With exactly two samples there is no spacing to validate; the step is
+ * `s1 - s0`, emitted symbolically — the `Range` canonical handler evaluates
+ * its step operand, so an exact symbolic step stays exact.
+ *
+ * **Nothing is pre-substituted, which is what makes a symbolic first anchor
+ * safe.** The question CE put to Tycho was who should own resolving a bound
+ * symbol before the fusion sees it; the answer is that neither side has to.
+ * Both anchors and the step are carried as EXPRESSIONS, so a later
+ * reassignment of `d` re-evaluates the range instead of replaying a value
+ * baked at parse time — the same discipline the `(coefficient · symbol)` path
+ * above already follows for `[2a, 3a...9a]` → `Range(2a, 9a, a)`.
  *
  * Two deliberate gates: the FIRST sample must be numerically known (see
  * `numericSampleValue` — a symbolic first anchor is the ambiguous-progression
  * territory the additive-base pass adjudicates), and the second must be an
  * arithmetic COMPOUND shape so generic-sequence notation stays a placeholder
  * List (see `ARITHMETIC_SAMPLE_OPERATORS`).
+ *
+ * The first gate is what still blocks Tycho item 134's D-17 witness
+ * (`[1+\frac{4}{d}, 1+\frac{8}{d}...5]` with `d` a bound document constant),
+ * and it is NOT an oversight that can be relaxed here: the parser sees
+ * declarations but never values (`Parser.resolveSymbol` answers a type), and
+ * declaration presence carries no signal because parsing AUTO-DECLARES a free
+ * symbol. So `d` and the `m`, `n`, `k` of `[m+n, m+k+15, ...]` are
+ * indistinguishable at this layer, and admitting one admits the generic
+ * sequence notation the pins below protect. Resolving it needs a ruling, not
+ * a wider gate — see the item-134 thread.
  */
 function tryTwoSampleSymbolicRange(
   samples: readonly MathJsonExpression[],
