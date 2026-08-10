@@ -3,8 +3,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 /**
  * Comprehension element-memo invalidation (Tycho item 38).
  *
- * The memo is keyed on `ce._mutationGeneration` + per-dependency
- * `_writeVersion`s, NOT on the engine-wide `_generation`: an unrelated
+ * The memo is keyed on `ce._semanticVersion` + per-dependency
+ * `_writeVersion`s, NOT on the engine-wide `_anyVersion`: an unrelated
  * scoped evaluation (a `\sum`, a `Block`) between two reads must not
  * invalidate it, while a semantic mutation (reassigning a free variable the
  * body reads — directly or through a helper —, `assume`/`forget`, an
@@ -137,8 +137,8 @@ describe('Comprehension element memo', () => {
     expect(nested.evaluate().re).toBe(18); // and again, post-memo
   });
 
-  it('bumps _mutationGeneration when a symbol-bound operator signature is inferred', () => {
-    // The memo's `_mutationGeneration` axis relies on every operator-definition
+  it('bumps _semanticVersion when a symbol-bound operator signature is inferred', () => {
+    // The memo's `_semanticVersion` axis relies on every operator-definition
     // change bumping the counter (see `snapshotDeps` in
     // `collection-element-memo.ts`). A symbol bound to an
     // operator definition whose (generic) signature is narrowed by inference is
@@ -146,7 +146,7 @@ describe('Comprehension element memo', () => {
     // mirroring `BoxedFunction.infer()`.
     ce.declare('opmemo', { signature: 'function' });
     const s = ce.box('opmemo');
-    const before = ce._mutationGeneration;
+    const before = ce._semanticVersion;
     // Narrow the generic `function` signature to a concrete one — this hits the
     // `def.operator.signature = newType` exit of the operator-def branch.
     const changed = (s as any).infer('(number) -> number', 'narrow');
@@ -154,7 +154,7 @@ describe('Comprehension element memo', () => {
     expect((ce.box('opmemo') as any)._def?.operator?.signature?.toString()).toBe(
       '(number) -> number'
     );
-    expect(ce._mutationGeneration).toBeGreaterThan(before);
+    expect(ce._semanticVersion).toBeGreaterThan(before);
   });
 
   it('never serves the memo for a non-scoped (structural) comprehension', () => {

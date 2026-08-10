@@ -5,7 +5,7 @@
  * flag unset — the default — every hook is a single branch on the
  * `CACHE_STATS` module constant and nothing is recorded.
  *
- * What it answers: how often does a `_generation` bump invalidate a cache
+ * What it answers: how often does a `_anyVersion` bump invalidate a cache
  * entry SPURIOUSLY — the recompute returns the same answer, because the
  * write that bumped the counter was to a binding the node does not depend
  * on. That share (`missGenerationWasted / missGeneration`) bounds what a
@@ -36,7 +36,7 @@ const CACHE_EVENTS = [
   'missCold', // no entry had ever been filled
   'missGeneration', // the generation key moved
   'missGenerationWasted', // …and the recompute produced the SAME answer
-  'missEpoch', // `_semanticEpoch` moved
+  'missEpoch', // `_worldVersion` moved
   'missScope', // ambient lexical-scope identity changed (lazyValue only)
   'missKeyShape', // entry key kind (constant vs generation) changed
   'missDependency', // a tracked dependency moved (elementMemo only)
@@ -128,7 +128,7 @@ export function instrumentedCachedValue<T>(
 // ── Shadow 'callable'-axis simulation ──────────────────────────────────────
 // Probe for docs/plans/2026-08-09-state-event-invalidation-axes.md §6: runs
 // the proposed `callable` axis as a SHADOW key alongside the real
-// `_generation` key of `_effects`, changing no behavior. On each settled
+// `_anyVersion` key of `_effects`, changing no behavior. On each settled
 // recompute, a would-be shadow hit whose stored answer differs from the
 // recomputed one is counted `unsound` — the dry-run soundness check.
 

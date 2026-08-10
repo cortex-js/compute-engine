@@ -1237,7 +1237,7 @@ export function updateDef(
     // bump (`declareSymbolOperator`), which such a throw would skip — leaving
     // generation-keyed caches holding results computed against the definition
     // that is no longer installed.
-    ce._generation += 1;
+    ce._anyVersion += 1;
     // Shadow 'callable' axis (CE_CACHE_STATS probe): this branch fires on
     // exactly the callable-shaped swaps — declares and redefinitions both
     // route through here.

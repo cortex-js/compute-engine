@@ -408,7 +408,7 @@ export type EvalContext<Expr = unknown, Binding = unknown> = {
   /**
    * Set when `assume()`/`forget()` modified THIS context's assumptions.
    * Popping the context then silently reverts them, so the pop must bump
-   * `ce._mutationGeneration` to invalidate mutation-keyed caches; a pop of
+   * `ce._semanticVersion` to invalidate mutation-keyed caches; a pop of
    * a clean context must not (that non-bump is what lets the
    * `Comprehension` element memo survive unrelated scoped evaluations).
    */

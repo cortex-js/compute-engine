@@ -34,7 +34,7 @@ import {
  *   separate "evaluation context" values map — the definition object is the
  *   single source of truth.
  *
- * - The `set value()` setter increments `ce._generation` so that cached
+ * - The `set value()` setter increments `ce._anyVersion` so that cached
  *   results depending on this symbol are invalidated.
  *
  * - The value or type of a constant cannot be changed.
@@ -325,13 +325,13 @@ export class _BoxedValueDefinition
       )
         bumpShadowCallable();
     }
-    this._engine._generation += 1;
+    this._engine._anyVersion += 1;
     this._writeVersion += 1;
     // Ephemeral loop-index writes (big-op/comprehension index assigns) are
     // tracked per-definition only: they must not invalidate mutation-keyed
     // caches of expressions that don't reference the index.
     if (this._engine._ephemeralWriteDepth === 0)
-      this._engine._mutationGeneration += 1;
+      this._engine._semanticVersion += 1;
   }
 
   get type(): BoxedType {

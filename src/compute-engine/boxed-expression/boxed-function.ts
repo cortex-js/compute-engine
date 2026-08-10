@@ -260,7 +260,7 @@ export class BoxedFunction
   /** The runtime effect channel (`effects-of.ts`). Generation-guarded like
    * `_type` and `_sgn`, and for a reason beyond speed: the projection resolves
    * a symbol operand through its CURRENT binding, so a reassignment — which
-   * bumps `ce._generation` — must invalidate the answer. (`reset()` is an inert
+   * bumps `ce._anyVersion` — must invalidate the answer. (`reset()` is an inert
    * stub and is NOT the invalidation mechanism.) `undefined` is a legitimate
    * cached value (the empty set); `null` is the miss marker.
    *
@@ -281,19 +281,19 @@ export class BoxedFunction
    * `_memoizedLazyCollectionValue()`. */
   private _lazyValueInFlight = false;
 
-  /** `ce._semanticEpoch` when the lazy-collection evaluate memo was filled,
+  /** `ce._worldVersion` when the lazy-collection evaluate memo was filled,
    * checked on EVERY entry (including the generation-independent one): the
    * rare global events — `assume`/`forget`, operator/type redefinition, and
    * above all a configuration change (`precision`/`angularUnit` run
    * `_reset()`) — invalidate stored numeric content that is otherwise
    * constant. `-1` is "never filled". Deliberately the epoch and not
-   * `_mutationGeneration`: value writes must NOT invalidate, or the
+   * `_semanticVersion`: value writes must NOT invalidate, or the
    * accumulator loop below loses its O(n). Same axis, same reason as the
    * element memo (`collection-element-memo.ts`). */
   private _lazyValueEpoch = -1;
 
   /** The ambient lexical scope a GENERATION-GATED lazy-collection memo entry
-   * was filled under. `ce._generation` alone does not characterize the
+   * was filled under. `ce._anyVersion` alone does not characterize the
    * resolution environment: re-pushing an already-populated scope bumps
    * nothing (only `popScope` bumps), yet a non-constant symbol operand
    * resolves by name through the ambient chain, so the same node means
@@ -442,11 +442,11 @@ export class BoxedFunction
     // serializes pure the moment its result type is inferred.
     def._resyncEffects();
 
-    this.engine._generation += 1;
+    this.engine._anyVersion += 1;
     // Signature inference mutates a SHARED operator definition in place: a
     // semantic change other expressions may depend on.
-    this.engine._mutationGeneration += 1;
-    this.engine._semanticEpoch += 1;
+    this.engine._semanticVersion += 1;
+    this.engine._worldVersion += 1;
 
     if (
       sink &&
@@ -513,7 +513,7 @@ export class BoxedFunction
    * @internal
    */
   _effectsOf(): ComputedEffects {
-    const generation = this.engine._generation;
+    const generation = this.engine._anyVersion;
     if (
       this._effects.generation === generation &&
       this._effects.value !== null
@@ -1004,7 +1004,7 @@ export class BoxedFunction
     const gen =
       this._ops.every((x) => x.isConstant) && this.isPure
         ? undefined
-        : this.engine._generation;
+        : this.engine._anyVersion;
     const compute = (): Sign | undefined => {
       if (!this.isValid || this.isNumber !== true) return undefined;
       return sgn(this);
@@ -1551,7 +1551,7 @@ export class BoxedFunction
 
   /** The type of the value of the function */
   get type(): BoxedType {
-    const generation = this.engine._generation;
+    const generation = this.engine._anyVersion;
     // Fast path: the cache was already consulted at this generation, so the
     // key it was consulted with — which costs a purity projection and an
     // `isConstant` subtree walk — is necessarily the same one now. See
@@ -1570,7 +1570,7 @@ export class BoxedFunction
     const gen =
       this._ops.every((x) => x.isConstant) && this.isPure
         ? undefined
-        : this.engine._generation;
+        : this.engine._anyVersion;
     const compute = (): BoxedType =>
       new BoxedType(type(this), this.engine._typeResolver);
     const result =
@@ -1699,7 +1699,7 @@ export class BoxedFunction
    * effectful operand's effects. Only the REPEAT walks are eliminated.
    *
    * **Dual key, and why the constant one is the whole point.** `Assign` bumps
-   * `ce._generation`, and an accumulator (`xs := Append(xs, v)` in a loop)
+   * `ce._anyVersion`, and an accumulator (`xs := Append(xs, v)` in a loop)
    * assigns every iteration — a memo keyed only on the current generation is
    * invalidated by the loop's own writes and never hits, leaving the loop
    * quadratic. So, exactly the split `get type` uses: a node whose operands
@@ -1711,7 +1711,7 @@ export class BoxedFunction
    * the purity gate explicit.)
    *
    * **Two axes the generation does not cover**, stamped alongside it:
-   * - `_lazyValueEpoch` (`ce._semanticEpoch`), checked on BOTH kinds of
+   * - `_lazyValueEpoch` (`ce._worldVersion`), checked on BOTH kinds of
    *   entry. "Constant" means no value write can change it, not that nothing
    *   can: `ce.precision = …` runs `_reset()` and purges caches precisely
    *   because stored numeric content is now stale, and `assume`/`forget` and
@@ -1756,7 +1756,7 @@ export class BoxedFunction
     const hit = this._lazyCollectionMemoHit();
     if (hit !== undefined) return hit;
 
-    const generation = this.engine._generation;
+    const generation = this.engine._anyVersion;
 
     if (this._lazyValueInFlight) {
       // A re-entrant evaluate of this very node. Take today's uncached path —
@@ -1806,7 +1806,7 @@ export class BoxedFunction
     if (
       CACHE_STATS &&
       prevValue !== null &&
-      prevEpoch === this.engine._semanticEpoch &&
+      prevEpoch === this.engine._worldVersion &&
       prevGeneration !== undefined &&
       prevGeneration !== generation &&
       result.isSame(prevValue)
@@ -1826,9 +1826,9 @@ export class BoxedFunction
   private _lazyCollectionMemoHit(): Expression | undefined {
     if (
       this._value.value !== null &&
-      this._lazyValueEpoch === this.engine._semanticEpoch &&
+      this._lazyValueEpoch === this.engine._worldVersion &&
       (this._value.generation === undefined ||
-        (this._value.generation === this.engine._generation &&
+        (this._value.generation === this.engine._anyVersion &&
           this._lazyValueScope === this.engine.context?.lexicalScope))
     ) {
       if (CACHE_STATS)
@@ -1840,9 +1840,9 @@ export class BoxedFunction
     }
     if (CACHE_STATS) {
       if (this._value.value === null) recordCache('lazyValue', 'missCold');
-      else if (this._lazyValueEpoch !== this.engine._semanticEpoch)
+      else if (this._lazyValueEpoch !== this.engine._worldVersion)
         recordCache('lazyValue', 'missEpoch');
-      else if (this._value.generation !== this.engine._generation)
+      else if (this._value.generation !== this.engine._anyVersion)
         recordCache('lazyValue', 'missGeneration');
       else recordCache('lazyValue', 'missScope');
     }
@@ -1865,7 +1865,7 @@ export class BoxedFunction
       // Sampled AFTER the walk, like the element memo's stamp: a bump the
       // walk itself caused (signature inference) is absorbed rather than
       // making the entry born stale.
-      this._lazyValueEpoch = this.engine._semanticEpoch;
+      this._lazyValueEpoch = this.engine._worldVersion;
       this._lazyValueScope = this.engine.context?.lexicalScope;
     }
 
@@ -1888,7 +1888,7 @@ export class BoxedFunction
         result._value.value = result;
         // Same epoch axis as the write above; no scope stamp is needed for a
         // constant entry, which resolves no symbol through the ambient chain.
-        result._lazyValueEpoch = this.engine._semanticEpoch;
+        result._lazyValueEpoch = this.engine._worldVersion;
       }
     }
   }
@@ -1969,7 +1969,7 @@ export class BoxedFunction
     const hit = this._lazyCollectionMemoHit();
     if (hit !== undefined) return hit;
 
-    const generation = this.engine._generation;
+    const generation = this.engine._anyVersion;
     const before = _lazyValueProvisionalReads;
     const cyclesBefore = cycleDetectionCount();
 

@@ -240,7 +240,7 @@ describe('lazy collection regimes', () => {
 describe('lazy collection evaluate memo', () => {
   test('each iteration re-uses the previous result', () => {
     // The decisive, DETERMINISTIC probe, in the real loop shape: the `Assign`
-    // between two iterations bumps `ce._generation`, so a memo keyed only on
+    // between two iterations bumps `ce._anyVersion`, so a memo keyed only on
     // the generation would be invalidated by the loop's own writes and
     // iteration k's walk would re-walk the whole chain. What makes the loop
     // sub-quadratic is that iteration k−1's RESULT is still a memo hit after
@@ -261,7 +261,7 @@ describe('lazy collection evaluate memo', () => {
 
   test('an evaluated view survives an unrelated Assign', () => {
     // The deterministic half of the test above: `Assign` bumps
-    // `ce._generation`, so a memo keyed only on the generation would be
+    // `ce._anyVersion`, so a memo keyed only on the generation would be
     // invalidated by the accumulator's own writes and never hit. A constant,
     // pure view gets a generation-INDEPENDENT entry instead.
     const ce = new ComputeEngine();
@@ -330,7 +330,7 @@ describe('lazy collection evaluate memo', () => {
     // "Constant" means no VALUE write can make the entry stale — not that
     // nothing can. `ce.precision` runs `_reset()`, which purges the engine's
     // caches precisely because stored numeric content is now stale, and bumps
-    // `_semanticEpoch`; the memo's epoch axis is what makes the same node
+    // `_worldVersion`; the memo's epoch axis is what makes the same node
     // follow.
     const ce = new ComputeEngine();
     ce.precision = 20;
@@ -351,7 +351,7 @@ describe('lazy collection evaluate memo', () => {
 
   test('a memoized view re-resolves inside a re-pushed populated scope', () => {
     // Re-pushing an already-populated scope bumps NO generation (only
-    // `popScope` bumps), so `ce._generation` alone does not characterize the
+    // `popScope` bumps), so `ce._anyVersion` alone does not characterize the
     // resolution environment: the memo also stamps the ambient lexical scope.
     const ce = new ComputeEngine();
     ce.assign('xs', ce.box(['List', 1, 2]));
@@ -421,7 +421,7 @@ describe('lazy collection evaluate memo', () => {
 describe('lazy collection evaluate memo — async parity', () => {
   test('each async iteration re-uses the previous result', async () => {
     // The async twin of the accumulator identity test above, in the same real
-    // loop shape: the `Assign` between two iterations bumps `ce._generation`,
+    // loop shape: the `Assign` between two iterations bumps `ce._anyVersion`,
     // so what keeps the loop sub-quadratic is that iteration k−1's RESULT is
     // still a memo hit afterwards — i.e. it evaluates to ITSELF.
     const ce = new ComputeEngine();
@@ -714,7 +714,7 @@ describe('conditional-handler accumulator loops', () => {
     // assertion (the suite dropped those as CI-flaky): the mechanism is
     // pinned deterministically, exactly as the `Append` accumulator above —
     // iteration k−1's RESULT must still be a memo hit after the loop's own
-    // `Assign` bumped `ce._generation`, which is what evaluating it to
+    // `Assign` bumped `ce._anyVersion`, which is what evaluating it to
     // ITSELF means. Before the fix this loop was not merely quadratic but
     // exponential (≈2× per iteration past 100 elements): 40 iterations over
     // a 90-element base took 214 s.

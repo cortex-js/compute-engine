@@ -267,7 +267,7 @@ const EMPTY_FACT_INDEX: FactIndex = Object.freeze({
 });
 
 type FactIndexCacheEntry = {
-  /** `ce._generation` at build time. `assume()`/`forget()` bump it. */
+  /** `ce._anyVersion` at build time. `assume()`/`forget()` bump it. */
   generation: number;
   /**
    * Identity of the assumptions map at build time. `pushScope`/`popScope`
@@ -446,7 +446,7 @@ function buildFactIndex(
  *   there are no assumptions — hot paths with zero assumptions pay only an
  *   emptiness check.
  * - Otherwise, the index is cached per engine and invalidated when
- *   `ce._generation` changes (bumped by `assume()`, `forget()`,
+ *   `ce._anyVersion` changes (bumped by `assume()`, `forget()`,
  *   declarations…), when the assumptions map object changes (scope
  *   push/pop), or when the number of stored assumptions changes (direct
  *   `.set()`/`.delete()` on the map).
@@ -466,7 +466,7 @@ export function getFactIndex(ce: ComputeEngine): FactIndex {
   const cached = factIndexCache.get(ce);
   if (
     cached &&
-    cached.generation === ce._generation &&
+    cached.generation === ce._anyVersion &&
     cached.assumptions === assumptions &&
     cached.count === count
   )
@@ -474,7 +474,7 @@ export function getFactIndex(ce: ComputeEngine): FactIndex {
 
   const index = buildFactIndex(assumptions);
   factIndexCache.set(ce, {
-    generation: ce._generation,
+    generation: ce._anyVersion,
     assumptions,
     count,
     index,

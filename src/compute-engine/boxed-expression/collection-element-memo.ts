@@ -27,7 +27,7 @@ import { CACHE_STATS, recordCache } from '../../common/cache-stats';
  * `precision`/`angularUnit` through `_reset()`) — so the memo needs exactly
  * two axes and nothing else:
  *
- * - `ce._semanticEpoch` equality — the RARE global events for which no
+ * - `ce._worldVersion` equality — the RARE global events for which no
  *   per-dependency tracking exists: `assume`/`forget` (and assumption-dirty
  *   scope pops), operator/type redefinition, signature inference, `reset()`,
  *   and configuration changes. Deliberately NOT bumped by value writes, so an
@@ -83,11 +83,11 @@ interface ElementMemoDep {
 }
 
 interface ElementMemoCache {
-  /** `ce._semanticEpoch` snapshot taken AFTER the fill, so any bump the walk
+  /** `ce._worldVersion` snapshot taken AFTER the fill, so any bump the walk
    * itself causes is absorbed. Covers the rare global events AND every
    * engine-configuration input (tolerance/precision/angular unit), which is
    * why no separate configuration stamps are kept. */
-  semanticEpoch: number;
+  worldVersion: number;
   deps: ElementMemoDep[];
   /** True when `elements` is the whole collection. `each()` serves only
    * complete entries; `at()`/`elementMemoFillTo` serve any covering prefix.
@@ -210,7 +210,7 @@ function resolveDepBinding(
 /**
  * Snapshot the instance's free-symbol dependencies, one per distinct value
  * definition. Only value-definition bindings are versioned: an operator
- * redefinition or signature inference always bumps `ce._semanticEpoch`, so
+ * redefinition or signature inference always bumps `ce._worldVersion`, so
  * operator-bound symbols are covered by the global axis.
  *
  * Returns `undefined` when the instance is ineligible for memoization: a
@@ -245,7 +245,7 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
     // cannot reach (an auto-declared unknown inside a literal's body scope)
     // is the hazard: `assign` takes the DECLARE path and installs the value
     // in a DIFFERENT definition, bumping neither the tracked version nor
-    // `_semanticEpoch` — such an instance is ineligible.
+    // `_worldVersion` — such an instance is ineligible.
     if (valueDef.value === undefined && !valueDef.isConstant) {
       const resolved = resolveDepBinding(ce, depScope, name);
       if (!isValueDef(resolved) || resolved.value !== valueDef) {
@@ -266,7 +266,7 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
     // own free symbols into the instance's meaning — `Map(xs, f)` with
     // `f(x) = x + q` depends on `q`, which appears nowhere in the tree.
     // No global counter tracks a reassignment of `q` (a plain value write
-    // never bumps `_semanticEpoch`; the DECLARE path a never-declared `q`
+    // never bumps `_worldVersion`; the DECLARE path a never-declared `q`
     // takes bumps nothing relevant either), so the value must be walked.
     // The `seen` set terminates self- and mutually-recursive definitions.
     const stored = valueDef.value;
@@ -335,7 +335,7 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
         visitValueDef(e, headDef);
       // A USER-DEFINED operator head (`f8(x)` after `ce.assign('f8', x ↦ …)`
       // creates an operator definition) needs no dep entry — redefinition and
-      // signature inference always bump `_semanticEpoch` — but its
+      // signature inference always bump `_worldVersion` — but its
       // lambda BODY carries transitive symbol dependencies exactly like a
       // stored value, so walk it (with its parameter names skipped: their
       // occurrences bind to valueless body-scope definitions, which are the
@@ -379,13 +379,13 @@ export function validElementMemo(
     return undefined;
   }
   const ce = expr.engine;
-  if (entry.semanticEpoch !== ce._semanticEpoch) {
+  if (entry.worldVersion !== ce._worldVersion) {
     if (CACHE_STATS) recordCache('elementMemo', 'missEpoch');
     return undefined;
   }
-  // NO `_mutationGeneration` fast path here: an ephemeral loop-index write
+  // NO `_semanticVersion` fast path here: an ephemeral loop-index write
   // bumps the index definition's `_writeVersion` but NOT
-  // `_mutationGeneration`, so generation equality does NOT prove the
+  // `_semanticVersion`, so generation equality does NOT prove the
   // dependencies are unchanged. The loop below IS the ephemeral-write
   // detector — it is what makes a memoized instance nested under a `Sum`
   // refill per iteration. Do not "optimize" it away.
@@ -436,7 +436,7 @@ function depsUnmoved(
 /**
  * Commit a recorded walk's buffer, if the walk is certifiable.
  *
- * `suspendedWrite` means the consumer bumped `_mutationGeneration` while the
+ * `suspendedWrite` means the consumer bumped `_semanticVersion` while the
  * generator was suspended between two pulls. That alone does not condemn the
  * buffer: a write to a NON-dependency cannot mix it (a consumer loop that
  * assigns an unrelated accumulator between pulls must not permanently block
@@ -484,7 +484,7 @@ function commitRecordedWalk(
       return;
   }
   elementMemoCaches.set(expr, {
-    semanticEpoch: expr.engine._semanticEpoch,
+    worldVersion: expr.engine._worldVersion,
     deps: endDeps,
     complete,
     elements: buffer,
@@ -525,28 +525,28 @@ export function* elementMemoRecordingStream(
   // post-yield comparison, so the `finally` must re-compare against the last
   // sample or a pull-mutate-break consumer would commit a prefix stamped
   // with the post-mutation state (the second reviewer-round catch).
-  let gen = ce._mutationGeneration;
-  let epoch = ce._semanticEpoch;
+  let gen = ce._semanticVersion;
+  let epoch = ce._worldVersion;
   try {
     let result = iter.next();
     // Bumps INSIDE `next()` are the walk's own and are absorbed; only a bump
     // observed across a yield boundary is the consumer's. Configuration
     // changes (tolerance/precision/angular unit/jit) bump
-    // `_mutationGeneration` too, so a mid-walk config change also raises
+    // `_semanticVersion` too, so a mid-walk config change also raises
     // these flags.
-    gen = ce._mutationGeneration;
-    epoch = ce._semanticEpoch;
+    gen = ce._semanticVersion;
+    epoch = ce._worldVersion;
     while (!result.done) {
       if (buffer.length < ELEMENT_MEMO_CAP) buffer.push(result.value);
       else overflow = true;
       yield result.value;
       // Resumed: anything that moved while we were suspended was the
       // consumer, not the element body.
-      if (ce._mutationGeneration !== gen) suspendedWrite = true;
-      if (ce._semanticEpoch !== epoch) suspendedEpochChange = true;
+      if (ce._semanticVersion !== gen) suspendedWrite = true;
+      if (ce._worldVersion !== epoch) suspendedEpochChange = true;
       result = iter.next();
-      gen = ce._mutationGeneration;
-      epoch = ce._semanticEpoch;
+      gen = ce._semanticVersion;
+      epoch = ce._worldVersion;
     }
     drained = true;
   } finally {
@@ -554,8 +554,8 @@ export function* elementMemoRecordingStream(
     // and this `finally` (abrupt closure), and — conservatively — a bump
     // made by an element evaluation that THREW (a deadline mid-`next()`);
     // declining that prefix loses nothing of value.
-    if (ce._mutationGeneration !== gen) suspendedWrite = true;
-    if (ce._semanticEpoch !== epoch) suspendedEpochChange = true;
+    if (ce._semanticVersion !== gen) suspendedWrite = true;
+    if (ce._worldVersion !== epoch) suspendedEpochChange = true;
     // Forward early abandonment (`break`, `Take`, `.return()`) to the
     // wrapped iterator so a future handler with cleanup semantics is closed
     // deterministically rather than left suspended until GC.
@@ -627,7 +627,7 @@ export function elementMemoFillTo(
   if (deps !== undefined) {
     const ce = expr.engine;
     elementMemoCaches.set(expr, {
-      semanticEpoch: ce._semanticEpoch,
+      worldVersion: ce._worldVersion,
       deps,
       complete,
       elements,

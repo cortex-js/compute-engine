@@ -1638,8 +1638,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             const fnDef = assignValueAsOperatorDef(ce, canonFn);
             if (fnDef !== undefined) {
               updateDef(ce, symbolName, binding, fnDef);
-              ce._mutationGeneration += 1;
-              ce._semanticEpoch += 1;
+              ce._semanticVersion += 1;
+              ce._worldVersion += 1;
             }
           }
         }
@@ -1778,8 +1778,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                   const fnDef = assignValueAsOperatorDef(ce, canonRhs);
                   if (fnDef !== undefined) {
                     updateDef(ce, symbolName, binding, fnDef);
-                    ce._mutationGeneration += 1;
-                    ce._semanticEpoch += 1;
+                    ce._semanticVersion += 1;
+                    ce._worldVersion += 1;
                   }
                 }
               }

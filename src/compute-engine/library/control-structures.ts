@@ -1399,13 +1399,13 @@ class ComprehensionIndexFrame {
   /** Save the scope's current index values and install this walk's. */
   install(): void {
     this.saved = this.defs.map((d) => d?.value);
-    // Ephemeral index writes: bump `_generation` and the per-def
-    // `_writeVersion`, not `_mutationGeneration` — installing/restoring a
+    // Ephemeral index writes: bump `_anyVersion` and the per-def
+    // `_writeVersion`, not `_semanticVersion` — installing/restoring a
     // walk's indices is not a semantic mutation of the document.
     this.ce._ephemeralWriteDepth += 1;
     try {
       this.defs.forEach((d, i) => {
-        // Skip no-op writes: the `value` setter bumps `ce._generation`, and a
+        // Skip no-op writes: the `value` setter bumps `ce._anyVersion`, and a
         // gratuitous bump invalidates generation-keyed caches engine-wide.
         if (d && d.value !== this.mine[i]) d.value = this.mine[i];
       });
@@ -1819,8 +1819,8 @@ function* runNested(
   // the parent scope looking for a binding to assign into.
   const skipAssign = name === 'Nothing';
   for (const value of collection.each()) {
-    // Ephemeral index write: bumps `_generation` and the index def's
-    // `_writeVersion`, not `_mutationGeneration` (see `assignLoopIndex`).
+    // Ephemeral index write: bumps `_anyVersion` and the index def's
+    // `_writeVersion`, not `_semanticVersion` (see `assignLoopIndex`).
     if (!skipAssign) assignLoopIndex(ce, name, value);
     yield* runNested(body, elements, index + 1, ce, state, onLeaf);
     if (state.stopped) return;

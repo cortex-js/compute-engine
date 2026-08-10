@@ -416,9 +416,9 @@ describe('DeclareType statement replacement is IN PLACE', () => {
   test('the generation is bumped (A5)', () => {
     const ce = new ComputeEngine();
     ce.declareType('g', 'integer', { alias: true, fromStatement: true });
-    const before = ce._generation;
+    const before = ce._anyVersion;
     ce.declareType('g', 'string', { alias: true, fromStatement: true });
-    expect(ce._generation).toBeGreaterThan(before);
+    expect(ce._anyVersion).toBeGreaterThan(before);
   });
 
   //

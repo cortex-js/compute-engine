@@ -268,7 +268,7 @@ const operatorPoolCache = new WeakMap<
  */
 function operatorNamePool(ce: IComputeEngine): string[] {
   const cached = operatorPoolCache.get(ce);
-  if (cached && cached.generation === ce._generation) return cached.names;
+  if (cached && cached.generation === ce._anyVersion) return cached.names;
 
   const names: string[] = [];
   const seen = new Set<string>();
@@ -282,7 +282,7 @@ function operatorNamePool(ce: IComputeEngine): string[] {
     scope = scope.parent;
   }
 
-  operatorPoolCache.set(ce, { generation: ce._generation, names });
+  operatorPoolCache.set(ce, { generation: ce._anyVersion, names });
   return names;
 }
 
@@ -429,7 +429,7 @@ export function declareSymbolValue(
   const boxedDef = scope.bindings.get(name)!;
   updateDef(ce, name, boxedDef, def);
 
-  ce._generation += 1;
+  ce._anyVersion += 1;
 
   return boxedDef;
 }
@@ -450,7 +450,7 @@ export function declareSymbolOperator(
   const boxedDef = scope.bindings.get(name)!;
   updateDef(ce, name, boxedDef, def);
 
-  ce._generation += 1;
+  ce._anyVersion += 1;
 
   return boxedDef;
 }
@@ -477,7 +477,7 @@ export function setSymbolValue(
 
   if (isValueDef(def)) {
     def.value.value = value;
-    ce._generation += 1;
+    ce._anyVersion += 1;
     // The declared-signature reconciliation paths (§6.3) store a `Function`
     // literal through here rather than through `updateDef`, so this is where a
     // function-typed value definition joins the forward-reference mechanism:
@@ -939,7 +939,7 @@ export function declareType(
   // `existing` is already truthy; the second disjunct is there so a future
   // unblocking route cannot silently skip the bump.
   if (existing || settled.length > 0) {
-    ce._generation += 1;
+    ce._anyVersion += 1;
     // Shadow 'callable' axis (CE_CACHE_STATS probe): variance settle is a
     // binding-repair event in its predicate.
     if (CACHE_STATS) bumpShadowCallable();
@@ -1776,8 +1776,8 @@ export function assignFn(
           if (shadowBuiltin) ce._declareSymbolOperator(id, lambdaDef);
           else {
             updateDef(ce, id, def, lambdaDef);
-            ce._mutationGeneration += 1;
-            ce._semanticEpoch += 1;
+            ce._semanticVersion += 1;
+            ce._worldVersion += 1;
           }
           return ce;
         }
@@ -1815,8 +1815,8 @@ export function assignFn(
     // Redefining an existing operator is a semantic mutation (no value-setter
     // write happens on this path, so bump explicitly) — and a global-semantics
     // event, not a value write, so the epoch bumps too.
-    ce._mutationGeneration += 1;
-    ce._semanticEpoch += 1;
+    ce._semanticVersion += 1;
+    ce._worldVersion += 1;
     return ce;
   }
 
@@ -1872,8 +1872,8 @@ export function assignFn(
     // updateDef removes def.value and sets def.operator — no separate
     // _setSymbolValue call needed to clear the old value.
     updateDef(ce, id, def, fnDef);
-    ce._mutationGeneration += 1;
-    ce._semanticEpoch += 1;
+    ce._semanticVersion += 1;
+    ce._worldVersion += 1;
   } else {
     // No previous definition: create a new one
     ce.declare(id, fnDef);

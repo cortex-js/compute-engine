@@ -28,7 +28,7 @@ import type { Interval } from './map-exact-proof.js';
  * eligibility-gated compile attempt produces a per-logical-instance cached
  * compiled element function, validated per invocation against the same
  * two-axis keys that govern the comprehension cache
- * (`ce._mutationGeneration` + per-definition `_writeVersion`), with silent
+ * (`ce._semanticVersion` + per-definition `_writeVersion`), with silent
  * per-element interpreter fallback.
  *
  * Design: `docs/plans/2026-07-19-map-auto-compile-design.md` (ratified
@@ -90,9 +90,9 @@ interface MapCompileCache {
   /** The compiled code's capture set (from the compiler's `symbolDeps`
    * collector), resolved in the ambient scope at compile time. */
   deps?: MapCompileDep[];
-  /** `ce._mutationGeneration` stamp for the cheap per-invocation check. */
+  /** `ce._semanticVersion` stamp for the cheap per-invocation check. */
   generation: number;
-  /** `ce._semanticEpoch` at compile time. An epoch event — assumptions
+  /** `ce._worldVersion` at compile time. An epoch event — assumptions
    * (`assume`/`forget`), operator/type redefinition, signature inference,
    * engine-config changes, reset — invalidates unconditionally: unlike a value
    * write, it cannot be re-stamped away by `validCompiled`'s dep walk, because
@@ -403,9 +403,9 @@ function depChanged(ce: ComputeEngine, dep: MapCompileDep): boolean {
 }
 
 /**
- * Per-invocation validation (D3). Cheap check first (`_mutationGeneration` +
+ * Per-invocation validation (D3). Cheap check first (`_semanticVersion` +
  * `ce.tolerance` stamps); on mismatch, the full dependency walk. If every
- * dep is unchanged (and the tolerance, angularUnit and `_semanticEpoch` still
+ * dep is unchanged (and the tolerance, angularUnit and `_worldVersion` still
  * match — those are never re-stamped away), **re-stamp and keep** the
  * compiled function: an unrelated per-frame `ce.assign` bumping the global
  * axis must not thrash the cache (review 13). A genuine dep change returns
@@ -413,7 +413,7 @@ function depChanged(ce: ComputeEngine, dep: MapCompileDep): boolean {
  */
 function validCompiled(ce: ComputeEngine, cache: MapCompileCache): boolean {
   if (
-    cache.generation === ce._mutationGeneration &&
+    cache.generation === ce._semanticVersion &&
     cache.tolerance === ce.tolerance &&
     cache.angularUnit === ce.angularUnit
   )
@@ -426,15 +426,15 @@ function validCompiled(ce: ComputeEngine, cache: MapCompileCache): boolean {
   if (cache.angularUnit !== ce.angularUnit) return false;
   // Global-semantics axis (2026-08-02 dependency-precise invalidation design,
   // §4): an `assume`/`forget`, an operator/type redefinition or a signature
-  // inference bumps `_mutationGeneration` too, but the dep walk below sees no
+  // inference bumps `_semanticVersion` too, but the dep walk below sees no
   // dep change and RE-STAMPS the bump away — while compile-time
   // canonicalization may have consulted exactly those global semantics. The
   // epoch is bumped only by those rare events (never by a value write), so
   // ANDing it here forces a recompile in precisely that case and costs
   // nothing otherwise.
-  if (cache.epoch !== ce._semanticEpoch) return false;
+  if (cache.epoch !== ce._worldVersion) return false;
   for (const d of cache.deps ?? []) if (depChanged(ce, d)) return false;
-  cache.generation = ce._mutationGeneration;
+  cache.generation = ce._semanticVersion;
   return true;
 }
 
@@ -460,8 +460,8 @@ function attemptCompile(
     state: 'no-compile',
     tier,
     reason,
-    generation: ce._mutationGeneration,
-    epoch: ce._semanticEpoch,
+    generation: ce._semanticVersion,
+    epoch: ce._worldVersion,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
   });
@@ -548,8 +548,8 @@ function attemptCompile(
     tier,
     fn: result.run as (...args: unknown[]) => unknown,
     deps: [...deps].map((name) => resolveDep(ce, name)),
-    generation: ce._mutationGeneration,
-    epoch: ce._semanticEpoch,
+    generation: ce._semanticVersion,
+    epoch: ce._worldVersion,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
   };
@@ -623,7 +623,7 @@ export function mapAutoCompileRunner(
   // before every recompile: a reassignment to a non-integer or unbounded
   // value revokes the proof, and the instance must fall back to the
   // interpreter rather than compile against the stale one. `exactTierShape`
-  // memoizes on `ce._mutationGeneration`, so this is a pointer compare unless
+  // memoizes on `ce._semanticVersion`, so this is a pointer compare unless
   // something actually changed.
   const stillEligible = (): boolean =>
     tier !== 'exact' || exactTierShape(ce, expr) !== undefined;

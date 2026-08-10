@@ -1,6 +1,6 @@
-// Attribute ce._generation bumps by call site over the Epsil JSON-parser
+// Attribute ce._anyVersion bumps by call site over the Epsil JSON-parser
 // workload (workload C of the cache-stats round). Patches the engine's
-// `_generation` accessor to sample the caller frame on every increment.
+// `_anyVersion` accessor to sample the caller frame on every increment.
 import { readFileSync } from 'node:fs';
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil';
@@ -9,8 +9,8 @@ const buckets = new Map<string, number>();
 let total = 0;
 
 const proto = ComputeEngine.prototype as any;
-const desc = Object.getOwnPropertyDescriptor(proto, '_generation')!;
-Object.defineProperty(proto, '_generation', {
+const desc = Object.getOwnPropertyDescriptor(proto, '_anyVersion')!;
+Object.defineProperty(proto, '_anyVersion', {
   get: desc.get,
   set(v: number) {
     total += 1;

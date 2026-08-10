@@ -15,43 +15,43 @@ type ResetHooks = {
 };
 
 export class EngineConfigurationLifecycle {
-  private _generation = 0;
-  private _mutationGeneration = 0;
-  private _semanticEpoch = 0;
+  private _anyVersion = 0;
+  private _semanticVersion = 0;
+  private _worldVersion = 0;
   private _ephemeralWriteDepth = 0;
   private _tracker = new ConfigurationChangeTracker();
 
-  get generation(): number {
-    return this._generation;
+  get anyVersion(): number {
+    return this._anyVersion;
   }
 
-  set generation(value: number) {
-    if (CACHE_STATS && value > this._generation) recordBump('generation');
-    this._generation = value;
+  set anyVersion(value: number) {
+    if (CACHE_STATS && value > this._anyVersion) recordBump('generation');
+    this._anyVersion = value;
   }
 
-  get mutationGeneration(): number {
-    return this._mutationGeneration;
+  get semanticVersion(): number {
+    return this._semanticVersion;
   }
 
-  set mutationGeneration(value: number) {
-    if (CACHE_STATS && value > this._mutationGeneration)
+  set semanticVersion(value: number) {
+    if (CACHE_STATS && value > this._semanticVersion)
       recordBump('mutationGeneration');
-    this._mutationGeneration = value;
+    this._semanticVersion = value;
   }
 
-  get semanticEpoch(): number {
-    return this._semanticEpoch;
+  get worldVersion(): number {
+    return this._worldVersion;
   }
 
-  set semanticEpoch(value: number) {
-    if (CACHE_STATS && value > this._semanticEpoch) {
+  set worldVersion(value: number) {
+    if (CACHE_STATS && value > this._worldVersion) {
       recordBump('semanticEpoch');
       // Shadow 'callable' axis: every epoch event (assumption, inference,
       // redefine, config, dirty pop) is in its predicate.
       bumpShadowCallable();
     }
-    this._semanticEpoch = value;
+    this._worldVersion = value;
   }
 
   get ephemeralWriteDepth(): number {
@@ -69,9 +69,9 @@ export class EngineConfigurationLifecycle {
       recordBump('semanticEpoch');
       bumpShadowCallable();
     }
-    this._generation += 1;
-    this._mutationGeneration += 1;
-    this._semanticEpoch += 1;
+    this._anyVersion += 1;
+    this._semanticVersion += 1;
+    this._worldVersion += 1;
     hooks.refreshNumericConstants();
     hooks.resetCommonSymbols();
     hooks.purgeCaches();

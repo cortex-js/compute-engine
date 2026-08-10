@@ -1863,9 +1863,9 @@ export type BigOpResult<T> =
   | { status: 'error'; reason: string };
 
 /**
- * Assign a big-op loop index as an EPHEMERAL write: it bumps `_generation`
+ * Assign a big-op loop index as an EPHEMERAL write: it bumps `_anyVersion`
  * and the index definition's `_writeVersion` (so anything that actually
- * references the index still invalidates), but not `ce._mutationGeneration`
+ * references the index still invalidates), but not `ce._semanticVersion`
  * — an interleaved `Sum`/`Product` evaluation must not invalidate
  * mutation-keyed caches (the `Comprehension` element memo) of expressions
  * that never mention its index (Tycho item 38). Only the assign itself is

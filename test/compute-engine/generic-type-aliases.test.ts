@@ -552,13 +552,13 @@ describe('GENERIC TYPE ALIASES — A8 snapshot / A5 generation', () => {
       fromStatement: true,
       typeParams: ['T'],
     });
-    const before = ce._generation;
+    const before = ce._anyVersion;
     ce.declareType('Pair', 'tuple<T, T, T>', {
       alias: true,
       fromStatement: true,
       typeParams: ['T'],
     });
-    expect(ce._generation).toBeGreaterThan(before);
+    expect(ce._anyVersion).toBeGreaterThan(before);
     expect(ce.type('Pair<integer>').toString()).toBe(
       'tuple<integer, integer, integer>'
     );

@@ -681,8 +681,8 @@ function installClauseList(
       effectRow,
       declared,
     };
-  ce._mutationGeneration += 1;
-  ce._semanticEpoch += 1;
+  ce._semanticVersion += 1;
+  ce._worldVersion += 1;
 }
 
 //

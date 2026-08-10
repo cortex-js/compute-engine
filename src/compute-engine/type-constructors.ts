@@ -160,7 +160,7 @@ function removeMintedTypeConstructor(
   // Removing a binding is a context change: invalidate the caches keyed on
   // the generation (a re-mint bumps it again through `ce.declare()`, but the
   // remove-only path — a body edited from a tuple to a record — would not).
-  ce._generation += 1;
+  ce._anyVersion += 1;
   // Shadow 'callable' axis (CE_CACHE_STATS probe): a constructor (callable)
   // binding was removed — binding-repair event.
   if (CACHE_STATS) bumpShadowCallable();
@@ -850,8 +850,8 @@ export function installConstructorFunction(
   const existing = scope.bindings.get(name);
   if (existing !== undefined) {
     updateDef(ce, name, existing, def);
-    ce._mutationGeneration += 1;
-    ce._semanticEpoch += 1;
+    ce._semanticVersion += 1;
+    ce._worldVersion += 1;
   } else {
     ce.declare(name, def);
   }

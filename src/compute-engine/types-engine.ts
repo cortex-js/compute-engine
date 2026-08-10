@@ -260,16 +260,16 @@ export interface IComputeEngine {
   readonly _customLibraryOperators: Set<string>;
 
   /** @internal */
-  _generation: number;
+  _anyVersion: number;
 
-  /** Semantic-mutation counter (see `ComputeEngine._mutationGeneration`).
+  /** Semantic-mutation counter (see `ComputeEngine._semanticVersion`).
    * @internal */
-  _mutationGeneration: number;
+  _semanticVersion: number;
 
   /** Rarely-bumped global-semantics counter (see
-   * `ComputeEngine._semanticEpoch`).
+   * `ComputeEngine._worldVersion`).
    * @internal */
-  _semanticEpoch: number;
+  _worldVersion: number;
 
   /** When > 0, value writes are ephemeral loop-index writes.
    * @internal */

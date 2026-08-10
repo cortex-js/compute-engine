@@ -1383,9 +1383,9 @@ function repairFreshMatrixInference(
     // numeric fast path cannot immediately narrow it back to `real`.
     def.value.inferredType = false;
   }
-  ce._generation += 1;
-  ce._mutationGeneration += 1;
-  ce._semanticEpoch += 1;
+  ce._anyVersion += 1;
+  ce._semanticVersion += 1;
+  ce._worldVersion += 1;
 
   const repaired = ce.box(op.json);
   if (repaired.type.matches(expected)) {
@@ -1403,9 +1403,9 @@ function repairFreshMatrixInference(
       def.value.inferredType = true;
     }
   }
-  ce._generation += 1;
-  ce._mutationGeneration += 1;
-  ce._semanticEpoch += 1;
+  ce._anyVersion += 1;
+  ce._semanticVersion += 1;
+  ce._worldVersion += 1;
   return null;
 }
 

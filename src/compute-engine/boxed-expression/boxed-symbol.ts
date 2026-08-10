@@ -520,8 +520,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         def.operator.signature = newType;
         // Signature inference mutates a SHARED operator definition in place: a
         // semantic change other expressions may depend on.
-        this.engine._mutationGeneration += 1;
-        this.engine._semanticEpoch += 1;
+        this.engine._semanticVersion += 1;
+        this.engine._worldVersion += 1;
         if (sink && previousType !== undefined)
           sink._recordNarrowing(this._id, def, previousType, newType);
         return true;

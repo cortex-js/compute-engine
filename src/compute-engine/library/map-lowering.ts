@@ -61,7 +61,7 @@ interface SpineMemo {
   /** The concatenated source element-type keys of `typeExprs` at record
    * time. */
   typeKey: string;
-  /** `ce._mutationGeneration` at record time (only consulted when `typeExprs`
+  /** `ce._semanticVersion` at record time (only consulted when `typeExprs`
    * is non-empty). */
   generation: number;
 }
@@ -110,13 +110,13 @@ export function lowerMapSpine(expr: Expression): LoweredSpine | undefined {
   const memo = spineMemo.get(expr);
   if (memo !== undefined) {
     if (memo.typeExprs.length === 0) return memo.spine ?? undefined;
-    if (memo.generation === ce._mutationGeneration)
+    if (memo.generation === ce._semanticVersion)
       return memo.spine ?? undefined;
     // A new generation: revalidate the TYPES the outcome was derived from
     // rather than the outcome itself. Unchanged — the common case, since any
     // `ce.assign` anywhere bumps the generation — the memo stands.
     if (typeKeyOf(memo.typeExprs) === memo.typeKey) {
-      memo.generation = ce._mutationGeneration;
+      memo.generation = ce._semanticVersion;
       return memo.spine ?? undefined;
     }
   }
@@ -133,7 +133,7 @@ export function lowerMapSpine(expr: Expression): LoweredSpine | undefined {
       spine,
       typeExprs,
       typeKey: typeKeyOf(typeExprs),
-      generation: ce._mutationGeneration,
+      generation: ce._semanticVersion,
     });
   };
 

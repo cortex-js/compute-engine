@@ -8,7 +8,7 @@ import { validElementMemo } from '../../src/compute-engine/boxed-expression/coll
  * `Map`, `Filter`, `Tabulate`, … opt into the per-instance element memo via
  * the `elementMemo` collection-handler flag, applied at the
  * `BoxedFunction.each()`/`at()` seam. Invalidation mirrors the Comprehension
- * memo (Tycho item 38): `ce._mutationGeneration` plus per-dependency binding
+ * memo (Tycho item 38): `ce._semanticVersion` plus per-dependency binding
  * identity and `_writeVersion` — an unrelated scoped evaluation between two
  * walks stays warm, a semantic mutation (reassigning a free variable, an
  * enclosing binder's index write) refills.
@@ -151,7 +151,7 @@ describe('Map element memo', () => {
 
   it('refills per iteration when nested under a binder that writes its index', () => {
     // The Sum's ephemeral index writes bump only the index definition's
-    // `_writeVersion`, not `_mutationGeneration` — the per-dependency axis
+    // `_writeVersion`, not `_semanticVersion` — the per-dependency axis
     // must catch them or every iteration would reuse iteration 1's elements.
     ce.assign(
       'msum',
@@ -180,7 +180,7 @@ describe('eligibility gates', () => {
     // `qlate` is auto-declared (valueless) inside the helper's body scope
     // when `hlate` is assigned; a later `ce.assign('qlate', …)` installs the
     // value in a DIFFERENT definition via the declare path, which bumps
-    // neither `_mutationGeneration` nor the tracked `_writeVersion`. The
+    // neither `_semanticVersion` nor the tracked `_writeVersion`. The
     // valueless-binding gate must therefore refuse to memoize — a committed
     // cache here would serve stale symbolic elements forever.
     ce.assign('hlate', ce.box(['Function', ['Add', 'x', 'qlate'], 'x']));
@@ -321,7 +321,7 @@ describe('review fixes (2026-08-02)', () => {
 describe('dependency-precise invalidation (Tycho item 127)', () => {
   it('stays warm across unrelated assigns, colds on a related one', () => {
     // The headline: a per-frame `assign` of a symbol the instance cannot
-    // reference must not cold it. Under the old `_mutationGeneration`
+    // reference must not cold it. Under the old `_semanticVersion`
     // equality requirement every one of these assigns refilled the memo.
     ce.assign('kslider', 2);
     ce.assign('tslider', 0);

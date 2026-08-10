@@ -388,14 +388,14 @@ describe('definition order does not change semantics', () => {
       ce.parse('g(t)\\coloneq 2a(t)').evaluate();
       ce.parse('h(t)\\coloneq 2a(t)+1').evaluate();
 
-      const generation = ce._generation;
+      const generation = ce._anyVersion;
       expect(() => declareArity2(ce)).toThrow();
 
       // The callee's own installation is committed — it is valid; only the
       // dependents' rebuilds failed — and so is the generation bump the
       // caller's post-`updateDef` bookkeeping would have been skipped by.
       expect((ce.lookupDefinition('a') as any).operator).toBeDefined();
-      expect(ce._generation).toBeGreaterThan(generation);
+      expect(ce._anyVersion).toBeGreaterThan(generation);
 
       // Each dependent kept its previous definition...
       expect(ce.parse('g(3)').evaluate().toString()).toEqual('6a');

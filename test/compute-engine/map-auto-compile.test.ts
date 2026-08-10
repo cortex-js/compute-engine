@@ -229,9 +229,9 @@ describe('Map auto-compile', () => {
 
     // A global-semantics event on a symbol NO dep of the compiled function
     // mentions. The dep walk therefore sees nothing changed and would
-    // re-stamp the `_mutationGeneration` bump away — but compile-time
+    // re-stamp the `_semanticVersion` bump away — but compile-time
     // canonicalization may have consulted assumptions, so the compiled code
-    // is potentially stale. `ce._semanticEpoch` is what forces the recompile
+    // is potentially stale. `ce._worldVersion` is what forces the recompile
     // (2026-08-02 dependency-precise invalidation design, §4).
     // UPPERCASE per the boolean-retyping convention: this file's engine is
     // shared across tests.

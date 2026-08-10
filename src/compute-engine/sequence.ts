@@ -640,8 +640,8 @@ function tryFinalizeSequence(ce: ComputeEngine, name: string): void {
     });
     // In-place redefinition of an existing binding is a semantic mutation
     // (a structural change, not a value write: the epoch bumps too).
-    ce._mutationGeneration += 1;
-    ce._semanticEpoch += 1;
+    ce._semanticVersion += 1;
+    ce._worldVersion += 1;
   } else {
     // Symbol doesn't exist - declare it with the handler
     ce.declare(name, {

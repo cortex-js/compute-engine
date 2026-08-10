@@ -532,12 +532,12 @@ export class ComputeEngine implements IComputeEngine {
    * It is used to invalidate caches.
    * @internal
    */
-  get _generation(): number {
-    return this._configurationLifecycle.generation;
+  get _anyVersion(): number {
+    return this._configurationLifecycle.anyVersion;
   }
 
-  set _generation(value: number) {
-    this._configurationLifecycle.generation = value;
+  set _anyVersion(value: number) {
+    this._configurationLifecycle.anyVersion = value;
   }
 
   /**
@@ -547,15 +547,15 @@ export class ComputeEngine implements IComputeEngine {
    * scope push/pop or by ephemeral loop-index writes (big-op and
    * comprehension index assigns, see `_ephemeralWriteDepth`), so caches
    * keyed on it (the `Comprehension` element memo) survive unrelated scoped
-   * evaluations. Leaves `_generation` semantics untouched.
+   * evaluations. Leaves `_anyVersion` semantics untouched.
    * @internal
    */
-  get _mutationGeneration(): number {
-    return this._configurationLifecycle.mutationGeneration;
+  get _semanticVersion(): number {
+    return this._configurationLifecycle.semanticVersion;
   }
 
-  set _mutationGeneration(value: number) {
-    this._configurationLifecycle.mutationGeneration = value;
+  set _semanticVersion(value: number) {
+    this._configurationLifecycle.semanticVersion = value;
   }
 
   /**
@@ -564,24 +564,24 @@ export class ComputeEngine implements IComputeEngine {
    * redefinition, signature inference on a shared definition,
    * matrix-inference repair, `reset()`, and engine-configuration changes
    * (tolerance, precision, angular unit). NOT bumped by value writes or by
-   * fresh declarations — unlike `_mutationGeneration`. A cache whose
+   * fresh declarations — unlike `_semanticVersion`. A cache whose
    * dependency tracking already covers value writes (the collection element
    * memo) requires equality on THIS counter instead, so that an unrelated
    * `assign()` does not cold it.
    * @internal
    */
-  get _semanticEpoch(): number {
-    return this._configurationLifecycle.semanticEpoch;
+  get _worldVersion(): number {
+    return this._configurationLifecycle.worldVersion;
   }
 
-  set _semanticEpoch(value: number) {
-    this._configurationLifecycle.semanticEpoch = value;
+  set _worldVersion(value: number) {
+    this._configurationLifecycle.worldVersion = value;
   }
 
   /**
    * When > 0, value writes are ephemeral loop-index writes: they bump
-   * `_generation` and the definition's `_writeVersion` but not
-   * `_mutationGeneration`. Incremented/decremented (try/finally) around the
+   * `_anyVersion` and the definition's `_writeVersion` but not
+   * `_semanticVersion`. Incremented/decremented (try/finally) around the
    * index assigns of `reduceBigOp` and `ComprehensionIndexFrame`.
    * @internal
    */
@@ -661,9 +661,9 @@ export class ComputeEngine implements IComputeEngine {
   set jit(value: 'auto' | 'off') {
     if (value === this._jit) return;
     this._jit = value;
-    this._generation += 1;
-    this._mutationGeneration += 1;
-    this._semanticEpoch += 1;
+    this._anyVersion += 1;
+    this._semanticVersion += 1;
+    this._worldVersion += 1;
   }
 
   private _jit: 'auto' | 'off' = 'auto';
@@ -1099,9 +1099,9 @@ export class ComputeEngine implements IComputeEngine {
       // are within tolerance), so a change is a semantic mutation AND an
       // epoch event. Deliberately not a full `_reset()`: unlike precision, no
       // stored value needs to be recomputed.
-      this._generation += 1;
-      this._mutationGeneration += 1;
-      this._semanticEpoch += 1;
+      this._anyVersion += 1;
+      this._semanticVersion += 1;
+      this._worldVersion += 1;
     }
   }
 

@@ -338,7 +338,7 @@ function proveSource(
     // generation revalidation — armed by `ctx.dynamic` — plus the
     // `stillEligible()` re-ask on every `attemptCompile` path are the ONLY
     // guard against a reassignment that widens the source bounds. Any
-    // `assign` bumps `ce._mutationGeneration`, so that guard is complete.
+    // `assign` bumps `ce._semanticVersion`, so that guard is complete.
     ctx.dynamic = true;
     if (ctx.depth >= MAX_SPINE_DEPTH) return undefined;
     const value = ctx.ce._getSymbolValue(x.symbol);
@@ -483,7 +483,7 @@ interface ExactProofMemo {
    * actually MOVED re-proves. Empty when no annotation took part. */
   typeExprs: Expression[];
   typeKey: string;
-  /** `ce._mutationGeneration` at proof time (only consulted when `dynamic` or
+  /** `ce._semanticVersion` at proof time (only consulted when `dynamic` or
    * `typeExprs` is non-empty). */
   generation: number;
 }
@@ -519,14 +519,14 @@ export function exactTierShape(
   const memo = exactProofMemo.get(expr);
   if (memo !== undefined) {
     if (!memo.dynamic && memo.typeExprs.length === 0) return memo.shape;
-    if (memo.generation === ce._mutationGeneration) return memo.shape;
+    if (memo.generation === ce._semanticVersion) return memo.shape;
     // A new generation. A VALUE-dependent proof has to be re-taken (the bounds
     // it propagated came from the values). A purely TYPE-dependent one only
     // has to have its types revalidated: recomputing the keys is a type read
     // per source, against a full walk + type probe, and every unrelated
     // `ce.assign` lands here (any assignment bumps the generation).
     if (!memo.dynamic && typeKeyOf(memo.typeExprs) === memo.typeKey) {
-      memo.generation = ce._mutationGeneration;
+      memo.generation = ce._semanticVersion;
       return memo.shape;
     }
   }
@@ -561,7 +561,7 @@ export function exactTierShape(
     dynamic: ctx.dynamic,
     typeExprs: ctx.typeExprs,
     typeKey: typeKeyOf(ctx.typeExprs),
-    generation: ce._mutationGeneration,
+    generation: ce._semanticVersion,
   });
   return shape;
 }

@@ -63,7 +63,7 @@ import { isFunction, sym } from './type-guards.js';
  * The computation is **write-free**: definitions are resolved by name (the
  * `isImpureHead` pattern of `library/map-broadcast-shape.ts`), nothing is bound
  * or canonicalized. Results are memoized on `BoxedFunction` behind a
- * `ce._generation` guard, which is what keeps "resolve through the current
+ * `ce._anyVersion` guard, which is what keeps "resolve through the current
  * binding" honest: reassigning a symbol bumps the generation and invalidates
  * the cached answer.
  */
