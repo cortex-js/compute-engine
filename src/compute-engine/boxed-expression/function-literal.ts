@@ -111,10 +111,7 @@ export function functionLiteralParameterType(
  * collection-like type. Conservative: unknown/any → scalar.
  * @internal
  */
-export function isScalarType(
-  t: Type,
-  seen?: Set<TypeReference>
-): boolean {
+export function isScalarType(t: Type, seen?: Set<TypeReference>): boolean {
   if (typeof t === 'string') {
     // String types like 'collection', 'list', 'tuple', 'set' are non-scalar.
     if (

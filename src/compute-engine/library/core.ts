@@ -2329,7 +2329,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               ) ?? value!
             );
           } catch (e) {
-            if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+            if (isEffectContractError(e))
+              return effectContractErrorValue(ce, e);
             if (isTypeCompatibilityError(e))
               return typeCompatibilityErrorValue(ce, e);
             throw e;

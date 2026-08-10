@@ -387,7 +387,11 @@ export function isProvablyTupleParticipant(x: Expression): boolean {
   // Same cycle guard as `unfaithfulComparisonAggregate` — but note `false` is
   // the DECLINING direction here, so stopping on a repeat is conservative.
   const walk = (t: Type, visited?: ReadonlySet<TypeReference>): boolean => {
-    if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
+    if (
+      typeof t === 'object' &&
+      t.kind === 'reference' &&
+      t.def !== undefined
+    ) {
       const decl = declarationOf(t);
       if (visited?.has(decl)) return false;
       visited = new Set(visited).add(decl);
@@ -419,7 +423,11 @@ export function isProvablyTupleParticipant(x: Expression): boolean {
  */
 export function isNumericTupleParticipant(x: Expression): boolean {
   const walk = (t: Type, visited?: ReadonlySet<TypeReference>): boolean => {
-    if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
+    if (
+      typeof t === 'object' &&
+      t.kind === 'reference' &&
+      t.def !== undefined
+    ) {
       const decl = declarationOf(t);
       if (visited?.has(decl)) return false;
       visited = new Set(visited).add(decl);
@@ -460,9 +468,7 @@ export function isNumericTupleParticipant(x: Expression): boolean {
  * The keep-compiling `every` side uses the narrower
  * `isFlatAllStringComparisonParticipant` — see there.
  */
-export function isProvablyStringComparisonParticipant(
-  x: Expression
-): boolean {
+export function isProvablyStringComparisonParticipant(x: Expression): boolean {
   if (isProvablyStringOperand(x)) return true;
   return typeHasStringEvidence(compilationType(x));
 }
@@ -478,9 +484,7 @@ export function isProvablyStringComparisonParticipant(
  * `compile-string-fail-closed.test.ts`). Parity for a NESTED all-string
  * ordering is unverified, so `every` must reject it and the head fails closed.
  */
-export function isFlatAllStringComparisonParticipant(
-  x: Expression
-): boolean {
+export function isFlatAllStringComparisonParticipant(x: Expression): boolean {
   if (isProvablyStringOperand(x)) return true;
   const elt = collectionElementType(compilationType(x));
   if (elt === undefined) return false;
@@ -517,7 +521,11 @@ export function isFlatAllStringComparisonParticipant(
  */
 export function couldBeCollectionParticipant(x: Expression): boolean {
   const walk = (t: Type, visited?: ReadonlySet<TypeReference>): boolean => {
-    if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
+    if (
+      typeof t === 'object' &&
+      t.kind === 'reference' &&
+      t.def !== undefined
+    ) {
       const decl = declarationOf(t);
       if (visited?.has(decl)) return false;
       visited = new Set(visited).add(decl);
@@ -2211,9 +2219,7 @@ export class BaseCompiler {
       // targets, i.e. Python) is the interpreter's own semantics. Everything
       // not wholly-string keeps the target's `Equal` codegen, with its gates.
       const strippedOf = (a: Expression): Type =>
-        resolveTypeForCompilation(
-          stripMissingFromType(compilationType(a))
-        );
+        resolveTypeForCompilation(stripMissingFromType(compilationType(a)));
       const allString = args.every((a) => isSubtype(strippedOf(a), 'string'));
       let inner: TargetSource;
       if (allString) {
@@ -3287,7 +3293,8 @@ export class BaseCompiler {
     if (source === undefined) return undefined;
     const src = source.isCanonical ? source : source.canonical;
     const elt = collectionElementType(resolveTypeForCompilation(src.type.type));
-    if (elt === undefined || elt === 'unknown' || elt === 'any') return undefined;
+    if (elt === undefined || elt === 'unknown' || elt === 'any')
+      return undefined;
     return elt;
   }
 
@@ -4358,9 +4365,7 @@ export class BaseCompiler {
       );
       const bodyTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
       return BaseCompiler.withCseScope(expr, -1, bodyTarget, () =>
-        stmts
-          .map((s) => BaseCompiler.compileLoopBody(s, bodyTarget))
-          .join('; ')
+        stmts.map((s) => BaseCompiler.compileLoopBody(s, bodyTarget)).join('; ')
       );
     }
 

@@ -557,14 +557,15 @@ function validatePolytypeArm(
  */
 type ForbiddenPosition = 'intersection' | 'negation' | 'bound';
 
-const FORBIDDEN_POSITION_MESSAGE: Readonly<Record<ForbiddenPosition, string>> = {
-  // Steer to the spelling that replaces it: `T & number` is what an author
-  // writes when they mean a CONSTRAINT, and a constraint is a bound.
-  intersection:
-    'cannot appear in an intersection. To constrain a type variable, declare a bound on it instead: `forall T: number.`',
-  negation: 'cannot appear in a negation',
-  bound: 'cannot appear in a bound',
-};
+const FORBIDDEN_POSITION_MESSAGE: Readonly<Record<ForbiddenPosition, string>> =
+  {
+    // Steer to the spelling that replaces it: `T & number` is what an author
+    // writes when they mean a CONSTRAINT, and a constraint is a bound.
+    intersection:
+      'cannot appear in an intersection. To constrain a type variable, declare a bound on it instead: `forall T: number.`',
+    negation: 'cannot appear in a negation',
+    bound: 'cannot appear in a bound',
+  };
 
 /**
  * Walk `t`, checking every variable occurrence against the v1 position

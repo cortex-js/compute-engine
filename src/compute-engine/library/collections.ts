@@ -3858,7 +3858,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const source = args[0];
       // The operands are already canonical, so an inner `Append` has itself
       // been flattened: one level of splicing keeps the chain at depth 1.
-      if (isFunction(source, 'Append') && source.isCanonical && source.nops >= 2)
+      if (
+        isFunction(source, 'Append') &&
+        source.isCanonical &&
+        source.nops >= 2
+      )
         return ce._fn('Append', [...source.ops, ...args.slice(1)]);
 
       return ce._fn('Append', args);

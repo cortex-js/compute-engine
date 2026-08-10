@@ -121,7 +121,11 @@ function hasNestedTupleEvidence(x: Expression): boolean {
     top: boolean,
     visited?: ReadonlySet<TypeReference>
   ): boolean => {
-    if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
+    if (
+      typeof t === 'object' &&
+      t.kind === 'reference' &&
+      t.def !== undefined
+    ) {
       const decl = declarationOf(t);
       if (visited?.has(decl)) return false;
       visited = new Set(visited).add(decl);

@@ -46,10 +46,7 @@ import {
 import { osaDistance } from '../common/fuzzy-string-match.js';
 
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
-import type {
-  MathJsonExpression,
-  MathJsonSymbol,
-} from '../math-json/types.js';
+import type { MathJsonExpression, MathJsonSymbol } from '../math-json/types.js';
 
 import type {
   ValueDefinition,
@@ -1122,7 +1119,8 @@ function settleVarianceGroup(
           if (free.size > 0) {
             const bindings: Record<string, Type> = Object.create(null);
             for (const v of free)
-              bindings[v] = ownParams?.find((p) => p.name === v)?.bound ?? 'any';
+              bindings[v] =
+                ownParams?.find((p) => p.name === v)?.bound ?? 'any';
             subjectArg = substituteTypeVariables(arg, bindings);
           }
           if (satisfiesTypeBound(subjectArg, bound)) continue;
@@ -2018,8 +2016,7 @@ function jsonWithSourceOffsets(expr: Expression): MathJsonExpression {
   if (isNumber(expr)) {
     const json = expr.json;
     if (sourceOffsets === undefined) return json;
-    if (typeof json === 'number')
-      return { num: String(json), sourceOffsets };
+    if (typeof json === 'number') return { num: String(json), sourceOffsets };
     if (typeof json === 'object' && json !== null && 'num' in json)
       return { ...json, sourceOffsets };
     return json; // composite numeric form (e.g. ['Complex', …])

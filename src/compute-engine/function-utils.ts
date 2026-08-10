@@ -2361,9 +2361,9 @@ function makeLambda(
     // We evaluate bodyFn.ops (the Block's children) rather than calling
     // body.evaluate() — see evaluateStatements JSDoc for why.
     // Named 'call': a function-application activation frame. The debugger's
-      // statement hook uses this to delimit stack frames (one per
-      // activation — nested unnamed Block/loop contexts group into it).
-      ce.pushScope(freshScope, 'call');
+    // statement hook uses this to delimit stack frames (one per
+    // activation — nested unnamed Block/loop contexts group into it).
+    ce.pushScope(freshScope, 'call');
     let result: Expression;
     try {
       result = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));

@@ -42,7 +42,6 @@ import {
   isSymbol,
   isString,
   isFunction,
-  isContinuationOperand,
   containsContinuationOperand,
 } from './type-guards.js';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils.js';

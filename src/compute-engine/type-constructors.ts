@@ -299,9 +299,7 @@ export function mintTypeConstructor(
     // instantiation and OVERWRITES its result, so a handler returning the
     // declaration record would type every `tree(1, [])` as the bare `tree` and
     // discard the solve.
-    ...(typeParams === undefined
-      ? { type: () => (alias ? body : ref) }
-      : {}),
+    ...(typeParams === undefined ? { type: () => (alias ? body : ref) } : {}),
   };
 
   if (alias) {

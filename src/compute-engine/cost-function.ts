@@ -4,7 +4,6 @@ import {
   isSymbol,
   isNumber,
   isFunction,
-  numericValue,
 } from './boxed-expression/type-guards.js';
 
 /**
@@ -63,9 +62,7 @@ function numericCostFunction(n: NumericValue | number): number {
     const imRad = (n as { imRadical?: number }).imRadical;
     const imExtra =
       imRad !== undefined && imRad > 1 ? 3 + numericCostFunction(imRad) : 0;
-    return (
-      numericCostFunction(n.re) + numericCostFunction(n.im) + imExtra + 1
-    );
+    return numericCostFunction(n.re) + numericCostFunction(n.im) + imExtra + 1;
   }
 
   // An exact value is `rational × √radical`. Price the radical explicitly:

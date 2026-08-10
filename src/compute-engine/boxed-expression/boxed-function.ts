@@ -1683,7 +1683,10 @@ export class BoxedFunction
     const def = this.operatorDefinition;
     if (!def || def.lazy === true) return false;
     if (!this.isLazyCollection) return false;
-    if (def.collection?.elementMemo === true && this.isFiniteCollection !== true)
+    if (
+      def.collection?.elementMemo === true &&
+      this.isFiniteCollection !== true
+    )
       return false;
     return true;
   }
