@@ -1,4 +1,5 @@
 import { BLUE, BOLD, CYAN, GREY, RESET } from '../common/ansi-codes.js';
+import { typeToDisplayString } from '../common/type/display.js';
 
 import type { BoxedDefinition, IComputeEngine, Scope } from './global-types.js';
 
@@ -232,18 +233,25 @@ function defToString(name: string, def: BoxedDefinition): string {
 
     result = `${CYAN}${name}${RESET}:${allTags}`;
 
+    // R-D5: GROUND display — see `typeToDisplayString`. A function-typed VALUE
+    // definition can carry the same `callback<S>` signature an operator
+    // definition does, and must print it the same way.
+    const displayed = typeToDisplayString(def.value.type.type);
     if (def.value.isConstant) {
-      result += ` const ${def.value.type.toString()}`;
+      result += ` const ${displayed}`;
       if (def.value.value !== undefined)
         result += ` = ${def.value.value?.toString()}`;
-    } else result += ` ${def.value.type.toString()}`;
+    } else result += ` ${displayed}`;
   } else if (isOperatorDef(def)) {
     const tags: string[] = [];
     if (def.operator.inferredSignature) tags.push('(inferred)');
 
     const allTags = tags.length > 0 ? ` (${tags.join(' ')})` : '';
 
-    result = `${CYAN}${name}${RESET}:${allTags} ${def.operator.signature.toString()}`;
+    // R-D5: GROUND display — see `typeToDisplayString`.
+    result = `${CYAN}${name}${RESET}:${allTags} ${typeToDisplayString(
+      def.operator.signature.type
+    )}`;
 
     const details: string[] = [];
 

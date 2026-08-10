@@ -978,6 +978,13 @@ function mentionsOf(
         if (t.variadicArg !== undefined) visit(t.variadicArg.type);
         visit(t.result);
         return;
+      // The contextual-callback wrapper (Design D §4) is transparent to this
+      // walk: a reference occurring ONLY inside `callback<S>` is still a
+      // mention of the target, and a re-declaration that invalidates it must
+      // be caught here (clause 4 — the constructor retains what it wraps).
+      case 'callback':
+        visit(t.signature);
+        return;
       case 'union':
       case 'intersection':
         t.types.forEach(visit);

@@ -154,11 +154,6 @@ type OperatorDefinitionFlags = {
   lazy: boolean;
   scoped: boolean;
   broadcastable: boolean;
-  /** Where a callback operand gets its parameter type from: a map from the
-   * 0-based index of a **callback** operand to the index of the sibling operand
-   * whose ELEMENT type the callback's (single) parameter is applied to. `Map`
-   * and `Filter` declare `{ 1: 0 }`. See `types-definitions.ts`. */
-  callbackElementOf?: Record<number, number>;
   inspectsErrors: boolean;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
   missingStrip: 'all' | number[];

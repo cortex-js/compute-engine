@@ -8,6 +8,7 @@ import {
 
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { deepEraseCallbackTypes } from '../../common/type/callback.js';
 import { admissionOf, hasValueComponent } from './value-membership.js';
 import {
   broadcastableBaseMatches,
@@ -746,6 +747,23 @@ export function validateArguments(
     : undefined;
   let paramStillOpen = false;
   const groundParam = (param: Type): Type => {
+    // Design D §4, contract clause 1: a `callback<S>` slot is the primitive
+    // `function` for EVERY argument-validation decision. Erased once here, at
+    // the projection every gate below reads, so admission, the reported
+    // expected type and the post-validation `infer()` write are all
+    // byte-identical to the bare-`function` slot this converted from — the
+    // wrapped signature is contextual-typing information and never escapes
+    // through an inference WRITE or a diagnostic. (It legitimately survives
+    // where a user DECLARED it: a value declared `callback<S>` carries the
+    // constructor in its definition, per clause 5; R-D5 erases it again at the
+    // display surfaces.)
+    //
+    // DEEP: the builtins converted so far write the constructor as a whole
+    // parameter slot, but a USER-declared signature may nest it
+    // (`(list<callback<(integer) -> boolean>>) -> integer`), and a top-level-
+    // only erasure would leak `callback<…>` into both the diagnostic and the
+    // `infer()` write for those.
+    param = deepEraseCallbackTypes(param);
     if (!solved) return param;
     const t = instantiatedParam(param, solved.bindings);
     if (t !== undefined) return t;
@@ -805,7 +823,9 @@ export function validateArguments(
       : undefined;
   const displayParam = (param: Type, ground: Type): Type => {
     if (displayBindings === undefined) return ground;
-    const t = instantiatedParam(param, displayBindings);
+    // Clause 1 again: what is DISPLAYED for a callback slot is `function` —
+    // deeply, for the nested-slot reason `groundParam` documents.
+    const t = instantiatedParam(deepEraseCallbackTypes(param), displayBindings);
     return t === undefined ? ground : reduceType(t);
   };
   const displayParams =

@@ -1397,6 +1397,68 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
       ])
     ).toMatchInlineSnapshot(`-6`));
 
+  // A SEEDLESS `Reduce` seeds with the FIRST element and folds from the
+  // second (ruled 2026-08-09) — the convention of `Scan` and of the compiled
+  // fast path. It used to fold from a `Nothing` sentinel instead, which only
+  // looked right for a reducer that splices it away (`Add`): subtraction
+  // answered -6 (`((nothing - 1) - 2) - 3`) where `Scan`'s last element is -4,
+  // division 1/32 instead of 2, and a non-splicing reducer leaked the sentinel
+  // into the result (`Power` → `Nothing^12`).
+  describe('Reduce, seedless', () => {
+    const SUB: Expression = ['Function', ['Subtract', 'a', 'b'], 'a', 'b'];
+    const DIV: Expression = ['Function', ['Divide', 'a', 'b'], 'a', 'b'];
+    const POW: Expression = ['Function', ['Power', 'a', 'b'], 'a', 'b'];
+
+    // The interpreted path (`evaluate`) and the compiled fast path (`N`, which
+    // is the only route that takes it) must agree on every case.
+    test.each([
+      // [name, collection, reducer, result]
+      [
+        'an empty collection has nothing to seed from',
+        ['List'],
+        SUB,
+        '"Nothing"',
+      ],
+      ['a single element IS the result', ['List', 5], SUB, '5'],
+      ['a NON-associative reducer folds left', ['List', 1, 2, 3], SUB, '-4'],
+      ['division folds left too', ['List', 8, 2, 2], DIV, '2'],
+      [
+        'a NON-splicing reducer never sees a sentinel',
+        ['List', 2, 3, 2],
+        POW,
+        '64',
+      ],
+    ] as [string, Expression, Expression, string][])(
+      '%s (interpreted and compiled agree)',
+      (_name, xs, f, result) => {
+        expect(engine.expr(['Reduce', xs, f]).evaluate().toString()).toBe(
+          result
+        );
+        expect(engine.expr(['Reduce', xs, f]).N().toString()).toBe(result);
+      }
+    );
+
+    test('agrees with the last element of the seedless Scan', () => {
+      // `Scan` is the cumulative spelling of the same fold, so its LAST
+      // element is `Reduce`'s result — the convention this alignment adopts.
+      expect(
+        engine
+          .expr(['Last', ['Scan', ['List', 1, 2, 3], SUB]])
+          .evaluate()
+          .toString()
+      ).toBe('-4');
+    });
+
+    test('an explicit initial value is still folded in from the start', () => {
+      expect(
+        engine
+          .expr(['Reduce', ['List', 1, 2, 3], SUB, 0])
+          .evaluate()
+          .toString()
+      ).toBe('-6');
+    });
+  });
+
   test('Fold rational sum stays exact under evaluate(), float under N()', () => {
     // Regression: the compiled fast path folds with JS numbers and returns a
     // float, violating the Evaluate-vs-N exactness contract. `a + 1/k` over

@@ -51,6 +51,18 @@ export class BoxedType {
    * a name is only meaningful relative to a resolver. */
   private _typeResolver: TypeResolver | undefined;
 
+  /** The resolver this type was created with, so a DERIVED boxed type (a
+   * projection of this one) can be built without losing the ability to name a
+   * user-declared type. */
+  get typeResolver(): TypeResolver | undefined {
+    return this._typeResolver;
+  }
+
+  /** The R-D5 display override (see {@linkcode withDisplayString}), computed on
+   * first print and memoized. `undefined` on every ordinary boxed type. */
+  private _displayString: (() => string) | undefined;
+  private _displayed: string | undefined;
+
   /** The resolver of the first boxed operand that has one, so a combined type
    * can still be compared against a user-declared type name. */
   private static _resolverOf(
@@ -264,12 +276,40 @@ export class BoxedType {
     return this.type === 'unknown';
   }
 
+  /**
+   * A twin of this type that PRINTS as `display()` while remaining, in every
+   * other respect, byte-identical to this one — same `Type` object, same
+   * `isPolymorphic`, same subtype/`matches` answers.
+   *
+   * This is the whole seam of the R-D5 display projection (Design D §9 item 4):
+   * the projection is a property of the STRING a type shows a human, never of
+   * the type itself. Applying it to the `Type` instead — building a boxed type
+   * around the projected AST — made it semantics-visible: a callback-bearing
+   * overload set collapsed to `nothing` through `reduceType`, dropping the
+   * `forall` flipped `isPolymorphic` (and with it every `Ground <: Poly`
+   * answer), and re-validating the projected polytype could THROW out of a
+   * getter. Deferring to stringification makes all three impossible by
+   * construction.
+   *
+   * `display` is called at most once, on the first print.
+   */
+  withDisplayString(display: () => string): BoxedType {
+    // The FAITHFUL type is re-boxed: it already passed this validation when the
+    // definition declared it, so this cannot throw (the projected form, which
+    // could, is never boxed).
+    const result = new BoxedType(this.type, this._typeResolver);
+    result._displayString = display;
+    return result;
+  }
+
   toString(): string {
+    if (this._displayString !== undefined)
+      return (this._displayed ??= this._displayString());
     return typeToString(this.type);
   }
 
   toJSON(): string {
-    return typeToString(this.type);
+    return this.toString();
   }
 
   [Symbol.toPrimitive](hint: string): string | null {
@@ -279,6 +319,6 @@ export class BoxedType {
   }
 
   valueOf(): string {
-    return typeToString(this.type);
+    return this.toString();
   }
 }

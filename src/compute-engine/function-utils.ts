@@ -2012,6 +2012,47 @@ function makeLambda(
     (declaredSignature.typeParams?.length ?? 0) > 0;
   const validateApplication = hasAnnotatedParam || isGenericLiteral;
 
+  // A BARE parameter of a PARTIALLY annotated literal imposes NO constraint
+  // (ruled 2026-08-09). The §6.4 gate above is all-or-nothing — one annotation
+  // turns validation on for EVERY parameter — but a bare parameter's signature
+  // slot is only whatever inference left there (`unknown` by default), which is
+  // not a contract its author wrote. Validating against it rejects values that
+  // are legitimately unconstrained: `nothing` is deliberately not a subtype of
+  // `unknown`, so `Reduce(xs, (acc, n: integer) |-> acc + n)` errored with
+  // `incompatible-type unknown nothing` on the sentinel a seedless fold used to
+  // start from. So for VALIDATION ONLY, a bare parameter's slot is relaxed to
+  // `any`; annotated parameters keep their exact enforcement, and the literal's
+  // reported type is untouched.
+  //
+  // Skipped entirely when the literal carries a whole-signature marker (§2.5):
+  // there the arrow IS the contract for every position, annotated operand or
+  // not (a GENERIC literal's parameter annotations were erased — relaxing them
+  // would silently disable its check).
+  const bareParamIndexes =
+    declaredSignature === undefined
+      ? params.reduce<number[]>((acc, p, i) => {
+          if (functionLiteralParameterType(p) === undefined) acc.push(i);
+          return acc;
+        }, [])
+      : [];
+
+  /** `t` with each bare parameter's argument slot widened to `any`. */
+  const relaxBareParams = (t: Type): Type => {
+    if (bareParamIndexes.length === 0) return t;
+    if (typeof t === 'string' || t.kind !== 'signature') return t;
+    const args = t.args;
+    if (args === undefined || args.length === 0) return t;
+    let changed = false;
+    const relaxed = args.map((arg, i) => {
+      if (!bareParamIndexes.includes(i)) return arg;
+      changed = true;
+      return { ...arg, type: 'any' as Type };
+    });
+    // A signature rebuilt field-by-field must carry its adjuncts; the spread
+    // does that (`typeParams`, `effects`).
+    return changed ? { ...t, args: relaxed } : t;
+  };
+
   // The return-type ascription operand (§4.2 marker: the last Block statement
   // wrapped in `["Typed", stmt, type]`), reused verbatim when re-attaching the
   // return type onto a curried literal (§6.5 point 3). `undefined` when the
@@ -2118,7 +2159,7 @@ function makeLambda(
       // (§6.4/§6.5). On mismatch, return the inert application with the
       // error-marked arguments (§13 decision 6).
       if (ce.strict && hasAnnotatedParam && _validateArguments) {
-        const fullSig = fnExpr.type.type;
+        const fullSig = relaxBareParams(fnExpr.type.type);
         if (typeof fullSig !== 'string' && fullSig.kind === 'signature') {
           const prefixSig: Type = {
             kind: 'signature',
@@ -2260,7 +2301,11 @@ function makeLambda(
     //     path so broadcast consumers (`Map`, …) surface the same diagnostic.
     //
     if (ce.strict && validateApplication && _validateArguments) {
-      const validated = _validateArguments(ce, evaluatedArgs, fnExpr.type.type);
+      const validated = _validateArguments(
+        ce,
+        evaluatedArgs,
+        relaxBareParams(fnExpr.type.type)
+      );
       if (validated !== null) {
         // Any invalid operand: mismatch — return the inert application.
         if (validated.some((x) => !x.isValid))

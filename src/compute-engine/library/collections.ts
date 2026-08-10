@@ -25,7 +25,7 @@ import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // (collections → compile-expression → base-compiler → library/utils → collections)
 import { parseType } from '../../common/type/parse.js';
 import { reduceType } from '../../common/type/reduce.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
   DictionaryType,
   ListType,
@@ -40,6 +40,7 @@ import {
   collectionElementType,
   functionResult,
   functionArity,
+  staticCollectionDims,
   widen,
 } from '../../common/type/utils.js';
 import { interval, intervalContains } from '../numerics/interval.js';
@@ -303,7 +304,8 @@ function isPredicateShorthand(op: Expression): boolean {
  *
  * A predicate applied to an element can fail on the ELEMENT rather than on the
  * predicate itself: the callback parameter's `Typed` annotation (installed by
- * `callbackElementOf`) rejects an element whose type was retracted, and
+ * the contextual `callback<S>` slot) rejects an element whose type was
+ * retracted, and
  * `applicable()` returns `["Apply", fn, ["Error", …]]` instead of `True`/
  * `False`. That is not a malformed predicate, so reporting
  * `predicate must return "True" or "False"` — with a spell-check hint that
@@ -405,6 +407,40 @@ function canonicalFunctionSlot(
     : undefined;
 
   return ce._fn(operator, adjusted ?? args);
+}
+
+/**
+ * Design D §5 step 4 (R-D2′, ruled 2026-08-10): the RESULT type a callback
+ * OPERAND contributes.
+ *
+ * Contract clause 3 in one function: only the operand's RESULT position is
+ * read. Its parameter types are never consulted, so a callback narrower than
+ * the source's elements still enters and is still judged per element at
+ * application time — the whole reason `callback<S>` exists.
+ *
+ * BOTH an inline literal and a NAMED callback contribute (that is R-D2′). A
+ * named one needs a second look: a `lazy` operator holds its callback operand
+ * STRUCTURALLY, and an unbound symbol reports `unknown` rather than its
+ * declared signature.
+ *
+ * That second look is a DECLARATION LOOKUP, never `.canonical`. Canonicalizing
+ * an unbound symbol AUTO-DECLARES an undeclared name into the enclosing
+ * literal's scope, and a `.type` read must not write a binding: the effects
+ * walker's unresolved-name rule (an undeclared head infers `{any}`) then reads
+ * a declared name and reports the application PURE. `ce.lookupDefinition` is
+ * the same side-effect-free route `valueSignatureOf` (`effects-inference.ts`)
+ * takes for exactly this reason.
+ */
+function callbackResultType(op: Expression | undefined): Type | undefined {
+  if (op === undefined) return undefined;
+  const direct = functionResult(op.type.type);
+  if (direct !== undefined) return direct;
+  if (!isSymbol(op)) return undefined;
+  const def = op.engine.lookupDefinition(op.symbol);
+  if (def === undefined) return undefined;
+  const declared =
+    'operator' in def ? def.operator.signature.type : def.value.type?.type;
+  return declared === undefined ? undefined : functionResult(declared);
 }
 
 /**
@@ -2319,7 +2355,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) |-> e === v)`.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, predicate: function?) -> boolean',
+    // Design D phase 1: the element-of link lives in the SIGNATURE (see
+    // `CountIf`). The predicate slot stays OPTIONAL — `Any(xs)` tests the
+    // elements themselves — and the contextual stamp simply never runs when the
+    // operand is absent.
+    signature:
+      'forall T. (collection<T>, predicate: callback<(T) -> boolean>?) -> boolean',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
@@ -2341,7 +2382,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given).',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, predicate: function?) -> boolean',
+    // Design D phase 1: the element-of link lives in the SIGNATURE, with the
+    // OPTIONAL predicate slot of `Any`.
+    signature:
+      'forall T. (collection<T>, predicate: callback<(T) -> boolean>?) -> boolean',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
@@ -2367,13 +2411,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    signature: '(collection+, mapping: function) -> indexed_collection',
-    // The mapping function is applied to the ELEMENTS of the source
-    // collection: an inline literal at operand 1 gets its parameter annotated
-    // with the element type of operand 0 (only the single-collection form —
-    // in `Map(xs, ys, f)` operand 1 is a collection, which the rewrite
-    // declines).
-    callbackElementOf: { 1: 0 },
+    // Design D phase 3 (§6, RE-RULED revision 4). `Map` is the one operator
+    // with TWO clauses, and they get ONE loose signature rather than an
+    // overload set — see the §13 addendum for the decision and its evidence:
+    //
+    //  - the UNARY clause is the contextual one, and it is what the parameter
+    //    positions above describe: `Map(xs, f)` solves `T` from the source and
+    //    stamps `f`'s parameter with it, exactly as every other converted
+    //    operator does;
+    //  - the VARIADIC (`zipWith`) clause is the trailing `collection*`. It
+    //    declares NO contextual slot, so nothing in the multi-collection form
+    //    is ever stamped — the re-ruled §6 behavior, by construction: at three
+    //    operands the slot below lands on a SOURCE, which is never an inline
+    //    `Function` literal, and the pass declines before it canonicalizes
+    //    anything.
+    //
+    // The two clauses cannot both be spelled positionally: the type language
+    // consumes required→optional→variadic, so a callback-LAST variadic
+    // (`(collection+, mapping)`) hoists the mapping to operand 0 — which is
+    // why the PRE-conversion spelling declared but never applied (§2). `Map` is
+    // `lazy` with a `canonical` handler, so `validateArguments` never runs on
+    // it and the looseness costs no diagnostic: admission, evaluation and every
+    // error value are byte-identical to the pre-conversion behavior.
+    signature:
+      'forall T, U. (collection<T>, mapping: callback<(T) -> U>, collection*) -> indexed_collection',
     // The mapped collection keeps the source's shape/indexed-ness, but its
     // elements are the lambda's RESULT type — not the source element type.
     // (If the input collection is indexed, the output collection is indexed.)
@@ -2670,11 +2731,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    signature: '(collection, predicate: function) -> collection',
-    // The predicate is applied to the ELEMENTS of the source collection: an
-    // inline literal at operand 1 gets its parameter annotated with the
-    // element type of operand 0.
-    callbackElementOf: { 1: 0 },
+    // Design D phase 0b: the element-of link lives in the SIGNATURE (see
+    // `CountIf`). The RESULT stays with the `type:` handler below — the type
+    // language cannot express "the source's own collection kind and
+    // indexedness", so converting the slot deliberately does not convert the
+    // result (§7, rule 1).
+    signature:
+      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> collection',
     // If the input collection is indexed, the output collection is indexed.
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
@@ -2895,7 +2958,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, reducer: function, initial:value?) -> value',
+    // Design D phase 2: the element-of link lives in the SIGNATURE (see
+    // `CountIf`). `S` spells the reducer as `(accumulator, element)` and stamps
+    // the ELEMENT parameter only — §7 rule 2: `S` describes the STAMP, not the
+    // operator's tolerance. The accumulator is deliberately `unknown`, which
+    // the stamp gate declines, because a fold's accumulator may CHANGE TYPE
+    // mid-fold and an annotation would forbid it: `Reduce([1,2,3], (a, x) |->
+    // a / x, 1)` folds 1 → 1/2 → 1/6, which a `finite_integer` accumulator
+    // annotation (solved from the initial value) rejects at apply time. That
+    // holds for the SEEDED form as much as the seedless one, so neither stamps
+    // it — see the phase-2 audit in the design doc.
+    //
+    // The RESULT stays with the `type:` handler below: it is the reducer's own
+    // result type, which the accumulator channel does not carry.
+    signature:
+      'forall T. (collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
@@ -2921,7 +2998,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // initial value (Sum → 0): stay inert instead.
       if (enumerationDeclined(collection)) return undefined;
       const hasInitial = initial !== undefined;
-      initial ??= ce.Nothing;
+      const seed = initial ?? ce.Nothing;
 
       // The compiled fast path folds with JS numbers, so it always yields a
       // float. Under exact evaluation that violates the Evaluate-vs-N
@@ -2931,11 +3008,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // is then correct anyway). Otherwise fall through to the interpreted
       // path, which is contract-correct.
       const inputsInexact =
-        numericApproximation || (isNumber(initial) && !initial.isExact);
+        numericApproximation || (isNumber(seed) && !seed.isExact);
 
       if (
         inputsInexact &&
-        initial.type.matches('real') &&
+        // A SEEDLESS fold has no initial value to type-check: its seed is the
+        // first element, covered by the collection check. (Testing `nothing`
+        // against `real` used to make this whole branch unreachable without an
+        // initial value.)
+        (!hasInitial || seed.type.matches('real')) &&
         collection.type.matches(ce.type('collection<real>'))
       ) {
         // If we're dealing with real numbers, we can compile.
@@ -2949,15 +3030,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               // With an explicit initial value, fold it in from the start; do
               // not overwrite it with the first element (that is only the seed
               // when no initial value was supplied).
-              let accumulator = hasInitial ? initial.re : NaN;
+              let accumulator = hasInitial ? seed.re : NaN;
               let first = true;
+              let empty = true;
               for (const item of collection.each()) {
+                empty = false;
                 if (first && !hasInitial) accumulator = item.re;
                 else
                   accumulator = compiled.run!(accumulator, item.re) as number;
                 first = false;
                 yield;
               }
+              // A seedless fold of an empty collection has nothing to seed
+              // from — `Nothing`, as the interpreted path answers.
+              if (empty && !hasInitial) return ce.Nothing;
               return ce.expr(accumulator);
             })(),
             ce._timeRemaining,
@@ -2968,14 +3054,45 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // We don't have a compiled function, so we need to use the
       // interpreted version.
       const f = applicable(fn);
+      // A reducer that produced no value is a computation failure: fold in
+      // the marker rather than the erasure symbol.
+      const step = (acc: Expression, x: Expression): Expression =>
+        f([acc, x]) ?? absenceMarker(ce, collection);
+
+      if (!hasInitial) {
+        // SEEDLESS: seed with the FIRST element and fold from the second —
+        // the convention of `Scan` and of the compiled fast path above (ruled
+        // 2026-08-09). The previous encoding folded from the `Nothing`
+        // sentinel, which only looked right for a reducer that splices it
+        // away (`Add`): `Reduce([1, 2, 3], (a, b) |-> a - b)` answered -6
+        // (`((nothing - 1) - 2) - 3`) where `Scan`'s last element is -4, and a
+        // reducer that does not splice leaked `Nothing` into the result
+        // (`Reduce([2, 3, 2], Power)` → `Nothing^12`). It also made the
+        // `Nothing` sentinel the accumulator's first VALUE, which apply-time
+        // validation rejects for an annotated reducer.
+        return run(
+          (function* (): Generator<
+            Expression | undefined,
+            Expression | undefined
+          > {
+            let acc: Expression | undefined = undefined;
+            for (const x of collection.each()) {
+              acc = acc === undefined ? x : step(acc, x);
+              yield acc;
+            }
+            // Nothing to seed from: an empty seedless fold has no value.
+            return acc ?? ce.Nothing;
+          })(),
+          ce._timeRemaining,
+          ce._deadlineFrame
+        );
+      }
+
       return run(
-        reduceCollection<Expression>(
-          collection,
-          // A reducer that produced no value is a computation failure: fold in
-          // the marker rather than the erasure symbol.
-          (acc, x) => f([acc, x]) ?? absenceMarker(ce, collection),
-          initial
-        ) as Generator<Expression | undefined, Expression | undefined>,
+        reduceCollection<Expression>(collection, step, seed) as Generator<
+          Expression | undefined,
+          Expression | undefined
+        >,
         ce._timeRemaining,
         ce._deadlineFrame
       );
@@ -2992,7 +3109,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value.',
     complexity: 8200,
     lazy: true,
-    signature: '(reducer: function, initial: value, collection) -> value',
+    // Design D phase 2: `Reduce`'s contextual slot with the operands flipped —
+    // the callback comes FIRST and its element parameter is solved from the
+    // collection at operand 2. The accumulator stays bare (see `Reduce`). The
+    // stamp survives this operator's rewrite into a `Reduce`: it runs before
+    // the canonical handler, on the raw literal the handler then reuses.
+    signature:
+      'forall T. (reducer: callback<(unknown, T) -> unknown>, initial: value, collection<T>) -> value',
     canonical: (ops, { engine }) => {
       const fn = canonicalFunctionLiteral(ops[0]);
       const initial = ops[1]?.canonical;
@@ -3012,8 +3135,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value).',
     complexity: 8200,
     lazy: true,
+    // Design D phase 2: `Reduce`'s contextual slot verbatim — the reducer is
+    // `(accumulator, element)`, the element is stamped from the source and the
+    // accumulator stays bare (see `Reduce` for why a fold never stamps its
+    // accumulator). The RESULT stays with the `type:` handler below: the
+    // source's shape with the fold's result as its elements.
     signature:
-      '(collection, reducer: function, initial:value?) -> indexed_collection',
+      'forall T. (collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> indexed_collection',
     // Same shape/indexed-ness as the source, but elements are the fold's
     // result type (mirrors Map).
     type: (ops) => {
@@ -3164,7 +3292,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    signature: '(collection, predicate: function) -> collection',
+    // Design D phase 1: the element-of link lives in the SIGNATURE (mirrors
+    // `Filter`). The RESULT stays with the `type:` handler — the source's own
+    // collection kind and indexedness, which the type language cannot express
+    // (§7 rule 1).
+    signature:
+      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> collection',
     // Preserve the source's element type / indexed-ness (mirrors Filter).
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
@@ -3293,7 +3426,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    signature: '(collection, predicate: function) -> collection',
+    // Design D phase 1: as `TakeWhile` — the result stays with the `type:`
+    // handler (§7 rule 1).
+    signature:
+      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> collection',
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -3373,9 +3509,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    signature: '(collection, mapping: function) -> list',
+    // Design D phase 1: the element-of link lives in the SIGNATURE. `U` is a
+    // RESULT-side variable (contract clause 3): the callback's own result — not
+    // its parameters — contributes to it, for an inline literal and a named
+    // callback alike (R-D2′). The slot is deliberately `(T) -> U` and not
+    // `(T) -> collection<U> | U`: `S` describes the STAMP, never the operator's
+    // tolerance, and the scalar-result singleton lift is the `type:` handler's
+    // calculation below (§7 rule 2).
+    signature:
+      'forall T, U. (collection<T>, mapping: callback<(T) -> U>) -> list',
     type: (ops) => {
-      const resultType = functionResult(ops[1].type.type);
+      const resultType = callbackResultType(ops[1]);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
         return parseType('list');
       const inner = collectionElementType(resultType);
@@ -3404,10 +3548,39 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         isFunction(expr) && expr.op1.isEmptyCollection === true
           ? true
           : undefined,
-      isFinite: (expr) =>
-        isFunction(expr) && expr.op1.isEmptyCollection === true
-          ? true
-          : undefined,
+      // A finite source is NECESSARY but not SUFFICIENT: the flattened stream
+      // is finite only if each of the finitely many inner results is finite
+      // too, and a callback returning an INFINITE inner collection
+      // (`FlatMap([1, 2], n |-> Range(1, Infinity))`) makes the result
+      // infinite from a finite source. Since every finite-guarded consumer
+      // (`Reduce`, `Sum`, …) enumerates on the strength of this facet, `true`
+      // is claimed only when BOTH halves are provable, from the callback's
+      // declared RESULT type (contract clause 3, the same type
+      // `callbackResultType` feeds the `type:` handler):
+      // - a result provably disjoint from `collection` is a SCALAR — the
+      //   iterator emits it as a single element, so it cannot diverge;
+      // - a collection result must pin a fixed extent statically
+      //   (`staticCollectionDims`, the only type-level finiteness evidence
+      //   this system has: `vector<2>` → `[2]`; `list<number>` → `[-1]`,
+      //   i.e. open, and `list` is NOT a finiteness claim here — `Cycle` is
+      //   `list`-typed and infinite).
+      // Anything else — an `unknown` result, an open-length list, a bare
+      // `collection` — is `undefined`, "not known", not `false`.
+      //
+      // `count` stays `undefined` regardless: a length is not a shape
+      // declaration — it would have to apply the callback to every element.
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        // A provably infinite source keeps reporting `false` (the reverse
+        // direction is untouched by this handler's tightening).
+        const source = expr.op1.isFiniteCollection;
+        if (source !== true) return source;
+        const inner = callbackResultType(expr.op2);
+        if (inner === undefined) return undefined;
+        if (provablyDisjoint(inner, 'collection')) return true;
+        const dims = staticCollectionDims(inner);
+        return dims !== null && dims.every((d) => d >= 0) ? true : undefined;
+      },
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
@@ -5203,7 +5376,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the 1-based index of the first element satisfying the predicate, or 0 if not found.',
     complexity: 8200,
-    signature: '(collection, predicate: function) -> integer',
+    // Design D phase 1: the element-of link lives in the SIGNATURE (see
+    // `CountIf`). The result type is unchanged.
+    signature:
+      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> integer',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'IndexWhere', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -5239,7 +5415,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the first element of the collection satisfying the predicate, or Nothing if none found.',
     complexity: 8200,
-    signature: '(collection, predicate: function) -> any',
+    // Design D phase 1: the element-of link lives in the SIGNATURE (see
+    // `CountIf`). The declared result stays the widest `any`: the NOT-FOUND
+    // answer is `Nothing`, so the precise `elementType | nothing` is the `type:`
+    // handler's below, not something `T` alone could say (§7 rule 1).
+    signature:
+      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> any',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1),
     // Returns a single element, or `Nothing` when no element matches: the
@@ -5275,7 +5456,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the number of elements in the collection satisfying the predicate.',
     complexity: 8200,
-    signature: '(collection, predicate: function) -> integer',
+    // Design D phase 0: the element-of link lives in the SIGNATURE. The
+    // predicate slot is a CONTEXTUAL callback — admission-wise the primitive
+    // `function` it converted from (so a narrower named predicate, a
+    // `function`-typed symbol and an unknown-result literal all still pass),
+    // while `(T) -> boolean` contextually types an inline literal there. The
+    // result type is unchanged.
+    signature:
+      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> integer',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'CountIf', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -5310,7 +5498,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return a list of indexes of elements in the collection satisfying the predicate.',
     complexity: 8200,
-    signature: '(collection, predicate: function) -> list<integer>',
+    // Design D phase 1: the element-of link lives in the SIGNATURE (see
+    // `CountIf`). The result is INDEXES, not elements — independent of `T`, and
+    // unchanged.
+    signature:
+      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> list<integer>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Position', ops, 1),
     type: () => 'list<integer>',
@@ -5884,14 +6076,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     wikidata: 'Q381060',
     complexity: 8200,
-    // The second parameter stays the PRIMITIVE `integer | function` union: an
-    // arm of a union may not mention a type variable, and the size/predicate
-    // arms are both ground anyway.
+    // Design D phase 2 — the first R-D4 (resolve-then-stamp) consumer. The
+    // second parameter is a genuine TWO-ARM shape, and it stays ONE union
+    // rather than becoming an overload set: the arms are disjoint (`integer`
+    // vs a function), `callback<S>` admits exactly what the primitive
+    // `function` admits (§4 clause 1), so admission, validation, the
+    // diagnostics and the result type are byte-identical to the pre-conversion
+    // spelling — while an intersection would have changed all of them plus the
+    // displayed signature. Rule U admits it: exactly ONE arm of the union is
+    // open.
+    //
+    // The stamp RESOLVES the arm first (`contextualSlotCallback`): the only
+    // operand shape it rewrites is an inline `Function` literal, which the
+    // `integer` arm cannot take, so the callback arm is the resolved one. A
+    // size operand (a number, or a symbol holding one) is not a literal, so
+    // the SIZE arm is untouched — as it was under the metadata.
     signature:
-      'forall T. (collection<T>, integer | function, integer?) -> list<list<T>>',
-    // A shorthand predicate (`Partition(xs, _ > 5)`) desugars to a function
-    // literal; a size operand (a number, or a symbol holding one) yields no
-    // parameter and is left alone, so the size arm is unaffected.
+      'forall T. (collection<T>, integer | callback<(T) -> boolean>, integer?) -> list<list<T>>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Partition', ops, 1),
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
@@ -6914,6 +7115,17 @@ function isSymbolicOperand(op: Expression | undefined): boolean {
  * undetermined element) and no short-circuit fired, `undefined` is returned so
  * the expression stays inert — the CAS-correct behavior rather than throwing.
  *
+ * An ELEMENT-valued predicate failure (see `predicateErrorValue`) is neither of
+ * those: it is surfaced as the operator's RESULT, the scalar-consumer
+ * convention `CountIf`/`Find`/`IndexWhere` follow. Absorbing it into
+ * `sawUndetermined` discarded the error entirely and left the quantifier inert.
+ *
+ * The interaction with short-circuiting is decided by ENUMERATION ORDER, which
+ * is the family's laziness: the loop answers with whatever it meets FIRST. A
+ * definite short-circuit (True for `Any`, False for `All`) at an element BEFORE
+ * the failing one still wins — the quantifier never looked at the rest — while
+ * an error met before any decision surfaces instead of being skipped past.
+ *
  * Enumeration is driven through `run(…, ce._timeRemaining)` so that an infinite
  * or lazy collection with no short-circuit aborts on the deadline instead of
  * hanging.
@@ -6940,7 +7152,13 @@ function evaluateQuantifier(
         const result = f ? f([item]) : item.evaluate();
         const s = sym(result);
         if (s === shortSym) return shortValue;
-        if (s !== definiteSym) sawUndetermined = true;
+        if (s !== definiteSym) {
+          // See `predicateErrorValue`: an element-valued predicate failure is
+          // surfaced as the operator's result, not absorbed as "undetermined".
+          const err = predicateErrorValue(result);
+          if (err) return err;
+          sawUndetermined = true;
+        }
         yield;
       }
       return sawUndetermined ? undefined : defaultValue;

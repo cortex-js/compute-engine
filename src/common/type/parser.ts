@@ -17,6 +17,7 @@ import {
   DictionaryTypeNode,
   SetTypeNode,
   BroadcastableTypeNode,
+  CallbackTypeNode,
   CollectionTypeNode,
   ExpressionTypeNode,
   SymbolTypeNode,
@@ -82,6 +83,7 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
                  | <dictionary_type>
                  | <set_type>
                  | <broadcastable_type>
+                 | <callback_type>
                  | <collection_type>
                  | <expression_type>
                  | <symbol_type>
@@ -156,6 +158,8 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 
 <broadcastable_type> ::= "broadcastable" ( "<" <type> ">" )?
 
+<callback_type> ::= "callback" "<" <signature> ">"
+
 <collection_type> ::= ( "collection" | "indexed_collection" ) ( "<" <type> ">" )?
 
 
@@ -215,6 +219,21 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 <string_literal> ::= '"' ( [^"] | '\"' )* '"'
  *
  */
+
+/**
+ * True when `node` is an arrow signature, looking through the redundant
+ * parentheses `callback<((T) -> boolean)>` produces.
+ *
+ * A `forall` node answers `true` as well — not because it is admissible, but
+ * because it already has a *better* rejection downstream (a nested `forall` is
+ * an unsupported variable position), which this check must not preempt.
+ */
+function isFunctionSignatureNode(node: TypeNode): boolean {
+  let n: TypeNode = node;
+  while (n.kind === 'group') n = (n as GroupTypeNode).type;
+  return n.kind === 'function_signature' || n.kind === 'forall';
+}
+
 export class Parser {
   private lexer: Lexer;
   private typeResolver: TypeResolver;
@@ -707,6 +726,7 @@ export class Parser {
       this.parseDictionaryType() ||
       this.parseSetType() ||
       this.parseBroadcastableType() ||
+      this.parseCallbackType() ||
       this.parseCollectionType() ||
       this.parseExpressionType() ||
       this.parseSymbolType() ||
@@ -856,17 +876,22 @@ export class Parser {
     }
 
     const args: ArgumentNode[] = [];
+    // The first token of each argument, so an ordering error can point at the
+    // offending argument rather than at the end of the signature.
+    const argTokens: Token[] = [];
 
     this.advance(); // consume '('
 
     // Parse arguments
     if (!this.match(')')) {
       do {
+        const argToken = this.current;
         const arg = this.parseArgument();
         if (!arg) {
           this.error('Expected argument');
         }
         args.push(arg);
+        argTokens.push(argToken);
       } while (this.match(','));
 
       this.expect(')');
@@ -900,6 +925,33 @@ export class Parser {
 
     if (variadicCount > 1) {
       this.error('There can be only one variadic argument');
+    }
+
+    // The consumption model is positional and bins arguments by MODIFIER, not
+    // by source order: required arguments, then optional ones, then the
+    // variadic. Any other order would be silently re-ordered into that model —
+    // `(collection+, mapping: function)` would mean `(mapping, ...collection)`
+    // — so it is a parse error rather than a reinterpretation.
+    let sawOptional = false;
+    let sawVariadic = false;
+    for (let i = 0; i < args.length; i++) {
+      const modifier = args[i].modifier;
+      if (sawVariadic) {
+        this.errorAtToken(
+          argTokens[i],
+          'A variadic argument must be the last argument'
+        );
+      }
+      if (modifier === 'variadic_zero' || modifier === 'variadic_one') {
+        sawVariadic = true;
+      } else if (modifier === 'optional') {
+        sawOptional = true;
+      } else if (sawOptional) {
+        this.errorAtToken(
+          argTokens[i],
+          'A required argument cannot follow an optional argument'
+        );
+      }
     }
 
     return this.createNode<FunctionSignatureNode>('function_signature', {
@@ -1387,6 +1439,49 @@ export class Parser {
     }
 
     return undefined;
+  }
+
+  /**
+   * `callback<(T) -> boolean>` — the contextual-callback constructor (Design D
+   * §4). The wrapped type must be a signature, which the builder checks.
+   *
+   * Recognized only when a `<` follows. The escape that leaves is NARROW, and
+   * covers only the BARE spelling: a user type declared and referenced without
+   * arguments (`type alias callback = integer`, used as `callback`) is still an
+   * ordinary type reference. An APPLIED one is not reachable at all —
+   * `callback<integer>` always parses here, so a user's generic `callback<T>`
+   * can be declared but never used. That is the same fate every other
+   * constructor keyword deals a same-named user type (`collection<T>`,
+   * `list<T>`, `tuple<T>`, … are all hijacked at use on both declaration
+   * routes); `callback` differs only in that its hijack REPORTS itself — the
+   * application fails to parse with "expects a function signature" instead of
+   * silently resolving to the builtin.
+   */
+  private parseCallbackType(): CallbackTypeNode | undefined {
+    if (this.current.type !== 'IDENTIFIER' || this.current.value !== 'callback')
+      return undefined;
+    if (this.lexer.peekToken().type !== '<') return undefined;
+
+    this.advance();
+    this.expect('<');
+    const payloadToken = this.current;
+    const signatureType = this.parseUnionType();
+    if (!signatureType) this.error('Expected a function signature');
+    // Reject a non-signature payload HERE, with the parser's own caret, rather
+    // than letting it reach the builder: the builder's bare `throw` carries no
+    // position, and `parseTypePrefix()` callers (the Epsil annotation route)
+    // surface it verbatim, unlike every other type rejection. The builder check
+    // stays as the backstop for any node this one cannot judge.
+    if (!isFunctionSignatureNode(signatureType!))
+      this.errorAtToken(
+        payloadToken,
+        '`callback<…>` expects a function signature, e.g. `callback<(T) -> boolean>`'
+      );
+    this.expect('>');
+
+    return this.createNode<CallbackTypeNode>('callback', {
+      signatureType: signatureType!,
+    });
   }
 
   private parseCollectionType(): CollectionTypeNode | undefined {

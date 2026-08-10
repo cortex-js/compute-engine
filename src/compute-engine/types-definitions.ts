@@ -1254,26 +1254,6 @@ export type OperatorDefinitionFlags = {
   broadcastable: boolean;
 
   /**
-   * Where a callback operand gets its parameter type from: a map from the
-   * 0-based index of a **callback** operand to the index of the sibling
-   * operand whose ELEMENT type the callback's (single) parameter is applied
-   * to. `Map` and `Filter` declare `{ 1: 0 }` — "operand 1 is applied to the
-   * elements of operand 0".
-   *
-   * At canonicalization of the call, an INLINE `Function` literal at the
-   * callback position whose parameter is unannotated is rebuilt with that
-   * parameter wrapped in `["Typed", param, <element type>]`, so it behaves
-   * exactly like the hand-annotated spelling. Only positive evidence
-   * qualifies: an `undefined`/`unknown`/`any` element type annotates nothing.
-   *
-   * This exists for the BUILT-INS, whose callback slots deliberately stay the
-   * primitive `function` type: an operator whose signature declares a concrete
-   * arrow-typed parameter needs no metadata — the signature is the trigger.
-   * See `docs/plans/2026-08-08-lambda-param-element-inference.md`.
-   */
-  callbackElementOf?: Record<number, number>;
-
-  /**
    * If `true`, this operator's `evaluate` handler runs even when the
    * expression is **invalid** — that is, when an operand is, or embeds, an
    * `Error` value.

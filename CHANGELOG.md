@@ -83,9 +83,19 @@
   overrides an explicit annotation, and does not fire for union element
   types of `Map`/`Filter` — heterogeneous "errors are values" programs keep
   their per-element behavior, and the vectorization default for
-  evidence-free lambdas is unchanged. Polymorphic (`forall`) callees are
-  excluded until generic instantiation lands; optional and variadic
-  callback positions are covered.
+  evidence-free lambdas is unchanged. Optional and variadic callback
+  positions are covered. The whole mechanism is driven by the callee's
+  declared signature, and a generic function you declare yourself gets the
+  same inference — provided the callback slot is spelled
+  `callback<(T) -> …>` rather than as a plain generic arrow `(T) -> …`. The
+  `callback<…>` spelling is what asks for the inference, and it is also the
+  permissive one: the slot still admits any function, exactly as a bare
+  `function` parameter does, and a callback that does not match is applied
+  and judged per element as before. A plain generic arrow does neither — it
+  declines the inference *and* rejects a callback whose declared type does
+  not fit the slot. A callback that combines several collections at once
+  (`Map(xs, ys, f)`) is admitted and applied dynamically, as it always was,
+  rather than annotated.
 
 - **Annotated lambda parameters no longer disable the Map fast paths.** The
   Map-fusion and exact-compile gates previously required bare (unannotated)
@@ -409,6 +419,44 @@
   position.
 
 ### Resolved Issues
+
+- **A seedless `Reduce` now seeds with the collection's first element.**
+  Without an initial value, `Reduce` folded from the `Nothing` sentinel, which
+  only looked right for a reducer that splices it away: `Reduce([1, 2, 3],
+  (a, b) |-> a - b)` answered `-6` — `((nothing - 1) - 2) - 3` — where the
+  corresponding `Scan` ends at `-4`, and a reducer that does not splice leaked
+  the sentinel into the result (`Reduce([2, 3, 2], Power)` produced a
+  `Nothing`-valued power instead of `64`). The seedless fold now starts at the
+  first element and folds from the second, matching `Scan` and the compiled
+  fast path; an empty seedless fold still answers `Nothing`. Folds given an
+  explicit initial value are unchanged.
+
+- **`Any` and `All` now surface an element's type error instead of silently
+  discarding it.** When a predicate fails on an element — for instance a
+  callback whose inferred parameter type a retracted element no longer
+  satisfies — the quantifiers previously treated the error as "undetermined"
+  and returned nothing, and `Any` could even short-circuit `True` straight
+  past the failing element. They now return the element's error, in
+  enumeration order: a definite answer found before the failing element
+  still short-circuits (matching the family's laziness), and an error
+  encountered before any decision is the result.
+
+- **`Sum`, `Reduce`, `Total` and other finite-only operations now work over
+  `FlatMap`.** `FlatMap` never reported whether its result was finite, so
+  every consumer that requires a finite collection stayed inert over it.
+  It now reports finite when its source is finite and the mapping
+  function's result is provably finite (a scalar, or a finite collection);
+  anything unprovable is left undetermined, as before.
+
+- **A partially annotated function literal no longer rejects arguments at
+  its unannotated parameters.** Annotating one parameter of a literal
+  activated per-application validation for every parameter, and a bare
+  (unannotated) parameter was checked against its inference residue —
+  which, among other things, made a seedless `Reduce` with an annotated
+  element parameter reject its own `Nothing` seed with
+  `incompatible-type unknown nothing`. A bare parameter now imposes no
+  constraint; explicitly annotated parameters are enforced exactly as
+  before.
 
 - **Membership queries on derived collections no longer answer a definite
   `False` when the underlying membership is undecidable.** Nine collection

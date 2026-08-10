@@ -607,6 +607,12 @@ function couldBeCallable(t: Type | undefined): boolean {
     return t === 'unknown' || t === 'any' || t === 'function' || t === 'symbol';
   return (
     t.kind === 'signature' ||
+    // A `callback<S>` is the primitive `function` for every admission decision
+    // (Design D §4 clause 1), so it is callable wherever a `signature` is. The
+    // constructor's intended home is a PARAMETER slot, but nothing enforces
+    // that, and a result/value position spelled that way must not read as
+    // non-callable.
+    t.kind === 'callback' ||
     t.kind === 'intersection' ||
     t.kind === 'union' ||
     t.kind === 'reference'

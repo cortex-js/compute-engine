@@ -60,6 +60,34 @@ interpreter-visible inference — and specifically what the mechanism offers
    this route. The signature-driven trigger is NOT narrowed — a
    user-declared arrow param is an explicit contract, whatever its types.
 
+   *Union exclusion RULED PERMANENT (2026-08-10, on the design
+   exploration's evidence).* The ruled per-element union semantics —
+   "each element evaluates under its arm; a mismatch errors at that
+   element only" — is what the UNANNOTATED path already computes:
+   interpretation is value-directed, so the arm an element satisfies is
+   its value, and evaluation under it is ordinary evaluation (the
+   flagship `[4, 2i, NaN, 9]` output requires the string element to
+   evaluate DYNAMICALLY — no static arm machinery can produce that NaN).
+   A union stamped from the source's own element type is vacuously
+   unviolatable on every reachable path, so admission buys only a
+   displayed signature, at the price of either the published
+   errors-are-values output (strict stamping), a second annotation kind
+   that breaks hand-annotation equivalence and serialization round-trip
+   (loose stamping), or per-arm canonicalization the flagship example
+   itself refutes. Demand is negative: the only union-element callback in
+   the corpus exists BECAUSE unions decline, and hand-written union
+   annotations are served by the signature-driven trigger. If demand ever
+   materializes, the only viable shape is a distinct MEMBERSHIP-ONLY
+   annotation: body scope stays inferred-`unknown`, enforcement solely at
+   the per-application validation (`function-utils.ts` step 4b),
+   invisible to `assertCallbackAnnotations`, erased on `toMathJson()` —
+   plus four sub-rulings (annotation kind; serialization erasure; compile
+   invisibility; hand-written unions keep strict semantics). Key
+   mechanism fact for future readers: the broadcastable-param route
+   avoids body poison via `Apply(callee, _1)` INDIRECTION — the callee's
+   body is opaque to the synthetic wrapper — while this trigger stamps
+   the user's own body, which is exactly why unions poison here.
+
    *Follow-up (1) DONE 2026-08-09*: `lowerLevel`
    (`map-broadcast-shape.ts`) accepts a `Typed` parameter when the level
    source's element type is a provable SUBTYPE of the annotation, then
@@ -102,6 +130,128 @@ interpreter-visible inference — and specifically what the mechanism offers
    hand-annotation; fresh canonicalizations re-infer. The same ruling
    covers string-element collections with numeric bodies poisoning at
    canonicalization instead of staying symbolic.
+
+   *Follow-ups (4) and (5) DONE 2026-08-09*: the metadata shape was
+   generalized and the coverage extended past `Map`/`Filter`.
+
+   **Shape.** `callbackElementOf` maps a CALLBACK operand to the sources of
+   its PARAMETERS (`CallbackElementLinks` / `CallbackElementSources`,
+   `types-definitions.ts`). A key is the callback's 0-based operand index, or
+   `'last'` — the callback-last spelling of a variadic operator. A value is
+   one of: a bare NUMBER (shorthand: a single-parameter callback fed by that
+   operand), an ARRAY of one operand index — or `null`, "no source, stays
+   bare" — per parameter in order, or `'preceding'` (parameter *k* ← operand
+   *k*, over every operand before the callback). Each parameter is an
+   INDEPENDENT contract: a callback can come out partly stamped, and every v1
+   guard (inline literal only, no overwrite of an author's annotation, symbol
+   callbacks untouched, `admissibleElementType`) applies unchanged per
+   parameter.
+
+   **Coverage.** `Map` `{ last: 'preceding' }` — this is what unblocks the
+   multi-collection `Map(xs, ys, f)` form, whose v1 exclusion below is now
+   superseded; `Filter`, `CountIf`, `Find`, `IndexWhere`, `Position`, `Any`,
+   `All`, `FlatMap` `{ 1: 0 }`; `Scan` `{ 1: [null, 0] }` (the reducer's
+   accumulator has no source). `Fold`, `TakeWhile`, `DropWhile` and
+   `Partition` have the same shapes and are the obvious next increment; they
+   were left out of this round's authorized scope.
+
+   The rewrite now also runs on the STRICT canonicalization path, not only
+   the lazy one: `CountIf`/`Find`/`IndexWhere`/`Position` are not `lazy`, so
+   their operands canonicalize before the handler runs and the literal's raw
+   structure — which the rebuild needs — would already be gone.
+
+   **`Reduce` withheld, needs a ruling.** It has `Scan`'s reducer shape, but
+   a SEEDLESS `Reduce` folds from the `Nothing` sentinel
+   (`initial ??= ce.Nothing`), and apply-time validation (`makeLambda` §6.4)
+   is gated on the literal carrying at least ONE annotation and then checks
+   EVERY parameter — so the bare accumulator, declared `unknown`, rejects
+   `nothing` (`nothing` is deliberately not a subtype of `unknown`). Stamping
+   the element parameter therefore turns `Reduce(xs, (acc, n) |-> acc + n)`
+   into an `incompatible-type` error (measured: it breaks the published Epsil
+   program in `test/epsil/programs.test.ts`). Pre-existing — the
+   hand-annotated spelling errors identically today. Two candidate fixes, both
+   needing a ruling: make a BARE parameter unconstrained in that validation
+   (validate against `any`, not `unknown`), or have the seedless interpreted
+   fold seed with the FIRST element, as the compiled fast path and `Scan`
+   already do.
+
+   Blast radius, measured on the full suite: ZERO snapshot churn (4241
+   snapshots, none changed) — stamping only adds `Typed` wrappers the
+   serializers drop. The compile gate (`assertCallbackAnnotations`) needed no
+   change: every newly stamped shape is provably satisfied by its source's
+   element type, so it compiles unchanged on both `javascript` and `python`,
+   and a narrowing/unprovable annotation still declines. The multi-collection
+   `Map` has no compiled lowering on either target and none was added.
+
+5. **The `Reduce` blocker: BOTH fixes** (ruled 2026-08-09, implemented the
+   same day). The withheld `Reduce` coverage rested on two independent
+   defects; the ruling was to fix both, and only then stamp.
+
+   **Fix 1 — a BARE parameter imposes no constraint** (`makeLambda`,
+   `function-utils.ts` §6.4). Apply-time validation is gated on the literal
+   carrying at least ONE annotation and then validates EVERY parameter
+   against the literal's signature. A bare parameter's slot there is only
+   whatever inference left behind (`unknown` by default) — not a contract its
+   author wrote — and `nothing` is deliberately not a subtype of `unknown`,
+   so a legitimate value was rejected. For VALIDATION ONLY, a bare
+   parameter's argument slot is now widened to `any`; annotated parameters
+   keep their exact enforcement and the literal's reported type is unchanged.
+   Applied at both validation sites (the step-3 curried PREFIX check and the
+   step-4b full check); no other route validates a literal's own parameter
+   types.
+
+   *Exception, load-bearing*: the relaxation is skipped whenever the literal
+   carries a WHOLE-SIGNATURE marker (§2.5). Erasure leaves a GENERIC literal
+   with no annotated parameter operand at all, so every position would look
+   bare and the polytype's check would silently vanish. Pinned
+   (`forall T: number. (x: T, n: integer) -> T` still rejects `nothing` and a
+   string).
+
+   **Fix 2 — a seedless `Reduce` seeds with the FIRST element** and folds
+   from the second, the convention `Scan` and `Reduce`'s own compiled fast
+   path already implement. It used to fold from a `Nothing` SENTINEL
+   (`initial ??= ce.Nothing`), which only looked right for a reducer that
+   splices the marker away. Measured semantics delta on `[1, 2, 3]`:
+   `Subtract` −6 → **−4** (= `Last(Scan(…))`), `Divide` over `[8, 2, 2]`
+   1/32 → **2**, `Power` over `[2, 3, 2]` `Nothing^12` → **64**; `Add` is
+   unchanged (6), which is why the sentinel survived this long. Empty +
+   seedless keeps answering `Nothing`; a single element is its own result.
+
+   A second, latent defect fell out: the compiled fast path was UNREACHABLE
+   without an initial value — its gate tested `initial.type.matches('real')`
+   on the `nothing` sentinel — even though its body was written for
+   first-element seeding (`hasInitial ? initial.re : NaN`). The gate now
+   skips the initial-type test when there is no initial value, so seedless
+   `N(Reduce(…))` takes the compiled path like the seeded form; the empty
+   case returns `Nothing` there too. Interpreted-vs-compiled parity is pinned
+   on all of empty / single / non-associative
+   (`collections.test.ts`, `describe('Reduce, seedless')`).
+
+   **Coverage.** With both fixes in, `Reduce` declares
+   `{ 1: [null, 0] }` (`Scan`'s shape). Extended in the same round, each
+   verified against its own operand order and laziness: `Fold`
+   `{ 0: [null, 2] }` — callback FIRST, collection LAST, and the rewrite runs
+   before `Fold`'s canonical handler rebuilds the call as a `Reduce`, so the
+   stamp survives; `TakeWhile` and `DropWhile` `{ 1: 0 }` (both lazy);
+   `Partition` `{ 1: 0 }` — NOT lazy, so it uses the strict-path hook, and
+   its SIZE arm is untouched because an integer operand is not an inline
+   `Function` literal. This supersedes the "Reduce's accumulator is out of
+   v1 (with `Reduce` itself)" default recorded below; the ACCUMULATOR itself
+   stays bare, as on `Scan`.
+
+   **Hardening pin (union round).** A HAND-annotated union callback
+   (`(x: finite_integer | string) |-> …`) over a source whose element type
+   provably satisfies it is ADMITTED by the compile gate
+   (`assertCallbackAnnotations`, `isSubtype(union, union)`) — hand-written
+   unions were never the excluded case; auto-STAMPING them is. Measured
+   outcome: the admission passes and the BODY declines (a `string` arm
+   reaches a numeric lowering), so `compile()` reports `success: false` on
+   both targets and the interpreter evaluates. Fail-closed, no silent wrong
+   values; pinned in `compile-predicate-errors.test.ts` with the note that a
+   body that ever DOES compile under a union annotation must instead assert
+   `run()` parity.
+
+   Blast radius, measured on the full suite: ZERO snapshot churn.
 
 Defaults carried from the open questions (not separately ruled):
 `Reduce`'s accumulator is out of v1 (with `Reduce` itself); any
@@ -258,7 +408,9 @@ All conservative; each is a mechanical extension later if wanted:
   routes are the ratified surface.
 - **Multi-collection `Map(xs, ys, f)`** (callback last) — `{1: 0}` cannot
   express it; the discriminator declines operand 1 (a collection) and the
-  form keeps today's behavior.
+  form keeps today's behavior. *(Superseded by follow-up (5), 2026-08-09:
+  `Map` declares `{ last: 'preceding' }` and each parameter is stamped from
+  its own source.)*
 - **Expected param types containing `broadcastable<T>`** are skipped: the
   2026-08-08 broadcastable-param ruling makes that a callee-side
   application contract; stamping it onto a literal would give it an

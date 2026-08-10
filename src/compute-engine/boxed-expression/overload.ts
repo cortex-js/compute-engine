@@ -1,12 +1,19 @@
-import { isSubtype, widen } from '../../common/type/subtype.js';
+import {
+  isSubtype,
+  provablyDisjoint,
+  widen,
+} from '../../common/type/subtype.js';
 import { isEffectSubset } from '../../common/type/effects.js';
 import {
   freeTypeVariables,
+  paramAt,
   readTypeVariablesAsBounds,
   substituteTypeVariables,
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
 import {
+  contextualSlotCallback,
+  hasCallbackParam,
   isThreadableAt,
   solveArm,
   type Threadable,
@@ -109,21 +116,89 @@ export function overloadArms(
 }
 
 /**
- * The parameter an arm would bind to operand `index`: a required parameter,
- * then an optional one, then the variadic parameter (which absorbs every
- * remaining position). `undefined` when the arm has no slot at that index.
+ * The parameter an arm would bind to operand `index` — the consumption order of
+ * `validateArguments`' three loops.
  *
- * Mirrors the consumption order of `validateArguments`' three loops.
+ * Re-exported from `instantiate.ts`, which owns the single definition shared
+ * with `parameterPositions` (the tabulated form the generic solver and Design
+ * D's contextual callback pass read).
  */
-export function paramAt(
-  sig: FunctionSignature,
-  index: number
-): Type | undefined {
-  const required = sig.args?.length ?? 0;
-  if (index < required) return sig.args![index].type;
-  const optional = sig.optArgs?.length ?? 0;
-  if (index < required + optional) return sig.optArgs![index - required].type;
-  return sig.variadicArg?.type;
+export { paramAt };
+
+/**
+ * **R-D4 — resolve-then-stamp** (ruled 2026-08-10), at ARM granularity: the
+ * single arm of an overload set that a Design D contextual stamp runs against,
+ * or `undefined` when the application does not resolve to exactly one.
+ *
+ * Resolution runs BEFORE the stamp and uses only signals available before any
+ * operand is boxed — the pass's whole contract is that the callback literal
+ * canonicalizes once, already annotated:
+ *
+ * 1. **arity** — an arm that cannot take this many operands is not a
+ *    candidate;
+ * 2. **the contextual slot** — an arm that declares no `callback<S>` cannot be
+ *    stamped against at all, so it is not a candidate either. This is what
+ *    makes `Map`'s two clauses (§6) resolve for free: at arity 2 only the
+ *    unary clause declares a slot, and at arity ≥ 3 only the variadic clause
+ *    survives the arity filter — and it declares none, which is exactly the
+ *    re-ruled "the variadic form is NOT stamped".
+ * 3. **the COMPETING arms** — filtering to the callback-bearing arms in step 2
+ *    would otherwise let a stamp run while resolution has not actually chosen
+ *    that arm: an overload with one contextual arm plus another arity-viable
+ *    arm whose slot could equally take the function operand is genuinely
+ *    ambiguous, and the operand's own type — which the stamp runs before
+ *    reading — is what would decide it. So every OTHER arity-viable arm must
+ *    provably be unable to accept a function at each slot the candidate
+ *    declares contextual; otherwise the stamp declines. This is the
+ *    arm-granularity twin of `contextualSlotCallback`'s union-sibling rule, and
+ *    it is what `Partition`-shaped disjointness (`integer` vs `function`) still
+ *    passes.
+ *
+ * Ambiguity DECLINES (two candidate arms leave the stamp unrun), and so does a
+ * set no arm of which declares a slot — which is every user-defined overload
+ * set, keeping their ratified conservative skip.
+ *
+ * Write-free, and box-free by construction: nothing here reads an operand.
+ */
+export function resolveContextualArm(
+  arms: ReadonlyArray<FunctionSignature>,
+  count: number
+): FunctionSignature | undefined {
+  let found: FunctionSignature | undefined;
+  for (const arm of arms) {
+    if (!arityAdmits(arm, count)) continue;
+    if (!hasCallbackParam(arm)) continue;
+    if (found !== undefined) return undefined;
+    found = arm;
+  }
+  if (found === undefined) return undefined;
+
+  // Step 3: the contextual slots of the candidate, and what every competing arm
+  // puts there.
+  const slots: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const p = paramAt(found, i);
+    if (p !== undefined && contextualSlotCallback(p) !== undefined)
+      slots.push(i);
+  }
+  for (const arm of arms) {
+    if (arm === found) continue;
+    if (!arityAdmits(arm, count)) continue;
+    for (const i of slots)
+      if (!provablyRejectsFunction(paramAt(arm, i))) return undefined;
+  }
+
+  return found;
+}
+
+/** Could a competing arm take a `Function` operand at this slot? Answered
+ * conservatively — `undefined` (no such parameter) and an OPEN type both count
+ * as "could", the latter because nothing says a function does not inhabit a
+ * variable (and `provablyDisjoint` asserts on an open input). */
+function provablyRejectsFunction(t: Type | undefined): boolean {
+  if (t === undefined) return false;
+  if (freeTypeVariables(t).size > 0) return false;
+  return provablyDisjoint(t, 'function');
 }
 
 /**

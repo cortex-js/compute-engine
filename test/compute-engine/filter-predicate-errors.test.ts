@@ -2,8 +2,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * A predicate can fail on the ELEMENT rather than on the predicate itself: the
- * callback parameter's `Typed` annotation (installed by `callbackElementOf`)
- * rejects an element whose type was retracted. That used to be reported as
+ * callback parameter's `Typed` annotation (installed by the operator's
+ * contextual `callback<S>` slot) rejects an element whose type was retracted. That used to be reported as
  * `Filter predicate must return "True" or "False".` followed by a spell-check
  * hint about the LAMBDA'S OWN PARAMETER (`Unknown symbol "n". Did you mean
  * "i"?`).
@@ -14,7 +14,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  */
 
 /** `["Function", <body>, ["Typed", <param>, <type>]]` — the shape the
- * `callbackElementOf` rewrite produces once the element type is known. */
+ * contextual stamp produces once the element type is known. */
 const annotatedPredicate = (param: string, type: string) => [
   'Function',
   ['Greater', param, 0],
@@ -127,6 +127,105 @@ describe('Sibling predicate consumers with an Error-valued result', () => {
         .evaluate()
         .toString()
     ).toBe('2');
+  });
+});
+
+/**
+ * `Any`/`All` are the SHORT-CIRCUITING members of the scalar-consumer family,
+ * so they need the sibling contract stated twice over: an element-valued
+ * predicate failure is the operator's RESULT (it used to be absorbed into the
+ * "undetermined" branch, discarding the error and leaving the quantifier
+ * inert), AND the interaction with the short circuit is decided by ENUMERATION
+ * ORDER — whichever the walk meets first wins.
+ */
+describe('Any/All with an Error-valued predicate result', () => {
+  for (const op of ['Any', 'All'] as const) {
+    test(`${op} returns the element error`, () => {
+      const ce = new ComputeEngine();
+      const result = ce
+        .box([
+          op,
+          ['List', 1.5, 2.5],
+          annotatedPredicate('n', 'finite_integer'),
+        ])
+        .evaluate();
+      expect(result.operator).toBe('Error');
+      expect(result.toString()).toContain('incompatible-type');
+      expect(result.toString()).not.toContain('Did you mean');
+      expect(result.toString()).not.toContain('must return');
+    });
+
+    test(`${op} surfaces an error met BEFORE any decision`, () => {
+      // `n > 0`: the float element fails its annotation at index 1, and the
+      // element that would short-circuit (`7` → True for `Any`; `-1` → False
+      // for `All`) sits AFTER it. The error wins.
+      const ce = new ComputeEngine();
+      const result = ce
+        .box([
+          op,
+          ['List', 1.5, op === 'Any' ? 7 : -1],
+          annotatedPredicate('n', 'finite_integer'),
+        ])
+        .evaluate();
+      expect(result.operator).toBe('Error');
+      expect(result.toString()).toContain('incompatible-type');
+    });
+
+    test(`${op} still short-circuits on a decision met BEFORE the error`, () => {
+      // The same two elements, swapped: the walk answers and never looks at
+      // the failing element — the family's laziness, unchanged.
+      const ce = new ComputeEngine();
+      expect(
+        ce
+          .box([
+            op,
+            ['List', op === 'Any' ? 7 : -1, 1.5],
+            annotatedPredicate('n', 'finite_integer'),
+          ])
+          .evaluate()
+          .toString()
+      ).toBe(op === 'Any' ? '"True"' : '"False"');
+    });
+
+    test(`${op} over valid elements is unchanged`, () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce
+          .box([op, ['List', 1, 2, 3], ['Function', ['Greater', 'k', 0], 'k']])
+          .evaluate()
+          .toString()
+      ).toBe('"True"');
+    });
+
+    test(`${op} stays inert for a genuine non-boolean predicate`, () => {
+      // Unlike the eager siblings, the quantifiers never threw here: a
+      // non-boolean result is "undetermined" and the expression stays inert.
+      // Surfacing the ERROR value must not change that.
+      const ce = new ComputeEngine();
+      const e = ce.box([
+        op,
+        ['List', 1, 2, 3],
+        ['Function', ['Add', 'k', 1], 'k'],
+      ]);
+      expect(e.evaluate().operator).toBe(op);
+    });
+  }
+
+  test('the retraction repro surfaces the element error', () => {
+    const ce = new ComputeEngine();
+    ce.assign('ds', ce.box(['List', 1, 2, 3]));
+    const f = ce.box(['Any', 'ds', ['Function', ['Greater', 'n', 0], 'n']]);
+
+    // First evaluation auto-annotates the parameter with `finite_integer`.
+    expect(f.evaluate().toString()).toBe('"True"');
+
+    // Retract the source to floats: the retained annotation now rejects every
+    // element, and the quantifier reports it instead of going inert.
+    ce.assign('ds', ce.box(['List', 1.5, 2.5]));
+    const result = f.evaluate().toString();
+    expect(result).toContain('incompatible-type');
+    expect(result).not.toContain('Did you mean');
+    expect(result).not.toContain('must return');
   });
 });
 
@@ -519,5 +618,69 @@ describe('color is an admissible inferred element type', () => {
     ]);
     expect(expr.ops[1].type.toString()).toBe('(c: color) -> boolean');
     expect(expr.evaluate().count).toBe(1);
+  });
+});
+
+/**
+ * `FlatMap`'s finiteness facet (reviewed 2026-08-09): a FINITE source is not
+ * on its own enough — a callback returning an INFINITE inner collection makes
+ * the flattened stream infinite, and every finite-guarded consumer (`Reduce`,
+ * `Sum`, …) enumerates on the strength of this facet.
+ */
+describe('FlatMap isFiniteCollection', () => {
+  test('a fixed-extent callback result over a finite source is finite', () => {
+    const ce = new ComputeEngine();
+    const fm = ce.box([
+      'FlatMap',
+      ['List', 1, 2],
+      ['Function', ['List', 'n', ['Multiply', 10, 'n']], 'n'],
+    ]);
+    expect(fm.isFiniteCollection).toBe(true);
+    // The pinned fold survives.
+    expect(
+      ce
+        .box(['Reduce', fm, ['Function', ['Add', 'a', 'x'], 'a', 'x'], 0])
+        .evaluate()
+        .toString()
+    ).toBe('33');
+  });
+
+  test('a SCALAR callback result over a finite source is finite', () => {
+    const ce = new ComputeEngine();
+    const fm = ce.box([
+      'FlatMap',
+      ['List', 1, 2],
+      ['Function', ['Multiply', 2, 'n'], 'n'],
+    ]);
+    expect(fm.isFiniteCollection).toBe(true);
+    expect(fm.evaluate().toString()).toBe('[2,4]');
+  });
+
+  test('an INFINITE callback result is not claimed finite', () => {
+    const ce = new ComputeEngine();
+    const fm = ce.box([
+      'FlatMap',
+      ['List', 1, 2],
+      ['Function', ['Range', 1, 'PositiveInfinity'], 'n'],
+    ]);
+    expect(fm.isFiniteCollection).toBe(undefined);
+  });
+
+  test('an unprovable callback result type is not claimed finite', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', 'function');
+    expect(
+      ce.box(['FlatMap', ['List', 1, 2], 'h']).isFiniteCollection
+    ).toBe(undefined);
+  });
+
+  test('a provably infinite source still reports false', () => {
+    const ce = new ComputeEngine();
+    const fm = ce.box([
+      'FlatMap',
+      ['Range', 1, 'PositiveInfinity'],
+      ['Function', ['List', 'n'], 'n'],
+    ]);
+    expect(fm.isFiniteCollection).toBe(false);
   });
 });

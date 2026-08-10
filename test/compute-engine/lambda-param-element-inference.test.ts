@@ -1,7 +1,9 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { applicable } from '../../src/compute-engine/function-utils';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { lowerLevel } from '../../src/compute-engine/library/map-broadcast-shape';
 import { lowerMapSpine } from '../../src/compute-engine/library/map-lowering';
 import {
@@ -27,9 +29,17 @@ import {
 //     functions; no library signature qualifies (their callback slots are the
 //     primitive `function`, a generics-v1 pinned ruling — see
 //     `collection-callback-signatures.test.ts`).
-//  2. Builtin METADATA — `callbackElementOf: { 1: 0 }` on `Map` and `Filter`
-//     (v1 scope, ruling 3): the callback's parameter takes the ELEMENT type of
-//     the sibling collection operand, when that type is provable.
+//  2. CONTEXTUAL — a `callback<S>` slot in the callee's own polytype
+//     signature, on the higher-order collection operators: a callback
+//     parameter takes the ELEMENT type of its paired source operand, when that
+//     type is provable. HISTORICAL NOTE: this trigger began as the
+//     `callbackElementOf` METADATA (ruling 3's `{ 1: 0 }`, generalized by
+//     follow-ups (4) and (5) to a `'last'` key, per-parameter sources and
+//     `null` for "no source"). Design D moved the element-of link into the
+//     signature and the metadata was deleted outright with its last consumer
+//     (`Map`, phase 3, 2026-08-10) — so the pins below describe the
+//     signature-driven behavior, and the two spellings agree everywhere except
+//     the deliberately-flipped multi-collection `Map` form (§6 revision 4).
 //
 // The motivating gain is the compiled fast path: `pt == (0,0)` is a
 // tuple-vs-not-provably-tuple comparison the aggregate gate must decline, so
@@ -50,7 +60,7 @@ const filterPoints = (t: unknown) => [
   ['Function', ['Equal', 'p', t], 'p'],
 ];
 
-describe('builtin metadata trigger: Filter/Map over a typed collection', () => {
+describe('builtin contextual trigger: Filter/Map over a typed collection', () => {
   test('the predicate parameter types as the collection element', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, POINTS);
@@ -138,9 +148,14 @@ describe('builtin metadata trigger: Filter/Map over a typed collection', () => {
     ).toBe('[[2,1]]');
   });
 
-  test('the multi-collection Map(xs, ys, f) form is unchanged', () => {
-    // `{1: 0}` cannot express "the LAST operand is the callback": operand 1 is
-    // a collection there, and the discriminator declines it.
+  test('the multi-collection Map(xs, ys, f) form is NOT annotated', () => {
+    // FLIPPED by Design D §6 REVISION 4 (2026-08-10): `Map`'s variadic clause
+    // declares no contextual callback slot and never stamps. Follow-up (5) had
+    // flipped this pin the other way with the interim `{ last: 'preceding' }`
+    // metadata; the re-ruling gives that annotation up deliberately — the
+    // acceptance bar for the multi-collection form is EVALUATION AND
+    // DIAGNOSTIC parity, not annotation parity — and the parameters go back to
+    // their pre-inference bare form.
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Map',
@@ -178,6 +193,548 @@ describe('builtin metadata trigger: Filter/Map over a typed collection', () => {
   });
 });
 
+//
+// Follow-ups (4) and (5) of the plan: the element-of link beyond
+// `Map`/`Filter`.
+//
+// These pins were written against the `callbackElementOf` METADATA, whose
+// shape was `{ <callback operand index> | 'last': <sources> }` — a bare
+// operand index, an array of one index (or `null`, "no source") per parameter,
+// or `'preceding'`. That spelling is GONE (Design D phase 3): the link now
+// lives in each operator's `callback<S>` signature, and the historical
+// spellings are quoted below only to say what a pin used to encode.
+//
+
+/** The single-collection, single-parameter predicate/mapping operators.
+ * `CountIf`/`Find`/`IndexWhere`/`Position` are NOT lazy, so their rewrite runs
+ * on the strict canonicalization path — before the operands canonicalize and
+ * the literal's raw structure is gone.
+ *
+ * Every operator below was converted to a Design D contextual signature
+ * (phases 0/1) before the `callbackElementOf` metadata was deleted — these
+ * pins are trigger-INDEPENDENT by design and passed unchanged across the
+ * move. */
+const PREDICATE_OPERATORS: ReadonlyArray<
+  [op: string, body: unknown, canonicalBody: unknown, result: string]
+> = [
+  ['CountIf', ['Greater', 'n', 1], ['Less', 1, 'n'], '2'],
+  ['Find', ['Greater', 'n', 1], ['Less', 1, 'n'], '2'],
+  ['IndexWhere', ['Greater', 'n', 1], ['Less', 1, 'n'], '2'],
+  ['Position', ['Greater', 'n', 1], ['Less', 1, 'n'], '[2,3]'],
+  ['Any', ['Greater', 'n', 1], ['Less', 1, 'n'], '"True"'],
+  ['All', ['Greater', 'n', 0], ['Less', 0, 'n'], '"True"'],
+  ['FlatMap', ['List', 'n', 'n'], ['List', 'n', 'n'], '[1,1,2,2,3,3]'],
+];
+
+describe('follow-up (4): the single-collection predicate/mapping operators', () => {
+  test.each(PREDICATE_OPERATORS)(
+    '%s annotates its callback parameter and evaluates',
+    (op, body, canonicalBody, result) => {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+      const expr = ce.box([op, 'cs', ['Function', body, 'n']] as any);
+      expect(expr.toMathJson()).toEqual([
+        op,
+        'cs',
+        ['Function', canonicalBody, ['Typed', 'n', "'integer'"]],
+      ]);
+      expect(expr.evaluate().toString()).toBe(result);
+    }
+  );
+
+  test.each(PREDICATE_OPERATORS)(
+    '%s over an unprovable source leaves the parameter bare',
+    (op, body, canonicalBody) => {
+      const ce = new ComputeEngine();
+      ce.declare('us', 'list');
+      const expr = ce.box([op, 'us', ['Function', body, 'n']] as any);
+      expect(expr.toMathJson()).toEqual([
+        op,
+        'us',
+        ['Function', canonicalBody, 'n'],
+      ]);
+    }
+  );
+
+  test.each(PREDICATE_OPERATORS)(
+    '%s: the sharing pin holds — a NAMED callback is never rebuilt',
+    (op) => {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+      executeEpsil(ce, 'let pred = n |-> n > 1');
+      expect(ce.box([op, 'cs', 'pred'] as any).toMathJson()).toEqual([
+        op,
+        'cs',
+        'pred',
+      ]);
+    }
+  );
+
+  test('a composite element type reaches a non-lazy operator too', () => {
+    // `CountIf` canonicalizes its operands on the STRICT path; the rewrite has
+    // to run before that, or the raw literal is already gone.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, POINTS);
+    const expr = ce.box([
+      'CountIf',
+      'points',
+      ['Function', ['Equal', 'p', ['Tuple', 0, 0]], 'p'],
+    ]);
+    expect(expr.ops[1].type.toString()).toBe(
+      '(p: tuple<number, number>) -> boolean'
+    );
+    expect(expr.evaluate().toString()).toBe('1');
+  });
+
+  test('a stamped CountIf still compiles on JS and on Python', () => {
+    // The stamp is provably satisfied by the source's element type, so
+    // `assertCallbackAnnotations` admits it and the codegen is unchanged (the
+    // annotation is not emitted).
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+    const expr = ce.box([
+      'CountIf',
+      'cs',
+      ['Function', ['Greater', 'n', 1], 'n'],
+    ]);
+    const r = compile(expr, { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe(
+      '((_f) => ([1, 2, 3]).filter((_x) => _f(_x)).length)(((n) => 1 < n))'
+    );
+    expect((r.run as () => unknown)()).toBe(2);
+    expect(new PythonTarget().compile(expr)?.code).toBe(
+      '(lambda _f: sum(1 for _x in [1, 2, 3] if _f(_x)))((lambda n: 1 < n))'
+    );
+    expect(expr.evaluate().toString()).toBe('2');
+  });
+
+  test('a NARROWING annotation still declines to compile, both targets', () => {
+    // The fail-closed gate is untouched: an annotation the source's element
+    // type does not provably satisfy cannot be enforced by the emitted code.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let ds: list<real> = [1.5,2.5]');
+    const expr = ce.box([
+      'CountIf',
+      'ds',
+      [
+        'Function',
+        ['Greater', ['Typed', 'n', { str: 'integer' }], 1],
+        ['Typed', 'n', { str: 'integer' }],
+      ],
+    ]);
+    expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
+    expect(() => new PythonTarget().compile(expr)).toThrow(/Fail closed/);
+  });
+});
+
+// FLIPPED WHOLESALE by Design D §6 REVISION 4 (2026-08-10). Follow-up (5) was
+// the interim `{ last: 'preceding' }` metadata spelling — parameter k stamped
+// from operand k, over every operand before the callback. The re-ruling gives
+// that up: `Map`'s multi-collection clause declares no contextual callback
+// slot, so nothing in this form is stamped, and the pins below now assert the
+// pre-inference bare shape WITH evaluation parity — which is the whole
+// acceptance bar for the variadic form (§10, phase 3).
+describe('§6 rev 4: the multi-collection, callback-LAST form is NOT stamped', () => {
+  test('no parameter takes a source’s element type — evaluation unchanged', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+    executeEpsil(ce, 'let ss: list<string> = ["a","bb","ccc"]');
+    const expr = ce.box([
+      'Map',
+      'cs',
+      'ss',
+      ['Function', ['Tuple', 'n', 's'], 'n', 's'],
+    ]);
+    expect(expr.toMathJson()).toEqual([
+      'Map',
+      'cs',
+      'ss',
+      ['Function', ['Pair', 'n', 's'], 'n', 's'],
+    ]);
+    expect(expr.ops[2].type.toString()).toBe(
+      '(unknown, unknown) -> tuple<unknown, unknown>'
+    );
+    expect(expr.evaluate().toString()).toBe('[(1, "a"),(2, "bb"),(3, "ccc")]');
+  });
+
+  test('a partially-provable zip is bare too, and still evaluates', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+    ce.declare('us', 'list');
+    ce.assign('us', ce.box(['List', { str: 'a' }, { str: 'b' }, { str: 'c' }]));
+    const expr = ce.box([
+      'Map',
+      'cs',
+      'us',
+      ['Function', ['Tuple', 'n', 's'], 'n', 's'],
+    ]);
+    // Parameter 0's source was provable under the metadata and stamped; the
+    // variadic clause stamps neither.
+    expect(expr.toMathJson()).toEqual([
+      'Map',
+      'cs',
+      'us',
+      ['Function', ['Pair', 'n', 's'], 'n', 's'],
+    ]);
+    expect(expr.evaluate().toString()).toBe('[(1, "a"),(2, "b"),(3, "c")]');
+  });
+
+  test('an arity-mismatched callback keeps its diagnostic verbatim', () => {
+    // The §6/§10 diagnostic-parity pin: a UNARY callback over two sources is
+    // admitted and errors at application, with the same error VALUE the
+    // metadata spelling produced.
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Map',
+      ['List', 1, 2],
+      ['List', 3, 4],
+      ['Function', ['Add', 'a', 1], 'a'],
+    ]);
+    expect(expr.toMathJson()).toEqual([
+      'Map',
+      ['List', 1, 2],
+      ['List', 3, 4],
+      ['Function', ['Add', 'a', 1], 'a'],
+    ]);
+    expect(expr.evaluate().toString()).toBe(
+      'Too many arguments for function "(a) |-> a + 1": expected 1, got 2'
+    );
+  });
+
+  test('the multi-collection form has no compiled lowering (unchanged)', () => {
+    // Neither target lowers `Map(xs, ys, f)`; the annotation does not change
+    // that, and none is added here.
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Map',
+      ['List', 1, 2],
+      ['List', 3, 4],
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+    ]);
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /multi-collection form is not compiled/
+    );
+    expect(() => new PythonTarget().compile(expr)).toThrow(
+      /multi-collection form is not compiled/
+    );
+  });
+
+  test('the sharing pin holds for the multi-collection form too', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+    executeEpsil(ce, 'let ss: list<string> = ["a","bb","ccc"]');
+    executeEpsil(ce, 'let pair = (n, s) |-> (n, s)');
+    expect(ce.box(['Map', 'cs', 'ss', 'pair']).toMathJson()).toEqual([
+      'Map',
+      'cs',
+      'ss',
+      'pair',
+    ]);
+  });
+});
+
+describe('follow-up (4): a parameter with NO source stays bare', () => {
+  test('Scan stamps the element and leaves the accumulator alone', () => {
+    // Historically `{ 1: [null, 0] }`, now `callback<(unknown, T) -> unknown>`:
+    // the reducer is `(accumulator, element)`. The accumulator's type is the
+    // fold's own result — a second channel neither spelling expresses, and
+    // deliberately so (§12.1: a fold never stamps its accumulator).
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+    const expr = ce.box([
+      'Scan',
+      'cs',
+      ['Function', ['Add', 'a', 'x'], 'a', 'x'],
+      0,
+    ]);
+    expect(expr.toMathJson()).toEqual([
+      'Scan',
+      'cs',
+      ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
+      0,
+    ]);
+    expect(expr.ops[1].type.toString()).toBe('(unknown, x: integer) -> number');
+    expect(expr.evaluate().toString()).toBe('[1,3,6]');
+  });
+
+  test('the seedless Scan folds too', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+    const expr = ce.box([
+      'Scan',
+      'cs',
+      ['Function', ['Add', 'a', 'x'], 'a', 'x'],
+    ]);
+    expect(expr.evaluate().toString()).toBe('[1,3,6]');
+  });
+
+  test('an unprovable source leaves BOTH parameters bare', () => {
+    const ce = new ComputeEngine();
+    ce.declare('us', 'list');
+    const expr = ce.box([
+      'Scan',
+      'us',
+      ['Function', ['Add', 'a', 'x'], 'a', 'x'],
+      0,
+    ]);
+    expect(expr.toMathJson()).toEqual([
+      'Scan',
+      'us',
+      ['Function', ['Add', 'a', 'x'], 'a', 'x'],
+      0,
+    ]);
+  });
+
+  test('Reduce stamps the element and leaves the accumulator alone', () => {
+    // Unblocked 2026-08-09 by the two Reduce rulings (see the `follow-up (6)`
+    // block below): a BARE parameter no longer constrains apply-time
+    // validation, and the seedless fold seeds with the FIRST element instead
+    // of the `Nothing` sentinel.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+    const expr = ce.box([
+      'Reduce',
+      'cs',
+      ['Function', ['Add', 'a', 'x'], 'a', 'x'],
+    ]);
+    expect(expr.toMathJson()).toEqual([
+      'Reduce',
+      'cs',
+      ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
+    ]);
+    expect(expr.ops[1].type.toString()).toBe('(unknown, x: integer) -> number');
+    // Seedless (the shape that used to error) and seeded both fold.
+    expect(expr.evaluate().toString()).toBe('6');
+    expect(
+      ce
+        .box(['Reduce', 'cs', ['Function', ['Add', 'a', 'x'], 'a', 'x'], 10])
+        .evaluate()
+        .toString()
+    ).toBe('16');
+
+    // The hand-annotated control — what stamping produces — agrees.
+    expect(
+      ce
+        .box([
+          'Reduce',
+          'cs',
+          [
+            'Function',
+            ['Add', 'a', 'x'],
+            'a',
+            ['Typed', 'x', { str: 'integer' }],
+          ],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('6');
+  });
+
+  test('Reduce over an unprovable source leaves BOTH parameters bare', () => {
+    const ce = new ComputeEngine();
+    ce.declare('us', 'list');
+    expect(
+      ce
+        .box(['Reduce', 'us', ['Function', ['Add', 'a', 'x'], 'a', 'x']])
+        .toMathJson()
+    ).toEqual(['Reduce', 'us', ['Function', ['Add', 'a', 'x'], 'a', 'x']]);
+  });
+});
+
+describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
+  test('Fold links its callback (operand 0) to the collection (operand 2)', () => {
+    // The callback-FIRST, collection-last spelling (historically
+    // `{ 0: [null, 2] }`). The rewrite runs before `Fold`'s canonical handler
+    // rebuilds the call as a `Reduce`, so the stamp survives the rewrite.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+    const expr = ce.box([
+      'Fold',
+      ['Function', ['Add', 'a', 'x'], 'a', 'x'],
+      10,
+      'cs',
+    ]);
+    expect(expr.toMathJson()).toEqual([
+      'Reduce',
+      'cs',
+      ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
+      10,
+    ]);
+    expect(expr.evaluate().toString()).toBe('16');
+  });
+
+  test('Fold over an unprovable source leaves the parameter bare', () => {
+    const ce = new ComputeEngine();
+    ce.declare('us', 'list');
+    expect(
+      ce
+        .box(['Fold', ['Function', ['Add', 'a', 'x'], 'a', 'x'], 10, 'us'])
+        .toMathJson()
+    ).toEqual(['Reduce', 'us', ['Function', ['Add', 'a', 'x'], 'a', 'x'], 10]);
+  });
+
+  // `TakeWhile`/`DropWhile` moved to a Design D contextual signature in phase
+  // 1; the stamp and its evaluation are unchanged.
+  test.each([
+    ['TakeWhile', '[1,2]'],
+    ['DropWhile', '[3,1]'],
+  ])('%s stamps its predicate parameter and evaluates', (op, result) => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3,1]');
+    const expr = ce.box([op, 'cs', ['Function', ['Less', 'n', 3], 'n']] as any);
+    expect(expr.toMathJson()).toEqual([
+      op,
+      'cs',
+      ['Function', ['Less', 'n', 3], ['Typed', 'n', "'integer'"]],
+    ]);
+    expect(expr.evaluate().toString()).toBe(result);
+  });
+
+  test.each(['TakeWhile', 'DropWhile'])(
+    '%s over an unprovable source leaves the parameter bare',
+    (op) => {
+      const ce = new ComputeEngine();
+      ce.declare('us', 'list');
+      expect(
+        ce
+          .box([op, 'us', ['Function', ['Less', 'n', 3], 'n']] as any)
+          .toMathJson()
+      ).toEqual([op, 'us', ['Function', ['Less', 'n', 3], 'n']]);
+    }
+  );
+
+  test('Partition stamps its PREDICATE arm (strict path) …', () => {
+    // `Partition` is not `lazy`, so the rewrite runs on the strict
+    // canonicalization path, before the operands lose their raw structure.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3,1]');
+    const expr = ce.box([
+      'Partition',
+      'cs',
+      ['Function', ['Less', 'n', 3], 'n'],
+    ]);
+    expect(expr.toMathJson()).toEqual([
+      'Partition',
+      'cs',
+      ['Function', ['Less', 'n', 3], ['Typed', 'n', "'integer'"]],
+    ]);
+    expect(expr.evaluate().toString()).toBe('[[1,2,1],[3]]');
+  });
+
+  test('… and leaves the SIZE arm untouched', () => {
+    // An integer operand is not an inline `Function` literal, so the
+    // discriminator declines it before any sibling is read.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3,1]');
+    const expr = ce.box(['Partition', 'cs', 2]);
+    expect(expr.toMathJson()).toEqual(['Partition', 'cs', 2]);
+    expect(expr.evaluate().toString()).toBe('[[1,2],[3,1]]');
+  });
+
+  test('Partition over an unprovable source leaves the parameter bare', () => {
+    const ce = new ComputeEngine();
+    ce.declare('us', 'list');
+    expect(
+      ce
+        .box(['Partition', 'us', ['Function', ['Less', 'n', 3], 'n']])
+        .toMathJson()
+    ).toEqual(['Partition', 'us', ['Function', ['Less', 'n', 3], 'n']]);
+  });
+
+  test.each(['Reduce', 'TakeWhile', 'DropWhile', 'Partition'])(
+    '%s: the sharing pin holds — a NAMED callback is never rebuilt',
+    (op) => {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+      executeEpsil(ce, 'let pred = n |-> n > 1');
+      expect(ce.box([op, 'cs', 'pred'] as any).toMathJson()).toEqual([
+        op,
+        'cs',
+        'pred',
+      ]);
+    }
+  );
+});
+
+describe('§6.4: a BARE parameter imposes no constraint (ruled 2026-08-09)', () => {
+  // Apply-time validation is gated on the literal carrying at least ONE
+  // annotation and then checks EVERY parameter. A bare sibling's signature
+  // slot is only what inference left there (`unknown`), which is not a
+  // contract its author wrote — and `nothing` is deliberately not a subtype of
+  // `unknown`, so validating against it rejected legitimate values. A bare
+  // parameter is now validated against `any`.
+
+  test('a partially annotated reducer binds `Nothing` in its bare slot', () => {
+    // Driven through `applicable`, the seam the collection operators use: a
+    // literal `Nothing` OPERAND would be elided (it is the erasure marker), so
+    // an `["Apply", f, "Nothing", 2]` probe never reaches the validation.
+    const ce = new ComputeEngine();
+    const f = ce.box([
+      'Function',
+      ['If', ['Equal', 'a', 'Nothing'], 'x', ['Add', 'a', 'x']],
+      'a',
+      ['Typed', 'x', { str: 'integer' }],
+    ]);
+    expect(f.type.toString()).toBe('(unknown, x: integer) -> number');
+    const fn = applicable(f)!;
+    // `nothing` in the BARE slot: admitted (it was rejected against `unknown`).
+    expect(fn([ce.Nothing, ce.box(2)])?.toString()).toBe('2');
+    // …and the ANNOTATED slot keeps its exact enforcement.
+    expect(fn([ce.Nothing, ce.string('oops')])?.toString()).toContain(
+      'incompatible-type'
+    );
+    expect(fn([ce.box(1), ce.box(2)])?.toString()).toBe('3');
+  });
+
+  test('a stamped Scan callback with a bare sibling validates nothing on it', () => {
+    // One parameter short of a source: `Scan`'s element parameter is stamped
+    // from `cs`, its accumulator parameter has no source and stays bare — and
+    // a `Nothing` element binds to it without a validation error.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+    const expr = ce.box([
+      'Scan',
+      'cs',
+      ['Function', ['Add', 'a', 'x'], 'a', 'x'],
+    ]);
+    // (the seedless `Scan` seeds `a` with the first element, not `Nothing`)
+    expect(expr.evaluate().toString()).toBe('[1,3,6]');
+
+    // The direct probe: the bare slot takes a `nothing` argument.
+    const lit = expr.ops[1];
+    expect(ce.box(['Apply', lit, 'Nothing', 2]).evaluate().isValid).toBe(true);
+  });
+
+  test('a GENERIC literal is not relaxed: the polytype is the contract', () => {
+    // Erasure leaves a generic literal with NO annotated parameter operand, so
+    // every position looks "bare" — but the polytype marker IS the contract
+    // (§2.5), and relaxing it would silently disable the check. The relaxation
+    // is therefore skipped whenever the literal carries a whole-signature
+    // marker.
+    const ce = new ComputeEngine();
+    const h = ce.box([
+      'Function',
+      [
+        'Typed',
+        ['Add', 'x', 'n'],
+        { str: 'forall T: number. (x: T, n: integer) -> T' },
+      ],
+      'x',
+      'n',
+    ]);
+    expect(h.type.toString()).toBe('forall T: number. (x: T, n: integer) -> T');
+    const hn = applicable(h)!;
+    expect(hn([ce.Nothing, ce.box(2)])?.toString()).toContain(
+      'incompatible-type'
+    );
+    expect(hn([ce.box(1), ce.string('oops')])?.toString()).toContain(
+      'incompatible-type'
+    );
+    expect(hn([ce.box(1), ce.box(2)])?.toString()).toBe('3');
+  });
+});
+
 describe('the sharing pin: a symbol-valued callback is never rebuilt', () => {
   test('one literal used over two differently-typed collections', () => {
     const ce = new ComputeEngine();
@@ -203,7 +760,7 @@ describe('the sharing pin: a symbol-valued callback is never rebuilt', () => {
 });
 
 describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
-  // The builtin metadata trigger fires on a CONCRETE element type — a numeric
+  // The contextual stamp fires on a CONCRETE element type — a numeric
   // primitive, `boolean`, `string`, or a parameterized structured kind.
   // Excluded: a UNION, the union-like ABSTRACT supertypes (`scalar`, `value`,
   // `expression`, …), a BARE composite name (`tuple`, `collection`, …) and the

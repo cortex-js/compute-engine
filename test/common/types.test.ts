@@ -692,6 +692,74 @@ describe('Negative Type Parser Tests', () => {
   });
 });
 
+describe('Argument order in a function signature', () => {
+  // The consumption model bins arguments by MODIFIER, independently of source
+  // order: required, then optional, then the variadic. A signature written in
+  // any other order used to be SILENTLY re-ordered into that model — the
+  // misrepresentation that hid the `Map` signature/behavior mismatch.
+
+  it('rejects a required argument after a variadic one (the `Map` shape)', () => {
+    expect(() => parseType('(collection+, mapping: function) -> any'))
+      .toThrowErrorMatchingInlineSnapshot(`
+      "Failed to parse type "(collection+, mapping: function) -> any": 
+      Invalid type
+      |   (collection+, mapping: function) -> any
+      |                 ^
+      |
+      |   A variadic argument must be the last argument
+      "
+    `);
+  });
+
+  it('rejects a required argument after a variadic one (minimal spelling)', () => {
+    expect(() => parseType('(integer+, string) -> any'))
+      .toThrowErrorMatchingInlineSnapshot(`
+      "Failed to parse type "(integer+, string) -> any": 
+      Invalid type
+      |   (integer+, string) -> any
+      |              ^
+      |
+      |   A variadic argument must be the last argument
+      "
+    `);
+    expect(() => parseType('(integer*, string) -> any')).toThrow(
+      'A variadic argument must be the last argument'
+    );
+  });
+
+  it('rejects a required argument after an optional one', () => {
+    expect(() => parseType('(string?, number) -> any'))
+      .toThrowErrorMatchingInlineSnapshot(`
+      "Failed to parse type "(string?, number) -> any": 
+      Invalid type
+      |   (string?, number) -> any
+      |             ^
+      |
+      |   A required argument cannot follow an optional argument
+      "
+    `);
+  });
+
+  it('rejects an optional argument after a variadic one', () => {
+    // Already covered by the optional/variadic exclusion, which reports first.
+    expect(() => parseType('(number*, string?) -> any')).toThrow(
+      'Variadic arguments cannot be used with optional arguments'
+    );
+  });
+
+  it('accepts required → optional and required → variadic', () => {
+    expect(typeToString(parseType('(number, string, boolean?) -> any'))).toBe(
+      '(number, string, boolean?) -> any'
+    );
+    expect(typeToString(parseType('(number, string*) -> any'))).toBe(
+      '(number, string*) -> any'
+    );
+    expect(typeToString(parseType('(collection+) -> set'))).toBe(
+      '(collection+) -> set'
+    );
+  });
+});
+
 describe('isSubtype POSITIVE', () => {
   // Positive Test Cases
 
@@ -1690,5 +1758,91 @@ describe('isSubtype with an intersection on the left', () => {
         'function'
       )
     ).toBe(true);
+  });
+});
+
+describe('`callback<S>` union absorption is order-independent', () => {
+  // `callback<S>` erases to the primitive `function` for every admission
+  // question, so the two members absorb each other. The tie-break keeps the
+  // `callback<S>` member — the one carrying the signature the contextual solve
+  // reads — whichever order they are written in.
+  const cb = parseType('callback<(integer) -> boolean>');
+  const union = (...types: Type[]): string =>
+    typeToString(reduceType({ kind: 'union', types }));
+
+  it('reduces `callback<S> | function` and `function | callback<S>` alike', () => {
+    expect(union(cb, 'function')).toBe('callback<(integer) -> boolean>');
+    expect(union('function', cb)).toBe('callback<(integer) -> boolean>');
+  });
+
+  it('keeps the callback over a mutually-subtype signature, in either order', () => {
+    const sig = parseType('(integer) -> boolean');
+    expect(union(cb, sig)).toBe('callback<(integer) -> boolean>');
+    expect(union(sig, cb)).toBe('callback<(integer) -> boolean>');
+  });
+
+  it('does not disturb ordinary subtype absorption', () => {
+    expect(union('integer', 'number')).toBe('number');
+    expect(union('number', 'integer')).toBe('number');
+  });
+});
+
+describe('`callback<…>` rejects a non-signature payload with a position', () => {
+  const messageOf = (source: string): string => {
+    try {
+      parseType(source);
+    } catch (e) {
+      return (e as Error).message;
+    }
+    throw new Error(`Expected \`${source}\` to be rejected`);
+  };
+
+  it('reports the misuse with the parser caret, not a bare builder throw', () => {
+    const message = messageOf('callback<integer>');
+    expect(message).toContain(
+      '`callback<…>` expects a function signature, e.g. `callback<(T) -> boolean>`'
+    );
+    // The parser's own rejection convention: the offending source line and a
+    // caret under the payload.
+    expect(message).toContain('Invalid type');
+    expect(message).toContain('|   callback<integer>');
+    expect(message).toContain('^');
+  });
+
+  it('rejects a collection payload the same way', () => {
+    expect(messageOf('callback<list<number>>')).toContain(
+      '`callback<…>` expects a function signature'
+    );
+  });
+
+  it('still accepts a parenthesized signature', () => {
+    expect(typeToString(parseType('callback<((integer) -> boolean)>'))).toBe(
+      'callback<(integer) -> boolean>'
+    );
+  });
+
+  it('leaves the nested-`forall` rejection to its own (better) message', () => {
+    expect(messageOf('callback<forall T. (T) -> boolean>')).toContain(
+      'unsupported-variable-position'
+    );
+  });
+});
+
+describe('`callback<…>` misuse on the Epsil annotation route', () => {
+  // `parseTypePrefix()` is where a bare builder `throw` used to escape with no
+  // position at all. The annotation route must report it like any other type
+  // rejection: a diagnostic with a source range.
+  it('reports a positioned diagnostic, not an unlocated throw', () => {
+    // Imported lazily: this suite is otherwise free of engine dependencies.
+    const { parseEpsil } = require('../../src/epsil/parse-epsil');
+    const [, diagnostics] = parseEpsil('let x: callback<integer> = 1');
+    expect(diagnostics).toHaveLength(1);
+    const [diagnostic] = diagnostics;
+    expect(diagnostic.severity).toBe('error');
+    expect(diagnostic.message[1]).toContain(
+      '`callback<…>` expects a function signature'
+    );
+    // `callback<` ends at offset 16, `integer` at 23.
+    expect(diagnostic.range).toEqual([16, 23]);
   });
 });

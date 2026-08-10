@@ -90,6 +90,7 @@ export function isValidType(t: any): t is Readonly<Type> {
   if (!('kind' in t)) return false;
   return (
     t.kind === 'signature' ||
+    t.kind === 'callback' ||
     t.kind === 'union' ||
     t.kind === 'intersection' ||
     t.kind === 'negation' ||

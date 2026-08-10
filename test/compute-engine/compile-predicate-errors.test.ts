@@ -329,3 +329,57 @@ describe('unannotated callbacks are untouched', () => {
     );
   });
 });
+
+/**
+ * The union-round hardening pin (2026-08-09).
+ *
+ * The element-type inference never stamps a UNION element type — that
+ * exclusion is ruled PERMANENT
+ * (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ruling 4). But a
+ * HAND-written union annotation is always spellable, and the compile admission
+ * (`assertCallbackAnnotations`, an `isSubtype(union, union)` check) ADMITS it
+ * when the source's element type provably satisfies it — the annotation is
+ * then enforcement-free, exactly as for a scalar one.
+ *
+ * The obligation at that point is the standing one: fail closed OR be sound.
+ * Measured: the admission passes and the BODY declines — a `string` arm reaches
+ * an operator whose lowering is numeric — so `compile()` reports
+ * `success: false` on both targets and the interpreter evaluates. No silent
+ * wrong values. (Were a body ever to compile under a union annotation, this
+ * test would have to assert `run()` parity with the interpreter instead.)
+ */
+describe('a HAND-annotated union callback over a satisfying source', () => {
+  const UNION_CB = [
+    'Function',
+    ['Equal', 'x', 1],
+    ['Typed', 'x', "'finite_integer | string'"],
+  ];
+
+  it('is admitted by the annotation gate, then declines on the BODY', () => {
+    const ce = new ComputeEngine();
+    // `list<finite_integer | string>` — the annotation is provably satisfied.
+    const src = ['List', 1, { str: 'a' }, 2];
+    expect(ce.box(src as any).type.toString()).toBe(
+      'list<finite_integer | string>'
+    );
+
+    const expr = ce.box(['Filter', src, UNION_CB] as any);
+    // The annotation survives onto the callback (hand-written unions are not
+    // the excluded case — auto-STAMPING them is).
+    expect(expr.ops[1].type.toString()).toBe(
+      '(x: finite_integer | string) -> boolean'
+    );
+
+    // Fail-closed on both targets: the decline comes from the body's `Equal`
+    // over a possibly-string operand, not from the annotation gate.
+    expect(() => js(expr)).toThrow(/string-valued operands are not supported/);
+    expect(() => python.compile(expr)).toThrow(
+      /string-valued operands are not supported/
+    );
+    // With the default fallback, that is a reported failure, not a wrong value.
+    expect(compile(expr).success).toBe(false);
+
+    // ...and the interpreter answers.
+    expect(expr.evaluate().toString()).toBe('[1]');
+  });
+});

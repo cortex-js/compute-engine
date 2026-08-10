@@ -1664,6 +1664,33 @@ describe('EPSIL TYPE RE-DECLARATION (value dependents and bounds)', () => {
     expect((recordOf(ce, 'Bar').def as any).elements).toHaveLength(2);
   });
 
+  // The dependency walk (`mentionsOf`) descends every type constructor. The
+  // contextual-callback wrapper (Design D §4) is one of them: a reference
+  // occurring ONLY inside `callback<S>` was invisible to the walk, so an
+  // incompatible re-declaration behind one landed silently.
+  test('a mention hidden inside `callback<S>` is still a dependent', () => {
+    const control = (slot: string) => {
+      const ce = new ComputeEngine();
+      expect(
+        executeEpsil(ce, 'type Wrap<T> = list<T>\nlet z = 1\nz').diagnostics
+      ).toEqual([]);
+      ce.declare('holder', `(${slot}) -> integer`);
+      const r = executeEpsil(ce, 'type Wrap<T, U> = tuple<T, U>');
+      return r.value;
+    };
+
+    for (const slot of [
+      'Wrap<integer>', // the uncallback'd control
+      'callback<(Wrap<integer>) -> boolean>', // the hidden mention
+    ]) {
+      const v = control(slot);
+      expect(v.operator).toBe('Error');
+      const s = v.toString();
+      expect(s).toContain('generic-alias-arity');
+      expect(s).toContain('The signature of \\"holder\\" applies \\"Wrap\\"');
+    }
+  });
+
   test('a TYPE dependent violating a NEW bound fails the redeclaring run', () => {
     const ce = new ComputeEngine();
     expect(

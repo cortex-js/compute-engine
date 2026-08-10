@@ -92,9 +92,16 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     expect(sig(ce, 'Tally')).toBe(
       'forall T. (collection<T>) -> tuple<list<T>, list<integer>>'
     );
-    // The second parameter stays a PRIMITIVE union — a union arm may not
-    // mention a type variable.
+    // The second parameter is still ONE union — but its function arm became a
+    // Design D contextual callback in phase 2 (Rule U admits it: exactly one
+    // arm of the union is open). This reads the DEFINITION's own signature,
+    // which by contract clause 5 keeps `callback<S>`; what a user SEES is the
+    // ground projection, and that is byte-identical to the line below it was
+    // before (`design-d-callback-contract.test.ts`, R-D5).
     expect(sig(ce, 'Partition')).toBe(
+      'forall T. (collection<T>, callback<(T) -> boolean> | integer, integer?) -> list<list<T>>'
+    );
+    expect(ce.box('Partition').type.toString()).toBe(
       'forall T. (collection<T>, function | integer, integer?) -> list<list<T>>'
     );
     expect(sig(ce, 'ChunkBy')).toBe(

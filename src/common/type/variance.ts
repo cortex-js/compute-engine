@@ -124,6 +124,10 @@ function forEachApplication(t: Type, cb: (ref: TypeReference) => void): void {
         forEachApplication(t.variadicArg.type, cb);
       forEachApplication(t.result, cb);
       return;
+    // The contextual-callback wrapper is transparent to a structural walk.
+    case 'callback':
+      forEachApplication(t.signature, cb);
+      return;
     case 'union':
     case 'intersection':
       for (const x of t.types) forEachApplication(x, cb);
@@ -282,6 +286,12 @@ export function analyzeVariance(
         visit(t.result, polarity, step(path, '(result)'), scope, deferredVia);
         return;
       }
+
+      // The contextual-callback wrapper is transparent to the polarity walk:
+      // the arrow it wraps flips its parameters exactly as a bare one does.
+      case 'callback':
+        visit(t.signature, polarity, path, shadowed, deferredVia);
+        return;
 
       case 'union':
       case 'intersection':

@@ -50,6 +50,7 @@ import { functionResult, signatureArms } from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import { typeToString } from '../../common/type/serialize.js';
+import { typeToDisplayString } from '../../common/type/display.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { defaultCollectionHandlers } from '../collection-utils.js';
 import { registerProvisionalDependents } from './provisional-application.js';
@@ -69,7 +70,6 @@ const OPERATOR_DEF_KEYS = new Set([
   'scoped',
   'bindingSites',
   'broadcastable',
-  'callbackElementOf',
   'inspectsErrors',
   'missingBehavior',
   'missingStrip',
@@ -165,11 +165,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   wikidata?: string;
 
   broadcastable = false;
-
-  /** See {@link OperatorDefinitionFlags.callbackElementOf}: from a callback
-   * operand index to the sibling operand whose element type annotates the
-   * callback literal's parameter. */
-  callbackElementOf?: Record<number, number>;
 
   inspectsErrors = false;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
@@ -437,8 +432,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     if (this.keywords) result.keywords = this.keywords;
     if (this.url) result.url = this.url;
     result.broadcastable = this.broadcastable;
-    if (this.callbackElementOf)
-      result.callbackElementOf = this.callbackElementOf;
     result.associative = this.associative;
     result.commutative = this.commutative;
     result.idempotent = this.idempotent;
@@ -449,7 +442,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     result.lazy = this.lazy;
     result.complexity = this.complexity;
     result.scoped = this.scoped;
-    result.signature = this.signature.toString();
+    // R-D5: GROUND display — see `typeToDisplayString`.
+    result.signature = typeToDisplayString(this.signature.type);
     result.inferredSignature = this.inferredSignature;
 
     if (this.collection) result.collection = this.collection;
@@ -590,7 +584,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.wikidata = def.wikidata ?? this.wikidata;
 
     this.broadcastable = def.broadcastable ?? this.broadcastable;
-    this.callbackElementOf = def.callbackElementOf ?? this.callbackElementOf;
     this.inspectsErrors = def.inspectsErrors ?? this.inspectsErrors;
     this.missingBehavior = def.missingBehavior ?? this.missingBehavior;
     this.missingStrip = def.missingStrip ?? this.missingStrip;

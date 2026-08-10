@@ -1,13 +1,17 @@
 import {
   admissionSkeleton,
   freeTypeVariables,
+  hasFreeTypeVariables,
   parameterPositions,
   solveTypeArguments,
   substituteTypeVariables,
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
+import { isCallbackType } from '../../common/type/callback.js';
+import { provablyDisjoint } from '../../common/type/subtype.js';
 import { typeContainsMissing } from '../../common/type/utils.js';
 import type {
+  CallbackType,
   FunctionSignature,
   Type,
   TypeParameter,
@@ -192,6 +196,198 @@ export function solveArm(
 // whole-bind ≡ wrap ∘ element-bind) and the variable-MENTIONING results the
 // short-circuit could never handle (`(T) -> tuple<T, T>` typed one rank too
 // high).
+
+//
+// ── The contextual callback solve (Design D §5) ───────────────────────────────
+//
+
+/** One `callback<S>` slot of an arm, at a concrete application. */
+export interface CallbackSlot {
+  /** The operand position the slot consumes. */
+  index: number;
+  /** `S` — the signature an inline literal at that position is stamped with. */
+  signature: FunctionSignature;
+}
+
+/** The positions Design D §5 steps 1–2 need from an application. */
+export interface ContextualCallbackPlan {
+  /** The `callback<S>` slots, in operand order. Never empty. */
+  callbacks: ReadonlyArray<CallbackSlot>;
+  /** The NON-callback positions whose type constrains a callback-DOMAIN
+   * variable — the only operands step 1 canonicalizes. Never empty. */
+  sources: ReadonlyArray<number>;
+  /** The variables the callback slots' PARAMETER types read (clause 2) — the
+   * only ones this pass solves and substitutes. A result-side variable is left
+   * OPEN in the instantiated slot: it belongs to §5 step 4, which reads the
+   * callback's own type, and pinning it to the domain solve's `unknown`
+   * fallback here would silently answer a question this pass never asked. */
+  domainVars: ReadonlySet<string>;
+}
+
+/**
+ * The `callback<S>` a PARAMETER SLOT offers a contextual stamp — R-D4
+ * (resolve-then-stamp, ruled 2026-08-10) at SLOT granularity, the companion of
+ * {@link resolveContextualArm}'s arm granularity.
+ *
+ * A slot spelled `callback<S>` is its own answer. A UNION slot resolves first:
+ * `Partition`'s `integer | callback<(T) -> boolean>` has two disjoint arms, and
+ * the only operand shape a contextual stamp ever rewrites — an inline
+ * `Function` literal — can take just one of them. So the callback arm is the
+ * RESOLVED arm, and the stamp runs against it.
+ *
+ * Declines whenever the resolution is not forced: two callback arms, or a
+ * non-callback arm that a function could also inhabit (`callback<S> |
+ * function`, `callback<S> | any`). The stamp never guesses which arm an operand
+ * took.
+ */
+export function contextualSlotCallback(t: Type): CallbackType | undefined {
+  if (isCallbackType(t)) return t;
+  if (typeof t !== 'object' || t.kind !== 'union') return undefined;
+
+  // The O(1)-per-arm scan FIRST: a union with no callback arm is every other
+  // union in the library, and it must not pay for the checks below.
+  let found: CallbackType | undefined;
+  for (const arm of t.types)
+    if (isCallbackType(arm)) {
+      if (found !== undefined) return undefined;
+      found = arm;
+    }
+  if (found === undefined) return undefined;
+
+  for (const arm of t.types) {
+    if (isCallbackType(arm)) continue;
+    // An OPEN arm (`T | callback<…>`) declines twice over: nothing says a
+    // function could not inhabit `T`, and an open type must never reach
+    // `provablyDisjoint` (the §4.2 ground invariant asserts on one).
+    if (hasFreeTypeVariables(arm)) return undefined;
+    // `provablyDisjoint`, not "is not a function": an arm that MIGHT admit a
+    // function (`any`, an arrow of its own) leaves the resolution open.
+    if (!provablyDisjoint(arm, 'function')) return undefined;
+  }
+  return found;
+}
+
+/** Does any DECLARED parameter of `arm` offer a contextual callback slot
+ * ({@link contextualSlotCallback})? Allocation-free — the guard on the
+ * contextual pass's whole cost. */
+export function hasCallbackParam(arm: FunctionSignature): boolean {
+  for (const a of arm.args ?? [])
+    if (contextualSlotCallback(a.type) !== undefined) return true;
+  for (const a of arm.optArgs ?? [])
+    if (contextualSlotCallback(a.type) !== undefined) return true;
+  return (
+    arm.variadicArg !== undefined &&
+    contextualSlotCallback(arm.variadicArg.type) !== undefined
+  );
+}
+
+/**
+ * The PLANNING pass, write-free: which operands of this application feed a
+ * `callback<S>` slot's PARAMETER types, and which slots they feed. It precedes
+ * §5's five steps — it decides what step 1 canonicalizes and what step 2
+ * solves — rather than being one of them.
+ *
+ * `undefined` when the arm has no contextual callback slot, or when no operand
+ * position can constrain one — the caller then does nothing at all, so an
+ * operator that has not been converted pays a shallow scan of its parameter
+ * list and no canonicalization.
+ *
+ * The domain variables are read from `S`'s PARAMETERS only (contract clause
+ * 2): a variable occurring solely in `S`'s result is a result-side variable,
+ * solved later from the callback's own type, and an operand mentioning only
+ * that variable is not a source this pass has any reason to force.
+ *
+ * `hasCallbackSlot` is the {@link hasCallbackParam} answer when the caller has
+ * already computed it (the contextual pass gates on it, and on the overload
+ * route `resolveContextualArm` did too) — the scan is repeated here only when
+ * it is omitted.
+ */
+export function contextualCallbackPlan(
+  arm: FunctionSignature,
+  count: number,
+  hasCallbackSlot?: boolean
+): ContextualCallbackPlan | undefined {
+  // Fast path: every polytype application reaches this, and almost none
+  // declares a contextual slot. A field scan is O(#params) and allocates
+  // nothing; the walk below allocates per position.
+  if (!(hasCallbackSlot ?? hasCallbackParam(arm))) return undefined;
+
+  const positions = parameterPositions(arm, count);
+  // ONE `contextualSlotCallback` per position: it walks a union's arms and can
+  // reach `provablyDisjoint`, and both loops below ask the same question of the
+  // same slot.
+  const slots = positions.map((p) =>
+    p === undefined ? undefined : contextualSlotCallback(p)
+  );
+
+  const callbacks: CallbackSlot[] = [];
+  const domainVars = new Set<string>();
+  slots.forEach((cb, index) => {
+    if (cb === undefined) return;
+    callbacks.push({ index, signature: cb.signature });
+    for (const el of [
+      ...(cb.signature.args ?? []),
+      ...(cb.signature.optArgs ?? []),
+      ...(cb.signature.variadicArg ? [cb.signature.variadicArg] : []),
+    ])
+      for (const v of freeTypeVariables(el.type)) domainVars.add(v);
+  });
+  if (callbacks.length === 0 || domainVars.size === 0) return undefined;
+
+  const sources: number[] = [];
+  positions.forEach((p, index) => {
+    if (p === undefined || slots[index] !== undefined) return;
+    for (const v of freeTypeVariables(p))
+      if (domainVars.has(v)) {
+        sources.push(index);
+        return;
+      }
+  });
+  if (sources.length === 0) return undefined;
+
+  return { callbacks, sources, domainVars };
+}
+
+/**
+ * Design D §5 step 2: solve the callback-DOMAIN variables from `actuals`, and
+ * return each slot's `S` instantiated with the solution.
+ *
+ * A RESTRICTED entry point beside {@link solveArm}, not a change to its §4.5
+ * lazy carve-out: the carve-out exists because building the full actuals array
+ * forces `.type` on operands that arrive unbound, and this pass never does
+ * that — its caller canonicalizes exactly the {@link ContextualCallbackPlan}
+ * `sources` and leaves every other operand, the callback included, untouched.
+ * `actuals` is therefore SPARSE: only the planned source positions carry a
+ * type, and every other position is skipped outright.
+ *
+ * Write-free. A slot whose `S` still has a free variable after the solve is
+ * returned as-is; the caller's per-parameter gate declines the open ones.
+ */
+export function instantiateCallbackSlots(
+  arm: FunctionSignature,
+  plan: ContextualCallbackPlan,
+  actuals: ReadonlyArray<Type | undefined>
+): Map<number, FunctionSignature> {
+  const sources = new Set(plan.sources);
+  const solved = solveTypeArguments(arm, actuals, {
+    skip: (i) => !sources.has(i) || actuals[i] === undefined,
+  });
+
+  // Clause 2: only the DOMAIN variables are substituted. A result-side
+  // variable stays open in the instantiated slot (see `domainVars`).
+  const bindings: Record<string, Type> = Object.create(null);
+  for (const name of plan.domainVars)
+    if (solved.bindings[name] !== undefined)
+      bindings[name] = solved.bindings[name];
+
+  const result = new Map<number, FunctionSignature>();
+  for (const slot of plan.callbacks)
+    result.set(
+      slot.index,
+      substituteTypeVariables(slot.signature, bindings) as FunctionSignature
+    );
+  return result;
+}
 
 /**
  * `param` with the solved bindings applied, or `undefined` when it is STILL

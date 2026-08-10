@@ -49,21 +49,27 @@ import {
   broadcastableParamSlots,
   paramsAreScalar,
 } from './boxed-function.js';
-import type { Threadable } from './generic-instantiation.js';
+import type { CallbackSlot, Threadable } from './generic-instantiation.js';
+import {
+  contextualCallbackPlan,
+  contextualSlotCallback,
+  hasCallbackParam,
+  instantiateCallbackSlots,
+} from './generic-instantiation.js';
 import { BoxedString } from './boxed-string.js';
 import { BoxedDictionary } from './boxed-dictionary.js';
 import { canonicalForm } from './canonical.js';
 import { sortOperands } from './order.js';
 import { validateArguments, checkNumericArgs } from './validate.js';
-import { overloadArms, paramAt } from './overload.js';
+import { overloadArms, paramAt, resolveContextualArm } from './overload.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { NUMERIC_TYPES } from '../../common/type/primitive.js';
 import {
-  collectionElementType,
   isWildcardFunctionType,
   resolveTypeForCompilation as resolveType,
 } from '../../common/type/utils.js';
 import { typeToString } from '../../common/type/serialize.js';
+import { freeTypeVariables } from '../../common/type/instantiate.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
 import { isValueDef } from './utils.js';
@@ -804,21 +810,40 @@ function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
  * the type DECLARED for the slot the literal occupies — or `undefined` when
  * the slot is not a concrete arrow type and carries no information.
  *
- * The bare `function` primitive (what every built-in callback slot is declared
- * as, by the generics-v1 pinned ruling) is a string type, so it declines here:
- * those operators use the `callbackElementOf` metadata channel instead. A
- * GENERIC arrow (`forall T. (T) -> boolean`) also declines — its quantified
- * positions are not types a literal can be annotated with; instantiating them
- * is design (D), a later trigger into the same rewrite.
+ * The bare `function` primitive is a string type, so it declines here — a
+ * built-in callback slot spelled that way carries no parameter types. A GENERIC
+ * arrow (`forall T. (T) -> boolean`) also declines: its quantified positions
+ * are not types a literal can be annotated with, and instantiating them is the
+ * contextual solve's job.
+ *
+ * A `callback<S>` slot reads as `S`. Design D §4 makes contextual typing `S`'s
+ * ONLY purpose, so a GROUND one — a user-declared MONOMORPHIC signature that
+ * spells a slot `callback<(integer) -> boolean>` — has to stamp here or be dead
+ * weight: it never reaches the contextual solve (that route is entered only by
+ * a polytype, and a ground `S` has no domain variables to solve anyway).
+ * Admission is untouched by this: clause 1's erasure to `function` happens in
+ * the subtype layer and in `validateArguments`, so the `callback<S>` spelling
+ * admits BROADLY where the plain-arrow spelling narrows — the difference
+ * between the two spellings is admission, never the stamp.
  */
 function declaredCallbackParamTypes(
   t: Type
 ): ReadonlyArray<Type | undefined> | undefined {
-  if (typeof t === 'string' || t.kind !== 'signature') return undefined;
-  if (t.typeParams !== undefined && t.typeParams.length > 0) return undefined;
-  const args = t.args;
+  const callback = contextualSlotCallback(t);
+  const sig = callback?.signature ?? t;
+  if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
+  if (sig.typeParams !== undefined && sig.typeParams.length > 0)
+    return undefined;
+  const args = sig.args;
   if (args === undefined || args.length === 0) return undefined;
-  const types = args.map((arg) => concreteCallbackParamType(arg.type));
+  // A contextual slot is gated by `admissibleElementType`, as on the
+  // contextual-solve path; a plain arrow is an explicit author-written
+  // contract and keeps its wider `concreteCallbackParamType` gate.
+  const types = args.map((arg) =>
+    callback === undefined
+      ? concreteCallbackParamType(arg.type)
+      : stampableParamType(arg.type)
+  );
   return types.some((x) => x !== undefined) ? types : undefined;
 }
 
@@ -840,16 +865,20 @@ function concreteCallbackParamType(t: Type): Type | undefined {
  * (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ruling 1): a
  * callee whose signature declares a concrete arrow-typed parameter annotates
  * an INLINE `Function` literal passed at that position with the declared
- * parameter types. This is what the mechanism offers USER-DEFINED functions;
- * no library signature qualifies (their callback slots are the primitive
- * `function`).
+ * parameter types — a plain arrow, or a ground `callback<S>` (see
+ * {@link declaredCallbackParamTypes}). This is what the mechanism offers
+ * USER-DEFINED functions; no library signature qualifies, every converted
+ * library slot being a POLYTYPE that takes the contextual route below.
  *
  * Runs before any operand is boxed and before any operand type is read, so the
  * literal is canonicalized ONCE, already annotated — exactly as the
  * hand-annotated spelling would be.
  *
  * An OVERLOAD set is skipped: resolution happens after this hook and the
- * annotation would itself feed the resolution.
+ * annotation would itself feed the resolution. The one exception is R-D4
+ * resolve-then-stamp — an arm that declares a `callback<S>` — since a
+ * contextual stamp is decided by the DECLARED slot, never by the operand's own
+ * type, so it cannot feed the resolution it follows.
  */
 function annotateCallbacksFromSignature(
   ce: ComputeEngine,
@@ -857,23 +886,57 @@ function annotateCallbacksFromSignature(
   sigType: Type | undefined
 ): ReadonlyArray<ExpressionInput> {
   if (sigType === undefined || typeof sigType === 'string') return ops;
-  if (overloadArms(sigType) !== undefined) return ops;
+  const arms = overloadArms(sigType);
+  if (arms !== undefined) {
+    // R-D4 (§9, ruled 2026-08-10): resolve the arm FIRST, then stamp against
+    // the resolved one alone. A set no arm of which declares a contextual slot
+    // — every user-defined overload set — resolves to nothing and keeps the
+    // ratified conservative skip.
+    const arm = resolveContextualArm(arms, ops.length);
+    if (arm === undefined) return ops;
+    return annotateCallbacksFromContextualSolve(ce, ops, arm);
+  }
   if (sigType.kind !== 'signature') return ops;
-  // A POLYMORPHIC callee is skipped ENTIRELY: its parameter types mention the
-  // variables its own `forall` clause binds, and stamping `T` on a literal
-  // would leave it unresolved outside that scope (or capture an unrelated
-  // nominal type of the same name). Instantiating them is design (D).
+  // A POLYMORPHIC callee takes the CONTEXTUAL route instead (Design D): its
+  // parameter types mention the variables its own `forall` clause binds, so
+  // stamping one verbatim would leave `T` unresolved outside that scope (or
+  // capture an unrelated nominal type of the same name). Only a `callback<S>`
+  // slot is contextually typed there, and only after `S` has been
+  // instantiated from the sibling operands.
   if (sigType.typeParams !== undefined && sigType.typeParams.length > 0)
-    return ops;
+    return annotateCallbacksFromContextualSolve(ce, ops, sigType);
 
+  return annotateFromDeclaredParams(ce, ops, sigType);
+}
+
+/**
+ * The stamp read straight off a signature's DECLARED parameter slots, with no
+ * solve: each supplied operand's parameter is read for callback parameter types
+ * ({@link declaredCallbackParamTypes}) and an inline `Function` literal there is
+ * annotated with them.
+ *
+ * `contextualOnly` restricts the scan to `callback<S>` slots. That is the shape
+ * the contextual pass falls back to when its solve has nothing to solve — a
+ * GROUND `S` in a POLYMORPHIC arm — where the plain-arrow slots of the same arm
+ * must still decline: their types mention the variables the arm's own `forall`
+ * binds, and stamping one verbatim would leave `T` unresolved outside that
+ * scope.
+ */
+function annotateFromDeclaredParams(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<ExpressionInput>,
+  sig: FunctionSignature,
+  contextualOnly = false
+): ReadonlyArray<ExpressionInput> {
   let result: ExpressionInput[] | undefined;
   for (let i = 0; i < ops.length; i++) {
     // The parameter each SUPPLIED operand binds to: required, then optional,
     // then variadic — `paramAt` mirrors `validateArguments`' consumption
     // order, so a concrete arrow type in an optional or variadic position
     // triggers exactly like a required one.
-    const param = paramAt(sigType, i);
+    const param = paramAt(sig, i);
     if (param === undefined) break;
+    if (contextualOnly && contextualSlotCallback(param) === undefined) continue;
     const paramTypes = declaredCallbackParamTypes(param);
     if (paramTypes === undefined) continue;
     const literal = annotateFunctionLiteralParams(ce, ops[i], paramTypes);
@@ -882,6 +945,188 @@ function annotateCallbacksFromSignature(
     result[i] = literal;
   }
   return result ?? ops;
+}
+
+/**
+ * The CONTEXTUAL-CALLBACK trigger (Design D, `docs/plans/2026-08-10-design-d-
+ * generic-callback-signatures.md` §5): a POLYMORPHIC callee with a
+ * `callback<S>` slot annotates an INLINE `Function` literal at that slot with
+ * `S`'s parameter types, instantiated from the sibling operands.
+ *
+ * The five steps of §5, in the spec's numbering:
+ *
+ * 1. **canonicalize** ONLY the operands that contribute constraints — the
+ *    non-callback positions mentioning a variable `S`'s parameters read
+ *    ({@link contextualCallbackPlan}'s `sources`), to read their types: the
+ *    operands arrive unboxed here, and on the lazy path they would otherwise
+ *    never bind. The canonical form is substituted back so the operator's own
+ *    handler reuses it;
+ * 2. **solve** the callback-DOMAIN variables from those sources alone
+ *    ({@link instantiateCallbackSlots});
+ * 3. **rebuild** each inline literal with the instantiated parameter types,
+ *    per parameter, through the {@link admissibleElementType} gate (inherited
+ *    verbatim from the `callbackElementOf` metadata trigger this replaced);
+ * 4. **result-side** variables are solved from the callback's own type — NOT
+ *    this pass: they are left open here and fall to ordinary validation;
+ * 5. **validate** proceeds normally — where a `callback<S>` slot admits
+ *    exactly what the primitive `function` admits (§4 clause 1).
+ *
+ * The discrimination that precedes step 1 (does the arm declare a slot, does
+ * any operand hold a stampable literal) is not one of the five steps: it is
+ * the guard that keeps the shared-symbol and shorthand spellings free, as the
+ * retired metadata trigger's own guard did.
+ *
+ * Runs before ANY operand is boxed, so the literal canonicalizes ONCE, already
+ * annotated — the same contract as
+ * {@link annotateCallbacksFromSignature}, the other surviving trigger.
+ */
+function annotateCallbacksFromContextualSolve(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<ExpressionInput>,
+  arm: FunctionSignature
+): ReadonlyArray<ExpressionInput> {
+  // Discriminate FIRST, in strictly increasing cost, so an application with no
+  // stampable literal at all — the overwhelmingly common case, including every
+  // symbol/operator-name callback — pays only allocation-free checks:
+  //
+  //  a. does the arm even DECLARE a contextual slot (a field scan);
+  //  b. does any operand LOOK like an inline literal (a syntactic scan of the
+  //     unboxed inputs — no boxing, no type read);
+  //  c. only then plan the slots and their sources (allocates), and only then
+  //     raw-box the callback operands to answer (b) exactly.
+  //
+  // Ordering matters: `contextualCallbackPlan` allocates per parameter
+  // position, and before this the shared-symbol spelling paid for a plan it
+  // could never use.
+  if (!hasCallbackParam(arm)) return ops;
+  if (!ops.some(mayBeInlineFunctionLiteral)) return ops;
+
+  // The `hasCallbackParam` answer is threaded in: the planning pass opens with
+  // the same field scan, and on the overload route `resolveContextualArm` has
+  // already run it a third time.
+  const plan = contextualCallbackPlan(arm, ops.length, true);
+  if (plan === undefined)
+    // No plan, but the arm DOES declare a contextual slot — the GROUND-`S`
+    // case, where there are no domain variables to solve (and hence no
+    // sources). A ground `callback<(integer) -> boolean>` stamps directly off
+    // the declaration, exactly as the identical NON-generic signature does on
+    // the route above; without this an overload arm silently stamped nothing.
+    return annotateFromDeclaredParams(ce, ops, arm, true);
+
+  // The raw box is computed ONCE per slot here and threaded into the stamp
+  // below. `annotateFunctionLiteralParams` still re-boxes what it is given —
+  // but on an already-raw `Expression` that call is the identity, so what this
+  // buys is the ARITY GUARD below, which needs this exact expression before the
+  // stamp runs.
+  const stampable: { slot: CallbackSlot; raw: Expression }[] = [];
+  for (const slot of plan.callbacks) {
+    const op = ops[slot.index];
+    if (op === undefined) continue;
+    // The syntactic scan again, per slot: `Map`'s variadic clause puts a
+    // SOURCE at the slot position, and raw-boxing one only to discard it is
+    // work every multi-collection `Map` would otherwise pay.
+    if (!mayBeInlineFunctionLiteral(op)) continue;
+    const raw = inlineLiteral(ce, op);
+    if (raw !== undefined) stampable.push({ slot, raw });
+  }
+  if (stampable.length === 0) return ops;
+
+  let result: ExpressionInput[] | undefined;
+
+  // §5 step 1: canonicalize only the operands the solve needs, and hand the
+  // CANONICAL form onward (canonical-of-canonical is the identity, so the
+  // operator's own operand check does not redo the work).
+  const actuals: (Type | undefined)[] = new Array(ops.length).fill(undefined);
+  for (const i of plan.sources) {
+    const src = ops[i];
+    if (src === undefined) continue;
+    const canonicalSrc =
+      src instanceof _BoxedExpression ? src.canonical : ce.expr(src);
+    if (canonicalSrc !== src) {
+      result ??= [...ops];
+      result[i] = canonicalSrc;
+    }
+    actuals[i] = resolveType(canonicalSrc.type.type);
+  }
+
+  // §5 step 2 + step 3.
+  const instantiated = instantiateCallbackSlots(arm, plan, actuals);
+  for (const { slot, raw } of stampable) {
+    const s = instantiated.get(slot.index);
+    if (s === undefined) continue;
+    // A VARIADIC `S` (`callback<(T+) -> U>`) would pair one parameter with N
+    // sources. No converted signature spells one: R-D6, which existed only to
+    // stamp `Map`'s variadic arrow, was RETIRED with the §6 re-ruling (that
+    // clause declares no contextual slot at all). A slot that did spell one
+    // declines outright rather than stamping a guess.
+    if (s.variadicArg !== undefined) continue;
+    // ARITY GUARD: the stamp pairs the literal's parameters with `S`'s
+    // POSITIONALLY, so a literal of the wrong arity would take a PARTIAL stamp
+    // — `Filter(cs, (a, b) |-> a > b)` annotating `a` alone. The whole stamp
+    // declines instead. Evaluation is unchanged either way (the arity error
+    // dominates); what this buys is that a declined application carries no
+    // half-written contract. The admissible range is `S`'s consumption arity:
+    // required parameters, optionally through the optional ones.
+    const required = s.args?.length ?? 0;
+    const arity = isFunction(raw) ? raw.nops - 1 : 0;
+    if (arity < required || arity > required + (s.optArgs?.length ?? 0))
+      continue;
+    const paramTypes = [...(s.args ?? []), ...(s.optArgs ?? [])].map((arg) =>
+      stampableParamType(arg.type)
+    );
+    if (!paramTypes.some((x) => x !== undefined)) continue;
+    const literal = annotateFunctionLiteralParams(ce, raw, paramTypes);
+    if (literal === undefined) continue;
+    result ??= [...ops];
+    result[slot.index] = literal;
+  }
+
+  return result ?? ops;
+}
+
+/** Could `op` be an inline `Function` literal? A purely SYNTACTIC test on the
+ * UNBOXED operand — no boxing, no type read — used to skip the whole
+ * contextual pass before it allocates anything. Conservative by construction:
+ * it may answer `true` for an operand {@link inlineLiteral} then declines (an
+ * already-canonical literal, a `["Function", body]` shorthand), never `false`
+ * for one it would accept. Nothing else in `ExpressionInput` — a number, a
+ * string, a symbol/number/string/dictionary object literal — can raw-box to a
+ * `Function`. */
+function mayBeInlineFunctionLiteral(op: ExpressionInput): boolean {
+  if (op instanceof _BoxedExpression) return op.operator === 'Function';
+  if (Array.isArray(op)) return op[0] === 'Function';
+  if (typeof op === 'object' && op !== null && 'fn' in op)
+    return (op as { fn: ReadonlyArray<unknown> }).fn[0] === 'Function';
+  return false;
+}
+
+/** `op` raw-boxed when it is an INLINE `Function` literal with an explicit
+ * parameter list — the one operand shape a contextual stamp rewrites — and
+ * `undefined` otherwise. Answered on the ORIGINAL operand, raw-boxed: an
+ * already-canonical literal is never rewritten, a symbol callback is shared and
+ * never rebuilt (`canonicalFunctionLiteral` would LIFT one into a literal,
+ * which is why this must not use it), and a `["Function", body]` shorthand has
+ * no parameter list to stamp. The box is RETURNED rather than discarded — the
+ * stamp needs this exact expression. */
+function inlineLiteral(
+  ce: ComputeEngine,
+  op: ExpressionInput
+): Expression | undefined {
+  const raw = ce.expr(op, { form: 'raw' });
+  if (raw.isCanonical || !isFunction(raw, 'Function') || raw.nops < 2)
+    return undefined;
+  return raw;
+}
+
+/** An instantiated `callback<S>` parameter type this trigger will stamp, or
+ * `undefined`. The gate is {@link admissibleElementType}'s — including the
+ * PERMANENT union exclusion — plus the ground-type invariant: a parameter
+ * still mentioning a variable the solve could not pin says nothing about an
+ * element, so it stays bare. */
+function stampableParamType(t: Type): Type | undefined {
+  if (freeTypeVariables(t).size > 0) return undefined;
+  const resolved = resolveType(t);
+  return admissibleElementType(resolved) ? t : undefined;
 }
 
 /** The signature to read a callee's declared callback slots from, for a
@@ -923,8 +1168,9 @@ const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
 ]);
 
 /**
- * The admission gate of the builtin-metadata trigger (ruling 4, widened
- * 2026-08-09): an element type this mechanism will stamp on a callback
+ * The admission gate of the contextual stamp (ruling 4, widened 2026-08-09;
+ * inherited unchanged from the `callbackElementOf` metadata trigger it
+ * outlived): an element type this mechanism will stamp on a callback
  * parameter.
  *
  * Admits a CONCRETE type — a concrete scalar primitive (a numeric type,
@@ -932,12 +1178,23 @@ const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
  * collection node). Rejects everything that is not evidence about a single
  * element:
  *
- * - a UNION (even of tuples). One annotation cannot express "each element
- *   satisfies its own arm": stamping the union makes a body that is valid for
- *   SOME arms fail once, at canonicalization, for the whole application —
- *   where the un-annotated program errors per element, which is the published
- *   Epsil "errors are values" behavior. Union admission waits on per-element
- *   error semantics for this route.
+ * - a UNION (even of tuples) — PERMANENTLY (ruled 2026-08-10). One
+ *   annotation cannot express "each element satisfies its own arm":
+ *   stamping the union makes a body that is valid for SOME arms fail once,
+ *   at canonicalization, for the whole application — where the
+ *   un-annotated program errors per element, which is the published Epsil
+ *   "errors are values" behavior. And that un-annotated behavior IS the
+ *   ruled per-element semantics: interpretation is value-directed, so the
+ *   arm an element "satisfies" is its value and evaluation under it is
+ *   ordinary evaluation. A union derived from the source's own element
+ *   type is vacuously unviolatable, so admission would buy only a
+ *   displayed signature — at the price of the published output (strict
+ *   stamping) or a second annotation kind that breaks hand-annotation
+ *   equivalence and serialization round-trip (loose stamping). Unions are
+ *   explicit-contract-only: the signature-driven trigger admits them
+ *   because an author wrote them; this trigger never will because no one
+ *   did. (Design record: the union section of
+ *   docs/plans/2026-08-08-lambda-param-element-inference.md.)
  * - an ABSTRACT supertype — `scalar`, `value`, `expression`, `symbol`,
  *   `missing`, … These are union-like (`scalar` covers number, boolean and
  *   string), so stamping one poisons the whole application at
@@ -976,64 +1233,6 @@ function admissibleElementType(t: Type): boolean {
     default:
       return false;
   }
-}
-
-/**
- * The builtin-METADATA trigger of the per-application element-type inference
- * (ruling 1 and 3: `Map` and `Filter` in v1). The operator declares "operand
- * `cbIdx` is applied to the elements of operand `srcIdx`"
- * ({@link OperatorDefinitionFlags.callbackElementOf}); the element type of the
- * sibling, when provable, annotates the inline literal's single parameter.
- *
- * These operators are `lazy`, so their operands arrive RAW: the sibling's type
- * is read from its CANONICAL form explicitly (a raw operand is unbound and
- * would report nothing). The canonicalization is cached on the raw operand, so
- * the handler's own `checkCollectionOperand` reuses it.
- */
-function annotateCallbacksFromElementType(
-  ce: ComputeEngine,
-  xs: ReadonlyArray<Expression>,
-  opDef: BoxedOperatorDefinition
-): ReadonlyArray<Expression> {
-  const links = opDef.callbackElementOf;
-  if (links === undefined) return xs;
-  if (xs.some((x) => x.operator === 'Spread')) return xs;
-
-  let result: Expression[] | undefined;
-  for (const key of Object.keys(links)) {
-    const cbIdx = Number(key);
-    const cb = xs[cbIdx];
-    const src = xs[links[cbIdx]];
-    if (cb === undefined || src === undefined) continue;
-
-    // Discriminate the callback FIRST — cheap, and it declines the shared
-    // (symbol) and shorthand spellings before the sibling is canonicalized.
-    // Exactly one parameter: the element binds to it. (In the multi-collection
-    // `Map(xs, ys, f)` form operand 1 is a collection, which fails this.)
-    if (cb.isCanonical || !isFunction(cb, 'Function')) continue;
-    if (cb.nops !== 2 || !isSymbol(cb.ops[1])) continue;
-
-    // The sibling has to be canonicalized to read its type; hand the CANONICAL
-    // form onward so the handler's own `checkCollectionOperand` does not redo
-    // it (canonical-of-canonical is the identity there). Substituted whether or
-    // not the admission checks below decline — the work is already done.
-    const canonicalSrc = src.canonical;
-    if (canonicalSrc !== src) {
-      result ??= [...xs];
-      result[links[cbIdx]] = canonicalSrc;
-    }
-
-    const elt = collectionElementType(resolveType(canonicalSrc.type.type));
-    // Positive, concrete, single-element evidence only (ruling 4).
-    if (elt === undefined) continue;
-    if (!admissibleElementType(resolveType(elt))) continue;
-
-    const literal = annotateFunctionLiteralParams(ce, cb, [elt]);
-    if (literal === undefined) continue;
-    result ??= [...xs];
-    result[cbIdx] = literal;
-  }
-  return result ?? xs;
 }
 
 function makeCanonicalFunction(
@@ -1423,16 +1622,21 @@ function applyOperatorDefinition(
   // `docs/plans/2026-08-08-lambda-param-element-inference.md`). Skipped when
   // the caller supplied already-boxed operands (a binder's pre-phase) and when
   // a `Spread` makes the positions uncertain.
+  //
+  // The `rawOps === undefined` half is a DELIBERATE narrowing (Design D §9b):
+  // the deleted `callbackElementOf` trigger ran on both routes, and the
+  // contextual trigger runs only on the unboxed one — where its whole contract
+  // (the literal canonicalizes ONCE, already annotated) is achievable. No
+  // converted operator declares binding sites, so nothing reaches the other
+  // route today. TRIPWIRE: a converted operator that also BINDS variables must
+  // re-visit this gate — it would silently stamp nothing.
   if (rawOps === undefined && !ops.some(isSpreadOperand))
     ops = annotateCallbacksFromSignature(ce, ops, opDef.signature.type);
 
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
-    let xs = rawOps ?? ops.map((x) => ce.expr(x, { form: 'raw' }));
+    const xs = rawOps ?? ops.map((x) => ce.expr(x, { form: 'raw' }));
     if (opDef.canonical) {
-      // The builtin-metadata trigger (`Map`/`Filter`): annotate an inline
-      // callback literal with the element type of its sibling collection.
-      xs = annotateCallbacksFromElementType(ce, xs, opDef);
       try {
         result = opDef.canonical(xs, { engine: ce, scope });
         if (result) return withSourceOffsets(result, metadata);

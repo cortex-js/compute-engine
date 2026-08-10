@@ -122,10 +122,32 @@ export function freeTypeVariables(t: Type): Set<string> {
   return result;
 }
 
+/**
+ * How many times each type variable occurs FREE in `t` — {@linkcode
+ * freeTypeVariables} counting instead of de-duplicating, over the same walk.
+ *
+ * The distinction a caller needs it for: a variable occurring ONCE relates
+ * nothing (it is interchangeable with its bound at that single position),
+ * while one occurring twice or more expresses a contract between positions.
+ */
+export function freeTypeVariableOccurrences(t: Type): Map<string, number> {
+  const counts = new Map<string, number>();
+  collectFreeVariables(t, undefined, {
+    add: (name) => void counts.set(name, (counts.get(name) ?? 0) + 1),
+  });
+  return counts;
+}
+
+/** Where {@linkcode collectFreeVariables} reports an occurrence. A `Set` is
+ * one (de-duplicating); a counter is another. */
+interface VariableSink {
+  add(name: string): void;
+}
+
 function collectFreeVariables(
   t: Type,
   bound: ReadonlySet<string> | undefined,
-  into: Set<string>
+  into: VariableSink
 ): void {
   if (typeof t === 'string') return;
   switch (t.kind) {
@@ -147,6 +169,12 @@ function collectFreeVariables(
       collectFreeVariables(t.result, scope, into);
       return;
     }
+    // Design D §4, clause 4: free-variable discovery RETAINS the variables
+    // inside `S`, so `callback<(T) -> boolean>` contributes `T` to its
+    // signature's `forall` accounting.
+    case 'callback':
+      collectFreeVariables(t.signature, bound, into);
+      return;
     case 'union':
     case 'intersection':
       for (const x of t.types) collectFreeVariables(x, bound, into);
@@ -220,6 +248,9 @@ function hasFreeVariables(
         if (hasFreeVariables(arg.type, scope)) return true;
       return hasFreeVariables(t.result, scope);
     }
+    // Clause 4 — see `collectFreeVariables`.
+    case 'callback':
+      return hasFreeVariables(t.signature, bound);
     case 'union':
     case 'intersection':
       for (const x of t.types) if (hasFreeVariables(x, bound)) return true;
@@ -334,6 +365,16 @@ export function substituteTypeVariables(
         else next.typeParams = typeParams;
       }
       return next;
+    }
+    // Clause 4: instantiation substitutes INSIDE `S`, normally — that is what
+    // turns `callback<(T) -> boolean>` into the `callback<(integer) ->
+    // boolean>` a contextual stamp reads its parameter types off.
+    case 'callback': {
+      const signature = substituteTypeVariables(t.signature, bindings);
+      if (signature === t.signature) return t;
+      // `substituteTypeVariables` on a signature returns a signature (it is a
+      // field-wise rebuild); the cast records what the switch above proves.
+      return { kind: 'callback', signature: signature as FunctionSignature };
     }
     case 'union':
     case 'intersection': {
@@ -567,6 +608,13 @@ function walk(
       for (const el of signatureElements(t))
         walk(el.type, declared, forbidden, into);
       walk(t.result, declared, forbidden, into);
+      return;
+    // Clause 4: a variable inside `S` is an ordinary occurrence — it is
+    // DECLARED by the enclosing `forall` and it counts as occurring in an
+    // argument position, which is what makes `forall T. (collection<T>,
+    // callback<(T) -> boolean>) -> integer` solvable.
+    case 'callback':
+      walk(t.signature, declared, forbidden, into);
       return;
     case 'union': {
       // Rule U: a union arm IS an admissible position, but at most one arm of
@@ -1058,19 +1106,40 @@ function isVariable(t: Type): t is { kind: 'variable'; name: string } {
   return typeof t === 'object' && t.kind === 'variable';
 }
 
-/** The parameter pattern at each operand position (required, then optional,
- * then the variadic pattern repeated — a variadic parameter collects ONE bound
- * per matching actual, all folded into the same variable's bound set). */
+/**
+ * The parameter an arm would bind to operand `index`: a required parameter,
+ * then an optional one, then the variadic parameter (which absorbs every
+ * remaining position). `undefined` when the arm has no slot at that index.
+ *
+ * Mirrors the consumption order of `validateArguments`' three loops — and is
+ * the SINGLE definition of that order: {@linkcode parameterPositions} is this
+ * function tabulated, and `overload.ts` re-exports it as `paramAt`. Two
+ * independent transcriptions of the required→optional→variadic model had drifted
+ * apart once already (Design D's contextual callback slots read one, argument
+ * validation the other, and an OPTIONAL callback slot is the first shape where
+ * a divergence would show).
+ */
+export function paramAt(
+  arm: FunctionSignature,
+  index: number
+): Type | undefined {
+  const required = arm.args?.length ?? 0;
+  if (index < required) return arm.args![index].type;
+  const optional = arm.optArgs?.length ?? 0;
+  if (index < required + optional) return arm.optArgs![index - required].type;
+  return arm.variadicArg?.type;
+}
+
+/** The parameter pattern at each of the first `count` operand positions —
+ * {@linkcode paramAt} tabulated (a variadic parameter collects ONE bound per
+ * matching actual, all folded into the same variable's bound set). */
 export function parameterPositions(
   arm: FunctionSignature,
   count: number
 ): (Type | undefined)[] {
   const out: (Type | undefined)[] = [];
-  for (const a of arm.args ?? []) out.push(a.type);
-  for (const a of arm.optArgs ?? []) out.push(a.type);
-  const variadic = arm.variadicArg?.type;
-  while (out.length < count) out.push(variadic);
-  return out.slice(0, Math.max(count, 0));
+  for (let i = 0; i < count; i++) out.push(paramAt(arm, i));
+  return out;
 }
 
 function addBound(
@@ -1229,6 +1298,12 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
       delete next.typeParams;
       return next;
     }
+    // Design D §4, clause 1: a `callback<S>` slot ADMITS exactly what the
+    // primitive `function` admits, so its skeleton — the loosest/admission
+    // reading of the position — is that primitive. Nothing about `S` may
+    // narrow (or widen) what the position accepts.
+    case 'callback':
+      return 'function';
     case 'list':
     case 'set':
     case 'collection':
@@ -1536,6 +1611,34 @@ function walkPattern(
         )
           ok = false;
       return ok;
+    }
+
+    case 'callback': {
+      // Design D §4, clause 3: the flow from a callback OPERAND into the solve
+      // is RESULT-side only. A named callback's own parameter types must never
+      // constrain a variable — that is the whole point of separating admission
+      // (clause 1) from contextual typing: `Filter(xs, IsPrime)` over a
+      // `list<integer|string>` must not pin `T` to `number`, it must admit
+      // `IsPrime` and let the runtime judge per element.
+      //
+      // Nothing here ever refutes, for the same reason: admission at a
+      // `callback<S>` slot is the primitive `function`'s, decided by the
+      // ordinary subtype check, never by this walk.
+      if (typeof actual !== 'object' || actual.kind !== 'signature')
+        return true;
+      // A POLYTYPE actual: v1 declines to unify (no higher-order unification).
+      if (actual.typeParams !== undefined && actual.typeParams.length > 0)
+        return true;
+      walkPattern(
+        s,
+        pattern.signature.result,
+        actual.result,
+        index,
+        phase,
+        covariant,
+        false
+      );
+      return true;
     }
 
     case 'broadcastable': {

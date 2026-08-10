@@ -34,6 +34,7 @@ import { quotientRingType } from './type-handlers.js';
 import { interval } from '../numerics/interval.js';
 import { range, rangeLast } from './collections.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { typeToDisplayString } from '../../common/type/display.js';
 
 import { randomExpression } from './random-expression.js';
 import { canonicalInvisibleOperator } from '../boxed-expression/invisible-operator.js';
@@ -3109,7 +3110,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { engine: ce }) => {
         if (!x.operatorDefinition) return ce.Nothing;
 
-        return ce.string(x.operatorDefinition.signature.toString());
+        // R-D5: a runtime signature display is GROUND — a converted operator's
+        // `forall`/`callback<S>` slot prints as the `function` slot it
+        // converted from, since neither carries admission information.
+        return ce.string(
+          typeToDisplayString(x.operatorDefinition.signature.type)
+        );
       },
     },
 

@@ -6,6 +6,7 @@ import type {
 } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { signatureArms, signatureEffects } from '../../common/type/utils.js';
+import { isCallbackType } from '../../common/type/callback.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   effectSetToString,
@@ -1067,11 +1068,16 @@ class Walker {
  * and `any` are excluded. This predicate arms the unresolved-operand `{any}`
  * rule, and most user-function parameters are typed `unknown` — admitting them
  * would collapse every literal that passes a free symbol to an ordinary head.
- * Only a position DECLARED callable (`Map`'s `function`, an explicit arrow
- * parameter) says "this operand is a callback".
+ * Only a position DECLARED callable (a `callback<S>` slot, the bare `function`
+ * primitive, an explicit arrow parameter) says "this operand is a callback".
+ *
+ * A `callback<S>` counts, per Design D §4 clause 1: the constructor is the
+ * primitive `function` for every admission and subtyping question, and this is
+ * one of them.
  */
 function isCallableType(t: Type): boolean {
   if (typeof t === 'string') return t === 'function';
+  if (isCallbackType(t)) return true;
   if (t.kind === 'signature') return true;
   if (t.kind === 'union' || t.kind === 'intersection')
     return (t.types as Type[]).some(isCallableType);
@@ -1083,11 +1089,9 @@ function isCallableType(t: Type): boolean {
  * {@link isCallableType}; any arm of an overload set suffices.
  *
  * Deliberately position-INSENSITIVE, as a simplification rather than out of
- * necessity: no operand-order mismatch forces it (`Map`'s declared signature,
- * `(collection+, function) -> indexed_collection`, lines up with its boxed
- * form `Map(collection, function)`), and a per-position variant — testing the
- * declared parameter an operand's index resolves to — is perfectly feasible if
- * a case ever calls for it. The question this gate answers is only "could an
+ * necessity: no operand-order mismatch forces it, and a per-position variant —
+ * testing the declared parameter an operand's index resolves to — is perfectly
+ * feasible if a case ever calls for it. The question this gate answers is only "could an
  * operand of this operator be a callback at all" — enough to keep the
  * unresolved-operand `{any}` rule off `Add`, `Total` and every other
  * callback-free operator, which is what it exists for.
