@@ -487,6 +487,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // that passes it as a bare argument to a callee with an `unknown`/`any`
         // parameter type (e.g. `f(S)` with `f: (unknown) -> unknown`).
         if (inferred.isUnknown) return false;
+        // A re-inference that lands on the type already recorded is a no-op:
+        // skip the write, which would replace the definition's `BoxedType`
+        // with a fresh object (defeating caches keyed on its identity, such
+        // as the R-D5 display projection) and bump `_writeVersion` on every
+        // use of an already-inferred symbol. `narrow`/`widen` are
+        // reference-preserving when nothing changes, so `===` is the test.
+        if (inferred.type === def.value.type.type) return true;
         def.value.type = inferred;
         // A first inference (unknown → concrete) during a boxing operation is
         // recorded as forward provenance for the fresh-matrix-inference
@@ -515,6 +522,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // shared definition below, corrupting it engine-wide. Leave the
       // definition unchanged instead.
       if (newType.matches('never')) return false;
+      // Unchanged signature (reference-preserving `narrow`/`widen`): skip the
+      // no-op write — it would bump `_semanticVersion`/`_worldVersion`
+      // engine-wide on every use of the symbol.
+      if (newType.type === def.operator.signature.type) return true;
       if (newType.matches('function')) {
         // The function signature was modified
         def.operator.signature = newType;
@@ -1504,6 +1515,11 @@ function groundedValueDisplay(def: BoxedValueDefinition): BoxedType {
 }
 
 function groundedTypeDisplay(t: BoxedType): BoxedType {
+  // A primitive type carries no `callback<S>`, so the projection is the
+  // identity: return by reference without touching the WeakMap. This getter
+  // runs on EVERY symbol `.type` read (~39×/box in the P-BOX canary), so the
+  // fast path is load-bearing, not cosmetic.
+  if (typeof t.type === 'string') return t;
   const cached = GROUNDED_SIGNATURE_DISPLAY.get(t);
   if (cached !== undefined) return cached;
   // The trigger is the presence of a `callback<S>` and nothing else (R-D5

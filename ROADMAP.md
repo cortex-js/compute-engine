@@ -1845,13 +1845,65 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 
 ### Symbolic-evaluation performance
 
-#### P-BOX. Generic boxing is ~1.2× slower across 0.100.1 → 0.103.2 (filed 2026-08-10)
+#### P-BOX. Generic boxing is ~1.2× slower across 0.100.1 → 0.103.2 (filed 2026-08-10, bisected 2026-08-10, canary FIXED 2026-08-10)
 
-**Open, unattributed, and uniform — which is what makes it worth a bisect.**
-Measured while answering Tycho item 162 work-item (e) ("did anything regress
-since 0.100.1"). Same machine, PUBLISHED 0.100.1 against PUBLISHED 0.103.2,
-`benchmarks/effects-registration.ts` at `ROUNDS=9` warm medians, three
-interleaved repetitions:
+**Bisected and attributed — two distinct problems, not one.** The per-release
+curve (all 8 published versions side by side, 3 interleaved reps of the same
+harness) splits the "uniform" 1.2×:
+
+- **Box-microloop canary: a single discrete step at 0.103.0** (1.00–1.06×
+  through 0.102.0, then 1.25–1.35× at 0.103.0, flat after). Root-caused below.
+- **Registration/re-registration: gradual accretion** (+5 % at 0.101.0, +11 %
+  at 0.102.0, +20 % at 0.103.0) that does NOT recover when the microloop
+  mechanism is patched out — a separate, smaller, unattributed problem.
+
+**Root cause of the canary step** (CPU profile of the published 0.103.0 bundle,
+confirmed by patching the minified bundle and recovering the 0.102.0 baseline):
+the R-D5 ground-display projection (`groundedTypeDisplay`,
+`boxed-symbol.ts`, commit `b059983f`, shipped in 0.103.0) runs on EVERY
+`BoxedSymbol.type` read — ~39 reads per `ce.box()` in the canary, 2.4 M WeakMap
+gets over the 60 k-iteration loop (6.5 % self time) — and interacts with a
+pre-existing behavior of `BoxedSymbol.infer()` (`boxed-symbol.ts:474-490`):
+once a symbol's type is inferred, every later use as an argument re-narrows
+(`narrow(number, number) = number`) and **unconditionally writes**
+`def.value.type = engine.type(...)`, and `engine.type()` allocates a fresh
+`BoxedType` per call. The fresh object defeats the R-D5 WeakMap (keyed on the
+`BoxedType` identity): exactly 2 guaranteed misses per box call (one per
+inferred symbol), each paying the `deepEraseCallbackTypes` walk plus a
+dead WeakMap entry — GC time tripled (3.1 % → 7.0 %) in the profile.
+
+**Fixed 2026-08-10** — all three fix directions implemented (full suite green,
+zero snapshot churn; production-build microloop back to the 0.102.0 baseline,
+0.0091 vs 0.0105–0.0108 ms/iter published-0.103.2):
+
+1. **Primitive fast path in `groundedTypeDisplay`** — `typeof t.type ===
+   'string'` (a primitive type carries no `callback<S>`) returns `t` by
+   reference before touching the WeakMap. Semantics-preserving by
+   construction.
+2. **Skip the redundant write in `infer()`** when the narrowed type equals the
+   current type (both branches — `narrow`/`widen` are reference-preserving on
+   no-change, so the test is `===` on the `Type`). Kills the fresh-key churn
+   at the source AND stops the spurious `_writeVersion` bump
+   (`boxed-value-definition.ts`) on value definitions plus the engine-wide
+   `_semanticVersion`/`_worldVersion` bumps on operator definitions that the
+   redundant write inflicted on every use of an already-inferred symbol.
+3. **Intern primitive types in `engine.type()`** (per-engine
+   `Map<string, BoxedType>`; primitive names cannot be shadowed by
+   user-declared types, so the singleton is safe) — also protects any future
+   identity-keyed cache.
+
+**Residual, still open:** the gradual registration accretion (+5 % at 0.101.0,
++11 % at 0.102.0, +20 % at 0.103.0) is NOT explained by R-D5 — the fixes
+recover ~1.5 ms of registration (the operator-branch version bumps) but the
+rest of the drift is unattributed. In the loaded-engine context the microloop
+also keeps the ~1.1× share that predates 0.103.0. Bisecting THAT means the
+same harness pointed at the accretion axis: per-release curve exists above;
+the next step is a within-release commit bisect of 0.101.0 and 0.102.0.
+
+Original filing follows. Measured while answering Tycho item 162 work-item (e)
+("did anything regress since 0.100.1"). Same machine, PUBLISHED 0.100.1
+against PUBLISHED 0.103.2, `benchmarks/effects-registration.ts` at `ROUNDS=9`
+warm medians, three interleaved repetitions:
 
 | metric | 0.100.1 | 0.103.2 | ratio |
 | --- | --- | --- | --- |
@@ -1878,13 +1930,9 @@ Consequences and what to do:
 - **1.2× does NOT explain item 162.** Their state converts in 14.9 s against a
   12 s deadline; this factor is worth ~2–3 s of that at most, and their
   attribution puts 60 % of the run in their own classification pipeline.
-- **It should be cheap to bisect.** The releases between are few (0.100.1 →
-  0.101.0 → 0.102.x → 0.103.x), the benchmark is self-contained, and the canary
-  isolates the axis: install each published version side by side and run
-  `benchmarks/effects-registration.ts` against it (the harness used for the
-  table above adapts the import to `@cortex-js/compute-engine`). A per-release
-  curve would say whether this is one change or steady accretion — and those
-  are different problems.
+- ~~**It should be cheap to bisect.**~~ Done 2026-08-10 — see the attribution
+  at the top of this entry: the canary step is one change (R-D5 in 0.103.0);
+  the registration drift is accretion.
 - **Caveat on the numbers:** medians are stable and the ratio is consistent
   across all five metrics and three repetitions, but the max column is noisy
   (60–80 ms outliers on a 20 ms median). Trust the ratio, not the absolute ms.

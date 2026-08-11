@@ -8,6 +8,7 @@ import {
   TypeString,
 } from '../common/type/types.js';
 import { BoxedType } from '../common/type/boxed-type.js';
+import { isValidPrimitiveType } from '../common/type/primitive.js';
 
 import type { OneOf } from '../common/one-of.js';
 import type { DeadlineFrame } from '../common/interruptible.js';
@@ -449,6 +450,13 @@ export class ComputeEngine implements IComputeEngine {
     12: null,
     36: null,
   };
+
+  /** @internal Interned `BoxedType`s for primitive type names (P-BOX).
+   * Primitive names can never be shadowed by a user-declared type, so a
+   * per-engine singleton is safe — and identity-stable, which keeps caches
+   * keyed on `BoxedType` identity (e.g. the R-D5 display projection) from
+   * missing on every `engine.type('number')`. */
+  private _commonTypes = new Map<string, BoxedType>();
 
   /**
    * The stack of evaluation contexts.
@@ -2580,6 +2588,14 @@ export class ComputeEngine implements IComputeEngine {
 
   type(type: Type | TypeString | BoxedType): BoxedType {
     if (type instanceof BoxedType) return type;
+    if (typeof type === 'string' && isValidPrimitiveType(type)) {
+      let boxed = this._commonTypes.get(type);
+      if (boxed === undefined) {
+        boxed = new BoxedType(type, this._typeResolver);
+        this._commonTypes.set(type, boxed);
+      }
+      return boxed;
+    }
     return new BoxedType(type, this._typeResolver);
   }
 

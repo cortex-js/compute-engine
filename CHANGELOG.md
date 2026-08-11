@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Improvements
+
+- **The 0.103.0 per-box slowdown is fixed** (ROADMAP P-BOX): generic boxing
+  had regressed ~1.25× in 0.103.0 through an interaction between the R-D5
+  ground-display cache — which runs on every symbol `.type` read and is keyed
+  on `BoxedType` identity — and type inference, which rewrote an
+  already-inferred symbol's type with a freshly allocated `BoxedType` on
+  every use, defeating that cache twice per boxing call and tripling GC
+  pressure. Three changes, each independently useful:
+  - primitive types bypass the display-projection cache entirely (a primitive
+    carries no `callback<S>`, so the projection is the identity);
+  - a re-inference that lands on the type already recorded no longer writes —
+    which also stops the spurious per-use `_writeVersion` bump on value
+    definitions and the engine-wide `_semanticVersion`/`_worldVersion` bumps
+    on operator definitions;
+  - `ce.type()` now interns primitive type names per engine, so
+    `ce.type('number')` is identity-stable.
+
+  The box-microloop canary in `benchmarks/effects-registration.ts` returns to
+  its 0.102.0 baseline (0.0091 vs 0.0105–0.0108 ms/iter regressed).
+
 ## 0.103.2 _2026-08-10_
 
 ### Breaking Changes
