@@ -1845,122 +1845,17 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 
 ### Symbolic-evaluation performance
 
-#### P-BOX. Generic boxing is ~1.2× slower across 0.100.1 → 0.103.2 (filed 2026-08-10, CLOSED 2026-08-10)
+#### P-BOX-2. Structural cost of generic boxing (noted 2026-08-10)
 
-**Bisected and attributed — two distinct problems, not one.** The per-release
-curve (all 8 published versions side by side, 3 interleaved reps of the same
-harness) splits the "uniform" 1.2×:
-
-- **Box-microloop canary: a single discrete step at 0.103.0** (1.00–1.06×
-  through 0.102.0, then 1.25–1.35× at 0.103.0, flat after). Root-caused below.
-- **Registration/re-registration: gradual accretion** (+5 % at 0.101.0, +11 %
-  at 0.102.0, +20 % at 0.103.0) that does NOT recover when the microloop
-  mechanism is patched out — a separate, smaller, unattributed problem.
-
-**Root cause of the canary step** (CPU profile of the published 0.103.0 bundle,
-confirmed by patching the minified bundle and recovering the 0.102.0 baseline):
-the R-D5 ground-display projection (`groundedTypeDisplay`,
-`boxed-symbol.ts`, commit `b059983f`, shipped in 0.103.0) runs on EVERY
-`BoxedSymbol.type` read — ~39 reads per `ce.box()` in the canary, 2.4 M WeakMap
-gets over the 60 k-iteration loop (6.5 % self time) — and interacts with a
-pre-existing behavior of `BoxedSymbol.infer()` (`boxed-symbol.ts:474-490`):
-once a symbol's type is inferred, every later use as an argument re-narrows
-(`narrow(number, number) = number`) and **unconditionally writes**
-`def.value.type = engine.type(...)`, and `engine.type()` allocates a fresh
-`BoxedType` per call. The fresh object defeats the R-D5 WeakMap (keyed on the
-`BoxedType` identity): exactly 2 guaranteed misses per box call (one per
-inferred symbol), each paying the `deepEraseCallbackTypes` walk plus a
-dead WeakMap entry — GC time tripled (3.1 % → 7.0 %) in the profile.
-
-**Fixed 2026-08-10** — all three fix directions implemented (full suite green,
-zero snapshot churn; production-build microloop back to the 0.102.0 baseline,
-0.0091 vs 0.0105–0.0108 ms/iter published-0.103.2):
-
-1. **Primitive fast path in `groundedTypeDisplay`** — `typeof t.type ===
-   'string'` (a primitive type carries no `callback<S>`) returns `t` by
-   reference before touching the WeakMap. Semantics-preserving by
-   construction.
-2. **Skip the redundant write in `infer()`** when the narrowed type equals the
-   current type (both branches — `narrow`/`widen` are reference-preserving on
-   no-change, so the test is `===` on the `Type`). Kills the fresh-key churn
-   at the source AND stops the spurious `_writeVersion` bump
-   (`boxed-value-definition.ts`) on value definitions plus the engine-wide
-   `_semanticVersion`/`_worldVersion` bumps on operator definitions that the
-   redundant write inflicted on every use of an already-inferred symbol.
-3. **Intern primitive types in `engine.type()`** (per-engine
-   `Map<string, BoxedType>`; primitive names cannot be shadowed by
-   user-declared types, so the singleton is safe) — also protects any future
-   identity-keyed cache.
-
-**Residual accretion: attributed and FIXED 2026-08-10.** The gradual drift was
-not one release's change but the standard library GROWING into a fixed cost:
-`parseType()` refused to cache resolver-aware calls, and every library
-signature boxed at `new ComputeEngine()` (1,953 parses, only ~308 distinct
-strings) or re-boxed at declare/assign time parsed from scratch. Splitting the
-axis showed the accretion lived in engine construction (+15–20 %) and
-fresh-engine first registration (+9–13 %), while long-run steady-state cost
-was flat — i.e. "features cost setup time", accruing a few percent per
-release. Fix: two-step resolution in `parseType()` (cached resolver-less
-parse first; only strings naming user types — including the `type X`
-forward-reference spelling, now tracked by `Parser.sawForwardRef` because it
-parses resolver-less into an unresolved placeholder WITHOUT throwing and its
-resolver-aware parse side-effects a forward registration — fall through to
-the uncached resolver-aware parse). Full parses: 1,953 → 343 (first engine) /
-48 (later engines) per construction, 2,278 → 0 per 120-fn registration.
-Measured: construction ~2.7 ms vs 7.6–8.2 ms for EVERY published 0.10x
-version (~3×); registration within ~3 % of the 0.100.1 baseline;
-re-registration at or below it.
-
-**Final residual — examined and CLOSED, not worth an open item.** The last
-~+9 % on the box microloop appears only on a bench-state engine (after
-composition/seed rows and re-registration; a plain loaded engine is at
-parity) and profiles as DIFFUSE: high-resolution profiles of 0.100.1 vs
-fixed-0.103.2 show the same structure (isSubtype ~12 %, GC ~8 %, `matches`
-~5 %, then a 1–2 % tail of canonicalization helpers) with no single new
-mechanism — it is three releases of per-box feature checks (missing-value
-behavior, effects, collection gating, Dot/tuple dispatch) at fractions of a
-percent each. Chasing it would be many-site micro-optimization for a few
-percent total. Noted for the future: `isSubtype` volume (~12 % of box time,
-already so in 0.100.1) and GC pressure are the structural levers if a
-"boxing 2×" initiative is ever wanted — that would be a NEW item, not this
-one.
-
-Original filing follows. Measured while answering Tycho item 162 work-item (e)
-("did anything regress since 0.100.1"). Same machine, PUBLISHED 0.100.1
-against PUBLISHED 0.103.2, `benchmarks/effects-registration.ts` at `ROUNDS=9`
-warm medians, three interleaved repetitions:
-
-| metric | 0.100.1 | 0.103.2 | ratio |
-| --- | --- | --- | --- |
-| registration (120 fns) | 18.3 / 19.7 / 21.8 ms | 21.9 / 23.4 / 25.1 ms | 1.15–1.20× |
-| re-registration (120 fns) | 14.1 / 14.8 / 18.2 ms | 15.9 / 17.6 / 23.0 ms | 1.13–1.26× |
-| composition rows (40) | 3.7 ms | 4.5 ms | ~1.22× |
-| `WithRandomSeed` rows (40) | 0.8 ms | 1.0 ms | ~1.25× |
-| **box microloop (ms/iter)** | **0.0113 / 0.0130 / 0.0136** | **0.0138 / 0.0158 / 0.0183** | **1.22–1.35×** |
-
-**The last row is the finding.** That microloop exists in the benchmark
-specifically so a generic-boxing regression can be told apart from one in the
-effect channel — and it moved by the SAME ratio as every other line. So this is
-not the registration path, not the effects path, and not the item-139 mechanism
-(which was fixed in 0.100.1 and is confirmed absent from Tycho's 0.103.1
-profile): it is uniform per-box cost accumulated across three releases of
-feature work.
-
-Consequences and what to do:
-
-- **It is nobody's filed defect.** Tycho did not report it — it fell out of a
-  question they asked about their own convert time — so it has no external
-  pressure behind it and will not surface on its own. Recorded here because a
-  commitment to own it was made in their `COMPUTE_ENGINE.md` item 162 (e).
-- **1.2× does NOT explain item 162.** Their state converts in 14.9 s against a
-  12 s deadline; this factor is worth ~2–3 s of that at most, and their
-  attribution puts 60 % of the run in their own classification pipeline.
-- ~~**It should be cheap to bisect.**~~ Done 2026-08-10 — see the attribution
-  at the top of this entry: the canary step is one change (R-D5 in 0.103.0);
-  the registration drift is accretion.
-- **Caveat on the numbers:** medians are stable and the ratio is consistent
-  across all five metrics and three repetitions, but the max column is noisy
-  (60–80 ms outliers on a 20 ms median). Trust the ratio, not the absolute ms.
+Not a regression — an observation left by the (closed) P-BOX
+investigation, recorded in case a "make boxing 2× faster" initiative is
+ever wanted: in high-resolution profiles of the box microloop, `isSubtype`
+accounts for ~12 % of box time and GC for ~8 %, and both shares are
+unchanged since at least 0.100.1. Type-check call volume and allocation
+pressure are the structural levers; everything else in the profile is a
+diffuse 1–2 % tail. (The P-BOX regression itself — R-D5 display-cache
+interaction and uncached resolver-aware `parseType` — was fixed 2026-08-10;
+see the CHANGELOG.)
 
 
 #### P0. `.N()` over nested user-function applications is exponential (filed 2026-07-26)
