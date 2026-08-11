@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+### New Features
+
+- **Annotation-bound parameters in Epsil typed declarations** (the "lambda
+  lift"). A parameter name now binds wherever it appears: when a declaration's
+  annotation is a literal function type with named parameters and the
+  initializer is not a lambda, the annotation's names become the parameters of
+  an automatically built lambda — `const f : (x: number) -> number = x^2 + 2x
+  + 1` now means `= (x) |-> x^2 + 2x + 1`. When the initializer is an explicit
+  lambda, the two parameter lists must agree positionally; a disagreement is
+  the new `parameter-name-mismatch` diagnostic, with a fixit that renames the
+  annotation to the lambda's names. Alias annotations stay opaque (names bind
+  only where they are written), only the outermost arrow of a nested signature
+  lifts, and zero-parameter, generic, effectful, optional/variadic, and
+  partially named signatures never lift. See
+  `docs/plans/2026-08-08-annotation-lambda-lift.md`.
+
 ### Improvements
 
 - **Engine construction is ~3× faster, and the gradual registration accretion is

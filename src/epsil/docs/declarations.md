@@ -130,6 +130,43 @@ an existing one, and takes a type-parameter clause if it needs one
 a reserved word — only these statement shapes claim it. See
 [Declaring a type](/epsil/types/#declaring-a-type) for the whole story.
 
+## Function-type annotations bind their parameter names
+
+A parameter name **binds wherever it appears**. When a declaration's
+annotation is a function type written out at the declaration site with named
+parameters, those names become the parameters of the declared function — the
+initializer is its **body**:
+
+```epsil
+const f : (x: number) -> number = x^2 + 2x + 1
+f(3)
+// ➔ 16
+```
+
+This is the same function as `= (x) |-> x^2 + 2x + 1`, and the same as the
+definition form `f(x: number) -> number = x^2 + 2x + 1`. The initializer may
+instead be an explicit lambda; the annotation's names must then agree with the
+lambda's (a disagreement is a diagnostic, with a fixit) — or leave the
+annotation's parameters unnamed, and let the lambda name them:
+
+```epsil
+const g : (number) -> number = (x) |-> x + 1
+```
+
+So a name appears in **one** place (or in both, agreeing) — never with two
+meanings. When the annotation is named, the initializer is read as a pointwise
+*body*; when it is unnamed, the initializer must *be* a function value, as in
+`const h : (number) -> number = g`.
+
+The names bind only where they are **written**: an annotation through a
+`type alias` never binds (its names are documentation), a zero-parameter
+signature has nothing to bind (`const t : () -> number = makeCounter()` keeps
+meaning what it says), and for a curried signature only the **outermost**
+arrow binds — `const add : (x: number) -> (y: number) -> number = (y) |-> x + y`
+binds `x` around an explicit inner lambda. Generic (`forall`), effectful,
+optional/variadic, and partially named signatures do not bind either; give
+those an explicit lambda.
+
 ## Reassignment vs. declaration
 
 A bare `x = 5` — no `let`/`const` keyword, no type annotation — is not

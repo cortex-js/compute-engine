@@ -10,7 +10,12 @@ import {
   parseTypePrefix,
 } from '../common/type/parse.js';
 import { EFFECT_LABELS } from '../common/type/effects.js';
-import type { TypeResolver } from '../common/type/types.js';
+import type {
+  FunctionSignature,
+  Type,
+  TypeResolver,
+} from '../common/type/types.js';
+import { typeToString } from '../common/type/serialize.js';
 import {
   isStringObject,
   mapArgs,
@@ -809,6 +814,7 @@ export class Parser {
     options?: { allowType?: boolean; requireValue?: boolean }
   ): MathJsonExpression | null {
     let typeNode: MathJsonExpression | undefined;
+    let annotationType: Type | undefined;
     let end = this.localEnd(nameNode) ?? this.previousEnd();
 
     if (this.check('OPERATOR') && this.current.text === ':') {
@@ -828,6 +834,7 @@ export class Parser {
         return null;
       }
       typeNode = t.node;
+      annotationType = t.type;
       end = t.end;
     }
 
@@ -851,6 +858,19 @@ export class Parser {
       this.error(['expression-expected'], this.current.start, this.current.end);
       return null;
     }
+
+    // Annotation-bound parameters (the "lambda lift"): a literal named
+    // function-type annotation may bind the initializer's parameters.
+    if (
+      typeNode !== undefined &&
+      annotationType !== undefined &&
+      valueNode !== undefined
+    )
+      valueNode = this.reconcileFunctionAnnotation(
+        typeNode,
+        annotationType,
+        valueNode
+      );
 
     // Assemble `["Declare", name, type?, attributes?]`. The type is positional
     // when present; `value`/`constant` go in a trailing attributes Dictionary
@@ -880,6 +900,178 @@ export class Parser {
       );
 
     return this.wrap(parts, start, end);
+  }
+
+  /**
+   * Annotation-bound parameters (the "lambda lift") — see
+   * `docs/plans/2026-08-08-annotation-lambda-lift.md`.
+   *
+   * A parameter name binds wherever it appears. When a declaration's
+   * annotation is a LITERAL function type whose parameters are all named and
+   * the initializer is not itself a function literal, the names bind: the
+   * initializer becomes the body of a lambda whose parameters come from the
+   * annotation, so `const f : (x: number) -> number = x^2 + 1` means
+   * `= (x) |-> x^2 + 1`. The lifted `Declare` is the exact shape the
+   * explicit-lambda spelling produces; the engine's declared-type
+   * reconciliation does the rest.
+   *
+   * When the initializer IS a function literal, the two parameter lists must
+   * agree positionally; a disagreement is a `parameter-name-mismatch`
+   * diagnostic. Exception: under a NESTED-arrow annotation
+   * (`(x: number) -> (y: number) -> number`) a lambda whose names don't
+   * match the outermost level is read as the outer lift's BODY
+   * (`= (y) |-> x + y` binds `x` around the inner lambda) — only the
+   * outermost level ever lifts.
+   *
+   * Deliberately inert (the initializer must then be an explicit lambda):
+   * alias annotations (a literal signature's source text starts with `(` —
+   * binders are written where they bind, and a name that merely RESOLVES to
+   * a signature does not bind); zero-parameter signatures (nothing to bind,
+   * and the initializer may legitimately be a thunk-valued expression);
+   * generic (`forall`), effectful, optional/variadic, and partially named
+   * signatures.
+   */
+  private reconcileFunctionAnnotation(
+    typeNode: MathJsonExpression,
+    type: Type,
+    valueNode: MathJsonExpression
+  ): MathJsonExpression {
+    if (typeof type === 'string' || type.kind !== 'signature')
+      return valueNode;
+    const text = stringValue(typeNode);
+    if (text === null || !text.startsWith('(')) return valueNode;
+    if (type.typeParams !== undefined || type.effects !== undefined)
+      return valueNode;
+    if (type.optArgs !== undefined || type.variadicArg !== undefined)
+      return valueNode;
+    const args = type.args ?? [];
+    if (args.length === 0) return valueNode;
+    const names: string[] = [];
+    for (const a of args) {
+      if (a.name === undefined) return valueNode;
+      names.push(a.name);
+    }
+
+    const ops = fnOps(valueNode);
+    if (ops !== null && ops[0] === 'Function') {
+      const params = ops.slice(2);
+      const lambdaNames = params.map(paramNameOf);
+      if (
+        lambdaNames.length === names.length &&
+        names.every((n, i) => lambdaNames[i] === n)
+      )
+        return valueNode; // the lambda IS the declared function value
+
+      if (typeof type.result !== 'string' && type.result.kind === 'signature')
+        return this.liftAnnotation(typeNode, text, names, valueNode);
+
+      if (lambdaNames.length === names.length) {
+        for (let i = 0; i < names.length; i++) {
+          if (lambdaNames[i] === null || lambdaNames[i] === names[i]) continue;
+          this.reportParameterNameMismatch(
+            typeNode,
+            type,
+            lambdaNames,
+            params[i],
+            lambdaNames[i]!,
+            names[i]
+          );
+          break;
+        }
+      }
+      // An arity disagreement is the declared-type check's job, not ours.
+      return valueNode;
+    }
+
+    return this.liftAnnotation(typeNode, text, names, valueNode);
+  }
+
+  /** Wrap a declaration initializer as a `Function` whose parameters are the
+   * annotation's named parameters. Each synthesized parameter points at its
+   * name's span inside the annotation source when it can be found there
+   * (best-effort; offsets feed diagnostics only). */
+  private liftAnnotation(
+    typeNode: MathJsonExpression,
+    text: string,
+    names: string[],
+    valueNode: MathJsonExpression
+  ): MathJsonExpression {
+    const start = this.localStart(valueNode) ?? 0;
+    const end = this.localEnd(valueNode) ?? this.previousEnd();
+    // The node's span starts at the `:`-adjacent whitespace while `text` is
+    // trimmed; anchor name lookups at the trimmed text's actual offset.
+    const typeStart = this.trimmedTypeStart(typeNode, text);
+    let cursor = 0;
+    const params = names.map((name) => {
+      if (typeStart !== undefined) {
+        const at = findParamName(text, name, cursor);
+        if (at >= 0) {
+          cursor = at + name.length;
+          return this.wrap(
+            { sym: name },
+            typeStart + at,
+            typeStart + at + name.length
+          );
+        }
+      }
+      return this.wrap({ sym: name }, start, end);
+    });
+    return this.wrap(
+      ['Function', valueNode, ...params] as MathJsonExpression[],
+      start,
+      end
+    );
+  }
+
+  /** `const f : (y: number) -> number = (x) |-> …` — the annotation and the
+   * lambda name the same positional parameter differently. The fixit renames
+   * the ANNOTATION to the lambda's names: the lambda's names are the binders
+   * the body actually uses, so that direction is the semantics-preserving
+   * single edit. */
+  private reportParameterNameMismatch(
+    typeNode: MathJsonExpression,
+    type: FunctionSignature,
+    lambdaNames: (string | null)[],
+    at: MathJsonExpression,
+    lambdaName: string,
+    annotationName: string
+  ): void {
+    const anchor = nodeOffsets(at) ?? nodeOffsets(typeNode);
+    const diagnostic: ParsingDiagnostic = {
+      severity: 'error',
+      message: ['parameter-name-mismatch', lambdaName, annotationName],
+      range: anchor ? [anchor[0], anchor[1]] : [0, 0],
+    };
+    const text = stringValue(typeNode);
+    const typeStart =
+      text !== null ? this.trimmedTypeStart(typeNode, text) : undefined;
+    if (text !== null && typeStart !== undefined) {
+      const args = type.args ?? [];
+      diagnostic.fixits = [
+        [
+          this.baseOffset + typeStart,
+          this.baseOffset + typeStart + text.length,
+          typeToString({
+            ...type,
+            args: args.map((a, i) => ({ ...a, name: lambdaNames[i] ?? a.name })),
+          }),
+        ],
+      ];
+    }
+    this.diagnostics.push(diagnostic);
+  }
+
+  /** Local offset where a held type node's TRIMMED source text begins (the
+   * node's span starts right after the `:`, including any whitespace). */
+  private trimmedTypeStart(
+    typeNode: MathJsonExpression,
+    text: string
+  ): number | undefined {
+    const start = this.localStart(typeNode);
+    const end = this.localEnd(typeNode);
+    if (start === undefined || end === undefined) return undefined;
+    const at = this.source.slice(start, end).indexOf(text);
+    return at < 0 ? start : start + at;
   }
 
   /** Build a `["KeyValuePair", key, value]` attributes entry with a bare-symbol
@@ -2895,6 +3087,7 @@ export class Parser {
   private parseTypeAnnotation(): {
     node: MathJsonExpression;
     end: number;
+    type: Type;
   } | null {
     const colonTok = this.advance(); // ':'
     return this.parseTypeBody(colonTok.end);
@@ -2911,15 +3104,18 @@ export class Parser {
   private parseTypeBody(typeSourceStart: number): {
     node: MathJsonExpression;
     end: number;
+    type: Type;
   } | null {
     let typeEnd: number;
     let typeString: string;
+    let type: Type;
     try {
-      const { end } = parseTypePrefix(
+      const parsed = parseTypePrefix(
         this.source.slice(typeSourceStart),
         this.typeResolver
       );
-      typeEnd = typeSourceStart + end;
+      type = parsed.type;
+      typeEnd = typeSourceStart + parsed.end;
       typeString = this.source.slice(typeSourceStart, typeEnd).trim();
       this.advanceToOffset(typeEnd);
     } catch (e) {
@@ -2942,7 +3138,7 @@ export class Parser {
     }
 
     const node = this.wrap({ str: typeString }, typeSourceStart, typeEnd);
-    return { node, end: typeEnd };
+    return { node, end: typeEnd, type };
   }
 
   /** Advance the token cursor until the current token starts at or past the
@@ -3577,6 +3773,23 @@ export class Parser {
         end
       );
 
+    // `(x: number) -> x^2`, `(x, y) -> x + y`, `= x -> x + 1`: a
+    // `KeyValuePair` whose left side is shaped like a parameter list is a
+    // function written with the wrong arrow (`->` for `|->`). None of these
+    // shapes is a valid dictionary key (keys are strings), so diagnose — with
+    // a fixit on the arrow — and RECOVER as the intended function. (The right
+    // operand was parsed at `->`'s precedence, which is tighter than `|->`'s,
+    // so a `??`/`|>` tail still lands outside the recovered lambda: the
+    // fixit, not the recovery, is the real repair.)
+    if (def.name === 'KeyValuePair' && this.lambdaMistypedAsPair(left)) {
+      this.reportMapstoArrowExpected(left, right);
+      return this.wrap(
+        ['Function', right, ...this.mapstoParams(left)] as MathJsonExpression[],
+        start,
+        end
+      );
+    }
+
     if (def.name === 'Assign') this.checkAssignTarget(left);
 
     if (
@@ -3725,6 +3938,80 @@ export class Parser {
 
     emit(left);
     return [];
+  }
+
+  /** Is a `KeyValuePair`'s left operand shaped like a parameter list — a
+   * `Typed` parameter (`(x: number) -> …`), a tuple of parameters
+   * (`(x, y) -> …`), or a bare symbol right after a `(` or `=`
+   * (`(x) -> …`, `f = x -> …`)? None of these is a valid dictionary key, so
+   * the `->` was almost certainly meant to be `|->`. A bare symbol in any
+   * other position (`{one -> 1}`, a list element) is left alone: inside a
+   * brace literal an unquoted name is a legitimate string key. */
+  private lambdaMistypedAsPair(left: MathJsonExpression): boolean {
+    const isTypedParam = (p: MathJsonExpression): boolean => {
+      const pops = fnOps(p);
+      return (
+        pops !== null &&
+        pops[0] === 'Typed' &&
+        pops[1] !== undefined &&
+        symbolNameOf(pops[1]) !== null
+      );
+    };
+    const ops = fnOps(left);
+    if (ops !== null && ops[0] === 'Typed') return isTypedParam(left);
+    // An empty Tuple only ever comes from a `()` parameter list, so it
+    // qualifies vacuously (`() -> 42`).
+    if (ops !== null && ops[0] === 'Tuple')
+      return ops
+        .slice(1)
+        .every((p) => symbolNameOf(p) !== null || isTypedParam(p));
+    if (symbolNameOf(left) !== null) {
+      const start = this.localStart(left);
+      if (start === undefined) return false;
+      let i = start - 1;
+      while (i >= 0 && /\s/.test(this.source[i])) i -= 1;
+      return i >= 0 && (this.source[i] === '(' || this.source[i] === '=');
+    }
+    return false;
+  }
+
+  /** Report a `->` that was meant to be `|->`, with a fixit replacing the
+   * arrow (found in the source gap between the two operands — the operator
+   * token has already been consumed by the infix loop). */
+  private reportMapstoArrowExpected(
+    left: MathJsonExpression,
+    right: MathJsonExpression
+  ): void {
+    const gapStart = this.localEnd(left);
+    const gapEnd = this.localStart(right);
+    let span: [number, number] | null = null;
+    if (gapStart !== undefined && gapEnd !== undefined) {
+      const gap = this.source.slice(gapStart, gapEnd);
+      for (const arrow of ['->', '→']) {
+        const at = gap.indexOf(arrow);
+        if (at >= 0) {
+          span = [gapStart + at, gapStart + at + arrow.length];
+          break;
+        }
+      }
+    }
+    const fallback: [number, number] = [
+      this.localStart(left) ?? 0,
+      this.localEnd(right) ?? this.previousEnd(),
+    ];
+    const diagnostic: ParsingDiagnostic = {
+      severity: 'error',
+      message: ['mapsto-arrow-expected'],
+      range: [
+        this.baseOffset + (span?.[0] ?? fallback[0]),
+        this.baseOffset + (span?.[1] ?? fallback[1]),
+      ],
+    };
+    if (span !== null)
+      diagnostic.fixits = [
+        [this.baseOffset + span[0], this.baseOffset + span[1], '|->'],
+      ];
+    this.diagnostics.push(diagnostic);
   }
 
   /** End offset (local) of the most recently consumed token. */
@@ -4147,8 +4434,13 @@ export class Parser {
       // An empty `()` immediately before a mapsto arrow is a zero-parameter
       // lambda parameter list: `() |-> expr` → `["Function", body]`. Emit an
       // empty `Tuple` so `mapstoParams` yields no parameters. Anywhere else,
-      // an empty parenthesis is a diagnostic (no empty tuple in v0).
-      if (this.check('OPERATOR') && this.current.text === '|->')
+      // an empty parenthesis is a diagnostic (no empty tuple in v0). A `->`
+      // here is the wrong-arrow spelling of the same lambda — let it through
+      // so `combineInfix` diagnoses (`mapsto-arrow-expected`) and recovers.
+      if (
+        this.check('OPERATOR') &&
+        (this.current.text === '|->' || this.current.text === '->')
+      )
         return this.wrap(['Tuple'] as MathJsonExpression[], open.start, end);
       if (this.diagnostics.length === diagBefore)
         this.error(['expression-expected'], open.start, end);
@@ -4156,8 +4448,16 @@ export class Parser {
     }
     // A type annotation is only meaningful in a mapsto parameter list. If the
     // annotated group is not the LHS of a `|->`, it is a type annotation in an
-    // invalid position.
-    if (typed && !(this.check('OPERATOR') && this.current.text === '|->')) {
+    // invalid position. A following `->` is exempt: that is the wrong-arrow
+    // spelling of a lambda, and `combineInfix` reports the ONE real problem
+    // (`mapsto-arrow-expected`) instead of a spurious `:` complaint.
+    if (
+      typed &&
+      !(
+        this.check('OPERATOR') &&
+        (this.current.text === '|->' || this.current.text === '->')
+      )
+    ) {
       const o = nodeOffsets(values[values.length - 1]);
       this.error(
         ['unexpected-symbol', ':'],
@@ -4632,6 +4932,33 @@ function fnOps(expr: MathJsonExpression): MathJsonExpression[] | null {
   )
     return (expr as { fn: MathJsonExpression[] }).fn;
   return null;
+}
+
+/** The bound name of a lambda parameter node: a bare symbol, or the symbol
+ * inside a `["Typed", sym, type]` annotation. */
+function paramNameOf(p: MathJsonExpression): string | null {
+  const direct = symbolNameOf(p) ?? (typeof p === 'string' ? p : null);
+  if (direct !== null) return direct;
+  const ops = fnOps(p);
+  if (ops !== null && ops[0] === 'Typed' && ops[1] !== undefined) {
+    const inner = ops[1];
+    return symbolNameOf(inner) ?? (typeof inner === 'string' ? inner : null);
+  }
+  return null;
+}
+
+/** Offset of a parameter name inside a literal signature's source text (a
+ * name token followed by `:`), searching from `from`; `-1` when not found. */
+function findParamName(text: string, name: string, from: number): number {
+  let i = text.indexOf(name, from);
+  while (i >= 0) {
+    const before = i === 0 ? '(' : text[i - 1];
+    let j = i + name.length;
+    while (j < text.length && /\s/.test(text[j])) j += 1;
+    if (/[(,\s]/.test(before) && text[j] === ':') return i;
+    i = text.indexOf(name, i + 1);
+  }
+  return -1;
 }
 
 /** The name of a bare-symbol node (`{sym}`), or `null` for any other node. Used

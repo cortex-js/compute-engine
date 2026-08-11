@@ -452,15 +452,22 @@ describe('EPSIL EXECUTE — static (canonicalization-time) type errors', () => {
 
   test('an error inside a `let` initializer is found', () => {
     // The canonical `Declare` carries its initializer inside a MathJSON
-    // dictionary literal, which the walk must descend into. Two cases: an
-    // ordinary type error in an initializer, and the `->` / `|->` typo (`->`
-    // builds a `KeyValuePair`, whose key must be a string).
-    for (const source of ['let g = "a" + 1', 'let f = (n) -> n^2 + 1']) {
-      const { diagnostics } = run(source);
-      expect(diagnostics.map((x) => x.message[0])).toContain(
-        'static-type-error'
-      );
-    }
+    // dictionary literal, which the walk must descend into: an ordinary type
+    // error in an initializer is still reported.
+    const { diagnostics } = run('let g = "a" + 1');
+    expect(diagnostics.map((x) => x.message[0])).toContain('static-type-error');
+  });
+
+  test('the `->` / `|->` typo is caught at parse time and recovered', () => {
+    // `(n) -> n^2 + 1` used to surface only as a static-type-error (a
+    // `KeyValuePair` whose key must be a string, found by the initializer
+    // descent above). The parser now diagnoses the wrong arrow directly —
+    // with a fixit — and recovers as the intended lambda.
+    const { value, diagnostics } = run('let f = (n) -> n^2 + 1\nf(3)');
+    expect(diagnostics.map((x) => x.message[0])).toEqual([
+      'mapsto-arrow-expected',
+    ]);
+    expect(value.re).toBe(10);
   });
 
   test('a dictionary literal built with `->` stays clean', () => {

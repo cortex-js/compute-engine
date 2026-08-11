@@ -63,6 +63,8 @@ export type DiagnosticCode =
   | 'primary-expected'
   | 'string-literal-opening-delimiter-expected'
   | 'string-literal-closing-delimiter-expected' // %0 = delimiter
+  | 'mapsto-arrow-expected' // `->` (KeyValuePair) whose left side is shaped like a parameter list — `(x: number) -> x^2`, `(x, y) -> x + y`, `= x -> x + 1` — a function written with the wrong arrow; recovered as the intended `|->`
+  | 'parameter-name-mismatch' // %0 = lambda parameter name, %1 = name in the type annotation — a typed declaration's annotation and its lambda initializer name the same positional parameter differently
   | 'symbol-expected'
   | 'unbalanced-verbatim-symbol' // %0 = symbol name
   | 'unexpected-symbol'; // %0 symbol, %1 = trace

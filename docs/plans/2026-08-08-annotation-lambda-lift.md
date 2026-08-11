@@ -1,6 +1,12 @@
 # Annotation-bound parameters (lambda lift) in Epsil typed declarations
 
-**Status: RULED 2026-08-08 — not yet implemented.**
+**Status: IMPLEMENTED 2026-08-10** (rulings 2026-08-08). Parse-time desugar in
+`src/epsil/parser.ts` (`reconcileFunctionAnnotation` / `liftAnnotation`,
+hooked into `finishDeclaration`); new `parameter-name-mismatch` diagnostic
+(`src/epsil/diagnostics.ts`, humanized in `src/cli/format.ts`); tests in
+`test/epsil/annotation-lambda-lift.test.ts`; user docs in
+`src/epsil/docs/declarations.md`. Decisions refined at implementation time are
+marked **[impl]** below.
 
 ## Motivation
 
@@ -48,14 +54,23 @@ the idiomatic named-definition spelling.
 2. **Both-sides-named — RULED: mismatch-only error, with fix-it.** Named
    annotation + lambda RHS is legal when the names match positionally
    (arity mismatches are left to the existing covariant type check). A name
-   mismatch is an error with a fix-it offering to rename either side. This
-   keeps the currently-canonical `const f : (x: number) -> number = (x) |-> …`
-   working (also the reflexive spelling for TypeScript users, where function
-   types *require* names).
+   mismatch is an error with a fix-it. **[impl]** The fix-it renames the
+   ANNOTATION to the lambda's names — the lambda's names are the binders the
+   body actually uses, so that direction is the only semantics-preserving
+   single edit (renaming the lambda's binder would orphan its body's
+   references). This ruling keeps the currently-canonical
+   `const f : (x: number) -> number = (x) |-> …` working (also the reflexive
+   spelling for TypeScript users, where function types *require* names).
 3. **Nested arrows — RULED: outermost only.** For
    `const f : (x: number) -> (y: number) -> number = …`, only `x` lifts; the
    body must itself be (or produce) a function of the inner type, e.g.
-   `= (y) |-> x + y`. No recursive/curried lift.
+   `= (y) |-> x + y`. No recursive/curried lift. **[impl]** Disambiguation of
+   a lambda RHS: a lambda whose parameter names match the OUTERMOST level
+   positionally is the declared function value (no lift); otherwise, when the
+   annotation's result is itself a signature, the lambda is the outer lift's
+   BODY (lift around it; the declared-type check validates it against the
+   inner signature). The `parameter-name-mismatch` diagnostic therefore only
+   fires under a NON-nested annotation, where no body reading exists.
 4. **Serializer — RULED: keep emission on the mapsto side.** The serializer
    continues to emit typed parameters on the lambda
    (`(x: integer) |-> body`), never a named annotation + bare body. Since
@@ -87,14 +102,25 @@ the idiomatic named-definition spelling.
   lifted body whose type is itself a function should include a fix-it to drop
   the annotation names.
 - **All-or-nothing naming** for the lift, mirroring the tuple-element rule:
-  a partially named literal signature does not lift (and should be
-  diagnosed).
-- **Zero-parameter case**: `const f : () -> number = 42` lifts to a thunk
-  `() |-> 42` (no names needed; complementarity is vacuous). PROPOSED, minor
-  — confirm at implementation time.
+  a partially named literal signature does not lift. **[impl]** Implemented
+  as silently inert (no diagnostic), like the other non-lifting shapes.
+- **Zero-parameter case — RULED OUT [impl]** (was PROPOSED as a thunk lift):
+  `() -> number` has no unnamed/named distinction, so lifting would make a
+  thunk-VALUED initializer (`const f : () -> number = makeCounter()`)
+  inexpressible. There is nothing to bind; no lift.
 - **Optional/variadic parameters**: no lift when the literal signature has
   optional (`?`) or variadic parameters — binders for those cannot be
-  synthesized meaningfully. RHS must be an explicit lambda. PROPOSED.
+  synthesized meaningfully. RHS must be an explicit lambda. **[impl]** Also
+  inert: generic (`forall`/`typeParams`) and effectful signatures, for the
+  same reason (the lift cannot faithfully re-state those adjuncts on the
+  synthesized literal).
+- **[impl] Not implemented from the behavior table**: the improved error
+  message for `const f : (number) -> number = x^2 + 1` (unnamed annotation +
+  bare expression). At parse time that shape is indistinguishable from a
+  perfectly legal function-VALUED initializer (`= g(2)`), so the parser
+  cannot warn; the message would have to come from the engine's declared-type
+  check, which is out of this change's scope. The runtime `incompatible-type`
+  error is unchanged.
 
 ## Companion diagnostics (separate track, same feedback)
 

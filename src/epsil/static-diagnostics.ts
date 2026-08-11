@@ -193,8 +193,10 @@ function collectErrors(
   // literal** (`let f = …` boxes to `["Declare", "f", { dict: { value: … } }]`),
   // which `operands()` does not traverse. Descend into the dictionary values,
   // or every canonicalization error inside an initializer stays invisible
-  // (`let g = "a" + 1`, or the `->`/`|->` typo that builds a `KeyValuePair`
-  // with a non-string key).
+  // (`let g = "a" + 1`, or a `KeyValuePair` with a non-string key — the
+  // common `->`/`|->` typo shapes are recovered by the parser as lambdas
+  // with a `mapsto-arrow-expected` diagnostic, but a bare-symbol key in an
+  // unclaimed position, e.g. `let f = [n -> n + 1]`, still lands here).
   if (isDictionaryObject(expr)) {
     for (const value of Object.values(expr.dict))
       collectErrors(value as MathJsonExpression, result);
