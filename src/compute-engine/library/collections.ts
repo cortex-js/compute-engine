@@ -600,10 +600,17 @@ const SET_BASE_HANDLERS = basicIndexedCollectionHandlers();
 // symbolic operand with a statically-known tuple type, derives the type of
 // the element at `position`; otherwise falls back to the (widened) collection
 // element type.
-function componentType(xs: Expression, position: number): Type {
+function componentType(
+  xs: Expression,
+  position: number,
+  // The stripped operand type at a `missingStrip` position (§3.B): the
+  // framework hands it via `operandTypes` so a `missing | tuple<…>` operand
+  // (an `At` access) types from its present arm.
+  typeOverride?: Type
+): Type {
   const elt = xs.operatorDefinition?.collection?.elttype?.(xs);
   if (elt) return elt;
-  const t = xs.type.type;
+  const t = typeOverride ?? xs.type.type;
   if (typeof t !== 'string' && t.kind === 'tuple' && position >= 1) {
     const e = t.elements[position - 1]?.type;
     if (e) return e;
@@ -615,15 +622,19 @@ function componentType(xs: Expression, position: number): Type {
 // `T | marker(T)` — the position may be out of band, e.g. an empty list or a
 // short tuple). An in-range literal tuple slot is exact (no marker); an
 // out-of-range literal tuple position misses to `marker(⊔S)`.
-function componentResultType(xs: Expression, position: number): Type {
-  const t = xs.type.type;
+function componentResultType(
+  xs: Expression,
+  position: number,
+  typeOverride?: Type
+): Type {
+  const t = typeOverride ?? xs.type.type;
   if (typeof t !== 'string' && t.kind === 'tuple') {
     const n = t.elements.length;
     const i = position < 0 ? n + position + 1 : position;
     if (i >= 1 && i <= n) return t.elements[i - 1].type;
     return markerType(widen(...t.elements.map((x) => x.type)) as Type);
   }
-  return withMarker(componentType(xs, position));
+  return withMarker(componentType(xs, position, typeOverride));
 }
 
 // Build the result type of `Map`: a collection with the same shape and
@@ -886,6 +897,10 @@ function componentAt(
   position: number,
   ce: ComputeEngine
 ): Expression | undefined {
+  // An absent base propagates position-preservingly, mirroring `At` over a
+  // `Missing` base (`missingBehavior: 'handle'` on First/Second/Third/Last —
+  // the element domain is unknown, so the marker stays `Missing`, not `NaN`).
+  if (isSymbol(xs, 'Missing')) return xs;
   if (xs.isCollection) {
     // Runtime re-validation of the `indexed_collection` parameter (the static
     // gate is overlap-deferred, so an `unknown`-typed operand can arrive
@@ -1040,10 +1055,14 @@ function collectionBroadcastsPoints(xs: Expression): boolean | undefined {
 // Result type of a point-component accessor: a single point yields the
 // coordinate type; a collection of points broadcasts to a collection of
 // coordinates.
-function pointComponentType(xs: Expression, position: number): Type {
-  const t = xs.type.type;
+function pointComponentType(
+  xs: Expression,
+  position: number,
+  typeOverride?: Type
+): Type {
+  const t = typeOverride ?? xs.type.type;
   if (typeof t !== 'string' && t.kind === 'tuple') {
-    const ct = componentType(xs, position);
+    const ct = componentType(xs, position, typeOverride);
     // An INFERENCE-PENDING component (`(x, y)` whose symbols get no numeric
     // inference in tuple position types `unknown`) is a coordinate-to-be: point
     // accessors read NUMERIC tuples, and a tuple component is atomic — never a
@@ -1077,7 +1096,11 @@ function pointComponentType(xs: Expression, position: number): Type {
   // recoverable (a literal list of tuples is often mis-typed as `vector<n>`
   // with numeric elements), so use `number` — honest for the geometric point
   // case, and it keeps the result an (honest) collection type, not a scalar.
-  if (xs.type.matches('indexed_collection')) {
+  if (
+    typeOverride !== undefined
+      ? isSubtype(t, 'indexed_collection')
+      : xs.type.matches('indexed_collection')
+  ) {
     // Only a collection whose elements are POINTS broadcasts. One whose
     // elements are scalars element-indexes like First/Second/Third, so the
     // result is a single COMPONENT — the flat point spelling `PointX([3, 4])`
@@ -1085,7 +1108,7 @@ function pointComponentType(xs: Expression, position: number): Type {
     // the decision off the static type alone claimed the broadcast arm for
     // every indexed collection, typing that `vector<2>`.
     if (collectionBroadcastsPoints(xs) === false)
-      return componentResultType(xs, position);
+      return componentResultType(xs, position, typeOverride);
     // A rank ≥ 2 numeric tensor is a list of coordinate ROWS: projecting a
     // coordinate drops the inner dimension (`matrix<3x2>` → `vector<3>`).
     // `mapResultType` alone keeps every dimension, so it reported the SOURCE
@@ -1109,7 +1132,7 @@ function pointComponentType(xs: Expression, position: number): Type {
   if (collectionBroadcastsPoints(xs) === true)
     return { kind: 'list', elements: 'number' };
   // Non-point-collection fallback follows the First/… row.
-  return componentResultType(xs, position);
+  return componentResultType(xs, position, typeOverride);
 }
 
 // Project a coordinate straight out of the LAZY point-list transpose form —
@@ -4709,11 +4732,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
+  // First/Second/Third/Last admit an absent base (§3.B strip-before-validate):
+  // an `At` access types `missing | T` (the out-of-range arm), and without the
+  // strip every indexed-then-accessed chain (`First(L[n])`) errored at
+  // canonicalization (Tycho item 164's sibling). Declared `handle`: the
+  // element domain is unknown, so `componentAt` propagates a `Missing` base
+  // as `Missing` — the position-preserving marker, mirroring `At` — rather
+  // than the numeric `NaN` a `propagate` gate would substitute.
   First: {
     description: 'The first element of a collection.',
     complexity: 8200,
     signature: '(xs: indexed_collection) -> any',
-    type: ([xs]) => componentResultType(xs, 1),
+    missingBehavior: 'handle',
+    type: ([xs], { operandTypes }) =>
+      componentResultType(xs, 1, operandTypes?.[0]),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 1, ce),
   },
 
@@ -4721,7 +4753,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'The second element of a collection.',
     complexity: 8200,
     signature: '(xs: indexed_collection) -> any',
-    type: ([xs]) => componentResultType(xs, 2),
+    missingBehavior: 'handle',
+    type: ([xs], { operandTypes }) =>
+      componentResultType(xs, 2, operandTypes?.[0]),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 2, ce),
   },
 
@@ -4729,7 +4763,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'The third element of a collection.',
     complexity: 8200,
     signature: '(xs: indexed_collection) -> any',
-    type: ([xs]) => componentResultType(xs, 3),
+    missingBehavior: 'handle',
+    type: ([xs], { operandTypes }) =>
+      componentResultType(xs, 3, operandTypes?.[0]),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 3, ce),
   },
 
@@ -4748,12 +4784,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // function parameter used as `PointX(a)` inferred nothing and its list
   // argument broadcast element-wise instead of binding whole (Tycho item 116).
   // `Distance` was narrowed away from `value`/`any` for the same reason.
+  //
+  // That narrowing composes with `At` through `missingBehavior: 'propagate'`
+  // (§3.B strip-before-validate): an in-range-unprovable access types
+  // `missing | tuple<…>`, and without the strip every indexed-then-accessed
+  // chain (`S[n].x`) errored at canonicalization (Tycho item 164). At run
+  // time an absent point's coordinate is a numeric slot's marker — `NaN`,
+  // per the accessors' own §3.C convention (`withMarker(number) = number`) —
+  // which the §3.E gate substitutes before the evaluate handler runs.
   PointX: {
     description:
       'The x-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
     signature: '(xs: collection | tuple) -> any',
-    type: ([xs]) => pointComponentType(xs, 1),
+    missingBehavior: 'propagate',
+    type: ([xs], { operandTypes }) =>
+      pointComponentType(xs, 1, operandTypes?.[0]),
     evaluate: ([xs], { engine: ce, numericApproximation }) =>
       pointComponentAt(xs, 1, ce, numericApproximation ?? false),
   },
@@ -4763,7 +4809,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'The y-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
     signature: '(xs: collection | tuple) -> any',
-    type: ([xs]) => pointComponentType(xs, 2),
+    missingBehavior: 'propagate',
+    type: ([xs], { operandTypes }) =>
+      pointComponentType(xs, 2, operandTypes?.[0]),
     evaluate: ([xs], { engine: ce, numericApproximation }) =>
       pointComponentAt(xs, 2, ce, numericApproximation ?? false),
   },
@@ -4773,6 +4821,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'The z-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
     signature: '(xs: collection | tuple) -> any',
+    missingBehavior: 'propagate',
     // A point with no z-coordinate is a DIMENSION mismatch, not an absent
     // slot (item 138 clarified ask — see `pointArityError`). When the operand
     // type statically proves 2-D, report it here, at type-check time, so the
@@ -4787,7 +4836,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       return ce._fn('PointZ', args);
     },
-    type: ([xs]) => pointComponentType(xs, 3),
+    type: ([xs], { operandTypes }) =>
+      pointComponentType(xs, 3, operandTypes?.[0]),
     evaluate: ([xs], { engine: ce, numericApproximation }) => {
       // The type was not decisive (a bare `tuple`, `list<tuple>`, `unknown`),
       // but the concrete value is 2-D: the WHOLE application errors — a
@@ -4803,7 +4853,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'The last element of a collection.',
     complexity: 8200,
     signature: '(xs: indexed_collection) -> any',
-    type: ([xs]) => componentResultType(xs, -1),
+    missingBehavior: 'handle',
+    type: ([xs], { operandTypes }) =>
+      componentResultType(xs, -1, operandTypes?.[0]),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, -1, ce),
   },
 

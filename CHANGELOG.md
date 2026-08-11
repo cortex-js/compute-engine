@@ -1,6 +1,34 @@
 ## [Unreleased]
 
+### Issues Resolved
+
+- **Indexed-then-accessed chains compose again** (Tycho item 164): the
+  0.103.2 narrowing of `PointX`/`PointY`/`PointZ` to
+  `(collection | tuple) -> any` rejected `At`'s optional result — an in-range
+  unprovable access types `missing | tuple<…>`, so every `S[n].x` chain
+  errored `incompatible-type` at canonicalization. The accessors (and
+  `First`/`Second`/`Third`/`Last` and `Distance`, which had the same
+  composition failure) now declare a `missingBehavior`, admitting the
+  `missing` arm through strip-before-validate (§3.B of the missing-value
+  design) while keeping the narrowed parameter evidence. At run time an
+  absent point's coordinate is `NaN` (numeric-slot marker), an absent
+  element access propagates `Missing` (mirroring `At`), and
+  `Distance` of an absent point is `NaN`.
+
 ### Improvements
+
+- **Wildcard dimensions no longer display as negative lengths**: a list type
+  with open (sentinel `-1`) dimensions and a non-numeric element printed as
+  `list<T^(-1x-1)>`, which neither parses back nor means anything. The
+  serializer now expresses open rank by nesting (`list<list<T>>`,
+  `list<list<T>^2>` for a bounded outer dimension), which round-trips.
+
+- **Deadline cancellations during canonicalization name their budget**: the
+  `error canonicalizing` console line printed a bare `Timeout exceeded`,
+  indistinguishable from an engine-imposed deadline (no such deadline
+  exists — deadlines are only ever installed by an enclosing
+  `ce.withTimeLimit()` span). The line now appends the expiring span's owner
+  label and span chain (Tycho item 163).
 
 - **The 0.103.0 per-box slowdown is fixed** (ROADMAP P-BOX): generic boxing
   had regressed ~1.25× in 0.103.0 through an interaction between the R-D5

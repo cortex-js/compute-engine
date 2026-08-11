@@ -172,6 +172,7 @@ import {
   isNumber,
   isFunction,
   isString,
+  isSymbol,
   isContinuationOperand,
 } from '../boxed-expression/type-guards.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
@@ -3249,6 +3250,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // boundary (Tycho items 130/138).
       signature:
         '(tuple | list<tuple> | list<number> | list<list<number>>, tuple | list<tuple> | list<number> | list<list<number>>) -> number',
+      // An `At` access types `missing | tuple<…>` (the out-of-range arm);
+      // strip-before-validate (§3.B) admits it, or `Distance(S[n], p)` errors
+      // at canonicalization (Tycho item 164's sibling). The runtime marker is
+      // handled in `evaluate` below: the §3.E gate cannot substitute the NaN
+      // because a tuple operand IS a collection, which the gate defers to.
+      missingBehavior: 'propagate',
       // A point-list operand broadcasts: one distance per point.
       type: ([a, b]) => {
         const pa = a ? isPointListType(a) : false;
@@ -3274,6 +3281,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return 'number';
       },
       evaluate: ([a, b], { engine: ce, numericApproximation }) => {
+        // An absent point absorbs: a distance is numeric, so the marker is
+        // `NaN` (§3.C) — substituted here because the §3.E gate defers to the
+        // collection operand (see `missingBehavior` above).
+        if (isSymbol(a, 'Missing') || isSymbol(b, 'Missing')) return ce.NaN;
         const pa = pointOperand(a);
         const pb = pointOperand(b);
         // Point-to-point: the scalar distance.

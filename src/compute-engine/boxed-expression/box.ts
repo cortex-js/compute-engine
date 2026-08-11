@@ -1645,6 +1645,31 @@ function withSourceOffsets(
   return result;
 }
 
+/**
+ * The log payload for a canonical-handler throw: the error message, plus —
+ * for a deadline cancellation — the owner and span chain of the budget that
+ * fired (`CancellationError.attribution`/`spans`). Without them the console
+ * line reads bare `Timeout exceeded`, which is indistinguishable from an
+ * engine-imposed deadline; no such deadline exists — a deadline frame is
+ * armed only by an enclosing `withTimeLimit` span, so naming its owner tells
+ * the reader whose clock expired (Tycho item 163). Identified by NAME, never
+ * `instanceof`: plugin bundles re-bundle engine code.
+ */
+function canonicalErrorDetail(e: unknown): unknown {
+  if (!(e instanceof Error)) return e;
+  if (e.name === 'CancellationError') {
+    const { attribution, spans } = e as {
+      attribution?: string;
+      spans?: string[];
+    };
+    if (attribution !== undefined || (spans?.length ?? 0) > 0) {
+      const chain = spans?.length ? `, spans: ${spans.join(' → ')}` : '';
+      return `${e.message} (budget owner: ${attribution ?? 'unlabeled'}${chain})`;
+    }
+  }
+  return e.message;
+}
+
 function applyOperatorDefinition(
   ce: ComputeEngine,
   name: MathJsonSymbol,
@@ -1686,7 +1711,7 @@ function applyOperatorDefinition(
         // string conversion throws, cannot break the recovery path).
         console.error(
           `ComputeEngine: error canonicalizing \`${name}\`:`,
-          e instanceof Error ? e.message : e
+          canonicalErrorDetail(e)
         );
       }
       // The canonical handler gave up, return a non-canonical expression
@@ -1806,7 +1831,7 @@ function applyOperatorDefinition(
       // Multi-arg form — see the lazy-path catch above.
       console.error(
         `ComputeEngine: error canonicalizing \`${name}\`:`,
-        e instanceof Error ? e.message : e
+        canonicalErrorDetail(e)
       );
     }
 

@@ -181,13 +181,28 @@ export function typeToString(type: Type, precedence = 0): string {
         }
       }
       if (!result) {
-        // Serialize generic list types
-        const dimensions = type.dimensions
-          ? type.dimensions.length === 1
-            ? `^${type.dimensions[0].toString()}`
-            : `^(${type.dimensions.join('x')})`
-          : '';
-        result = `list<${typeToString(type.elements)}${dimensions}>`;
+        const dims = type.dimensions;
+        if (dims !== undefined && dims.some((d) => d < 0)) {
+          // A wildcard dimension (`-1`, the open-length sentinel `matrix`/
+          // `vector` parse to) has no literal spelling — `^(-1x-1)` neither
+          // parses back nor means a negative length (Tycho item 164 note).
+          // Express the open rank by NESTING instead: `list<list<T>>` parses
+          // back to the same `[-1, -1]` shape (`staticCollectionDims`), and a
+          // bounded dimension keeps its `^n`.
+          let nested = typeToString(type.elements);
+          for (let i = dims.length - 1; i >= 0; i--)
+            nested =
+              dims[i] < 0 ? `list<${nested}>` : `list<${nested}^${dims[i]}>`;
+          result = nested;
+        } else {
+          // Serialize generic list types
+          const dimensions = dims
+            ? dims.length === 1
+              ? `^${dims[0].toString()}`
+              : `^(${dims.join('x')})`
+            : '';
+          result = `list<${typeToString(type.elements)}${dimensions}>`;
+        }
       }
       break;
 
