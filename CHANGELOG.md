@@ -51,6 +51,47 @@
 
 ### Issues Resolved
 
+- **`toLatex()` and `.latex` are total: formatting no longer throws** (Tycho
+  item 168). Serializing a lazy collection materializes it first, and
+  materialization EVALUATES — so a comprehension over an unresolvable binding
+  raised `Condition must evaluate to "True" or "False"` out of a *formatting*
+  call, taking down whatever asked for it. An unresolvable binding is not a
+  formatting error: the tree is perfectly printable, and prints identically
+  when nothing is bound at all. The materialization is now guarded and falls
+  through to that symbolic spelling. Successful output is unchanged — the guard
+  only covers what previously threw.
+
+  A `CancellationError` still propagates: deadlines are installed only by an
+  enclosing `ce.withTimeLimit()` span, and a caller who set a budget must see it
+  expire rather than receive a silently degraded spelling.
+
+  Callers who want the un-materialized form **by contract** rather than by
+  fallback should pass `toLatex({ materialization: false })`, which never
+  evaluates. That is the supported opt-out and predates this fix.
+
+- **A `broadcastable<T>` parameter now admits exactly what `T` admits** (Tycho
+  item 157(4), generalized). The filed case — `(broadcastable<value>)` accepting
+  a function-typed argument that `(value)` rejects — was one instance of a
+  wholesale hole: `(broadcastable<number>)` also accepted a `string` and a
+  `boolean`.
+
+  Neither the admission path nor `isSubtype` was at fault; both were already
+  correct (`isSubtype(function, broadcastable<value>)` is `false`). The gap was
+  in `provablyDisjoint`: a `broadcastable<T>` spans two category buckets (`T`
+  and `indexed_collection<T>`), so the category test found no bucket and fell
+  through to the conservative "may overlap". That is safe for the predicate in
+  isolation, but argument checking only KEEPS a type error when every candidate
+  parameter is provably disjoint from the operand — an un-rejection that exists
+  so a bare symbol with a provisional type is not eagerly refused. A parameter
+  kind that is never provably disjoint therefore admitted every operand with a
+  free variable. `provablyDisjoint` now distributes over `broadcastable<T>`
+  exactly as over a union, using the same `T | indexed_collection<T>` expansion
+  `isSubtype` uses.
+
+  What `broadcastable` is for is unaffected: scalar and collection arguments are
+  admitted as before, and `broadcastable<value>` still accepts `string` and
+  `boolean` because `value` does.
+
 - **`Divide` no longer drops the tuple type of a `PointList` numerator** (Tycho
   item 165). `canonicalDivide` scales a `tuple / scalar` component-wise only
   when the numerator's components are ACCESSIBLE — a `Tuple`/`Pair`/`Triple`/

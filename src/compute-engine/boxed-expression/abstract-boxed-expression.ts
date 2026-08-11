@@ -306,8 +306,25 @@ export abstract class _BoxedExpression implements Expression {
       this.symbol === undefined &&
       !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator)
     ) {
-      const materialized = this.evaluate({ materialization: true });
-      if (!materialized.isLazyCollection) return materialized.latex;
+      // Materialization EVALUATES, and evaluation can fail on an expression
+      // that is nonetheless perfectly printable — a comprehension over an
+      // unresolvable binding raises "Condition must evaluate to True or
+      // False" from its `Which`, and that would otherwise escape a *formatting*
+      // call (Tycho item 168). An unresolvable binding is not a formatting
+      // error, so fall through to the symbolic spelling instead: it is exactly
+      // what the same expression prints with nothing bound. Callers who want
+      // the un-materialized form by contract rather than by fallback should
+      // pass `toLatex({ materialization: false })`, which never evaluates.
+      // A CancellationError is deliberately NOT swallowed: deadlines are
+      // installed only by an enclosing `ce.withTimeLimit()` span, and a caller
+      // who set a budget must see it expire rather than get a silently
+      // degraded spelling.
+      try {
+        const materialized = this.evaluate({ materialization: true });
+        if (!materialized.isLazyCollection) return materialized.latex;
+      } catch (e) {
+        if (e instanceof CancellationError) throw e;
+      }
     }
     const syntax = this.engine._requireLatexSyntax();
     const json = this.toMathJson({ prettify: true, fractionalDigits: 'auto' });
@@ -349,10 +366,21 @@ export abstract class _BoxedExpression implements Expression {
       this.symbol === undefined &&
       (explicitMaterialization || !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator))
     ) {
-      const materialized = this.evaluate({
-        materialization: options?.materialization ?? true,
-      });
-      if (!materialized.isLazyCollection) return materialized.toLatex(options);
+      // See the `latex` getter: materialization evaluates, and a printable
+      // expression whose evaluation fails must still print (Tycho item 168).
+      // `materialization: false` is the by-contract opt-out — it reaches here
+      // but leaves the collection lazy, so the fall-through below prints the
+      // operator form without this catch ever firing. A CancellationError
+      // still propagates.
+      try {
+        const materialized = this.evaluate({
+          materialization: options?.materialization ?? true,
+        });
+        if (!materialized.isLazyCollection)
+          return materialized.toLatex(options);
+      } catch (e) {
+        if (e instanceof CancellationError) throw e;
+      }
     }
 
     // Round numbers at the MathJSON (kernel) layer so the LaTeX layer only

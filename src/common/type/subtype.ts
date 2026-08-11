@@ -424,6 +424,28 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
   if (typeof b === 'object' && b.kind === 'union')
     return b.types.every((t) => provablyDisjoint(a, t));
 
+  // `broadcastable<T>` is the union `T | indexed_collection<T>` (the same
+  // expansion `isSubtype` uses on both sides), so it distributes exactly like
+  // a union: disjoint from it iff disjoint from BOTH arms. Without this the
+  // category test below finds no bucket for the `broadcastable` kind — it
+  // spans two — and falls through to the conservative "may overlap". That
+  // answer is safe for this predicate in isolation, but `box.ts` only KEEPS an
+  // argument-type error when every candidate parameter is provably disjoint,
+  // so a never-disjoint parameter kind silently admitted every operand with a
+  // free variable: `f: (broadcastable<number>) -> number` accepted a
+  // `function`, a `string` and a `boolean`, each of which the plain `(number)`
+  // spelling correctly rejects (Tycho item 157(4), generalized).
+  if (typeof b === 'object' && b.kind === 'broadcastable')
+    return (
+      provablyDisjoint(a, b.elements) &&
+      provablyDisjoint(a, { kind: 'indexed_collection', elements: b.elements })
+    );
+  if (typeof a === 'object' && a.kind === 'broadcastable')
+    return (
+      provablyDisjoint(a.elements, b) &&
+      provablyDisjoint({ kind: 'indexed_collection', elements: a.elements }, b)
+    );
+
   // A value literal is a singleton `{v}`: having failed the subtype checks
   // above (it is not contained in the other type), it must be disjoint from it.
   if (
