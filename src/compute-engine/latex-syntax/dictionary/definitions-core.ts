@@ -2658,9 +2658,38 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         bodyToSerialize = operand(innerFn, 1) ?? innerFn;
       }
 
-      // Serialize the function body
-      const fnLatex = serializer.serialize(bodyToSerialize);
+      const plainLatex = serializer.serialize(bodyToSerialize);
+      // `wrapShort` delimits precisely the loose-infix heads
+      // (`Add`/`Subtract`/`Negate`/`Multiply`/`Mod`/`Range`) and leaves
+      // symbols, numbers, function applications (`\sin(x)`) and already
+      // delimited bodies untouched — so a difference between the two spellings
+      // is exactly the test "is this differentiand a tight atom?".
+      const fnLatex = serializer.wrapShort(bodyToSerialize);
       const varLatex = serializer.serialize(variable);
+
+      // A COMPOUND differentiand folds into the NUMERATOR
+      // (`\frac{\mathrm{d}(x - d_t)}{\mathrm{d}y}`) instead of trailing the
+      // fraction. Trailing it is unsafe at any level of delimiting: the
+      // differentiand is parsed at `ADDITION_PRECEDENCE`, so the parser keeps
+      // consuming past a closing delimiter and swallows whatever follows —
+      // `D(x - d_t, y) + 1` serialized to
+      // `\frac{\mathrm{d}}{\mathrm{d}y}x-d_{t}+1` and re-read as
+      // `D(x - d_t + 1, y)`, and merely parenthesizing the body still re-read
+      // as `D((x - d_t) + 1, y)`. The isolated case round-tripped only because
+      // that greed happened to re-absorb exactly what it emitted; any right
+      // neighbour broke it (Tycho item 166).
+      //
+      // The folded spelling is self-delimiting by construction — the numerator
+      // group bounds the differentiand, so nothing can leak into it — and the
+      // parser already accepts it (`\frac{d^n f}{dx^n}`, the `numerFn` route),
+      // at every order. This deliberately does NOT narrow the parser's greed:
+      // documents that rely on the current trailing binding are untouched,
+      // because a tight atom still serializes the way it always did.
+      if (fnLatex !== plainLatex) {
+        if (order === 1)
+          return `\\frac{\\mathrm{d}${fnLatex}}{\\mathrm{d}${varLatex}}`;
+        return `\\frac{\\mathrm{d}^{${order}}${fnLatex}}{\\mathrm{d}${varLatex}^{${order}}}`;
+      }
 
       // Output Leibniz notation: \frac{d}{dx}f or \frac{d^n}{dx^n}f
       if (order === 1) {

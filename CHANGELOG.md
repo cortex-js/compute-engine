@@ -51,6 +51,45 @@
 
 ### Issues Resolved
 
+- **`D` no longer swallows what follows it when serialized** (Tycho item 166).
+  The Leibniz spelling put the differentiand undelimited and trailing the
+  fraction, where the parser binds it greedily — so any `D` with a right
+  neighbour re-read as a different expression:
+  `["Add", ["D", ["Subtract","x","d_t"], "y"], 1]` serialized to
+  `\frac{\mathrm{d}}{\mathrm{d}y}x-d_{t}+1` and re-parsed as
+  `D(x - d_t + 1, y)`. The isolated case round-tripped only because that greed
+  happened to re-absorb exactly what it emitted.
+
+  Delimiting the body is not sufficient — the differentiand is parsed at
+  addition precedence, so the parser consumes past a closing delimiter and
+  `\frac{d}{dy}(x-d_t)+1` still re-read as `D((x-d_t)+1, y)`. A COMPOUND
+  differentiand now folds into the numerator instead
+  (`\frac{\mathrm{d}(x-d_t)}{\mathrm{d}y}`), a spelling the parser already
+  accepts at every order and which is self-delimiting by construction.
+
+  The parser's greed is deliberately unchanged, so documents relying on the
+  current trailing binding are unaffected: a TIGHT differentiand (a symbol, a
+  number, a function application, a power) serializes exactly as before.
+
+- **`.count` answers for an un-evaluated arithmetic broadcast** (Tycho item
+  167). `[1,2,3]+1` reported no count even though its type says
+  `vector<finite_integer^3>`, and `2(1..99)/99-1` reported none even though the
+  `Range` inside it reports 99 — because the broadcasting arithmetic operators
+  carry no collection handlers (broadcasting is a property of how they evaluate,
+  not a collection operator), so `count` had nothing to delegate to. A caller
+  wanting to prove finiteness BEFORE deciding whether to evaluate then had no
+  way to do so short of the eager walk it was trying to avoid.
+
+  `count` now reads the operands when no count handler is declared. That is
+  exact because the length rule for a lifted operator is agreement, not
+  zip-to-shortest (`docs/BROADCAST-MODEL.md`): a scalar operand is a lift and
+  never participates, and participants of differing lengths are
+  `incompatible-dimensions` rather than a shorter result — so mismatched or
+  unknown-length participants report `undefined` rather than a guess. A
+  declared `count` handler still owns its own answer, and
+  `isCollection`/`isFiniteCollection` are deliberately unchanged: this answers
+  the length question only.
+
 - **`toLatex()` and `.latex` are total: formatting no longer throws** (Tycho
   item 168). Serializing a lazy collection materializes it first, and
   materialization EVALUATES — so a comprehension over an unresolvable binding

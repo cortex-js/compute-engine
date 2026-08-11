@@ -2134,7 +2134,53 @@ export class BoxedFunction
 
   get count(): number | undefined {
     if (this._optedOutOfCollection) return undefined;
-    return this.operatorDefinition?.collection?.count?.(this);
+    // A DECLARED count handler owns the answer, including its `undefined`.
+    const handler = this.operatorDefinition?.collection?.count;
+    if (handler !== undefined) return handler(this);
+    return this._broadcastCount();
+  }
+
+  /**
+   * The element count of an un-evaluated arithmetic BROADCAST, read from the
+   * operands instead of by materializing (Tycho item 167).
+   *
+   * The broadcasting arithmetic operators (`Add`, `Multiply`, …) carry no
+   * collection handlers — broadcasting is not a collection operator, it is a
+   * property of how they evaluate — so `count` was `undefined` for `[1,2,3]+1`
+   * even though the type says `vector<finite_integer^3>`, and for
+   * `2(1..99)/99-1` even though the `Range` inside it reports 99. A caller that
+   * wants to prove finiteness before deciding whether to evaluate (a
+   * comprehension-domain guard, say) then had no way to do so short of the
+   * eager walk it was trying to avoid.
+   *
+   * Reading the operands is exact here because the length rule for a LIFTED
+   * operator is agreement, not zip-to-shortest (`docs/BROADCAST-MODEL.md`): a
+   * scalar operand is a lift and never participates, and two participants of
+   * different lengths are `incompatible-dimensions`, not a shorter result. So
+   * the result length is the participants' common length — and when they
+   * disagree, or any one of them is unknown, this reports `undefined` rather
+   * than guessing.
+   *
+   * Deliberately NOT extended to `isCollection`/`isFiniteCollection`: those
+   * report `false`/`undefined` for a `list<finite_number>` by design, and
+   * consumers rely on that. This answers the LENGTH question only.
+   */
+  private _broadcastCount(): number | undefined {
+    // Only a collection-SHAPED result can have an element count. `Add(1, 2)`
+    // types `finite_integer` and must keep answering `undefined`.
+    if (!typeCouldBeCollection(this.type.type)) return undefined;
+    const ops = this.ops;
+    if (ops === undefined) return undefined;
+    let count: number | undefined;
+    for (const op of ops) {
+      // A scalar operand is a LIFT, not a participant.
+      if (!typeCouldBeCollection(op.type.type)) continue;
+      const c = op.count;
+      if (c === undefined) return undefined;
+      if (count === undefined) count = c;
+      else if (count !== c) return undefined;
+    }
+    return count;
   }
 
   get isEmptyCollection(): boolean | undefined {

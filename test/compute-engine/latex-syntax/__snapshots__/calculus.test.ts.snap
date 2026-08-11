@@ -85,7 +85,7 @@ D((t) |-> x, t)
 `;
 
 exports[`EULER DERIVATIVE NOTATION D_x (x^2 + 1) - derivative of expression 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}x}x^2+1
+\\frac{\\mathrm{d}(x^2+1)}{\\mathrm{d}x}
 D(x^2 + 1, x)
 ["D", ["Add", ["Square", "x"], 1], "x"]
 `;
