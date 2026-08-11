@@ -495,7 +495,7 @@ For types in the type latice (like `number`), if a type is protocol-conforming, 
 
 ### Protocol Implementatioon
 
-A protocol implementation defines the implementation of the functions of a protocol for a given type. An protocol implementation statement is also a declaration.
+A protocol implementation defines the implementation of the functions of a protocol for a given type. A protocol implementation statement is also a declaration.
 
 For example, declare that the primitive type `string` conforms to the `Comparable` protocol, and provide an implementation:
 

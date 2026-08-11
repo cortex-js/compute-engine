@@ -987,7 +987,11 @@ export function declareType(
         outer = outer.parent;
       }
       if (inherited && !scope.bindings.has(name))
-        ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
+        ce._declareSymbolValue(
+          name,
+          { type: 'unknown', inferred: true },
+          scope
+        );
     }
   }
 

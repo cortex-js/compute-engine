@@ -928,8 +928,7 @@ export class Parser {
     type: Type,
     valueNode: MathJsonExpression
   ): MathJsonExpression {
-    if (typeof type === 'string' || type.kind !== 'signature')
-      return valueNode;
+    if (typeof type === 'string' || type.kind !== 'signature') return valueNode;
     const text = stringValue(typeNode);
     if (text === null || !text.startsWith('(')) return valueNode;
     if (type.typeParams !== undefined || type.effects !== undefined)
@@ -1045,7 +1044,10 @@ export class Parser {
           this.baseOffset + typeStart + text.length,
           typeToString({
             ...type,
-            args: args.map((a, i) => ({ ...a, name: lambdaNames[i] ?? a.name })),
+            args: args.map((a, i) => ({
+              ...a,
+              name: lambdaNames[i] ?? a.name,
+            })),
           }),
         ],
       ];
