@@ -214,6 +214,24 @@ const c = 6.28
     ["KeyValuePair", "constant", "True"]]]
 ```
 
+A **named literal function-type annotation binds the initializer's
+parameters** (the "lambda lift" — see
+[Declarations](/epsil/declarations/#function-type-annotations-bind-their-parameter-names)):
+before lowering, the parser wraps a non-lambda initializer in a `Function`
+whose parameters come from the annotation, so the declared value is exactly
+what the explicit `|->` spelling produces:
+
+```epsil
+const f : (x: number) -> number = x + 1
+```
+
+```json
+["Declare", "f", {"str": "(x: number) -> number"},
+  ["Dictionary",
+    ["KeyValuePair", "value", ["Function", ["Add", "x", 1], "x"]],
+    ["KeyValuePair", "constant", "True"]]]
+```
+
 Because declarations lower directly to the engine's own `Declare` primitive,
 there is no separate Epsil-side declaration logic at execution time — the
 program evaluates the `Declare` expression exactly like any other expression.

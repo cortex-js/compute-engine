@@ -134,8 +134,8 @@ calls and indexing.
 </ReadMore>
 
 <ReadMore path="/epsil/declarations/">
-**Declarations** — names, `let`, `const`, destructuring, scopes, and named
-types.
+**Declarations** — names, `let`, `const`, destructuring, function-type
+annotations that bind their parameters, scopes, and named types.
 </ReadMore>
 
 <ReadMore path="/epsil/types/">

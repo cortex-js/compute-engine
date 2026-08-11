@@ -169,6 +169,14 @@ arrow:
 () |-> 42
 ```
 
+Writing `->` where a function was meant — `(x, y) -> x + y`,
+`(n: integer) -> n^2` — is a diagnosed typo: the parser suggests `|->` with a
+fixit and recovers as the intended function, so the program still runs. And
+when a declaration's annotation is a function type with named parameters, the
+lambda can be omitted entirely — `const f : (x: number) -> number = x^2 + 1`
+binds `x` from the annotation. See
+[Function-type annotations](/epsil/declarations/#function-type-annotations-bind-their-parameter-names).
+
 ## `if` / `else` {#if-else}
 
 `if`/`else` is an **expression**, not a statement — it evaluates to a value:

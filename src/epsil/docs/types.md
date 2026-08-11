@@ -167,6 +167,18 @@ function g(x: integer) -> integer { x + 1 }
 (x: integer) |-> x + 1
 ```
 
+A declaration whose annotation is a function type **written out with named
+parameters** binds those names too — the initializer is then the function's
+body, no `|->` needed:
+
+```epsil
+const f : (x: real) -> real = x^2 + 2x + 1
+```
+
+The names bind only when the signature is spelled at the declaration site
+(an alias never binds). See
+[Function-type annotations](/epsil/declarations/#function-type-annotations-bind-their-parameter-names).
+
 Everything after the `:` is read as a **type**, not as an expression. That is
 why `<`, `>`, `|`, `&` and `->` mean something different there than they do in
 ordinary code — in `u: integer | boolean` the `|` is a union, not a logical

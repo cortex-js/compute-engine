@@ -16,6 +16,18 @@
   partially named signatures never lift. See
   `docs/plans/2026-08-08-annotation-lambda-lift.md`.
 
+- **The `->`-for-`|->` typo is now diagnosed and recovered in Epsil.** A
+  `KeyValuePair` arrow whose left side is shaped like a parameter list — a
+  typed parameter (`(x: number) -> x^2`), a parameter tuple
+  (`(x, y) -> x + y`), an empty `()`, or a bare symbol right after `(` or `=`
+  (`f = x -> x + 1`) — is a function written with the wrong arrow: none of
+  those shapes is a valid dictionary key. The parser reports the new
+  `mapsto-arrow-expected` diagnostic with a fixit on the arrow and recovers
+  as the intended lambda, so the program still runs. It also no longer emits
+  a spurious `unexpected-symbol ":"` for typed parameters before a `->`.
+  Legitimate dictionary spellings (`{one -> 1}`, `"a" -> 1`, `{->}`) are
+  untouched.
+
 ### Improvements
 
 - **Engine construction is ~3× faster, and the gradual registration accretion is

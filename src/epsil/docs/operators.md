@@ -240,6 +240,11 @@ function to `f`. Typed parameters can be written in parentheses:
 The `MapsTo` name in the table is internal to parsing: it names the operator,
 not the function value the expression produces.
 
+A `->` whose left side is shaped like a parameter list — `(x, y) -> x + y`,
+`(n: integer) -> n^2`, `f = x -> x + 1` — is diagnosed as a wrong-arrow typo
+(with a fixit) and recovered as the intended function: `->` builds a
+`key -> value` pair, and none of those shapes is a valid key.
+
 ## Ranges: `..` {#ranges}
 
 The range operator is a compact spelling of a two-argument `Range`:

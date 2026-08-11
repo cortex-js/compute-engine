@@ -124,11 +124,20 @@ the idiomatic named-definition spelling.
 
 ## Companion diagnostics (separate track, same feedback)
 
-- `->`-for-`|->` typo: a `->` in expression (non-brace) position whose LHS is
-  a parenthesized/typed parameter tuple, or whose key is not a string, should
-  produce "did you mean `|->`?" with a fix-it (today it silently builds a
-  `KeyValuePair` and surfaces `incompatible-type string/number` from the key
-  check, or `unexpected-symbol ":"`).
+- `->`-for-`|->` typo — **IMPLEMENTED 2026-08-10** (`mapsto-arrow-expected`,
+  in `combineInfix`). Triggers, all zero-false-positive because none is a
+  valid dictionary key (keys are strings): LHS is a `Typed` parameter, a
+  tuple of parameters, an empty `()`, or a bare symbol whose preceding
+  non-whitespace character is `(` or `=`. The parser emits the diagnostic
+  with a fixit on the arrow and RECOVERS as the intended lambda (the RHS was
+  parsed at `->`'s tighter precedence, so a `??`/`|>` tail lands outside the
+  recovered lambda — the fixit is the real repair). The typed-parameter
+  lookaheads in `parseParenthesizedBody` also accept `->` now, so
+  `(x: number) -> …` produces the ONE arrow diagnostic instead of a spurious
+  `unexpected-symbol ":"`. A bare-symbol key in any other position (`{one ->
+  1}` dictionaries, list elements) is untouched — brace literals are
+  legitimate, and unclaimed positions keep the initializer-descent
+  `static-type-error`. Tests: `test/epsil/mapsto-arrow-diagnostic.test.ts`.
 - A TS-style return annotation `(x:number):number -> …` stays rejected: `:`
   deliberately has no infix parselet in expression position, and `-> type`
   is the established return-type spelling.
