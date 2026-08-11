@@ -1845,7 +1845,7 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 
 ### Symbolic-evaluation performance
 
-#### P-BOX. Generic boxing is ~1.2× slower across 0.100.1 → 0.103.2 (filed 2026-08-10, bisected 2026-08-10, canary FIXED 2026-08-10)
+#### P-BOX. Generic boxing is ~1.2× slower across 0.100.1 → 0.103.2 (filed 2026-08-10, CLOSED 2026-08-10)
 
 **Bisected and attributed — two distinct problems, not one.** The per-release
 curve (all 8 published versions side by side, 3 interleaved reps of the same
@@ -1892,13 +1892,38 @@ zero snapshot churn; production-build microloop back to the 0.102.0 baseline,
    user-declared types, so the singleton is safe) — also protects any future
    identity-keyed cache.
 
-**Residual, still open:** the gradual registration accretion (+5 % at 0.101.0,
-+11 % at 0.102.0, +20 % at 0.103.0) is NOT explained by R-D5 — the fixes
-recover ~1.5 ms of registration (the operator-branch version bumps) but the
-rest of the drift is unattributed. In the loaded-engine context the microloop
-also keeps the ~1.1× share that predates 0.103.0. Bisecting THAT means the
-same harness pointed at the accretion axis: per-release curve exists above;
-the next step is a within-release commit bisect of 0.101.0 and 0.102.0.
+**Residual accretion: attributed and FIXED 2026-08-10.** The gradual drift was
+not one release's change but the standard library GROWING into a fixed cost:
+`parseType()` refused to cache resolver-aware calls, and every library
+signature boxed at `new ComputeEngine()` (1,953 parses, only ~308 distinct
+strings) or re-boxed at declare/assign time parsed from scratch. Splitting the
+axis showed the accretion lived in engine construction (+15–20 %) and
+fresh-engine first registration (+9–13 %), while long-run steady-state cost
+was flat — i.e. "features cost setup time", accruing a few percent per
+release. Fix: two-step resolution in `parseType()` (cached resolver-less
+parse first; only strings naming user types — including the `type X`
+forward-reference spelling, now tracked by `Parser.sawForwardRef` because it
+parses resolver-less into an unresolved placeholder WITHOUT throwing and its
+resolver-aware parse side-effects a forward registration — fall through to
+the uncached resolver-aware parse). Full parses: 1,953 → 343 (first engine) /
+48 (later engines) per construction, 2,278 → 0 per 120-fn registration.
+Measured: construction ~2.7 ms vs 7.6–8.2 ms for EVERY published 0.10x
+version (~3×); registration within ~3 % of the 0.100.1 baseline;
+re-registration at or below it.
+
+**Final residual — examined and CLOSED, not worth an open item.** The last
+~+9 % on the box microloop appears only on a bench-state engine (after
+composition/seed rows and re-registration; a plain loaded engine is at
+parity) and profiles as DIFFUSE: high-resolution profiles of 0.100.1 vs
+fixed-0.103.2 show the same structure (isSubtype ~12 %, GC ~8 %, `matches`
+~5 %, then a 1–2 % tail of canonicalization helpers) with no single new
+mechanism — it is three releases of per-box feature checks (missing-value
+behavior, effects, collection gating, Dot/tuple dispatch) at fractions of a
+percent each. Chasing it would be many-site micro-optimization for a few
+percent total. Noted for the future: `isSubtype` volume (~12 % of box time,
+already so in 0.100.1) and GC pressure are the structural levers if a
+"boxing 2×" initiative is ever wanted — that would be a NEW item, not this
+one.
 
 Original filing follows. Measured while answering Tycho item 162 work-item (e)
 ("did anything regress since 0.100.1"). Same machine, PUBLISHED 0.100.1

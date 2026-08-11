@@ -73,12 +73,60 @@ export function parseType(
   // A PRE-SEEDED parse is uncacheable: identical text means different things
   // under different seeds (`tuple<T, T>` with `T` seeded is an open type; with
   // nothing seeded it is an unknown-type error).
-  const cacheable = typeResolver === undefined && typeVars === undefined;
-  if (cacheable) {
-    const cached = TYPE_CACHE.get(s);
-    if (cached !== undefined) return cached;
+  if (typeVars !== undefined)
+    return parseTypeUncached(s, typeResolver, typeVars).type;
+
+  // Sound for resolver-aware calls too: `cacheResult()` admits only strings
+  // whose resolver-less parse is resolver-INDEPENDENT (see below), so a hit
+  // is the answer any resolver would give.
+  const cached = TYPE_CACHE.get(s);
+  if (cached !== undefined) return cached;
+
+  // Two-step resolution: try the RESOLVER-LESS parse first even when a
+  // resolver is supplied. A user type name can never shadow built-in type
+  // syntax, so with one exception a resolver-less SUCCESS is identical to the
+  // resolver-aware result — and cacheable, shared across all engines. This is
+  // what lets the standard library's ~2000 signature parses per
+  // `new ComputeEngine()` (all resolver-aware, ~300 distinct strings)
+  // collapse into cache hits (P-BOX registration accretion).
+  //
+  // The exception is the `type X` forward-reference spelling
+  // (`parser.sawForwardRef`): it parses resolver-less into an UNRESOLVED
+  // placeholder instead of throwing, and its resolver-aware parse registers
+  // the forward reference as a side effect — so such a result is discarded
+  // and the resolver-aware parse runs. A string that NAMES a user type bare
+  // throws on the first attempt and falls through the same way; both shapes
+  // appear at declaration sites, not in per-box hot paths.
+  if (typeResolver !== undefined) {
+    try {
+      const r = parseTypeUncached(s, undefined, undefined);
+      if (!r.sawForwardRef) return cacheResult(s, r.type);
+    } catch {}
+    return parseTypeUncached(s, typeResolver, undefined).type;
   }
 
+  const r = parseTypeUncached(s, undefined, undefined);
+  // A forward-reference string never enters the shared cache — not even on
+  // this resolver-less path — so a later resolver-aware call cannot hit a
+  // placeholder parse.
+  if (r.sawForwardRef) return r.type;
+  return cacheResult(s, r.type);
+}
+
+/** Memoize a resolver-independent parse in {@link TYPE_CACHE}. */
+function cacheResult(s: TypeString, type: Type): Type {
+  // Simple bound: reset the cache if it grows too large (the working set
+  // of distinct type strings is small, so this should rarely trigger)
+  if (TYPE_CACHE.size >= TYPE_CACHE_MAX_SIZE) TYPE_CACHE.clear();
+  TYPE_CACHE.set(s, deepFreeze(type));
+  return type;
+}
+
+function parseTypeUncached(
+  s: TypeString,
+  typeResolver: TypeResolver | undefined,
+  typeVars: readonly TypeParameter[] | undefined
+): { type: Type; sawForwardRef: boolean } {
   try {
     const parser = new Parser(s, { typeResolver, typeVars });
     const ast = parser.parseType();
@@ -89,14 +137,7 @@ export function parseType(
     // so a type string without a clause pays nothing.
     if (parser.sawForall) validateDeclaredType(type);
 
-    if (cacheable) {
-      // Simple bound: reset the cache if it grows too large (the working set
-      // of distinct type strings is small, so this should rarely trigger)
-      if (TYPE_CACHE.size >= TYPE_CACHE_MAX_SIZE) TYPE_CACHE.clear();
-      TYPE_CACHE.set(s, deepFreeze(type));
-    }
-
-    return type;
+    return { type, sawForwardRef: parser.sawForwardRef };
   } catch (error) {
     const wrapped = new Error(
       `Failed to parse type "${s}": ${

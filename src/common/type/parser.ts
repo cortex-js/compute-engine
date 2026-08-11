@@ -262,6 +262,14 @@ export class Parser {
    * without a clause pays nothing. */
   private _sawForall = false;
 
+  /** True once a `type X` forward-reference spelling has been parsed. Unlike a
+   * BARE unknown name — which throws without a resolver — the `type X` form
+   * parses resolver-less into an UNRESOLVED placeholder, and resolver-aware
+   * with a side effect (`typeResolver.forward()` registration). So a
+   * resolver-less parse of a string containing one is NOT equivalent to the
+   * resolver-aware parse, and `parseType()` must neither reuse nor cache it. */
+  private _sawForwardRef = false;
+
   constructor(
     input: string,
     options?: {
@@ -298,6 +306,12 @@ export class Parser {
    * declaration-time polytype validation. */
   get sawForall(): boolean {
     return this._sawForall;
+  }
+
+  /** True when the parsed type carried a `type X` forward-reference spelling —
+   * the gate that keeps such parses out of the resolver-less memo cache. */
+  get sawForwardRef(): boolean {
+    return this._sawForwardRef;
   }
 
   error(message: string, suggestion?: string): never {
@@ -1673,6 +1687,7 @@ export class Parser {
     const isForward =
       this.current.type === 'IDENTIFIER' && this.current.value === 'type';
     if (isForward) {
+      this._sawForwardRef = true;
       this.advance();
     }
 
