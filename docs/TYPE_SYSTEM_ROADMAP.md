@@ -197,6 +197,8 @@ discharged"** — one criterion covering products (erase) and sums (reify).
 
 ## 4. Protocols and conformance (long term)
 
+See also: Appendix A below.
+
 Two distinct gaps stand between today and a user-facing `mappable`:
 
 - **Constraint**: "a type that supports map" as a bound. Bounds today are
@@ -358,3 +360,301 @@ with three rulings needed in order (see §7).
    rebind — the smaller theory); (b) the per-head rebind/fallback table,
    seeded from what the builtin type handlers already do; (c) whether the
    operators are user-visible type syntax or declarations-only at first.
+
+
+## Appendix A: Protocol Syntax
+
+
+A protocol is a set of functions that a type must implement in order to be said to **conform** to the protocol. 
+
+```
+protocol Comparable {
+  function compare(self: Self, other: Self) -> "<" | "=" | ">"
+}
+
+// Alternative (both syntax acceptable)
+protocol Comparable {
+  compare: (self: Self, other: Self) -> "<" | "=" | ">"
+}
+```
+
+Multiple protocols can include functions with the same name, and same or different signatures:
+
+```
+protocol Comparable {
+  compare: (self: Self, other: Self) -> "<" | "=" | ">"
+}
+protocol Comparator {
+  compare: (self: Self, other: Self) -> -1 | 0 | +1
+  // ok: the `compare` function does not conflict wiht the one from `Comparable`
+}
+```
+
+A protocol can also define readwrite or readonly properties. The properties are mapped to getter and setter functions, which must be implemented by the conforming type. An appropriate mangling scheme is used, for example `__get__hash` for the `hash` property getter, but is an implementation detail and not part of the public surface (see `hash` above)
+
+```epsil
+protocol Hashable {
+  readonly hash: string
+  // Equivalent to:
+  // function __get__hash(self: Hashable): string
+}
+```
+
+The type `Self` used in the protocol function signatures refer to the type for which the specific implementation of the protocol is defined. The first argument of the functions of a protocol must be of type Self. If the type is omitted, Self is inferred.
+
+
+```
+protocol Comparable {
+  function compare(self, other: Self) -> "<" | "=" | ">"
+  // Same as `function compare(self: Self, other: Self) -> "<" | "=" | ">"`
+}
+
+protocol Comparable {
+  function compare(self: list, other: Self) -> "<" | "=" | ">"
+  // If the type of the first argument is not Self, a diagnostic is emitted
+}
+```
+
+
+### Scope
+
+Protocols are not scoped, they are global for the Compute Engine instance. When reading an Epsil file, the protocol declarations can be hoisted (or processed in a first pass). Protocols declared inside a local scope trigger a diagnostic.
+
+### Conformance
+
+The `is` keyword is used to declare the conformance of a type.
+
+For example, to declare conformance of a built-in type (`string`):
+
+```
+type string is Hashable
+```
+
+Conformance to multiple protocols can be declared using the `&` keyword:
+
+```
+type string is Hashable & Comparable
+```
+
+Note this is equivalent to:
+
+```
+type string is Hashable
+type string is Comparable
+```
+
+Conformance can be added, but never removed (monotonicity).
+
+Re-declaring conformance is legal and a no-op, although we can emit a warning diagnostic when encountered.
+
+Conformance can also be declared for user-defined **nominal** types. The conformance can be declared with the type definition, or separately.
+
+```
+type Point: tuple<number, number> is Comparable;
+
+// or:
+
+type Point: tuple<number, number>;
+type Point is Comparable;
+
+```
+
+Structural types cannot conform to protocols:
+
+```
+type alias Pt: tuple<number, number> is Comparable;
+// -> diagnostic error: Use a nominal type (`type Pt`) to conform to protocol `Comparable`. Structural types (`type alias`) cannot conform to protocols.
+```
+
+To declare a conformance, the type has to be known:
+
+```
+type FooBar is Comparable;
+// -> diagnostic error: the type `FooBar` is unknown
+```
+
+The conforming type must be an `expression` subtype or a nominal type. Compound types (unions, etc...) are not valid. 
+
+```
+type list<integer> is Comparable;
+// -> diagnostic error
+
+type list is Comparable;
+// -> ok: `list` is an expression type
+
+type Record<K> is Comparable;
+// -> diagnostic error
+
+type (integer | string) is Comparable;
+// -> diagnostic error
+
+```
+
+For types in the type latice (like `number`), if a type is protocol-conforming, its subtypes are as well: in this case `integer` is `Comparable` as well. Because the latice is not a chain, a new conformance that overlaps an existing conforming type without being comparable to it is an error.
+
+
+### Protocol Implementatioon
+
+A protocol implementation defines the implementation of the functions of a protocol for a given type. An protocol implementation statement is also a declaration.
+
+For example, declare that the primitive type `string` conforms to the `Comparable` protocol, and provide an implementation:
+
+```
+type string is Comparable {
+  // Provide an implementation of the `compare` function for `string`
+  // The name of the function and the first argument must match the protocol declaration and are used to dispatch the call to the correct implementation. The implementations are provided in a braced block after the conformance declaration. If a type conforms to multiple protocols, it will have multiple implementation blocks
+  function compare(self: string, other: string): "<" | "=" | ">" {
+    if (self < other) return "<";
+    if (self > other) return ">";
+    return "=";
+  }
+}
+```
+
+If at the end of a protocol implementation block the protocol is only partially implemented, or include functions that are not part of the protocol, a diagnostic error is emitted:
+
+```
+type boolean is Comparable {
+  cmpare(self, other: Self) -> "<" | "=" | ">" {
+    ...
+  }
+  // -> `cmpare` is not a function of the `Comparable` protocol. Did you mean `compare`?
+  // -> The `Comparable` protocol expected a definition of `compare`
+```
+
+Multiple conformance implementations can be provided for a given type:
+
+```
+type string is Hashable {
+    // Note that in the implementation, the type of the argument can either be Self or the actual type (`string`) in this case: in this context they are synonyms
+    hash(self: Self) -> string {
+        ...
+    }
+}
+```
+
+If a conformance implementation is provided more than once on the same type, a diganostic error is emitted:
+
+```
+type boolean is Comparable {
+  function compare(self: Self, other: Self): "<" | "=" | ">" { ... }
+}
+
+type boolean is Comparable;
+// -> ok, no-op re-declaration
+
+type boolean is Comparable {
+  // -> diagnostic error: the type `boolean` already has an implementation of the `Comparable` protocol.
+  function compare(self: Self, other: Self): "<" | "=" | ">" { ... }
+}
+
+```
+
+### Protocol Bounds
+
+A function signature may declare that some of its argument must conform to some protocols using a `where` clause:
+
+```
+function bar<T>(x: T) -> boolean where T: collection { ...}
+
+function baz<T>(x: T) -> boolean where T: collection is Hashable { ...}
+
+// Also acceptable
+function baz<T>(x: T) -> boolean where T: collection, T is Hashable { ...}
+
+
+// Alternative syntax:
+const sort : forall T is Comparable & Hashable . (xs: list<T>) -> list<T>) = { ... }
+```
+
+A type may be required to conform to multiple protocols (not an *OR*, an *AND*).
+
+The `where` clause can also be used to define type bounds using ":". The `is` operator is used to specify protocol comformance
+
+If a type parameter is bound by several protocols, the list of protocols is separated by a `&` character
+
+```
+function sort<T>(xs: list<T>): list<T> where T is Comparable & Hashable {
+    // A protocol function can be called directly. The appropriate implementation is displatched based on the type of the arguments.
+    if (compare(x, y) === "=") {
+        //....
+    } 
+
+    // If necessary, to disambiguate (for example if there is a local identifier shadowing the protocol function or if two protocols define a protocol function with the same), the protocol name can be used as a prefix, 
+    if (Comparable.compare(x, y) === "=") {
+    }
+
+}
+```
+
+A protocol cannot be used where a type would be used:
+
+```
+function sort(xs: list<Comparable>) -> list<Comparable> {
+}
+// -> emit a diagnostic error
+```
+
+### Dispatching
+
+The combination of the function name and the conforming type are used to **dispatch** to the appropriate implementation. 
+
+The dispatch is **dynamic** and determined at runtime. The implementation chosen is always the most specific one for the runtime type of the first argument. The engine may apply **static resolution** as an optimization when it can prove the answer is identical — essentially only when the static type is exact and no more-specific conformance could apply. This can be useful when compiling as well.
+
+When dispatching, the most specific implementation wins: if there is both a Comparable implementation for `number` and `integer`, and `compare()` is called on an `integer`, the `integer` implementation is dispatched.
+
+```
+type number is Comparable {
+  function compare(self: number, other: number): "<" | "=" | ">" {
+    if (self < other) return "<";
+    if (self > other) return ">";
+    return "=";
+  }
+}
+type string is Comparable {
+  function compare(self: string, other: number): "<" | "=" | ">" {
+    // Flag protocol functions defined on a type that do not match the expected signature (the second argument is `number` here instead of string).
+    // -> Diagnostic: The signature of the compare function does not match the expected signature for the protocol `Comparable`.
+    if (self.length < other) return "<";
+    if (self.length > other) return ">";
+    return "=";
+  }
+}
+```
+
+A protocol function is recognized as a global unqalified identifier if it is unique. A specific function can be disambiguated by qualifying it:
+
+```
+type string is Comparable;
+type string is Comparator;
+let c = compare("foo", "bar")
+// -> diagnostic error: `compare` is defined for the `Comparable` and `Comparator` protocols. Use a qualified name to narrow the one you meant.
+// Note: if there is no ambiguity (the type + name is unique), the call does not need to be qualified
+
+let c = Comparable.compare("foo", "bar")
+```
+
+The qualified call can alway be used, even where there is no ambiguity.
+
+A direct call type-checks by treating `Self` as an implicit type variable that both arguments unify to a single conforming type (broadest of the type). In this case, `value` (the common ancestor of `string` and `integer`, and if the resulting type does not have a protocol implementation a diagnostic error is emitted (if it can be detected statically), or an error value at runtime
+
+```
+compare("a", 3)
+// -> diagnostic error: no implementation of `compare` for `string` and `number`: the common type `value` is not conforming to the `Comparable` protocol.
+```
+
+
+### Host API
+
+The CE host API can also be used to declare protocols:
+```
+ce.declareProtocol(protocolName: string, fields: Record<string, string>);
+```
+
+for example:
+
+```
+ce.declareProtocol("Comparable", {
+  "compare", "(Self, other: Self) -> "<" | "=" | ">""
+});
+```
