@@ -114,13 +114,22 @@ the idiomatic named-definition spelling.
   inert: generic (`forall`/`typeParams`) and effectful signatures, for the
   same reason (the lift cannot faithfully re-state those adjuncts on the
   synthesized literal).
-- **[impl] Not implemented from the behavior table**: the improved error
-  message for `const f : (number) -> number = x^2 + 1` (unnamed annotation +
-  bare expression). At parse time that shape is indistinguishable from a
-  perfectly legal function-VALUED initializer (`= g(2)`), so the parser
-  cannot warn; the message would have to come from the engine's declared-type
-  check, which is out of this change's scope. The runtime `incompatible-type`
-  error is unchanged.
+- **[impl] The unnamed-annotation near-miss message — IMPLEMENTED 2026-08-11,
+  engine-side** (was deferred). At parse time
+  `const f : (number) -> number = x^2 + 1` is indistinguishable from a legal
+  function-VALUED initializer (`= g(2)`), so the parser stays silent; the
+  explanation lives in the engine's declared-type seam instead
+  (`unboundSignatureHint` in
+  `src/compute-engine/boxed-expression/type-compatibility-error.ts`). When
+  the declared type is a signature and the value is NOT a function, both
+  routes — the host `ce.declare`/`ce.assign` throw and the
+  `Assign`/`Declare` `incompatible-type` error value (hint carried in the
+  `where` slot, the G11 pattern) — explain that a signature's parameters
+  bind only when named, and name the exact rewrite when the value's unknowns
+  pair off positionally with the unnamed parameters (`(x: number) -> number`
+  / `(x) |-> x^2 + 1`; value text elided beyond 40 chars). Function-valued
+  mismatches (wrong arity/param types) are excluded — they have their own,
+  better messages.
 
 ## Companion diagnostics (separate track, same feedback)
 

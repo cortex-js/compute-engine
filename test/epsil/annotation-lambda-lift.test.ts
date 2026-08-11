@@ -129,8 +129,35 @@ describe('EPSIL ANNOTATION LAMBDA LIFT — deliberately inert', () => {
   });
 
   test('an unnamed annotation never lifts a bare expression', () => {
+    // The error explains the near-miss — readers mentally auto-insert the
+    // missing name, so the message must spell out that nothing binds — and
+    // names the exact rewrite, pairing the initializer's unknown with the
+    // unnamed parameter.
     const { value } = run('const f : (number) -> number = x^2 + 1');
-    expect(value.toString()).toContain('incompatible-type');
+    const message = value.toString();
+    expect(message).toContain('incompatible-type');
+    expect(message).toContain('parameters bind only when they are named');
+    expect(message).toContain('an expression in the unknown \\"x\\"');
+    expect(message).toContain('(x: number) -> number');
+    expect(message).toContain('(x) |-> x^2 + 1');
+  });
+
+  test('the host `ce.declare` route throws the same explanation', () => {
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.declare('f', {
+        type: '(number) -> number',
+        value: ce.parse('x^2+1'),
+      })
+    ).toThrow(/bind only when they are named[\s\S]*\(x: number\) -> number/);
+  });
+
+  test('a function-valued initializer under an unnamed annotation is untouched', () => {
+    const { value, diagnostics } = run(
+      'const k = (x) |-> x + 1\nconst m : (number) -> number = k\nm(3)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
   });
 
   test('an alias annotation is opaque: its names never bind', () => {
