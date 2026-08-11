@@ -1375,10 +1375,24 @@ describe('EPSIL RECURSIVE TYPES', () => {
         test(`rejects ${label} with a type error, not a stack overflow`, () => {
           const ce = new ComputeEngine();
           const r = executeEpsil(ce, def + `let a: json = ${value}\na`);
-          const messages = r.diagnostics.map((d) => String(d.message[1]));
-          expect(messages).toHaveLength(1);
-          expect(messages[0]).toContain('incompatible-type');
-          expect(messages[0]).not.toContain('call stack');
+          // Two diagnostics for the one mistake — the static declared-type
+          // check (which proves the mismatch through the recursive alias
+          // without overflowing either) plus the runtime rejection. The
+          // static/runtime duplication is the pass's documented convention.
+          const statics = r.diagnostics.filter(
+            (d) => d.message[0] === 'static-type-error'
+          );
+          const runtime = r.diagnostics.filter(
+            (d) => d.message[0] === 'runtime-error'
+          );
+          expect(statics).toHaveLength(1);
+          expect(String(statics[0].message[1])).toContain(
+            'not compatible with the declared type "json"'
+          );
+          expect(runtime).toHaveLength(1);
+          expect(String(runtime[0].message[1])).toContain('incompatible-type');
+          for (const d of r.diagnostics)
+            expect(String(d.message[1])).not.toContain('call stack');
         });
       }
 

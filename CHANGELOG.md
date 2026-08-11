@@ -150,6 +150,34 @@
 
 ### Improvements
 
+- **Declared-type mismatches on `let`/`const` are now caught statically.**
+  The Epsil static pass (`epsil check`, editor diagnostics, `executeEpsil`'s
+  pre-run check) never evaluates, and the declared-type check lived only in
+  `Declare`'s evaluate path — so `let s: string = 42` produced no diagnostic
+  until the program ran, and none at all in the editor. The pass now checks
+  each annotated declaration's initializer against its annotation without
+  evaluating, reporting only **provable** mismatches so there are no false
+  positives: disjoint types (`let s: string = 42`, and the
+  unnamed-signature near-miss `const f : (number) -> number = x^2 + 1`,
+  which carries the same explanation as the runtime error), plus closed
+  literals that fail the full covariant check (`let n: integer = 1.5`).
+  Unknown-typed initializers, overlapping types, and cross-statement
+  bindings remain the run phase's job — incomplete rather than unsound.
+
+- **The declared-function-type near-miss now explains itself.**
+  `const f : (number) -> number = x^2 + 1` used to fail with a bare
+  `incompatible-type (expected "(number) -> number", got "finite_number")` —
+  cryptic enough that readers mentally auto-insert the missing parameter name
+  and cannot spot the mistake. When a declared type is a function signature
+  and the initializer is not a function, the error (on both the host
+  `ce.declare`/`ce.assign` throw and the `Assign`/`Declare` error-value
+  routes) now spells out the near-miss: a signature's parameters bind only
+  when they are named, so nothing in `(number) -> number` binds and
+  `x^2 + 1` is an expression in the unknown `x`, not a function of `x` — and
+  names the exact rewrite when the initializer's unknowns pair off with the
+  unnamed parameters (`"(x: number) -> number"`, or
+  `"(x) |-> x^2 + 1"`).
+
 - **New `expr.isEnumerableCollection`: telling an empty collection from one that
   cannot be walked.** `each()` yields nothing for two unrelated reasons — the
   collection is empty, or its elements have no computable value (`Range(a, b)`

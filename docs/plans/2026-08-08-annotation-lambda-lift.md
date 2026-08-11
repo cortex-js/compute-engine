@@ -131,6 +131,38 @@ the idiomatic named-definition spelling.
   mismatches (wrong arity/param types) are excluded — they have their own,
   better messages.
 
+## Static declared-type check — IMPLEMENTED 2026-08-11
+
+The near-miss message (previous item) fires at evaluation time, so
+`checkSource` — the editor path — stayed silent. Closed by
+`declaredTypeMismatch` in `src/epsil/static-diagnostics.ts`: for a `Declare`
+carrying both an annotation and an initializer, the canonicalized
+initializer's STATIC type is checked against the annotation, reporting only
+**provable** mismatches (no false positives by construction):
+
+- **Disjointness tier** — `BoxedType.isDisjointFrom` (conservative: unproven
+  ⇒ silent). Sound because evaluation only narrows a value within its static
+  type. Catches `let s: string = 42` and the near-miss (function vs number
+  categories are disjoint), reusing `unboundSignatureHint` so static and
+  runtime wording never drift.
+- **Closed-literal tier** — a bare number/string/boolean literal IS its
+  runtime value, so the full covariant `matches()` verdict applies
+  (`let n: integer = 1.5`).
+
+Deliberately silent: unknown-typed initializers, overlapping types,
+`holdUntil` values, and cross-statement bindings (modeling declarations
+forward through the pass is a separate ruling — it interacts with the
+global-type-registry rollback and inference write-through). Static + runtime
+double-reporting for the same statement follows the pass's documented
+"duplication is accepted" convention. Imports stay engine-free
+(`type-compatibility-error.ts`, `type-guards.ts` are leaves), preserving the
+module's injected-engine rule. Tests:
+`test/epsil/static-declared-type.test.ts`; the recursive-JSON pins in
+`declare-type.test.ts` were updated (they now see the static diagnostic too,
+proving disjointness through a recursive alias without overflow). This
+closes the `let s: string = 42` checker-gap item from the VSCode extension's
+open list.
+
 ## Companion diagnostics (separate track, same feedback)
 
 - `->`-for-`|->` typo — **IMPLEMENTED 2026-08-10** (`mapsto-arrow-expected`,

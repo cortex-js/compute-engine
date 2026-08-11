@@ -73,7 +73,7 @@ export function isTypeCompatibilityError(
  * parameters — or `undefined` when the mismatch is not this shape (the value
  * is a function, or the declared type is not a plain signature).
  */
-function unboundSignatureHint(
+export function unboundSignatureHint(
   value: { toString(): string; type: BoxedType; unknowns?: ReadonlyArray<string> },
   declaredType: BoxedType
 ): string | undefined {

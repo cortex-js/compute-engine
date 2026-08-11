@@ -11,6 +11,20 @@ import {
 // imports the engine — the engine is injected at call time.
 import type { ComputeEngine } from '../compute-engine.js';
 
+// RUNTIME imports, but not of the engine: `type-compatibility-error.ts` and
+// `type-guards.ts` are engine-free leaves (their only runtime dependency is
+// `common/type`), so the injected-engine rule above is preserved.
+// `unboundSignatureHint` supplies the same near-miss wording the runtime
+// declared-type check uses, so the static and runtime messages never drift.
+import { unboundSignatureHint } from '../compute-engine/boxed-expression/type-compatibility-error.js';
+import {
+  isDictionary,
+  isFunction,
+  isNumber,
+  isString,
+  isSymbol,
+} from '../compute-engine/boxed-expression/type-guards.js';
+
 import type { ParsingDiagnostic } from './diagnostics.js';
 import { serializeEpsil } from './serialize-epsil.js';
 
@@ -136,8 +150,10 @@ function canonicalizationDiagnostics(
     const authored = authoredErrors(statement);
 
     let canonical: MathJsonExpression;
+    let boxed: ReturnType<ComputeEngine['box']> | undefined;
     try {
-      canonical = ce.box(statement).json;
+      boxed = ce.box(statement);
+      canonical = boxed.json;
     } catch {
       // Canonicalization is best-effort: a statement the engine cannot box is
       // left to the run phase rather than crashing the check.
@@ -146,10 +162,20 @@ function canonicalizationDiagnostics(
 
     const errors: MathJsonExpression[] = [];
     collectErrors(canonical, errors);
-    if (errors.length === 0) continue;
+    // A declaration whose initializer PROVABLY cannot satisfy the annotation
+    // is a static problem too, even though `Declare` only enforces it at
+    // evaluation time (see `declaredTypeMismatch`).
+    const declMismatch = declaredTypeMismatch(ce, boxed);
+    if (errors.length === 0 && declMismatch === undefined) continue;
 
     const [start, end] = statementRange(statement, source);
     const snippet = epsilSnippet(statement);
+    if (declMismatch !== undefined)
+      diagnostics.push({
+        severity: 'error',
+        message: ['static-type-error', declMismatch, snippet, 'incompatible-type'],
+        range: [start, end, start],
+      });
     // One diagnostic per distinct problem: every error in a statement shares
     // the statement's range, so identical descriptions would be N copies of
     // the same line.
@@ -177,6 +203,75 @@ function canonicalizationDiagnostics(
   }
 
   return diagnostics;
+}
+
+/**
+ * The per-statement declared-type check: for `let s: string = 42` — a
+ * `Declare` carrying BOTH an annotation and an initializer — everything
+ * needed to spot the mistake is inside the one statement, yet the runtime
+ * check (`declaredTypeError`, fired by `Declare`'s evaluate path) never runs
+ * in this pass. Compare the canonicalized initializer's STATIC type against
+ * the annotation here instead.
+ *
+ * Soundness — no false positives, by construction:
+ * - **Disjointness tier.** Evaluation only narrows a value within its static
+ *   type, so if the static type is PROVABLY DISJOINT from the annotation
+ *   (`BoxedType.isDisjointFrom`, conservative: unproven ⇒ "may overlap" ⇒
+ *   silent), every runtime outcome fails too. This catches
+ *   `let s: string = 42` (number vs string) and the unnamed-signature
+ *   near-miss `const f : (number) -> number = x^2 + 1` (function vs number
+ *   — reported with the same {@link unboundSignatureHint} explanation the
+ *   runtime error carries).
+ * - **Closed-literal tier.** A bare number/string/boolean literal IS its
+ *   runtime value, so the full covariant `matches()` check applies — the
+ *   same verdict the runtime reaches — catching overlapping-but-wrong cases
+ *   like `let n: integer = 1.5`.
+ *
+ * Everything else (unknown-typed values, overlapping types, cross-statement
+ * bindings) is left to the run phase: incomplete rather than unsound,
+ * matching the pass's philosophy.
+ *
+ * Returns the diagnostic description, or `undefined` when the statement is
+ * not a checkable declaration or no mismatch is provable.
+ */
+function declaredTypeMismatch(
+  ce: ComputeEngine,
+  boxed: ReturnType<ComputeEngine['box']>
+): string | undefined {
+  if (!isFunction(boxed, 'Declare')) return undefined;
+  // `["Declare", sym, "'type'", {dict}]` — the annotation is positional and
+  // optional; without one there is nothing to check against.
+  const typeOp = boxed.ops[1];
+  if (!isString(typeOp)) return undefined;
+  const attributes = boxed.ops.find((op) => isDictionary(op));
+  if (attributes === undefined || !isDictionary(attributes)) return undefined;
+  const value = attributes.get('value');
+  if (value === undefined) return undefined;
+  // A deferred value (`holdUntil`) is not this pass's to judge.
+  if (attributes.get('holdUntil') !== undefined) return undefined;
+
+  let declared: ReturnType<ComputeEngine['type']>;
+  try {
+    declared = ce.type(typeOp.string);
+  } catch {
+    // A malformed annotation is already a `type-annotation-error`.
+    return undefined;
+  }
+  if (declared.isUnknown || value.type.isUnknown) return undefined;
+
+  const isClosedLiteral =
+    isNumber(value) ||
+    isString(value) ||
+    isSymbol(value, 'True') ||
+    isSymbol(value, 'False');
+  const mismatch = isClosedLiteral
+    ? !value.type.matches(declared)
+    : declared.isDisjointFrom(value.type);
+  if (!mismatch) return undefined;
+
+  const lead = `The value "${value.toString()}" of type "${value.type}" is not compatible with the declared type "${declared}"`;
+  const hint = unboundSignatureHint(value, declared);
+  return hint === undefined ? lead : `${lead}. ${hint}`;
 }
 
 /**
