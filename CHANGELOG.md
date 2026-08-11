@@ -49,6 +49,31 @@
   Legitimate dictionary spellings (`{one -> 1}`, `"a" -> 1`, `{->}`) are
   untouched.
 
+### Issues Resolved
+
+- **`Divide` no longer drops the tuple type of a `PointList` numerator** (Tycho
+  item 165). `canonicalDivide` scales a `tuple / scalar` component-wise only
+  when the numerator's components are ACCESSIBLE — a `Tuple`/`Pair`/`Triple`/
+  `Single` head. Any other tuple-TYPED numerator, notably the `PointList` head
+  importers emit, stays an inert `Divide`, and the type handler had no tuple
+  branch, so that inert form collapsed to `number`. `PointList(x, y) / n` typed
+  `number` while `PointList(x, y) · n` and `(x, y) / n` both kept the tuple —
+  `Divide` was the sole outlier among the arithmetic operators (`Multiply`,
+  `Add`, `Subtract` and `Negate` were already correct).
+
+  The collapse cascaded: a list of such quotients typed `vector<n>` — a list of
+  NUMBERS — so `PointX`/`PointY` over it took the element-INDEX reading instead
+  of the elementwise one, and a mixed `p + p/n` failed outright with
+  `incompatible-type`. Downstream, a consumer proving collection-ness by type
+  saw a scalar and failed closed, so dependent rows never registered and a plot
+  silently drew nothing (while getting faster, because the work was skipped).
+
+  The fix mirrors the `Multiply` handler, which also stays inert on this input
+  yet reports the tuple type. It is **type-only**: no canonical form changes, so
+  the `PointList` head — which carries a consumer compile contract — is
+  preserved, and the accessor narrowing that surfaced the bug is untouched
+  (`PointX` over a genuinely flat numeric list remains the element-index read).
+
 ### Improvements
 
 - **New `expr.isEnumerableCollection`: telling an empty collection from one

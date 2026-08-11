@@ -540,6 +540,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number+) -> number',
       type: ([num, den]) => {
         if (den.isSame(1)) return num.type;
+        // A numeric tuple (point/vector) divided by a scalar keeps the tuple
+        // type, mirroring the `Multiply` handler. `canonicalDivide` scales
+        // component-wise only when the numerator's components are ACCESSIBLE
+        // (a `Tuple`/`Pair`/`Triple`/`Single` head); every other tuple-typed
+        // numerator — notably the `PointList` head importers emit — stays an
+        // inert `Divide`, and without this branch that inert form collapsed to
+        // `number`. That collapse propagated: a list of such quotients typed
+        // `vector<n>` instead of `list<tuple<…>>`, so `PointX`/`PointY` over it
+        // took the element-INDEX reading rather than the elementwise one, and a
+        // mixed `p + p/n` failed outright with `incompatible-type` (Tycho item
+        // 165). Hoisted above the NaN/finiteness early-returns for the same
+        // reason `Multiply` hoists its tuple branch: a tuple's `isFinite` is
+        // `false`, which would otherwise collapse it to `number`.
+        // COULD-semantics on the numerator, and the denominator must not itself
+        // be tuple-shaped — `tuple / tuple` has no defined quotient and
+        // `canonicalDivide` already rejects it.
+        if (couldBeNumericTuple(num) && !couldBeNumericTuple(den))
+          return num.type;
         if (den.isNaN || num.isNaN) return 'number';
         // Division by zero: k/0 = ~oo, 0/0 = NaN — indeterminate.
         if (den.isSame(0)) return 'number';
