@@ -159,8 +159,11 @@ describe('DeclareType redeclaration', () => {
   });
 });
 
-describe('DeclareType scoping', () => {
-  test('a type declared in a Block does not leak out', () => {
+describe('DeclareType is top-level only', () => {
+  // Types are engine-global (ruled 2026-08-10): a `DeclareType` nested in a
+  // Block (or any function body) is a hard error on the box route too, and
+  // registers nothing.
+  test('a DeclareType nested in a Block is an error and registers nothing', () => {
     const ce = new ComputeEngine();
     const r = ce
       .box([
@@ -169,8 +172,33 @@ describe('DeclareType scoping', () => {
         42,
       ])
       .evaluate();
-    expect(r.isSame(42)).toBe(true);
+    expect(r.toString()).toContain('invalid-type-declaration');
     expect(resolves(ce, 'localpt')).toBe(false);
+  });
+
+  test('at the top level of the box route it registers', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['DeclareType', 'toppt', { str: 'tuple<integer, integer>' }, ALIAS])
+      .evaluate();
+    expect(r.json).toBe('Nothing');
+    expect(resolves(ce, 'toppt')).toBe(true);
+  });
+
+  test('a host-forged pre-pass frame name does not bypass the rule', () => {
+    // The Epsil static pre-pass frame is a top-level surrogate, but it is
+    // recognized by frame name AND the engine's internal
+    // `_staticTypeCheckDepth` counter — a host pushing a scope with the same
+    // public name must not be able to smuggle a nested DeclareType past the
+    // top-level rule.
+    const ce = new ComputeEngine();
+    ce.pushScope(undefined, 'epsil:static-check');
+    const r = ce
+      .box(['DeclareType', 'forged', { str: 'integer' }, ALIAS])
+      .evaluate();
+    ce.popScope();
+    expect(r.toString()).toContain('invalid-type-declaration');
+    expect(resolves(ce, 'forged')).toBe(false);
   });
 });
 
@@ -275,7 +303,7 @@ describe('FORWARD REFERENCES', () => {
     const ce = new ComputeEngine();
     ce.declareType('done', 'integer');
     expect(() => ce.declareType('done', 'string')).toThrow(
-      /already defined in the current scope/
+      /already defined/
     );
   });
 
@@ -320,7 +348,7 @@ describe('FORWARD REFERENCES: review findings', () => {
     ce.declareType('pending', 'integer', { alias: true });
     expect(() =>
       ce.declareType('pending', 'string', { fromStatement: true, alias: true })
-    ).toThrow(/already defined in the current scope/);
+    ).toThrow(/already defined/);
     expect(ce.type('list<integer>').matches('holder')).toBe(true);
   });
 });
@@ -547,17 +575,17 @@ describe('DeclareType statement replacement is IN PLACE', () => {
     const ce = new ComputeEngine();
     ce.declareType('h', 'integer', { alias: true });
     expect(() => ce.declareType('h', 'string', { alias: true })).toThrow(
-      /already defined in the current scope/
+      /already defined/
     );
     // …including with `fromStatement`, on a record no statement declared.
     expect(() =>
       ce.declareType('h', 'string', { alias: true, fromStatement: true })
-    ).toThrow(/already defined in the current scope/);
+    ).toThrow(/already defined/);
     // And a statement-declared record is not replaceable by the plain host
     // route either.
     ce.declareType('s', 'integer', { alias: true, fromStatement: true });
     expect(() => ce.declareType('s', 'string', { alias: true })).toThrow(
-      /already defined in the current scope/
+      /already defined/
     );
     expect(ce.type('integer').matches(ce.type('s'))).toBe(true);
   });

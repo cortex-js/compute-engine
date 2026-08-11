@@ -25,7 +25,7 @@ export type DiagnosticCode =
   | 'empty-type-parameter-clause' // %0 = function name — `function f<>(…)`: the clause slot is present but declares nothing
   | 'duplicate-type-parameter' // %0 = variable name — the same name twice in one `function f<T, T>(…)` clause
   | 'generic-clause-unsupported' // %0 = function name — a generic (`function f<T>(…)`) definition cannot take part in a multi-clause set
-  | 'type-shadow' // %0 = type name — a block-local `type` declaration shadows an existing type of the same name; nominal identity is the name, so values of the two are indistinguishable
+  | 'type-declaration-not-top-level' // %0 = type name — a `type` statement inside a block or function body; types are engine-global, so declarations are legal only at the top level of a program
   | 'host-pragma-disabled' // %0 = pragma name (host-state pragmas gated off)
   | 'error-directive' // %0 = message from a `#error` pragma
   | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value), %1 = breadcrumb frame chain, if the error bubbled (e.g. "in Ln argument 1, in Add argument 2")

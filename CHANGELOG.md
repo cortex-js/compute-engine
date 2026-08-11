@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Types are now engine-global; `type` statements are top-level only.**
+  Type declarations (and the value constructors they mint) now live in one
+  engine-level registry rather than the lexical scope chain: a declared type
+  name means the same thing everywhere on the engine, for the engine's
+  lifetime, and a duplicate name is an error. Consequently a `type` statement
+  inside a `do` block, function body, `if` branch or loop body is now a hard
+  error — `type-declaration-not-top-level` at parse time in Epsil, an
+  `invalid-type-declaration` error value on the MathJSON `["DeclareType"]`
+  route — instead of declaring a block-local type; there is no hoisting, and
+  the former `type-shadow` warning is gone (shadowing is impossible). The
+  top-level statement-replace flow (re-running an edited notebook cell) is
+  unchanged. This closes the class of bugs where a value of a block-local
+  nominal type escaped its block and re-bound to a different same-named type
+  (or typed as `unknown`), makes any serialize→reparse of a type sound
+  anywhere in the engine, and is the prerequisite for protocols. Host note:
+  `ce.declareType()` under a pushed scope now targets the engine registry —
+  `popScope()` no longer removes a type. See
+  `docs/plans/2026-08-10-global-type-registry.md`.
+
 ### New Features
 
 - **Annotation-bound parameters in Epsil typed declarations** (the "lambda

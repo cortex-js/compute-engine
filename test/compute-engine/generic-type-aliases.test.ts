@@ -800,14 +800,18 @@ describe('GENERIC TYPE ALIASES — Epsil statement route', () => {
     expect(JSON.stringify(r.diagnostics)).toContain('incompatible-type');
   });
 
-  test('a generic alias declared in a block is not visible after it', () => {
+  test('a generic alias declared in a block is a hard error', () => {
+    // Types are engine-global (ruled 2026-08-10): the block-local declaration
+    // is rejected and declares nothing — same rule as a plain `type`.
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
       'let start = 0\ndo {\n  type alias Inner<T> = tuple<T, T>\n  let q: Inner<integer> = (3, 4)\n  q\n}'
     );
-    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
-    expect(r.value.toString()).toBe('(3, 4)');
+    expect(r.diagnostics.map((d) => d.message)).toEqual([
+      ['type-declaration-not-top-level', 'Inner'],
+      ['type-annotation-error', 'Unknown type "Inner"'],
+    ]);
     expect(() => ce.type('Inner<integer>')).toThrow();
     const r2 = executeEpsil(ce, 'let z: Inner<integer> = (3, 4)\nz');
     expect(r2.diagnostics.map((d) => d.message)).toEqual([

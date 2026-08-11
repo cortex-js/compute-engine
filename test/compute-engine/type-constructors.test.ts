@@ -404,15 +404,39 @@ describe('NAMESPACE rules (D5)', () => {
     expect(ce._typeResolver.resolve('v')).toBeUndefined();
   });
 
-  test('an OUTER-scope name is shadowed, not conflicted', () => {
+  test('a SYSTEM builtin name is shadowed engine-wide, not conflicted', () => {
     const ce = new ComputeEngine();
-    // `Sin` is a builtin in an outer scope.
+    // `Sin` is a system-scope builtin: the D5 check consults the GLOBAL
+    // scope's own bindings (an engine-wide name claim), where `Sin` is not
+    // bound, so the declaration succeeds. Types are engine-global (ruled
+    // 2026-08-10) and the constructor's lifetime is the type's — it is
+    // minted into the GLOBAL scope even from inside a pushed scope, so the
+    // builtin stays shadowed after the pop.
     ce.pushScope();
     expect(outcome(() => ce.declareType('Sin', 'number'))).toBe('ok');
-    expect(ce.operatorInfo('Sin')?.signature?.toString()).toBe('(number) -> Sin');
+    expect(ce.operatorInfo('Sin')?.signature?.toString()).toBe(
+      '(number) -> Sin'
+    );
     ce.popScope();
-    // The builtin is untouched outside.
-    expect(ce.box(['Sin', 0]).evaluate().toString()).toBe('0');
+    const r = ce.box(['Sin', 0]).evaluate();
+    expect(r.operator).toBe('Sin');
+    expect(r.type.toString()).toBe('Sin');
+  });
+
+  test('a host declareType under a pushed scope keeps its constructor after the pop', () => {
+    // The constructor's lifetime matches the (engine-global) type's: no
+    // stranded type-without-constructor once the scope pops.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    expect(outcome(() => ce.declareType('gpt', 'tuple<number, number>'))).toBe(
+      'ok'
+    );
+    ce.popScope();
+    expect(ce._typeResolver.resolve('gpt')).toBeDefined();
+    expect(ce.operatorInfo('gpt')).toBeDefined();
+    const r = ce.box(['gpt', 1, 2]).evaluate();
+    expect(r.operator).toBe('gpt');
+    expect(r.type.toString()).toBe('gpt');
   });
 
   test('an INFERRED (auto-declared, valueless) binding upgrades', () => {
@@ -449,7 +473,7 @@ describe('NAMESPACE rules (D5)', () => {
     const ce = new ComputeEngine();
     ce.declareType('po', 'tuple<number, number>');
     expect(outcome(() => ce.declareType('po', 'tuple<number>'))).toContain(
-      'already defined in the current scope'
+      'already defined'
     );
     // Both halves survive intact.
     expect(ce.operatorInfo('po')?.signature?.toString()).toBe('(number, number) -> po');

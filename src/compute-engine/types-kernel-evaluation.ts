@@ -1,5 +1,4 @@
 import type { MathJsonSymbol } from '../math-json.js';
-import type { TypeReference } from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { LatexString } from './latex-syntax/types.js';
 import type { BoxedSubstitution } from './types-kernel-serialization.js';
@@ -303,11 +302,14 @@ export type AssignValue<Expr = unknown, SemiExpr = unknown, CE = unknown> =
     ) => Expr)
   | undefined;
 
-/** @category Definitions */
+/** A lexical scope holds VALUE bindings only. Declared types live in the
+ * engine-level type registry (`IComputeEngine._typeRegistry`) — one namespace
+ * per engine, not scoped (`docs/plans/2026-08-10-global-type-registry.md`).
+ *
+ * @category Definitions */
 export type Scope<Binding = unknown> = {
   parent: Scope<Binding> | null;
   bindings: Map<string, Binding>;
-  types?: Record<string, TypeReference>;
   /** When true, auto-declarations during canonicalization are promoted to parent scope. */
   noAutoDeclare?: boolean;
 };

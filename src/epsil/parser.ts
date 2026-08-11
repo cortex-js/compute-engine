@@ -240,13 +240,11 @@ export class Parser {
    * enough to make the reference parse. */
   private readonly typeResolver: TypeResolver;
 
-  /** Statement-block nesting depth (incremented by `parseBlock`). A `type`
-   * statement at depth > 0 whose name is already known SHADOWS an existing
-   * type — nominal identity is the type NAME, so values of the two would be
-   * indistinguishable; the `type-shadow` warning makes the accident loud
-   * (ruled 2026-08-01, nominal-types design). Depth 0 stays silent: a
-   * top-level redeclaration is the legitimate statement-replace flow
-   * (re-running a notebook cell). */
+  /** Statement-block nesting depth (incremented by `parseBlock`). Types are
+   * engine-global, so a `type` statement at depth > 0 is a hard error
+   * (`type-declaration-not-top-level`, ruled 2026-08-10 — no hoisting).
+   * Depth 0 permits redeclaration silently: a top-level redeclaration is the
+   * legitimate statement-replace flow (re-running a notebook cell). */
   private blockDepth = 0;
 
   /**
@@ -572,12 +570,8 @@ export class Parser {
     const open = this.advance(); // '{'
     this.brackets.push(open);
 
-    // Type names declared inside a block scope LEXICALLY at parse time:
-    // snapshot the known names on entry and restore them on exit, so a `type`
-    // statement in a block is not visible to annotations after it. The set is
-    // mutated in place (never replaced): `typeResolver` closes over the Set
-    // itself. Nested blocks each keep their own snapshot.
-    const outerTypeNames = new Set(this.knownTypeNames);
+    // No type-name snapshot here: `type` statements are top-level only (a
+    // block-local one is a hard error), so `knownTypeNames` only ever grows.
     this.blockDepth += 1;
 
     const stmts: MathJsonExpression[] = [];
@@ -635,8 +629,6 @@ export class Parser {
     }
 
     this.blockDepth -= 1;
-    this.knownTypeNames.clear();
-    for (const n of outerTypeNames) this.knownTypeNames.add(n);
 
     return this.wrap(
       ['Block', ...stmts] as MathJsonExpression[],
@@ -1165,20 +1157,27 @@ export class Parser {
       return null;
     }
 
+    // Types are ENGINE-GLOBAL (`docs/plans/2026-08-10-global-type-registry.md`):
+    // a `type` statement is legal only at the top level of a program. Inside a
+    // block or a function body it is a hard error — no hoisting. The name is
+    // NOT seeded (a declaration that errors declares nothing), so a later
+    // annotation naming it gets an accurate `Unknown type`; recovery skips
+    // just this statement, keeping the rest of the block. The engine's
+    // `DeclareType` handler enforces the same rule for the box route.
+    if (this.blockDepth > 0) {
+      this.error(
+        ['type-declaration-not-top-level', name],
+        kw.start,
+        nameTok.end
+      );
+      this.recoverAtStatementBoundary();
+      return null;
+    }
+
     // Record the name BEFORE the body is parsed: a type alias may refer to
     // itself (`type json = list<json> | integer`), and later annotations in the
     // same program must see it too.
     const wasKnown = this.knownTypeNames.has(name);
-    // Shadowing an existing type inside a block merges nominal identities
-    // (identity is the NAME) — warn, but parse normally. Top level (depth 0)
-    // is the statement-replace flow and stays silent.
-    if (wasKnown && this.blockDepth > 0) {
-      this.diagnostics.push({
-        severity: 'warning',
-        message: ['type-shadow', name],
-        range: [this.baseOffset + nameTok.start, this.baseOffset + nameTok.end],
-      });
-    }
     this.knownTypeNames.add(name);
     // …but undo that seeding on every failure path below: a declaration that
     // did not parse declares nothing, and leaving the name in the set makes a

@@ -627,9 +627,36 @@ export function declareType(
   // declaration that must not claim the value name; no caller uses it today.
   mint ??= true;
 
-  // Is the type already defined in this scope?
-  const scope = ce.context.lexicalScope;
-  const existing = scope.types?.[name];
+  // Is the type already defined? Types live in the ENGINE-LEVEL registry —
+  // one namespace per engine, not lexically scoped
+  // (`docs/plans/2026-08-10-global-type-registry.md`).
+  //
+  // The VALUE half splits across two scopes:
+  //
+  // - The D5 collision PRE-CHECK consults the GLOBAL scope: that is where the
+  //   binding an engine-wide name claim actually collides with lives. The
+  //   Epsil static pre-pass canonicalizes top-level statements inside a
+  //   pushed frame, and checking THAT frame's (empty) bindings would miss a
+  //   genuine collision during the canonical pass while the registry half
+  //   went through — breaking D5's all-or-nothing contract across the two
+  //   passes. (Bootstrap declarations run before the global frame exists and
+  //   fall back to the current, system, scope.)
+  //
+  // - The MINT targets the GLOBAL scope too — the constructor's lifetime is
+  //   the type's (§3.2): a host `declareType()` under a `pushScope()` must
+  //   not leave a permanently-registered type stranded without its
+  //   constructor when the scope pops. The ONE exception is the static
+  //   pre-pass surrogate frame (depth-guarded, unforgeable): there the mint
+  //   goes to the transient frame — visible to the rest of the pre-pass,
+  //   discarded with it (the registry half is rolled back by the pre-pass's
+  //   registry transaction, so the two halves stay in sync).
+  const surrogate =
+    ce._staticTypeCheckDepth > 0 && ce.context.name === 'epsil:static-check';
+  const checkScope =
+    ce._evalContextStack[1]?.lexicalScope ?? ce.context.lexicalScope;
+  const scope = surrogate ? ce.context.lexicalScope : checkScope;
+  const registry = ce._typeRegistry;
+  const existing = registry[name];
 
   // An UNRESOLVED FORWARD REFERENCE is a promise to declare, not a conflict:
   // `type json_array` inside an earlier body made `resolver.forward()` install
@@ -674,7 +701,7 @@ export function declareType(
       (existing as { _declaredByStatement?: boolean })._declaredByStatement !==
         true
     )
-      throw Error(`The type "${name}" is already defined in the current scope`);
+      throw Error(`The type "${name}" is already defined`);
   }
 
   // A statement replacement UPDATES THE RECORD IN PLACE, for the same reason a
@@ -704,9 +731,7 @@ export function declareType(
   // constructor (design §5), so it does claim the value name. `alias` is not
   // yet defaulted here, so `!== true` reads "nominal".
   if (mint && (params === undefined || alias !== true))
-    checkTypeConstructorNamespace(scope, name);
-
-  scope.types ??= {};
+    checkTypeConstructorNamespace(checkScope, name);
 
   alias ??= false; // Nominal by default
 
@@ -743,14 +768,14 @@ export function declareType(
     delete existing!.typeParams;
     delete existing!._varianceState;
     delete existing!._varianceBlockedOn;
-  } else scope.types[name] = { kind: 'reference', name, alias, def: undefined };
+  } else registry[name] = { kind: 'reference', name, alias, def: undefined };
   // The clause goes on the placeholder, BEFORE the body parses: a generic
   // alias that applies itself is then detected unambiguously (the record has
   // `typeParams` and no `def` yet) as `generic-alias-self-reference`.
-  if (params !== undefined) scope.types[name].typeParams = params;
+  if (params !== undefined) registry[name].typeParams = params;
   if (fromStatement)
     (
-      scope.types[name] as { _declaredByStatement?: boolean }
+      registry[name] as { _declaredByStatement?: boolean }
     )._declaredByStatement = true;
 
   /** Undo the placeholder: a declaration that failed declares nothing. */
@@ -801,7 +826,7 @@ export function declareType(
     // A first declaration: the placeholder is this handler's own, so undoing it
     // is removing it. (Every case with an `existing` record is handled above —
     // both reuse it in place.)
-    delete scope.types![name];
+    delete registry[name];
   };
 
   // Parse the type (which may reference itself). If it is malformed, leave
@@ -835,7 +860,7 @@ export function declareType(
     typeof def === 'object' &&
     def.kind === 'reference' &&
     def.args !== undefined &&
-    declarationOf(def) === scope.types[name]
+    declarationOf(def) === registry[name]
   ) {
     rollbackTypeHalf();
     throw new TypeVariableError(
@@ -862,7 +887,7 @@ export function declareType(
       rollbackTypeHalf();
       throw new TypeVariableError(verdict.code, verdict.message);
     }
-    const record = scope.types[name];
+    const record = registry[name];
     if (verdict.status === 'deferred') {
       record._varianceState = 'deferred';
       record._varianceBlockedOn = verdict.blockedOn;
@@ -888,7 +913,7 @@ export function declareType(
 
   // Adjust the definition (the type references in the type will point to
   // the placeholder record)
-  scope.types[name].def = def;
+  registry[name].def = def;
 
   // Hook B: this declaration may have fulfilled the forward reference a
   // provisionally-accepted one was waiting on. Verify every group that has
@@ -902,8 +927,12 @@ export function declareType(
   // statement, which rolls back, leaving the dependent as it was.
   let settled: TypeReference[];
   try {
+    // Value-level dependents are gathered from the CURRENT frame's chain
+    // (which contains `scope`), so a transient frame's own declarations are
+    // covered too.
     settled = settleVarianceGroup(
-      scope,
+      ce,
+      ce.context.lexicalScope,
       name,
       replacesInPlace ? existing : undefined
     );
@@ -922,13 +951,43 @@ export function declareType(
   if (mint) {
     const existingBinding = scope.bindings.get(name);
     try {
-      mintTypeConstructor(ce, scope, name, scope.types[name], def);
+      // `mintTypeConstructor` installs through `ce.declare()`, which targets
+      // the CURRENT frame — enter `scope` when they differ (a host
+      // `declareType()` under a pushed scope) so the constructor lands next
+      // to the binding the D5 check consulted.
+      if (scope === ce.context.lexicalScope)
+        mintTypeConstructor(ce, scope, name, registry[name], def);
+      else
+        ce._inScope(scope, () =>
+          mintTypeConstructor(ce, scope, name, registry[name], def)
+        );
     } catch (e) {
       rollbackTypeHalf();
       if (existingBinding !== undefined)
         scope.bindings.set(name, existingBinding);
       else scope.bindings.delete(name);
       throw e;
+    }
+
+    // A declaration that minted NO constructor (a record body, a generic
+    // alias — or a REPLACEMENT to one, which removed the previous local
+    // constructor) may still have a minted constructor for the name visible
+    // in an OUTER scope: under the pre-pass surrogate, the previous run's
+    // constructor lives in the global scope while this replacement operates
+    // on the transient frame. Left visible, the rest of the pre-pass would
+    // canonicalize calls against a constructor that real evaluation removes
+    // (a spurious arity diagnostic, or a silently-validated call). Mask it
+    // with an inert value shell in the mint scope, so the pass sees the same
+    // value namespace real execution will.
+    if (!isMintedConstructor(scope.bindings.get(name))) {
+      let outer = scope.parent;
+      let inherited = false;
+      while (outer !== null && outer !== undefined && !inherited) {
+        if (isMintedConstructor(outer.bindings.get(name))) inherited = true;
+        outer = outer.parent;
+      }
+      if (inherited && !scope.bindings.has(name))
+        ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
     }
   }
 
@@ -943,6 +1002,13 @@ export function declareType(
   // unblocking route cannot silently skip the bump.
   if (existing || settled.length > 0) {
     ce._anyVersion += 1;
+    // A type REDEFINITION (statement replace, forward-ref fulfillment,
+    // variance settle) changes the answers subtyping gives — a
+    // global-semantics event on all three axes ('operator/type redefinition'
+    // in `_worldVersion`'s contract). A FRESH declaration deliberately bumps
+    // none of these beyond what `ce.declare()` did for the constructor half.
+    ce._semanticVersion += 1;
+    ce._worldVersion += 1;
     // Shadow 'callable' axis (CE_CACHE_STATS probe): variance settle is a
     // binding-repair event in its predicate.
     if (CACHE_STATS) bumpShadowCallable();
@@ -1051,6 +1117,7 @@ function mentionsOf(
  * fails, which throws and so fails the redeclaration.
  */
 function settleVarianceGroup(
+  ce: IComputeEngine,
   scope: Scope,
   justDeclared: string,
   replaced?: TypeReference
@@ -1139,29 +1206,31 @@ function settleVarianceGroup(
       }
     };
 
+    // TYPE-level dependents come from the engine registry — one namespace,
+    // no chain to walk.
+    for (const record of Object.values(ce._typeRegistry)) {
+      if (record === replaced || record.def === undefined) continue;
+      recheckMentions(
+        record.def,
+        `The definition of "${record.name}"`,
+        record.typeParams
+      );
+
+      // VARIANCE: only a parameterized nominal has one to re-verify, and a
+      // still-deferred one belongs to the fixpoint below.
+      if (record._varianceState !== 'verified') continue;
+      if (record.typeParams === undefined) continue;
+      const verdict = verifyVariance(
+        record.name,
+        record.typeParams,
+        record.def,
+        { triggeredBy: justDeclared }
+      );
+      if (verdict.status === 'violation')
+        throw new TypeVariableError(verdict.code, verdict.message);
+    }
+
     for (let s: Scope | null | undefined = scope; s; s = s.parent) {
-      for (const record of Object.values(s.types ?? {})) {
-        if (record === replaced || record.def === undefined) continue;
-        recheckMentions(
-          record.def,
-          `The definition of "${record.name}"`,
-          record.typeParams
-        );
-
-        // VARIANCE: only a parameterized nominal has one to re-verify, and a
-        // still-deferred one belongs to the fixpoint below.
-        if (record._varianceState !== 'verified') continue;
-        if (record.typeParams === undefined) continue;
-        const verdict = verifyVariance(
-          record.name,
-          record.typeParams,
-          record.def,
-          { triggeredBy: justDeclared }
-        );
-        if (verdict.status === 'violation')
-          throw new TypeVariableError(verdict.code, verdict.message);
-      }
-
       // VALUE-level dependents. A declared symbol type or operator signature
       // that mentions the record is broken by exactly the edits that break a
       // type dependent — after `type Foo<T>` replaces `type Foo`, a declared
@@ -1215,36 +1284,31 @@ function settleVarianceGroup(
   let progressed = true;
   while (progressed) {
     progressed = false;
-    // The root scope's `parent` is spelled `null`, but a bootstrap scope may
-    // leave it undefined — walk on truthiness.
-    for (let s: Scope | null | undefined = scope; s; s = s.parent) {
-      for (const record of Object.values(s.types ?? {})) {
-        if (record._varianceState !== 'deferred') continue;
-        if (record.typeParams === undefined || record.def === undefined)
-          continue;
-        let verdict: VarianceResult;
-        try {
-          verdict = verifyVariance(record.name, record.typeParams, record.def, {
-            triggeredBy: justDeclared,
-          });
-        } catch (e) {
-          undo();
-          throw e;
-        }
-        if (verdict.status === 'violation') {
-          undo();
-          throw new TypeVariableError(verdict.code, verdict.message);
-        }
-        if (verdict.status === 'deferred') {
-          record._varianceBlockedOn = verdict.blockedOn;
-          continue;
-        }
-        wasBlockedOn.set(record, record._varianceBlockedOn);
-        record._varianceState = 'verified';
-        delete record._varianceBlockedOn;
-        flipped.push(record);
-        progressed = true;
+    for (const record of Object.values(ce._typeRegistry)) {
+      if (record._varianceState !== 'deferred') continue;
+      if (record.typeParams === undefined || record.def === undefined) continue;
+      let verdict: VarianceResult;
+      try {
+        verdict = verifyVariance(record.name, record.typeParams, record.def, {
+          triggeredBy: justDeclared,
+        });
+      } catch (e) {
+        undo();
+        throw e;
       }
+      if (verdict.status === 'violation') {
+        undo();
+        throw new TypeVariableError(verdict.code, verdict.message);
+      }
+      if (verdict.status === 'deferred') {
+        record._varianceBlockedOn = verdict.blockedOn;
+        continue;
+      }
+      wasBlockedOn.set(record, record._varianceBlockedOn);
+      record._varianceState = 'verified';
+      delete record._varianceBlockedOn;
+      flipped.push(record);
+      progressed = true;
     }
   }
   return flipped;
@@ -1450,7 +1514,7 @@ export function assignFn(
   {
     const scope = ce.context.lexicalScope;
     if (
-      scope.types?.[id]?.def !== undefined &&
+      ce._typeRegistry[id]?.def !== undefined &&
       arg2 !== null &&
       typeof arg2 === 'object'
     )
@@ -1468,7 +1532,7 @@ export function assignFn(
   // `id` as function-typed, then re-canonicalize the literal from its JSON so
   // the self-reference binds and types against the real definition.
   const ctorScope = ce.context.lexicalScope;
-  const ctorType = ctorScope.types?.[id];
+  const ctorType = ce._typeRegistry[id];
   let ctorLiteral: Expression | undefined = undefined;
   try {
     if (arg2 !== null && typeof arg2 === 'object') {
@@ -1497,8 +1561,8 @@ export function assignFn(
     }
 
     // §4.5b D13 (nominal-types design) — constructor-function recognition. A
-    // function literal assigned to a name that the CURRENT scope's own
-    // `scope.types` declares as a NOMINAL type is that type's constructor
+    // function literal assigned to a name that the engine's type registry
+    // declares as a NOMINAL type is that type's constructor
     // function: recognized here, at install time, so the Epsil `function`
     // statement and the box/host routes agree by construction. Ordering falls
     // out of execution order — at Assign time the type either is already

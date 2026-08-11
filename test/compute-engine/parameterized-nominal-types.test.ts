@@ -397,11 +397,15 @@ describe('PARAMETERIZED NOMINAL TYPES — subtyping', () => {
   });
 
   // Finding 9. Relating two applications by NAME alone read the per-parameter
-  // variance off the RHS declaration and then applied it to the LHS's body, so
-  // two same-name types in nested scopes related ASYMMETRICALLY: the outer
-  // `box<inout T>` was a subtype of the inner `box<out T>` and not the reverse.
-  // Two APPLICATIONS must be applications of the SAME declaration record.
-  test('same-name applications from DIFFERENT declarations never relate', () => {
+  // variance off the RHS declaration and then applied it to the LHS's body —
+  // the subtype rule requires two applications of the SAME declaration record
+  // (`declarationOf` identity, `subtype.ts`). The original probe built two
+  // same-name records in nested scopes; that scenario is unrepresentable now
+  // that types are engine-global (ruled 2026-08-10): a second declaration of
+  // the name is refused, so one name ⇒ one declaration record per engine, and
+  // the record-identity guard remains as defense in depth (e.g. across
+  // engines).
+  test('a same-name redeclaration is refused: one declaration record per name', () => {
     const ce = new ComputeEngine();
     ce.declareType('box', 'tuple<v: T, f: (T) -> nothing>', {
       typeParams: [{ name: 'T', variance: 'inout' }],
@@ -409,23 +413,16 @@ describe('PARAMETERIZED NOMINAL TYPES — subtyping', () => {
     const outerInt = ce.type('box<integer>');
     const outerNum = ce.type('box<number>');
     ce.pushScope();
-    ce.declareType('box', 'tuple<v: T>', {
-      typeParams: [{ name: 'T', variance: 'out' }],
-    });
-    const innerInt = ce.type('box<integer>');
-    const innerNum = ce.type('box<number>');
-
-    // All four cross-scope combinations: false, symmetrically.
-    expect(outerInt.matches(innerNum)).toBe(false);
-    expect(innerNum.matches(outerInt)).toBe(false);
-    expect(innerInt.matches(outerNum)).toBe(false);
-    expect(outerNum.matches(innerInt)).toBe(false);
-
-    // Within a scope, nothing changed: the outer `inout` still refuses to
-    // widen, the inner `out` still grants it.
-    expect(outerInt.matches(outerNum)).toBe(false);
-    expect(innerInt.matches(innerNum)).toBe(true);
+    expect(() =>
+      ce.declareType('box', 'tuple<v: T>', {
+        typeParams: [{ name: 'T', variance: 'out' }],
+      })
+    ).toThrow(/already defined/);
     ce.popScope();
+
+    // The one declaration is untouched: `inout` still refuses to widen.
+    expect(outerInt.matches(outerNum)).toBe(false);
+    expect(outerInt.matches('box<integer>')).toBe(true);
   });
 
   test('a `typeToString`/re-parse round trip still relates', () => {

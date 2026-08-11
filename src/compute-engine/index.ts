@@ -4,6 +4,7 @@ import { BigDecimal } from '../big-decimal/index.js';
 import {
   Type,
   TypeParamsOption,
+  TypeReference,
   TypeResolver,
   TypeString,
 } from '../common/type/types.js';
@@ -477,6 +478,116 @@ export class ComputeEngine implements IComputeEngine {
 
   set contextStack(stack: ReadonlyArray<EvalContext>) {
     this._evalContextStack = [...stack];
+  }
+
+  /** The engine-level type registry: one namespace of declared types per
+   * engine, world state alongside symbol assignment. Types are NOT lexically
+   * scoped (`docs/plans/2026-08-10-global-type-registry.md`).
+   * @internal */
+  readonly _typeRegistry: Record<string, TypeReference> = Object.create(null);
+
+  /** See `IComputeEngine._staticTypeCheckDepth`. @internal */
+  _staticTypeCheckDepth = 0;
+
+  /** Capture the registry's state and return a rollback thunk restoring it.
+   *
+   * For the Epsil STATIC PRE-PASS, which canonicalizes every top-level
+   * statement for diagnostics only: a `DeclareType` registers at
+   * canonicalization time (so later statements of the same program check
+   * against the new definition), and the rollback discards those
+   * registrations so the program's real evaluation performs them in
+   * statement order, on the real state. Records are REPLACED IN PLACE
+   * elsewhere (captures hold the record object), so the snapshot is
+   * per-record FIELDS, not just the name table.
+   * @internal */
+  _typeRegistryRollbackPoint(): () => void {
+    const registry = this._typeRegistry;
+    const names = new Set(Object.keys(registry));
+    const fields = [...names].map((name) => {
+      const r = registry[name] as TypeReference & {
+        _declaredByStatement?: boolean;
+        _forwardArity?: Set<number>;
+      };
+      return {
+        r,
+        def: r.def,
+        alias: r.alias,
+        typeParams: r.typeParams,
+        varianceState: r._varianceState,
+        varianceBlockedOn: r._varianceBlockedOn,
+        declaredByStatement: r._declaredByStatement,
+        forwardArity:
+          r._forwardArity === undefined ? undefined : new Set(r._forwardArity),
+      };
+    });
+    return () => {
+      // Track whether the restore actually changed anything: the rollback
+      // runs on EVERY static pre-pass (i.e. every `executeEpsil` call), and
+      // the overwhelming majority of programs declare no types at all.
+      // Bumping the version axes unconditionally would cold every
+      // mutation-keyed cache on every run — the exact anti-pattern the
+      // conditional `_assumptionsDirty` bump in `engine-scope.ts` exists to
+      // avoid (Tycho item 38).
+      let changed = false;
+      for (const k of Object.keys(registry))
+        if (!names.has(k)) {
+          delete registry[k];
+          changed = true;
+        }
+      for (const s of fields) {
+        const r = s.r;
+        if (r.def !== s.def) changed = true;
+        r.def = s.def;
+        if (r.alias !== s.alias) changed = true;
+        r.alias = s.alias;
+        if (r.typeParams !== s.typeParams) changed = true;
+        if (s.typeParams === undefined) delete r.typeParams;
+        else r.typeParams = s.typeParams;
+        if (r._varianceState !== s.varianceState) changed = true;
+        if (s.varianceState === undefined) delete r._varianceState;
+        else r._varianceState = s.varianceState;
+        if (r._varianceBlockedOn !== s.varianceBlockedOn) changed = true;
+        if (s.varianceBlockedOn === undefined) delete r._varianceBlockedOn;
+        else r._varianceBlockedOn = s.varianceBlockedOn;
+        const holder = r as { _declaredByStatement?: boolean };
+        if (holder._declaredByStatement !== s.declaredByStatement)
+          changed = true;
+        if (s.declaredByStatement === undefined)
+          delete holder._declaredByStatement;
+        else holder._declaredByStatement = s.declaredByStatement;
+        const arities = r as { _forwardArity?: Set<number> };
+        // Snapshot took a COPY of the arity set (it is mutated in place), so
+        // compare contents, not identity.
+        const before = arities._forwardArity;
+        const after = s.forwardArity;
+        if (
+          (before === undefined) !== (after === undefined) ||
+          (before !== undefined &&
+            after !== undefined &&
+            (before.size !== after.size ||
+              [...after].some((n) => !before.has(n))))
+        )
+          changed = true;
+        if (after === undefined) delete arities._forwardArity;
+        else arities._forwardArity = after;
+        // A record that vanished from the table but is still captured by a
+        // pre-pass-built type keeps its restored fields — same contract as a
+        // statement replacement rollback.
+        if (!(r.name in registry)) {
+          registry[r.name] = r;
+          changed = true;
+        }
+      }
+      // A rollback that restored something is a type redefinition for
+      // anything boxed against the pre-pass state: bump all three axes,
+      // mirroring the declaration path's replacement bump. A no-op rollback
+      // (no `type` statements in the program) bumps nothing.
+      if (changed) {
+        this._anyVersion += 1;
+        this._semanticVersion += 1;
+        this._worldVersion += 1;
+      }
+    };
   }
 
   /** @internal */

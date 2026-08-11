@@ -1537,7 +1537,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare a type in the current scope. The name is a symbol (or a string) and the type a string holding a type expression, e.g. `\"tuple<x: integer, y: integer>\"`. The type is nominal by default; an optional trailing attributes dictionary with `alias -> True` makes it a structural alias instead, and an additional `typeParams -> \"T, U: number\"` entry makes it a GENERIC alias whose uses must be applied (`Pair<integer>`). The declaration also mints a value constructor of the same name — `[\"point\", 1, 2]`, an inert tagged value for a nominal type, a checked identity for an alias — except for a `record` body, which mints none. Evaluates to `Nothing`."
+      "description": "Declare a type. Types are engine-global (not lexically scoped), so this is only valid at the top level of a program — inside a block or function body it is an error. The name is a symbol (or a string) and the type a string holding a type expression, e.g. `\"tuple<x: integer, y: integer>\"`. The type is nominal by default; an optional trailing attributes dictionary with `alias -> True` makes it a structural alias instead, and an additional `typeParams -> \"T, U: number\"` entry makes it a GENERIC alias whose uses must be applied (`Pair<integer>`). The declaration also mints a value constructor of the same name — `[\"point\", 1, 2]`, an inert tagged value for a nominal type, a checked identity for an alias — except for a `record` body, which mints none. Evaluates to `Nothing`."
     },
     {
       "name": "DedekindEta",
@@ -4967,7 +4967,7 @@
       "name": "PointX",
       "category": "Collections",
       "arity": "1",
-      "signature": "(any) -> any",
+      "signature": "(xs: collection | tuple) -> any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4979,7 +4979,7 @@
       "name": "PointY",
       "category": "Collections",
       "arity": "1",
-      "signature": "(any) -> any",
+      "signature": "(xs: collection | tuple) -> any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4991,7 +4991,7 @@
       "name": "PointZ",
       "category": "Collections",
       "arity": "1",
-      "signature": "(any) -> any",
+      "signature": "(xs: collection | tuple) -> any",
       "associative": false,
       "commutative": false,
       "idempotent": false,

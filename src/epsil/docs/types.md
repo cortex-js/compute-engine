@@ -514,17 +514,30 @@ type polar = tuple<r: number, t: number>
 // ➔ (True, False, False)
 ```
 
-### Scope, and re-running a cell
+### Types are global, and re-running a cell
 
-A type declaration — both the type name and its constructor — lives in the
-current scope, like a `let`. One inside a block or a loop body stays there:
+A type declaration — both the type name and its constructor — is **global**:
+it belongs to the whole program (and to later cells on the same engine), not
+to any block. A type name means the same thing everywhere it appears.
+Consequently a `type` statement is only allowed at the top level of a
+program. Inside a `do` block, a function body, an `if` branch or a loop body
+it is an error:
 
-```epsil-live
-let origin = 0
+<!-- epsil-test: expect-diagnostics -->
+
+```epsil
 do {
-  type inner = tuple<number, number>
+  type inner = tuple<number, number> // ✘ type-declaration-not-top-level
   inner(3, 4)
 }
+```
+
+Declare the type at the top level instead, and use it anywhere — inside
+blocks and function bodies included:
+
+```epsil-live
+type inner = tuple<number, number>
+do { inner(3, 4) }
 // ➔ inner(3, 4)
 ```
 

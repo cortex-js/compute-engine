@@ -909,18 +909,21 @@ describe('Annotations naming a SCOPE-LOCAL type survive the scope', () => {
     expect(t && typeToString(t)).toBe('ret');
   });
 
-  test('the resolution is per-OPERAND, so a re-used name does not leak', () => {
-    // Two scopes declare `dup` differently. Each literal keeps the definition
-    // that was in scope where IT was built — a resolution recorded by name
-    // would hand the second definition to both.
+  test('a re-used name is a duplicate: one engine-wide type namespace', () => {
+    // Types are engine-global (ruled 2026-08-10): a second declaration of
+    // `dup` — from any scope — is an error, so an annotation can never see
+    // two definitions of one name. (This test used to pin a per-OPERAND
+    // resolution memo distinguishing two scope-local `dup`s; that scenario is
+    // now unrepresentable.)
     const ce = new ComputeEngine();
     ce.pushScope();
     ce.declareType('dup', 'tuple<number, number>', { alias: true });
     const a = ce.box(['Function', 1, ['Typed', 'p', "'dup'"]]);
     ce.popScope();
     ce.pushScope();
-    ce.declareType('dup', 'string', { alias: true });
-    const b = ce.box(['Function', 1, ['Typed', 'p', "'dup'"]]);
+    expect(() => ce.declareType('dup', 'string', { alias: true })).toThrow(
+      /already defined/
+    );
     ce.popScope();
     const defOf = (f: ReturnType<ComputeEngine['box']>) => {
       const t = functionLiteralParameters(f)[0].type;
@@ -928,8 +931,8 @@ describe('Annotations naming a SCOPE-LOCAL type survive the scope', () => {
         ? typeToString(t.def!)
         : undefined;
     };
+    // The original annotation still reads its (only) definition.
     expect(defOf(a)).toBe('tuple<number, number>');
-    expect(defOf(b)).toBe('string');
   });
 
   test('a genuinely unknown type name still reads as unannotated', () => {

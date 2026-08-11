@@ -215,6 +215,11 @@ introduced by `if`/`else`/`while`/`for`, or a function body, pushes its own
 lexical scope, so a `let`/`const` inside a block does not leak into the
 enclosing scope.
 
+[Type declarations](/epsil/types/) are the exception: types (and their
+constructors) are **global** — a `type` statement is only allowed at the top
+level of a program, and the declared name means the same thing everywhere on
+the engine.
+
 `let` and `const` are the binding keywords. There is currently no compound
 assignment (`+=`); destructuring declarations (`let (x, y) = t`) and
 destructuring assignments (`(x, y) := t`) are described above.

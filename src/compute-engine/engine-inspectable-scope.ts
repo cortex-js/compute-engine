@@ -1,4 +1,4 @@
-import type { Type, TypeString, TypeReference } from '../common/type/types.js';
+import type { Type, TypeString } from '../common/type/types.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 
 import type {
@@ -45,14 +45,13 @@ function definitionIsInferred(def: BoxedDefinition): boolean {
  * A lexical scope the caller owns and can read back — see
  * `docs/plans/2026-08-04-parse-scope-control-design.md` B2/B3.
  *
- * Structurally a `Scope` (`parent`/`bindings`/`types`), so it is accepted
+ * Structurally a `Scope` (`parent`/`bindings`), so it is accepted
  * anywhere a scope is; the read surface (`declarations`, `narrowings`) exists
  * because `bindings` holds internal definition records whose shape is not API.
  */
 class _InspectableScope implements InspectableScope {
   readonly parent: Scope | null;
   readonly bindings: Map<string, BoxedDefinition>;
-  types?: Record<string, TypeReference>;
 
   /** Outer-definition narrowings observed by contained calls, keyed by name.
    * `from` is the type at the FIRST narrowing seen for that name, `to` the

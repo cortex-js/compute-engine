@@ -368,15 +368,15 @@ export function defineFunctionClause(
 
   const scope = ce.context.lexicalScope;
 
-  // Constructor precedence (spec §4.7): a same-scope NOMINAL type
-  // declaration owns the name — the CONSTRUCTOR interpretation wins, and
-  // v1 has no constructor clauses. Delegate to assignment: its
-  // constructor-function recognition installs the smart constructor
-  // (nominal-types v2); re-defining it replaces the constructor, the
-  // notebook re-run semantics that implementation pins. An ALIAS's
-  // same-name function is an ordinary function (nominal spec §4.5), so it
-  // falls through to normal clause accumulation below.
-  const sameScopeType = scope.types?.[id];
+  // Constructor precedence (spec §4.7): a NOMINAL type declaration owns the
+  // name engine-wide (types are registry-level, not scoped) — the
+  // CONSTRUCTOR interpretation wins, and v1 has no constructor clauses.
+  // Delegate to assignment: its constructor-function recognition installs
+  // the smart constructor (nominal-types v2); re-defining it replaces the
+  // constructor, the notebook re-run semantics that implementation pins. An
+  // ALIAS's same-name function is an ordinary function (nominal spec §4.5),
+  // so it falls through to normal clause accumulation below.
+  const sameScopeType = ce._typeRegistry[id];
   if (sameScopeType?.def !== undefined && sameScopeType.alias !== true) {
     ce.assign(id, literal);
     return;

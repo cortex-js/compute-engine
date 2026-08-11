@@ -30,8 +30,9 @@ import { apply } from './function-utils.js';
  * (`docs/plans/2026-08-01-nominal-types-design.md`, §4.1/§4.1b/§4.1c, D4/D4b/
  * D5/D10).
  *
- * Declaring a type claims BOTH namespaces: the type record in `scope.types`,
- * and a value-level operator of the same name in `scope.bindings`. The operator
+ * Declaring a type claims BOTH namespaces: the type record in the engine's
+ * type registry (`ce._typeRegistry` — engine-level, not scoped), and a
+ * value-level operator of the same name in `scope.bindings`. The operator
  * is what makes a nominal type inhabitable — `point(1, 2)` canonicalizes to,
  * and stays, the inert tagged application `["point", 1, 2]` whose `.type` is
  * the nominal reference. For a structural alias the same signature is minted
@@ -243,7 +244,7 @@ function appliedNominalResult(ref: TypeReference): Type {
  * `scope` (§4.1). Idempotent with respect to a previously minted constructor
  * for the same name, which it removes first (statement re-run, D5).
  *
- * `ref` is the type record in `scope.types` — the same mutable object the
+ * `ref` is the type record in the engine registry — the same mutable object the
  * resolver hands out, so the constructor's result type stays the nominal
  * reference even as its `def` is patched.
  *

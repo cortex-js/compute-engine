@@ -5,6 +5,7 @@ import type {
   Type,
   TypeString,
   TypeResolver,
+  TypeReference,
   TypeParamsOption,
 } from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
@@ -222,6 +223,28 @@ export interface IComputeEngine {
 
   /** @internal */
   readonly _typeResolver: TypeResolver;
+
+  /** The engine-level type registry: one namespace of declared types per
+   * engine, world state alongside symbol assignment. Types are NOT lexically
+   * scoped — a name means the same thing everywhere in the engine, for the
+   * engine's lifetime (see `docs/plans/2026-08-10-global-type-registry.md`).
+   * All reads and writes go through `_typeResolver` / `declareType()`.
+   * @internal */
+  readonly _typeRegistry: Record<string, TypeReference>;
+
+  /** Capture the type registry's state; the returned thunk restores it.
+   * Used by the Epsil static pre-pass to discard its canonicalization-time
+   * type registrations (see `ComputeEngine._typeRegistryRollbackPoint`).
+   * @internal */
+  _typeRegistryRollbackPoint(): () => void;
+
+  /** Depth of enclosing static type-check passes (the Epsil pre-pass).
+   * Non-zero while `staticDiagnostics` canonicalizes a program under its
+   * 'epsil:static-check' frame; the `DeclareType` top-level surrogate check
+   * requires BOTH the frame name and this counter, so a host `pushScope`
+   * with the same name cannot forge the surrogate.
+   * @internal */
+  _staticTypeCheckDepth: number;
 
   /** Absolute time beyond which evaluation should not proceed.
    * @internal

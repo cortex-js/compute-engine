@@ -88,11 +88,35 @@ export function staticDiagnostics(
   ast: MathJsonExpression,
   source: string
 ): ParsingDiagnostic[] {
+  // The frame NAME is load-bearing: the engine's `DeclareType` handler treats
+  // 'epsil:static-check' as a top-level surrogate (types are engine-global,
+  // and statements boxed directly in this frame are top-level by
+  // construction) — see `declareTypeStatement` in
+  // `src/compute-engine/library/core.ts`. Renaming it here without updating
+  // that check would make every checked `type` statement a false
+  // `invalid-type-declaration`.
+  //
+  // The registry rollback is the pre-pass's isolation for the TYPE namespace,
+  // symmetric with what popping the frame does for value bindings: a
+  // `DeclareType` registers at canonicalization time so LATER statements of
+  // the same program check against the new definition (arity of a re-declared
+  // constructor, self-references), and the rollback discards those
+  // registrations so the program's real evaluation performs them in statement
+  // order, on the real engine state — a declaration this pass diagnosed as a
+  // conflict must not have half-registered, and a checked-but-never-run
+  // program must not mutate the engine's types.
+  const rollbackTypes = ce._typeRegistryRollbackPoint();
+  // The engine requires the depth counter IN ADDITION to the frame name (so a
+  // host `pushScope(undefined, 'epsil:static-check')` cannot forge the
+  // surrogate and smuggle a nested `DeclareType` past the top-level rule).
+  ce._staticTypeCheckDepth += 1;
   ce.pushScope(undefined, 'epsil:static-check');
   try {
     return canonicalizationDiagnostics(ce, ast, source);
   } finally {
     ce.popScope();
+    ce._staticTypeCheckDepth -= 1;
+    rollbackTypes();
   }
 }
 

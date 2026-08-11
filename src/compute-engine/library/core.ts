@@ -659,8 +659,8 @@ function bindTuplePattern(
 }
 
 /**
- * Register the type declared by a `DeclareType` statement in the current
- * lexical scope. Returns an `Error` value on failure, `null` on success.
+ * Register the type declared by a `DeclareType` statement in the ENGINE-LEVEL
+ * type registry. Returns an `Error` value on failure, `null` on success.
  *
  * Called from both the canonical and the evaluate handler: the canonical pass
  * makes the type visible to the statements canonicalized after it (a `Block`
@@ -668,6 +668,15 @@ function bindTuplePattern(
  * runtime frame), and the evaluate pass makes it visible on routes that skip
  * canonicalization. Both passes are idempotent thanks to the
  * `fromStatement` replace rule in `ce.declareType()`.
+ *
+ * Types are engine-global (`docs/plans/2026-08-10-global-type-registry.md`),
+ * so a `DeclareType` statement is legal only at the TOP LEVEL of a program —
+ * inside a `do` block, a function body, an `if` branch or a loop it is a hard
+ * error (no hoisting). A registration from a nested scope would still write
+ * global state; the error keeps "a block mutated the engine's type namespace"
+ * from ever being something a reader has to consider. The Epsil parser
+ * enforces the same rule statically (`type-declaration-not-top-level`); this
+ * check covers the box route and non-Epsil MathJSON programs.
  */
 function declareTypeStatement(
   ce: ComputeEngine,
@@ -681,6 +690,42 @@ function declareTypeStatement(
     : undefined;
   if (!name)
     return ce.error(['invalid-type-declaration', 'Expected a type name']);
+
+  // Top-level only: the current lexical scope must be the engine's global
+  // scope (`_evalContextStack[1]` — `[0]` is the system scope). A `Block` or
+  // `Function` body canonicalizes AND evaluates its statements inside its own
+  // scope (`canonicalBlock` runs them under `ce._inScope(scope, …)`), so both
+  // routes are caught by the same comparison. The executeEpsil program
+  // wrapper unwraps its top-level `Block`, so genuine top-level statements
+  // run directly in the global scope. An engine without a global frame yet
+  // (bootstrap) never routes statements through here.
+  //
+  // One frame is a TOP-LEVEL SURROGATE: the Epsil static pre-pass
+  // (`src/epsil/static-diagnostics.ts`) canonicalizes each top-level
+  // statement inside a single pushed frame — named 'epsil:static-check' AND
+  // guarded by the engine's `_staticTypeCheckDepth` counter, so a host
+  // `pushScope` with the same public name cannot forge it — to keep binding
+  // side-effects out of the program scope. Statements boxed directly in that
+  // frame are top-level by construction, and registering there is what lets
+  // later statements of the same cell (and a statement-replace re-run) check
+  // against the NEW definition. A nested `DeclareType` under it still
+  // errors: the enclosing `Block` pushes its own (anonymous) frame on top.
+  const globalScope = ce._evalContextStack[1]?.lexicalScope;
+  const ctx = ce.context;
+  const inSurrogate =
+    ce._staticTypeCheckDepth > 0 && ctx.name === 'epsil:static-check';
+  if (
+    globalScope !== undefined &&
+    ctx.lexicalScope !== globalScope &&
+    !inSurrogate
+  )
+    return ce.error(
+      [
+        'invalid-type-declaration',
+        'Type declarations must be at the top level of a program, not inside a block or function body',
+      ],
+      name
+    );
 
   const typeStr = typeOp
     ? ((isString(typeOp) ? typeOp.string : sym(typeOp)) ?? undefined)
@@ -1545,7 +1590,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const symbolName = sym(symbol);
         const ctorScope = ce.context.lexicalScope;
         const ctorType =
-          symbolName !== undefined ? ctorScope.types?.[symbolName] : undefined;
+          symbolName !== undefined ? ce._typeRegistry[symbolName] : undefined;
         const isCtorTarget =
           ctorType?.def !== undefined && ctorType.alias !== true;
         const isAliasTarget =
@@ -1739,7 +1784,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         let restoreCtor: (() => void) | undefined = undefined;
         if (symbolName !== undefined && isFunction(args[1], 'Function')) {
           const scope = ce.context.lexicalScope;
-          if (scope.types?.[symbolName]?.def !== undefined)
+          if (ce._typeRegistry[symbolName]?.def !== undefined)
             restoreCtor = loosenMintedConstructor(ce, scope, symbolName);
         }
 
@@ -1759,7 +1804,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // assign path re-runs the same installation idempotently.
         if (symbolName !== undefined && isFunction(canonRhs, 'Function')) {
           const scope = ce.context.lexicalScope;
-          const t = scope.types?.[symbolName];
+          const t = ce._typeRegistry[symbolName];
           if (t?.def !== undefined) {
             try {
               if (t.alias !== true) {
@@ -2360,7 +2405,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     DeclareType: {
       description:
-        'Declare a type in the current scope. The name is a symbol (or a ' +
+        'Declare a type. Types are engine-global (not lexically scoped), so ' +
+        'this is only valid at the top level of a program — inside a block ' +
+        'or function body it is an error. The name is a symbol (or a ' +
         'string) and the type a string holding a type expression, e.g. ' +
         '`"tuple<x: integer, y: integer>"`. The type is nominal by default; ' +
         'an optional trailing attributes dictionary with `alias -> True` ' +

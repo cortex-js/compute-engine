@@ -492,21 +492,24 @@ describe('EPSIL TYPE STATEMENT RECOVERY', () => {
   });
 
   test('inside a block, the rest of the block still parses', () => {
+    // A block-local `type` statement is a hard error (types are global; ruled
+    // 2026-08-10) — reported BEFORE the body parses, so the malformed body is
+    // never reached. Recovery skips just the statement.
     const source =
       'do {\n  type inner = )bad(\n  let b = 1\n  b + 1\n}\nlet c = 2';
     expect(diagnosticsOf(source)).toEqual([
-      ['type-annotation-error', 'Expected a type'],
+      ['type-declaration-not-top-level', 'inner'],
     ]);
     // Both the block's remaining statements and the statement AFTER the block.
     expect(recovered(source)).toBe('do {let b = 1; b + 1}\nlet c = 2');
   });
 
-  test('a malformed body does not eat the block’s closing brace', () => {
+  test('a misplaced declaration does not eat the block’s closing brace', () => {
     // Same-line closer: the statement recovery stops at `}` rather than
     // skipping past it and unbalancing the block.
     const source = 'do { type inner = )bad( }\nlet c = 2';
     expect(diagnosticsOf(source)).toEqual([
-      ['type-annotation-error', 'Expected a type'],
+      ['type-declaration-not-top-level', 'inner'],
     ]);
     expect(recovered(source)).toBe('do {}\nlet c = 2');
   });
@@ -585,73 +588,86 @@ describe('EPSIL TYPE NAME SEEDING', () => {
     ).toEqual([['type-annotation-error', 'Expected a type']]);
   });
 
-  test('a type declared in a `do` block is not visible after it', () => {
+  // Types are ENGINE-GLOBAL (ruled 2026-08-10, global-type-registry plan): a
+  // `type` statement inside any block or function body is a hard error — no
+  // hoisting. The name is not seeded (the declaration declares nothing), so a
+  // later annotation naming it gets an accurate `Unknown type`.
+  test('a `type` statement in a `do` block is a hard error', () => {
     expect(
       diagnosticsOf(
         'do {\n  type inner = integer\n  let q: inner = 1\n  q\n}\nlet z: inner = 2'
       )
-    ).toEqual([['type-annotation-error', 'Unknown type "inner"']]);
+    ).toEqual([
+      ['type-declaration-not-top-level', 'inner'],
+      ['type-annotation-error', 'Unknown type "inner"'],
+      ['type-annotation-error', 'Unknown type "inner"'],
+    ]);
   });
 
-  test('…but it IS visible inside the block', () => {
-    expect(
-      diagnosticsOf('do {\n  type inner = integer\n  let q: inner = 1\n  q\n}')
-    ).toEqual([]);
-  });
-
-  test('a type declared in a function body does not leak', () => {
+  test('a `type` statement in a function body is a hard error', () => {
     expect(
       diagnosticsOf(
         'function f() {\n  type inner = integer\n  let q: inner = 1\n  q\n}\nlet z: inner = 2'
       )
-    ).toEqual([['type-annotation-error', 'Unknown type "inner"']]);
+    ).toEqual([
+      ['type-declaration-not-top-level', 'inner'],
+      ['type-annotation-error', 'Unknown type "inner"'],
+      ['type-annotation-error', 'Unknown type "inner"'],
+    ]);
   });
 
-  test('a type declared in an `if` branch does not leak', () => {
+  test('a `type` statement in an `if` branch is a hard error', () => {
     expect(
       diagnosticsOf('if true {\n  type inner = integer\n  1\n}\nlet z: inner = 2')
-    ).toEqual([['type-annotation-error', 'Unknown type "inner"']]);
+    ).toEqual([
+      ['type-declaration-not-top-level', 'inner'],
+      ['type-annotation-error', 'Unknown type "inner"'],
+    ]);
   });
 
-  test('nested blocks each restore their own snapshot', () => {
+  test('a nested block errors too, and the name never lands', () => {
     expect(
       diagnosticsOf(
         'do {\n  do {\n    type deep = integer\n    let a: deep = 1\n    a\n  }\n  let b: deep = 2\n}'
       )
-    ).toEqual([['type-annotation-error', 'Unknown type "deep"']]);
+    ).toEqual([
+      ['type-declaration-not-top-level', 'deep'],
+      ['type-annotation-error', 'Unknown type "deep"'],
+      ['type-annotation-error', 'Unknown type "deep"'],
+    ]);
   });
 
   test('a TOP-LEVEL declaration stays visible across a block', () => {
     expect(
       diagnosticsOf(
-        'type outer = integer\ndo {\n  type inner = integer\n  let q: inner = 1\n  q\n}\nlet z: outer = 2'
+        'type outer = integer\ndo {\n  let q: outer = 1\n  q\n}\nlet z: outer = 2'
       )
     ).toEqual([]);
   });
 });
 
-describe('EPSIL TYPE SHADOW WARNING', () => {
-  // Nominal identity is the type NAME, so a block-local declaration shadowing
-  // an existing type silently merges the two identities. The `type-shadow`
-  // warning makes the accident loud (ruled 2026-08-01). Top level stays
-  // silent: re-declaring at depth 0 is the legitimate statement-replace flow.
-  test('a block-local type shadowing a program type warns', () => {
+describe('EPSIL TYPE DECLARATIONS ARE TOP-LEVEL ONLY', () => {
+  // Types are ENGINE-GLOBAL (ruled 2026-08-10): shadowing is impossible — a
+  // block-local declaration of ANY name (fresh or existing) is the
+  // `type-declaration-not-top-level` hard error. Top level stays permissive:
+  // re-declaring at depth 0 is the legitimate statement-replace flow.
+  test('a block-local declaration reusing a program type name errors', () => {
     const [, diagnostics] = parseEpsil(
       'type point = tuple<number, number>\nlet a = 0\ndo {\n  type point = tuple<string, string>\n  1\n}'
     );
     expect(diagnostics.map((d) => [d.severity, d.message])).toEqual([
-      ['warning', ['type-shadow', 'point']],
+      ['error', ['type-declaration-not-top-level', 'point']],
     ]);
   });
 
-  test('a block-local type shadowing a HOST type warns', () => {
+  test('a block-local declaration reusing a HOST type name errors', () => {
     const [, diagnostics] = parseEpsil(
       'let a = 0\ndo {\n  type hostpt = tuple<number, number>\n  1\n}',
       undefined,
       { typeNames: ['hostpt'] }
     );
     expect(diagnostics.map((d) => [d.severity, d.message])).toEqual([
-      ['warning', ['type-shadow', 'hostpt']],
+      ['error', ['type-declaration-not-top-level', 'hostpt']],
     ]);
   });
 
@@ -667,24 +683,24 @@ describe('EPSIL TYPE SHADOW WARNING', () => {
     ).toEqual([]);
   });
 
-  test('a fresh block-local name does not warn', () => {
+  test('a fresh block-local name errors too', () => {
     expect(
       diagnosticsOf('let a = 0\ndo {\n  type fresh = tuple<number, number>\n  1\n}')
-    ).toEqual([]);
+    ).toEqual([['type-declaration-not-top-level', 'fresh']]);
   });
 
-  test('the shadowed program still evaluates (and the shadow takes effect)', () => {
+  test('the outer type is untouched by a rejected block-local declaration', () => {
     const ce = new ComputeEngine();
-    // The inner (shadowing) `point` accepts strings — its constructor is the
-    // one in scope inside the block, so the call proves the shadow is live.
+    // The block-local `type point` errors; the top-level `point` (numbers)
+    // stays the one and only `point`, so its constructor still validates.
     const r = executeEpsil(
       ce,
-      'type point = tuple<number, number>\nlet a = 0\ndo {\n  type point = tuple<string, string>\n  point("a", "b")\n}'
+      'type point = tuple<number, number>\nlet a = 0\ndo {\n  type point = tuple<string, string>\n  point(1, 2)\n}'
     );
     expect(r.diagnostics.map((d) => d.message)).toEqual([
-      ['type-shadow', 'point'],
+      ['type-declaration-not-top-level', 'point'],
     ]);
-    expect(r.value.toString()).toBe('point("a", "b")');
+    expect(r.value.toString()).toBe('point(1, 2)');
   });
 });
 
@@ -842,7 +858,7 @@ describe('EPSIL TYPE DECLARATIONS (end-to-end)', () => {
     expect(r.value.toString()).toBe('(1, 2, 3)');
   });
 
-  test('a type declared in a block stays in the block', () => {
+  test('a type declared in a block is a hard error and declares nothing', () => {
     const ce = new ComputeEngine();
     // Two top-level statements: a single `do {…}` program would be unwrapped
     // as the program wrapper and its statements would run at top level.
@@ -850,9 +866,11 @@ describe('EPSIL TYPE DECLARATIONS (end-to-end)', () => {
       ce,
       'let start = 0\ndo {\n  type alias inner = tuple<number, number>\n  let q: inner = (3, 4)\n  q\n}'
     );
-    expect(r.diagnostics).toEqual([]);
-    expect(r.value.toString()).toBe('(3, 4)');
-    // Not visible at top level afterwards…
+    expect(r.diagnostics.map((d) => d.message)).toEqual([
+      ['type-declaration-not-top-level', 'inner'],
+      ['type-annotation-error', 'Unknown type "inner"'],
+    ]);
+    // Nothing landed in the engine registry…
     expect(() => ce.type('inner')).toThrow();
     // …and a next cell's annotation errors at parse time.
     const r2 = executeEpsil(ce, 'let z: inner = (3, 4)\nz');
@@ -1159,46 +1177,89 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     expect(executeEpsil(ce, 'po(1, 2)').value.toString()).toContain('Error');
   });
 
-  test('a type declared in a block keeps its constructor in the block', () => {
+  test('a block-local declaration mints NO constructor', () => {
+    // The `type` statement errors (top-level only, ruled 2026-08-10), so
+    // neither namespace is claimed: no type record, no constructor.
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
       'let start = 0\ndo {\n  type inner = tuple<number, number>\n  inner(3, 4)\n}'
     );
-    expect(r.diagnostics).toEqual([]);
-    expect(r.value.toString()).toBe('inner(3, 4)');
-    // Not visible at top level afterwards.
+    expect(r.diagnostics.map((d) => d.message[0])).toEqual([
+      'type-declaration-not-top-level',
+    ]);
     expect(ce.operatorInfo('inner')).toBeUndefined();
+    expect(() => ce.type('inner')).toThrow();
   });
 
-  test('a type declared in a function body may ESCAPE as the inferred result type', () => {
-    // The inferred signature used to be assembled as a STRING and re-parsed at
-    // the declaration site, where `inner` is out of scope:
-    // `Failed to parse type "(unknown) -> inner"`. The signature is now built
-    // as a Type object, so the `TypeReference` (carrying its own definition)
-    // survives the escape.
+  test('a function-body declaration is rejected (no escaping result type)', () => {
+    // Historically a function-local type could escape as the inferred result
+    // type (and once broke signature reparsing: `Failed to parse type
+    // "(unknown) -> inner"`). Under the global-type-registry ruling the
+    // declaration itself is the error, closing that class by construction:
+    // declare the type at top level instead.
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
       'function f(a) {\n  type inner = tuple<number, number>\n  inner(a, a)\n}\nf(2)'
     );
-    expect(r.diagnostics).toEqual([]);
-    expect(r.value.toString()).toBe('inner(2, 2)');
-    expect(r.value.type.toString()).toBe('inner');
-    // The type name itself still does not leak out of the function body.
+    expect(r.diagnostics.map((d) => d.message[0])).toEqual([
+      'type-declaration-not-top-level',
+    ]);
     expect(() => ce.type('inner')).toThrow();
   });
 
-  test('a scalar-result body using a locally declared type still works', () => {
-    // The type name never enters the signature here — the historical
-    // working case, pinned alongside the escaping one.
+  test('a top-level type is usable inside a function body', () => {
+    // The supported spelling of the two rejected shapes above.
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      'function g(a) {\n  type inner = tuple<number, number>\n  match inner(a, a) { inner(u, v) => u + v }\n}\ng(2)'
+      'type inner = tuple<number, number>\nfunction f(a) {\n  inner(a, a)\n}\nfunction g(a) {\n  match inner(a, a) { inner(u, v) => u + v }\n}\n(f(2), g(2))'
     );
     expect(r.diagnostics).toEqual([]);
-    expect(r.value.toString()).toBe('4');
+    expect(r.value.toString()).toBe('(inner(2, 2), 4)');
+    expect(r.value.ops![0].type.toString()).toBe('inner');
+  });
+
+  test('pre-pass parity: a replacement to a record body drops the OLD constructor for later statements', () => {
+    // Cell 1 mints an arity-2 tuple constructor. Cell 2 replaces the type
+    // with a record body (which mints NO constructor) and then calls the old
+    // constructor shape. The static pre-pass replaces in a transient frame
+    // while the old constructor lives in the GLOBAL scope — left visible
+    // through the chain it would produce a spurious arity diagnostic
+    // (`po(1, 2, 3)` validated against the removed arity-2 constructor).
+    // The mint step masks the inherited constructor, so the pass sees the
+    // same value namespace real evaluation will: the call is inert.
+    const ce = new ComputeEngine();
+    expect(
+      executeEpsil(ce, 'type po = tuple<number, number>').diagnostics
+    ).toEqual([]);
+    const r = executeEpsil(
+      ce,
+      'type po = record<x: number, y: number>\npo(1, 2, 3)'
+    );
+    // Identical to declaring the record type on a FRESH engine: the
+    // `type-not-callable` lint (record bodies mint no constructor), not a
+    // stale-arity `static-type-error`.
+    expect(r.diagnostics.map((d) => [d.severity, d.message])).toEqual([
+      ['warning', ['type-not-callable', 'po']],
+    ]);
+    // Inert application: record bodies mint no constructor.
+    expect(r.value.operator).toBe('po');
+  });
+
+  test('a program with no type statements does not bump the world/semantic axes', () => {
+    // The pre-pass registry rollback runs on EVERY executeEpsil call; a
+    // no-op rollback (no `type` statements) must not invalidate
+    // mutation-keyed caches (mirrors the conditional `_assumptionsDirty`
+    // bump precedent, Tycho item 38).
+    const ce = new ComputeEngine();
+    executeEpsil(ce, '1 + 1'); // warm up any lazy initialization
+    const world = ce._worldVersion;
+    const semantic = ce._semanticVersion;
+    executeEpsil(ce, '2 + 3');
+    expect(ce._worldVersion).toBe(world);
+    expect(ce._semanticVersion).toBe(semantic);
   });
 
   test('notebook re-run: a second cell sees the constructor', () => {
