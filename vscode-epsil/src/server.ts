@@ -1,13 +1,16 @@
 import {
+  CodeActionKind,
   createConnection,
   DiagnosticSeverity,
   DidChangeConfigurationNotification,
   ProposedFeatures,
   TextDocuments,
   TextDocumentSyncKind,
+  type CodeAction,
   type Diagnostic,
   type InitializeParams,
   type InitializeResult,
+  type TextEdit,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
@@ -34,12 +37,27 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 /** Newest document version scheduled or validated, per document URI. */
 const pendingVersion = new Map<string, number>();
 
+/** A published diagnostic paired with its source fixits (absolute offsets
+ * into the text that was checked), kept so `onCodeAction` can serve them as
+ * quick fixes. */
+type PublishedEntry = {
+  diagnostic: Diagnostic;
+  start: number;
+  end: number;
+  fixits: { start: number; end: number; value: string }[];
+};
+/** The entries behind the last publish, per document URI, stamped with the
+ * document version they were computed from — a version mismatch means the
+ * offsets no longer apply. */
+const published = new Map<string, { version: number; entries: PublishedEntry[] }>();
+
 connection.onInitialize((params: InitializeParams): InitializeResult => {
   hasConfigurationCapability =
     params.capabilities.workspace?.configuration === true;
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
+      codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix] },
     },
   };
 });
@@ -67,6 +85,7 @@ documents.onDidClose((event) => {
   if (timer !== undefined) clearTimeout(timer);
   timers.delete(uri);
   pendingVersion.delete(uri);
+  published.delete(uri);
   void connection.sendDiagnostics({ uri, diagnostics: [] });
 });
 
@@ -87,6 +106,7 @@ async function refreshConfiguration(): Promise<void> {
     const timer = timers.get(document.uri);
     if (timer !== undefined) clearTimeout(timer);
     timers.delete(document.uri);
+    published.delete(document.uri);
     void connection.sendDiagnostics({ uri: document.uri, diagnostics: [] });
   }
 }
@@ -137,13 +157,13 @@ function validate(uri: string): void {
 
   const text = document.getText();
 
-  let diagnostics: Diagnostic[];
+  let entries: PublishedEntry[];
   try {
     // `checkSource()` parses and canonicalizes but never evaluates, and
     // builds a fresh engine per call — canonicalization can retype symbols,
     // so a shared engine would leak state between validations.
     const result = checkSource(text, uri);
-    diagnostics = result.diagnostics.map((x) => toLspDiagnostic(x, text, document));
+    entries = result.diagnostics.map((x) => toEntry(x, text, document));
   } catch (error) {
     // A check that throws is a bug in the engine, not in the user's program:
     // report it in place of diagnostics rather than going silent.
@@ -157,31 +177,105 @@ function validate(uri: string): void {
   const current = documents.get(uri);
   if (current === undefined || current.version !== version) return;
 
-  void connection.sendDiagnostics({ uri, version, diagnostics });
+  published.set(uri, { version, entries });
+  void connection.sendDiagnostics({
+    uri,
+    version,
+    diagnostics: entries.map((e) => e.diagnostic),
+  });
 }
 
-function toLspDiagnostic(
+function toEntry(
   diagnostic: ParsingDiagnostic,
   text: string,
   document: TextDocument
-): Diagnostic {
+): PublishedEntry {
   // `diagnosticToJson()` is the CLI's pure renderer: it turns the
   // code/argument tuple into a human-readable message and normalizes the
-  // offsets. Reusing it keeps the editor's wording identical to `epsil check`.
+  // offsets (and carries the fixits through). Reusing it keeps the editor's
+  // wording identical to `epsil check`.
   const json = diagnosticToJson(diagnostic, text);
   const start = Math.max(0, Math.min(json.start, text.length));
   const end = Math.max(start, Math.min(json.end, text.length));
 
   return {
-    severity: severityOf(diagnostic.severity),
-    range: {
-      start: document.positionAt(start),
-      end: document.positionAt(end),
+    diagnostic: {
+      severity: severityOf(diagnostic.severity),
+      range: {
+        start: document.positionAt(start),
+        end: document.positionAt(end),
+      },
+      message: json.message,
+      code: json.code,
+      source: 'epsil',
     },
-    message: json.message,
-    code: json.code,
-    source: 'epsil',
+    start,
+    end,
+    fixits: json.fixits ?? [],
   };
+}
+
+//
+// ─── Quick fixes ────────────────────────────────────────────────────────────
+//
+// A diagnostic's `fixits` are a SERIES of edits that together address it (not
+// alternatives), so each fixit-carrying diagnostic becomes ONE quick fix
+// applying all of its edits. Per the diagnostic contract, a warning's fixit
+// is always safe (marked preferred); an error's is a best guess.
+//
+
+connection.onCodeAction((params) => {
+  const uri = params.textDocument.uri;
+  const document = documents.get(uri);
+  const state = published.get(uri);
+  if (document === undefined || state === undefined) return [];
+  // The stored offsets are relative to the text that was checked; after an
+  // edit, they no longer apply (a re-check is already scheduled).
+  if (state.version !== document.version) return [];
+
+  const rangeStart = document.offsetAt(params.range.start);
+  const rangeEnd = document.offsetAt(params.range.end);
+
+  const actions: CodeAction[] = [];
+  for (const entry of state.entries) {
+    if (entry.fixits.length === 0) continue;
+    // Offer the fix when the requested range touches the diagnostic.
+    if (entry.end < rangeStart || entry.start > rangeEnd) continue;
+
+    const edits: TextEdit[] = entry.fixits.map((f) => ({
+      range: {
+        start: document.positionAt(f.start),
+        end: document.positionAt(f.end),
+      },
+      newText: f.value,
+    }));
+    actions.push({
+      title: fixTitle(entry),
+      kind: CodeActionKind.QuickFix,
+      diagnostics: [entry.diagnostic],
+      isPreferred: entry.diagnostic.severity === DiagnosticSeverity.Warning,
+      edit: { changes: { [uri]: edits } },
+    });
+  }
+  return actions;
+});
+
+/** A short, action-shaped label for a diagnostic's quick fix. */
+function fixTitle(entry: PublishedEntry): string {
+  switch (entry.diagnostic.code) {
+    case 'mapsto-arrow-expected':
+      return 'Use the function arrow "|->"';
+    case 'parameter-name-mismatch':
+      return "Rename the annotation's parameters to match the lambda";
+    default: {
+      const [first] = entry.fixits;
+      if (entry.fixits.length === 1 && first.start === first.end)
+        return `Insert ${JSON.stringify(first.value)}`;
+      if (entry.fixits.length === 1)
+        return `Replace with ${JSON.stringify(first.value)}`;
+      return 'Apply fix';
+    }
+  }
 }
 
 function severityOf(severity: string): DiagnosticSeverity {

@@ -109,22 +109,17 @@ describe('a parameterless operand is rejected at every callback slot', () => {
     'MinBy',
   ];
 
-  it.each([...eager, ...lazy])(
-    '%s rejects a non-function operand',
-    (op) => {
-      const ce = new ComputeEngine();
-      expect(ce.box([op, XS, 5]).isValid).toBe(false);
-    }
-  );
+  it.each([...eager, ...lazy])('%s rejects a non-function operand', (op) => {
+    const ce = new ComputeEngine();
+    expect(ce.box([op, XS, 5]).isValid).toBe(false);
+  });
 
   // The diagnostic is the declared slot's, identical on both halves — the
   // eager one from `validateArguments`, the lazy one from the operand the
   // canonical handler replaced with it.
   it.each([...eager, ...lazy])('%s reports incompatible-type', (op) => {
     const ce = new ComputeEngine();
-    expect(
-      ce.box([op, XS, 5]).errors[0]?.toString()
-    ).toBe(
+    expect(ce.box([op, XS, 5]).errors[0]?.toString()).toBe(
       'Error(ErrorCode("incompatible-type", "function", "finite_integer"))'
     );
   });
@@ -310,13 +305,36 @@ describe('a valueless source leaves every operator inert', () => {
   // A genuinely EMPTY collection still gets the definite answers.
   it('an empty collection is not inert', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Filter', ['List'], P]).evaluate().toString()).toBe('[]');
-    expect(ce.box(['Any', ['List'], P]).evaluate().toString()).toBe('"False"');
-    expect(ce.box(['All', ['List'], P]).evaluate().toString()).toBe('"True"');
-    expect(ce.box(['Find', ['List'], P]).evaluate().toString()).toBe(
-      '"Nothing"'
-    );
-    expect(ce.box(['IndexWhere', ['List'], P]).evaluate().toString()).toBe('0');
+    expect(
+      ce
+        .box(['Filter', ['List'], P])
+        .evaluate()
+        .toString()
+    ).toBe('[]');
+    expect(
+      ce
+        .box(['Any', ['List'], P])
+        .evaluate()
+        .toString()
+    ).toBe('"False"');
+    expect(
+      ce
+        .box(['All', ['List'], P])
+        .evaluate()
+        .toString()
+    ).toBe('"True"');
+    expect(
+      ce
+        .box(['Find', ['List'], P])
+        .evaluate()
+        .toString()
+    ).toBe('"Nothing"');
+    expect(
+      ce
+        .box(['IndexWhere', ['List'], P])
+        .evaluate()
+        .toString()
+    ).toBe('0');
   });
 });
 
@@ -339,4 +357,439 @@ describe('a malformed predicate is reported by its own operator', () => {
       );
     }
   );
+});
+
+/**
+ * # `isEnumerableCollection`: empty vs. cannot-be-walked
+ *
+ * `each()` yields nothing for two unrelated reasons — the collection is EMPTY,
+ * or its elements have no computable value (`Range(a, b)` over free variables,
+ * a valueless symbol, a wrapper over either). The walk alone cannot tell them
+ * apart, and the facets that could (`count`, `isEmptyCollection`) are not
+ * cheap: reading them from a wrapper re-enters the wrapper's own emptiness
+ * handler, which is exponential in the chain depth (2^(d+1) − 2 calls,
+ * measured over a depth-d `Filter` chain), so the operators fell back to
+ * EVALUATING the source to decide.
+ *
+ * `isEnumerableCollection` answers the question directly and structurally: a
+ * wrapper reads only its source's enumerability, never its own emptiness.
+ */
+describe('isEnumerableCollection separates empty from unwalkable', () => {
+  const P = ['Function', ['Greater', '_1', 0], '_1'] as const;
+
+  function ce(): ComputeEngine {
+    const engine = new ComputeEngine();
+    engine.declare('xs', 'list<integer>');
+    return engine;
+  }
+
+  it('an empty collection is enumerable; a symbolic-bound one is not', () => {
+    const e = ce();
+    // Both walk to nothing — only the facet tells them apart.
+    expect([...e.box(['List']).each()]).toHaveLength(0);
+    expect([...e.box(['Range', 'a', 'b']).each()]).toHaveLength(0);
+
+    expect(e.box(['List']).isEnumerableCollection).toBe(true);
+    expect(e.box(['List']).isEmptyCollection).toBe(true);
+    expect(e.box(['Range', 'a', 'b']).isEnumerableCollection).toBe(false);
+    expect(e.box(['Range', 'a', 'b']).isEmptyCollection).toBe(undefined);
+  });
+
+  it.each([
+    ['a populated list', ['List', 1, 2, 3], true],
+    ['an empty list', ['List'], true],
+    ['a numeric Range', ['Range', 1, 5], true],
+    ['a symbolic Range', ['Range', 'a', 'b'], false],
+    ['a symbolic Linspace', ['Linspace', 'a', 1, 3], false],
+    ['a symbolic Repeat count', ['Repeat', 3, 'n'], false],
+    ['a symbolic Tabulate count', ['Tabulate', P, 'n'], false],
+    ['a valueless symbol', 'xs', false],
+    ['an undeclared symbol', 'zz', false],
+    ['an unknown application', ['f', 'x'], false],
+    ['a scalar', 5, false],
+  ] as const)('%s reports %s', (_label, expr, expected) => {
+    expect(ce().box(expr as any).isEnumerableCollection).toBe(expected);
+  });
+
+  // The one case that stays undecided: an EAGER collection operator has no
+  // collection handlers until it is evaluated, and its declared result type is
+  // the same whether or not the elements are reachable. Callers that need a
+  // verdict (and only they) pay for the evaluation.
+  it('an eager collection operator is undecided, not false', () => {
+    const chars = ce().box(['Characters', { str: 'ab' }]);
+    expect(chars.isCollection).toBe(false);
+    expect(chars.isEnumerableCollection).toBe(undefined);
+    expect([...chars.each()]).toHaveLength(2);
+  });
+
+  it('an eager operator is undecided whether or not its argument is ground', () => {
+    const e = ce();
+    e.declare('s', 'string');
+    // Structurally indistinguishable — same type, no handlers on either — yet
+    // one walks and the other does not. This is why the caller must evaluate.
+    for (const expr of [
+      ['Characters', { str: 'ab' }],
+      ['Characters', 's'],
+    ]) {
+      const boxed = e.box(expr as any);
+      expect(boxed.type.toString()).toBe('list<string>');
+      expect(boxed.isEnumerableCollection).toBe(undefined);
+    }
+    expect([...e.box(['Characters', { str: 'ab' }]).each()]).toHaveLength(2);
+    expect([...e.box(['Characters', 's']).each()]).toHaveLength(0);
+  });
+
+  /**
+   * The evaluation `isEnumerableSource` falls back to is for ATTRIBUTION, not
+   * for enablement: `each()` materializes an eager source by itself, so
+   * dropping it still answers `Filter(Characters("aab"), p)` correctly. What
+   * it decides is the OTHER half — an eager source whose argument is symbolic
+   * walks to nothing, and without the evaluation that empty walk reads as an
+   * empty collection (probed 2026-08-10: `Filter(Characters(s), p)` → `[]`,
+   * `Any(Divisors(n), p)` → `False`).
+   */
+  describe('an eager operator over a symbolic argument stays inert', () => {
+    const GT1 = ['Function', ['Greater', '_1', 1], '_1'] as const;
+
+    it.each([
+      ['Divisors', ['Divisors', 'n'], ['Divisors', 12], '[2,3,4,6,12]'],
+      ['PrimeFactors', ['PrimeFactors', 'n'], ['PrimeFactors', 12], '[2,3]'],
+    ] as const)('Filter over %s', (_op, symbolic, ground, expected) => {
+      const e = ce();
+      expect(e.box(['Filter', symbolic, GT1] as any).evaluate().operator).toBe(
+        'Filter'
+      );
+      // ...while the ground argument still gets a definite answer.
+      expect(
+        e
+          .box(['Filter', ground, GT1] as any)
+          .evaluate()
+          .toString()
+      ).toBe(expected);
+    });
+
+    it.each(['Any', 'All', 'CountIf', 'Find', 'IndexWhere', 'Position'])(
+      '%s over Divisors(n)',
+      (op) => {
+        expect(
+          ce()
+            .box([op, ['Divisors', 'n'], GT1] as any)
+            .evaluate().operator
+        ).toBe(op);
+      }
+    );
+
+    it('Characters of a valueless string symbol', () => {
+      const e = ce();
+      e.declare('s', 'string');
+      const isA = ['Function', ['Equal', '_1', { str: 'a' }], '_1'];
+      expect(
+        e.box(['Filter', ['Characters', 's'], isA]).evaluate().operator
+      ).toBe('Filter');
+      expect(e.box(['Any', ['Characters', 's'], isA]).evaluate().operator).toBe(
+        'Any'
+      );
+      // The same expressions over a REACHABLE string answer definitively.
+      expect(
+        e
+          .box(['Filter', ['Characters', { str: 'aab' }], isA])
+          .evaluate()
+          .toString()
+      ).toBe('["a","a"]');
+      expect(
+        e
+          .box(['Any', ['Characters', { str: 'aab' }], isA])
+          .evaluate()
+          .toString()
+      ).toBe('"True"');
+    });
+  });
+
+  it('propagates through a chain of wrappers', () => {
+    const e = ce();
+    for (const wrapped of [
+      ['Take', 'xs', 2],
+      ['Reverse', ['Take', 'xs', 2]],
+      ['Filter', ['Reverse', ['Take', 'xs', 2]], P],
+      ['Map', ['Cycle', ['Range', 'a', 'b']], P],
+      ['Zip', ['List', 1, 2], ['Range', 'a', 'b']],
+      ['Union', ['Range', 'a', 'b'], ['List', 1]],
+    ]) {
+      const boxed = e.box(wrapped as any);
+      // The wrapper HAS collection handlers — this is exactly the case a
+      // `isCollection` guard reads as walkable.
+      expect(boxed.isCollection).toBe(true);
+      expect(boxed.isEnumerableCollection).toBe(false);
+    }
+  });
+
+  it('a wrapper over a valued source stays enumerable', () => {
+    const e = ce();
+    e.assign('xs', e.box(['List', 1, 5]));
+    expect(e.box(['Take', 'xs', 2]).isEnumerableCollection).toBe(true);
+    expect(e.box(['Filter', ['Reverse', 'xs'], P]).isEnumerableCollection).toBe(
+      true
+    );
+  });
+
+  // Every operator that builds its elements from a source collection
+  // propagates, not only the list wrappers.
+  it.each([
+    ['Partition', ['Partition', 'xs', 2], ['Partition', ['List', 1, 2, 3], 2]],
+    ['Permutations', ['Permutations', 'xs'], ['Permutations', ['List', 1, 2]]],
+    [
+      'Combinations',
+      ['Combinations', 'xs', 2],
+      ['Combinations', ['List', 1, 2], 2],
+    ],
+    ['PowerSet', ['PowerSet', 'ss'], ['PowerSet', ['Set', 1, 2]]],
+    [
+      'CartesianProduct',
+      ['CartesianProduct', 'ss', ['Set', 2]],
+      ['CartesianProduct', ['Set', 1], ['Set', 2]],
+    ],
+    [
+      'Comprehension',
+      ['Comprehension', ['Multiply', 'x', 2], ['Element', 'x', 'xs']],
+      ['Comprehension', ['Multiply', 'x', 2], ['Element', 'x', ['List', 1, 2]]],
+    ],
+  ] as const)('%s propagates from its source', (_op, unknown, known) => {
+    const e = ce();
+    e.declare('ss', 'set<integer>');
+    expect(e.box(unknown as any).isEnumerableCollection).toBe(false);
+    expect(e.box(known as any).isEnumerableCollection).toBe(true);
+  });
+
+  // A DECLARED handler owns all three states: a dependent comprehension binds
+  // its index per iteration, so its clause domains cannot be judged
+  // structurally — the handler says `undefined` and that must not collapse to
+  // the `true` default reserved for operators with no handler at all.
+  it('a declared handler can answer `undefined`', () => {
+    const dependent = ce().box([
+      'Comprehension',
+      ['Add', 'x', 'y'],
+      ['Element', 'x', ['List', 1, 2]],
+      ['Element', 'y', ['Range', 1, 'x']],
+    ]);
+    expect(dependent.isEnumerableCollection).toBe(undefined);
+    // ...and the caller still gets the right answer, by evaluating.
+    expect(dependent.evaluate().toString()).toBe('[2,3,4]');
+  });
+
+  // Independent of size: `Linspace(a, 1, 3)` knows it has three elements and
+  // can compute none of them.
+  it('is independent of `count`', () => {
+    const linspace = ce().box(['Linspace', 'a', 1, 3]);
+    expect(linspace.count).toBe(3);
+    expect(linspace.isEmptyCollection).toBe(false);
+    expect(linspace.isEnumerableCollection).toBe(false);
+    expect([...linspace.each()]).toHaveLength(0);
+  });
+
+  // The wrapper hole this facet was added to close: the operators that
+  // conclude from a walk were guarded by `isCollection`, which a wrapper
+  // answers `true` — so `Filter(Take(xs, 2), p)` answered `[]` for a valueless
+  // `xs` while `Filter(xs, p)` (guarded directly) stayed inert.
+  describe('a WRAPPED valueless source leaves the operators inert', () => {
+    const OPS = [
+      'Filter',
+      'TakeWhile',
+      'DropWhile',
+      'Map',
+      'CountIf',
+      'Find',
+      'IndexWhere',
+      'Position',
+      'Any',
+      'All',
+      'FlatMap',
+    ];
+
+    it.each(OPS)('%s over Take(xs, 2)', (op) => {
+      expect(
+        ce()
+          .box([op, ['Take', 'xs', 2], P])
+          .evaluate().operator
+      ).toBe(op);
+    });
+
+    it.each(OPS)('%s over Reverse(xs)', (op) => {
+      expect(
+        ce()
+          .box([op, ['Reverse', 'xs'], P])
+          .evaluate().operator
+      ).toBe(op);
+    });
+
+    it.each(OPS)('%s over a symbolic Range', (op) => {
+      expect(
+        ce()
+          .box([op, ['Range', 'a', 'b'], P])
+          .evaluate().operator
+      ).toBe(op);
+    });
+  });
+
+  // The cost class this facet exists to avoid. Reading the emptiness facets
+  // from a wrapper was measured at exactly 2^(d+1) − 2 calls; the facet's own
+  // propagation is one call per level.
+  it('is not exponential in the wrapper depth', () => {
+    const e = ce();
+    const proto = Object.getPrototypeOf(e.box(['Filter', ['List', 1], P]));
+    const original = Object.getOwnPropertyDescriptor(
+      proto,
+      'isEnumerableCollection'
+    )!;
+    let calls = 0;
+    const counts: number[] = [];
+    try {
+      Object.defineProperty(proto, 'isEnumerableCollection', {
+        get() {
+          calls += 1;
+          return original.get!.call(this);
+        },
+        configurable: true,
+      });
+      for (const depth of [2, 4, 6, 8]) {
+        let expr: any = ['List', 1, 2, 3];
+        for (let i = 0; i < depth; i++) expr = ['Filter', expr, P];
+        const boxed = e.box(expr);
+        calls = 0;
+        void boxed.isEmptyCollection;
+        counts.push(calls);
+      }
+    } finally {
+      Object.defineProperty(proto, 'isEnumerableCollection', original);
+    }
+    // Assert the COMPLEXITY CLASS, not the exact counts: an extra defensive
+    // read inside the propagation is a legitimate change, an exponential
+    // blow-up is not. Measured 2026-08-10: [3, 10, 21, 36] = d(d+1)/2, against
+    // 2^(d+1) − 2 = [6, 30, 126, 510] for the emptiness-facet shape this
+    // replaced. The bound below (2× the measured quadratic) separates the two
+    // decisively from depth 4 on.
+    const depths = [2, 4, 6, 8];
+    counts.forEach((n, i) => {
+      const d = depths[i];
+      expect(n).toBeLessThanOrEqual(d * (d + 1));
+    });
+    // Sanity: the walk did happen (a facet that is never consulted would also
+    // satisfy the bound above).
+    expect(counts[0]).toBeGreaterThan(0);
+  });
+
+  // Cases found by the 2026-08-10 dual review, each verified against the
+  // engine before it was fixed.
+  describe('review regressions', () => {
+    // An ALIAS must not change the answer. A symbol with a value relays that
+    // value's verdict verbatim; only the ABSENCE of a value is a definite
+    // `false`. Collapsing the value's `undefined` reported a symbol bound to
+    // an eager collection as unwalkable.
+    it('a symbol bound to an eager collection answers like the value', () => {
+      const e = ce();
+      e.assign('ys', e.box(['Characters', { str: 'aab' }]));
+      const isA = ['Function', ['Equal', '_1', { str: 'a' }], '_1'];
+      expect(e.box('ys').isEnumerableCollection).toBe(undefined);
+      expect(e.box(['Filter', 'ys', isA]).evaluate().toString()).toBe(
+        '["a","a"]'
+      );
+    });
+
+    // A dependent clause cannot be judged, but the INDEPENDENT clauses before
+    // it can — and a `false` from one of those decides the comprehension.
+    it('a dependent comprehension over a valueless base clause is inert', () => {
+      const e = ce();
+      const c = [
+        'Comprehension',
+        ['Add', 'x', 'y'],
+        ['Element', 'x', 'xs'],
+        ['Element', 'y', ['Range', 1, 'x']],
+      ];
+      expect(e.box(c as any).isEnumerableCollection).toBe(false);
+      expect(e.box(['Any', c, P] as any).evaluate().operator).toBe('Any');
+      expect(e.box(['CountIf', c, P] as any).evaluate().operator).toBe(
+        'CountIf'
+      );
+      // A dependent comprehension over a REACHABLE base still evaluates.
+      expect(
+        e
+          .box([
+            'Comprehension',
+            ['Add', 'x', 'y'],
+            ['Element', 'x', ['List', 1, 2]],
+            ['Element', 'y', ['Range', 1, 'x']],
+          ])
+          .evaluate()
+          .toString()
+      ).toBe('[2,3,4]');
+    });
+
+    // The multi-source `Map` advances its sources in lockstep, so ANY
+    // unwalkable source stops the walk — reading only `op1` reported `true`.
+    it('the variadic Map consults every source', () => {
+      const e = ce();
+      const f = ['Function', ['Add', '_1', '_2'], '_1', '_2'];
+      const m = ['Map', ['List', 1, 2], 'xs', f];
+      expect(e.box(m as any).isEnumerableCollection).toBe(false);
+      expect(e.box(['Any', m, P] as any).evaluate().operator).toBe('Any');
+    });
+
+    // `count` is a second route to the same wrong answer: these handlers gate
+    // on `isFiniteCollection`, which `Take(xs, 2)` satisfies (capped at 2)
+    // while having nothing to walk.
+    it.each([
+      ['Filter', ['Length', ['Filter', ['Take', 'xs', 2], P]], 'Length'],
+      ['TakeWhile', ['Length', ['TakeWhile', ['Take', 'xs', 2], P]], 'Length'],
+      ['DropWhile', ['Length', ['DropWhile', ['Take', 'xs', 2], P]], 'Length'],
+      ['Dedup', ['Length', ['Dedup', ['Take', 'xs', 2]]], 'Length'],
+      ['Count', ['Count', ['Take', 'xs', 2], 3], 'Count'],
+      ['Ordering', ['Ordering', ['Take', 'xs', 2]], 'Ordering'],
+    ] as const)(
+      '%s does not count an unwalkable source as 0',
+      (_op, expr, head) => {
+        expect(
+          ce()
+            .box(expr as any)
+            .evaluate().operator
+        ).toBe(head);
+      }
+    );
+
+    it('the same expressions over a valued source still count', () => {
+      const e = ce();
+      e.assign('xs', e.box(['List', 3, -1, 4]));
+      expect(
+        e
+          .box(['Length', ['Filter', ['Take', 'xs', 2], P]])
+          .evaluate()
+          .toString()
+      ).toBe('1');
+      expect(
+        e
+          .box(['Count', ['Take', 'xs', 2], 3])
+          .evaluate()
+          .toString()
+      ).toBe('1');
+    });
+
+    // A non-positive bound makes `Take` empty whatever its source is, so the
+    // definite answer stays available.
+    it('Take with a non-positive bound is enumerable', () => {
+      const e = ce();
+      expect(e.box(['Take', 'xs', 0]).isEnumerableCollection).toBe(true);
+      expect(
+        e
+          .box(['Any', ['Take', 'xs', 0], P])
+          .evaluate()
+          .toString()
+      ).toBe('"False"');
+      expect(
+        e
+          .box(['All', ['Take', 'xs', 0], P])
+          .evaluate()
+          .toString()
+      ).toBe('"True"');
+      // A positive bound still propagates from the source.
+      expect(e.box(['Take', 'xs', 2]).isEnumerableCollection).toBe(false);
+    });
+  });
 });

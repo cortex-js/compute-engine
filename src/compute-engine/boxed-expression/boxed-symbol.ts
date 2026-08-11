@@ -1374,6 +1374,43 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
   }
 
+  /**
+   * A symbol can be walked only through something that holds the elements:
+   * its own collection handlers (a built-in set such as `Integers`), or its
+   * value. A DECLARED but valueless symbol (`ce.declare('xs', 'list<integer>')`)
+   * is the canonical non-enumerable source — its walk yields nothing, and
+   * reading that as "empty" is what made `Filter(xs, p)` answer `[]` for a
+   * list that a later `xs := [1, 5]` contradicts. Answer a definite `false`
+   * so callers stay inert without evaluating.
+   *
+   * Only the ABSENCE of a value is definite. A symbol that HAS one relays that
+   * value's own verdict verbatim, `undefined` included: collapsing it (`?? false`)
+   * would report `xs := Characters("aab")` as unwalkable and leave
+   * `Filter(xs, p)` inert, where the un-aliased `Filter(Characters("aab"), p)`
+   * answers `["a","a"]` — the alias must not change the result.
+   */
+  get isEnumerableCollection(): boolean | undefined {
+    const def = this._def;
+    if (def === undefined) return false;
+    const guard = enterCycleQuery(def, CycleQuery.IsEnumerableCollection);
+    // Fail closed: a binding that re-enters its own enumerability query
+    // cannot be walked to a conclusion either.
+    if (guard === CYCLE_DETECTED) return false;
+    try {
+      const handlers = this._asCollection;
+      if (handlers !== undefined) {
+        // A declared handler owns all three states (see `BoxedFunction`).
+        if (handlers.isEnumerable === undefined) return true;
+        return handlers.isEnumerable(this._value ?? this);
+      }
+      const value = this._value;
+      if (value === undefined) return false;
+      return value.isEnumerableCollection;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
+  }
+
   each(): Generator<Expression> {
     // The guard spans this method's SYNCHRONOUS body only — that is where the
     // delegation to another symbol's `each()` happens, so it is enough to

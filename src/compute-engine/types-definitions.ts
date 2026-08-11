@@ -904,6 +904,30 @@ export interface BaseCollectionHandlers {
   isFinite?: (collection: Expression) => boolean | undefined;
 
   /**
+   * Optional predicate answering whether `iterator()` will actually produce
+   * this collection's elements — the cheap way to tell an EMPTY collection
+   * from one that merely cannot be walked, which are otherwise
+   * indistinguishable (both yield nothing).
+   *
+   * Return `false` when the elements have no computable value in the current
+   * state: symbolic bounds (`Range(a, b)`, `Linspace(a, 1, 3)`, a symbolic
+   * repeat count), or a source that is itself not enumerable. Return
+   * `undefined` only when it cannot be decided without evaluating.
+   *
+   * Implementations must be O(1) and must NOT consult `count`, `isEmpty` or
+   * `isFinite` on themselves, nor walk the collection: a wrapper answers by
+   * reading its source's `isEnumerableCollection`, so a chain costs one call
+   * per level. (Reading the emptiness facets instead is exponential in the
+   * chain depth — each read re-enters the next `isEmpty` down.)
+   *
+   * Default when the handler is ABSENT: `true` (an operator with a
+   * `collection` block can enumerate its elements). A handler that IS declared
+   * owns all three states — returning `undefined` from it means "cannot tell
+   * cheaply" and does not fall back to the default.
+   */
+  isEnumerable?: (collection: Expression) => boolean | undefined;
+
+  /**
    * Optional predicate for operators whose collection-ness depends on their
    * operands, e.g. `When(value, cond)`, which is a collection exactly when
    * `value` is one.

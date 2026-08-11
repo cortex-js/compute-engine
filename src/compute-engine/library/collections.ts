@@ -10,6 +10,8 @@ import { toInteger, toIntegerOperand } from '../boxed-expression/numerics.js';
 import {
   basicIndexedCollectionHandlers,
   broadcastOverIndexedCollections,
+  enumerableFromAllSources,
+  enumerableFromSource,
   hasAccessibleComponents,
   isDeclaredScalarNumber,
   isEnumerableSource,
@@ -1918,6 +1920,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
 
     collection: {
+      isEnumerable: (expr) => !hasSymbolicRangeBounds(expr),
       isLazy: (_expr) => true,
       count: (expr) => {
         // Symbolic bounds (e.g. Range(1, n)): the count is indeterminate —
@@ -2235,6 +2238,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     // @todo: need eq handler
     collection: {
+      isEnumerable: (expr) =>
+        isFunction(expr) && !expr.ops.some((op) => isSymbolicOperand(op)),
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -2450,6 +2455,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Only a finite collection has a knowable count; anything else stays
       // symbolic, mirroring the 1-arg form.
       if (xs.isFiniteCollection !== true) return undefined;
+      // ...and only an enumerable one: `Take(xs, 2)` over a valueless `xs` is
+      // finite yet has nothing to walk (see `isEnumerableSource`).
+      if (!isEnumerableSource(xs)) return undefined;
       let n = 0;
       for (const x of xs.each()) if (x.isSame(what)) n += 1;
       return engine.number(n);
@@ -2646,6 +2654,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('Map', [...collections, fn]);
     },
     collection: {
+      // The multi-source form advances every source in LOCKSTEP, so a single
+      // unwalkable source stops the whole walk — mirror `isEmpty`/`count`,
+      // which read the same `ops.slice(0, -1)` (the last operand is the
+      // mapping function, not a source).
+      isEnumerable: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.nops <= 2) return expr.op1.isEnumerableCollection;
+        let unknown = false;
+        for (const x of expr.ops.slice(0, -1)) {
+          const e = x.isEnumerableCollection;
+          if (e === false) return false;
+          if (e === undefined) unknown = true;
+        }
+        return unknown ? undefined : true;
+      },
       isLazy: (_expr) => true,
       elementMemo: true,
       count: (expr) => {
@@ -2897,6 +2920,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('Filter', [collection, fn]);
     },
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       elementMemo: true,
       // Structural, O(1), never walks the source: a filter of a finite source
@@ -2945,6 +2969,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // infinite source may still have a finite count.
         if (!isFunction(expr)) return undefined;
         if (expr.op1.isFiniteCollection !== true) return undefined;
+        // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
+        // is finite (capped at 2) yet has nothing to walk, and the loop below
+        // would report that empty walk as a count of 0. See `isEnumerableSource`.
+        if (!isEnumerableSource(expr.op1)) return undefined;
         // The exact walk enforces `ce.iterationLimit` on SOURCE elements; if
         // that limit trips, report the count as unknown rather than letting
         // the cancellation escape (mirrors `comprehensionEnumeratedCount`).
@@ -3308,6 +3336,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('Scan', [collection, fn]);
     },
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       elementMemo: true,
       count: (expr) => (isFunction(expr) ? expr.op1.count : undefined),
@@ -3386,6 +3415,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('Differences', [collection]);
     },
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -3452,6 +3482,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('TakeWhile', [collection, fn]);
     },
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       elementMemo: true,
       // Length is unknown without enumeration. For a finite source we can count
@@ -3459,6 +3490,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.op1.isFiniteCollection !== true) return undefined;
+        // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
+        // is finite (capped at 2) yet has nothing to walk, and the loop below
+        // would report that empty walk as a count of 0. See `isEnumerableSource`.
+        if (!isEnumerableSource(expr.op1)) return undefined;
         let n = 0;
         for (const _ of expr.each()) n++;
         return n;
@@ -3586,6 +3621,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('DropWhile', [collection, fn]);
     },
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       elementMemo: true,
       // For a finite source we can count the retained suffix (bounded); an
@@ -3593,6 +3629,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.op1.isFiniteCollection !== true) return undefined;
+        // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
+        // is finite (capped at 2) yet has nothing to walk, and the loop below
+        // would report that empty walk as a count of 0. See `isEnumerableSource`.
+        if (!isEnumerableSource(expr.op1)) return undefined;
         let n = 0;
         for (const _ of expr.each()) n++;
         return n;
@@ -3688,6 +3728,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('List', Array.from(expr.each()) as Expression[]);
     },
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       elementMemo: true,
       count: (expr) =>
@@ -3806,6 +3847,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     type: joinResultType,
     collection: {
+      isEnumerable: enumerableFromAllSources,
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -3946,6 +3988,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     type: appendResultType,
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -4577,6 +4620,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // already collapsed to its display preview, placeholder included, and
     // `Take` returned the preview's elements instead of its own.)
     collection: {
+      // A non-positive bound yields the empty collection whatever the source
+      // is, so the walk is faithful even over an unwalkable one — without this
+      // short-circuit `Any(Take(xs, 0), p)` would go inert for a valueless
+      // `xs`, where `False` is both available and correct.
+      isEnumerable: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const bound = integerParam(expr.op2);
+        if (bound !== null && (bound ?? 0) <= 0) return true;
+        return expr.op1.isEnumerableCollection;
+      },
       isLazy: (_expr) => true,
       count: takeCount,
       isEmpty: (expr) => {
@@ -4654,6 +4707,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       'forall T. (xs: indexed_collection<T>, count: number) -> list<T>',
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -4867,6 +4921,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(indexed_collection) -> indexed_collection',
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -4928,6 +4983,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     signature: '(indexed_collection) -> indexed_collection',
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -4986,6 +5042,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       'forall T. (value: indexed_collection<T>, start: number, end: number) -> list<T>',
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
         const bounds = sliceBounds(expr);
@@ -5045,6 +5102,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: 'forall T: indexed_collection. (T) -> T',
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -5146,6 +5204,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ]);
     },
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       // One `op1.count` per level, threaded into the position guard — see
       // `insertPositionOf`.
@@ -5245,6 +5304,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return ce.function('List', [...all.slice(0, i0), ...all.slice(i0 + 1)]);
     },
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       // One `op1.count` per level, threaded into the position guard — see
       // `targetPositionOf`.
@@ -5338,6 +5398,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return ce.function('List', out);
     },
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       // One `op1.count` per level, threaded into the position guard — see
       // `targetPositionOf`.
@@ -5396,6 +5457,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(indexed_collection, integer?) -> indexed_collection',
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       // A rotation is a permutation, so length/emptiness/finiteness are
       // offset-INVARIANT and knowable here. They are nonetheless suppressed
@@ -5485,6 +5547,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(indexed_collection, integer?) -> indexed_collection',
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       // See `RotateLeft`: knowable, but suppressed while `at`/`iterator`
       // cannot back it up.
@@ -5663,6 +5726,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Stay inert on non-finite or unknown-length input: a count requires
       // totality (walking every element).
       if (xs.isFiniteCollection !== true) return undefined;
+      // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
+      // is finite (at most 2 elements) yet has no elements to walk, and the
+      // loop below would count 0. See `isEnumerableSource`.
+      if (!isEnumerableSource(xs)) return undefined;
       let count = 0;
       for (const item of xs.each()) {
         const applied = f([item]);
@@ -5699,6 +5766,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Stay inert on non-finite or unknown-length input: reporting positions
       // requires totality (walking every element).
       if (xs.isFiniteCollection !== true) return undefined;
+      // Finiteness is not enumerability — see `CountIf`.
+      if (!isEnumerableSource(xs)) return undefined;
       const indices: Expression[] = [];
       let index = 1;
       for (const item of xs.each()) {
@@ -5732,6 +5801,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Stay inert on non-finite or unknown-length input, aligning with Sort:
       // an empty List would falsely claim a complete ordering.
       if (xs.isFiniteCollection !== true) return undefined;
+      // Same for a finite-but-unwalkable source (`Take(xs, 2)` over a valueless
+      // `xs`), where the walk below finds no elements to order. `Sort` already
+      // declines it — `sortedIndices` returns null — but `Ordering` reads that
+      // as the empty ordering.
+      if (!isEnumerableSource(xs)) return undefined;
       const indices = sortedIndices(xs, fn);
       if (!indices) return ce.function('List', []);
       return ce.function('List', indices);
@@ -6000,6 +6074,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Tabulate(f, 1_000_000)` bound but unread costs O(1) instead of building
     // a million-element list.
     collection: {
+      isEnumerable: (expr) => tabulateCount(expr) !== undefined,
       isLazy: () => true,
       elementMemo: true,
       count: (expr) => tabulateCount(expr),
@@ -6150,12 +6225,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('Dedup', [collection]);
     },
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       // Length is unknown without enumeration. For a finite source we can count
       // the deduped result (bounded); an infinite source stays unknown.
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.op1.isFiniteCollection !== true) return undefined;
+        // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
+        // is finite (capped at 2) yet has nothing to walk, and the loop below
+        // would report that empty walk as a count of 0. See `isEnumerableSource`.
+        if (!isEnumerableSource(expr.op1)) return undefined;
         // The guarded iterator caps the walk at `ce.iterationLimit`; if that
         // trips, report the count as unknown rather than letting the
         // cancellation escape (mirrors Filter's `count`). Any other
@@ -6460,6 +6540,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // unknowable, so `count`/`isFinite` mirror `Dedup`: known only for a finite
     // source.
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       elementMemo: true,
       // Number of runs: for a finite source, walk our own iterator (bounded);
@@ -6467,6 +6548,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.op1.isFiniteCollection !== true) return undefined;
+        // Finiteness is not enumerability: `Take(xs, 2)` over a valueless `xs`
+        // is finite (capped at 2) yet has nothing to walk, and the loop below
+        // would report that empty walk as a count of 0. See `isEnumerableSource`.
+        if (!isEnumerableSource(expr.op1)) return undefined;
         let n = 0;
         for (const _ of expr.each()) n++;
         return n;
@@ -6612,6 +6697,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(indexed_collection+) -> list',
     collection: {
+      isEnumerable: enumerableFromAllSources,
       isLazy: (_expr) => true,
       count: zipCount,
       isFinite: (expr) => {
@@ -6764,6 +6850,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('List', Array(n).fill(ops[0]));
     },
     collection: {
+      isEnumerable: (expr) =>
+        isFunction(expr) &&
+        (expr.ops.length < 2 || toIntegerOperand(expr.op2) !== null),
       isLazy: (expr) => isFunction(expr) && expr.ops?.length === 1,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -6835,6 +6924,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(list) -> list',
     collection: {
+      isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       // Cycling a non-empty collection is infinite; cycling an empty one is
       // empty. Inspect the *underlying* collection (`op1`) — reading
@@ -6898,6 +6988,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Fill', ops, 0),
     collection: {
+      isEnumerable: (expr) =>
+        isFunction(expr) && isFunction(expr.op2) && fillDims(expr.op2) !== null,
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -7796,6 +7888,9 @@ function tally(collection: Expression): [ReadonlyArray<Expression>, number[]] {
  */
 export function enumerationDeclined(collection: Expression): boolean {
   if (collection.isEmptyCollection === true) return false;
+  // A collection that reports itself non-enumerable is decided structurally —
+  // no walk, and in particular no evaluation of an eager or impure source.
+  if (collection.isEnumerableCollection === false) return true;
   return collection.each().next().done === true;
 }
 

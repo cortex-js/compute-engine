@@ -76,6 +76,7 @@ export const CycleQuery = {
   Is: 1 << 21,
   Each: 1 << 22,
   Dereference: 1 << 23,
+  IsEnumerableCollection: 1 << 24,
 } as const;
 
 /** A bitmask of the query kinds currently in progress for a binding. */

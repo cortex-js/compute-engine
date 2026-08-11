@@ -151,18 +151,42 @@ standing polytype behavior).
 - ~~`src/math-json/OPERATORS.json` is stale for `Map`~~ — CLOSED:
   regenerated (it was stale for 41 more operators, and missing three);
   two generator arity defects fixed with it.
-- **A WRAPPER over a valueless source still answers as if empty**
-  (pre-existing, surfaced 2026-08-09 while closing the direct case):
-  `Filter(Take(xs, 2), p)` answers `[]` and `Any(Reverse(xs), p)`
-  `False` for a valueless `xs`, because the wrapper HAS collection
-  handlers — `isCollection` is `true` — while its own walk yields
-  nothing. The honest facets do propagate (`count` and
-  `isEmptyCollection` are both `undefined` all the way up), but reading
-  them from `isEnumerableSource` is **exponential**: measured at
-  exactly 2^(d+1) − 2 predicate calls over a depth-d `Filter` chain
-  (6/14/30/62/126/254 at depths 2–7), since each read re-enters the
-  next `isEmpty` down. Needs an O(1) propagating enumerability facet on
-  the collection handlers — a design, not a re-ordering.
+- ~~A WRAPPER over a valueless source still answers as if empty~~ —
+  CLOSED 2026-08-10 by the enumerability facet this item asked for.
+  `isEnumerableCollection` (expression) / `isEnumerable` (collection
+  handler) answers "will `each()` produce the elements?" structurally,
+  so an empty walk is attributable: `true` means EMPTY, `false` means
+  unwalkable (symbolic-bound `Range`/`Linspace`/`Repeat`/`Tabulate`, a
+  valueless symbol), `undefined` only for an eager operator that has no
+  collection handlers until evaluated. A wrapper propagates from its
+  source ALONE (`enumerableFromSource` / `enumerableFromAllSources`)
+  and never reads its own emptiness, which is what keeps it cheap —
+  the depth-d `Filter` chain went from 2^(d+1) − 2 predicate calls to
+  d(d+1)/2 (3/10/21/36 at depths 2/4/6/8), pinned in
+  `collection-callback-signatures.test.ts`. The dual review of
+  2026-08-10 found the same misreading of `isFiniteCollection` as
+  enumerability on eight more guards (`CountIf`, `Position`,
+  `Ordering`, the 2-arg `Count`, and the walking `count` handlers of
+  `Filter`/`TakeWhile`/`DropWhile`/`Dedup`/`ChunkBy` — all finite
+  because `Take(xs, 2)` caps at 2, all walkable only if `xs` is); they
+  are fixed and pinned too.
+- **An EAGER collection leaf under a wrapper is still read as empty**
+  (pre-existing, surfaced 2026-08-10 by the review of the above):
+  `Filter(Take(Characters(s), 2), p)` answers `[]` and
+  `Any(Take(Characters(s), 2), p)` `False` for a valueless `s`. The
+  eager leaf is the one shape `isEnumerableCollection` reports
+  `undefined` for, a wrapper propagates that `undefined` up, and
+  `isEnumerableSource`'s evaluate-fallback then sees a
+  collection-shaped wrapper (`Take(…)` evaluates to itself) and reads
+  it as walkable. Re-asking the facet on the evaluated form does NOT
+  fix it: a lazy wrapper over a REACHABLE eager leaf
+  (`Filter(Characters("aab"), p)`) also evaluates to a wrapper whose
+  facet is `undefined`, so that spelling would newly declare a working
+  expression inert. The real fix is to give the 73 eager
+  collection-returning operators (`Characters`, `Divisors`,
+  `Eigenvalues`, `Flatten`, …) lazy collection handlers, which would
+  also retire the evaluate-fallback entirely — a per-operator round,
+  not a predicate change.
 - **An eager IMPURE collection source is evaluated several times**
   (pre-existing, measured 2026-08-09 during the above): counting
   handler invocations over a 5-element source,

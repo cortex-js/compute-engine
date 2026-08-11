@@ -38,6 +38,7 @@ import {
   isPossiblyCollectionTyped,
   isTuple,
   isUnknownLengthBroadcast,
+  typeCouldBeCollection,
   lazyBroadcastMapIfNeeded,
   lazyMapNumericApproximation,
   zip,
@@ -2144,6 +2145,27 @@ export class BoxedFunction
   get isFiniteCollection(): boolean | undefined {
     if (!this.isCollection) return undefined;
     return this.operatorDefinition?.collection?.isFinite?.(this);
+  }
+
+  get isEnumerableCollection(): boolean | undefined {
+    if (!this.isValid) return false;
+    if (this.baseDefinition?.collection !== undefined) {
+      // Handlers present: they own the answer. An instance that opted out of
+      // being a collection has inert handlers and nothing to walk.
+      if (this._optedOutOfCollection) return false;
+      const handler = this.operatorDefinition?.collection?.isEnumerable;
+      // A DECLARED handler owns all three states — its `undefined` means
+      // "cannot tell cheaply" and must not collapse to the default.
+      if (handler === undefined) return true;
+      return handler(this);
+    }
+
+    // No collection handlers. An *eager* collection operator (`Characters`,
+    // `UnicodeScalars`) only materializes when evaluated, and `each()` walks
+    // it through the materialize-then-iterate path — so a collection-typed
+    // application is undecidable here rather than false. Anything that cannot
+    // be a collection at all definitely cannot be walked.
+    return typeCouldBeCollection(this.type.type) ? undefined : false;
   }
 
   each(): Generator<Expression> {

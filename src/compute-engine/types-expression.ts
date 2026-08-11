@@ -2445,6 +2445,32 @@ export interface Expression {
    */
   isEmptyCollection: boolean | undefined;
 
+  /**
+   * Whether `each()` yields this collection's actual elements.
+   *
+   * This is the cheap predicate that separates the two reasons `each()` can
+   * produce nothing:
+   *
+   * - `true`: the elements are enumerable, so a walk that yields nothing
+   *   means the collection is **empty**.
+   * - `false`: the elements cannot be produced in the current state, so a
+   *   walk that yields nothing means **nothing at all**. For example
+   *   `Range(a, b)` with free variables, `Repeat(3, n)` with a symbolic
+   *   count, or a wrapper over such a source (`Take(Range(a, b), 2)`).
+   * - `undefined`: undecidable without evaluating — an *eager* collection
+   *   operator (`Characters(s)`, `UnicodeScalars(s)`) has no collection
+   *   handlers until it is evaluated, yet `each()` walks it through the
+   *   materialize-then-iterate path.
+   *
+   * Independent of `count`: a collection can know its size and still not be
+   * enumerable (`Linspace(a, 1, 3)` has a count of 3 and no computable
+   * elements), and an enumerable collection can have an unknown size.
+   *
+   * Answered structurally, without evaluating: O(1) for a leaf, O(depth) for
+   * a chain of wrappers.
+   */
+  isEnumerableCollection: boolean | undefined;
+
   /** If this is an indexed collection, return the element at the specified
    *  index. The first element is at index 1.
    *
@@ -2563,6 +2589,7 @@ export interface CollectionInterface {
   readonly count: number | undefined;
   readonly isFiniteCollection: boolean | undefined;
   readonly isEmptyCollection: boolean | undefined;
+  readonly isEnumerableCollection: boolean | undefined;
 }
 
 /**

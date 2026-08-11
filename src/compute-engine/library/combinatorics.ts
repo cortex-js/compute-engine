@@ -10,6 +10,10 @@ import { apply2 } from '../boxed-expression/apply.js';
 import { gamma, bigGamma, gammaln } from '../numerics/special-functions.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { kleeneEvery } from '../../common/kleene.js';
+import {
+  enumerableFromAllSources,
+  enumerableFromSource,
+} from '../collection-utils.js';
 
 /**
  * Above this many decimal digits, an exact combinatorial result (Fibonacci,
@@ -370,6 +374,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q173740',
       signature: '(set+) -> set',
       collection: {
+        isEnumerable: enumerableFromAllSources,
         contains: (expr, x) => {
           if (!isFunction(expr)) return false;
           const factors = expr.ops;
@@ -400,6 +405,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q205170',
       signature: '(set) -> set',
       collection: {
+        isEnumerable: enumerableFromSource,
         contains: (expr, x) => {
           if (!isFunction(expr)) return false;
           const base = expr.ops[0];
@@ -431,6 +437,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // first `i` ARRANGEMENTS (after reading the — typically small — base
       // collection once). Binding an unread `Permutations` is O(1).
       collection: {
+        isEnumerable: enumerableFromSource,
         isLazy: () => true,
         count: (expr) => permutationsCount(expr),
         isEmpty: (expr) => {
@@ -468,6 +475,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // `iterator`, and `at(i)` yields only the first `i` combinations (after
       // reading the — typically small — base collection once).
       collection: {
+        isEnumerable: enumerableFromSource,
         isLazy: () => true,
         count: (expr) => combinationsCount(expr),
         isEmpty: (expr) => {

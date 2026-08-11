@@ -47,11 +47,12 @@ export function isFiniteIndexedCollection(col: Expression): boolean {
  * the library (`Length`, `Total`, `Sort`, `Map`, `CountIf`, …) has always
  * declined to give by staying inert.
  *
- * An EAGER collection operator (`Characters`, `UnicodeScalars`) has no
- * collection handlers either until it is evaluated, but `each()` DOES walk it
- * through the materialize-then-iterate path. The evaluated form is consulted
- * for exactly that case — off the hot path, since a source that is already a
- * collection answers on the first test.
+ * An EAGER collection operator (`Characters(s)`, `Divisors(n)`, `Eigenvalues`,
+ * … — 73 of them, against 47 with collection handlers) has no collection
+ * handlers either until it is evaluated, and is the one case
+ * `isEnumerableCollection` reports `undefined` for. The evaluated form is
+ * consulted for exactly that case — off the hot path, since a source that is
+ * already a collection answers on the first test.
  *
  * **On the discarded evaluation** (measured 2026-08-09, don't re-litigate):
  * the fallback fires only for a source that is not already a collection, and
@@ -61,15 +62,17 @@ export function isFiniteIndexedCollection(col: Expression): boolean {
  * also what the subsequent walk materializes, and the lazy-collection evaluate
  * memo keeps that second pass cheap.
  *
- * **Why not the propagating signal.** `isEmptyCollection`/`count` are the
- * HONEST facets — a valueless leaf reports `undefined` for both, and so does a
- * wrapper over one (`Take(xs, 2)`, `Reverse(xs)`), where `isCollection`
- * answers `true`. Testing them here would close the wrapper hole (see the
- * ROADMAP follow-up) but is **exponential**: `Filter.isEmpty` would call this,
- * which reads the source's `isEmptyCollection`, which is the inner
- * `Filter.isEmpty`, which calls this again — measured at exactly 2^(d+1) − 2
- * calls (6/14/30/62/126/254 at depths 2–7), the double-read shape-query class.
- * The wrapper hole needs an O(1) propagating facet, not this predicate.
+ * **Why the dedicated facet, and not the emptiness ones.**
+ * `isEmptyCollection`/`count` are HONEST about a valueless leaf (both
+ * `undefined`), and so is a wrapper over one (`Take(xs, 2)`, `Reverse(xs)`),
+ * where `isCollection` answers `true`. But reading them from here is
+ * **exponential**: `Filter.isEmpty` would call this, which reads the source's
+ * `isEmptyCollection`, which is the inner `Filter.isEmpty`, which calls this
+ * again — measured at exactly 2^(d+1) − 2 calls (6/14/30/62/126/254 at depths
+ * 2–7), the double-read shape-query class. `isEnumerableCollection` is the
+ * O(1) propagating facet that answers instead: a wrapper reads only its
+ * source's enumerability (never its own emptiness), so a depth-d chain costs
+ * d calls.
  *
  * **On evaluating an IMPURE source.** The fallback evaluates `xs` and throws
  * the result away, so an eager IMPURE producer (`RandomShuffle`) runs one
@@ -92,8 +95,69 @@ export function isFiniteIndexedCollection(col: Expression): boolean {
  * is worth an evaluation here and is not needed there.
  */
 export function isEnumerableSource(xs: Expression): boolean {
-  // @fixme: we should have a better signal to indicate that `xs` is not a collection. Something `count` or `isCollection` would be suitable (they return undefined), but this appears to not be O(1)
-  return xs.isCollection === true || xs.evaluate().isCollection === true;
+  // The facet answers structurally for everything that can be decided without
+  // evaluating: a leaf collection (`true`), a symbolic-bounds `Range` or a
+  // valueless symbol (`false`), and a wrapper over either (propagated).
+  const enumerable = xs.isEnumerableCollection;
+  if (enumerable !== undefined) return enumerable;
+
+  // Undecidable structurally: an EAGER collection operator has no collection
+  // handlers until it is evaluated, and its declared result type is the same
+  // whether or not the elements are reachable — `Characters("abc")` and
+  // `Characters(s)` for a valueless `s` are both `list<string>` with no
+  // handlers.
+  //
+  // This evaluation does NOT enable the subsequent walk: `each()` materializes
+  // such a source by itself, so dropping this branch still gives
+  // `Filter(Characters("aab"), p)` the right answer. What it buys is
+  // ATTRIBUTION — `each()` yields nothing for `Characters(s)` and three
+  // elements for `Characters("abc")`, and never says which case it was in.
+  // Without it, `Filter(Characters(s), p)` answers `[]` and
+  // `Any(Divisors(n), p)` `False` (probed 2026-08-10), the very bug class this
+  // predicate exists to prevent.
+  //
+  // It is the only branch that pays for an evaluation — see the note above on
+  // its measured cost, and on the impure source it duplicates a draw for
+  // (`each()` is about to evaluate the same expression again; computing the
+  // evaluated form once and threading it through is the ROADMAP follow-up).
+  return xs.evaluate().isCollection === true;
+}
+
+/**
+ * The `isEnumerable` handler of a collection operator that wraps ONE source
+ * collection at `op1` (`Take`, `Filter`, `Reverse`, `Map`, …): it can produce
+ * elements exactly when its source can.
+ *
+ * This is the propagation step that keeps enumerability O(depth): it reads the
+ * source's `isEnumerableCollection` only — never its own `count`/`isEmpty`,
+ * which would re-enter this operator's emptiness handler (see
+ * {@link isEnumerableSource}).
+ */
+export function enumerableFromSource(expr: Expression): boolean | undefined {
+  if (!isFunction(expr)) return undefined;
+  return expr.op1.isEnumerableCollection;
+}
+
+/**
+ * The `isEnumerable` handler of a collection operator that draws from SEVERAL
+ * sources (`Zip`, `Join`, `Union`, …): every collection-typed operand must be
+ * enumerable. Three-valued — one `false` decides, an `undefined` with no
+ * `false` leaves the verdict unknown.
+ */
+export function enumerableFromAllSources(
+  expr: Expression
+): boolean | undefined {
+  if (!isFunction(expr)) return undefined;
+  let unknown = false;
+  for (const op of expr.ops) {
+    // Skip non-collection operands (a `Join` may mix scalars in): they
+    // contribute themselves as a single element, always available.
+    if (!op.isCollection && !typeCouldBeCollection(op.type.type)) continue;
+    const e = op.isEnumerableCollection;
+    if (e === false) return false;
+    if (e === undefined) unknown = true;
+  }
+  return unknown ? undefined : true;
 }
 
 /**
@@ -1121,6 +1185,14 @@ export function windowedCollectionOps(
       if (p === undefined) return undefined;
       return p.src.isFiniteCollection;
     },
+    isEnumerable: (expr) => {
+      const p = getParams(expr);
+      if (p === undefined) return undefined;
+      // Windows are cut from the source's elements: no source walk, no
+      // windows (`count` reports 0 for an unknown-length source, which a
+      // consumer would otherwise read as an empty result).
+      return p.src.isEnumerableCollection;
+    },
     isEmpty: (expr) => {
       const p = getParams(expr);
       if (p === undefined) return undefined;
@@ -1505,6 +1577,7 @@ export function defaultCollectionHandlers(
     subsetOf: def.subsetOf ?? collectionSubset,
   };
   if (def.isCollection) result.isCollection = def.isCollection;
+  if (def.isEnumerable) result.isEnumerable = def.isEnumerable;
   if (def.isLazy) result.isLazy = def.isLazy;
   if (def.elementMemo) result.elementMemo = def.elementMemo;
   if (def.eltsgn) result.eltsgn = def.eltsgn;

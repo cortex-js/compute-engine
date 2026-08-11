@@ -30,6 +30,38 @@
 
 ### Improvements
 
+- **New `expr.isEnumerableCollection`: telling an empty collection from one
+  that cannot be walked.** `each()` yields nothing for two unrelated reasons —
+  the collection is empty, or its elements have no computable value
+  (`Range(a, b)` over free variables, `Linspace(a, 1, 3)`, `Repeat(3, n)`, a
+  declared-but-unassigned symbol, or any wrapper over one of those). The walk
+  alone cannot tell them apart, and the facets that could (`count`,
+  `isEmptyCollection`) are `undefined` in both cases, so the library decided by
+  EVALUATING the source. The new predicate answers structurally, without
+  evaluating: `true` (an empty walk means empty), `false` (an empty walk means
+  nothing), or `undefined` for the one undecidable case — an eager collection
+  operator such as `Characters(s)`, which has no collection handlers until it
+  is evaluated. Custom collection operators declare it with the optional
+  `isEnumerable` collection handler; a wrapper propagates it from its source
+  (default: `true`).
+
+  This closes a family of wrong answers over wrapped unknown sources: for a
+  valueless `xs`, `Filter(Take(xs, 2), p)` answered `[]`, `Any(Reverse(xs), p)`
+  `False`, `CountIf(Take(xs, 2), p)` `0`, `Position(Take(xs, 2), p)` `[]`,
+  `Ordering(Take(xs, 2))` `[]`, `Count(Take(xs, 2), 3)` `0`, and
+  `Length(Filter(Take(xs, 2), p))` `0` — answers a later `xs := [1, 5]`
+  contradicts. All of them now stay inert, as `Length`, `Total`, `Sort` and
+  `Map` always did over the same source spelled directly. The same applies to a
+  symbolic-bound source: `Filter(Range(a, b), p)` no longer reports itself
+  empty, and the multi-source `Map` now consults every source rather than only
+  the first.
+
+  One shape is knowingly left: an *eager* collection leaf under a wrapper
+  (`Filter(Take(Characters(s), 2), p)` for a valueless `s`) still reads as
+  empty, because an eager operator has no collection handlers to answer from
+  and the wrapper's evaluated form is still a wrapper. Tracked in `ROADMAP.md`;
+  the fix is to give those operators lazy collection handlers.
+
 - **Engine construction is ~3× faster, and the gradual registration accretion is
   recovered** (ROADMAP P-BOX, residual half). Every `new ComputeEngine()`
   re-parsed the standard library's type strings from scratch — 1,953

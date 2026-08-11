@@ -601,6 +601,8 @@ function whenCollectionHandlers(): CollectionHandlers {
 
     isFinite: (expr) => value(expr)?.isFiniteCollection,
 
+    isEnumerable: (expr) => value(expr)?.isEnumerableCollection,
+
     elttype: (expr) => {
       const v = value(expr);
       if (!v) return undefined;
@@ -1678,6 +1680,55 @@ function comprehensionIsFinite(expr: Expression): boolean | undefined {
  * random access of its own (`at(i)` for i = 1…n without a prefix cache is
  * O(n²), the original item-23 regression).
  */
+/**
+ * Whether a `Comprehension` can produce its elements: every clause domain the
+ * stream walks must be enumerable.
+ *
+ * A DEPENDENT clause — one naming an index bound by an earlier clause — cannot
+ * be judged here: its index is declared-but-unassigned in the local scope, so
+ * `Range(1, i)` reads as symbolic-bound though it enumerates fine once the walk
+ * binds `i` per iteration. Such a clause contributes `undefined`, not `false`,
+ * so a walkable comprehension is never declared inert.
+ *
+ * The clauses BEFORE the first dependent one are still judged, and that is what
+ * catches the shape a whole-comprehension `undefined` used to miss:
+ * `[x + y for x in xs for y in 1..x]` over a valueless `xs` walks to nothing,
+ * evaluates to `[]`, and had `Any(…)` answering `False` — the caller's
+ * evaluate-fallback sees a collection-shaped result and cannot tell. The
+ * leading `x in xs` clause is independent, so a `false` from it decides the
+ * whole comprehension.
+ */
+function comprehensionIsEnumerable(expr: Expression): boolean | undefined {
+  if (!isFunction(expr)) return undefined;
+  const clauses = expr.ops.slice(1);
+  if (clauses.length === 0) return undefined;
+
+  // Index names bound so far; a clause whose domain mentions one of them is
+  // dependent (same test `comprehensionIsDependent` applies, per clause).
+  const bound: string[] = [];
+  let unknown = false;
+  for (const clause of clauses) {
+    if (!isFunction(clause, 'Element')) return undefined;
+    const coll = clause.ops[1];
+    if (coll === undefined) return undefined;
+
+    if (bound.length > 0 && coll.has(bound)) {
+      // Dependent domain: unjudgeable, but a LATER clause cannot rescue an
+      // earlier `false`, so keep scanning rather than bailing out.
+      unknown = true;
+    } else {
+      const e = coll.isEnumerableCollection;
+      if (e === false) return false;
+      if (e === undefined) unknown = true;
+    }
+
+    const idx = clause.ops[0];
+    if (idx && isSymbol(idx) && idx.symbol !== 'Nothing')
+      bound.push(idx.symbol);
+  }
+  return unknown ? undefined : true;
+}
+
 function comprehensionCollectionHandlers(): CollectionHandlers {
   return {
     isLazy: () => true,
@@ -1691,6 +1742,8 @@ function comprehensionCollectionHandlers(): CollectionHandlers {
     },
 
     isFinite: (expr) => comprehensionIsFinite(expr),
+
+    isEnumerable: (expr) => comprehensionIsEnumerable(expr),
 
     iterator: (expr) => comprehensionStream(expr),
 

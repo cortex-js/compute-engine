@@ -24,7 +24,11 @@ import {
 } from '../boxed-expression/constraint-subject.js';
 import { domainToType } from '../boxed-expression/utils.js';
 import { adjoinType, quotientRingType } from './type-handlers.js';
-import { MAX_SIZE_EAGER_COLLECTION } from '../collection-utils.js';
+import {
+  enumerableFromAllSources,
+  enumerableFromSource,
+  MAX_SIZE_EAGER_COLLECTION,
+} from '../collection-utils.js';
 import type {
   Expression,
   SymbolDefinitions,
@@ -937,6 +941,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the elements of the first set that are not in any of the subsequent sets.',
     collection: {
+      isEnumerable: enumerableFromSource,
       // Three-valued: `x ∈ col ∧ x ∉ s1 ∧ x ∉ s2 ∧ …` with Kleene
       // combination — indeterminate member tests yield `undefined`, not a
       // spurious definitive answer.
@@ -982,6 +987,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     },
     evaluate: intersection,
     collection: {
+      isEnumerable: enumerableFromAllSources,
       contains: containsAll,
       count: (expr) => {
         if (!isFunction(expr)) return 0;
@@ -1019,6 +1025,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // that is a union of collections with more than MAX_SIZE_EAGER_COLLECTION
     // elements. Otherwise, when we evaluated the union, we got a set literal.
     collection: {
+      isEnumerable: enumerableFromAllSources,
       // Kleene OR over the members: any `true` → `true`, all `false` →
       // `false`, otherwise `undefined` (an indeterminate member test must
       // not collapse to a definitive `false`).
@@ -1060,6 +1067,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     },
     evaluate: setMinus,
     collection: {
+      isEnumerable: enumerableFromSource,
       // Three-valued: `x ∈ col ∧ ¬excluded(v1, x) ∧ …` with Kleene
       // combination (mirrors the `membershipKleene` SetMinus decomposition).
       contains: (expr, x) => {
@@ -1092,6 +1100,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       'Return the symmetric difference of two sets (elements in either set but not both).',
     evaluate: symmetricDifference,
     collection: {
+      isEnumerable: enumerableFromAllSources,
       // Three-valued XOR: decided only when both member tests are decided.
       contains: (expr, x) => {
         if (!isFunction(expr)) return undefined;

@@ -1181,6 +1181,15 @@ export abstract class _BoxedExpression implements Expression {
     return Number.isFinite(count);
   }
 
+  // Base contract: a self-contained collection (a dictionary, a string, a
+  // tensor) holds its elements, so a walk of it is faithful; anything that is
+  // not a collection has nothing to walk. Subclasses whose elements may be
+  // out of reach (a valueless symbol, an operator over symbolic bounds)
+  // override this.
+  get isEnumerableCollection(): boolean | undefined {
+    return this.isCollection;
+  }
+
   each(): Generator<Expression> {
     return (function* () {})();
   }
