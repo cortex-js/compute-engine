@@ -2408,6 +2408,16 @@ readonly isEmptyCollection: boolean | undefined;
 
 <MemberCard>
 
+##### CollectionInterface.isEnumerableCollection
+
+```ts
+readonly isEnumerableCollection: boolean | undefined;
+```
+
+</MemberCard>
+
+<MemberCard>
+
 ##### CollectionInterface.each()
 
 ```ts
@@ -3932,6 +3942,37 @@ optional isFinite?: (collection) => boolean | undefined;
 ```
 
 Optional flag to quickly check if the collection is finite, without having to count exactly how many elements it has (useful for lazy evaluation).
+
+</MemberCard>
+
+<MemberCard>
+
+##### BaseCollectionHandlers.isEnumerable?
+
+```ts
+optional isEnumerable?: (collection) => boolean | undefined;
+```
+
+Optional predicate answering whether `iterator()` will actually produce
+this collection's elements — the cheap way to tell an EMPTY collection
+from one that merely cannot be walked, which are otherwise
+indistinguishable (both yield nothing).
+
+Return `false` when the elements have no computable value in the current
+state: symbolic bounds (`Range(a, b)`, `Linspace(a, 1, 3)`, a symbolic
+repeat count), or a source that is itself not enumerable. Return
+`undefined` only when it cannot be decided without evaluating.
+
+Implementations must be O(1) and must NOT consult `count`, `isEmpty` or
+`isFinite` on themselves, nor walk the collection: a wrapper answers by
+reading its source's `isEnumerableCollection`, so a chain costs one call
+per level. (Reading the emptiness facets instead is exponential in the
+chain depth — each read re-enters the next `isEmpty` down.)
+
+Default when the handler is ABSENT: `true` (an operator with a
+`collection` block can enumerate its elements). A handler that IS declared
+owns all three states — returning `undefined` from it means "cannot tell
+cheaply" and does not fall back to the default.
 
 </MemberCard>
 
@@ -12383,6 +12424,39 @@ isEmptyCollection: boolean | undefined;
 If this is an empty collection, return true.
 
 An empty collection has a size of 0.
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.isEnumerableCollection
+
+```ts
+isEnumerableCollection: boolean | undefined;
+```
+
+Whether `each()` yields this collection's actual elements.
+
+This is the cheap predicate that separates the two reasons `each()` can
+produce nothing:
+
+- `true`: the elements are enumerable, so a walk that yields nothing
+  means the collection is **empty**.
+- `false`: the elements cannot be produced in the current state, so a
+  walk that yields nothing means **nothing at all**. For example
+  `Range(a, b)` with free variables, `Repeat(3, n)` with a symbolic
+  count, or a wrapper over such a source (`Take(Range(a, b), 2)`).
+- `undefined`: undecidable without evaluating — an *eager* collection
+  operator (`Characters(s)`, `UnicodeScalars(s)`) has no collection
+  handlers until it is evaluated, yet `each()` walks it through the
+  materialize-then-iterate path.
+
+Independent of `count`: a collection can know its size and still not be
+enumerable (`Linspace(a, 1, 3)` has a count of 3 and no computable
+elements), and an enumerable collection can have an unknown size.
+
+Answered structurally, without evaluating: O(1) for a leaf, O(depth) for
+a chain of wrappers.
 
 </MemberCard>
 

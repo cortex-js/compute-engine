@@ -1,24 +1,25 @@
+## [Unreleased]
+
 ## 0.104.0 _2026-08-11_
 
 ### Breaking Changes
 
-- **Types are now engine-global; `type` statements are top-level only.**
-  Type declarations (and the value constructors they mint) now live in one
+- **Types are now engine-global; `type` statements are top-level only.** Type
+  declarations (and the value constructors they mint) now live in one
   engine-level registry rather than the lexical scope chain: a declared type
-  name means the same thing everywhere on the engine, for the engine's
-  lifetime, and a duplicate name is an error. Consequently a `type` statement
-  inside a `do` block, function body, `if` branch or loop body is now a hard
-  error — `type-declaration-not-top-level` at parse time in Epsil, an
-  `invalid-type-declaration` error value on the MathJSON `["DeclareType"]`
-  route — instead of declaring a block-local type; there is no hoisting, and
-  the former `type-shadow` warning is gone (shadowing is impossible). The
-  top-level statement-replace flow (re-running an edited notebook cell) is
-  unchanged. This closes the class of bugs where a value of a block-local
-  nominal type escaped its block and re-bound to a different same-named type
-  (or typed as `unknown`), makes any serialize→reparse of a type sound
-  anywhere in the engine, and is the prerequisite for protocols. Host note:
-  `ce.declareType()` under a pushed scope now targets the engine registry —
-  `popScope()` no longer removes a type. See
+  name means the same thing everywhere on the engine, for the engine's lifetime,
+  and a duplicate name is an error. Consequently a `type` statement inside a
+  `do` block, function body, `if` branch or loop body is now a hard error —
+  `type-declaration-not-top-level` at parse time in Epsil, an
+  `invalid-type-declaration` error value on the MathJSON `["DeclareType"]` route
+  — instead of declaring a block-local type; there is no hoisting, and the
+  former `type-shadow` warning is gone (shadowing is impossible). The top-level
+  statement-replace flow (re-running an edited notebook cell) is unchanged. This
+  closes the class of bugs where a value of a block-local nominal type escaped
+  its block and re-bound to a different same-named type (or typed as `unknown`),
+  makes any serialize→reparse of a type sound anywhere in the engine, and is the
+  prerequisite for protocols. Host note: `ce.declareType()` under a pushed scope
+  now targets the engine registry — `popScope()` no longer removes a type. See
   `docs/plans/2026-08-10-global-type-registry.md`.
 
 ### New Features
@@ -28,26 +29,19 @@
   annotation is a literal function type with named parameters and the
   initializer is not a lambda, the annotation's names become the parameters of
   an automatically built lambda — `const f : (x: number) -> number = x^2 + 2x
-  + 1` now means `= (x) |-> x^2 + 2x + 1`. When the initializer is an explicit
-  lambda, the two parameter lists must agree positionally; a disagreement is
-  the new `parameter-name-mismatch` diagnostic, with a fixit that renames the
-  annotation to the lambda's names. Alias annotations stay opaque (names bind
-  only where they are written), only the outermost arrow of a nested signature
-  lifts, and zero-parameter, generic, effectful, optional/variadic, and
-  partially named signatures never lift. See
-  `docs/plans/2026-08-08-annotation-lambda-lift.md`.
+  - 1`now means`= (x) |-> x^2 + 2x +
+    1`. When the initializer is an explicit lambda, the two parameter lists must agree positionally; a disagreement is the new `parameter-name-mismatch`diagnostic, with a fixit that renames the annotation to the lambda's names. Alias annotations stay opaque (names bind only where they are written), only the outermost arrow of a nested signature lifts, and zero-parameter, generic, effectful, optional/variadic, and partially named signatures never lift. See`docs/plans/2026-08-08-annotation-lambda-lift.md`.
 
 - **The `->`-for-`|->` typo is now diagnosed and recovered in Epsil.** A
-  `KeyValuePair` arrow whose left side is shaped like a parameter list — a
-  typed parameter (`(x: number) -> x^2`), a parameter tuple
-  (`(x, y) -> x + y`), an empty `()`, or a bare symbol right after `(` or `=`
-  (`f = x -> x + 1`) — is a function written with the wrong arrow: none of
-  those shapes is a valid dictionary key. The parser reports the new
-  `mapsto-arrow-expected` diagnostic with a fixit on the arrow and recovers
-  as the intended lambda, so the program still runs. It also no longer emits
-  a spurious `unexpected-symbol ":"` for typed parameters before a `->`.
-  Legitimate dictionary spellings (`{one -> 1}`, `"a" -> 1`, `{->}`) are
-  untouched.
+  `KeyValuePair` arrow whose left side is shaped like a parameter list — a typed
+  parameter (`(x: number) -> x^2`), a parameter tuple (`(x, y) -> x + y`), an
+  empty `()`, or a bare symbol right after `(` or `=` (`f = x -> x + 1`) — is a
+  function written with the wrong arrow: none of those shapes is a valid
+  dictionary key. The parser reports the new `mapsto-arrow-expected` diagnostic
+  with a fixit on the arrow and recovers as the intended lambda, so the program
+  still runs. It also no longer emits a spurious `unexpected-symbol ":"` for
+  typed parameters before a `->`. Legitimate dictionary spellings (`{one -> 1}`,
+  `"a" -> 1`, `{->}`) are untouched.
 
 ### Issues Resolved
 
@@ -85,20 +79,20 @@
   zip-to-shortest (`docs/BROADCAST-MODEL.md`): a scalar operand is a lift and
   never participates, and participants of differing lengths are
   `incompatible-dimensions` rather than a shorter result — so mismatched or
-  unknown-length participants report `undefined` rather than a guess. A
-  declared `count` handler still owns its own answer, and
+  unknown-length participants report `undefined` rather than a guess. A declared
+  `count` handler still owns its own answer, and
   `isCollection`/`isFiniteCollection` are deliberately unchanged: this answers
   the length question only.
 
 - **`toLatex()` and `.latex` are total: formatting no longer throws** (Tycho
   item 168). Serializing a lazy collection materializes it first, and
   materialization EVALUATES — so a comprehension over an unresolvable binding
-  raised `Condition must evaluate to "True" or "False"` out of a *formatting*
+  raised `Condition must evaluate to "True" or "False"` out of a _formatting_
   call, taking down whatever asked for it. An unresolvable binding is not a
-  formatting error: the tree is perfectly printable, and prints identically
-  when nothing is bound at all. The materialization is now guarded and falls
-  through to that symbolic spelling. Successful output is unchanged — the guard
-  only covers what previously threw.
+  formatting error: the tree is perfectly printable, and prints identically when
+  nothing is bound at all. The materialization is now guarded and falls through
+  to that symbolic spelling. Successful output is unchanged — the guard only
+  covers what previously threw.
 
   A `CancellationError` still propagates: deadlines are installed only by an
   enclosing `ce.withTimeLimit()` span, and a caller who set a budget must see it
@@ -156,18 +150,18 @@
 
 ### Improvements
 
-- **New `expr.isEnumerableCollection`: telling an empty collection from one
-  that cannot be walked.** `each()` yields nothing for two unrelated reasons —
-  the collection is empty, or its elements have no computable value
-  (`Range(a, b)` over free variables, `Linspace(a, 1, 3)`, `Repeat(3, n)`, a
+- **New `expr.isEnumerableCollection`: telling an empty collection from one that
+  cannot be walked.** `each()` yields nothing for two unrelated reasons — the
+  collection is empty, or its elements have no computable value (`Range(a, b)`
+  over free variables, `Linspace(a, 1, 3)`, `Repeat(3, n)`, a
   declared-but-unassigned symbol, or any wrapper over one of those). The walk
   alone cannot tell them apart, and the facets that could (`count`,
   `isEmptyCollection`) are `undefined` in both cases, so the library decided by
   EVALUATING the source. The new predicate answers structurally, without
   evaluating: `true` (an empty walk means empty), `false` (an empty walk means
   nothing), or `undefined` for the one undecidable case — an eager collection
-  operator such as `Characters(s)`, which has no collection handlers until it
-  is evaluated. Custom collection operators declare it with the optional
+  operator such as `Characters(s)`, which has no collection handlers until it is
+  evaluated. Custom collection operators declare it with the optional
   `isEnumerable` collection handler; a wrapper propagates it from its source
   (default: `true`).
 
@@ -182,11 +176,11 @@
   empty, and the multi-source `Map` now consults every source rather than only
   the first.
 
-  One shape is knowingly left: an *eager* collection leaf under a wrapper
+  One shape is knowingly left: an _eager_ collection leaf under a wrapper
   (`Filter(Take(Characters(s), 2), p)` for a valueless `s`) still reads as
-  empty, because an eager operator has no collection handlers to answer from
-  and the wrapper's evaluated form is still a wrapper. Tracked in `ROADMAP.md`;
-  the fix is to give those operators lazy collection handlers.
+  empty, because an eager operator has no collection handlers to answer from and
+  the wrapper's evaluated form is still a wrapper. Tracked in `ROADMAP.md`; the
+  fix is to give those operators lazy collection handlers.
 
 - **Engine construction is ~3× faster, and the gradual registration accretion is
   recovered** (ROADMAP P-BOX, residual half). Every `new ComputeEngine()`
