@@ -393,8 +393,8 @@ declared, calling the name reports a `type-not-callable` warning.
 
 ### Constructor functions
 
-A `function` with a declared type's name — in the same scope, after the
-`type` statement — is that type's **constructor function**. The body
+A `function` bearing a declared type's name — after the `type` statement —
+is that type's **constructor function**. The body
 computes the *payload*: a value that must satisfy the type's definition
 (for a record, exactly the definition's keys, each field matching its
 type). The engine checks the payload and tags it; the result is a value of

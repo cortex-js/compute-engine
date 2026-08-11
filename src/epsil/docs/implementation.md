@@ -324,9 +324,12 @@ f(x: integer) -> real = x + 1
 ### Type declarations
 
 A `type` statement lowers to the engine's `DeclareType` operator — the
-MathJSON mirror of `ce.declareType()`. The body is carried as the source text
-of the type. The bare form has no attributes; the `alias` form adds an
-attributes dictionary with `alias -> True`:
+MathJSON mirror of `ce.declareType()`. Types are global, so the statement is
+only legal at the top level of a program: the parser rejects a nested one
+(`type-declaration-not-top-level`), and the engine's `DeclareType` handler
+enforces the same rule for MathJSON built directly. The body is carried as
+the source text of the type. The bare form has no attributes; the `alias`
+form adds an attributes dictionary with `alias -> True`:
 
 ```epsil
 type point = tuple<x: number, y: number>

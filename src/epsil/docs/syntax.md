@@ -228,10 +228,12 @@ expression, so the math form does not take it
 
 _type-declaration_ → **`type`** **`alias`** _symbol_
 \[_type-parameter-clause_\] **`=`** _type_ |
-**`type`** _symbol_ **`=`** _type_
-&nbsp;&nbsp;&nbsp;&nbsp;— only the **`alias`** form takes a clause; the
-`<…>` slot of the bare (nominal) form is reserved and rejected. The clause
-names scope over the definition only, and each must be used in it
+**`type`** _symbol_ \[_type-parameter-clause_\] **`=`** _type_
+&nbsp;&nbsp;&nbsp;&nbsp;— both forms take a clause (a variance marker such
+as `out T` is legal only on the bare, nominal, form). The clause names scope
+over the definition only, and each must be used in it. Types are global, so
+a _type-declaration_ is only valid at the top level of a program — inside a
+block or function body it is the `type-declaration-not-top-level` error
 
 _while-statement_ → **`while`** _expression_ _block_
 
