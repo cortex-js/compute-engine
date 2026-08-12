@@ -510,6 +510,54 @@ describe('a WRITE checks the value against the property’s type', () => {
   });
 });
 
+describe('a DEFERRED write checks the EVALUATED value, not the raw RHS', () => {
+  const SCORED = `protocol Scored {
+  readwrite score: integer
+}
+type Person = tuple<n: string, age: integer>
+type Person is Scored {
+  get score(self: Self) -> integer { self.age }
+  set score(self: Self, v: integer) -> Self { Person(self.n, v) }
+}`;
+
+  test('a loop-body SET whose value reads the loop index takes effect', () => {
+    // Regression: the deferred `Assign(Field(…))` route ran the value-fit
+    // check on the RAW RHS, and `10 * i` statically types `finite_number` —
+    // wider than the `integer` property — so the write was refused, and the
+    // refusal error was discarded in statement position: a silent no-op
+    // (each iteration read back the ORIGINAL `age`, answering 3), while the
+    // compiled tier performed the write and answered 60.
+    const ce = engineFor(`${SCORED}
+function f() -> integer {
+  let acc = 0
+  for i in 1..3 {
+    let q: Person = Person("bob", 1)
+    q.score = 10 * i
+    acc = acc + q.score
+  }
+  acc
+}`);
+    expect(value(ce, 'f()')).toBe('60');
+  });
+
+  test('a genuinely mistyped value is still refused on the deferred route', () => {
+    // The check now sees the CONCRETE value, so a real mismatch is still an
+    // `incompatible-type` refusal that leaves the binding alone. Boxed
+    // BEFORE `d` exists, so the `Field` LHS survives canonicalization (the
+    // deferral) and the check runs at evaluation.
+    const ce = engineFor(SCORED);
+    const assign = ce.box([
+      'Assign',
+      ['Field', 'd', { str: 'score' }],
+      { str: 'nope' },
+    ] as any);
+    expect(assign.toString()).toBe('Assign(Field(d, "score"), "nope")');
+    expect(run(ce, 'let d = Person("bob", 1)')).toEqual([]);
+    expect(errorCode(assign.evaluate().toString())).toBe('incompatible-type');
+    expect(value(ce, 'd')).toBe('Person("bob", 1)');
+  });
+});
+
 describe('P38: a DEFERRED target that is not a protocol property after all', () => {
   test('it produces the ordinary field-assignment error, not silence', () => {
     // `d` is undeclared when the assignment canonicalizes, so the `Field` LHS

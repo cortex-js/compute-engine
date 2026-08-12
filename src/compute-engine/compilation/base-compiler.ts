@@ -1977,9 +1977,18 @@ export class BaseCompiler {
           );
         }
       }
-      return `${
-        isSymbol(args[0]) ? args[0].symbol : '_'
-      } = ${BaseCompiler.compileOp(node, 1, target, 0, args[1])}`;
+      // Any other non-symbol target (a `Subscript` sequence definition, a
+      // `Field` naming no protocol property, …) has no lowering: emitting
+      // `_ = v` would silently leave the target at its old value (and, in
+      // sloppy mode, write a stray global `_`) behind `success: true` —
+      // fail closed (D6).
+      if (!isSymbol(args[0]))
+        throw new Error(
+          `Assign: cannot compile — the assignment target ` +
+            `'${args[0].operator}' is not a variable, and this target ` +
+            `shape has no lowering. Fail closed (D6).`
+        );
+      return `${args[0].symbol} = ${BaseCompiler.compileOp(node, 1, target, 0, args[1])}`;
     }
     if (h === 'Return')
       return `return ${BaseCompiler.compileOp(node, 0, target, 0, args[0])}`;
@@ -3990,35 +3999,11 @@ export class BaseCompiler {
 
       // The DECLARED types of typed block locals, for the raw-LHS lowerings
       // (the protocol-property SET reads its receiver's static type from
-      // `declaredVarTypes` — see `CompileTarget.declaredVarTypes`). Merged
-      // over the enclosing definition's parameter map; an UNTYPED local
-      // REMOVES the entry it shadows (`let p = …` over a `p: Person`
-      // parameter must not keep reading as `Person`). Block-scoped, not
-      // statement-ordered: a use-before-declare is invalid upstream, so the
-      // approximation is safe.
-      let declaredVarTypes = target.declaredVarTypes;
-      if (locals.length > 0) {
-        const merged: Record<string, Type> = { ...declaredVarTypes };
-        for (const arg of args) {
-          if (!isFunction(arg, 'Declare') || !isSymbol(arg.ops[0])) continue;
-          const name = arg.ops[0].symbol;
-          delete merged[name];
-          const src = arg.ops[1];
-          const text = isString(src)
-            ? src.string
-            : isSymbol(src)
-              ? src.symbol
-              : undefined;
-          if (text === undefined || text === 'unknown') continue;
-          try {
-            merged[name] = parseType(text, arg.engine._typeResolver);
-          } catch {
-            // An unparseable annotation contributes nothing (the local then
-            // reads as undeclared here, the safe direction).
-          }
-        }
-        declaredVarTypes = merged;
-      }
+      // `declaredVarTypes` — see `CompileTarget.declaredVarTypes`).
+      const declaredVarTypes = BaseCompiler.statementListDeclaredVarTypes(
+        args,
+        target.declaredVarTypes
+      );
 
       const localTarget: CompileTarget<Expression> = {
         ...target,
@@ -4556,7 +4541,50 @@ export class BaseCompiler {
       ...target,
       var: (id) => (temps.includes(id) ? id : target.var(id)),
       boundVars: BaseCompiler.withBoundNames(target, temps),
+      declaredVarTypes: BaseCompiler.statementListDeclaredVarTypes(
+        stmts,
+        target.declaredVarTypes
+      ),
     };
+  }
+
+  /**
+   * The `declaredVarTypes` map for a statement list: the enclosing map (the
+   * definition's parameter types, or an outer list's) merged with the
+   * DECLARED types of this list's typed locals, for the raw-LHS lowerings
+   * (the protocol-property SET reads its receiver's static type from it —
+   * see `CompileTarget.declaredVarTypes`). An UNTYPED local REMOVES the
+   * entry it shadows (`let p = …` over a `p: Person` parameter must not
+   * keep reading as `Person`). List-scoped, not statement-ordered: a
+   * use-before-declare is invalid upstream, so the approximation is safe.
+   *
+   * Returns the enclosing map unchanged when the list declares nothing.
+   */
+  static statementListDeclaredVarTypes(
+    stmts: ReadonlyArray<Expression>,
+    enclosing: Readonly<Record<string, Type>> | undefined
+  ): Readonly<Record<string, Type>> | undefined {
+    if (!stmts.some((s) => isFunction(s, 'Declare'))) return enclosing;
+    const merged: Record<string, Type> = { ...enclosing };
+    for (const arg of stmts) {
+      if (!isFunction(arg, 'Declare') || !isSymbol(arg.ops[0])) continue;
+      const name = arg.ops[0].symbol;
+      delete merged[name];
+      const src = arg.ops[1];
+      const text = isString(src)
+        ? src.string
+        : isSymbol(src)
+          ? src.symbol
+          : undefined;
+      if (text === undefined || text === 'unknown') continue;
+      try {
+        merged[name] = parseType(text, arg.engine._typeResolver);
+      } catch {
+        // An unparseable annotation contributes nothing (the local then
+        // reads as undeclared here, the safe direction).
+      }
+    }
+    return merged;
   }
 
   /**
@@ -8006,7 +8034,20 @@ export class BaseCompiler {
               collectPatternLeaves(stmt.ops[0]);
           }
         const inner = locals.length ? union(bound, locals) : bound;
-        for (const op of ops) visit(op, inner);
+        // Typed block locals extend the declared-type frame (the mirror of
+        // the `compileBlock` / `loopBodyTempTarget` merge), so a protocol
+        // SET/GET probe on a local declared in this list resolves the same
+        // static type the compile path does.
+        const saved = declaredTypes;
+        declaredTypes = BaseCompiler.statementListDeclaredVarTypes(
+          ops,
+          declaredTypes
+        );
+        try {
+          for (const op of ops) visit(op, inner);
+        } finally {
+          declaredTypes = saved;
+        }
         return;
       }
       if (h === 'Match') {

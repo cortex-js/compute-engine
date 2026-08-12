@@ -816,4 +816,18 @@ describe('Assign with a Tuple pattern: compilation', () => {
     expect(compile(expr)?.success).toBe(false);
     expect(expr.evaluate().toString()).toBe('(2, 1)');
   });
+
+  test('any other non-symbol Assign target fails closed', () => {
+    // A `Subscript` LHS (a sequence definition, kept raw by `Assign`'s
+    // canonicalization) is the reachable shape. Regression: the generic
+    // lowering emitted the silent no-op `_ = 5` behind `success: true` —
+    // and in sloppy mode that write creates a stray global `_`.
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Block',
+      ['Assign', ['Subscript', { sym: 'L' }, 0], 5],
+      42,
+    ] as any);
+    expect(compile(expr)?.success).toBe(false);
+  });
 });

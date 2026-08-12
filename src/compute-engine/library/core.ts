@@ -2457,7 +2457,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // settled now, so the rebinding is resolved and performed here.
         //
         if (isFunction(op1, 'Field')) {
-          const property = protocolPropertyAssignment(ce, op1, op2);
+          // Evaluate the VALUE first: this is the runtime route, so the
+          // value-fit check inside `protocolPropertyAssignment` must see the
+          // CONCRETE value. The static type of a raw RHS is often wider than
+          // the property's declared type (`10 * i` in a loop body types
+          // `finite_number` against an `integer` property), and the false
+          // refusal it produced was DISCARDED in statement position — a
+          // silent no-op write, diverging from the compiled tier, which
+          // performs it. The `ProtocolProperty` operator is not lazy, so
+          // this evaluates the RHS exactly once, same as every other route.
+          const rhs = op2.evaluate();
+          if (!rhs.isValid) return rhs;
+          const property = protocolPropertyAssignment(ce, op1, rhs);
           if (property?.kind === 'error') return property.error;
           if (property === undefined) {
             // The deferred target is NOT a protocol property after all (the

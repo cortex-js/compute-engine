@@ -434,6 +434,36 @@ function retag(p: Person, v: string) -> Person {
     expect(result.success).toBe(false);
   });
 
+  test('a typed local declared in a LOOP BODY resolves the static tier', () => {
+    // A loop body rides `compileLoopBody`, not `compileBlock` — the
+    // declared-type merge (`statementListDeclaredVarTypes`) has to run on
+    // that path too, or the SET below fails closed. Also pins the
+    // interpreter agreeing (its deferred write used to refuse `10 * i`
+    // against the RAW RHS's static type and silently drop the write).
+    const ce = engineFor(`protocol Scored {
+  readwrite score: integer
+}
+type Person = tuple<n: string, age: integer>
+type Person is Scored {
+  get score(self: Self) -> integer { self.age }
+  set score(self: Self, v: integer) -> Self { Person(self.n, v) }
+}
+function tally() -> integer {
+  let acc = 0
+  for i in 1..3 {
+    let q: Person = Person("bob", 1)
+    q.score = 10 * i
+    acc = acc + q.score
+  }
+  acc
+}`);
+    const result = compile(ce.box('tally'));
+    expect(result.success).toBe(true);
+    expect(result.unsupported ?? []).toEqual([]);
+    expect(result.run?.()()).toBe(60);
+    expect(ce.box(['tally'] as any).evaluate().toString()).toBe('60');
+  });
+
   test('an ordinary record field does not go through the protocol tier', () => {
     const ce = engineFor(`protocol Nameable {
   readwrite name: string

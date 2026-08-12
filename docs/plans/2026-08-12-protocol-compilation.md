@@ -176,10 +176,22 @@ would die inside the protocol-naming `Field` operand).
 
 ## Residuals / follow-ups
 
-- Typed block locals ARE covered (`compileBlock` merges them into
+- ~~Typed block locals ARE covered (`compileBlock` merges them into
   `declaredVarTypes`, block-scoped), but a typed local declared inside a
   LOOP BODY rides `compileLoopBody` — a separate statement path — and a SET
-  on it fails closed.
+  on it fails closed.~~ CLOSED 2026-08-12: the merge was extracted to
+  `statementListDeclaredVarTypes` and applied on the loop-body path
+  (`loopBodyTempTarget`) and in `analyzeReferences`'s `Block` walk (which
+  previously mislabeled a compilable block-local SET as `unsupported`).
+  Fixing it surfaced an INTERPRETER defect on the same shape: the deferred
+  `Assign(Field(…))` route checked the property value's fit on the RAW RHS,
+  whose static type is often wider than the declared property type
+  (`10 * i` in a loop body types `finite_number` against `integer`), and
+  the refusal error was discarded in statement position — a silent no-op
+  write, diverging from the compiled tier, which performed it. The deferred
+  route now evaluates the RHS first (the `ProtocolProperty` operator is not
+  lazy, so this is the same single evaluation every other route does) and
+  checks the CONCRETE value.
 - The per-plan result convention (`branchComplexCoercion` across the arms)
   is part of the helper cache key (`$cx` suffix): the same edge emitted by a
   coercion-free plan and reused by a mixed real/complex chain gets two
@@ -187,9 +199,14 @@ would die inside the protocol-naming `Field` operand).
 - Complex-conventioned protocol parameters follow the multi-clause unanimity
   rule for call-site coercion; a mixed real/complex candidate set stays
   uncoerced at that position.
-- The pre-existing generic `Assign` lowering still emits `_ = v` for
+- ~~The pre-existing generic `Assign` lowering still emits `_ = v` for
   non-protocol non-symbol LHS shapes (e.g. record field assignment) — out of
-  scope here, flagged.
+  scope here, flagged.~~ CLOSED 2026-08-12: the generic lowering now THROWS
+  on any non-symbol LHS (fail closed, D6). The reachable shape was the
+  `Subscript` sequence definition (`L_0 := 5` inside a compiled body
+  compiled to `_ = 5` under `success: true` — a sloppy-mode global write); a
+  non-protocol `Field` LHS never reaches it (the `Assign` canonical/evaluate
+  routes reject it with `incompatible-type` first).
 - `Typed` was added to `STRUCTURAL_HEADS` (reference analysis only): it has
   a bespoke, always-lowerable branch in `compileExpr`, and canonical
   function bodies carry their return marker as a `Typed` node — without

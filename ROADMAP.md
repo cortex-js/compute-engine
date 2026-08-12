@@ -89,6 +89,19 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### Protocols residue (protocols + compiled dispatch landed 2026-08-12)
+
+- **Sum-name conformance** — `type shape is Area`, where `shape` is a sum
+  type, is rejected with `protocol-conformance-target-invalid`: the sum
+  sugar registers the sum name as an alias, and an alias cannot conform.
+  Per-variant conformance blocks are the working pattern (and what compiled
+  dispatch keys on), but the whole-sum spelling is the natural thing to
+  write. Product question to rule on: should it desugar to one conformance
+  edge per variant (with `Self` = the variant), or stay an explicit error
+  pointing at the per-variant form? If desugared, decide whether a later
+  variant added to the sum re-runs the conformance (batch re-run semantics,
+  P47) and how a per-variant duplicate is reported.
+
 ### Contextual callback typing residue (Design D landed 2026-08-09)
 
 The `callback<S>` conversion of the 15 collection operators
