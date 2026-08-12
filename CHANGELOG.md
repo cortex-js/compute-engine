@@ -1,5 +1,50 @@
 ## [Unreleased]
 
+### New Features
+
+- **Sum-type declaration sugar.** One statement now declares a tagged sum —
+  the variants and the union together:
+
+  ```epsil
+  type TrafficLight = red | green | yellow
+  type node = lit(num: number) | plus(op1: node, op2: node) | times(op1: node, op2: node)
+  type tree<T> = leaf | node(value: T, children: list<tree<T>>)
+  ```
+
+  desugaring to the equivalent N nominal variant declarations plus one
+  transparent `type alias` union (identical semantics — the sugar is a
+  declaration bundler). The sum's own name is usable in variant payloads
+  without a `type` forward-reference marker, a generic sum distributes its
+  type parameters to each variant by usage, and a variant name that collides
+  with an existing type, a reserved word, or a builtin (`type bad = Add(…)`,
+  whose constructor would be silently unreachable) rejects the whole
+  declaration atomically. Existing spellings are unchanged: `type X = A | B`
+  over known types stays the opaque nominal, `type alias X = A | B` stays the
+  transparent union. See
+  `docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` and
+  `docs/TYPE_SYSTEM_ROADMAP.md` §2.3.
+
+- **Sum types compile to JavaScript.** For sugar-declared sums, `match`
+  constructor patterns and variant constructors now compile (previously they
+  failed closed). Per sum, the compiler picks a representation: when every
+  variant has a distinct JS shape (`jnull | jbool(boolean) | jnum(number) |
+  jstr(string) | jarr(list<…>)`) values stay erased and dispatch uses
+  `typeof`/`Array.isArray`; otherwise constructors reify the tag as
+  `{ _tag, _ops }` and `match` tests it — amending the D11 erasure rule to
+  *"the tag is erased iff it is statically discharged"*. Tagged values do not
+  cross the compiled↔engine boundary (a unit whose *result* is a tagged sum
+  declines); Python/GPU/interval targets keep failing closed.
+
+### Bug Fixes
+
+- **A nominal-typed argument no longer broadcasts at compiled call sites.**
+  With `type bag = list<number>` and `function size(b: bag) -> number`,
+  compiled `size(bag([1,2,3]))` answered `[42, 42, 42]` — the erased array
+  was mapped element-wise — where the interpreter answers `42`. Nominal
+  values are atomic (like tuples): the whole value binds. The same rule now
+  also lets a `broadcastable<bag>` slot accept a `bag` argument directly
+  where it previously refused to compile.
+
 ### Breaking Changes
 
 - **The prefix `forall` quantifier was replaced by a trailing `where` clause.**
