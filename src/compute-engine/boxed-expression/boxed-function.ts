@@ -142,8 +142,6 @@ import {
   CACHE_STATS,
   recordCache,
   instrumentedCachedValue,
-  shadowEffectsOnHit,
-  shadowEffectsOnRecompute,
 } from '../../common/cache-stats.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
@@ -181,6 +179,34 @@ let _effectsProvisionalReads = 0;
  * bumps this, and neither the re-entrant computation nor the one it is
  * nested in is frozen into the memo. */
 let _lazyValueProvisionalReads = 0;
+
+/** Count of settled `_effectsOf` recomputations, engine-wide. A test
+ * observable (the house instance-instrumentation pattern): a cache HIT
+ * leaves it unchanged, a miss advances it — how the effects-invalidation
+ * suite asserts hit/miss without wall-clock or prototype patching.
+ * Monotonic; only ever compared before/after an operation. @internal */
+let _effectsComputeCount = 0;
+
+/** Read {@link _effectsComputeCount} — for tests. @internal */
+export function effectsComputeCount(): number {
+  return _effectsComputeCount;
+}
+
+/** `CE_EFFECTS_PARANOID`: the effects-cache canary of the state-event
+ * design's §6 (step 3) — on every served hit, `_effectsOf` recomputes the
+ * projection and THROWS on divergence (a hard failure, per the A5
+ * amendment precedent: a validation aid for smoke + soak runs, not a
+ * semantic mode). Env-gated like `CE_CACHE_STATS`. */
+const EFFECTS_PARANOID: boolean = (() => {
+  if (typeof process === 'undefined') return false;
+  const flag = process.env?.CE_EFFECTS_PARANOID;
+  return flag !== undefined && flag !== '0';
+})();
+
+/** Re-entrancy latch for the canary: the cross-check's own projection walk
+ * reads children's `_effectsOf`, and a canary-within-a-canary recurses
+ * exponentially (the element-memo canary's latch pattern). */
+let _effectsParanoidActive = false;
 
 /** `CE_CACHE_STATS` only: is a recomputed effect channel the same answer as
  * the entry it replaced? Structural equality over the `ComputedEffects`
@@ -258,12 +284,18 @@ export class BoxedFunction
     value: null,
     generation: -1,
   };
-  /** The runtime effect channel (`effects-of.ts`). Generation-guarded like
-   * `_type` and `_sgn`, and for a reason beyond speed: the projection resolves
-   * a symbol operand through its CURRENT binding, so a reassignment — which
-   * bumps `ce._anyVersion` — must invalidate the answer. (`reset()` is an inert
-   * stub and is NOT the invalidation mechanism.) `undefined` is a legitimate
-   * cached value (the empty set); `null` is the miss marker.
+  /** The runtime effect channel (`effects-of.ts`). Keyed — since migration
+   * step 3 of `docs/plans/2026-08-09-state-event-invalidation-axes.md` — on
+   * the **`callable` axis** (`ce._callableVersion`: the events that can
+   * change what the projection reads) plus an ambient-scope identity stamp
+   * (`_effectsScope`), instead of the broad `any` axis: the measured waste
+   * (§1 of the design — 100% of this cache's generation misses were
+   * same-answer recomputes) came from scalar writes, per-call `let`
+   * declares, and clean scope pops, none of which can move an effects
+   * answer. The `generation` slot of the `CachedValue` stores the
+   * callable-axis version. `undefined` is a legitimate cached value (the
+   * empty set); `null` is the miss marker. Validated by the
+   * `CE_EFFECTS_PARANOID` canary (recompute-on-hit, throw on divergence).
    *
    * NOT managed through the shared `cachedValue` helper — see `_effectsOf`:
    * the projection can re-enter the same node through a binding cycle, and
@@ -277,6 +309,14 @@ export class BoxedFunction
 
   /** Re-entrancy marker for `_effectsOf` — see the cycle note there. */
   private _effectsInFlight = false;
+
+  /** The ambient lexical scope the `_effects` entry was filled under — the
+   * `_lazyValueScope` mechanics, verbatim: the projection resolves symbol
+   * operands BY NAME through the ambient chain, and re-pushing the same
+   * scope object restores the same bindings (identity hit is correct),
+   * while a genuinely different chain must miss. This stamp is what lets
+   * clean scope pops leave the `callable` axis entirely (design §6). */
+  private _effectsScope: Scope | undefined = undefined;
 
   /** Re-entrancy marker for the lazy-collection evaluate memo — see
    * `_memoizedLazyCollectionValue()`. */
@@ -512,14 +552,30 @@ export class BoxedFunction
    * @internal
    */
   _effectsOf(): ComputedEffects {
-    const generation = this.engine._anyVersion;
+    const callableVersion = this.engine._callableVersion;
+    const scope = this.engine.context?.lexicalScope;
     if (
-      this._effects.generation === generation &&
-      this._effects.value !== null
+      this._effects.generation === callableVersion &&
+      this._effects.value !== null &&
+      this._effectsScope === scope
     ) {
-      if (CACHE_STATS) {
-        recordCache('effects', 'hit');
-        shadowEffectsOnHit(this, this.engine.context?.lexicalScope);
+      if (CACHE_STATS) recordCache('effects', 'hit');
+      // Canary (`CE_EFFECTS_PARANOID`, design §6): on every served hit,
+      // recompute the projection and compare — a divergence is a
+      // callable-axis coverage hole and throws. Latched: the recompute
+      // itself reads children's `_effectsOf` re-entrantly.
+      if (EFFECTS_PARANOID && !_effectsParanoidActive) {
+        _effectsParanoidActive = true;
+        try {
+          const fresh = applicationEffects(this);
+          if (!sameComputedEffects(this._effects.value, fresh))
+            throw new Error(
+              `CE_EFFECTS_PARANOID: stale effects served for "${this._operator}": ` +
+                `cached ${JSON.stringify(this._effects.value)} vs fresh ${JSON.stringify(fresh)}`
+            );
+        } finally {
+          _effectsParanoidActive = false;
+        }
       }
       return this._effects.value;
     }
@@ -535,21 +591,27 @@ export class BoxedFunction
     try {
       const prev = this._effects.value;
       const value = applicationEffects(this);
+      _effectsComputeCount += 1;
       if (_effectsProvisionalReads === before) {
         if (CACHE_STATS) {
-          recordCache('effects', prev === null ? 'missCold' : 'missGeneration');
-          if (prev !== null && sameComputedEffects(prev, value))
-            recordCache('effects', 'missGenerationWasted');
-          shadowEffectsOnRecompute(
-            this,
-            this.engine.context?.lexicalScope,
-            value,
-            sameComputedEffects as (a: unknown, b: unknown) => boolean,
-            this._operator
+          recordCache(
+            'effects',
+            prev === null
+              ? 'missCold'
+              : this._effects.generation !== callableVersion
+                ? 'missGeneration'
+                : 'missScope'
           );
+          if (
+            prev !== null &&
+            this._effects.generation !== callableVersion &&
+            sameComputedEffects(prev, value)
+          )
+            recordCache('effects', 'missGenerationWasted');
         }
-        this._effects.generation = generation;
+        this._effects.generation = callableVersion;
         this._effects.value = value;
+        this._effectsScope = scope;
       } else if (CACHE_STATS) recordCache('effects', 'declineStore');
       return value;
     } finally {

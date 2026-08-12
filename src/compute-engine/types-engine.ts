@@ -296,6 +296,10 @@ export interface IComputeEngine {
    * @internal */
   readonly _worldVersion: number;
 
+  /** The `callable` invalidation axis (read-only; advanced only through
+   * `_noteStateEvent`) — keys `BoxedFunction._effects`. @internal */
+  readonly _callableVersion: number;
+
   /** When > 0, value writes are ephemeral loop-index writes.
    * @internal */
   _ephemeralWriteDepth: number;

@@ -17,7 +17,6 @@ import {
   containsSignatureArm,
 } from '../common/type/utils.js';
 import { parseType, parseTypeParameterClause } from '../common/type/parse.js';
-import { CACHE_STATS, bumpShadowCallable } from '../common/cache-stats.js';
 import { isEffectSubset } from '../common/type/effects.js';
 import {
   freeTypeVariables,
@@ -1032,9 +1031,6 @@ export function declareType(
     // global-semantics event on all three axes ('operator/type redefinition'
     // in `_worldVersion`'s contract). A FRESH declaration deliberately bumps
     // none of these beyond what `ce.declare()` did for the constructor half.
-    // Shadow 'callable' axis (CE_CACHE_STATS probe): variance settle is a
-    // binding-repair event in its predicate.
-    if (CACHE_STATS) bumpShadowCallable();
   }
 }
 

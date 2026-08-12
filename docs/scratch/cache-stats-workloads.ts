@@ -10,7 +10,6 @@ import { executeEpsil } from '../../src/epsil';
 import {
   formatCacheStats,
   resetCacheStats,
-  shadowEffectsStats,
 } from '../../src/common/cache-stats';
 
 function section(title: string, fn: () => void): void {
@@ -63,16 +62,3 @@ section('C. Epsil JSON parser (demo.epsil), 20 runs', () => {
   for (let r = 0; r < 20; r++) executeEpsil(ce, src);
 });
 
-const s = shadowEffectsStats;
-console.log('\n===== Shadow callable-axis simulation (effects, all workloads) =====');
-console.log(`reads ${s.reads}, real hits ${s.realHits}, shadow hits ${s.shadowHits}`);
-console.log(
-  `saved recomputes (shadow hit, real miss, same answer): ${s.saved}`
-);
-console.log(`UNSOUND (shadow hit, answer changed): ${s.unsound}`);
-if (s.unsoundExamples.length)
-  console.log('  examples:', s.unsoundExamples.join(', '));
-console.log(
-  `would-be hit rate: ${(((s.realHits + s.saved) / s.reads) * 100).toFixed(1)}%` +
-    ` (real: ${((s.realHits / s.reads) * 100).toFixed(1)}%)`
-);

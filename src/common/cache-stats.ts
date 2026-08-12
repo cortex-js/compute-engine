@@ -125,61 +125,6 @@ export function instrumentedCachedValue<T>(
   return v.value;
 }
 
-// ── Shadow 'callable'-axis simulation ──────────────────────────────────────
-// Probe for docs/plans/2026-08-09-state-event-invalidation-axes.md §6: runs
-// the proposed `callable` axis as a SHADOW key alongside the real
-// `_anyVersion` key of `_effects`, changing no behavior. On each settled
-// recompute, a would-be shadow hit whose stored answer differs from the
-// recomputed one is counted `unsound` — the dry-run soundness check.
-
-let _shadowCallableVersion = 0;
-
-export function bumpShadowCallable(): void {
-  _shadowCallableVersion += 1;
-}
-
-const shadowEffectsEntries = new WeakMap<
-  object,
-  { v: number; scope: unknown; value: unknown }
->();
-
-export const shadowEffectsStats = {
-  reads: 0,
-  realHits: 0,
-  shadowHits: 0,
-  saved: 0, // shadow hit where the real key missed, same answer (the win)
-  unsound: 0, // shadow hit, real recompute produced a DIFFERENT answer
-  unsoundExamples: [] as string[],
-};
-
-export function shadowEffectsOnHit(node: object, scope: unknown): void {
-  shadowEffectsStats.reads += 1;
-  shadowEffectsStats.realHits += 1;
-  const e = shadowEffectsEntries.get(node);
-  if (e && e.v === _shadowCallableVersion && e.scope === scope)
-    shadowEffectsStats.shadowHits += 1;
-}
-
-export function shadowEffectsOnRecompute(
-  node: object,
-  scope: unknown,
-  value: unknown,
-  same: (a: unknown, b: unknown) => boolean,
-  label: string
-): void {
-  shadowEffectsStats.reads += 1;
-  const e = shadowEffectsEntries.get(node);
-  if (e && e.v === _shadowCallableVersion && e.scope === scope) {
-    shadowEffectsStats.shadowHits += 1;
-    if (same(e.value, value)) shadowEffectsStats.saved += 1;
-    else {
-      shadowEffectsStats.unsound += 1;
-      if (shadowEffectsStats.unsoundExamples.length < 10)
-        shadowEffectsStats.unsoundExamples.push(label);
-    }
-  }
-  shadowEffectsEntries.set(node, { v: _shadowCallableVersion, scope, value });
-}
 
 export type CacheStatsSnapshot = {
   caches: Record<CacheClass, CacheCounters>;

@@ -686,6 +686,18 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * The `callable` invalidation axis (design §5, step 3) — events that can
+   * change what the effects projection reads: world-class events, callable
+   * writes/declares/retypes/swaps, and assumption-dirty pops. Keys
+   * `BoxedFunction._effects` (with a scope-identity stamp). READ-ONLY —
+   * see `_anyVersion`.
+   * @internal
+   */
+  get _callableVersion(): number {
+    return this._configurationLifecycle.callableVersion;
+  }
+
+  /**
    * When > 0, value writes are ephemeral loop-index writes: they bump
    * `_anyVersion` and the definition's `_writeVersion` but not
    * `_semanticVersion`. Incremented/decremented (try/finally) around the

@@ -699,11 +699,33 @@ Replaced with:
 3. Only after 1–2 pass: delete the old G key, re-measure A/B/C with
    `CE_CACHE_STATS`, and record before/after here.
 
-**Measured effect** (shadow-key simulation, §1b — no longer an estimate):
-would-be hit rate **78.0%** (from 53.9%); 14.5K of 20.5K wasted recomputes
-eliminated (~71%); zero divergences from today's behavior on every read
-where today recomputed (absolute validation is the canary's job, below).
-The residual is
+**STEP 3 SHIPPED (2026-08-11) — measured live results, workload C:**
+
+| workload C, effects cache | BEFORE step 3 (old `_generation` key) | AFTER step 3 (`callable` axis + scope stamp) |
+|--------|--------------------------|------------------------------|
+| effects reads | 60,158 | 49,918 (hits avoid child re-reads — the win compounds) |
+| hit rate | 53.9% | **73.5%** |
+| axis-driven misses (all same-answer recomputes) | 20,539 | **19** |
+| total settled recomputes | ≈27,740 | 13,240 (−52%) |
+
+The axis waste is eliminated to within noise (20,539 → 19, 99.9% — better
+than the shadow simulation's 71% projection, which measured against the
+old, larger read stream). Residual misses: 7,201 colds (unavoidable) and
+6,020 scope-stamp misses (ambient-chain changes — the price of by-name
+soundness). Validation: the full suite ran green under
+`CE_EFFECTS_PARANOID=1` (recompute-on-every-hit, throw-on-divergence) with
+**zero stale serves**, plus the three workloads and the Epsil examples
+under the canary; the §6 matrix below is implemented as
+`test/compute-engine/effects-invalidation.test.ts` (17 tests). One §5.3
+refinement discovered by the matrix: a **bound** head resolves through its
+pinned definition, so a shadowing declare (correctly) does not change a
+bound application's effects — the by-name `'any'` flip applies to unbound
+(held/raw) heads, which is exactly `operatorDefinitionOf`'s documented
+fallback; `shadowsCallable` remains necessary for those.
+
+**Pre-implementation estimate** (shadow-key simulation, §1b): would-be hit
+rate 78.0% (from 53.9%); zero divergences from today's behavior on every
+read where today recomputed. The residual is
 true callable-axis advances (Epsil's function declares) plus scope misses —
 not reclaimable without per-instance precision (§7). The projection is one
 of the pricier per-node facts (resolves overloads, forces stored arrows),

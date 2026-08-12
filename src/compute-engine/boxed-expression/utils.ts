@@ -16,7 +16,6 @@ import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import { foldSeed } from '../numerics/random.js';
 import { Type } from '../../common/type/types.js';
 import { containsSignatureArm } from '../../common/type/utils.js';
-import { CACHE_STATS, bumpShadowCallable } from '../../common/cache-stats.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
@@ -1262,10 +1261,6 @@ export function updateDef(
     // emission (design §4) — the CALLERS emit their operation event
     // (`declare`/`redefine`) separately, after this returns.
     ce._noteStateEvent({ kind: 'binding-repair' });
-    // Shadow 'callable' axis (CE_CACHE_STATS probe): this branch fires on
-    // exactly the callable-shaped swaps — declares and redefinitions both
-    // route through here.
-    if (CACHE_STATS) bumpShadowCallable();
     // The definition installed just now is passed as `justInstalled` so a
     // recursive body — which noted its OWN name while canonicalizing — is not
     // re-derived against itself.

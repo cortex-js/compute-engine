@@ -2,11 +2,7 @@ import {
   ConfigurationChangeTracker,
   type ConfigurationChangeListener,
 } from '../common/configuration-change.js';
-import {
-  CACHE_STATS,
-  recordBump,
-  bumpShadowCallable,
-} from '../common/cache-stats.js';
+import { CACHE_STATS, recordBump } from '../common/cache-stats.js';
 
 type ResetHooks = {
   refreshNumericConstants: () => void;
@@ -42,6 +38,44 @@ export type AxisMask = {
   semantic: boolean;
   world: boolean;
 };
+
+/**
+ * The `callable` axis predicate (design §5, migration step 3): does this
+ * event select the axis that keys `BoxedFunction._effects`?
+ *
+ * Selected: every world-class event (`assumption`, `inference` — all
+ * variants including the zero-mask `valueType` —, `config`), `redefine` and
+ * `type-write` when EITHER side is callable, `binding-repair` wholesale,
+ * assumption-dirty scope pops (either variant), callable-classified value
+ * writes, and declares that install a callable or shadow one.
+ *
+ * Not selected — the measured waste of §1: scalar value writes (slider
+ * ticks, loop indexes), non-callable non-shadowing declares (per-call
+ * `let`s), and clean scope pops (neutralized by the effects cache's
+ * scope-identity stamp instead).
+ *
+ * Soundness argument: design §5 (four-part, verified by the §1b shadow
+ * simulation — zero divergences vs the generation key wherever it
+ * recomputed — and guarded by the `CE_EFFECTS_PARANOID` canary).
+ */
+export function callableAxisSelects(e: StateEvent): boolean {
+  switch (e.kind) {
+    case 'assumption':
+    case 'inference':
+    case 'config':
+    case 'binding-repair':
+      return true;
+    case 'redefine':
+    case 'type-write':
+      return e.callableBefore || e.callableAfter;
+    case 'scope-pop':
+      return e.assumptionsDirty;
+    case 'value-write':
+      return e.callable;
+    case 'declare':
+      return e.callable || e.shadowsCallable;
+  }
+}
 
 /**
  * The dispatch table: a row-by-row TRANSCRIPTION of the legacy counter
@@ -107,6 +141,7 @@ export class EngineConfigurationLifecycle {
   private _anyVersion = 0;
   private _semanticVersion = 0;
   private _worldVersion = 0;
+  private _callableVersion = 0;
   private _ephemeralWriteDepth = 0;
   private _tracker = new ConfigurationChangeTracker();
 
@@ -120,6 +155,10 @@ export class EngineConfigurationLifecycle {
 
   get worldVersion(): number {
     return this._worldVersion;
+  }
+
+  get callableVersion(): number {
+    return this._callableVersion;
   }
 
   get ephemeralWriteDepth(): number {
@@ -142,15 +181,11 @@ export class EngineConfigurationLifecycle {
     if (m.any) this._anyVersion += 1;
     if (m.semantic) this._semanticVersion += 1;
     if (m.world) this._worldVersion += 1;
+    if (callableAxisSelects(e)) this._callableVersion += 1;
     if (CACHE_STATS) {
       if (m.any) recordBump('generation');
       if (m.semantic) recordBump('mutationGeneration');
-      if (m.world) {
-        recordBump('semanticEpoch');
-        // Shadow 'callable' axis probe: every world-class event is in its
-        // predicate (assumption, inference, redefine, config, dirty pop).
-        bumpShadowCallable();
-      }
+      if (m.world) recordBump('semanticEpoch');
     }
   }
 

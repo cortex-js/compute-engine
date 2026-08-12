@@ -22,11 +22,7 @@ import { declaredTypeError } from './type-compatibility-error.js';
 import { isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
-import {
-  CACHE_STATS,
-  recordBump,
-  bumpShadowCallable,
-} from '../../common/cache-stats.js';
+import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -309,40 +305,32 @@ export class _BoxedValueDefinition
     // authoritative for type-level reach; otherwise the effective type
     // derives from the value, on each side of the swap.
     //
-    // Computed only when a consumer exists — the CE_CACHE_STATS probe. The
-    // `value-write` axis mask does not read `callable`, and no live axis
-    // subscribes to it until migration step 3 (the `callable` axis), so
-    // default builds skip the classification on this hot path (every write,
-    // including ephemeral loop-index assigns). Step 3 makes it
-    // unconditional — with the cost budgeted in the design's §3 — when the
-    // flag gains its live consumer.
-    let callable = false;
-    if (CACHE_STATS) {
-      const litCallable = (x0: Expression | null | undefined): boolean => {
-        if (x0 == null) return false;
-        const x = x0 as {
-          operator?: string;
-          ops?: ReadonlyArray<{ operator?: string }> | null;
-        };
-        if (x.operator === 'Function') return true;
-        return x.ops?.some((o) => o.operator === 'Function') ?? false;
+    // Unconditional since migration step 3: the `callable` axis (which keys
+    // `BoxedFunction._effects`) is this flag's live consumer, and the cost —
+    // O(size of the traversed type/value fragment), a couple of property
+    // reads for scalar writes — is budgeted in the design's §3 ("pay for
+    // precision at write sites, never at read sites").
+    const litCallable = (x0: Expression | null | undefined): boolean => {
+      if (x0 == null) return false;
+      const x = x0 as {
+        operator?: string;
+        ops?: ReadonlyArray<{ operator?: string }> | null;
       };
-      callable = litCallable(prev) || litCallable(v);
-      if (!callable) {
-        if (this._type != null)
-          callable = containsSignatureArm(this._type.type);
-        else
-          callable =
-            containsSignatureArm(prev?.type?.type) ||
-            containsSignatureArm(v?.type?.type);
-      }
+      if (x.operator === 'Function') return true;
+      return x.ops?.some((o) => o.operator === 'Function') ?? false;
+    };
+    let callable = litCallable(prev) || litCallable(v);
+    if (!callable) {
+      if (this._type != null) callable = containsSignatureArm(this._type.type);
+      else
+        callable =
+          containsSignatureArm(prev?.type?.type) ||
+          containsSignatureArm(v?.type?.type);
     }
     this._engine._noteStateEvent({ kind: 'value-write', ephemeral, callable });
 
-    if (CACHE_STATS) {
+    if (CACHE_STATS)
       recordBump(ephemeral ? 'ephemeralValueWrite' : 'valueWrite');
-      if (callable) bumpShadowCallable();
-    }
     this._writeVersion += 1;
     // Axis advancement comes from the `value-write` event above: ephemeral
     // loop-index writes (big-op/comprehension index assigns) advance the
