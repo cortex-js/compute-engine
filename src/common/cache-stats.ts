@@ -125,7 +125,6 @@ export function instrumentedCachedValue<T>(
   return v.value;
 }
 
-
 export type CacheStatsSnapshot = {
   caches: Record<CacheClass, CacheCounters>;
   bumps: Record<BumpKind, number>;

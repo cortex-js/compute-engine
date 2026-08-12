@@ -12,7 +12,11 @@ import type {
   SequenceStatus,
   SequenceInfo,
 } from './global-types.js';
-import { isValueDef, updateDef, defIsCallableShaped } from './boxed-expression/utils.js';
+import {
+  isValueDef,
+  updateDef,
+  defIsCallableShaped,
+} from './boxed-expression/utils.js';
 import {
   isSymbol,
   isNumber,

@@ -74,7 +74,11 @@ export function isTypeCompatibilityError(
  * is a function, or the declared type is not a plain signature).
  */
 export function unboundSignatureHint(
-  value: { toString(): string; type: BoxedType; unknowns?: ReadonlyArray<string> },
+  value: {
+    toString(): string;
+    type: BoxedType;
+    unknowns?: ReadonlyArray<string>;
+  },
   declaredType: BoxedType
 ): string | undefined {
   const declared = declaredType.type;
@@ -127,7 +131,11 @@ export function unboundSignatureHint(
  */
 export function declaredTypeError(
   symbol: string,
-  value: { toString(): string; type: BoxedType; unknowns?: ReadonlyArray<string> },
+  value: {
+    toString(): string;
+    type: BoxedType;
+    unknowns?: ReadonlyArray<string>;
+  },
   declaredType: BoxedType
 ): TypeCompatibilityError {
   const hint = unboundSignatureHint(value, declaredType);
@@ -267,6 +275,10 @@ export function typeCompatibilityErrorValue(
   // `where` slot, exactly as G11 does, so the error value is as actionable
   // as the host throw.
   if (e.hint !== undefined)
-    return ce.typeError(e.declaredType.type, e.valueType, `${e.symbol}: ${e.hint}`);
+    return ce.typeError(
+      e.declaredType.type,
+      e.valueType,
+      `${e.symbol}: ${e.hint}`
+    );
   return ce.typeError(e.declaredType.type, e.valueType, e.symbol);
 }

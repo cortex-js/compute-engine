@@ -9,8 +9,7 @@ import type {
 
 import type { Type, TypeString } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
-import { containsSignatureArm } from '../../common/type/utils.js';
-import { isValidType } from '../../common/type/utils.js';
+import { containsSignatureArm, isValidType } from '../../common/type/utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 
 import { defaultCollectionHandlers } from '../collection-utils.js';

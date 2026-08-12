@@ -173,7 +173,12 @@ function canonicalizationDiagnostics(
     if (declMismatch !== undefined)
       diagnostics.push({
         severity: 'error',
-        message: ['static-type-error', declMismatch, snippet, 'incompatible-type'],
+        message: [
+          'static-type-error',
+          declMismatch,
+          snippet,
+          'incompatible-type',
+        ],
         range: [start, end, start],
       });
     // One diagnostic per distinct problem: every error in a statement shares
