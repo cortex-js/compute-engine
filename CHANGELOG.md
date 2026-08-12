@@ -2,6 +2,18 @@
 
 ### Issues Resolved
 
+- **Stacked restrictions no longer depend on the order they were written.**
+  `When(When(e, c1), c2)` merges to `When(e, And(c1, c2))`, but the merged
+  conjunction was built without going through canonical `And`, so it kept the
+  authored operand order. Since `.json` serializes through the structural form,
+  which DOES order a commutative operator's operands, the two spellings of one
+  restriction set disagreed depending on which accessor you asked:
+  `x\{|z|<5\}\{0<y\}` and `x\{0<y\}\{|z|<5\}` produced byte-identical MathJSON
+  while `isSame()` answered `false` and their hashes differed, `.json` and
+  `.toString()` of the SAME expression listed the conjuncts in opposite orders,
+  and `ce.box(expr.json)` was not `isSame` to `expr`. Reported by Tycho as the
+  11 `differs-json-equal` rows of the item-153 corpus seed.
+
 - **Indexed wrappers over an eager collection producer no longer read it as
   empty** (design: `docs/plans/2026-08-11-eager-collection-enumerability.md`).
   An eager producer (`Divisors`, `Characters`, `Eigenvalues`, … — an operator
@@ -20,10 +32,21 @@
   free `n` reports `false` (wrappers over it stay inert instead of answering
   `[]`/`False`/`0`), `Divisors(12)` reports `true`, and an operator whose
   success is not cheaply decidable (`Solve`) stays `undefined` and resolves by
-  evaluating, as before. Adopted in this release: `Characters`,
-  `GraphemeClusters`, `UnicodeScalars`, `Utf8`, `Utf16`, `StringSplit`,
-  `Divisors`, `PrimeFactors`, `FactorInteger`, `IntegerDigits`, and
-  (decline-only) `Sort`, `Ordering`, `Unique`, `Tally`.
+  evaluating, as before. Adopted in this release — 45 of the 73 eager
+  producers: `Characters`, `GraphemeClusters`, `UnicodeScalars`, `Utf8`,
+  `Utf16`, `StringSplit`, `Divisors`, `PrimeFactors`, `FactorInteger`,
+  `IntegerDigits`, `Shape`, `Keys`, `Values`, `AbsArg`, `ComplexRoots`,
+  `ExtendedGCD`, `PlusMinus`, and (decline-only) `Sort`, `Ordering`,
+  `Unique`, `Tally`, `Eigenvalues`, `Eigenvectors`, `Eigen`,
+  `SingularValues`, `SVD`, `LUDecomposition`, `QRDecomposition`, `Cross`,
+  `MatrixMultiply`, `HadamardProduct`, `Flatten`, `Chunk`, `GroupBy`,
+  `ListFrom`, `SetFrom`, `TupleFrom`, `DictionaryFrom`, `RecordFrom`,
+  `BinCounts`, `Histogram`, `ContinuedFraction`, `RandomShuffle`,
+  `RandomChoice`, `RandomSample` (the impure trio answers from its domain
+  operand's facets alone — consulting the predicate consumes no random
+  draws). The rest are deliberate skips: solver-class operators stay in the
+  `undefined` tier by design, and a handful (`Pair`, `Vector`, `Tail`, …)
+  never exist as canonical leaves at all.
 
 - **A type alias naming a union of nominal types now confers membership**, so a
   sum type is usable through its own name. Given

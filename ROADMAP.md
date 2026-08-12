@@ -185,19 +185,57 @@ standing polytype behavior).
   `GraphemeClusters`, `UnicodeScalars`, `Utf8`, `Utf16`,
   `StringSplit`, `Divisors`, `PrimeFactors`, `FactorInteger`,
   `IntegerDigits`, and (decline-only) `Sort`/`Ordering`/`Unique`/
-  `Tally`. **Remaining work**: adoption over the rest of the ~73 eager
-  producers (probe-confirmed reproducers still open include
-  `Eigenvalues`/`Eigenvectors`/`SingularValues`, `Flatten`, `Kernel`,
-  `CoefficientList`, `AbsArg`, `ContinuedFraction`, `ListFrom`,
-  `Vector`, `TruthTable`, `PrimeImplicants`/`PrimeImplicates`,
-  `Timing`, `Keys`/`Values`); rulings that bind that work: `true` only
-  for COMPLETE preconditions (`Solve`/`FindRoot` answer `undefined`,
-  never `true` — pinned), evaluate handlers keep their self-guards (no
-  framework gate), the `undefined` tier and its evaluate fallback are
-  permanent. An IMPURE producer under an indexed wrapper
+  `Tally`. **Adoption round 2 (2026-08-11, three parallel passes)
+  CLOSED the sweep: 45 of the 73 producers now declare
+  `canEnumerate`**, the other 28 are deliberate, categorized skips —
+  the sweep itself is DONE, not paused. Round-2 additions: `true`-capable
+  `Shape` (no decline path), `Keys`/`Values` (dictionary test),
+  `AbsArg`, `ComplexRoots`, `ExtendedGCD`, `PlusMinus`; decline-only
+  `Eigenvalues`/`Eigenvectors`/`Eigen`/`SingularValues`/`SVD`/
+  `LUDecomposition`/`QRDecomposition`, `Cross`/`MatrixMultiply`/
+  `HadamardProduct` (both operands), `Flatten` (scalar carve-out:
+  `Flatten(5)` succeeds, so a number operand is `undefined` not
+  `false`), `Chunk`, `GroupBy`, `ListFrom`/`SetFrom`/`TupleFrom`
+  (collection-typed operands only — a scalar operand is legitimate),
+  `DictionaryFrom`/`RecordFrom`, `BinCounts`/`Histogram`,
+  `ContinuedFraction`, and the IMPURE trio
+  `RandomShuffle`/`RandomChoice`/`RandomSample` (domain-facet only,
+  zero draws, never `true`). The 28 skips, by category, all pinned or
+  reasoned: **permanent `undefined` tier** (success not cheaply
+  decidable, by ruling): `Solve`, `FindRoot`, `FindFit`, `NDSolve`,
+  `PolynomialRoots`, `Kernel`, `CoefficientList`, `QuotientRing`,
+  `LinearRegression`, `PolynomialFit`, `TruthTable`,
+  `PrimeImplicants`/`PrimeImplicates`, `Table`, `Timing` (operand
+  purity is the operand's), `Position` (already guarded by
+  `isEnumerableSource`), `Dictionary`, `Limits`,
+  `ColorFrom`/`ToColorspace`, `Quartiles` (see the crash item below);
+  **structurally ineligible**: `Pair`/`Triple`/`Single`/
+  `KeyValuePair`/`Vector` (canonicalize away — no canonical leaf ever
+  exists), `Tail` (evaluates to `Nothing` for every surviving form),
+  `Adjoin` (inert by design, no evaluate handler). Candidate noticed
+  for a later look: `Dot` (linear-algebra.ts) has decline paths and no
+  handler. An IMPURE producer under an indexed wrapper
   (`Take(RandomShuffle(xs), 2)`) still walks empty — the fallback is
   pure-only by ruling (per-generation re-draws would mix draw-sets);
   that case belongs to the draw-coherence item below.
+- **`Quartiles` throws a `TypeError` on a symbolic operand**
+  (pre-existing, found 2026-08-11 during the `canEnumerate` sweep):
+  `Quartiles(z)` for a valueless `number`-typed `z` crashes in
+  `bigMedian` (`numerics/statistics.ts:38`, via `bigQuartiles` ←
+  `library/statistics.ts`) instead of staying inert;
+  `InterquartileRange` shares `bigQuartiles`/`exactData` and is likely
+  affected identically. Also blocks its `canEnumerate` adoption (no
+  tier is honest while evaluation can throw). Fix = a ground-data
+  guard at the `exactData` seam.
+- **`ListFrom(xs)` over a VALUELESS collection-typed symbol wraps the
+  symbol as a scalar** (pre-existing, surfaced 2026-08-11): the
+  handler's `if (!xs.isCollection)` branch reads a valueless
+  `list<integer>` symbol as a scalar and answers `["xs"]` — a
+  one-element list containing the symbol — where every sibling
+  operator stays inert. Same `isCollection`-as-enumerability
+  misreading the facet round fixed elsewhere; needs its own ruling
+  (inert, or keep the scalar reading?). `SetFrom`/`TupleFrom` share
+  the branch.
 - **An eager IMPURE collection source is evaluated several times**
   (pre-existing, measured 2026-08-09 during the above): counting
   handler invocations over a 5-element source,

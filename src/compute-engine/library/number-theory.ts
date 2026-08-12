@@ -481,6 +481,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients).',
       signature: '(integer, integer) -> tuple<integer, integer, integer>',
       examples: ['ExtendedGCD(12, 18)  // (6, -1, 1)'],
+      // Complete precondition (the evaluate guard on both ground operands):
+      // two integers always yield the Bézout tuple.
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const a = canEnumerateOperand(expr.ops[0], (g) => toBigint(g) !== null);
+        if (a !== true) return a;
+        return canEnumerateOperand(expr.ops[1], (g) => toBigint(g) !== null);
+      },
       evaluate: ([aOp, bOp], { engine: ce }) => {
         const a = toBigint(aOp);
         const b = toBigint(bOp);
@@ -607,6 +615,25 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully; for an inexact value the expansion is truncated to the optional `n` terms (default 20).',
       signature: '(number, integer?) -> list<integer>',
       examples: ['ContinuedFraction(43/19)  // [2, 3, 1, 4]'],
+      // Decline-only: the provable declines are a definitively unavailable
+      // `x`, and a term count that `Number(toBigint(nOp) ?? 0n)` puts below 1
+      // (a valueless symbol included). Success on a ground `x` further
+      // depends on the branch taken (exact Euclidean expansion vs. a bounded
+      // float expansion, which declines on a non-finite value), so this never
+      // answers `true`.
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const x = groundEnumerationOperand(expr.ops[0]);
+        if (x === null) return false;
+        if (expr.ops[1] !== undefined) {
+          const n = groundEnumerationOperand(expr.ops[1]);
+          if (n !== undefined) {
+            const k = n === null ? null : toBigint(n);
+            if (k === null || k < 1n) return false;
+          }
+        }
+        return undefined;
+      },
       evaluate: ([xOp, nOp], { engine: ce }) => {
         if (xOp === undefined) return undefined;
         const maxTerms =

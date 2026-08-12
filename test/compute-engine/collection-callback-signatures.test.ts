@@ -411,32 +411,30 @@ describe('isEnumerableCollection separates empty from unwalkable', () => {
     expect(ce().box(expr as any).isEnumerableCollection).toBe(expected);
   });
 
-  // The case that stays undecided: an UNADOPTED eager collection operator —
-  // no collection handlers, no `canEnumerate` precondition — is structurally
-  // indistinguishable whether or not its elements are reachable. Callers that
-  // need a verdict (and only they) pay for the evaluation. (An ADOPTED eager
-  // operator answers definitively — see
-  // `eager-collection-enumerability.test.ts`; `ContinuedFraction` is
-  // deliberately outside the adoption tranche.)
-  it('an unadopted eager collection operator is undecided, not false', () => {
+  // The case that stays undecided even after adoption: a DECLINE-ONLY
+  // `canEnumerate` (here `ContinuedFraction`, whose rational/float branches
+  // can decline mid-computation) never answers `true`, so a ground argument
+  // is honestly `undefined` — the caller pays for the evaluation, and the
+  // walk is what tells empty from unwalkable. (A permanently UNADOPTED
+  // producer such as `Solve` behaves the same — pinned in
+  // `eager-collection-enumerability.test.ts`.)
+  it('a decline-only producer is undecided on ground input, not true', () => {
     const cf = ce().box(['ContinuedFraction', ['Rational', 43, 19]]);
     expect(cf.isCollection).toBe(false);
     expect(cf.isEnumerableCollection).toBe(undefined);
     expect([...cf.each()].length).toBeGreaterThan(0);
   });
 
-  it('an unadopted eager operator is undecided whether or not its argument is ground', () => {
+  it('a decline-only producer answers false only for a provable decline', () => {
     const e = ce();
-    // Same type, no handlers, no precondition on either — yet one walks and
-    // the other does not. This is why the caller must evaluate.
-    for (const expr of [
-      ['ContinuedFraction', ['Rational', 43, 19]],
-      ['ContinuedFraction', 'x'],
-    ]) {
-      const boxed = e.box(expr as any);
-      expect(boxed.type.toString()).toBe('list<integer>');
-      expect(boxed.isEnumerableCollection).toBe(undefined);
-    }
+    // Ground argument: undecided (success not cheaply provable) — resolves by
+    // evaluating. Valueless symbol: provable decline, definite false.
+    expect(
+      e.box(['ContinuedFraction', ['Rational', 43, 19]]).isEnumerableCollection
+    ).toBe(undefined);
+    expect(e.box(['ContinuedFraction', 'x']).isEnumerableCollection).toBe(
+      false
+    );
     expect(
       [...e.box(['ContinuedFraction', ['Rational', 43, 19]]).each()].length
     ).toBeGreaterThan(0);

@@ -317,9 +317,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         if (isFunction(expr, 'When')) {
           const inner = expr.op1.canonical;
           const innerCond = expr.op2.canonical;
+          // Build the merged condition through canonical `And`, not `_fn`:
+          // `And` is commutative, so its canonical form flattens, folds and
+          // ORDERS its operands. Skipping that left the conjunction in
+          // authored order while `.json` (which goes through `structural`)
+          // sorts — so `x{a}{b}` and `x{b}{a}` serialized to identical
+          // MathJSON while `isSame`/`hash` disagreed, and `ce.box(e.json)`
+          // was not `isSame` to `e` (Tycho item-153 seed, the 11
+          // `differs-json-equal` rows).
           return ce._fn('When', [
             inner,
-            ce._fn('And', [innerCond, cond.canonical]),
+            ce.function('And', [innerCond, cond.canonical]),
           ]);
         }
         return ce._fn('When', [expr.canonical, cond.canonical]);

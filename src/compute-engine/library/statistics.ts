@@ -17,6 +17,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
+  canEnumerateFiniteSource,
   windowedCollectionOps,
 } from '../collection-utils.js';
 import { aggregateAbsence } from './missing-data.js';
@@ -586,6 +587,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       examples: [
         'Histogram([1, 2, 2, 3], 3)  // Returns [(1,1), (1.6667,2), (2.3333,1)]',
       ],
+      // Decline-only: `computeBinning` opens with `if (!xs.isFiniteCollection)
+      // return undefined`, so an unwalkable or infinite source is a provable
+      // decline. Success also needs a non-empty finite numeric sample and a
+      // usable bin spec, neither cheaply decidable — never `true`.
+      canEnumerate: canEnumerateFiniteSource,
       evaluate: ([xs, binsArg], { engine: ce }) => {
         const binning = computeBinning(xs, binsArg);
         if (!binning) return undefined;
@@ -606,6 +612,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // Same widened bin spec as Histogram (non-integer counts stay inert).
       signature: '(collection, number | list<number>) -> list<number>',
       examples: ['BinCounts([1, 2, 2, 3], 3)  // Returns [1, 2, 1]'],
+      // Decline-only, same `computeBinning` precondition as `Histogram`.
+      canEnumerate: canEnumerateFiniteSource,
       evaluate: ([xs, binsArg], { engine: ce }) => {
         const binning = computeBinning(xs, binsArg);
         if (!binning) return undefined;
@@ -780,6 +788,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // are invalid, while a lazy indexed view (`Filter` over a `Range`)
       // passes.
       signature: '(indexed_collection, number) random -> list',
+      // IMPURE producer: decline-only from the source facet — zero draws,
+      // never `true` (see `RandomShuffle`/`RandomChoice`).
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        return expr.op1.isEnumerableCollection === false ? false : undefined;
+      },
       evaluate: ([xs, kOp], { engine: ce }) => {
         if (!xs.isIndexedCollection) return undefined;
         const n = xs.count;

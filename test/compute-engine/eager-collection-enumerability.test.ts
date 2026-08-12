@@ -304,3 +304,131 @@ describe('the coupling: wrapped symbolic sources are inert, ground ones answer (
     expect(boxed.evaluate().isCollection).toBe(true);
   });
 });
+
+/**
+ * # Adoption round 2 (2026-08-11): the remaining eager producers
+ *
+ * Three parallel adoption passes over linear-algebra, collections/sets and
+ * statistics/complex/number-theory/arithmetic — 31 more operators. Recipes
+ * per the same rulings: `true` only for complete preconditions, decline-only
+ * where success is not cheaply decidable, IMPURE producers never `true`.
+ */
+describe('adoption round 2', () => {
+  it.each([
+    // Complete preconditions (true-capable).
+    [
+      'Shape([[1,2],[3,4]])',
+      ['Shape', ['List', ['List', 1, 2], ['List', 3, 4]]],
+      true,
+    ],
+    ['Shape(5) — a tuple for every value', ['Shape', 5], true],
+    ['Keys(dict)', ['Keys', ['Dictionary', ['Tuple', { str: 'a' }, 1]]], true],
+    [
+      'Values(dict)',
+      ['Values', ['Dictionary', ['Tuple', { str: 'a' }, 1]]],
+      true,
+    ],
+    ['Keys(xs) — not a dictionary', ['Keys', 'xs'], false],
+    ['AbsArg(3)', ['AbsArg', 3], true],
+    ['AbsArg(z) valueless', ['AbsArg', 'z'], false],
+    ['ComplexRoots(1, 4)', ['ComplexRoots', 1, 4], true],
+    ['ComplexRoots(z, 4)', ['ComplexRoots', 'z', 4], false],
+    ['ExtendedGCD(12, 18)', ['ExtendedGCD', 12, 18], true],
+    ['ExtendedGCD(n, 18)', ['ExtendedGCD', 'n', 18], false],
+    ['PlusMinus(1, 2)', ['PlusMinus', 1, 2], true],
+    // Decline-only: false on a provable decline, undefined on ground input.
+    ['Eigenvalues(M) valueless', ['Eigenvalues', 'M'], false],
+    [
+      'Eigenvalues(ground) — never true',
+      ['Eigenvalues', ['List', ['List', 2, 0], ['List', 0, 3]]],
+      undefined,
+    ],
+    ['Chunk(xs, 2) valueless', ['Chunk', 'xs', 2], false],
+    ['Chunk([1,2,3], 0) bad size', ['Chunk', ['List', 1, 2, 3], 0], false],
+    [
+      'GroupBy(xs, f)',
+      ['GroupBy', 'xs', ['Function', ['Greater', '_1', 0], '_1']],
+      false,
+    ],
+    [
+      'ListFrom(Range(1,+oo)) infinite',
+      ['ListFrom', ['Range', 1, { sym: 'PositiveInfinity' }]],
+      false,
+    ],
+    ['DictionaryFrom(xs)', ['DictionaryFrom', 'xs'], false],
+    ['BinCounts(xs, 3)', ['BinCounts', 'xs', 3], false],
+    ['Histogram(xs, 3)', ['Histogram', 'xs', 3], false],
+    // Impure: decline-only from the domain facet, never true.
+    ['RandomShuffle(xs)', ['RandomShuffle', 'xs'], false],
+    [
+      'RandomShuffle([1,2]) — never true',
+      ['RandomShuffle', ['List', 1, 2]],
+      undefined,
+    ],
+    ['RandomChoice(xs, 2)', ['RandomChoice', 'xs', 2], false],
+    ['RandomSample(xs, 2)', ['RandomSample', 'xs', 2], false],
+  ] as const)('%s → %s', (_label, expr, expected) => {
+    const e = ce();
+    e.declare('z', 'number');
+    e.declare('n', 'integer');
+    e.declare('M', 'matrix');
+    expect(e.box(expr as any).isEnumerableCollection).toBe(expected);
+  });
+
+  // The Flatten scalar carve-out: `Flatten(5)` succeeds (→ `[5]`), and a
+  // scalar's facet is `false` — the plain decline-only recipe would wrongly
+  // inert it, so `Flatten` answers `undefined` for a number operand.
+  it('Flatten does not decline a scalar operand', () => {
+    const e = ce();
+    expect(e.box(['Flatten', 5]).isEnumerableCollection).toBeUndefined();
+    expect(e.box(['Flatten', 5]).evaluate().toString()).toBe('[5]');
+    e.declare('M', 'matrix');
+    expect(e.box(['Flatten', 'M']).isEnumerableCollection).toBe(false);
+  });
+
+  it('wrapped decline-only leaves are inert; ground ones answer', () => {
+    const e = ce();
+    e.declare('M', 'matrix');
+    const P = ['Function', ['Greater', '_1', 1], '_1'];
+    expect(e.box(['Take', ['Eigenvalues', 'M'], 1]).evaluate().operator).toBe(
+      'Take'
+    );
+    expect(
+      e
+        .box([
+          'Filter',
+          ['Take', ['Flatten', ['List', ['List', 1, 2], ['List', 3, 4]]], 3],
+          P,
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[2,3]');
+    expect(
+      e
+        .box(['Take', ['ExtendedGCD', 12, 18], 2])
+        .evaluate()
+        .toString()
+    ).toBe('[6,-1]');
+  });
+
+  // The impure predicates consume nothing: reading the facet must not draw.
+  it('an impure producer answers its facet with zero draws', () => {
+    const e = ce();
+    const probe = e.box(['RandomShuffle', ['List', 1, 2, 3]]);
+    const proto = Object.getPrototypeOf(probe);
+    const original = proto.evaluate;
+    let evaluations = 0;
+    try {
+      proto.evaluate = function (...args: unknown[]) {
+        evaluations += 1;
+        return original.apply(this, args);
+      };
+      void probe.isEnumerableCollection;
+      void e.box(['RandomChoice', ['List', 1, 2], 2]).isEnumerableCollection;
+      void e.box(['RandomSample', ['List', 1, 2], 2]).isEnumerableCollection;
+      expect(evaluations).toBe(0);
+    } finally {
+      proto.evaluate = original;
+    }
+  });
+});

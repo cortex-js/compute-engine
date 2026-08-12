@@ -11,6 +11,7 @@ import {
   basicIndexedCollectionHandlers,
   broadcastOverIndexedCollections,
   canEnumerateFiniteSource,
+  canEnumerateOperand,
   enumerableFromAllSources,
   enumerableFromSource,
   hasAccessibleComponents,
@@ -134,6 +135,33 @@ function isProvablyScalar(operand: Expression): boolean {
       ? t.types.some(nonScalar)
       : isSubtype(t, 'collection');
   return !nonScalar(operand.type.type);
+}
+
+/**
+ * `canEnumerate` for the VARIADIC eager materializers (`ListFrom`, `SetFrom`,
+ * `TupleFrom`): each operand that IS a collection gets walked, and the
+ * evaluate handlers decline on one that is not finite
+ * (`if (!xs.isFiniteCollection) return undefined`).
+ *
+ * A NON-collection operand contributes ITSELF (`ListFrom(5)` → `[5]`), so its
+ * facets must not decide anything — a scalar's `isEnumerableCollection` is
+ * `false`, which would otherwise wrongly inert the whole call. Hence the
+ * `isCollection === true` gate.
+ *
+ * Provable declines only, never `true`: success also depends on the element
+ * walk, which is not cheaply decidable (same reasoning as
+ * `canEnumerateFiniteSource`).
+ */
+function canEnumerateCollectionOperands(
+  expr: Expression
+): boolean | undefined {
+  if (!isFunction(expr)) return undefined;
+  for (const op of expr.ops) {
+    if (op.isCollection !== true) continue;
+    if (op.isEnumerableCollection === false) return false;
+    if (op.isFiniteCollection === false) return false;
+  }
+  return undefined;
 }
 
 // Parsed form of the `At` signature (kept in sync with the `signature:` string
@@ -1781,6 +1809,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(dictionary) -> list<string>',
     type: () => parseType('list<string>'),
+    // Complete precondition: the evaluate guard (`isDictionary`) is the
+    // handler's only decline — see `canEnumerate` (types-definitions.ts).
+    canEnumerate: (expr) =>
+      isFunction(expr)
+        ? canEnumerateOperand(expr.op1, isDictionary)
+        : undefined,
     evaluate: ([dict], { engine: ce }) => {
       if (!isDictionary(dict)) return undefined;
       // Iteration order matches `each()` (both enumerate the underlying
@@ -1805,6 +1839,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return { kind: 'list', elements: widen(...Object.values(t.elements)) };
       return parseType('list<any>');
     },
+    // Complete precondition — see `Keys`.
+    canEnumerate: (expr) =>
+      isFunction(expr)
+        ? canEnumerateOperand(expr.op1, isDictionary)
+        : undefined,
     evaluate: ([dict], { engine: ce }) => {
       if (!isDictionary(dict)) return undefined;
       // Same insertion order as `Keys` and `each()`.
@@ -5993,6 +6032,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The result always rebuilds as a `List` (see `evaluate`), so the result
     // type is `list<T>`, not the source's (possibly indexed/Range) type.
     signature: 'forall T. (indexed_collection<T>) random -> list<T>',
+    // Provable declines only, answered from the SOURCE's facets alone — an
+    // IMPURE producer must never claim `true` (the `at()` materialize
+    // fallback is pure-only, so a `true` would promise a walk the indexed
+    // route cannot deliver), and the predicate consumes ZERO draws.
+    // Mirrors the evaluate guards: an infinite source errors, an unknown
+    // finiteness stays symbolic.
+    canEnumerate: canEnumerateFiniteSource,
     evaluate: ([xs], { engine: ce }) => {
       // An INFINITE collection can never be shuffled: error loudly, matching
       // `Random`/`RandomSample` (`out-of-range`, "a finite collection").
@@ -6478,6 +6524,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Split the collection into `k` nearly equal-sized groups. See `Partition` for splitting into fixed-size chunks.',
     complexity: 8200,
     signature: '(collection, integer) -> list<list>',
+    // Provable declines only (a finite, walkable source and a positive
+    // integer `k` are required); success is not cheaply decidable, so never
+    // `true` — see `canEnumerateFiniteSource`.
+    canEnumerate: (expr) => {
+      if (!isFunction(expr)) return undefined;
+      const k = canEnumerateOperand(expr.ops[1], (g) => {
+        const i = toInteger(g);
+        return i !== null && i > 0;
+      });
+      if (k === false) return false;
+      return canEnumerateFiniteSource(expr);
+    },
     evaluate: ([xs, n], { engine: ce }) => {
       const k = toInteger(n);
       if (!xs.isFiniteCollection || k === null || k <= 0) return undefined;
@@ -6652,6 +6710,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection, key: function) -> dictionary<list>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'GroupBy', ops, 1),
+    // Provable declines only (finite, walkable source required); success also
+    // depends on the key function and the element walk, so never `true` —
+    // see `canEnumerateFiniteSource`.
+    canEnumerate: canEnumerateFiniteSource,
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = applicable(fn);
@@ -7080,6 +7142,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       return { kind: 'list', elements: type };
     },
+    // Provable declines only, over the COLLECTION operands (a scalar operand
+    // contributes itself) — see `canEnumerateCollectionOperands`.
+    canEnumerate: canEnumerateCollectionOperands,
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
       for (const xs of ops) {
@@ -7145,6 +7210,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       return { kind: 'set', elements: type };
     },
+    // Provable declines only — see `ListFrom`.
+    canEnumerate: canEnumerateCollectionOperands,
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
       for (const xs of ops) {
@@ -7162,6 +7229,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'Create a tuple from the elements of a collection.',
     complexity: 8200,
     signature: '(value*) -> tuple',
+    // Provable declines only — see `ListFrom`.
+    canEnumerate: canEnumerateCollectionOperands,
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
       for (const xs of ops) {
@@ -7180,6 +7249,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Create a dictionary from the elements of a collection of (key, value) pairs.',
     complexity: 8200,
     signature: '(collection) -> dictionary',
+    // Provable declines only (the source must be a finite, walkable
+    // collection); success also depends on every element being a
+    // string-keyed pair, so never `true` — see `canEnumerateFiniteSource`.
+    canEnumerate: canEnumerateFiniteSource,
     evaluate: ([xs], { engine: ce }) => {
       if (!xs.isCollection) return undefined;
 
@@ -7215,6 +7288,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Create a record from the elements of a collection of (key, value) pairs.',
     complexity: 8200,
     signature: '(collection) -> record',
+    // Provable declines only — see `DictionaryFrom`.
+    canEnumerate: canEnumerateFiniteSource,
     evaluate: ([xs], { engine: ce }) => {
       if (!xs.isCollection) return undefined;
 

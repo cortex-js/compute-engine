@@ -3153,6 +3153,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // to round it first. It is rounded on evaluation.
       signature: '(collection | set<real>, number) random -> list<any>',
       type: ([domain, k]) => randomListType(domain, k),
+      // IMPURE producer: decline-only, from the domain operand's facet alone
+      // — zero draws, never `true` (the `at()` materialize fallback is
+      // pure-only and could not honor it). Mirrors `RandomShuffle`.
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        return expr.op1.isEnumerableCollection === false ? false : undefined;
+      },
       evaluate: ([domain, kOp], { engine: ce }) => {
         // Domain validity is checked FIRST, by KIND, before any `k` test.
         const plan = analyzeRandomDomain(ce, domain);

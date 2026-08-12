@@ -1,9 +1,14 @@
 # Eager collections: split the enumerability question from materialization
 
-**Date:** 2026-08-11 · **Status:** IMPLEMENTED 2026-08-11 (Parts 1 and 2;
-adoption tranche of 14 operators — strings ×6, number theory ×4,
-finite-source consumers ×4 decline-only). Remaining adoption is incremental;
-the `undefined` tier and its evaluate fallback are permanent by design.
+**Date:** 2026-08-11 · **Status:** COMPLETE 2026-08-11 (Parts 1 and 2, plus
+the full adoption sweep: 45 of the 73 eager producers declare
+`canEnumerate` — first tranche of 14, then a three-pass parallel round of
+31; the remaining 28 are deliberate, categorized skips recorded in
+ROADMAP.md — the permanent `undefined` tier plus the structurally
+ineligible). The `undefined` tier and its evaluate fallback are permanent by
+design. Two pre-existing defects surfaced by the sweep are tracked in
+ROADMAP.md: the `Quartiles` symbolic-operand `TypeError`, and
+`ListFrom`'s scalar-wrapping of a valueless collection-typed symbol.
 Tests: `test/compute-engine/eager-collection-enumerability.test.ts`.
 One implementation delta vs. the text below: the definition-key validator
 (`OPERATOR_DEF_KEYS`, `boxed-operator-definition.ts`) is a whitelist that

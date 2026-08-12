@@ -10,6 +10,7 @@ import {
 import { totalDegree } from '../boxed-expression/polynomial-degree.js';
 import { checkArity } from '../boxed-expression/validate.js';
 import {
+  canEnumerateFiniteSource,
   hasAccessibleComponents,
   isFiniteIndexedCollection,
   isNumericTuple,
@@ -173,6 +174,27 @@ function innerProductType(
   return ce.function('Add', terms).type;
 }
 
+/**
+ * `canEnumerate` for an eager matrix operator that consumes TWO tensor
+ * operands (`MatrixMultiply`, `HadamardProduct`, `Cross`): provable declines
+ * only, the two-operand form of {@link canEnumerateFiniteSource}. Their
+ * evaluate handlers require both operands to be materialized tensor values
+ * (`isTensorValue` + `packTensor`), so an operand that definitively cannot be
+ * walked — or is infinite — decides `false`. Success additionally depends on
+ * kernel admissibility and shape agreement (and, for a vector·vector product,
+ * on the result being a number rather than a collection at all), none of it
+ * cheaply decidable, so this never answers `true`; the `undefined` tier
+ * resolves by evaluating, exactly as before adoption.
+ */
+function canEnumerateTensorOperands(expr: Expression): boolean | undefined {
+  if (!isFunction(expr)) return undefined;
+  for (const op of expr.ops) {
+    if (op.isEnumerableCollection === false) return false;
+    if (op.isFiniteCollection === false) return false;
+  }
+  return undefined;
+}
+
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
     Matrix: {
@@ -213,6 +235,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Return the shape tuple of an expression.',
       complexity: 8200,
       signature: '(value) -> tuple',
+      // Complete precondition: the evaluate handler has NO decline path — any
+      // valid operand has a `shape` (`()` for a scalar), so a shape tuple is
+      // always produced — see `canEnumerate` (types-definitions.ts).
+      canEnumerate: () => true,
       evaluate: ([xs], { engine: ce }) => ce.tuple(...xs.shape),
     },
 
@@ -305,6 +331,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Flatten a tensor or collection into a list.',
       complexity: 8200,
       signature: '(value, integer?) -> list',
+      // Provable declines only. The evaluate handler succeeds on three shapes:
+      // a scalar (wrapped in a one-element list), a tensor value, and a finite
+      // indexed collection — the last two imply a walkable operand, so an
+      // operand that definitively cannot be walked (or is infinite) decides
+      // `false`. The SCALAR path must be carved out first: `Flatten(5)`
+      // succeeds although `5` is not an enumerable collection. Success also
+      // depends on shape regularity and the depth operand, neither cheaply
+      // decidable, so this never answers `true`.
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const xs = expr.op1;
+        if (xs === undefined) return undefined;
+        if (xs.isNumber === true) return undefined; // scalar: evaluates fine
+        if (xs.isEnumerableCollection === false) return false;
+        if (xs.isFiniteCollection === false) return false;
+        return undefined;
+      },
       evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0];
 
@@ -863,6 +906,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Matrix and vector multiplication.',
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> matrix|vector',
+      // Provable declines only (both operands must be tensor values); success
+      // is not cheaply decidable — see `canEnumerateTensorOperands`.
+      canEnumerate: canEnumerateTensorOperands,
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const A = ops[0];
         const B = ops[1];
@@ -1062,6 +1108,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'Hadamard (element-wise) product of two vectors or matrices of the same shape.',
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> matrix|vector',
+      // Provable declines only (both operands must be tensor values); success
+      // is not cheaply decidable — see `canEnumerateTensorOperands`.
+      canEnumerate: canEnumerateTensorOperands,
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const A = ops[0];
         const B = ops[1];
@@ -1213,6 +1262,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Cross product of two 3-vectors.',
       complexity: 8300,
       signature: '(vector, vector) -> vector',
+      // Provable declines only (both operands must be tensor values); success
+      // also requires two 3-vectors — see `canEnumerateTensorOperands`.
+      canEnumerate: canEnumerateTensorOperands,
       evaluate: ([a, b], { engine: ce }) => {
         const A = a;
         const B = b;
@@ -1788,6 +1840,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Eigenvalues of a square matrix.',
       complexity: 8500,
       signature: '(matrix) -> list',
+      // Provable declines only (the operand must be a walkable, finite tensor
+      // value); success is not cheaply decidable — a full ground test would
+      // walk every entry. See `canEnumerateFiniteSource`.
+      canEnumerate: canEnumerateFiniteSource,
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
@@ -1858,6 +1914,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Eigenvectors of a square matrix.',
       complexity: 8600,
       signature: '(matrix) -> list',
+      // Provable declines only (the operand must be a walkable, finite tensor
+      // value); success is not cheaply decidable — see
+      // `canEnumerateFiniteSource`.
+      canEnumerate: canEnumerateFiniteSource,
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
@@ -1905,6 +1965,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Eigenvalue-eigenvector decomposition of a square matrix.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
+      // Provable declines only (the operand must be a walkable, finite tensor
+      // value); success is not cheaply decidable — see
+      // `canEnumerateFiniteSource`.
+      canEnumerate: canEnumerateFiniteSource,
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
@@ -1932,6 +1996,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'LU decomposition of a square matrix.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
+      // Provable declines only (the operand must be a walkable, finite tensor
+      // value); success is not cheaply decidable — see
+      // `canEnumerateFiniteSource`.
+      canEnumerate: canEnumerateFiniteSource,
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
@@ -1958,6 +2026,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'QR decomposition of a matrix.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
+      // Provable declines only (the operand must be a walkable, finite tensor
+      // value); success is not cheaply decidable — see
+      // `canEnumerateFiniteSource`.
+      canEnumerate: canEnumerateFiniteSource,
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
@@ -2006,6 +2078,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Singular value decomposition of a matrix.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
+      // Provable declines only (the operand must be a walkable, finite tensor
+      // value); success is not cheaply decidable — see
+      // `canEnumerateFiniteSource`.
+      canEnumerate: canEnumerateFiniteSource,
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
@@ -2034,6 +2110,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'numeric otherwise.',
       complexity: 8700,
       signature: '(matrix) -> list',
+      // Provable declines only (the operand must be a walkable, finite tensor
+      // value); success is not cheaply decidable — the exact path may bail to
+      // the numeric SVD, which itself declines. See
+      // `canEnumerateFiniteSource`.
+      canEnumerate: canEnumerateFiniteSource,
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
         if (!isTensorValue(M)) return undefined;

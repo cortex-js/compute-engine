@@ -2036,6 +2036,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (args.length === 0) return ce.error('missing');
         return ce._fn('PlusMinus', [args[0], args[1].abs()]);
       },
+      // Complete precondition: the evaluate handler has no decline path — a
+      // valid `PlusMinus` always builds the `(x - y, x + y)` tuple, symbolic
+      // operands included. (An arity/type error makes the instance invalid,
+      // which `isEnumerableCollection` rejects before consulting this.)
+      canEnumerate: () => true,
       evaluate: ([x, y], { engine }) => engine.tuple(x.add(y.neg()), x.add(y)),
     },
 

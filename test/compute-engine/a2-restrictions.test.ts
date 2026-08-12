@@ -195,3 +195,30 @@ describe('A2 — When(e, False) masking rule', () => {
     expect(result.operator).toEqual('When');
   });
 });
+
+describe('A2 — stacked restrictions merge through canonical `And`', () => {
+  // The `When(When(e, c1), c2) → When(e, And(c1, c2))` merge used to build the
+  // conjunction with `_fn`, which skips canonical `And`'s operand ordering.
+  // `.json` goes through `structural`, which DOES sort, so the two spellings
+  // serialized identically while `isSame`/`hash` disagreed.
+  const A = 'x\\left\\{\\vert z\\vert\\lt5\\right\\}\\left\\{0\\lt y\\right\\}';
+  const B = 'x\\left\\{0\\lt y\\right\\}\\left\\{\\vert z\\vert\\lt5\\right\\}';
+
+  test('restriction order does not change the canonical tree', () => {
+    const ce = new ComputeEngine();
+    const a = ce.parse(A);
+    const b = ce.parse(B);
+    expect(JSON.stringify(a.json)).toEqual(JSON.stringify(b.json));
+    expect(a.isSame(b)).toBe(true);
+    expect(a.hash).toEqual(b.hash);
+  });
+
+  test('`.json` agrees with the boxed operand order', () => {
+    const ce = new ComputeEngine();
+    const a = ce.parse(A);
+    // The MathJSON must re-box to the same tree it came from.
+    expect(ce.box(a.json).isSame(a)).toBe(true);
+    // ...and the two serializations must agree with each other.
+    expect(ce.parse(a.toLatex()).isSame(a)).toBe(true);
+  });
+});

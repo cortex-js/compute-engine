@@ -7,8 +7,13 @@ import type {
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
+import { groundEnumerationOperand } from '../collection-utils.js';
 import {
   type SubjectPart,
   hasAssumptions,
@@ -170,6 +175,18 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> tuple<real, real>',
+      // Complete precondition: the evaluate guard (`isNumber`) on the ground
+      // operand — the tuple is always built for a number literal, NaN and ±∞
+      // included. A ground COLLECTION operand takes the broadcast route
+      // instead, which this precondition does not model.
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const z = groundEnumerationOperand(expr.op1);
+        if (z === undefined) return undefined;
+        if (z === null) return false;
+        if (z.isCollection) return undefined;
+        return isNumber(z);
+      },
       evaluate: (ops, { engine: ce, numericApproximation }) => {
         if (!isNumber(ops[0])) return undefined;
         return ce.tuple(
@@ -198,6 +215,23 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number, number) -> list<number>',
+      // Complete precondition, mirroring both evaluate declines on the ground
+      // operands: a non-NaN real part, and a positive integer root count. (A
+      // ground collection operand broadcasts — not modelled here.)
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const z = groundEnumerationOperand(expr.ops[0]);
+        if (z === undefined) return undefined;
+        if (z === null) return false;
+        if (z.isCollection) return undefined;
+        if (isNaN(z.re)) return false;
+        const nOp = groundEnumerationOperand(expr.ops[1]);
+        if (nOp === undefined) return undefined;
+        if (nOp === null) return false;
+        if (nOp.isCollection) return undefined;
+        const n = nOp.re;
+        return Number.isInteger(n) && n > 0;
+      },
       evaluate: (ops, { engine: ce }) => {
         const re = ops[0].re;
         if (isNaN(re)) return undefined;
