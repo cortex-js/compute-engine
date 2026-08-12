@@ -6,6 +6,7 @@
   "publisher": "FarfieldStudio",
   "license": "MIT",
   "icon": "icon.png",
+  "preview": true,
   "repository": {
     "type": "git",
     "url": "https://github.com/cortex-js/compute-engine.git",

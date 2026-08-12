@@ -295,3 +295,84 @@ statement. A bare NUMBER-literal statement (`{ 1 }` as a whole branch body)
 does not fire. Hover remains identifier-only. Evaluate/variables requests
 while running (not paused) are declined. Anonymous lambdas show
 `(anonymous)` in the stack.
+
+## Releasing the extension
+
+Published as **`FarfieldStudio.epsil`** on the VS Code Marketplace. First
+release (0.1.0) was uploaded by hand on 2026-08-11; everything after that is
+meant to ride the engine's release.
+
+### Versioning: lockstep with the engine, deliberately
+
+The extension's version **is** the engine's version. This is not cosmetic. The
+language server bundles the Compute Engine *from repo source* at package time
+(see `build.mjs`), so a published extension is frozen to whatever engine was in
+the tree when it was built — it does **not** track the user's installed
+`@cortex-js/compute-engine`. Sharing the version number is the only thing that
+makes "which engine is inside this extension?" answerable without a lookup
+table, and packaging in the same CI run as the npm release is what stops the
+editor and the CLI from drifting apart on diagnostics.
+
+`scripts/version.sh` (run by `npm version` at the repo root) stamps
+`vscode-epsil/package.json` and `package-lock.json` with the engine version, so
+there is never a separate bump to remember.
+
+> The lockfile carries the version in **two** places — the root `version` and
+> `packages[""].version` — on top of `package.json`. `npm ci` fails if they
+> disagree, which breaks the release job while local builds keep working. The
+> stamper updates all three and is byte-idempotent.
+
+### The automated path
+
+Prerequisite, one time: a `VSCE_PAT` repository secret. Generate it at
+dev.azure.com -> User settings -> Personal access tokens, with **Organization =
+"All accessible organizations"** and **Scopes -> Show all scopes -> Marketplace
+-> Manage** (both are easy to get wrong, and both fail unhelpfully). Store it
+with `gh secret set VSCE_PAT`, which takes hidden input. It expires within a
+year and will fail a release on the day it does, with no prior warning.
+
+Then a release is just the engine's normal flow:
+
+```
+npm version <major|minor|patch>   # stamps CHANGELOG + extension version
+git push --follow-tags
+# publish a GitHub Release for the tag
+```
+
+`.github/workflows/publish.yml` fires on `release: published` and runs two
+jobs: `publish` (npm), then `publish-vsix` (`needs: publish`) which installs
+both dependency trees, runs the DAP tests, packages, `vsce publish`es, and
+attaches the `.vsix` to the GitHub Release. A failed npm publish skips the
+extension rather than leaving the two out of sync.
+
+### The manual path (no PAT needed)
+
+Still works, including for updates, and is the fallback whenever CI is
+unavailable:
+
+```
+cd vscode-epsil
+npm version patch --no-git-tag-version   # NEVER plain `npm version` here —
+                                         # it commits and tags, sweeping up
+                                         # whatever else is in the tree
+npm run package                          # -> epsil.vsix (runs build.mjs)
+code --install-extension epsil.vsix      # smoke-test the real artifact
+```
+
+Then upload `epsil.vsix` at marketplace.visualstudio.com/manage -> the
+extension's ... menu -> Update. Marketplace versions are **immutable**: you
+cannot re-upload a version, so every upload needs a bump.
+
+Always smoke-test the packaged `.vsix` rather than trusting the F5 extension
+host — F5 runs from source and will not catch a `.vscodeignore` mistake that
+omits or over-includes files.
+
+### Not set up
+
+- **Open VSX** (open-vsx.org) — the registry VSCodium, Cursor, Windsurf, and
+  Gitpod use, since those cannot legally ship Microsoft's marketplace client.
+  Publishing there is a separate account, an `OVSX_PAT`, and one more step
+  (`ovsx publish`) uploading the same `.vsix`. Worth adding if any meaningful
+  share of users are on a VS Code fork.
+- **Publisher domain verification** — the marketplace's verified badge comes
+  from a DNS TXT record on a domain you control.
