@@ -812,7 +812,7 @@ function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
  *
  * The bare `function` primitive is a string type, so it declines here — a
  * built-in callback slot spelled that way carries no parameter types. A GENERIC
- * arrow (`forall T. (T) -> boolean`) also declines: its quantified positions
+ * arrow (`(T) -> boolean where T`) also declines: its quantified positions
  * are not types a literal can be annotated with, and instantiating them is the
  * contextual solve's job.
  *
@@ -923,7 +923,7 @@ function annotateCallbacksFromSignature(
   }
   if (sigType.kind !== 'signature') return ops;
   // A POLYMORPHIC callee takes the CONTEXTUAL route instead (Design D): its
-  // parameter types mention the variables its own `forall` clause binds, so
+  // parameter types mention the variables its own `where` clause binds, so
   // stamping one verbatim would leave `T` unresolved outside that scope (or
   // capture an unrelated nominal type of the same name). Only a `callback<S>`
   // slot is contextually typed there, and only after `S` has been
@@ -943,8 +943,8 @@ function annotateCallbacksFromSignature(
  * `contextualOnly` restricts the scan to `callback<S>` slots. That is the shape
  * the contextual pass falls back to when its solve has nothing to solve — a
  * GROUND `S` in a POLYMORPHIC arm — where the plain-arrow slots of the same arm
- * must still decline: their types mention the variables the arm's own `forall`
- * binds, and stamping one verbatim would leave `T` unresolved outside that
+ * must still decline: their types mention the variables the arm's own `where`
+ * clause binds, and stamping one verbatim would leave `T` unresolved outside that
  * scope.
  */
 function annotateFromDeclaredParams(

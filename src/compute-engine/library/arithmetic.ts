@@ -495,7 +495,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       idempotent: true,
       complexity: 1200,
 
-      signature: 'forall T: number. (T) -> T',
+      signature: '(T) -> T where T: number',
       evaluate: (ops, { numericApproximation }) => {
         const op = ops[0];
         const ce = op.engine;
@@ -2030,7 +2030,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Plus or Minus',
       wikidata: 'Q120812',
       complexity: 1200,
-      signature: 'forall T: value, U: value. (T, U) -> tuple<T, U>',
+      signature: '(T, U) -> tuple<T, U> where T: value, U: value',
       canonical: (args, { engine: ce }) => {
         args = checkNumericArgs(ce, args, 2);
         if (args.length === 0) return ce.error('missing');
@@ -2427,7 +2427,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         'IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`)',
       complexity: 2500,
       broadcastable: true,
-      signature: 'forall T: number. (T, T) -> T',
+      signature: '(T, T) -> T where T: number',
       evaluate: ([a, b]) =>
         apply2(
           a,

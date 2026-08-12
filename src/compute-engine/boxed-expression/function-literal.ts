@@ -210,7 +210,7 @@ export function functionLiteralReturnMarker(
  *
  * **Decomposition predicate**: the marker's type operand decomposes as a full
  * signature iff its TEXT is ungrouped and parses to a signature — effects and
- * `forall` clause optional. An author who spells an arrow in the return slot
+ * `where` clause optional. An author who spells an arrow in the return slot
  * plainly means the literal's contract; the GROUPED spelling (below) is the
  * explicit opt-out for the "returns a function" reading, so a ground arrow
  * needs no second discriminator (ruled 2026-08-04). Before that ruling only an
@@ -243,7 +243,7 @@ export function functionLiteralDeclaredSignature(
 
 /**
  * True when `t` — a component of `sig` (an argument type or the result) —
- * mentions one of the variables `sig`'s `forall` clause quantifies.
+ * mentions one of the variables `sig`'s `where` clause quantifies.
  *
  * Read on the COMPONENT, not on the whole signature: the clause-carrying
  * signature is CLOSED, so `freeTypeVariables` of it is empty by construction.
@@ -281,7 +281,7 @@ export function functionLiteralDeclaredEffects(
  * no return type at all, so the return stays inferred from the body and only
  * the effects are declared (`function tick() scope { … }`).
  *
- * A result that mentions a QUANTIFIED variable (`forall T. (T) -> T`) joins
+ * A result that mentions a QUANTIFIED variable (`(T) -> T where T`) joins
  * that same wide-result convention and declares no return type: under erasure
  * there is nothing ground to ascribe, and call-site result types come from the
  * INSTANTIATED signature instead. An open type must never leave this accessor

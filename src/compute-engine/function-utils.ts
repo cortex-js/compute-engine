@@ -452,7 +452,7 @@ export function canonicalFunctionLiteralArguments(
   // which reports the type parser's own diagnostic (see
   // `signatureStringError`) rather than blaming the operand.
   if (ops.length === 2 && isString(ops[1])) {
-    // A `forall` clause IS accepted here (generic-literals design §2.2, E1):
+    // A `where` clause IS accepted here (generic-literals design §2.2, E1):
     // the string parses to a signature carrying `typeParams` and desugars into
     // the E2 form — bare symbols at the quantified positions (erasure, G1) and
     // the full signature as the body's ascription — which then re-enters this
@@ -472,7 +472,7 @@ export function canonicalFunctionLiteralArguments(
     if (isSymbol(x)) return x;
     if (isFunction(x, 'Typed') && isSymbol(x.op1)) {
       const normalized = normalizeTypedParameter(ce, x);
-      // A `forall` clause on a PARAMETER annotation is a rank-2 spelling, and
+      // A `where` clause on a PARAMETER annotation is a rank-2 spelling, and
       // stays rejected (G6, §2.2): a type variable enters a literal only
       // through a whole-signature clause.
       const t = functionLiteralParameterType(normalized);
@@ -1023,7 +1023,7 @@ function rebindParameters(
 
 /**
  * The full signature a `Function` literal's body-slot marker declares
- * (`["Function", ["Typed", body, "'forall T. (x: T) -> T'"], "x"]`, or the
+ * (`["Function", ["Typed", body, "'(x: T) -> T where T'"], "x"]`, or the
  * ground `"'(x: number) -> number'"`), or `undefined` when the body slot
  * carries no such marker.
  *
@@ -1242,7 +1242,7 @@ function desugarSignatureString(
   if (args.some((a) => !a.name)) return undefined;
 
   const isWide = (t: Type): boolean => t === 'unknown' || t === 'any';
-  // A `forall` clause (E1, generic-literals design §2.3): an argument whose
+  // A `where` clause (E1, generic-literals design §2.3): an argument whose
   // type mentions a quantified variable produces a BARE parameter symbol —
   // erasure (G1) — since the marker ascribed onto the body states its type and
   // no type variable may become the type of a symbol. Ground-typed arguments
@@ -1257,7 +1257,7 @@ function desugarSignatureString(
   );
   let newBody = body;
   if (generic) {
-    // A `forall` clause is the ONLY record the literal keeps of its type
+    // A `where` clause is the ONLY record the literal keeps of its type
     // variables, so the full signature is ascribed unconditionally — unlike the
     // result-type cases below, a body-slot ascription does not get to win here
     // and silently drop the clause (it stays, as an inner statement ascription).
@@ -2164,7 +2164,7 @@ function makeLambda(
           const prefixSig: Type = {
             kind: 'signature',
             args: (fullSig.args ?? []).slice(0, args.length),
-            // The arrow's `forall` clause is an adjunct field: a signature
+            // The arrow's `where` clause is an adjunct field: a signature
             // rebuilt field-by-field carries it (the rebuild invariant).
             ...(fullSig.typeParams !== undefined
               ? { typeParams: fullSig.typeParams }
@@ -2594,12 +2594,12 @@ export function lookupApplicable(
   return innermost;
 }
 
-/** True when `s` is a type string that parses to a POLYTYPE (a `forall`
+/** True when `s` is a type string that parses to a POLYTYPE (a `where`
  * clause). Used to reject a generic annotation on a function literal (D7,
  * §4.1 of the type-variables design); a non-type string is not our business
  * and answers `false`. */
 function isPolytypeString(ce: ComputeEngine, s: string): boolean {
-  if (!s.includes('forall')) return false;
+  if (!s.includes('where')) return false;
   try {
     return isPolymorphicType(parseType(s, ce._typeResolver));
   } catch {

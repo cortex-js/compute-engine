@@ -274,7 +274,7 @@ pt(-3, True)`
 
 //
 // A generic constructor function annotates its result with an application of
-// the nominal type (`forall U. (v: U) -> tree<U>`). When that annotation does
+// the nominal type (`(v: U) -> tree<U> where U`). When that annotation does
 // not parse — a wrong arity, an unknown name — the signature readers used to
 // swallow the failure: the E1 sugar (a signature STRING in the parameter slot)
 // fell through to `expected-a-symbol`, blaming the operand for not being a
@@ -298,14 +298,14 @@ describe('a signature annotation that does not parse reports WHY', () => {
   }
 
   test('a wrong-arity result type carries the `generic-alias-arity` code', () => {
-    const r = sugar(treeEngine(), 'forall U. (v: U) -> tree<U, U>');
+    const r = sugar(treeEngine(), '(v: U) -> tree<U, U> where U');
     expect(r).toContain('generic-alias-arity');
     expect(r).toContain('takes 1 type argument, but 2 were given');
     expect(r).not.toContain('expected-a-symbol');
   });
 
   test('an unknown type name gets its own code, not the arity one', () => {
-    const r = sugar(treeEngine(), 'forall U. (v: U) -> nosuch<U>');
+    const r = sugar(treeEngine(), '(v: U) -> nosuch<U> where U');
     expect(r).toContain('invalid-type-annotation');
     expect(r).toContain('Unknown type');
     expect(r).toContain('nosuch');
@@ -330,10 +330,10 @@ describe('a signature annotation that does not parse reports WHY', () => {
     const f = ce.box([
       'Function',
       ['Block', 'v'],
-      { str: 'forall U. (v: U) -> tree<U>' },
+      { str: '(v: U) -> tree<U> where U' },
     ]);
     expect(f.toString()).not.toContain('Error');
-    expect(f.type.toString()).toBe('forall U. (v: U) -> tree<U>');
+    expect(f.type.toString()).toBe('(v: U) -> tree<U> where U');
   });
 
   test('the Epsil route reports the arity problem instead of dropping the annotation', () => {

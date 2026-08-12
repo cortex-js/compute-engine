@@ -20,7 +20,10 @@ its own):
   parameterized nominals, variance, N1–N12 ruling record (N11 = Rule U,
   variables under a union arm)
 - `docs/plans/2026-08-04-generic-type-aliases-design.md` — A1–A8
-- `docs/plans/2026-08-01-type-variables-design.md` — forall/generics v1
+- `docs/plans/2026-08-01-type-variables-design.md` — type variables /
+  generics v1 (surface syntax superseded by the `where`-clause design below)
+- `docs/plans/2026-08-11-where-clause-type-constraints.md` — the trailing
+  `where` clause that replaced the prefix `forall` quantifier
 - `docs/plans/2026-08-04-generic-function-literals-design.md` — G1–G11,
   `function f<T>()` and generic literals
 - `docs/plans/2026-08-01-function-polymorphism-design.md` and
@@ -56,10 +59,12 @@ statement.
 - **Generic type aliases** (`type alias Pair<T> = tuple<T, T>`): eager,
   transparent expansion; ground bounds; no self-reference (by eager-expansion
   necessity); no constructor (generic-type-aliases design, A1–A8).
-- **Type variables v1**: prenex (`forall T. …` / `function f<T>(…)`),
-  rank-1, kind-`*` only, ground bounds only — no F-bounded, no variable
-  bounds (type-variables design; generic-function-literals design, G1–G11,
-  for the literal and `function f<T>()` surface).
+- **Type variables v1**: rank-1 (quantifiers top-level only, never nested
+  left of an arrow), spelled as a trailing `where` clause
+  (`(T) -> T where T`) or as `function f<T>(…)`; kind-`*` only, ground
+  bounds only — no F-bounded, no variable bounds (type-variables design;
+  where-clause design; generic-function-literals design, G1–G11, for the
+  literal and `function f<T>()` surface).
 - **Function polymorphism**: multi-clause definitions, intersection-typed
   overload sets, per-position-join overload resolution
   (function-polymorphism and overload-resolution designs).
@@ -87,7 +92,7 @@ door open without committing to it.
 Relatedly, the system is deliberately **not Hindley–Milner**: the base
 relation is a subtype lattice (join/meet), not type equality under
 unification; generics are explicitly quantified and solved locally at each
-call site by a bound-collection/join fold (D2: `forall T. (T, T) -> T` at
+call site by a bound-collection/join fold (D2: `(T, T) -> T where T` at
 `(integer, real)` solves `T = real` where HM would fail to unify); and
 inference of unannotated symbols is evidence-based and *revisable* (narrow
 from argument use, widen from value assignment, non-monotone override per
@@ -233,7 +238,7 @@ depends on it, so the operative content:
   contribute no bound in v1.
 - A variable in an **intersection** or a **negation** is still rejected;
   the intersection message steers to the replacement spelling, a bound
-  (`forall T: number.`).
+  (`where T: number`).
 
 Consequence for sums: all three spellings of a recursive generic sum are
 now **declarable** — the union inlined directly in a parameterized nominal
@@ -374,8 +379,8 @@ handlers from Epsil).
 
 ## 5. F-bounded and variable-referencing bounds (mid term, unblocked)
 
-Assessed 2026-08-08: `forall T: comparable<T>` and cross-variable bounds
-(`forall T: list<U>`) fit the current machinery as an **incremental
+Assessed 2026-08-08: `where T: comparable<T>` and cross-variable bounds
+(`where T: list<U>`) fit the current machinery as an **incremental
 extension** — no new theory. The reason is the solver's shape: bounds do
 not participate in the sweeps of `solveTypeArguments`; they enter only at
 the end (joined into the upper set, and as the S3 default). Since S1–S3
@@ -395,6 +400,12 @@ the lattice is consulted. Work list:
 - Teach the `Poly <: Poly` α-equivalence comparison to compare bounds up
   to renaming.
 
+**No syntax decision is outstanding.** The `where`-clause design settled
+clause ordering with the *seed all names, then parse all bounds* rule, so a
+bound may reference a variable declared later in the same clause —
+`(T) -> U where T: list<U>, U` is well-formed as written. Lifting the
+`validateDeclaredType` gate is the whole surface change.
+
 Recursion in the bound (`comparable<T>` where the solution itself involves
 `comparable`) is already covered by nominal opacity plus the
 `beginUnfold`/`endUnfold` cycle guards. Trigger: comparator-style
@@ -406,19 +417,32 @@ needing a self-referential bound.
 For genuine Functor/Monad abstraction, in dependency order:
 
 1. **Higher-kinded type parameters** — `F` ranging over type constructors
-   (`forall F, A, B. (F<A>, (A) -> B) -> F<B>`). Explicitly out of scope
+   (`(F<A>, (A) -> B) -> F<B> where F, A, B`). Explicitly out of scope
    in the parameterized-nominal design; all current quantifiers are
    kind-`*`. Without HKT, protocols still deliver conformance and
    existentials, but `Map`-like signatures stay constructor-erased
    (`-> indexed_collection`) — HKT and protocols pay off together.
 2. **Rank-2 quantification**, if protocols become first-class
-   dictionaries: a `mappable` witness is `record<map: forall A, B. …>`
-   and any function taking one is rank-2. (Rank = where `forall` nests
-   left of arrows = who instantiates; orthogonal to kind. Also enables
+   dictionaries: a `mappable` witness is
+   `record<map: ((A) -> B where A, B), …>` and any function taking one is
+   rank-2. (Rank = how deeply a quantifier nests left of arrows = who
+   instantiates; orthogonal to kind. Also enables
    scope-enforcement types à la `runST`/`withFile`, where the nested
    quantifier makes resource escape a type error.) Inference: rank-2 is
    barely decidable, rank-3+ undecidable — annotation-required in
    practice, which fits Epsil's explicit-annotation posture.
+
+**Syntax ruling reserved for rank-2** (where-clause design, W1): a `where`
+clause in any **nested** position must be **parenthesized** —
+`record<map: ((A) -> B where A, B), other: number>`. Unparenthesized, the
+clause's `,` separator collides with the record field separator
+(`other: number` is simultaneously a well-formed `<var_decl>` and a
+well-formed field), so unparenthesized nested `where` is a **syntax error**,
+never a silent reinterpretation. Same failure mode and same resolution as the
+`&`-precedence rule for overload arms: mandatory parens, loud failure. (The
+prefix `forall A, B.` self-delimited via its `.`; trailing `where` does not.)
+Nested quantification is rejected outright today, so this is reserved, not
+implemented.
 
 **General** HKT breaks four load-bearing assumptions at once (assessed
 2026-08-08): no AST node for "variable applied to arguments" and no
@@ -438,7 +462,7 @@ The cost-benefit flips if `F` is restricted to a **closed universe of
 collection constructors**. Two findings sharpen the actual gap first:
 
 - Kind-preservation with an *unchanged* element is already expressible
-  today: `forall T: indexed_collection. (T) -> T` covers the
+  today: `(T) -> T where T: indexed_collection` covers the
   `Sort`/`Reverse`/`Filter`/`Take` family with no new machinery.
 - Builtins already deliver the precision imperatively, per-head fallback
   included — probed 2026-08-08: `Map` over a list types `vector<3>`
@@ -465,7 +489,7 @@ preservation promise that is the point).
 on kind-`*` variables — `elem<T>` and `rebind<T, B>`:
 
 ```
-Map: forall T: collection, B. (T, (elem<T>) -> B) -> rebind<T, B>
+Map: (T, (elem<T>) -> B) -> rebind<T, B> where T: collection, B
 ```
 
 No kind system, no change to what a type variable is, and the same

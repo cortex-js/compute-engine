@@ -34,7 +34,7 @@ export class BoxedType {
   type: Type;
 
   /**
-   * True when this type is a **polytype**: a signature carrying a `forall`
+   * True when this type is a **polytype**: a signature carrying a `where`
    * clause, or an overload set with at least one such arm.
    *
    * Computed ONCE, here, at construction: every per-call dispatch check
@@ -108,7 +108,7 @@ export class BoxedType {
       else if (hasFreeTypeVariables(this.type))
         throw new TypeVariableError(
           'unresolved-type-variable',
-          `The type \`${typeToString(this.type)}\` refers to a type variable that is not quantified by a \`forall\` clause: an open type is not declarable`
+          `The type \`${typeToString(this.type)}\` refers to a type variable that is not quantified by a \`where\` clause: an open type is not declarable`
         );
     }
   }
@@ -145,7 +145,7 @@ export class BoxedType {
    * **A polymorphic PATTERN is a consistent existential** (D12): the pattern's
    * variables are solved against the subject and the match holds iff a
    * consistent instantiation exists — so
-   * `ce.type('(number) -> number').matches('forall T. (T) -> T')` is `true`,
+   * `ce.type('(number) -> number').matches('(T) -> T where T')` is `true`,
    * the probe users actually mean. `couldMatch` deliberately answers `false`
    * on the same row (D6's bound-reading, contravariant `any`); the two
    * predicates diverge by design.
@@ -286,7 +286,7 @@ export class BoxedType {
    * the type itself. Applying it to the `Type` instead — building a boxed type
    * around the projected AST — made it semantics-visible: a callback-bearing
    * overload set collapsed to `nothing` through `reduceType`, dropping the
-   * `forall` flipped `isPolymorphic` (and with it every `Ground <: Poly`
+   * a `where` clause flipped `isPolymorphic` (and with it every `Ground <: Poly`
    * answer), and re-validating the projected polytype could THROW out of a
    * getter. Deferring to stringification makes all three impossible by
    * construction.

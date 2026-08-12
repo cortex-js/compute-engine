@@ -606,7 +606,7 @@ export function declareType(
     typeParams?: TypeParamsOption;
   } = {}
 ): void {
-  // `forall` is a reserved word in type strings (the quantifier clause), so it
+  // `where` is a reserved word in type strings (the quantifier clause), so it
   // cannot also name a type.
   if (isReservedTypeName(name))
     throw new TypeVariableError(
@@ -744,7 +744,7 @@ export function declareType(
   // `type alias Duo<T> = tuple<T, T>` is legal. (A plain→generic replacement
   // still drops the constructor the plain form minted — `mintTypeConstructor`
   // calls `removeMintedTypeConstructor` before deriving.)
-  // A parameterized NOMINAL type is the opposite: it mints a `forall`-quantified
+  // A parameterized NOMINAL type is the opposite: it mints a `where`-quantified
   // constructor (design §5), so it does claim the value name. `alias` is not
   // yet defaulted here, so `!== true` reads "nominal".
   if (mint && (params === undefined || alias !== true))
@@ -2247,13 +2247,13 @@ export function assignValueAsOperatorDef(
 function functionLiteralHasAnnotation(literal: Expression): boolean {
   if (functionLiteralReturnType(literal) !== undefined) return true;
   if (functionLiteralDeclaredEffects(literal) !== undefined) return true;
-  // A GENERIC literal (a whole-signature `forall` marker) is the strongest
+  // A GENERIC literal (a whole-signature `where` marker) is the strongest
   // annotation there is, yet it declares NO return type (the result mentions a
   // variable, so `functionLiteralReturnType` joins the wide-result convention)
   // and, under erasure, no annotated parameter either. Without this arm
   // `ce.assign('f', genericLiteral)` fell to the inferred-signature path, which
   // reads the ascribed BODY type and produced the nonsense
-  // `(unknown) -> forall T. (x: T) -> T`.
+  // `(unknown) -> (x: T) -> T where T`.
   if (isPolymorphicType(literal.type.type)) return true;
   return functionLiteralParameters(literal).some((p) => p.type !== undefined);
 }
@@ -2419,8 +2419,8 @@ export function reconcileFunctionLiteralReturn(
   // to ascribe (§2.4, G4): the body's return stays inferred and call-site
   // result types come from the INSTANTIATED signature instead. Decided BEFORE
   // `functionResult`, which hands back the honest-but-useless-here `unknown`
-  // on a polytype arm. A ground result under a `forall`
-  // (`forall T. (T) -> boolean`) reconciles exactly as it does under a ground
+  // on a polytype arm. A ground result under a `where` clause
+  // (`(T) -> boolean where T`) reconciles exactly as it does under a ground
   // declaration.
   if (
     typeof declaredType === 'object' &&
@@ -2572,7 +2572,7 @@ export function ascribeDeclaredParameterTypes(
  * R1 — ascribe a DECLARED POLYTYPE onto a marker-less function literal, so the
  * stored value describes itself.
  *
- * `let f: forall T. (x: T) -> T = x |-> x` installed a literal whose own type
+ * `let f: (x: T) -> T where T = x |-> x` installed a literal whose own type
  * was the erased `(unknown) -> unknown`: the declaration's clause lived only on
  * the definition, so `f`'s VALUE (what `evaluate()` and serialization hand back)
  * had lost it. Rebuilding through the Phase-1 authoring form — the full
@@ -2597,13 +2597,13 @@ export function ascribeDeclaredParameterTypes(
  * it.
  *
  * The last condition is not cosmetic. A GROUND argument in the clause
- * (`forall T. (x: T, n: number) -> T`) would become a real constraint on the
+ * (`(x: T, n: number) -> T where T`) would become a real constraint on the
  * literal's OWN arrow, and that arrow is enforced at every direct application
  * of the stored value — notably the per-element `apply()` inside a broadcast,
  * where `n` legitimately receives a whole row. Ascribing it there turns a
  * working broadcast into `incompatible-type`. Restricting the ascription to
  * clauses whose arguments are all quantified means it can only ever RECORD the
- * `forall`, never tighten a parameter.
+ * `where` clause, never tighten a parameter.
  *
  * Ground declarations are deliberately out of scope: their parameter types are
  * dropped from the stored literal's arrow too (`(x) |-> x` under

@@ -233,7 +233,7 @@ function declaredSignatureOf(
   return t;
 }
 
-/** True when a canonical `Function` literal states its own `forall` clause
+/** True when a canonical `Function` literal states its own `where` clause
  * (the E1/E2/E4 spellings) — i.e. the incoming clause is GENERIC. */
 function isGenericClauseLiteral(literal: Expression): boolean {
   return isPolymorphicType(literal.type.type);

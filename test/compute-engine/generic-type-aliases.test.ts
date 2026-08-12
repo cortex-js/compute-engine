@@ -147,9 +147,9 @@ describe('GENERIC TYPE ALIASES — A7 open-argument admission', () => {
 
   test('an UNBOUNDED variable does not satisfy a BOUNDED parameter', () => {
     const ce = engineWithAliases();
-    // A bare `forall T.` gives `T` the implicit bound `any`, which is not a
+    // A bare `where T` gives `T` the implicit bound `any`, which is not a
     // subtype of `Keyed`'s `number`.
-    expect(codeOf(() => ce.type('forall T. (Keyed<T>) -> T'))).toBe(
+    expect(codeOf(() => ce.type('(Keyed<T>) -> T where T'))).toBe(
       'generic-alias-bound'
     );
     // …and the same, one level in, for an alias declaration.
@@ -160,17 +160,17 @@ describe('GENERIC TYPE ALIASES — A7 open-argument admission', () => {
     ).toBe('generic-alias-bound');
   });
 
-  test('a `forall` clause whose bound satisfies the parameter is accepted', () => {
+  test('a `where` clause whose bound satisfies the parameter is accepted', () => {
     const ce = engineWithAliases();
-    expect(ce.type('forall T: integer. (Keyed<T>) -> T').toString()).toBe(
-      'forall T: integer. (tuple<string, T>) -> T'
+    expect(ce.type('(Keyed<T>) -> T where T: integer').toString()).toBe(
+      '(tuple<string, T>) -> T where T: integer'
     );
   });
 
   test('end-to-end through a generic function', () => {
     const ce = engineWithAliases();
     ce.declare('label', {
-      signature: 'forall T: integer. (Keyed<T>) -> T',
+      signature: '(Keyed<T>) -> T where T: integer',
       evaluate: (ops) => ops[0].ops?.[1],
     });
     const r = ce.box(['label', ['Tuple', { str: 'k' }, 7]]);
@@ -181,7 +181,7 @@ describe('GENERIC TYPE ALIASES — A7 open-argument admission', () => {
   test('a composite open argument is admitted pointwise', () => {
     const ce = engineWithAliases();
     // `list<T>` with `T: any` is not a `number`.
-    expect(codeOf(() => ce.type('forall T. (Keyed<list<T>>) -> T'))).toBe(
+    expect(codeOf(() => ce.type('(Keyed<list<T>>) -> T where T'))).toBe(
       'generic-alias-bound'
     );
   });
@@ -289,9 +289,9 @@ describe('GENERIC TYPE ALIASES — error matrix (host route)', () => {
     const ce = new ComputeEngine();
     expect(
       codeOf(() =>
-        ce.declareType('Res', 'tuple<forall, forall>', {
+        ce.declareType('Res', 'tuple<where, where>', {
           alias: true,
-          typeParams: ['forall'],
+          typeParams: ['where'],
         })
       )
     ).toBe('reserved-type-name');

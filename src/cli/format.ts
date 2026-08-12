@@ -159,6 +159,8 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `"function ${args[0]}<>" declares no type variable; write "function ${args[0]}<T>(…)" or drop the "<>"`;
     case 'duplicate-type-parameter':
       return `The type variable "${args[0]}" is declared more than once`;
+    case 'duplicate-type-parameter-clause':
+      return `"${args[0]}" declares its type variables twice: "function ${args[0]}<T>(…)" and "… where T" are the same binding site, so use one or the other`;
     case 'generic-clause-unsupported':
       return `"${args[0]}" is generic; generic functions are single-clause — they cannot use literal parameters or be extended with more clauses`;
     case 'control-outside-loop':

@@ -3,12 +3,12 @@ import { ComputeEngine } from '../../src/compute-engine';
 /**
  * Phase 3b of the type-variables design
  * (`docs/plans/2026-08-01-type-variables-design.md` §7.3): the `arithmetic.ts`
- * conversions from a weak signature + imperative `type:` handler to a `forall`
+ * conversions from a weak signature + imperative `type:` handler to a `where`
  * signature.
  *
- *   Chop       `forall T: number. (T) -> T`        (broadcastable)
- *   PlusMinus  `forall T: value, U: value. (T, U) -> tuple<T, U>`
- *   Remainder  `forall T: number. (T, T) -> T`     (broadcastable)
+ *   Chop       `(T) -> T where T: number`        (broadcastable)
+ *   PlusMinus  `(T, U) -> tuple<T, U> where T: value, U: value`
+ *   Remainder  `(T, T) -> T where T: number`     (broadcastable)
  *
  * The signature now IS the contract: each `type:` handler was deleted, so
  * these tests pin that the substituted result type reproduces what the
@@ -31,21 +31,21 @@ function engine(): ComputeEngine {
 }
 
 describe('TYPE VARIABLES / arithmetic — declared signatures', () => {
-  test('the four operators carry `forall` signatures', () => {
+  test('the four operators carry `where` signatures', () => {
     const ce = engine();
     const sig = (op: string) =>
       ce.box(op).operatorDefinition!.signature.toString();
-    expect(sig('Chop')).toBe('forall T: number. (T) -> T');
+    expect(sig('Chop')).toBe('(T) -> T where T: number');
     expect(sig('PlusMinus')).toBe(
-      'forall T: value, U: value. (T, U) -> tuple<T, U>'
+      '(T, U) -> tuple<T, U> where T: value, U: value'
     );
-    expect(sig('Remainder')).toBe('forall T: number. (T, T) -> T');
+    expect(sig('Remainder')).toBe('(T, T) -> T where T: number');
     // NOT converted — see the file header.
     expect(sig('Negate')).toBe('(value) -> value');
   });
 });
 
-describe('TYPE VARIABLES / Chop — `forall T: number. (T) -> T`', () => {
+describe('TYPE VARIABLES / Chop — `(T) -> T where T: number`', () => {
   test('result type echoes the operand (exact and inexact)', () => {
     const ce = engine();
     expect(ce.function('Chop', [ce.number(2)]).type.toString()).toBe(
@@ -113,7 +113,7 @@ describe('TYPE VARIABLES / Chop — `forall T: number. (T) -> T`', () => {
 
 describe('TYPE VARIABLES / Negate — conversion DECLINED (blocking behavior)', () => {
   // The audit listed `Negate` as a bounded identity echo
-  // (`forall T: value. (T) -> T`), but the conversion regressed two pinned
+  // (`(T) -> T where T: value`), but the conversion regressed two pinned
   // behaviors, both traced to the same cause: a `propagate` operator's absent
   // operand is stripped BEFORE inference (§4.5), so `T` falls to the S3
   // declared bound instead of echoing the operand's own (`missing`-bearing)
@@ -123,7 +123,7 @@ describe('TYPE VARIABLES / Negate — conversion DECLINED (blocking behavior)', 
   test('an absent operand still types `number` (missing-value P2 §3.B)', () => {
     const ce = engine();
     const e = ce.box(['Negate', 'Missing']);
-    expect(e.type.toString()).toBe('number'); // was `value` under `forall`
+    expect(e.type.toString()).toBe('number'); // was `value` under the clause
     expect(e.evaluate().toString()).toBe('NaN');
     expect(ce.box('Negate').operatorDefinition!.resolvedMissingBehavior).toBe(
       'propagate'
@@ -155,7 +155,7 @@ describe('TYPE VARIABLES / Negate — conversion DECLINED (blocking behavior)', 
   });
 });
 
-describe('TYPE VARIABLES / PlusMinus — `forall T: value, U: value. (T, U) -> tuple<T, U>`', () => {
+describe('TYPE VARIABLES / PlusMinus — `(T, U) -> tuple<T, U> where T: value, U: value`', () => {
   test('the two variables are independent (per-position echo)', () => {
     const ce = engine();
     expect(
@@ -195,7 +195,7 @@ describe('TYPE VARIABLES / PlusMinus — `forall T: value, U: value. (T, U) -> t
   });
 });
 
-describe('TYPE VARIABLES / Remainder — `forall T: number. (T, T) -> T`', () => {
+describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
   test('the repeated variable joins its two operands (was `widen`)', () => {
     const ce = engine();
     expect(

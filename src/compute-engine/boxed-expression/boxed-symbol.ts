@@ -691,7 +691,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const def = this._def;
     // R-D5 (Design D): a NAME PRINTS its signature in the GROUND display form
     // — a converted operator's `callback<S>` slot reads as the `function` slot
-    // it converted from, and its `forall` variables at their ground skeleton.
+    // it converted from, and its `where`-bound variables at their ground skeleton.
     // Neither carries admission information (contract clause 1), so the printed
     // string is byte-identical to the pre-conversion type.
     //
@@ -700,13 +700,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // prints differently (`BoxedType.withDisplayString`). Applying it to the
     // TYPE — which is what this getter used to do — made a display ruling
     // semantics-visible: an overload set reduced to `nothing`, a dropped
-    // `forall` flipped `isPolymorphic` and broke `Ground <: Poly`, and
+    // `where` clause flipped `isPolymorphic` and broke `Ground <: Poly`, and
     // re-boxing the projected polytype could throw `unsolvable-type-variable`
     // out of the getter.
     //
     // BOTH definition kinds, because the same signature can be either: a
     // function-typed VALUE definition (`Declare(f, "(collection<T>,
-    // callback<…>) -> …")`) displayed the raw `forall`/`callback<>` where the
+    // callback<…>) -> …")`) displayed the raw `where`/`callback<>` where the
     // identical OPERATOR definition displayed the ground form. The projection
     // is trigger-scoped — a type with no `callback<S>` is returned by
     // reference — so nothing else moves.
@@ -1606,7 +1606,7 @@ function groundedTypeDisplay(t: BoxedType): BoxedType {
   const cached = GROUNDED_SIGNATURE_DISPLAY.get(t);
   if (cached !== undefined) return cached;
   // The trigger is the presence of a `callback<S>` and nothing else (R-D5
-  // scoping): a type with none is returned BY REFERENCE, `forall` included.
+  // scoping): a type with none is returned BY REFERENCE, `where` clause included.
   // `deepEraseCallbackTypes` is identity-preserving, so this IS that test.
   const result =
     deepEraseCallbackTypes(t.type) === t.type

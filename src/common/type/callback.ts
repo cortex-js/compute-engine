@@ -50,7 +50,7 @@ export function eraseCallbackType(t: Type): Type {
  *
  * Used where a type is consumed as a WHOLE rather than walked structurally:
  * the polytype α-equivalence dedup-key comparison in `subtype.ts` (clause 1
- * must hold for `forall` arms too) and the argument-validation surfaces that
+ * must hold for `where`-quantified arms too) and the argument-validation surfaces that
  * print or infer a parameter type.
  */
 export function deepEraseCallbackTypes(t: Type): Type {

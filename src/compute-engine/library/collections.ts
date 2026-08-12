@@ -1783,7 +1783,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
     invokes: false,
     complexity: 8200,
-    signature: 'forall T. (key: string, value: T) -> tuple<string, T>',
+    signature: '(key: string, value: T) -> tuple<string, T> where T',
 
     canonical: (args, { engine }) => {
       const [key, value] = checkTypes(engine, args, ['string', 'any']);
@@ -1867,7 +1867,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
     invokes: false,
     complexity: 8200,
-    signature: 'forall T. (value: T) -> tuple<T>',
+    signature: '(value: T) -> tuple<T> where T',
     canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 1)),
   },
 
@@ -1878,7 +1878,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
     invokes: false,
     complexity: 8200,
-    signature: 'forall T, U. (first: T, second: U) -> tuple<T, U>',
+    signature: '(first: T, second: U) -> tuple<T, U> where T, U',
     canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 2)),
   },
 
@@ -1890,7 +1890,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature:
-      'forall T, U, V. (first: T, second: U, third: V) -> tuple<T, U, V>',
+      '(first: T, second: U, third: V) -> tuple<T, U, V> where T, U, V',
 
     canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 3)),
   },
@@ -2566,7 +2566,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // elements themselves — and the contextual stamp simply never runs when the
     // operand is absent.
     signature:
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>?) -> boolean',
+      '(collection<T>, predicate: callback<(T) -> boolean>?) -> boolean where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
@@ -2591,7 +2591,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Design D phase 1: the element-of link lives in the SIGNATURE, with the
     // OPTIONAL predicate slot of `Any`.
     signature:
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>?) -> boolean',
+      '(collection<T>, predicate: callback<(T) -> boolean>?) -> boolean where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
@@ -2640,7 +2640,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // it and the looseness costs no diagnostic: admission, evaluation and every
     // error value are byte-identical to the pre-conversion behavior.
     signature:
-      'forall T, U. (collection<T>, mapping: callback<(T) -> U>, collection*) -> indexed_collection',
+      '(collection<T>, mapping: callback<(T) -> U>, collection*) -> indexed_collection where T, U',
     // The mapped collection keeps the source's shape/indexed-ness, but its
     // elements are the lambda's RESULT type — not the source element type.
     // (If the input collection is indexed, the output collection is indexed.)
@@ -2958,7 +2958,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // indexedness", so converting the slot deliberately does not convert the
     // result (§7, rule 1).
     signature:
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> collection',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
     // If the input collection is indexed, the output collection is indexed.
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
@@ -3194,7 +3194,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The RESULT stays with the `type:` handler below: it is the reducer's own
     // result type, which the accumulator channel does not carry.
     signature:
-      'forall T. (collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> value',
+      '(collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> value where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalCallbackOperand(ops[1]);
@@ -3337,7 +3337,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // stamp survives this operator's rewrite into a `Reduce`: it runs before
     // the canonical handler, on the raw literal the handler then reuses.
     signature:
-      'forall T. (reducer: callback<(unknown, T) -> unknown>, initial: value, collection<T>) -> value',
+      '(reducer: callback<(unknown, T) -> unknown>, initial: value, collection<T>) -> value where T',
     canonical: (ops, { engine }) => {
       const fn = canonicalCallbackOperand(ops[0]);
       const initial = ops[1]?.canonical;
@@ -3363,7 +3363,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // accumulator). The RESULT stays with the `type:` handler below: the
     // source's shape with the fold's result as its elements.
     signature:
-      'forall T. (collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> indexed_collection',
+      '(collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> indexed_collection where T',
     // Same shape/indexed-ness as the source, but elements are the fold's
     // result type (mirrors Map).
     type: (ops) => {
@@ -3521,7 +3521,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // collection kind and indexedness, which the type language cannot express
     // (§7 rule 1).
     signature:
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> collection',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
     // Preserve the source's element type / indexed-ness (mirrors Filter).
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
@@ -3661,7 +3661,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Design D phase 1: as `TakeWhile` — the result stays with the `type:`
     // handler (§7 rule 1).
     signature:
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> collection',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -3754,7 +3754,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // tolerance, and the scalar-result singleton lift is the `type:` handler's
     // calculation below (§7 rule 2).
     signature:
-      'forall T, U. (collection<T>, mapping: callback<(T) -> U>) -> list',
+      '(collection<T>, mapping: callback<(T) -> U>) -> list where T, U',
     type: (ops) => {
       const resultType = callbackResultType(ops[1]);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
@@ -4661,7 +4661,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: ['Return `n` elements from a collection.'],
     complexity: 8200,
     signature:
-      'forall T. (xs: indexed_collection<T>, count: number) -> list<T>',
+      '(xs: indexed_collection<T>, count: number) -> list<T> where T',
     // No `evaluate` handler: materialization goes through the generic lazy-
     // collection path, driven by the `count`/`at`/`iterator` handlers below.
     // (A previous handler materialized eagerly from its operands — but the
@@ -4754,7 +4754,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: ['Return the collection without the first n elements.'],
     complexity: 8200,
     signature:
-      'forall T. (xs: indexed_collection<T>, count: number) -> list<T>',
+      '(xs: indexed_collection<T>, count: number) -> list<T> where T',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -5089,7 +5089,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature:
-      'forall T. (value: indexed_collection<T>, start: number, end: number) -> list<T>',
+      '(value: indexed_collection<T>, start: number, end: number) -> list<T> where T',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -5149,7 +5149,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Reverse: {
     description: 'Reverse the order of the elements of an indexed collection.',
     complexity: 8200,
-    signature: 'forall T: indexed_collection. (T) -> T',
+    signature: '(T) -> T where T: indexed_collection',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -5223,7 +5223,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `list<function>` that the ground `(indexed_collection, …)` accepted.
     // `evaluate` splices whatever it is given, so the looser reading is also
     // the honest one.
-    signature: 'forall T. (indexed_collection<T>, integer, T) -> list<T>',
+    signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);
@@ -5327,7 +5327,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
     ],
     complexity: 8200,
-    signature: 'forall T. (indexed_collection<T>, integer) -> list<T>',
+    signature: '(indexed_collection<T>, integer) -> list<T> where T',
     evaluate: ([xs, idx], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
@@ -5421,7 +5421,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The repeated variable widens the element type to include the replacement
     // value's type (the §4.3 join of the two lower bounds). UNBOUNDED — see
     // `Insert`: a bound would also constrain the SOURCE collection's elements.
-    signature: 'forall T. (indexed_collection<T>, integer, T) -> list<T>',
+    signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
@@ -5683,7 +5683,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Design D phase 1: the element-of link lives in the SIGNATURE (see
     // `CountIf`). The result type is unchanged.
     signature:
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> integer',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'IndexWhere', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -5723,7 +5723,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // answer is `Nothing`, so the precise `elementType | nothing` is the `type:`
     // handler's below, not something `T` alone could say (§7 rule 1).
     signature:
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> any',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> any where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1),
     // Returns a single element, or `Nothing` when no element matches: the
@@ -5766,7 +5766,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // while `(T) -> boolean` contextually types an inline literal there. The
     // result type is unchanged.
     signature:
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> integer',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'CountIf', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -5805,7 +5805,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `CountIf`). The result is INDEXES, not elements — independent of `T`, and
     // unchanged.
     signature:
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> list<integer>',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> list<integer> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Position', ops, 1),
     type: () => 'list<integer>',
@@ -5873,7 +5873,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `order` slot stays the PRIMITIVE `function`, not an arrow: a
     // function-typed *symbol* operand must be admitted there (pinned by
     // `collection-callback-signatures.test.ts`).
-    signature: 'forall T. (indexed_collection<T>, order: function?) -> list<T>',
+    signature: '(indexed_collection<T>, order: function?) -> list<T> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Sort', ops, 1),
     // Provable declines only (finite, walkable source required); success is
@@ -6040,7 +6040,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `map-auto-compile.ts` does not gate it.
     // The result always rebuilds as a `List` (see `evaluate`), so the result
     // type is `list<T>`, not the source's (possibly indexed/Range) type.
-    signature: 'forall T. (indexed_collection<T>) random -> list<T>',
+    signature: '(indexed_collection<T>) random -> list<T> where T',
     // Provable declines only, answered from the SOURCE's facets alone — an
     // IMPURE producer must never claim `true` (the `at()` materialize
     // fallback is pure-only, so a `true` would promise a walk the indexed
@@ -6244,7 +6244,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return a tuple with the unique elements of the collection and their respective counts.',
     complexity: 8200,
-    signature: 'forall T. (collection<T>) -> tuple<list<T>, list<integer>>',
+    signature: '(collection<T>) -> tuple<list<T>, list<integer>> where T',
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
@@ -6261,7 +6261,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Unique: {
     description: 'Return a list of the unique elements of the collection.',
     complexity: 8200,
-    signature: 'forall T. (collection<T>) -> list<T>',
+    signature: '(collection<T>) -> list<T> where T',
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
@@ -6423,7 +6423,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // size operand (a number, or a symbol holding one) is not a literal, so
     // the SIZE arm is untouched — as it was under the metadata.
     signature:
-      'forall T. (collection<T>, integer | callback<(T) -> boolean>, integer?) -> list<list<T>>',
+      '(collection<T>, integer | callback<(T) -> boolean>, integer?) -> list<list<T>> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Partition', ops, 1),
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
@@ -6574,7 +6574,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Element types flow through from the source: `list<list<T>>`. The `key`
     // slot stays the PRIMITIVE `function` (a function-typed symbol operand
     // must be admitted there).
-    signature: 'forall T. (collection<T>, key: function) -> list<list<T>>',
+    signature: '(collection<T>, key: function) -> list<list<T>> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {

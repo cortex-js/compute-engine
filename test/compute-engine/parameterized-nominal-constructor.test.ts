@@ -10,11 +10,11 @@ import type { Type } from '../../src/common/type/types';
 // QUANTIFIED constructor.
 //
 //   type tree<T> = tuple<value: T, children: list<tree<T>>>
-//     ⇒ tree : forall T. (T, list<tree<T>>) -> tree<T>
+//     ⇒ tree : (T, list<tree<T>>) -> tree<T> where T
 //
 // Three things are pinned here:
 //
-//  1. The minted signature is `forall`-quantified and its RESULT is the
+//  1. The minted signature is `where`-quantified and its RESULT is the
 //     APPLIED reference (`tree<T>`), so the rank-1 call-site solver types
 //     `tree(1, [])` as `tree<finite_integer>`. A `def.type` handler would
 //     overwrite that (it runs AFTER the instantiation), so a parameterized
@@ -63,18 +63,18 @@ function countAssertFailures(f: () => void): number {
   return n;
 }
 
-describe('§5 — the minted constructor is `forall`-quantified', () => {
+describe('§5 — the minted constructor is `where`-quantified', () => {
   test('a tuple body mints an n-ary quantified constructor returning tree<T>', () => {
     const ce = treeEngine();
     expect(signatureOf(ce, 'tree')).toBe(
-      'forall T. (value: T, children: list<tree<T>>) -> tree<T>'
+      '(value: T, children: list<tree<T>>) -> tree<T> where T'
     );
   });
 
   test('a non-tuple body mints a unary quantified constructor', () => {
     const ce = new ComputeEngine();
     ce.declareType('box', 'T', { typeParams: ['T'] });
-    expect(signatureOf(ce, 'box')).toBe('forall T. (T) -> box<T>');
+    expect(signatureOf(ce, 'box')).toBe('(T) -> box<T> where T');
   });
 
   test('a generic ALIAS still mints nothing (the coexistence precedent)', () => {
@@ -248,7 +248,7 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
   test('installing a position-disjoint user arm violates no ground-type assert', () => {
     const ce = treeEngine();
     expect(countAssertFailures(() => install(ce))).toBe(0);
-    expect(signatureOf(ce, 'tree')).toContain('forall T.');
+    expect(signatureOf(ce, 'tree')).toContain('where T');
   });
 
   // D14a grounds the RAW arm; before the fix the USER arm went to
@@ -266,7 +266,7 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
           ce.box([
             'Function',
             ['Dictionary', ['KeyValuePair', { str: 'v' }, 'x']],
-            { str: 'forall U. (x: U) -> pack<U>' },
+            { str: '(x: U) -> pack<U> where U' },
           ]) as any
         );
       } catch {
@@ -287,7 +287,7 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
         ce.box([
           'Function',
           ['Dictionary', ['KeyValuePair', { str: 'v' }, 'x']],
-          { str: 'forall U. (x: U) -> pack<U>' },
+          { str: '(x: U) -> pack<U> where U' },
         ]) as any
       )
     ).toThrow(/overlaps the type's raw-injection constructor/);
@@ -342,7 +342,7 @@ describe('§5 — a record body is inhabited by a generic constructor function',
           ['KeyValuePair', { str: 'value' }, 'v'],
           ['KeyValuePair', { str: 'children' }, 'cs'],
         ],
-        { str: 'forall U. (v: U, cs: list<tree<U>>) -> tree<U>' },
+        { str: '(v: U, cs: list<tree<U>>) -> tree<U> where U' },
       ]) as any
     );
     return ce;
@@ -359,8 +359,8 @@ describe('§5 — a record body is inhabited by a generic constructor function',
   test('the overload set keeps both clauses, each its own', () => {
     const ce = recordTreeEngine();
     expect(signatureOf(ce, 'tree')).toBe(
-      '(forall U. (v: U, cs: list<tree<U>>) -> tree<U>) & ' +
-        '(forall T. (record<value: T, children: list<tree<T>>>) -> tree<T>)'
+      '((v: U, cs: list<tree<U>>) -> tree<U> where U) & ' +
+        '((record<value: T, children: list<tree<T>>>) -> tree<T> where T)'
     );
   });
 
@@ -395,7 +395,7 @@ describe('§5 — a record body is inhabited by a generic constructor function',
         ['KeyValuePair', { str: 'value' }, 'v'],
         ['KeyValuePair', { str: 'children' }, 'cs'],
       ],
-      { str: 'forall U. (v: U, cs: list<tree<U>>) -> tree<U, U>' },
+      { str: '(v: U, cs: list<tree<U>>) -> tree<U, U> where U' },
     ] as any);
     expect(literal.isValid).toBe(false);
   });
@@ -512,7 +512,7 @@ describe('§4.3/§5 — an invariant nominal is still a constructor argument', (
       ce.box([
         'Function',
         ['Tuple', 'x', 'x'],
-        { str: 'forall U. (x: cell<U>) -> nest<U>' },
+        { str: '(x: cell<U>) -> nest<U> where U' },
       ]) as any
     );
     const t = ce.box(['nest', ['cell', 1]]).evaluate();

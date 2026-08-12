@@ -246,7 +246,7 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
     // evaluated ⊆ declared.
     const eng = new ComputeEngine();
     eng.declare('pg57', {
-      signature: 'forall T: number, U: number. (T, U) -> T',
+      signature: '(T, U) -> T where T: number, U: number',
       broadcastable: true,
       evaluate: (ops) => ops[0],
     } as any);
@@ -269,13 +269,13 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
 
   test('a UNION-typed operand also takes the wrapper answer', () => {
     // Same re-ruling: a declared `list<integer> | matrix<integer>` operand at
-    // `forall T. (T) -> T` binds `T` to the union's ELEMENT (`integer` on
+    // `(T) -> T where T` binds `T` to the union's ELEMENT (`integer` on
     // both arms), and the wrapper — unable to prove a rank across the arms —
     // answers `list<integer>`. Again the ground reading, and again sound.
     const eng = new ComputeEngine();
     eng.declare('lu57', 'list<integer> | matrix<integer>');
     eng.declare('echoU57', {
-      signature: 'forall T. (T) -> T',
+      signature: '(T) -> T where T',
       broadcastable: true,
       evaluate: (ops) => ops[0],
     } as any);

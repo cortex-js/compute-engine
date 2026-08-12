@@ -603,8 +603,8 @@ Type(t)
 // ➔ "tree<finite_integer>"
 ```
 
-The constructor is **quantified** — `tree: forall T. (T, list<tree<T>>) ->
-tree<T>` — so `T` is solved at each construction, from the arguments.
+The constructor is **quantified** — `tree: (T, list<tree<T>>) -> tree<T>
+where T` — so `T` is solved at each construction, from the arguments.
 Applying the type at the wrong arity — including a bare `tree` — is the same
 error as for an alias, and a parameter bound is enforced the same way.
 
@@ -714,8 +714,26 @@ swap(1, "a")
 ```
 
 A type parameter may carry a ground bound (`function g<T: number>(x: T) -> T`),
-which is enforced at every call. The equivalent full-type spelling is a
-`forall` annotation — `let f: forall T. (T) -> T = x |-> x`.
+which is enforced at every call.
+
+The same clause can be written as a trailing **`where` clause** instead of the
+`<…>` binder. The two spellings are synonyms, and the clause always comes last
+— after the effect specifier and after the return type:
+
+```epsil
+function swap(x: T, y: U) -> tuple<U, T> where T, U { (y, x) }
+function g(x: T) -> T where T: number { x }
+function f(x: T) where T { x }                 // return type inferred
+function tick(x: T) random -> T where T { x }  // with an effect specifier
+f(x: T) -> T where T = x + x                   // math definition form
+```
+
+A declaration has **one binding site**: it may carry a `<…>` clause or a
+`where` clause, never both. `function f<T>(x: T) -> T where T: number` is an
+error, not a bounded `<T: number>`.
+
+A full-type annotation has no binder slot, so it always uses the `where`
+clause — `let f: (T) -> T where T = x |-> x`.
 
 Note that a function is generic only when it is **declared** generic. Nothing
 is silently generalized: `x |-> x` is a function on some inferred type, not an
@@ -784,7 +802,7 @@ This system deliberately trades those guarantees away, for two reasons.
 
 First, subtyping and principal types pull against each other. In
 Hindley–Milner, `integer` and `real` simply fail to unify; here, a
-function declared `forall T. (T, T) -> T` called with an `integer` and a
+function declared `(T, T) -> T where T` called with an `integer` and a
 `real` succeeds, solving `T` to their join (a `real`). That is the
 behavior mathematics wants — but once many types are valid for an
 expression, "the single most general one" stops being the useful answer,

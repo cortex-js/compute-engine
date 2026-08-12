@@ -28,7 +28,7 @@ import {
   NamedElementNode,
   ArgumentNode,
   DimensionNode,
-  ForallTypeNode,
+  ConstrainedTypeNode,
   TypeParamNode,
   TypeVariableNode,
 } from './ast-nodes.js';
@@ -44,27 +44,40 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 /**
  * BNF grammar for the type parser:
  *
-<type> ::= <forall_type>
-         | <union_type>
-         | <function_signature>
+<type> ::= <constrained_type>
 
 (* --- Type variables (parametric polymorphism) --- *)
 
-(* A prefix, dot-terminated quantifier clause. The clause is only MEANINGFUL on
-   a function signature (and, per arm, on the members of an overload set:
-   `(forall T. (list<T>) -> T) & (forall T. (set<T>) -> boolean)`); the grammar
-   admits it in any type position and the declaration-time validation rejects
-   every other placement with `unsupported-variable-position`.
-   The dot is load-bearing: a bound is a type, and types have unbounded right
-   edges (`forall T: (real) -> real. (g: T) -> boolean`).
-   `forall` is a RESERVED word in type strings. *)
-<forall_type> ::= "forall" <var_decl> ( "," <var_decl> )* "." <type>
+(* A TRAILING `where` clause quantifying the type it follows. The clause is
+   only MEANINGFUL on a function signature (and, per arm, on the members of an
+   overload set: `((list<T>) -> T where T) & ((set<T>) -> boolean where T)`);
+   the grammar admits it in any type position and the declaration-time
+   validation rejects every other placement with
+   `unsupported-variable-position`. Because <constrained_type> sits ABOVE the
+   union/intersection levels, an unparenthesized `A & B where T` attaches the
+   clause to the WHOLE intersection — which is then rejected (a clause may only
+   quantify a signature), with a diagnostic that names the per-arm
+   parenthesized fix.
+   `where` is a RESERVED word in type strings.
 
-<var_decl> ::= <identifier> ( ":" <type> )?      (* the bound must be GROUND *)
+   Because the clause TRAILS the body, identifier classification cannot wait
+   for it: the parser LEXICALLY PRE-SCANS for a depth-0 `where` (resolving no
+   names — see `scanWhereClauseNames`), seeds the clause's names as type
+   variables, then parses the body. All names are seeded before any bound is
+   parsed, so the clause is order-independent. *)
+<constrained_type> ::= <union_type> ( <where_clause> )?
+
+<where_clause> ::= "where" <var_decl> ( "," <var_decl> )*
+
+(* The bound must be GROUND. The `is` protocol slot parses and is stored, but
+   is semantically INERT: a type carrying one fails at declaration time with
+   `protocol-conformance-unsupported` until protocols land. *)
+<var_decl> ::= <identifier> ( ":" <union_type> )?
+               ( "is" <identifier> ( "&" <identifier> )* )?
 
 (* Within its arm, a quantified name SHADOWS every other reading of that
    identifier (primitive, nominal or resolver-provided) and parses as a type
-   variable. A parse may also be PRE-SEEDED with variables that no `forall` in
+   variable. A parse may also be PRE-SEEDED with variables that no clause in
    the text declares (the `typeVars` option — the body of a generic type alias,
    whose parameters are quantified by the declaration, not by the body). Such a
    parse is UNCACHEABLE: the same text means different things under different
@@ -224,14 +237,15 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
  * True when `node` is an arrow signature, looking through the redundant
  * parentheses `callback<((T) -> boolean)>` produces.
  *
- * A `forall` node answers `true` as well — not because it is admissible, but
- * because it already has a *better* rejection downstream (a nested `forall` is
- * an unsupported variable position), which this check must not preempt.
+ * A `where`-constrained node answers `true` as well — not because it is
+ * admissible, but because it already has a *better* rejection downstream (a
+ * nested clause is an unsupported variable position), which this check must
+ * not preempt.
  */
 function isFunctionSignatureNode(node: TypeNode): boolean {
   let n: TypeNode = node;
   while (n.kind === 'group') n = (n as GroupTypeNode).type;
-  return n.kind === 'function_signature' || n.kind === 'forall';
+  return n.kind === 'function_signature' || n.kind === 'constrained';
 }
 
 export class Parser {
@@ -253,14 +267,26 @@ export class Parser {
    * type. Exposed via `endOffset` for prefix mode. */
   private _end = 0;
 
-  /** The `forall`-quantified names in scope, innermost last. An identifier
+  /** The clause-quantified names in scope, innermost last. An identifier
    * found here parses as a type VARIABLE, shadowing every other reading. */
   private _typeVarScopes: Set<string>[] = [];
 
-  /** True once a `forall` clause has been parsed. The declaration-time
-   * validation (`validateDeclaredType`) is gated on it, so a type string
-   * without a clause pays nothing. */
-  private _sawForall = false;
+  /**
+   * Whether a trailing `where` clause may be attached to the type being
+   * parsed. `true` for whole-string parses and standalone annotations, `false`
+   * for embedded prefix parses (a return type after `->`, a comma-delimited
+   * parameter annotation, a clause bound) where the clause belongs to an
+   * enclosing construct — or where the clause's own `,`-separated list would
+   * swallow the following list element. A PARENTHESIZED clause
+   * (`((list<T>) -> T where T) & …`) is always admitted, independent of this
+   * flag: the parens delimit it unambiguously.
+   */
+  private allowWhere: boolean;
+
+  /** True once a `where` clause has been seen (pre-scanned or parsed). The
+   * declaration-time validation (`validateDeclaredType`) is gated on it, so a
+   * type string without a clause pays nothing. */
+  private _sawWhere = false;
 
   /** True once a `type X` forward-reference spelling has been parsed. Unlike a
    * BARE unknown name — which throws without a resolver — the `type X` form
@@ -275,13 +301,15 @@ export class Parser {
     options?: {
       typeResolver?: TypeResolver;
       allowTrailing?: boolean;
+      allowWhere?: boolean;
       typeVars?: readonly TypeParameter[];
     }
   ) {
     this.allowTrailing = options?.allowTrailing ?? false;
+    this.allowWhere = options?.allowWhere ?? true;
     // A PRE-SEEDED parse (the body of a generic type alias): the alias's own
     // parameters are in scope from the first token, exactly as if an enclosing
-    // `forall` had quantified them, so `tuple<T, T>` reads `T` as a VARIABLE
+    // `where` clause had quantified them, so `tuple<T, T>` reads `T` as a VARIABLE
     // rather than as an unknown type name.
     if (options?.typeVars !== undefined && options.typeVars.length > 0)
       this._typeVarScopes.push(new Set(options.typeVars.map((p) => p.name)));
@@ -302,10 +330,10 @@ export class Parser {
     return this._end;
   }
 
-  /** True when the parsed type carried a `forall` clause — the gate for the
+  /** True when the parsed type carried a `where` clause — the gate for the
    * declaration-time polytype validation. */
-  get sawForall(): boolean {
-    return this._sawForall;
+  get sawWhereClause(): boolean {
+    return this._sawWhere;
   }
 
   /** True when the parsed type carried a `type X` forward-reference spelling —
@@ -399,7 +427,9 @@ export class Parser {
     // Check for naked function signature pattern at the start
     this.checkForNakedFunctionSignature();
 
-    const type = this.parseUnionType();
+    const type = this.allowWhere
+      ? this.parseConstrainedType()
+      : this.parseUnionType();
     if (!type) {
       this.error('Expected a type');
     }
@@ -475,7 +505,9 @@ export class Parser {
     // even in prefix mode, e.g. `real -> real` without parentheses).
     this.checkForNakedFunctionSignature();
 
-    const type = this.parseUnionType();
+    const type = this.allowWhere
+      ? this.parseConstrainedType()
+      : this.parseUnionType();
     if (!type) this.error('Expected a type');
 
     // No EOF check: trailing tokens belong to the surrounding (Epsil) grammar.
@@ -595,7 +627,7 @@ export class Parser {
     return this.createNode<IntersectionTypeNode>('intersection', { types });
   }
 
-  /** True when `name` is quantified by an enclosing `forall` clause. */
+  /** True when `name` is quantified by an enclosing `where` clause. */
   private isTypeVariable(name: string): boolean {
     for (let i = this._typeVarScopes.length - 1; i >= 0; i--)
       if (this._typeVarScopes[i].has(name)) return true;
@@ -603,82 +635,251 @@ export class Parser {
   }
 
   /**
-   * `forall <var_decl> ("," <var_decl>)* "." <type>`.
+   * `<union_type> ( <where_clause> )?` — a type optionally carrying a
+   * trailing `where` clause.
    *
-   * Each name enters scope as soon as it is read, so it shadows every other
-   * reading of that identifier for the rest of the clause (including a later
-   * bound) and for the quantified type. A clause on anything other than a
-   * signature — and any nested clause — parses, and is rejected when the
-   * declared type is validated (`unsupported-variable-position`).
+   * Because the clause TRAILS the body, the parse is in three phases (the
+   * binding strategy of `docs/plans/2026-08-11-where-clause-type-constraints.md`):
+   *
+   * 1. **Pre-scan** ({@link scanWhereClauseNames}): a purely lexical scan for
+   *    a depth-0 `where`, collecting the clause's names. Resolves nothing, so
+   *    no resolver side effects fire.
+   * 2. **Seed**: the names are pushed as a type-variable scope, exactly as an
+   *    enclosing quantifier would have, so a quantified name shadows a nominal
+   *    of the same name throughout the body (the D13 shadowing contract).
+   * 3. **Parse**: the body, then the clause itself ({@link parseWhereClause}),
+   *    whose bounds are parsed with ALL names already in scope (the
+   *    seed-all-names-then-parse-all-bounds rule — a bound referencing a
+   *    clause variable parses, and fails validation, not parsing).
+   *
+   * A clause on anything other than a signature — and any nested clause —
+   * parses, and is rejected when the declared type is validated
+   * (`unsupported-variable-position`).
    */
-  private parseForallType(): ForallTypeNode {
-    this._sawForall = true;
-    this.advance(); // consume 'forall'
-
-    const scope = new Set<string>();
-    this._typeVarScopes.push(scope);
+  private parseConstrainedType(): TypeNode | undefined {
+    const names = this.scanWhereClauseNames();
+    if (names !== null) {
+      // Even if the clause parse below never runs (a divergent body parse),
+      // the seeded names may have produced variable nodes: keep the
+      // declaration-time validation gate ON.
+      this._sawWhere = true;
+      this._typeVarScopes.push(new Set(names));
+    }
     try {
-      const typeParams: TypeParamNode[] = [];
-      do {
-        if (this.current.type !== 'IDENTIFIER')
-          this.error(
-            'Expected a type variable name after `forall`',
-            'For example `forall T. (T) -> T`'
-          );
-        const nameToken = this.current;
-        const name = this.advance().value;
-        if (scope.has(name))
-          this.errorAtToken(
-            nameToken,
-            `The type variable \`${name}\` is declared more than once`
-          );
-        scope.add(name);
-
-        let bound: TypeNode | undefined;
-        if (this.match(':')) {
-          bound = this.parseUnionType();
-          if (!bound)
-            this.error(
-              `Expected a type after the bound of \`${name}\``,
-              'For example `forall T: number. (T) -> T`'
-            );
-        }
-
-        typeParams.push(
-          this.createNode<TypeParamNode>('type_param', { name, bound })
-        );
-      } while (this.match(','));
-
-      if (!this.match('.'))
-        this.error(
-          'Expected `.` after the `forall` clause',
-          'For example `forall T. (T) -> T`'
-        );
-
       const body = this.parseUnionType();
-      if (!body)
-        this.error(
-          'Expected a function signature after the `forall` clause',
-          'For example `forall T. (T) -> T`'
-        );
+      if (!body) return undefined;
 
-      return this.createNode<ForallTypeNode>('forall', { typeParams, body });
+      if (
+        this.current.type === 'IDENTIFIER' &&
+        this.current.value === 'where'
+      ) {
+        const typeParams = this.parseWhereClause();
+        return this.createNode<ConstrainedTypeNode>('constrained', {
+          typeParams,
+          body,
+        });
+      }
+      return body;
     } finally {
-      this._typeVarScopes.pop();
+      if (names !== null) this._typeVarScopes.pop();
     }
   }
 
+  /**
+   * Phase 0: locate a depth-0 `where` clause ahead of the cursor and collect
+   * its variable NAMES, purely lexically — nothing is resolved, so no
+   * side effects (`typeResolver.forward()` registration) can fire for a name
+   * that the clause later reclassifies as a variable.
+   *
+   * The scan runs on a fresh, TOLERANT lexer over the remaining input: the
+   * first character that cannot begin a type token ends the scan (the same
+   * rule that ends a prefix parse), so `= 5`, `{ … }` and other trailing
+   * (non-type) source bound the search for free. The scan additionally stops
+   * at a depth-0 `,` (inside a single type, commas only occur bracketed — a
+   * depth-0 comma means the type already ended) and when the bracket depth
+   * goes negative (the closing delimiter of the surrounding construct).
+   *
+   * Returns the clause names, or `null` when no clause is in range.
+   */
+  private scanWhereClauseNames(): string[] | null {
+    const input = this.lexer.input;
+    const start = this.current.position;
+    // Fast path: no `where` anywhere ahead — skip the token scan entirely.
+    if (!input.includes('where', start)) return null;
+
+    const lexer = new Lexer(input.slice(start), { tolerant: true });
+    let depth = 0;
+    let token = lexer.consumeToken();
+    while (token.type !== 'EOF') {
+      switch (token.type) {
+        case '(':
+        case '<':
+        case '[':
+          depth += 1;
+          break;
+        case ')':
+        case '>':
+        case ']':
+          depth -= 1;
+          if (depth < 0) return null;
+          break;
+        case ',':
+          if (depth === 0) return null;
+          break;
+        case 'IDENTIFIER':
+          if (depth === 0 && token.value === 'where') {
+            // Found the clause: collect the first identifier of each
+            // depth-0 comma-separated entry.
+            const names: string[] = [];
+            token = lexer.consumeToken();
+            for (;;) {
+              if (token.type !== 'IDENTIFIER') return names;
+              names.push(token.value);
+              // Skip the rest of this entry (bound, `is` protocols) to the
+              // next depth-0 `,` — bounds are types and may contain
+              // bracketed commas of their own.
+              let entryDepth = 0;
+              token = lexer.consumeToken();
+              while (token.type !== 'EOF') {
+                if (
+                  token.type === '(' ||
+                  token.type === '<' ||
+                  token.type === '['
+                )
+                  entryDepth += 1;
+                else if (
+                  token.type === ')' ||
+                  token.type === '>' ||
+                  token.type === ']'
+                ) {
+                  entryDepth -= 1;
+                  if (entryDepth < 0) return names;
+                } else if (token.type === ',' && entryDepth === 0) break;
+                token = lexer.consumeToken();
+              }
+              if (token.type === 'EOF') return names;
+              token = lexer.consumeToken(); // past the ','
+            }
+          }
+          break;
+      }
+      token = lexer.consumeToken();
+    }
+    return null;
+  }
+
+  /**
+   * The trailing clause itself:
+   * `where <var_decl> ("," <var_decl>)*`, where
+   * `<var_decl> ::= <name> (":" <bound>)? ("is" <protocol> ("&" <protocol>)*)?`.
+   *
+   * The cursor is on the `where` identifier. The clause's names are already
+   * in scope (seeded by {@link parseConstrainedType}), so a bound referencing
+   * a clause variable — its own name or a later one — PARSES here and is
+   * rejected by the declaration-time validation instead (the
+   * order-independence rule, W2).
+   */
+  private parseWhereClause(): TypeParamNode[] {
+    this._sawWhere = true;
+    this.advance(); // consume 'where'
+
+    const seen = new Set<string>();
+    const typeParams: TypeParamNode[] = [];
+    do {
+      if (this.current.type !== 'IDENTIFIER')
+        this.error(
+          'Expected a type variable name after `where`',
+          'For example `(T) -> T where T`'
+        );
+      const nameToken = this.current;
+      const name = this.advance().value;
+      if (name === 'where')
+        this.errorAtToken(nameToken, 'The type name `where` is reserved');
+      if (seen.has(name))
+        this.errorAtToken(
+          nameToken,
+          `The type variable \`${name}\` is declared more than once`
+        );
+      seen.add(name);
+
+      let bound: TypeNode | undefined;
+      if (this.match(':')) {
+        bound = this.parseUnionType();
+        if (!bound)
+          this.error(
+            `Expected a type after the bound of \`${name}\``,
+            'For example `(T) -> T where T: number`'
+          );
+      }
+
+      // The reserved `is` protocol-conformance slot: parsed and stored, but
+      // semantically inert — rejected at declaration time with
+      // `protocol-conformance-unsupported` until protocols land.
+      let protocols: string[] | undefined;
+      if (this.current.type === 'IDENTIFIER' && this.current.value === 'is') {
+        this.advance(); // consume 'is'
+        protocols = [];
+        do {
+          if (this.current.type !== 'IDENTIFIER')
+            this.error(
+              `Expected a protocol name after \`is\``,
+              'For example `(T) -> T where T: collection is Hashable`'
+            );
+          protocols.push(this.advance().value);
+        } while (this.match('&'));
+      }
+
+      typeParams.push(
+        this.createNode<TypeParamNode>('type_param', { name, bound, protocols })
+      );
+    } while (this.match(','));
+
+    return typeParams;
+  }
+
+  /**
+   * The migration diagnostic for the removed prefix `forall` syntax: an
+   * identifier `forall` followed by an identifier and one of `:` `,` `.` can
+   * only be a leftover `forall T. …` clause — two adjacent identifiers are
+   * never a valid type — so fail with a message that names the replacement
+   * rather than a generic unknown-type error.
+   */
+  private checkForLegacyForall(): void {
+    const savedState = this.lexer.saveState();
+    const savedCurrent = this.current;
+    const forallToken = this.current;
+    let isLegacy = false;
+    try {
+      this.advance(); // consume 'forall'
+      if ((this.current as Token).type === 'IDENTIFIER') {
+        this.advance();
+        const t = (this.current as Token).type;
+        isLegacy = t === ':' || t === ',' || t === '.';
+      }
+    } finally {
+      this.lexer.restoreState(savedState);
+      this.current = savedCurrent;
+    }
+    if (isLegacy)
+      this.errorAtToken(
+        forallToken,
+        'The `forall T. …` prefix syntax was replaced by a trailing `where` clause',
+        'For example `(T) -> T where T: number`'
+      );
+  }
+
   private parsePrimaryType(): TypeNode | undefined {
-    // A `forall` clause, and the occurrences of the names it quantifies. The
-    // variable check comes first: within its arm a quantified name shadows
-    // every other reading of the identifier (primitive, nominal, or
-    // resolver-provided).
+    // Occurrences of clause-quantified names. The variable check comes first:
+    // within its arm a quantified name shadows every other reading of the
+    // identifier (primitive, nominal, or resolver-provided).
     if (this.current.type === 'IDENTIFIER') {
       if (this.isTypeVariable(this.current.value)) {
         const name = this.advance().value;
         return this.createNode<TypeVariableNode>('type_variable', { name });
       }
-      if (this.current.value === 'forall') return this.parseForallType();
+      // A leftover of the REMOVED prefix `forall` syntax gets a targeted
+      // migration diagnostic instead of a generic unknown-type error.
+      if (this.current.value === 'forall') this.checkForLegacyForall();
     }
 
     // Try negation
@@ -696,9 +897,13 @@ export class Parser {
       const signature = this.parseFunctionSignature();
       if (signature) return signature;
 
-      // Fall back to grouped type or parenthesized tuple
+      // Fall back to grouped type or parenthesized tuple. A parenthesized
+      // type may carry its own trailing `where` clause — the per-arm
+      // overload-set spelling `((list<T>) -> T where T) & …` — so the group
+      // parses a CONSTRAINED type, regardless of `allowWhere` (the
+      // parentheses delimit the clause unambiguously).
       if (this.match('(')) {
-        const firstType = this.parseUnionType();
+        const firstType = this.parseConstrainedType();
         if (!firstType) {
           this.error('Expected type after (');
         }

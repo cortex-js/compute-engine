@@ -275,25 +275,32 @@ describe('EPSIL GENERIC TYPE ALIASES (lowering)', () => {
   });
 
   test('a RESERVED clause name is rejected by the shared clause parser', () => {
+    // `where` is the ONE reserved type name (it heads the trailing clause).
+    expect(
+      diagnosticsOf('type alias Pair<where> = tuple<where, where>')
+    ).toEqual([['type-annotation-error', 'The type name "where" is reserved']]);
+  });
+
+  test('…and `forall`, once the prefix syntax was removed, is declarable', () => {
+    // The host-API compatibility break of the `where`-clause migration: the
+    // two names swapped places in `RESERVED_TYPE_NAMES`.
     expect(
       diagnosticsOf('type alias Pair<forall> = tuple<forall, forall>')
-    ).toEqual([
-      ['type-annotation-error', 'The type name "forall" is reserved'],
-    ]);
+    ).toEqual([]);
   });
 
   test('…and its position survives LEADING WHITESPACE in the clause', () => {
     // The shared parser reports positions relative to the TRIMMED clause text,
     // so the whitespace it dropped has to be added back — otherwise the
     // diagnostic lands one column early, on the space.
-    const source = 'type alias Pair< forall> = tuple<forall, forall>';
+    const source = 'type alias Pair< where> = tuple<where, where>';
     const [, diagnostics] = parseEpsil(source);
     expect(diagnostics.map((d) => d.message)).toEqual([
-      ['type-annotation-error', 'The type name "forall" is reserved'],
+      ['type-annotation-error', 'The type name "where" is reserved'],
     ]);
-    expect(diagnostics[0].range[0]).toBe(source.indexOf('forall'));
+    expect(diagnostics[0].range[0]).toBe(source.indexOf('where'));
     expect(source.slice(diagnostics[0].range[0], source.indexOf('>'))).toBe(
-      'forall'
+      'where'
     );
   });
 

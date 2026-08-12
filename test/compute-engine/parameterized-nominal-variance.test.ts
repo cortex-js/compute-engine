@@ -433,7 +433,7 @@ describe('VARIANCE — forward references and mutual recursion (ruling C)', () =
 describe('VARIANCE — the operator route unblocks (Phase 0 deviation)', () => {
   // The ground skeleton of `tree<T>` is `tree<any>`, and admission asks
   // `tree<integer> <: tree<any>`. Under Phase 0's invariant reading that was
-  // false, so a `forall T. (tree<T>) -> T` operator declined the operand and
+  // false, so a `(tree<T>) -> T where T` operator declined the operand and
   // its result fell back to `unknown`. The declared `out` unblocks it.
   test('a quantified operand type solves `T` through an application', () => {
     const ce = new ComputeEngine();
@@ -441,7 +441,7 @@ describe('VARIANCE — the operator route unblocks (Phase 0 deviation)', () => {
       typeParams: [{ name: 'T', variance: 'out' }],
     });
     ce.declare('t', ce.type('tree<integer>'));
-    ce.declare('rootOf', ce.type('forall T. (tree<T>) -> T'));
+    ce.declare('rootOf', ce.type('(tree<T>) -> T where T'));
     expect(ce.box(['rootOf', 't']).type.toString()).toBe('integer');
   });
 
@@ -458,7 +458,7 @@ describe('VARIANCE — the operator route unblocks (Phase 0 deviation)', () => {
       typeParams: [{ name: 'T', variance: 'inout' }],
     });
     ce.declare('c', ce.type('cell<integer>'));
-    ce.declare('peek', ce.type('forall T. (cell<T>) -> T'));
+    ce.declare('peek', ce.type('(cell<T>) -> T where T'));
     expect(ce.box(['peek', 'c']).type.toString()).toBe('integer');
   });
 

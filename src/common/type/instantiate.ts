@@ -13,7 +13,7 @@ import { subtypingVarianceOf } from './variance.js';
 /**
  * Type variables (parametric polymorphism), type-layer half.
  *
- * A **polytype** is a function signature carrying a `forall` clause
+ * A **polytype** is a function signature carrying a `where` clause
  * (`typeParams`); its variables (`{ kind: 'variable' }`) are quantified over
  * that one arm (rank-1, per-arm — see
  * `docs/plans/2026-08-01-type-variables-design.md`).
@@ -36,6 +36,10 @@ export type TypeVariableErrorCode =
   | 'unsolvable-type-variable'
   | 'unsupported-variable-position'
   | 'reserved-type-name'
+  /** The `is` protocol-conformance slot of a `where` clause is parsed and
+   * stored, but semantically inert until protocols land: declaring a type
+   * that carries one fails with this code. */
+  | 'protocol-conformance-unsupported'
   /** A generic alias applied to the wrong number of type arguments — including
    * a bare use (`let p: Pair`), an empty list (`Pair<>`), and arguments on a
    * name that takes none. */
@@ -71,8 +75,8 @@ function fail(code: TypeVariableErrorCode, message: string): never {
   throw new TypeVariableError(code, message);
 }
 
-/** Type names that cannot be declared (`ce.declareType('forall', …)`). */
-export const RESERVED_TYPE_NAMES: ReadonlySet<string> = new Set(['forall']);
+/** Type names that cannot be declared (`ce.declareType('where', …)`). */
+export const RESERVED_TYPE_NAMES: ReadonlySet<string> = new Set(['where']);
 
 export function isReservedTypeName(name: string): boolean {
   return RESERVED_TYPE_NAMES.has(name);
@@ -83,7 +87,7 @@ export function isReservedTypeName(name: string): boolean {
 //
 
 /**
- * True when `t` is a polytype: a signature carrying a `forall` clause, or an
+ * True when `t` is a polytype: a signature carrying a `where` clause, or an
  * overload set (intersection) with at least one such arm.
  *
  * SHALLOW by construction — polytypes are legal only as signatures (§4.1), so
@@ -111,9 +115,9 @@ export function isPolymorphicType(t: Type): boolean {
 
 /**
  * The names of the type variables occurring FREE in `t` — i.e. not bound by a
- * `forall` clause on an enclosing (or on `t`'s own) signature.
+ * `where` clause on an enclosing (or on `t`'s own) signature.
  *
- * `freeTypeVariables('forall T. (T) -> T')` is therefore empty, while
+ * `freeTypeVariables('(T) -> T where T')` is therefore empty, while
  * `freeTypeVariables('(T) -> T')` (an open, internally-constructed type) is
  * `{T}`.
  */
@@ -172,7 +176,7 @@ function collectFreeVariables(
     }
     // Design D §4, clause 4: free-variable discovery RETAINS the variables
     // inside `S`, so `callback<(T) -> boolean>` contributes `T` to its
-    // signature's `forall` accounting.
+    // signature's `where` accounting.
     case 'callback':
       collectFreeVariables(t.signature, bound, into);
       return;
@@ -202,7 +206,7 @@ function collectFreeVariables(
       return;
     case 'reference':
       // An APPLIED reference (`tree<T>`) carries its arguments, and a variable
-      // may occur only there — without this, `forall T. (tree<T>) -> T` reads
+      // may occur only there — without this, `(tree<T>) -> T where T` reads
       // as ground. The `def` is NOT followed: a nominal reference is opaque,
       // and its body's variables are bound by its own clause.
       if (t.args !== undefined)
@@ -318,7 +322,7 @@ function hasOwn(map: Readonly<Record<string, unknown>>, key: string): boolean {
  * touches.
  *
  * A signature's own clause is INSTANTIATED, not shadowed: substituting `{T:
- * integer}` into `forall T. (T) -> T` yields the ground `(integer) -> integer`
+ * integer}` into `(T) -> T where T` yields the ground `(integer) -> integer`
  * with the clause (and just the substituted entries) removed. That is what a
  * call-site instantiation means; there is no rank-2 nesting in v1 for the
  * shadowing reading to matter to.
@@ -500,7 +504,7 @@ function substituteElements(
 //
 
 /**
- * Validate a declared type's `forall` clauses and variable occurrences, per
+ * Validate a declared type's `where` clauses and variable occurrences, per
  * arm. Throws a {@link TypeVariableError} on the first violation; returns
  * normally for every type with no clause and no variable — including every
  * type in the pre-generics language.
@@ -545,9 +549,16 @@ function validatePolytypeArm(
     if (declared.has(p.name))
       fail(
         'unsupported-variable-position',
-        `The type variable \`${p.name}\` is declared more than once in the same \`forall\` clause`
+        `The type variable \`${p.name}\` is declared more than once in the same \`where\` clause`
       );
     declared.add(p.name);
+    // The reserved `is` slot is parsed and stored, but semantically inert
+    // until protocols land: a declared type carrying one is rejected here.
+    if (p.protocols !== undefined && p.protocols.length > 0)
+      fail(
+        'protocol-conformance-unsupported',
+        `Protocol conformance constraints (\`where ${p.name} is ${p.protocols.join(' & ')}\`) are not supported yet`
+      );
   }
 
   // v1: a bound must be GROUND — no variables (no `T: list<U>`, no F-bounded
@@ -599,14 +610,14 @@ const FORBIDDEN_POSITION_MESSAGE: Readonly<Record<ForbiddenPosition, string>> =
     // Steer to the spelling that replaces it: `T & number` is what an author
     // writes when they mean a CONSTRAINT, and a constraint is a bound.
     intersection:
-      'cannot appear in an intersection. To constrain a type variable, declare a bound on it instead: `forall T: number.`',
+      'cannot appear in an intersection. To constrain a type variable, declare a bound on it instead: `where T: number`',
     negation: 'cannot appear in a negation',
     bound: 'cannot appear in a bound',
   };
 
 /**
  * Walk `t`, checking every variable occurrence against the v1 position
- * fragment (§3) and rejecting a `forall` clause in any nested position.
+ * fragment (§3) and rejecting a `where` clause in any nested position.
  *
  * `forbidden` names the enclosing position when variables are not admissible
  * there (an intersection member, a negation or a bound), and is `null`
@@ -629,7 +640,7 @@ function walk(
       if (!declared.has(t.name))
         fail(
           'unresolved-type-variable',
-          `The type variable \`${t.name}\` is not quantified by a \`forall\` clause`
+          `The type variable \`${t.name}\` is not quantified by a \`where\` clause`
         );
       into.add(t.name);
       return;
@@ -637,7 +648,7 @@ function walk(
       if (t.typeParams !== undefined && t.typeParams.length > 0)
         fail(
           'unsupported-variable-position',
-          'A `forall` clause can only quantify a top-level signature (or one arm of an overload set), not a nested one'
+          'A `where` clause can only quantify a top-level signature (or one arm of an overload set), not a nested one. Parenthesize a nested clause: `((A) -> B where A, B)`'
         );
       // `forbidden` is PROPAGATED, not reset: a nested arrow reached from a
       // forbidden position (an intersection member, a negation, a bound) is
@@ -648,9 +659,9 @@ function walk(
       walk(t.result, declared, forbidden, into);
       return;
     // Clause 4: a variable inside `S` is an ordinary occurrence — it is
-    // DECLARED by the enclosing `forall` and it counts as occurring in an
-    // argument position, which is what makes `forall T. (collection<T>,
-    // callback<(T) -> boolean>) -> integer` solvable.
+    // DECLARED by the enclosing `where` clause and it counts as occurring in
+    // an argument position, which is what makes `(collection<T>,
+    // callback<(T) -> boolean>) -> integer where T` solvable.
     case 'callback':
       walk(t.signature, declared, forbidden, into);
       return;
@@ -852,7 +863,7 @@ interface SolverState {
 }
 
 /**
- * Solve one signature arm's `forall` clause against the actual operand types
+ * Solve one signature arm's `where` clause against the actual operand types
  * (§4.3). Write-free: the only output is a binding map.
  *
  * Order-independent by construction — the covariant sweep (pass 1 + pass 2a)
@@ -1231,7 +1242,7 @@ function joinBounds(bounds: ReadonlyArray<Bound>): {
   // own type at a bare-variable pattern. That is the only shape D8/§4.3 rules
   // on, and the only one the ground path has a counterpart for: the
   // unknown/`any` gate in `validateArguments` admits a top-typed OPERAND
-  // unconditionally, so `forall T: indexed_collection. (T) -> T` must admit
+  // unconditionally, so `(T) -> T where T: indexed_collection` must admit
   // one too (§4.5 parity). A NESTED top type has no such counterpart —
   // `isSubtype(tuple<any>, tuple<number>)` is false, so the ground signature
   // rejects and the generic one must as well; waiving there would loosen past
@@ -1266,7 +1277,7 @@ function joinBounds(bounds: ReadonlyArray<Bound>): {
  * Variance-aware, and that is load-bearing: `any` in a CONTRAVARIANT position
  * is the tightest possible reading, not the loosest — `(integer) -> boolean`
  * is not a subtype of `(any) -> boolean`. A variable under a callback
- * parameter therefore reads as `never`, so `forall T. ((T) -> boolean) -> T`
+ * parameter therefore reads as `never`, so `((T) -> boolean) -> T where T`
  * admits every unary predicate at its skeleton, as it must.
  */
 export function groundSkeleton(t: Type, covariant = true): Type {
@@ -1485,7 +1496,7 @@ function elementTypeOf(type: Type): Type | undefined {
  * any `couldBeCollectionOperand` at a threadable position), and the two must
  * not be conflated: a `set` operand is admitted but never mapped (`Conjugate(
  * Set(1, 2))` stays inert), and a TUPLE binds whole and atomically
- * (`Negate((1, 2))` is a tuple, and `f((1, 2))` under `forall T. (T) -> T`
+ * (`Negate((1, 2))` is a tuple, and `f((1, 2))` under `(T) -> T where T`
  * echoes the tuple). Those, like a plain scalar actual — `broadcastable` means
  * scalar-OR-collection — contribute THEMSELVES, exactly as before the
  * re-ruling. So does an `unknown`/`any` actual, which keeps its D8 top-type

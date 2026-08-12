@@ -80,12 +80,12 @@ describe('LAZY-IDLE — the solver never touches a lazy operand', () => {
     }) as any;
 
   test('no operand `.type` is forced under `lazy`', () => {
-    const sig = arm('forall T: number. (list<T>) -> T');
+    const sig = arm('(list<T>) -> T where T: number');
     expect(() => solveArm(sig, [tripwire()], { lazy: true })).not.toThrow();
   });
 
   test('every variable falls to its S3 declared-bound fallback', () => {
-    const sig = arm('forall T: number. (list<T>) -> T');
+    const sig = arm('(list<T>) -> T where T: number');
     const solved = solveArm(sig, [tripwire()], { lazy: true });
     expect(solved.bindings.T).toBe('number');
     expect(solved.failures).toEqual([]);
@@ -94,7 +94,7 @@ describe('LAZY-IDLE — the solver never touches a lazy operand', () => {
   test('the end-to-end lazy operator is unaffected', () => {
     const ce = fresh();
     ce.declare('lzr', {
-      signature: 'forall T: number. (list<T>) -> T',
+      signature: '(list<T>) -> T where T: number',
       lazy: true,
       evaluate: (ops) => ops[0],
     });
@@ -112,7 +112,7 @@ describe('`OverloadResolution` carries only what a caller consumes', () => {
   const ce = fresh();
 
   test('a generic selected arm exposes its solve, ground arms do not', () => {
-    const arms = [arm('forall T: number. (T) -> T'), arm('(string) -> string')];
+    const arms = [arm('(T) -> T where T: number'), arm('(string) -> string')];
     const generic = resolveOverload(ce, [ce.number(2)], arms);
     expect(generic.selected?.typeParams?.length).toBe(1);
     // `selectedInstance` is GROUND: the clause is discharged.
@@ -153,7 +153,7 @@ describe('the value-arm JOIN runs on INSTANTIATED arms (§4.2)', () => {
   const setup = () => {
     const ce = fresh();
     ce.declare('vg', {
-      signature: '((0) -> string) & (forall T: number. (T) -> T)',
+      signature: '((0) -> string) & ((T) -> T where T: number)',
       evaluate: (ops) => ops[0],
     } as any);
     ce.declare('n', 'integer');
@@ -192,14 +192,14 @@ describe('a generic declaration accepts a BODY, never a ground function value', 
 
   test('a `Function` literal installs on `ce.assign`', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (T) -> T');
+    ce.declare('f', '(T) -> T where T');
     expect(() => ce.assign('f', ce.parse('x \\mapsto x'))).not.toThrow();
     expect(ce.box(['f', 5]).evaluate().toString()).toBe('5');
   });
 
   test('…and on the `Assign` OPERATOR route', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (T) -> T');
+    ce.declare('f', '(T) -> T where T');
     const v = ce
       .box(['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']])
       .evaluate();
@@ -213,7 +213,7 @@ describe('a generic declaration accepts a BODY, never a ground function value', 
     let caught: any;
     try {
       ce.declare('f', {
-        type: 'forall T. (T) -> T',
+        type: '(T) -> T where T',
         value: ce.symbol('g'),
       } as any);
     } catch (e) {
@@ -230,7 +230,7 @@ describe('a generic declaration accepts a BODY, never a ground function value', 
     let caught: any;
     try {
       ce.declare('f', {
-        type: 'forall T: string. (T) -> T',
+        type: '(T) -> T where T: string',
         value: ce.symbol('g'),
       } as any);
     } catch (e) {
@@ -242,7 +242,7 @@ describe('a generic declaration accepts a BODY, never a ground function value', 
 
   // An INSTANCE-SHAPED ground function is the trap: the D12 existential
   // `matches` answers true for it (`(integer) -> integer` IS an instantiation
-  // of `forall T. (T) -> T`), but a declaration promises EVERY instantiation
+  // of `(T) -> T where T`), but a declaration promises EVERY instantiation
   // (`Ground <: Poly` false, D3). The declaration boundary must use subtype
   // semantics, not the query probe — without that, this assignment succeeds
   // silently.
@@ -251,13 +251,13 @@ describe('a generic declaration accepts a BODY, never a ground function value', 
     ce.declare('g', '(integer) -> integer');
     expect(() =>
       ce.declare('f', {
-        type: 'forall T. (T) -> T',
+        type: '(T) -> T where T',
         value: ce.symbol('g'),
       } as any)
     ).toThrow(/is not compatible with the type/);
     const ce2 = fresh();
     ce2.declare('g', '(integer) -> integer');
-    ce2.declare('f', 'forall T. (T) -> T');
+    ce2.declare('f', '(T) -> T where T');
     expect(() => ce2.assign('f', ce2.symbol('g'))).toThrow(
       /is not compatible with the type/
     );
@@ -278,9 +278,9 @@ describe('§4.5 parity on the VALUE-definition route', () => {
   const setup = () => {
     const ce = fresh();
     // The same signature on all three routes.
-    ce.declare('vecho', 'forall T: indexed_collection. (T) -> T'); // value
+    ce.declare('vecho', '(T) -> T where T: indexed_collection'); // value
     ce.declare('oecho', {
-      signature: 'forall T: indexed_collection. (T) -> T',
+      signature: '(T) -> T where T: indexed_collection',
     }); // operator
     ce.declare('gecho', '(indexed_collection) -> indexed_collection'); // ground
     return ce;
@@ -321,8 +321,8 @@ describe('§4.5 parity on the VALUE-definition route', () => {
 
   test('(iii) a D10 lift-echo is NOT wrapped a second time', () => {
     const ce = fresh();
-    ce.declare('vid', 'forall T. (T) -> T'); // value route
-    ce.declare('oid', { signature: 'forall T. (T) -> T' }); // operator route
+    ce.declare('vid', '(T) -> T where T'); // value route
+    ce.declare('oid', { signature: '(T) -> T where T' }); // operator route
     expect(ce.box(['vid', ['List', 1, 2, 3]]).type.toString()).toBe(
       'vector<finite_integer^3>'
     );
@@ -338,9 +338,9 @@ describe('§4.5 parity on the VALUE-definition route', () => {
 
   test('(iii) a scalar-bounded polytype echoes the actual, as on the operator route', () => {
     const ce = fresh();
-    ce.declare('vnum', 'forall T: number. (T) -> T');
+    ce.declare('vnum', '(T) -> T where T: number');
     ce.declare('onum', {
-      signature: 'forall T: number. (T) -> T',
+      signature: '(T) -> T where T: number',
       broadcastable: true,
     });
     // D10: the lift binds the FULL actual, so both routes echo the operand's
@@ -356,7 +356,7 @@ describe('§4.5 parity on the VALUE-definition route', () => {
 
   test('a migrated broadcastable operator still evaluates elementwise', () => {
     const ce = fresh();
-    // `Chop`: `forall T: number. (T) -> T`, broadcastable.
+    // `Chop`: `(T) -> T where T: number`, broadcastable.
     expect(ce.box(['Chop', ['List', 1, 2, 3]]).type.toString()).toBe(
       'vector<finite_integer^3>'
     );

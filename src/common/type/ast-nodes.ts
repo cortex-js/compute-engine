@@ -30,25 +30,29 @@ export interface FunctionSignatureNode extends ASTNode {
   returnType: TypeNode;
 }
 
-/** One `<identifier> (":" <type>)?` entry of a `forall` clause. */
+/** One `<identifier> (":" <bound>)? ("is" <protocol> ("&" <protocol>)*)?`
+ * entry of a `where` clause. The `is` protocol slot is parsed and stored but
+ * semantically inert: a type carrying one is rejected at declaration time
+ * with `protocol-conformance-unsupported` until protocols land. */
 export interface TypeParamNode extends ASTNode {
   kind: 'type_param';
   name: string;
   bound?: TypeNode;
+  protocols?: string[];
 }
 
-/** A `forall <var_decl> ("," <var_decl>)* "." <type>` clause.
+/** A type carrying a trailing `where <var_decl> ("," <var_decl>)*` clause.
  *
  * The clause is only MEANINGFUL on a function signature; the grammar admits it
  * in any type position and the declaration-time validation rejects the rest
  * (`unsupported-variable-position`). */
-export interface ForallTypeNode extends ASTNode {
-  kind: 'forall';
+export interface ConstrainedTypeNode extends ASTNode {
+  kind: 'constrained';
   typeParams: TypeParamNode[];
   body: TypeNode;
 }
 
-/** An occurrence of a name quantified by an enclosing `forall` clause. */
+/** An occurrence of a name quantified by an enclosing `where` clause. */
 export interface TypeVariableNode extends ASTNode {
   kind: 'type_variable';
   name: string;
@@ -197,7 +201,7 @@ export interface VerbatimStringNode extends ASTNode {
 
 export type TypeNode =
   | FunctionSignatureNode
-  | ForallTypeNode
+  | ConstrainedTypeNode
   | TypeVariableNode
   | UnionTypeNode
   | IntersectionTypeNode
@@ -223,7 +227,7 @@ export type TypeNode =
 
 export interface ASTVisitor<T> {
   visitFunctionSignature(node: FunctionSignatureNode): T;
-  visitForallType(node: ForallTypeNode): T;
+  visitConstrainedType(node: ConstrainedTypeNode): T;
   visitTypeVariable(node: TypeVariableNode): T;
   visitUnionType(node: UnionTypeNode): T;
   visitIntersectionType(node: IntersectionTypeNode): T;
@@ -252,8 +256,8 @@ export function visitNode<T>(node: TypeNode, visitor: ASTVisitor<T>): T {
   switch (node.kind) {
     case 'function_signature':
       return visitor.visitFunctionSignature(node);
-    case 'forall':
-      return visitor.visitForallType(node);
+    case 'constrained':
+      return visitor.visitConstrainedType(node);
     case 'type_variable':
       return visitor.visitTypeVariable(node);
     case 'union':

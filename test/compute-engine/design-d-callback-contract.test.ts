@@ -134,7 +134,7 @@ describe('clause 1: `callback<S>` IS the primitive `function` for subtyping', ()
 
 describe('clause 2: the contextual solve traverses `S`’s parameters only', () => {
   const ARM = parseType(
-    'forall T, U. (collection<T>, callback<(T) -> U>) -> list<U>'
+    '(collection<T>, callback<(T) -> U>) -> list<U> where T, U'
   ) as FunctionSignature;
 
   it('plans the callback slot and the sources its PARAMETERS read', () => {
@@ -159,12 +159,12 @@ describe('clause 2: the contextual solve traverses `S`’s parameters only', () 
 
   it('declines when the arm has no callback slot, or no source for one', () => {
     const plain = parseType(
-      'forall T. (collection<T>, (T) -> boolean) -> integer'
+      '(collection<T>, (T) -> boolean) -> integer where T'
     ) as FunctionSignature;
     expect(contextualCallbackPlan(plain, 2)).toBeUndefined();
     // `T` is read only by `S`'s RESULT: nothing to solve the domain from.
     const resultOnly = parseType(
-      'forall T. (callback<() -> T>, T) -> integer'
+      '(callback<() -> T>, T) -> integer where T'
     ) as FunctionSignature;
     expect(contextualCallbackPlan(resultOnly, 2)).toBeUndefined();
   });
@@ -176,7 +176,7 @@ describe('clause 2: the contextual solve traverses `S`’s parameters only', () 
 
 describe('clause 3: a named callback’s PARAMETERS never constrain a variable', () => {
   const ARM = parseType(
-    'forall T, U. (collection<T>, callback<(T) -> U>) -> list<U>'
+    '(collection<T>, callback<(T) -> U>) -> list<U> where T, U'
   ) as FunctionSignature;
 
   it('the callback’s RESULT contributes, its parameters do not', () => {
@@ -194,7 +194,7 @@ describe('clause 3: a named callback’s PARAMETERS never constrain a variable',
 
   it('the same arm spelled with a bare arrow DOES conflict — the contrast', () => {
     const plain = parseType(
-      'forall T, U. (collection<T>, (T) -> U) -> list<U>'
+      '(collection<T>, (T) -> U) -> list<U> where T, U'
     ) as FunctionSignature;
     const solved = solveTypeArguments(plain, [
       parseType('list<integer>'),
@@ -224,7 +224,7 @@ describe('clause 4: variables inside `S` are retained and substituted', () => {
   it('a variable occurring ONLY inside `S` counts as occurring in an argument', () => {
     // Without discovery inside `S` this is `unsolvable-type-variable`.
     expect(() =>
-      parseType('forall T. (callback<(T) -> boolean>) -> integer')
+      parseType('(callback<(T) -> boolean>) -> integer where T')
     ).not.toThrow();
   });
 
@@ -236,7 +236,7 @@ describe('clause 4: variables inside `S` are retained and substituted', () => {
 
   it('`freeTypeVariables` sees through the wrapper', () => {
     const arm = parseType(
-      'forall T, U. (collection<T>, callback<(T) -> U>) -> list<U>'
+      '(collection<T>, callback<(T) -> U>) -> list<U> where T, U'
     ) as FunctionSignature;
     // Quantified at the arm, so free at the arm is empty…
     expect([...freeTypeVariables(arm)]).toEqual([]);
@@ -249,7 +249,7 @@ describe('clause 4: variables inside `S` are retained and substituted', () => {
 
   it('substitution rewrites inside `S`, and returns identity otherwise', () => {
     const slot = parseType(
-      'forall T. (callback<(T) -> boolean>) -> integer'
+      '(callback<(T) -> boolean>) -> integer where T'
     ) as FunctionSignature;
     const cb = slot.args![0].type;
     expect(typeToString(substituteTypeVariables(cb, { T: 'integer' }))).toBe(
@@ -269,9 +269,9 @@ describe('clause 5: `callback<S>` round-trips through serialize/parse', () => {
     'callback<(integer, string) -> list<integer>>',
     'callback<(integer) random -> boolean>',
     'callback<() -> nothing>',
-    'forall T. (callback<(T) -> boolean>) -> integer',
-    'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> integer',
-    'forall T, U. (collection<T>, callback<(T) -> U>) -> list<U>',
+    '(callback<(T) -> boolean>) -> integer where T',
+    '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T',
+    '(collection<T>, callback<(T) -> U>) -> list<U> where T, U',
   ];
 
   it.each(SPELLINGS)('%s survives a round trip exactly', (text) => {
@@ -312,7 +312,7 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
   it('declares the contextual slot and NO metadata', () => {
     const ce = new ComputeEngine();
     expect(ce.type(declaredSignature(ce, 'CountIf')).toString()).toBe(
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> integer'
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T'
     );
     // Read through `typeToString`, not `ce.type()`: the slot is OPEN (it
     // mentions the arm's `T`), and an open type is deliberately not boxable.
@@ -413,7 +413,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
   it('declares the contextual slot, keeps its result typing, drops the metadata', () => {
     const ce = new ComputeEngine();
     expect(ce.type(declaredSignature(ce, 'Filter')).toString()).toBe(
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> collection'
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T'
     );
     expect(hasCallbackMetadata(ce, 'Filter')).toBe(false);
     // §7 rule 1: the result stays with the `type:` handler — the source's own
@@ -547,42 +547,42 @@ describe('phase 1: the single-clause single-collection family converts', () => {
   const CONVERTED: ReadonlyArray<[string, string, string]> = [
     [
       'Find',
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> any',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> any where T',
       '(collection, predicate: function) -> any',
     ],
     [
       'IndexWhere',
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> integer',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T',
       '(collection, predicate: function) -> integer',
     ],
     [
       'Position',
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> list<integer>',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> list<integer> where T',
       '(collection, predicate: function) -> list<integer>',
     ],
     [
       'Any',
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>?) -> boolean',
+      '(collection<T>, predicate: callback<(T) -> boolean>?) -> boolean where T',
       '(collection, predicate: function?) -> boolean',
     ],
     [
       'All',
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>?) -> boolean',
+      '(collection<T>, predicate: callback<(T) -> boolean>?) -> boolean where T',
       '(collection, predicate: function?) -> boolean',
     ],
     [
       'TakeWhile',
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> collection',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
       '(collection, predicate: function) -> collection',
     ],
     [
       'DropWhile',
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> collection',
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
       '(collection, predicate: function) -> collection',
     ],
     [
       'FlatMap',
-      'forall T, U. (collection<T>, mapping: callback<(T) -> U>) -> list',
+      '(collection<T>, mapping: callback<(T) -> U>) -> list where T, U',
       '(collection, mapping: function) -> list',
     ],
   ];
@@ -672,7 +672,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
 
 describe('phase 1: `Any` / `All` — the OPTIONAL callback slot', () => {
   const ARM = parseType(
-    'forall T. (collection<T>, predicate: callback<(T) -> boolean>?) -> boolean'
+    '(collection<T>, predicate: callback<(T) -> boolean>?) -> boolean where T'
   ) as FunctionSignature;
 
   it('the planner maps an OPTIONAL slot to its operand position', () => {
@@ -743,7 +743,7 @@ describe('phase 1: `Any` / `All` — the OPTIONAL callback slot', () => {
 
 describe('phase 1: `FlatMap` — R-D2′ result inference', () => {
   const ARM = parseType(
-    'forall T, U. (collection<T>, mapping: callback<(T) -> U>) -> list'
+    '(collection<T>, mapping: callback<(T) -> U>) -> list where T, U'
   ) as FunctionSignature;
 
   it('the SOLVER binds `U` from the callback’s result, `T` from the source', () => {
@@ -920,17 +920,17 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
   const CONVERTED: ReadonlyArray<[string, string, string]> = [
     [
       'Reduce',
-      'forall T. (collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> value',
+      '(collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> value where T',
       '(collection, reducer: function, initial: value?) -> value',
     ],
     [
       'Scan',
-      'forall T. (collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> indexed_collection',
+      '(collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> indexed_collection where T',
       '(collection, reducer: function, initial: value?) -> indexed_collection',
     ],
     [
       'Fold',
-      'forall T. (reducer: callback<(unknown, T) -> unknown>, initial: value, collection<T>) -> value',
+      '(reducer: callback<(unknown, T) -> unknown>, initial: value, collection<T>) -> value where T',
       '(reducer: function, initial: value, collection) -> value',
     ],
   ];
@@ -1138,9 +1138,9 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
 
 describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity', () => {
   const DECLARED =
-    'forall T. (collection<T>, callback<(T) -> boolean> | integer, integer?) -> list<list<T>>';
+    '(collection<T>, callback<(T) -> boolean> | integer, integer?) -> list<list<T>> where T';
   const DISPLAY =
-    'forall T. (collection<T>, function | integer, integer?) -> list<list<T>>';
+    '(collection<T>, function | integer, integer?) -> list<list<T>> where T';
 
   it('declares the union slot, keeps its display, and drops the metadata', () => {
     const ce = new ComputeEngine();
@@ -1149,7 +1149,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
     // R-D5, with the vacuity refinement phase 2 required: `T` still relates
     // the source's elements to the result AFTER the callback erasure, so it is
     // a pre-existing declared contract — not a conversion artifact — and the
-    // `forall` clause survives the projection. Byte-identical to the
+    // `where` clause survives the projection. Byte-identical to the
     // pre-conversion display.
     expect(ce.box('Partition').type.toString()).toBe(DISPLAY);
     expect(
@@ -1252,7 +1252,7 @@ describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
   // consumer of `Map`'s signature resolve an overload set for no behavioral
   // gain.
   const DECLARED =
-    'forall T, U. (collection<T>, mapping: callback<(T) -> U>, collection*) -> indexed_collection';
+    '(collection<T>, mapping: callback<(T) -> U>, collection*) -> indexed_collection where T, U';
   const DISPLAY =
     '(collection, mapping: function, collection*) -> indexed_collection';
 
@@ -1453,7 +1453,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     // ordered to decline before it: nothing says a function could not inhabit
     // `T` anyway.
     const arm = (
-      parseType(`forall T. (x: T | ${CB}) -> integer`) as FunctionSignature
+      parseType(`(x: T | ${CB}) -> integer where T`) as FunctionSignature
     ).args![0].type;
     expect(contextualSlotCallback(arm)).toBeUndefined();
   });
@@ -1461,7 +1461,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
   it('ARM granularity: arity, then the contextual slot, then ambiguity', () => {
     const sig = (s: string) => parseType(s) as FunctionSignature;
     const unary = sig(
-      `forall T. (collection<T>, callback<(T) -> boolean>) -> integer`
+      `(collection<T>, callback<(T) -> boolean>) -> integer where T`
     );
     // Spelled variadic-LAST: `(collection+, function)` is the same type (the
     // bins are filled by modifier, not by source order) but the type parser
@@ -1487,7 +1487,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     ce.declare(
       'pick',
-      '(forall T. (collection<T>, callback<(T) -> boolean>) -> integer) & ((collection, integer) -> integer)'
+      '((collection<T>, callback<(T) -> boolean>) -> integer where T) & ((collection, integer) -> integer)'
     );
     expect(
       ce
@@ -1512,7 +1512,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     ce.declare(
       'amb',
-      '(forall T. (collection<T>, callback<(T) -> boolean>) -> integer) & (forall T. (collection<T>, f: function) -> string)'
+      '((collection<T>, callback<(T) -> boolean>) -> integer where T) & ((collection<T>, f: function) -> string where T)'
     );
     expect(
       ce.box(['amb', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson()
@@ -1522,7 +1522,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     // provably disjoint from `function`.
     ce.declare(
       'ok',
-      '(forall T. (collection<T>, callback<(T) -> boolean>) -> integer) & (forall T. (collection<T>, n: integer) -> string)'
+      '((collection<T>, callback<(T) -> boolean>) -> integer where T) & ((collection<T>, n: integer) -> string where T)'
     );
     expect(
       ce.box(['ok', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson()
@@ -1626,10 +1626,10 @@ describe('clause 1, on the POLYTYPE path: erasure reaches α-equivalence', () =>
   // `Poly <: Poly` is decided by comparing dedup-key STRINGS, and the dedup
   // key PRESERVES `callback<S>` (clause 5). Without a deep erasure on that
   // path the two arms below were unrelated in BOTH directions — clause 1
-  // holding for ground signatures but not for the `forall` arms that actually
+  // holding for ground signatures but not for the `where`-quantified arms that actually
   // carry the constructor.
-  const WITH = 'forall T. (collection<T>, callback<(T) -> boolean>) -> integer';
-  const WITHOUT = 'forall T. (collection<T>, function) -> integer';
+  const WITH = '(collection<T>, callback<(T) -> boolean>) -> integer where T';
+  const WITHOUT = '(collection<T>, function) -> integer where T';
 
   it('a converted arm and its pre-conversion arm are equivalent', () => {
     expect(isSubtype(parseType(WITH), parseType(WITHOUT))).toBe(true);
@@ -1643,16 +1643,16 @@ describe('clause 1, on the POLYTYPE path: erasure reaches α-equivalence', () =>
     expect(
       isSubtype(
         parseType(
-          'forall T. (collection<T>, list<callback<(T) -> boolean>>) -> integer'
+          '(collection<T>, list<callback<(T) -> boolean>>) -> integer where T'
         ),
-        parseType('forall T. (collection<T>, list<function>) -> integer')
+        parseType('(collection<T>, list<function>) -> integer where T')
       )
     ).toBe(true);
     expect(
       isSubtype(
-        parseType('forall T. (collection<T>, list<function>) -> integer'),
+        parseType('(collection<T>, list<function>) -> integer where T'),
         parseType(
-          'forall T. (collection<T>, list<callback<(T) -> boolean>>) -> integer'
+          '(collection<T>, list<callback<(T) -> boolean>>) -> integer where T'
         )
       )
     ).toBe(true);
@@ -1662,13 +1662,13 @@ describe('clause 1, on the POLYTYPE path: erasure reaches α-equivalence', () =>
     expect(
       isSubtype(
         parseType(WITHOUT),
-        parseType('forall T. (collection<T>, function) -> number')
+        parseType('(collection<T>, function) -> number where T')
       )
     ).toBe(false);
     expect(
       isSubtype(
         parseType(WITH),
-        parseType('forall T. (list<T>, callback<(T) -> boolean>) -> integer')
+        parseType('(list<T>, callback<(T) -> boolean>) -> integer where T')
       )
     ).toBe(false);
     // …and the dedup key itself still distinguishes them (clause 5 intact).
@@ -1713,7 +1713,7 @@ describe('clause 1: the erasure is DEEP in argument validation', () => {
 
 describe('R-D5: runtime signature display is the GROUND form', () => {
   // Ruled 2026-08-09. A converted operator prints exactly its pre-conversion
-  // signature — `callback<S>` erased to `function`, the `forall` variables at
+  // signature — `callback<S>` erased to `function`, the quantified variables at
   // their ground skeleton — because neither carries admission information.
   const COUNT_IF = '(collection, predicate: function) -> integer';
   const FILTER = '(collection, predicate: function) -> collection';
@@ -1766,17 +1766,17 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
   it('an UNCONVERTED operator is byte-identical to before', () => {
     const ce = new ComputeEngine();
     expect(ce.box('Add').type.toString()).toBe('(value+) -> value');
-    // …and an unconverted POLYTYPE keeps its `forall` display: the trigger is
+    // …and an unconverted POLYTYPE keeps its `where` display: the trigger is
     // the presence of a `callback<S>`, not being generic (R-D5, scoping).
     expect(ce.box('Sort').type.toString()).toBe(
-      'forall T. (indexed_collection<T>, order: function?) -> list<T>'
+      '(indexed_collection<T>, order: function?) -> list<T> where T'
     );
   });
 
   it('DISPLAY ONLY: the definition still holds the contextual signature', () => {
     const ce = new ComputeEngine();
     expect(typeToString(declaredSignature(ce, 'CountIf'))).toBe(
-      'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> integer'
+      '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T'
     );
   });
 
@@ -1787,12 +1787,12 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
     const ce = new ComputeEngine();
     const t = ce.box('CountIf').type;
     expect(t.toString()).toBe(COUNT_IF);
-    // Dropping the `forall` on the `.type` object flipped this, and with it
+    // Dropping the `where` clause on the `.type` object flipped this, and with it
     // every `Ground <: Poly` answer (which is unconditionally false).
     expect(t.isPolymorphic).toBe(true);
     expect(
       t.matches(
-        'forall T. (collection<T>, predicate: callback<(T) -> boolean>) -> integer'
+        '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T'
       )
     ).toBe(true);
 
@@ -1800,14 +1800,14 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
     // definition surface.
     ce.declare(
       'myCount',
-      'forall T. (collection<T>, p: callback<(T) -> boolean>) -> integer'
+      '(collection<T>, p: callback<(T) -> boolean>) -> integer where T'
     );
     const u = ce.symbol('myCount').type;
     expect(u.toString()).toBe('(collection, p: function) -> integer');
     expect(u.isPolymorphic).toBe(true);
     expect(
       u.matches(
-        'forall T. (collection<T>, p: callback<(T) -> boolean>) -> integer'
+        '(collection<T>, p: callback<(T) -> boolean>) -> integer where T'
       )
     ).toBe(true);
   });
@@ -1833,20 +1833,20 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
     // The erasure can leave a quantified variable occurring only result-side,
     // which is not a declarable polytype: re-boxing that form raised
     // `unsolvable-type-variable` from a property read. The projection now falls
-    // back to the erased-but-`forall`-kept spelling.
+    // back to the erased-but-`where`-kept spelling.
     const ce = new ComputeEngine();
-    ce.declare('r', 'forall T. (c: callback<(T) -> boolean>) -> tuple<T, T>');
+    ce.declare('r', '(c: callback<(T) -> boolean>) -> tuple<T, T> where T');
     expect(ce.symbol('r').type.toString()).toBe(
-      'forall T. (c: function) -> tuple<T, T>'
+      '(c: function) -> tuple<T, T> where T'
     );
     // A variable the erasure leaves relating an argument to the result is kept
     // as before (the §12.3 vacuity rule) and validates.
     ce.declare(
       'r2',
-      'forall T. (c: callback<(T) -> boolean>, collection<T>) -> tuple<T, T>'
+      '(c: callback<(T) -> boolean>, collection<T>) -> tuple<T, T> where T'
     );
     expect(ce.symbol('r2').type.toString()).toBe(
-      'forall T. (c: function, collection<T>) -> tuple<T, T>'
+      '(c: function, collection<T>) -> tuple<T, T> where T'
     );
   });
 });
@@ -1856,7 +1856,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     const ce = new ComputeEngine();
     ce.declare(
       'zipw',
-      'forall T, U, V. (collection<T>, collection<U>, callback<(T, U) -> V>) -> list<V>'
+      '(collection<T>, collection<U>, callback<(T, U) -> V>) -> list<V> where T, U, V'
     );
     const e = ce.box([
       'zipw',
@@ -1879,7 +1879,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     const ce = new ComputeEngine();
     ce.declare(
       'optcb',
-      'forall T. (collection<T>, callback<(T, T?) -> boolean>) -> integer'
+      '(collection<T>, callback<(T, T?) -> boolean>) -> integer where T'
     );
     const e = ce.box([
       'optcb',
@@ -1898,7 +1898,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     const ce = new ComputeEngine();
     ce.declare(
       'two',
-      'forall T. (collection<T>, callback<(T) -> boolean>, callback<(T) -> boolean>) -> integer'
+      '(collection<T>, callback<(T) -> boolean>, callback<(T) -> boolean>) -> integer where T'
     );
     const e = ce.box([
       'two',
@@ -1922,7 +1922,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     const ce = new ComputeEngine();
     ce.declare(
       'vz',
-      'forall T, U. (collection<T>, callback<(T+) -> U>) -> list<U>'
+      '(collection<T>, callback<(T+) -> U>) -> list<U> where T, U'
     );
     const e = ce.box([
       'vz',
@@ -1941,7 +1941,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     const ce = new ComputeEngine();
     ce.declare(
       'part',
-      'forall T, U. (collection<T>, callback<(T, U) -> boolean>) -> integer'
+      '(collection<T>, callback<(T, U) -> boolean>) -> integer where T, U'
     );
     const e = ce.box([
       'part',
@@ -2144,11 +2144,11 @@ describe('the stamp declines on an ARITY mismatch', () => {
 });
 
 describe('R-D5: the ground display reaches the VALUE-definition surface', () => {
-  // The same signature displayed the raw `forall`/`callback<>` as a value
+  // The same signature displayed the raw `where`/`callback<>` as a value
   // definition and the ground form as an operator definition. The projection
   // is trigger-scoped (presence of a `callback<S>`), so nothing else moves.
   const SIG =
-    'forall T. (collection<T>, p: callback<(T) -> boolean>) -> integer';
+    '(collection<T>, p: callback<(T) -> boolean>) -> integer where T';
 
   it('a function-typed value declared with a `callback<S>` displays ground', () => {
     const ce = new ComputeEngine();
@@ -2164,8 +2164,8 @@ describe('R-D5: the ground display reaches the VALUE-definition surface', () => 
 
   it('a user polytype with no callback keeps its declared contract', () => {
     const ce = new ComputeEngine();
-    ce.declare('idf', 'forall T. (x: T) -> T');
-    expect(ce.symbol('idf').type.toString()).toBe('forall T. (x: T) -> T');
+    ce.declare('idf', '(x: T) -> T where T');
+    expect(ce.symbol('idf').type.toString()).toBe('(x: T) -> T where T');
   });
 });
 
@@ -2180,7 +2180,7 @@ describe('R-D5: the display cache re-grounds a REPLACED signature', () => {
     );
     (ce.lookupDefinition('CountIf') as any).operator.update({
       signature:
-        'forall U. (collection<U>, p: callback<(U) -> boolean>) -> number',
+        '(collection<U>, p: callback<(U) -> boolean>) -> number where U',
     });
     expect(ce.symbol('CountIf').type.toString()).toBe(
       '(collection, p: function) -> number'

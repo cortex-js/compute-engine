@@ -80,8 +80,8 @@ type EffectSpecifier = { words: string[]; start: number; end: number };
 
 /** One declaration of a definition's **type-parameter clause** —
  * `function f<T, U: number>(…)` (the M2 sugared generic form). The bound is
- * the verbatim source slice, so it re-assembles into the `forall` prefix
- * exactly as written. */
+ * the verbatim source slice, so it re-assembles into the trailing `where`
+ * clause exactly as written. */
 type TypeParamDecl = { name: string; bound: string | null };
 
 /** A parsed type-parameter clause and its source span (the span covers
@@ -96,10 +96,67 @@ type TypeParamClause = {
  * namespace, not the Epsil binding namespace). */
 const TYPE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*/;
 
+/** The trailing `where` clause of a definition head — the names it quantifies
+ * (Phase 0 of the binding strategy of
+ * `docs/plans/2026-08-11-where-clause-type-constraints.md`), its VERBATIM
+ * source text (which rides into the assembled signature) and its span. */
+type WhereClause = {
+  names: string[];
+  text: string;
+  start: number;
+  end: number;
+};
+
+/** Reported for a `where` clause in an annotation position that cannot carry
+ * one. Verbatim from the type layer's own nested-clause rejection
+ * (`instantiate.ts`), so the two surfaces say the same thing. */
+const NESTED_WHERE_CLAUSE_MESSAGE =
+  'A `where` clause can only quantify a top-level signature (or one arm of an overload set), not a nested one. Parenthesize a nested clause: `((A) -> B where A, B)`';
+
 /** The contextual variance marker of a type-parameter clause, followed by (the
  * start of) the parameter's name. Mirrors `parseTypeParameterClause`'s reader;
  * `inout` is listed first so it is preferred over its `in` prefix. */
 const VARIANCE_MARKER = /^(inout|in|out)\s+(?=[A-Za-z_])/;
+
+/** If a comment starts at `pos`, the offset just past it; otherwise `pos`
+ * unchanged. Block comments NEST, as they do in the lexer. Used by the
+ * raw-source scanners, which would otherwise read a commented-out `where` as
+ * a real clause. */
+function skipComment(src: string, pos: number): number {
+  if (src[pos] !== '/') return pos;
+  if (src[pos + 1] === '/') {
+    let p = pos + 2;
+    while (p < src.length && !/[\n\r\u2028\u2029]/.test(src[p])) p += 1;
+    return p;
+  }
+  if (src[pos + 1] !== '*') return pos;
+  let p = pos + 2;
+  let level = 1;
+  while (level > 0 && p < src.length) {
+    if (src[p] === '/' && src[p + 1] === '*') {
+      level += 1;
+      p += 2;
+    } else if (src[p] === '*' && src[p + 1] === '/') {
+      level -= 1;
+      p += 2;
+    } else p += 1;
+  }
+  return p;
+}
+
+/** Skip a string literal starting at `pos` (its opening quote), honoring
+ * backslash escapes; returns the offset just past the closing quote (or the
+ * end of `src` for an unterminated one). Used by the raw-source scanners,
+ * which must not read a quote's contents as syntax. */
+function skipStringLiteral(src: string, pos: number): number {
+  const quote = src[pos];
+  pos += 1;
+  while (pos < src.length && src[pos] !== quote) {
+    if (src[pos] === '\\') pos += 1;
+    pos += 1;
+  }
+  return Math.min(pos + 1, src.length);
+}
 
 /** Does this OPERATOR token, following `type Name`, head a `type` statement?
  * `=` opens the body; `<` opens a type-parameter clause. `<>` is listed too
@@ -304,7 +361,7 @@ export class Parser {
    * name lowers to a BARE symbol. Reading it off the resolver is exact — it is
    * the type parser itself reporting which identifiers it took as type
    * references — where a text scan would have to guess about `list<T>`,
-   * `(T) -> real`, nested `forall` shadowing, and names like `Tx`. */
+   * `(T) -> real`, clause-name shadowing, and names like `Tx`. */
   private typeParamHits: Set<string> | null = null;
 
   constructor(
@@ -818,7 +875,9 @@ export class Parser {
         );
         return null;
       }
-      const t = this.parseTypeAnnotation();
+      // A standalone annotation IS the whole type, so it may carry a trailing
+      // `where` clause (`let f: (T) -> T where T: number = …`).
+      const t = this.parseTypeAnnotation({ allowWhere: true });
       if (t === null) {
         // Diagnosed, cursor still at the error: skip the rest of the
         // declaration (ONCE) so the next statement still parses.
@@ -920,7 +979,7 @@ export class Parser {
    * binders are written where they bind, and a name that merely RESOLVES to
    * a signature does not bind); zero-parameter signatures (nothing to bind,
    * and the initializer may legitimately be a thunk-valued expression);
-   * generic (`forall`), effectful, optional/variadic, and partially named
+   * generic (`where`-quantified), effectful, optional/variadic, and partially named
    * signatures.
    */
   private reconcileFunctionAnnotation(
@@ -1284,7 +1343,8 @@ export class Parser {
     };
 
     const eq = this.advance(); // '='
-    const body = this.parseTypeBody(eq.end);
+    // A `type` body IS the whole type, so it may carry a trailing clause.
+    const body = this.parseTypeBody(eq.end, { allowWhere: true });
     unseedParams();
     if (body === null) {
       unseed();
@@ -2036,7 +2096,9 @@ export class Parser {
     const binding = this.wrap({ sym: '_' + name }, start, end);
 
     // Optional `: Type` → an implicit `Element(name, type)` guard, conjoined
-    // with any explicit guard by the caller.
+    // with any explicit guard by the caller. Comma-delimited, so `allowWhere`
+    // stays false (the default): a clause's own `,`-list would swallow the
+    // next pattern.
     if (this.check('OPERATOR') && this.current.text === ':') {
       const annotation = this.parseTypeAnnotation();
       if (annotation === null) {
@@ -2264,7 +2326,7 @@ export class Parser {
    * A **type-parameter clause** may sit between the name and the parameter
    * list (`function map<T, U>(…)` — the M2 sugared generic form,
    * `docs/plans/2026-08-04-generic-function-literals-design.md` §3). It turns
-   * the ascription into a `forall`-quantified full signature and ERASES the
+   * the ascription into a `where`-quantified full signature and ERASES the
    * annotations of the parameters it quantifies (they lower to bare symbols;
    * the signature is the single source of truth for their types). See
    * {@link parseTypeParamClause}. */
@@ -2299,23 +2361,37 @@ export class Parser {
       return null;
     }
 
+    // Phase 0 of the trailing-`where` binding strategy: the clause sits at the
+    // END of the head, but its names must already be in scope when the FIRST
+    // parameter annotation is parsed, so locate it lexically first.
+    const whereScan = this.scanWhereClause(this.current.start);
+
     // G7 — the clause's names are in scope for the HEAD only (parameter list,
     // effect specifier, return type). The body parses unseeded, so a
     // body-local `let y: T` is an ordinary unknown-type error. The set is
     // mutated in place (`typeResolver` closes over it), and only the names
     // this clause ADDED are removed on restore: a clause name that shadows a
-    // user type of the same name leaves that type known afterwards.
-    const seeded = typeParams.filter((d) => !this.knownTypeNames.has(d.name));
+    // user type of the same name leaves that type known afterwards. Both
+    // binder spellings seed the same way — writing BOTH is an error (reported
+    // once the clause's extent is known), but seeding both names keeps the
+    // recovery from cascading into unknown-type reports.
+    const seedNames = [
+      ...new Set([
+        ...typeParams.map((d) => d.name),
+        ...(whereScan?.names ?? []),
+      ]),
+    ];
+    const seeded = seedNames.filter((n) => !this.knownTypeNames.has(n));
     const outerTypeParamNames = this.typeParamNames;
-    if (typeParams.length > 0) {
-      for (const d of typeParams) this.knownTypeNames.add(d.name);
-      this.typeParamNames = new Set(typeParams.map((d) => d.name));
+    if (seedNames.length > 0) {
+      for (const n of seedNames) this.knownTypeNames.add(n);
+      this.typeParamNames = new Set(seedNames);
     }
 
     // Which parameters mention a quantified name (parallel to `params`).
     const quantified: boolean[] = [];
     const params = this.parseParameterList(
-      typeParams.length > 0 ? quantified : undefined
+      seedNames.length > 0 ? quantified : undefined
     );
 
     // Optional effect specifier `random`, `scope`, `pure`, … (bare words
@@ -2329,9 +2405,40 @@ export class Parser {
       returnType = this.parseHeldType();
     }
 
-    if (typeParams.length > 0) {
-      for (const d of seeded) this.knownTypeNames.delete(d.name);
+    // Phase 3 — the clause itself, always LAST (after the effects slot and
+    // the return type), in every spelling.
+    let where: WhereClause | undefined;
+    // A clause that was WRITTEN but did not parse. Tracked explicitly because
+    // the gates below cannot otherwise tell it apart from "no clause at all":
+    // the annotations of the head were parsed with its names seeded, so they
+    // reference variables that no clause declares.
+    let clauseFailed = false;
+    if (
+      whereScan !== null &&
+      this.current.type === 'SYMBOL' &&
+      this.current.text === 'where'
+    ) {
+      const consumed = this.consumeWhereClause(whereScan.start);
+      if (consumed !== null)
+        where = { ...whereScan, text: consumed.text, end: consumed.end };
+      else clauseFailed = true;
+    }
+
+    if (seedNames.length > 0) {
+      for (const n of seeded) this.knownTypeNames.delete(n);
       this.typeParamNames = outerTypeParamNames;
+    }
+
+    // One binding site per declaration: `<T>` and `where T` are synonyms, so
+    // writing both is an error rather than a bounded `<T: number>`. The `<T>`
+    // clause wins; the `where` clause is dropped.
+    if (where !== undefined && typeParams.length > 0) {
+      this.error(
+        ['duplicate-type-parameter-clause', name],
+        where.start,
+        where.end
+      );
+      where = undefined;
     }
 
     // G2 rule 1 (§2.6) — a clause plus a LITERAL parameter is a generic
@@ -2341,22 +2448,39 @@ export class Parser {
     // dropped (the definition parses on as an ordinary one) — the error
     // diagnostic is the rejection.
     let clauseDecls: readonly TypeParamDecl[] = typeParams;
-    if (typeParams.length > 0 && params.some(isLiteralParamNode)) {
+    const clauseSpan: [number, number] | undefined =
+      clause !== undefined
+        ? [clause.start, clause.end]
+        : where !== undefined
+          ? [where.start, where.end]
+          : undefined;
+    if (
+      (typeParams.length > 0 || where !== undefined) &&
+      params.some(isLiteralParamNode)
+    ) {
       this.error(
         ['generic-clause-unsupported', name],
-        clause!.start,
-        clause!.end
+        clauseSpan![0],
+        clauseSpan![1]
       );
       clauseDecls = [];
+      where = undefined;
     }
 
-    const ascription = this.definitionAscription(
-      params,
-      spec,
-      returnType,
-      clauseDecls,
-      clause !== undefined ? [clause.start, clause.end] : undefined
-    );
+    const hasClause = clauseDecls.length > 0 || where !== undefined;
+    // A clause that failed SYNTACTICALLY gets no ascription at all: the plain
+    // return type would name a variable no clause declares (the contract in
+    // {@link definitionAscription}).
+    const ascription = clauseFailed
+      ? null
+      : this.definitionAscription(
+          params,
+          spec,
+          returnType,
+          clauseDecls,
+          clauseSpan,
+          where?.text
+        );
 
     // Erased lowering (§3.1): a parameter whose annotation mentions a
     // quantified name lowers to a BARE symbol — the full-signature ascription
@@ -2367,8 +2491,16 @@ export class Parser {
     // `f(x, 0)` clause. The annotation stays, and reads as whatever `T` names
     // outside the clause — a user type when one exists, an unresolved (hence
     // `unknown`) name otherwise.
+    //
+    // A clause REJECTED downstream — syntactically (`clauseFailed`) or
+    // semantically (the assembled signature was refused, so the ascription is
+    // null) — is the same situation: there is no quantified ascription to
+    // carry those types, so the annotations stay. Keeping them, rather than
+    // erasing to bare symbols, is the recovery the G2 rejection above already
+    // uses: a definition that did not parse must not end up MORE permissive
+    // than its source.
     const loweredParams =
-      clauseDecls.length > 0
+      hasClause && !clauseFailed && ascription !== null
         ? params.map((p, i) =>
             quantified[i] === true ? (operand(p, 1) ?? p) : p
           )
@@ -2425,8 +2557,15 @@ export class Parser {
    * cursor is re-synced ONCE at the end with `advanceToOffset` — which lands
    * correctly even when the closing angle is buried in a munched token.
    *
-   * Bounds are parsed with the clause's own names NOT in scope, so an
-   * F-bounded `<T: list<U>>` is an ordinary `Unknown type "U"` error.
+   * ALL the clause's names are collected first, THEN the bounds are parsed
+   * with every one of them in scope — the seed-all-names-then-parse-all-bounds
+   * rule shared with the type layer's clause reader
+   * ({@link parseTypeParameterClause}) and the trailing `where` clause. A
+   * bound that mentions a clause variable therefore PARSES, and is rejected by
+   * the assembled signature's ground-bound check with a message naming the
+   * variable, rather than as an opaque `Unknown type`. A bound naming
+   * something the clause does NOT declare (`<T: list<U>>`) is still an
+   * ordinary `Unknown type "U"` error.
    */
   private parseTypeParamClause(
     fnName: string,
@@ -2451,6 +2590,17 @@ export class Parser {
       return { decls: [], start, end: pos };
     }
 
+    // Pass 1 — the NAMES only, so every one of them is in scope before ANY
+    // bound is parsed. Only the names this clause ADDS are removed on the way
+    // out: a clause name shadowing a user type leaves that type known.
+    const seededNames = this.scanTypeParamNames(pos, allowVariance).filter(
+      (n) => !this.knownTypeNames.has(n)
+    );
+    for (const n of seededNames) this.knownTypeNames.add(n);
+    const unseed = (): void => {
+      for (const n of seededNames) this.knownTypeNames.delete(n);
+    };
+
     const decls: TypeParamDecl[] = [];
     const seen = new Set<string>();
     for (;;) {
@@ -2468,6 +2618,7 @@ export class Parser {
       if (m === null) {
         this.error(['symbol-expected'], pos, Math.min(pos + 1, src.length));
         this.advanceToOffset(pos);
+        unseed();
         return null;
       }
       const varName = m[0];
@@ -2479,6 +2630,10 @@ export class Parser {
       if (src[pos] === ':') {
         pos += 1;
         try {
+          // A bound is a GROUND type: `allowWhere` stays false (the default),
+          // so a nested clause is a syntax error rather than a silent parse.
+          // (Groundness itself is checked on the assembled signature — the
+          // clause's own names are in scope here, see the pass-1 seeding.)
           const { end } = parseTypePrefix(src.slice(pos), this.typeResolver);
           bound = src.slice(pos, pos + end).trim();
           pos += end;
@@ -2493,11 +2648,12 @@ export class Parser {
             Math.min(pos + rel + 1, src.length)
           );
           this.advanceToOffset(pos);
+          unseed();
           return null;
         }
       }
 
-      // Mirrors the type grammar's own `forall` check, reported here so the
+      // Mirrors the type grammar's own duplicate check, reported here so the
       // clause — not the assembled signature — carries the diagnostic. The
       // duplicate is dropped so the assembly does not report it twice.
       if (seen.has(varName))
@@ -2526,11 +2682,304 @@ export class Parser {
         Math.min(pos + 1, src.length)
       );
       this.advanceToOffset(pos);
+      unseed();
       return null;
     }
 
     this.advanceToOffset(pos);
+    unseed();
     return { decls, start, end: pos };
+  }
+
+  /** The parameter NAMES of a `<…>` clause whose first entry starts at `pos`
+   * (just past the `<`), collected WITHOUT parsing any bound — a bound's
+   * extent comes from {@link scanTypeParamBound}. A malformed entry simply
+   * ends the scan: the parse that follows is what diagnoses it. */
+  private scanTypeParamNames(pos: number, allowVariance: boolean): string[] {
+    const src = this.source;
+    const names: string[] = [];
+    const skipSpace = (): void => {
+      while (pos < src.length && /\s/.test(src[pos])) pos += 1;
+    };
+    for (;;) {
+      skipSpace();
+      if (allowVariance) {
+        const vm = VARIANCE_MARKER.exec(src.slice(pos));
+        if (vm !== null) pos += vm[0].length;
+      }
+      const m = TYPE_IDENTIFIER.exec(src.slice(pos));
+      if (m === null) return names;
+      names.push(m[0]);
+      pos += m[0].length;
+
+      skipSpace();
+      if (src[pos] === ':') pos = this.scanTypeParamBound(pos + 1);
+      skipSpace();
+      if (src[pos] !== ',') return names;
+      pos += 1;
+    }
+  }
+
+  /** The end offset of a `<…>` clause bound starting at `pos`: the next `,` or
+   * closing bracket at depth 0. Brackets nest, `->` is skipped atomically so
+   * its `>` does not close one, and strings and comments are skipped whole —
+   * the same scan as {@link scanWhereClauseNames}. */
+  private scanTypeParamBound(pos: number): number {
+    const src = this.source;
+    let depth = 0;
+    while (pos < src.length) {
+      const ch = src[pos];
+      if (ch === '"' || ch === "'" || ch === '`') {
+        pos = skipStringLiteral(src, pos);
+        continue;
+      }
+      if (ch === '/') {
+        const past = skipComment(src, pos);
+        if (past !== pos) {
+          pos = past;
+          continue;
+        }
+      }
+      if (ch === '-' && src[pos + 1] === '>') {
+        pos += 2;
+        continue;
+      }
+      if (ch === '(' || ch === '[' || ch === '<') {
+        depth += 1;
+        pos += 1;
+        continue;
+      }
+      if (ch === ')' || ch === ']' || ch === '>') {
+        if (depth === 0) return pos;
+        depth -= 1;
+        pos += 1;
+        continue;
+      }
+      if (depth === 0 && (ch === ',' || ch === '{' || ch === ';')) return pos;
+      pos += 1;
+    }
+    return pos;
+  }
+
+  /**
+   * **Phase 0** of the trailing-`where` binding strategy
+   * (`docs/plans/2026-08-11-where-clause-type-constraints.md`): locate a
+   * definition head's clause and collect the variable NAMES it declares,
+   * purely lexically — nothing is resolved, so no resolver side effect can
+   * fire for a name the clause later reclassifies as a variable.
+   *
+   * The clause TRAILS the head but its names must be in scope from the first
+   * parameter annotation, so it has to be found before anything is parsed.
+   * `from` is the offset of the parameter list's `(`; the scan runs to the
+   * head terminator — a depth-0 `{` (block form), `=` (math form) or `;` —
+   * and stops early if the bracket depth goes negative.
+   *
+   * **Scanned from the RAW SOURCE, not from tokens**, for the same reason
+   * {@link parseTypeParamClause} is: the Epsil lexer maximal-munches a run of
+   * angle characters, so `list<list<integer>>` arrives with its two closing
+   * angles fused. `->` is skipped atomically so its `>` does not close a
+   * bracket, and string literals are skipped whole.
+   *
+   * Returns `null` when the head carries no clause.
+   */
+  private scanWhereClause(
+    from: number
+  ): { start: number; names: string[] } | null {
+    const src = this.source;
+    let depth = 0;
+    let pos = from;
+    while (pos < src.length) {
+      const ch = src[pos];
+      if (ch === '"' || ch === "'" || ch === '`') {
+        pos = skipStringLiteral(src, pos);
+        continue;
+      }
+      if (ch === '/') {
+        const past = skipComment(src, pos);
+        if (past !== pos) {
+          pos = past;
+          continue;
+        }
+      }
+      if (ch === '-' && src[pos + 1] === '>') {
+        pos += 2;
+        continue;
+      }
+      if (ch === '(' || ch === '[' || ch === '<') {
+        depth += 1;
+        pos += 1;
+        continue;
+      }
+      if (ch === ')' || ch === ']' || ch === '>') {
+        depth -= 1;
+        pos += 1;
+        if (depth < 0) return null;
+        continue;
+      }
+      if (depth === 0 && (ch === '{' || ch === '=' || ch === ';')) return null;
+      const m =
+        /[A-Za-z_]/.test(ch) && !/[A-Za-z0-9_]/.test(src[pos - 1] ?? '')
+          ? TYPE_IDENTIFIER.exec(src.slice(pos))
+          : null;
+      if (m !== null) {
+        if (depth === 0 && m[0] === 'where')
+          return {
+            start: pos,
+            names: this.scanWhereClauseNames(pos + m[0].length),
+          };
+        pos += m[0].length;
+        continue;
+      }
+      pos += 1;
+    }
+    return null;
+  }
+
+  /** The variable NAMES of the clause whose body starts at `pos` (just past
+   * the `where` word): the first identifier of each depth-0 comma-separated
+   * entry. An entry's bound may contain bracketed commas of its own, so the
+   * split tracks bracket depth — the same scan as {@link scanWhereClause}. */
+  private scanWhereClauseNames(pos: number): string[] {
+    const src = this.source;
+    const names: string[] = [];
+    let depth = 0;
+    let atEntryStart = true;
+    while (pos < src.length) {
+      const ch = src[pos];
+      if (ch === '"' || ch === "'" || ch === '`') {
+        pos = skipStringLiteral(src, pos);
+        continue;
+      }
+      if (ch === '/') {
+        const past = skipComment(src, pos);
+        if (past !== pos) {
+          pos = past;
+          continue;
+        }
+      }
+      if (ch === '-' && src[pos + 1] === '>') {
+        pos += 2;
+        continue;
+      }
+      if (ch === '(' || ch === '[' || ch === '<') {
+        depth += 1;
+        pos += 1;
+        continue;
+      }
+      if (ch === ')' || ch === ']' || ch === '>') {
+        depth -= 1;
+        pos += 1;
+        if (depth < 0) break;
+        continue;
+      }
+      if (depth === 0) {
+        if (ch === '{' || ch === '=' || ch === ';') break;
+        if (ch === ',') {
+          atEntryStart = true;
+          pos += 1;
+          continue;
+        }
+      }
+      const m =
+        /[A-Za-z_]/.test(ch) && !/[A-Za-z0-9_]/.test(src[pos - 1] ?? '')
+          ? TYPE_IDENTIFIER.exec(src.slice(pos))
+          : null;
+      if (m !== null) {
+        if (depth === 0 && atEntryStart) {
+          names.push(m[0]);
+          atEntryStart = false;
+        }
+        pos += m[0].length;
+        continue;
+      }
+      pos += 1;
+    }
+    return names;
+  }
+
+  /**
+   * **Phase 3**: consume the definition head's trailing clause, whose `where`
+   * word starts at `start` (found by {@link scanWhereClause}). The clause's
+   * VERBATIM source text rides into the assembled signature, so the author's
+   * spelling of a bound survives and the type grammar's own declaration-time
+   * validation — duplicates, reserved names, unused or result-only variables,
+   * non-ground bounds, and the reserved `is` slot — comes back for free.
+   *
+   * `where <name> (":" <bound>)? ("is" <Proto> ("&" <Proto>)*)? ("," …)*`.
+   * Scanned from the raw source (see {@link parseTypeParamClause}); a bound's
+   * extent comes from the type subparser, with the clause's own names already
+   * seeded. Returns `null` after diagnosing a malformed clause.
+   */
+  private consumeWhereClause(
+    start: number
+  ): { text: string; end: number } | null {
+    const src = this.source;
+    let pos = start + 'where'.length;
+    const skipSpace = (): void => {
+      while (pos < src.length && /\s/.test(src[pos])) pos += 1;
+    };
+    const fail = (): null => {
+      this.error(['symbol-expected'], pos, Math.min(pos + 1, src.length));
+      this.advanceToOffset(pos);
+      return null;
+    };
+
+    for (;;) {
+      skipSpace();
+      const m = TYPE_IDENTIFIER.exec(src.slice(pos));
+      if (m === null) return fail();
+      pos += m[0].length;
+
+      skipSpace();
+      if (src[pos] === ':') {
+        pos += 1;
+        try {
+          // Extent only — the bound's MEANING is validated on the assembled
+          // signature. `allowWhere` stays false (the default): a bound is a
+          // ground type, and the clause's `,`-list must not be swallowed.
+          const { end } = parseTypePrefix(src.slice(pos), this.typeResolver);
+          pos += end;
+        } catch (e) {
+          const err = e as { position?: number; rawMessage?: string };
+          const rel = typeof err.position === 'number' ? err.position : 0;
+          const message =
+            err.rawMessage ?? (e instanceof Error ? e.message : String(e));
+          this.error(
+            ['type-annotation-error', message],
+            pos + rel,
+            Math.min(pos + rel + 1, src.length)
+          );
+          this.advanceToOffset(pos);
+          return null;
+        }
+      }
+
+      // The reserved protocol-conformance slot. Parsed so the clause's extent
+      // is right; rejected (as `protocol-conformance-unsupported`) by the
+      // signature validation, not here.
+      skipSpace();
+      if (/^is\b/.test(src.slice(pos))) {
+        pos += 2;
+        for (;;) {
+          skipSpace();
+          const proto = TYPE_IDENTIFIER.exec(src.slice(pos));
+          if (proto === null) return fail();
+          pos += proto[0].length;
+          skipSpace();
+          if (src[pos] !== '&') break;
+          pos += 1;
+        }
+      }
+
+      skipSpace();
+      if (src[pos] !== ',') break;
+      pos += 1;
+    }
+
+    const text = src.slice(start, pos).trimEnd();
+    const end = start + text.length;
+    this.advanceToOffset(end);
+    return { text, end };
   }
 
   /** Whether the statement at the cursor is a math-style function definition
@@ -2609,7 +3058,27 @@ export class Parser {
       nameTok.start,
       nameTok.end
     );
-    const params = this.parseParameterList();
+
+    // Phase 0 of the trailing-`where` binding strategy — see
+    // {@link scanWhereClause}. This route has no `<T>` binder site (the
+    // lookahead requires the `(` to abut the name), so the clause is the only
+    // way to quantify a math-form definition.
+    const whereScan = this.check('OPEN_PAREN')
+      ? this.scanWhereClause(this.current.start)
+      : null;
+    const seedNames = whereScan?.names ?? [];
+    const seeded = seedNames.filter((n) => !this.knownTypeNames.has(n));
+    const outerTypeParamNames = this.typeParamNames;
+    if (seedNames.length > 0) {
+      for (const n of seedNames) this.knownTypeNames.add(n);
+      this.typeParamNames = new Set(seedNames);
+    }
+
+    // Which parameters mention a quantified name (parallel to `params`).
+    const quantified: boolean[] = [];
+    const params = this.parseParameterList(
+      seedNames.length > 0 ? quantified : undefined
+    );
 
     // Optional effect specifier — supported here only WITH the arrow (the
     // lookahead does not claim `f(x) random = 5`).
@@ -2621,7 +3090,60 @@ export class Parser {
       this.advance(); // '->'
       returnType = this.parseHeldType();
     }
-    const ascription = this.definitionAscription(params, spec, returnType);
+
+    // Phase 3 — the clause, always last. The bare `f(x) where T = …` spelling
+    // is NOT claimed by the lookahead (as with a bare effect specifier), so
+    // this only fires on the `-> Type where …` form.
+    let where: WhereClause | undefined;
+    // A clause that was written but did not parse — see
+    // {@link parseFunctionDefinition}.
+    let clauseFailed = false;
+    if (
+      whereScan !== null &&
+      this.current.type === 'SYMBOL' &&
+      this.current.text === 'where'
+    ) {
+      const consumed = this.consumeWhereClause(whereScan.start);
+      if (consumed !== null)
+        where = { ...whereScan, text: consumed.text, end: consumed.end };
+      else clauseFailed = true;
+    }
+
+    if (seedNames.length > 0) {
+      for (const n of seeded) this.knownTypeNames.delete(n);
+      this.typeParamNames = outerTypeParamNames;
+    }
+
+    // A clause plus a LITERAL parameter is a generic multi-clause definition
+    // (G2 rule 1) — out of scope; the clause is dropped after the rejection.
+    if (where !== undefined && params.some(isLiteralParamNode)) {
+      this.error(
+        ['generic-clause-unsupported', nameTok.text],
+        where.start,
+        where.end
+      );
+      where = undefined;
+    }
+
+    const ascription = clauseFailed
+      ? null
+      : this.definitionAscription(
+          params,
+          spec,
+          returnType,
+          [],
+          where !== undefined ? [where.start, where.end] : undefined,
+          where?.text
+        );
+
+    // Erased lowering (§3.1), and the clause-rejection recovery that gates it
+    // — see {@link parseFunctionDefinition}.
+    const loweredParams =
+      where !== undefined && !clauseFailed && ascription !== null
+        ? params.map((p, i) =>
+            quantified[i] === true ? (operand(p, 1) ?? p) : p
+          )
+        : params;
 
     if (!(this.check('OPERATOR') && this.current.text === '=')) {
       this.error(
@@ -2650,7 +3172,7 @@ export class Parser {
         : rhs;
 
     const fnNode = this.wrap(
-      ['Function', ascribedBody, ...params] as MathJsonExpression[],
+      ['Function', ascribedBody, ...loweredParams] as MathJsonExpression[],
       nameTok.start,
       end
     );
@@ -2707,26 +3229,31 @@ export class Parser {
    * effects (`function tick() scope { … }`).
    *
    * The full signature is ALSO assembled — with no effect run — whenever a
-   * **type-parameter clause** is present (§3.2): a `forall`-quantified
-   * signature has no other spelling, and the clause's `forall` prefix is what
-   * makes `T` a variable rather than an unknown type name.
+   * **type-parameter clause** is present (§3.2): a quantified signature has no
+   * other spelling, and the trailing `where` clause the assembly appends is
+   * what makes `T` a variable rather than an unknown type name. Either binder
+   * spelling reaches this: the `<T>` clause as `typeParams` (rendered), the
+   * trailing clause as `whereText` (the author's VERBATIM source).
    *
    * The signature is validated by the engine's type parser; a rejected
    * specifier (e.g. `pure random`, mutually exclusive in the type grammar) is
    * diagnosed on the specifier words and the definition falls back to the
    * no-specifier ascription. A rejected CLAUSE (an unused or result-only
-   * variable, a duplicate, a non-ground bound — all of them free from the type
-   * grammar's own declaration-time validation) falls back to NO ascription:
-   * the plain return type would name a variable that is no longer in scope.
+   * variable, a duplicate, a non-ground bound, an `is` protocol slot — all of
+   * them free from the type grammar's own declaration-time validation) falls
+   * back to NO ascription: the plain return type would name a variable that is
+   * no longer in scope.
    */
   private definitionAscription(
     params: MathJsonExpression[],
     spec: EffectSpecifier | null,
     returnType: MathJsonExpression | null,
     typeParams: readonly TypeParamDecl[] = [],
-    clauseSpan?: [number, number]
+    clauseSpan?: [number, number],
+    whereText?: string
   ): MathJsonExpression | null {
-    if (spec === null && typeParams.length === 0) return returnType;
+    const hasClause = typeParams.length > 0 || whereText !== undefined;
+    if (spec === null && !hasClause) return returnType;
 
     const span: [number, number] =
       spec !== null ? [spec.start, spec.end] : (clauseSpan ?? [0, 0]);
@@ -2737,13 +3264,18 @@ export class Parser {
       spec,
       retText,
       typeParams,
-      span
+      span,
+      whereText
     );
     // Diagnosed; keep the plain ascription (but never a clause-dependent one).
-    if (sig === null) return typeParams.length > 0 ? null : returnType;
-    const start = clauseSpan?.[0] ?? span[0];
-    const end =
+    if (sig === null) return hasClause ? null : returnType;
+    // The span covers every piece the signature was assembled from. Taken as
+    // an extent rather than "clause start → return-type end": a TRAILING
+    // `where` clause sits after the return type, so the naive pair inverts.
+    const retEnd =
       (returnType !== null ? this.localEnd(returnType) : undefined) ?? span[1];
+    const start = Math.min(clauseSpan?.[0] ?? span[0], span[0]);
+    const end = Math.max(clauseSpan?.[1] ?? span[1], retEnd);
     return this.wrap({ str: sig }, start, end);
   }
 
@@ -2763,19 +3295,25 @@ export class Parser {
    * parser's position (as `parseTypeAnnotation` does): the signature is
    * assembled, not a slice of the source, so its offsets do not map back.
    *
-   * A non-empty `typeParams` prefixes the assembled string with the clause's
-   * `forall` declarations (bounds verbatim from the source). The result is
-   * SELF-CONTAINED — `forall` introduces its own names — so the validation
-   * below needs no seeding, and the type grammar's declaration-time checks
-   * (unused variable, result-only variable, non-ground bound, duplicate) come
-   * back as parse-time diagnostics for free.
+   * A clause is appended as a trailing `where` SUFFIX — always last, after the
+   * effects slot and the return type, in every declaration spelling (the
+   * clause-placement ruling of
+   * `docs/plans/2026-08-11-where-clause-type-constraints.md`). Either binder
+   * supplies it: a `<T>` clause is RENDERED from `typeParams` (bounds verbatim
+   * from the source), a trailing clause rides as `whereText`, the author's
+   * verbatim `where …` slice. The result is SELF-CONTAINED — the clause
+   * introduces its own names — so the validation below needs no seeding, and
+   * the type grammar's declaration-time checks (unused variable, result-only
+   * variable, non-ground bound, duplicate, the reserved `is` slot) come back
+   * as parse-time diagnostics for free.
    */
   private specifierSignature(
     params: MathJsonExpression[],
     spec: EffectSpecifier | null,
     retText: string,
     typeParams: readonly TypeParamDecl[],
-    span: [number, number]
+    span: [number, number],
+    whereText?: string
   ): string | null {
     const parts = params.map((p) => {
       if (operator(p) === 'Typed') {
@@ -2790,18 +3328,20 @@ export class Parser {
     });
 
     const effects = spec !== null ? ` ${spec.words.join(' ')}` : '';
-    const prefix =
-      typeParams.length > 0
-        ? `forall ${typeParams
-            .map((d) => (d.bound !== null ? `${d.name}: ${d.bound}` : d.name))
-            .join(', ')}. `
-        : '';
+    const suffix =
+      whereText !== undefined
+        ? ` ${whereText}`
+        : typeParams.length > 0
+          ? ` where ${typeParams
+              .map((d) => (d.bound !== null ? `${d.name}: ${d.bound}` : d.name))
+              .join(', ')}`
+          : '';
     const build = (named: boolean): string =>
-      `${prefix}(${parts
+      `(${parts
         .map((p) =>
           named && p.name !== null ? `${p.name}: ${p.type}` : p.type
         )
-        .join(', ')})${effects} -> ${retText}`;
+        .join(', ')})${effects} -> ${retText}${suffix}`;
 
     // A generated literal-parameter name must not leak into the marker
     // signature: fall back to the all-positional spelling.
@@ -2888,7 +3428,10 @@ export class Parser {
         const symNode = this.wrap({ sym: pname }, tok.start, tok.end);
 
         // Optional `: Type` — an annotated param is a typed function-literal
-        // parameter `["Typed", sym, {str: type}]`.
+        // parameter `["Typed", sym, {str: type}]`. Comma-delimited, so
+        // `allowWhere` stays false (the default): the definition's OWN clause
+        // trails the whole head, and a clause here would read the next
+        // parameter as one of its `<var_decl>`s.
         if (this.check('OPERATOR') && this.current.text === ':') {
           const hits = quantified !== undefined ? new Set<string>() : null;
           const outerHits = this.typeParamHits;
@@ -3020,7 +3563,11 @@ export class Parser {
   /** Consume a `Type` starting at the current token (a return type after
    * `->`). Returns the held `{str: type}` node (to be ascribed onto the
    * function body as `["Typed", body, {str: type}]`), or `null` on a malformed
-   * type (the following `{` / `=` expectation reports the problem). */
+   * type (the following `{` / `=` expectation reports the problem).
+   *
+   * `allowWhere` stays false (the default): a trailing clause quantifies the
+   * whole assembled signature, not the return type, so it is left for the
+   * definition parser to consume (see {@link consumeWhereClause}). */
   private parseHeldType(): MathJsonExpression | null {
     const start = this.current.start;
     try {
@@ -3084,14 +3631,16 @@ export class Parser {
    * offending token: the caller resynchronizes, since the right resync unit
    * depends on the context (a statement boundary for a declaration, the next
    * `,`/closer for a parameter or pattern list).
+   *
+   * `options.allowWhere` — see {@link parseTypeBody}.
    */
-  private parseTypeAnnotation(): {
+  private parseTypeAnnotation(options?: { allowWhere?: boolean }): {
     node: MathJsonExpression;
     end: number;
     type: Type;
   } | null {
     const colonTok = this.advance(); // ':'
-    return this.parseTypeBody(colonTok.end);
+    return this.parseTypeBody(colonTok.end, options);
   }
 
   /** Parse a type starting at the (local) source offset `typeSourceStart` —
@@ -3101,25 +3650,50 @@ export class Parser {
    * past the type. Returns the held `{str}` type node and its end offset, or
    * `null` on a malformed type (after emitting a `type-annotation-error`
    * diagnostic). Recovery is the CALLER's: on `null` the cursor is left at the
-   * offending token, un-advanced (see {@link parseTypeAnnotation}). */
-  private parseTypeBody(typeSourceStart: number): {
+   * offending token, un-advanced (see {@link parseTypeAnnotation}).
+   *
+   * `options.allowWhere` (default `false`) admits a trailing `where` clause —
+   * pass `true` only where the annotation is the WHOLE type (a standalone
+   * `let f: <type> = …` declaration, a `type name = <type>` body). Everywhere
+   * else the clause belongs to an enclosing construct, or — in a
+   * comma-delimited list — its own `,`-separated declarations would swallow
+   * the next parameter, so a clause there is diagnosed AT the `where` (see
+   * {@link misplacedWhereClause}). */
+  private parseTypeBody(
+    typeSourceStart: number,
+    options?: { allowWhere?: boolean }
+  ): {
     node: MathJsonExpression;
     end: number;
     type: Type;
   } | null {
+    const allowWhere = options?.allowWhere ?? false;
     let typeEnd: number;
     let typeString: string;
     let type: Type;
     try {
       const parsed = parseTypePrefix(
         this.source.slice(typeSourceStart),
-        this.typeResolver
+        this.typeResolver,
+        undefined,
+        { allowWhere }
       );
+      // The type parsed, but a clause this context does not admit follows it.
+      if (
+        !allowWhere &&
+        this.misplacedWhereClause(typeSourceStart, typeSourceStart + parsed.end)
+      )
+        return null;
       type = parsed.type;
       typeEnd = typeSourceStart + parsed.end;
       typeString = this.source.slice(typeSourceStart, typeEnd).trim();
       this.advanceToOffset(typeEnd);
     } catch (e) {
+      // A type that parses only WITH a clause fails here on the variable the
+      // clause would have bound (`(T) -> T where T` reports `Unknown type
+      // "T"`). Report the misplaced clause instead — that is the real problem.
+      if (!allowWhere && this.misplacedWhereClause(typeSourceStart))
+        return null;
       const err = e as { position?: number; rawMessage?: string };
       const rel = typeof err.position === 'number' ? err.position : 0;
       const message =
@@ -3140,6 +3714,61 @@ export class Parser {
 
     const node = this.wrap({ str: typeString }, typeSourceStart, typeEnd);
     return { node, end: typeEnd, type };
+  }
+
+  /**
+   * Diagnose a `where` clause in an annotation position that cannot carry one
+   * (every comma-delimited context — a parameter, a pattern, a mapsto
+   * parameter — plus the `is` operator's compound operand). Returns `true`
+   * when a clause was found and reported.
+   *
+   * Two entry points, because the clause shows up differently on each:
+   *
+   *  - with `consumedEnd`, the type PARSED (`(integer) -> integer where T`)
+   *    and the clause is the `where` word just past it. Left unreported, the
+   *    enclosing list would stop at the `where` and blame its own missing
+   *    `,`/`)`, and the clause's `,`-separated declarations would read the
+   *    next parameter as a `<var_decl>`.
+   *  - without it, the type FAILED — `(T) -> T where T` reports `Unknown type
+   *    "T"`, since `T` is only a variable once the clause is admitted. A
+   *    re-parse that admits the clause tells us the clause is the real
+   *    problem, and where it starts.
+   */
+  private misplacedWhereClause(
+    typeSourceStart: number,
+    consumedEnd?: number
+  ): boolean {
+    const src = this.source;
+    let at: number | null = null;
+    if (consumedEnd !== undefined) {
+      let pos = consumedEnd;
+      while (pos < src.length && /\s/.test(src[pos])) pos += 1;
+      if (/^where\b/.test(src.slice(pos))) at = pos;
+    } else {
+      try {
+        const { end } = parseTypePrefix(
+          src.slice(typeSourceStart),
+          this.typeResolver,
+          undefined,
+          { allowWhere: true }
+        );
+        // The TRAILING clause is the one that was rejected; a nested one is
+        // parenthesized and already legal.
+        for (const m of src
+          .slice(typeSourceStart, typeSourceStart + end)
+          .matchAll(/\bwhere\b/g))
+          at = typeSourceStart + m.index;
+      } catch {
+        at = null;
+      }
+    }
+    if (at === null) return false;
+    this.error(
+      ['type-annotation-error', NESTED_WHERE_CLAUSE_MESSAGE],
+      at,
+      Math.min(at + 'where'.length, src.length)
+    );
+    return true;
   }
 
   /** Advance the token cursor until the current token starts at or past the
@@ -3530,7 +4159,8 @@ export class Parser {
       this.harvest(tok);
       // Validate the name against the type grammar in isolation, so a typo is
       // caught here (`x is intger`) rather than becoming a comparison against
-      // an undeclared symbol.
+      // an undeclared symbol. A bare name, so `allowWhere` is moot; it stays
+      // false (the default).
       try {
         parseTypePrefix(tok.text, this.typeResolver);
       } catch (e) {
@@ -3553,7 +4183,9 @@ export class Parser {
     // A compound type (`!error`, `integer | string`, `list<integer>`) or no
     // type at all. Hand it to the type subparser so the diagnostic is precise
     // and the cursor lands past the whole type, then report it as unsupported
-    // — the same verdict the equivalent `match` pattern gets.
+    // — the same verdict the equivalent `match` pattern gets. The operand of
+    // `is` is a ground type test, never a polytype, so `allowWhere` stays
+    // false (the default).
     const annotation = this.parseTypeBody(kw.end);
     if (annotation === null) return null;
     this.error(
@@ -4638,6 +5270,9 @@ export class Parser {
         // A `bare-symbol : Type` element is a typed lambda parameter
         // `["Typed", sym, {str: type}]` (only valid in a `( … ) |->` mapsto
         // parameter list; the caller checks the `|->` follows).
+        // Comma-delimited, so `allowWhere` stays false (the default); an
+        // anonymous literal's polytype is spelled on the DECLARATION
+        // (`let f: (T) -> T where T = x |-> x`), which does admit a clause.
         let element = expr;
         if (
           allowTypedParams &&

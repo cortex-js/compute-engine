@@ -251,7 +251,7 @@ export function analyzeVariance(
         return;
 
       case 'signature': {
-        // A nested `forall` clause SHADOWS a same-named declaration parameter.
+        // A nested `where` clause SHADOWS a same-named declaration parameter.
         let scope = shadowed;
         if (t.typeParams !== undefined && t.typeParams.length > 0) {
           scope = new Set(shadowed);

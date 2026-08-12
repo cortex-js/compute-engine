@@ -6,9 +6,9 @@ import { ComputeEngine } from '../../src/compute-engine';
  * identity-echo conversions whose operands are numeric / matrix-shaped.
  *
  *   Conjugate  `(number) -> number` + `type: ([z]) => z.type`
- *              →  `forall T: number. (T) -> T`   (broadcastable, §4.4/D10)
+ *              →  `(T) -> T where T: number`   (broadcastable, §4.4/D10)
  *   Inverse    `(matrix) -> matrix` + `type: ([m]) => m.type`
- *              →  `forall T: matrix. (T) -> T`   (§4.7 dimensions row)
+ *              →  `(T) -> T where T: matrix`   (§4.7 dimensions row)
  *
  * Every expectation below was probed against the PRE-migration engine and
  * pinned verbatim: the contract of a bounded identity echo is that the
@@ -26,21 +26,21 @@ const M22 = ['List', ['List', 1, 2], ['List', 3, 4]] as any;
 const M23 = ['List', ['List', 1, 2, 5], ['List', 3, 4, 6]] as any;
 
 describe('the migrated definitions are declaratively generic', () => {
-  test('the forall signature REPLACES the imperative `type:` echo', () => {
+  test('the polytype signature REPLACES the imperative `type:` echo', () => {
     const ce = fresh();
     const conj = ce.box(['Conjugate', 2]).operatorDefinition as any;
-    expect(conj.signature.toString()).toBe('forall T: number. (T) -> T');
+    expect(conj.signature.toString()).toBe('(T) -> T where T: number');
     expect(conj.signature.isPolymorphic).toBe(true);
     expect(conj.type).toBeUndefined();
 
     const inv = ce.box(['Inverse', M22]).operatorDefinition as any;
-    expect(inv.signature.toString()).toBe('forall T: matrix. (T) -> T');
+    expect(inv.signature.toString()).toBe('(T) -> T where T: matrix');
     expect(inv.signature.isPolymorphic).toBe(true);
     expect(inv.type).toBeUndefined();
   });
 });
 
-describe('Conjugate — forall T: number. (T) -> T', () => {
+describe('Conjugate — (T) -> T where T: number', () => {
   test('scalar result types echo the operand (kind preserved)', () => {
     const ce = fresh();
     expect(ce.function('Conjugate', [ce.number(2)]).type.toString()).toBe(
@@ -165,7 +165,7 @@ describe('Conjugate — forall T: number. (T) -> T', () => {
   });
 });
 
-describe('Inverse — forall T: matrix. (T) -> T', () => {
+describe('Inverse — (T) -> T where T: matrix', () => {
   test('§4.7 identity row — dimensions and kind are preserved verbatim', () => {
     const ce = fresh();
     expect(ce.box(['Inverse', M22]).type.toString()).toBe(

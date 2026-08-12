@@ -133,9 +133,9 @@ function parseTypeUncached(
     const type = buildTypeFromAST(ast, typeResolver, typeVars);
 
     // Polytypes are validated where they are boxed (§7.2). Gated on the parse
-    // having seen a `forall` clause: a variable can only be introduced by one,
+    // having seen a `where` clause: a variable can only be introduced by one,
     // so a type string without a clause pays nothing.
-    if (parser.sawForall) validateDeclaredType(type);
+    if (parser.sawWhereClause) validateDeclaredType(type);
 
     return { type, sawForwardRef: parser.sawForwardRef };
   } catch (error) {
@@ -179,20 +179,31 @@ function parseTypeUncached(
  * message), so callers can offset-shift the diagnostic.
  *
  * This path deliberately does **not** touch the `parseType` `TYPE_CACHE`.
+ *
+ * `options.allowWhere` controls whether a trailing `where` clause may attach
+ * to the type (default `false`): pass `true` only where the annotation is the
+ * WHOLE type (a standalone `let f: <type> = …` annotation, a type-declaration
+ * body). In embedded contexts — a return type after `->`, a comma-delimited
+ * parameter or pattern annotation, a clause bound — the clause belongs to an
+ * enclosing construct (or its `,`-separated list would swallow the next list
+ * element), so the parse stops before the `where` and the caller's grammar
+ * reports it. A PARENTHESIZED clause is always admitted.
  */
 export function parseTypePrefix(
   source: string,
   typeResolver?: TypeResolver,
-  typeVars?: readonly TypeParameter[]
+  typeVars?: readonly TypeParameter[],
+  options?: { allowWhere?: boolean }
 ): { type: Type; end: number } {
   const parser = new Parser(source, {
     typeResolver,
     allowTrailing: true,
+    allowWhere: options?.allowWhere ?? false,
     typeVars,
   });
   const ast = parser.parseTypePrefix();
   const type = buildTypeFromAST(ast, typeResolver, typeVars);
-  if (parser.sawForall) validateDeclaredType(type);
+  if (parser.sawWhereClause) validateDeclaredType(type);
   return { type, end: parser.endOffset };
 }
 
@@ -231,8 +242,11 @@ export interface TypeParameterClauseError {
  *
  * The whole text must be consumed (a trailing `,` or a stray `>` is an error).
  * Names are checked for duplicates and against {@link isReservedTypeName}.
- * Bounds are parsed as ordinary — GROUND — types with the clause's own names
- * NOT in scope, so an F-bounded `T: list<U>` is an unknown-type error.
+ * ALL names are collected first, THEN bounds are parsed with every clause
+ * name in scope (the seed-all-names-then-parse-all-bounds rule shared with
+ * the trailing `where` clause, which makes the clause order-independent). A
+ * bound referencing a clause variable therefore PARSES — and then fails the
+ * ground-bound check with a clear message, since v1 bounds must be ground.
  *
  * A parameter may carry a leading VARIANCE marker — `out T`, `in T`,
  * `inout T` — the declaration-level variance of a parameterized nominal type
@@ -266,7 +280,16 @@ export function parseTypeParameterClause(
   if (pos >= text.length)
     return err('empty-clause', 'Expected at least one type parameter', pos);
 
-  const params: TypeParameter[] = [];
+  // ── Pass 1: structure. Collect every entry's name (and the raw extent of
+  // its bound, via a bracket-depth scan) WITHOUT parsing any bound, so that
+  // all names can be seeded before any bound is parsed.
+  interface ClauseEntry {
+    name: string;
+    variance?: TypeVariance;
+    boundText?: string;
+    boundPos?: number;
+  }
+  const entries: ClauseEntry[] = [];
   const seen = new Set<string>();
   for (;;) {
     skipSpace();
@@ -300,37 +323,21 @@ export function parseTypeParameterClause(
       );
     seen.add(name);
 
+    const entry: ClauseEntry = { name };
+    if (variance !== undefined) entry.variance = variance;
+
     skipSpace();
-    let bound: Type | undefined;
     if (text[pos] === ':') {
       pos += 1;
       const boundPos = pos;
-      try {
-        const { type, end } = parseTypePrefix(text.slice(pos), typeResolver);
-        bound = type;
-        pos += end;
-      } catch (e) {
-        const detail = e as { position?: number; rawMessage?: string };
-        return err(
-          'bound-error',
-          detail.rawMessage ?? (e instanceof Error ? e.message : String(e)),
-          boundPos + (detail.position ?? 0)
-        );
-      }
-      // v1: a bound is GROUND. Unreachable through the type parser (the
-      // clause's names are not seeded), but a `forall`-carrying bound is not.
-      if (freeTypeVariables(bound).size > 0)
-        return err(
-          'bound-error',
-          `The bound of the type variable \`${name}\` must be a ground type`,
-          boundPos
-        );
+      // Scan — not parse — to the end of the bound: the next `,` at bracket
+      // depth 0, or the end of the clause. Bounds are types, so brackets may
+      // nest commas of their own.
+      pos = scanToClauseComma(text, pos);
+      entry.boundText = text.slice(boundPos, pos);
+      entry.boundPos = boundPos;
     }
-
-    const param: TypeParameter = { name };
-    if (bound !== undefined) param.bound = bound;
-    if (variance !== undefined) param.variance = variance;
-    params.push(param);
+    entries.push(entry);
 
     skipSpace();
     if (pos >= text.length) break;
@@ -346,5 +353,80 @@ export function parseTypeParameterClause(
       return err('name-expected', 'Expected a type parameter name', pos);
   }
 
+  // ── Pass 2: bounds, with EVERY clause name in scope (the clause is
+  // order-independent: a bound may reference a variable declared later). A
+  // bound that does reference one parses — and is rejected right below by
+  // the v1 ground-bound rule, with a message that names the variable.
+  const seededNames: TypeParameter[] = entries.map((e) => ({ name: e.name }));
+  const params: TypeParameter[] = [];
+  for (const entry of entries) {
+    const param: TypeParameter = { name: entry.name };
+    if (entry.variance !== undefined) param.variance = entry.variance;
+    if (entry.boundText !== undefined) {
+      const boundPos = entry.boundPos!;
+      let bound: Type;
+      let consumed: number;
+      try {
+        const r = parseTypePrefix(entry.boundText, typeResolver, seededNames);
+        bound = r.type;
+        consumed = r.end;
+      } catch (e) {
+        const detail = e as { position?: number; rawMessage?: string };
+        return err(
+          'bound-error',
+          detail.rawMessage ?? (e instanceof Error ? e.message : String(e)),
+          boundPos + (detail.position ?? 0)
+        );
+      }
+      // The prefix parse must have consumed the whole scanned extent: a
+      // leftover (`T: number 5`) is the same separator error the single-pass
+      // reader reported.
+      if (entry.boundText.slice(consumed).trim().length > 0)
+        return err(
+          'separator-expected',
+          'Expected `,` between type parameters',
+          boundPos + consumed
+        );
+      // v1: a bound is GROUND — no reference to a clause variable (its own
+      // name or any other), no F-bounded `T: comparable<T>`.
+      if (freeTypeVariables(bound).size > 0)
+        return err(
+          'bound-error',
+          `The bound of the type variable \`${entry.name}\` must be a ground type`,
+          boundPos
+        );
+      param.bound = bound;
+    }
+    params.push(param);
+  }
+
   return { params };
+}
+
+/**
+ * Scan from `pos` to the next `,` at bracket depth 0, or to the end of
+ * `text`, WITHOUT parsing: the raw extent of one clause entry's bound.
+ * Brackets (`()`, `<>`, `[]`) nest; `->` is skipped atomically so its `>`
+ * does not close a bracket; string literals (`"…"`, `'…'`, `` `…` ``) are
+ * skipped with their escapes.
+ */
+function scanToClauseComma(text: string, pos: number): number {
+  let depth = 0;
+  while (pos < text.length) {
+    const ch = text[pos];
+    if (ch === ',' && depth === 0) return pos;
+    if (ch === '(' || ch === '<' || ch === '[') depth += 1;
+    else if (ch === ')' || ch === '>' || ch === ']') depth -= 1;
+    else if (ch === '-' && text[pos + 1] === '>') pos += 1;
+    else if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch;
+      pos += 1;
+      while (pos < text.length && text[pos] !== quote) {
+        if (text[pos] === '\\') pos += 1;
+        pos += 1;
+      }
+    }
+    pos += 1;
+  }
+  return pos;
 }

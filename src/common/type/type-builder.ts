@@ -1,7 +1,7 @@
 import {
   TypeNode,
   FunctionSignatureNode,
-  ForallTypeNode,
+  ConstrainedTypeNode,
   TypeVariableNode,
   UnionTypeNode,
   IntersectionTypeNode,
@@ -51,7 +51,7 @@ export class TypeBuilder implements ASTVisitor<Type> {
   private typeResolver: TypeResolver;
 
   /** The type VARIABLES in scope, innermost last: the pre-seed (a generic type
-   * alias's own parameters) plus one frame per enclosing `forall` clause. Their
+   * alias's own parameters) plus one frame per enclosing `where` clause. Their
    * declared BOUNDS are what A7 admission compares when a generic alias is
    * applied to an open argument. */
   private _typeVarScopes: (readonly TypeParameter[])[] = [];
@@ -122,17 +122,21 @@ export class TypeBuilder implements ASTVisitor<Type> {
     return signature;
   }
 
-  visitForallType(node: ForallTypeNode): Type {
+  visitConstrainedType(node: ConstrainedTypeNode): Type {
     // The clause is built BEFORE its body: a generic-alias application inside
-    // the body (`forall T: value. (Keyed<T>) -> T`) is admitted by comparing
+    // the body (`(Keyed<T>) -> T where T: value`) is admitted by comparing
     // `T`'s declared bound against the alias parameter's (A7), so the bounds
-    // must already be in scope when the body is built. Bounds themselves are
-    // built with the clause NOT in scope — they are ground (§7.2).
-    const typeParams: TypeParameter[] = node.typeParams.map((p) =>
-      p.bound === undefined
-        ? { name: p.name }
-        : { name: p.name, bound: this.buildType(p.bound) }
-    );
+    // must already be in scope when the body is built. The PARSER seeds all
+    // names before parsing any bound, so a bound referencing a clause
+    // variable arrives here as a variable node — and is rejected by the
+    // declaration-time ground-bound validation (§7.2), not by the parse.
+    const typeParams: TypeParameter[] = node.typeParams.map((p) => {
+      const param: TypeParameter = { name: p.name };
+      if (p.bound !== undefined) param.bound = this.buildType(p.bound);
+      if (p.protocols !== undefined && p.protocols.length > 0)
+        param.protocols = p.protocols;
+      return param;
+    });
 
     this._typeVarScopes.push(typeParams);
     let body: Type;
@@ -148,7 +152,7 @@ export class TypeBuilder implements ASTVisitor<Type> {
     if (typeof body === 'string' || body.kind !== 'signature')
       throw new TypeVariableError(
         'unsupported-variable-position',
-        'A `forall` clause can only be applied to a function signature'
+        'A `where` clause can only quantify a function signature. To constrain one arm of an overload set, parenthesize it: `((list<T>) -> T where T) & …`'
       );
 
     const signature: FunctionSignature = { ...body, typeParams };
@@ -475,7 +479,7 @@ export class TypeBuilder implements ASTVisitor<Type> {
    * A7 — per-argument admission.
    *
    * A GROUND argument is checked against the parameter's declared bound
-   * directly. An OPEN one (a type variable quantified by an enclosing `forall`
+   * directly. An OPEN one (a type variable quantified by an enclosing `where`
    * clause, or by the enclosing alias's own clause) is checked BOUND AGAINST
    * BOUND: the argument variable's declared bound (`any` when unbounded) must
    * satisfy the parameter's. Both sides are then ground, so the type algebra

@@ -719,12 +719,12 @@ describe('§6.4: a BARE parameter imposes no constraint (ruled 2026-08-09)', () 
       [
         'Typed',
         ['Add', 'x', 'n'],
-        { str: 'forall T: number. (x: T, n: integer) -> T' },
+        { str: '(x: T, n: integer) -> T where T: number' },
       ],
       'x',
       'n',
     ]);
-    expect(h.type.toString()).toBe('forall T: number. (x: T, n: integer) -> T');
+    expect(h.type.toString()).toBe('(x: T, n: integer) -> T where T: number');
     const hn = applicable(h)!;
     expect(hn([ce.Nothing, ce.box(2)])?.toString()).toContain(
       'incompatible-type'
@@ -1037,12 +1037,12 @@ describe('signature-driven trigger: a user-defined callee', () => {
   });
 
   test('a POLYMORPHIC callee is skipped', () => {
-    // The inner parameter type `T` is bound by the callee's own `forall`
+    // The inner parameter type `T` is bound by the callee's own `where`
     // clause: stamping it on the literal would leave it unresolved outside
     // that scope (or capture an unrelated nominal type named `T`).
     // Instantiating it is design (D).
     const ce = new ComputeEngine();
-    ce.declare('gen', 'forall T: number. ((T) -> boolean, T) -> T');
+    ce.declare('gen', '((T) -> boolean, T) -> T where T: number');
     const expr = ce.box(['gen', ['Function', ['Greater', 'n', 1], 'n'], 3]);
     expect(expr.toMathJson()).toEqual([
       'gen',

@@ -80,14 +80,13 @@ function arityFromSignature(sig: unknown): string {
   // a space-separated word list (`(any) scope -> string`, or `any` for the
   // any-set; see `effectSetToString()` in common/type/effects.ts).
   //
-  // A POLYMORPHIC signature (`forall T. (collection<T>, …) -> …`, the Design D
-  // spelling of every converted collection operator) binds its variables
-  // before the parameter list. The quantifier says nothing about arity, so it
-  // is stripped rather than parsed; without this every converted operator
-  // reported `"unknown"`.
+  // A POLYMORPHIC signature (`(collection<T>, …) -> … where T`, the Design D
+  // spelling of every converted collection operator) carries a trailing
+  // `where` clause. The quantifier says nothing about arity, and the arity
+  // regex below is anchored on the LEADING parameter list, so the clause
+  // needs no stripping — the match simply stops before it.
   const match = sig
     .trim()
-    .replace(/^forall\s+[^.]*\.\s*/, '')
     .match(/^\((.*)\)\s*(?:[a-z_]+(?:\s+[a-z_]+)*\s*)?->/);
   if (!match) return 'unknown';
   const args = match[1].trim();

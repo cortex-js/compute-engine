@@ -727,7 +727,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // Every free type variable read as its declared bound (`any` when
       // unbounded) — the D6 bound-reading this SUBJECT-LESS check uses (§5.1
       // of the type-variables design). It is what makes a migrated identity
-      // echo (`forall T: indexed_collection. (T) -> T`) count as possibly
+      // echo (`(T) -> T where T: indexed_collection`) count as possibly
       // indexed, and it keeps an open type out of `isSubtype`/`couldMatch`.
       const declaredType = readTypeVariablesAsBounds(this.signature.type);
       // If we have collection handlers, the result type must be a collection

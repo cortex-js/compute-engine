@@ -175,12 +175,12 @@ export const GENERIC_OVERLOAD_LITERAL_MESSAGE =
  * The rule a rejected generic spelling on a function LITERAL states
  * (`docs/plans/2026-08-04-generic-function-literals-design.md` §3.4).
  *
- * A type variable enters a literal ONLY through a whole-signature `forall`
+ * A type variable enters a literal ONLY through a whole-signature `where`
  * clause (G6) — never through a per-parameter annotation, which would be a
  * rank-2 spelling.
  */
 export const TYPE_VARIABLE_INTRODUCTION_MESSAGE =
-  'Type variables are introduced by a whole-signature `forall` clause on the function literal (or by the `function f<T>(…)` form), never by a per-parameter annotation';
+  'Type variables are introduced by a whole-signature `where` clause on the function literal (or by the `function f<T>(…)` form), never by a per-parameter annotation';
 
 /**
  * A whole-signature marker on a literal that is not well-formed (§2.3): the
@@ -200,7 +200,7 @@ export const INVALID_SIGNATURE_MARKER_MESSAGE =
  * question has to be answered before it is dropped: by the time the
  * declaration boundary (`acceptsGenericFunctionLiteral`) reads the literal's
  * parameters, the contradicting annotation is gone. `(x: integer)` at a
- * `forall T: number` position must not silently become "accepts every
+ * `where T: number` position must not silently become "accepts every
  * number".
  */
 export const GENERIC_ANNOTATION_COVERAGE_MESSAGE =
@@ -210,7 +210,7 @@ export const GENERIC_ANNOTATION_COVERAGE_MESSAGE =
  * G5 (§2.5) — currying a generic function literal is not supported.
  *
  * A variable consumed by the supplied prefix cannot be recovered in the
- * residual arrow: `forall T, U. (T, U) -> U` curried at one argument leaves a
+ * residual arrow: `(T, U) -> U where T, U` curried at one argument leaves a
  * clause whose `T` occurs nowhere, which is unsolvable. Partial INSTANTIATION
  * (solve the prefix, substitute, prune the clause) is the principled lift.
  */

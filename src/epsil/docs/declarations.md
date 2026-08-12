@@ -163,7 +163,7 @@ The names bind only where they are **written**: an annotation through a
 signature has nothing to bind (`const t : () -> number = makeCounter()` keeps
 meaning what it says), and for a curried signature only the **outermost**
 arrow binds — `const add : (x: number) -> (y: number) -> number = (y) |-> x + y`
-binds `x` around an explicit inner lambda. Generic (`forall`), effectful,
+binds `x` around an explicit inner lambda. Generic (a `where` clause), effectful,
 optional/variadic, and partially named signatures do not bind either; give
 those an explicit lambda.
 

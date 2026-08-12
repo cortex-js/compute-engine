@@ -11,12 +11,12 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // Generic function literals (M1, PHASE 1 — the literal standing alone).
 //
 // `docs/plans/2026-08-04-generic-function-literals-design.md`: a whole-signature
-// `forall` clause on a function literal is accepted, the literal's quantified
+// `where` clause on a function literal is accepted, the literal's quantified
 // parameters are ERASED before the body canonicalizes (G1), and the literal's
 // `.type` becomes the polytype. Two spellings introduce the clause here:
 //
-//   E1  `["Function", body, "'forall T. (x: T) -> T'"]`      (signature-string)
-//   E2  `["Function", ["Typed", body, "'forall …'"], …params]` (full marker)
+//   E1  `["Function", body, "'(x: T) -> T where T'"]`      (signature-string)
+//   E2  `["Function", ["Typed", body, "'… where …'"], …params]` (full marker)
 //
 // The DECLARATION BOUNDARY (`ce.assign` / the `Assign` operator / Epsil
 // annotated `const`) is phase 2 — the second half of this file. Its sibling
@@ -45,17 +45,17 @@ function e2(ce: ComputeEngine, body: any, signature: string, ...params: any[]) {
 describe('E1/E2 — a generic literal is a canonical value with a polytype', () => {
   test('E1 boxes, and its `.type` is the polytype', () => {
     const ce = fresh();
-    const f = e1(ce, ['Add', 'x', 'x'], 'forall T: number. (x: T) -> T');
+    const f = e1(ce, ['Add', 'x', 'x'], '(x: T) -> T where T: number');
     expect(f.isValid).toBe(true);
     expect(f.isCanonical).toBe(true);
-    expect(f.type.toString()).toBe('forall T: number. (x: T) -> T');
+    expect(f.type.toString()).toBe('(x: T) -> T where T: number');
     expect(f.type.isPolymorphic).toBe(true);
   });
 
   test('E2 boxes to the same literal — E1 lowers to E2', () => {
     const ce = fresh();
-    const a = e1(ce, ['Add', 'x', 'x'], 'forall T: number. (x: T) -> T');
-    const b = e2(ce, ['Add', 'x', 'x'], 'forall T: number. (x: T) -> T', 'x');
+    const a = e1(ce, ['Add', 'x', 'x'], '(x: T) -> T where T: number');
+    const b = e2(ce, ['Add', 'x', 'x'], '(x: T) -> T where T: number', 'x');
     expect(JSON.stringify(b.json)).toBe(JSON.stringify(a.json));
     // The clause survives canonicalization as the body-slot marker.
     expect(JSON.stringify(a.json)).toBe(
@@ -63,7 +63,7 @@ describe('E1/E2 — a generic literal is a canonical value with a polytype', () 
         'Function',
         [
           'Block',
-          ['Typed', ['Add', 'x', 'x'], "'forall T: number. (x: T) -> T'"],
+          ['Typed', ['Add', 'x', 'x'], "'(x: T) -> T where T: number'"],
         ],
         'x',
       ])
@@ -74,20 +74,20 @@ describe('E1/E2 — a generic literal is a canonical value with a polytype', () 
   // raw-MathJSON `ce.box(...)` route (the lazy-operator lesson).
   test('route parity — `ce.function` agrees with `ce.box`', () => {
     const ce = fresh();
-    const viaBox = e2(ce, 'x', 'forall T. (x: T) -> T', 'x');
+    const viaBox = e2(ce, 'x', '(x: T) -> T where T', 'x');
     const viaFunction = ce.function('Function', [
-      ce.function('Typed', [ce.box('x'), ce.string('forall T. (x: T) -> T')]),
+      ce.function('Typed', [ce.box('x'), ce.string('(x: T) -> T where T')]),
       ce.symbol('x'),
     ]);
     expect(viaFunction.isValid).toBe(true);
-    expect(viaFunction.type.toString()).toBe('forall T. (x: T) -> T');
+    expect(viaFunction.type.toString()).toBe('(x: T) -> T where T');
     expect(JSON.stringify(viaFunction.json)).toBe(JSON.stringify(viaBox.json));
   });
 
   test('a ground result under a clause is still an ordinary return type', () => {
     const ce = fresh();
-    const f = e1(ce, ['Equal', 'x', 'x'], 'forall T. (x: T) -> boolean');
-    expect(f.type.toString()).toBe('forall T. (x: T) -> boolean');
+    const f = e1(ce, ['Equal', 'x', 'x'], '(x: T) -> boolean where T');
+    expect(f.type.toString()).toBe('(x: T) -> boolean where T');
     expect(functionLiteralReturnType(f)).toBe('boolean');
   });
 
@@ -97,7 +97,7 @@ describe('E1/E2 — a generic literal is a canonical value with a polytype', () 
     // ascribe, so the return stays inferred. An open type must never leave
     // this accessor — it would reach the ground-invariant tripwires.
     const ce = fresh();
-    const f = e1(ce, 'x', 'forall T. (x: T) -> T');
+    const f = e1(ce, 'x', '(x: T) -> T where T');
     expect(functionLiteralReturnType(f)).toBeUndefined();
   });
 
@@ -111,10 +111,10 @@ describe('E1/E2 — a generic literal is a canonical value with a polytype', () 
     const f = ce.box([
       'Function',
       ['Typed', ['Add', 'x', 'x'], { str: 'integer' }],
-      { str: 'forall T: number. (x: T) -> T' },
+      { str: '(x: T) -> T where T: number' },
     ] as any);
     expect(f.isValid).toBe(true);
-    expect(f.type.toString()).toBe('forall T: number. (x: T) -> T');
+    expect(f.type.toString()).toBe('(x: T) -> T where T: number');
     expect(
       ce
         .box(['Apply', f.json, 21] as any)
@@ -127,12 +127,12 @@ describe('E1/E2 — a generic literal is a canonical value with a polytype', () 
 describe('ERASURE (G1) — quantified parameters lose their annotation', () => {
   test('mixed parameters: the quantified one is erased, the ground one is not', () => {
     const ce = fresh();
-    const f = e1(ce, ['Add', 'x', 'n'], 'forall T. (x: T, n: integer) -> T');
+    const f = e1(ce, ['Add', 'x', 'n'], '(x: T, n: integer) -> T where T');
     expect(f.isValid).toBe(true);
     // `x` is a BARE symbol; `n` keeps its `Typed` annotation.
     expect(f.ops[1].toString()).toBe('x');
     expect(f.ops[2].json).toEqual(['Typed', 'n', "'integer'"]);
-    expect(f.type.toString()).toBe('forall T. (x: T, n: integer) -> T');
+    expect(f.type.toString()).toBe('(x: T, n: integer) -> T where T');
   });
 
   test('a hand-authored E2 whose parameter annotation NAMES the variable', () => {
@@ -141,12 +141,12 @@ describe('ERASURE (G1) — quantified parameters lose their annotation', () => {
     const ce = fresh();
     const f = ce.box([
       'Function',
-      ['Typed', ['Add', 'x', 'x'], { str: 'forall T: number. (x: T) -> T' }],
+      ['Typed', ['Add', 'x', 'x'], { str: '(x: T) -> T where T: number' }],
       ['Typed', 'x', { str: 'T' }],
     ] as any);
     expect(f.isValid).toBe(true);
     expect(f.ops[1].toString()).toBe('x');
-    expect(f.type.toString()).toBe('forall T: number. (x: T) -> T');
+    expect(f.type.toString()).toBe('(x: T) -> T where T: number');
   });
 
   test('a bare `T` annotation with NO clause is still an unknown type (G6)', () => {
@@ -161,7 +161,7 @@ describe('ERASURE (G1) — quantified parameters lose their annotation', () => {
 describe('ANONYMOUS APPLICATION — the polytype is enforced without a declaration', () => {
   test('identity applies at two instantiations, on ONE engine', () => {
     const ce = fresh();
-    const f = e1(ce, 'x', 'forall T. (x: T) -> T');
+    const f = e1(ce, 'x', '(x: T) -> T where T');
     expect(
       ce
         .box(['Apply', f.json, 5] as any)
@@ -181,7 +181,7 @@ describe('ANONYMOUS APPLICATION — the polytype is enforced without a declarati
         .evaluate()
         .toString()
     ).toBe('5');
-    expect(f.type.toString()).toBe('forall T. (x: T) -> T');
+    expect(f.type.toString()).toBe('(x: T) -> T where T');
   });
 
   test('a BOUND violation is rejected at apply time (the widened gate)', () => {
@@ -190,7 +190,7 @@ describe('ANONYMOUS APPLICATION — the polytype is enforced without a declarati
     // anonymous application (which never passes a symbol's definition seam)
     // would skip bound enforcement entirely.
     const ce = fresh();
-    const f = e1(ce, 'x', 'forall T: number. (x: T) -> T');
+    const f = e1(ce, 'x', '(x: T) -> T where T: number');
     const ok = ce.box(['Apply', f.json, 5] as any).evaluate();
     expect(ok.toString()).toBe('5');
     const bad = ce.box(['Apply', f.json, { str: 'a' }] as any).evaluate();
@@ -203,7 +203,7 @@ describe('ANONYMOUS APPLICATION — the polytype is enforced without a declarati
 
   test('a GROUND parameter under a clause is enforced too', () => {
     const ce = fresh();
-    const f = e1(ce, ['Add', 'x', 'n'], 'forall T. (x: T, n: integer) -> T');
+    const f = e1(ce, ['Add', 'x', 'n'], '(x: T, n: integer) -> T where T');
     expect(
       ce
         .box(['Apply', f.json, 5, 2] as any)
@@ -219,9 +219,9 @@ describe('ANONYMOUS APPLICATION — the polytype is enforced without a declarati
     const g = e1(
       ce,
       ['Tuple', 'y', 'x'],
-      'forall T, U. (x: T, y: U) -> tuple<U, T>'
+      '(x: T, y: U) -> tuple<U, T> where T, U'
     );
-    expect(g.type.toString()).toBe('forall T, U. (x: T, y: U) -> tuple<U, T>');
+    expect(g.type.toString()).toBe('(x: T, y: U) -> tuple<U, T> where T, U');
     expect(
       ce
         .box(['Apply', g.json, 1, { str: 'a' }] as any)
@@ -236,21 +236,21 @@ describe('E2 WELL-FORMEDNESS (§2.3) — the marker is the contract of record', 
 
   test('marker arity ≠ parameter count', () => {
     const ce = fresh();
-    const f = e2(ce, 'x', 'forall T. (x: T, y: T) -> T', 'x');
+    const f = e2(ce, 'x', '(x: T, y: T) -> T where T', 'x');
     expect(f.isValid).toBe(false);
     expect(f.toString()).toMatch(INVALID);
   });
 
   test('a VARIADIC marker', () => {
     const ce = fresh();
-    const f = e2(ce, 'x', 'forall T. (x: T, y: T*) -> T', 'x', 'y');
+    const f = e2(ce, 'x', '(x: T, y: T*) -> T where T', 'x', 'y');
     expect(f.isValid).toBe(false);
     expect(f.toString()).toMatch(INVALID);
   });
 
   test('an OPTIONAL-argument marker', () => {
     const ce = fresh();
-    const f = e2(ce, 'x', 'forall T. (x: T, y: T?) -> T', 'x', 'y');
+    const f = e2(ce, 'x', '(x: T, y: T?) -> T where T', 'x', 'y');
     expect(f.isValid).toBe(false);
     expect(f.toString()).toMatch(INVALID);
   });
@@ -260,7 +260,7 @@ describe('E2 WELL-FORMEDNESS (§2.3) — the marker is the contract of record', 
     const f = e2(
       ce,
       ['Add', 'a', 'k'],
-      'forall T. (x: T, n: integer) -> T',
+      '(x: T, n: integer) -> T where T',
       // A WIDE annotation at the quantified position: an unbounded variable is
       // bounded by `any`, so a narrower one (`integer`) would fail the §2.4
       // rule-4 coverage check the pre-pass now runs before erasing (below).
@@ -274,7 +274,7 @@ describe('E2 WELL-FORMEDNESS (§2.3) — the marker is the contract of record', 
     // …and position 1 (quantified in the marker) was erased despite carrying a
     // ground annotation, position 2 (ground) kept it — from the marker's ORDER,
     // not from the names, which disagree with the literal's throughout.
-    expect(f.type.toString()).toBe('forall T. (x: T, n: integer) -> T');
+    expect(f.type.toString()).toBe('(x: T, n: integer) -> T where T');
     expect(
       ce
         .box(['Apply', f.json, 5, 2] as any)
@@ -291,21 +291,21 @@ describe('E2 WELL-FORMEDNESS (§2.3) — the marker is the contract of record', 
   describe('a ground annotation at a QUANTIFIED position must cover the bound', () => {
     const COVERAGE = /must accept every admitted instantiation/;
 
-    test('`(x: real)` under `forall T: integer` is accepted (and dropped)', () => {
+    test('`(x: real)` under `where T: integer` is accepted (and dropped)', () => {
       const ce = fresh();
-      const f = e2(ce, 'x', 'forall T: integer. (x: T) -> T', [
+      const f = e2(ce, 'x', '(x: T) -> T where T: integer', [
         'Typed',
         'x',
         { str: 'real' },
       ]);
       expect(f.isValid).toBe(true);
       expect(f.ops[1].toString()).toBe('x'); // erased
-      expect(f.type.toString()).toBe('forall T: integer. (x: T) -> T');
+      expect(f.type.toString()).toBe('(x: T) -> T where T: integer');
     });
 
-    test('`(x: integer)` under `forall T: number` is a diagnostic', () => {
+    test('`(x: integer)` under `where T: number` is a diagnostic', () => {
       const ce = fresh();
-      const f = e2(ce, 'x', 'forall T: number. (x: T) -> T', [
+      const f = e2(ce, 'x', '(x: T) -> T where T: number', [
         'Typed',
         'x',
         { str: 'integer' },
@@ -316,7 +316,7 @@ describe('E2 WELL-FORMEDNESS (§2.3) — the marker is the contract of record', 
 
     test('an UNBOUNDED variable is bounded by `any`: `(x: integer)` fails', () => {
       const ce = fresh();
-      const f = e2(ce, 'x', 'forall T. (x: T) -> T', [
+      const f = e2(ce, 'x', '(x: T) -> T where T', [
         'Typed',
         'x',
         { str: 'integer' },
@@ -327,14 +327,14 @@ describe('E2 WELL-FORMEDNESS (§2.3) — the marker is the contract of record', 
 
     test('…and a wide `(x: any)` annotation passes', () => {
       const ce = fresh();
-      const f = e2(ce, 'x', 'forall T. (x: T) -> T', [
+      const f = e2(ce, 'x', '(x: T) -> T where T', [
         'Typed',
         'x',
         { str: 'any' },
       ]);
       expect(f.isValid).toBe(true);
       expect(f.ops[1].toString()).toBe('x');
-      expect(f.type.toString()).toBe('forall T. (x: T) -> T');
+      expect(f.type.toString()).toBe('(x: T) -> T where T');
     });
   });
 });
@@ -353,7 +353,7 @@ describe('G5 — partial application of a generic literal is rejected', () => {
     const g = e1(
       ce,
       ['Tuple', 'y', 'x'],
-      'forall T, U. (x: T, y: U) -> tuple<U, T>'
+      '(x: T, y: U) -> tuple<U, T> where T, U'
     );
     const curried = ce.box(['Apply', g.json, 1] as any).evaluate();
     expect(curried.toString()).toMatch(
@@ -390,7 +390,7 @@ describe('G5 — partial application of a generic literal is rejected', () => {
     //    the same arity gives. That parity is the point; a generic function is
     //    not silently curried, and no `unsolvable-type-variable` escapes.
     const ce = fresh();
-    ce.declare('g', 'forall T, U. (T, U) -> U');
+    ce.declare('g', '(T, U) -> U where T, U');
     ce.assign('g', ce.box(['Function', 'y', 'x', 'y'] as any));
     const call = ce.box(['g', 1] as any);
     expect(call.isValid).toBe(false);
@@ -416,28 +416,28 @@ describe('EFFECTS — the literal arrow stays `declared ∪ inferred`', () => {
     // over-approximation of what the body does. The declared/inferred conflict
     // is the declaration boundary's business (phase 2), not the arrow's.
     const ce = fresh();
-    const f = e1(ce, ['Random'], 'forall T. (x: T) pure -> T');
+    const f = e1(ce, ['Random'], '(x: T) pure -> T where T');
     expect(f.isValid).toBe(true);
-    expect(f.type.toString()).toBe('forall T. (x: T) random -> T');
+    expect(f.type.toString()).toBe('(x: T) random -> T where T');
   });
 
   test('a declared effect with a pure body keeps the declared effect', () => {
     const ce = fresh();
-    const f = e1(ce, 'x', 'forall T. (x: T) random -> T');
-    expect(f.type.toString()).toBe('forall T. (x: T) random -> T');
+    const f = e1(ce, 'x', '(x: T) random -> T where T');
+    expect(f.type.toString()).toBe('(x: T) random -> T where T');
   });
 
   test('no effects slot, pure body — the arrow stays effect-free', () => {
     const ce = fresh();
-    const f = e1(ce, 'x', 'forall T. (x: T) -> T');
-    expect(f.type.toString()).toBe('forall T. (x: T) -> T');
+    const f = e1(ce, 'x', '(x: T) -> T where T');
+    expect(f.type.toString()).toBe('(x: T) -> T where T');
   });
 });
 
 describe('The §4.2 GROUND INVARIANT holds throughout', () => {
   test('no parameter binding, and no application result, carries a variable', () => {
     const ce = fresh();
-    const f = e1(ce, ['Add', 'x', 'x'], 'forall T: number. (x: T) -> T');
+    const f = e1(ce, ['Add', 'x', 'x'], '(x: T) -> T where T: number');
     // The body Block's binding for the erased parameter is an ORDINARY inferred
     // parameter — whatever the body's uses narrowed it to (`Add` ⇒ `number`),
     // exactly as for an untyped literal. A type variable never becomes the type
@@ -476,8 +476,8 @@ function declareAssign(signature: string, literal: any): ComputeEngine {
 
 describe('§5.1 — identity and swap, end to end, on every route', () => {
   test('E3 host route — one engine, two instantiations, no pollution', () => {
-    const ce = declareAssign('forall T. (x: T) -> T', ['Function', 'x', 'x']);
-    expect(ce.box('f').type.toString()).toBe('forall T. (x: T) -> T');
+    const ce = declareAssign('(x: T) -> T where T', ['Function', 'x', 'x']);
+    expect(ce.box('f').type.toString()).toBe('(x: T) -> T where T');
     expect(ce.box('f').type.isPolymorphic).toBe(true);
 
     expect(
@@ -496,12 +496,12 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
     expect(ce.box(['f', { str: 'a' }] as any).type.toString()).toBe('string');
     // …and back, on the SAME engine: the declaration is unchanged.
     expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
-    expect(ce.box('f').type.toString()).toBe('forall T. (x: T) -> T');
+    expect(ce.box('f').type.toString()).toBe('(x: T) -> T where T');
   });
 
   test('the OPERATOR-slot declaration (`{ signature: … }`) agrees', () => {
     const ce = fresh();
-    ce.declare('f', { signature: 'forall T. (x: T) -> T' } as any);
+    ce.declare('f', { signature: '(x: T) -> T where T' } as any);
     ce.assign('f', ce.box(['Function', 'x', 'x'] as any));
     expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
     expect(
@@ -514,7 +514,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
 
   test('the `Assign` OPERATOR route — a plain literal onto a declaration', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (x: T) -> T');
+    ce.declare('f', '(x: T) -> T where T');
     const r = ce.box(['Assign', 'f', ['Function', 'x', 'x']] as any).evaluate();
     expect(r.toString()).not.toContain('incompatible-type');
     expect(
@@ -533,9 +533,9 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
     ce.box([
       'Assign',
       'f',
-      ['Function', 'x', { str: 'forall T. (x: T) -> T' }],
+      ['Function', 'x', { str: '(x: T) -> T where T' }],
     ] as any).evaluate();
-    expect(ce.box('f').type.toString()).toBe('forall T. (x: T) -> T');
+    expect(ce.box('f').type.toString()).toBe('(x: T) -> T where T');
     expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
     expect(
       ce
@@ -548,21 +548,21 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
   test('`ce.assign` of an E1/E2 literal keeps the polytype as the signature', () => {
     // Before phase 2 this fell to the inferred-signature path, which reads the
     // ASCRIBED BODY type and produced the nonsense
-    // `(unknown) -> forall T. (x: T) -> T`.
+    // `(unknown) -> ((x: T) -> T where T)`.
     for (const literal of [
-      e1(fresh(), 'x', 'forall T. (x: T) -> T'),
-      e2(fresh(), 'x', 'forall T. (x: T) -> T', 'x'),
+      e1(fresh(), 'x', '(x: T) -> T where T'),
+      e2(fresh(), 'x', '(x: T) -> T where T', 'x'),
     ]) {
       const ce = fresh();
       ce.assign('f', ce.box(literal.json));
-      expect(ce.box('f').type.toString()).toBe('forall T. (x: T) -> T');
+      expect(ce.box('f').type.toString()).toBe('(x: T) -> T where T');
       expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
       expect(ce.box(['f', { str: 'a' }] as any).type.toString()).toBe('string');
     }
   });
 
   test('swap — two variables, instantiated per call', () => {
-    const ce = declareAssign('forall T, U. (x: T, y: U) -> tuple<U, T>', [
+    const ce = declareAssign('(x: T, y: U) -> tuple<U, T> where T, U', [
       'Function',
       ['Tuple', 'y', 'x'],
       'x',
@@ -586,7 +586,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
   // application-head form canonicalizes to `Apply`.
   test('the ANONYMOUS `Apply` route instantiates its callee', () => {
     const ce = fresh();
-    const f = e1(ce, 'x', 'forall T. (x: T) -> T');
+    const f = e1(ce, 'x', '(x: T) -> T where T');
     expect(ce.box(['Apply', f.json, 5] as any).type.toString()).toBe(
       'finite_integer'
     );
@@ -603,7 +603,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
 
   test('…and the application-HEAD spelling is the same node', () => {
     const ce = fresh();
-    const f = e1(ce, 'x', 'forall T. (x: T) -> T');
+    const f = e1(ce, 'x', '(x: T) -> T where T');
     const head = ce.box([f.json, 5] as any);
     expect(head.operator).toBe('Apply');
     expect(head.type.toString()).toBe('finite_integer');
@@ -617,7 +617,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
     // `Apply` does not broadcast — `apply()` binds the argument whole — so the
     // D10 echo answer (the operand's own type) is the honest one here too.
     const ce = fresh();
-    const f = e1(ce, 'x', 'forall T. (x: T) -> T');
+    const f = e1(ce, 'x', '(x: T) -> T where T');
     const call = ce.box(['Apply', f.json, ['List', 1, 2]] as any);
     expect(call.type.toString()).toBe('vector<finite_integer^2>');
     expect(call.evaluate().toString()).toBe('[1,2]');
@@ -633,7 +633,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
 
 describe('§5.3 — bounds and broadcast (no double-lift)', () => {
   test('a bounded literal broadcasts over a list, at its own rank', () => {
-    const ce = declareAssign('forall T: number. (x: T) -> T', [
+    const ce = declareAssign('(x: T) -> T where T: number', [
       'Function',
       ['Multiply', 2, 'x'],
       'x',
@@ -662,7 +662,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
     // this milestone, had neither `instantiatedResultType` nor the D10 echo
     // guard and typed `f([1,2,3])` as `list<vector<…^3>>`.
     const ce = fresh();
-    ce.assign('f', e1(ce, 'x', 'forall T. (x: T) -> T'));
+    ce.assign('f', e1(ce, 'x', '(x: T) -> T where T'));
     expect(ce.box(['f', ['List', 1, 2, 3]] as any).type.toString()).toBe(
       'vector<finite_integer^3>'
     );
@@ -680,7 +680,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
   });
 
   test('…and the VALUE-DEF arm agrees (the pre-existing half)', () => {
-    const ce = declareAssign('forall T. (x: T) -> T', ['Function', 'x', 'x']);
+    const ce = declareAssign('(x: T) -> T where T', ['Function', 'x', 'x']);
     expect(ce.box(['f', ['List', 1, 2, 3]] as any).type.toString()).toBe(
       'vector<finite_integer^3>'
     );
@@ -693,7 +693,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
   // has carried this test since D10; both lambda arms now mirror it.
   test('the echoed operand DOMINATES: the short-circuit applies', () => {
     const ce = fresh();
-    ce.assign('f', e1(ce, 'x', 'forall T. (x: T, n: number) -> T'));
+    ce.assign('f', e1(ce, 'x', '(x: T, n: number) -> T where T'));
     const call = ce.box(['f', ['List', 1, 2], 5] as any);
     expect(call.type.toString()).toBe('vector<finite_integer^2>');
     expect(call.evaluate().toString()).toBe('[1,2]');
@@ -704,7 +704,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
     // and a collection is admitted there. The body broadcasts, so the runtime
     // result is a matrix — the echo's `vector` would be a lie.
     const ce = fresh();
-    ce.assign('f', e1(ce, ['Add', 'x', 'n'], 'forall T, U. (x: T, n: U) -> T'));
+    ce.assign('f', e1(ce, ['Add', 'x', 'n'], '(x: T, n: U) -> T where T, U'));
     const m = ['List', ['List', 1, 2], ['List', 3, 4]];
     const call = ce.box(['f', ['List', 1, 2], m] as any);
     expect(call.type.toString()).not.toBe('vector<finite_integer^2>');
@@ -714,7 +714,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
   });
 
   test('…and the same on the VALUE-DEF arm', () => {
-    const ce = declareAssign('forall T. (x: T, n: number) -> T', [
+    const ce = declareAssign('(x: T, n: number) -> T where T', [
       'Function',
       ['Add', 'x', 'n'],
       'x',
@@ -733,7 +733,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
 // lift-admitted position the runtime MAPS, so `T` denotes ONE ELEMENT. Under
 // the old whole-actual bind a result that MENTIONS `T` (rather than being the
 // bare `T` the retired echo short-circuit recognized) came out one rank too
-// high — `forall T. (T) -> tuple<T, T>` over `[1, 2]` typed
+// high — `(T) -> tuple<T, T> where T` over `[1, 2]` typed
 // `list<tuple<vector<…^2>, vector<…^2>>>` while the value is
 // `[(1,1), (2,2)]`. Every case below asserts evaluated ⊆ declared, which is
 // what the old answers failed.
@@ -750,7 +750,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     const ce = fresh();
     ce.assign(
       'f',
-      e1(ce, ['Tuple', 'x', 'x'], 'forall T. (x: T) -> tuple<T, T>')
+      e1(ce, ['Tuple', 'x', 'x'], '(x: T) -> tuple<T, T> where T')
     );
     // The scalar call is the per-element answer the wrap is built from.
     pin(ce, 5, 'tuple<finite_integer, finite_integer>', '(5, 5)');
@@ -771,7 +771,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
   });
 
   test('…and the VALUE-DEF arm agrees, at rank 1 AND rank 2', () => {
-    const ce = declareAssign('forall T. (x: T) -> tuple<T, T>', [
+    const ce = declareAssign('(x: T) -> tuple<T, T> where T', [
       'Function',
       ['Tuple', 'x', 'x'],
       'x',
@@ -802,7 +802,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     const ce = fresh();
     ce.assign(
       'f',
-      e1(ce, ['Tuple', 'x', 'x'], 'forall T: number. (x: T) -> tuple<T, T>')
+      e1(ce, ['Tuple', 'x', 'x'], '(x: T) -> tuple<T, T> where T: number')
     );
     pin(ce, 5, 'tuple<finite_integer, finite_integer>', '(5, 5)');
     pin(
@@ -818,7 +818,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     // `paramsAreScalar` is false, nothing is lifted, and the operand binds
     // whole — unchanged by the re-ruling.
     const ce = fresh();
-    ce.declare('vecho', 'forall T: indexed_collection. (T) -> T');
+    ce.declare('vecho', '(T) -> T where T: indexed_collection');
     expect(ce.box(['vecho', ['List', 1, 2]] as any).type.toString()).toBe(
       'vector<finite_integer^2>'
     );
@@ -835,7 +835,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     // broadcast and a `set` is admitted but never mapped, so neither is
     // peeled (this is what keeps `Conjugate(Set(1, 2))` typed `set<…>`).
     const ce = fresh();
-    ce.assign('f', e1(ce, 'x', 'forall T. (x: T) -> T'));
+    ce.assign('f', e1(ce, 'x', '(x: T) -> T where T'));
     expect(ce.box(['f', ['Tuple', 1, 2]] as any).type.toString()).toBe(
       'tuple<finite_integer, finite_integer>'
     );
@@ -846,7 +846,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
 
   test('a UNION actual distributes the peel only when EVERY member maps', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (x: T) -> tuple<T, T>');
+    ce.declare('f', '(x: T) -> tuple<T, T> where T');
     // All members mapped: the peel distributes (the `Add` widen artifact).
     ce.declare('v', 'list<integer> | matrix<integer>');
     expect(ce.box(['f', 'v'] as any).type.toString()).toBe(
@@ -863,7 +863,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
 
   test('the peel depth follows the OUTER kind, not the element', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (x: T) -> tuple<T, T>');
+    ce.declare('f', '(x: T) -> tuple<T, T> where T');
     // A `list` outer has a static rank, so the peel descends to the LEAF and
     // `broadcastShapedResultType` re-adds every level.
     ce.declare('h', 'list<list<integer^2>>');
@@ -890,7 +890,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     // route and the element bind must not fire (there is no wrap here to put
     // a rank back).
     const ce = fresh();
-    const f = e1(ce, ['Tuple', 'x', 'x'], 'forall T. (x: T) -> tuple<T, T>');
+    const f = e1(ce, ['Tuple', 'x', 'x'], '(x: T) -> tuple<T, T> where T');
     const call = ce.box(['Apply', f.json, ['List', 1, 2]] as any);
     expect(call.type.toString()).toBe(
       'tuple<vector<finite_integer^2>, vector<finite_integer^2>>'
@@ -904,7 +904,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
 describe('§5.4 — generic recursion (declare-then-assign)', () => {
   test('a self-calling body, at two instantiations', () => {
     const ce = fresh();
-    ce.declare('nest', 'forall T. (x: T, n: integer) -> T');
+    ce.declare('nest', '(x: T, n: integer) -> T where T');
     ce.assign(
       'nest',
       ce.box([
@@ -935,14 +935,14 @@ describe('§5.4 — generic recursion (declare-then-assign)', () => {
     // The declaration survived the self-call: no narrowing write happened
     // during body canonicalization (the S3 fallback, §2.5).
     expect(ce.box('nest').type.toString()).toBe(
-      'forall T. (x: T, n: integer) -> T'
+      '(x: T, n: integer) -> T where T'
     );
   });
 });
 
 describe('§5.5 — mixed parameters', () => {
   test('the ground parameter is enforced at apply, the erased one is not', () => {
-    const ce = declareAssign('forall T. (x: T, n: integer) -> T', [
+    const ce = declareAssign('(x: T, n: integer) -> T where T', [
       'Function',
       ['Add', 'x', 'n'],
       'x',
@@ -971,45 +971,45 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
     // with `isSubtype`, which is α-equivalence only BETWEEN POLYTYPES. Were
     // the clause dropped by the strip, the comparison would silently degrade
     // to ordinary function subtyping.
-    const t = parseType('forall T. (x: T) random -> T');
+    const t = parseType('(x: T) random -> T where T');
     const stripped = stripArrowEffects(t);
-    expect(typeToString(stripped)).toBe('forall T. (x: T) -> T');
+    expect(typeToString(stripped)).toBe('(x: T) -> T where T');
     expect((stripped as any).typeParams).toHaveLength(1);
   });
 
   // Rule 3 (G9) — α-equivalence on the TYPE axes only.
   test('G9 — a pure RENAMING of the clause is accepted', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (x: T) -> T');
+    ce.declare('f', '(x: T) -> T where T');
     expect(() =>
-      ce.assign('f', e1(ce, 'q', 'forall U. (u: U) -> U'))
+      ce.assign('f', e1(ce, 'q', '(u: U) -> U where U'))
     ).not.toThrow();
     expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
   });
 
   test('G9 — argument NAMES are cosmetic, so an unnamed declaration matches', () => {
     // The E1 sugar REQUIRES named arguments, so a declaration written
-    // `forall T. (T) -> T` must still accept its own E1 implementation.
+    // `(T) -> T where T` must still accept its own E1 implementation.
     const ce = fresh();
-    ce.declare('f', 'forall T. (T) -> T');
+    ce.declare('f', '(T) -> T where T');
     expect(() =>
-      ce.assign('f', e1(ce, 'x', 'forall T. (x: T) -> T'))
+      ce.assign('f', e1(ce, 'x', '(x: T) -> T where T'))
     ).not.toThrow();
   });
 
   test('G9 — a genuine mismatch on a type axis is rejected', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (x: T) -> T');
+    ce.declare('f', '(x: T) -> T where T');
     expect(() =>
-      ce.assign('f', e1(ce, 'x', 'forall T. (x: T) -> integer'))
+      ce.assign('f', e1(ce, 'x', '(x: T) -> integer where T'))
     ).toThrow(MISMATCH);
   });
 
   test('G9 — differing declared BOUNDS are a mismatch', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T: number. (x: T) -> T');
+    ce.declare('f', '(x: T) -> T where T: number');
     expect(() =>
-      ce.assign('f', e1(ce, 'x', 'forall U: integer. (y: U) -> U'))
+      ce.assign('f', e1(ce, 'x', '(y: U) -> U where U: integer'))
     ).toThrow(MISMATCH);
   });
 
@@ -1017,25 +1017,25 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
     // Explicitness must not be penalized where silence passes: the effects axis
     // is governed by rule 2's `inferred ⊆ declared` subset alone.
     const ce = fresh();
-    ce.declare('f', 'forall T. (x: T) random -> T');
+    ce.declare('f', '(x: T) random -> T where T');
     expect(() =>
-      ce.assign('f', e1(ce, 'x', 'forall T. (x: T) pure -> T'))
+      ce.assign('f', e1(ce, 'x', '(x: T) pure -> T where T'))
     ).not.toThrow();
   });
 
   // Rule 2 — effects.
   test('a `random` body under a `pure` declaration is rejected', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (x: T) pure -> T');
+    ce.declare('f', '(x: T) pure -> T where T');
     expect(() =>
       ce.assign('f', ce.box(['Function', ['Add', 'x', ['Random']], 'x'] as any))
     ).toThrow(/random/);
   });
 
   // Rule 4 — ground annotations cover the domain (CONTRAVARIANT).
-  test('rule 4 — `(x: real)` under `forall T: integer` is accepted', () => {
+  test('rule 4 — `(x: real)` under `where T: integer` is accepted', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T: integer. (x: T) -> T');
+    ce.declare('f', '(x: T) -> T where T: integer');
     expect(() =>
       ce.assign(
         'f',
@@ -1044,9 +1044,9 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
     ).not.toThrow();
   });
 
-  test('rule 4 — `(x: integer)` under `forall T: number` is rejected', () => {
+  test('rule 4 — `(x: integer)` under `where T: number` is rejected', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T: number. (x: T) -> T');
+    ce.declare('f', '(x: T) -> T where T: number');
     expect(() =>
       ce.assign(
         'f',
@@ -1057,7 +1057,7 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
 
   test('rule 4 — an UNBOUNDED variable admits only `any`/`unknown`', () => {
     const ok = fresh();
-    ok.declare('f', 'forall T. (x: T) -> T');
+    ok.declare('f', '(x: T) -> T where T');
     expect(() =>
       ok.assign(
         'f',
@@ -1066,7 +1066,7 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
     ).not.toThrow();
 
     const bad = fresh();
-    bad.declare('f', 'forall T. (x: T) -> T');
+    bad.declare('f', '(x: T) -> T where T');
     expect(() =>
       bad.assign(
         'f',
@@ -1077,7 +1077,7 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
 
   test('rule 4 — a ground annotation at a GROUND position reconciles as today', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (x: T, n: integer) -> T');
+    ce.declare('f', '(x: T, n: integer) -> T where T');
     expect(() =>
       ce.assign(
         'f',
@@ -1100,7 +1100,7 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
   // Rule 1 — arity.
   test('an arity mismatch keeps its own diagnostic', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (x: T, y: T) -> T');
+    ce.declare('f', '(x: T, y: T) -> T where T');
     expect(() => ce.assign('f', ce.box(['Function', 'x', 'x'] as any))).toThrow(
       /takes 1 parameter\(s\)/
     );
@@ -1109,7 +1109,7 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
   // Rule 0 — G11.
   test('G11 — a polymorphic overload INTERSECTION is rejected, ahead of arity', () => {
     const ce = fresh();
-    ce.declare('m', '(forall T. (T) -> T) & ((string) -> string)');
+    ce.declare('m', '((T) -> T where T) & ((string) -> string)');
     // A 2-ary literal would fail the arity rule too; G11 must win.
     expect(() =>
       ce.assign('m', ce.box(['Function', 'x', 'x', 'y'] as any))
@@ -1118,7 +1118,7 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
 
   test('G11 — on the `Assign` OPERATOR route, as an error VALUE', () => {
     const ce = fresh();
-    ce.declare('m', '(forall T. (T) -> T) & ((string) -> string)');
+    ce.declare('m', '((T) -> T where T) & ((string) -> string)');
     const v = ce.box(['Assign', 'm', ['Function', 'x', 'x']] as any).evaluate();
     expect(v.toString()).toContain('incompatible-type');
     expect(v.toString()).toMatch(
@@ -1128,13 +1128,13 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
 });
 
 describe('§5.7 — G10, the variable-correlated return is a TRUSTED ascription', () => {
-  test('`x |-> 0` installs at `forall T. (T) -> T`; `f("a")` types `string`', () => {
+  test('`x |-> 0` installs at `(T) -> T where T`; `f("a")` types `string`', () => {
     // RULED (G10, 2026-08-04): under erasure nothing verifies that the body
     // returns its argument's type, and the typed-function-literals precedent
     // (ruled 2026-07-12) makes return ascriptions TRUSTED, TypeScript-style —
     // not covariant runtime checks. Disclosed and pinned here; a strict-mode
     // per-call instantiated-result check is recorded as future work.
-    const ce = declareAssign('forall T. (x: T) -> T', ['Function', 0, 'x']);
+    const ce = declareAssign('(x: T) -> T where T', ['Function', 0, 'x']);
     expect(ce.box(['f', { str: 'a' }] as any).type.toString()).toBe('string');
     expect(
       ce
@@ -1144,8 +1144,8 @@ describe('§5.7 — G10, the variable-correlated return is a TRUSTED ascription'
     ).toBe('0');
   });
 
-  test('G4 — a GROUND result under a `forall` reconciles as today', () => {
-    const ce = declareAssign('forall T. (x: T) -> boolean', [
+  test('G4 — a GROUND result under a `where` clause reconciles as today', () => {
+    const ce = declareAssign('(x: T) -> boolean where T', [
       'Function',
       ['Equal', 'x', 'x'],
       'x',
@@ -1164,7 +1164,7 @@ describe('§2.6 — G2, generic × multi-clause is rejected in BOTH directions',
   const G2 = /generic-clause-unsupported/;
 
   test('a later clause onto a GENERIC definition (operator route)', () => {
-    const ce = declareAssign('forall T. (x: T) -> T', ['Function', 'x', 'x']);
+    const ce = declareAssign('(x: T) -> T where T', ['Function', 'x', 'x']);
     const v = ce
       .box([
         'DefineFunction',
@@ -1186,14 +1186,14 @@ describe('§2.6 — G2, generic × multi-clause is rejected in BOTH directions',
       .box([
         'DefineFunction',
         'g',
-        e1(ce, 'x', 'forall T. (x: T) -> T').json,
+        e1(ce, 'x', '(x: T) -> T where T').json,
       ] as any)
       .evaluate();
     expect(v.toString()).toMatch(G2);
   });
 
   test('the HOST route THROWS instead of yielding an error value', () => {
-    const ce = declareAssign('forall T. (x: T) -> T', ['Function', 'x', 'x']);
+    const ce = declareAssign('(x: T) -> T where T', ['Function', 'x', 'x']);
     expect(() =>
       defineFunctionClause(
         ce as any,
@@ -1222,7 +1222,7 @@ describe('§2.6 — G2, generic × multi-clause is rejected in BOTH directions',
       .box([
         'DefineFunction',
         'f',
-        literalParamGeneric('forall T. (x: T, y: 0) -> integer'),
+        literalParamGeneric('(x: T, y: 0) -> integer where T'),
       ] as any)
       .evaluate();
     expect(v.toString()).toMatch(G2);
@@ -1241,7 +1241,7 @@ describe('§2.6 — G2, generic × multi-clause is rejected in BOTH directions',
       defineFunctionClause(
         ce as any,
         'f',
-        ce.box(literalParamGeneric('forall T. (x: T, y: 0) -> integer'))
+        ce.box(literalParamGeneric('(x: T, y: 0) -> integer where T'))
       )
     ).toThrow(/cannot combine a generic clause with a literal parameter/);
   });
@@ -1257,7 +1257,7 @@ describe('§2.6 — G2, generic × multi-clause is rejected in BOTH directions',
       .box([
         'DefineFunction',
         'f',
-        literalParamGeneric('forall T. (x: T, y: T) -> integer'),
+        literalParamGeneric('(x: T, y: T) -> integer where T'),
       ] as any)
       .evaluate();
     expect(v.toString()).toMatch(/must accept every admitted instantiation/);
@@ -1276,7 +1276,7 @@ describe('§2.6 — G2, generic × multi-clause is rejected in BOTH directions',
       .box([
         'DefineFunction',
         'h',
-        e1(ce, 'x', 'forall T. (x: T) -> T').json,
+        e1(ce, 'x', '(x: T) -> T where T').json,
       ] as any)
       .evaluate();
     expect(v.toString()).not.toMatch(G2);
@@ -1289,7 +1289,7 @@ describe('§2.6 — G2, generic × multi-clause is rejected in BOTH directions',
     // applies and `declaredSignatureOf` deliberately reports "no declaration"
     // for a polytype, so no polytype ever enters clause storage.
     const ce = fresh();
-    ce.declare('k', 'forall T. (x: T) -> T');
+    ce.declare('k', '(x: T) -> T where T');
     const v = ce
       .box(['DefineFunction', 'k', ['Function', 'x', 'x']] as any)
       .evaluate();
@@ -1302,16 +1302,16 @@ describe('§2.6 — G2, generic × multi-clause is rejected in BOTH directions',
 describe('§5.12 — the ground invariant holds at every installed application', () => {
   test('no result type of a generic call contains a free variable', () => {
     const cases: [string, any, any[]][] = [
-      ['forall T. (x: T) -> T', ['Function', 'x', 'x'], [5]],
-      ['forall T. (x: T) -> T', ['Function', 'x', 'x'], [['List', 1, 2, 3]]],
-      ['forall T: number. (x: T) -> T', ['Function', 'x', 'x'], [1.5]],
+      ['(x: T) -> T where T', ['Function', 'x', 'x'], [5]],
+      ['(x: T) -> T where T', ['Function', 'x', 'x'], [['List', 1, 2, 3]]],
+      ['(x: T) -> T where T: number', ['Function', 'x', 'x'], [1.5]],
       [
-        'forall T, U. (x: T, y: U) -> tuple<U, T>',
+        '(x: T, y: U) -> tuple<U, T> where T, U',
         ['Function', ['Tuple', 'y', 'x'], 'x', 'y'],
         [1, { str: 'a' }],
       ],
       [
-        'forall T. (x: T, n: integer) -> T',
+        '(x: T, n: integer) -> T where T',
         ['Function', ['Add', 'x', 'n'], 'x', 'n'],
         [5, 2],
       ],
@@ -1338,7 +1338,7 @@ describe('§5.13 — G3, compile() declines a generic user function whole-fn', (
 
   it('declared route (E3): declines, fallback agrees with the interpreter', () => {
     const ce = fresh();
-    ce.declare('gd', 'forall T: number. (x: T) -> T');
+    ce.declare('gd', '(x: T) -> T where T: number');
     ce.assign('gd', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
     const r = compile(ce.box(['gd', 'y'] as any));
     // No lowering emitted for the generic fn: the whole expression declined.
@@ -1352,7 +1352,7 @@ describe('§5.13 — G3, compile() declines a generic user function whole-fn', (
     const ce = fresh();
     ce.assign(
       'hd',
-      e2(ce, ['Add', 'x', 'x'], 'forall T: number. (x: T) -> T', 'x')
+      e2(ce, ['Add', 'x', 'x'], '(x: T) -> T where T: number', 'x')
     );
     const r = compile(ce.box(['hd', 'y'] as any));
     expect(r?.code ?? '').not.toContain('_fn_hd');
@@ -1386,8 +1386,8 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
   // declare-then-assign VALUE route (gated on `paramsAreScalar`, `box.ts`) and
   // on the COMPILED path (`userFunctionParamsAreScalar`, `base-compiler.ts`).
   // The flag is now derived the same way, so the three routes read one gate —
-  // which is what the design's §2 sketch already promised ("f: forall T:
-  // number. (T) -> T; f([1,2,3]) → broadcasts, types vector").
+  // which is what the design's §2 sketch already promised ("f: (T) -> T
+  // where T: number; f([1,2,3]) → broadcasts, types vector").
   const {
     compile,
   } = require('../../src/compute-engine/compilation/compile-expression');
@@ -1396,14 +1396,14 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     const ce = fresh();
     ce.assign(
       'f',
-      e2(ce, ['Multiply', 2, 'x'], 'forall T: number. (x: T) -> T', 'x')
+      e2(ce, ['Multiply', 2, 'x'], '(x: T) -> T where T: number', 'x')
     );
     const call = ce.box(['f', ['List', 1, 2, 3]] as any);
     expect(call.evaluate().toString()).toBe('[2,4,6]');
     // No double-lift (the §2.5 twin arm): the map's type, not a list of vectors.
     expect(call.type.toString()).toBe('vector<finite_integer^3>');
     // …and the VALUE route answers the same thing, literally.
-    const value = declareAssign('forall T: number. (x: T) -> T', [
+    const value = declareAssign('(x: T) -> T where T: number', [
       'Function',
       ['Multiply', 2, 'x'],
       'x',
@@ -1427,7 +1427,7 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     // default), so the derived flag must not turn that echo into a per-element
     // map.
     const ce = fresh();
-    ce.assign('f', e1(ce, 'x', 'forall T. (x: T) -> T'));
+    ce.assign('f', e1(ce, 'x', '(x: T) -> T where T'));
     const call = ce.box(['f', ['List', 1, 2, 3]] as any);
     expect(call.evaluate().toString()).toBe('[1,2,3]');
     expect(call.type.toString()).toBe('vector<finite_integer^3>');
@@ -1506,7 +1506,7 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
       e2(
         ce,
         ['Length', 'x'],
-        'forall T: indexed_collection. (x: T) -> integer',
+        '(x: T) -> integer where T: indexed_collection',
         'x'
       )
     );
@@ -1599,7 +1599,7 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
 
 describe('§follow-up — an UNGROUPED ground marker is the literal’s own signature', () => {
   // Ruled 2026-08-04: the decomposition predicate is "ungrouped signature",
-  // effects or `forall` clause optional. Before, a ground arrow in the return
+  // effects or `where` clause optional. Before, a ground arrow in the return
   // slot read as a RETURN type, so the literal typed
   // `(unknown) -> (x: number) -> number` and a broadcast call typed
   // `list<(x: number) -> number^3>` while evaluating `[2,4,6]`.
@@ -1689,13 +1689,13 @@ describe('§follow-up — an UNGROUPED ground marker is the literal’s own sign
       const f = e2Block(
         ce,
         ['Add', 'x', 'x'],
-        'forall T: number. (x: T) -> T',
+        '(x: T) -> T where T: number',
         ['Typed', 'x', { str: 'T' }]
       );
       // The quantified parameter is a BARE symbol — `T` never becomes the type
       // of a symbol (the §4.2 ground invariant).
       expect(f.ops[1].json).toBe('x');
-      expect(f.type.toString()).toBe('forall T: number. (x: T) -> T');
+      expect(f.type.toString()).toBe('(x: T) -> T where T: number');
     });
   });
 });
@@ -1712,26 +1712,26 @@ describe('§follow-up — an UNGROUPED ground marker is the literal’s own sign
 //
 describe('R1 — a declared polytype is ascribed onto the stored literal', () => {
   test('declare-then-assign: the value carries the clause', () => {
-    const ce = declareAssign('forall T. (x: T) -> T', ['Function', 'x', 'x']);
+    const ce = declareAssign('(x: T) -> T where T', ['Function', 'x', 'x']);
     const value = ce.box('f').evaluate();
     expect(value.toString()).toBe('(x) |-> x');
-    expect(value.type.toString()).toBe('forall T. (x: T) -> T');
+    expect(value.type.toString()).toBe('(x: T) -> T where T');
     // The definition's own type is unchanged, and so is every call.
-    expect(ce.box('f').type.toString()).toBe('forall T. (x: T) -> T');
+    expect(ce.box('f').type.toString()).toBe('(x: T) -> T where T');
     expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
   });
 
   test('declare-WITH-value: the same', () => {
     const ce = fresh();
     ce.declare('f', {
-      type: 'forall T. (x: T) -> T',
+      type: '(x: T) -> T where T',
       value: ce.box(['Function', 'x', 'x']),
     } as any);
     const value = ce.box('f').evaluate();
-    expect(value.type.toString()).toBe('forall T. (x: T) -> T');
+    expect(value.type.toString()).toBe('(x: T) -> T where T');
     expect(value.json).toMatchObject([
       'Function',
-      ['Block', ['Typed', 'x', "'forall T. (x: T) -> T'"]],
+      ['Block', ['Typed', 'x', "'(x: T) -> T where T'"]],
       'x',
     ]);
   });
@@ -1740,7 +1740,7 @@ describe('R1 — a declared polytype is ascribed onto the stored literal', () =>
     // `n: number` would become a real constraint on the literal's own arrow,
     // enforced at the per-element `apply()` inside a broadcast — where `n`
     // legitimately receives a whole row. The clause is left off instead.
-    const ce = declareAssign('forall T. (x: T, n: number) -> T', [
+    const ce = declareAssign('(x: T, n: number) -> T where T', [
       'Function',
       ['Add', 'x', 'n'],
       'x',
@@ -1753,10 +1753,10 @@ describe('R1 — a declared polytype is ascribed onto the stored literal', () =>
 
   test("a literal with its OWN marker keeps it", () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (x: T) -> T');
-    ce.assign('f', e2(ce, 'x', 'forall U. (y: U) -> U', 'x'));
+    ce.declare('f', '(x: T) -> T where T');
+    ce.assign('f', e2(ce, 'x', '(y: U) -> U where U', 'x'));
     expect(ce.box('f').evaluate().type.toString()).toBe(
-      'forall U. (y: U) -> U'
+      '(y: U) -> U where U'
     );
   });
 
@@ -1809,8 +1809,8 @@ describe('R4 — untyped re-assign replaces a derived signature', () => {
 
   test('a GENERIC annotation is derived the same way', () => {
     const ce = fresh();
-    ce.assign('g', e2(ce, 'x', 'forall T. (x: T) -> T', 'x'));
-    expect(ce.box('g').type.toString()).toBe('forall T. (x: T) -> T');
+    ce.assign('g', e2(ce, 'x', '(x: T) -> T where T', 'x'));
+    expect(ce.box('g').type.toString()).toBe('(x: T) -> T where T');
     ce.assign('g', untyped(ce));
     expect(ce.box('g').type.isPolymorphic).toBe(false);
     expect(ce.box('g').type.toString()).toBe('(unknown) -> finite_number');

@@ -199,13 +199,13 @@ describe('PARAMETERIZED NOMINAL TYPES — declaration, three routes', () => {
     ]);
   });
 
-  // Phase 2: a parameterized body mints a `forall`-QUANTIFIED constructor
+  // Phase 2: a parameterized body mints a `where`-QUANTIFIED constructor
   // (§5). Its behavior is pinned in
   // `parameterized-nominal-constructor.test.ts`.
   test('a quantified constructor is minted', () => {
     const ce = hostEngine();
     expect(ce.box('tree').operatorDefinition?.signature.toString()).toBe(
-      'forall T. (value: T, children: list<tree<T>>) -> tree<T>'
+      '(value: T, children: list<tree<T>>) -> tree<T> where T'
     );
   });
 });
@@ -463,7 +463,7 @@ describe('PARAMETERIZED NOMINAL TYPES — vacuous self-application', () => {
 });
 
 describe('PARAMETERIZED NOMINAL TYPES — instantiate.ts walkers', () => {
-  // §3: without traversing `args`, `forall T. (tree<T>) -> T` reads as GROUND,
+  // §3: without traversing `args`, `(tree<T>) -> T where T` reads as GROUND,
   // and the signature would be rejected as "quantified but never used".
   test('a free variable is detected THROUGH an application', () => {
     const ce = hostEngine();
@@ -476,8 +476,8 @@ describe('PARAMETERIZED NOMINAL TYPES — instantiate.ts walkers', () => {
 
   test('a signature whose only variable sits inside an application is legal', () => {
     const ce = hostEngine();
-    expect(ce.type('forall T. (tree<T>) -> T').toString()).toBe(
-      'forall T. (tree<T>) -> T'
+    expect(ce.type('(tree<T>) -> T where T').toString()).toBe(
+      '(tree<T>) -> T where T'
     );
   });
 
@@ -485,20 +485,20 @@ describe('PARAMETERIZED NOMINAL TYPES — instantiate.ts walkers', () => {
   // pairwise argument unification. `tree<T>` unifies with `tree<integer>`.
   test('the solver reaches a variable inside an application', () => {
     const ce = hostEngine();
-    const arm = ce.type('forall T. (tree<T>) -> T').type as FunctionSignature;
+    const arm = ce.type('(tree<T>) -> T where T').type as FunctionSignature;
     expect(
       inferTypeArguments(arm, [ce.type('tree<integer>').type])
     ).toMatchObject({ T: 'integer' });
     // …and through the public existential, which runs the same solver.
     expect(
-      ce.type('(tree<integer>) -> integer').matches('forall T. (tree<T>) -> T')
+      ce.type('(tree<integer>) -> integer').matches('(tree<T>) -> T where T')
     ).toBe(true);
   });
 
   test('a DIFFERENT nominal name does not unify', () => {
     const ce = hostEngine();
     ce.declareType('other', 'tuple<v: T>', { typeParams: ['T'] });
-    const arm = ce.type('forall T. (tree<T>) -> T').type as FunctionSignature;
+    const arm = ce.type('(tree<T>) -> T where T').type as FunctionSignature;
     expect(inferTypeArguments(arm, [ce.type('other<integer>').type])).toBe(
       null
     );
@@ -507,7 +507,7 @@ describe('PARAMETERIZED NOMINAL TYPES — instantiate.ts walkers', () => {
   test('a different ARITY does not unify', () => {
     const ce = hostEngine();
     ce.declareType('pair', 'tuple<a: A, b: B>', { typeParams: ['A', 'B'] });
-    const arm = ce.type('forall T. (tree<T>) -> T').type as FunctionSignature;
+    const arm = ce.type('(tree<T>) -> T where T').type as FunctionSignature;
     expect(
       inferTypeArguments(arm, [ce.type('pair<integer, string>').type])
     ).toBe(null);
@@ -515,7 +515,7 @@ describe('PARAMETERIZED NOMINAL TYPES — instantiate.ts walkers', () => {
 
   test('substitution reaches into an application but never through it', () => {
     const ce = hostEngine();
-    const arm = ce.type('forall T. (T) -> tree<T>').type as FunctionSignature;
+    const arm = ce.type('(T) -> tree<T> where T').type as FunctionSignature;
     const bindings = inferTypeArguments(arm, ['integer'])!;
     expect(typeToString(substituteTypeVariables(arm, bindings))).toBe(
       '(integer) -> tree<integer>'

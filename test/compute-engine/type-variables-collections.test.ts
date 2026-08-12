@@ -7,15 +7,15 @@ import { typeToString } from '../../src/common/type/serialize';
 /**
  * Phase 3b of the type-variables design
  * (`docs/plans/2026-08-01-type-variables-design.md` §7.3): the `collections.ts`
- * conversions from a weak signature + imperative `type:` handler to a `forall`
+ * conversions from a weak signature + imperative `type:` handler to a `where`
  * signature.
  *
  * CONVERTED (17):
- *   KeyValuePair  `forall T. (key: string, value: T) -> tuple<string, T>`
- *   Single        `forall T. (value: T) -> tuple<T>`
- *   Pair          `forall T, U. (first: T, second: U) -> tuple<T, U>`
- *   Triple        `forall T, U, V. (first: T, second: U, third: V) -> tuple<T, U, V>`
- *   Reverse       `forall T: indexed_collection. (T) -> T`  (the ONLY
+ *   KeyValuePair  `(key: string, value: T) -> tuple<string, T> where T`
+ *   Single        `(value: T) -> tuple<T> where T`
+ *   Pair          `(first: T, second: U) -> tuple<T, U> where T, U`
+ *   Triple        `(first: T, second: U, third: V) -> tuple<T, U, V> where T, U, V`
+ *   Reverse       `(T) -> T where T: indexed_collection`  (the ONLY
  *                 identity-preserving echo in the file)
  *   Take, Drop, Slice, DeleteAt, Insert, ReplaceAt, Sort, Unique,
  *   RandomShuffle, Tally, Partition, ChunkBy — the `collection<T>` /
@@ -42,55 +42,55 @@ const sig = (ce: ComputeEngine, op: string) =>
   ce.box(op).operatorDefinition!.signature.toString();
 
 describe('TYPE VARIABLES / collections — declared signatures', () => {
-  test('the five converted operators carry `forall` signatures', () => {
+  test('the five converted operators carry `where` signatures', () => {
     const ce = engine();
     expect(sig(ce, 'KeyValuePair')).toBe(
-      'forall T. (key: string, value: T) -> tuple<string, T>'
+      '(key: string, value: T) -> tuple<string, T> where T'
     );
-    expect(sig(ce, 'Single')).toBe('forall T. (value: T) -> tuple<T>');
+    expect(sig(ce, 'Single')).toBe('(value: T) -> tuple<T> where T');
     expect(sig(ce, 'Pair')).toBe(
-      'forall T, U. (first: T, second: U) -> tuple<T, U>'
+      '(first: T, second: U) -> tuple<T, U> where T, U'
     );
     expect(sig(ce, 'Triple')).toBe(
-      'forall T, U, V. (first: T, second: U, third: V) -> tuple<T, U, V>'
+      '(first: T, second: U, third: V) -> tuple<T, U, V> where T, U, V'
     );
-    expect(sig(ce, 'Reverse')).toBe('forall T: indexed_collection. (T) -> T');
+    expect(sig(ce, 'Reverse')).toBe('(T) -> T where T: indexed_collection');
   });
 
-  test('the twelve constructor-pattern operators carry `forall` signatures', () => {
+  test('the twelve constructor-pattern operators carry `where` signatures', () => {
     const ce = engine();
     expect(sig(ce, 'Take')).toBe(
-      'forall T. (xs: indexed_collection<T>, count: number) -> list<T>'
+      '(xs: indexed_collection<T>, count: number) -> list<T> where T'
     );
     expect(sig(ce, 'Drop')).toBe(
-      'forall T. (xs: indexed_collection<T>, count: number) -> list<T>'
+      '(xs: indexed_collection<T>, count: number) -> list<T> where T'
     );
     expect(sig(ce, 'Slice')).toBe(
-      'forall T. (value: indexed_collection<T>, start: number, end: number) -> list<T>'
+      '(value: indexed_collection<T>, start: number, end: number) -> list<T> where T'
     );
     expect(sig(ce, 'DeleteAt')).toBe(
-      'forall T. (indexed_collection<T>, integer) -> list<T>'
+      '(indexed_collection<T>, integer) -> list<T> where T'
     );
     // UNBOUNDED (the D4 audit's spelling). A bound on `T` would also
     // constrain the SOURCE collection's elements, since the same variable
     // stands for both — see the `list<function>` source pin below.
     expect(sig(ce, 'Insert')).toBe(
-      'forall T. (indexed_collection<T>, integer, T) -> list<T>'
+      '(indexed_collection<T>, integer, T) -> list<T> where T'
     );
     expect(sig(ce, 'ReplaceAt')).toBe(
-      'forall T. (indexed_collection<T>, integer, T) -> list<T>'
+      '(indexed_collection<T>, integer, T) -> list<T> where T'
     );
     // The `order`/`key` slots stay the PRIMITIVE `function`, not an arrow: a
     // function-typed SYMBOL operand must still be admitted there.
     expect(sig(ce, 'Sort')).toBe(
-      'forall T. (indexed_collection<T>, order: function?) -> list<T>'
+      '(indexed_collection<T>, order: function?) -> list<T> where T'
     );
-    expect(sig(ce, 'Unique')).toBe('forall T. (collection<T>) -> list<T>');
+    expect(sig(ce, 'Unique')).toBe('(collection<T>) -> list<T> where T');
     expect(sig(ce, 'RandomShuffle')).toBe(
-      'forall T. (indexed_collection<T>) random -> list<T>'
+      '(indexed_collection<T>) random -> list<T> where T'
     );
     expect(sig(ce, 'Tally')).toBe(
-      'forall T. (collection<T>) -> tuple<list<T>, list<integer>>'
+      '(collection<T>) -> tuple<list<T>, list<integer>> where T'
     );
     // The second parameter is still ONE union — but its function arm became a
     // Design D contextual callback in phase 2 (Rule U admits it: exactly one
@@ -99,13 +99,13 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // ground projection, and that is byte-identical to the line below it was
     // before (`design-d-callback-contract.test.ts`, R-D5).
     expect(sig(ce, 'Partition')).toBe(
-      'forall T. (collection<T>, callback<(T) -> boolean> | integer, integer?) -> list<list<T>>'
+      '(collection<T>, callback<(T) -> boolean> | integer, integer?) -> list<list<T>> where T'
     );
     expect(ce.box('Partition').type.toString()).toBe(
-      'forall T. (collection<T>, function | integer, integer?) -> list<list<T>>'
+      '(collection<T>, function | integer, integer?) -> list<list<T>> where T'
     );
     expect(sig(ce, 'ChunkBy')).toBe(
-      'forall T. (collection<T>, key: function) -> list<list<T>>'
+      '(collection<T>, key: function) -> list<list<T>> where T'
     );
   });
 });
@@ -116,7 +116,7 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
 // own signature is observable — it is probed alongside the canonical routes.
 //
 
-describe('TYPE VARIABLES / KeyValuePair — `forall T. (key: string, value: T) -> tuple<string, T>`', () => {
+describe('TYPE VARIABLES / KeyValuePair — `(key: string, value: T) -> tuple<string, T> where T`', () => {
   test('the value position echoes verbatim on every route', () => {
     const ce = engine();
     const t = (v: any) =>
@@ -259,7 +259,7 @@ describe('TYPE VARIABLES / Single, Pair, Triple — per-position echo', () => {
 // Reverse — the one identity-preserving echo.
 //
 
-describe('TYPE VARIABLES / Reverse — `forall T: indexed_collection. (T) -> T`', () => {
+describe('TYPE VARIABLES / Reverse — `(T) -> T where T: indexed_collection`', () => {
   test('the operand type is echoed VERBATIM — kind and dimensions', () => {
     const ce = engine();
     ce.declare('rvM', 'matrix<integer^(2x3)>');
@@ -356,7 +356,7 @@ describe('TYPE VARIABLES / Reverse — `forall T: indexed_collection. (T) -> T`'
     // it, because the ground `(indexed_collection) -> indexed_collection`
     // admits `any` unconditionally through the unknown/any gate. `any` is
     // therefore absorbed exactly as `unknown` is (D8). Same for the
-    // already-migrated `Inverse: forall T: matrix. (T) -> T`.
+    // already-migrated `Inverse: (T) -> T where T: matrix`.
     const ce2 = engine();
     ce2.declare('rvA', 'any');
     expect(ce2.function('Reverse', [ce2.box('rvA')]).isValid).toBe(true);
@@ -491,7 +491,7 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
     // parameter whose true expected type is `list<integer>`. The bound is
     // substituted INTO the pattern for display, like the §8 callback case.
     const ce = engine();
-    ce.declare('hh57', { signature: 'forall T: integer. (T, list<T>) -> T' });
+    ce.declare('hh57', { signature: '(T, list<T>) -> T where T: integer' });
     const e = ce.box(['hh57', 1, ['List', 1.5, 2.5]]);
     expect(e.isValid).toBe(false);
     // Blame lands on the offending operand (position 1), with the

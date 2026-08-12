@@ -1821,8 +1821,8 @@ describe('`callback<…>` rejects a non-signature payload with a position', () =
     );
   });
 
-  it('leaves the nested-`forall` rejection to its own (better) message', () => {
-    expect(messageOf('callback<forall T. (T) -> boolean>')).toContain(
+  it('leaves the nested-`where` rejection to its own (better) message', () => {
+    expect(messageOf('callback<((T) -> boolean where T)>')).toContain(
       'unsupported-variable-position'
     );
   });

@@ -66,7 +66,7 @@ import {
 
 export interface OverloadResolution {
   /** The most-specific viable arm, AS DECLARED — a polytype arm keeps its
-   * `forall` clause; `undefined` when no arm fits. */
+   * `where` clause; `undefined` when no arm fits. */
   selected: FunctionSignature | undefined;
   /** Every arm that survived arity + type filtering, in declaration order,
    * each one GROUND: a polytype arm is the instantiation solved at THIS call
@@ -389,14 +389,14 @@ function operandAdmits(
 
 /** A GROUND view of one arm at one call (§4.1 per-arm instantiation). */
 interface ArmInstance {
-  /** The arm as DECLARED — a polytype arm keeps its `forall` clause. */
+  /** The arm as DECLARED — a polytype arm keeps its `where` clause. */
   declared: FunctionSignature;
   /** The arm with this call's solution substituted. Always ground. */
   instance: FunctionSignature;
   /** The solve that produced `instance`. `undefined` for a ground arm (no
    * clause, no solve). */
   solution: TypeInferenceResult | undefined;
-  /** The arm carries a `forall` clause (D11's generic-vs-ground test). */
+  /** The arm carries a `where` clause (D11's generic-vs-ground test). */
   generic: boolean;
   /** False when the instantiation itself is unsatisfiable — a violated
    * declared bound, or conflicting upper bounds. Such an arm is NOT viable;
@@ -406,7 +406,7 @@ interface ArmInstance {
   ok: boolean;
 }
 
-/** Does this arm carry a `forall` clause? O(1) — the gate that keeps a ground
+/** Does this arm carry a `where` clause? O(1) — the gate that keeps a ground
  * overload set on the pre-generics path. */
 function isGenericArm(arm: FunctionSignature): boolean {
   return arm.typeParams !== undefined && arm.typeParams.length > 0;
@@ -548,7 +548,7 @@ export function isMoreSpecific(
  * arms (§6 of the type-variables design).
  *
  * **D11 — generic-vs-ground tie (RULED ground-wins).** When the two arms are
- * IDENTICAL after instantiation (`(forall T. (T) -> T) & ((integer) ->
+ * IDENTICAL after instantiation (`((T) -> T where T) & ((integer) ->
  * integer)` at an `integer` operand), the GROUND declaration wins: "most
  * specific declaration" is why an author writes the specialized arm at all
  * (distinct handler, distinct effects). Without the rule, resolution falls

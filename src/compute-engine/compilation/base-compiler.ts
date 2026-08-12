@@ -6121,7 +6121,7 @@ export class BaseCompiler {
       // coerces (a generic user function declines whole-fn — G3,
       // generic-function-literals design §2.7, enforced in
       // `ensureUserFunctionEmitted`). Answering `true` here would silently
-      // claim scalar parameters for a `forall T. (T) -> T`.
+      // claim scalar parameters for a `(T) -> T where T`.
       if (isPolymorphicType(declared)) return false;
       return paramsAreScalar(declared);
     }
@@ -6337,7 +6337,7 @@ export class BaseCompiler {
     // A GENERIC user function declines whole-fn (G3, generic-function-
     // literals design §2.7): its parameters are open type variables, so the
     // emitted code can neither coerce nor broadcast a call — a lifted call
-    // (`f([1,2,3])` under `forall T: number. (T) -> T`) would run the scalar
+    // (`f([1,2,3])` under `(T) -> T where T: number`) would run the scalar
     // body on the array and silently compute a wrong value. The declared
     // signature is authoritative when there is one (an E3 install stores a
     // plain literal whose own arrow is ground); the literal's own polytype

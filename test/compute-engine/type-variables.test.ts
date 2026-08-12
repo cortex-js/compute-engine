@@ -19,8 +19,8 @@ import type { Type } from '../../src/common/type/types';
 //
 // Type variables (parametric polymorphism), PHASE 1 — the type layer only.
 //
-// `docs/plans/2026-08-01-type-variables-design.md`: a polytype is a `forall`
-// clause prefixing a function signature. This file pins the type-layer half of
+// `docs/plans/2026-08-01-type-variables-design.md`: a polytype is a `where`
+// clause trailing a function signature. This file pins the type-layer half of
 // the §11 test plan: parse/serialize round trips, per-arm α-equivalence, the
 // §7.2 declaration-time rejections (with their exact error codes), the two
 // polytype subtype rules that exist in v1, and the no-mutation invariant on
@@ -49,32 +49,32 @@ function codeOf(fn: () => unknown): string {
 describe('PARSE / SERIALIZE ROUND TRIP', () => {
   // Every signature of §4.7, plus the effects-composed forms.
   const ROUND_TRIP = [
-    'forall T. (T, T) -> T',
-    'forall T. (list<T>) -> T',
-    'forall T. (T?) -> list<T>',
-    'forall T: number. (T?) -> list<T>',
-    'forall T. (T+) -> list<T>',
-    'forall T, U. (tuple<T, U>) -> tuple<U, T>',
-    'forall T: indexed_collection. (T) -> T',
-    'forall T: number. (T) -> T',
-    'forall T. ((T) -> boolean, (T) -> boolean) -> T',
-    'forall T. ((T) -> boolean, T) -> T',
-    'forall T, U, V. ((U) -> V, (T) -> U) -> (T) -> V',
-    'forall T: number, U. (list<T>, (T) any -> U) -> list<U>',
-    'forall Elem. (list<Elem>) -> Elem',
-    'forall T. (broadcastable<T>) -> T',
-    'forall T. (set<T>, dictionary<T>, record<x: T>) -> T',
-    'forall T. (collection<T>, indexed_collection<T>) -> T',
+    '(T, T) -> T where T',
+    '(list<T>) -> T where T',
+    '(T?) -> list<T> where T',
+    '(T?) -> list<T> where T: number',
+    '(T+) -> list<T> where T',
+    '(tuple<T, U>) -> tuple<U, T> where T, U',
+    '(T) -> T where T: indexed_collection',
+    '(T) -> T where T: number',
+    '((T) -> boolean, (T) -> boolean) -> T where T',
+    '((T) -> boolean, T) -> T where T',
+    '((U) -> V, (T) -> U) -> (T) -> V where T, U, V',
+    '(list<T>, (T) any -> U) -> list<U> where T: number, U',
+    '(list<Elem>) -> Elem where Elem',
+    '(broadcastable<T>) -> T where T',
+    '(set<T>, dictionary<T>, record<x: T>) -> T where T',
+    '(collection<T>, indexed_collection<T>) -> T where T',
     // A bound may itself be a signature: the dot terminates the clause.
-    'forall T: (real) -> real. (g: T) -> boolean',
+    '(g: T) -> boolean where T: (real) -> real',
     // Overload set: per-arm clauses, parenthesized.
-    '(forall T. (list<T>) -> T) & (forall T. (set<T>) -> boolean)',
+    '((list<T>) -> T where T) & ((set<T>) -> boolean where T)',
     // Effects compose with the clause (the specifier slot sits between the
     // argument list and the arrow).
-    'forall T. (T) random -> T',
-    'forall T. (T) pure -> T',
-    'forall T, U. (T, U) random scope -> U',
-    'forall T. (T) any -> T',
+    '(T) random -> T where T',
+    '(T) pure -> T where T',
+    '(T, U) random scope -> U where T, U',
+    '(T) any -> T where T',
   ];
 
   test.each(ROUND_TRIP)('%s round-trips', (s) => {
@@ -82,36 +82,36 @@ describe('PARSE / SERIALIZE ROUND TRIP', () => {
   });
 
   test('the author’s variable names are preserved (never canonicalized)', () => {
-    expect(ce.type('forall Widget. (list<Widget>) -> Widget').toString()).toBe(
-      'forall Widget. (list<Widget>) -> Widget'
+    expect(ce.type('(list<Widget>) -> Widget where Widget').toString()).toBe(
+      '(list<Widget>) -> Widget where Widget'
     );
-    expect(ce.type('forall zz. (zz) -> zz').toString()).toBe(
-      'forall zz. (zz) -> zz'
+    expect(ce.type('(zz) -> zz where zz').toString()).toBe(
+      '(zz) -> zz where zz'
     );
   });
 
   test('a stated `pure` on a polytype arrow survives serialize → parse', () => {
-    const t = ce.type('forall T. (T) pure -> T');
-    expect(t.toString()).toBe('forall T. (T) pure -> T');
+    const t = ce.type('(T) pure -> T where T');
+    expect(t.toString()).toBe('(T) pure -> T where T');
     expect(t.effects).toEqual([]);
     const reparsed = ce.type(t.toString());
     expect(reparsed.effects).toEqual([]);
-    expect(reparsed.toString()).toBe('forall T. (T) pure -> T');
+    expect(reparsed.toString()).toBe('(T) pure -> T where T');
   });
 
   test('a polytype records its effects contract', () => {
-    // NOTE: §11 spells this row `forall T, U. (T) random -> U`, which its own
+    // NOTE: §11 spells this row `(T) random -> U where T, U`, which its own
     // §4.1 result-reachability rule rejects (`U` occurs only in the result);
     // the reachable form is used instead.
-    expect(ce.type('forall T, U. (T, U) random -> U').effects).toEqual([
+    expect(ce.type('(T, U) random -> U where T, U').effects).toEqual([
       'random',
     ]);
-    expect(ce.type('forall T. (T) -> T').effects).toBeUndefined();
+    expect(ce.type('(T) -> T where T').effects).toBeUndefined();
   });
 
   test('a quantified name shadows a known type name inside its arm', () => {
-    const t = parseType('forall integer. (integer) -> integer');
-    expect(typeToString(t)).toBe('forall integer. (integer) -> integer');
+    const t = parseType('(integer) -> integer where integer');
+    expect(typeToString(t)).toBe('(integer) -> integer where integer');
     expect((t as any).args[0].type).toEqual({
       kind: 'variable',
       name: 'integer',
@@ -125,7 +125,7 @@ describe('PARSE / SERIALIZE ROUND TRIP', () => {
   });
 
   test('the clause is represented on the signature', () => {
-    expect(parseType('forall T: number, U. (T, U) -> T')).toMatchObject({
+    expect(parseType('(T, U) -> T where T: number, U')).toMatchObject({
       kind: 'signature',
       typeParams: [{ name: 'T', bound: 'number' }, { name: 'U' }],
       args: [
@@ -137,9 +137,9 @@ describe('PARSE / SERIALIZE ROUND TRIP', () => {
   });
 
   test('isPolymorphic is set on the boxed type', () => {
-    expect(ce.type('forall T. (T) -> T').isPolymorphic).toBe(true);
+    expect(ce.type('(T) -> T where T').isPolymorphic).toBe(true);
     expect(
-      ce.type('(forall T. (list<T>) -> T) & ((integer) -> integer)')
+      ce.type('((list<T>) -> T where T) & ((integer) -> integer)')
         .isPolymorphic
     ).toBe(true);
     expect(ce.type('(integer) -> integer').isPolymorphic).toBe(false);
@@ -149,21 +149,21 @@ describe('PARSE / SERIALIZE ROUND TRIP', () => {
 
 describe('α-EQUIVALENCE (Poly <: Poly, rule 3)', () => {
   const equivalent: [string, string][] = [
-    ['forall T. (T) -> T', 'forall U. (U) -> U'],
-    ['forall T. (T) -> T', 'forall T. (T) -> T'],
-    ['forall T, U. (T, U) -> T', 'forall U, T. (U, T) -> U'],
-    ['forall T. (list<T>) -> T', 'forall Elem. (list<Elem>) -> Elem'],
-    ['forall T: number. (T) -> T', 'forall U: number. (U) -> U'],
+    ['(T) -> T where T', '(U) -> U where U'],
+    ['(T) -> T where T', '(T) -> T where T'],
+    ['(T, U) -> T where T, U', '(U, T) -> U where U, T'],
+    ['(list<T>) -> T where T', '(list<Elem>) -> Elem where Elem'],
+    ['(T) -> T where T: number', '(U) -> U where U: number'],
     // `pure` and an absent effect specifier are the two spellings of the SAME
     // (empty) effect set — the generic path must not be stricter than the
     // ground one, which already treats them as equal.
-    ['forall T. (T) pure -> T', 'forall U. (U) -> U'],
-    ['forall T: number. (T) pure -> T', 'forall T: number. (T) -> T'],
+    ['(T) pure -> T where T', '(U) -> U where U'],
+    ['(T) pure -> T where T: number', '(T) -> T where T: number'],
     // The same letter in two arms of an overload set is two unrelated
     // variables: each arm renames independently.
     [
-      '(forall T. (list<T>) -> T) & (forall T. (set<T>) -> boolean)',
-      '(forall A. (list<A>) -> A) & (forall B. (set<B>) -> boolean)',
+      '((list<T>) -> T where T) & ((set<T>) -> boolean where T)',
+      '((list<A>) -> A where A) & ((set<B>) -> boolean where B)',
     ],
   ];
   test.each(equivalent)('%s ≡ %s', (a, b) => {
@@ -173,13 +173,13 @@ describe('α-EQUIVALENCE (Poly <: Poly, rule 3)', () => {
 
   const different: [string, string][] = [
     // Different shape, not a renaming.
-    ['forall T, U. (T, U) -> T', 'forall T, U. (T, U) -> U'],
-    ['forall T. (T, T) -> T', 'forall T, U. (T, U) -> T'],
+    ['(T, U) -> T where T, U', '(T, U) -> U where T, U'],
+    ['(T, T) -> T where T', '(T, U) -> T where T, U'],
     // Bounds are compared STRUCTURALLY.
-    ['forall T: number. (T) -> T', 'forall U: integer. (U) -> U'],
-    ['forall T: number. (T) -> T', 'forall U. (U) -> U'],
+    ['(T) -> T where T: number', '(U) -> U where U: integer'],
+    ['(T) -> T where T: number', '(U) -> U where U'],
     // Effects still compose (and still differ).
-    ['forall T. (T) random -> T', 'forall U. (U) -> U'],
+    ['(T) random -> T where T', '(U) -> U where U'],
   ];
   test.each(different)('%s ≢ %s', (a, b) => {
     expect(isSubtype(parseType(a), parseType(b))).toBe(false);
@@ -188,9 +188,9 @@ describe('α-EQUIVALENCE (Poly <: Poly, rule 3)', () => {
 
 describe('Ground <: Poly (rule 2) is FALSE', () => {
   test.each([
-    ['(integer) -> integer', 'forall T. (T) -> T'],
-    ['(number) -> number', 'forall T. (T) -> T'],
-    ['(list<integer>) -> integer', 'forall T. (list<T>) -> T'],
+    ['(integer) -> integer', '(T) -> T where T'],
+    ['(number) -> number', '(T) -> T where T'],
+    ['(list<integer>) -> integer', '(list<T>) -> T where T'],
   ])('%s is not a subtype of %s', (a, b) => {
     expect(isSubtype(parseType(a), parseType(b))).toBe(false);
     // NOTE (phase 2, D12): `BoxedType.matches` with a POLYMORPHIC PATTERN is
@@ -203,34 +203,34 @@ describe('Ground <: Poly (rule 2) is FALSE', () => {
 
   test('rule 1 (Poly <: Ground) — instantiate-and-check (phase 2)', () => {
     expect(
-      isSubtype(parseType('forall T. (T) -> T'), parseType('(number) -> number'))
+      isSubtype(parseType('(T) -> T where T'), parseType('(number) -> number'))
     ).toBe(true);
     expect(
       isSubtype(
-        parseType('forall T. (T) -> T'),
+        parseType('(T) -> T where T'),
         parseType('(integer) -> integer')
       )
     ).toBe(true);
     // …and a polytype IS a function.
-    expect(ce.type('forall T. (T) -> T').matches('function')).toBe(true);
+    expect(ce.type('(T) -> T where T').matches('function')).toBe(true);
   });
 });
 
 describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
   test('result-only variable — unbounded AND bounded both reject', () => {
-    expect(codeOf(() => ce.type('forall T. () -> list<T>'))).toBe(
+    expect(codeOf(() => ce.type('() -> list<T> where T'))).toBe(
       'unsolvable-type-variable'
     );
-    expect(codeOf(() => ce.type('forall T: number. () -> list<T>'))).toBe(
+    expect(codeOf(() => ce.type('() -> list<T> where T: number'))).toBe(
       'unsolvable-type-variable'
     );
-    expect(codeOf(() => ce.type('forall T. (integer) -> T'))).toBe(
+    expect(codeOf(() => ce.type('(integer) -> T where T'))).toBe(
       'unsolvable-type-variable'
     );
   });
 
   test('quantified but unused variable', () => {
-    expect(codeOf(() => ce.type('forall T, U. (T) -> T'))).toBe(
+    expect(codeOf(() => ce.type('(T) -> T where T, U'))).toBe(
       'unsolvable-type-variable'
     );
   });
@@ -238,19 +238,19 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
   test('variable in an unsupported position', () => {
     // A UNION arm is no longer one of them (Rule U) — see
     // `union-position-polytypes.test.ts`.
-    expect(ce.type('forall T. (T | string) -> T').isPolymorphic).toBe(true);
-    expect(ce.type('forall T. (list<T | string>) -> T').isPolymorphic).toBe(
+    expect(ce.type('(T | string) -> T where T').isPolymorphic).toBe(true);
+    expect(ce.type('(list<T | string>) -> T where T').isPolymorphic).toBe(
       true
     );
-    expect(codeOf(() => ce.type('forall T. (T & number) -> T'))).toBe(
+    expect(codeOf(() => ce.type('(T & number) -> T where T'))).toBe(
       'unsupported-variable-position'
     );
-    expect(codeOf(() => ce.type('forall T. (!T) -> T'))).toBe(
+    expect(codeOf(() => ce.type('(!T) -> T where T'))).toBe(
       'unsupported-variable-position'
     );
     // Two OPEN arms stay rejected: nothing at a call site says which arm a
     // value took, so neither variable could be solved.
-    expect(codeOf(() => ce.type('forall T, U. (T | U) -> tuple<T, U>'))).toBe(
+    expect(codeOf(() => ce.type('(T | U) -> tuple<T, U> where T, U'))).toBe(
       'unsupported-variable-position'
     );
   });
@@ -260,60 +260,60 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
     // arm no longer forbids what it contains, so a nested arrow reached
     // through one is an ordinary nested arrow.
     expect(
-      ce.type('forall T. (((T) -> T) | string) -> T').isPolymorphic
+      ce.type('(((T) -> T) | string) -> T where T').isPolymorphic
     ).toBe(true);
     expect(
-      ce.type('forall T. ((integer) -> (T | string)) -> T').isPolymorphic
+      ce.type('((integer) -> (T | string)) -> T where T').isPolymorphic
     ).toBe(true);
     // An INTERSECTION member still forbids what it contains, nested arrow or
     // not.
     expect(
-      codeOf(() => ce.type('forall T. (list<((T) -> boolean) & string>) -> T'))
+      codeOf(() => ce.type('(list<((T) -> boolean) & string>) -> T where T'))
     ).toBe('unsupported-variable-position');
     // …and an ordinary nested arrow, reached from an allowed position, is
     // still accepted.
     expect(
-      ce.type('forall T, U. (collection<T>, (T) any -> U) -> collection<U>')
+      ce.type('(collection<T>, (T) any -> U) -> collection<U> where T, U')
         .isPolymorphic
     ).toBe(true);
     expect(
-      ce.type('forall T, U, V. ((U) -> V, (T) -> U) -> (T) -> V').isPolymorphic
+      ce.type('((U) -> V, (T) -> U) -> (T) -> V where T, U, V').isPolymorphic
     ).toBe(true);
   });
 
   test('non-ground bound (F-bounded, or referring to another variable)', () => {
-    expect(codeOf(() => ce.type('forall T: list<T>. (T) -> T'))).toBe(
+    expect(codeOf(() => ce.type('(T) -> T where T: list<T>'))).toBe(
       'unsupported-variable-position'
     );
-    expect(codeOf(() => ce.type('forall U, T: list<U>. (T, U) -> T'))).toBe(
+    expect(codeOf(() => ce.type('(T, U) -> T where U, T: list<U>'))).toBe(
       'unsupported-variable-position'
     );
   });
 
   test('a clause on a non-signature, or on a bare intersection', () => {
-    expect(codeOf(() => ce.type('forall T. list<T>'))).toBe(
+    expect(codeOf(() => ce.type('list<T> where T'))).toBe(
       'unsupported-variable-position'
     );
-    expect(codeOf(() => ce.type('forall T. integer & string'))).toBe(
+    expect(codeOf(() => ce.type('integer & string where T'))).toBe(
       'unsupported-variable-position'
     );
-    expect(codeOf(() => ce.type('forall T. integer | string'))).toBe(
+    expect(codeOf(() => ce.type('integer | string where T'))).toBe(
       'unsupported-variable-position'
     );
   });
 
   test('a NESTED clause — parameter, result, element or bound position', () => {
     expect(
-      codeOf(() => ce.type('forall T. ((forall U. (U) -> U)) -> T'))
+      codeOf(() => ce.type('(((U) -> U where U)) -> T where T'))
     ).toBe('unsupported-variable-position');
-    expect(codeOf(() => ce.type('forall T. (T) -> (forall U. (U) -> U)'))).toBe(
+    expect(codeOf(() => ce.type('(T) -> ((U) -> U where U) where T'))).toBe(
       'unsupported-variable-position'
     );
     expect(
-      codeOf(() => ce.type('forall T. (T) -> list<forall U. (U) -> U>'))
+      codeOf(() => ce.type('(T) -> list<((U) -> U where U)> where T'))
     ).toBe('unsupported-variable-position');
     expect(
-      codeOf(() => ce.type('forall T: (forall U. (U) -> U). (T) -> T'))
+      codeOf(() => ce.type('(T) -> T where T: ((U) -> U where U)'))
     ).toBe('unsupported-variable-position');
   });
 
@@ -360,7 +360,7 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
 
   test('`__proto__` is a legal type-variable name (no prototype pollution)', () => {
     const engine = fresh();
-    const SIGNATURE = 'forall __proto__. (__proto__) -> __proto__';
+    const SIGNATURE = '(__proto__) -> __proto__ where __proto__';
     expect(() => engine.declare('pid', { signature: SIGNATURE })).not.toThrow();
     expect(engine.lookupDefinition('pid')!.operator!.signature.toString()).toBe(
       SIGNATURE
@@ -369,25 +369,26 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
     expect(e.isValid).toBe(true);
     expect(e.type.toString()).toBe('finite_integer');
     // The α-equivalence renaming map is prototype-free too.
-    expect(isSubtype(parseType(SIGNATURE), parseType('forall U. (U) -> U'))).toBe(
+    expect(isSubtype(parseType(SIGNATURE), parseType('(U) -> U where U'))).toBe(
       true
     );
     // Nothing leaked onto `Object.prototype`.
     expect(({} as any).name).toBeUndefined();
   });
 
-  test('`forall` is a reserved type name', () => {
+  test('`where` is a reserved type name (`forall` no longer is)', () => {
     const engine = new ComputeEngine();
-    expect(codeOf(() => engine.declareType('forall', 'number'))).toBe(
+    expect(codeOf(() => engine.declareType('where', 'number'))).toBe(
       'reserved-type-name'
     );
+    expect(() => engine.declareType('forall', 'number')).not.toThrow();
   });
 
   test('a quantified name does not leak out of its arm', () => {
     // The second arm does not quantify `T`, so `T` is an unknown type there.
     expect(
       codeOf(() =>
-        ce.type('(forall T. (list<T>) -> T) & ((set<T>) -> boolean)')
+        ce.type('((list<T>) -> T where T) & ((set<T>) -> boolean)')
       )
     ).toMatch(/Unknown type "T"/);
   });
@@ -405,10 +406,16 @@ describe('NO BEHAVIOR CHANGE FOR EXISTING TYPE STRINGS', () => {
     expect(() => ce.type('<T>')).toThrow();
   });
 
-  test('a bare `forall` is a parse error', () => {
-    expect(() => ce.type('forall')).toThrow();
-    expect(() => ce.type('forall T (T) -> T')).toThrow(); // missing dot
-    expect(() => ce.type('forall T, T. (T) -> T')).toThrow(); // duplicate name
+  test('a malformed `where` clause is a parse error', () => {
+    expect(() => ce.type('(T) -> T where')).toThrow(); // no variable name
+    expect(() => ce.type('(T) -> T where T:')).toThrow(); // no bound
+    expect(() => ce.type('(T) -> T where T, T')).toThrow(); // duplicate name
+  });
+
+  test('the legacy `forall` prefix reports the migration diagnostic', () => {
+    expect(() => ce.type('forall T. (T) -> T')).toThrow(
+      /prefix syntax was replaced by a trailing `where` clause/
+    );
   });
 
   test('ordinary types are unaffected', () => {
@@ -425,7 +432,7 @@ describe('DIMENSIONED ACTUALS — the two collection readings (subtype.ts)', () 
   // collection, and `isSubtype` must admit BOTH: the flat scalar-dtype reading,
   // and the PEELED reading the runtime uses (`collectionElementType`: "the
   // first element of a matrix is its first row"). Admitting only the first is
-  // what made `forall T. (indexed_collection<T>, …)` reject the very matrix
+  // what made `(indexed_collection<T>, …) where T` reject the very matrix
   // operand whose element type pinned `T`.
   test('the peeled row reading is admitted', () => {
     const m = parseType('matrix<integer^(2x3)>');
@@ -470,7 +477,7 @@ describe('DIMENSIONED ACTUALS — the two collection readings (subtype.ts)', () 
 
 describe('FREE VARIABLES AND SUBSTITUTION', () => {
   test('a polytype has no free variables; an open type does', () => {
-    expect([...freeTypeVariables(parseType('forall T. (T) -> T'))]).toEqual([]);
+    expect([...freeTypeVariables(parseType('(T) -> T where T'))]).toEqual([]);
     expect([
       ...freeTypeVariables({
         kind: 'list',
@@ -483,24 +490,24 @@ describe('FREE VARIABLES AND SUBSTITUTION', () => {
   });
 
   test('substitution instantiates the arm and removes the clause', () => {
-    const poly = parseType('forall T. (list<T>, T) -> T');
+    const poly = parseType('(list<T>, T) -> T where T');
     expect(typeToString(substituteTypeVariables(poly, { T: 'integer' }))).toBe(
       '(list<integer>, integer) -> integer'
     );
   });
 
   test('a partial substitution keeps the remaining clause entries', () => {
-    const poly = parseType('forall T, U. (T, (U) -> T) -> list<U>');
+    const poly = parseType('(T, (U) -> T) -> list<U> where T, U');
     expect(typeToString(substituteTypeVariables(poly, { U: 'string' }))).toBe(
-      'forall T. (T, (string) -> T) -> list<string>'
+      '(T, (string) -> T) -> list<string> where T'
     );
   });
 
   test('NO-MUTATION PIN: substitution never writes into a shared polytype', () => {
     // `parseType` interns (and deep-freezes) resolver-less results, so the two
     // parses hand back the SAME object — the one a definition would store.
-    const a = parseType('forall T. (list<T>, T) -> T');
-    const b = parseType('forall T. (list<T>, T) -> T');
+    const a = parseType('(list<T>, T) -> T where T');
+    const b = parseType('(list<T>, T) -> T where T');
     expect(a).toBe(b);
     const before = JSON.stringify(a);
 
@@ -512,23 +519,23 @@ describe('FREE VARIABLES AND SUBSTITUTION', () => {
     // The cached polytype is structurally unchanged, and still a polytype.
     expect(JSON.stringify(a)).toBe(before);
     expect(JSON.stringify(b)).toBe(before);
-    expect(typeToString(a)).toBe('forall T. (list<T>, T) -> T');
+    expect(typeToString(a)).toBe('(list<T>, T) -> T where T');
     expect(instantiated).not.toBe(a);
   });
 });
 
 describe('REBUILD INVARIANT (typeParams alongside effects)', () => {
   test('reduction preserves both adjunct fields', () => {
-    const t = parseType('forall T. (list<T>) random -> T');
+    const t = parseType('(list<T>) random -> T where T');
     // `reduceType` runs on every union/intersection member; going through a
     // reduced intersection exercises it on the arm.
     const reduced = parseType(
-      '(forall T. (list<T>) random -> T) & (forall U. (set<U>) -> boolean)'
+      '((list<T>) random -> T where T) & ((set<U>) -> boolean where U)'
     );
     expect(typeToString(reduced)).toBe(
-      '(forall T. (list<T>) random -> T) & (forall U. (set<U>) -> boolean)'
+      '((list<T>) random -> T where T) & ((set<U>) -> boolean where U)'
     );
-    expect(typeToString(t)).toBe('forall T. (list<T>) random -> T');
+    expect(typeToString(t)).toBe('(list<T>) random -> T where T');
   });
 });
 
@@ -571,14 +578,14 @@ function solvedVar(sig: string, actuals: string[], name: string): string {
 
 describe('SOLVER — the §4.7 worked examples (unit)', () => {
   test('join of two lower bounds', () => {
-    expect(solve('forall T. (T, T) -> T', ['integer', 'real'])).toBe(
+    expect(solve('(T, T) -> T where T', ['integer', 'real'])).toBe(
       '(real, real) -> real'
     );
   });
 
   test('a non-inferable `unknown` ABSORBS (never raw `widen`)', () => {
     // `widen(unknown, integer)` is `integer`, which would OVERSTATE the result.
-    expect(solve('forall T. (T, T) -> T', ['unknown', 'integer'])).toBe(
+    expect(solve('(T, T) -> T where T', ['unknown', 'integer'])).toBe(
       '(unknown, unknown) -> unknown'
     );
   });
@@ -589,53 +596,53 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // gate reads the WHOLE operand's type, so the waiver is for a bound
     // recorded at a bare-variable pattern, depth 0.
     for (const top of ['any', 'unknown']) {
-      expect(solve('forall T: indexed_collection. (T) -> T', [top])).toBe(
+      expect(solve('(T) -> T where T: indexed_collection', [top])).toBe(
         `(${top}) -> ${top}`
       );
       // NESTED under a constructor there is no such counterpart:
       // `isSubtype(tuple<any>, tuple<number>)` is false, so the bound is
       // enforced and the solve FAILS, exactly as the ground reading does.
-      expect(solve('forall T: number. (tuple<T>) -> T', [`tuple<${top}>`])).toMatch(
+      expect(solve('(tuple<T>) -> T where T: number', [`tuple<${top}>`])).toMatch(
         /^FAIL .*is declared with bound `number`/
       );
       // The JOIN itself is unchanged — `T` still solves to the top type.
-      expect(solvedVar('forall T: number. (tuple<T>) -> T', [`tuple<${top}>`], 'T')).toBe(
+      expect(solvedVar('(tuple<T>) -> T where T: number', [`tuple<${top}>`], 'T')).toBe(
         top
       );
     }
     // An UNBOUNDED variable is unaffected either way.
-    expect(solve('forall T. (tuple<T>) -> T', ['tuple<any>'])).toBe(
+    expect(solve('(tuple<T>) -> T where T', ['tuple<any>'])).toBe(
       '(tuple<any>) -> any'
     );
   });
 
   test('element extraction from a list', () => {
-    expect(solve('forall T. (list<T>) -> T', ['list<integer | string>'])).toBe(
+    expect(solve('(list<T>) -> T where T', ['list<integer | string>'])).toBe(
       '(list<integer | string>) -> integer | string'
     );
   });
 
   test('S3 fallback — `unknown` when unbounded, the BOUND when bounded', () => {
-    expect(solve('forall T. (T?) -> list<T>', [])).toBe(
+    expect(solve('(T?) -> list<T> where T', [])).toBe(
       '(unknown?) -> list<unknown>'
     );
-    expect(solve('forall T: number. (T?) -> list<T>', [])).toBe(
+    expect(solve('(T?) -> list<T> where T: number', [])).toBe(
       '(number?) -> list<number>'
     );
     // Explicitly NOT `never` — an omitted optional must not type the result
     // "impossible".
-    expect(solvedVar('forall T. (T?) -> list<T>', [], 'T')).not.toBe('never');
+    expect(solvedVar('(T?) -> list<T> where T', [], 'T')).not.toBe('never');
   });
 
   test('variadic fold — one bound per actual, all into the same variable', () => {
     expect(
-      solve('forall T. (T+) -> list<T>', ['integer', 'real', 'rational'])
+      solve('(T+) -> list<T> where T', ['integer', 'real', 'rational'])
     ).toBe('(real+) -> list<real>');
   });
 
   test('tuple destructuring, two variables', () => {
     expect(
-      solve('forall T, U. (tuple<T, U>) -> tuple<U, T>', [
+      solve('(tuple<T, U>) -> tuple<U, T> where T, U', [
         'tuple<integer, string>',
       ])
     ).toBe('(tuple<integer, string>) -> tuple<string, integer>');
@@ -643,12 +650,12 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
 
   test('bounded identity — the operand type VERBATIM, dimensions preserved', () => {
     expect(
-      solve('forall T: indexed_collection. (T) -> T', ['matrix<integer^(2x3)>'])
+      solve('(T) -> T where T: indexed_collection', ['matrix<integer^(2x3)>'])
     ).toBe('(matrix<integer^(2x3)>) -> matrix<integer^(2x3)>');
   });
 
   test('a violated DECLARED bound fails, naming the bound (§8)', () => {
-    const r = solve('forall T: indexed_collection. (T) -> T', ['set<real>']);
+    const r = solve('(T) -> T where T: indexed_collection', ['set<real>']);
     expect(r).toContain('FAIL');
     expect(r).toContain('bound `indexed_collection`');
     expect(r).toContain('set<real>');
@@ -667,13 +674,13 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // Under `(T, T) -> T` the JOIN violates the bound, but only ONE operand is
     // at fault: blaming the first PINNING position named the innocent one.
     expect(
-      blame('forall T: number. (T, T) -> T', [
+      blame('(T, T) -> T where T: number', [
         'finite_integer',
         'matrix<integer^(2x2)>',
       ])
     ).toBe(1);
     expect(
-      blame('forall T: number. (T, T) -> T', [
+      blame('(T, T) -> T where T: number', [
         'matrix<integer^(2x2)>',
         'finite_integer',
       ])
@@ -681,21 +688,21 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // Deterministic: the EARLIEST individually-violating position, never the
     // last one, when several are at fault.
     expect(
-      blame('forall T: number. (T, T) -> T', [
+      blame('(T, T) -> T where T: number', [
         'matrix<integer^(2x2)>',
         'string',
       ])
     ).toBe(0);
     expect(
-      blame('forall T: number. (T, T, T) -> T', ['integer', 'real', 'string'])
+      blame('(T, T, T) -> T where T: number', ['integer', 'real', 'string'])
     ).toBe(2);
     // A widening join (no union in sight) is blamed the same way: `real` is the
     // operand that does not fit `T: integer`.
     expect(
-      blame('forall T: integer. (T, T) -> T', ['integer', 'real'])
+      blame('(T, T) -> T where T: integer', ['integer', 'real'])
     ).toBe(1);
     // The single-position case is unchanged.
-    expect(blame('forall T: number. (T) -> T', ['string'])).toBe(0);
+    expect(blame('(T) -> T where T: number', ['string'])).toBe(0);
     // NOTE: the "every contribution individually satisfies the bound but the
     // JOIN does not" case is NOT constructible — the join is a least upper
     // bound, so `A <: B` and `C <: B` imply `widen(A, C) <: B`. The
@@ -711,13 +718,13 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // element-bind) while a variable-MENTIONING result no longer types one
     // rank too high.
     expect(
-      solve('forall T: number. (T) -> T', ['list<integer>'], {
+      solve('(T) -> T where T: number', ['list<integer>'], {
         lifted: () => true,
       })
     ).toBe('(integer) -> integer');
     // The peel goes to the LEAF, matching the rank the wrap re-adds.
     expect(
-      solve('forall T: number. (T) -> tuple<T, T>', ['matrix<integer^(2x3)>'], {
+      solve('(T) -> tuple<T, T> where T: number', ['matrix<integer^(2x3)>'], {
         lifted: () => true,
       })
     ).toBe('(integer) -> tuple<integer, integer>');
@@ -725,32 +732,32 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // (`broadcastable` = scalar-or-collection), and so do the admitted-but-
     // never-mapped kinds — a `set`, and an atomic `tuple`.
     expect(
-      solve('forall T: number. (T) -> T', ['integer'], { lifted: () => true })
+      solve('(T) -> T where T: number', ['integer'], { lifted: () => true })
     ).toBe('(integer) -> integer');
     expect(
-      solve('forall T. (T) -> T', ['set<integer>'], { lifted: () => true })
+      solve('(T) -> T where T', ['set<integer>'], { lifted: () => true })
     ).toBe('(set<integer>) -> set<integer>');
     expect(
-      solve('forall T. (T) -> T', ['tuple<integer, string>'], {
+      solve('(T) -> T where T', ['tuple<integer, string>'], {
         lifted: () => true,
       })
     ).toBe('(tuple<integer, string>) -> tuple<integer, string>');
     // Without the lift flag the same call violates the declared bound.
-    expect(solve('forall T: number. (T) -> T', ['list<integer>'])).toContain(
+    expect(solve('(T) -> T where T: number', ['list<integer>'])).toContain(
       'FAIL'
     );
   });
 
   test('compose — order-independent (2a fully before solve, then 2b)', () => {
     expect(
-      solve('forall T, U, V. ((U) -> V, (T) -> U) -> (T) -> V', [
+      solve('((U) -> V, (T) -> U) -> (T) -> V where T, U, V', [
         '(real) -> string',
         '(integer) -> real',
       ])
     ).toBe('((real) -> string, (integer) -> real) -> (integer) -> string');
     // The same problem with the operands (and the clause) reversed.
     expect(
-      solve('forall T, U, V. ((T) -> U, (U) -> V) -> (T) -> V', [
+      solve('((T) -> U, (U) -> V) -> (T) -> V where T, U, V', [
         '(integer) -> real',
         '(real) -> string',
       ])
@@ -760,7 +767,7 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
   test('multi-callback upper bounds MEET', () => {
     expect(
       solvedVar(
-        'forall T. ((T) -> boolean, (T) -> boolean) -> T',
+        '((T) -> boolean, (T) -> boolean) -> T where T',
         ['(integer) -> boolean', '(real) -> boolean'],
         'T'
       )
@@ -768,7 +775,7 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
   });
 
   test('DISJOINT upper bounds fail (empty meet)', () => {
-    const r = solve('forall T. ((T) -> boolean, (T) -> boolean) -> T', [
+    const r = solve('((T) -> boolean, (T) -> boolean) -> T where T', [
       '(integer) -> boolean',
       '(string) -> boolean',
     ]);
@@ -778,7 +785,7 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
 
   test('D8 — an absorbed `unknown` satisfies upper bounds PROVISIONALLY', () => {
     expect(
-      solve('forall T. ((T) -> boolean, T) -> T', [
+      solve('((T) -> boolean, T) -> T where T', [
         '(integer) -> boolean',
         'unknown',
       ])
@@ -788,7 +795,7 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
   test('`never` is NEUTRAL in the bound join (the `Concat([], [1])` shape)', () => {
     expect(
       solvedVar(
-        'forall T. (list<T>, list<T>) -> list<T>',
+        '(list<T>, list<T>) -> list<T> where T',
         ['list<never>', 'list<integer>'],
         'T'
       )
@@ -796,7 +803,7 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // …and all-`never` still solves to `never`, not to `unknown`.
     expect(
       solvedVar(
-        'forall T. (list<T>, list<T>) -> list<T>',
+        '(list<T>, list<T>) -> list<T> where T',
         ['list<never>', 'list<never>'],
         'T'
       )
@@ -804,25 +811,25 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
   });
 
   test('a ground constructor mismatch does not match', () => {
-    expect(solve('forall T. (list<T>) -> T', ['set<real>'])).toBe('NO MATCH');
+    expect(solve('(list<T>) -> T where T', ['set<real>'])).toBe('NO MATCH');
   });
 
   test('§4.4 — `broadcastable<T>` binds through all THREE shapes', () => {
-    expect(solvedVar('forall T. (broadcastable<T>) -> T', ['integer'], 'T')).toBe(
+    expect(solvedVar('(broadcastable<T>) -> T where T', ['integer'], 'T')).toBe(
       'integer'
     );
     expect(
-      solvedVar('forall T. (broadcastable<T>) -> T', ['list<real>'], 'T')
+      solvedVar('(broadcastable<T>) -> T where T', ['list<real>'], 'T')
     ).toBe('real');
     expect(
-      solvedVar('forall T. (broadcastable<T>) -> T', ['broadcastable<string>'], 'T')
+      solvedVar('(broadcastable<T>) -> T where T', ['broadcastable<string>'], 'T')
     ).toBe('string');
   });
 
   test('a UNION actual distributes — every arm contributes a bound', () => {
     expect(
       solvedVar(
-        'forall T. (list<T>) -> T',
+        '(list<T>) -> T where T',
         ['list<integer> | list<string>'],
         'T'
       )
@@ -836,7 +843,7 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
       typeToString(collectionElementType(parseType('matrix<integer^(2x3)>'))!)
     ).toBe('vector<integer^3>');
     expect(
-      solvedVar('forall T. (list<T>) -> T', ['matrix<integer^(2x3)>'], 'T')
+      solvedVar('(list<T>) -> T where T', ['matrix<integer^(2x3)>'], 'T')
     ).toBe('vector<integer^3>');
   });
 
@@ -848,7 +855,7 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
       typeToString(collectionElementType(parseType('dictionary<number>'))!)
     ).toBe('tuple<string, number>');
     expect(
-      solvedVar('forall T. (collection<T>) -> T', ['dictionary<number>'], 'T')
+      solvedVar('(collection<T>) -> T where T', ['dictionary<number>'], 'T')
     ).toBe('tuple<string, number>');
     expect(
       typeToString(
@@ -857,14 +864,14 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     ).toBe('tuple<string, integer | string>');
     expect(
       solvedVar(
-        'forall T. (collection<T>) -> T',
+        '(collection<T>) -> T where T',
         ['record<a: integer, b: string>'],
         'T'
       )
     ).toBe('tuple<string, integer | string>');
     // End to end: the operand pins `T`; it does not fall to the S3 `unknown`.
     const ce = fresh();
-    ce.declare('entryOf', { signature: 'forall T. (collection<T>) -> T' });
+    ce.declare('entryOf', { signature: '(collection<T>) -> T where T' });
     const d = ce.box([
       'Dictionary',
       ['Tuple', ce.string('a'), 1],
@@ -881,7 +888,7 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // contravariantly by another position is a different constraint, and must
     // still be checked.
     const r = solve(
-      'forall T: number. (T, (T) -> boolean) -> T',
+      '(T, (T) -> boolean) -> T where T: number',
       ['list<integer>', '(string) -> boolean'],
       { lifted: (i: number) => i === 0 }
     );
@@ -894,19 +901,19 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // the never-mapped `set`/`tuple` kinds, whose whole-actual bound would
     // otherwise be blamed against the scalar declared bound.)
     expect(
-      solve('forall T: number. (T) -> T', ['list<integer>'], {
+      solve('(T) -> T where T: number', ['list<integer>'], {
         lifted: () => true,
       })
     ).toBe('(integer) -> integer');
     expect(
-      solve('forall T: number. (T) -> T', ['set<string>'], {
+      solve('(T) -> T where T: number', ['set<string>'], {
         lifted: () => true,
       })
     ).not.toContain('FAIL');
     // …and a COMPATIBLE positioned upper bound still solves.
     expect(
       solve(
-        'forall T: number. (T, (T) -> boolean) -> T',
+        '(T, (T) -> boolean) -> T where T: number',
         ['list<integer>', '(number) -> boolean'],
         { lifted: (i: number) => i === 0 }
       )
@@ -914,26 +921,26 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
   });
 
   test('`inferTypeArguments` returns null exactly when a constraint fails', () => {
-    const ok = inferTypeArguments(parseType('forall T. (T, T) -> T') as any, [
+    const ok = inferTypeArguments(parseType('(T, T) -> T where T') as any, [
       'integer',
       'real',
     ]);
     expect(ok && typeToString(ok.T)).toBe('real');
     expect(
       inferTypeArguments(
-        parseType('forall T: indexed_collection. (T) -> T') as any,
+        parseType('(T) -> T where T: indexed_collection') as any,
         ['set<real>']
       )
     ).toBeNull();
     expect(
-      inferTypeArguments(parseType('forall T. (list<T>) -> T') as any, [
+      inferTypeArguments(parseType('(list<T>) -> T where T') as any, [
         'set<real>',
       ])
     ).toBeNull();
   });
 
   test('the solver is WRITE-FREE: the arm is structurally unchanged', () => {
-    const arm = parseType('forall T: number. (list<T>, T) -> T');
+    const arm = parseType('(list<T>, T) -> T where T: number');
     const before = JSON.stringify(arm);
     solveTypeArguments(arm as any, [
       parseType('list<integer>'),
@@ -946,32 +953,32 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
 describe('END TO END — a user-declared generic operator', () => {
   test('§4.7 rows, through `ce.declare` and a call', () => {
     const ce = fresh();
-    ce.declare('idf', { signature: 'forall T. (T) -> T' });
+    ce.declare('idf', { signature: '(T) -> T where T' });
     expect(ce.box(['idf', 5]).type.toString()).toBe('finite_integer');
 
-    ce.declare('firstOf', { signature: 'forall T. (list<T>) -> T' });
+    ce.declare('firstOf', { signature: '(list<T>) -> T where T' });
     expect(ce.box(['firstOf', ['List', 1, 2, 3]]).type.toString()).toBe(
       'finite_integer'
     );
 
-    ce.declare('swap', { signature: 'forall T, U. (tuple<T, U>) -> tuple<U, T>' });
+    ce.declare('swap', { signature: '(tuple<T, U>) -> tuple<U, T> where T, U' });
     expect(
       ce.box(['swap', ['Tuple', 1, ce.string('a')]]).type.toString()
     ).toBe('tuple<string, finite_integer>');
 
-    ce.declare('pack', { signature: 'forall T. (T+) -> list<T>' });
+    ce.declare('pack', { signature: '(T+) -> list<T> where T' });
     expect(ce.box(['pack', 1, 2.5]).type.toString()).toBe('list<finite_real>');
 
-    ce.declare('opt', { signature: 'forall T. (T?) -> list<T>' });
+    ce.declare('opt', { signature: '(T?) -> list<T> where T' });
     expect(ce.box(['opt']).type.toString()).toBe('list<unknown>');
-    ce.declare('optb', { signature: 'forall T: number. (T?) -> list<T>' });
+    ce.declare('optb', { signature: '(T?) -> list<T> where T: number' });
     expect(ce.box(['optb']).type.toString()).toBe('list<number>');
   });
 
   test('bounded identity preserves kind AND dimensions', () => {
     const ce = fresh();
     ce.declare('rev', {
-      signature: 'forall T: indexed_collection. (T) -> T',
+      signature: '(T) -> T where T: indexed_collection',
     });
     const m = ce.box(['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
     expect(m.type.toString()).toBe('matrix<finite_integer^(2x3)>');
@@ -982,18 +989,18 @@ describe('END TO END — a user-declared generic operator', () => {
 
   test('a violated declared bound is an `incompatible-type` naming the BOUND (§8)', () => {
     const ce = fresh();
-    ce.declare('rev', { signature: 'forall T: indexed_collection. (T) -> T' });
+    ce.declare('rev', { signature: '(T) -> T where T: indexed_collection' });
     const bad = ce.box(['rev', ['Set', 1, 2]]);
     expect(bad.isValid).toBe(false);
     // §8 rule 1: the displayed expected type is always GROUND.
     expect(bad.toString()).toContain('"indexed_collection"');
     expect(bad.toString()).toContain('set<finite_integer>');
-    expect(bad.toString()).not.toContain('forall');
+    expect(bad.toString()).not.toContain('where');
   });
 
   test('§8 blame — the OFFENDING operand carries the error, not the first one', () => {
     const ce = fresh();
-    ce.declare('rem2', { signature: 'forall T: number. (T, T) -> T' });
+    ce.declare('rem2', { signature: '(T, T) -> T where T: number' });
     ce.declare('mtx', 'matrix<integer^(2x2)>');
 
     const bad = ce.box(['rem2', 5, 'mtx']);
@@ -1015,7 +1022,7 @@ describe('END TO END — a user-declared generic operator', () => {
 
     // A widening join, no union: `real` is what does not fit `T: integer`,
     // and the reported actual is `real` — never the innocent `integer`.
-    ce.declare('gInt', { signature: 'forall T: integer. (T, T) -> T' });
+    ce.declare('gInt', { signature: '(T, T) -> T where T: integer' });
     ce.declare('iSym', 'integer');
     ce.declare('rSym', 'real');
     const g = ce.box(['gInt', 'iSym', 'rSym']);
@@ -1029,7 +1036,7 @@ describe('END TO END — a user-declared generic operator', () => {
   test('`never` neutrality — the `Concat([], [1])` shape', () => {
     const ce = fresh();
     ce.declare('cat', {
-      signature: 'forall T. (list<T>, list<T>) -> list<T>',
+      signature: '(list<T>, list<T>) -> list<T> where T',
     });
     expect(ce.box(['cat', ['List'], ['List', 1]]).type.toString()).toBe(
       'list<finite_integer>'
@@ -1041,10 +1048,10 @@ describe('END TO END — a user-declared generic operator', () => {
     ce.declare('f1', '(real) -> string');
     ce.declare('f2', '(integer) -> real');
     ce.declare('comp', {
-      signature: 'forall T, U, V. ((U) -> V, (T) -> U) -> (T) -> V',
+      signature: '((U) -> V, (T) -> U) -> (T) -> V where T, U, V',
     });
     ce.declare('flip', {
-      signature: 'forall T, U, V. ((T) -> U, (U) -> V) -> (T) -> V',
+      signature: '((T) -> U, (U) -> V) -> (T) -> V where T, U, V',
     });
     expect(ce.box(['comp', 'f1', 'f2']).type.toString()).toBe(
       '(integer) -> string'
@@ -1060,7 +1067,7 @@ describe('END TO END — a user-declared generic operator', () => {
     ce.declare('pReal', '(real) -> boolean');
     ce.declare('pStr', '(string) -> boolean');
     ce.declare('both', {
-      signature: 'forall T. ((T) -> boolean, (T) -> boolean) -> T',
+      signature: '((T) -> boolean, (T) -> boolean) -> T where T',
     });
     expect(ce.box(['both', 'pInt', 'pReal']).type.toString()).toBe('integer');
 
@@ -1076,7 +1083,7 @@ describe('END TO END — a user-declared generic operator', () => {
     const ce = fresh();
     ce.declare('sPred', '(string) -> boolean');
     ce.declare('keep', {
-      signature: 'forall T. (list<T>, (T) -> boolean) -> list<T>',
+      signature: '(list<T>, (T) -> boolean) -> list<T> where T',
     });
     const bad = ce.box(['keep', ['List', 1, 2, 3], 'sPred']);
     expect(bad.isValid).toBe(false);
@@ -1088,7 +1095,7 @@ describe('END TO END — a user-declared generic operator', () => {
     const ce = fresh();
     ce.declare('u', 'unknown'); // DECLARED unknown ⇒ non-inferable
     ce.declare('pInt', '(integer) -> boolean');
-    ce.declare('d8', { signature: 'forall T. ((T) -> boolean, T) -> T' });
+    ce.declare('d8', { signature: '((T) -> boolean, T) -> T where T' });
     const e = ce.box(['d8', 'pInt', 'u']);
     expect(e.isValid).toBe(true);
     expect(e.type.toString()).toBe('unknown');
@@ -1097,7 +1104,7 @@ describe('END TO END — a user-declared generic operator', () => {
   test('D10 — a broadcastable echo at a collection operand', () => {
     const ce = fresh();
     ce.declare('neg2', {
-      signature: 'forall T: number. (T) -> T',
+      signature: '(T) -> T where T: number',
       broadcastable: true,
     });
     expect(ce.box(['neg2', 5]).type.toString()).toBe('finite_integer');
@@ -1110,7 +1117,7 @@ describe('END TO END — a user-declared generic operator', () => {
   test('D10 — the OPERATOR route echoes rank ≥ 2 without re-shaping it', () => {
     const ce = fresh();
     ce.declare('pEcho', {
-      signature: 'forall T: number. (T) -> T',
+      signature: '(T) -> T where T: number',
       broadcastable: true,
     });
     // A GROUND broadcastable is the reference answer: the wrapper builds the
@@ -1145,7 +1152,7 @@ describe('END TO END — a user-declared generic operator', () => {
     // `list<finite_integer | vector<finite_integer^2>^(2x2)>` — the very
     // mixed encoding the wrapper exists to repair.)
     ce.declare('pRem', {
-      signature: 'forall T: number. (T, T) -> T',
+      signature: '(T, T) -> T where T: number',
       broadcastable: true,
     });
     expect(ce.box(['pRem', m22, 7]).type.toString()).toBe(
@@ -1163,9 +1170,9 @@ describe('END TO END — a user-declared generic operator', () => {
     // the arm instantiates to the PER-ELEMENT result and the ordinary
     // broadcast wrap re-adds the operand's rank.
     const ce = fresh();
-    ce.declare('vEcho', 'forall T. (T) -> T');
-    ce.declare('vTuple', 'forall T. (T) -> tuple<T>');
-    ce.declare('vList', 'forall T. (T) -> list<T>');
+    ce.declare('vEcho', '(T) -> T where T');
+    ce.declare('vTuple', '(T) -> tuple<T> where T');
+    ce.declare('vList', '(T) -> list<T> where T');
     const xs = ['List', 1, 2, 3] as any;
     expect(ce.box(['vEcho', xs]).type.toString()).toBe(
       'vector<finite_integer^3>'
@@ -1177,7 +1184,7 @@ describe('END TO END — a user-declared generic operator', () => {
       'list<list<finite_integer>>'
     );
     // A BOUNDED echo is still an echo.
-    ce.declare('vBounded', 'forall T: indexed_collection. (T) -> T');
+    ce.declare('vBounded', '(T) -> T where T: indexed_collection');
     expect(ce.box(['vBounded', xs]).type.toString()).toBe(
       'vector<finite_integer^3>'
     );
@@ -1185,19 +1192,19 @@ describe('END TO END — a user-declared generic operator', () => {
 
   test('a POLYTYPE actual is admitted against the instantiated expected arrow', () => {
     const ce = fresh();
-    ce.declare('gid', 'forall T. (T) -> T');
+    ce.declare('gid', '(T) -> T where T');
     ce.declare('useIt', { signature: '((integer) -> integer, integer) -> integer' });
     expect(ce.box(['useIt', 'gid', 3]).isValid).toBe(true);
   });
 
   test('open expected × polytype actual — v1 declines to unify, then admits', () => {
     const ce = fresh();
-    ce.declare('gp', 'forall U. (U) -> boolean');
-    ce.declare('hof', { signature: 'forall T. ((T) -> boolean, T) -> T' });
+    ce.declare('gp', '(U) -> boolean where U');
+    ce.declare('hof', { signature: '((T) -> boolean, T) -> T where T' });
     // The generic callback contributes NO bound; `T` is pinned by argument 2.
     expect(ce.box(['hof', 'gp', 3]).type.toString()).toBe('finite_integer');
     // With nothing else to pin it, `T` falls to S3.
-    ce.declare('hof2', { signature: 'forall T. ((T) -> boolean) -> list<T>' });
+    ce.declare('hof2', { signature: '((T) -> boolean) -> list<T> where T' });
     expect(ce.box(['hof2', 'gp']).type.toString()).toBe('list<unknown>');
   });
 });
@@ -1206,11 +1213,11 @@ describe('GROUND-TYPE INVARIANT — no open type escapes as an expression type',
   test('`functionResult` of a polytype is `unknown`, never the OPEN pattern', () => {
     // A dozen library `type:` handlers read `functionResult(callback.type)` and
     // pass it straight through (`Map(xs, genericFn)`).
-    expect(typeToString(functionResult(parseType('forall T. (T) -> T'))!)).toBe(
+    expect(typeToString(functionResult(parseType('(T) -> T where T'))!)).toBe(
       'unknown'
     );
     const ce = fresh();
-    ce.declare('gid', 'forall T. (T) -> T');
+    ce.declare('gid', '(T) -> T where T');
     const mapped = ce.box(['Map', ['List', 1, 2, 3], 'gid']);
     expect(mapped.isValid).toBe(true);
     expect(freeTypeVariables(mapped.type.type).size).toBe(0);
@@ -1218,7 +1225,7 @@ describe('GROUND-TYPE INVARIANT — no open type escapes as an expression type',
 
   test('a generic call’s result type is always ground', () => {
     const ce = fresh();
-    ce.declare('g', { signature: 'forall T, U. (T, list<U>) -> tuple<T, U>' });
+    ce.declare('g', { signature: '(T, list<U>) -> tuple<T, U> where T, U' });
     for (const call of [
       ['g', 1, ['List', ce.string('a')]],
       ['g', 'undeclaredSym', ['List']],
@@ -1232,26 +1239,26 @@ describe('GROUND-TYPE INVARIANT — no open type escapes as an expression type',
 
 describe('§5 — `Poly <: Ground` (rule 1) accepts only a COMPLETE match', () => {
   const rows: [string, string, boolean][] = [
-    ['forall T. (T) -> T', '(number) -> number', true],
-    ['forall T. (list<T>) -> T', '(list<integer>) -> integer', true],
-    ['forall T. (T) -> T', '(integer) -> number', true],
+    ['(T) -> T where T', '(number) -> number', true],
+    ['(list<T>) -> T where T', '(list<integer>) -> integer', true],
+    ['(T) -> T where T', '(integer) -> number', true],
     // Result covariance violated after a successful argument instantiation.
-    ['forall T. (T) -> T', '(integer) -> string', false],
+    ['(T) -> T where T', '(integer) -> string', false],
     // Effects: a `random` polytype does not fit a pure ground arrow…
-    ['forall T. (T) random -> T', '(integer) -> integer', false],
+    ['(T) random -> T where T', '(integer) -> integer', false],
     // …but a pure one fits an effect-permitting arrow.
-    ['forall T. (T) -> T', '(integer) random -> integer', true],
+    ['(T) -> T where T', '(integer) random -> integer', true],
     // Arity shape.
-    ['forall T. (T) -> T', '(integer, integer) -> integer', false],
+    ['(T) -> T where T', '(integer, integer) -> integer', false],
     // A top type NESTED under a constructor does not waive the declared bound
     // (D8 is a TOP-LEVEL waiver): the ground reading needs
     // `tuple<any> <: tuple<number>`, which is false, so no instantiation fits.
     // There is no runtime re-check on this route, so admitting it would be
     // unsound rather than merely optimistic.
-    ['forall T: number. (tuple<T>) -> T', '(tuple<any>) -> any', false],
-    ['forall T: number. (tuple<T>) -> T', '(tuple<unknown>) -> unknown', false],
+    ['(tuple<T>) -> T where T: number', '(tuple<any>) -> any', false],
+    ['(tuple<T>) -> T where T: number', '(tuple<unknown>) -> unknown', false],
     // Unbounded: unchanged.
-    ['forall T. (tuple<T>) -> T', '(tuple<any>) -> any', true],
+    ['(tuple<T>) -> T where T', '(tuple<any>) -> any', true],
   ];
   test.each(rows)('%s <: %s → %s', (a, b, expected) => {
     expect(isSubtype(parseType(a), parseType(b))).toBe(expected);
@@ -1262,9 +1269,9 @@ describe('GROUND-INVARIANT REGRESSION (§4.2 rule 1)', () => {
   // A previously-inferred symbol narrowed against a GENERIC parameter must end
   // with a GROUND type and must not throw — on all three narrow paths.
   const shapes: [string, (ce: ComputeEngine) => any][] = [
-    ['forall T. (T) -> T', (ce) => ce.box(['g', 'q'])],
-    ['forall T. (integer, T?) -> T', (ce) => ce.box(['g', 1, 'q'])],
-    ['forall T. (T+) -> list<T>', (ce) => ce.box(['g', 'q'])],
+    ['(T) -> T where T', (ce) => ce.box(['g', 'q'])],
+    ['(integer, T?) -> T where T', (ce) => ce.box(['g', 1, 'q'])],
+    ['(T+) -> list<T> where T', (ce) => ce.box(['g', 'q'])],
   ];
   test.each(shapes)('%s narrows an inferred symbol to a ground type', (sig, call) => {
     const ce = fresh();
@@ -1300,7 +1307,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
 
   test('inferable unknown symbol', () => {
     const [g, r] = parity(
-      'forall T: number. (T) -> T',
+      '(T) -> T where T: number',
       '(number) -> number',
       (ce) => ce.box(['p', 'z']),
       (ce) => {
@@ -1313,7 +1320,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
 
   test('NON-inferable unknown operand (D8)', () => {
     const [g, r] = parity(
-      'forall T: number. (T) -> T',
+      '(T) -> T where T: number',
       '(number) -> number',
       (ce) => ce.box(['p', 'u']),
       (ce) => ce.declare('u', 'unknown')
@@ -1328,7 +1335,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
     // signature admits an `any` operand unconditionally (the unknown/any gate).
     // `any` therefore absorbs exactly as `unknown` does.
     const [g, r] = parity(
-      'forall T: indexed_collection. (T) -> T',
+      '(T) -> T where T: indexed_collection',
       '(indexed_collection) -> indexed_collection',
       (ce) => ce.box(['p', 'a']),
       (ce) => ce.declare('a', 'any')
@@ -1337,7 +1344,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
     expect(g).toBe(true);
     // The D8 `unknown` arm at the SAME bounded shape stays green.
     const [gu, ru] = parity(
-      'forall T: indexed_collection. (T) -> T',
+      '(T) -> T where T: indexed_collection',
       '(indexed_collection) -> indexed_collection',
       (ce) => ce.box(['p', 'u']),
       (ce) => ce.declare('u', 'unknown')
@@ -1360,7 +1367,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
     // signature.
     for (const nested of ['tuple<any>', 'tuple<unknown>']) {
       const [g, r] = parity(
-        'forall T: number. (tuple<T>) -> T',
+        '(tuple<T>) -> T where T: number',
         '(tuple<number>) -> number',
         (ce) => ce.box(['p', 'n']),
         (ce) => ce.declare('n', nested)
@@ -1369,7 +1376,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
     }
     // Control: the same shape with an in-bound element is admitted by both.
     const [g2, r2] = parity(
-      'forall T: number. (tuple<T>) -> T',
+      '(tuple<T>) -> T where T: number',
       '(tuple<number>) -> number',
       (ce) => ce.box(['p', 'n']),
       (ce) => ce.declare('n', 'tuple<integer>')
@@ -1379,7 +1386,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
 
   test('a refuted operand is refuted under BOTH', () => {
     const [g, r] = parity(
-      'forall T: number. (T) -> T',
+      '(T) -> T where T: number',
       '(number) -> number',
       (ce) => ce.box(['p', ce.string('nope')])
     );
@@ -1390,7 +1397,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
   test('broadcastable lift', () => {
     const a = fresh();
     a.declare('p', {
-      signature: 'forall T: number. (T) -> T',
+      signature: '(T) -> T where T: number',
       broadcastable: true,
     });
     const b = fresh();
@@ -1402,7 +1409,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
 
   test('deferred (overlap-provisional) collection admission', () => {
     const [g, r] = parity(
-      'forall T. (list<T>) -> T',
+      '(list<T>) -> T where T',
       '(list<number>) -> number',
       (ce) => ce.box(['p', 'c']),
       (ce) => ce.declare('c', 'list')
@@ -1412,7 +1419,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
 
   test('`Spread` defers all validation under both', () => {
     const [g, r] = parity(
-      'forall T. (T, T) -> T',
+      '(T, T) -> T where T',
       '(number, number) -> number',
       (ce) => ce.box(['p', ['Spread', ['Tuple', 1, 2]]]),
       (ce) => undefined
@@ -1423,7 +1430,7 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
   test('non-strict mode admits under both', () => {
     const a = fresh();
     a.strict = false;
-    a.declare('p', { signature: 'forall T: number. (T) -> T' });
+    a.declare('p', { signature: '(T) -> T where T: number' });
     const b = fresh();
     b.strict = false;
     b.declare('p', { signature: '(number) -> number' });
@@ -1441,7 +1448,7 @@ describe('LAZY-IDLE (§4.5 landmine ledger)', () => {
   test('a lazy operator with a generic signature stays idle', () => {
     const ce = fresh();
     ce.declare('lz', {
-      signature: 'forall T: number. (list<T>) -> T',
+      signature: '(list<T>) -> T where T: number',
       lazy: true,
       evaluate: (ops) => ops[0],
     });
@@ -1461,8 +1468,8 @@ describe('EFFECTS (§4.6) — substitution never touches the effects slot', () =
     ce.declare('ap', { signature: sig });
     return ce.box(['ap', 'cb', 1]).isValid;
   }
-  const ANY = 'forall T, U. ((T) any -> U, T) -> U';
-  const PURE = 'forall T, U. ((T) -> U, T) -> U';
+  const ANY = '((T) any -> U, T) -> U where T, U';
+  const PURE = '((T) -> U, T) -> U where T, U';
 
   test('`(T) any -> U` accepts pure, random and scope callbacks', () => {
     expect(probe(ANY, '(integer) -> string')).toBe(true);
@@ -1477,11 +1484,11 @@ describe('EFFECTS (§4.6) — substitution never touches the effects slot', () =
   });
 
   test('`effectsDeclared` is recorded from a polytype arrow', () => {
-    // NOTE: §11 spells this row `forall T. (T) random -> U`, which its own
+    // NOTE: §11 spells this row `(T) random -> U where T`, which its own
     // §4.1 result-reachability rule rejects (`U` occurs only in the result);
     // the reachable spelling is used instead.
     const ce = fresh();
-    ce.declare('g', 'forall T, U. (T, U) random -> U');
+    ce.declare('g', '(T, U) random -> U where T, U');
     const def: any = ce.lookupDefinition('g');
     expect(def.value.effectsDeclared).toBe(true);
     expect(def.value.type.effects).toEqual(['random']);
@@ -1502,9 +1509,9 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
 
   test('route 1 — `ce.assign` installs the literal', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (T) -> T');
+    ce.declare('f', '(T) -> T where T');
     expect(() => ce.assign('f', ce.parse('x \\mapsto x'))).not.toThrow();
-    expect(ce.box('f').type.toString()).toBe('forall T. (T) -> T');
+    expect(ce.box('f').type.toString()).toBe('(T) -> T where T');
     expect(ce.box(['f', 5]).evaluate().toString()).toBe('5');
     expect(ce.box(['f', 5]).type.toString()).toBe('finite_integer');
   });
@@ -1513,7 +1520,7 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
     const ce = fresh();
     expect(() =>
       ce.declare('h', {
-        type: 'forall T. (T) -> T',
+        type: '(T) -> T where T',
         value: ce.parse('x \\mapsto x'),
       } as any)
     ).not.toThrow();
@@ -1527,7 +1534,7 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
 
   test('route 2 — the `Assign` OPERATOR installs it, with no error value', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (T) -> T');
+    ce.declare('f', '(T) -> T where T');
     const v = ce
       .box(['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']])
       .evaluate();
@@ -1537,7 +1544,9 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
 
   test('route 3 — an Epsil annotated declaration', () => {
     const ce = fresh();
-    const { value } = executeEpsil(ce, 'let f: forall T. (T) -> T = x |-> x');
+    // The clause is parenthesized: in an annotation position a bare trailing
+    // `where` would run into the `=` of the declaration.
+    const { value } = executeEpsil(ce, 'let f: ((T) -> T where T) = x |-> x');
     expect(value.toString()).not.toContain('incompatible-type');
     expect(ce.box(['f', 5]).evaluate().toString()).toBe('5');
   });
@@ -1549,7 +1558,7 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
   test('a function-typed SYMBOL is still an ordinary mismatch', () => {
     const ce = fresh();
     ce.declare('g', '(integer) -> string');
-    ce.declare('f', 'forall T. (T) -> T');
+    ce.declare('f', '(T) -> T where T');
     let caught: any;
     try {
       ce.assign('f', ce.symbol('g'));
@@ -1563,7 +1572,7 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
 
   test('a NON-callable value is an ordinary mismatch', () => {
     const ce = fresh();
-    ce.declare('f', 'forall T. (T) -> T');
+    ce.declare('f', '(T) -> T where T');
     let caught: any;
     try {
       // NOTE: a non-string operand would be LIFTED into a constant lambda by
@@ -1580,7 +1589,7 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
   // G11 (§2.4) — the ONE polytype shape a literal body still cannot implement.
   test('G11 — a generic OVERLOAD SET keeps a dedicated rejection', () => {
     const ce = fresh();
-    ce.declare('m', '(forall T. (T) -> T) & ((string) -> string)');
+    ce.declare('m', '((T) -> T where T) & ((string) -> string)');
     let caught: any;
     try {
       ce.assign('m', ce.parse('x \\mapsto x'));
@@ -1593,7 +1602,7 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
 
   test('G11 — …and as an error VALUE on the `Assign` operator route', () => {
     const ce = fresh();
-    ce.declare('m', '(forall T. (T) -> T) & ((string) -> string)');
+    ce.declare('m', '((T) -> T where T) & ((string) -> string)');
     const v = ce.box(['Assign', 'm', ['Function', 'x', 'x']]).evaluate();
     expect(v.toString()).toContain('incompatible-type');
     expect(v.toString()).toMatch(G11);
@@ -1605,42 +1614,42 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
   // the literal a polymorphic `.type`. See
   // `test/compute-engine/generic-function-literals.test.ts`. The rank-2
   // per-parameter spelling keeps rejecting (G6), with the rule-stating message.
-  test('a whole-signature `forall` annotation on a literal is ACCEPTED (M1)', () => {
+  test('a whole-signature `where` annotation on a literal is ACCEPTED (M1)', () => {
     const ce = fresh();
     // signature-string sugar (E1)
     const a = ce.box([
       'Function',
       ['Add', 'x', 1],
-      { str: 'forall T. (x: T) -> T' },
+      { str: '(x: T) -> T where T' },
     ] as any);
     expect(a.isValid).toBe(true);
-    expect(a.type.toString()).toBe('forall T. (x: T) -> T');
+    expect(a.type.toString()).toBe('(x: T) -> T where T');
     // return-slot full-signature marker (E2)
     const c = ce.box([
       'Function',
-      ['Typed', 'x', { str: 'forall T. (x: T) -> T' }],
+      ['Typed', 'x', { str: '(x: T) -> T where T' }],
       'x',
     ] as any);
     expect(c.isValid).toBe(true);
-    expect(c.type.toString()).toBe('forall T. (x: T) -> T');
+    expect(c.type.toString()).toBe('(x: T) -> T where T');
   });
 
-  test('a `forall` PARAMETER annotation (rank-2) is still rejected', () => {
+  test('a `where` PARAMETER annotation (rank-2) is still rejected', () => {
     const ce = fresh();
     const b = ce.box([
       'Function',
       1,
-      ['Typed', 'x', { str: 'forall T. (T) -> T' }],
+      ['Typed', 'x', { str: '(T) -> T where T' }],
     ] as any);
     expect(b.isValid).toBe(false);
     expect(b.toString()).toMatch(RANK2);
   });
 
-  test('Epsil — a `forall` parameter annotation is rejected, not a parse error', () => {
+  test('Epsil — a `where` parameter annotation is rejected, not a parse error', () => {
     const ce = fresh();
     const { value, diagnostics } = executeEpsil(
       ce,
-      'f(x: forall T. (T) -> T) = 1'
+      'f(x: ((T) -> T where T)) = 1'
     );
     expect(diagnostics).toEqual([]);
     expect(value.toString()).toMatch(RANK2);
@@ -1649,7 +1658,7 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
 
 describe('QUERY APIS (D6 + D12) — `matches` and `couldMatch` pinned SEPARATELY', () => {
   // NOTE: §11 spells three of these rows with a RESULT-ONLY variable
-  // (`forall T. () -> list<T>`, `forall T. () -> tuple<T, T>`), which phase 1's
+  // (`() -> list<T> where T`, `() -> tuple<T, T> where T`), which phase 1's
   // result-reachability rule rejects at declaration time (§4.1). The nearest
   // constructible analogues are used, and each row still exercises the
   // property §11 names.
@@ -1657,12 +1666,12 @@ describe('QUERY APIS (D6 + D12) — `matches` and `couldMatch` pinned SEPARATELY
 
   test('the identity probe — the row where the two predicates DIVERGE', () => {
     // D12: pattern-side `matches` is a consistent existential ⇒ true.
-    expect(ce2.type('(number) -> number').matches('forall T. (T) -> T')).toBe(
+    expect(ce2.type('(number) -> number').matches('(T) -> T where T')).toBe(
       true
     );
     // D6: `couldMatch` reads each occurrence as its bound — `any` in a
     // CONTRAVARIANT position is the tightest reading, so ⇒ false.
-    expect(ce2.type('(number) -> number').couldMatch('forall T. (T) -> T')).toBe(
+    expect(ce2.type('(number) -> number').couldMatch('(T) -> T where T')).toBe(
       false
     );
   });
@@ -1672,7 +1681,7 @@ describe('QUERY APIS (D6 + D12) — `matches` and `couldMatch` pinned SEPARATELY
     // twice, so the bound-reading (`any`) is the loose one there too. (§11
     // spells this row `() -> list<T>`, which the result-reachability rule
     // rejects; this is the nearest constructible analogue.)
-    const pattern = 'forall T. ((T) -> boolean) -> list<T>';
+    const pattern = '((T) -> boolean) -> list<T> where T';
     const subject = ce2.type('((integer) -> boolean) -> list<integer>');
     expect(subject.matches(pattern)).toBe(true);
     expect(subject.couldMatch(pattern)).toBe(true);
@@ -1681,7 +1690,7 @@ describe('QUERY APIS (D6 + D12) — `matches` and `couldMatch` pinned SEPARATELY
   test('a repeated-variable row — true on BOTH (via a genuine join)', () => {
     // `matches`: `T = integer | string` is a real solution (D12's corrected
     // claim on the record). `couldMatch`: the wildcard reading.
-    const pattern = 'forall T. ((T) -> boolean) -> tuple<T, T>';
+    const pattern = '((T) -> boolean) -> tuple<T, T> where T';
     const subject = ce2.type(
       '((integer | string) -> boolean) -> tuple<integer, string>'
     );
@@ -1690,27 +1699,27 @@ describe('QUERY APIS (D6 + D12) — `matches` and `couldMatch` pinned SEPARATELY
   });
 
   test('a pattern with no consistent instantiation does NOT match', () => {
-    expect(ce2.type('(integer) -> string').matches('forall T. (T) -> T')).toBe(
+    expect(ce2.type('(integer) -> string').matches('(T) -> T where T')).toBe(
       false
     );
   });
 
   test('subject-side — a generic function `couldMatch` `function` and its bound', () => {
-    expect(ce2.type('forall T. (T) -> T').couldMatch('function')).toBe(true);
-    expect(ce2.type('forall T. (T) -> T').matches('function')).toBe(true);
+    expect(ce2.type('(T) -> T where T').couldMatch('function')).toBe(true);
+    expect(ce2.type('(T) -> T where T').matches('function')).toBe(true);
     // A BOUNDED variable reads as its bound in the `couldMatch` reading.
     expect(
       ce2
-        .type('forall T: indexed_collection. (T) -> T')
+        .type('(T) -> T where T: indexed_collection')
         .couldMatch('(indexed_collection) -> indexed_collection')
     ).toBe(true);
   });
 
   test('subject-side `matches` against a ground pattern is rule 1', () => {
-    expect(ce2.type('forall T. (T) -> T').matches('(number) -> number')).toBe(
+    expect(ce2.type('(T) -> T where T').matches('(number) -> number')).toBe(
       true
     );
-    expect(ce2.type('forall T. (T) -> T').matches('(number) -> string')).toBe(
+    expect(ce2.type('(T) -> T where T').matches('(number) -> string')).toBe(
       false
     );
   });
@@ -1726,7 +1735,7 @@ describe('ROUTE PARITY — `ce.function`, `ce.box`, `ce.parse`', () => {
   test('a generic user operator types identically on all three routes', () => {
     const ce = fresh();
     ce.declare('firstOf', {
-      signature: 'forall T. (list<T>) -> T',
+      signature: '(list<T>) -> T where T',
       evaluate: (ops) => ops[0],
     });
     const viaFn = ce.function('firstOf', [ce.box(['List', 1, 2])]);
@@ -1743,7 +1752,7 @@ describe('COMPILE (§6)', () => {
   test('a CALL to a generic operator compiles (ground result)', () => {
     const ce = fresh();
     ce.declare('Echo', {
-      signature: 'forall T: number. (T) -> T',
+      signature: '(T) -> T where T: number',
       compile: (args, compile, { language }) =>
         language === 'javascript' ? `(${compile(args[0])})` : undefined,
     });
@@ -1755,7 +1764,7 @@ describe('COMPILE (§6)', () => {
   test('a generic user function itself DECLINES cleanly (no throw)', () => {
     const ce = fresh();
     ce.declare('gg', {
-      signature: 'forall T. (T) -> T',
+      signature: '(T) -> T where T',
       evaluate: (ops) => ops[0],
     });
     expect(() => compile(ce.box(['gg', 'x']))).not.toThrow();
@@ -1785,7 +1794,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
   test('the same letter in two arms is two UNRELATED variables', () => {
     const ce = fresh();
     ce.declare('pick', {
-      signature: '(forall T. (list<T>) -> T) & (forall T. (set<T>) -> boolean)',
+      signature: '((list<T>) -> T where T) & ((set<T>) -> boolean where T)',
     });
     // The operand kind selects the arm, and each arm solves its own `T`.
     expect(ce.box(['pick', ['List', 1, 2, 3]]).type.toString()).toBe(
@@ -1796,7 +1805,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
     // parameters, never a bare type variable.
     const bad = ce.box(['pick', ce.string('x')]);
     expect(bad.isValid).toBe(false);
-    expect(bad.toString()).not.toContain('forall');
+    expect(bad.toString()).not.toContain('where');
     expect(bad.toString()).not.toContain('"T"');
   });
 
@@ -1804,7 +1813,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
     const ce = fresh();
     ce.declare('rv', {
       signature:
-        '(forall T: indexed_collection. (T) -> T) & ((set<number>) -> number)',
+        '((T) -> T where T: indexed_collection) & ((set<number>) -> number)',
     });
     // The bounded arm takes the list; the ground arm takes the set.
     expect(ce.box(['rv', ['List', 1, 2]]).type.toString()).toBe(
@@ -1816,7 +1825,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
   test('the viable-arm JOIN feeding `joinParamAt` is GROUND', () => {
     const ce = fresh();
     ce.declare('g', {
-      signature: '(forall T. (list<T>) -> T) & (forall T. (set<T>) -> T)',
+      signature: '((list<T>) -> T where T) & ((set<T>) -> T where T)',
     });
     // An inferable unknown operand keeps BOTH arms viable, with different
     // bindings. Narrowing consumes the join of the two INSTANTIATED arms, so
@@ -1831,7 +1840,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
   test('resolution is WRITE-FREE: the stored signature is unchanged', () => {
     const ce = fresh();
     ce.declare('wf', {
-      signature: '(forall T. (list<T>) -> T) & (forall T. (set<T>) -> boolean)',
+      signature: '((list<T>) -> T where T) & ((set<T>) -> boolean where T)',
     });
     const def = ce.lookupDefinition('wf')!.operator!;
     const before = JSON.stringify(def.signature.type);
@@ -1842,7 +1851,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
     // The declared arms still carry their clauses (nothing was substituted in
     // place — instantiation is a pure rebuild).
     expect(def.signature.toString()).toBe(
-      '(forall T. (list<T>) -> T) & (forall T. (set<T>) -> boolean)'
+      '((list<T>) -> T where T) & ((set<T>) -> boolean where T)'
     );
   });
 
@@ -1850,8 +1859,8 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
     // The arms are chosen so the winner is observable: their ARGUMENTS
     // coincide at an `integer` operand (the D11 tie), and only their results
     // differ.
-    const GENERIC_FIRST = '(forall T. (T) -> list<T>) & ((integer) -> string)';
-    const GROUND_FIRST = '((integer) -> string) & (forall T. (T) -> list<T>)';
+    const GENERIC_FIRST = '((T) -> list<T> where T) & ((integer) -> string)';
+    const GROUND_FIRST = '((integer) -> string) & ((T) -> list<T> where T)';
     for (const signature of [GENERIC_FIRST, GROUND_FIRST]) {
       const ce = fresh();
       ce.declare('tie', { signature });
@@ -1873,7 +1882,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
   test('a generic overload set ROUND-TRIPS through declaration', () => {
     const ce = fresh();
     const SIGNATURE =
-      '(forall T. (list<T>) -> T) & (forall T, U. (tuple<T, U>) -> U)';
+      '((list<T>) -> T where T) & ((tuple<T, U>) -> U where T, U)';
     // The registration-time round-trip guard (`boxed-operator-definition.ts`)
     // re-parses the serialized signature and compares: an α-name-losing
     // serialization would throw here.
@@ -1917,14 +1926,14 @@ describe('ARM-AWARE `at`-HANDLER CHECK (§6)', () => {
     const ce = fresh();
     expect(() =>
       ce.declare('rev3', {
-        signature: 'forall T: indexed_collection. (T) -> T',
+        signature: '(T) -> T where T: indexed_collection',
         collection: collectionHandlers(),
       } as any)
     ).not.toThrow();
     // ... and the check still discriminates: a non-indexed bound is refused.
     expect(() =>
       ce.declare('rev4', {
-        signature: 'forall T: set<number>. (T) -> T',
+        signature: '(T) -> T where T: set<number>',
         collection: collectionHandlers(),
       } as any)
     ).toThrow(/no arm of the signature .* can return an indexed collection/);

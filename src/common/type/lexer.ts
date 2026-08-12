@@ -363,9 +363,12 @@ export class Lexer {
         this.advance();
         return this.createToken('*', '*');
       case '.':
-        // A lone `.` terminates a `forall` clause. (`..`, the numeric-range
-        // separator, is matched before this switch; a decimal point is
-        // consumed by `readNumber`.)
+        // No grammar rule consumes a lone `.` anymore (it terminated the
+        // REMOVED prefix `forall` clause), but the token is kept so the
+        // parser's legacy-`forall` migration diagnostic can recognize
+        // `forall T. …` instead of failing with a raw lexer error. (`..`, the
+        // numeric-range separator, is matched before this switch; a decimal
+        // point is consumed by `readNumber`.)
         this.advance();
         return this.createToken('.', '.');
       case '+':

@@ -11,12 +11,17 @@ import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 //     function f<T: number, U>(x: T, k: (T) any -> U) -> list<U> { … }
 //
 // The clause between the name and the parameter list lowers to a
-// `forall`-quantified full-signature ascription (E2), with the parameters it
-// quantifies ERASED to bare symbols — the signature is the single source of
-// truth for their types (§3.1/§3.2). Serialization decomposes that marker back
-// into the clause (§3.3), losslessly.
+// full-signature ascription carrying a trailing `where` clause (E2), with the
+// parameters it quantifies ERASED to bare symbols — the signature is the
+// single source of truth for their types (§3.1/§3.2). Serialization
+// decomposes that marker back into the clause (§3.3), losslessly.
 //
-// Everything the type grammar already validates about a `forall` clause —
+// Section (f) covers the SECOND binder spelling: the same clause written as a
+// trailing `where` on the definition head
+// (`docs/plans/2026-08-11-where-clause-type-constraints.md`). The two are
+// synonyms — and writing both is an error.
+//
+// Everything the type grammar already validates about a `where` clause —
 // unused variables, result-only variables, non-ground bounds, duplicates —
 // comes back as a PARSE-TIME diagnostic for free, because the assembled
 // signature is validated by the shared type DSL.
@@ -81,8 +86,8 @@ function roundTrip(source: string): {
 }
 
 //
-// (a) Lowering: the clause becomes a `forall` full-signature ascription and the
-// quantified parameters lose their annotations.
+// (a) Lowering: the clause becomes a `where`-quantified full-signature
+// ascription and the quantified parameters lose their annotations.
 //
 
 describe('M2 SUGARED GENERICS — lowering (§3.1/§3.2)', () => {
@@ -92,7 +97,7 @@ describe('M2 SUGARED GENERICS — lowering (§3.1/§3.2)', () => {
       'f',
       [
         'Function',
-        ['Typed', ['Block', 'x'], { str: 'forall T. (x: T) -> T' }],
+        ['Typed', ['Block', 'x'], { str: '(x: T) -> T where T' }],
         'x',
       ],
     ]);
@@ -104,7 +109,7 @@ describe('M2 SUGARED GENERICS — lowering (§3.1/§3.2)', () => {
       'f',
       [
         'Function',
-        ['Typed', ['Block', 'x'], { str: 'forall T. (x: T, n: integer) -> T' }],
+        ['Typed', ['Block', 'x'], { str: '(x: T, n: integer) -> T where T' }],
         'x',
         ['Typed', 'n', { str: 'integer' }],
       ],
@@ -122,7 +127,7 @@ describe('M2 SUGARED GENERICS — lowering (§3.1/§3.2)', () => {
         [
           'Typed',
           ['Block', ['Length', 'xs']],
-          { str: 'forall T. (xs: list<T>) -> integer' },
+          { str: '(xs: list<T>) -> integer where T' },
         ],
         'xs',
       ],
@@ -142,7 +147,7 @@ describe('M2 SUGARED GENERICS — lowering (§3.1/§3.2)', () => {
         'f',
         [
           'Function',
-          ['Typed', ['Block', 'x'], { str: 'forall T. (x: T, y: Tx) -> T' }],
+          ['Typed', ['Block', 'x'], { str: '(x: T, y: Tx) -> T where T' }],
           'x',
           ['Typed', 'y', { str: 'Tx' }],
         ],
@@ -156,7 +161,7 @@ describe('M2 SUGARED GENERICS — lowering (§3.1/§3.2)', () => {
       'f',
       [
         'Function',
-        ['Typed', ['Block', 'x'], { str: 'forall T. (x: T) -> unknown' }],
+        ['Typed', ['Block', 'x'], { str: '(x: T) -> unknown where T' }],
         'x',
       ],
     ]);
@@ -168,7 +173,7 @@ describe('M2 SUGARED GENERICS — lowering (§3.1/§3.2)', () => {
       'tick',
       [
         'Function',
-        ['Typed', ['Block', 'x'], { str: 'forall T. (x: T) random -> T' }],
+        ['Typed', ['Block', 'x'], { str: '(x: T) random -> T where T' }],
         'x',
       ],
     ]);
@@ -186,7 +191,7 @@ describe('M2 SUGARED GENERICS — lowering (§3.1/§3.2)', () => {
         [
           'Typed',
           ['Block', 'x'],
-          { str: 'forall T: list<integer>. (x: T) -> T' },
+          { str: '(x: T) -> T where T: list<integer>' },
         ],
         'x',
       ],
@@ -204,7 +209,7 @@ describe('M2 SUGARED GENERICS — lowering (§3.1/§3.2)', () => {
         [
           'Typed',
           ['Block', ['k', 'x']],
-          { str: 'forall T: (real) -> real. (k: T, x: real) -> real' },
+          { str: '(k: T, x: real) -> real where T: (real) -> real' },
         ],
         'k',
         ['Typed', 'x', { str: 'real' }],
@@ -241,7 +246,7 @@ describe('M2 SUGARED GENERICS — end to end', () => {
   test('the function value keeps its polytype', () => {
     expect(run('function f<T>(x: T) -> T { x }\nf')).toMatchObject({
       diagnostics: [],
-      type: 'forall T. (x: T) -> T',
+      type: '(x: T) -> T where T',
     });
   });
 
@@ -308,7 +313,7 @@ describe('M2 SUGARED GENERICS — end to end', () => {
 
 //
 // (c) Grammar diagnostics. Everything the type grammar validates about a
-// `forall` clause is inherited by the assembled signature — no bespoke checks.
+// `where` clause is inherited by the assembled signature — no bespoke checks.
 //
 
 describe('M2 SUGARED GENERICS — grammar diagnostics (§3.1/§3.2)', () => {
@@ -343,11 +348,29 @@ describe('M2 SUGARED GENERICS — grammar diagnostics (§3.1/§3.2)', () => {
   });
 
   test('an F-BOUNDED bound is an ordinary unknown-type error', () => {
-    // Bounds parse with the clause's own names NOT in scope (F-bounded bounds
-    // are out of scope for this milestone), so `U` never resolves.
+    // The clause declares only `T`, so the `U` its bound names resolves to
+    // nothing at all.
     expect(parseDiagnostics('function f<T: list<U>>(x: T) -> T { x }')).toEqual(
       [['type-annotation-error', 'Unknown type "U"']]
     );
+  });
+
+  test('a bound naming a SIBLING clause variable gets the ground-bound rule', () => {
+    // All the clause's names are seeded before ANY bound is parsed (the rule
+    // shared with the type layer's clause reader and the trailing `where`
+    // clause), so `U` resolves and the assembled signature reports the real
+    // problem — a bound must be ground — instead of `Unknown type "U"`.
+    const diags = parseDiagnostics(
+      'function f<T: list<U>, U>(x: T, y: U) -> T { x }'
+    );
+    expect(diags.map((d) => d[0])).toEqual(['type-annotation-error']);
+    expect(String(diags[0][1])).toContain(
+      'The bound of the type variable `T` must be a ground type'
+    );
+    // …and the same for a SELF-referential bound.
+    expect(
+      String(parseDiagnostics('function f<T: list<T>>(x: T) -> T { x }')[0][1])
+    ).toContain('The bound of the type variable `T` must be a ground type');
   });
 
   test('G2 — a clause plus a LITERAL parameter is rejected at the parser', () => {
@@ -360,7 +383,7 @@ describe('M2 SUGARED GENERICS — grammar diagnostics (§3.1/§3.2)', () => {
 
   test('a REJECTED clause leaves the parameter annotations untouched', () => {
     // The erased lowering keys off the POST-rejection clause state: with the
-    // clause dropped there is no `forall` ascription to carry `x`'s type, so
+    // clause dropped there is no quantified ascription to carry `x`'s type, so
     // erasing it here would silently turn this into an ordinary `f(x, 0)`
     // clause. (An unresolvable `T` then reads as `unknown` in the engine; when
     // the clause name shadows a real type, it resolves to that type.)
@@ -484,7 +507,7 @@ describe('M2 SUGARED GENERICS — serialization (§3.3)', () => {
         'f',
         [
           'Function',
-          ['Typed', ['Block', 'y'], { str: 'forall T. (zz: T) -> T' }],
+          ['Typed', ['Block', 'y'], { str: '(zz: T) -> T where T' }],
           'y',
         ],
       ] as any)
@@ -497,7 +520,7 @@ describe('M2 SUGARED GENERICS — serialization (§3.3)', () => {
       'f',
       [
         'Function',
-        ['Typed', ['Block', 'x'], { str: 'forall T. (x: T) -> T' }],
+        ['Typed', ['Block', 'x'], { str: '(x: T) -> T where T' }],
         'x',
       ],
     ];
@@ -506,7 +529,7 @@ describe('M2 SUGARED GENERICS — serialization (§3.3)', () => {
     const ce = new ComputeEngine();
     ce.box(json as any).evaluate();
     expect(ce.box(['f', 5]).evaluate().toString()).toBe('5');
-    expect(ce.symbol('f').type.toString()).toBe('forall T. (x: T) -> T');
+    expect(ce.symbol('f').type.toString()).toBe('(x: T) -> T where T');
   });
 
   test('a non-`Block` body still serializes in the `function` block form', () => {
@@ -516,8 +539,393 @@ describe('M2 SUGARED GENERICS — serialization (§3.3)', () => {
       serializeEpsil([
         'DefineFunction',
         'f',
-        ['Function', ['Typed', 'x', { str: 'forall T. (x: T) -> T' }], 'x'],
+        ['Function', ['Typed', 'x', { str: '(x: T) -> T where T' }], 'x'],
       ] as any)
     ).toBe('function f<T>(x: T) -> T {x}');
+  });
+});
+
+//
+// (f) The SECOND binder spelling: a trailing `where` clause on the definition
+// head (`docs/plans/2026-08-11-where-clause-type-constraints.md`). The clause
+// is always LAST — after the effects slot and after the return type — in every
+// declaration form, and its names must nevertheless be in scope from the FIRST
+// parameter annotation, which is what the lexical pre-scan buys.
+//
+
+describe('WHERE-CLAUSE BINDER — the five declaration spellings', () => {
+  test('block form, annotated return', () => {
+    expect(lowered('function f(x: T) -> T where T { x }')).toEqual([
+      'DefineFunction',
+      'f',
+      [
+        'Function',
+        ['Typed', ['Block', 'x'], { str: '(x: T) -> T where T' }],
+        'x',
+      ],
+    ]);
+    expect(run('function f(x: T) -> T where T { x }\nf(5)')).toMatchObject({
+      diagnostics: [],
+      value: '5',
+      type: 'finite_integer',
+    });
+  });
+
+  test('block form, return inferred — the wide-result `unknown`', () => {
+    expect(lowered('function f(x: T) where T { x }')).toEqual([
+      'DefineFunction',
+      'f',
+      [
+        'Function',
+        ['Typed', ['Block', 'x'], { str: '(x: T) -> unknown where T' }],
+        'x',
+      ],
+    ]);
+    expect(run('function f(x: T) where T { x }\nf("a")')).toMatchObject({
+      diagnostics: [],
+      value: '"a"',
+      type: 'string',
+    });
+  });
+
+  test('block form with an effects slot — the clause still comes last', () => {
+    expect(lowered('function tick(x: T) random -> T where T { x }')).toEqual([
+      'DefineFunction',
+      'tick',
+      [
+        'Function',
+        ['Typed', ['Block', 'x'], { str: '(x: T) random -> T where T' }],
+        'x',
+      ],
+    ]);
+    expect(
+      run('function tick(x: T) random -> T where T { x }\ntick(3)')
+    ).toMatchObject({
+      diagnostics: [],
+      value: '3',
+    });
+  });
+
+  test('math form (with `->`)', () => {
+    expect(lowered('f(x: T) -> T where T = x + x')).toEqual([
+      'DefineFunction',
+      'f',
+      [
+        'Function',
+        ['Typed', ['Add', 'x', 'x'], { str: '(x: T) -> T where T' }],
+        'x',
+      ],
+    ]);
+    expect(run('f(x: T) -> T where T = x + x\nf(7)')).toMatchObject({
+      diagnostics: [],
+      value: '14',
+    });
+  });
+
+  test('…and the math form WITHOUT `->` is NOT claimed', () => {
+    // Same rule as the bare effect specifier (`f(x) random = 5`): the
+    // definition lookahead claims `f( … ) = …` and `f( … ) -> T = …` only, so
+    // `f(x) where T = 5` stays an ORDINARY expression statement — the `where`
+    // is an unexpected symbol, not a clause.
+    const [expr, diags] = parseEpsil('f(x) where T = 5');
+    expect(strip(expr)).toEqual(['f', 'x']);
+    expect((diags ?? []).map((d) => d.message)).toEqual([
+      ['unexpected-symbol', 'where'],
+    ]);
+  });
+
+  test('anonymous type — the clause has nowhere else to go', () => {
+    expect(run('let f: (T) -> T where T = x |-> x\nf(5)')).toMatchObject({
+      diagnostics: [],
+      value: '5',
+      type: 'finite_integer',
+    });
+  });
+});
+
+describe('WHERE-CLAUSE BINDER — binding, bounds and generic behavior', () => {
+  test('a `where`-bound parameter is generic: two calls, two types', () => {
+    // The pre-scan is what makes this work: `x: T` is parsed BEFORE the clause
+    // is reached, so `T` has to be seeded from a lexical scan.
+    expect(run('function id(x: T) -> T where T { x }\nid(5)')).toMatchObject({
+      value: '5',
+      type: 'finite_integer',
+    });
+    expect(run('function id(x: T) -> T where T { x }\nid("a")')).toMatchObject({
+      value: '"a"',
+      type: 'string',
+    });
+  });
+
+  test('…and both instantiations live on ONE engine', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'function id(x: T) -> T where T { x }');
+    expect(ce.box(['id', 5]).evaluate().toString()).toBe('5');
+    expect(
+      ce
+        .box(['id', { str: 'a' }])
+        .evaluate()
+        .toString()
+    ).toBe('"a"');
+  });
+
+  test('two variables, structural positions', () => {
+    expect(
+      run(
+        'function swap(p: tuple<T, U>) -> tuple<U, T> where T, U { (p[2], p[1]) }\nswap((1, "a"))'
+      )
+    ).toMatchObject({
+      diagnostics: [],
+      value: '("a", 1)',
+      type: 'tuple<string, finite_integer>',
+    });
+  });
+
+  test('a bound is enforced at the call', () => {
+    expect(
+      run('function f(x: T) -> T where T: number { x }\nf("a")').value
+    ).toBe('Error(ErrorCode("incompatible-type", "number", "string"))');
+  });
+
+  test('a BOUND containing `->` and brackets keeps the clause extent right', () => {
+    expect(
+      lowered(
+        'function h(k: T, x: real) -> real where T: (real) -> real { k(x) }'
+      )
+    ).toEqual([
+      'DefineFunction',
+      'h',
+      [
+        'Function',
+        [
+          'Typed',
+          ['Block', ['k', 'x']],
+          { str: '(k: T, x: real) -> real where T: (real) -> real' },
+        ],
+        'k',
+        ['Typed', 'x', { str: 'real' }],
+      ],
+    ]);
+  });
+
+  test('the clause names are OUT of scope in the BODY', () => {
+    // G7: the clause scopes over the HEAD only.
+    expect(
+      parseDiagnostics('function f(x: T) -> T where T { let y: T = x\ny }')
+    ).toEqual([['type-annotation-error', 'Unknown type "T"']]);
+  });
+
+  test('the type grammar’s own validations come back for free', () => {
+    expect(parseDiagnostics('function f(x: T) -> T where T, U { x }')).toEqual([
+      [
+        'type-annotation-error',
+        'unsolvable-type-variable: The type variable `U` is quantified but never used',
+      ],
+    ]);
+    expect(
+      parseDiagnostics('function f(x: integer) -> T where T { x }')
+    ).toEqual([
+      [
+        'type-annotation-error',
+        'unsolvable-type-variable: The type variable `T` occurs only in the result of its signature, so it can never be solved. Write the ground type directly',
+      ],
+    ]);
+    expect(parseDiagnostics('function f(x: T) -> T where T, T { x }')).toEqual([
+      [
+        'type-annotation-error',
+        'The type variable `T` is declared more than once',
+      ],
+    ]);
+  });
+
+  test('the reserved `is` slot parses, and is rejected as unsupported', () => {
+    expect(
+      parseDiagnostics('function f(x: T) -> T where T is Hashable { x }')
+    ).toEqual([
+      [
+        'type-annotation-error',
+        'protocol-conformance-unsupported: Protocol conformance constraints (`where T is Hashable`) are not supported yet',
+      ],
+    ]);
+  });
+});
+
+describe('WHERE-CLAUSE BINDER — one binding site per declaration', () => {
+  test('`<T>` and `where` on the same definition is an error', () => {
+    const source = 'function f<T>(x: T) -> T where T: number { x }';
+    const [, diags] = parseEpsil(source);
+    expect((diags ?? []).map((d) => d.message)).toEqual([
+      ['duplicate-type-parameter-clause', 'f'],
+    ]);
+    // …and the diagnostic spans the `where` clause, not the `<T>` binder.
+    expect(diags![0].range[0]).toBe(source.indexOf('where'));
+  });
+
+  test('…and the `<T>` clause wins: the definition still works', () => {
+    expect(
+      run('function f<T>(x: T) -> T where T: number { x }\nf(5)').value
+    ).toBe('5');
+  });
+});
+
+//
+// A clause that does not survive — syntactically (it never parsed) or
+// semantically (the assembled signature was refused) — must leave the
+// definition with NO ascription (one naming a variable nothing declares) and
+// with its parameter annotations INTACT: a definition that failed to parse
+// must not end up more permissive than its source. Same recovery as the G2
+// literal-parameter rejection.
+//
+
+describe('WHERE-CLAUSE BINDER — clause-failure recovery', () => {
+  test('a SYNTACTICALLY malformed clause leaves no dangling ascription (block form)', () => {
+    // `is` with no protocol name: the clause never parses, so nothing
+    // quantifies `T` and the body must not be ascribed `-> T`.
+    const [expr, diags] = parseEpsil('function f(x: T) -> T where T is { x }');
+    expect((diags ?? []).map((d) => d.message)).toEqual([['symbol-expected']]);
+    expect(strip(expr)).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', ['Block', 'x'], ['Typed', 'x', { str: 'T' }]],
+    ]);
+  });
+
+  test('…a bound-less `where T:` too', () => {
+    const [expr, diags] = parseEpsil('function f(x: T) -> T where T: { x }');
+    expect((diags ?? []).map((d) => d.message)).toEqual([
+      ['type-annotation-error', 'Expected a type'],
+    ]);
+    expect(strip(expr)).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', ['Block', 'x'], ['Typed', 'x', { str: 'T' }]],
+    ]);
+  });
+
+  test('…and a NAMELESS `where` is diagnosed, not silently quantified', () => {
+    // Nothing is seeded (the pre-scan finds no name), so the annotation is an
+    // ordinary unknown type and the head never completes.
+    expect(parseDiagnostics('function f(x: T) -> T where { x }')).toEqual([
+      ['type-annotation-error', 'Unknown type "T"'],
+      ['opening-bracket-expected', '{'],
+    ]);
+  });
+
+  test('a SYNTACTICALLY malformed clause, math form', () => {
+    const [expr, diags] = parseEpsil('f(x: T) -> T where T is = x');
+    expect((diags ?? []).map((d) => d.message)).toEqual([['symbol-expected']]);
+    expect(strip(expr)).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', 'x', ['Typed', 'x', { str: 'T' }]],
+    ]);
+  });
+
+  test('a SEMANTICALLY rejected clause keeps the parameter annotations (block form)', () => {
+    // `U` is quantified but never used, so the assembled signature is refused
+    // — and with no signature to carry `x`'s type, erasing its annotation
+    // would make the definition MORE permissive than what was written.
+    const [expr, diags] = parseEpsil(
+      'function f(x: T, n: integer) -> T where T, U { x }'
+    );
+    expect((diags ?? []).map((d) => d.message)).toEqual([
+      [
+        'type-annotation-error',
+        'unsolvable-type-variable: The type variable `U` is quantified but never used',
+      ],
+    ]);
+    expect(strip(expr)).toEqual([
+      'DefineFunction',
+      'f',
+      [
+        'Function',
+        ['Block', 'x'],
+        ['Typed', 'x', { str: 'T' }],
+        ['Typed', 'n', { str: 'integer' }],
+      ],
+    ]);
+    // The pre-existing fallback semantics: the definition still runs (`T` is
+    // an unresolved — hence `unknown` — name).
+    expect(
+      run('function f(x: T, n: integer) -> T where T, U { x }\nf(1, 2)').value
+    ).toBe('1');
+  });
+
+  test('a SEMANTICALLY rejected clause keeps the parameter annotations (math form)', () => {
+    const [expr, diags] = parseEpsil('f(x: T) -> T where T, U = x');
+    expect((diags ?? []).map((d) => d.message)).toEqual([
+      [
+        'type-annotation-error',
+        'unsolvable-type-variable: The type variable `U` is quantified but never used',
+      ],
+    ]);
+    expect(strip(expr)).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', 'x', ['Typed', 'x', { str: 'T' }]],
+    ]);
+  });
+});
+
+describe('WHERE-CLAUSE BINDER — a clause in a comma-delimited annotation', () => {
+  const NESTED =
+    'A `where` clause can only quantify a top-level signature (or one arm of an overload set), not a nested one. Parenthesize a nested clause: `((A) -> B where A, B)`';
+
+  test('a clause in a PARAMETER annotation errors at the `where`', () => {
+    const source = 'function f(x: (T) -> T where T) { 1 }';
+    const [, diags] = parseEpsil(source);
+    expect((diags ?? []).map((d) => d.message)).toEqual([
+      ['type-annotation-error', NESTED],
+    ]);
+    expect(diags![0].range[0]).toBe(source.indexOf('where'));
+  });
+
+  test('…and it does not EAT the following parameter', () => {
+    // The sharp case: `where T, y: real` is simultaneously a well-formed
+    // `<var_decl>` list and a well-formed next parameter. `y` must survive.
+    const source = 'function f(x: (integer) -> integer where T, y: real) { y }';
+    const [expr, diags] = parseEpsil(source);
+    expect((diags ?? []).map((d) => d.message)).toEqual([
+      ['type-annotation-error', NESTED],
+    ]);
+    expect(diags![0].range[0]).toBe(source.indexOf('where'));
+    expect(strip(expr)).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', ['Block', 'y'], 'x', ['Typed', 'y', { str: 'real' }]],
+    ]);
+  });
+
+  test('a COMMENTED-OUT `where` is not a clause', () => {
+    // The pre-scan reads raw source, so it has to skip comments (and string
+    // literals) itself — otherwise a commented-out clause silently seeds its
+    // names and swallows the `Unknown type` the annotation deserves.
+    expect(
+      parseDiagnostics('function f(x: T) /* where T */ -> T { x }')
+    ).toEqual([
+      ['type-annotation-error', 'Unknown type "T"'],
+      ['opening-bracket-expected', '{'],
+    ]);
+  });
+
+  test('a `where` inside a STRING literal is not a clause either', () => {
+    expect(lowered('f("where T", x) = 1')).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', 1, ['Typed', 'literalParam_1', { str: '"where T"' }], 'x'],
+    ]);
+  });
+
+  test('`where` stays an ordinary identifier everywhere else', () => {
+    expect(run('let where = 5\nwhere + 1').value).toBe('6');
+    expect(run('f(where) = where + 1\nf(3)').value).toBe('4');
+  });
+
+  test('a PARENTHESIZED clause is admitted anywhere', () => {
+    expect(lowered('f(x: ((T) -> T where T)) = x')).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', 'x', ['Typed', 'x', { str: '((T) -> T where T)' }]],
+    ]);
   });
 });

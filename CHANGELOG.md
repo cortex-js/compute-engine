@@ -1,3 +1,42 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **The prefix `forall` quantifier was replaced by a trailing `where` clause.**
+  A generic signature now states its type variables *after* the signature
+  instead of before it: `forall T. (T) -> T` is written `(T) -> T where T`,
+  `forall T: indexed_collection. (T) -> T` is
+  `(T) -> T where T: indexed_collection`, and
+  `forall T, U. (list<T>, (T) any -> U) -> list<U>` is
+  `(list<T>, (T) any -> U) -> list<U> where T, U`. The clause is always **last**
+  — after the effect specifier and after the return type — and an omitted bound
+  means `any`, so `where T` is shorthand for `where T: any`. The prefix spelling
+  is **removed**, not deprecated: the feature is days old and the type language
+  is experimental, so carrying both spellings would cost more than migrating.
+  Semantics, solving, bounds and every existing restriction are unchanged. See
+  `docs/plans/2026-08-11-where-clause-type-constraints.md`.
+
+  Three consequences for host code:
+
+  - **`where` is now a reserved type name and `forall` is not.**
+    `ce.declareType("where", …)` is a `reserved-type-name` error where it
+    previously succeeded, and `ce.declareType("forall", …)` now succeeds where
+    it previously errored. A consumer with a nominal type named `where` must
+    rename it.
+  - **Legacy input gets a targeted migration diagnostic.** A type string
+    beginning with `forall` followed by a name reports *"The `forall T. …`
+    prefix syntax was replaced by a trailing `where` clause"* rather than a
+    generic unknown-type or cascading parse error.
+  - **Serialization emits the trailing shorthand.** `.toString()` writes
+    `(T) -> T where T`, never `where T: any` — an explicitly written `: any` is
+    normalized away, so a type has one canonical string. Variable *names* still
+    round-trip exactly as the author wrote them.
+
+  Per-arm quantification of an overload set now needs parentheses, since
+  `where` binds looser than `&`:
+  `((list<T>) -> T where T) & ((set<T>) -> boolean where T)`. The
+  unparenthesized form is rejected with a message naming the fix.
+
 ## 0.104.1 _2026-08-11_
 
 ### Issues Resolved

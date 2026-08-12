@@ -3,12 +3,12 @@ import { ComputeEngine } from '../../src/compute-engine';
 /**
  * Phase 3b of the type-variables design
  * (`docs/plans/2026-08-01-type-variables-design.md` §7.3): the `core.ts`
- * conversions from a weak signature + imperative `type:` handler to a `forall`
+ * conversions from a weak signature + imperative `type:` handler to a `where`
  * signature.
  *
- *   Identity   `forall T. (T) -> T`
- *   Prime      `forall T. (T, integer?) -> T`
- *   BaseForm   `forall T: number. (T, (string|number)?) -> T`
+ *   Identity   `(T) -> T where T`
+ *   Prime      `(T, integer?) -> T where T`
+ *   BaseForm   `(T, (string|number)?) -> T where T: number`
  *
  * The signature now IS the contract: each `type:` handler was deleted, so
  * these tests pin that the substituted result type reproduces what the
@@ -31,21 +31,21 @@ function engine(): ComputeEngine {
 }
 
 describe('TYPE VARIABLES / core — declared signatures', () => {
-  test('the three operators carry `forall` signatures', () => {
+  test('the three operators carry `where` signatures', () => {
     const ce = engine();
     const sig = (op: string) =>
       ce.box(op).operatorDefinition!.signature.toString();
-    expect(sig('Identity')).toBe('forall T. (T) -> T');
-    expect(sig('Prime')).toBe('forall T. (T, integer?) -> T');
+    expect(sig('Identity')).toBe('(T) -> T where T');
+    expect(sig('Prime')).toBe('(T, integer?) -> T where T');
     // The optional second parameter keeps its union spelling (the serializer
     // orders the members, `(string|number)?` → `number | string?`).
     expect(sig('BaseForm')).toBe(
-      'forall T: number. (T, number | string?) -> T'
+      '(T, number | string?) -> T where T: number'
     );
   });
 });
 
-describe('TYPE VARIABLES / Identity — `forall T. (T) -> T`', () => {
+describe('TYPE VARIABLES / Identity — `(T) -> T where T`', () => {
   test('IMPROVEMENT — the DECLARED result is no longer `unknown`', () => {
     // Pre-migration the declared signature was `(any) -> unknown` and only the
     // `type:` handler echoed the operand. The signature now carries the echo,
@@ -153,7 +153,7 @@ describe('TYPE VARIABLES / Identity — `forall T. (T) -> T`', () => {
   });
 });
 
-describe('TYPE VARIABLES / Prime — `forall T. (T, integer?) -> T`', () => {
+describe('TYPE VARIABLES / Prime — `(T, integer?) -> T where T`', () => {
   test('the result mirrors the base on every route', () => {
     const ce = engine();
     ce.declare('g', 'integer');
@@ -210,7 +210,7 @@ describe('TYPE VARIABLES / Prime — `forall T. (T, integer?) -> T`', () => {
   });
 });
 
-describe('TYPE VARIABLES / BaseForm — `forall T: number. (T, (string|number)?) -> T`', () => {
+describe('TYPE VARIABLES / BaseForm — `(T, (string|number)?) -> T where T: number`', () => {
   test('result type echoes the value operand on every route', () => {
     const ce = engine();
     expect(

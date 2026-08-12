@@ -302,7 +302,7 @@ export function functionResult(
   const arms = signatureArms(type);
   if (!arms) return undefined;
   // A POLYTYPE arm's declared result is OPEN — it is a pattern, not a type
-  // (`forall T. (T) -> T` results in `T`). An open type must never escape as
+  // (`(T) -> T where T` results in `T`). An open type must never escape as
   // an expression's `.type` (§4.2 ground invariant of the type-variables
   // design), and this function is read by a dozen library `type:` handlers
   // that pass it straight through (`Map(xs, genericFn)`). Callers that CAN

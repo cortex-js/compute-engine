@@ -24,6 +24,7 @@ export type DiagnosticCode =
   | 'type-variables-unsupported' // %0 = type name — a parameterized NOMINAL type (`type name<…> = …`); only the `type alias name<…>` form takes a clause
   | 'empty-type-parameter-clause' // %0 = function name — `function f<>(…)`: the clause slot is present but declares nothing
   | 'duplicate-type-parameter' // %0 = variable name — the same name twice in one `function f<T, T>(…)` clause
+  | 'duplicate-type-parameter-clause' // %0 = function name — BOTH binder spellings on one definition (`function f<T>(x: T) -> T where T`); `<T>` and `where T` are the same binding site
   | 'generic-clause-unsupported' // %0 = function name — a generic (`function f<T>(…)`) definition cannot take part in a multi-clause set
   | 'type-declaration-not-top-level' // %0 = type name — a `type` statement inside a block or function body; types are engine-global, so declarations are legal only at the top level of a program
   | 'host-pragma-disabled' // %0 = pragma name (host-state pragmas gated off)

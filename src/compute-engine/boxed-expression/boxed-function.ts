@@ -477,7 +477,7 @@ export class BoxedFunction
             ? narrow(oldSig.result, t)
             : widen(oldSig.result, t),
       };
-      // The effect specifier and the `forall` clause are the arrow's two
+      // The effect specifier and the `where` clause are the arrow's two
       // adjunct fields, neither re-derivable from the result-type inference:
       // carry BOTH across the rebuild.
       if (oldSig.effects !== undefined) nextSig.effects = oldSig.effects;
@@ -4316,7 +4316,7 @@ function type(expr: BoxedFunction): Type {
           // result — the solver bound each lift-admitted operand's element
           // type — so the ordinary wrap below is the whole answer. It
           // reproduces the retired echo short-circuit on the bare-echo shape
-          // (`f([1,2,3])` under `forall T. (T) -> T` is `vector<…^3>`, since
+          // (`f([1,2,3])` under `(T) -> T where T` is `vector<…^3>`, since
           // `T` binds `finite_integer` and the wrap re-adds the operand's
           // rank) and fixes the variable-MENTIONING shapes the short-circuit
           // could not reach.

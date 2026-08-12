@@ -12,8 +12,8 @@ import type { FunctionSignature, Type } from './types.js';
  * The GROUND display form of a type (Design D, R-D5, ruled 2026-08-09).
  *
  * A converted operator's declared signature is a polytype over a contextual
- * callback slot — `forall T. (collection<T>, predicate: callback<(T) ->
- * boolean>) -> integer`. Neither half of that is information a caller can act
+ * callback slot — `(collection<T>, predicate: callback<(T) -> boolean>)
+ * -> integer where T`. Neither half of that is information a caller can act
  * on: `callback<S>` admits exactly what the primitive `function` admits
  * (contract clause 1), and `T` is solved per application. Displaying it says
  * the operator got stricter when nothing about admission changed.
@@ -24,16 +24,16 @@ import type { FunctionSignature, Type } from './types.js';
  * - every `callback<S>` erases to `function`, at any depth (clause 1);
  * - every quantified variable the erasure left VACUOUS — occurring at most
  *   once in the erased signature — is instantiated to its ground skeleton
- *   (`any`, or its declared bound), and the `forall` clause drops with the
+ *   (`any`, or its declared bound), and the `where` clause drops with the
  *   last of them. `reduceType` then normalizes `collection<any>` back to the
  *   bare `collection`, which is the pre-conversion wording. (The same "ground
  *   skeleton" device `validate.ts` uses for the expected type in an
  *   `incompatible-type` message.)
  *
  * The vacuity test is what keeps the projection HONEST for an operator that
- * was already generic before Design D touched it: `Partition`'s `forall T.
- * (collection<T>, integer | callback<(T) -> boolean>, integer?) ->
- * list<list<T>>` still relates its source's elements to its result after the
+ * was already generic before Design D touched it: `Partition`'s
+ * `(collection<T>, integer | callback<(T) -> boolean>, integer?) ->
+ * list<list<T>> where T` still relates its source's elements to its result after the
  * erasure, so `T` is a pre-existing declared contract — not a conversion
  * artifact — and it is kept, on exactly the rationale that keeps a user's own
  * polytype below. A variable left in a single position relates nothing and
@@ -52,8 +52,8 @@ import type { FunctionSignature, Type } from './types.js';
  *
  * SCOPED TO A CONVERSION. The presence of a `callback<S>` is what identifies a
  * signature this mechanism rewrote, and it is the whole trigger: a type with no
- * callback anywhere is returned BY REFERENCE, `forall` and all. A user's own
- * generic function keeps its polytype display (`forall T. (x: T) -> T`) —
+ * callback anywhere is returned BY REFERENCE, `where` clause and all. A user's own
+ * generic function keeps its polytype display (`(x: T) -> T where T`) —
  * that is its declared contract, not a conversion artifact, and it is pinned
  * in `generic-function-literals.test.ts`.
  */
@@ -75,10 +75,10 @@ export function groundedDisplayType(t: Type): Type {
 /** The projection of ONE (already callback-erased) arm. Never throws: a
  * projection is a printing device, and a getter that prints must not be able to
  * fail. The erasure can leave a quantified variable occurring only result-side
- * (`forall T. (callback<(T) -> boolean>) -> tuple<T, T>` erases to
+ * (`(callback<(T) -> boolean>) -> tuple<T, T> where T` erases to
  * `(function) -> tuple<T, T>`), which is not a declarable polytype — so the
  * grounded form is validated here and, if it does not stand on its own, the
- * erased-but-`forall`-kept spelling is shown instead. */
+ * erased-but-`where`-kept spelling is shown instead. */
 function groundedArm(erased: Type): Type {
   try {
     return reduceType(groundVacuousVariables(erased));

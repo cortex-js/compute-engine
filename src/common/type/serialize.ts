@@ -80,7 +80,7 @@ export function typeToString(type: Type, precedence = 0): string {
     case 'variable':
       // A type variable is atomic: its name, as the author wrote it. Variable
       // names are NEVER canonicalized here — the author's letters round-trip
-      // by construction, which the `forall` clause below relies on (the
+      // by construction, which the `where` clause below relies on (the
       // α-blindness of string-keyed identity is recorded and accepted, see
       // §5 of the type-variables design).
       result = type.name;
@@ -281,20 +281,30 @@ export function typeToString(type: Type, precedence = 0): string {
         (ELIDE_STATED_PURE && type.effects !== 'any' && !type.effects.length)
           ? ''
           : ` ${effectSetToString(type.effects)}`;
-      // The `forall` clause, emitted with the author's variable names (it
-      // round-trips by construction). A polytype has SIGNATURE_PRECEDENCE, so
-      // an arm of an overload set is parenthesized by the check below, exactly
-      // as the per-arm clause syntax requires.
+      // The trailing `where` clause, emitted with the author's variable names
+      // (they round-trip by construction). An unbounded variable — including
+      // an author-written explicit `: any`, which is the identity bound —
+      // emits the SHORTHAND (`where T`), so a type has exactly one canonical
+      // string (the serialization ruling of the where-clause spec). A polytype
+      // has SIGNATURE_PRECEDENCE, so an arm of an overload set is
+      // parenthesized by the check below, exactly as the per-arm clause
+      // syntax requires.
       const clause = type.typeParams?.length
-        ? `forall ${type.typeParams
-            .map((p) =>
-              p.bound === undefined
-                ? p.name
-                : `${p.name}: ${typeToString(p.bound)}`
-            )
-            .join(', ')}. `
+        ? ` where ${type.typeParams
+            .map((p) => {
+              const bound =
+                p.bound === undefined ? undefined : typeToString(p.bound);
+              const decl =
+                bound === undefined || bound === 'any'
+                  ? p.name
+                  : `${p.name}: ${bound}`;
+              return p.protocols?.length
+                ? `${decl} is ${p.protocols.join(' & ')}`
+                : decl;
+            })
+            .join(', ')}`
         : '';
-      result = `${clause}(${argsList})${effects} -> ${typeToString(type.result)}`;
+      result = `(${argsList})${effects} -> ${typeToString(type.result)}${clause}`;
       break;
 
     default:

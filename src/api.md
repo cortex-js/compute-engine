@@ -14600,7 +14600,7 @@ type: Type;
 readonly isPolymorphic: boolean;
 ```
 
-True when this type is a **polytype**: a signature carrying a `forall`
+True when this type is a **polytype**: a signature carrying a `where`
 clause, or an overload set with at least one such arm.
 
 Computed ONCE, here, at construction: every per-call dispatch check
@@ -14707,7 +14707,7 @@ True when every value of this type is an `other`.
 **A polymorphic PATTERN is a consistent existential** (D12): the pattern's
 variables are solved against the subject and the match holds iff a
 consistent instantiation exists — so
-`ce.type('(number) -> number').matches('forall T. (T) -> T')` is `true`,
+`ce.type('(number) -> number').matches('(T) -> T where T')` is `true`,
 the probe users actually mean. `couldMatch` deliberately answers `false`
 on the same row (D6's bound-reading, contravariant `any`); the two
 predicates diverge by design.
@@ -14897,7 +14897,7 @@ the projection is a property of the STRING a type shows a human, never of
 the type itself. Applying it to the `Type` instead — building a boxed type
 around the projected AST — made it semantics-visible: a callback-bearing
 overload set collapsed to `nothing` through `reduceType`, dropping the
-`forall` flipped `isPolymorphic` (and with it every `Ground <: Poly`
+a `where` clause flipped `isPolymorphic` (and with it every `Ground <: Poly`
 answer), and re-validating the projected polytype could THROW out of a
 getter. Deferring to stringification makes all three impossible by
 construction.
@@ -15323,7 +15323,7 @@ type TypeVariable = {
 A universally quantified type variable (rank-1).
 
 Only legal inside a function signature; declared and scoped by its arm's
-`forall` clause ([FunctionSignature.typeParams](#typeparams)). A variable is
+`where` clause ([FunctionSignature.typeParams](#typeparams)). A variable is
 **atomic and opaque**: it is never reduced, distributed or collapsed, and it
 is substituted away by instantiation at a call site.
 
@@ -15343,7 +15343,7 @@ How a parameterized NOMINAL type relates two of its applications
 Declared inside a type-parameter clause (`type tree<out T> = …`); the words
 are contextual there and are never reserved. Only a nominal declaration
 carries one — a transparent alias has no declaration-level variance, and a
-`forall` clause never does.
+`where` clause never does.
 
 </MemberCard>
 
@@ -15356,10 +15356,11 @@ type TypeParameter = {
   name: string;
   bound: Type;
   variance: TypeVariance;
+  protocols: string[];
 };
 ```
 
-One entry of a signature's `forall` clause, or of a declared type's
+One entry of a signature's `where` clause, or of a declared type's
 type-parameter clause: the variable's name and its optional declared upper
 bound.
 
@@ -15444,7 +15445,7 @@ five-clause contract:
 3. **Inference from the operand traverses only `S`'s RESULT type** — a named
    callback's own parameter types must never constrain a type variable.
 4. **Free-variable discovery and substitution retain variables inside `S`**:
-   `callback<(T) -> U>` contributes `T` and `U` to its signature's `forall`
+   `callback<(T) -> U>` contributes `T` and `U` to its signature's `where`
    accounting, and instantiation substitutes inside `S` normally.
 5. **Internal serialization preserves it** (`typeToString`/`parseType`
    round-trip, dedup keys), even where user-facing display erases it.

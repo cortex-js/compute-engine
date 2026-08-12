@@ -1,5 +1,13 @@
 # Type variables (parametric polymorphism) in the type system
 
+> **Surface syntax superseded (2026-08-11).** The prefix quantifier
+> `forall T: bound. (T) -> T` described throughout this document was replaced
+> by a trailing `where` clause — `(T) -> T where T: bound` — by
+> `docs/plans/2026-08-11-where-clause-type-constraints.md`. The **semantics
+> are unchanged**: read every `forall T: bound. <sig>` below as
+> `<sig> where T: bound`. Consult the where-clause design for the current
+> grammar, clause placement, reserved words, and serialization rules.
+
 Status: **draft v4 — D1–D12 RULED (2026-08-01, approved as
 recommended); v2 milestone (generic literals + `function f<T>(…)`
 sugar) IMPLEMENTED 2026-08-04, see §9.1; open: D13's encoding half

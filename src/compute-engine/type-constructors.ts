@@ -187,8 +187,8 @@ function removeMintedTypeConstructor(
  *   still DROPS a previously minted constructor: `mintTypeConstructor` removes
  *   it before consulting this.)
  * - a parameterized NOMINAL type (`type tree<T> = tuple<value: T, …>`) → the
- *   same signature, `forall`-QUANTIFIED by the type's clause
- *   (`forall T. (T, list<tree<T>>) -> tree<T>`, parameterized-nominal design
+ *   same signature, `where`-QUANTIFIED by the type's clause
+ *   (`(T, list<tree<T>>) -> tree<T> where T`, parameterized-nominal design
  *   §5). The rank-1 call-site solver instantiates `T` per construction. The
  *   open body is legal here for exactly the reason it is not for an alias: the
  *   clause closes it.
@@ -393,7 +393,7 @@ function paramTypeAt(sig: FunctionSignature, i: number): Type | undefined {
  *
  * BOTH sides must be GROUND. `raw` already is (the caller grounds the body),
  * and the user arm is grounded here: a QUANTIFIED user arm (§5 —
- * `forall U. (x: U) -> pack<U>`) otherwise walks its own `U` into
+ * `(x: U) -> pack<U> where U`) otherwise walks its own `U` into
  * `provablyDisjoint`, breaking the ground-inputs contract that only a
  * stripped-in-production `console.assert` guards. Each parameter is grounded
  * COVARIANTLY, as the domain it is: the position asks "which values could

@@ -1,5 +1,25 @@
 # Generic function literals + `function f<T>(…)` — the type-variables v2 milestone
 
+> **Note (2026-08-11) — the `<T>` binder is unchanged; the *other* spelling
+> moved.** `docs/plans/2026-08-11-where-clause-type-constraints.md` replaced
+> the prefix quantifier `forall T: bound. <sig>` with a trailing clause,
+> `<sig> where T: bound`. Everything this document says about the `<…>` binder
+> and about generic literals still holds verbatim; only the anonymous-type
+> spelling changed, so read every `forall T: bound. <sig>` below as
+> `<sig> where T: bound`.
+>
+> **Equivalence.** `function f<T>(…)` and `function f(…) where T` are
+> synonyms — the same clause, two binding sites, as in Rust. The `where`
+> clause always comes **last**: after the effect specifier and after the
+> return type, and in every definition form (`function f(x: T) -> T where T
+> { … }`, `function f(x: T) where T { … }`,
+> `function tick(x: T) random -> T where T { … }`,
+> `f(x: T) -> T where T = x + x`).
+>
+> **One binding site per declaration.** A declaration may carry a `<…>` clause
+> *or* a `where` clause, never both: `function f<T>(x: T) -> T where T: number`
+> is an error, not a bounded `<T: number>`.
+
 Status: v2 RATIFIED 2026-08-04 — ready for implementation. Dual spec
 review applied (14 findings, record in
 `docs/scratch/2026-08-04-generic-function-literals-design_SPEC_REVIEW.md`);

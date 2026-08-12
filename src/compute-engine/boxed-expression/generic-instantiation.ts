@@ -111,7 +111,7 @@ export interface ArmInferenceContext {
 }
 
 /**
- * Solve `arm`'s `forall` clause against `ops` (§4.3), mapping each §4.5
+ * Solve `arm`'s `where` clause against `ops` (§4.3), mapping each §4.5
  * admission gate onto the solver's bound-contribution rules.
  */
 export function solveArm(

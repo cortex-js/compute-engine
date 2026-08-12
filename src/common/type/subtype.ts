@@ -708,7 +708,7 @@ export function couldMatch(a: Type, b: Type): boolean {
   return isSubtype(a, b) || isSubtype(b, a);
 }
 
-/** True when this signature carries a `forall` clause (is a polytype). */
+/** True when this signature carries a `where` clause (is a polytype). */
 function isPolytype(t: FunctionSignature): boolean {
   return t.typeParams !== undefined && t.typeParams.length > 0;
 }
@@ -717,8 +717,8 @@ function isPolytype(t: FunctionSignature): boolean {
  * α-equivalence of two polytype arms: the same shape up to a CONSISTENT
  * renaming of their quantified variables (§5 rule 3).
  *
- * The clauses are paired positionally — `forall T, U. (T, U) -> T` and
- * `forall U, T. (U, T) -> U` are equivalent — and their declared bounds are
+ * The clauses are paired positionally — `(T, U) -> T where T, U` and
+ * `(U, T) -> U where U, T` are equivalent — and their declared bounds are
  * compared STRUCTURALLY (differing bounds ⇒ not equivalent). The bodies are
  * compared by renaming the lhs's variables to the rhs's names (a simultaneous
  * substitution, so a swap does not capture) and comparing DEDUP KEYS, which is
@@ -732,9 +732,9 @@ function isPolytype(t: FunctionSignature): boolean {
  * The keys are computed on the CALLBACK-ERASED types (Design D §4 clause 1).
  * The dedup key deliberately PRESERVES `callback<S>` (clause 5, round-tripping)
  * — but this is an admission decision, and for admission `callback<S>` IS the
- * primitive `function`. Without the erasure, `forall T. (collection<T>,
- * callback<(T) -> boolean>) -> integer` and `forall T. (collection<T>,
- * function) -> integer` would be unrelated in BOTH directions, which is exactly
+ * primitive `function`. Without the erasure, `(collection<T>,
+ * callback<(T) -> boolean>) -> integer where T` and `(collection<T>,
+ * function) -> integer where T` would be unrelated in BOTH directions, which is exactly
  * the equivalence clause 1 promises. Erasure is DEEP here: unlike the
  * structural walk in `isSubtype`, this path consumes the whole type as one
  * string.
@@ -1621,8 +1621,8 @@ function broadcastableCollectionElementType(type: Type): Type | undefined {
  * element of a matrix is its first row"). `collectionElementType` (utils.ts)
  * and `broadcastableCollectionElementType` above both report the PEELED row;
  * membership in `collection<E>` / `indexed_collection<E>` must accept it too,
- * or a signature instantiated from the element type (`forall T.
- * (indexed_collection<T>, …)` solving `T = vector<integer^3>`) rejects the very
+ * or a signature instantiated from the element type
+ * (`(indexed_collection<T>, …) … where T` solving `T = vector<integer^3>`) rejects the very
  * operand that produced it.
  *
  * Additive only: the caller checks the scalar reading first and consults this

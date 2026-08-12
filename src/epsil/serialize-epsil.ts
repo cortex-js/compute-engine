@@ -72,7 +72,7 @@ export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
  * reference to itself.
  *
  * The serializer re-parses a `Typed` marker's type text only to DECOMPOSE it
- * (does it carry effects or a `forall` clause? what are its argument types?)
+ * (does it carry effects or a `where` clause? what are its argument types?)
  * and then writes the pieces back out with `typeToString`, so names only have
  * to round-trip TEXTUALLY — validating them is the parser's and the engine's
  * job, and there is no type environment here to validate against. Without
@@ -543,7 +543,7 @@ export function serializeEpsil(
       // A marker that DECOMPOSED is not an ascription though — it is the
       // literal's own signature (`docs/EFFECTS-MODEL.md`, "Epsil surface"),
       // and dropping it would silently weaken the literal. None of its pieces
-      // has an anonymous-mapsto spelling — the specifier and `forall` slots
+      // has an anonymous-mapsto spelling — the specifier and quantifier slots
       // exist only on the named definition forms, and the mapsto's `-> ‹ret›`
       // slot does not exist at all — so a marker-carrying anonymous literal
       // falls back to the generic `Function(…)` spelling, where the `Typed`
@@ -970,7 +970,7 @@ export function serializeEpsil(
     bodyExpr: MathJsonExpression | null;
     retType: string | null;
     specifier: string | null;
-    /** The rendered `forall` declarations (`T, U: number`), or `null`. */
+    /** The rendered type-parameter declarations (`T, U: number`), or `null`. */
     typeParams: string | null;
     /** The marker signature's argument TYPES, positionally aligned with the
      * literal's parameter operands. Marker argument NAMES are cosmetic — the

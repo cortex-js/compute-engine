@@ -296,7 +296,7 @@ export function assertSingleArmPolytype(
  * literal's operand names are the names of record (§2.3, the
  * `docs/EFFECTS-MODEL.md` mirror rule) — and the α-equivalence relation
  * compares dedup KEYS, which do spell names out (`(x: T) -> T`). Without this
- * a declaration written `forall T. (T) -> T` would refuse the E1 spelling of
+ * a declaration written `(T) -> T where T` would refuse the E1 spelling of
  * its own implementation, whose sugar REQUIRES named arguments.
  *
  * `typeParams` is carried through (the rebuild invariant): the comparison is
@@ -522,7 +522,7 @@ export function functionLiteralSignatureType(expr: Expression): Type {
       ? inferredEffects
       : unionEffectSets(declaredEffects, inferredEffects);
 
-  // A GENERIC marker (a `forall` clause) is the literal's contract of record on
+  // A GENERIC marker (a `where` clause) is the literal's contract of record on
   // every TYPE axis: the clause, the argument types and the result are carried
   // VERBATIM. Under erasure the quantified parameter operands are bare symbols,
   // so the `args` assembled above would read `unknown` and the result would be
@@ -545,7 +545,7 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   };
 }
 
-/** True when a full-signature marker carries a non-empty `forall` clause. */
+/** True when a full-signature marker carries a non-empty `where` clause. */
 function isGenericSignature(t: FunctionSignature): boolean {
   return (t.typeParams?.length ?? 0) > 0;
 }

@@ -1397,7 +1397,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     Identity: {
       description: 'Return the argument unchanged',
-      signature: 'forall T. (T) -> T',
+      signature: '(T) -> T where T',
       evaluate: ([x]) => x,
     },
   },
@@ -1408,7 +1408,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // (rung 2 — `apply()` bubbles it) instead of freezing with it.
       inspectsErrors: true,
       signature: '(name:symbol, arguments:expression*) -> unknown',
-      // An ANONYMOUS application instantiates its callee's `forall` clause here
+      // An ANONYMOUS application instantiates its callee's `where` clause here
       // (generic-function-literals design §2.5). This is the one application
       // seam that crosses NO symbol/definition boundary — the callee is an
       // expression, so neither the operator-def nor the value-def arm of
@@ -3213,7 +3213,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (!def) return ce.Nothing;
 
         // R-D5: a runtime signature display is GROUND — a converted operator's
-        // `forall`/`callback<S>` slot prints as the `function` slot it
+        // `where`/`callback<S>` slot prints as the `function` slot it
         // converted from, since neither carries admission information.
         return ce.string(typeToDisplayString(def.signature.type));
       },
@@ -3845,7 +3845,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     BaseForm: {
       description: '`BaseForm(expr, base=10)`',
       complexity: 9000,
-      signature: 'forall T: number. (T, (string|number)?) -> T',
+      signature: '(T, (string|number)?) -> T where T: number',
       evaluate: ([x]) => x,
     },
 
@@ -4036,7 +4036,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // A primed entity denotes something of the same kind as its base:
       // `a'` on a number-valued symbol is another value (so `\sin a'`
       // type-checks), `f'` on a function is a function. Mirror the type.
-      signature: 'forall T. (T, integer?) -> T',
+      signature: '(T, integer?) -> T where T',
     },
   },
 ];

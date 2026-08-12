@@ -1,6 +1,6 @@
 # `where` clauses for type constraints — replacing `forall`
 
-**Status**: proposed · **Date**: 2026-08-11 · **Supersedes**: the `forall`
+**Status**: implemented (2026-08-11) · **Date**: 2026-08-11 · **Supersedes**: the `forall`
 prefix syntax introduced in `docs/plans/2026-08-01-type-variables-design.md`
 
 ## Decision

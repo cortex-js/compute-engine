@@ -150,7 +150,7 @@ export type EffectSet = 'any' | EffectLabel[];
  * A universally quantified type variable (rank-1).
  *
  * Only legal inside a function signature; declared and scoped by its arm's
- * `forall` clause ({@link FunctionSignature.typeParams}). A variable is
+ * `where` clause ({@link FunctionSignature.typeParams}). A variable is
  * **atomic and opaque**: it is never reduced, distributed or collapsed, and it
  * is substituted away by instantiation at a call site.
  */
@@ -162,11 +162,11 @@ export type TypeVariable = { kind: 'variable'; name: string };
  * Declared inside a type-parameter clause (`type tree<out T> = …`); the words
  * are contextual there and are never reserved. Only a nominal declaration
  * carries one — a transparent alias has no declaration-level variance, and a
- * `forall` clause never does. */
+ * `where` clause never does. */
 export type TypeVariance = 'in' | 'out' | 'inout';
 
 /**
- * One entry of a signature's `forall` clause, or of a declared type's
+ * One entry of a signature's `where` clause, or of a declared type's
  * type-parameter clause: the variable's name and its optional declared upper
  * bound.
  *
@@ -179,6 +179,11 @@ export type TypeParameter = {
   /** Declaration-level variance, on a parameterized NOMINAL type only.
    * Absent means the default (`out`, verified — §4.4). */
   variance?: TypeVariance;
+  /** The reserved `is` protocol-conformance slot of a `where` clause
+   * (`where T: collection is Hashable`). Parsed and stored, but semantically
+   * INERT: a declared type carrying one is rejected with
+   * `protocol-conformance-unsupported` until protocols land. */
+  protocols?: string[];
 };
 
 /**
@@ -212,9 +217,9 @@ export type FunctionSignature = {
    * specifier slot, exactly as an unannotated signature always has. The
    * stated-pure `[]` is the same set, spelled ` pure`. See {@link EffectSet}. */
   effects?: EffectSet;
-  /** The `forall` clause quantifying this arm (order-preserving).
+  /** The `where` clause quantifying this arm (order-preserving).
    *
-   * Present only on a **polytype**: `forall T, U: number. (T, U) -> T`. Each
+   * Present only on a **polytype**: `(T, U) -> T where T, U: number`. Each
    * arm of an overload set carries its own clause; same-named variables in
    * different arms are unrelated.
    *
@@ -243,7 +248,7 @@ export type FunctionSignature = {
  * 3. **Inference from the operand traverses only `S`'s RESULT type** — a named
  *    callback's own parameter types must never constrain a type variable.
  * 4. **Free-variable discovery and substitution retain variables inside `S`**:
- *    `callback<(T) -> U>` contributes `T` and `U` to its signature's `forall`
+ *    `callback<(T) -> U>` contributes `T` and `U` to its signature's `where`
  *    accounting, and instantiation substitutes inside `S` normally.
  * 5. **Internal serialization preserves it** (`typeToString`/`parseType`
  *    round-trip, dedup keys), even where user-facing display erases it.
@@ -385,7 +390,7 @@ export type TypeReference = {
   name: string;
   alias: boolean;
   def: Type | undefined;
-  /** The `forall`-like clause of a GENERIC type declaration — an ALIAS
+  /** The `where`-like clause of a GENERIC type declaration — an ALIAS
    * (`type alias Pair<T> = tuple<T, T>`) or a parameterized NOMINAL type
    * (`type tree<out T> = …`) — in declaration order.
    *
@@ -616,8 +621,9 @@ export type TypeResolver = {
 
 /**
  * Parametric polymorphism is IMPLEMENTED: a signature may be quantified by a
- * prefix `forall` clause with ground upper bounds
- * (`forall T: indexed_collection. (T) -> T`), rank-1 (prenex) only, solved by
+ * trailing `where` clause with ground upper bounds
+ * (`(T) -> T where T: indexed_collection`), rank-1 (quantifiers top-level
+ * only), solved by
  * local inference at each call site. See `doc/08-guide-types.md` and
  * `docs/plans/2026-08-01-type-variables-design.md`.
  *
@@ -625,13 +631,13 @@ export type TypeResolver = {
  * - Add support for generic function literals and the `function f<T>(…)`
  *   definition form (today a generic declaration requires an `evaluate`
  *   handler; a function-literal body is rejected),
- * - Add support for dimension variables (e.g. `forall T, M, N, P.
- *   (matrix<T^(MxN)>, matrix<T^(NxP)>) -> matrix<T^(MxP)>`) -- dimensions are
+ * - Add support for dimension variables (e.g. `(matrix<T^(MxN)>,
+ *   matrix<T^(NxP)>) -> matrix<T^(MxP)> where T, M, N, P`) -- dimensions are
  *   integers, not types, so they need their own variable kind and solver,
  * - Add support for type packs / variadic correlation (the `Map`-class
  *   contract: n independently-typed collections with an n-ary callback),
  * - Add support for F-bounded and variable-referencing bounds
- *   (e.g. `forall T: comparable<T>`, `forall T: list<U>`) -- bounds are ground,
+ *   (e.g. `where T: comparable<T>`, `where T: list<U>`) -- bounds are ground,
  * - Add support for type variables in unions, intersections and negations,
  *   each of which needs its own inference rule,
  * - Add support for higher-rank and higher-kinded types, and for variance

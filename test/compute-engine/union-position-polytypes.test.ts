@@ -84,7 +84,7 @@ function signatureOf(ce: ComputeEngine, name: string): string {
 describe('RULE U — `type opt<T> = T | missing`', () => {
   test('the minted constructor is quantified over the union body', () => {
     expect(signatureOf(optEngine(), 'opt')).toBe(
-      'forall T. (T | missing) -> opt<T>'
+      '(T | missing) -> opt<T> where T'
     );
   });
 
@@ -129,7 +129,7 @@ describe('RULE U — a union nested in a body', () => {
   test('`type bag<T> = tuple<d: T | string>` constructs and reads back', () => {
     const ce = new ComputeEngine();
     ce.declareType('bag', 'tuple<d: T | string>', { typeParams: ['T'] });
-    expect(signatureOf(ce, 'bag')).toBe('forall T. (d: T | string) -> bag<T>');
+    expect(signatureOf(ce, 'bag')).toBe('(d: T | string) -> bag<T> where T');
     const b = ce.box(['bag', 1]);
     expect(b.isValid).toBe(true);
     expect(b.type.toString()).toBe('bag<finite_integer>');
@@ -154,9 +154,9 @@ describe('RULE U — refutation propagates out of the open arm', () => {
 });
 
 describe('RULE U — a declared BOUND still binds through the arm', () => {
-  test('a `string` operand of `forall T: number. (T | missing) -> …` fails', () => {
+  test('a `string` operand of `(T | missing) -> … where T: number` fails', () => {
     const ce = new ComputeEngine();
-    ce.declare('f', 'forall T: number. (T | missing) -> list<T>');
+    ce.declare('f', '(T | missing) -> list<T> where T: number');
     const bad = ce.box(['f', { str: 'abc' }]);
     expect(bad.isValid).toBe(false);
     // The instantiated parameter names the whole union, not just the arm.
@@ -170,35 +170,35 @@ describe('RULE U — declaration-time validation', () => {
   const ce = new ComputeEngine();
 
   test('TWO open arms are rejected — unsolvable by construction', () => {
-    expect(codeOf(() => ce.type('forall T, U. (T | U) -> tuple<T, U>'))).toBe(
+    expect(codeOf(() => ce.type('(T | U) -> tuple<T, U> where T, U'))).toBe(
       'unsupported-variable-position'
     );
     expect(
-      messageOf(() => ce.type('forall T, U. (T | U) -> tuple<T, U>'))
+      messageOf(() => ce.type('(T | U) -> tuple<T, U> where T, U'))
     ).toContain(
       'At most one arm of a union can refer to a type variable, but `T | U` has 2'
     );
     // Two arms that are OPEN in the same variable are just as unsolvable.
     expect(
-      codeOf(() => ce.type('forall T. (list<T> | set<T>) -> T'))
+      codeOf(() => ce.type('(list<T> | set<T>) -> T where T'))
     ).toBe('unsupported-variable-position');
   });
 
   test('an INTERSECTION stays rejected, steering to a bound', () => {
-    expect(codeOf(() => ce.type('forall T. (T & number) -> T'))).toBe(
+    expect(codeOf(() => ce.type('(T & number) -> T where T'))).toBe(
       'unsupported-variable-position'
     );
-    expect(messageOf(() => ce.type('forall T. (T & number) -> T'))).toContain(
+    expect(messageOf(() => ce.type('(T & number) -> T where T'))).toContain(
       'The type variable `T` cannot appear in an intersection. To constrain a ' +
-        'type variable, declare a bound on it instead: `forall T: number.`'
+        'type variable, declare a bound on it instead: `where T: number`'
     );
   });
 
   test('a NEGATION stays rejected', () => {
-    expect(codeOf(() => ce.type('forall T. (!T) -> T'))).toBe(
+    expect(codeOf(() => ce.type('(!T) -> T where T'))).toBe(
       'unsupported-variable-position'
     );
-    expect(messageOf(() => ce.type('forall T. (!T) -> T'))).toContain(
+    expect(messageOf(() => ce.type('(!T) -> T where T'))).toContain(
       'The type variable `T` cannot appear in a negation'
     );
   });
@@ -208,10 +208,10 @@ describe('RULE U — declaration-time validation', () => {
     // through a union arm used to be a forbidden position because v1 had no
     // inference rule for it. Rule U supplies one.
     expect(
-      ce.type('forall T. (((T) -> T) | string) -> T').isPolymorphic
+      ce.type('(((T) -> T) | string) -> T where T').isPolymorphic
     ).toBe(true);
     expect(
-      ce.type('forall T. ((integer) -> (T | string)) -> T').isPolymorphic
+      ce.type('((integer) -> (T | string)) -> T where T').isPolymorphic
     ).toBe(true);
   });
 });
@@ -240,7 +240,7 @@ describe('RULE U — the consumers', () => {
   test('`couldMatch` no longer refuses a union-carrying polytype', () => {
     expect(
       couldMatch(
-        parseType('forall T. (T | missing) -> list<T>')!,
+        parseType('(T | missing) -> list<T> where T')!,
         parseType('(finite_integer) -> list<finite_integer>')!
       )
     ).toBe(true);
@@ -248,11 +248,11 @@ describe('RULE U — the consumers', () => {
 
   test('a union polytype round-trips through parse and serialize', () => {
     const ce = optEngine();
-    expect(ce.type('forall T. (T | missing) -> opt<T>').toString()).toBe(
-      'forall T. (T | missing) -> opt<T>'
+    expect(ce.type('(T | missing) -> opt<T> where T').toString()).toBe(
+      '(T | missing) -> opt<T> where T'
     );
-    expect(ce.type('forall T. (list<T | string>) -> T').toString()).toBe(
-      'forall T. (list<T | string>) -> T'
+    expect(ce.type('(list<T | string>) -> T where T').toString()).toBe(
+      '(list<T | string>) -> T where T'
     );
   });
 
@@ -295,7 +295,7 @@ describe('RULE U — R2: the ground-inputs contract of the overlap check', () =>
         clause(ce, 'k', [
           'Function',
           { str: 'b' },
-          { str: 'forall T. (x: T | missing) -> string' },
+          { str: '(x: T | missing) -> string where T' },
         ])
       )
     ).toContain('generic-clause-unsupported');
@@ -304,7 +304,7 @@ describe('RULE U — R2: the ground-inputs contract of the overlap check', () =>
     clause(ce2, 'g', [
       'Function',
       { str: 'a' },
-      { str: 'forall T. (x: T | missing) -> string' },
+      { str: '(x: T | missing) -> string where T' },
     ]);
     expect(
       JSON.stringify(
@@ -342,8 +342,8 @@ describe('RULE U — R2: the ground-inputs contract of the overlap check', () =>
     // fails validation. Rule U must not make that route any leakier — and must
     // keep its conservative answer (the operand is DEFERRED, not refuted).
     const ce = new ComputeEngine();
-    ce.declare('f', 'forall T: number. (T | missing) -> list<T>');
-    ce.declare('g', 'forall T: number. (T) -> list<T>');
+    ce.declare('f', '(T | missing) -> list<T> where T: number');
+    ce.declare('g', '(T) -> list<T> where T: number');
     ce.declare('s', 'string');
     // Both probes run UNDER the spy: the leak is pre-existing (it is the raw
     // polytype parameter, not the union, that is open), and letting it print
