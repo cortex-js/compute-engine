@@ -1,4 +1,5 @@
 import type { MathJsonSymbol } from '../../math-json/types.js';
+import type { Type } from '../../common/type/types.js';
 import type { Interval, IntervalResult } from '../interval/types.js';
 
 /**
@@ -579,6 +580,18 @@ export interface CompileTarget<Expr = unknown> {
    * reference.
    */
   symbolDeps?: Set<MathJsonSymbol>;
+
+  /**
+   * The DECLARED types of the enclosing emitted definition's parameters, by
+   * name. `Assign` keeps its LHS raw — the root symbol of `p.name = v` types
+   * `unknown` inside a canonical function body, where the interpreter
+   * re-resolves the binding at evaluation time — so the protocol-property
+   * SET lowering reads the receiver's static type here instead. Installed
+   * fresh (parameters only) by `prepareUserFunctionBody` — an emitted
+   * definition is module-level and must not inherit the requester's locals —
+   * and REPLACED per nested definition.
+   */
+  declaredVarTypes?: Readonly<Record<string, Type>>;
 
   /**
    * When provided, the compiler records into this set the id of every free

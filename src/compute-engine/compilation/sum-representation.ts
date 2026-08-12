@@ -74,7 +74,7 @@ export interface SumVariantInfo {
  * the sum its erasure.) So records, dictionaries, function types,
  * `unknown`/`any`/`never` and every union all return `undefined`.
  */
-function bucketOf(t: Type): {
+export function bucketOf(t: Type): {
   bucket: SumBucket | undefined;
   complexNumber: boolean;
 } {

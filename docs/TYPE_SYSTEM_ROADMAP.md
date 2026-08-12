@@ -1249,6 +1249,12 @@ conformance could apply. Two consequences (rulings):
   proven, the compiler declines compilation of that expression (consistent
   with its other fail-closed capability gates, cf. §3) rather than guess.
 
+  *Implemented 2026-08-12* (JS target; function dispatch, bare and
+  qualified, plus property GET/SET) —
+  `docs/plans/2026-08-12-protocol-compilation.md` records the two-tier
+  decision procedure, the guard model, and the deliberate divergences (a
+  compiled miss throws where the interpreter yields the error value).
+
 **Effects (ruling).** A dynamically dispatched call site carries the
 *requirement's* declared effect. Implementations may not be more effectful
 than the requirement (see "Signature matching"), so the static effect is

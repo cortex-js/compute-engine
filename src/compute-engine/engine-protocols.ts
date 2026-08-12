@@ -525,13 +525,17 @@ function edgeCouldApply(
  *
  * `options.where` makes it a CONDITIONAL conformance (phase 5): `targetSource`
  * is then a HEAD PATTERN naming the clause's variables (`list<T>`).
+ *
+ * `options.block` is the implementation block EXPRESSION the statement carries
+ * — the identity P47's same-batch duplicate rule is keyed on (see
+ * {@link ConformanceRecord._implOrigin}).
  */
 export function declareConformance(
   ce: IComputeEngine,
   targetSource: string,
   protocolNames: readonly string[],
   impl?: Record<string, Expression | JSImplementation>,
-  options?: { where?: string }
+  options?: { where?: string; block?: Expression }
 ): Expression | null {
   if (protocolNames.length === 0)
     return ce.error([
@@ -609,6 +613,31 @@ export function declareConformance(
       ]);
   }
 
+  // P47 — a SECOND implementation block for the same (type, protocol) pair
+  // WITHIN ONE BATCH is an error; the same statement re-run in a LATER batch
+  // replaces (the notebook pattern). The two are told apart by the batch stamp
+  // the install leaves behind, and a re-registration of the SAME block — one
+  // statement registers up to three times per batch: the static pre-pass
+  // canonicalizes it, then the evaluation loop canonicalizes and evaluates it
+  // — is not a second block. Checked BEFORE the block is validated: a second
+  // block is inadmissible whatever it contains. `impl` implies a single
+  // protocol (checked above).
+  const batch = ce._epsilBatchId;
+  if (impl !== undefined && batch !== undefined) {
+    const origin = records[0]!.conformances.find(
+      (c) => c.targetKey === targetKey
+    )?._implOrigin;
+    if (
+      origin !== undefined &&
+      origin.batch === batch &&
+      origin.block !== options?.block
+    )
+      return ce.error([
+        'protocol-implementation-duplicate',
+        `the type \`${targetKey}\` already has an implementation of the \`${records[0]!.name}\` protocol in this batch`,
+      ]);
+  }
+
   // The implementation block is validated BEFORE anything is stored: a
   // rejected block must leave the previous implementation (and `pending`)
   // untouched, so that a re-run with an edited, broken block does not destroy
@@ -633,6 +662,10 @@ export function declareConformance(
       // requirements.
       if (impl !== undefined) {
         existing.impl = impl;
+        // The stamp rides with the implementation: an install from outside a
+        // batch (the box route, P47) leaves it UNSTAMPED and replaces freely.
+        if (batch === undefined) delete existing._implOrigin;
+        else existing._implOrigin = { batch, block: options?.block };
         existing.pending = !implCoversRequirements(record.members, impl);
         // The new implementation may also fulfil the impl-less edges of the
         // target's SUBTYPES, which inherit it.
@@ -648,7 +681,11 @@ export function declareConformance(
       declaredByStatement: true,
     };
     if (params !== undefined) conformance.where = params;
-    if (impl !== undefined) conformance.impl = impl;
+    if (impl !== undefined) {
+      conformance.impl = impl;
+      if (batch !== undefined)
+        conformance._implOrigin = { batch, block: options?.block };
+    }
     record.conformances.push(conformance);
     // The new edge may INHERIT an implementation registered for a supertype,
     // and (with a block of its own) may fulfil impl-less subtype edges.
@@ -2847,4 +2884,216 @@ function invalidTargetError(ce: IComputeEngine, name: string): Expression {
     'property-assignment-target-invalid',
     `the protocol property \`${name}\` can only be assigned through a variable: \`p.${name.split('.').pop()} = …\` rebinds \`p\`, and only a binding can be rebound`,
   ]);
+}
+
+//
+// ── Compilation planning ─────────────────────────────────────────────────────
+//
+// Read-only views over the registry for `compilation/protocol-dispatch.ts`
+// (the JS dispatch planner). They reuse the SAME selection machinery the
+// interpreter runs (`bestCandidates`, `edgeTargetAt`), so the compiled tier
+// cannot drift from `dispatchMember` on what applies. Everything here is a
+// SNAPSHOT of the registry at compile time: a later conformance is a `config`
+// state event, and compiled artifacts bake the candidate set they saw (the
+// sum-representation posture).
+//
+
+/** The property name of a mangled accessor key, or `null` for a function
+ * member key. */
+function propertyNameOfKey(implKey: string): string | null {
+  if (implKey.startsWith(GET_PREFIX)) return implKey.slice(GET_PREFIX.length);
+  if (implKey.startsWith(SET_PREFIX)) return implKey.slice(SET_PREFIX.length);
+  return null;
+}
+
+/** One conformance edge as the compilation planner sees it. */
+export type DispatchCandidate = {
+  record: ProtocolRecord;
+  edge: ConformanceRecord;
+  /** Index of the edge in `record.conformances` — stable within a compile,
+   * used to mint a deterministic helper name. */
+  edgeIndex: number;
+  /** The edge's own target. OPEN for a conditional edge — specificity and
+   * guard planning must use `widest` or an instantiation, never this. */
+  target: Type;
+  /** The widest GROUND type the edge can stand for
+   * ({@link edgeComparisonTarget}). */
+  widest: Type;
+  conditional: boolean;
+  host: boolean;
+};
+
+/**
+ * Every non-pending conformance edge carrying an implementation of `implKey`
+ * (a function member name, or a mangled `__get__x`/`__set__x` accessor key),
+ * across every protocol declaring the member — or only `only`, the qualified
+ * form. Returns `null` when NO protocol declares such a member (or `only` is
+ * unknown / declares it with the wrong kind): "not a protocol call at all",
+ * as opposed to `[]`, "a protocol call with nothing to dispatch to".
+ */
+export function protocolDispatchCandidates(
+  ce: IComputeEngine,
+  implKey: string,
+  only?: string
+): DispatchCandidate[] | null {
+  const propertyName = propertyNameOfKey(implKey);
+  const memberName = propertyName ?? implKey;
+  let records: ProtocolRecord[];
+  if (only !== undefined) {
+    const record = ce._protocolRegistry[only];
+    const m = record?.members[memberName];
+    if (m === undefined) return null;
+    if (propertyName === null ? m.kind !== 'function' : m.kind === 'function')
+      return null;
+    records = [record!];
+  } else {
+    records =
+      propertyName === null
+        ? protocolsWithMember(ce, memberName)
+        : protocolsWithProperty(ce, memberName);
+    if (records.length === 0) return null;
+  }
+
+  const out: DispatchCandidate[] = [];
+  for (const record of records) {
+    record.conformances.forEach((edge, edgeIndex) => {
+      if (edge.pending) return;
+      const impl = edge.impl?.[implKey];
+      if (impl === undefined) return;
+      out.push({
+        record,
+        edge,
+        edgeIndex,
+        target: edge.target,
+        widest: edgeComparisonTarget(edge),
+        conditional: edge.where !== undefined,
+        host: !isExpressionImplementation(impl),
+      });
+    });
+  }
+  return out;
+}
+
+/**
+ * The implementation `dispatchMember` would select for a receiver whose type
+ * IS `receiver` — the static half of the compiled tier's "tier A" decision.
+ * `ambiguous` mirrors the interpreter's `protocol-call-ambiguous`;
+ * `undecided` is the P32 gate.
+ */
+export function staticProtocolResolution(
+  ce: IComputeEngine,
+  implKey: string,
+  receiver: Type,
+  only?: string
+):
+  | { status: 'undecided' | 'none' | 'ambiguous' }
+  | {
+      status: 'unique';
+      record: ProtocolRecord;
+      edge: ConformanceRecord;
+      /** The GROUND target the winning edge stands for at `receiver`. */
+      target: Type;
+    } {
+  if (!isDecidedReceiverType(receiver)) return { status: 'undecided' };
+  const cands = protocolDispatchCandidates(ce, implKey, only);
+  if (cands === null || cands.length === 0) return { status: 'none' };
+  const records = [...new Set(cands.map((c) => c.record))];
+  const best = bestCandidates(ce, records, implKey, receiver);
+  if (best.length === 0) return { status: 'none' };
+  if (best.length > 1) return { status: 'ambiguous' };
+  const b = best[0];
+  return { status: 'unique', record: b.record, edge: b.edge, target: b.target };
+}
+
+/**
+ * The arity a call to the FUNCTION member `member` of `record` must have, or
+ * `undefined` when the requirement does not pin one (unparseable, optional or
+ * variadic parameters) — the planner declines those.
+ */
+export function requirementArityOf(
+  ce: IComputeEngine,
+  record: ProtocolRecord,
+  member: string
+): number | undefined {
+  const sig = requirementShape(ce, record, member);
+  if (sig === null) return undefined;
+  if ((sig.optArgs?.length ?? 0) > 0 || sig.variadicArg !== undefined)
+    return undefined;
+  return sig.args?.length ?? 0;
+}
+
+/**
+ * The stored implementation of `implKey` on `edge`, rebuilt as a RAW function
+ * literal whose type annotations are GROUND — every `Self`-bearing annotation
+ * re-parsed at `Self = edge.target` (P12's substitution, via the same
+ * {@link selfSubstitutingResolver} the P17 validation uses) and re-serialized.
+ *
+ * The interpreter never enforces these annotations: `apply()` runs the stored
+ * literal with its `Self` annotations unparseable (so effectively
+ * unannotated), after `dispatchMember` has checked the arguments at
+ * `Self = runtime type`. Substituting the edge's target — a SUPERTYPE of every
+ * runtime receiver the edge admits — is therefore sound for the compiled
+ * body: it admits everything the interpreter admits.
+ *
+ * Returns `null` for a host callback, a conditional edge (the v1 compiler
+ * declines those before asking), or an annotation that fails to re-parse.
+ */
+export function implementationLiteralAt(
+  ce: IComputeEngine,
+  edge: ConformanceRecord,
+  implKey: string
+): Expression | null {
+  const impl = edge.impl?.[implKey];
+  if (impl === undefined) return null;
+  if (!isExpressionImplementation(impl)) return null;
+  if (edge.where !== undefined) return null;
+  if (!isFunction(impl, 'Function')) return null;
+
+  const resolver = selfSubstitutingResolver(
+    ce._typeResolver,
+    edge.target,
+    edge.targetKey
+  );
+  const ground = (text: string): string | null => {
+    try {
+      return typeToString(parseType(text, resolver));
+    } catch {
+      return null;
+    }
+  };
+
+  const params: Expression[] = [];
+  for (const param of impl.ops.slice(1)) {
+    if (!isFunction(param, 'Typed')) {
+      params.push(param);
+      continue;
+    }
+    const text = typeTextOf(param.ops[1]);
+    if (text === undefined) {
+      params.push(param);
+      continue;
+    }
+    const g = ground(text);
+    if (g === null) return null;
+    params.push(
+      ce._fn('Typed', [param.ops[0], ce.string(g)], { canonical: false })
+    );
+  }
+
+  // The body-slot return ascription (`["Typed", body, text]`) may be a plain
+  // return type or the literal's full marker signature — both re-parse and
+  // re-serialize the same way.
+  let body = impl.ops[0];
+  if (isFunction(body, 'Typed')) {
+    const text = typeTextOf(body.ops[1]);
+    if (text !== undefined) {
+      const g = ground(text);
+      if (g === null) return null;
+      body = ce._fn('Typed', [body.ops[0], ce.string(g)], {
+        canonical: false,
+      });
+    }
+  }
+
+  return ce._fn('Function', [body, ...params], { canonical: false });
 }

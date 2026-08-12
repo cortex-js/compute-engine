@@ -736,19 +736,30 @@ Quartile([1, 2, 3, 4, 5])`
   });
 });
 
-describe('compilation fails closed', () => {
-  test('a bare dispatch declines rather than emitting garbage', () => {
+describe('compilation', () => {
+  // Since `docs/plans/2026-08-12-protocol-compilation.md` a compilable
+  // dispatch COMPILES on the JS target (this pin previously recorded the
+  // fail-closed posture): a single string-target conformance reifies to a
+  // `typeof` guard chain, and a receiver no conformance covers THROWS where
+  // the interpreter yields the `protocol-implementation-missing` error value
+  // (the multi-clause `no-matching-clause` convention).
+  test('a bare dispatch with an unknown receiver compiles to a guard chain', () => {
     const ce = engineFor(`${COMPARABLE}
 type string is Comparable {
   function compare(self: Self, other: Self) -> string { "proto" }
 }`);
     const result = compile(ce.box(['compare', 'x', 'y'] as any));
-    expect(result.success).toBe(false);
-    expect(result.code).toBe('');
-    expect(result.unsupported).toContain('compare');
+    expect(result.success).toBe(true);
+    expect(result.unsupported).not.toContain('compare');
+    expect(result.run?.({ x: 'a', y: 'b' })).toBe('proto');
+    expect(() => result.run?.({ x: 1, y: 2 })).toThrow(
+      'protocol-implementation-missing: compare'
+    );
   });
 
-  test('a qualified dispatch declines too', () => {
+  // A protocol with NO conformance at all has nothing to dispatch to: the
+  // compiler still declines (fail closed, D6) — deliberately re-pinned.
+  test('a qualified dispatch with no conformance declines', () => {
     const ce = engineFor(COMPARABLE);
     const result = compile(
       ce.box([

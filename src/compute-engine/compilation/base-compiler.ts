@@ -48,6 +48,13 @@ import {
 } from '../boxed-expression/function-literal.js';
 import { multiClauseState } from '../multi-clause.js';
 import type { FunctionClause } from '../multi-clause.js';
+import {
+  isProtocolDispatcher,
+  protocolDispatchCandidates,
+  protocolOfSymbol,
+} from '../engine-protocols.js';
+import { planProtocolDispatch } from './protocol-dispatch.js';
+import type { ReceiverGuard } from './protocol-dispatch.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
@@ -1927,6 +1934,49 @@ export class BaseCompiler {
             `position (a block's non-final statement, or a loop body). ` +
             `Fail closed (D6).`
         );
+      // A protocol property assignment — `p.name = v`, P2's REBINDING sugar
+      // (`p = «set name»(p, v)`). The engine may keep the canonical form as
+      // `Assign(Field(p, "name"), v)` (the rebind decision re-resolves at
+      // evaluation), which the generic lowering below would compile to the
+      // silent no-op `_ = v`. Rebind through the compiled setter instead;
+      // when the property IS protocol-declared but the setter cannot be
+      // compiled (readonly, ambiguous, undecided receiver, …), fail closed
+      // rather than emit the no-op.
+      if (isFunction(args[0], 'Field') && isString(args[0].ops[1])) {
+        const propertyName = args[0].ops[1].string;
+        if (
+          protocolDispatchCandidates(engine, `__set__${propertyName}`) !== null
+        ) {
+          const root = args[0].ops[0];
+          if (isSymbol(root)) {
+            // STATIC tier only, like the bare-`Field` GET: an undecided
+            // receiver may be an ordinary record/dictionary at runtime,
+            // whose keys beat protocol properties (P46) — a guard chain
+            // over the conformance targets would throw on such a value
+            // where the interpreter performs the ordinary field update.
+            const setter = BaseCompiler.tryCompileProtocolDispatch(
+              engine,
+              {
+                implKey: `__set__${propertyName}`,
+                member: propertyName,
+                args: [root, args[1]],
+                staticOnly: true,
+              },
+              target
+            );
+            if (setter !== undefined) return `${root.symbol} = ${setter}`;
+          }
+          throw new Error(
+            `${propertyName}: this protocol property assignment has no ` +
+              `lowering on target '${target.language ?? 'javascript'}' ` +
+              `(the setter could not be compiled${
+                isSymbol(args[0].ops[0])
+                  ? ''
+                  : '; only a variable can be rebound'
+              }). Fail closed (D6).`
+          );
+        }
+      }
       return `${
         isSymbol(args[0]) ? args[0].symbol : '_'
       } = ${BaseCompiler.compileOp(node, 1, target, 0, args[1])}`;
@@ -2320,9 +2370,51 @@ export class BaseCompiler {
       return code;
     }
 
+    // A qualified protocol call — `Comparable.compare(x, y)` — canonicalizes
+    // and STAYS `Apply(Field(Comparable, "compare"), x, y)` (the
+    // `ProtocolMember` node only appears when the `Field` EVALUATE handler's
+    // wrapper literal beta-reduces). Intercept it BEFORE the target's `Apply`
+    // mapping, which would otherwise compile the protocol-naming `Field`
+    // operand and die inside it. When the dispatch tier declines, fail closed
+    // for the whole unit rather than falling through to the generic `Apply`
+    // lowering (ruled 2026-08-12, `docs/plans/2026-08-12-protocol-compilation.md`).
+    if (h === 'Apply' && args.length >= 2 && isFunction(args[0], 'Field')) {
+      const fieldOps = args[0].ops;
+      const record = protocolOfSymbol(engine, fieldOps[0]);
+      const member = isString(fieldOps[1]) ? fieldOps[1].string : undefined;
+      if (record !== undefined && member !== undefined) {
+        const code = BaseCompiler.tryCompileProtocolDispatch(
+          engine,
+          { implKey: member, member, protocol: record.name, args: args.slice(1) },
+          target
+        );
+        if (code !== undefined) return code;
+        throw new Error(
+          `${record.name}.${member}: this protocol call has no lowering on ` +
+            `target '${target.language ?? 'javascript'}' (dynamic dispatch ` +
+            `could not be proven compilable). Fail closed (D6).`
+        );
+      }
+    }
+
     // Handle function calls
     const fn = target.functions?.(h);
     if (!fn) {
+      // A protocol call — a bare dispatcher head (`compare(x, y)`), the
+      // `ProtocolMember`/`ProtocolProperty` operators, or a `Field` read that
+      // only a protocol property can answer. Compiled as a direct call
+      // (static resolution) or a reified guard chain (dynamic dispatch); a
+      // decline falls through to the standard fail-closed throw below.
+      const protoCall = BaseCompiler.protocolCallParts(engine, h, args);
+      if (protoCall !== undefined) {
+        const code = BaseCompiler.tryCompileProtocolDispatch(
+          engine,
+          protoCall,
+          target
+        );
+        if (code !== undefined) return code;
+      }
+
       // `h` may be a symbol whose engine definition is a user-defined function
       // literal (`f(x) := …`, `x ↦ …`). Emit it as a named local function and
       // compile the call site as `_fn_f(arg)`. Returns undefined for a truly
@@ -3896,6 +3988,38 @@ export class BaseCompiler {
         }
       }
 
+      // The DECLARED types of typed block locals, for the raw-LHS lowerings
+      // (the protocol-property SET reads its receiver's static type from
+      // `declaredVarTypes` — see `CompileTarget.declaredVarTypes`). Merged
+      // over the enclosing definition's parameter map; an UNTYPED local
+      // REMOVES the entry it shadows (`let p = …` over a `p: Person`
+      // parameter must not keep reading as `Person`). Block-scoped, not
+      // statement-ordered: a use-before-declare is invalid upstream, so the
+      // approximation is safe.
+      let declaredVarTypes = target.declaredVarTypes;
+      if (locals.length > 0) {
+        const merged: Record<string, Type> = { ...declaredVarTypes };
+        for (const arg of args) {
+          if (!isFunction(arg, 'Declare') || !isSymbol(arg.ops[0])) continue;
+          const name = arg.ops[0].symbol;
+          delete merged[name];
+          const src = arg.ops[1];
+          const text = isString(src)
+            ? src.string
+            : isSymbol(src)
+              ? src.symbol
+              : undefined;
+          if (text === undefined || text === 'unknown') continue;
+          try {
+            merged[name] = parseType(text, arg.engine._typeResolver);
+          } catch {
+            // An unparseable annotation contributes nothing (the local then
+            // reads as undeclared here, the safe direction).
+          }
+        }
+        declaredVarTypes = merged;
+      }
+
       const localTarget: CompileTarget<Expression> = {
         ...target,
         var: (id) => {
@@ -3903,6 +4027,7 @@ export class BaseCompiler {
           return target.var(id);
         },
         boundVars: BaseCompiler.withBoundNames(target, locals),
+        declaredVarTypes,
       };
 
       // The statement LIST is one INERT region — no binding is placed at the
@@ -6887,9 +7012,44 @@ export class BaseCompiler {
       ...root,
       var: (id) => (params.includes(id) ? id : root.var(id)),
       boundVars: BaseCompiler.withBoundNames(root, params),
+      // The parameters' DECLARED types, for the lowerings that read a raw
+      // (never-bound) symbol — the protocol-property SET rebinding, whose
+      // `Assign` LHS root types `unknown` in the canonical body. Fresh per
+      // definition (module-level semantics: the requester's map must not
+      // leak in), replacing whatever the spread copied from `root`.
+      declaredVarTypes: BaseCompiler.literalDeclaredParamTypes(literal),
     };
     BaseCompiler.mergeUsedNames(target, collectUsedNames(bodyExpr));
     return { params, bodyExpr, bodyTarget };
+  }
+
+  /**
+   * The DECLARED types of a function literal's annotated parameters, by
+   * name. An unannotated or unparseable parameter contributes nothing (it
+   * then reads as undeclared, the safe direction). Shared by the emitted
+   * definition compile (`prepareUserFunctionBody`) and the reference
+   * analysis, so the two agree on what a raw body symbol's static type is.
+   */
+  private static literalDeclaredParamTypes(
+    literal: Expression & FunctionInterface
+  ): Record<string, Type> {
+    const out: Record<string, Type> = {};
+    for (const p of literal.ops.slice(1)) {
+      if (!isFunction(p, 'Typed') || !isSymbol(p.ops[0])) continue;
+      const src = p.ops[1];
+      const text = isString(src)
+        ? src.string
+        : isSymbol(src)
+          ? src.symbol
+          : undefined;
+      if (text === undefined) continue;
+      try {
+        out[p.ops[0].symbol] = parseType(text, literal.engine._typeResolver);
+      } catch {
+        // Unparseable annotation: skip.
+      }
+    }
+    return out;
   }
 
   /**
@@ -7138,6 +7298,288 @@ export class BaseCompiler {
   }
 
   /**
+   * Recognize a PROTOCOL call head (`docs/plans/2026-08-12-protocol-compilation.md`):
+   *
+   * - a bare dispatcher (`compare(x, y)` where `compare` resolves to the
+   *   installed `_protocolDispatcher` operator — a user shadow of the name
+   *   drops the marker and wins, matching the interpreter);
+   * - the `ProtocolMember` operator (`(protocol, member, receiver, …args)`);
+   * - the `ProtocolProperty` operator — 3 operands GET, 4 operands SET;
+   * - a bare `Field` read that the ordinary field routes already declined
+   *   (this runs in the `!fn` branch, AFTER `Field`'s own `compile` handler
+   *   declined). The bare-`Field` form is STATIC-tier only: an undecided
+   *   receiver may be an ordinary record/dictionary at runtime, whose keys
+   *   beat protocol properties (P46) — a guard chain cannot arbitrate that.
+   */
+  private static protocolCallParts(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ):
+    | {
+        implKey: string;
+        member: string;
+        protocol?: string;
+        args: ReadonlyArray<Expression>;
+        staticOnly?: boolean;
+      }
+    | undefined {
+    if (h === 'ProtocolMember' || h === 'ProtocolProperty') {
+      // Operands 0-1 ride as string literals, or as bare symbols after a
+      // round trip (the `protocolMemberOperandsOf` reading).
+      const nameOf = (op: Expression | undefined): string | undefined => {
+        if (op === undefined) return undefined;
+        return isString(op) ? op.string : isSymbol(op) ? op.symbol : undefined;
+      };
+      const protocol = nameOf(args[0]);
+      const member = nameOf(args[1]);
+      if (protocol === undefined || member === undefined) return undefined;
+      if (h === 'ProtocolMember')
+        return { implKey: member, member, protocol, args: args.slice(2) };
+      if (args.length === 3)
+        return {
+          implKey: `__get__${member}`,
+          member,
+          protocol,
+          args: args.slice(2),
+        };
+      if (args.length === 4)
+        return {
+          implKey: `__set__${member}`,
+          member,
+          protocol,
+          args: args.slice(2),
+        };
+      return undefined;
+    }
+
+    if (h === 'Field' && args.length === 2 && isString(args[1])) {
+      const name = args[1].string;
+      return {
+        implKey: `__get__${name}`,
+        member: name,
+        args: [args[0]],
+        staticOnly: true,
+      };
+    }
+
+    if (isProtocolDispatcher(lookupApplicable(h, engine.context.lexicalScope)))
+      return { implKey: h, member: h, args };
+
+    return undefined;
+  }
+
+  /** The JS test that the receiver `x` takes a candidate's arm — the
+   * rendering of the planner's guard descriptors. `null` = no test needed;
+   * `undefined` = not renderable (whole-call decline). */
+  private static renderReceiverGuard(
+    g: ReceiverGuard,
+    x: string
+  ): string | null | undefined {
+    switch (g.kind) {
+      case 'js-type':
+        return BaseCompiler.jsClauseParamGuard(g.type, x);
+      case 'tag':
+        // Optional chaining is load-bearing: a primitive receiver must fall
+        // through to the next arm, not TypeError (the compiled-`match`
+        // convention).
+        return `${x}?._tag === ${JSON.stringify(g.tag)}`;
+      case 'bucket': {
+        const test = BaseCompiler.sumBucketTest(g.bucket, x, g.complexNumber);
+        if (g.tupleArity === undefined) return test;
+        return `(${test} && ${x}.length === ${g.tupleArity})`;
+      }
+    }
+  }
+
+  /**
+   * Compile a protocol call (`docs/plans/2026-08-12-protocol-compilation.md`;
+   * the governing ruling is Appendix A "Static resolution and compiled
+   * code"): a statically resolved call becomes a DIRECT call of the winning
+   * implementation; a dynamic one becomes a guard chain over the reified
+   * receiver representation, most-specific-first, throwing
+   * `protocol-implementation-missing` on fall-through (the multi-clause
+   * convention — the interpreter's error VALUE has no compiled analog).
+   *
+   * `undefined` declines: the caller falls through to the standard
+   * fail-closed diagnostic. JavaScript only; the emitted code SNAPSHOTS the
+   * protocol registry (like the multi-clause chain snapshots its clause set).
+   *
+   * Divergences from the interpreter, both recorded in the design doc:
+   * non-receiver arguments are NOT guarded (the interpreter's
+   * `argumentTypeError` would answer an `incompatible-type` error value; the
+   * compiled body trusts the static check that ran at canonicalization —
+   * the P28 trusted-ascription posture), and guard fidelity is over the JS
+   * machine-value model (the same trust compiled `match` constructor
+   * patterns and multi-clause guards already extend).
+   */
+  private static tryCompileProtocolDispatch(
+    engine: ComputeEngine,
+    call: {
+      implKey: string;
+      member: string;
+      protocol?: string;
+      args: ReadonlyArray<Expression>;
+      staticOnly?: boolean;
+    },
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    const registry = target.userFunctions;
+    if (!registry) return undefined;
+    // JS-only (§8): the interval target's runtime values are intervals and
+    // the shader targets cannot express the dispatcher. Fail closed there.
+    if (target.language !== 'javascript' || registry.lowering)
+      return undefined;
+
+    const receiver = call.args[0];
+    if (receiver === undefined) return undefined;
+
+    // The receiver's static type. An `Assign` LHS root is a RAW symbol (it
+    // never binds — the interpreter re-resolves at evaluation), so a
+    // top-primitive answer falls back to the enclosing definition's declared
+    // parameter type (`CompileTarget.declaredVarTypes`).
+    let receiverType = receiver.type.type;
+    if (
+      (receiverType === 'unknown' || receiverType === 'any') &&
+      isSymbol(receiver)
+    ) {
+      const declared = target.declaredVarTypes?.[receiver.symbol];
+      if (declared !== undefined) receiverType = declared;
+    }
+
+    const plan = planProtocolDispatch(engine, {
+      implKey: call.implKey,
+      argc: call.args.length,
+      receiverType,
+      protocol: call.protocol,
+    });
+    if (plan === undefined) return undefined;
+    if (call.staticOnly === true && plan.tier !== 'static') return undefined;
+
+    // ── Plan the whole emission BEFORE mutating the registry ──────────────
+    // (the multi-clause whole-function-decline discipline).
+
+    // Canonicalize every implementation literal; any invalid one declines.
+    const literals: (Expression & FunctionInterface)[] = [];
+    for (const c of plan.candidates) {
+      const canonical = c.literal.canonical;
+      if (!isFunction(canonical, 'Function') || !canonical.isValid)
+        return undefined;
+      if (canonical.ops.length - 1 !== plan.argc) return undefined;
+      literals.push(canonical);
+    }
+
+    // Render the receiver guards (dynamic tier).
+    let guardSrcs: (string | null)[] | undefined;
+    if (plan.tier === 'dynamic') {
+      guardSrcs = [];
+      for (const c of plan.candidates) {
+        const g = BaseCompiler.renderReceiverGuard(c.guard!, '_$p0');
+        if (g === undefined) return undefined;
+        guardSrcs.push(g);
+      }
+    }
+
+    // Call-boundary complex coercion, per position — UNANIMOUS across the
+    // candidates (the multi-clause rule: where candidates disagree, wrapping
+    // would change dispatch, so the position stays uncoerced).
+    const sigParams = literals.map((lit) => {
+      const t = lit.type.type;
+      return typeof t === 'object' && t.kind === 'signature'
+        ? t.args?.map((a) => a.type)
+        : undefined;
+    });
+    const coerceToComplex = call.args.map((a, i) => {
+      if (!BaseCompiler.isProvablyRealValued(a)) return false;
+      return sigParams.every((params) => {
+        const pt = params?.[i];
+        return pt !== undefined && isNonRealNumber(pt);
+      });
+    });
+
+    // The generated code bakes the member's current conformance set: record
+    // the dependency (see `CompileTarget.symbolDeps`).
+    target.symbolDeps?.add(call.member);
+
+    // ── Emit: one helper per candidate, in plan order ─────────────────────
+    // The candidate bodies are the ARMS of one dispatcher: if any is
+    // complex-valued, every provably-real one is coerced to `{re, im}`.
+    const coerceResult = BaseCompiler.branchComplexCoercion(
+      literals.map((l) => l.ops[0]),
+      target
+    );
+    // The coercion is a property of the PLAN (the arm set), not of the edge:
+    // the same edge can be emitted by a coercion-free singleton plan and
+    // reused by a mixed real/complex chain (or vice versa), and the `defs`
+    // cache would then hand the wrong result convention to one of them. Keep
+    // the convention in the cache key so each variant is emitted once.
+    const convention = coerceResult ? '$cx' : '';
+    const helperNames: string[] = [];
+    for (let i = 0; i < plan.candidates.length; i++) {
+      const c = plan.candidates[i];
+      // `$` cannot appear in a MathJSON symbol, so these names can never
+      // collide with an emitted user function.
+      const name = BaseCompiler.userFunctionName(
+        `${call.implKey}$${c.protocol}$e${c.edgeIndex}${convention}`
+      );
+      helperNames.push(name);
+      if (registry.defs.has(name) || registry.compiling.has(name)) continue;
+      registry.compiling.add(name);
+      try {
+        const { params, bodyExpr, bodyTarget } =
+          BaseCompiler.prepareUserFunctionBody(literals[i], target, registry);
+        const compiled = BaseCompiler.withEnforcedParams(literals[i], () =>
+          BaseCompiler.withNestedCseHarvest(bodyExpr, bodyTarget, params, () =>
+            BaseCompiler.compile(bodyExpr, bodyTarget)
+          )
+        );
+        const body = coerceResult
+          ? coerceResult(bodyExpr, compiled)
+          : compiled;
+        registry.defs.set(
+          name,
+          `const ${name} = (${params.join(', ')}) => ${body};`
+        );
+      } finally {
+        registry.compiling.delete(name);
+      }
+    }
+
+    const compiledArgs = call.args.map((a, i) => {
+      const code = BaseCompiler.compileValueOperand(a, target);
+      return coerceToComplex[i] ? `({ re: ${code}, im: 0 })` : code;
+    });
+
+    if (plan.tier === 'static')
+      return `${helperNames[0]}(${compiledArgs.join(', ')})`;
+
+    // ── The dispatcher: guard chain, most-specific-first ──────────────────
+    // Emitted once per (implKey, protocol restriction); recursion through an
+    // impl body re-enters here idempotently (all defs run in the preamble
+    // before any call, so forward references are safe — the multi-clause
+    // argument).
+    const dName = BaseCompiler.userFunctionName(
+      `${call.implKey}$${call.protocol ?? ''}$d`
+    );
+    if (!registry.defs.has(dName)) {
+      const params = Array.from({ length: plan.argc }, (_, i) => `_$p${i}`);
+      const branches = plan.candidates.map((_, i) => {
+        const g = guardSrcs![i];
+        const invoke = `return ${helperNames[i]}(${params.join(', ')});`;
+        return g === null ? invoke : `if (${g}) ${invoke}`;
+      });
+      registry.defs.set(
+        dName,
+        `const ${dName} = (${params.join(', ')}) => { ${branches.join(' ')} ` +
+          `throw new Error(${JSON.stringify(
+            `protocol-implementation-missing: ${call.member}`
+          )}); };`
+      );
+    }
+    return `${dName}(${compiledArgs.join(', ')})`;
+  }
+
+  /**
    * Operator heads the compiler lowers directly in `compileExpr`, independent
    * of any target operator/function mapping (control-flow, binding, and
    * indexing-set forms). `analyzeReferences` never reports these as
@@ -7164,6 +7606,11 @@ export class BaseCompiler {
     // standalone.
     'Limits',
     'Element',
+    // Ascription — a bespoke, always-lowerable branch in `compileExpr` (it
+    // compiles its operand); canonical function-literal bodies carry their
+    // return marker as a `Typed` node, so without this the reference
+    // analysis mislabeled every annotated body as unsupported.
+    'Typed',
   ]);
 
   /**
@@ -7206,6 +7653,72 @@ export class BaseCompiler {
       return s;
     };
 
+    // The declared parameter types of the literal body currently being
+    // walked — the analysis-side mirror of `CompileTarget.declaredVarTypes`,
+    // so probes that read a raw (never-bound) symbol (the protocol SET root)
+    // resolve the same static type the compile path does. Replaced (not
+    // stacked) per body, matching `prepareUserFunctionBody`.
+    let declaredTypes: Readonly<Record<string, Type>> | undefined =
+      target.declaredVarTypes;
+
+    /** Visit a function literal's body with its parameters bound and its
+     * declared-type frame installed. */
+    const visitLiteralBody = (
+      literal: Expression & FunctionInterface,
+      bound: ReadonlySet<string>
+    ): void => {
+      const params = literal.ops
+        .slice(1)
+        .map((p) => functionLiteralParameterName(p))
+        .filter((name) => name !== '');
+      const saved = declaredTypes;
+      declaredTypes = BaseCompiler.literalDeclaredParamTypes(literal);
+      try {
+        visit(literal.ops[0], params.length ? union(bound, params) : bound);
+      } finally {
+        declaredTypes = saved;
+      }
+    };
+
+    /** The receiver type a dispatch probe should use — the expression's own
+     * static type, falling back to the current body's declared parameter
+     * type for a raw symbol (the same fallback `tryCompileProtocolDispatch`
+     * applies). */
+    const probeReceiverType = (r: Expression | undefined): Type | undefined => {
+      if (r === undefined) return undefined;
+      let t = r.type.type;
+      if ((t === 'unknown' || t === 'any') && isSymbol(r)) {
+        const declared = declaredTypes?.[r.symbol];
+        if (declared !== undefined) t = declared;
+      }
+      return t;
+    };
+
+    /** Can the protocol dispatch tier run on this target at all? */
+    const jsProtocolTarget = (): boolean =>
+      target.language === 'javascript' &&
+      target.userFunctions !== undefined &&
+      target.userFunctions.lowering === undefined;
+
+    /** Descend into a dispatch plan's implementation bodies, once per
+     * DISPATCH IDENTITY (protocol restriction + impl key — never the
+     * syntactic head, which `ProtocolMember`/`Field` share across members). */
+    const visitProtocolPlan = (
+      key: string,
+      plan: NonNullable<ReturnType<typeof planProtocolDispatch>>,
+      bound: ReadonlySet<string>
+    ): void => {
+      if (userFnSeen.has(`protocol:${key}`)) return;
+      userFnSeen.add(`protocol:${key}`);
+      for (const c of plan.candidates) {
+        // The CANONICAL literal — the body the dispatch tier compiles (the
+        // raw one still carries `Typed` ascription nodes).
+        const literal = c.literal.canonical;
+        if (!isFunction(literal, 'Function')) continue;
+        visitLiteralBody(literal, bound);
+      }
+    };
+
     const visit = (e: Expression, bound: ReadonlySet<string>): void => {
       if (isSymbol(e)) {
         const s = e.symbol;
@@ -7234,14 +7747,7 @@ export class BaseCompiler {
           if (symLiteral !== undefined) {
             if (!userFnSeen.has(s)) {
               userFnSeen.add(s);
-              const params = symLiteral.ops
-                .slice(1)
-                .map((p) => functionLiteralParameterName(p))
-                .filter((name) => name !== '');
-              visit(
-                symLiteral.ops[0],
-                params.length ? union(bound, params) : bound
-              );
+              visitLiteralBody(symLiteral, bound);
             }
             return;
           }
@@ -7282,6 +7788,66 @@ export class BaseCompiler {
       // below would otherwise strip `.ops` from `e` in the fall-through.
       const h = e.operator;
       const ops: ReadonlyArray<Expression> = e.ops;
+
+      // The two compile-path protocol intercepts that do NOT key on the head
+      // alone — mirrored here, or their operands are analyzed as ordinary
+      // expressions (listing `Field` as unsupported on a compilable SET, or
+      // descending into a getter where the compile path emits a setter).
+      //
+      // Qualified call: `Apply(Field(Protocol, "member"), args…)`. The
+      // compile path declines whole-unit when the tier declines, so the
+      // member is reported unsupported in that case.
+      if (h === 'Apply' && ops.length >= 2 && isFunction(ops[0], 'Field')) {
+        const fieldOps = ops[0].ops;
+        const record = protocolOfSymbol(engine, fieldOps[0]);
+        const member = isString(fieldOps[1]) ? fieldOps[1].string : undefined;
+        if (record !== undefined && member !== undefined) {
+          const plan = jsProtocolTarget()
+            ? planProtocolDispatch(engine, {
+                implKey: member,
+                argc: ops.length - 1,
+                receiverType: probeReceiverType(ops[1]),
+                protocol: record.name,
+              })
+            : undefined;
+          if (plan !== undefined)
+            visitProtocolPlan(`${record.name}:${member}`, plan, bound);
+          else unsupported.add(member);
+          // The call arguments are ordinary expressions; the protocol-naming
+          // `Field` callee is consumed by the intercept and never compiled.
+          for (const op of ops.slice(1)) visit(op, bound);
+          return;
+        }
+      }
+      // Property SET: `Assign(Field(root, "name"), v)` where some protocol
+      // declares the property. STATIC tier only (P46), like the compile
+      // path; a non-static site fails closed there, so `Field` stays listed.
+      if (
+        h === 'Assign' &&
+        isFunction(ops[0], 'Field') &&
+        isString(ops[0].ops[1]) &&
+        protocolDispatchCandidates(
+          engine,
+          `__set__${ops[0].ops[1].string}`
+        ) !== null
+      ) {
+        const name = ops[0].ops[1].string;
+        const root = ops[0].ops[0];
+        const plan =
+          jsProtocolTarget() && isSymbol(root)
+            ? planProtocolDispatch(engine, {
+                implKey: `__set__${name}`,
+                argc: 2,
+                receiverType: probeReceiverType(root),
+              })
+            : undefined;
+        if (plan !== undefined && plan.tier === 'static')
+          visitProtocolPlan(`:__set__${name}`, plan, bound);
+        else unsupported.add('Field');
+        visit(root, bound);
+        if (ops[1] !== undefined) visit(ops[1], bound);
+        return;
+      }
 
       // A head that names a user-defined function literal is lowerable (emitted
       // as a named local function — see `tryCompileUserFunction`), not
@@ -7335,27 +7901,57 @@ export class BaseCompiler {
         }
       }
 
+      // A protocol call the dispatch tier can lower is supported on the JS
+      // target; everywhere else it keeps reporting unsupported (the tier is
+      // JS-only, mirroring `tryCompileProtocolDispatch`'s gate). The probe is
+      // the pure planner — no emission, same decision the compile path makes.
+      let protocolPlan: ReturnType<typeof planProtocolDispatch> = undefined;
+      let protocolPlanKey = '';
+      if (
+        jsProtocolTarget() &&
+        !BaseCompiler.STRUCTURAL_HEADS.has(h) &&
+        target.functions?.(h) === undefined &&
+        target.operators?.(h) === undefined &&
+        userLiteral === undefined &&
+        !hasCustomCompile
+      ) {
+        const parts = BaseCompiler.protocolCallParts(engine, h, ops);
+        if (parts !== undefined && parts.args[0] !== undefined) {
+          protocolPlan = planProtocolDispatch(engine, {
+            implKey: parts.implKey,
+            argc: parts.args.length,
+            receiverType: probeReceiverType(parts.args[0]),
+            protocol: parts.protocol,
+          });
+          if (parts.staticOnly === true && protocolPlan?.tier !== 'static')
+            protocolPlan = undefined;
+          protocolPlanKey = `${parts.protocol ?? ''}:${parts.implKey}`;
+        }
+      }
+
       if (
         h !== 'Error' &&
         !BaseCompiler.STRUCTURAL_HEADS.has(h) &&
         target.functions?.(h) === undefined &&
         target.operators?.(h) === undefined &&
         userLiteral === undefined &&
-        !hasCustomCompile
+        !hasCustomCompile &&
+        protocolPlan === undefined
       )
         unsupported.add(h);
+
+      // Descend into the plan's implementation bodies (parameters bound), the
+      // same walk the user-literal branch below performs, so symbols an
+      // implementation references transitively are surfaced. Keyed by the
+      // DISPATCH IDENTITY, not the head — `ProtocolMember`/`ProtocolProperty`
+      // are shared wrappers across every member.
+      if (protocolPlan !== undefined)
+        visitProtocolPlan(protocolPlanKey, protocolPlan, bound);
 
       if (userLiteral !== undefined) {
         if (!userFnSeen.has(h)) {
           userFnSeen.add(h);
-          const params = userLiteral.ops
-            .slice(1)
-            .map((p) => functionLiteralParameterName(p))
-            .filter((name) => name !== '');
-          visit(
-            userLiteral.ops[0],
-            params.length ? union(bound, params) : bound
-          );
+          visitLiteralBody(userLiteral, bound);
         }
         // The call arguments are evaluated in the surrounding scope.
         for (const op of ops) visit(op, bound);

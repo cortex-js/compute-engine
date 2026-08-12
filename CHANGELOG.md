@@ -35,6 +35,25 @@
   constrained variable). Design record:
   `docs/plans/2026-08-12-protocols-design.md` (rulings P1–P46).
 
+- **Duplicate implementation blocks are rejected within a batch** (P47): a
+  second implementation block for the same (type, protocol) pair in one
+  Epsil batch is a `protocol-implementation-duplicate` error, while the same
+  statement re-run in a *later* batch still replaces (the notebook pattern).
+
+- **Protocol dispatch compiles to JavaScript.** A protocol call — bare
+  (`compare(x, y)`), qualified (`Comparable.compare(x, y)`), and property
+  GET/SET (`p.name`, `p.name = v`) — now compiles on the JS target: a
+  statically resolved call becomes a direct call of the winning
+  implementation, and a dynamic one becomes a guard chain over the
+  receiver's reified runtime representation (`typeof` classes, tagged-sum
+  `_tag`s), most-specific-first. A receiver no conformance covers throws
+  `protocol-implementation-missing` at runtime (where the interpreter
+  yields the error value). Anything unprovable — conditional conformances,
+  host implementations, ambiguity-capable conformance sets, unguardable
+  targets — declines compilation (fail closed, D6), and Python/GPU/interval
+  targets keep failing closed. See
+  `docs/plans/2026-08-12-protocol-compilation.md`.
+
 - **Sum-type declaration sugar.** One statement now declares a tagged sum —
   the variants and the union together:
 
