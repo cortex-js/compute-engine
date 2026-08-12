@@ -328,6 +328,7 @@
       "Coalesce",
       "Colon",
       "Declare",
+      "DeclareSumType",
       "DeclareType",
       "DefineFunction",
       "Delimiter",

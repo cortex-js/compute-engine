@@ -1034,6 +1034,244 @@ export function declareType(
   }
 }
 
+/** Does `name` on its own parse as a type? True for a grammar PRIMITIVE
+ * (`integer`, `list`, `nothing`) as well as for a declared name — the two are
+ * one question only the type parser can answer, since a primitive never
+ * reaches the resolver. */
+function namesAGrammarType(ce: IComputeEngine, name: string): boolean {
+  try {
+    parseType(name, ce._typeResolver);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** One arm of a sum-type declaration: the variant's name and the TYPE TEXT its
+ * payload lowered to (A2 — `"nothing"` for a nullary variant, the payload type
+ * itself for a single positional one, `tuple<…>` otherwise). */
+export type SumTypeVariant = { name: string; payload: string };
+
+/**
+ * Declare a SUM TYPE — the N nominal variant declarations plus the transparent
+ * union that names them — as ONE atomic operation
+ * (`docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §A).
+ *
+ * The sugar adds no semantics: it is a declaration bundler, and what it
+ * produces is exactly the manual desugaring pinned by
+ * `test/compute-engine/sum-types.test.ts`:
+ *
+ * ```
+ * type node = lit(num: number) | plus(op1: node, op2: node)
+ *   ≡  type lit  = tuple<num: number>
+ *      type plus = tuple<op1: node, op2: node>
+ *      type alias node = lit | plus
+ * ```
+ *
+ * Four things this owns that the manual form leaves to the author:
+ *
+ * - **A3** — the sum's name is FORWARD-REGISTERED before the variants are
+ *   declared, so a payload may write `node` / `tree<T>` bare instead of the
+ *   `type node` marker. The final alias fulfils the reference in place.
+ * - **A4** — a generic sum's parameters are distributed to each variant BY
+ *   USAGE: a variant is declared with the subset that occurs free in its
+ *   parsed payload, and the alias applies each variant to its own subset
+ *   (`type alias tree<T> = leaf | node<T>`).
+ * - **A5** — the variant-name collision guard. A variant that already names a
+ *   type, is reserved, or names a SYSTEM-scope (builtin) binding is rejected,
+ *   because `type Add = tuple<…>` succeeds today while `Add(1, 2)` still
+ *   evaluates the builtin — the constructor would be silently unreachable.
+ * - **Atomicity** — any failure rolls both namespaces back: the type registry
+ *   to its entry state, and the constructor bindings this call claimed.
+ */
+export function declareSumType(
+  ce: IComputeEngine,
+  name: string,
+  variants: readonly SumTypeVariant[],
+  {
+    typeParams,
+    fromStatement,
+  }: { typeParams?: TypeParamsOption; fromStatement?: boolean } = {}
+): void {
+  if (isReservedTypeName(name))
+    throw new TypeVariableError(
+      'reserved-type-name',
+      `The type name "${name}" is reserved`
+    );
+  if (!isValidTypeName(name)) throw Error(`The type name "${name}" is invalid`);
+  if (variants.length === 0)
+    throw Error(`The sum type "${name}" declares no variants`);
+
+  // The clause is validated FIRST, before any namespace is touched.
+  const params =
+    typeParams === undefined
+      ? undefined
+      : normalizeDeclaredTypeParams(ce, name, typeParams);
+
+  // The sum itself is a transparent ALIAS, and an alias has no relation
+  // between two applications to declare — so a variance marker on the sum's
+  // clause has nowhere to go. Rejected rather than silently dropped or
+  // silently pushed onto the variants (whose parameter subsets differ).
+  const marked = params?.find((p) => p.variance !== undefined);
+  if (marked !== undefined)
+    throw new TypeVariableError(
+      'unsupported-variable-position',
+      `The type parameter \`${marked.name}\` of the sum type "${name}" cannot declare a variance: the sum is a transparent union of its variants, so its applications are expanded rather than related`
+    );
+
+  const registry = ce._typeRegistry;
+  const globalScope = ce._evalContextStack[1]?.lexicalScope;
+  // Builtins live in the SYSTEM scope — the parent of the global one.
+  const systemScope = globalScope?.parent ?? undefined;
+
+  // A5 — the guard runs over EVERY variant before anything is declared, so a
+  // collision on the last arm leaves the first ones undeclared too.
+  const seen = new Set<string>();
+  for (const v of variants) {
+    if (!isValidTypeName(v.name))
+      throw Error(`The variant name "${v.name}" is invalid`);
+    if (isReservedTypeName(v.name))
+      throw new TypeVariableError(
+        'reserved-type-name',
+        `The variant name "${v.name}" is reserved`
+      );
+    if (v.name === name)
+      throw Error(
+        `The variant "${v.name}" cannot have the same name as the sum type it belongs to`
+      );
+    if (seen.has(v.name))
+      throw Error(
+        `The variant "${v.name}" is declared twice in the sum type "${name}"`
+      );
+    seen.add(v.name);
+
+    // Two exemptions, both narrower than `declareType`'s. An unfulfilled
+    // forward reference (no `def`) is a promise to declare, not a conflict;
+    // and a record THIS SAME SUM declared is ours to replace, which is what
+    // makes re-running the statement idempotent. `declareType`'s broader
+    // "any statement-declared record is replaceable" rule is deliberately NOT
+    // inherited: a variant silently taking over an unrelated `type foo = …`
+    // from earlier in the same program is exactly the kind of quiet capture
+    // A5 exists to refuse.
+    const existing = registry[v.name];
+    if (
+      existing !== undefined &&
+      existing.def !== undefined &&
+      existing._sumOf !== name
+    )
+      throw Error(
+        `The variant "${v.name}" of the sum type "${name}" already names a type`
+      );
+
+    // A PRIMITIVE of the type grammar (`integer`, `list`, `nothing`) is never
+    // a registry record, so the check above cannot see it — but the grammar
+    // keeps winning, so the declaration would be inert exactly the way an
+    // `Add` variant's constructor is. (`ce.declareType()` accepts
+    // `type integer = …` today; the sugar refuses it rather than inherit the
+    // trap.)
+    if (existing === undefined && namesAGrammarType(ce, v.name))
+      throw Error(
+        `The variant "${v.name}" of the sum type "${name}" is the name of a built-in type`
+      );
+
+    if (systemScope?.bindings.has(v.name) === true)
+      throw Error(
+        `The variant "${v.name}" of the sum type "${name}" is the name of a built-in: its constructor would be unreachable, because \`${v.name}(…)\` still evaluates the builtin. Rename the variant.`
+      );
+  }
+
+  // The variant list this declaration REPLACES, read before anything is
+  // touched (the declarations below overwrite it).
+  const priorVariants = registry[name]?._sumVariants;
+
+  // Atomicity. The registry snapshot restores every record FIELD (records are
+  // replaced in place, so captures hold the object); the binding snapshot
+  // covers the constructors `declareType` mints for the names this call
+  // claims. `declareType` rolls its OWN failed declaration back — this covers
+  // the ones that already succeeded when a later arm fails.
+  const rollbackTypes = ce._typeRegistryRollbackPoint();
+  const surrogate =
+    ce._staticTypeCheckDepth > 0 && ce.context.name === 'epsil:static-check';
+  const mintScope = surrogate
+    ? ce.context.lexicalScope
+    : (globalScope ?? ce.context.lexicalScope);
+  const priorBindings = [name, ...variants.map((v) => v.name)].map(
+    (n) => [n, mintScope.bindings.get(n)] as const
+  );
+  const rollback = (): void => {
+    rollbackTypes();
+    for (const [n, binding] of priorBindings) {
+      if (binding === undefined) mintScope.bindings.delete(n);
+      else mintScope.bindings.set(n, binding);
+    }
+  };
+
+  try {
+    // A3 — the promise, made before the variants that reference it.
+    const promise = ce._typeResolver.forward(name)!;
+    // A GENERIC sum's promise carries its clause, so a payload may apply it
+    // (`list<tree<T>>`). Without it the application is rejected outright: the
+    // type builder only admits an applied reference to an undefined record
+    // when the SOURCE spelled the `type tree<T>` marker, and the whole point of
+    // A3 is that the sugar needs no marker. With the clause on the record the
+    // application takes the ordinary opaque-nominal path, and the fulfilling
+    // `type alias` below re-opens the record — every capture delegates `alias`
+    // and `def` to it, so they follow.
+    if (params !== undefined && promise.def === undefined)
+      promise.typeParams = params;
+
+    const subsets = new Map<string, TypeParameter[]>();
+    for (const v of variants) {
+      let subset: TypeParameter[] | undefined;
+      if (params !== undefined) {
+        // A4 — parse the payload with the WHOLE clause seeded, then keep the
+        // parameters it actually mentions. (The payload is parsed a second
+        // time by `declareType`; this one only answers "which variables?".)
+        const free = freeTypeVariables(
+          parseType(v.payload, ce._typeResolver, params)
+        );
+        subset = params.filter((p) => free.has(p.name));
+        if (subset.length === 0) subset = undefined;
+      }
+      declareType(ce, v.name, v.payload, { fromStatement, typeParams: subset });
+      if (subset !== undefined) subsets.set(v.name, subset);
+      registry[v.name]._sumOf = name;
+    }
+
+    // The fulfilment: `type alias NAME = v₁ | v₂<T> | …`, each variant applied
+    // to its own parameter subset.
+    const body = variants
+      .map((v) => {
+        const subset = subsets.get(v.name);
+        return subset === undefined
+          ? v.name
+          : `${v.name}<${subset.map((p) => p.name).join(', ')}>`;
+      })
+      .join(' | ');
+    declareType(ce, name, body, { alias: true, fromStatement, typeParams });
+
+    // A RE-declaration that drops a variant leaves that variant's record
+    // behind — it is still a perfectly good nominal type, only its membership
+    // ended. Its `_sumOf` back-pointer must go with the membership: left
+    // dangling, the compile tier would keep reading it and compile the orphan's
+    // constructor under the policy the NEW variant set implies (§B1), which
+    // flips its representation without flipping the values already built.
+    // Cleared here, inside the try, so the atomic rollback restores it.
+    if (priorVariants !== undefined)
+      for (const p of priorVariants)
+        if (!seen.has(p.name) && registry[p.name]?._sumOf === name)
+          delete registry[p.name]._sumOf;
+
+    registry[name]._sumVariants = variants.map((v) => ({
+      name: v.name,
+      typeParams: (subsets.get(v.name) ?? []).map((p) => p.name),
+    }));
+  } catch (e) {
+    rollback();
+    throw e;
+  }
+}
+
 /**
  * Every mention of the declaration record `target` in `body` — `undefined` when
  * it is not mentioned at all. A BARE reference is an application at arity ZERO,

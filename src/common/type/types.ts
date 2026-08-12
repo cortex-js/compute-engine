@@ -434,6 +434,22 @@ export type TypeReference = {
   /** The unfulfilled forward-reference names a `'deferred'` verification waits
    * on. Cleared when the record reaches `'verified'`. */
   _varianceBlockedOn?: string[];
+
+  /** SUM-TYPE SUGAR bookkeeping — on a VARIANT's declaration record, the name
+   * of the sum that declared it
+   * (`docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §A6).
+   *
+   * Set only by `declareSumType`: a hand-assembled union of nominals has no
+   * sum identity and carries neither field. Metadata about the DECLARATION, so
+   * it never rides an applied reference and never participates in a type's
+   * structure, its serialization or its comparison. */
+  _sumOf?: string;
+
+  /** SUM-TYPE SUGAR bookkeeping — on the SUM's own declaration record, its
+   * variants in declaration order, each with the subset of the sum's type
+   * parameters it was declared with (A4). The companion of {@link _sumOf};
+   * same non-structural status. */
+  _sumVariants?: { name: string; typeParams: string[] }[];
 };
 
 export type Type =

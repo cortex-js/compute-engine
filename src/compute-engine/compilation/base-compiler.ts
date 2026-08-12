@@ -50,7 +50,13 @@ import { multiClauseState } from '../multi-clause.js';
 import type { FunctionClause } from '../multi-clause.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
 import { rewriteAngularUnit } from './angular-unit.js';
-import { isWildcard } from '../boxed-expression/pattern-utils.js';
+import {
+  isWildcard,
+  wildcardName,
+  wildcardType,
+} from '../boxed-expression/pattern-utils.js';
+import { sumVariantInfo, taggedSumInType } from './sum-representation.js';
+import type { SumBucket } from './sum-representation.js';
 import {
   buildCaseClosure,
   getMatchPlan,
@@ -933,6 +939,27 @@ export class BaseCompiler {
               `representation. Discharge with 'Coalesce' first (fail closed, §3.F).`
           );
       }
+    }
+    // The engine⇄compiled boundary for TAGGED sums
+    // (`docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §B2). A
+    // `{_tag, _ops}` object is an implementation detail of one compiled unit;
+    // v1 does not marshal it back into boxed land. So a unit whose RESULT type
+    // admits one declines here, at the compilation boundary (`_compileDepth
+    // === 0` — the outermost `compile()`, whichever target funnels through it),
+    // rather than leaking the representation. A tagged sum in a PARAMETER
+    // position is fine and stays supported: an in-unit recursive function
+    // (`ev(n: node)`) needs it, and its only callers are in the same unit.
+    // Representation-DISJOINT sums are ordinary erased values and flow as
+    // today.
+    if (BaseCompiler._compileDepth === 0) {
+      const tagged = taggedSumInType(expr.engine, expr.type.type);
+      if (tagged !== undefined)
+        throw new Error(
+          `Cannot compile an expression whose result type '${expr.type.toString()}' ` +
+            `is the tagged sum variant '${tagged}': its compiled representation ` +
+            `is internal to the compiled unit and does not cross the boundary. ` +
+            `Fail closed (D6).`
+        );
     }
     // Keep the compile-bound-variables context in sync for the contextless
     // analysis helpers (`isComplexValued`): every recursive compilation flows
@@ -5620,6 +5647,15 @@ export class BaseCompiler {
       return `if (${conds.join(' && ')}) return ${body};`;
     }
 
+    // The SUM-CONSTRUCTOR tier (`docs/plans/2026-08-12-sum-type-sugar-and-
+    // compilation.md` §B3): a pattern whose head names a variant of a
+    // sugar-declared sum. It is classified tier 3 by the interpreter's ladder
+    // (which reaches it with the generic matcher), but the compiler CAN lower
+    // it — against the same per-sum representation policy the constructors
+    // emit under.
+    const ctor = BaseCompiler.emitMatchConstructorCaseJS(engine, cc, s, target);
+    if (ctor !== undefined) return ctor;
+
     // Tier 3, refutable: no compiled reference implementation of the generic
     // matcher — fail closed (D6), naming the offending pattern so the caller can
     // rewrite it with destructuring or guards.
@@ -5627,6 +5663,246 @@ export class BaseCompiler {
     throw new Error(
       `Match: pattern '${p?.toString() ?? '?'}' is not compilable; ` +
         `rewrite with destructuring or guards. Fail closed (D6).`
+    );
+  }
+
+  /**
+   * Lower a tier-3 case whose pattern(s) are sum-type CONSTRUCTOR patterns
+   * (`lit(v)`, `plus(a, b)`, `red()`) to a guarded early-return `if`, or return
+   * `undefined` to leave the case to the tier-3 fail-closed throw.
+   *
+   * The test emitted follows the sum's representation policy (§B1), which is
+   * the same policy the constructors emitted under, so a value built and
+   * matched inside one compiled unit always agrees with itself:
+   *
+   * - TAGGED — `s?._tag === 'plus'`, payload captures read `s._ops[i]`. The
+   *   optional chaining is what makes a tag test TOTAL: the scrutinee may be a
+   *   `null`/`undefined`/primitive value from another sum, and a mixed-sum
+   *   match must fall through, not throw.
+   * - ERASED — a representation test on the variant's bucket (`s === null`,
+   *   `typeof s === 'number'`, `Array.isArray(s)`, …); captures read the value
+   *   itself (unary payload) or `s[i]` (tuple payload).
+   *
+   * JS only. The GPU targets override `Match` wholesale and keep throwing on
+   * tier 3; Python and interval-js decline the head outright (§B2).
+   */
+  private static emitMatchConstructorCaseJS(
+    engine: ComputeEngine,
+    cc: CompiledCase,
+    s: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    if ((target.language ?? 'javascript') !== 'javascript') return undefined;
+    const pats = cc.rawPatterns;
+    if (pats === undefined || pats.length === 0) return undefined;
+
+    const accessors = new Map<string, string>();
+    const alts: string[] = [];
+    for (const p of pats) {
+      const conds: string[] = [];
+      // Fresh per ALTERNATIVE: a name bound once in each arm of
+      // `plus(a, _) | times(a, _)` is linear (only one arm ever matches),
+      // while a name bound twice in the SAME arm is the non-linear pattern
+      // `walkConstructorElement` fails closed on.
+      if (
+        !BaseCompiler.walkConstructorPattern(
+          engine,
+          p,
+          s,
+          conds,
+          accessors,
+          new Set<string>(),
+          target
+        )
+      )
+        return undefined;
+      alts.push(conds.join(' && '));
+    }
+
+    // Every name the case's body may reference must have an accessor: a
+    // capture the walk did not bind would compile in the body as a free
+    // symbol (a `_.v` vars-object lookup) and read `undefined` at run time.
+    for (const n of cc.captureNames) if (!accessors.has(n)) return undefined;
+
+    const cond =
+      alts.length === 1 ? alts[0] : alts.map((a) => `(${a})`).join(' || ');
+    const conds = [`(${cond})`];
+    const guard = BaseCompiler.compileMatchGuard(cc, accessors, target);
+    if (guard !== undefined) conds.push(`(${guard})`);
+    const body = BaseCompiler.compileMatchBody(cc, accessors, target);
+    return `if (${conds.join(' && ')}) return ${body};`;
+  }
+
+  /** The total JS test that `base` holds a value of the given erased
+   * representation bucket. `complexNumber` widens the `number` test to the
+   * `{re, im}` object a complex-admitting payload may carry. */
+  private static sumBucketTest(
+    bucket: SumBucket,
+    base: string,
+    complexNumber: boolean
+  ): string {
+    switch (bucket) {
+      case 'null':
+        return `${base} === null`;
+      case 'boolean':
+        return `typeof ${base} === 'boolean'`;
+      case 'number':
+        return complexNumber
+          ? `(typeof ${base} === 'number' || (${base} !== null && typeof ${base} === 'object' && ${base}.im !== undefined))`
+          : `typeof ${base} === 'number'`;
+      case 'string':
+        return `typeof ${base} === 'string'`;
+      case 'array':
+        return `Array.isArray(${base})`;
+    }
+  }
+
+  /** Walk a sum constructor pattern, appending conditions and capture
+   * accessors. Returns `false` — leaving `conds`/`accessors` to be discarded
+   * by the caller — when the pattern is not a sum constructor pattern this
+   * compiler can lower. */
+  private static walkConstructorPattern(
+    engine: ComputeEngine,
+    p: Expression,
+    base: string,
+    conds: string[],
+    accessors: Map<string, string>,
+    bound: Set<string>,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (!isFunction(p)) return false;
+    const info = sumVariantInfo(engine, p.operator);
+    if (info === undefined) return false;
+    const ops = p.ops;
+    // The pattern must be a saturated application: `plus(a, b)`, never
+    // `plus(___)` or a wrong-arity application. (`red` — the bare symbol — is
+    // not a function expression and never reaches here; `red()` is.)
+    if (ops.length !== info.arity) return false;
+
+    if (info.policy === 'tagged') {
+      conds.push(`${base}?._tag === ${JSON.stringify(p.operator)}`);
+      return ops.every((op, i) =>
+        BaseCompiler.walkConstructorElement(
+          engine,
+          op,
+          `${base}._ops[${i}]`,
+          conds,
+          accessors,
+          bound,
+          target
+        )
+      );
+    }
+
+    // ERASED. An unclassifiable variant can never reach here: it forces its
+    // whole sum to the tagged policy.
+    if (info.bucket === undefined) return false;
+    conds.push(
+      BaseCompiler.sumBucketTest(info.bucket, base, info.complexNumber)
+    );
+    if (info.shape === 'nothing') return true;
+    if (info.shape === 'value')
+      return BaseCompiler.walkConstructorElement(
+        engine,
+        ops[0],
+        base,
+        conds,
+        accessors,
+        bound,
+        target
+      );
+    // A tuple payload erases to the same JS array `Tuple` emits, of a fixed
+    // length the constructor always produces.
+    conds.push(`${base}.length === ${info.arity}`);
+    return ops.every((op, i) =>
+      BaseCompiler.walkConstructorElement(
+        engine,
+        op,
+        `${base}[${i}]`,
+        conds,
+        accessors,
+        bound,
+        target
+      )
+    );
+  }
+
+  /** One payload slot of a constructor pattern: a binding / `_`, a literal or
+   * pin (compared with `===`, the same seam tier 2 carries), or a NESTED
+   * constructor pattern (`plus(lit(v), _)`) — which falls out of the recursion.
+   * A `List`/`Tuple` sub-pattern is NOT supported in v1: it would need the
+   * interpreter's shape classifier, which does not descend through an operator
+   * pattern. Fails closed by returning `false`. */
+  private static walkConstructorElement(
+    engine: ComputeEngine,
+    el: Expression,
+    access: string,
+    conds: string[],
+    accessors: Map<string, string>,
+    bound: Set<string>,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (isWildcard(el)) {
+      const wt = wildcardType(el);
+      if (wt === 'Sequence' || wt === 'OptionalSequence') return false;
+      const name = wildcardName(el);
+      if (name === undefined || name === null) return false;
+      const bare = name.replace(/^_+/, '');
+      if (bare.length > 0) {
+        // NON-LINEAR pattern (`plus(a, a)`): the interpreter's generic matcher
+        // UNIFIES the two occurrences, so the arm is taken only when the two
+        // payloads are equal. Overwriting the accessor would drop that
+        // condition entirely and match `plus(1, 2)`. There is no
+        // representation-independent equality to emit here — a payload may be
+        // a machine number, a string, a JS array (tuple/list erasure), a
+        // `{re, im}` complex or a `{_tag, _ops}` tagged value, and `===` is
+        // wrong for all but the first two — so FAIL CLOSED, matching the
+        // fixed-shape precedent (`hasRepeatedKeys` in `match-dispatch.ts`
+        // excludes a repeated binding from tier 2, sending it to the tier-3
+        // throw).
+        if (bound.has(bare)) return false;
+        // Across ALTERNATIVES the name is linear, but the body has a single
+        // accessor for it: the arms must agree on where to read it from, or
+        // whichever arm matched, the body would read the other's slot. (Belt
+        // and braces — `getMatchPlan` already refuses a name-binding
+        // alternative upstream, so only capture-free arms reach here today.)
+        const prior = accessors.get(bare);
+        if (prior !== undefined && prior !== access) return false;
+        bound.add(bare);
+        accessors.set(bare, access);
+      }
+      return true;
+    }
+    if (isFunction(el, 'Pin')) {
+      conds.push(
+        `${access} === ${BaseCompiler.compileMatchConstant(
+          engine,
+          { kind: 'pin', expr: el.op1 },
+          true,
+          target
+        )}`
+      );
+      return true;
+    }
+    if (isNumber(el) || isString(el) || isSymbol(el)) {
+      conds.push(
+        `${access} === ${BaseCompiler.compileMatchConstant(
+          engine,
+          { kind: 'literal', value: el },
+          true,
+          target
+        )}`
+      );
+      return true;
+    }
+    return BaseCompiler.walkConstructorPattern(
+      engine,
+      el,
+      access,
+      conds,
+      accessors,
+      bound,
+      target
     );
   }
 

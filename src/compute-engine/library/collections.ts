@@ -62,6 +62,7 @@ import {
 import { mapAutoCompileRunner } from './map-auto-compile.js';
 import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
+import { sumVariantInfo } from '../compilation/sum-representation.js';
 import type {
   Expression,
   FunctionInterface,
@@ -4222,6 +4223,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (rt.kind === 'tuple') {
         const i = rt.elements.findIndex((x) => x.name === name);
         if (i < 0) return undefined;
+
+        // …unless the nominal is a variant of a TAGGED sum
+        // (`docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §B1/§B2),
+        // whose compiled representation is `{_tag, _ops}` and NOT the bare
+        // tuple: the payload lives one level down, in `_ops`. Without this the
+        // positional index below reads a property the object does not have and
+        // silently yields `undefined`.
+        const info = sumVariantInfo(base.engine, t.name);
+        if (info?.policy === 'tagged') {
+          // JS only (§B2: the tagged emission is JS-only), and only for the
+          // `tuple` shape whose slots ARE the `_ops` entries. Any other shape
+          // (a variant whose payload merely *aliases* a tuple mints a UNARY
+          // constructor, so `_ops[0]` is the whole tuple) fails closed.
+          if (language === 'javascript' && info.shape === 'tuple')
+            return `${compile(base)}._ops[${i}]`;
+          return undefined;
+        }
+
         if (language === 'javascript' || language === 'python')
           return `${compile(base)}[${i}]`;
         if ((language === 'glsl' || language === 'wgsl') && i < 4)

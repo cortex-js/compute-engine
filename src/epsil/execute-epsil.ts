@@ -63,6 +63,18 @@ export interface ExecuteEpsilResult {
  * `while`/`for` lower to the engine's imperative `Loop` (see `parser.ts`), so
  * they evaluate as ordinary engine primitives — no special handling here.
  */
+/** Every sum VARIANT the engine knows, mapped to the sum that declared it
+ * (`_sumOf`, recorded by `declareSumType`). Read through the resolver, which
+ * is the public window onto the engine-global type registry. */
+function sumVariantNames(ce: ComputeEngine): Record<string, string> {
+  const variants: Record<string, string> = {};
+  for (const name of ce._typeResolver.names) {
+    const sum = ce._typeResolver.resolve(name)?._sumOf;
+    if (sum !== undefined) variants[name] = sum;
+  }
+  return variants;
+}
+
 export function executeEpsil(
   ce: ComputeEngine,
   source: string,
@@ -78,6 +90,9 @@ export function executeEpsil(
       // The engine's already-declared type names, so an annotation naming a
       // host type resolves at parse time. `names` walks the scope chain.
       typeNames: ce._typeResolver.names,
+      // …and which of those names are sum VARIANTS, so re-running a
+      // sugar-declared sum still reads as the sugar (see `parseEpsil`).
+      sumVariants: sumVariantNames(ce),
     });
     ast = parsed;
     diagnostics.push(...parseDiagnostics);

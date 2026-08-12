@@ -94,7 +94,9 @@ import {
 import {
   assertAssignable,
   assignValueAsOperatorDef,
+  declareSumType,
 } from '../engine-declarations.js';
+import type { SumTypeVariant } from '../engine-declarations.js';
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
   effectContractErrorValue,
@@ -780,6 +782,118 @@ function declareTypeStatement(
   // conflict with a host declaration must not throw to the host.
   try {
     ce.declareType(name, typeStr, { alias, fromStatement: true, typeParams });
+  } catch (e) {
+    return ce.error(
+      ['invalid-type-declaration', e instanceof Error ? e.message : String(e)],
+      name
+    );
+  }
+  return null;
+}
+
+/** The name a `DeclareSumType` operand holds — a symbol or a string, the two
+ * spellings every declaration operand is read in. */
+function declarationName(op: Expression | undefined): string | undefined {
+  if (op === undefined) return undefined;
+  return (isString(op) ? op.string : sym(op)) ?? undefined;
+}
+
+/**
+ * Register the sum type declared by a `DeclareSumType` statement: the N
+ * nominal variants plus the transparent union naming them
+ * (`docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §A). Returns an
+ * `Error` value on failure, `null` on success.
+ *
+ * The shape mirrors `DeclareType` in every respect — called from BOTH the
+ * canonical and the evaluate handler, idempotent through the `fromStatement`
+ * replace rule, top-level only because types are engine-global — with one
+ * difference forced by the variadic variant list: the optional attributes
+ * dictionary rides at operand 1, AHEAD of the variants, and is told apart from
+ * a variant by its head (a variant is a `Tuple`).
+ */
+function declareSumTypeStatement(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | null {
+  const name = declarationName(ops[0]);
+  if (!name)
+    return ce.error(['invalid-type-declaration', 'Expected a type name']);
+
+  // Top-level only — the identical rule (and the identical static-pre-pass
+  // surrogate exemption) as `declareTypeStatement`; see its comment.
+  const globalScope = ce._evalContextStack[1]?.lexicalScope;
+  const ctx = ce.context;
+  const inSurrogate =
+    ce._staticTypeCheckDepth > 0 && ctx.name === 'epsil:static-check';
+  if (
+    globalScope !== undefined &&
+    ctx.lexicalScope !== globalScope &&
+    !inSurrogate
+  )
+    return ce.error(
+      [
+        'invalid-type-declaration',
+        'Type declarations must be at the top level of a program, not inside a block or function body',
+      ],
+      name
+    );
+
+  let rest = ops.slice(1);
+
+  // The attributes bag, when present: anything at operand 1 that is not a
+  // variant `Tuple`.
+  let typeParams: TypeParameter[] | undefined;
+  if (rest.length > 0 && !isFunction(rest[0], 'Tuple')) {
+    const attrs = rest[0];
+    rest = rest.slice(1);
+    if (!isDictionary(attrs))
+      return ce.error(
+        ['invalid-type-declaration', 'Expected an attributes dictionary'],
+        name
+      );
+    const clauseText = declarationName(attrs.get('typeParams'));
+    if (clauseText !== undefined) {
+      const parsed = parseTypeParameterClause(clauseText, ce._typeResolver);
+      if ('error' in parsed)
+        return ce.error(
+          [
+            'invalid-type-declaration',
+            `Invalid type parameter clause: ${parsed.error.message}`,
+          ],
+          name
+        );
+      typeParams = parsed.params;
+    }
+  }
+
+  const variants: SumTypeVariant[] = [];
+  for (const op of rest) {
+    if (!isFunction(op, 'Tuple') || op.nops !== 2)
+      return ce.error(
+        [
+          'invalid-type-declaration',
+          'Expected a variant as `["Tuple", name, payload type]`',
+        ],
+        name
+      );
+    const variantName = declarationName(op.ops[0]);
+    const payload = declarationName(op.ops[1]);
+    if (!variantName || !payload)
+      return ce.error(
+        ['invalid-type-declaration', 'Expected a variant name and payload type'],
+        name
+      );
+    variants.push({ name: variantName, payload });
+  }
+  if (variants.length === 0)
+    return ce.error(
+      ['invalid-type-declaration', 'Expected at least one variant'],
+      name
+    );
+
+  // Errors are values, exactly as for `DeclareType`.
+  try {
+    declareSumType(ce, name, variants, { typeParams, fromStatement: true });
   } catch (e) {
     return ce.error(
       ['invalid-type-declaration', e instanceof Error ? e.message : String(e)],
@@ -2468,6 +2582,46 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // own record (with a possibly edited body).
         return declareTypeStatement(ce, ops[0], ops[1], ops[2]) ?? ce.Nothing;
       },
+    },
+
+    DeclareSumType: {
+      description:
+        'Declare a SUM TYPE: N nominal variants plus the transparent union ' +
+        'that names them, in one statement — the lowering of the Epsil sugar ' +
+        '`type node = lit(num: number) | plus(op1: node, op2: node)`. The ' +
+        'name is a symbol (or a string); each variant is a ' +
+        '`["Tuple", name, payload]` pair whose payload is a type string ' +
+        '(`"nothing"` for a nullary variant). An optional attributes ' +
+        'dictionary at operand 1 — ahead of the variants — carries ' +
+        '`typeParams -> "T"` for a generic sum, whose parameters are ' +
+        'distributed to each variant by usage. The sum name is ' +
+        'forward-registered before the variants are declared, so a payload ' +
+        'may name it bare. A variant name that already names a type, is ' +
+        'reserved, or is a builtin is rejected and NOTHING is declared. ' +
+        'Types are engine-global, so this is only valid at the top level of ' +
+        'a program. Evaluates to `Nothing`.',
+      lazy: true,
+      // Introduces type bindings (and their constructors) in a scope that
+      // outlives the application: the `scope` label, as `DeclareType`.
+      signature: '(symbol|string, any*) scope -> nothing',
+      // A STORING writer, like `DeclareType`.
+      invokes: false,
+      canonical: (args, { engine: ce }) => {
+        // The name and the variant tuples are kept RAW — canonicalizing them
+        // would auto-declare the names as variables. Only an attributes
+        // dictionary is canonicalized, so that its `.get(…)` accessor works.
+        const ops = [...args];
+        if (ops.length > 1 && !isFunction(ops[1], 'Tuple'))
+          ops[1] = ops[1].canonical;
+
+        // Register during the canonical pass, so that the statements
+        // canonicalized after this one see the sum and its variants.
+        const err = declareSumTypeStatement(ce, ops);
+        if (err) return err;
+        return ce._fn('DeclareSumType', ops);
+      },
+      evaluate: (ops, { engine: ce }) =>
+        declareSumTypeStatement(ce, ops) ?? ce.Nothing,
     },
 
     /** Return the type of an expression */

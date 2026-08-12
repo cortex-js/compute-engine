@@ -335,6 +335,17 @@ motivated by multi-variant recursive sums, not by `maybe`.
 
 ## 3. Compiling sums: amend D11 (blocks on sum adoption)
 
+**Status: IMPLEMENTED** for sugar-declared sums (§2.3) on the **JavaScript**
+target — `docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` Part B,
+`test/compute-engine/sum-compile.test.ts`. The reframing below is the shipped
+rule. Fail-closed scope, all deliberate in v1: hand-assembled unions of
+nominals (no sum identity to key a policy on) keep erased constructors and a
+`match` that fails closed; the Python / GPU / interval targets decline both
+constructor patterns and tagged emissions; and a compiled unit whose *result*
+type is a tagged sum declines rather than leak `{_tag}` objects across the
+engine⇄compiled boundary (sum-typed *parameters* are supported — an in-unit
+recursive `ev(n: node)` needs them).
+
 D11's erasure argument is a **product-type** argument: the tag decides
 nothing at runtime once the checker discharges opacity. **For sums the tag
 is runtime data** — `match` branches on it. When sums are adopted:
@@ -349,6 +360,11 @@ is runtime data** — `match` branches on it. When sums are adopted:
 
 Suggested reframing: **"the tag is erased iff it is statically
 discharged"** — one criterion covering products (erase) and sums (reify).
+
+Protocol dispatch is this criterion's second consumer (Appendix A,
+"Dispatching"): a dynamically dispatched protocol call needs the receiver's
+tag at runtime exactly as `match` needs a sum's; a statically resolved call
+discharges it and erases.
 
 ## 4. Protocols and conformance (long term)
 
@@ -532,6 +548,17 @@ with three rulings needed in order (see §7).
    rebind — the smaller theory); (b) the per-head rebind/fallback table,
    seeded from what the builtin type handlers already do; (c) whether the
    operators are user-visible type syntax or declarations-only at first.
+6. Protocol rulings introduced by the 2026-08-12 revision of Appendix A,
+   to ratify: (a) dispatch on the first `Self` argument, with `Self` bound
+   statically from that argument (the join-across-arguments rule is
+   withdrawn); (b) property assignment as rebinding sugar, non-variable
+   LHS rejected in v1; (c) pending-conformance lifecycle — end-of-batch
+   warning, not error; (d) overlap predicate = inhabited meet, with
+   incomparable overlap rejected; (e) statement-replace on Epsil re-run
+   vs host-API throw for protocol/implementation re-declaration; (f)
+   amending nominal-types D16 to admit `person.(Protocol.name)`; (g)
+   whether engine-global conformance needs a host-side trust control
+   (registry freeze / built-in-target authorization).
 
 
 ## Appendix A: Protocol Syntax
@@ -822,13 +849,15 @@ protocol list<T, U> is Mapeable where T is Hashable {
 A function signature may declare that some of its argument must conform to some protocols using a `where` clause:
 
 ```
-function bar<T>(x: T) -> boolean where T: collection { ...}
+function bar(x: T) -> boolean where T: collection { ...}
 
-function baz<T>(x: T) -> boolean where T: collection is Hashable { ...}
+function baz(x: T) -> boolean where T: collection is Hashable { ...}
 
 // Also acceptable
-function baz<T>(x: T) -> boolean where T: collection, T is Hashable { ...}
+function baz(x: T) -> boolean where T: collection, T is Hashable { ...}
 ```
+
+Note that `T: collection is Hashable` should be read as `T: collection, T is Hashable`. 
 
 A type may be required to conform to multiple protocols (not an *OR*, an *AND*).
 

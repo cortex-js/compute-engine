@@ -521,6 +521,8 @@ export class ComputeEngine implements IComputeEngine {
         declaredByStatement: r._declaredByStatement,
         forwardArity:
           r._forwardArity === undefined ? undefined : new Set(r._forwardArity),
+        sumOf: r._sumOf,
+        sumVariants: r._sumVariants,
       };
     });
     return () => {
@@ -573,6 +575,15 @@ export class ComputeEngine implements IComputeEngine {
           changed = true;
         if (after === undefined) delete arities._forwardArity;
         else arities._forwardArity = after;
+        // Sum-sugar bookkeeping (A6): declaration metadata, restored with the
+        // rest of the record so a rolled-back pre-pass declaration cannot
+        // leave a stale `sumOf`/variant list behind for the compile tier.
+        if (r._sumOf !== s.sumOf) changed = true;
+        if (s.sumOf === undefined) delete r._sumOf;
+        else r._sumOf = s.sumOf;
+        if (r._sumVariants !== s.sumVariants) changed = true;
+        if (s.sumVariants === undefined) delete r._sumVariants;
+        else r._sumVariants = s.sumVariants;
         // A record that vanished from the table but is still captured by a
         // pre-pass-built type keeps its restored fields — same contract as a
         // statement replacement rollback.

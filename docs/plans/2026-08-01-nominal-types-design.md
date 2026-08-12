@@ -932,6 +932,17 @@ phase 1) while **nominal** parameterized types remain out of scope
     released state for those shapes. Prerequisite for both: reference
     unfolding at representation-question sites (§4.6 step 1), whose alias
     half is the §6 phase-0 must-fix.
+    **AMENDED 2026-08-12** (`docs/plans/2026-08-12-sum-type-sugar-and-
+    compilation.md`, Part B): the criterion is now **"the tag is erased iff
+    it is statically discharged"**. Products discharge theirs at type-check
+    time and keep the erasure ruled here, verbatim. A **sum**'s tag is
+    runtime data as soon as `match` branches on it, so a sugar-declared sum
+    whose variants share a JS representation reifies it
+    (`{ _tag, _ops }`), and `match` tests it; a sum whose variants are
+    representation-DISJOINT still erases, dispatching on `typeof` /
+    `Array.isArray` / `=== null`. Scope of the amendment: sugar-declared
+    sums (the ones carrying `_sumOf`/`_sumVariants`) on the JS target —
+    every other declaration and target is unchanged.
 12. **D12 — constructed-value representation under constructor functions
     (§4.5): RULED (a)** (author, 2026-08-01) — **payload-tagged with an
     auto raw-injection arm** — the body's checked payload is what the tag

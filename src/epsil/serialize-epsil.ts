@@ -755,6 +755,70 @@ export function serializeEpsil(
       return fmt.line(kind, name, '<', clause, '> = ', body);
     },
 
+    //
+    // Sum-type declarations: reconstruct the `type NAME = v₁ | v₂(…)` sugar
+    // (`docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §A6).
+    //
+    //   ["DeclareSumType", "node",
+    //      ["Tuple", {str:"lit"},  {str:"tuple<num: number>"}],
+    //      ["Tuple", {str:"plus"}, {str:"tuple<op1: node, op2: node>"}]]
+    //        → type node = lit(num: number) | plus(op1: node, op2: node)
+    //
+    // The lowering is inverted per the A2 table: a `"nothing"` payload is a
+    // NULLARY variant (printed bare), a `tuple<…>` payload prints its element
+    // list inside the parentheses, and anything else is the single positional
+    // payload (`{str:"boolean"}` → `jbool(boolean)`). Two payloads spell the
+    // same declaration in the source and in the reconstruction — `red(nothing)`
+    // comes back as `red`, and `f(tuple<a: integer>)` as `f(a: integer)` —
+    // which is exact, since both lower to the identical variant declaration.
+    //
+    DeclareSumType: (expr: MathJsonExpression): FormattingBlock => {
+      const args = operands(expr);
+      if (args.length < 2) return serializeGenericFunction(expr);
+
+      const name = symbol(args[0]) ?? stringValue(args[0]);
+      if (name === null) return serializeGenericFunction(expr);
+
+      let rest = args.slice(1);
+      let clause: string | null = null;
+      if (operator(rest[0]) !== 'Tuple') {
+        const entries = attributeEntries(rest[0]);
+        rest = rest.slice(1);
+        if (entries === null) return serializeGenericFunction(expr);
+        const keys = Object.keys(entries);
+        if (keys.length !== 1 || keys[0] !== 'typeParams')
+          return serializeGenericFunction(expr);
+        clause =
+          stringValue(entries['typeParams']) ?? symbol(entries['typeParams']);
+        if (clause === null || clause.length === 0)
+          return serializeGenericFunction(expr);
+      }
+      if (rest.length === 0) return serializeGenericFunction(expr);
+
+      const arms: string[] = [];
+      for (const v of rest) {
+        if (operator(v) !== 'Tuple' || nops(v) !== 2)
+          return serializeGenericFunction(expr);
+        const variant = stringValue(operand(v, 1)) ?? symbol(operand(v, 1));
+        const payload = stringValue(operand(v, 2)) ?? symbol(operand(v, 2));
+        if (variant === null || payload === null)
+          return serializeGenericFunction(expr);
+        if (payload === 'nothing') arms.push(variant);
+        else {
+          const inner = tupleElementList(payload);
+          arms.push(`${variant}(${inner ?? payload})`);
+        }
+      }
+
+      return fmt.line(
+        'type ',
+        name,
+        clause === null ? '' : `<${clause}>`,
+        ' = ',
+        arms.join(' | ')
+      );
+    },
+
     Assign: (expr: MathJsonExpression): FormattingBlock => {
       const name = operand(expr, 1);
       const rhs = operand(expr, 2);
@@ -1492,6 +1556,37 @@ export function serializeEpsil(
 function dictionaryValueToExpression(v: unknown): MathJsonExpression {
   if (typeof v === 'boolean') return v ? 'True' : 'False';
   return v as MathJsonExpression;
+}
+
+/** The element list of a payload type text that is EXACTLY one `tuple<…>` —
+ * `"tuple<op1: node, op2: node>"` → `"op1: node, op2: node"` — and `null` for
+ * anything else, including a type that merely CONTAINS a tuple
+ * (`"list<tuple<integer>>"`). Used to invert the sum-sugar payload lowering
+ * (A2); the bracket walk is what tells `tuple<a>` apart from
+ * `tuple<a> | integer`, and `->` is skipped atomically so its `>` closes
+ * nothing. */
+function tupleElementList(payload: string): string | null {
+  const OPEN = 'tuple<';
+  if (!payload.startsWith(OPEN) || !payload.endsWith('>')) return null;
+  let depth = 0;
+  for (let i = OPEN.length; i < payload.length; i++) {
+    const ch = payload[i];
+    if (ch === '-' && payload[i + 1] === '>') {
+      i += 1;
+      continue;
+    }
+    if (ch === '<' || ch === '(' || ch === '[') depth += 1;
+    else if (ch === '>' || ch === ')' || ch === ']') {
+      if (depth === 0)
+        // The matching close of the leading `tuple<`: it is the whole payload
+        // only when nothing follows it.
+        return ch === '>' && i === payload.length - 1
+          ? payload.slice(OPEN.length, i)
+          : null;
+      depth -= 1;
+    }
+  }
+  return null;
 }
 
 function attributeEntries(

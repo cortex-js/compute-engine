@@ -297,6 +297,16 @@ export class Parser {
    * enough to make the reference parse. */
   private readonly typeResolver: TypeResolver;
 
+  /** Each known sum VARIANT name mapped to the sum that declared it — the
+   * host's (`executeEpsil` reads them off the engine's type registry) plus
+   * every one this program's own sum statements added.
+   *
+   * Consulted by the sum-sugar trigger only, and load-bearing there: a variant
+   * DOES name a type once it is declared, so re-running
+   * `type X = red | green` would otherwise stop reading as the sugar and
+   * silently redeclare `X` as an opaque nominal whose body is a union. */
+  private readonly sumVariants: Record<string, string>;
+
   /** Statement-block nesting depth (incremented by `parseBlock`). Types are
    * engine-global, so a `type` statement at depth > 0 is a hard error
    * (`type-declaration-not-top-level`, ruled 2026-08-10 — no hoisting).
@@ -372,6 +382,7 @@ export class Parser {
       parseLatex?: (latex: string) => MathJsonExpression;
       allowHostPragmas?: boolean;
       typeNames?: readonly string[];
+      sumVariants?: Readonly<Record<string, string>>;
     }
   ) {
     this.source = source;
@@ -380,6 +391,7 @@ export class Parser {
     this.parseLatex = options?.parseLatex;
     this.allowHostPragmas = options?.allowHostPragmas ?? false;
     this.knownTypeNames = new Set(options?.typeNames ?? []);
+    this.sumVariants = { ...options?.sumVariants };
     const names = this.knownTypeNames;
     this.typeResolver = {
       get names(): string[] {
@@ -1343,6 +1355,31 @@ export class Parser {
     };
 
     const eq = this.advance(); // '='
+
+    // SUM-TYPE SUGAR (A1): a NON-alias `type` statement whose body is a
+    // top-level union of constructor arms declares the variants and the sum in
+    // one statement. Probed BEFORE the ordinary body parse, since call-form
+    // (`plus(op1: node, op2: node)`) is not type syntax at all. A body that
+    // does not trigger falls through to the existing path untouched.
+    if (!isAlias) {
+      const sum = this.parseSumTypeArms(eq.end, name);
+      if (sum !== undefined) {
+        unseedParams();
+        if (sum === null) {
+          unseed();
+          this.recoverAtStatementBoundary();
+          return null;
+        }
+        return this.buildSumTypeStatement(
+          kw.start,
+          name,
+          nameTok,
+          clauseText,
+          sum
+        );
+      }
+    }
+
     // A `type` body IS the whole type, so it may carry a trailing clause.
     const body = this.parseTypeBody(eq.end, { allowWhere: true });
     unseedParams();
@@ -1389,6 +1426,359 @@ export class Parser {
         );
       parts.push(this.wrap(entries, start, end));
     }
+    return this.wrap(parts, start, end);
+  }
+
+  //
+  // ─── Sum-type declaration sugar ──────────────────────────────────────────
+  //
+  // `docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §A. One
+  // statement declares the N nominal variants AND the transparent union that
+  // names them:
+  //
+  //   type node = lit(num: number) | plus(op1: node, op2: node)
+  //     → ["DeclareSumType", "node",
+  //          ["Tuple", {str:"lit"},  {str:"tuple<num: number>"}],
+  //          ["Tuple", {str:"plus"}, {str:"tuple<op1: node, op2: node>"}]]
+  //
+  //   type tree<T> = leaf | node(value: T, children: list<tree<T>>)
+  //     → ["DeclareSumType", "tree",
+  //          ["Dictionary", ["KeyValuePair", typeParams, {str:"T"}]],
+  //          ["Tuple", {str:"leaf"}, {str:"nothing"}],
+  //          ["Tuple", {str:"node"}, {str:"tuple<value: T, children: list<tree<T>>>"}]]
+  //
+  // ONE node per statement is a parser invariant — `parseProgram` wraps a
+  // multi-statement program in a `Block` that `executeEpsil` unwraps, and a
+  // NESTED `Block` here would push a scope, making every inner declaration
+  // fail the top-level rule (`type-declaration-not-top-level`). So the N+1
+  // desugaring happens engine-side (`declareSumType`), not here; the attributes
+  // dictionary rides at operand 1 (ahead of the variadic variant list) and is
+  // told apart from a variant by its head.
+  //
+  // The variant payload is lowered to a type TEXT here, per the A2 table: no
+  // payload → `"nothing"` (a nullary constructor), one POSITIONAL payload →
+  // that type verbatim (`jbool(boolean)` → `"boolean"`), anything else →
+  // `tuple<…>` over the payload list verbatim, so a named element stays named.
+  //
+
+  /**
+   * The sum-sugar reader for a `type NAME = …` body starting at `from`.
+   *
+   * Returns `undefined` when the body is not the sugar — the caller then takes
+   * the ordinary `parseTypeBody` path, so every `type` statement that works
+   * today keeps its meaning. Returns `null` after diagnosing a body that IS
+   * the sugar but is malformed, and the parsed variants otherwise.
+   *
+   * **Read from the RAW SOURCE**, like {@link parseTypeParamClause} and
+   * {@link scanWhereClause}, for two reasons: the Epsil lexer maximal-munches
+   * a run of angle characters (`list<tree<T>>`), and call-form is not type
+   * syntax, so neither the token stream nor the type subparser can see this
+   * shape. The cursor is re-synced ONCE at the end with `advanceToOffset`.
+   */
+  private parseSumTypeArms(
+    from: number,
+    sumName: string
+  ):
+    | { variants: { name: string; payload: string }[]; end: number }
+    | null
+    | undefined {
+    const scanned = this.scanSumTypeArms(from);
+    if (scanned === null) return undefined;
+    const { arms, end } = scanned;
+
+    // A1 — the trigger. Either an arm is CALL-FORM (never valid type syntax,
+    // so the reading is unambiguous), or every arm is a bare identifier, there
+    // are at least two of them (a union), and none currently names a type
+    // (that spelling is an `Unknown type` error today, so the reading is
+    // purely additive). A body mixing known and unknown bare names — or a
+    // union over KNOWN types, which stays the opaque nominal-with-union-body —
+    // is left alone. A single bare arm is not a union at all, so
+    // `type X = typo` keeps its `Unknown type` error rather than quietly
+    // declaring a variant.
+    //
+    // A name this sum ALREADY declared as a variant does not count as "names a
+    // type": re-running the statement must read as the sugar a second time.
+    const anyCall = arms.some((a) => a.payload !== null);
+    const isOwnVariant = (n: string): boolean => this.sumVariants[n] === sumName;
+    if (
+      !anyCall &&
+      !(
+        arms.length >= 2 &&
+        arms.every((a) => !this.namesAType(a.name) || isOwnVariant(a.name))
+      )
+    )
+      return undefined;
+
+    // From here the statement IS the sugar: every exit reports.
+    const variants: { name: string; payload: string }[] = [];
+    for (const arm of arms) {
+      if (arm.payload === null) {
+        variants.push({ name: arm.name, payload: 'nothing' });
+        continue;
+      }
+      const payload = this.parseSumVariantPayload(
+        arm.payload[0],
+        arm.payload[1]
+      );
+      if (payload === null) {
+        this.advanceToOffset(end);
+        return null;
+      }
+      variants.push({ name: arm.name, payload });
+    }
+    this.advanceToOffset(end);
+    return { variants, end };
+  }
+
+  /** Does `name` already name a type? Both halves matter: the type grammar's
+   * own primitives (`integer`, `list`, `nothing`) never reach the resolver, and
+   * declared names do. Asking the type parser is what makes the two one
+   * question. */
+  private namesAType(name: string): boolean {
+    try {
+      return parseTypePrefix(name, this.typeResolver).end === name.length;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Lexical scan of a `type NAME = …` body as a `|`-separated list of arms,
+   * each `identifier` or `identifier( … )`. Returns `null` for anything else —
+   * which is the fall-through to the ordinary type body.
+   *
+   * The union may span lines (`| plus(…)` on its own line is the natural
+   * spelling), so a line break cannot END it. What ends it is a `|` that does
+   * not follow, at a point that is a statement boundary: end of source, a `;`,
+   * or a line break. An arm followed on the SAME line by anything else
+   * (`type X = a | list<b>` — `list` then `<`) is not a clean union and is
+   * rejected here, leaving the body to the type subparser.
+   */
+  private scanSumTypeArms(from: number): {
+    arms: { name: string; payload: [number, number] | null }[];
+    end: number;
+  } | null {
+    const src = this.source;
+    let pos = from;
+    const arms: { name: string; payload: [number, number] | null }[] = [];
+    let end = from;
+
+    /** Whitespace and comments; reports whether a line break was crossed. */
+    const skipTrivia = (): boolean => {
+      let sawBreak = false;
+      for (;;) {
+        if (pos < src.length && /\s/.test(src[pos])) {
+          if (/[\n\r\u2028\u2029]/.test(src[pos])) sawBreak = true;
+          pos += 1;
+          continue;
+        }
+        const past = skipComment(src, pos);
+        if (past === pos) return sawBreak;
+        if (/[\n\r\u2028\u2029]/.test(src.slice(pos, past))) sawBreak = true;
+        pos = past;
+      }
+    };
+
+    for (;;) {
+      skipTrivia();
+      const m = TYPE_IDENTIFIER.exec(src.slice(pos));
+      if (m === null) return null;
+      pos += m[0].length;
+      let payload: [number, number] | null = null;
+      // ADJACENT `(`, like every other call clause in the grammar — and
+      // load-bearing here: skipping trivia to look for one would swallow the
+      // line break that ends the union (`| yellow` followed by a `function`
+      // statement on the next line).
+      if (src[pos] === '(') {
+        const close = this.scanBalancedParen(pos);
+        if (close === null) return null;
+        payload = [pos + 1, close];
+        pos = close + 1;
+      }
+      arms.push({ name: m[0], payload });
+      end = pos;
+
+      const sawBreak = skipTrivia();
+      // `|>` (pipe) and `||` are other operators, not a union bar.
+      if (src[pos] === '|' && src[pos + 1] !== '|' && src[pos + 1] !== '>') {
+        pos += 1;
+        continue;
+      }
+      if (pos >= src.length || src[pos] === ';' || sawBreak) break;
+      return null;
+    }
+    return { arms, end };
+  }
+
+  /** The offset of the `)` matching the `(` at `pos`, or `null` when it is
+   * unbalanced. Brackets nest; strings and comments are skipped whole. Angle
+   * brackets are NOT tracked — a `<`/`>` never hides a paren. */
+  private scanBalancedParen(pos: number): number | null {
+    const src = this.source;
+    let depth = 0;
+    while (pos < src.length) {
+      const ch = src[pos];
+      if (ch === '"' || ch === "'" || ch === '`') {
+        pos = skipStringLiteral(src, pos);
+        continue;
+      }
+      if (ch === '/') {
+        const past = skipComment(src, pos);
+        if (past !== pos) {
+          pos = past;
+          continue;
+        }
+      }
+      if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+      else if (ch === ')' || ch === ']' || ch === '}') {
+        depth -= 1;
+        if (depth === 0) return ch === ')' ? pos : null;
+        if (depth < 0) return null;
+      }
+      pos += 1;
+    }
+    return null;
+  }
+
+  /**
+   * The payload of one call-form arm — the source between its parentheses —
+   * lowered to the A2 type TEXT. Each element is `name: type` or a bare type;
+   * an element's extent comes from the type subparser (with the sum's name and
+   * its type parameters already seeded, so `node` / `tree<T>` parse bare),
+   * which is also what validates it. Returns `null` after diagnosing.
+   */
+  private parseSumVariantPayload(from: number, to: number): string | null {
+    const src = this.source;
+    let pos = from;
+    const skipSpace = (): void => {
+      for (;;) {
+        if (pos < to && /\s/.test(src[pos])) {
+          pos += 1;
+          continue;
+        }
+        const past = skipComment(src, pos);
+        if (past === pos || past > to) return;
+        pos = past;
+      }
+    };
+
+    const elements: string[] = [];
+    let named = false;
+    skipSpace();
+    if (pos >= to) return 'nothing'; // `red()` — a nullary constructor
+
+    for (;;) {
+      skipSpace();
+      const elementStart = pos;
+      // `name: type` — contextual, so a positional element whose type happens
+      // to be an identifier (`pair(integer, string)`) is not mistaken for one.
+      const m = TYPE_IDENTIFIER.exec(src.slice(pos, to));
+      if (m !== null) {
+        let after = pos + m[0].length;
+        while (after < to && /\s/.test(src[after])) after += 1;
+        if (src[after] === ':' && src[after + 1] !== ':') {
+          named = true;
+          pos = after + 1;
+        }
+      }
+      skipSpace();
+      try {
+        // Extent AND validation. `allowWhere` stays false: a payload element
+        // is a ground type, and a clause's `,`-list would swallow the next
+        // element.
+        const { end } = parseTypePrefix(src.slice(pos, to), this.typeResolver);
+        pos += end;
+      } catch (e) {
+        const err = e as { position?: number; rawMessage?: string };
+        const rel = typeof err.position === 'number' ? err.position : 0;
+        const message =
+          err.rawMessage ?? (e instanceof Error ? e.message : String(e));
+        this.error(
+          ['type-annotation-error', message],
+          pos + rel,
+          Math.min(pos + rel + 1, src.length)
+        );
+        return null;
+      }
+      elements.push(src.slice(elementStart, pos).trim());
+
+      skipSpace();
+      if (pos >= to) break;
+      if (src[pos] === ',') {
+        pos += 1;
+        skipSpace();
+        // A trailing comma closes the list.
+        if (pos >= to) break;
+        continue;
+      }
+      this.error(
+        [
+          'type-annotation-error',
+          `Expected \`,\` or \`)\` in the payload of a sum-type variant`,
+        ],
+        pos,
+        Math.min(pos + 1, src.length)
+      );
+      return null;
+    }
+
+    if (elements.length === 0) return 'nothing';
+    // A2: one POSITIONAL element is the type itself (`jbool(boolean)` →
+    // `boolean`); anything else — named, or two or more — is a tuple.
+    if (elements.length === 1 && !named) return elements[0];
+    return `tuple<${elements.join(', ')}>`;
+  }
+
+  /** Assemble the `DeclareSumType` node. The clause TEXT rides the attributes
+   * dictionary exactly as it does for `DeclareType`. */
+  private buildSumTypeStatement(
+    start: number,
+    name: string,
+    nameTok: Token,
+    clauseText: string | undefined,
+    sum: { variants: { name: string; payload: string }[]; end: number }
+  ): MathJsonExpression {
+    const end = sum.end;
+    // The variants are ordinary global type names once declared, so a later
+    // annotation in this same program may name one (`function f(l: lit) …`).
+    // Recording them as THIS sum's variants is also what keeps a second
+    // declaration of the same sum reading as the sugar (see `sumVariants`).
+    for (const v of sum.variants) {
+      this.knownTypeNames.add(v.name);
+      this.sumVariants[v.name] = name;
+    }
+    const parts: MathJsonExpression[] = [
+      'DeclareSumType',
+      this.wrap({ sym: name }, nameTok.start, nameTok.end),
+    ];
+    if (clauseText !== undefined)
+      parts.push(
+        this.wrap(
+          [
+            'Dictionary',
+            this.kvPair(
+              'typeParams',
+              this.wrap({ str: clauseText }, start, end),
+              start,
+              end
+            ),
+          ],
+          start,
+          end
+        )
+      );
+    for (const v of sum.variants)
+      parts.push(
+        this.wrap(
+          [
+            'Tuple',
+            this.wrap({ str: v.name }, start, end),
+            this.wrap({ str: v.payload }, start, end),
+          ],
+          start,
+          end
+        )
+      );
     return this.wrap(parts, start, end);
   }
 

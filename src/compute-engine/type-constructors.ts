@@ -23,6 +23,7 @@ import { isDictionary, isFunction } from './boxed-expression/type-guards.js';
 import { updateDef, defIsCallableShaped } from './boxed-expression/utils.js';
 import { functionLiteralParameters } from './boxed-expression/function-literal.js';
 import { apply } from './function-utils.js';
+import { sumVariantInfo } from './compilation/sum-representation.js';
 
 /**
  * Value constructors minted by a type declaration
@@ -343,7 +344,33 @@ export function mintTypeConstructor(
   // where `Tuple` fails closed declines identically, with that path's own
   // diagnostic. Both kinds erase: an alias identity constructor can appear
   // un-evaluated inside a compiled expression too.
-  def.compile = (args, compile) => {
+  //
+  // AMENDED by the sum-type plan
+  // (`docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §B1): the tag is
+  // erased iff it is statically discharged. A variant of a SUGAR-DECLARED sum
+  // whose sibling variants share its JS representation has nothing to discharge
+  // the tag against at run time, so its constructor REIFIES the tag —
+  // `{ _tag: 'plus', _ops: [a, b] }` (`{ _tag: 'red' }` when nullary). Every
+  // other constructor, this same sum's variants included when they are
+  // representation-disjoint, keeps the erasure above verbatim.
+  def.compile = (args, compile, context) => {
+    const info = sumVariantInfo(ce, name);
+    const js = (context?.language ?? 'javascript') === 'javascript';
+    if (info?.policy === 'tagged') {
+      // JS target only (§B2): every other target fails closed on a tagged
+      // value by declining here, with the caller's own diagnostic.
+      if (!js) return undefined;
+      const tag = JSON.stringify(name);
+      if (args.length === 0) return `({ _tag: ${tag} })`;
+      const ops = args.map((x) => compile(x)).join(', ');
+      return `({ _tag: ${tag}, _ops: [${ops}] })`;
+    }
+    // ERASED policy, `nothing` payload: the variant has no operands to erase
+    // TO, so give it the one JS value its representation bucket names. (A
+    // nullary constructor outside a sum still declines — there is nothing to
+    // distinguish it from, and D11 never gave it an emission.)
+    if (info !== undefined && info.shape === 'nothing')
+      return js ? 'null' : undefined;
     if (args.length === 0) return undefined;
     if (!nAry) return args.length === 1 ? compile(args[0]) : undefined;
     return compile(args[0].engine.function('Tuple', args as Expression[]));

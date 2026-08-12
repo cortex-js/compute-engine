@@ -1528,6 +1528,18 @@
       "description": "Declare a symbol in the current scope, optionally assigning a type and an initial value. An optional trailing attributes dictionary (with keys `type`, `value`, `constant` and `holdUntil`) can further describe the definition, e.g. to declare a constant. With a value, evaluates to that value; otherwise evaluates to `Nothing`."
     },
     {
+      "name": "DeclareSumType",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(symbol|string, any*) scope -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Declare a SUM TYPE: N nominal variants plus the transparent union that names them, in one statement — the lowering of the Epsil sugar `type node = lit(num: number) | plus(op1: node, op2: node)`. The name is a symbol (or a string); each variant is a `[\"Tuple\", name, payload]` pair whose payload is a type string (`\"nothing\"` for a nullary variant). An optional attributes dictionary at operand 1 — ahead of the variants — carries `typeParams -> \"T\"` for a generic sum, whose parameters are distributed to each variant by usage. The sum name is forward-registered before the variants are declared, so a payload may name it bare. A variant name that already names a type, is reserved, or is a builtin is rejected and NOTHING is declared. Types are engine-global, so this is only valid at the top level of a program. Evaluates to `Nothing`."
+    },
+    {
       "name": "DeclareType",
       "category": "Core",
       "arity": "optional",

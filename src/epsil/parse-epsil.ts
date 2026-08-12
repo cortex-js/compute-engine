@@ -60,6 +60,12 @@ export function analyzeErrors(
  * host's already-declared types — `executeEpsil` passes the engine's). A
  * `type` statement in the program extends the set. A name in neither is still a
  * parse-time `type-annotation-error`, so typos are caught early.
+ *
+ * `options.sumVariants` maps each already-declared sum VARIANT name to the sum
+ * that declared it. It is what keeps the sum-sugar trigger stable across
+ * re-runs: `type X = red | green` is the sugar the first time (no arm names a
+ * type), and the second time only because `red` and `green` are recognized as
+ * X's own variants rather than as two unrelated known types.
  */
 export function parseEpsil(
   source: string,
@@ -68,6 +74,7 @@ export function parseEpsil(
     parseLatex?: (latex: string) => MathJsonExpression;
     allowHostPragmas?: boolean;
     typeNames?: readonly string[];
+    sumVariants?: Readonly<Record<string, string>>;
   }
 ): [MathJsonExpression, ParsingDiagnostic[]] {
   const parser = new Parser(source, {
@@ -75,6 +82,7 @@ export function parseEpsil(
     parseLatex: options?.parseLatex,
     allowHostPragmas: options?.allowHostPragmas,
     typeNames: options?.typeNames,
+    sumVariants: options?.sumVariants,
   });
 
   const value: MathJsonExpression | null = parser.parseProgram();
