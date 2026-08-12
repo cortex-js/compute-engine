@@ -170,41 +170,34 @@ standing polytype behavior).
   `Filter`/`TakeWhile`/`DropWhile`/`Dedup`/`ChunkBy` — all finite
   because `Take(xs, 2)` caps at 2, all walkable only if `xs` is); they
   are fixed and pinned too.
-- **Eager collection leaves under wrappers: wrong values on GROUND
-  input, empty-reads on symbolic input** (pre-existing; surfaced
-  2026-08-10 by the enumerability review, upgraded 2026-08-11 when the
-  ground-argument half was found — design ratified in
-  `docs/plans/2026-08-11-eager-collection-enumerability.md`, not yet
-  implemented). Two defects, one root. (A) **Wrong values with no free
-  variables**: `Filter(Take(Divisors(12), 3), _ > 1)` → `[]` (should
-  be `[2,3]`), `Any(Reverse(Divisors(12)), _ > 1)` → `False` (should
-  be `True`) — `each()` has the eager-source materialize fallback but
-  `at()` does NOT (`if (!handler) return undefined`), so every wrapper
-  that reads its source via `src.at(i)` (`Take`/`Drop`/`Reverse`/
-  `Rest`/`Slice`/`RotateLeft`) walks empty over any of the 73
-  handler-less eager producers, while the streaming wrappers
-  (`Map`/`Filter`/`Dedup`/`Zip`) work. (B) **Symbolic-argument
-  residue**: `Filter(Take(Characters(s), 2), p)` → `[]` for a
-  valueless `s` — the eager leaf's facet is `undefined`, and
-  `isEnumerableSource`'s evaluate-fallback misreads the still-lazy
-  wrapper's collection-ness as walkability. 32 of the 73 operators
-  confirmed reproducing (a floor; only ~11 are string-related).
-  The fix is NOT per-operator lazy collection blocks: (1) give `at()`
-  the materialize fallback `each()` already has (one seam, pure
-  sources only, evaluated form reused across indices — fixes A), then
-  (2) a `canEnumerate` operator-definition handler exposing the
-  decline test each eager `evaluate` handler already starts with
-  (O(1), no evaluation, no draws — fixes B per adopted operator), then
-  (3) the `isEnumerableSource` evaluate-fallback narrows to the
-  `undefined` tier (operators whose success is not cheaply decidable —
-  `Solve`, `FindRoot` — answer `undefined`, never `true`, by ruling).
-  Order is load-bearing: a cheap `true` is a promise the access routes
-  must honor, so delivery lands before the predicate. Also ruled: NO
-  framework guarantee that evaluate is only called when `canEnumerate`
-  is true — evaluate handlers keep their self-guards; the duplication
-  is killed per-operator with a shared extractor (the
-  `hasSymbolicRangeBounds` pattern). See the plan for probe tables and
-  the coupling argument.
+- ~~Eager collection leaves under wrappers: wrong values on GROUND
+  input, empty-reads on symbolic input~~ — **mechanisms SHIPPED
+  2026-08-11; adoption is incremental and OPEN** (design + rulings:
+  `docs/plans/2026-08-11-eager-collection-enumerability.md`; tests:
+  `eager-collection-enumerability.test.ts`). Defect A (wrong values on
+  ground input — `Filter(Take(Divisors(12), 3), _ > 1)` → `[]`) is
+  CLOSED for all pure eager producers: `at()` now has the
+  materialize fallback `each()` always had (`_materializedAt`,
+  `boxed-function.ts` — pure sources only, evaluated once per
+  instance/generation via the `cachedValue` idiom). Defect B (wrapped
+  symbolic source read as empty) is closed PER ADOPTED OPERATOR via
+  the `canEnumerate` definition handler; adopted so far: `Characters`,
+  `GraphemeClusters`, `UnicodeScalars`, `Utf8`, `Utf16`,
+  `StringSplit`, `Divisors`, `PrimeFactors`, `FactorInteger`,
+  `IntegerDigits`, and (decline-only) `Sort`/`Ordering`/`Unique`/
+  `Tally`. **Remaining work**: adoption over the rest of the ~73 eager
+  producers (probe-confirmed reproducers still open include
+  `Eigenvalues`/`Eigenvectors`/`SingularValues`, `Flatten`, `Kernel`,
+  `CoefficientList`, `AbsArg`, `ContinuedFraction`, `ListFrom`,
+  `Vector`, `TruthTable`, `PrimeImplicants`/`PrimeImplicates`,
+  `Timing`, `Keys`/`Values`); rulings that bind that work: `true` only
+  for COMPLETE preconditions (`Solve`/`FindRoot` answer `undefined`,
+  never `true` — pinned), evaluate handlers keep their self-guards (no
+  framework gate), the `undefined` tier and its evaluate fallback are
+  permanent. An IMPURE producer under an indexed wrapper
+  (`Take(RandomShuffle(xs), 2)`) still walks empty — the fallback is
+  pure-only by ruling (per-generation re-draws would mix draw-sets);
+  that case belongs to the draw-coherence item below.
 - **An eager IMPURE collection source is evaluated several times**
   (pre-existing, measured 2026-08-09 during the above): counting
   handler invocations over a 5-element source,

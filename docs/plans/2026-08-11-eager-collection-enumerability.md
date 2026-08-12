@@ -1,6 +1,15 @@
 # Eager collections: split the enumerability question from materialization
 
-**Date:** 2026-08-11 · **Status:** DESIGN — ratified in discussion, not implemented
+**Date:** 2026-08-11 · **Status:** IMPLEMENTED 2026-08-11 (Parts 1 and 2;
+adoption tranche of 14 operators — strings ×6, number theory ×4,
+finite-source consumers ×4 decline-only). Remaining adoption is incremental;
+the `undefined` tier and its evaluate fallback are permanent by design.
+Tests: `test/compute-engine/eager-collection-enumerability.test.ts`.
+One implementation delta vs. the text below: the definition-key validator
+(`OPERATOR_DEF_KEYS`, `boxed-operator-definition.ts`) is a whitelist that
+REJECTS the whole definition on an unknown key — `canEnumerate` had to be
+added there as well as to the types and the field copy (the same trap the
+Files section flagged for `defaultCollectionHandlers`).
 **Follow-up to:** the `isEnumerableCollection` facet (2026-08-10, see CHANGELOG
 "telling an empty collection from one that cannot be walked" and the ROADMAP
 entry it closed).

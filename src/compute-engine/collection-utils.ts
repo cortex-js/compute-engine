@@ -124,6 +124,80 @@ export function isEnumerableSource(xs: Expression): boolean {
 }
 
 /**
+ * Resolve an eager producer's operand for a `canEnumerate` handler, WITHOUT
+ * evaluating — the tri-state at the heart of the adoption recipe
+ * (`docs/plans/2026-08-11-eager-collection-enumerability.md`):
+ *
+ * - an `Expression`: the operand's cheaply-readable ground form — a literal,
+ *   or a symbol's assigned value (a symbol dereference is a scope lookup,
+ *   not an evaluation).
+ * - `null`: definitively unavailable NOW — a missing operand, or a valueless
+ *   (or undeclared) symbol: evaluation would receive the bare symbol and
+ *   decline. This is the state that maps to `canEnumerate: false`.
+ * - `undefined`: undecidable without evaluating — an unevaluated compound
+ *   (`Divisors(n + 1)`, `f(x)`) or a symbol whose assigned value is one.
+ *   Evaluation may still produce a value, so a `canEnumerate` handler MUST
+ *   answer `undefined` here, never `false`.
+ *
+ * The asymmetry with the evaluate handler's own guard is deliberate: that
+ * guard sees the EVALUATED operand, where a still-compound value is a
+ * definitive decline; this helper sees the CANONICAL operand, where it is
+ * merely not-yet-known.
+ */
+export function groundEnumerationOperand(
+  op: Expression | undefined
+): Expression | null | undefined {
+  if (op === undefined) return null;
+  if (isSymbol(op)) {
+    if (op.symbol === 'Nothing') return op; // an explicit "absent" operand
+    const value = op.value;
+    if (value === undefined) return null;
+    return isFunction(value) ? undefined : value;
+  }
+  if (isFunction(op)) return undefined;
+  return op; // a literal: number, string, tensor, dictionary
+}
+
+/**
+ * The standard `canEnumerate` body for an eager producer with ONE
+ * value-shaped operand: resolve the operand ({@link
+ * groundEnumerationOperand}), then apply the operator's own acceptance test
+ * — the same predicate that guards its `evaluate` handler — to the ground
+ * form. Keeps the two handlers on a single source of truth (the
+ * `hasSymbolicRangeBounds` pattern).
+ */
+export function canEnumerateOperand(
+  op: Expression | undefined,
+  isAcceptable: (ground: Expression) => boolean
+): boolean | undefined {
+  const ground = groundEnumerationOperand(op);
+  if (ground === undefined) return undefined;
+  if (ground === null) return false;
+  return isAcceptable(ground);
+}
+
+/**
+ * Conservative `canEnumerate` for an eager operator that CONSUMES a finite
+ * collection source at `op1` (`Sort`, `Ordering`, `Unique`, `Tally`):
+ * provable declines only. Their evaluate handlers require a finite, walkable
+ * source — so a source that is definitively unwalkable or infinite decides
+ * `false` — but success ALSO depends on work that is not cheaply decidable
+ * (`sortedIndices`, the element walk), so per the `canEnumerate` contract
+ * this never answers `true`; the `undefined` tier resolves by evaluating,
+ * exactly as before adoption.
+ */
+export function canEnumerateFiniteSource(
+  expr: Expression
+): boolean | undefined {
+  if (!isFunction(expr)) return undefined;
+  const xs = expr.op1;
+  if (xs === undefined) return undefined;
+  if (xs.isEnumerableCollection === false) return false;
+  if (xs.isFiniteCollection === false) return false;
+  return undefined;
+}
+
+/**
  * The `isEnumerable` handler of a collection operator that wraps ONE source
  * collection at `op1` (`Take`, `Filter`, `Reverse`, `Map`, …): it can produce
  * elements exactly when its source can.

@@ -1,5 +1,10 @@
 import type { Expression, SymbolDefinitions } from '../global-types.js';
 import { toBigint } from '../boxed-expression/numerics.js';
+import { isFunction } from '../boxed-expression/type-guards.js';
+import {
+  canEnumerateOperand,
+  groundEnumerationOperand,
+} from '../collection-utils.js';
 import {
   gcd,
   lcm,
@@ -44,6 +49,14 @@ const MAX_VALUE_SCALED_ITERATIONS = 1e7;
  * that into a 30s+ hang.
  */
 const MAX_DIGIT_ITERATION_DIGITS = 1_000_000;
+
+/** `canEnumerate` acceptance for `Divisors`/`PrimeFactors`: a nonzero
+ * integer (0 declines — infinitely many divisors / no factorization). The
+ * same test that guards the evaluate handlers, on the ground operand. */
+function nonzeroIntegerGround(g: Expression): boolean {
+  const k = toBigint(g);
+  return k !== null && k !== 0n;
+}
 
 /**
  * Cheap (O(digits), not O(digits²)) approximate bit length of a bigint's
@@ -155,6 +168,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign.',
       signature: '(integer) -> list<tuple<integer, integer>>',
       examples: ['FactorInteger(360)  // [(2, 3), (3, 2), (5, 1)]'],
+      // Complete precondition: any integer (0 and ±1 have defined
+      // degenerate factorizations) — see `canEnumerate` (types-definitions.ts).
+      canEnumerate: (expr) =>
+        isFunction(expr)
+          ? canEnumerateOperand(expr.op1, (g) => toBigint(g) !== null)
+          : undefined,
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -225,6 +244,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the sorted list of positive divisors of an integer `n`. The sign of `n` is ignored.',
       signature: '(integer) -> list<integer>',
       examples: ['Divisors(12)  // [1, 2, 3, 4, 6, 12]'],
+      // Complete precondition (the evaluate guard on the ground operand) —
+      // see `canEnumerate` (types-definitions.ts).
+      canEnumerate: (expr) =>
+        isFunction(expr)
+          ? canEnumerateOperand(expr.op1, nonzeroIntegerGround)
+          : undefined,
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -301,6 +326,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the sorted list of distinct prime factors of an integer `n`. The sign of `n` is ignored; `PrimeFactors(1)` is the empty list.',
       signature: '(integer) -> list<integer>',
       examples: ['PrimeFactors(360)  // [2, 3, 5]'],
+      // Complete precondition — see `Divisors`.
+      canEnumerate: (expr) =>
+        isFunction(expr)
+          ? canEnumerateOperand(expr.op1, nonzeroIntegerGround)
+          : undefined,
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -644,6 +674,37 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the digits of `n` in the given `base` (default 10), most-significant first. The sign of `n` is ignored. With a third argument `length`, the result is zero-padded on the left (or truncated to its least-significant digits) to that length.',
       signature: '(integer, integer?, integer?) -> list<integer>',
       examples: ['IntegerDigits(255, 16)  // [15, 15]'],
+      // Complete precondition, mirroring every decline in the evaluate
+      // handler: integer `n`, integer base >= 2 (default 10), digit-count cap,
+      // and a non-negative integer pad length when given.
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const n = groundEnumerationOperand(expr.ops[0]);
+        if (n === undefined) return undefined;
+        const k = n === null ? null : toBigint(n);
+        if (k === null) return false;
+
+        let base = 10n;
+        if (expr.ops[1] !== undefined) {
+          const b = groundEnumerationOperand(expr.ops[1]);
+          if (b === undefined) return undefined;
+          const bb = b === null ? null : toBigint(b);
+          if (bb === null || bb < 2n) return false;
+          base = bb;
+        }
+
+        const m = k < 0n ? -k : k;
+        if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
+          return false;
+
+        if (expr.ops[2] !== undefined) {
+          const l = groundEnumerationOperand(expr.ops[2]);
+          if (l === undefined) return undefined;
+          const len = l === null ? null : toBigint(l);
+          if (len === null || len < 0n) return false;
+        }
+        return true;
+      },
       evaluate: ([nOp, baseOp, lenOp], { engine: ce }) => {
         const k = toBigint(nOp);
         if (k === null) return undefined;

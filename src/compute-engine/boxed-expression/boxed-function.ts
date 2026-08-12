@@ -276,6 +276,15 @@ export class BoxedFunction
     value: null,
     generation: -1,
   };
+  /** Evaluated form of an EAGER collection producer (`Divisors`,
+   * `Characters`, … — no collection handlers), filled by the `at()`
+   * materialize fallback (`_materializedAt`): once per generation, not per
+   * probed index — `takeIterator` calls `at(1), at(2), …` and must not run
+   * the producer (an eigendecomposition, a factorization) per element. */
+  private _eagerSource: CachedValue<Expression> = {
+    value: null,
+    generation: -1,
+  };
   private _sgn: CachedValue<Sign | undefined> = {
     value: null,
     generation: -1,
@@ -2266,11 +2275,16 @@ export class BoxedFunction
       return handler(this);
     }
 
-    // No collection handlers. An *eager* collection operator (`Characters`,
-    // `UnicodeScalars`) only materializes when evaluated, and `each()` walks
-    // it through the materialize-then-iterate path — so a collection-typed
-    // application is undecidable here rather than false. Anything that cannot
-    // be a collection at all definitely cannot be walked.
+    // No collection handlers: an *eager* collection operator (`Characters`,
+    // `Divisors`) only materializes when evaluated. An adopted one exposes
+    // its decline test — the `canEnumerate` precondition — and owns all
+    // three states, exactly like a declared `isEnumerable` handler above.
+    const can = this.operatorDefinition?.canEnumerate;
+    if (can !== undefined) return can(this);
+
+    // Unadopted: a collection-typed application is undecidable here rather
+    // than false (`each()`/`at()` walk it through the materialize fallbacks).
+    // Anything that cannot be a collection at all cannot be walked.
     return typeCouldBeCollection(this.type.type) ? undefined : false;
   }
 
@@ -2385,7 +2399,7 @@ export class BoxedFunction
   at(index: number): Expression | undefined {
     if (this._optedOutOfCollection) return undefined;
     const handler = this.operatorDefinition?.collection?.at;
-    if (!handler) return undefined;
+    if (!handler) return this._materializedAt(index);
 
     // Centralize negative-index normalization so every collection `at`
     // handler gets a 1-based positive index. Most handlers reject `index < 1`
@@ -2417,6 +2431,67 @@ export class BoxedFunction
     }
 
     return handler(this, idx);
+  }
+
+  /**
+   * Indexed-route twin of `each()`'s eager-source fallback (see the
+   * materialize-then-iterate note there, and
+   * `docs/plans/2026-08-11-eager-collection-enumerability.md`). An EAGER
+   * collection operator (`Divisors`, `Characters`, `Eigenvalues`, …) has no
+   * collection handlers — its collection exists only as its `evaluate()`
+   * result. The streaming route materializes on demand; without this twin,
+   * every wrapper that reads its source by index (`Take`, `Drop`, `Reverse`,
+   * `Rest`, `Slice`, `RotateLeft` — see `takeIterator`) walked such a source
+   * as EMPTY, a definite wrong value on fully-ground input:
+   * `Filter(Take(Divisors(12), 3), _ > 1)` answered `[]`.
+   *
+   * Gates:
+   * - Collection-typed only: `at()` is probed speculatively on all kinds of
+   *   expressions; a scalar-typed application must not pay an evaluation.
+   * - PURE only: an impure producer re-evaluated across generations would
+   *   serve elements of DIFFERENT draws (`Take(RandomShuffle(xs), 2)` mixing
+   *   two shuffles) — incoherent. The impure case stays declined; tracked
+   *   with the ROADMAP draw-coherence item.
+   * - The evaluated form is cached per (instance, generation) — the
+   *   `sgn`/`type` idiom, constant+pure entries generation-independent.
+   *
+   * Negative indices are handled by the DELEGATED call: the evaluated form is
+   * a materialized `List` with real `count`/`at` handlers, so `at(-1)`
+   * normalizes there — it cannot here (no `count`).
+   */
+  private _materializedAt(index: number): Expression | undefined {
+    if (!this.isValid) return undefined;
+    if (!typeCouldBeCollection(this.type.type)) return undefined;
+    if (!this.isPure) return undefined;
+    // An adopted eager producer that declares evaluation would decline saves
+    // the evaluation (and keeps the walk's silence honest).
+    const can = this.operatorDefinition?.canEnumerate?.(this);
+    if (can === false) return undefined;
+
+    const gen =
+      this._ops.every((x) => x.isConstant) && this.isPure
+        ? undefined
+        : this.engine._anyVersion;
+    const evaluated = cachedValue(this._eagerSource, gen, () =>
+      this.evaluate()
+    );
+    // Drift tripwire (dev only): a `canEnumerate` handler that vouched `true`
+    // must be backed by an evaluation that actually produced the collection.
+    console.assert(
+      can !== true || (evaluated !== this && evaluated.isCollection),
+      `canEnumerate for "${this.operator}" answered true but evaluate() declined`
+    );
+    if (evaluated === this) return undefined;
+    // Evaluation may DECLINE into an equal-but-distinct instance; delegating
+    // to another handler-less function expression would re-enter this
+    // fallback. Non-function results (a string, a dictionary) dispatch their
+    // own `at` overrides, which cannot re-enter.
+    if (
+      isFunction(evaluated) &&
+      evaluated.operatorDefinition?.collection?.at === undefined
+    )
+      return undefined;
+    return evaluated.at(index);
   }
 
   get(index: Expression | string): Expression | undefined {

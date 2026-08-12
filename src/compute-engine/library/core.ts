@@ -114,6 +114,7 @@ import {
   shallowApplicationEffects,
 } from '../boxed-expression/effects-of.js';
 import { hasDeclaredEffectLabel } from '../../common/type/effects.js';
+import { canEnumerateOperand } from '../collection-utils.js';
 import {
   isNumber,
   isSymbol,
@@ -3638,6 +3639,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'A non-string argument leaves the expression unevaluated.',
       ],
       signature: '(string) -> list<string>',
+      // The evaluate guard (`isString`) is a complete precondition, exposed
+      // for the enumerability facet — see `canEnumerate` (types-definitions).
+      canEnumerate: (expr) =>
+        isFunction(expr) ? canEnumerateOperand(expr.op1, isString) : undefined,
       evaluate: ([s], { engine }) => {
         if (!isString(s)) return undefined;
         return engine.function(
@@ -3662,6 +3667,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'expression unevaluated.',
       ],
       signature: '(string, string?) -> list<string>',
+      // Complete precondition: op1 must be a string; a PRESENT separator must
+      // be one too (an absent separator selects the whitespace split).
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const s = canEnumerateOperand(expr.ops[0], isString);
+        if (s !== true) return s;
+        if (expr.ops[1] === undefined) return true;
+        return canEnumerateOperand(expr.ops[1], isString);
+      },
       evaluate: ([s, sep], { engine }) => {
         if (!isString(s)) return undefined;
         let parts: string[];
@@ -3747,6 +3761,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Utf8: {
       description: 'A collection of UTF-8 code units from a string.',
       signature: '(string) -> list<integer>',
+      // The evaluate guard (`isString`) is a complete precondition, exposed
+      // for the enumerability facet — see `canEnumerate` (types-definitions).
+      canEnumerate: (expr) =>
+        isFunction(expr) ? canEnumerateOperand(expr.op1, isString) : undefined,
       evaluate: ([str], { engine }) => {
         if (!isString(str)) return undefined;
         const utf8Buffer = str.buffer;
@@ -3761,6 +3779,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Utf16: {
       description: 'A collection of UTF-16 code units from a string.',
       signature: '(string) -> list<integer>',
+      // The evaluate guard (`isString`) is a complete precondition, exposed
+      // for the enumerability facet — see `canEnumerate` (types-definitions).
+      canEnumerate: (expr) =>
+        isFunction(expr) ? canEnumerateOperand(expr.op1, isString) : undefined,
       evaluate: ([str], { engine }) => {
         if (!isString(str)) return undefined;
         const utf16Values: number[] = [];
@@ -3780,6 +3802,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'A collection of Unicode scalars from a string, same as UTF-32',
       signature: '(string) -> list<integer>',
+      // The evaluate guard (`isString`) is a complete precondition, exposed
+      // for the enumerability facet — see `canEnumerate` (types-definitions).
+      canEnumerate: (expr) =>
+        isFunction(expr) ? canEnumerateOperand(expr.op1, isString) : undefined,
       evaluate: ([str], { engine }) => {
         if (!isString(str)) return undefined;
         const codePoints = str.unicodeScalars;
@@ -3796,6 +3822,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'A collection of grapheme clusters from a string. Synonym of Characters.',
       signature: '(string) -> list<string>',
+      // The evaluate guard (`isString`) is a complete precondition, exposed
+      // for the enumerability facet — see `canEnumerate` (types-definitions).
+      canEnumerate: (expr) =>
+        isFunction(expr) ? canEnumerateOperand(expr.op1, isString) : undefined,
       evaluate: ([str], { engine }) => {
         if (!isString(str)) return undefined;
         return engine.function(

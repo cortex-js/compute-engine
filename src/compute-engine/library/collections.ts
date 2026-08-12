@@ -10,6 +10,7 @@ import { toInteger, toIntegerOperand } from '../boxed-expression/numerics.js';
 import {
   basicIndexedCollectionHandlers,
   broadcastOverIndexedCollections,
+  canEnumerateFiniteSource,
   enumerableFromAllSources,
   enumerableFromSource,
   hasAccessibleComponents,
@@ -5797,6 +5798,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(indexed_collection, order: function?) -> list<integer>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Ordering', ops, 1),
+    // Provable declines only (finite, walkable source required); success is
+    // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
+    canEnumerate: canEnumerateFiniteSource,
     evaluate: ([xs, fn], { engine: ce }) => {
       // Stay inert on non-finite or unknown-length input, aligning with Sort:
       // an empty List would falsely claim a complete ordering.
@@ -5824,6 +5828,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: 'forall T. (indexed_collection<T>, order: function?) -> list<T>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Sort', ops, 1),
+    // Provable declines only (finite, walkable source required); success is
+    // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
+    canEnumerate: canEnumerateFiniteSource,
     evaluate: ([xs, fn], { engine: ce }) => {
       // Eager collection results rebuild as `List`, never the source's head
       // (a `Range`/`Linspace` head would reinterpret the sorted elements as
@@ -6183,6 +6190,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return a tuple with the unique elements of the collection and their respective counts.',
     complexity: 8200,
     signature: 'forall T. (collection<T>) -> tuple<list<T>, list<integer>>',
+    // Provable declines only (finite, walkable source required); success is
+    // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
+    canEnumerate: canEnumerateFiniteSource,
     evaluate: (ops, { engine: ce }) => {
       if (!ops[0].isFiniteCollection) return undefined;
       const [values, counts] = tally(ops[0]!);
@@ -6197,6 +6207,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'Return a list of the unique elements of the collection.',
     complexity: 8200,
     signature: 'forall T. (collection<T>) -> list<T>',
+    // Provable declines only (finite, walkable source required); success is
+    // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
+    canEnumerate: canEnumerateFiniteSource,
     evaluate: (ops, { engine: ce }) => {
       if (!ops[0].isFiniteCollection) return undefined;
       const [values, _counts] = tally(ops[0]!);

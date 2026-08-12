@@ -665,6 +665,37 @@ export type OperatorDefinition = Partial<BaseDefinition> &
     neq?: (a: Expression, b: Expression) => boolean | undefined;
 
     collection?: CollectionHandlers;
+
+    /**
+     * For an operator that RETURNS a collection but has no `collection`
+     * handlers (an EAGER producer — `Characters`, `Divisors`, `Eigenvalues`,
+     * …): can `evaluate()` produce the collection's elements in the current
+     * state?
+     *
+     * This is the operator's own decline test — the guard at the top of its
+     * `evaluate` handler — exposed so the enumerability facet
+     * (`isEnumerableCollection`) can answer without evaluating. Contract
+     * (see `docs/plans/2026-08-11-eager-collection-enumerability.md`):
+     *
+     * - MUST be O(1), evaluation-free and side-effect free. An impure
+     *   producer answers from its operands' facets, consuming no draws.
+     * - `false` means evaluation WOULD decline — callers stay inert without
+     *   paying for the evaluation.
+     * - `true` is a hard promise that evaluation produces the collection. An
+     *   operator whose success is not cheaply decidable (`Solve`,
+     *   `FindRoot`) must return `undefined`, never `true`.
+     * - The operand seen here is the CANONICAL operand, not the evaluated
+     *   one. An unevaluated compound operand (`Divisors(n + 1)`) whose value
+     *   cannot be read cheaply must yield `undefined` (undecidable), not
+     *   `false` — only a definitively unavailable operand (a valueless
+     *   symbol, a literal of the wrong kind) yields `false`. See
+     *   `canEnumerateOperand` (`collection-utils.ts`) for the shared
+     *   tri-state resolution.
+     *
+     * Ignored (never consulted) when the definition has `collection`
+     * handlers — those own enumerability via `collection.isEnumerable`.
+     */
+    canEnumerate?: (expr: Expression) => boolean | undefined;
   };
 
 /**
@@ -1681,6 +1712,10 @@ export interface BoxedOperatorDefinition
   /** See `OperatorDefinition.eq` for the meaning of `prover`. */
   eq?: (a: Expression, b: Expression, prover?: boolean) => boolean | undefined;
   neq?: (a: Expression, b: Expression) => boolean | undefined;
+
+  /** The eager producer's enumerability precondition — see the
+   * `canEnumerate` contract on {@link OperatorDefinition}. */
+  canEnumerate?: (expr: Expression) => boolean | undefined;
 
   canonical?: (
     ops: ReadonlyArray<Expression>,

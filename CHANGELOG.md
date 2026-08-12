@@ -2,6 +2,29 @@
 
 ### Issues Resolved
 
+- **Indexed wrappers over an eager collection producer no longer read it as
+  empty** (design: `docs/plans/2026-08-11-eager-collection-enumerability.md`).
+  An eager producer (`Divisors`, `Characters`, `Eigenvalues`, … — an operator
+  whose collection exists only as its `evaluate()` result) could be walked
+  through `each()` but not indexed through `at()`, so every wrapper that reads
+  its source by index walked it as empty — wrong values on fully-ground input:
+  `Filter(Take(Divisors(12), 3), _ > 1)` answered `[]` (now `[2, 3]`),
+  `Any(Reverse(Divisors(12)), _ > 1)` answered `False` (now `True`), and
+  `Sum(Take(Divisors(12), 3))` stayed inert (now `6`). `at()` now has the same
+  materialize-on-demand fallback `each()` always had — pure sources only, and
+  the evaluated form is computed once per instance, not once per index.
+
+  With it, eager producers can now declare a `canEnumerate` handler — the
+  decline test their `evaluate` handler already starts with — so
+  `isEnumerableCollection` answers without evaluating: `Divisors(n)` for a
+  free `n` reports `false` (wrappers over it stay inert instead of answering
+  `[]`/`False`/`0`), `Divisors(12)` reports `true`, and an operator whose
+  success is not cheaply decidable (`Solve`) stays `undefined` and resolves by
+  evaluating, as before. Adopted in this release: `Characters`,
+  `GraphemeClusters`, `UnicodeScalars`, `Utf8`, `Utf16`, `StringSplit`,
+  `Divisors`, `PrimeFactors`, `FactorInteger`, `IntegerDigits`, and
+  (decline-only) `Sort`, `Ordering`, `Unique`, `Tally`.
+
 - **A type alias naming a union of nominal types now confers membership**, so a
   sum type is usable through its own name. Given
 

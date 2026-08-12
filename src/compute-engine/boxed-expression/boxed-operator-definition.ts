@@ -107,6 +107,7 @@ const OPERATOR_DEF_KEYS = new Set([
 
   // Collection Handlers
   'collection',
+  'canEnumerate',
 ]);
 
 /**
@@ -379,6 +380,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /** See `OperatorDefinition.eq` (types-definitions.ts) for `prover`. */
   eq?: (a: Expression, b: Expression, prover?: boolean) => boolean | undefined;
   neq?: (a: Expression, b: Expression) => boolean | undefined;
+
+  /** The eager producer's enumerability precondition — see the
+   * `canEnumerate` contract on `OperatorDefinition` (types-definitions.ts). */
+  canEnumerate?: (expr: Expression) => boolean | undefined;
 
   even?: (
     ops: ReadonlyArray<Expression>,
@@ -704,6 +709,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.compile = def.compile ?? this.compile;
     this.eq = def.eq ?? this.eq;
     this.neq = def.neq ?? this.neq;
+    this.canEnumerate = def.canEnumerate ?? this.canEnumerate;
     this.setScoped(
       def.scoped,
       (def as Partial<BoxedOperatorDefinition>).bindingSites

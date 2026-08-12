@@ -411,32 +411,47 @@ describe('isEnumerableCollection separates empty from unwalkable', () => {
     expect(ce().box(expr as any).isEnumerableCollection).toBe(expected);
   });
 
-  // The one case that stays undecided: an EAGER collection operator has no
-  // collection handlers until it is evaluated, and its declared result type is
-  // the same whether or not the elements are reachable. Callers that need a
-  // verdict (and only they) pay for the evaluation.
-  it('an eager collection operator is undecided, not false', () => {
-    const chars = ce().box(['Characters', { str: 'ab' }]);
-    expect(chars.isCollection).toBe(false);
-    expect(chars.isEnumerableCollection).toBe(undefined);
-    expect([...chars.each()]).toHaveLength(2);
+  // The case that stays undecided: an UNADOPTED eager collection operator —
+  // no collection handlers, no `canEnumerate` precondition — is structurally
+  // indistinguishable whether or not its elements are reachable. Callers that
+  // need a verdict (and only they) pay for the evaluation. (An ADOPTED eager
+  // operator answers definitively — see
+  // `eager-collection-enumerability.test.ts`; `ContinuedFraction` is
+  // deliberately outside the adoption tranche.)
+  it('an unadopted eager collection operator is undecided, not false', () => {
+    const cf = ce().box(['ContinuedFraction', ['Rational', 43, 19]]);
+    expect(cf.isCollection).toBe(false);
+    expect(cf.isEnumerableCollection).toBe(undefined);
+    expect([...cf.each()].length).toBeGreaterThan(0);
   });
 
-  it('an eager operator is undecided whether or not its argument is ground', () => {
+  it('an unadopted eager operator is undecided whether or not its argument is ground', () => {
     const e = ce();
-    e.declare('s', 'string');
-    // Structurally indistinguishable — same type, no handlers on either — yet
-    // one walks and the other does not. This is why the caller must evaluate.
+    // Same type, no handlers, no precondition on either — yet one walks and
+    // the other does not. This is why the caller must evaluate.
     for (const expr of [
-      ['Characters', { str: 'ab' }],
-      ['Characters', 's'],
+      ['ContinuedFraction', ['Rational', 43, 19]],
+      ['ContinuedFraction', 'x'],
     ]) {
       const boxed = e.box(expr as any);
-      expect(boxed.type.toString()).toBe('list<string>');
+      expect(boxed.type.toString()).toBe('list<integer>');
       expect(boxed.isEnumerableCollection).toBe(undefined);
     }
-    expect([...e.box(['Characters', { str: 'ab' }]).each()]).toHaveLength(2);
-    expect([...e.box(['Characters', 's']).each()]).toHaveLength(0);
+    expect(
+      [...e.box(['ContinuedFraction', ['Rational', 43, 19]]).each()].length
+    ).toBeGreaterThan(0);
+    expect([...e.box(['ContinuedFraction', 'x']).each()]).toHaveLength(0);
+  });
+
+  // An ADOPTED eager operator answers from its `canEnumerate` precondition —
+  // no evaluation, both directions.
+  it('an adopted eager operator answers definitively', () => {
+    const e = ce();
+    e.declare('s', 'string');
+    expect(e.box(['Characters', { str: 'ab' }]).isEnumerableCollection).toBe(
+      true
+    );
+    expect(e.box(['Characters', 's']).isEnumerableCollection).toBe(false);
   });
 
   /**
@@ -688,7 +703,12 @@ describe('isEnumerableCollection separates empty from unwalkable', () => {
       const e = ce();
       e.assign('ys', e.box(['Characters', { str: 'aab' }]));
       const isA = ['Function', ['Equal', '_1', { str: 'a' }], '_1'];
-      expect(e.box('ys').isEnumerableCollection).toBe(undefined);
+      // The value's own verdict, relayed verbatim — `true` since `Characters`
+      // adopted `canEnumerate` (it was `undefined` before adoption; the pin
+      // is that it is never collapsed to `false`).
+      expect(e.box('ys').isEnumerableCollection).toBe(
+        e.box(['Characters', { str: 'aab' }]).isEnumerableCollection
+      );
       expect(e.box(['Filter', 'ys', isA]).evaluate().toString()).toBe(
         '["a","a"]'
       );
