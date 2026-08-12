@@ -1159,7 +1159,13 @@ function declareConformanceStatement(
   // operator's canonical/evaluate handler (the `declareProtocolStatement`
   // contract).
   try {
-    return declareConformance(ce, target, names, impl, { where });
+    // `implOp` is the block's IDENTITY, which the P47 same-batch duplicate
+    // rule keys on: this handler runs once per canonicalization AND once per
+    // evaluation of the same statement, on the very same operand.
+    return declareConformance(ce, target, names, impl, {
+      where,
+      block: implOp,
+    });
   } catch (e) {
     return ce.error(
       [

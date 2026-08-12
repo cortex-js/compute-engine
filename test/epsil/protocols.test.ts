@@ -869,6 +869,96 @@ describe('EPSIL PROTOCOL IMPLEMENTATIONS', () => {
     );
   });
 
+  //
+  // ── P47: same batch = duplicate, later batch = re-run ─────────────────────
+  //
+  // A second implementation block for one (type, protocol) pair WITHIN one
+  // `executeEpsil` run is `protocol-implementation-duplicate`; the same
+  // statement re-run in a LATER batch replaces (the notebook pattern). The
+  // batch spans the static pre-pass AND the evaluation loop, and one statement
+  // registers its block up to three times per batch — none of which may read
+  // as a duplicate of itself.
+  //
+  describe('P47: a second block in one batch is a duplicate', () => {
+    const BLOCK = (result: string): string =>
+      impl(`function compare(self: Self, other: Self) -> string { ${result} }`);
+
+    test('ONE block in a batch runs clean (the pre-pass does not shadow itself)', () => {
+      // The pre-pass installs the block (stamped with THIS batch), rolls back,
+      // and the evaluation loop installs it again: the loop's install must not
+      // read the pre-pass's own stamp as a duplicate. Both edge states are
+      // exercised — one the batch CREATES, one a previous batch left behind.
+      const ce = withComparable();
+      const r = executeEpsil(ce, BLOCK('"="'));
+      expect(r.diagnostics).toEqual([]);
+      expect(r.value.toString()).toBe('"Nothing"');
+      expect(ce._protocolRegistry.Comparable.conformances[0].pending).toBe(
+        false
+      );
+
+      const onExistingEdge = new ComputeEngine();
+      executeEpsil(onExistingEdge, COMPARABLE);
+      executeEpsil(onExistingEdge, 'type string is Comparable');
+      const again = executeEpsil(onExistingEdge, BLOCK('"="'));
+      expect(again.diagnostics).toEqual([]);
+      expect(again.value.toString()).toBe('"Nothing"');
+    });
+
+    test('TWO blocks in one batch: the second is a duplicate, the first stands', () => {
+      const ce = withComparable();
+      const r = executeEpsil(ce, `${BLOCK('"="')}\n${BLOCK('"<"')}`);
+      expect(r.value.toString()).toContain('protocol-implementation-duplicate');
+      expect(r.value.toString()).toContain(
+        'already has an implementation of the `Comparable` protocol in this batch'
+      );
+      // The pre-pass sees the collision first (conformances register from the
+      // canonical handler), so it is a STATIC diagnostic too.
+      expect(
+        r.diagnostics.map((d) => (Array.isArray(d.message) ? d.message : []))
+      ).toContainEqual(
+        expect.arrayContaining(['protocol-implementation-duplicate'])
+      );
+      // The FIRST implementation is installed and functional.
+      expect(ce._protocolRegistry.Comparable.conformances[0].pending).toBe(
+        false
+      );
+      expect(executeEpsil(ce, 'compare("a", "b")').value.toString()).toBe(
+        '"="'
+      );
+    });
+
+    test('TWO BATCHES: the same statement re-run REPLACES (P24 atomicity kept)', () => {
+      const ce = withComparable();
+      expect(runCodes(ce, BLOCK('"="'))).toEqual([]);
+      const stored = ce._protocolRegistry.Comparable.conformances[0].impl;
+      expect(runCodes(ce, BLOCK('"<"'))).toEqual([]);
+      expect(ce._protocolRegistry.Comparable.conformances[0].impl).not.toBe(
+        stored
+      );
+      expect(executeEpsil(ce, 'compare("a", "b")').value.toString()).toBe(
+        '"<"'
+      );
+    });
+
+    test('a bare re-declaration between the two blocks does not reset the stamp', () => {
+      const ce = withComparable();
+      const r = executeEpsil(
+        ce,
+        `${BLOCK('"="')}\ntype string is Comparable\n${BLOCK('"<"')}`
+      );
+      expect(r.value.toString()).toContain('protocol-implementation-duplicate');
+    });
+
+    test('the NEXT batch replaces normally after an in-batch duplicate', () => {
+      const ce = withComparable();
+      executeEpsil(ce, `${BLOCK('"="')}\n${BLOCK('"<"')}`);
+      expect(runCodes(ce, BLOCK('">"'))).toEqual([]);
+      expect(executeEpsil(ce, 'compare("a", "b")').value.toString()).toBe(
+        '">"'
+      );
+    });
+  });
+
   test('PROPERTY handlers: shapes, readonly `set`, and a missing `get`', () => {
     const NAMED =
       'protocol Named {\n  readonly hash: string\n  readwrite name: string\n}';

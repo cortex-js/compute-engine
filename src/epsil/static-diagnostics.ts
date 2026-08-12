@@ -45,6 +45,13 @@ const SNIPPET_LENGTH = 60;
  * attributable to an `Error` the source itself authored (see `authoredErrors`).
  */
 const CANONICALIZATION_ERROR_CODES = new Set([
+  // A SECOND implementation block for one (type, protocol) pair in this batch
+  // (ruling P47). The pre-pass registers conformances from the canonical
+  // handler, so it is the pass that sees the collision first — and, unlike the
+  // other protocol-statement codes, this one is a property of the PROGRAM (two
+  // blocks in one compilation unit), which is exactly what a static diagnostic
+  // reports.
+  'protocol-implementation-duplicate',
   'incompatible-type',
   'incompatible-dimensions',
   'invalid-axis',

@@ -920,9 +920,12 @@ type boolean is Comparable {
 }
 ```
 
-If a conformance implementation is provided more than once on the same
-type, a diagnostic error is emitted — except as a whole-statement re-run,
-which replaces (see "Scope and lifecycle"):
+If a conformance implementation is provided more than once **within one
+compilation unit** (a single `.epsil` file / one `ce.parse()` batch), the
+second is a diagnostic error. Across batches — the notebook pattern of
+re-executing a cell — the re-run **replaces** (see "Scope and lifecycle").
+The two cases are distinguished by the batch: same batch = duplicate,
+later batch = re-run.
 
 ```epsil
 type boolean is Comparable {
@@ -933,11 +936,11 @@ type boolean is Comparable
 // -> ok, no-op re-declaration
 
 type boolean is Comparable {
-  // -> replaces the previous implementation (statement re-run semantics —
-  //    the engine cannot distinguish a re-run from a duplicate; the HOST
-  //    route throws protocol-implementation-duplicate instead).
-  //    Validation runs first: an invalid block leaves the previous valid
-  //    implementation intact.
+  // -> protocol-implementation-duplicate: the type `boolean` already has
+  //    an implementation of the `Comparable` protocol in this batch.
+  //    (In a LATER batch this same statement replaces instead —
+  //    validation first: an invalid block leaves the previous valid
+  //    implementation intact. The HOST route always throws on duplicates.)
   function compare(self: Self, other: Self) -> "<" | "=" | ">" { ... }
 }
 ```

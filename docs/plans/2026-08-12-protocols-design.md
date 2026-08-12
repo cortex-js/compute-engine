@@ -266,6 +266,25 @@ Phase-2 outcome rulings (2026-08-12):
   makes re-run-replace the convention. Appendix A's duplicate example is
   amended accordingly. Replacement validates FIRST — an invalid block
   leaves the previous valid implementation intact (atomicity).
+  **SUPERSEDED by P47 (2026-08-12, user ruling):** the two cases ARE
+  distinguishable — by batch. A second implementation block for the same
+  (type, protocol) pair **within one `executeEpsil`/`ce.parse()` batch**
+  is `protocol-implementation-duplicate` (an error value at evaluation,
+  and a static diagnostic from the pre-pass); a re-implementation in a
+  **later** batch replaces (P24's validate-first atomicity retained).
+  Mechanism (as implemented): a batch id minted per `executeEpsil` run
+  (module-level monotone counter; `ce._epsilBatchId` holds the running
+  batch, pre-pass and loop included, restored in `finally`); an installed
+  implementation is stamped `_implOrigin = { batch, block }` — the block
+  identity is LOAD-BEARING, since one statement installs its block three
+  times per batch (pre-pass canonical, loop canonical, loop evaluate) and
+  a bare batch id would false-positive. The duplicate fires only for
+  `origin.batch === current && origin.block !== incoming`. Box-route
+  installs outside any batch are unstamped and replace silently. The
+  stamp participates in the rollback snapshot (verified load-bearing).
+  The pre-pass surfaces the code as a static diagnostic via a one-code
+  addition to `CANONICALIZATION_ERROR_CODES` in `static-diagnostics.ts`.
+  The host route is unchanged (always throws on duplicate).
 - **P25 — The `set` handler's result type is unchecked** (Appendix A says
   "conventionally" the property type); the requirement rides as
   `(Self, T) -> any`. Tighten only on demand.

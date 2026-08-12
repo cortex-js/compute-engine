@@ -75,7 +75,32 @@ function sumVariantNames(ce: ComputeEngine): Record<string, string> {
   return variants;
 }
 
+/** Source of {@link executeEpsil}'s batch ids. Monotone and never reused: the
+ * ids are only ever compared for equality with the stamp an earlier install of
+ * the same run left on the protocol registry (ruling P47). */
+let epsilBatchCounter = 0;
+
 export function executeEpsil(
+  ce: ComputeEngine,
+  source: string,
+  options?: ExecuteEpsilOptions
+): ExecuteEpsilResult {
+  // The BATCH (ruling P47): everything below — the static pre-pass and the
+  // evaluation loop alike — runs under one id, which the protocol registry
+  // stamps on the implementations it installs so that a second implementation
+  // block for one (type, protocol) pair in this program is an error while a
+  // later batch replaces. Restored rather than cleared, so a nested run (a
+  // host re-entering the interpreter) leaves the outer batch intact.
+  const enclosingBatch = ce._epsilBatchId;
+  ce._epsilBatchId = ++epsilBatchCounter;
+  try {
+    return executeEpsilBatch(ce, source, options);
+  } finally {
+    ce._epsilBatchId = enclosingBatch;
+  }
+}
+
+function executeEpsilBatch(
   ce: ComputeEngine,
   source: string,
   options?: ExecuteEpsilOptions

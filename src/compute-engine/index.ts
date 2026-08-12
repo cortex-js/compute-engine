@@ -507,6 +507,9 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._staticTypeCheckDepth`. @internal */
   _staticTypeCheckDepth = 0;
 
+  /** See `IComputeEngine._epsilBatchId`. @internal */
+  _epsilBatchId: number | undefined = undefined;
+
   /** Capture the registry's state and return a rollback thunk restoring it.
    *
    * For the Epsil STATIC PRE-PASS, which canonicalizes every top-level
@@ -643,6 +646,11 @@ export class ComputeEngine implements IComputeEngine {
         edges: r.conformances.map((c) => ({
           c,
           impl: c.impl,
+          // The batch stamp rides with the implementation it describes (P47):
+          // the pre-pass installs a block, this thunk removes it again, and
+          // the evaluation loop's install must not then see the pre-pass's
+          // own stamp as a duplicate.
+          origin: c._implOrigin,
           pending: c.pending,
         })),
         declaredByStatement: r.declaredByStatement,
@@ -673,6 +681,8 @@ export class ComputeEngine implements IComputeEngine {
           if (e.c.impl !== e.impl) changed = true;
           if (e.impl === undefined) delete e.c.impl;
           else e.c.impl = e.impl;
+          if (e.origin === undefined) delete e.c._implOrigin;
+          else e.c._implOrigin = e.origin;
           if (e.c.pending !== e.pending) changed = true;
           e.c.pending = e.pending;
         }

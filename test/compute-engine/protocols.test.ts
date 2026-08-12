@@ -1016,6 +1016,61 @@ describe('implementation validation (P17)', () => {
     );
   });
 
+  test('P47: the BOX ROUTE outside a batch replaces, unstamped', () => {
+    // The same-batch duplicate rule is a property of an Epsil BATCH: an
+    // install outside any batch (a bare `ce.box(…).evaluate()`) carries no
+    // stamp and replaces without error, exactly as before P47.
+    const ce = withComparable();
+    const member = (resultType: string) =>
+      fnLiteral(resultType, ['self', 'Self'], ['other', 'Self']);
+    expect(
+      implement(ce, 'string', 'Comparable', { compare: member('string') }).json
+    ).toBe('Nothing');
+    const [edge] = ce._protocolRegistry.Comparable.conformances;
+    expect(edge._implOrigin).toBeUndefined();
+
+    const stored = edge.impl;
+    expect(
+      implement(ce, 'string', 'Comparable', { compare: member('"="') }).json
+    ).toBe('Nothing');
+    expect(edge.impl).not.toBe(stored);
+    expect(edge._implOrigin).toBeUndefined();
+  });
+
+  test('P47: INSIDE a batch, a second block for the same pair is a duplicate', () => {
+    // The engine-level half of the Epsil-surface pins: what makes the second
+    // block a duplicate is the batch stamp, not anything Epsil-specific.
+    const ce = withComparable();
+    const member = (resultType: string) =>
+      fnLiteral(resultType, ['self', 'Self'], ['other', 'Self']);
+    ce._epsilBatchId = 42;
+    try {
+      expect(
+        implement(ce, 'string', 'Comparable', { compare: member('string') })
+          .json
+      ).toBe('Nothing');
+      const [edge] = ce._protocolRegistry.Comparable.conformances;
+      expect(edge._implOrigin!.batch).toBe(42);
+      const stored = edge.impl;
+
+      const r = implement(ce, 'string', 'Comparable', {
+        compare: member('"="'),
+      });
+      expect(r.toString()).toContain('protocol-implementation-duplicate');
+      expect(edge.impl).toBe(stored);
+
+      // A LATER batch replaces.
+      ce._epsilBatchId = 43;
+      expect(
+        implement(ce, 'string', 'Comparable', { compare: member('"="') }).json
+      ).toBe('Nothing');
+      expect(edge.impl).not.toBe(stored);
+      expect(edge._implOrigin!.batch).toBe(43);
+    } finally {
+      ce._epsilBatchId = undefined;
+    }
+  });
+
   test('REPLACING the protocol revalidates every implementation', () => {
     // Appendix A "Scope and lifecycle": a re-declaration with a changed
     // requirement set revalidates what is registered against it. The edge
@@ -1613,6 +1668,41 @@ describe('_protocolRegistryRollbackPoint', () => {
     expect(record.conformances).toHaveLength(1);
     expect(edge.pending).toBe(true);
     expect(edge.impl).toBeUndefined();
+  });
+
+  test('the P47 batch STAMP is snapshotted with the implementation', () => {
+    // The stamp is registry state: the pre-pass installs a block (stamped),
+    // this thunk removes it, and the evaluation loop's own install must not
+    // then read the pre-pass's stamp as a same-batch duplicate.
+    const ce = new ComputeEngine();
+    ce.box(protocolWithCompare('Comparable')).evaluate();
+    ce.box([
+      'DeclareConformance',
+      { str: 'string' },
+      ['List', 'Comparable'],
+    ]).evaluate();
+    const edge = ce._protocolRegistry.Comparable.conformances[0];
+
+    const rollback = ce._protocolRegistryRollbackPoint();
+    ce._epsilBatchId = 7;
+    try {
+      ce.box([
+        'DeclareConformance',
+        { str: 'string' },
+        ['List', 'Comparable'],
+        [
+          'Dictionary',
+          ['KeyValuePair', 'compare', ['Function', 'x', 'a', 'b']],
+        ],
+      ]).evaluate();
+      expect(edge._implOrigin!.batch).toBe(7);
+
+      rollback();
+      expect(edge.impl).toBeUndefined();
+      expect(edge._implOrigin).toBeUndefined();
+    } finally {
+      ce._epsilBatchId = undefined;
+    }
   });
 
   test('the Epsil static pre-pass leaves the registry untouched', () => {

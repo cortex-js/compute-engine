@@ -222,6 +222,22 @@ export type ConformanceRecord = {
    * ride under the mangled keys `__get__<name>` / `__set__<name>`. Validated
    * against the protocol's requirements before it is stored (P17). */
   impl?: Record<string, Expression | JSImplementation>;
+  /** Where {@link ConformanceRecord.impl} came from, when it was installed
+   * from INSIDE an Epsil batch (ruling P47): the batch id
+   * ({@link IComputeEngine._epsilBatchId}) and the identity of the
+   * implementation BLOCK expression that installed it. A second, DIFFERENT
+   * block for the same (type, protocol) pair in the SAME batch is
+   * `protocol-implementation-duplicate`; a re-implementation in a later batch
+   * replaces. The block identity is what tells a genuine second block from
+   * the SAME statement re-registering — one statement installs its block up
+   * to three times per batch (the static pre-pass canonicalizes it, then the
+   * evaluation loop canonicalizes and evaluates it), each time rebuilding the
+   * record around the very same block expression.
+   *
+   * Absent for an implementation installed outside any batch (a box-route
+   * `DeclareConformance`) or by the host, both of which replace without
+   * error. */
+  _implOrigin?: { batch: number; block?: Expression };
   /** No implementation yet: an end-of-batch `protocol-implementation-pending`
    * warning (ruling P3). A SEMANTIC protocol (no members) is never pending. */
   pending: boolean;
@@ -378,6 +394,18 @@ export interface IComputeEngine {
    * with the same name cannot forge the surrogate.
    * @internal */
   _staticTypeCheckDepth: number;
+
+  /** The id of the Epsil BATCH currently executing — one `executeEpsil` run,
+   * spanning BOTH its static pre-pass and its evaluation loop — or
+   * `undefined` outside any batch. Set by `executeEpsil` (the same posture as
+   * {@link IComputeEngine._staticTypeCheckDepth}: a batch is an `src/epsil`
+   * notion, the engine only holds the flag) and read by the protocol
+   * registry, which stamps every implementation it installs inside a batch so
+   * that a SECOND implementation block for the same (type, protocol) pair in
+   * one batch is `protocol-implementation-duplicate`, while a
+   * re-implementation in a later batch replaces (ruling P47).
+   * @internal */
+  _epsilBatchId: number | undefined;
 
   /** Absolute time beyond which evaluation should not proceed.
    * @internal
