@@ -21,7 +21,7 @@ import type {
 } from './global-types.js';
 
 import { isDictionary, isFunction } from './boxed-expression/type-guards.js';
-import { updateDef } from './boxed-expression/utils.js';
+import { updateDef, defIsCallableShaped } from './boxed-expression/utils.js';
 import { functionLiteralParameters } from './boxed-expression/function-literal.js';
 import { apply } from './function-utils.js';
 
@@ -161,6 +161,7 @@ function removeMintedTypeConstructor(
   // Removing a binding is a context change: invalidate the caches keyed on
   // the generation (a re-mint bumps it again through `ce.declare()`, but the
   // remove-only path — a body edited from a tuple to a record — would not).
+  ce._noteStateEvent({ kind: 'binding-repair' });
   ce._anyVersion += 1;
   // Shadow 'callable' axis (CE_CACHE_STATS probe): a constructor (callable)
   // binding was removed — binding-repair event.
@@ -850,7 +851,13 @@ export function installConstructorFunction(
   // self-references already bound to the old one — and declare otherwise.
   const existing = scope.bindings.get(name);
   if (existing !== undefined) {
+    const callableBefore = defIsCallableShaped(existing);
     updateDef(ce, name, existing, def);
+    ce._noteStateEvent({
+      kind: 'redefine',
+      callableBefore,
+      callableAfter: true,
+    });
     ce._semanticVersion += 1;
     ce._worldVersion += 1;
   } else {

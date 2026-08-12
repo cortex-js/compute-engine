@@ -195,7 +195,11 @@ import {
   resetCommonSymbols,
 } from './engine-common-symbols.js';
 import { CompilationTargetRegistry } from './engine-compilation-targets.js';
-import { EngineConfigurationLifecycle } from './engine-configuration-lifecycle.js';
+import {
+  EngineConfigurationLifecycle,
+  PARITY_CHECK,
+  type StateEvent,
+} from './engine-configuration-lifecycle.js';
 import {
   type CommonNumberTable,
   createBindingSymbolExpression,
@@ -583,6 +587,10 @@ export class ComputeEngine implements IComputeEngine {
       // mirroring the declaration path's replacement bump. A no-op rollback
       // (no `type` statements in the program) bumps nothing.
       if (changed) {
+        // Classified `config` for the state-event dispatch: a type-statement
+        // rollback is a global type-redefinition event (G+M+E, selected by
+        // every axis). Recorded in the design's §2 table (2b addenda).
+        this._noteStateEvent({ kind: 'config' });
         this._anyVersion += 1;
         this._semanticVersion += 1;
         this._worldVersion += 1;
@@ -712,6 +720,18 @@ export class ComputeEngine implements IComputeEngine {
     this._configurationLifecycle.ephemeralWriteDepth = value;
   }
 
+  /** The state-event choke point — see `IComputeEngine._noteStateEvent`.
+   * @internal */
+  _noteStateEvent(event: StateEvent): void {
+    this._configurationLifecycle.noteStateEvent(event);
+  }
+
+  /** Parity-gate checkpoint (step 2b, `CE_PARITY_CHECK` only): callers are
+   * the public entry points. @internal */
+  _parityCheckpoint(label: string): void {
+    this._configurationLifecycle.parityCheckpoint(label);
+  }
+
   /** Depth of nested top-level boxing operations (see
    * `beginInferenceTransaction` in `box.ts`).
    * @internal
@@ -780,9 +800,11 @@ export class ComputeEngine implements IComputeEngine {
   set jit(value: 'auto' | 'off') {
     if (value === this._jit) return;
     this._jit = value;
+    this._noteStateEvent({ kind: 'config' });
     this._anyVersion += 1;
     this._semanticVersion += 1;
     this._worldVersion += 1;
+    if (PARITY_CHECK) this._parityCheckpoint('jit');
   }
 
   private _jit: 'auto' | 'off' = 'auto';
@@ -991,6 +1013,7 @@ export class ComputeEngine implements IComputeEngine {
   set precision(p: number | 'machine' | 'auto') {
     if (!this._numericConfiguration.setPrecision(p)) return;
     this._reset();
+    if (PARITY_CHECK) this._parityCheckpoint('precision');
   }
 
   /**
@@ -1010,6 +1033,7 @@ export class ComputeEngine implements IComputeEngine {
   set angularUnit(u: AngularUnit) {
     if (!this._numericConfiguration.setAngularUnit(u)) return;
     this._reset();
+    if (PARITY_CHECK) this._parityCheckpoint('angularUnit');
   }
 
   /**
@@ -1218,9 +1242,11 @@ export class ComputeEngine implements IComputeEngine {
       // are within tolerance), so a change is a semantic mutation AND an
       // epoch event. Deliberately not a full `_reset()`: unlike precision, no
       // stored value needs to be recomputed.
+      this._noteStateEvent({ kind: 'config' });
       this._anyVersion += 1;
       this._semanticVersion += 1;
       this._worldVersion += 1;
+      if (PARITY_CHECK) this._parityCheckpoint('tolerance');
     }
   }
 
@@ -2023,7 +2049,11 @@ export class ComputeEngine implements IComputeEngine {
     arg2?: Type | TypeString | Partial<SymbolDefinition>,
     scope?: Scope
   ): IComputeEngine {
-    return declareFnImpl(this, arg1, arg2, scope);
+    try {
+      return declareFnImpl(this, arg1, arg2, scope);
+    } finally {
+      if (PARITY_CHECK) this._parityCheckpoint('declare');
+    }
   }
 
   /**
@@ -2217,7 +2247,11 @@ export class ComputeEngine implements IComputeEngine {
     arg1: string | { [id: string]: AssignValue },
     arg2?: AssignValue
   ): IComputeEngine {
-    return assignFnImpl(this, arg1, arg2);
+    try {
+      return assignFnImpl(this, arg1, arg2);
+    } finally {
+      if (PARITY_CHECK) this._parityCheckpoint('assign');
+    }
   }
 
   /**
@@ -2296,9 +2330,13 @@ export class ComputeEngine implements IComputeEngine {
     }
   ): Expression {
     const { canonical, structural } = optionsToInternal(options);
-    return inHarvestScope(this, options?.scope, () =>
-      box(this, expr, { canonical, structural, scope: options?.scope })
-    );
+    try {
+      return inHarvestScope(this, options?.scope, () =>
+        box(this, expr, { canonical, structural, scope: options?.scope })
+      );
+    } finally {
+      if (PARITY_CHECK) this._parityCheckpoint('expr');
+    }
   }
 
   /** @deprecated Use `expr()` instead. */
@@ -2568,6 +2606,7 @@ export class ComputeEngine implements IComputeEngine {
       return boxed;
     } finally {
       endInferenceTransaction(this);
+      if (PARITY_CHECK) this._parityCheckpoint('parse');
     }
   }
 
@@ -2912,7 +2951,11 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
   assume(predicate: Expression | string): AssumeResult {
-    return assumeFnImpl(this, predicate);
+    try {
+      return assumeFnImpl(this, predicate);
+    } finally {
+      if (PARITY_CHECK) this._parityCheckpoint('assume');
+    }
   }
 
   /**
@@ -2925,7 +2968,11 @@ export class ComputeEngine implements IComputeEngine {
    *
    * */
   forget(symbol: undefined | MathJsonSymbol | MathJsonSymbol[]): void {
-    forgetImpl(this, symbol);
+    try {
+      forgetImpl(this, symbol);
+    } finally {
+      if (PARITY_CHECK) this._parityCheckpoint('forget');
+    }
   }
 }
 

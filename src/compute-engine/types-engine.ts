@@ -10,6 +10,7 @@ import type {
 } from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
+import type { StateEvent } from './engine-configuration-lifecycle.js';
 import type { DeadlineFrame } from '../common/interruptible.js';
 import type {
   ParseLatexOptions,
@@ -297,6 +298,20 @@ export interface IComputeEngine {
   /** When > 0, value writes are ephemeral loop-index writes.
    * @internal */
   _ephemeralWriteDepth: number;
+
+  /** The state-event choke point (the parity regime of
+   * `docs/plans/2026-08-09-state-event-invalidation-axes.md` §3): write
+   * sites report what happened; the lifecycle's dispatch table maps the
+   * event to axis advancement. During migration step 2b the legacy counter
+   * writes remain authoritative and this advances shadow counters only.
+   * @internal */
+  _noteStateEvent(event: StateEvent): void;
+
+  /** Parity-gate checkpoint (`CE_PARITY_CHECK` only, migration step 2b):
+   * compares live-vs-shadow axis advancement since the previous checkpoint
+   * and throws with the recent event trace on mismatch. Called at public
+   * operation boundaries. @internal */
+  _parityCheckpoint(label: string): void;
 
   /** Depth of nested top-level boxing operations (see
    * `beginInferenceTransaction` in `box.ts`).

@@ -937,3 +937,79 @@ export function couldBeNonRealNumber(t: Readonly<Type>): boolean {
     (isSubtype(t as Type, 'number') && !isSubtype(t as Type, 'real'))
   );
 }
+
+/**
+ * Does `t` contain a function-signature arm ANYWHERE — including inside
+ * composite types (list elements, tuple/record members, dictionary values,
+ * unions/intersections, negations, broadcastable bases, nominal references)?
+ *
+ * This is the `callable` write-classifier of the state-event design
+ * (`docs/plans/2026-08-09-state-event-invalidation-axes.md` §4): a value
+ * write or def retype is callable-relevant iff either side's effective type
+ * passes this test. It deliberately reaches FARTHER than `couldBeCallable`
+ * in `effects-of.ts`: the effects projection can surface an arm stored
+ * inside a composite through type-level operations (an `At` over a callback
+ * list yields `signature | nothing` — the R1 repro), so the classifier must
+ * match that reach or a relevant write escapes the axis.
+ *
+ * Policy (§4): exhaustive switch over the `Type` union; opaque or
+ * unrecognized kinds classify as CONTAINING (fail-conservative — a spurious
+ * event is a lost optimization, a missed one is a stale cache). Nominal
+ * references expand through their embedded `def` with a cycle guard.
+ */
+export function containsSignatureArm(t: Type | undefined): boolean {
+  return containsArm(t, undefined);
+}
+
+function containsArm(
+  t: Type | undefined,
+  visited: Set<Readonly<Type>> | undefined
+): boolean {
+  if (t === undefined) return false;
+  if (typeof t === 'string')
+    return t === 'function' || t === 'unknown' || t === 'any';
+  switch (t.kind) {
+    case 'signature':
+    case 'callback':
+      return true;
+    case 'variable':
+      // A type variable can instantiate to anything: conservative.
+      return true;
+    case 'union':
+    case 'intersection':
+      return t.types.some((x) => containsArm(x, visited));
+    case 'negation':
+      return containsArm(t.type, visited);
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return containsArm(t.elements, visited);
+    case 'tuple':
+      return t.elements.some((e) => containsArm(e.type, visited));
+    case 'record':
+      return Object.values(t.elements).some((x) => containsArm(x, visited));
+    case 'dictionary':
+      return containsArm(t.values, visited);
+    case 'reference': {
+      // Cycle guard: recursive nominal types reach their own reference.
+      if (visited?.has(t)) return false;
+      (visited ??= new Set()).add(t);
+      // An applied parameterized nominal keeps its type ARGUMENTS
+      // (`tree<(number) -> number>`): an arm can live there even when the
+      // declaration body carries none.
+      if (t.args?.some((x) => containsArm(x, visited))) return true;
+      if (t.def === undefined) return true; // opaque: conservative
+      return containsArm(t.def, visited);
+    }
+    case 'value':
+    case 'symbol':
+    case 'expression':
+    case 'numeric':
+      return false;
+    default:
+      // A kind this switch does not know (added later): conservative.
+      return true;
+  }
+}

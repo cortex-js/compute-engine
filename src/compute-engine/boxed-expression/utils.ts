@@ -15,6 +15,7 @@ import type {
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import { foldSeed } from '../numerics/random.js';
 import { Type } from '../../common/type/types.js';
+import { containsSignatureArm } from '../../common/type/utils.js';
 import { CACHE_STATS, bumpShadowCallable } from '../../common/cache-stats.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
@@ -1162,6 +1163,26 @@ export function isOperatorDef(
   return def !== undefined && 'operator' in def;
 }
 
+/**
+ * Is this definition callable-shaped for state-event classification
+ * (`docs/plans/2026-08-09-state-event-invalidation-axes.md` §4): it has an
+ * operator half, its value type carries a signature arm anywhere (deep —
+ * the R1 list-of-callbacks shape), or its stored value is (or contains one
+ * level down) a `Function` literal.
+ */
+export function defIsCallableShaped(def: BoxedDefinition | undefined): boolean {
+  if (def === undefined) return false;
+  if ('operator' in def) return true;
+  if (!('value' in def)) return false;
+  if (containsSignatureArm(def.value.type?.type)) return true;
+  const v = def.value.value;
+  if (v === undefined) return false;
+  if (v.operator === 'Function') return true;
+  return (
+    isFunction(v) && v.ops.some((o: Expression) => o.operator === 'Function')
+  );
+}
+
 export function updateDef(
   ce: ComputeEngine,
   name: string,
@@ -1237,6 +1258,10 @@ export function updateDef(
     // bump (`declareSymbolOperator`), which such a throw would skip — leaving
     // generation-keyed caches holding results computed against the definition
     // that is no longer installed.
+    // State event: `updateDef`'s own conditional bump is a `binding-repair`
+    // emission (design §4) — the CALLERS emit their operation event
+    // (`declare`/`redefine`) separately, after this returns.
+    ce._noteStateEvent({ kind: 'binding-repair' });
     ce._anyVersion += 1;
     // Shadow 'callable' axis (CE_CACHE_STATS probe): this branch fires on
     // exactly the callable-shaped swaps — declares and redefinitions both

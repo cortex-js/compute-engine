@@ -252,7 +252,8 @@ this list with a test that fails when a new direct counter write appears
 | `boxed-value-definition.ts:303/309` (`set value`) | G, +M if not ephemeral | `value-write {ephemeral, callable}` |
 | `engine-declarations.ts:434/455` (declare fresh symbol/operator) | G — **G×2 when the installed def is callable-shaped** (`updateDef`'s internal gate fires first: always for `:455` operator declares, when function-typed for `:434`) | `declare {callable, shadowsCallable}` |
 | `engine-declarations.ts:482` (declared-signature value store; runs the value setter, then bumps G again — a collapsible double-bump, see parity note §8) | G×2 + M | `value-write {callable}` |
-| `engine-declarations.ts:943` (variance settle on fwd-ref fulfillment) | G | `binding-repair` |
+| `engine-declarations.ts:943` (variance settle / type-record replace on fwd-ref fulfillment) | ~~G~~ → **G+M+E** (widened by the 2026-08-11 type-statement work, post-inventory) | `config` (type-redefinition class) |
+| `index.ts` type-statement rollback (~:590; NEW site, 2026-08-11 type-statement work) | G+M+E | `config` (type-redefinition class) |
 | `boxed-expression/utils.ts:1239` (callable-swap repair) | G | `binding-repair` |
 | `type-constructors.ts:162` (minted-constructor removal) | G | `binding-repair` |
 | `engine-scope.ts:116/124-125` (`popEvalContext`) | G, +M+E if assumptions dirty | `scope-pop {assumptionsDirty}` |
@@ -347,6 +348,16 @@ event the `callable` axis selects, so no separate emission is needed:
 
 Net: **one new event kind (`type-write`), three emitting sites**, twelve
 enclosed. §6 pins the public-setter route.
+
+**2b-implementation addenda (2026-08-11):** the conversion found a FOURTH
+bare route this enumeration missed — the public `BoxedSymbol.type` setter's
+in-place `operator.signature` write (the §2c sweep covered `.value.type`
+writers only; `operator.signature` writers are a second family). It emits
+`type-write{true, true}`. The swap-shaped `type-write` emitters (see the
+§4 parity-regime amendment) additionally cover: the setter's two
+`updateDef` branches, `BoxedSymbol.infer`'s operator→value narrowing, the
+operator→scalar assignment, and the declared-signature value-slot
+reconciliation swap.
 
 ## 3. The model
 
@@ -454,9 +465,23 @@ too):
   wholesale.
 
 `type-write{callableBefore, callableAfter}` is the direct def-retype event
-(zero legacy mask; the three emitting sites and the twelve enclosed ones
-are enumerated in §2c). `inference{valueType}` is the zero-mask
-value-branch emission of §2b.
+(zero legacy mask; the emitting sites are enumerated in §2c).
+`inference{valueType}` is the zero-mask value-branch emission of §2b.
+
+**Parity-regime amendment (2b implementation, 2026-08-11).** `redefine` is
+emitted ONLY by the callers that bump M+E today — all of which install an
+operator half, so `callableAfter` is true at every emitting site and the
+kind's M+E mask never misfires. The **swap sites whose callers bump
+nothing** — the operator→scalar assignment, the public `BoxedSymbol.type`
+setter's two `updateDef` branches, and `BoxedSymbol.infer`'s
+operator→value narrowing — emit **`type-write`** instead: a `redefine`
+with a computed `callableAfter: true` at such a site (a `list<sig>` value
+assigned over an operator, say) would advance the shadow M+E with no
+legacy counterpart and trip the gate. Axis-wise the two kinds are
+interchangeable (the `callable` axis selects either on the same
+either-side rule); reclassifying the swaps as `redefine` — with M+E
+semantics — is a step-5 normalization decision, not a transcription
+choice.
 
 Classification at the sites:
 

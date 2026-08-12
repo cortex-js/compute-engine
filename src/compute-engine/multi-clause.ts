@@ -681,6 +681,12 @@ function installClauseList(
       effectRow,
       declared,
     };
+  // A multi-clause install mutates an operator definition in place.
+  ce._noteStateEvent({
+    kind: 'redefine',
+    callableBefore: true,
+    callableAfter: true,
+  });
   ce._semanticVersion += 1;
   ce._worldVersion += 1;
 }

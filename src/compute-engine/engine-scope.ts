@@ -114,6 +114,10 @@ function discardEvalContext(
   // bump here to invalidate those caches. (A matching bump on push is not
   // needed: `pushEvalContext` copies the current assumptions unchanged, and any
   // assumption added inside the scope goes through `assume()`, which bumps.)
+  ce._noteStateEvent({
+    kind: 'scope-pop',
+    assumptionsDirty: context?._assumptionsDirty === true,
+  });
   ce._anyVersion += 1;
 
   // `_semanticVersion` (the key of the `Comprehension` element memo) is
@@ -149,7 +153,14 @@ export function inScope<T>(
   } finally {
     const popped = ce._evalContextStack.pop();
     // Mirror popEvalContext: reverting assumptions modified inside the
-    // temporary context is a semantic change.
+    // temporary context is a semantic change. (The `transient` variant has
+    // no G bump — §2's measured mask — and emits even when clean, for
+    // future axis subscribers.)
+    ce._noteStateEvent({
+      kind: 'scope-pop',
+      assumptionsDirty: popped?._assumptionsDirty === true,
+      transient: true,
+    });
     if (popped?._assumptionsDirty) {
       ce._semanticVersion += 1;
       ce._worldVersion += 1;

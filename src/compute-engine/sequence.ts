@@ -12,7 +12,7 @@ import type {
   SequenceStatus,
   SequenceInfo,
 } from './global-types.js';
-import { isValueDef, updateDef } from './boxed-expression/utils.js';
+import { isValueDef, updateDef, defIsCallableShaped } from './boxed-expression/utils.js';
 import {
   isSymbol,
   isNumber,
@@ -635,11 +635,17 @@ function tryFinalizeSequence(ce: ComputeEngine, name: string): void {
 
   if (existingDef) {
     // Symbol already exists - update it with subscriptEvaluate
+    const callableBefore = defIsCallableShaped(existingDef);
     updateDef(ce, name, existingDef, {
       subscriptEvaluate: handler,
     });
     // In-place redefinition of an existing binding is a semantic mutation
     // (a structural change, not a value write: the epoch bumps too).
+    ce._noteStateEvent({
+      kind: 'redefine',
+      callableBefore,
+      callableAfter: true,
+    });
     ce._semanticVersion += 1;
     ce._worldVersion += 1;
   } else {

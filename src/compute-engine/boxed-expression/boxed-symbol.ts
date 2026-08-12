@@ -10,6 +10,7 @@ import {
   isNonRealNumber,
   widen,
   narrow,
+  containsSignatureArm,
 } from '../../common/type/utils.js';
 import { reduceType } from '../../common/type/reduce.js';
 import type { OneOf } from '../../common/one-of.js';
@@ -63,6 +64,7 @@ import {
   isValueDef,
   normalizedUnknownsForSolve,
   updateDef,
+  defIsCallableShaped,
 } from './utils.js';
 import { pow } from './arithmetic-power.js';
 import { add } from './arithmetic-add.js';
@@ -494,6 +496,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // use of an already-inferred symbol. `narrow`/`widen` are
         // reference-preserving when nothing changes, so `===` is the test.
         if (inferred.type === def.value.type.type) return true;
+        // State event: the zero-mask value-branch inference (design §2b) —
+        // a binding can go `unknown` → effect-bearing signature here with
+        // no counter advance; future axes subscribe to the event.
+        this.engine._noteStateEvent({ kind: 'inference', valueType: true });
         def.value.type = inferred;
         // A first inference (unknown → concrete) during a boxing operation is
         // recorded as forward provenance for the fresh-matrix-inference
@@ -531,14 +537,26 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         def.operator.signature = newType;
         // Signature inference mutates a SHARED operator definition in place: a
         // semantic change other expressions may depend on.
+        this.engine._noteStateEvent({
+          kind: 'inference',
+          symbolSignature: true,
+        });
         this.engine._semanticVersion += 1;
         this.engine._worldVersion += 1;
         if (sink && previousType !== undefined)
           sink._recordNarrowing(this._id, def, previousType, newType);
         return true;
       }
-      // The type is no longer a function, use a value definition
+      // The type is no longer a function, use a value definition.
+      // Zero-mask `type-write` (this caller bumps nothing today): an
+      // inference-driven operator→value swap — callability leaves the
+      // binding unless the narrowed type still carries an arm.
       updateDef(this.engine, this._id, def, { type: newType.type });
+      this.engine._noteStateEvent({
+        kind: 'type-write',
+        callableBefore: true,
+        callableAfter: containsSignatureArm(newType.type),
+      });
       if (sink && previousType !== undefined)
         sink._recordNarrowing(this._id, def, previousType, newType);
       return true;
@@ -716,19 +734,49 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
     if (t === 'function' || isSignatureType(t)) {
       if (isOperatorDef(this._def)) {
-        // We are changing the signature of a function
+        // We are changing the signature of a function.
+        // State event: an in-place signature write with no legacy bump — a
+        // bare route like §2c's, callable on both sides.
+        this.engine._noteStateEvent({
+          kind: 'type-write',
+          callableBefore: true,
+          callableAfter: true,
+        });
         // @ts-expect-error - signature is readonly but we need to update it
         this._def.operator.signature = t;
       } else {
-        // We are changing a symbol to a function
+        // We are changing a symbol to a function.
+        // `type-write`, not `redefine`: this caller bumps NOTHING today (the
+        // only legacy advance is `updateDef`'s internal G, emitted there as
+        // `binding-repair`), so the event must carry a zero parity mask —
+        // the callable axis selects `type-write{either side}` identically.
+        const callableBefore = defIsCallableShaped(this._def);
         updateDef(this.engine, this._id, this._def, { signature: t });
+        this.engine._noteStateEvent({
+          kind: 'type-write',
+          callableBefore,
+          callableAfter: true,
+        });
       }
     } else {
       if (isOperatorDef(this._def)) {
-        // We are changing a function to a symbol
+        // We are changing a function to a symbol — callability LEAVES the
+        // binding (§2b). Zero-mask `type-write` for the same parity reason
+        // as the symbol→function branch above.
         updateDef(this.engine, this._id, this._def, { type: t });
+        this.engine._noteStateEvent({
+          kind: 'type-write',
+          callableBefore: true,
+          callableAfter: containsSignatureArm(t as Type),
+        });
       } else {
-        // We are changing the type of a symbol
+        // We are changing the type of a symbol — the bare route of §2c.
+        const before = containsSignatureArm(this._def.value.type?.type);
+        this.engine._noteStateEvent({
+          kind: 'type-write',
+          callableBefore: before,
+          callableAfter: containsSignatureArm(t as Type),
+        });
         this._def.value.type = this.engine.type(t);
       }
     }

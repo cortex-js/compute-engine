@@ -14,6 +14,7 @@ import {
   returnTypeText,
   signatureArms,
   widen,
+  containsSignatureArm,
 } from '../common/type/utils.js';
 import { parseType, parseTypeParameterClause } from '../common/type/parse.js';
 import { CACHE_STATS, bumpShadowCallable } from '../common/cache-stats.js';
@@ -68,6 +69,7 @@ import {
   isValueDef,
   isOperatorDef,
   updateDef,
+  defIsCallableShaped,
 } from './boxed-expression/utils.js';
 import { canonicalFunctionLiteral, lookup } from './function-utils.js';
 import {
@@ -420,6 +422,12 @@ export function declareSymbolValue(
 ): BoxedDefinition {
   scope ??= ce.context.lexicalScope;
 
+  // State event: `shadowsCallable` must be captured BEFORE the placeholder
+  // install below, while the chain still shows any shadowed binding — and
+  // resolved through the TARGET scope's chain, not the engine's current
+  // lexical scope (an explicit `scope` argument may differ).
+  const shadowsCallable = defIsCallableShaped(lookup(name, scope));
+
   // Insert a placeholder in the bindings to handle recursive calls
   // (the value could be a function that references itself)
   scope.bindings.set(name, {
@@ -432,6 +440,11 @@ export function declareSymbolValue(
   const boxedDef = scope.bindings.get(name)!;
   updateDef(ce, name, boxedDef, def);
 
+  ce._noteStateEvent({
+    kind: 'declare',
+    callable: defIsCallableShaped(boxedDef),
+    shadowsCallable,
+  });
   ce._anyVersion += 1;
 
   return boxedDef;
@@ -444,6 +457,9 @@ export function declareSymbolOperator(
   scope?: Scope
 ): BoxedDefinition {
   scope ??= ce.context.lexicalScope;
+  // State event: capture the shadow BEFORE the placeholder install, through
+  // the TARGET scope's chain.
+  const shadowsCallable = defIsCallableShaped(lookup(name, scope));
   // Insert a placeholder in the bindings to handle recursive calls
   // (the function is not yet defined)
   scope.bindings.set(name, {
@@ -453,6 +469,7 @@ export function declareSymbolOperator(
   const boxedDef = scope.bindings.get(name)!;
   updateDef(ce, name, boxedDef, def);
 
+  ce._noteStateEvent({ kind: 'declare', callable: true, shadowsCallable });
   ce._anyVersion += 1;
 
   return boxedDef;
@@ -479,6 +496,10 @@ export function setSymbolValue(
   if (!def) throw new Error(`Unknown symbol "${id}"`);
 
   if (isValueDef(def)) {
+    // State event: emitted by the value SETTER below (`value-write`); the
+    // extra G bump on the next line is the enumerated double-bump collapse
+    // of the parity gate (design §8) — advancement-invisible, no second
+    // event.
     def.value.value = value;
     ce._anyVersion += 1;
     // The declared-signature reconciliation paths (§6.3) store a `Function`
@@ -1005,6 +1026,10 @@ export function declareType(
   // `existing` is already truthy; the second disjunct is there so a future
   // unblocking route cannot silently skip the bump.
   if (existing || settled.length > 0) {
+    // State event: a type redefinition (G+M+E today) — `config`-class for
+    // the parity dispatch, like the type-statement rollback in `index.ts`.
+    // Both rows are recorded in the design's §2 table (2b addenda).
+    ce._noteStateEvent({ kind: 'config' });
     ce._anyVersion += 1;
     // A type REDEFINITION (statement replace, forward-ref fulfillment,
     // variance settle) changes the answers subtyping gives — a
@@ -1724,7 +1749,16 @@ export function assignFn(
       // Existing expressions using this symbol as a function head (e.g.
       // ["g", 2]) will produce a type error at evaluation time if the
       // new value is not callable — which is the correct semantic.
+      // State event: callability LEAVES the binding (§2b). Zero-mask
+      // `type-write` in the parity regime (this caller bumps nothing
+      // directly; the G+M arrive via the `_setSymbolValue` value-write).
+      const callableBefore = defIsCallableShaped(def);
       updateDef(ce, id, def, { value });
+      ce._noteStateEvent({
+        kind: 'type-write',
+        callableBefore,
+        callableAfter: defIsCallableShaped(def),
+      });
       ce._setSymbolValue(id, value);
       return ce;
     }
@@ -1850,7 +1884,13 @@ export function assignFn(
           };
           if (shadowBuiltin) ce._declareSymbolOperator(id, lambdaDef);
           else {
+            const callableBefore = defIsCallableShaped(def);
             updateDef(ce, id, def, lambdaDef);
+            ce._noteStateEvent({
+              kind: 'redefine',
+              callableBefore,
+              callableAfter: true,
+            });
             ce._semanticVersion += 1;
             ce._worldVersion += 1;
           }
@@ -1869,11 +1909,22 @@ export function assignFn(
           });
           return ce;
         }
-        updateDef(ce, id, def, {
-          value: reconciled,
-          type: declaredType.type,
-          effectsDeclared,
-        });
+        {
+          // State event: a value-slot reconciliation swap — zero-mask
+          // `type-write` (the G+M arrive via the value-write below; the
+          // updateDef-internal G via `binding-repair`).
+          const callableBefore = defIsCallableShaped(def);
+          updateDef(ce, id, def, {
+            value: reconciled,
+            type: declaredType.type,
+            effectsDeclared,
+          });
+          ce._noteStateEvent({
+            kind: 'type-write',
+            callableBefore,
+            callableAfter: defIsCallableShaped(def),
+          });
+        }
         ce._setSymbolValue(id, reconciled);
         return ce;
       }
@@ -1886,7 +1937,15 @@ export function assignFn(
       ce._declareSymbolOperator(id, fnDef);
       return ce;
     }
-    updateDef(ce, id, def, fnDef);
+    {
+      const callableBefore = defIsCallableShaped(def);
+      updateDef(ce, id, def, fnDef);
+      ce._noteStateEvent({
+        kind: 'redefine',
+        callableBefore,
+        callableAfter: true,
+      });
+    }
     // Redefining an existing operator is a semantic mutation (no value-setter
     // write happens on this path, so bump explicitly) — and a global-semantics
     // event, not a value write, so the epoch bumps too.
@@ -1923,9 +1982,21 @@ export function assignFn(
       // juxtaposition parser now given a scalar value (`number | function`) —
       // the guess was simply wrong: adopt the value's own type instead (D11).
       const widened = widen(current, vt);
-      def.value.type = ce.type(
-        typeof widened === 'object' && widened.kind === 'union' ? vt : widened
-      );
+      const adopted =
+        typeof widened === 'object' && widened.kind === 'union' ? vt : widened;
+      // State event (§2c): the D11 adopt branch can REMOVE a callable arm
+      // (a `function` guess replaced by the scalar value's own type) before
+      // the value write below classifies — emit `type-write` when the
+      // arm-containment changes; the arm-preserving widen emits nothing.
+      const armBefore = containsSignatureArm(current);
+      const armAfter = containsSignatureArm(adopted);
+      if (armBefore !== armAfter)
+        ce._noteStateEvent({
+          kind: 'type-write',
+          callableBefore: armBefore,
+          callableAfter: armAfter,
+        });
+      def.value.type = ce.type(adopted);
     }
 
     // ... and set the value
@@ -1946,7 +2017,13 @@ export function assignFn(
     console.assert(isValueDef(def));
     // updateDef removes def.value and sets def.operator — no separate
     // _setSymbolValue call needed to clear the old value.
+    const callableBefore = defIsCallableShaped(def);
     updateDef(ce, id, def, fnDef);
+    ce._noteStateEvent({
+      kind: 'redefine',
+      callableBefore,
+      callableAfter: true,
+    });
     ce._semanticVersion += 1;
     ce._worldVersion += 1;
   } else {

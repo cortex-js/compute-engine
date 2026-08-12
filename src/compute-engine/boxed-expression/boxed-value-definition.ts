@@ -9,6 +9,7 @@ import type {
 
 import type { Type, TypeString } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
+import { containsSignatureArm } from '../../common/type/utils.js';
 import { isValidType } from '../../common/type/utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 
@@ -26,6 +27,7 @@ import {
   recordBump,
   bumpShadowCallable,
 } from '../../common/cache-stats.js';
+import { PARITY_CHECK } from '../engine-configuration-lifecycle.js';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -296,34 +298,51 @@ export class _BoxedValueDefinition
   set value(v: Expression | undefined) {
     if (this._isConstant)
       throw new Error(`Cannot set value of constant "${this.name}"`);
-    const prev = CACHE_STATS ? this._value : null;
+    const prev = this._value;
     this._value = v;
     this._isSelfReferential = isSelfReferentialValue(this.name, v);
-    if (CACHE_STATS) {
-      recordBump(
-        this._engine._ephemeralWriteDepth > 0
-          ? 'ephemeralValueWrite'
-          : 'valueWrite'
-      );
-      // Shadow 'callable' axis: a write is callable-relevant when either side
-      // is a function literal, contains one a level down (a callback list —
-      // the R1 shape), or the declared type carries a signature arm anywhere
-      // (deep: the '->' containment test, probe-quality only).
-      const callableish = (v0: Expression | null | undefined): boolean => {
-        if (v0 == null) return false;
-        const x = v0 as {
+
+    const ephemeral = this._engine._ephemeralWriteDepth > 0;
+    // `callable` classification (design §4): the write is callable-relevant
+    // when either side is (or contains, one level down) a `Function`
+    // literal, or the definition's EFFECTIVE type carries a signature arm
+    // anywhere (deep — the R1 list-of-callbacks shape). A declared type is
+    // authoritative for type-level reach; otherwise the effective type
+    // derives from the value, on each side of the swap.
+    //
+    // Computed only when a consumer exists — the CE_CACHE_STATS probe or the
+    // CE_PARITY_CHECK trace. The `value-write` axis mask does not read
+    // `callable`, and no live axis subscribes to it until migration step 3
+    // (the `callable` axis), so default builds skip the classification on
+    // this hot path (every write, including ephemeral loop-index assigns).
+    // Step 3 makes it unconditional — with the cost budgeted in the
+    // design's §3 — when the flag gains its live consumer.
+    let callable = false;
+    if (CACHE_STATS || PARITY_CHECK) {
+      const litCallable = (x0: Expression | null | undefined): boolean => {
+        if (x0 == null) return false;
+        const x = x0 as {
           operator?: string;
           ops?: ReadonlyArray<{ operator?: string }> | null;
         };
         if (x.operator === 'Function') return true;
         return x.ops?.some((o) => o.operator === 'Function') ?? false;
       };
-      if (
-        callableish(prev) ||
-        callableish(v) ||
-        (this._type != null && this._type.toString().includes('->'))
-      )
-        bumpShadowCallable();
+      callable = litCallable(prev) || litCallable(v);
+      if (!callable) {
+        if (this._type != null)
+          callable = containsSignatureArm(this._type.type);
+        else
+          callable =
+            containsSignatureArm(prev?.type?.type) ||
+            containsSignatureArm(v?.type?.type);
+      }
+    }
+    this._engine._noteStateEvent({ kind: 'value-write', ephemeral, callable });
+
+    if (CACHE_STATS) {
+      recordBump(ephemeral ? 'ephemeralValueWrite' : 'valueWrite');
+      if (callable) bumpShadowCallable();
     }
     this._engine._anyVersion += 1;
     this._writeVersion += 1;

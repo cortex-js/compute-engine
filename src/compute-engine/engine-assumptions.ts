@@ -410,6 +410,7 @@ export function assumeFn(
     const pred = predicateFromArg(ce, predicate, 'assume').canonical;
 
     // The new assumption could affect existing expressions
+    ce._noteStateEvent({ kind: 'assumption' });
     ce._anyVersion += 1;
     ce._semanticVersion += 1;
     ce._worldVersion += 1;
@@ -456,6 +457,7 @@ export function forget(
     }
 
     // The removed assumptions could affect existing expressions
+    ce._noteStateEvent({ kind: 'assumption' });
     ce._anyVersion += 1;
     ce._semanticVersion += 1;
     ce._worldVersion += 1;
@@ -496,6 +498,7 @@ export function forget(
     ce.context.assumptionBindings?.delete(symbol);
   }
   // The removed assumptions could affect existing expressions
+  ce._noteStateEvent({ kind: 'assumption' });
   ce._anyVersion += 1;
   ce._semanticVersion += 1;
   ce._worldVersion += 1;

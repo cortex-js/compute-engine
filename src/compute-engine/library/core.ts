@@ -44,6 +44,7 @@ import {
   isValidType,
   stripMissingFromType,
   widen,
+  containsSignatureArm,
 } from '../../common/type/utils.js';
 import {
   parseType,
@@ -1683,6 +1684,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             const fnDef = assignValueAsOperatorDef(ce, canonFn);
             if (fnDef !== undefined) {
               updateDef(ce, symbolName, binding, fnDef);
+              // A minted constructor is callable on both sides of the swap.
+              ce._noteStateEvent({
+                kind: 'redefine',
+                callableBefore: true,
+                callableAfter: true,
+              });
               ce._semanticVersion += 1;
               ce._worldVersion += 1;
             }
@@ -1823,6 +1830,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                   const fnDef = assignValueAsOperatorDef(ce, canonRhs);
                   if (fnDef !== undefined) {
                     updateDef(ce, symbolName, binding, fnDef);
+                    ce._noteStateEvent({
+                      kind: 'redefine',
+                      callableBefore: true,
+                      callableAfter: true,
+                    });
                     ce._semanticVersion += 1;
                     ce._worldVersion += 1;
                   }
@@ -2237,6 +2249,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               existingValueDef as { _declaredByStatement?: boolean }
             )._declaredByStatement = true;
             if (hasType) {
+              // State event (§2c): a typed `let` with no initializer has no
+              // accompanying value write, so the retype must emit its own
+              // zero-mask `type-write`.
+              ce._noteStateEvent({
+                kind: 'type-write',
+                callableBefore: containsSignatureArm(
+                  existingValueDef.value.type?.type
+                ),
+                callableAfter: containsSignatureArm(parseType(type!)),
+              });
               existingValueDef.value.type = ce.type(type!);
               existingValueDef.value.inferredType = false;
               existingValueDef.value.effectsDeclared = effectsDeclared;
