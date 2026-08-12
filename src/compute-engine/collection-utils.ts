@@ -334,6 +334,37 @@ export function isKnownFinitenessBroadcast(x: Expression): boolean {
   return isBroadcastableCollection(x) && x.isFiniteCollection !== undefined;
 }
 
+/**
+ * Whether evaluating `expr` to read its elements by index is **draw-free** —
+ * the evaluation itself cannot consume randomness, so a cached evaluation
+ * serves `at()` reads that stay coherent with `each()` across generations.
+ *
+ * True for any pure expression. Also true for a broadcasting operator
+ * (`operatorDefinition.broadcastable`) whose impurity is confined to SCALAR
+ * (lifted) operands: the distribute is structural — the random family is
+ * inert under `evaluate()` (draws happen at the consumer, `.N()` or compiled
+ * code), so `[1, 2] + RandomInteger(1, 10)` evaluates to
+ * `[1 + RandomInteger(1, 10), 2 + RandomInteger(1, 10)]` without a draw, and
+ * re-evaluation yields the identical structure. An impure collection
+ * PARTICIPANT (`RandomShuffle(xs) + 1`) fails the test: its evaluation draws
+ * a fresh permutation each time, so per-index reads spanning generations
+ * could mix draw sets — the incoherence `_materializedAt`'s purity gate
+ * exists to prevent. (A whole `each()` walk is one evaluation and stays
+ * coherent within itself, which is why the walk is not gated on this.)
+ *
+ * Tycho item-169 ruling (2026-08-12): this is the delivery precondition that
+ * lets `isEnumerableCollection` answer `true` for a broadcast — `true` is a
+ * promise every access route must honor, including `at()`.
+ */
+export function isDrawFreeBroadcast(expr: Expression): boolean {
+  if (expr.isPure) return true;
+  if (!isFunction(expr)) return false;
+  if (expr.operatorDefinition?.broadcastable !== true) return false;
+  return expr.ops.every(
+    (op) => !typeCouldBeCollection(op.type.type) || isDrawFreeBroadcast(op)
+  );
+}
+
 /** Operators that construct a tuple. All canonicalize to `Tuple`. */
 const TUPLE_OPERATORS = new Set(['Tuple', 'Pair', 'Triple', 'Single']);
 

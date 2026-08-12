@@ -29,6 +29,7 @@ import {
   broadcastLengthMismatch,
   isBroadcastableCollection,
   isBroadcastCollectionType,
+  isDrawFreeBroadcast,
   isFiniteIndexedCollection,
   isFixedShapeCollection,
   isKnownFinitenessBroadcast,
@@ -2292,6 +2293,47 @@ export class BoxedFunction
     const can = this.operatorDefinition?.canEnumerate;
     if (can !== undefined) return can(this);
 
+    // An UNBOUND head binds vacuously (item 152): its result can look
+    // collection-shaped through the lift (`Total([1, 2])` types
+    // `list<unknown^2>` on a bare engine), but there is no evaluation rule
+    // to produce elements — `each()` provably walks nothing and there is
+    // nothing to materialize. That is the facet's definite `false` (an
+    // empty walk means NOTHING), the enumerability twin of
+    // `_broadcastCount`'s `undefined` (Tycho item-169 ruling, 2026-08-12).
+    if (this.operatorDefinition === undefined) return false;
+
+    // Broadcast tier (Tycho item-169 ruling, 2026-08-12): a broadcasting
+    // operator's collection-ness is a lift over its operands, and both
+    // access routes deliver through the materialize fallbacks — so the
+    // facet answers from the participants, the enumerability twin of
+    // `_broadcastCount`. `true` is a kept promise under three gates:
+    // - a participant that is definitively unwalkable makes the whole
+    //   broadcast unwalkable (`x + Total([1, 2])`, `x + Linspace(a, 1, 3)`)
+    //   — a definite `false`;
+    // - the participants must AGREE on a length (`_broadcastCount`), else
+    //   evaluation is `incompatible-dimensions` with an empty walk;
+    // - evaluation must be draw-free (`isDrawFreeBroadcast`) so `at()`
+    //   reads stay coherent: an impure PARTICIPANT (`RandomShuffle(xs)+1`)
+    //   caps the answer at `undefined` — its walk works, but per-index
+    //   reads cannot promise draw coherence. Impure lifted SCALARS
+    //   (`[1, 2] + RandomInteger(1, 10)`) do not demote the answer.
+    if (
+      this.operatorDefinition.broadcastable === true &&
+      typeCouldBeCollection(this.type.type)
+    ) {
+      let result: boolean | undefined = true;
+      for (const op of this.ops) {
+        // A scalar operand is a LIFT, not a participant.
+        if (!typeCouldBeCollection(op.type.type)) continue;
+        const e = op.isEnumerableCollection;
+        if (e === false) return false;
+        if (e === undefined) result = undefined;
+      }
+      if (this._broadcastCount() === undefined) return undefined;
+      if (!isDrawFreeBroadcast(this)) return undefined;
+      return result;
+    }
+
     // Unadopted: a collection-typed application is undecidable here rather
     // than false (`each()`/`at()` walk it through the materialize fallbacks).
     // Anything that cannot be a collection at all cannot be walked.
@@ -2458,10 +2500,12 @@ export class BoxedFunction
    * Gates:
    * - Collection-typed only: `at()` is probed speculatively on all kinds of
    *   expressions; a scalar-typed application must not pay an evaluation.
-   * - PURE only: an impure producer re-evaluated across generations would
-   *   serve elements of DIFFERENT draws (`Take(RandomShuffle(xs), 2)` mixing
-   *   two shuffles) — incoherent. The impure case stays declined; tracked
-   *   with the ROADMAP draw-coherence item.
+   * - DRAW-FREE only (pure, or a broadcast whose impurity is confined to
+   *   lifted scalars — see `isDrawFreeBroadcast`): an impure producer whose
+   *   evaluation draws, re-evaluated across generations, would serve
+   *   elements of DIFFERENT draws (`Take(RandomShuffle(xs), 2)` mixing two
+   *   shuffles) — incoherent. That case stays declined; tracked with the
+   *   ROADMAP draw-coherence item.
    * - The evaluated form is cached per (instance, generation) — the
    *   `sgn`/`type` idiom, constant+pure entries generation-independent.
    *
@@ -2472,7 +2516,16 @@ export class BoxedFunction
   private _materializedAt(index: number): Expression | undefined {
     if (!this.isValid) return undefined;
     if (!typeCouldBeCollection(this.type.type)) return undefined;
-    if (!this.isPure) return undefined;
+    // Draw-free rather than pure (item-169 ruling, 2026-08-12): a BROADCAST
+    // whose impurity is confined to scalar (lifted) operands evaluates to a
+    // structural distribute with the impure calls left unevaluated —
+    // `[1, 2] + RandomInteger(1, 10)` → `[1 + RandomInteger(…), …]`, zero
+    // draws — so serving `at()` from the cached evaluation is coherent with
+    // `each()`, and re-evaluation across generations rebuilds the identical
+    // structure. An impure producer whose evaluation DOES draw
+    // (`RandomShuffle(xs)`, or a broadcast over one) stays declined: reads
+    // spanning generations would mix draw sets.
+    if (!isDrawFreeBroadcast(this)) return undefined;
     // An adopted eager producer that declares evaluation would decline saves
     // the evaluation (and keeps the walk's silence honest).
     const can = this.operatorDefinition?.canEnumerate?.(this);

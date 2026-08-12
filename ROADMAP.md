@@ -2415,7 +2415,19 @@ is in git history. The only items deliberately left open:
   compiles a scalar `<` against an array) — that side effect has no dedicated
   pin yet.
 
-- **Degenerate big-op round (2026-08-03), flagged not fixed:**
+- **`_broadcastCount` leaks onto non-broadcast operators (2026-08-12, found
+  at the item-169 broadcast-enumerability ruling), flagged not fixed:** the
+  item-167 broadcast `count` (participants' agreed length) has no
+  `operatorDefinition.broadcastable` gate, so any bound, handler-less,
+  collection-typed operator with collection operands answers its OPERAND's
+  length — `Chunk([1,2,3], 2).count` is 3 (true count: 2); `GroupBy`/
+  `BinCounts`/`Histogram` are the same reshaping class. The leak is
+  accidentally CORRECT for length-preserving ops (`Sort`, `RandomShuffle`
+  both answer 3 through it), so a blanket `broadcastable === true` gate
+  would regress those — the fix is per-operator `count` collection handlers
+  (or a reshaping denylist), decided per operator. The new
+  `isEnumerableCollection` broadcast tier is already gated on
+  `broadcastable === true` and does not inherit the leak.
   - `sameSyntactic` (`boxed-expression/compare.ts`) is mis-named: despite its
     "compares symbols by NAME, ignoring bindings" doc, the symbol-vs-non-symbol
     branch of `same()` dereferences `sym.value` unconditionally — the

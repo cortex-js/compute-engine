@@ -2462,6 +2462,21 @@ export interface Expression {
    *   handlers until it is evaluated, yet `each()` walks it through the
    *   materialize-then-iterate path.
    *
+   * An arithmetic **broadcast** (`x + [1, 2]`, `Sin(1..99)` — a
+   * `broadcastable` operator whose collection-ness is a lift over its
+   * operands) answers from its participants: `true` when they agree on a
+   * length, evaluation is draw-free, and every collection-typed participant
+   * is itself enumerable; `false` when a participant is definitively
+   * unwalkable (a valueless symbol, an application of an UNBOUND head —
+   * `x + Total([1, 2])` with `Total` undeclared binds vacuously and can
+   * never produce elements); `undefined` when the lengths disagree or an
+   * impure participant (`RandomShuffle(xs) + 1`) makes per-index reads
+   * unable to promise draw coherence — there `each()` still walks, but
+   * `at()` declines. Impurity confined to a *scalar* (lifted) operand does
+   * not demote the answer: `[1, 2] + RandomInteger(1, 10)` is `true` — its
+   * evaluation distributes structurally without consuming randomness, and
+   * both `each()` and `at()` serve the unevaluated elements.
+   *
    * Independent of `count`: a collection can know its size and still not be
    * enumerable (`Linspace(a, 1, 3)` has a count of 3 and no computable
    * elements), and an enumerable collection can have an unknown size.
