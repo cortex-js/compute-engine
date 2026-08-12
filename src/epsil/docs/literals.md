@@ -84,7 +84,7 @@ them as names.
 `namespace`, `NaN`, `native`, `new`, `not`, `of`, `on`, `oo`, `optional`, `or`, `package`,
 `parallel`, `private`, `protected`, `protocol`, `public`, `repeat`, `return`,
 `self`, `set`, `static`, `super`, `switch`, `this`, `throw`, `to`, `true`,
-`try`, `union`, `until`, `using`, `var`, `variant`, `warn`, `when`, `where`,
+`try`, `union`, `until`, `using`, `var`, `variant`, `warn`, `when`,
 `while`, `with`, `xor`, `yield`.
 
 **To write a symbol with the _Verbatim Form_** , put a backtick **`` ` ``**

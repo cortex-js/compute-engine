@@ -19,9 +19,12 @@
 //     undeclared symbol.
 //
 // A word moves from the first tier to the second exactly when its construct
-// lands. Everything else — `set`, `with`, `label`, `where`, `to`, `each`, … —
-// is usable as an identifier in every position: a binding name, a bare
-// assignment target, a mapsto parameter, and a call's callee.
+// lands — unless the construct is recognized contextually (as `type`,
+// `alias`, `is`, and the trailing `where` clause are), in which case the
+// word leaves the tables entirely and stays an ordinary identifier.
+// Everything else — `set`, `with`, `label`, `to`, `each`, … — is usable as
+// an identifier in every position: a binding name, a bare assignment
+// target, a mapsto parameter, and a call's callee.
 //
 // The verbatim form (`` `word` ``) always spells any of them.
 //
@@ -165,7 +168,6 @@ export const RESERVED_WORDS = new Set<string>([
   'variant', // Not in use
   'warn', // Not in use
   'when', // Not in use
-  'where', // Not in use
   'while', // ACTIVE — conditional loop head
   'with', // Not in use
   'xor', // Not in use

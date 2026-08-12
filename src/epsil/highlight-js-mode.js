@@ -93,10 +93,10 @@ const DOMAINS_LIST = [
 
 // The words the grammar CLAIMS (source of truth: `ACTIVE_WORDS` in
 // `src/epsil/reserved-words.ts`), plus the contextual heads that are not
-// reserved words at all but do head a construct: `let`, `type`, `alias`, and
-// the `is` type test.
+// reserved words at all but do head a construct: `let`, `type`, `alias`,
+// the `is` type test, and the trailing `where` clause.
 //
-// The merely-RESERVED words (`set`, `with`, `label`, `where`, …) are
+// The merely-RESERVED words (`set`, `with`, `label`, …) are
 // deliberately NOT here. They are ordinary identifiers — they can name a
 // binding, be assigned to, be a `|->` parameter, and be called — so painting
 // them as keywords would tell the author a name is unavailable when it is
@@ -109,10 +109,16 @@ const DOMAINS_LIST = [
 // it cannot drift again.
 export const KEYWORDS_LIST = [
   // Contextual heads — not reserved words, but they head a construct.
+  // (`readonly`/`readwrite` head protocol property members; `get`/`set` are
+  // deliberately NOT here — they are merely-reserved and common identifiers,
+  // and the pinning test forbids painting non-hard reserved words.)
   'let',
   'type',
   'alias',
   'is',
+  'where',
+  'readonly',
+  'readwrite',
   // ACTIVE_WORDS — the heads and word operators the parser claims.
   'break',
   'const',
