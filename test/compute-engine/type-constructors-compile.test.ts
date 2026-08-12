@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { resolveTypeForCompilation } from '../../src/common/type/utils';
@@ -577,5 +578,185 @@ describe('BOUNDARY MARSHALLING — the current world (§4.6 step 4)', () => {
     // The drain/auto-compile gates are numeric: a tagged element is not a
     // number literal, so the interpreter keeps the values (tags intact).
     expect(list.evaluate().toString()).toBe('[meters(1),meters(2)]');
+  });
+});
+
+//
+// A NOMINAL-TYPED ARGUMENT IS ATOMIC at a compiled user-function call site —
+// ruled 2026-08-12 (context in
+// `docs/plans/2026-08-12-sum-type-sugar-and-compilation.md`), matching the
+// interpreter and the pre-existing TUPLE precedent.
+//
+// The two halves of the design pull in opposite directions at a call site:
+// D3 makes a nominal OPAQUE, so the interpreter binds the whole tagged value
+// and never looks through it; D11 ERASES the tag, so `bag([1,2,3])` reaches
+// the emitted call as a bare JS array. The JS call-site broadcast
+// (`_SYS.bcastFn`) dispatches on `Array.isArray` at RUN time, so it used to
+// map the callee over that array — `size(bag([1,2,3]))` answering
+// `[42,42,42]` where the interpreter answers `42`.
+//
+// The carve-out keys on the argument's STATIC type, never on its expression
+// shape, and is deliberately narrow: opaque nominals, plus the transparent
+// alias a sugar-declared SUM is (every arm of one is a nominal, so every
+// runtime value is atomic). A plain `type alias` is NOT covered — the
+// interpreter does look through those, and does broadcast over them.
+//
+describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', () => {
+  /** The `bag`/`size` repro, in one engine. */
+  const bagEngine = (): ComputeEngine => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      `type bag = list<number>
+       function size(b: bag) -> number { 42 }`
+    );
+    expect(r.diagnostics.map((d) => String(d.message))).toEqual([]);
+    return ce;
+  };
+
+  test('the repro: a constructor-literal argument is bound whole, not mapped', () => {
+    const ce = bagEngine();
+    const expr = ce.box(['size', ['bag', ['List', 1, 2, 3]]] as never);
+    // The interpreter binds the tagged value whole (D3 opacity).
+    expect(expr.evaluate().re).toBe(42);
+    const r = compile(expr, { fallback: false });
+    // …and so does the emitted call: no runtime broadcast dispatch at all.
+    expect(r.code).toBe('_fn_size([1, 2, 3])');
+    expect(r.code).not.toContain('bcastFn');
+    expect(r.run!({})).toBe(42);
+  });
+
+  test('keyed on the static TYPE, not the expression shape: a bag-typed VARIABLE', () => {
+    const ce = bagEngine();
+    ce.declare('b', 'bag');
+    const r = compile(ce.box(['size', 'b'] as never), { fallback: false });
+    expect(r.code).toBe('_fn_size(_.b)');
+    expect(r.code).not.toContain('bcastFn');
+    expect(r.run!({ b: [1, 2, 3] })).toBe(42);
+  });
+
+  test('a plain TRANSPARENT alias still broadcasts — the carve-out is not over-broad', () => {
+    // `type alias mylist = list<number>` is looked THROUGH by the interpreter,
+    // so `q(L)` maps `q` element-wise. Pinning the pre-existing correct
+    // behavior: the carve-out must not swallow it.
+    const ce = new ComputeEngine();
+    const r0 = executeEpsil(ce, 'type alias mylist = list<number>');
+    expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
+    ce.box([
+      'Assign',
+      'q',
+      ['Function', ['Add', ['Multiply', 4, 't'], 1], 't'],
+    ] as never).evaluate();
+    // The interpreter's answer for the same values.
+    expect(ce.box(['q', ['List', 1, 2, 3]] as never).evaluate().toString()).toBe(
+      '[5,9,13]'
+    );
+    ce.declare('L', 'mylist');
+    expect(ce.box('L').type.toString()).toBe('mylist');
+    const r = compile(ce.box(['q', 'L'] as never), { fallback: false });
+    expect(r.code).toContain('_SYS.bcastFn');
+    expect(r.run!({ L: [1, 2, 3] })).toEqual([5, 9, 13]);
+  });
+
+  test('an ERASED-policy sum with a list-payload variant is atomic too', () => {
+    // `jarr(list<json>)` erases to a bare JS array under the erased policy —
+    // exactly the shape `bcastFn` would map. Both the variant type (`jarr`,
+    // an opaque nominal) and the sum type (`json`, the transparent alias
+    // carrying `_sumVariants`) must read as atomic.
+    const ce = new ComputeEngine();
+    const r0 = executeEpsil(
+      ce,
+      `type json = jnull | jbool(boolean) | jnum(number) | jstr(string) | jarr(list<json>)
+       function kind(v: json) -> number { 7 }`
+    );
+    expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
+
+    const expr = ce.box([
+      'kind',
+      ['jarr', ['List', ['jnum', 1], ['jnum', 2]]],
+    ] as never);
+    expect(expr.evaluate().re).toBe(7);
+    const r = compile(expr, { fallback: false });
+    expect(r.code).toBe('_fn_kind([1, 2])');
+    expect(r.code).not.toContain('bcastFn');
+    expect(r.run!({})).toBe(7);
+
+    // …and through a `json`-typed variable (the sum alias, not the variant).
+    ce.declare('v', 'json');
+    const r2 = compile(ce.box(['kind', 'v'] as never), { fallback: false });
+    expect(r2.code).toBe('_fn_kind(_.v)');
+    expect(r2.code).not.toContain('bcastFn');
+    expect(r2.run!({ v: [1, 2] })).toBe(7);
+  });
+
+  test('a SCALAR-wrapping nominal keeps the direct path', () => {
+    // `meters` was never mapped at run time (`5` is not an array), so this
+    // one only loses a dead dispatch — but it must still be correct.
+    const ce = new ComputeEngine();
+    const r0 = executeEpsil(
+      ce,
+      `type meters = number
+       function f(m: meters) -> number { 3 }`
+    );
+    expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
+    const expr = ce.box(['f', ['meters', 5]] as never);
+    expect(expr.evaluate().re).toBe(3);
+    const r = compile(expr, { fallback: false });
+    expect(r.code).toBe('_fn_f(5)');
+    expect(r.code).not.toContain('bcastFn');
+    expect(r.run!({})).toBe(3);
+  });
+
+  test('MIXED arguments: the carve-out is all-or-nothing, like the tuple one', () => {
+    // One nominal argument puts the WHOLE call on the direct path — the same
+    // all-or-nothing shape the `isTuple` clause has always had.
+    const ce = new ComputeEngine();
+    const r0 = executeEpsil(
+      ce,
+      `type bag = list<number>
+       function g(x: number, b: bag) -> number { x + 1 }`
+    );
+    expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
+    const expr = ce.box(['g', 10, ['bag', ['List', 1, 2, 3]]] as never);
+    expect(expr.evaluate().re).toBe(11);
+    const r = compile(expr, { fallback: false });
+    expect(r.code).toBe('_fn_g(10, [1, 2, 3])');
+    expect(r.code).not.toContain('bcastFn');
+    expect(r.run!({})).toBe(11);
+  });
+
+  test('a `broadcastable<T>` slot the nominal SATISFIES no longer fails closed', () => {
+    // `checkDeclaredBroadcast` runs just ahead of the call-site gate and used
+    // to decline here, contradicting the carve-out: the argument it called
+    // "possibly mapped" is atomic. Exempt on the same terms as an atomic
+    // tuple — only when the slot's element contract admits it.
+    const ce = new ComputeEngine();
+    const r0 = executeEpsil(ce, 'type bag = list<number>');
+    expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
+    ce.declare('h', { type: '(broadcastable<bag>) -> number' });
+    ce.assign('h', ce.box(['Function', 5, 'u'] as never));
+    expect(
+      ce.box(['h', ['bag', ['List', 1, 2, 3]]] as never).evaluate().re
+    ).toBe(5);
+    ce.declare('B', 'bag');
+    const r = compile(ce.box(['h', 'B'] as never), { fallback: false });
+    expect(r.code).toBe('_fn_h(_.B)');
+    expect(r.run!({ B: [1, 2, 3] })).toBe(5);
+  });
+
+  test('…but a `broadcastable<T>` slot the nominal REFUTES still fails closed', () => {
+    const ce = new ComputeEngine();
+    const r0 = executeEpsil(ce, 'type bag = list<number>');
+    expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
+    ce.declare('k', { type: '(broadcastable<number>) -> number' });
+    ce.assign('k', ce.box(['Function', ['Add', 'u', 1], 'u'] as never));
+    ce.declare('B', 'bag');
+    // The interpreter answers `incompatible-type`; no emitted form says that.
+    expect(
+      ce.box(['k', ['bag', ['List', 1, 2, 3]]] as never).evaluate().toString()
+    ).toContain('incompatible-type');
+    expect(() =>
+      compile(ce.box(['k', 'B'] as never), { fallback: false })
+    ).toThrow(/broadcastable<T>/);
   });
 });

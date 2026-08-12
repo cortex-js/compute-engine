@@ -6341,6 +6341,14 @@ export class BaseCompiler {
     //   - a TUPLE argument is atomic (a point/vector), excluded from broadcast
     //     by the interpreter yet lowered to a JS array here — `bcast` would
     //     map over its components. Leave those on the direct-call path;
+    //   - a NOMINAL-TYPED argument is atomic for exactly the same reason
+    //     (`isNominalAtomicArg`, ruled 2026-08-12 — see
+    //     `docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` context):
+    //     D3 opacity means the interpreter binds the whole tagged value, but
+    //     D11 erasure lowers `bag([1,2,3])` to the bare JS array, which
+    //     `bcastFn`'s runtime `Array.isArray` dispatch would then map over —
+    //     `size(bag([1,2,3]))` answering `[42,42,42]` where the interpreter
+    //     answers `42`. Leave those on the direct-call path too;
     //   - every argument PROVABLY not a collection (`provablyScalarArg`, at
     //     the top of this function) can never broadcast at run time, so the
     //     dispatch would be dead weight in the hot path.
@@ -6354,6 +6362,7 @@ export class BaseCompiler {
       args.length > 0 &&
       !args.every(provablyScalarArg) &&
       !args.some((a) => isTuple(a)) &&
+      !args.some((a) => BaseCompiler.isNominalAtomicArg(a)) &&
       BaseCompiler.userFunctionParamsAreScalar(engine, h)
     ) {
       // A complex-typed parameter is coerced INSIDE the closure, on the
@@ -6373,6 +6382,46 @@ export class BaseCompiler {
     return `${name}(${compiledArgs
       .map((code, i) => (coerceToComplex[i] ? complexWrap(code) : code))
       .join(', ')})`;
+  }
+
+  /**
+   * Is `a`'s STATIC type one whose values are ATOMIC at a call site — bound
+   * WHOLE by the interpreter, never mapped over? The nominal counterpart of
+   * the `isTuple` clause above (ruled 2026-08-12, context in
+   * `docs/plans/2026-08-12-sum-type-sugar-and-compilation.md`).
+   *
+   * Keyed on the static TYPE, not on the expression's shape: `size(b)` with
+   * `b: bag` is as atomic as `size(bag([1,2,3]))`.
+   *
+   * Two answers are `true`:
+   *  - an OPAQUE nominal reference (`alias !== true`). D3: a nominal's
+   *    representation is not its definition, so the interpreter binds the
+   *    tagged value whole. Compilation erases the tag (D11), and the bare
+   *    array left behind is what `bcastFn` would wrongly map.
+   *  - a TRANSPARENT alias reference that is a sugar-declared SUM — its
+   *    declaration record carries `_sumVariants`. Every arm of such a sum is
+   *    a nominal, so every runtime value is atomic by the clause above,
+   *    whichever arm it came from. (Under the TAGGED policy the value is a
+   *    `{_tag}` object, which `bcastFn` would not map anyway; under the
+   *    ERASED policy it can be a bare array, which it would. The static test
+   *    covers both uniformly.)
+   *
+   * Everything else is `false` — in particular a plain transparent alias
+   * (`type alias mylist = list<number>`), which the interpreter DOES look
+   * through and DOES broadcast over, and a hand-written union, which carries
+   * no sum identity.
+   *
+   * `alias` is read through the LIVE accessor (it delegates to the
+   * declaration record — a forward reference is created nominal-by-default
+   * and flipped when the `type alias` that fulfils it is parsed), and
+   * `_sumVariants` through {@link declarationOf}, since it lives on the
+   * declaration record and never on an applied reference.
+   */
+  private static isNominalAtomicArg(a: Expression): boolean {
+    const t = a.type.type;
+    if (typeof t === 'string' || t.kind !== 'reference') return false;
+    if (t.alias !== true) return true;
+    return declarationOf(t)._sumVariants !== undefined;
   }
 
   /**
@@ -6466,9 +6515,10 @@ export class BaseCompiler {
    * PER SLOT, though: only an argument that could actually be MAPPED forces
    * the decline. A collection at a slot the contract binds whole compiles
    * exactly as it did before the declaration existed, and so does an atomic
-   * TUPLE the slot's element type ADMITS (tuples are never mapped — rule 4).
-   * A tuple the element type refutes is NOT exempt: the interpreter answers
-   * `incompatible-type` there, and no emitted form says that.
+   * TUPLE — or an atomic NOMINAL-typed value — the slot's element type
+   * ADMITS (neither is ever mapped — rule 4, and the 2026-08-12 nominal
+   * ruling). One the element type refutes is NOT exempt: the interpreter
+   * answers `incompatible-type` there, and no emitted form says that.
    */
   private static checkDeclaredBroadcast(
     engine: ComputeEngine,
@@ -6483,9 +6533,13 @@ export class BaseCompiler {
         ? args.some((a, i) => {
             const slot = plan.at(i);
             if (!slot.mappable || provablyScalarArg(a)) return false;
-            // An atomic tuple binds whole — safe to emit, provided the slot's
-            // element contract actually admits it.
-            if (isTuple(a))
+            // An ATOMIC argument — a tuple, or a nominal-typed value (see
+            // {@link isNominalAtomicArg}; same 2026-08-12 ruling) — binds
+            // whole, so it is safe to emit, provided the slot's element
+            // contract actually admits it. Without the second clause this
+            // gate would contradict the call-site carve-out below: it would
+            // decline the very applications that carve-out proves atomic.
+            if (isTuple(a) || BaseCompiler.isNominalAtomicArg(a))
               return !(
                 slot.elements === undefined || a.type.matches(slot.elements)
               );
