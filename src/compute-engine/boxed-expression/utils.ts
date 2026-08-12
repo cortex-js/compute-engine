@@ -1262,7 +1262,6 @@ export function updateDef(
     // emission (design §4) — the CALLERS emit their operation event
     // (`declare`/`redefine`) separately, after this returns.
     ce._noteStateEvent({ kind: 'binding-repair' });
-    ce._anyVersion += 1;
     // Shadow 'callable' axis (CE_CACHE_STATS probe): this branch fires on
     // exactly the callable-shaped swaps — declares and redefinitions both
     // route through here.

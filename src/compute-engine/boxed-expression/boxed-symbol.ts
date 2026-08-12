@@ -541,8 +541,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           kind: 'inference',
           symbolSignature: true,
         });
-        this.engine._semanticVersion += 1;
-        this.engine._worldVersion += 1;
         if (sink && previousType !== undefined)
           sink._recordNarrowing(this._id, def, previousType, newType);
         return true;

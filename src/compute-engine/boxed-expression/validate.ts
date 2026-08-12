@@ -1384,9 +1384,6 @@ function repairFreshMatrixInference(
     def.value.inferredType = false;
   }
   ce._noteStateEvent({ kind: 'inference' });
-  ce._anyVersion += 1;
-  ce._semanticVersion += 1;
-  ce._worldVersion += 1;
 
   const repaired = ce.box(op.json);
   if (repaired.type.matches(expected)) {
@@ -1405,9 +1402,6 @@ function repairFreshMatrixInference(
     }
   }
   ce._noteStateEvent({ kind: 'inference' });
-  ce._anyVersion += 1;
-  ce._semanticVersion += 1;
-  ce._worldVersion += 1;
   return null;
 }
 

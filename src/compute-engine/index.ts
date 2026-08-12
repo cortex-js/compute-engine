@@ -197,7 +197,6 @@ import {
 import { CompilationTargetRegistry } from './engine-compilation-targets.js';
 import {
   EngineConfigurationLifecycle,
-  PARITY_CHECK,
   type StateEvent,
 } from './engine-configuration-lifecycle.js';
 import {
@@ -591,9 +590,6 @@ export class ComputeEngine implements IComputeEngine {
         // rollback is a global type-redefinition event (G+M+E, selected by
         // every axis). Recorded in the design's §2 table (2b addenda).
         this._noteStateEvent({ kind: 'config' });
-        this._anyVersion += 1;
-        this._semanticVersion += 1;
-        this._worldVersion += 1;
       }
     };
   }
@@ -655,54 +651,38 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * The generation is incremented each time the context changes.
-   * It is used to invalidate caches.
+   * The `any` invalidation axis — advanced by every state event whose mask
+   * selects it. READ-ONLY since the step-2b cutover: all advancement goes
+   * through `_noteStateEvent` and the dispatch table
+   * (`engine-configuration-lifecycle.ts`, `axisMaskOf` — the per-kind masks
+   * are documented there and in the design's §2/§5).
    * @internal
    */
   get _anyVersion(): number {
     return this._configurationLifecycle.anyVersion;
   }
 
-  set _anyVersion(value: number) {
-    this._configurationLifecycle.anyVersion = value;
-  }
-
   /**
-   * Bumped on SEMANTIC mutations only: value/type writes to bindings,
-   * `assume()`/`forget()`, signature inference on a shared definition, and
-   * popping an eval context that added assumptions. NOT bumped by plain
-   * scope push/pop or by ephemeral loop-index writes (big-op and
-   * comprehension index assigns, see `_ephemeralWriteDepth`), so caches
-   * keyed on it (the `Comprehension` element memo) survive unrelated scoped
-   * evaluations. Leaves `_anyVersion` semantics untouched.
+   * The `semantic` invalidation axis — semantic mutations only; excludes
+   * ephemeral loop-index writes and clean scope pops, so caches keyed on it
+   * (the `Comprehension` element memo) survive unrelated scoped
+   * evaluations. READ-ONLY since the step-2b cutover — see `_anyVersion`.
    * @internal
    */
   get _semanticVersion(): number {
     return this._configurationLifecycle.semanticVersion;
   }
 
-  set _semanticVersion(value: number) {
-    this._configurationLifecycle.semanticVersion = value;
-  }
-
   /**
-   * Bumped only on RARE global-semantics events: `assume()`/`forget()` and
-   * popping an eval context that added assumptions, operator/type
-   * redefinition, signature inference on a shared definition,
-   * matrix-inference repair, `reset()`, and engine-configuration changes
-   * (tolerance, precision, angular unit). NOT bumped by value writes or by
-   * fresh declarations — unlike `_semanticVersion`. A cache whose
+   * The `world` invalidation axis — rare global-semantics events only
+   * (assumptions, redefinition, inference, configuration). A cache whose
    * dependency tracking already covers value writes (the collection element
-   * memo) requires equality on THIS counter instead, so that an unrelated
-   * `assign()` does not cold it.
+   * memo) keys on THIS axis, so an unrelated `assign()` does not cold it.
+   * READ-ONLY since the step-2b cutover — see `_anyVersion`.
    * @internal
    */
   get _worldVersion(): number {
     return this._configurationLifecycle.worldVersion;
-  }
-
-  set _worldVersion(value: number) {
-    this._configurationLifecycle.worldVersion = value;
   }
 
   /**
@@ -724,12 +704,6 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _noteStateEvent(event: StateEvent): void {
     this._configurationLifecycle.noteStateEvent(event);
-  }
-
-  /** Parity-gate checkpoint (step 2b, `CE_PARITY_CHECK` only): callers are
-   * the public entry points. @internal */
-  _parityCheckpoint(label: string): void {
-    this._configurationLifecycle.parityCheckpoint(label);
   }
 
   /** Depth of nested top-level boxing operations (see
@@ -801,10 +775,6 @@ export class ComputeEngine implements IComputeEngine {
     if (value === this._jit) return;
     this._jit = value;
     this._noteStateEvent({ kind: 'config' });
-    this._anyVersion += 1;
-    this._semanticVersion += 1;
-    this._worldVersion += 1;
-    if (PARITY_CHECK) this._parityCheckpoint('jit');
   }
 
   private _jit: 'auto' | 'off' = 'auto';
@@ -1013,7 +983,6 @@ export class ComputeEngine implements IComputeEngine {
   set precision(p: number | 'machine' | 'auto') {
     if (!this._numericConfiguration.setPrecision(p)) return;
     this._reset();
-    if (PARITY_CHECK) this._parityCheckpoint('precision');
   }
 
   /**
@@ -1033,7 +1002,6 @@ export class ComputeEngine implements IComputeEngine {
   set angularUnit(u: AngularUnit) {
     if (!this._numericConfiguration.setAngularUnit(u)) return;
     this._reset();
-    if (PARITY_CHECK) this._parityCheckpoint('angularUnit');
   }
 
   /**
@@ -1243,10 +1211,6 @@ export class ComputeEngine implements IComputeEngine {
       // epoch event. Deliberately not a full `_reset()`: unlike precision, no
       // stored value needs to be recomputed.
       this._noteStateEvent({ kind: 'config' });
-      this._anyVersion += 1;
-      this._semanticVersion += 1;
-      this._worldVersion += 1;
-      if (PARITY_CHECK) this._parityCheckpoint('tolerance');
     }
   }
 
@@ -2049,11 +2013,7 @@ export class ComputeEngine implements IComputeEngine {
     arg2?: Type | TypeString | Partial<SymbolDefinition>,
     scope?: Scope
   ): IComputeEngine {
-    try {
-      return declareFnImpl(this, arg1, arg2, scope);
-    } finally {
-      if (PARITY_CHECK) this._parityCheckpoint('declare');
-    }
+    return declareFnImpl(this, arg1, arg2, scope);
   }
 
   /**
@@ -2247,11 +2207,7 @@ export class ComputeEngine implements IComputeEngine {
     arg1: string | { [id: string]: AssignValue },
     arg2?: AssignValue
   ): IComputeEngine {
-    try {
-      return assignFnImpl(this, arg1, arg2);
-    } finally {
-      if (PARITY_CHECK) this._parityCheckpoint('assign');
-    }
+    return assignFnImpl(this, arg1, arg2);
   }
 
   /**
@@ -2330,13 +2286,9 @@ export class ComputeEngine implements IComputeEngine {
     }
   ): Expression {
     const { canonical, structural } = optionsToInternal(options);
-    try {
-      return inHarvestScope(this, options?.scope, () =>
-        box(this, expr, { canonical, structural, scope: options?.scope })
-      );
-    } finally {
-      if (PARITY_CHECK) this._parityCheckpoint('expr');
-    }
+    return inHarvestScope(this, options?.scope, () =>
+      box(this, expr, { canonical, structural, scope: options?.scope })
+    );
   }
 
   /** @deprecated Use `expr()` instead. */
@@ -2606,7 +2558,6 @@ export class ComputeEngine implements IComputeEngine {
       return boxed;
     } finally {
       endInferenceTransaction(this);
-      if (PARITY_CHECK) this._parityCheckpoint('parse');
     }
   }
 
@@ -2951,11 +2902,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
   assume(predicate: Expression | string): AssumeResult {
-    try {
-      return assumeFnImpl(this, predicate);
-    } finally {
-      if (PARITY_CHECK) this._parityCheckpoint('assume');
-    }
+    return assumeFnImpl(this, predicate);
   }
 
   /**
@@ -2968,11 +2915,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    * */
   forget(symbol: undefined | MathJsonSymbol | MathJsonSymbol[]): void {
-    try {
-      forgetImpl(this, symbol);
-    } finally {
-      if (PARITY_CHECK) this._parityCheckpoint('forget');
-    }
+    forgetImpl(this, symbol);
   }
 }
 

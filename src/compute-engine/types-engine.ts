@@ -283,35 +283,31 @@ export interface IComputeEngine {
    * @internal */
   readonly _customLibraryOperators: Set<string>;
 
-  /** @internal */
-  _anyVersion: number;
+  /** The `any` invalidation axis (read-only; advanced only through
+   * `_noteStateEvent`). @internal */
+  readonly _anyVersion: number;
 
   /** Semantic-mutation counter (see `ComputeEngine._semanticVersion`).
    * @internal */
-  _semanticVersion: number;
+  readonly _semanticVersion: number;
 
   /** Rarely-bumped global-semantics counter (see
    * `ComputeEngine._worldVersion`).
    * @internal */
-  _worldVersion: number;
+  readonly _worldVersion: number;
 
   /** When > 0, value writes are ephemeral loop-index writes.
    * @internal */
   _ephemeralWriteDepth: number;
 
-  /** The state-event choke point (the parity regime of
-   * `docs/plans/2026-08-09-state-event-invalidation-axes.md` §3): write
-   * sites report what happened; the lifecycle's dispatch table maps the
-   * event to axis advancement. During migration step 2b the legacy counter
-   * writes remain authoritative and this advances shadow counters only.
+  /** The state-event choke point
+   * (`docs/plans/2026-08-09-state-event-invalidation-axes.md` §3): write
+   * sites report what happened; the lifecycle's dispatch table
+   * (`axisMaskOf`) decides which invalidation axes advance. Since the
+   * step-2b cutover this is the SOLE writer of the axes — the axis members
+   * below are read-only.
    * @internal */
   _noteStateEvent(event: StateEvent): void;
-
-  /** Parity-gate checkpoint (`CE_PARITY_CHECK` only, migration step 2b):
-   * compares live-vs-shadow axis advancement since the previous checkpoint
-   * and throws with the recent event trace on mismatch. Called at public
-   * operation boundaries. @internal */
-  _parityCheckpoint(label: string): void;
 
   /** Depth of nested top-level boxing operations (see
    * `beginInferenceTransaction` in `box.ts`).

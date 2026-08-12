@@ -1690,8 +1690,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 callableBefore: true,
                 callableAfter: true,
               });
-              ce._semanticVersion += 1;
-              ce._worldVersion += 1;
             }
           }
         }
@@ -1835,8 +1833,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                       callableBefore: true,
                       callableAfter: true,
                     });
-                    ce._semanticVersion += 1;
-                    ce._worldVersion += 1;
                   }
                 }
               }

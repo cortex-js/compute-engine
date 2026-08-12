@@ -173,6 +173,42 @@ describe('containsSignatureArm: the callable write-classifier', () => {
       expect(containsSignatureArm(parseType(t))).toBe(expected));
 });
 
+describe('choke-point pin: no direct axis writes outside the lifecycle', () => {
+  // The step-2b cutover made `noteStateEvent` the sole writer of the
+  // invalidation axes. This pin fails when any site writes an axis
+  // directly — the "each site hand-picks counters" failure mode the
+  // design's §3 closes structurally.
+  const fs = require('node:fs') as typeof import('node:fs');
+  const path = require('node:path') as typeof import('node:path');
+
+  function* tsFiles(dir: string): Generator<string> {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) yield* tsFiles(p);
+      else if (entry.name.endsWith('.ts')) yield p;
+    }
+  }
+
+  test('src contains no direct writes to the three axes', () => {
+    const root = path.join(__dirname, '../../src');
+    const offenders: string[] = [];
+    const write =
+      /_(anyVersion|semanticVersion|worldVersion)\s*(\+=|-=|\+\+|--|=\s*[^=])/;
+    for (const file of tsFiles(root)) {
+      if (file.endsWith('engine-configuration-lifecycle.ts')) continue;
+      const lines = fs.readFileSync(file, 'utf8').split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*'))
+          continue;
+        if (write.test(line))
+          offenders.push(`${path.relative(root, file)}:${i + 1}: ${line.trim()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('end-to-end advancement (legacy counters, public API)', () => {
   // These pin today's ADVANCEMENT behavior through real operations — the
   // outer layer of the parity gate, and the baseline the cutover must

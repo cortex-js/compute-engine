@@ -411,9 +411,6 @@ export function assumeFn(
 
     // The new assumption could affect existing expressions
     ce._noteStateEvent({ kind: 'assumption' });
-    ce._anyVersion += 1;
-    ce._semanticVersion += 1;
-    ce._worldVersion += 1;
     // Popping this context silently reverts the assumption: mark it so the
     // pop bumps `_semanticVersion` too (clean pops don't).
     if (ce.context) ce.context._assumptionsDirty = true;
@@ -458,9 +455,6 @@ export function forget(
 
     // The removed assumptions could affect existing expressions
     ce._noteStateEvent({ kind: 'assumption' });
-    ce._anyVersion += 1;
-    ce._semanticVersion += 1;
-    ce._worldVersion += 1;
     if (ce.context) ce.context._assumptionsDirty = true;
 
     return;
@@ -499,8 +493,5 @@ export function forget(
   }
   // The removed assumptions could affect existing expressions
   ce._noteStateEvent({ kind: 'assumption' });
-  ce._anyVersion += 1;
-  ce._semanticVersion += 1;
-  ce._worldVersion += 1;
   if (ce.context) ce.context._assumptionsDirty = true;
 }

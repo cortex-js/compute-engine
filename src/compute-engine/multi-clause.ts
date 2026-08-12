@@ -687,8 +687,6 @@ function installClauseList(
     callableBefore: true,
     callableAfter: true,
   });
-  ce._semanticVersion += 1;
-  ce._worldVersion += 1;
 }
 
 //

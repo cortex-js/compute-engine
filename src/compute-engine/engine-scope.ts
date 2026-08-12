@@ -109,26 +109,20 @@ function discardEvalContext(
   // declarations to the enclosing context. Per-expression caches keyed on
   // `ce._anyVersion` (e.g. `BoxedFunction.sgn`/`.type`) would otherwise keep
   // returning values computed under the popped scope's assumptions — a stale
-  // read on any expression held across the scope. `assume()`/`forget()` bump
-  // the generation on the way in, but the revert on the way out is silent, so
-  // bump here to invalidate those caches. (A matching bump on push is not
-  // needed: `pushEvalContext` copies the current assumptions unchanged, and any
-  // assumption added inside the scope goes through `assume()`, which bumps.)
+  // read on any expression held across the scope. `assume()`/`forget()`
+  // advance the axis on the way in, but the revert on the way out is silent,
+  // so this event covers it. (A matching event on push is not needed:
+  // `pushEvalContext` copies the current assumptions unchanged, and any
+  // assumption added inside the scope goes through `assume()`.) The
+  // `assumptionsDirty` payload carries the M+E half: `_semanticVersion` (the
+  // key of the `Comprehension` element memo) advances ONLY when this
+  // context's assumptions were modified — a clean pop leaves it untouched so
+  // mutation-keyed caches survive unrelated scoped evaluations (Tycho
+  // item 38).
   ce._noteStateEvent({
     kind: 'scope-pop',
     assumptionsDirty: context?._assumptionsDirty === true,
   });
-  ce._anyVersion += 1;
-
-  // `_semanticVersion` (the key of the `Comprehension` element memo) is
-  // bumped by the pop ONLY when this context's assumptions were modified —
-  // that revert is the one semantic change a pop can make. A clean pop leaves
-  // it untouched so mutation-keyed caches survive unrelated scoped
-  // evaluations (Tycho item 38).
-  if (context?._assumptionsDirty) {
-    ce._semanticVersion += 1;
-    ce._worldVersion += 1;
-  }
 }
 
 export function inScope<T>(
@@ -154,17 +148,13 @@ export function inScope<T>(
     const popped = ce._evalContextStack.pop();
     // Mirror popEvalContext: reverting assumptions modified inside the
     // temporary context is a semantic change. (The `transient` variant has
-    // no G bump — §2's measured mask — and emits even when clean, for
+    // no G advance — §2's measured mask — and emits even when clean, for
     // future axis subscribers.)
     ce._noteStateEvent({
       kind: 'scope-pop',
       assumptionsDirty: popped?._assumptionsDirty === true,
       transient: true,
     });
-    if (popped?._assumptionsDirty) {
-      ce._semanticVersion += 1;
-      ce._worldVersion += 1;
-    }
   }
 }
 

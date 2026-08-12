@@ -646,8 +646,6 @@ function tryFinalizeSequence(ce: ComputeEngine, name: string): void {
       callableBefore,
       callableAfter: true,
     });
-    ce._semanticVersion += 1;
-    ce._worldVersion += 1;
   } else {
     // Symbol doesn't exist - declare it with the handler
     ce.declare(name, {

@@ -445,7 +445,6 @@ export function declareSymbolValue(
     callable: defIsCallableShaped(boxedDef),
     shadowsCallable,
   });
-  ce._anyVersion += 1;
 
   return boxedDef;
 }
@@ -470,7 +469,6 @@ export function declareSymbolOperator(
   updateDef(ce, name, boxedDef, def);
 
   ce._noteStateEvent({ kind: 'declare', callable: true, shadowsCallable });
-  ce._anyVersion += 1;
 
   return boxedDef;
 }
@@ -501,7 +499,6 @@ export function setSymbolValue(
     // of the parity gate (design §8) — advancement-invisible, no second
     // event.
     def.value.value = value;
-    ce._anyVersion += 1;
     // The declared-signature reconciliation paths (§6.3) store a `Function`
     // literal through here rather than through `updateDef`, so this is where a
     // function-typed value definition joins the forward-reference mechanism:
@@ -1030,14 +1027,11 @@ export function declareType(
     // the parity dispatch, like the type-statement rollback in `index.ts`.
     // Both rows are recorded in the design's §2 table (2b addenda).
     ce._noteStateEvent({ kind: 'config' });
-    ce._anyVersion += 1;
     // A type REDEFINITION (statement replace, forward-ref fulfillment,
     // variance settle) changes the answers subtyping gives — a
     // global-semantics event on all three axes ('operator/type redefinition'
     // in `_worldVersion`'s contract). A FRESH declaration deliberately bumps
     // none of these beyond what `ce.declare()` did for the constructor half.
-    ce._semanticVersion += 1;
-    ce._worldVersion += 1;
     // Shadow 'callable' axis (CE_CACHE_STATS probe): variance settle is a
     // binding-repair event in its predicate.
     if (CACHE_STATS) bumpShadowCallable();
@@ -1891,8 +1885,6 @@ export function assignFn(
               callableBefore,
               callableAfter: true,
             });
-            ce._semanticVersion += 1;
-            ce._worldVersion += 1;
           }
           return ce;
         }
@@ -1938,6 +1930,9 @@ export function assignFn(
       return ce;
     }
     {
+      // Redefining an existing operator is a semantic mutation AND a
+      // global-semantics event (no value-setter write happens on this path,
+      // so the `redefine` event is the sole advance: semantic + world axes).
       const callableBefore = defIsCallableShaped(def);
       updateDef(ce, id, def, fnDef);
       ce._noteStateEvent({
@@ -1946,11 +1941,6 @@ export function assignFn(
         callableAfter: true,
       });
     }
-    // Redefining an existing operator is a semantic mutation (no value-setter
-    // write happens on this path, so bump explicitly) — and a global-semantics
-    // event, not a value write, so the epoch bumps too.
-    ce._semanticVersion += 1;
-    ce._worldVersion += 1;
     return ce;
   }
 
@@ -2024,8 +2014,6 @@ export function assignFn(
       callableBefore,
       callableAfter: true,
     });
-    ce._semanticVersion += 1;
-    ce._worldVersion += 1;
   } else {
     // No previous definition: create a new one
     ce.declare(id, fnDef);

@@ -27,7 +27,6 @@ import {
   recordBump,
   bumpShadowCallable,
 } from '../../common/cache-stats.js';
-import { PARITY_CHECK } from '../engine-configuration-lifecycle.js';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -310,15 +309,15 @@ export class _BoxedValueDefinition
     // authoritative for type-level reach; otherwise the effective type
     // derives from the value, on each side of the swap.
     //
-    // Computed only when a consumer exists — the CE_CACHE_STATS probe or the
-    // CE_PARITY_CHECK trace. The `value-write` axis mask does not read
-    // `callable`, and no live axis subscribes to it until migration step 3
-    // (the `callable` axis), so default builds skip the classification on
-    // this hot path (every write, including ephemeral loop-index assigns).
-    // Step 3 makes it unconditional — with the cost budgeted in the
-    // design's §3 — when the flag gains its live consumer.
+    // Computed only when a consumer exists — the CE_CACHE_STATS probe. The
+    // `value-write` axis mask does not read `callable`, and no live axis
+    // subscribes to it until migration step 3 (the `callable` axis), so
+    // default builds skip the classification on this hot path (every write,
+    // including ephemeral loop-index assigns). Step 3 makes it
+    // unconditional — with the cost budgeted in the design's §3 — when the
+    // flag gains its live consumer.
     let callable = false;
-    if (CACHE_STATS || PARITY_CHECK) {
+    if (CACHE_STATS) {
       const litCallable = (x0: Expression | null | undefined): boolean => {
         if (x0 == null) return false;
         const x = x0 as {
@@ -344,13 +343,12 @@ export class _BoxedValueDefinition
       recordBump(ephemeral ? 'ephemeralValueWrite' : 'valueWrite');
       if (callable) bumpShadowCallable();
     }
-    this._engine._anyVersion += 1;
     this._writeVersion += 1;
-    // Ephemeral loop-index writes (big-op/comprehension index assigns) are
-    // tracked per-definition only: they must not invalidate mutation-keyed
-    // caches of expressions that don't reference the index.
-    if (this._engine._ephemeralWriteDepth === 0)
-      this._engine._semanticVersion += 1;
+    // Axis advancement comes from the `value-write` event above: ephemeral
+    // loop-index writes (big-op/comprehension index assigns) advance the
+    // `any` axis and this definition's `_writeVersion` but NOT `semantic` —
+    // they must not invalidate mutation-keyed caches of expressions that
+    // don't reference the index (the event's `ephemeral` flag carries this).
   }
 
   get type(): BoxedType {

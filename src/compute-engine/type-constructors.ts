@@ -162,7 +162,6 @@ function removeMintedTypeConstructor(
   // the generation (a re-mint bumps it again through `ce.declare()`, but the
   // remove-only path — a body edited from a tuple to a record — would not).
   ce._noteStateEvent({ kind: 'binding-repair' });
-  ce._anyVersion += 1;
   // Shadow 'callable' axis (CE_CACHE_STATS probe): a constructor (callable)
   // binding was removed — binding-repair event.
   if (CACHE_STATS) bumpShadowCallable();
@@ -858,8 +857,6 @@ export function installConstructorFunction(
       callableBefore,
       callableAfter: true,
     });
-    ce._semanticVersion += 1;
-    ce._worldVersion += 1;
   } else {
     ce.declare(name, def);
   }

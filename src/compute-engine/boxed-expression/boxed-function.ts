@@ -145,7 +145,6 @@ import {
   shadowEffectsOnHit,
   shadowEffectsOnRecompute,
 } from '../../common/cache-stats.js';
-import { PARITY_CHECK } from '../engine-configuration-lifecycle.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
@@ -444,13 +443,9 @@ export class BoxedFunction
     // serializes pure the moment its result type is inferred.
     def._resyncEffects();
 
-    this.engine._noteStateEvent({ kind: 'inference' });
-
-    this.engine._anyVersion += 1;
     // Signature inference mutates a SHARED operator definition in place: a
     // semantic change other expressions may depend on.
-    this.engine._semanticVersion += 1;
-    this.engine._worldVersion += 1;
+    this.engine._noteStateEvent({ kind: 'inference' });
 
     if (
       sink &&
@@ -1623,19 +1618,11 @@ export class BoxedFunction
     // A deadline is armed only by an enclosing `withTimeLimit` span; work
     // outside a span runs unbounded. Evaluation checkpoints the ambient
     // deadline (`engine._deadlineFrame`) if one is in effect.
-    try {
-      const canonical = this._canonicalToEvaluate();
-      if (canonical) return canonical.evaluate(options);
-      if (this._isMemoizableLazyCollection(options))
-        return this._memoizedLazyCollectionValue(options);
-      return this._computeValue(options)();
-    } finally {
-      // Parity gate (design §8, step 2b): `evaluate` is one of the public
-      // operation boundaries. Nested evaluates checkpoint too — harmless,
-      // since every event is emitted adjacent to its legacy bumps, so no
-      // window boundary can split a pair.
-      if (PARITY_CHECK) this.engine._parityCheckpoint('evaluate');
-    }
+    const canonical = this._canonicalToEvaluate();
+    if (canonical) return canonical.evaluate(options);
+    if (this._isMemoizableLazyCollection(options))
+      return this._memoizedLazyCollectionValue(options);
+    return this._computeValue(options)();
   }
 
   /**
