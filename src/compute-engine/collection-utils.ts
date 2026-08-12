@@ -198,6 +198,30 @@ export function canEnumerateFiniteSource(
 }
 
 /**
+ * The `elementCount` handler of a LENGTH-PRESERVING eager operator over a
+ * finite source at `op1` (`Sort`, `Ordering`, `RandomShuffle`): its result has
+ * exactly as many elements as its source.
+ *
+ * Gated on the source being a definitively FINITE collection, mirroring those
+ * operators' evaluate guards: on an infinite or unknown-finiteness source they
+ * decline (or error), so there is no result to count and the honest answer is
+ * `undefined` — not the source's `Infinity` (Tycho item-169 ruling: a count
+ * nobody can walk is worse than no count).
+ *
+ * Evaluation-free and draw-free: `RandomShuffle` uses it without touching the
+ * random stream.
+ */
+export function elementCountOfFiniteSource(
+  expr: Expression
+): number | undefined {
+  if (!isFunction(expr)) return undefined;
+  const xs = expr.op1;
+  if (xs === undefined) return undefined;
+  if (xs.isFiniteCollection !== true) return undefined;
+  return xs.count;
+}
+
+/**
  * The `isEnumerable` handler of a collection operator that wraps ONE source
  * collection at `op1` (`Take`, `Filter`, `Reverse`, `Map`, …): it can produce
  * elements exactly when its source can.

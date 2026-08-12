@@ -12,6 +12,7 @@ import {
   broadcastOverIndexedCollections,
   canEnumerateFiniteSource,
   canEnumerateOperand,
+  elementCountOfFiniteSource,
   enumerableFromAllSources,
   enumerableFromSource,
   hasAccessibleComponents,
@@ -5917,6 +5918,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
+    // One index per element: length-preserving over the source.
+    elementCount: elementCountOfFiniteSource,
     evaluate: ([xs, fn], { engine: ce }) => {
       // Stay inert on non-finite or unknown-length input, aligning with Sort:
       // an empty List would falsely claim a complete ordering.
@@ -5947,6 +5950,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
+    // A permutation of the source: length-preserving.
+    elementCount: elementCountOfFiniteSource,
     evaluate: ([xs, fn], { engine: ce }) => {
       // Eager collection results rebuild as `List`, never the source's head
       // (a `Range`/`Linspace` head would reinterpret the sorted elements as
@@ -6116,6 +6121,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Mirrors the evaluate guards: an infinite source errors, an unknown
     // finiteness stays symbolic.
     canEnumerate: canEnumerateFiniteSource,
+    // A permutation of the source: length-preserving, and reading it consumes
+    // ZERO draws (`elementCountOfFiniteSource` never evaluates).
+    elementCount: elementCountOfFiniteSource,
     evaluate: ([xs], { engine: ce }) => {
       // An INFINITE collection can never be shuffled: error loudly, matching
       // `Random`/`RandomSample` (`out-of-range`, "a finite collection").
@@ -6612,6 +6620,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       });
       if (k === false) return false;
       return canEnumerateFiniteSource(expr);
+    },
+    // `Chunk` RESHAPES: the result has exactly `k` groups, whatever the
+    // source's length (`Chunk([1,2,3], 5)` yields 5 groups, two of them
+    // empty) — so it must answer its own length rather than inherit the
+    // source's. Knowable only when `k` is a literal positive integer AND the
+    // source is a finite collection (the evaluate guard below); anything else
+    // declines.
+    elementCount: (expr) => {
+      if (!isFunction(expr)) return undefined;
+      if (expr.op1.isFiniteCollection !== true) return undefined;
+      const k = toInteger(expr.op2);
+      if (k === null || k <= 0) return undefined;
+      return k;
     },
     evaluate: ([xs, n], { engine: ce }) => {
       const k = toInteger(n);

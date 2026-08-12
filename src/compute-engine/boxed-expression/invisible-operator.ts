@@ -136,7 +136,25 @@ export function canonicalInvisibleOperator(
         (x) => x.isValid && (x.type.isUnknown || x.type.matches('number'))
       );
 
-      if (allArgsNumeric) {
+      // …but the HEAD decides, not the argument: a head bound to a value that
+      // does not multiply (a string, a set, a boolean) can be neither scaled
+      // nor applied, and reading the juxtaposition as a product yields a
+      // `Multiply` whose type error blames multiplication instead of the
+      // actual mistake — the illegal application of a non-function value. Such
+      // a head falls through to the function-call route below, matching the
+      // `isScalable` gate on the non-numeric branch just after (item 173:
+      // the reading must not depend on the argument's type). Heads that are
+      // still ambiguous — undeclared, or typed `unknown`/`any`/`expression`/
+      // `value` — keep the charitable product reading (`x(x+1)`, `q(2q)`),
+      // which is what this branch is for.
+      const headCannotMultiply =
+        def !== undefined &&
+        !isOperatorDef(def) &&
+        def.value !== undefined &&
+        !isWideValueType(lhsCanon) &&
+        !isScalable(lhsCanon);
+
+      if (allArgsNumeric && !headCannotMultiply) {
         // The product reading rests on `lhsCanon` having no function
         // definition *yet*: record it so a `Function` literal canonicalized now
         // can be re-derived if the symbol later gains one (see
@@ -476,6 +494,19 @@ function isScalable(x: Expression): boolean {
     isLinearAlgebraCollection(x) ||
     couldBeNumericTuple(x)
   );
+}
+
+/**
+ * Whether the head's type is too WIDE to settle the multiply-vs-apply reading:
+ * `unknown`, or one of the supertypes spanning both scalars and collections
+ * (`any`, `expression`, `value`). These are exactly the wide-type arms of the
+ * multi-operand invisible-multiplication gate below, which reads them as
+ * products; the scalar-argument branch does too, so only a head with a
+ * CONCRETE non-multiplicative type is diverted to the application route.
+ */
+function isWideValueType(x: Expression): boolean {
+  const t = x.type.type;
+  return x.type.isUnknown || t === 'any' || t === 'expression' || t === 'value';
 }
 
 /** Whether a later definition could turn a juxtaposition on this symbol into a

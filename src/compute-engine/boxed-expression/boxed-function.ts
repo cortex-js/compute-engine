@@ -2207,6 +2207,12 @@ export class BoxedFunction
     // A DECLARED count handler owns the answer, including its `undefined`.
     const handler = this.operatorDefinition?.collection?.count;
     if (handler !== undefined) return handler(this);
+    // An EAGER producer with no collection handlers may still know its own
+    // length without evaluating (`Sort` preserves its source's, `Chunk`
+    // answers `k`) — the `count` twin of `canEnumerate`. It owns the answer,
+    // including its `undefined`.
+    const elementCount = this.operatorDefinition?.elementCount;
+    if (elementCount !== undefined) return elementCount(this);
     return this._broadcastCount();
   }
 
@@ -2234,6 +2240,14 @@ export class BoxedFunction
    * Deliberately NOT extended to `isCollection`/`isFiniteCollection`: those
    * report `false`/`undefined` for a `list<finite_number>` by design, and
    * consumers rely on that. This answers the LENGTH question only.
+   *
+   * Gated on `broadcastable === true` (2026-08-12): agreement is the length
+   * rule for a LIFTING operator only. Ungated, it answered the OPERANDS' length
+   * for any bound, handler-less, collection-typed operator — so a RESHAPING
+   * operator inherited its source's length (`Chunk([1,2,3], 2)` reported 3,
+   * true count 2). An operator that does know its length without evaluating
+   * says so with an `elementCount` handler; the rest honestly report
+   * `undefined`.
    */
   private _broadcastCount(): number | undefined {
     // Only a collection-SHAPED result can have an element count. `Add(1, 2)`
@@ -2248,7 +2262,11 @@ export class BoxedFunction
     // Total([1, 2])` counted 2 through `Add` while walking 0. A count nobody
     // can walk is worse than no count, so this is the same `undefined`
     // `Add([1,2], [1,2,3])` already gets.
-    if (this.operatorDefinition === undefined) return undefined;
+    //
+    // Nor does a bound head that does not LIFT: agreement is the length rule
+    // for a broadcasting operator only. Every other collection-typed operator
+    // decides its own length — and answers it with `elementCount` when it can.
+    if (this.operatorDefinition?.broadcastable !== true) return undefined;
     const ops = this.ops;
     if (ops === undefined) return undefined;
     let count: number | undefined;

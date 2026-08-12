@@ -138,3 +138,128 @@ describe('Tycho item 169: count does not outrun the walk', () => {
     expect(walked(expr)).toBe(2);
   });
 });
+
+// 2026-08-12: the broadcast count leaked onto NON-broadcasting operators.
+// It had no `broadcastable` gate, so any bound, collection-handler-less,
+// collection-typed operator with a collection operand answered its OPERAND's
+// length — `Chunk([1,2,3], 2).count` was 3 (true count: 2). The leak was
+// accidentally right for length-preserving operators (`Sort`,
+// `RandomShuffle`), which is why it survived.
+//
+// Fixed in two parts: `_broadcastCount` is now gated on
+// `operatorDefinition.broadcastable === true` — agreement is the length rule
+// for a LIFTING operator only — and an operator that knows its own length
+// without evaluating declares an `elementCount` handler (the `count` twin of
+// `canEnumerate`). Everything else honestly reports `undefined`.
+describe('the broadcast count does not leak onto reshaping operators', () => {
+  let ce: ComputeEngine;
+  beforeEach(() => {
+    ce = new ComputeEngine();
+  });
+
+  describe('Chunk reshapes: it answers k, not its source length', () => {
+    test('Chunk([1,2,3], 2) counts 2, not 3', () => {
+      const expr = ce.box(['Chunk', ['List', 1, 2, 3], 2]);
+      expect(expr.count).toBe(2);
+      expect(expr.count).toBe(expr.evaluate().count);
+    });
+
+    test('k groups even when k exceeds the source length', () => {
+      // `Chunk([1,2,3], 5)` pads with empty groups — the count is `k`, and is
+      // emphatically not the source's 3 nor `ceil(3/5)`.
+      const expr = ce.box(['Chunk', ['List', 1, 2, 3], 5]);
+      expect(expr.count).toBe(5);
+      expect(expr.count).toBe(expr.evaluate().count);
+    });
+
+    test('a non-literal k declines', () => {
+      expect(ce.box(['Chunk', ['List', 1, 2, 3], 'n']).count).toBeUndefined();
+    });
+
+    test('a non-literal source declines', () => {
+      expect(ce.box(['Chunk', 'xs', 2]).count).toBeUndefined();
+    });
+  });
+
+  describe('length-preserving operators answer via elementCount', () => {
+    test('Sort preserves its source length', () => {
+      const expr = ce.box(['Sort', ['List', 3, 1, 2]]);
+      expect(expr.count).toBe(3);
+      expect(expr.count).toBe(expr.evaluate().count);
+    });
+
+    test('Ordering emits one index per element', () => {
+      const expr = ce.box(['Ordering', ['List', 3, 1, 2]]);
+      expect(expr.count).toBe(3);
+      expect(expr.count).toBe(expr.evaluate().count);
+    });
+
+    test('RandomShuffle is a permutation', () => {
+      const expr = ce.box(['RandomShuffle', ['List', 1, 2, 3]]);
+      expect(expr.count).toBe(3);
+    });
+
+    test('an infinite source declines rather than reporting Infinity', () => {
+      // `Sort` refuses a non-finite source, so there is no sorted collection
+      // to count — the leak reported the source's `Infinity` for a walk of 0.
+      const expr = ce.parse('\\mathrm{Sort}(1..\\infty)');
+      expect(expr.count).toBeUndefined();
+      expect([...expr.each()].length).toBe(0);
+    });
+  });
+
+  describe('reading the count of an impure producer draws nothing', () => {
+    test('RandomShuffle counts without evaluating', () => {
+      const expr = ce.box(['RandomShuffle', ['List', 1, 2, 3]]);
+      const before = expr.toString();
+      const proto = Object.getPrototypeOf(expr);
+      const original = proto.evaluate;
+      let evaluations = 0;
+      try {
+        proto.evaluate = function (...args: unknown[]) {
+          evaluations += 1;
+          return original.apply(this, args);
+        };
+        expect(expr.count).toBe(3);
+        expect(evaluations).toBe(0);
+      } finally {
+        proto.evaluate = original;
+      }
+      // The expression is untouched: still the symbolic shuffle.
+      expect(expr.toString()).toBe(before);
+    });
+
+    test('the random stream is not advanced by reading the count', () => {
+      const withCount = new ComputeEngine();
+      const withoutCount = new ComputeEngine();
+      const seeded = (engine: ComputeEngine, readCount: boolean): string => {
+        const expr = engine.box([
+          'WithRandomSeed',
+          42,
+          ['RandomShuffle', ['List', 1, 2, 3, 4, 5, 6, 7, 8]],
+        ]);
+        if (readCount) void expr.op2.count;
+        return expr.evaluate().toString();
+      };
+      expect(seeded(withCount, true)).toBe(seeded(withoutCount, false));
+    });
+  });
+
+  describe('an unadopted operator reports undefined, not its source length', () => {
+    // `GroupBy`/`BinCounts`/`Histogram` reshape too, and their result length
+    // is not cheaply knowable. `undefined` IS the fix for them.
+    test('BinCounts', () => {
+      expect(ce.box(['BinCounts', ['List', 1, 2, 3], 2]).count).toBeUndefined();
+    });
+
+    test('Histogram', () => {
+      expect(ce.box(['Histogram', ['List', 1, 2, 3], 2]).count).toBeUndefined();
+    });
+
+    test('GroupBy', () => {
+      expect(
+        ce.box(['GroupBy', ['List', 1, 2, 3], ['Function', 'x', 'x']]).count
+      ).toBeUndefined();
+    });
+  });
+});

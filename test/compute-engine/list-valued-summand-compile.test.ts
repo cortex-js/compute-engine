@@ -285,3 +285,140 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
     expect((r as any).run({ t: 0.3 })).toBeCloseTo(9, 10); // 1 + 3 + 5
   });
 });
+
+// Tycho item 171, residue on the NON-JS targets (2026-08-12). The JS fix above
+// routes the shape into the element-wise `_SYS.bcast` fold, but GLSL/WGSL,
+// Python and interval-js call `BaseCompiler.assertScalarBigOpBody` directly and
+// have NO element-wise arm — correct emission is not on the table there, so the
+// only sound answer is to decline (D6).
+//
+// They were admitting it: `assertScalarBigOpBody`'s first clause declines a
+// body whose DECLARED type matches `list`/`indexed_collection`, but under the
+// consumers' open `(unknown) -> unknown` head the body types
+// `broadcastable<unknown>` and rode the two documented item-121 EXEMPTIONS
+// (top types and `broadcastable<T>` stay admitted) straight into the scalar
+// accumulation. GLSL emitted, behind `success: true`:
+//
+//     vec2 _fn_a(float t) { return vec2(cos(t), sin(t)); }
+//     float _fn_A(float t) {
+//       return ((_fn_a(_fn_h(0.0))) + (_fn_a(_fn_h(1.0))) + (_fn_a(_fn_h(2.0))));
+//     }
+//
+// — a `vec2` sum returned from a `float` function, i.e. shader source that does
+// not even compile. WGSL emitted the same shape.
+//
+// The fix is a third clause on `assertScalarBigOpBody`
+// (`isCollectionValuedBigOpBodyByLookThrough`), sharing the JS look-through's
+// mechanism: it fires ONLY where an exemption is doing the admitting, and ONLY
+// on POSITIVE evidence — the operator names a user function whose
+// `Function`-literal body has a type that MATCHES a collection. Absence of
+// evidence stays admitted, per the item-121 closure.
+describe('list-valued big-op bodies decline on the non-JS targets (item 171 residue)', () => {
+  const NON_JS = ['glsl', 'wgsl', 'python', 'interval-js'] as const;
+
+  const setup = (hBody: any = 'i') => {
+    const ce = new ComputeEngine();
+    for (const id of ['h', 'a', 'A'])
+      ce.declare(id, { signature: '(unknown) -> unknown' });
+    ce.assign('h', ce.box(['Function', ['Block', hBody], 'i']));
+    ce.assign(
+      'a',
+      ce.box(['Function', ['Block', ['List', ['Cos', 't'], ['Sin', 't']]], 't'])
+    );
+    ce.assign(
+      'A',
+      ce.box([
+        'Function',
+        ['Block', ['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]],
+        't',
+      ])
+    );
+    return ce;
+  };
+
+  test.each(NON_JS)('%s declines `Sum a(h(i))` (direct form)', (to) => {
+    const ce = setup();
+    const r = compile(ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]), {
+      to,
+      fallback: true,
+    } as any);
+    expect(r?.success ?? false).toBe(false);
+    expect((r as any).error).toMatch(/collection-valued body does not compile/);
+  });
+
+  test.each(NON_JS)('%s declines the `A(t)` wrapper form', (to) => {
+    const ce = setup();
+    const r = compile(ce.parse('A(t)', { strict: false }), {
+      to,
+      fallback: true,
+    } as any);
+    expect(r?.success ?? false).toBe(false);
+    // The MESSAGE is pinned on the direct form above, not here: Python has no
+    // user-function lowering at all, so the wrapper declines earlier, at the
+    // outer `A` call ("Unknown operator `A`"), and never reaches the big-op
+    // gate. That decline is pre-existing and independent of this fix.
+    if (to !== 'python')
+      expect((r as any).error).toMatch(
+        /collection-valued body does not compile/
+      );
+  });
+
+  test('JavaScript is unaffected — it still takes the element-wise fold', () => {
+    const ce = setup();
+    const r = compile(ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]), {
+      fallback: true,
+    });
+    expect(r?.success).toBe(true);
+    expect((r as any).code).toContain('_SYS.bcast');
+    expect(Array.isArray((r as any).run({}))).toBe(true);
+  });
+
+  // The item-121 exemptions must survive on every target: the refinement adds
+  // POSITIVE collection evidence, it does not narrow "absence of evidence".
+  test.each(['javascript', ...NON_JS] as const)(
+    '%s still compiles a boolean big-op body (the counting idiom)',
+    (to) => {
+      const ce = new ComputeEngine();
+      const r = compile(
+        ce.box(['Sum', ['Greater', 'i', 1], ['Limits', 'i', 1, 3]]),
+        { to, fallback: true } as any
+      );
+      expect(r?.success).toBe(true);
+    }
+  );
+
+  test.each(['javascript', ...NON_JS] as const)(
+    '%s still compiles a wide-typed (possibly broadcastable) big-op body',
+    (to) => {
+      const ce = new ComputeEngine();
+      ce.declare('b', 'unknown');
+      const r = compile(
+        ce.box(['Sum', ['Multiply', 2, 'b'], ['Limits', 'i', 0, 2]]),
+        { to, fallback: true } as any
+      );
+      expect(r?.success).toBe(true);
+    }
+  );
+
+  test.each(['javascript', 'glsl', 'wgsl', 'interval-js'] as const)(
+    '%s still compiles a wide-declared user helper whose body is SCALAR',
+    (to) => {
+      // The shader idiom the `broadcastable<T>` exemption exists for: an open
+      // `(unknown) -> unknown` helper that is scalar at run time. Only the
+      // collection-constructing body is new evidence. (Python is omitted: it
+      // has no user-function lowering at all and declines with
+      // "Unknown operator `q`" independently of this change.)
+      const ce = new ComputeEngine();
+      ce.declare('q', { signature: '(unknown) -> unknown' });
+      ce.assign(
+        'q',
+        ce.box(['Function', ['Block', ['Add', ['Multiply', 2, 'x'], 1]], 'x'])
+      );
+      const r = compile(ce.box(['Sum', ['q', 'i'], ['Limits', 'i', 0, 2]]), {
+        to,
+        fallback: true,
+      } as any);
+      expect(r?.success).toBe(true);
+    }
+  );
+});

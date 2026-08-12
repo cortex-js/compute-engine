@@ -696,6 +696,35 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * handlers — those own enumerability via `collection.isEnumerable`.
      */
     canEnumerate?: (expr: Expression) => boolean | undefined;
+
+    /**
+     * For an operator that RETURNS a collection but has no `collection`
+     * handlers (an EAGER producer — `Sort`, `Chunk`, `Ordering`, …): how many
+     * elements would `evaluate()` produce?
+     *
+     * The `count` twin of {@link canEnumerate}, and the honest replacement for
+     * the broadcast count fallback: `count` reads the operands' agreed length
+     * only for a `broadcastable` operator, where agreement IS the semantics
+     * (`docs/BROADCAST-MODEL.md`). A reshaping operator's length is its own
+     * business, so it must say so here or report `undefined`.
+     *
+     * Contract, mirroring `canEnumerate`:
+     *
+     * - MUST be O(1), evaluation-free and side-effect free. An impure producer
+     *   (`RandomShuffle`) answers from its operands' facets, consuming ZERO
+     *   draws.
+     * - The operands seen here are the CANONICAL ones. Anything not cheaply
+     *   knowable — a non-literal shape argument, an unknown source length —
+     *   must report `undefined` (decline), never a guess.
+     * - A returned number is a hard promise: it must equal
+     *   `expr.evaluate().count`. When evaluation would DECLINE (an infinite or
+     *   unknown-length source), report `undefined` — a count nobody can walk is
+     *   worse than no count (Tycho item-169 ruling).
+     *
+     * Consulted only when the definition has no `collection.count` handler —
+     * a declared `count` owns the answer, including its `undefined`.
+     */
+    elementCount?: (expr: Expression) => number | undefined;
   };
 
 /**
@@ -1716,6 +1745,10 @@ export interface BoxedOperatorDefinition
   /** The eager producer's enumerability precondition — see the
    * `canEnumerate` contract on {@link OperatorDefinition}. */
   canEnumerate?: (expr: Expression) => boolean | undefined;
+
+  /** The eager producer's element count — see the `elementCount` contract on
+   * {@link OperatorDefinition}. */
+  elementCount?: (expr: Expression) => number | undefined;
 
   canonical?: (
     ops: ReadonlyArray<Expression>,

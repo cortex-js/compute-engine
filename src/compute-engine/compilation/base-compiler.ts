@@ -5428,6 +5428,88 @@ export class BaseCompiler {
           `non-numeric body silently produces a string or an object rather ` +
           `than a number. Fail closed (D6) — evaluate it instead.`
       );
+    if (BaseCompiler.isCollectionValuedBigOpBodyByLookThrough(body))
+      throw new Error(
+        `${kind}: a collection-valued body does not compile — '${
+          isFunction(body) ? body.operator : body.toString()
+        }' is declared with an open result type ` +
+          `('${body.type.toString()}') but its body constructs a collection. ` +
+          `Distribute the element access through the ${kind} ` +
+          `(At(${kind}(…), k) → ${kind}(At(…, k))) or evaluate instead. ` +
+          `Fail closed (D6).`
+      );
+  }
+
+  /**
+   * The body look-through behind the third `assertScalarBigOpBody` clause
+   * (Tycho item 171 residue): POSITIVE evidence that a big-op body whose
+   * DECLARED type says nothing is nonetheless collection-valued.
+   *
+   * The first clause above already declines a body whose declared type matches
+   * `list`/`indexed_collection`. Consumers, however, register helpers under the
+   * open `(unknown) -> unknown` head (the spelling that keeps list-broadcasting
+   * working), so `a(t) = [cos t, sin t]` applied inside a Sum types
+   * `broadcastable<unknown>` and slips past that clause via the two documented
+   * EXEMPTIONS (top types and `broadcastable<T>` stay admitted — item-121
+   * closure). Those exemptions protect the ABSENCE of evidence; they were never
+   * meant to protect a body we can PROVE builds a collection.
+   *
+   * So this fires only where an exemption is doing the admitting — the body's
+   * type carries no sort evidence at all (`unknown`/`any`/… and the union
+   * spelling of the top type) or is `broadcastable<T>` — and only on positive
+   * evidence: the operator names a USER function (`userFunctionLiteral`) whose
+   * `Function`-literal body has a type that MATCHES a collection (the subtype
+   * direction, so a wide body type is not evidence). A nested user-function
+   * application recurses, `visited` declining self/mutual recursion.
+   *
+   * The JavaScript target never consults this: its own wider gate
+   * (`isElementwiseBigOpBody` → `isPossiblyCollectionTypedJS`, which routes the
+   * same shape through the value-safe `_SYS.bcast` element-wise fold) diverts
+   * every body this predicate accepts before `assertScalarBigOpBody` is reached,
+   * so JS emission is unchanged. The GPU/Python/interval targets have no
+   * element-wise arm — correct emission is not on the table there — so for them
+   * the only sound answer is to decline (D6). Left admitted, GLSL emitted a
+   * `vec2 + vec2 + vec2` sum from a function declared to return `float`.
+   */
+  private static isCollectionValuedBigOpBodyByLookThrough(
+    body: Expression
+  ): boolean {
+    const t = compilationType(body);
+    const exempted =
+      (typeof t !== 'string' && t.kind === 'broadcastable') ||
+      carriesNoSortEvidence(t);
+    if (!exempted) return false;
+    return BaseCompiler.isProvablyCollectionValuedApplication(body, new Set());
+  }
+
+  /**
+   * See `isCollectionValuedBigOpBodyByLookThrough` — the body half of the
+   * look-through. A conservative WHITELIST whose only permitted failure mode is
+   * declining to see the evidence (the caller then keeps compiling), never a
+   * false positive: admission here DECLINES a compile that used to succeed.
+   */
+  private static isProvablyCollectionValuedApplication(
+    e: Expression,
+    visited: Set<string>
+  ): boolean {
+    if (!isFunction(e)) return false;
+    const op = e.operator;
+    if (typeof op !== 'string' || visited.has(op)) return false;
+    const literal = BaseCompiler.userFunctionLiteral(e.engine, op);
+    if (literal === undefined) return false;
+    // Canonical parse wraps a lambda body in `Block`; unwrap only the
+    // single-statement form (a multi-statement body is not evidence).
+    let fnBody: Expression | undefined = literal.ops[0];
+    if (fnBody === undefined) return false;
+    while (isFunction(fnBody, 'Block') && fnBody.nops === 1)
+      fnBody = fnBody.ops[0];
+    if (fnBody.type.matches('collection')) return true;
+    const nextVisited = new Set(visited);
+    nextVisited.add(op);
+    return BaseCompiler.isProvablyCollectionValuedApplication(
+      fnBody,
+      nextVisited
+    );
   }
 
   /**
@@ -5450,7 +5532,10 @@ export class BaseCompiler {
    *   body is routinely a plain scalar at run time (a wide-declared helper
    *   application in a shader body). The JS target routes it through the
    *   `_SYS.bcast` fold before it ever gets here; the GPU/Python/interval
-   *   targets rely on it staying admitted.
+   *   targets rely on it staying admitted. The narrow case where the body can
+   *   be PROVEN collection-valued despite the open declared type is carved out
+   *   by the caller's third clause
+   *   (`isCollectionValuedBigOpBodyByLookThrough`), not here.
    *
    * What is left is the filed class: `string`, `symbol`, `nothing`,
    * `record`/`dictionary`, and function types. Collections are handled by the

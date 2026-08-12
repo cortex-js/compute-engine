@@ -136,6 +136,88 @@ describe('COMPREHENSION with a Block body (Tycho item 172)', () => {
   });
 });
 
+describe('LOOP with a Block body (item 172 sibling)', () => {
+  // The `Loop` serializer had the same latent hazard as the comprehension one:
+  // a `Block` body emits a bare `;`-separated statement list, and `;` (19)
+  // binds looser than the `do` clause. Unfenced, `for i from 1 to 3 do
+  // s≔2i; s+1` re-parsed as `Tuple(Loop(s≔2i, …), s+1)` — only the first
+  // statement stayed in the loop and the rest escaped both the loop and the
+  // block's scope. The body is fenced with `(…)`.
+  const blockLoop = [
+    'Loop',
+    [
+      'Block',
+      ['Declare', 's'],
+      ['Assign', 's', ['Multiply', 'i', 2]],
+      ['Add', 's', 1],
+    ],
+    ['Element', 'i', ['Range', 1, 3]],
+  ] as any;
+
+  test('box route: the block body is fenced', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(blockLoop).latex).toMatchInlineSnapshot(
+      `\\text{for }i\\text{ from }1\\text{ to }3\\text{ do }\\left(s\\coloneq2i; s+1\\right)`
+    );
+  });
+
+  test('box route: round-trips to the identical expression', () => {
+    const ce = new ComputeEngine();
+    const original = ce.box(blockLoop);
+    const roundTripped = ce.parse(original.latex);
+    expect(roundTripped.operator).toBe('Loop');
+    expect(roundTripped.json).toEqual(original.json);
+  });
+
+  test('a loop WITHOUT a block body is not fenced', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Loop',
+      ['Add', 'i', 1],
+      ['Element', 'i', ['Range', 1, 3]],
+    ] as any);
+    expect(e.latex).toMatchInlineSnapshot(
+      `\\text{for }i\\text{ from }1\\text{ to }3\\text{ do }i+1`
+    );
+    expect(ce.parse(e.latex).json).toEqual(e.json);
+  });
+
+  // The functional fallback spelling — used for loop shapes the `for … do`
+  // syntax cannot express (a non-`Range` collection) — has the same hazard:
+  // `;` binds looser than the argument-separating `,`, so an unfenced block
+  // body swallowed the `Element` operand into its last statement.
+  test('the \\operatorname{Loop}(...) fallback fences a block body too', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Loop',
+      [
+        'Block',
+        ['Declare', 's'],
+        ['Assign', 's', ['Multiply', 'k', 2]],
+        ['Add', 's', 1],
+      ],
+      ['Element', 'k', ['List', 1, 2, 3]],
+    ] as any);
+    expect(e.latex).toMatchInlineSnapshot(
+      `\\operatorname{Loop}(\\left(s\\coloneq2k; s+1\\right), k\\in\\bigl\\lbrack1, 2, 3\\bigr\\rbrack)`
+    );
+    expect(ce.parse(e.latex).json).toEqual(e.json);
+  });
+
+  test('the fallback leaves a non-block body unfenced', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Loop',
+      ['Add', 'k', 1],
+      ['Element', 'k', ['List', 1, 2, 3]],
+    ] as any);
+    expect(e.latex).toMatchInlineSnapshot(
+      `\\operatorname{Loop}(k+1, k\\in\\bigl\\lbrack1, 2, 3\\bigr\\rbrack)`
+    );
+    expect(ce.parse(e.latex).json).toEqual(e.json);
+  });
+});
+
 describe('MAP / FILTER - SERIALIZATION (Tycho item 26)', () => {
   // A canonical `Map`/`Filter` is a lazy collection. Its `.latex` must be the
   // faithful operator form, not a materialized preview List. Materializing is

@@ -579,6 +579,73 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
       ce.declare('P', 'matrix');
       expect(ce.parse('M(P)').json).toEqual(['Multiply', 'M', 'P']);
     });
+
+    // Item 173 residue: the SCALAR-argument branch (just above the
+    // collection-argument one) still decided on the argument's numeric-ness
+    // alone, so a non-multiplicative head became a `Multiply` whose type error
+    // blamed multiplication — the outcome the E3 pin's rationale objects to.
+    // The head decides here too: a string/set head falls through to the
+    // application route, whose error blames the illegal application.
+    describe('a non-multiplicative head with a SCALAR arg is an application', () => {
+      test('string head (parse route)', () => {
+        const ce = new ComputeEngine();
+        ce.assign('t', ce.parse('"hello"'));
+        const e = ce.parse('t(2)');
+        expect(e.operator).toBe('t'); // application, NOT Multiply
+        expect(e.evaluate().operator).toBe('Error');
+        expect(errorCode(e.evaluate())).toBe('incompatible-type');
+        // The error blames the application of a non-function, not the product.
+        expect(e.evaluate().json).toEqual([
+          'Error',
+          ['ErrorCode', "'incompatible-type'", "'function'", "'string'"],
+          '\'"hello"\'',
+        ]);
+      });
+
+      test('string head (box route)', () => {
+        const ce = new ComputeEngine();
+        ce.assign('t', ce.parse('"hello"'));
+        const e = ce.box(['InvisibleOperator', 't', ['Delimiter', 2]] as any);
+        expect(e.operator).toBe('t');
+        expect(errorCode(e.evaluate())).toBe('incompatible-type');
+      });
+
+      test('set head (parse and box routes)', () => {
+        const ce = new ComputeEngine();
+        ce.declare('S', ce.type('set<number>'));
+        expect(ce.parse('S(2)').operator).toBe('S');
+        expect(
+          ce.box(['InvisibleOperator', 'S', ['Delimiter', 2]] as any).operator
+        ).toBe('S');
+      });
+
+      test('an ambiguous head keeps the product reading', () => {
+        // Undeclared, and unknown-typed, heads stay genuinely ambiguous: the
+        // scalar-argument branch's charitable product reading is unchanged.
+        {
+          const ce = new ComputeEngine();
+          expect(ce.parse('f(2)').json).toEqual(['Multiply', 2, 'f']);
+          expect(ce.parse('x(x+1)').json).toEqual([
+            'Multiply',
+            'x',
+            ['Add', 'x', 1],
+          ]);
+        }
+        {
+          const ce = new ComputeEngine();
+          ce.declare('u', 'unknown');
+          expect(ce.parse('u(2)').json).toEqual(['Multiply', 2, 'u']);
+        }
+        // …and a numeric head still multiplies, a function head still applies.
+        {
+          const ce = new ComputeEngine();
+          ce.assign('k', ce.box(3));
+          expect(ce.parse('k(2)').json).toEqual(['Multiply', 2, 'k']);
+          ce.declare('g', ce.type('(number) -> number'));
+          expect(ce.parse('g(2)').json).toEqual(['g', 2]);
+        }
+      });
+    });
   });
 });
 

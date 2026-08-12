@@ -168,12 +168,15 @@ describe('Adjoin — parsing', () => {
     expect(parse('\\R[x]')).toEqual(['Adjoin', 'RealNumbers', 'x']);
   });
 
-  test('field adjunction with PARENTHESES is not parsed (v1)', () => {
-    // `\mathbb{Q}(\sqrt2)` stays the pre-existing juxtaposition reading.
+  test('field adjunction with PARENTHESES is not parsed as Adjoin (v1)', () => {
+    // `\mathbb{Q}(\sqrt2)` is NOT the bracket form: no Adjoin. It reads as
+    // an application of the set constant — a set-valued head is not
+    // multiplicative, so the juxtaposition does not become a product (the
+    // item-173-adjacent head gate; before that it read `√2 · ℚ`). A future
+    // v2 could canonicalize this application into `Adjoin` directly.
     expect(parse('\\mathbb{Q}(\\sqrt{2})')).toEqual([
-      'Multiply',
-      ['Sqrt', 2],
       'RationalNumbers',
+      ['Sqrt', 2],
     ]);
   });
 });

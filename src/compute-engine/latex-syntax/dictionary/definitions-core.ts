@@ -2224,16 +2224,35 @@ export const DEFINITIONS_CORE: LatexDictionary = [
             serializeKeyword(serializer, 'to', { lead: true, trail: true }),
             serializer.serialize(hi),
             serializeKeyword(serializer, 'do', { lead: true, trail: true }),
-            serializer.serialize(body),
+            // A `Block` body serializes as a bare `;`-separated statement
+            // list, which binds LOOSER than the `do` clause: unfenced,
+            // `for i from 1 to 3 do s≔2i; s+1` re-parses with only the FIRST
+            // statement as the loop body and the rest hoisted out of the loop
+            // (and out of the block's scope). Fence it so `do` binds to the
+            // whole block: `(…)` re-parses as `Delimiter(Block(…))`, which
+            // canonicalizes back to the same `Block` — the same mechanism as
+            // the comprehension body fence (Tycho item 172).
+            operator(body) === 'Block'
+              ? joinLatex(['\\left(', serializer.serialize(body), '\\right)'])
+              : serializer.serialize(body),
           ]);
         }
       }
 
       // All other Loop shapes → functional fallback \operatorname{Loop}(...).
       // (Comprehension syntax is reserved for the `Comprehension` operator.)
+      // Same fence, same reason: a `Block` argument's `;` statement list binds
+      // looser than the argument-separating `,`, so an unfenced block body
+      // swallows the following operands into its last statement.
       return joinLatex([
         '\\operatorname{Loop}(',
-        args.map((a) => serializer.serialize(a)).join(', '),
+        args
+          .map((a) =>
+            operator(a) === 'Block'
+              ? joinLatex(['\\left(', serializer.serialize(a), '\\right)'])
+              : serializer.serialize(a)
+          )
+          .join(', '),
         ')',
       ]);
     },

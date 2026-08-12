@@ -2398,36 +2398,56 @@ is in git history. The only items deliberately left open:
   to the denylist to honor the documented contract.
 
 - **List-valued big-op bodies on non-JS targets (2026-08-12, Tycho item 171
-  residue), flagged not fixed:** the JS fix routes a user-function application
-  in a big-op body through the item-86 body look-through
-  (`isPossiblyCollectionTypedJS`, `javascript-target.ts`), so `Σ_i a(h(i))`
-  with `a` list-valued takes the element-wise `_SYS.bcast` fold. Python, GPU
-  and interval have no `isElementwiseBigOpBody` equivalent and call
-  `assertScalarBigOpBody` directly, where `broadcastable<unknown>` is admitted
-  by the ruled item-121 exemption — the same shape presumably still emits
-  scalar accumulation over a list there (unverified; Python string-concats,
-  GPU/GLSL likely fails to compile the emitted code). Widening the base
-  assert is forbidden by the item-121 ruling (it would break working
-  boolean/broadcastable shader bodies); the fix is a target-local elementwise
-  arm (or the same look-through) per target. Also note the JS
-  `isPossiblyCollectionTypedJS` fix incidentally corrected the
-  comparison/equality gates for the same shape (`a(h(i)) < y` no longer
-  compiles a scalar `<` against an array) — that side effect has no dedicated
-  pin yet.
+  residue), FIXED 2026-08-12 (same day):** measured first — GLSL/WGSL emitted
+  shader source that does not even compile (a `vec2` sum returned from a
+  `float` function) behind `success: true`; Python and interval-js declined,
+  but for incidental unrelated reasons. Fixed with a third clause in
+  `assertScalarBigOpBody` (`base-compiler.ts`), not a per-target arm: it
+  fires only when (1) the body's type is one an item-121 exemption is
+  admitting (`broadcastable<T>` or a top type) AND (2) the body look-through
+  gives POSITIVE evidence — the operator names a user function whose
+  `Function`-literal body's type matches `collection`. The ruled exemptions
+  are untouched (positive collection evidence was never exempted), and JS is
+  byte-identical because its `isElementwiseBigOpBody` gate is strictly wider
+  and diverts these bodies before the assert. Pins in
+  `list-valued-summand-compile.test.ts` (per-target declines with the
+  actionable D6 message, exemption survival on all five targets). Residues,
+  deliberately untouched: a LYING declaration (`-> number` head over a
+  `List`-constructing body) keeps its current path on every target,
+  including the broken GPU emission — declining it would change JS, a
+  different defect; and the JS comparison-gate side effect (`a(h(i)) < y`)
+  still has no dedicated pin.
 
-- **`_broadcastCount` leaks onto non-broadcast operators (2026-08-12, found
-  at the item-169 broadcast-enumerability ruling), flagged not fixed:** the
-  item-167 broadcast `count` (participants' agreed length) has no
+- **`_broadcastCount` leaked onto non-broadcast operators (2026-08-12, found
+  at the item-169 broadcast-enumerability ruling), FIXED 2026-08-12:** the
+  item-167 broadcast `count` (participants' agreed length) had no
   `operatorDefinition.broadcastable` gate, so any bound, handler-less,
-  collection-typed operator with collection operands answers its OPERAND's
-  length — `Chunk([1,2,3], 2).count` is 3 (true count: 2); `GroupBy`/
-  `BinCounts`/`Histogram` are the same reshaping class. The leak is
+  collection-typed operator with collection operands answered its OPERAND's
+  length — `Chunk([1,2,3], 2).count` was 3 (true count: 2); `GroupBy`/
+  `BinCounts`/`Histogram` are the same reshaping class. The leak was
   accidentally CORRECT for length-preserving ops (`Sort`, `RandomShuffle`
-  both answer 3 through it), so a blanket `broadcastable === true` gate
-  would regress those — the fix is per-operator `count` collection handlers
-  (or a reshaping denylist), decided per operator. The new
-  `isEnumerableCollection` broadcast tier is already gated on
-  `broadcastable === true` and does not inherit the leak.
+  both answered 3 through it), so a blanket gate alone would have regressed
+  those. Fixed in two parts: `_broadcastCount` is now gated on
+  `broadcastable === true` (agreement is the length rule for a LIFTING
+  operator only), and a new optional operator-definition handler
+  `elementCount` — the `count` twin of `canEnumerate`, same dispatch level,
+  consulted by `count` after a declared `collection.count` — lets an operator
+  that knows its own length say so without evaluating. Adopted:
+  `Sort`/`Ordering`/`RandomShuffle` (`elementCountOfFiniteSource`,
+  length-preserving over a definitively finite `op1`, zero draws) and `Chunk`
+  (exactly `k` groups for a literal positive `k` — NOT `ceil(count/k)`;
+  `Chunk([1,2,3], 5)` yields 5 groups, two empty). Pinned by
+  `test/compute-engine/tycho-item-167-broadcast-count.test.ts`. The
+  `isEnumerableCollection` broadcast tier was already gated on
+  `broadcastable === true` and never inherited the leak.
+  - Residue: every other reshaping/eager operator now reports an honest
+    `undefined` instead of a wrong number (`GroupBy`, `BinCounts`,
+    `Histogram`, `Tally`, `Unique`, `Flatten`, `Shape`, `Quartiles`,
+    `RandomChoice`, `RandomSample`, `LinearRegression`, `PolynomialFit`, …),
+    as do the count-preserving pass-throughs that were right by accident
+    (`N`, `Evaluate`, `Identity`, `Typed`, `Matrix`, `Transpose`, …). Each is
+    an `elementCount` handler away from answering again; adopt on demand,
+    never as a name list in engine code.
   - `sameSyntactic` (`boxed-expression/compare.ts`) is mis-named: despite its
     "compares symbols by NAME, ignoring bindings" doc, the symbol-vs-non-symbol
     branch of `same()` dereferences `sym.value` unconditionally — the

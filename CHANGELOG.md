@@ -113,6 +113,46 @@
 
 ### Bug Fixes
 
+- **A list-valued big-op body no longer compiles to garbage on the GPU
+  targets** (Tycho item 171, non-JS residue). `Σ_i a(h(i))` with `a`
+  list-valued under an open `(unknown) -> unknown` head compiled
+  `success: true` on GLSL/WGSL and emitted shader source that does not even
+  compile (a `vec2` sum returned from a `float` function). All non-JS
+  targets (GLSL, WGSL, Python, interval) now fail closed at the big-op gate
+  with an actionable message; the JS target's element-wise compilation is
+  byte-identical. The ruled item-121 exemptions (`boolean` and
+  `broadcastable<T>` bodies, `unknown` admitted) are unchanged — the new
+  clause fires only on positive evidence that the body constructs a
+  collection.
+
+- **`count` no longer invents a length for reshaping operators.** The
+  broadcast count read participants' lengths without checking that the
+  operator actually broadcasts, so `Chunk([1,2,3], 2).count` answered 3
+  (true count: 2), and a dozen other reshaping operators (`BinCounts`,
+  `Histogram`, `Tally`, `Shape`, …) similarly reported their operand's
+  length. The broadcast count is now gated on broadcasting operators, and a
+  new `elementCount` operator-definition handler (the `canEnumerate`
+  pattern) lets length-knowing operators answer honestly: `Sort`,
+  `Ordering`, and `RandomShuffle` report their source's length (with zero
+  draws), `Chunk(xs, k)` reports `k` for a literal `k`, and operators whose
+  length is not cheaply knowable now answer `undefined` instead of a wrong
+  number.
+
+- **A non-multiplicative value head applied to a scalar is now an illegal
+  application, not a product** (item-173 adjacent). With `t := "hello"`,
+  `t(2)` canonicalized to `Multiply` and the type error blamed
+  multiplication; string-, set-, and boolean-valued heads now take the
+  application route so the error blames the actual mistake. Numeric and
+  collection heads, undeclared heads, and wide-typed heads (`x(x+1)`)
+  are unchanged.
+
+- **A `Loop` with a `Block` body now round-trips through LaTeX** (item-172
+  sibling). Both `Loop` spellings (`\text{for } i \text{ from } … \text{do}`
+  and the `\operatorname{Loop}(…)` fallback) serialized a `Block` body as a
+  bare `;`-statement list, so on reparse only the first statement stayed in
+  the loop. Block bodies are now fenced, same mechanism as the item-172
+  comprehension fix.
+
 - **A parenthesized juxtaposition on a collection-valued symbol is a product
   regardless of the argument's type** (Tycho item 173). With `A` a list (or
   any collection-typed value) and `B` a list, `A(B)` and `A(t-B)`
