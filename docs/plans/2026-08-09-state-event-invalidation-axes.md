@@ -1,8 +1,22 @@
 # State Events and Invalidation Axes
 
-**Date:** 2026-08-09 · **Status:** DESIGN — not implemented. Companion
-instrumentation (`CE_CACHE_STATS`, `src/common/cache-stats.ts`) is in the
-working tree and produced every number in this document.
+**Date:** 2026-08-09 · **Status: SHIPPED** (2026-08-11, migration steps
+2a→5 complete). Live results: effects hit rate 53.9% → 73.5% on the
+program workload, axis-driven waste 20,539 → 19 misses, recomputes −52%
+(§6). Step 4 closed as measured-no (below); step 5 applied with one
+evidence-driven amendment to R5 (§9). Companion instrumentation:
+`CE_CACHE_STATS` (`src/common/cache-stats.ts`), the `CE_EFFECTS_PARANOID`
+canary, and the pinned dispatch table
+(`test/compute-engine/state-events.test.ts`) + effects matrix
+(`test/compute-engine/effects-invalidation.test.ts`).
+
+**Step 4 — CLOSED (measured-no, 2026-08-11).** The literal-refinement
+check passed (`x=3` and `x=4` both infer `integer`; widening only on kind
+change), so a `type-shape` axis is *viable* — but not worth it: it would
+recover ~3,553 of 21,546 workload-C misses (+3pp on an 82% hit rate,
+~177 recomputes/run) while adding a def-type comparison to every value
+write. Revisit trigger: a workload where `type` misses dominate the
+profile.
 
 **Revision 5 (2026-08-09):** third (convergence) review round applied — all
 findings targeted revision-4 additions, none the core design. The
@@ -862,6 +876,24 @@ reproduce or beat these numbers with the real classifier.
   twin and closing the latent `_sgn`/`_type` staleness gap. Lands in
   **step 5** (§8) as its own measured commit, never during the step-2
   transcription.
+
+  **APPLIED WITH ONE AMENDMENT (2026-08-11, blast-radius evidence).**
+  Normalized to `any`: `type-write` (all), `inference{symbolSignature}`,
+  and the assumption-dirty transient pop. **NOT normalized —
+  `inference{valueType}` stays zero-mask on `any`, by necessity:**
+  value-branch inference is a side effect of type computation itself
+  (canonicalization infers operand types mid-walk), so advancing the axis
+  `_type`/`_sgn` read makes the type system invalidate its own footing.
+  Measured fallout of trying: a stack-overflow in assumption-driven sign
+  reasoning (`assumptions.test.ts` Wester 21/22) and inference-outcome
+  drift in two typing suites. The pre-design zero-mask on this branch was
+  load-bearing, not a gap — the residual `_sgn`/`_type` staleness across a
+  value-branch inference remains, mitigated by the identity no-op skips
+  (a re-inference of the same type writes nothing) and bounded by the
+  `world`-axis events that accompany any real signature settlement. Cost
+  of the applied rows (workload C): `type` +413 misses per 20 runs
+  (~21/run) — accepted. The `callable` axis is unaffected throughout (its
+  predicate selects all `inference` variants regardless of mask).
 
 (Revision-1's R2 — `shadowsCallable` optionality — is closed: mandatory,
 per §5.3.)

@@ -83,15 +83,17 @@ describe('axisMaskOf: the parity dispatch table, row by row', () => {
       mask(false, false, false),
     ],
     // type-write: zero mask today (§2c — bare def retypes).
+    // R5-normalized (step 5): type-writes advance `any` so G-keyed
+    // _sgn/_type see a def retype.
     [
       'type-write (arm arriving)',
       { kind: 'type-write', callableBefore: false, callableAfter: true },
-      mask(false, false, false),
+      mask(true, false, false),
     ],
     [
       'type-write (arm leaving)',
       { kind: 'type-write', callableBefore: true, callableAfter: false },
-      mask(false, false, false),
+      mask(true, false, false),
     ],
     // scope-pop: G always for popEvalContext, +M+E when assumptions dirty;
     // the transient (inScope) variant has no G.
@@ -111,19 +113,23 @@ describe('axisMaskOf: the parity dispatch table, row by row', () => {
       mask(false, false, false),
     ],
     [
-      'scope-pop (transient, dirty)',
+      'scope-pop (transient, dirty)', // R5: advances `any` like its twin
       { kind: 'scope-pop', assumptionsDirty: true, transient: true },
-      mask(false, true, true),
+      mask(true, true, true),
     ],
     // assumption: G+M+E (assume/forget).
     ['assumption', { kind: 'assumption' }, mask(true, true, true)],
     // inference: default G+M+E; the BoxedSymbol operator branch M+E; the
     // value branch zero-mask (§2b).
     ['inference (default)', { kind: 'inference' }, mask(true, true, true)],
+    // R5 (amended): symbolSignature advances `any` (twin-consistent);
+    // valueType MUST stay zero-mask — value-branch inference fires DURING
+    // type computation, and advancing the axis it reads is self-invalidating
+    // (measured: stack overflow + inference drift). Load-bearing row.
     [
       'inference (symbol signature)',
       { kind: 'inference', symbolSignature: true },
-      mask(false, true, true),
+      mask(true, true, true),
     ],
     [
       'inference (value type)',
@@ -206,6 +212,42 @@ describe('choke-point pin: no direct axis writes outside the lifecycle', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('no-op dispatch guard (design §4, step 5)', () => {
+  test('an identity re-write dispatches nothing — no axis, no writeVersion', () => {
+    const ce = new ComputeEngine();
+    ce.assign('nv', 7);
+    const def = ce.symbol('nv').valueDefinition!;
+    const stored = def.value;
+    const a0 = ce._anyVersion;
+    const c0 = ce._callableVersion;
+    const w0 = def._writeVersion;
+    def.value = stored; // the IDENTICAL object: state-identical write
+    expect(ce._anyVersion).toBe(a0);
+    expect(ce._callableVersion).toBe(c0);
+    expect(def._writeVersion).toBe(w0);
+  });
+
+  test('a distinct-but-equal value still dispatches (identity only)', () => {
+    const ce = new ComputeEngine();
+    // Function expressions are always-fresh instances (small-integer
+    // literals are INTERNED — `ce.box(7)` twice is the same object, which
+    // the guard would legitimately treat as an identity write).
+    ce.assign('nv', ce.box(['List', 1, 2]));
+    const def = ce.symbol('nv').valueDefinition!;
+    const a0 = ce._anyVersion;
+    def.value = ce.box(['List', 1, 2]); // structurally equal, fresh object
+    expect(ce._anyVersion).toBeGreaterThan(a0);
+  });
+
+  test('same-signature/different-body redefinition still dispatches', () => {
+    const ce = new ComputeEngine();
+    ce.assign('nf', ce.parse('x \\mapsto x + 1'));
+    const c0 = ce._callableVersion;
+    ce.assign('nf', ce.parse('x \\mapsto x + 2')); // same arrow, new body
+    expect(ce._callableVersion).toBeGreaterThan(c0);
   });
 });
 

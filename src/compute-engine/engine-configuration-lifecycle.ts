@@ -96,14 +96,18 @@ export function callableAxisSelects(e: StateEvent): boolean {
  *   `any` arrives via `binding-repair`). `callableAfter: false` is
  *   zero-mask (the operator→scalar swap's advances arrive via the
  *   accompanying `value-write`).
- * - `type-write`: direct def retype (§2c) — zero mask.
+ * - `type-write`: direct def retype (§2c) — `any` only (R5-normalized in
+ *   step 5: pre-design these bare routes advanced nothing).
  * - `scope-pop`: `any` always for `popEvalContext`, +`semantic`+`world`
- *   when assumptions dirty; the `transient` (`inScope`) variant has no
- *   `any` and `semantic`+`world` only when dirty.
+ *   when assumptions dirty; the `transient` (`inScope`) variant advances
+ *   `any` only when dirty (R5) — a clean transient pop is zero-mask.
  * - `inference`: `BoxedFunction.infer` and the matrix freeze/restore — all
- *   three; `symbolSignature` (`BoxedSymbol.infer`, operator branch) —
- *   `semantic`+`world`; `valueType` (value branch) — zero mask.
+ *   three; `symbolSignature` (`BoxedSymbol.infer`, operator branch) — all
+ *   three (R5); `valueType` (value branch) — `any` only (R5).
  * - `assumption`, `config`: all three.
+ *
+ * The R5 rows are the step-5 normalization (ruled 2026-08-09): the
+ * pre-cutover masks they replace are recorded in the design's §2/§9.
  */
 export function axisMaskOf(e: StateEvent): AxisMask {
   switch (e.kind) {
@@ -118,19 +122,35 @@ export function axisMaskOf(e: StateEvent): AxisMask {
         ? { any: false, semantic: true, world: true }
         : { any: false, semantic: false, world: false };
     case 'type-write':
-      return { any: false, semantic: false, world: false };
+      // R5 normalization (step 5, ruled 2026-08-09): a def retype advances
+      // `any` so G-keyed `_sgn`/`_type` see it — closing the pre-design
+      // latent gap where the bare routes (§2c) advanced nothing.
+      return { any: true, semantic: false, world: false };
     case 'scope-pop':
       return {
-        any: !e.transient,
+        // R5: an assumption-dirty TRANSIENT pop advances `any` too, matching
+        // its `popEvalContext` twin. A clean transient pop stays zero-mask —
+        // `inScope` runs per boxing operation, and its twin's unconditional
+        // `any` exists for assumption reverts a clean pop does not perform.
+        any: !e.transient || e.assumptionsDirty,
         semantic: e.assumptionsDirty,
         world: e.assumptionsDirty,
       };
     case 'assumption':
       return { any: true, semantic: true, world: true };
     case 'inference':
+      // R5 — PARTIALLY applied (amended by blast-radius evidence,
+      // 2026-08-11): the `valueType` branch MUST stay off the `any` axis.
+      // Value-branch inference is a side effect of type computation itself
+      // (canonicalization infers operand types mid-walk), so advancing the
+      // axis that `_type`/`_sgn` read makes the type system invalidate its
+      // own footing: measured fallout was a stack overflow in
+      // assumption-driven sign reasoning and inference-outcome drift in
+      // two typing suites. The pre-design zero-mask was load-bearing. The
+      // `symbolSignature` branch (rare, not self-triggered) does advance
+      // `any`, matching its `BoxedFunction.infer` twin.
       if (e.valueType) return { any: false, semantic: false, world: false };
-      if (e.symbolSignature)
-        return { any: false, semantic: true, world: true };
+      if (e.symbolSignature) return { any: true, semantic: true, world: true };
       return { any: true, semantic: true, world: true };
     case 'config':
       return { any: true, semantic: true, world: true };

@@ -293,6 +293,13 @@ export class _BoxedValueDefinition
   set value(v: Expression | undefined) {
     if (this._isConstant)
       throw new Error(`Cannot set value of constant "${this.name}"`);
+    // No-op dispatch guard (design §4, step 5): re-writing the IDENTICAL
+    // value object is a state-identical write, and suppression is TOTAL —
+    // no event, no axis advance, no `_writeVersion` (a spurious local bump
+    // would cold the element memo's per-dependency entries). Object
+    // identity ONLY: structural equality (`.isSame`) is syntactic, not
+    // binding-identity, and must not suppress (design §4's predicate table).
+    if (v !== undefined && v === this._value) return;
     const prev = this._value;
     this._value = v;
     this._isSelfReferential = isSelfReferentialValue(this.name, v);
