@@ -33,7 +33,38 @@ import {
   substituteTypeVariables,
 } from './instantiate.js';
 import { typeToDedupKey } from './serialize.js';
+import { declarationOf } from './reference.js';
 import { subtypingVarianceOf } from './variance.js';
+
+/**
+ * The definition a STRUCTURAL alias reference stands for, instantiated at that
+ * reference's own arguments.
+ *
+ * A generic alias is normally expanded eagerly at parse time, so a consumer
+ * rarely meets one as a reference. A reference captured BEFORE its declaration
+ * landed — a forward reference inside another type's body — is the exception:
+ * it is still a reference when the check runs, and its `def` is the OPEN body
+ * (`leaf | node<T>`). Unfolding to that body without substituting the
+ * application's arguments compares a ground type against a type VARIABLE and
+ * fails, which is what made `node<integer> <: tree<integer>` false for exactly
+ * the recursive shapes a sum needs.
+ *
+ * Returns `undefined` when there is nothing to unfold to, or when the arity
+ * does not line up (a mismatch is a declaration-time error; here it just means
+ * "cannot decide structurally").
+ */
+function aliasDefinitionAt(ref: Readonly<TypeReference>): Type | undefined {
+  const def = ref.def;
+  if (def === undefined) return undefined;
+  const params = declarationOf(ref as TypeReference).typeParams;
+  const args = ref.args;
+  if (params === undefined || params.length === 0 || args === undefined)
+    return def;
+  if (params.length !== args.length) return undefined;
+  const bindings: Record<string, Type> = {};
+  params.forEach((p, i) => (bindings[p.name] = args[i]));
+  return substituteTypeVariables(def, bindings);
+}
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
@@ -349,6 +380,47 @@ function beginUnfold(ref: TypeReference): boolean {
 function endUnfold(ref: TypeReference): void {
   unfoldingRefs!.delete(ref);
   if (unfoldingRefs!.size === 0) unfoldingRefs = null;
+}
+
+/**
+ * The RHS unfold's cycle guard, keyed on the PAIR — the alias record together
+ * with the identity of the left-hand type it is being unfolded against.
+ *
+ * Keying on the record alone (what `beginUnfold` does for the lhs) is wrong on
+ * this side: an equirecursive alias reaches itself through a CONSTRUCTOR
+ * (`type alias json = … | list<type json>`), so answering `json` for a list
+ * legitimately unfolds `json` once per level, each time against a smaller lhs.
+ * A record-keyed guard cuts that off at the first repeat and reports a
+ * non-subtype — it broke every recursive-JSON test when tried.
+ *
+ * Re-entering with the SAME lhs object is the case that makes no progress: an
+ * alias chain that cycles through bare references or union arms
+ * (`type alias a = b`, `type alias b = a`) hands the identical lhs down
+ * forever and overflows the stack. Identity is the exact discriminator,
+ * because the shrinking case rebuilds the lhs on the way down and the
+ * looping case does not — and it costs a `Set` probe, not a structural key.
+ */
+let unfoldingPairs: Map<TypeReference, Set<unknown>> | null = null;
+
+// `lhs` is compared by IDENTITY only, never read, so it is typed `unknown`:
+// the call site holds a widened union at this point, and narrowing it back to
+// `Type` would be a cast that buys nothing.
+function beginUnfoldAgainst(ref: TypeReference, lhs: unknown): boolean {
+  if (unfoldingPairs === null) unfoldingPairs = new Map();
+  let seen = unfoldingPairs.get(ref);
+  if (seen === undefined) {
+    seen = new Set();
+    unfoldingPairs.set(ref, seen);
+  } else if (seen.has(lhs)) return false;
+  seen.add(lhs);
+  return true;
+}
+
+function endUnfoldAgainst(ref: TypeReference, lhs: unknown): void {
+  const seen = unfoldingPairs!.get(ref)!;
+  seen.delete(lhs);
+  if (seen.size === 0) unfoldingPairs!.delete(ref);
+  if (unfoldingPairs!.size === 0) unfoldingPairs = null;
 }
 
 /**
@@ -798,7 +870,8 @@ export function isSubtype(
     // length is answered exactly.
     if (!beginUnfold(lhs)) return false;
     try {
-      return isSubtype(lhs.def, rhs);
+      const def = aliasDefinitionAt(lhs);
+      return def === undefined ? false : isSubtype(def, rhs);
     } finally {
       endUnfold(lhs);
     }
@@ -1062,11 +1135,30 @@ export function isSubtype(
   // top of this function.
   //
   if (rhs.kind === 'reference') {
-    if (typeof lhs !== 'string' && lhs.kind === 'reference')
-      return sameTypeApplication(lhs, rhs);
+    if (typeof lhs !== 'string' && lhs.kind === 'reference') {
+      // Same name (and compatible arguments) settles it — this is also what
+      // terminates a self-referential alias, so it must be asked first.
+      if (sameTypeApplication(lhs, rhs)) return true;
+      // Otherwise FALL THROUGH to the unfold below. A reference lhs is not
+      // exempt from it: a NOMINAL `lit` is a member of the structural alias
+      // `type alias node = lit | plus`, and answering `sameTypeApplication`
+      // here made membership depend on which side the alias sat — `node <:
+      // lit` unfolded on the lhs and held, `lit <: node` did not. That broke
+      // every sum reached through a variant payload or a fulfilled forward
+      // reference, so a recursive sum declared but could not be constructed.
+    }
     if (rhs.alias === true && rhs.def) {
-      // The rhs is a structural type, so we need to check if the lhs is a subtype of the rhs definition
-      return isSubtype(lhs, rhs.def);
+      // A STRUCTURAL alias IS its definition, on this side too — the mirror of
+      // the lhs unfold at the top of this function. Guarded on the PAIR, not
+      // the record: see `beginUnfoldAgainst` for why this side cannot use the
+      // record-keyed guard the lhs uses.
+      if (!beginUnfoldAgainst(rhs, lhs)) return false;
+      try {
+        const def = aliasDefinitionAt(rhs);
+        return def === undefined ? false : isSubtype(lhs, def);
+      } finally {
+        endUnfoldAgainst(rhs, lhs);
+      }
     }
   }
 

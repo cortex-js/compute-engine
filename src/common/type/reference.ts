@@ -30,11 +30,26 @@ export function applyTypeReference(
   const applied = {
     kind: 'reference',
     name: record.name,
-    alias: record.alias,
     args,
   } as TypeReference;
   Object.defineProperty(applied, 'def', {
     get: () => record.def,
+    enumerable: true,
+    configurable: true,
+  });
+  // `alias` delegates for the SAME reason `def` does, and it was a snapshot
+  // until 2026-08-11. A forward reference is created by use, while the record
+  // is still the nominal-by-default placeholder (`alias: false`); the
+  // declaration that fulfils it may be a `type alias`, which flips the record
+  // to `true`. An application built before that kept the stale `false`, so
+  // `subtype.ts` refused to unfold it — the sum was declarable and its
+  // members were then rejected at the first construction that went through a
+  // variant payload (`expected list<tree<T>>, got list<node<T>^1>`).
+  Object.defineProperty(applied, 'alias', {
+    get: () => record.alias,
+    set: (v: boolean) => {
+      record.alias = v;
+    },
     enumerable: true,
     configurable: true,
   });
