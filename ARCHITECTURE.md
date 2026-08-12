@@ -520,9 +520,12 @@ symbol. `assume()` returns `'ok'`, `'tautology'` (already implied), or
 (`ce.context.assumptions`). A child scope sees the parent's facts (they are
 copied on push) but discards its own additions on `popScope()`; a
 subsequently-restored scope therefore recovers the parent's original facts. Any
-mutation bumps the engine generation counter (`ce._generation`), which
-invalidates the cached rule sets and the FactIndex (below) so stale sign/bound
-answers cannot survive a scope change.
+mutation reports a state event (`ce._noteStateEvent`, the sole writer of the
+invalidation axes since the 2026-08-11 state-event migration — see
+`docs/plans/2026-08-09-state-event-invalidation-axes.md`), advancing
+`ce._anyVersion` and the finer axes, which invalidates the cached rule sets
+and the FactIndex (below) so stale sign/bound answers cannot survive a scope
+change.
 
 **Three-valued discharge.** `verify(P)` returns `true` when `P` is provable from
 the current assumptions, `false` when its negation is provable, and `undefined`
@@ -538,7 +541,8 @@ verify`) is broken by an `_isVerifying` re-entrancy flag: while it is set,
 `ask` skips its closed-predicate `verify` fallback.
 
 **Bounds & the FactIndex.** Sign and bound queries are answered from a cached
-`FactIndex` (`getFactIndex`, keyed on the generation counter, the assumptions
+`FactIndex` (`getFactIndex`, keyed on the `any` invalidation axis
+(`ce._anyVersion`), the assumptions
 map identity, and the fact count). It maps each **subject** — a bare symbol or a
 part extractor of one (`Re(z)`, `Im(τ)`, `Abs(q)`, `Argument(z)`) — to its
 numeric `lower`/`upper` bounds with strictness flags. `assume()` uses it for the

@@ -33,3 +33,18 @@ StringJoin(Repeat("I", 4))
 String(Repeat("I", 4)) 
 // -> should output "IIII", actual: ["I", "I", "I", "I"]
 
+xs = Join(xs, [k]) 
+
+xs = Append(xs, k)
+xs = [...xs, k]
+xs += k
+
+xs = xs + [k]
+xs += [k]   // Join, if "+" is join
+
+// Scala: :+ append, +: prepend, ++ concatenation, += append in place
+
+xs = [k, ...xs]
+
+// Copy/materialzize a collection
+ys = [...xs]

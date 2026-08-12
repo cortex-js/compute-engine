@@ -7,3 +7,7 @@ build.mjs
 tsconfig.json
 **/*.map
 **/*.ts
+*.vsix
+test/**
+package-lock.json
+VSCODE_EPSIL_ROADMAP.md

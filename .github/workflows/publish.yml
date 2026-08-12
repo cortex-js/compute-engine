@@ -1,4 +1,4 @@
-name: Publish to npm
+name: Publish release artifacts
 
 on:
   release:
@@ -6,6 +6,7 @@ on:
 
 jobs:
   publish:
+    name: Publish to npm
     runs-on: ubuntu-latest
 
     steps:
@@ -31,3 +32,53 @@ jobs:
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # The VS Code extension ships in lockstep with the engine: its language
+  # server bundles the engine FROM SOURCE, so packaging it in the same run as
+  # the npm release is what guarantees the two agree. `scripts/version.sh`
+  # stamps vscode-epsil/package.json with the engine version during
+  # `npm version`, so no bump is needed here.
+  publish-vsix:
+    name: Publish VS Code extension
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the .vsix to the GitHub Release
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Two dependency trees: the root one for the engine sources that get
+      # bundled, and vscode-epsil's for the extension and its build tooling.
+      - name: Install engine dependencies
+        run: npm ci
+
+      - name: Install extension dependencies
+        run: npm ci
+        working-directory: vscode-epsil
+
+      - name: Test extension
+        run: npm test
+        working-directory: vscode-epsil
+
+      - name: Package extension
+        run: npm run package
+        working-directory: vscode-epsil
+
+      - name: Publish to VS Code Marketplace
+        run: npm run publish:marketplace
+        working-directory: vscode-epsil
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Attach .vsix to the release
+        run: gh release upload "${{ github.event.release.tag_name }}" epsil.vsix --clobber
+        working-directory: vscode-epsil
+        env:
+          GH_TOKEN: ${{ github.token }}

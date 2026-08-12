@@ -3,8 +3,9 @@
   "displayName": "Epsil",
   "description": "Language support for Epsil — syntax highlighting, diagnostics, and run commands for .epsil files",
   "version": "0.1.0",
-  "publisher": "cortex-js",
+  "publisher": "FarfieldStudio",
   "license": "MIT",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/cortex-js/compute-engine.git",
@@ -159,7 +160,7 @@
       "properties": {
         "epsil.cliCommand": {
           "type": "string",
-          "default": "npx epsil",
+          "default": "npx @cortex-js/epsil",
           "description": "Command used by 'Epsil: Run File' to execute a source file in the terminal."
         },
         "epsil.inlineResults.statementTimeLimit": {
@@ -190,6 +191,8 @@
     "watch": "node build.mjs --watch",
     "pretest": "node build.mjs",
     "test": "node test/dap.test.mjs",
+    "package": "vsce package --out epsil.vsix",
+    "publish:marketplace": "vsce publish --packagePath epsil.vsix",
     "vscode:prepublish": "node build.mjs"
   },
   "dependencies": {
@@ -200,6 +203,7 @@
     "@types/vscode": "^1.90.0",
     "@vscode/debugadapter": "^1.68.0",
     "@vscode/debugprotocol": "^1.68.0",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1",
     "typescript": "^6.0.0",
     "vscode-languageserver": "^9.0.1",
