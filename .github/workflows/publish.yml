@@ -44,6 +44,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # attach the .vsix to the GitHub Release
+    env:
+      # Job-level so the marketplace step can gate on its presence: secrets are
+      # not readable from a step `if:`, but `env` is.
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
     steps:
       - uses: actions/checkout@v5
@@ -71,11 +75,21 @@ jobs:
         run: npm run package
         working-directory: vscode-epsil
 
+      # Creating the Azure DevOps org that mints a VSCE_PAT now requires a
+      # linked Azure subscription, so the token may stay absent indefinitely
+      # and the extension gets uploaded manually via the publisher web UI.
+      # Skip rather than fail: the release-artifact step below must still run.
       - name: Publish to VS Code Marketplace
+        if: env.VSCE_PAT != ''
         run: npm run publish:marketplace
         working-directory: vscode-epsil
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Note skipped marketplace publish
+        if: env.VSCE_PAT == ''
+        run: |
+          echo "::notice::VSCE_PAT not set — skipped the marketplace publish." \
+               "Upload vscode-epsil/epsil.vsix manually at" \
+               "https://marketplace.visualstudio.com/manage/publishers/FarfieldStudio"
 
       - name: Attach .vsix to the release
         run: gh release upload "${{ github.event.release.tag_name }}" epsil.vsix --clobber
