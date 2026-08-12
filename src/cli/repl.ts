@@ -10,7 +10,11 @@ import {
 import { version } from '../epsil.js';
 import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
 
-import { formatDiagnostics, formatValue } from './format.js';
+import {
+  formatDiagnostics,
+  formatRuntimeError,
+  formatValue,
+} from './format.js';
 import type { EpsilSession, EvaluationResult, OutputMode } from './types.js';
 
 export interface ReplOptions {
@@ -149,7 +153,10 @@ function formatReplResult(
   );
   const value = result.diagnostics.some((x) => x.severity === 'error')
     ? ''
-    : formatValue(result, outputMode);
+    : outputMode === 'value'
+      ? formatRuntimeError(result, undefined, color) ||
+        formatValue(result, outputMode)
+      : formatValue(result, outputMode);
   const timing = showTime ? `(${result.elapsedMs.toFixed(1)} ms)` : '';
   return [diagnostics, value, timing].filter(Boolean).join('\n');
 }

@@ -1,7 +1,7 @@
 {
-  // In this in-repo demo workspace the npm package isn't installed, so run
-  // the CLI from the repo's build output instead of `npx epsil` (which only
-  // works in a project that has @cortex-js/compute-engine installed).
-  // Rebuild with `npm run build` at the repo root if dist/ is stale.
-  "epsil.cliCommand": "node ../../dist/esm/cli/epsil.js"
+  // `Epsil: Run File` runs the CLI bundled with the extension by default —
+  // in the dev host that is the repo source as of the last `npm run build`
+  // in vscode-epsil/ (or live, under `npm run watch`). No `epsil.cliCommand`
+  // override is needed; setting one here would pin Run File to a different
+  // (possibly stale) engine build.
 }

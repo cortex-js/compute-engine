@@ -345,7 +345,7 @@ function f<U>(x: U) -> tr<U, U> { x }
 Type(f)`
     );
     const messages = (r.diagnostics ?? []).map((d) => String(d.message));
-    expect(messages.join('\n')).toContain('generic-alias-arity');
+    expect(messages.join('\n')).toContain('generic alias arity');
     // Before the fix the annotation was dropped and `f` typed
     // `(unknown) -> unknown` with no diagnostic at all.
     expect(messages.join('\n')).toContain('takes 1 type argument');

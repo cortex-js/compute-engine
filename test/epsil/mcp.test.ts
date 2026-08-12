@@ -245,7 +245,7 @@ describe('MCP server tools', () => {
       code: 'static-type-error',
       line: 2,
     });
-    expect(result.diagnostics[0].message).toContain('expected number');
+    expect(result.diagnostics[0].message).toContain('expected `number`');
   });
 
   test('doc looks up a symbol by name', async () => {

@@ -6,6 +6,7 @@ import { runDoc } from './doc.js';
 import {
   diagnosticToJson,
   formatDiagnostics,
+  formatRuntimeError,
   formatValue,
   hasErrors,
 } from './format.js';
@@ -26,8 +27,9 @@ Evaluate Epsil programs or start an interactive session.
 Commands:
   check                   parse a program and report diagnostics without
                           evaluating it; "--json" prints them as JSON
-  doc                     show documentation for a library symbol, or search
-                          the library by keyword; "--json" for JSON,
+  doc                     show documentation for a library symbol, search the
+                          library by keyword, or explain a diagnostic code
+                          (e.g. "epsil doc zero-index"); "--json" for JSON,
                           "--limit <n>" for more matches
   mcp                     start a Model Context Protocol server, exposing
                           evaluate/check/doc/parse/serialize tools and the
@@ -125,8 +127,22 @@ export async function main(
     }
 
     if (!result.diagnostics.some((x) => x.severity === 'error')) {
-      const value = formatValue(result, options.outputMode);
-      if (value) io.stdout.write(`${value}\n`);
+      // In the human-facing text mode, an error-valued result renders as an
+      // annotated report on stderr, not as a raw `Error(…)` value on stdout;
+      // the machine modes (--json / --epsil) keep the value itself.
+      const errorReport =
+        options.outputMode === 'value' && options.diagnosticsFormat === 'text'
+          ? formatRuntimeError(
+              result,
+              options.file,
+              options.color && Boolean(io.stderr.isTTY)
+            )
+          : '';
+      if (errorReport) io.stderr.write(`${errorReport}\n`);
+      else {
+        const value = formatValue(result, options.outputMode);
+        if (value) io.stdout.write(`${value}\n`);
+      }
     }
     return hasErrors(result) ? 1 : 0;
   } catch (error) {

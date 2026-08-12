@@ -135,8 +135,9 @@ describe('Epsil CLI check: canonicalization-time type errors', () => {
     const { io, stderr } = makeIo();
     expect(await main(['check', '-e', '"a" + 1'], io)).toBe(1);
     expect(stderr()).toContain(
-      '1:1 error: Type error: incompatible-type (expected number, got string) in `"a" + 1`'
+      'error: Type error: expected `number`, got `string` in `"a" + 1`'
     );
+    expect(stderr()).toContain('--> 1:1');
   });
 
   test('anchors to the offending statement of a multi-statement program', async () => {
@@ -208,7 +209,7 @@ describe('Epsil CLI check: canonicalization-time type errors', () => {
     // `static-type-error`).
     const { io, stderr } = makeIo();
     expect(await main(['check', '-e', 'Sqrt(1, 2, 3)'], io)).toBe(1);
-    expect(stderr()).toContain('Static error: unexpected-argument');
+    expect(stderr()).toContain('Static error: unexpected argument');
   });
 
   test('keeps the readable form of a three-operand type error', async () => {
@@ -217,7 +218,7 @@ describe('Epsil CLI check: canonicalization-time type errors', () => {
     const { io, stderr } = makeIo();
     expect(await main(['check', '-e', '1 |> 2'], io)).toBe(1);
     expect(stderr()).toContain(
-      'Type error: incompatible-type (expected function, got finite_integer; at 2)'
+      'Type error: expected `function`, got `finite_integer` for argument 2'
     );
   });
 
@@ -347,6 +348,91 @@ describe('Epsil CLI JSON diagnostics for evaluation', () => {
   });
 });
 
+describe('Epsil CLI runtime error reporting', () => {
+  test('renders a final-statement error value as an annotated report', async () => {
+    const { io, stdout, stderr } = makeIo();
+    // The final statement's problem stays in `value` (no diagnostic, by
+    // design — errors are values); the CLI renders it as an annotated block
+    // on stderr instead of printing a raw `Error(…)` on stdout.
+    expect(await main(['-e', 'const c = 1\nc = 2'], io)).toBe(1);
+    expect(stdout()).toBe('');
+    expect(stderr()).toContain('error: Runtime error:');
+    expect(stderr()).toContain('--> 2:1');
+    expect(stderr()).toContain('2 | c = 2');
+    expect(stderr()).toContain('^^^^^');
+  });
+
+  test('anchors the report on the statement that produced the value', async () => {
+    const { io, stderr } = makeIo();
+    expect(
+      await main(['-e', 'let s: string = "hi"\nLn(s, 2)'], io)
+    ).toBe(1);
+    expect(stderr()).toContain('error: Runtime error: expected `number`');
+    // Narrowed to the offending `s` inside `Ln(s, 2)`, not the statement.
+    expect(stderr()).toContain('--> 2:4');
+    expect(stderr()).toContain('2 | Ln(s, 2)');
+  });
+
+  test('machine output modes keep the error value on stdout', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['-e', 'const c = 1\nc = 2', '--json'], io)).toBe(1);
+    expect(JSON.parse(stdout())[0]).toBe('Error');
+  });
+
+  test('renders a fixit as a help line', async () => {
+    const { io, stderr } = makeIo();
+    expect(await main(['-e', '(x) -> x^2'], io)).toBe(1);
+    expect(stderr()).toContain('= help: did you mean `(x) |-> x^2`?');
+  });
+
+  test('advertises extended docs with a note footer', async () => {
+    const { io, stderr } = makeIo();
+    // The footer names the most SPECIFIC code with an entry — the engine's
+    // `incompatible-type`, not the `runtime-error` wrapper.
+    expect(await main(['-e', 'let s = ["a"]\nLength(Characters(s))'], io)).toBe(
+      1
+    );
+    expect(stderr()).toContain(
+      '= note: `epsil doc incompatible-type` explains this error'
+    );
+  });
+
+  test('omits the note footer for codes without an entry', async () => {
+    const { io, stderr } = makeIo();
+    expect(await main(['-e', '1 +'], io)).toBe(1);
+    expect(stderr()).not.toContain('= note:');
+  });
+
+  test('serves diagnostic-code documentation through `doc`', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['doc', 'zero-index'], io)).toBe(0);
+    expect(stdout()).toContain('zero-index (diagnostic)');
+    expect(stdout()).toContain('Indexing is 1-based');
+
+    // JSON mode carries the same explanation, machine-shaped.
+    const json = makeIo();
+    expect(await main(['doc', 'zero-index', '--json'], json.io)).toBe(0);
+    expect(JSON.parse(json.stdout())).toMatchObject({ code: 'zero-index' });
+  });
+
+  test('narrows the span to the innermost source-mapped frame', async () => {
+    const { io, stderr } = makeIo();
+    // The error happens at the `s` inside `Characters(s)` — the report
+    // points there, not at the whole statement. The breadcrumb chain is
+    // data-only: the caret says it more clearly, so it is not rendered.
+    expect(
+      await main(
+        ['-e', 'let s = ["a", "b"]\ns |> Map(_, _ |-> Length(Characters(s)))'],
+        io
+      )
+    ).toBe(1);
+    expect(stderr()).not.toContain('in Characters argument');
+    expect(stderr()).toContain('--> 2:37');
+    // A single-character span: one caret, not a statement-wide underline.
+    expect(stderr()).toMatch(/\n\s*\| {37}\^\n/);
+  });
+});
+
 describe('Epsil CLI evaluation', () => {
   test('keeps declarations in one session and resets them on request', () => {
     const session = makeEpsilSession(0);
@@ -402,8 +488,8 @@ describe('Epsil CLI evaluation', () => {
       'example.epsil',
       false
     );
-    expect(output).toContain('example.epsil:1:4 error');
-    expect(output).toContain('Unexpected symbol "+"');
+    expect(output).toContain('error: Unexpected symbol "+"');
+    expect(output).toContain('--> example.epsil:1:3');
     expect(output).toContain('1 | 1 +');
     expect(hasErrors(result)).toBe(true);
   });

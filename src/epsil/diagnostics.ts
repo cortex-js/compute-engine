@@ -35,7 +35,7 @@ export type DiagnosticCode =
   | 'protocol-in-type-position' // %0 = protocol name — a PROTOCOL used where a type is expected (`function f(x: Comparable)`); protocols are not types (ruling P8), so the annotation must be a constrained variable instead
   | 'host-pragma-disabled' // %0 = pragma name (host-state pragmas gated off)
   | 'error-directive' // %0 = message from a `#error` pragma
-  | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value), %1 = breadcrumb frame chain, if the error bubbled (e.g. "in Ln argument 1, in Add argument 2")
+  | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value), %1 = breadcrumb frame chain ('' when the error was raised in place, e.g. "in Ln argument 1, in Add argument 2"), %2 = engine error code (keys `epsil doc <code>` extended docs)
   | 'static-type-error' // %0 = error description, %1 = offending statement in Epsil form (a type error the engine detects at canonicalization time, before anything runs)
   | 'evaluation-canceled' // %0 = machine-readable CancellationCause, %1 = error description (non-final statement hit a cap breach: timeout/iteration/recursion)
   | 'unknown-function' // %0 = called name, %1 = suggested known operator ("did you mean")

@@ -47,6 +47,10 @@ export interface EvaluationResult {
   source: string;
   value: BoxedExpression;
   diagnostics: ParsingDiagnostic[];
+  /** Source range of the statement that produced `value` (see
+   * `ExecuteEpsilResult.valueRange`) — the anchor for rendering an
+   * error-valued result. */
+  valueRange?: [start: number, end: number];
   elapsedMs: number;
 }
 

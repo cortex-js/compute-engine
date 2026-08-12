@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../epsil.js';
+import { explainErrorCode } from '../epsil/error-explanations.js';
 
 import { CliUsageError, parseDocArguments } from './arguments.js';
 import type { CliIo } from './io.js';
@@ -35,6 +36,19 @@ export function runDoc(args: readonly string[], io: CliIo): number {
         : '';
     io.stderr.write(`${message}Try "epsil --help" for more information.\n`);
     return 2;
+  }
+
+  // Diagnostic codes are doc-addressable (`epsil doc zero-index`) — the
+  // lookup surface a rendered diagnostic's `note:` footer points at.
+  const explanation = explainErrorCode(options.query);
+  if (explanation !== undefined) {
+    const code = options.query.toLowerCase();
+    if (options.json)
+      io.stdout.write(
+        `${JSON.stringify({ query: options.query, code, explanation }, null, 2)}\n`
+      );
+    else io.stdout.write(`${code} (diagnostic)\n\n${explanation}\n`);
+    return 0;
   }
 
   const engine = new ComputeEngine();

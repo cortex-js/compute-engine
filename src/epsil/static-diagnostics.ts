@@ -344,7 +344,7 @@ function collectErrors(
 
 /** The error code of an `["Error", cause, where?]` node: the head of its
  * `ErrorCode` payload, or the cause itself when it is a bare message. */
-function errorCode(error: MathJsonExpression): string {
+export function errorCode(error: MathJsonExpression): string {
   const cause = operand(error, 1);
   if (cause === null) return 'error';
   if (operator(cause) === 'ErrorCode')
@@ -361,10 +361,21 @@ function errorCode(error: MathJsonExpression): string {
  * three-operand shape `["Error", ["ErrorCode", "incompatible-type", expected,
  * actual], where]`: folding `where` in with the payload used to push the
  * argument count past two and degrade the readable "(expected X, got Y)" form.
+ *
+ * Also the shared translation for RUNTIME error values (`executeEpsil`'s
+ * `runtime-error` diagnostics and the CLI's rendering of an error-valued
+ * program result), so the same problem reads the same at both tiers. The
+ * output doubles as the dedup / authored-error subtraction key in
+ * `staticDiagnostics()` — both sides go through this function, so the
+ * phrasing is free to change but must stay deterministic.
  */
-function describeError(error: MathJsonExpression): string {
+export function describeError(error: MathJsonExpression): string {
   const cause = operand(error, 1);
-  const where = operand(error, 2);
+  // The second operand is the error's site — unless it is the `ErrorTrace`
+  // breadcrumb (identified by head, never by position; it is rendered
+  // separately by `errorFrameChain`).
+  const second = operand(error, 2);
+  const where = operator(second) === 'ErrorTrace' ? null : second;
 
   let code = 'error';
   const payload: string[] = [];
@@ -376,14 +387,58 @@ function describeError(error: MathJsonExpression): string {
     } else code = text(cause);
   }
 
-  const detail =
-    code === 'incompatible-type' && payload.length === 2
-      ? `expected ${payload[0]}, got ${payload[1]}`
-      : payload.join(', ');
-  const args = [detail, where === null ? '' : `at ${text(where)}`].filter(
-    (x) => x !== ''
-  );
-  return args.length === 0 ? code : `${code} (${args.join('; ')})`;
+  // `where` is the error's site — a bare argument index when the engine
+  // validated a signature positionally, the offending subexpression, or
+  // (some minters) a full explanatory sentence, each phrased differently.
+  const siteText = where === null ? '' : text(where);
+  const site =
+    siteText === ''
+      ? ''
+      : /^\d+$/.test(siteText)
+        ? `for argument ${siteText}`
+        : siteText.length <= 40
+          ? `at \`${siteText}\``
+          : `— ${siteText}`;
+
+  let detail: string;
+  switch (code) {
+    case 'incompatible-type':
+      detail =
+        payload.length === 2
+          ? `expected \`${payload[0]}\`, got \`${payload[1]}\``
+          : `incompatible type: ${payload.join(', ')}`;
+      break;
+    case 'missing':
+      detail =
+        payload.length === 0
+          ? 'a required argument is missing'
+          : `a required argument is missing (${payload.join(', ')})`;
+      break;
+    case 'unexpected-argument':
+      // No site: some minters put the argument's VALUE in the `where` slot,
+      // where a numeric one would masquerade as an argument index — and the
+      // report's caret already points at the argument.
+      return payload.length === 0
+        ? 'unexpected argument'
+        : `unexpected argument \`${payload.join(', ')}\``;
+    case 'invalid-symbol':
+      detail =
+        payload.length === 0
+          ? 'invalid symbol'
+          : `invalid symbol \`${payload.join(', ')}\``;
+      break;
+    default: {
+      // A kebab-case code reads as words; a free-form message (a thrown
+      // `Error`'s text captured as the cause) passes through verbatim.
+      const readable = /^[a-z][a-z0-9-]*$/.test(code)
+        ? code.replaceAll('-', ' ')
+        : code;
+      detail =
+        payload.length === 0 ? readable : `${readable}: ${payload.join(', ')}`;
+    }
+  }
+
+  return site === '' ? detail : `${detail} ${site}`;
 }
 
 /** The text of a MathJSON string operand, or its Epsil form. */

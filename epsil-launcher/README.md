@@ -19,10 +19,9 @@ npx epsil program.epsil
 Documentation: [cortexjs.io/epsil](https://cortexjs.io/epsil/)
 
 This launcher can also be used standalone — `npx @cortex-js/epsil`, or
-`npm install -g @cortex-js/epsil` to put `epsil` on your PATH. Once the next
-`@cortex-js/compute-engine` release ships the `epsil` binary, the launcher
-forwards to it directly; until then it prints the instructions above.
+`npm install -g @cortex-js/epsil` to put `epsil` on your PATH. It forwards
+directly to the CLI that ships with `@cortex-js/compute-engine`.
 
-> The bare npm name `epsil` is currently blocked by the registry's
-> name-similarity check (vs. `psl`); a manual-review request is the path to
-> claiming it. The same check prevents anyone else from claiming it.
+> The bare npm name `epsil` is permanently blocked by the registry's
+> name-similarity check (vs. `psl`); npm support confirmed there is no
+> override. The same check prevents anyone else from claiming it.

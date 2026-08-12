@@ -607,7 +607,7 @@ describe('§10 — construction at a widened type', () => {
     );
     const messages = r.diagnostics.map((d) => d.message.toString());
     expect(messages.length).toBe(1);
-    expect(messages[0]).toContain('incompatible-type');
+    expect(messages[0]).toContain('expected `');
     expect(messages[0]).toContain('tree<number>');
     expect(messages[0]).toContain('tree<finite_integer>');
   });

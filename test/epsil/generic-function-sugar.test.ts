@@ -455,7 +455,9 @@ describe('M2 SUGARED GENERICS — G2 multi-clause rejection (§2.6)', () => {
       'function f<T>(x: T) -> T { x }\nfunction f(x: string) -> string { x }\nf(2)'
     );
     expect(r.diagnostics.map((d) => d[0])).toEqual(['runtime-error']);
-    expect(String(r.diagnostics[0][1])).toContain('generic-clause-unsupported');
+    expect(String(r.diagnostics[0][1])).toContain(
+      'generic clause unsupported'
+    );
     // The first (generic) definition survives.
     expect(r.value).toBe('2');
   });

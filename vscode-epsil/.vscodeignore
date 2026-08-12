@@ -11,3 +11,5 @@ tsconfig.json
 test/**
 package-lock.json
 VSCODE_EPSIL_ROADMAP.md
+DEVELOPMENT.md
+examples/**

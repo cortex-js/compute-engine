@@ -1,11 +1,14 @@
 import { serializeEpsil } from '../epsil.js';
 import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
+import { explainErrorCode } from '../epsil/error-explanations.js';
+import { describeError, errorCode } from '../epsil/static-diagnostics.js';
 
 import type { EvaluationResult, OutputMode } from './types.js';
 
 const ANSI = {
   red: '\u001b[31m',
   yellow: '\u001b[33m',
+  blue: '\u001b[34m',
   dim: '\u001b[2m',
   reset: '\u001b[0m',
 };
@@ -57,7 +60,7 @@ export function formatDiagnostics(
 ): string {
   return diagnostics
     .map((diagnostic) => formatDiagnostic(diagnostic, source, url, color))
-    .join('\n');
+    .join('\n\n');
 }
 
 export function hasErrors(result: EvaluationResult): boolean {
@@ -93,7 +96,7 @@ export function diagnosticToJson(
     ? diagnostic.message
     : [diagnostic.message];
   const [code, ...args] = parts;
-  const offset = diagnostic.range[2] ?? diagnostic.range[1];
+  const offset = diagnostic.range[2] ?? diagnostic.range[0];
   const { line, column } = sourceLocation(source, offset);
 
   const result: JsonDiagnostic = {
@@ -121,21 +124,172 @@ function formatDiagnostic(
   url: string | undefined,
   color: boolean
 ): string {
-  const message = diagnosticMessage(diagnostic);
-  const offset = diagnostic.range[2] ?? diagnostic.range[1];
-  const { line, column, text } = sourceLocation(source, offset);
-  const label = diagnostic.severity === 'error' ? 'error' : 'warning';
-  const labelColor = diagnostic.severity === 'error' ? ANSI.red : ANSI.yellow;
+  return renderAnnotation(
+    diagnostic.severity,
+    diagnosticMessage(diagnostic),
+    diagnostic.range,
+    source,
+    url,
+    color,
+    diagnostic.fixits,
+    diagnosticDocCode(diagnostic)
+  );
+}
+
+/**
+ * The code advertised by a diagnostic's `note:` footer — the most SPECIFIC
+ * code with an extended-doc entry: for the wrapper codes (`runtime-error`,
+ * `static-type-error`) the engine error code they carry, falling back to
+ * the wrapper itself; for everything else, the diagnostic code. `undefined`
+ * when nothing has an entry (no footer — never a dead-end reference).
+ */
+function diagnosticDocCode(diagnostic: ParsingDiagnostic): string | undefined {
+  const parts = Array.isArray(diagnostic.message)
+    ? diagnostic.message
+    : [diagnostic.message];
+  const [code, ...args] = parts.map(String);
+  const candidates =
+    code === 'runtime-error'
+      ? [args[2], code]
+      : code === 'static-type-error'
+        ? [args[2], code]
+        : [code];
+  return candidates.find(
+    (x) => x !== undefined && explainErrorCode(x) !== undefined
+  );
+}
+
+/**
+ * Render an error-valued program RESULT as an annotated block, anchored at
+ * the statement that produced it (`valueRange`).
+ *
+ * Presentation-layer only, by design: `executeEpsil` deliberately reports no
+ * diagnostic for the final statement — a program may legitimately *author*
+ * an `Error` value (errors are values) — so the raw value stays available to
+ * every host, and the CLI translates it only when printing for a human.
+ */
+export function formatRuntimeError(
+  result: EvaluationResult,
+  url: string | undefined,
+  color: boolean
+): string {
+  const error = result.value.errors[0];
+  if (error === undefined) return '';
+
+  // The breadcrumb chain is deliberately NOT rendered: the caret already
+  // points at the innermost source-mapped frame, more clearly. The chain
+  // stays available in the machine-readable diagnostic data.
+  const message = `Runtime error: ${describeError(error.json)}`;
+
+  const code = errorCode(error.json);
+  const docCode = [code, 'runtime-error'].find(
+    (x) => explainErrorCode(x) !== undefined
+  );
+
+  const [start, end] = result.valueRange ?? [0, result.source.length];
+  return renderAnnotation(
+    'error',
+    message,
+    [start, end, start],
+    result.source,
+    url,
+    color,
+    undefined,
+    docCode
+  );
+}
+
+/**
+ * One annotated source block, in the style popularized by Elm and rustc: the
+ * message first, then the location, the offending line with its span
+ * underlined, and — when the diagnostic carries fixits that fit on that
+ * line — a `help:` line showing the corrected source.
+ *
+ *     error: Unexpected symbol "+"
+ *      --> example.epsil:1:3
+ *       |
+ *     1 | 1 +
+ *       |   ^
+ *       = help: …
+ *
+ * The excerpt is the line holding the diagnostic's position (its explicit
+ * `position`, or the span start); a span reaching past that line is
+ * underlined to the end of the line.
+ */
+function renderAnnotation(
+  severity: 'error' | 'warning',
+  message: string,
+  range: ParsingDiagnostic['range'],
+  source: string,
+  url: string | undefined,
+  color: boolean,
+  fixits?: ParsingDiagnostic['fixits'],
+  docCode?: string
+): string {
+  const paint = (code: string, s: string) =>
+    color ? `${code}${s}${ANSI.reset}` : s;
+  const label = severity === 'error' ? 'error' : 'warning';
+  const labelColor = severity === 'error' ? ANSI.red : ANSI.yellow;
+
+  const anchor = range[2] ?? range[0];
+  const { line, column, text, lineStart } = sourceLocation(source, anchor);
   const location = `${url ? `${url}:` : ''}${line}:${column}`;
-  const prefix = color
-    ? `${ANSI.dim}${location}${ANSI.reset} ${labelColor}${label}${ANSI.reset}`
-    : `${location} ${label}`;
 
-  if (text === undefined) return `${prefix}: ${message}`;
+  const head = `${paint(labelColor, `${label}:`)} ${message}`;
+  const pad = ' '.repeat(String(line).length);
+  const arrow = `${pad}${paint(ANSI.blue, '-->')} ${paint(ANSI.dim, location)}`;
 
-  const gutter = `${line} | `;
-  const caret = `${' '.repeat(gutter.length + Math.max(column - 1, 0))}^`;
-  return `${prefix}: ${message}\n${gutter}${text}\n${caret}`;
+  if (text === undefined) return `${head}\n${arrow}`;
+
+  const bar = paint(ANSI.blue, `${pad} |`);
+  const codeLine = `${paint(ANSI.blue, `${line} |`)} ${text}`;
+
+  // The span's intersection with the excerpt line; when empty (the position
+  // sits outside its own span, e.g. at the end of the input), a single caret
+  // at the position.
+  const from = Math.max(0, Math.min(range[0] - lineStart, text.length));
+  const to = Math.max(from, Math.min(range[1] - lineStart, text.length));
+  const [mark, width] =
+    to > from
+      ? [from, to - from]
+      : [Math.max(0, Math.min(column - 1, text.length)), 1];
+  const underline = `${bar} ${' '.repeat(mark)}${paint(labelColor, '^'.repeat(width))}`;
+
+  const suggestion = fixitSuggestion(fixits, lineStart, text);
+  const help =
+    suggestion === ''
+      ? ''
+      : `\n${pad} ${paint(ANSI.blue, '=')} help: ${suggestion}`;
+  const note =
+    docCode === undefined
+      ? ''
+      : `\n${pad} ${paint(ANSI.blue, '=')} ${paint(
+          ANSI.dim,
+          `note: \`epsil doc ${docCode}\` explains this ${label}`
+        )}`;
+
+  return `${head}\n${arrow}\n${bar}\n${codeLine}\n${underline}${help}${note}`;
+}
+
+/**
+ * The excerpt line with the diagnostic's fixits applied — the "did you
+ * mean" suggestion — or `''` when there are none or they reach beyond the
+ * line (a multi-line rewrite does not render in a one-line hint).
+ */
+function fixitSuggestion(
+  fixits: ParsingDiagnostic['fixits'],
+  lineStart: number,
+  text: string
+): string {
+  if (!fixits || fixits.length === 0) return '';
+  const lineEnd = lineStart + text.length;
+  if (!fixits.every(([s, e]) => s >= lineStart && e <= lineEnd)) return '';
+
+  let fixed = text;
+  for (const [s, e, value] of [...fixits].sort((a, b) => b[0] - a[0]))
+    fixed = fixed.slice(0, s - lineStart) + value + fixed.slice(e - lineStart);
+  fixed = fixed.replaceAll(/\s+/g, ' ').trim();
+  return fixed === '' ? '' : `did you mean \`${fixed}\`?`;
 }
 
 function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
@@ -194,11 +348,10 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
     case 'floor-division-comment':
       return `"//" starts a comment, not floor division; use Floor(a / b) for the integer quotient`;
     case 'runtime-error':
-      // `%1` is the breadcrumb frame chain of a bubbled error (engine design
-      // §2a); absent when the error was raised in place.
-      return args[1]
-        ? `Runtime error: ${args[0]} (${args[1]})`
-        : `Runtime error: ${args[0]}`;
+      // `%1` (the breadcrumb frame chain, engine design §2a) is deliberately
+      // not rendered: the caret already points at the innermost source-mapped
+      // frame. It stays in the diagnostic data for machine consumers.
+      return `Runtime error: ${args[0]}`;
     case 'static-type-error': {
       // The canonicalization walk collects more than type errors (`missing`,
       // `unexpected-argument`, …), so the label follows the error code
@@ -240,15 +393,17 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
 function sourceLocation(
   source: string,
   offset: number
-): { line: number; column: number; text?: string } {
+): { line: number; column: number; text?: string; lineStart: number } {
   const clamped = Math.max(0, Math.min(offset, source.length));
   const before = source.slice(0, clamped);
   const lines = before.split(/\r\n|[\n\r\u2028\u2029]/);
   const allLines = source.split(/\r\n|[\n\r\u2028\u2029]/);
   const line = lines.length;
+  const column = (lines.at(-1)?.length ?? 0) + 1;
   return {
     line,
-    column: (lines.at(-1)?.length ?? 0) + 1,
+    column,
     text: allLines[line - 1],
+    lineStart: clamped - (column - 1),
   };
 }

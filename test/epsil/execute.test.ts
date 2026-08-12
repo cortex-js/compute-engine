@@ -356,9 +356,10 @@ describe('EPSIL EXECUTE — runtime problems in non-final statements', () => {
       'static-type-error',
       'runtime-error',
     ]);
-    // Both diagnostics point at the offending statement
+    // The static diagnostic points at the offending statement; the runtime
+    // one narrows to the innermost source-mapped breadcrumb frame (`xs[2]`).
     expect(diagnostics[0].range.slice(0, 2)).toEqual([19, 28]);
-    expect(diagnostics[1].range).toEqual([19, 28]);
+    expect(diagnostics[1].range).toEqual([19, 24]);
     // The list is unchanged
     expect(value.toString()).toBe('[1,2,3]');
   });
@@ -386,9 +387,7 @@ describe('EPSIL EXECUTE — static (canonicalization-time) type errors', () => {
   test('reports the error and still evaluates the program', () => {
     const { value, diagnostics } = run('"a" + 1\n2');
     expect(diagnostics[0].message[0]).toBe('static-type-error');
-    expect(diagnostics[0].message[1]).toBe(
-      'incompatible-type (expected number, got string)'
-    );
+    expect(diagnostics[0].message[1]).toBe('expected `number`, got `string`');
     // Anchored to the offending statement.
     expect(diagnostics[0].range.slice(0, 2)).toEqual([0, 7]);
     // Evaluation proceeded: the final statement's value is unchanged.

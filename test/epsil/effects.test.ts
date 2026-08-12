@@ -433,6 +433,6 @@ describe('EPSIL EFFECTS — end to end through the engine', () => {
       'function bad() pure -> integer {Random(Range(1, 6))}\n1 + 1'
     );
     expect(diagnostics.map((d) => d.message[0])).toEqual(['runtime-error']);
-    expect(String(diagnostics[0].message[1])).toContain('incompatible-type');
+    expect(String(diagnostics[0].message[1])).toContain('expected `');
   });
 });

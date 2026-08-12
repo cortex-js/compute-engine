@@ -807,7 +807,7 @@ describe('EPSIL TYPE DECLARATIONS (end-to-end)', () => {
     // The declared-type rejection is an `incompatible-type` error VALUE (the
     // `Declare` operator route does not throw), so the diagnostic quotes the
     // coded error rather than an opaque host message.
-    expect(String(messages[0][1])).toContain('incompatible-type');
+    expect(String(messages[0][1])).toContain('expected `');
     expect(String(messages[0][1])).toContain('point');
     // The type itself IS registered — only the annotation is refused.
     expect(ce.type('point').matches('point')).toBe(true);
@@ -1096,7 +1096,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     // The rejection travels as an `incompatible-type` error VALUE, not a
     // host throw, so the diagnostic carries the code (see the channel note in
     // `test/compute-engine/nominal-assign.test.ts`).
-    expect(JSON.stringify(r.diagnostics)).toContain('incompatible-type');
+    expect(JSON.stringify(r.diagnostics)).toContain('expected `');
     expect(JSON.stringify(r.diagnostics)).toContain('point');
   });
 
@@ -1112,7 +1112,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
       new ComputeEngine(),
       'type point = tuple<x: number, y: number>\nlet p = point(1, 2)\nlet (a, b) = p\na'
     );
-    expect(JSON.stringify(r2.diagnostics)).toContain('incompatible-type');
+    expect(JSON.stringify(r2.diagnostics)).toContain('expected `');
   });
 
   test('`match` destructures a tagged value (free, §2)', () => {
@@ -1304,7 +1304,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     );
     const messages = r.diagnostics.map((d) => d.message);
     expect(messages).toHaveLength(1);
-    expect(String(messages[0][1])).toContain('incompatible-type');
+    expect(String(messages[0][1])).toContain('expected `');
   });
 
   test('equality is structural over the tag (D9)', () => {
@@ -1397,7 +1397,7 @@ describe('EPSIL RECURSIVE TYPES', () => {
             'not compatible with the declared type "json"'
           );
           expect(runtime).toHaveLength(1);
-          expect(String(runtime[0].message[1])).toContain('incompatible-type');
+          expect(String(runtime[0].message[1])).toContain('expected `');
           for (const d of r.diagnostics)
             expect(String(d.message[1])).not.toContain('call stack');
         });

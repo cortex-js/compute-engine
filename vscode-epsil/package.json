@@ -161,8 +161,13 @@
       "properties": {
         "epsil.cliCommand": {
           "type": "string",
-          "default": "npx @cortex-js/epsil",
-          "description": "Command used by 'Epsil: Run File' to execute a source file in the terminal."
+          "default": "",
+          "description": "Command used by 'Epsil: Run File' to execute a source file in the terminal. Leave empty to run the Epsil CLI bundled with the extension (the same engine build used for diagnostics, inline results, and debugging). Set it to run a different engine, e.g. 'npx @cortex-js/epsil'."
+        },
+        "epsil.terminal.addToPath": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add an 'epsil' command to the PATH of integrated terminals, running the CLI bundled with the extension. Takes effect in newly created terminals."
         },
         "epsil.inlineResults.statementTimeLimit": {
           "type": "number",

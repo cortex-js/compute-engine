@@ -8,6 +8,7 @@ import {
 import type { AddressInfo } from 'node:net';
 
 import { ComputeEngine, serializeEpsil, version } from '../epsil.js';
+import { explainErrorCode } from '../epsil/error-explanations.js';
 
 import { CliUsageError, parseMcpArguments } from './arguments.js';
 import { checkSource, parseSource } from './check.js';
@@ -512,6 +513,10 @@ class McpServer {
 
   private static doc(args: Record<string, unknown>): unknown {
     const query = requireString(args, 'query');
+    // Diagnostic codes are doc-addressable, mirroring `epsil doc <code>`.
+    const explanation = explainErrorCode(query);
+    if (explanation !== undefined)
+      return toolResult({ query, code: query.toLowerCase(), explanation });
     const limit =
       typeof args.limit === 'number' && Number.isInteger(args.limit)
         ? Math.min(Math.max(args.limit, 1), 100)

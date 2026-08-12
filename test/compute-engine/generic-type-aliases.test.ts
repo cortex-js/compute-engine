@@ -797,7 +797,7 @@ describe('GENERIC TYPE ALIASES — Epsil statement route', () => {
       ce,
       'type alias Pair<T> = tuple<T, T>\nlet p: Pair<integer> = (1, "x")\np'
     );
-    expect(JSON.stringify(r.diagnostics)).toContain('incompatible-type');
+    expect(JSON.stringify(r.diagnostics)).toContain('expected `');
   });
 
   test('a generic alias declared in a block is a hard error', () => {

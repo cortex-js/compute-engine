@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { chmod } from 'node:fs/promises';
 import * as path from 'node:path';
 
 import * as vscode from 'vscode';
@@ -13,6 +14,9 @@ import {
 const TERMINAL_NAME = 'Epsil';
 
 let client: LanguageClient | undefined;
+
+/** Absolute path of the CLI bundled with the extension, set on activation. */
+let bundledCliPath = '';
 
 export async function activate(
   context: vscode.ExtensionContext
@@ -57,6 +61,18 @@ export async function activate(
         }
         return config;
       },
+    })
+  );
+
+  bundledCliPath = context.asAbsolutePath(path.join('dist', 'cli.mjs'));
+
+  // Put an `epsil` shim on the PATH of integrated terminals (controlled by
+  // `epsil.terminal.addToPath`), and keep it in sync with the setting.
+  void updateTerminalPath(context);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('epsil.terminal.addToPath'))
+        void updateTerminalPath(context);
     })
   );
 
@@ -133,14 +149,19 @@ async function runFile(): Promise<void> {
   }
   if (!(await document.save())) return;
 
-  const cliCommand =
-    vscode.workspace.getConfiguration('epsil').get<string>('cliCommand') ||
-    'npx epsil';
+  // An explicit `epsil.cliCommand` wins; by default run the CLI bundled
+  // with the extension, so `Epsil: Run File` executes the same engine build
+  // as the language server, inline results, and the debugger.
+  const configured = vscode.workspace
+    .getConfiguration('epsil')
+    .get<string>('cliCommand')
+    ?.trim();
+  const cliCommand = configured || `node ${quoteArgument(bundledCliPath)}`;
 
   // Run from the file's workspace folder (or its directory) so a
-  // project-local install of the CLI resolves — `npx epsil` finds the bin in
-  // the nearest node_modules, and workspace-relative `epsil.cliCommand`
-  // overrides work.
+  // workspace-relative `epsil.cliCommand` override resolves — e.g.
+  // `npx epsil` finding a project-local install in the nearest
+  // node_modules.
   const cwd =
     vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ??
     path.dirname(document.uri.fsPath);
@@ -150,6 +171,57 @@ async function runFile(): Promise<void> {
     vscode.window.createTerminal({ name: TERMINAL_NAME, cwd });
   terminal.show(true);
   terminal.sendText(`${cliCommand} ${quoteArgument(document.uri.fsPath)}`);
+}
+
+/**
+ * Make `epsil` available on the PATH of integrated terminals, running the
+ * CLI bundled with the extension — the same engine build as the language
+ * server, inline results, and the debugger.
+ *
+ * The shim lives in global storage, whose path is stable across extension
+ * updates (unlike the versioned extension directory), and is rewritten on
+ * every activation so it always points at the current bundle. Integrated
+ * terminals only: an extension cannot (and should not) reach the PATH of
+ * external shells.
+ */
+async function updateTerminalPath(
+  context: vscode.ExtensionContext
+): Promise<void> {
+  const enabled = vscode.workspace
+    .getConfiguration('epsil')
+    .get<boolean>('terminal.addToPath', true);
+
+  const collection = context.environmentVariableCollection;
+  if (!enabled) {
+    // Existing terminals keep the stale environment until relaunched; VS
+    // Code marks them with a relaunch indicator.
+    collection.clear();
+    return;
+  }
+
+  try {
+    const shimDir = vscode.Uri.joinPath(context.globalStorageUri, 'bin');
+    await vscode.workspace.fs.createDirectory(shimDir);
+    if (process.platform === 'win32') {
+      const shim = vscode.Uri.joinPath(shimDir, 'epsil.cmd');
+      const body = `@echo off\r\nnode ${quoteArgument(bundledCliPath)} %*\r\n`;
+      await vscode.workspace.fs.writeFile(shim, Buffer.from(body, 'utf8'));
+    } else {
+      const shim = vscode.Uri.joinPath(shimDir, 'epsil');
+      const body = `#!/bin/sh\nexec node ${quoteArgument(bundledCliPath)} "$@"\n`;
+      await vscode.workspace.fs.writeFile(shim, Buffer.from(body, 'utf8'));
+      await chmod(shim.fsPath, 0o755);
+    }
+
+    collection.persistent = true;
+    collection.description =
+      'Adds the `epsil` command (the CLI bundled with the extension) to integrated terminals.';
+    collection.prepend('PATH', shimDir.fsPath + path.delimiter);
+  } catch (error) {
+    // The PATH shim is a convenience, not a load-bearing feature: log and
+    // move on rather than surfacing an error dialog on every activation.
+    console.error('Epsil: could not add the CLI to the terminal PATH.', error);
+  }
 }
 
 // ── Inline results ─────────────────────────────────────────────────────────

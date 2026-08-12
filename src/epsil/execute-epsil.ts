@@ -18,7 +18,11 @@ import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
 
 import { FatalParsingError, ParsingDiagnostic } from './diagnostics.js';
 import { parseEpsil } from './parse-epsil.js';
-import { staticDiagnostics } from './static-diagnostics.js';
+import {
+  describeError,
+  errorCode,
+  staticDiagnostics,
+} from './static-diagnostics.js';
 
 export interface ExecuteEpsilOptions {
   /** Source URL (for `#url`/`#filename` pragmas and diagnostic origins). */
@@ -41,6 +45,14 @@ export interface ExecuteEpsilResult {
    * each *non-final* statement that evaluated to an error value (its value is
    * discarded, so the problem would otherwise be invisible). */
   diagnostics: ParsingDiagnostic[];
+  /** The source range of the statement that produced `value` (the last
+   * executed statement) — narrowed, when the value is an error, to the
+   * innermost breadcrumb frame that maps onto the source (the `s` inside
+   * `Characters(s)`, not the whole statement). The final statement's
+   * problems stay in `value` — deliberately NOT mirrored as a diagnostic,
+   * since a program may legitimately *author* an `Error` value — so a host
+   * that wants to point at the failing site anchors on this range instead. */
+  valueRange?: [start: number, end: number];
 }
 
 /**
@@ -181,6 +193,7 @@ function executeEpsilBatch(
   }
 
   let value: BoxedExpression = ce.Nothing;
+  let valueRange: [number, number] | undefined;
 
   // Names already surfaced as `unknown-function` — one diagnostic per unknown
   // name per program run, not per occurrence.
@@ -194,8 +207,15 @@ function executeEpsilBatch(
     // reassigning a `const`, or a cap breach such as `timeLimit`/
     // `iterationLimit`/`recursionLimit`, which throw a `CancellationError`).
     let cancellation: CancellationCause | undefined;
+    valueRange = statementRange(stmt, source);
     try {
       value = ce.box(stmt).evaluate();
+      // An error value narrows the anchor to its breadcrumb's innermost
+      // source-mapped frame, so a host that reports the error points at the
+      // offending subexpression, not the whole statement.
+      const errors = value.errors;
+      if (errors.length > 0)
+        valueRange = narrowErrorRange(errors[0].json, stmt, valueRange);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       cancellation = cancellationCause(e);
@@ -225,14 +245,21 @@ function executeEpsilBatch(
         // compactly as `%1`, it recovers the context the bare error lost; the
         // statement range below supplies the source anchoring.
         const frames = errorFrameChain(errors[0].json);
+        const description = describeError(errors[0].json);
         diagnostics.push(
           makeDiagnostic(
             cancellation !== undefined
               ? ['evaluation-canceled', cancellation, errors[0].toString()]
-              : frames
-                ? ['runtime-error', errors[0].toString(), frames]
-                : ['runtime-error', errors[0].toString()],
-            statementRange(stmt, source)
+              : // `%2` (the frame chain) is `''` when the error was raised in
+                // place, so `%3` — the machine-readable engine error code,
+                // which keys extended docs (`epsil doc <code>`) — has a
+                // stable position.
+                ['runtime-error', description, frames, errorCode(errors[0].json)],
+            narrowErrorRange(
+              errors[0].json,
+              stmt,
+              statementRange(stmt, source)
+            )
           )
         );
       }
@@ -275,7 +302,9 @@ function executeEpsilBatch(
           range: [0, source.length],
         });
 
-  return { value, diagnostics };
+  return valueRange === undefined
+    ? { value, diagnostics }
+    : { value, diagnostics, valueRange };
 }
 
 /**
@@ -293,7 +322,7 @@ function executeEpsilBatch(
  * collection argument, and a failure inside one element is unreadable without
  * saying so.
  */
-function errorFrameChain(error: MathJsonExpression): string {
+export function errorFrameChain(error: MathJsonExpression): string {
   const ops = [...operands(error)];
   const trace = ops[ops.length - 1];
   if (trace === undefined || operator(trace) !== 'ErrorTrace') return '';
@@ -315,9 +344,78 @@ function errorFrameChain(error: MathJsonExpression): string {
     const name = stringValue(operand(frame, 1));
     const index = machineValue(operand(frame, 2));
     if (name === null || index === null) continue;
+    // `Block` and `Function` frames are evaluation structure the engine
+    // inserted (a lambda body, a statement block) — not calls the user
+    // wrote — so they add no information a reader can act on.
+    if (name === 'Block' || name === 'Function') continue;
     frames.push(`in ${name} argument ${index}`);
   }
   return frames.join(', ');
+}
+
+/**
+ * Narrow an error's source anchor from the whole statement down to the
+ * innermost breadcrumb frame that still maps onto the parsed source — the
+ * difference between underlining all of `s |> Map(_, _ |-> Length(Characters(s)))`
+ * and underlining the `s` inside `Characters(s)`.
+ *
+ * The frames were recorded against the EVALUATED tree, which is structurally
+ * different from the raw AST (pipe sugar is applied, `Block` wrappers are
+ * inserted), so frames cannot be walked positionally. Instead they are
+ * matched by operator name: innermost first, the first frame whose operator
+ * occurs exactly ONCE in the statement subtree wins, and the frame's operand
+ * (or, when that operand carries no offsets, the matched call) supplies the
+ * range. An ambiguous name (two `Characters` calls) or a vanished one (a
+ * canonicalization-minted wrapper) falls through to the next outer frame;
+ * the fallback is the statement range.
+ */
+function narrowErrorRange(
+  error: MathJsonExpression,
+  stmt: MathJsonExpression,
+  fallback: [number, number]
+): [number, number] {
+  const ops = [...operands(error)];
+  const trace = ops[ops.length - 1];
+  if (trace === undefined || operator(trace) !== 'ErrorTrace') return fallback;
+
+  for (const frame of operands(trace)) {
+    // `ErrorBroadcast` frames locate an ELEMENT, not a source span.
+    if (operator(frame) !== 'ErrorFrame') continue;
+    const name = stringValue(operand(frame, 1));
+    const index = machineValue(operand(frame, 2));
+    if (name === null || index === null) continue;
+
+    const matches: MathJsonExpression[] = [];
+    findByOperator(stmt, name, matches);
+    if (matches.length !== 1) continue;
+
+    const arg = [...operands(matches[0])][index - 1] ?? null;
+    const range = nodeOffsets(arg) ?? nodeOffsets(matches[0]);
+    if (range !== undefined) return range;
+  }
+  return fallback;
+}
+
+/** Collect every node of `expr` whose operator is `name` (early-exits once
+ * ambiguous — two matches decide `narrowErrorRange` as surely as ten). */
+function findByOperator(
+  expr: MathJsonExpression | null,
+  name: string,
+  matches: MathJsonExpression[]
+): void {
+  if (expr === null || matches.length > 1) return;
+  if (operator(expr) === '') return;
+  if (operator(expr) === name) matches.push(expr);
+  for (const op of operands(expr)) findByOperator(op, name, matches);
+}
+
+/** The `sourceOffsets` of a raw AST node, when it carries them. */
+function nodeOffsets(
+  node: MathJsonExpression | null
+): [number, number] | undefined {
+  return typeof node === 'object' && node !== null && !Array.isArray(node)
+    ? (node as { sourceOffsets?: [number, number] }).sourceOffsets
+    : undefined;
 }
 
 /** The source range of a statement AST node, falling back to the whole
