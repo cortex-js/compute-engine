@@ -195,11 +195,16 @@ standing polytype behavior).
   (2) a `canEnumerate` operator-definition handler exposing the
   decline test each eager `evaluate` handler already starts with
   (O(1), no evaluation, no draws — fixes B per adopted operator), then
-  (3) retire the `isEnumerableSource` evaluate-fallback once adoption
-  covers the producers. Order is load-bearing: a cheap `true` is a
-  promise the access routes must honor, so delivery lands before the
-  predicate. See the plan for the probe tables and the coupling
-  argument.
+  (3) the `isEnumerableSource` evaluate-fallback narrows to the
+  `undefined` tier (operators whose success is not cheaply decidable —
+  `Solve`, `FindRoot` — answer `undefined`, never `true`, by ruling).
+  Order is load-bearing: a cheap `true` is a promise the access routes
+  must honor, so delivery lands before the predicate. Also ruled: NO
+  framework guarantee that evaluate is only called when `canEnumerate`
+  is true — evaluate handlers keep their self-guards; the duplication
+  is killed per-operator with a shared extractor (the
+  `hasSymbolicRangeBounds` pattern). See the plan for probe tables and
+  the coupling argument.
 - **An eager IMPURE collection source is evaluated several times**
   (pre-existing, measured 2026-08-09 during the above): counting
   handler invocations over a 5-element source,

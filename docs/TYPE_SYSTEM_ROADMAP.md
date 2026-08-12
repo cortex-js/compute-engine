@@ -189,6 +189,12 @@ check. Fixed in `subtype.ts` and `reference.ts`, and pinned by
 `test/compute-engine/sum-types.test.ts` — which is what a future resolver
 or canonicalization change will trip over first.
 
+
+When compiling to Javascript, sum types need to be represented by an object 
+literal that includes a `_tag` property, unless the compiler can prove that 
+the tags are not necessary, for example if the variants are non-overlapping 
+JS types, i.e. `type T = integer | boolean | string | some(boolean)`.
+
 ### 2.1 Semantics by detection — largely done
 
 A union of nominal types **is** a tagged sum: disjoint variants (nominal

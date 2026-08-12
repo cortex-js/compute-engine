@@ -222,6 +222,57 @@ Naming note: deliberately NOT `isEnumerable` — that name is the collection
 handler with different dispatch semantics (declared-handler-owns-all-three-
 states). `canEnumerate` marks it as the eager-operator precondition.
 
+#### Contract direction (ruled 2026-08-11): one-directional, evaluate keeps its guard
+
+Considered and REJECTED: a framework guarantee that the `evaluate` handler is
+only invoked when `canEnumerate` is `true`, letting handlers drop their
+decline test. Four reasons:
+
+- **Unenforceable at the seam that matters.** `evaluate()` is reached from
+  every route in the engine (user code, `N()`, simplify, other handlers), not
+  just the collection machinery; the gate would have to cover every
+  handler-invocation seam (evaluate / evaluateAsync / numericApproximation),
+  and a handler that trusts it becomes a landmine on any route that forgets
+  it. Route asymmetry is this codebase's most recurring bug class; a
+  self-guarding handler is correct from every route unconditionally.
+- **The promise can only be one-directional.** `false ⇒ evaluate would
+  decline` is solid (and is what the machinery exploits: facet `false` →
+  inert, no evaluation). But `true ⇒ evaluate succeeds` cannot be hard for
+  operators whose success is not cheaply decidable — `Solve`, `FindRoot`,
+  `PolynomialRoots` can decline on fully-GROUND input (no closed form, no
+  convergence). **Those must answer `undefined`, never `true`** — a `true`
+  followed by a declined evaluate re-creates the original bug behind the new
+  facet (`Filter(Take(Solve(…), 2), p)` walking an empty stream the engine
+  vouched for). Since the `undefined` tier is resolved by evaluating,
+  handlers there must self-guard regardless — the guard could only ever be
+  dropped for a subset, splitting the library idiom (every evaluate handler
+  self-guards today; the docs even promise it: "a non-string argument leaves
+  the expression unevaluated").
+- **Dropping the `if` doesn't drop the work.** The guard usually IS the
+  conversion the body consumes (`const k = toBigint(n); if (k === null)
+  return undefined;`); a gated handler still performs it, or trades a runtime
+  check for a type assertion resting on a cross-handler invariant.
+- **The duplication has an in-house cure.** Single source of truth at the
+  OPERATOR level, not the framework level: one shared predicate/extractor
+  consumed by both handlers — exactly the existing `hasSymbolicRangeBounds`
+  pattern in `Range` (consulted by `count`, `contains`, `iterator`, `at`,
+  `isEnumerable`). Adoption guidance: write a per-operator extractor
+  returning `null` on decline, e.g.
+
+  ```ts
+  const divisorsInput = (n) => {
+    const k = toBigint(n);
+    return k !== null && k !== 0n ? absBig(k) : null;
+  };
+  canEnumerate: (expr) => isFunction(expr) && divisorsInput(expr.op1) !== null,
+  evaluate:     ([n]) => { const m = divisorsInput(n); if (m === null) return undefined; … }
+  ```
+
+Residual-drift tripwire (dev only): in the materialize fallbacks,
+`console.assert` when `canEnumerate === true` yet `evaluate()` declined —
+catches a drifted pair without a load-bearing contract (`console.assert` is
+sanctioned and stripped in production).
+
 ### The coupling invariant (why the order matters)
 
 **A cheap `true` is a promise the access routes must honor.** If
@@ -233,10 +284,14 @@ strictly worse than today's `undefined`. Therefore:
 1. Land Part 1 (delivery). Generic; fixes Defect A; no predicate yet.
 2. Land Part 2's mechanism plus per-operator adoption, starting with the 32
    confirmed reproducers. Each adoption fixes Defect B for that operator.
-3. When adoption covers the eager producers, `isEnumerableSource`'s
-   evaluate-and-discard fallback is dead code — remove it (and simplify
-   `enumerationDeclined`). Until then it stays, so unadopted operators keep
-   status-quo behavior. Adoption is incremental and per-operator safe.
+3. `isEnumerableSource`'s evaluate-and-discard fallback **narrows to the
+   `undefined` tier** — it remains the correct (and only) resolution for
+   operators whose success is not cheaply decidable (`Solve`, `FindRoot`,
+   `PolynomialRoots`, … answer `undefined` by the contract above), and for
+   unadopted operators, which keep status-quo behavior. It can be deleted
+   only if that tier empties, which is not expected; the win is that it
+   becomes RARE (the common producers answer definitively) rather than the
+   default path. Adoption is incremental and per-operator safe.
 
 ### Explicitly out of scope
 
@@ -268,10 +323,13 @@ strictly worse than today's `undefined`. Therefore:
   invocations); `at()`-fallback does not fire for impure sources (pin the
   current declining behavior with a comment pointing at the draw-coherence
   item).
-- The `isEnumerableSource` fallback-removal step: the existing
-  eager-operator route-parity tests in
-  `collection-callback-signatures.test.ts` must pass unchanged without the
-  evaluate fallback.
+- The `undefined` tier: a `Solve`-class operator answers `undefined` (not
+  `true`) on ground input, and the wrapped forms still resolve correctly via
+  the evaluate fallback — pin one such operator so the tier does not silently
+  drift to `true` during adoption.
+- Coherence: for each adopted operator, `canEnumerate === true` implies the
+  evaluate handler produces a collection on the same input (drives the shared
+  extractor; the dev-mode `console.assert` tripwire covers unpinned inputs).
 
 ## Files
 
