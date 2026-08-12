@@ -124,6 +124,7 @@ export const KEYWORDS_LIST = [
   'if',
   'in',
   'match',
+  'protocol',
   'while',
 ];
 

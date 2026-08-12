@@ -26,7 +26,11 @@ import {
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
-import type { FunctionSignature, Type } from '../../common/type/types.js';
+import type {
+  FunctionSignature,
+  Type,
+  TypeResolver,
+} from '../../common/type/types.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -427,7 +431,10 @@ function isGenericArm(arm: FunctionSignature): boolean {
 function instantiateArm(
   arm: FunctionSignature,
   ops: ReadonlyArray<Expression>,
-  policies?: AdmissionPolicies
+  policies?: AdmissionPolicies,
+  /** The conformance oracle for a `where T is P` slot — the CALLING engine's
+   * resolver (protocols design P19). */
+  resolver?: TypeResolver
 ): ArmInstance {
   if (!isGenericArm(arm))
     return {
@@ -442,6 +449,7 @@ function instantiateArm(
     threadable: policies?.threadable,
     stripMissing: policies?.stripMissing,
     lazy: policies?.lazy,
+    resolver,
   });
 
   // Substitution of a signature preserves its kind, so both branches below are
@@ -485,10 +493,14 @@ function instantiateArm(
 export function instantiateArms(
   arms: ReadonlyArray<FunctionSignature>,
   ops: ReadonlyArray<Expression>,
-  policies?: AdmissionPolicies
+  policies?: AdmissionPolicies,
+  /** See {@link instantiateArm}: the calling engine's conformance oracle. */
+  resolver?: TypeResolver
 ): ReadonlyArray<FunctionSignature> {
   if (!arms.some(isGenericArm)) return arms;
-  return arms.map((arm) => instantiateArm(arm, ops, policies).instance);
+  return arms.map(
+    (arm) => instantiateArm(arm, ops, policies, resolver).instance
+  );
 }
 
 /**
@@ -628,7 +640,7 @@ export function resolveOverload(
   const candidates: ArmInstance[] = [];
   for (const arm of arms) {
     if (!arityAdmits(arm, arity)) continue;
-    const candidate = instantiateArm(arm, ops, policies);
+    const candidate = instantiateArm(arm, ops, policies, ce._typeResolver);
     // An unsatisfiable instantiation (violated bound) is not an arm this call
     // can take.
     if (!candidate.ok) continue;
@@ -821,7 +833,12 @@ export function diagnoseNoMatch(
   let fewest = Infinity;
   let candidates: { arm: FunctionSignature; refutes: number[] }[] = [];
   for (const declared of arityViable) {
-    const arm = instantiateArm(declared, ops, options).instance;
+    const arm = instantiateArm(
+      declared,
+      ops,
+      options,
+      ce._typeResolver
+    ).instance;
     const refutes: number[] = [];
     ops.forEach((op, i) => {
       const param = paramAt(arm, i);

@@ -616,6 +616,14 @@ export function declareType(
 
   if (!isValidTypeName(name)) throw Error(`The type name "${name}" is invalid`);
 
+  // P8, the no-dual-role rule, in the type-over-protocol direction: a protocol
+  // name is not a type name, so a type may not claim one either. (The
+  // protocol-over-type direction is enforced in `declareProtocolImpl()`.)
+  if (ce._protocolRegistry[name] !== undefined)
+    throw Error(
+      `The type name "${name}" is already a protocol; protocols and types share no names`
+    );
+
   // The generic clause is validated FIRST — before any namespace is touched —
   // so a malformed one leaves both halves exactly as they were.
   const params =

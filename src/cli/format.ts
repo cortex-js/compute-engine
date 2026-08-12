@@ -153,6 +153,18 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `"${args[0]}" is a type, not a function: types have no constructor; annotate instead, e.g. "const p: ${args[0]} = …"`;
     case 'type-declaration-not-top-level':
       return `The type "${args[0]}" is declared inside a block: types are global, so type declarations are only allowed at the top level of a program`;
+    case 'protocol-declaration-not-top-level':
+      return `The protocol "${args[0]}" is declared inside a block: protocols are global, so protocol declarations are only allowed at the top level of a program`;
+    case 'protocol-name-expected':
+      return `Expected a protocol name after "protocol"`;
+    case 'protocol-member-keyword-missing':
+      return `The protocol member "${args[0]}" needs a keyword; did you mean "readonly ${args[0]}" or "readwrite ${args[0]}"?`;
+    case 'protocol-member-signature-expected':
+      return `Expected a member of the "${args[0]}" protocol: "function name(self: Self, …) -> type", "readonly name: type" or "readwrite name: type"`;
+    case 'protocol-implementation-pending':
+      return `The conformance "type ${args[0]} is ${args[1]}" has no implementation yet; provide one with "type ${args[0]} is ${args[1]} { … }"`;
+    case 'protocol-in-type-position':
+      return `"${args[0]}" is a protocol, not a type. Use a constrained variable: "where T is ${args[0]}"`;
     case 'type-variables-unsupported':
       return `Generic type aliases are not supported yet: "type ${args[0]}<…>" is reserved syntax`;
     case 'empty-type-parameter-clause':

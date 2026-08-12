@@ -16,6 +16,7 @@ import type {
   TypeResolver,
 } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
+import { TypeVariableError } from '../common/type/instantiate.js';
 import {
   isStringObject,
   mapArgs,
@@ -107,6 +108,17 @@ type WhereClause = {
   end: number;
 };
 
+/** The trailing `where` clause of a CONDITIONAL conformance
+ * (`type list<T> is Comparable where T is Comparable { … }`): its verbatim
+ * source text, its span, and the names it binds — which are in scope for the
+ * implementation block's member signatures. */
+type ConformanceClause = {
+  text: string;
+  start: number;
+  end: number;
+  names: ReadonlySet<string>;
+};
+
 /** Reported for a `where` clause in an annotation position that cannot carry
  * one. Verbatim from the type layer's own nested-clause rejection
  * (`instantiate.ts`), so the two surfaces say the same thing. */
@@ -165,6 +177,117 @@ function skipStringLiteral(src: string, pos: number): number {
  * recognized, diagnosed and recovered as a type statement. */
 function isTypeStatementHead(text: string): boolean {
   return text === '=' || text === '<' || text === '<>';
+}
+
+/** A resolver that accepts EVERY name, used only to ask the type grammar a
+ * purely syntactic question (see `denotesTypeTarget`). Whether a named type
+ * actually exists is a semantic verdict the engine reports at execution — it
+ * must not change how a statement is READ. */
+const ANY_TYPE_NAME_RESOLVER: TypeResolver = {
+  get names(): string[] {
+    return [];
+  },
+  forward: () => undefined,
+  resolve: (name: string) => name as any,
+  // Same posture for the `where T is P` slot: a purely syntactic reader
+  // accepts every conformance. The registry lives in the engine, which checks
+  // the constraint at each call site (protocols design P19).
+  conformsTo: () => true,
+};
+
+/** Does `text` denote a conformance TARGET — i.e. does it parse, in full, as a
+ * type expression? This is what separates `type list<integer> is Hashable`
+ * (a conformance declaration) from `type + 1 is integer` (a type test on a
+ * binding named `type`, since `type` is only a contextual keyword). */
+function denotesTypeTarget(text: string): boolean {
+  const target = text.trim();
+  if (target.length === 0) return false;
+  try {
+    return (
+      parseTypePrefix(target, ANY_TYPE_NAME_RESOLVER).end === target.length
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The name of the first head variable a conformance target BOUNDS
+ * (`list<T: number>`), or `null`.
+ *
+ * The trailing `where` clause is the single binding site of a conditional
+ * conformance, so a bound in the head has no legal reading — and the type
+ * subparser would only report `Expected >, got :`. Recognized here, lexically:
+ * an identifier followed by `:` inside the head's angle brackets. (A named tuple
+ * element — `tuple<a: integer>` — is a legitimate `name:` inside angle
+ * brackets, so the scan requires the identifier to be a bare, argument-position
+ * one: it stops at the first depth-1 `,`-separated entry that is not one.)
+ */
+/**
+ * The protocol NAME of a `protocol-in-type-position` failure raised by a type
+ * resolver, or `null` for any other error.
+ *
+ * The name is read back out of the message: a `TypeVariableError` carries only a
+ * `code` and its text through `parseType()`'s wrap, so the backticked name in
+ * the message is the channel. Both resolvers that raise it (this parser's and
+ * the engine's) spell the message the same way.
+ */
+function protocolInTypePosition(e: unknown): string | null {
+  if ((e as { code?: string }).code !== 'protocol-in-type-position')
+    return null;
+  const text =
+    (e as { rawMessage?: string }).rawMessage ??
+    (e instanceof Error ? e.message : '');
+  return /`([^`]+)`/.exec(text)?.[1] ?? null;
+}
+
+function boundInConformanceHead(text: string): string | null {
+  const m = /^\s*[A-Za-z_][A-Za-z0-9_]*\s*</.exec(text);
+  if (m === null) return null;
+  let depth = 1;
+  let pos = m[0].length;
+  let atEntryStart = true;
+  let name: string | null = null;
+  while (pos < text.length) {
+    const ch = text[pos];
+    if (ch === '<' || ch === '(' || ch === '[') {
+      depth += 1;
+      atEntryStart = false;
+      pos += 1;
+      continue;
+    }
+    if (ch === '>' || ch === ')' || ch === ']') {
+      depth -= 1;
+      if (depth === 0) return null;
+      atEntryStart = false;
+      pos += 1;
+      continue;
+    }
+    if (ch === ',' && depth === 1) {
+      atEntryStart = true;
+      name = null;
+      pos += 1;
+      continue;
+    }
+    if (ch === ':' && depth === 1 && name !== null) return name;
+    if (/\s/.test(ch)) {
+      pos += 1;
+      continue;
+    }
+    const id = atEntryStart
+      ? /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(pos))
+      : null;
+    if (id === null) {
+      atEntryStart = false;
+      name = null;
+      pos += 1;
+      continue;
+    }
+    name = id[0];
+    atEntryStart = false;
+    pos += id[0].length;
+  }
+  return null;
 }
 
 //
@@ -291,6 +414,17 @@ export class Parser {
    * type name would fail at parse time with `Unknown type`. */
   private readonly knownTypeNames: Set<string>;
 
+  /** The PROTOCOL names this program may refer to — the engine's registry,
+   * seeded by `executeEpsil`, plus every name a `protocol` statement parsed so
+   * far declares.
+   *
+   * Kept strictly SEPARATE from {@link knownTypeNames}: a protocol name is not
+   * a type (ruling P8), and adding one there would make `x: Comparable` parse.
+   * It is consulted on the unknown-type path ONLY, to turn a generic
+   * `type-annotation-error` into the `protocol-in-type-position` guidance that
+   * points at the constrained-variable spelling. */
+  private readonly protocolNames: Set<string>;
+
   /** Resolver shim over `knownTypeNames`, handed to every `parseTypePrefix` /
    * `parseType` call. The built `Type` is discarded by this parser (parse-time
    * typing is only a syntax check), so resolving a name to the bare name is
@@ -359,6 +493,17 @@ export class Parser {
    * statement instead of bailing out of the block. */
   private statementRecovered = false;
 
+  /** A second statement produced by the statement just parsed, to be appended
+   * to the program right after it.
+   *
+   * Set ONLY by the combined declare-and-conform form
+   * (`type Point = tuple<…> is Comparable`), which lowers to TWO statements:
+   * a `DeclareType` followed by a `DeclareConformance` (P15). Emitting a
+   * `Block` instead is not an option — a nested `Block` pushes a scope, and
+   * both statements are top-level only. Drained by `parseProgram`; the form is
+   * top-level only, so `parseBlock` never sees one. */
+  private pendingStatement: MathJsonExpression | null = null;
+
   /** While a `function f<T>(…)` definition HEAD is being parsed, the names its
    * type-parameter clause quantifies (G7 — the clause scopes over the head
    * only). `null` everywhere else. */
@@ -382,6 +527,7 @@ export class Parser {
       parseLatex?: (latex: string) => MathJsonExpression;
       allowHostPragmas?: boolean;
       typeNames?: readonly string[];
+      protocolNames?: readonly string[];
       sumVariants?: Readonly<Record<string, string>>;
     }
   ) {
@@ -391,14 +537,31 @@ export class Parser {
     this.parseLatex = options?.parseLatex;
     this.allowHostPragmas = options?.allowHostPragmas ?? false;
     this.knownTypeNames = new Set(options?.typeNames ?? []);
+    this.protocolNames = new Set(options?.protocolNames ?? []);
     this.sumVariants = { ...options?.sumVariants };
     const names = this.knownTypeNames;
+    const protocols = this.protocolNames;
     this.typeResolver = {
       get names(): string[] {
         return [...names];
       },
       forward: () => undefined,
+      // Parse-time typing is a SYNTAX check, and conformance is not a
+      // syntactic property: the parser has no engine, hence no protocol
+      // registry, so every `where T is P` slot is admitted here and checked at
+      // the call site by the engine's own resolver (protocols design P19).
+      conformsTo: () => true,
       resolve: (name: string) => {
+        // A PROTOCOL in type position. The engine's own resolver makes the same
+        // diagnosis on the same path (`engine-type-resolver.ts`), but the Epsil
+        // parser never reaches it: it resolves annotations against its own
+        // known-name set and reports `Unknown type` first. Raised as the same
+        // `TypeVariableError`, so the code survives `parseType`'s wrap.
+        if (!names.has(name) && protocols.has(name))
+          throw new TypeVariableError(
+            'protocol-in-type-position',
+            `\`${name}\` is a protocol, not a type. Use a constrained variable: \`where T is ${name}\``
+          );
         if (!names.has(name)) return undefined;
         // Record a reference to a name the enclosing definition's clause
         // quantifies — see `typeParamHits`.
@@ -526,8 +689,15 @@ export class Parser {
       const expr = this.parseStatement();
       if (expr !== null) {
         exprs.push(expr);
+        // The combined `type Name = … is Protocol` form lowers to two
+        // top-level statements; the second is queued rather than nested.
+        if (this.pendingStatement !== null) {
+          exprs.push(this.pendingStatement);
+          this.pendingStatement = null;
+        }
         this.expectStatementSeparator();
       } else {
+        this.pendingStatement = null;
         // If the failed parse already emitted a diagnostic, don't double-report.
         if (this.diagnostics.length === diagBefore)
           this.reportUnexpected(token);
@@ -604,6 +774,11 @@ export class Parser {
           // the reserved generic slot `type Name<` — claims it as a head.
           if (this.isTypeStatement()) return this.parseTypeStatement();
           break;
+        case 'protocol':
+          // `protocol` is an ACTIVE word (it can no longer name a binding), so
+          // it claims the statement unconditionally — a malformed declaration
+          // is diagnosed rather than silently read as an expression.
+          return this.parseProtocolStatement();
       }
     }
 
@@ -1200,10 +1375,80 @@ export class Parser {
     // form below, declaring a nominal type named `alias` (D8).
     if (this.isTypeAliasAt(1)) return true;
 
+    // CONFORMANCE (`type string is Hashable`, `type list<integer> is …`): a
+    // same-line, top-level `is` claims the statement too — but ONLY when the
+    // span between `type` and that `is` actually denotes a type: it must
+    // start with a name and parse, in full, as a type expression. Without
+    // that check any expression whose head is a binding named `type` and
+    // which contains a top-level `is` (`type + 1 is integer`) would be
+    // hijacked. Statement position is otherwise disjoint from the
+    // expression-position `is` type test (`x is integer`), which the Pratt
+    // loop reads at TYPE_TEST_PRECEDENCE — and requiring at least one token
+    // between `type` and `is` keeps `type is integer` (a type test on a
+    // binding NAMED `type`) an expression, as before.
+    const head = this.peek(1);
+    if (head.type === 'SYMBOL' || head.type === 'VERBATIM_SYMBOL') {
+      const conf = this.scanConformanceIs(this.pos + 1);
+      if (
+        conf !== null &&
+        !conf.hasAssign &&
+        conf.at > this.pos + 1 &&
+        denotesTypeTarget(
+          this.source.slice(this.current.end, this.tokens[conf.at].start)
+        )
+      )
+        return true;
+    }
+
     const name = this.peek(1);
     if (name.type !== 'SYMBOL') return false;
     const next = this.peek(2);
     return next.type === 'OPERATOR' && isTypeStatementHead(next.text);
+  }
+
+  /**
+   * Locate the `is` of a conformance declaration: a SYMBOL `is` at bracket
+   * depth 0, on the same line as the `type` head. Returns its token INDEX and
+   * whether a top-level `=` precedes it — the combined declare-and-conform
+   * form (`type Point = tuple<…> is Comparable`).
+   *
+   * Scanned over TOKENS rather than the raw source so the angle characters of
+   * a target application (`type list<integer> is …`) — which the Epsil lexer
+   * maximal-munches into `OPERATOR` runs — do not need bracket tracking.
+   *
+   * `from` is the token index just past the `type` word.
+   */
+  private scanConformanceIs(from: number): {
+    at: number;
+    hasAssign: boolean;
+  } | null {
+    let depth = 0;
+    let hasAssign = false;
+    for (let i = from; i < this.tokens.length; i++) {
+      const t = this.tokens[i];
+      if (t.type === 'EOF' || t.type === 'SEMICOLON') return null;
+      if (t.precededByLinebreak) return null;
+      switch (t.type) {
+        case 'OPEN_PAREN':
+        case 'OPEN_BRACKET':
+        case 'OPEN_BRACE':
+          depth += 1;
+          break;
+        case 'CLOSE_PAREN':
+        case 'CLOSE_BRACKET':
+        case 'CLOSE_BRACE':
+          if (depth === 0) return null;
+          depth -= 1;
+          break;
+        case 'OPERATOR':
+          if (depth === 0 && t.text === '=') hasAssign = true;
+          break;
+        case 'SYMBOL':
+          if (depth === 0 && t.text === 'is') return { at: i, hasAssign };
+          break;
+      }
+    }
+    return null;
   }
 
   /** Is the token `n` ahead of the current one the `alias` word of a
@@ -1218,6 +1463,17 @@ export class Parser {
 
   private parseTypeStatement(): MathJsonExpression | null {
     const kw = this.advance(); // 'type'
+
+    // CONFORMANCE (`type <target> is P₁ & P₂ [{ … }]`): the target is the
+    // type-expression SOURCE up to a same-line, top-level `is`, so it may be
+    // any named ground type (`string`, `list<integer>`, `Point`) — the engine
+    // is the authority on what a legal target is. When a top-level `=`
+    // precedes the `is`, this is the COMBINED form: the declaration is parsed
+    // by the ordinary path below and the conformance is queued after it.
+    const conf = this.scanConformanceIs(this.pos);
+    if (conf !== null && !conf.hasAssign)
+      return this.parseConformanceStatement(kw, conf.at);
+
     // `alias` is consumed only in the `type alias Name =`/`<` shape (checked
     // relative to the CURRENT token, now that `type` is consumed).
     const isAlias = this.isTypeAliasAt(0);
@@ -1361,7 +1617,12 @@ export class Parser {
     // one statement. Probed BEFORE the ordinary body parse, since call-form
     // (`plus(op1: node, op2: node)`) is not type syntax at all. A body that
     // does not trigger falls through to the existing path untouched.
-    if (!isAlias) {
+    // A trailing conformance clause takes the ordinary type-body path (which
+    // stops at `is` — `is` cannot begin a type token): the sum scanner reads
+    // the RAW source to the end of the statement and would swallow the
+    // clause. Combining sum sugar with a conformance is not supported in
+    // phase 1.
+    if (!isAlias && conf === null) {
       const sum = this.parseSumTypeArms(eq.end, name);
       if (sum !== undefined) {
         unseedParams();
@@ -1426,7 +1687,724 @@ export class Parser {
         );
       parts.push(this.wrap(entries, start, end));
     }
+    const declaration = this.wrap(parts, start, end);
+
+    // The COMBINED form: the declaration is this statement's node, and the
+    // conformance — whose target is the name just declared — is queued as the
+    // NEXT top-level statement (P15; both are top-level only, so a `Block`
+    // wrapper is not an option).
+    if (
+      conf !== null &&
+      this.current.type === 'SYMBOL' &&
+      this.current.text === 'is'
+    ) {
+      const conformance = this.parseConformanceTail(
+        start,
+        this.wrap({ str: name }, nameTok.start, nameTok.end)
+      );
+      if (conformance === null) {
+        unseed();
+        return null;
+      }
+      this.pendingStatement = conformance;
+    }
+    return declaration;
+  }
+
+  //
+  // ─── Protocol declarations and conformance ────────────────────────────────
+  //
+  // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix A. Three statement forms:
+  //
+  //   protocol Comparable {
+  //     function compare(self: Self, other: Self) -> "<" | "=" | ">"
+  //     readonly key: string
+  //   }
+  //     → ["DeclareProtocol", "Comparable",
+  //         ["Dictionary",
+  //           ["KeyValuePair", "compare",
+  //             ["Pair", {str: "function"},
+  //                      {str: "(self: Self, other: Self) -> \"<\"|\"=\"|\">\""}]],
+  //           ["KeyValuePair", "key", ["Pair", {str: "readonly"}, {str: "string"}]]]]
+  //
+  //   type string is Hashable & Comparable
+  //     → ["DeclareConformance", {str: "string"}, ["List", "Hashable", "Comparable"]]
+  //
+  //   type string is Comparable { function compare(a, b) { … } }
+  //     → ["DeclareConformance", {str: "string"}, ["List", "Comparable"],
+  //         ["Dictionary", ["KeyValuePair", "compare", <function literal>]]]
+  //
+  // Like a `type` body, every member SIGNATURE is captured as trimmed source
+  // TEXT and re-parsed by the engine — which is what keeps `Self` (a textual
+  // substitution token, never a declarable type) engine-side.
+  //
+  // `readonly`/`readwrite`/`get`/`set`/`Self` are CONTEXTUAL: they mean
+  // something only inside these braces and are not reserved words. Only
+  // `protocol` itself is claimed.
+  //
+
+  /** The statement heads that are CONTEXTUAL rather than reserved (`let type =
+   * 5` parses, so they are ordinary identifiers everywhere else). A
+   * conformance tail refuses them all the same: the only way one appears
+   * there is a missing protocol name. */
+  private static readonly CONTEXTUAL_STATEMENT_WORDS: ReadonlySet<string> =
+    new Set(['let', 'type', 'alias']);
+
+  /** `protocol NAME { member* }` — top-level only, like `type`. */
+  private parseProtocolStatement(): MathJsonExpression | null {
+    const kw = this.advance(); // 'protocol'
+
+    const nameTok = this.current;
+    if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
+      this.error(['protocol-name-expected'], nameTok.start, nameTok.end);
+      this.recoverAtStatementBoundary();
+      return null;
+    }
+    this.advance();
+    this.harvest(nameTok);
+    const name =
+      nameTok.type === 'VERBATIM_SYMBOL' ? (nameTok.value ?? '') : nameTok.text;
+    if (nameTok.type === 'SYMBOL' && HARD_RESERVED_WORDS.has(name)) {
+      this.error(['reserved-word', name], nameTok.start, nameTok.end);
+      this.recoverAtStatementBoundary();
+      return null;
+    }
+    // A protocol declared by THIS program is a protocol name for the rest of it,
+    // so a later annotation naming it gets `protocol-in-type-position` rather
+    // than `Unknown type`. NOT a type name (P8) — see `protocolNames`.
+    //
+    // Seeded here, for the member block, and UNSEEDED on every failure return
+    // below: a declaration the parser discards must not flavor the diagnostics
+    // of the rest of the program. A name that was already known — the engine's
+    // registry, or an earlier statement re-declaring the protocol — stays.
+    const knownProtocol = this.protocolNames.has(name);
+    const discardProtocol = (): null => {
+      if (!knownProtocol) this.protocolNames.delete(name);
+      return null;
+    };
+    this.protocolNames.add(name);
+
+    if (!this.check('OPEN_BRACE')) {
+      this.error(
+        ['opening-bracket-expected', '{'],
+        this.current.start,
+        this.current.end
+      );
+      this.recoverAtStatementBoundary();
+      return discardProtocol();
+    }
+
+    const open = this.advance(); // '{'
+    this.brackets.push(open);
+    const entries: MathJsonExpression[] = ['Dictionary'];
+    // `Self` names the conforming type inside a protocol declaration. Seeded
+    // for the member signatures only — it never reaches the engine's type
+    // registry (P12), and a user type of the same name is left known.
+    const unseedSelf = this.seedSelfTypeName();
+    try {
+      for (;;) {
+        while (this.match('SEMICOLON')) {
+          /* empty member */
+        }
+        if (this.check('CLOSE_BRACE') || this.check('EOF')) break;
+        const startPos = this.pos;
+        const member = this.parseProtocolMember(name);
+        if (member === null) {
+          this.recoverInBracket();
+          break;
+        }
+        entries.push(member);
+        if (this.pos === startPos) this.advance();
+      }
+    } finally {
+      unseedSelf();
+    }
+    this.brackets.pop();
+
+    let end: number;
+    if (this.check('CLOSE_BRACE')) {
+      end = this.current.end;
+      this.advance();
+    } else {
+      this.error(['closing-bracket-expected', '}'], open.start, open.end);
+      end = this.current.start;
+      if (isCloseToken(this.current.type)) this.advance();
+    }
+
+    // Protocols are engine-global, exactly like types: a declaration inside a
+    // block or a function body is a hard error, with no hoisting. Checked
+    // AFTER the member block is consumed — "the statement is parsed and
+    // discarded", so the cursor lands past the closing brace and the rest of
+    // the enclosing block still parses. The engine's `DeclareProtocol`
+    // handler enforces the same rule for the box route.
+    if (this.blockDepth > 0) {
+      this.error(
+        ['protocol-declaration-not-top-level', name],
+        kw.start,
+        nameTok.end
+      );
+      this.recoverAtStatementBoundary();
+      return discardProtocol();
+    }
+
+    const parts: MathJsonExpression[] = [
+      'DeclareProtocol',
+      this.wrap({ sym: name }, nameTok.start, nameTok.end),
+    ];
+    // A SEMANTIC protocol (`protocol Copyable {}`) declares no members, so it
+    // carries no dictionary at all.
+    if (entries.length > 1) parts.push(this.wrap(entries, open.start, end));
+    return this.wrap(parts, kw.start, end);
+  }
+
+  /** One member of a `protocol` body: `function f(…) -> T`, or
+   * `readonly`/`readwrite` NAME `:` T. */
+  private parseProtocolMember(protocolName: string): MathJsonExpression | null {
+    const kw = this.current;
+    if (kw.type !== 'SYMBOL') {
+      this.error(
+        ['protocol-member-signature-expected', protocolName],
+        kw.start,
+        kw.end
+      );
+      return null;
+    }
+
+    if (kw.text === 'function') {
+      this.advance();
+      const nameTok = this.current;
+      if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
+        this.error(['symbol-expected'], nameTok.start, nameTok.end);
+        return null;
+      }
+      this.advance();
+      this.harvest(nameTok);
+      const member =
+        nameTok.type === 'VERBATIM_SYMBOL'
+          ? (nameTok.value ?? '')
+          : nameTok.text;
+      if (!this.check('OPEN_PAREN')) {
+        this.error(
+          ['opening-bracket-expected', '('],
+          this.current.start,
+          this.current.end
+        );
+        return null;
+      }
+      // The whole `(params) -> result` IS a signature type, so the type
+      // subparser reads it in one go from the raw source (the `parseTypeBody`
+      // pattern) and the cursor is re-synced afterwards.
+      const signature = this.parseProtocolSignature();
+      if (signature === null) return null;
+      return this.kvPair(
+        member,
+        this.wrap(
+          [
+            'Pair',
+            this.wrap({ str: 'function' }, kw.start, kw.end),
+            signature.node,
+          ] as MathJsonExpression[],
+          kw.start,
+          signature.end
+        ),
+        kw.start,
+        signature.end
+      );
+    }
+
+    if (kw.text === 'readonly' || kw.text === 'readwrite') {
+      const kind = kw.text;
+      this.advance();
+      const nameTok = this.current;
+      if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
+        this.error(['symbol-expected'], nameTok.start, nameTok.end);
+        return null;
+      }
+      this.advance();
+      this.harvest(nameTok);
+      const member =
+        nameTok.type === 'VERBATIM_SYMBOL'
+          ? (nameTok.value ?? '')
+          : nameTok.text;
+      if (!this.check('OPERATOR') || this.current.text !== ':') {
+        this.error(
+          ['protocol-member-signature-expected', protocolName],
+          this.current.start,
+          this.current.end
+        );
+        return null;
+      }
+      const colon = this.advance(); // ':'
+      const type = this.parseTypeBody(colon.end);
+      if (type === null) return null;
+      return this.kvPair(
+        member,
+        this.wrap(
+          [
+            'Pair',
+            this.wrap({ str: kind }, kw.start, kw.end),
+            type.node,
+          ] as MathJsonExpression[],
+          kw.start,
+          type.end
+        ),
+        kw.start,
+        type.end
+      );
+    }
+
+    // A bare `value: string` member: the author meant a property but left out
+    // the keyword that says whether it can be written.
+    if (this.peek(1).type === 'OPERATOR' && this.peek(1).text === ':') {
+      this.error(
+        ['protocol-member-keyword-missing', kw.text],
+        kw.start,
+        this.peek(1).end
+      );
+      return null;
+    }
+
+    this.error(
+      ['protocol-member-signature-expected', protocolName],
+      kw.start,
+      kw.end
+    );
+    return null;
+  }
+
+  /** `type <target> is …` — the standalone conformance statement. `isIndex`
+   * is the token index of the `is`, located by {@link scanConformanceIs}. */
+  private parseConformanceStatement(
+    kw: Token,
+    isIndex: number
+  ): MathJsonExpression | null {
+    const isTok = this.tokens[isIndex];
+    const target = this.source.slice(kw.end, isTok.start).trim();
+    if (target.length === 0) {
+      this.error(
+        ['type-annotation-error', 'Expected a type'],
+        kw.end,
+        isTok.start
+      );
+      this.recoverAtStatementBoundary();
+      return null;
+    }
+
+    // Top-level only, exactly like a `type` declaration: a conformance is a
+    // fact about a TYPE, and types are engine-global.
+    if (this.blockDepth > 0) {
+      this.error(
+        ['type-declaration-not-top-level', target],
+        kw.start,
+        isTok.end
+      );
+      this.recoverAtStatementBoundary();
+      return null;
+    }
+
+    // The head of a CONDITIONAL conformance names its variables; the trailing
+    // `where` clause is the single binding site, so it — and nothing else — may
+    // bound them. A bound written in the head has no other reading, so it is
+    // steered rather than left to the type subparser's `Expected >, got :`.
+    // Gated on the target NOT parsing as a type: `tuple<a: integer>` is a
+    // legitimate (if unconformable) type whose `name:` is a tuple element, not
+    // a bound, and it keeps the engine's own target diagnostic.
+    const bound = denotesTypeTarget(target)
+      ? null
+      : boundInConformanceHead(target);
+    if (bound !== null) {
+      this.error(
+        [
+          'type-annotation-error',
+          `The head of a conformance cannot bound its variables: write \`is … where ${bound}: <bound>\` instead of \`${bound}: <bound>\` in the head`,
+        ],
+        kw.end,
+        isTok.start
+      );
+      this.recoverAtStatementBoundary();
+      return null;
+    }
+
+    this.advanceToOffset(isTok.start);
+    return this.parseConformanceTail(
+      kw.start,
+      this.wrap({ str: target }, kw.end, isTok.start)
+    );
+  }
+
+  /** The `is P₁ & P₂ [where …] [{ … }]` tail shared by the standalone and the
+   * combined conformance forms. The cursor is at the `is` word.
+   *
+   * The trailing `where` clause makes the conformance CONDITIONAL (Appendix A
+   * "Conditional Conformance"): the head names the target's variables and the
+   * clause is their single BINDING site. Unlike a definition head — whose clause
+   * trails the annotations it quantifies, forcing the lexical pre-scan of
+   * {@link scanWhereClause} — a conformance clause PRECEDES everything that
+   * mentions its variables (the implementation block's member signatures), so
+   * the names are seeded when it is consumed and no pre-scan is needed. The
+   * clause rides the lowering as its VERBATIM source text; the engine re-parses
+   * it (the P11 pattern). */
+  private parseConformanceTail(
+    start: number,
+    targetNode: MathJsonExpression
+  ): MathJsonExpression | null {
+    const isTok = this.advance(); // 'is'
+    let end = isTok.end;
+
+    // `P₁ & P₂ & …` — a list of protocol NAMES joined by `&`, not a type
+    // intersection (protocol names are not types).
+    const names: MathJsonExpression[] = ['List'];
+    for (;;) {
+      const tok = this.current;
+      // A conformance tail does not cross a line: `type Foo = tuple<integer>
+      // is` followed by `let x = 1` on the NEXT line must diagnose the missing
+      // protocol name, not read `let` as one. (Recovery stops on the spot —
+      // `recoverAtStatementBoundary` consumes nothing at a line start — so the
+      // following statement still parses.)
+      if (
+        (tok.type !== 'SYMBOL' && tok.type !== 'VERBATIM_SYMBOL') ||
+        tok.precededByLinebreak
+      ) {
+        this.error(['protocol-name-expected'], tok.start, tok.end);
+        this.recoverAtStatementBoundary();
+        return null;
+      }
+      this.advance();
+      this.harvest(tok);
+      const name =
+        tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
+      if (
+        tok.type === 'SYMBOL' &&
+        (HARD_RESERVED_WORDS.has(name) ||
+          Parser.CONTEXTUAL_STATEMENT_WORDS.has(name))
+      ) {
+        // `let`/`type`/`alias` are contextual, not reserved (`let type = 5`
+        // parses), but a statement head is never what a conformance tail
+        // meant — a missing name reads as one otherwise.
+        if (Parser.CONTEXTUAL_STATEMENT_WORDS.has(name))
+          this.error(['protocol-name-expected'], tok.start, tok.end);
+        else this.error(['reserved-word', name], tok.start, tok.end);
+        this.recoverAtStatementBoundary();
+        return null;
+      }
+      names.push(this.wrap({ sym: name }, tok.start, tok.end));
+      end = tok.end;
+      if (this.check('OPERATOR') && this.current.text === '&') {
+        this.advance();
+        continue;
+      }
+      break;
+    }
+
+    const parts: MathJsonExpression[] = [
+      'DeclareConformance',
+      targetNode,
+      this.wrap(names, isTok.end, end),
+    ];
+
+    // The trailing `where` clause, on the SAME line as the protocol list.
+    let clause: ConformanceClause | undefined;
+    let unseedClause: () => void = () => {};
+    if (
+      this.current.type === 'SYMBOL' &&
+      this.current.text === 'where' &&
+      !this.current.precededByLinebreak
+    ) {
+      const clauseStart = this.current.start;
+      // The clause's own names are in scope for its BOUNDS (the
+      // order-independence rule W2 — a non-ground bound is then rejected by the
+      // type grammar with a message that names the variable) and, below, for the
+      // implementation block's member signatures.
+      const clauseNames = this.scanWhereClauseNames(
+        clauseStart + 'where'.length
+      );
+      const seeded = clauseNames.filter((n) => !this.knownTypeNames.has(n));
+      const outerTypeParamNames = this.typeParamNames;
+      for (const n of clauseNames) this.knownTypeNames.add(n);
+      this.typeParamNames = new Set(clauseNames);
+      unseedClause = (): void => {
+        for (const n of seeded) this.knownTypeNames.delete(n);
+        this.typeParamNames = outerTypeParamNames;
+      };
+      const consumed = this.consumeWhereClause(clauseStart);
+      if (consumed === null) {
+        unseedClause();
+        this.recoverAtStatementBoundary();
+        return null;
+      }
+      clause = {
+        text: consumed.text,
+        start: clauseStart,
+        end: consumed.end,
+        names: new Set(clauseNames),
+      };
+      end = consumed.end;
+      parts.push(this.wrap({ str: clause.text }, clause.start, clause.end));
+    }
+
+    try {
+      // The optional implementation block, on the SAME line (a `{` on the next
+      // line is an ordinary statement, not this statement's block).
+      if (this.check('OPEN_BRACE') && !this.current.precededByLinebreak) {
+        const impl = this.parseImplementationBlock(clause);
+        if (impl === null) return null;
+        parts.push(impl.node);
+        end = impl.end;
+      }
+    } finally {
+      unseedClause();
+    }
+
     return this.wrap(parts, start, end);
+  }
+
+  /**
+   * The implementation block of a conformance:
+   * `{ (function|get|set) NAME(params) [effects] [-> T] { body } … }`.
+   *
+   * Members are parsed SYNTACTICALLY only — they are not checked against the
+   * protocol's requirements, which is phase 2. Property handlers ride under
+   * the mangled keys `__get__<name>` / `__set__<name>` (an implementation
+   * detail, per Appendix A "Properties").
+   */
+  private parseImplementationBlock(clause?: ConformanceClause): {
+    node: MathJsonExpression;
+    end: number;
+  } | null {
+    const open = this.advance(); // '{'
+    this.brackets.push(open);
+    const entries: MathJsonExpression[] = ['Dictionary'];
+    // In an implementation, `Self` and the conforming type's own name are
+    // synonyms, so the annotations may spell either.
+    const unseedSelf = this.seedSelfTypeName();
+    try {
+      for (;;) {
+        while (this.match('SEMICOLON')) {
+          /* empty member */
+        }
+        if (this.check('CLOSE_BRACE') || this.check('EOF')) break;
+        const startPos = this.pos;
+        const member = this.parseImplementationMember(clause);
+        if (member === null) {
+          this.recoverInBracket();
+          break;
+        }
+        entries.push(member);
+        if (this.pos === startPos) this.advance();
+      }
+    } finally {
+      unseedSelf();
+    }
+    this.brackets.pop();
+
+    let end: number;
+    if (this.check('CLOSE_BRACE')) {
+      end = this.current.end;
+      this.advance();
+    } else {
+      this.error(['closing-bracket-expected', '}'], open.start, open.end);
+      end = this.current.start;
+      if (isCloseToken(this.current.type)) this.advance();
+    }
+
+    return { node: this.wrap(entries, open.start, end), end };
+  }
+
+  /** One `function`/`get`/`set` member of an implementation block, lowered to
+   * a `KeyValuePair` of the (possibly mangled) member name and a function
+   * literal.
+   *
+   * Under a CONDITIONAL conformance the member's annotations may mention the
+   * head's variables (`self: list<T>`). Those parameters take the ERASED
+   * lowering of §3.1 — a bare symbol, with the FULL signature (clause included)
+   * riding as the body's ascription — exactly as a `function f(x: T) … where T`
+   * definition does: the parameter annotation alone would name a variable no
+   * clause declares once the literal is boxed. A member that mentions no clause
+   * variable keeps the ordinary ascription, so an unquantified one is never
+   * given a clause it would leave unused. */
+  private parseImplementationMember(
+    clause?: ConformanceClause
+  ): MathJsonExpression | null {
+    const kw = this.current;
+    if (
+      kw.type !== 'SYMBOL' ||
+      (kw.text !== 'function' && kw.text !== 'get' && kw.text !== 'set')
+    ) {
+      this.error(['protocol-member-signature-expected', ''], kw.start, kw.end);
+      return null;
+    }
+    this.advance();
+
+    const nameTok = this.current;
+    if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
+      this.error(['symbol-expected'], nameTok.start, nameTok.end);
+      return null;
+    }
+    this.advance();
+    this.harvest(nameTok);
+    const member =
+      nameTok.type === 'VERBATIM_SYMBOL' ? (nameTok.value ?? '') : nameTok.text;
+    // The `__get__` / `__set__` prefixes are RESERVED by the property-handler
+    // mangling below: a `function` member spelled that way would be
+    // indistinguishable from a `get`/`set` member (and would print back as
+    // one). `get __get__x` is fine — it mangles to `__get____get__x`.
+    if (
+      kw.text === 'function' &&
+      (member.startsWith('__get__') || member.startsWith('__set__'))
+    ) {
+      this.error(['reserved-word', member], nameTok.start, nameTok.end);
+      return null;
+    }
+    const key = kw.text === 'function' ? member : `__${kw.text}__${member}`;
+
+    if (!this.check('OPEN_PAREN')) {
+      this.error(
+        ['opening-bracket-expected', '('],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    // Which parameters mention a clause variable (parallel to `params`).
+    const quantified: boolean[] = [];
+    const params = this.parseParameterList(
+      clause !== undefined ? quantified : undefined
+    );
+    const spec = this.parseEffectSpecifier();
+    let returnType: MathJsonExpression | null = null;
+    if (this.check('OPERATOR') && this.current.text === '->') {
+      this.advance();
+      returnType = this.parseHeldType();
+    }
+    if (!this.check('OPEN_BRACE')) {
+      this.error(
+        ['opening-bracket-expected', '{'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    // An implementation body is a `break`/`continue` BOUNDARY, like any
+    // function body.
+    const body = this.inLoopContext(0, () => this.parseBlock());
+    const end = this.localEnd(body) ?? this.previousEnd();
+
+    const quantifies = clause !== undefined && quantified.some((q) => q);
+    const ascription = this.definitionAscription(
+      params,
+      spec,
+      returnType,
+      [],
+      quantifies ? [clause!.start, clause!.end] : undefined,
+      quantifies ? clause!.text : undefined
+    );
+    const loweredParams =
+      quantifies && ascription !== null
+        ? params.map((p, i) =>
+            quantified[i] === true ? (operand(p, 1) ?? p) : p
+          )
+        : params;
+    const ascribedBody =
+      ascription !== null
+        ? this.wrap(
+            ['Typed', body, ascription] as MathJsonExpression[],
+            this.localStart(body) ?? kw.start,
+            end
+          )
+        : body;
+
+    return this.kvPair(
+      key,
+      this.wrap(
+        ['Function', ascribedBody, ...loweredParams] as MathJsonExpression[],
+        nameTok.start,
+        end
+      ),
+      kw.start,
+      end
+    );
+  }
+
+  /**
+   * The `(params) ‹effects› -> result` signature of a protocol `function`
+   * member, with the P22 sugar applied.
+   *
+   * **First-parameter `Self` inference.** Appendix A allows
+   * `function compare(self, other: Self)`, but the type grammar rejects a
+   * parameter list that mixes named and unnamed parameters, so the sugar is a
+   * parser-side SOURCE REWRITE rather than a grammar change (P22): `: Self` is
+   * injected after an unannotated first parameter, and the captured signature
+   * text is the NORMALIZED one — `(self: Self, other: Self) -> …` — which is
+   * what the registry stores and what the serializer prints back.
+   *
+   * A first parameter annotated with anything else is left exactly as written:
+   * the engine's `protocol-self-required` check is the authority on it.
+   */
+  private parseProtocolSignature(): {
+    node: MathJsonExpression;
+    end: number;
+  } | null {
+    const start = this.current.start; // At the `(` of the parameter list.
+    const inject = this.unannotatedFirstParameterEnd(start);
+    if (inject !== null) {
+      const tail = this.source.slice(start);
+      const at = inject - start;
+      const annotation = ': Self';
+      const rewritten = `${tail.slice(0, at)}${annotation}${tail.slice(at)}`;
+      try {
+        const { end } = parseTypePrefix(rewritten, this.typeResolver);
+        // The injection sits BEFORE the end of the signature, so the offset in
+        // the real source is the rewritten end less the injected text.
+        const sourceEnd = start + end - annotation.length;
+        this.advanceToOffset(sourceEnd);
+        return {
+          node: this.wrap(
+            { str: rewritten.slice(0, end).trim() },
+            start,
+            sourceEnd
+          ),
+          end: sourceEnd,
+        };
+      } catch {
+        // Not a signature even with the annotation: fall through, so the
+        // diagnostic lands on the source the author actually wrote.
+      }
+    }
+    return this.parseTypeBody(start);
+  }
+
+  /**
+   * The source offset just past the first parameter of the list starting at
+   * `start`, when that parameter is a bare NAME with no `: type` annotation —
+   * the injection point for {@link parseProtocolSignature}. `null` when the
+   * list is empty, the first parameter is annotated, or the text is not a
+   * parameter list at all.
+   */
+  private unannotatedFirstParameterEnd(start: number): number | null {
+    const src = this.source;
+    if (src[start] !== '(') return null;
+    let i = start + 1;
+    while (i < src.length && /\s/.test(src[i]!)) i += 1;
+    if (!/[\p{L}_]/u.test(src[i] ?? '')) return null;
+    const nameStart = i;
+    while (i < src.length && /[\p{L}\p{N}_]/u.test(src[i]!)) i += 1;
+    const nameEnd = i;
+    while (i < src.length && /\s/.test(src[i]!)) i += 1;
+    // A `:` means the author annotated it; anything other than a parameter
+    // separator or the closing paren means this is not a plain name.
+    const next = src[i];
+    if (next !== ',' && next !== ')') return null;
+    return nameStart === nameEnd ? null : nameEnd;
+  }
+
+  /** Seed `Self` as a known type name for the duration of a protocol or
+   * implementation block; the returned thunk restores the set. `Self` is a
+   * textual substitution token (P12): it is never declared, never reaches the
+   * engine's type registry, and a user type of the same name survives. */
+  private seedSelfTypeName(): () => void {
+    if (this.knownTypeNames.has('Self')) return () => {};
+    this.knownTypeNames.add('Self');
+    return () => this.knownTypeNames.delete('Self');
   }
 
   //
@@ -1499,7 +2477,8 @@ export class Parser {
     // A name this sum ALREADY declared as a variant does not count as "names a
     // type": re-running the statement must read as the sugar a second time.
     const anyCall = arms.some((a) => a.payload !== null);
-    const isOwnVariant = (n: string): boolean => this.sumVariants[n] === sumName;
+    const isOwnVariant = (n: string): boolean =>
+      this.sumVariants[n] === sumName;
     if (
       !anyCall &&
       !(
@@ -3344,9 +4323,9 @@ export class Parser {
         }
       }
 
-      // The reserved protocol-conformance slot. Parsed so the clause's extent
-      // is right; rejected (as `protocol-conformance-unsupported`) by the
-      // signature validation, not here.
+      // The protocol-conformance slot. Parsed so the clause's extent is
+      // right; the conformance itself is checked by the engine at each call
+      // site (protocols design P19), never here.
       skipSpace();
       if (/^is\b/.test(src.slice(pos))) {
         pos += 2;
@@ -4097,6 +5076,17 @@ export class Parser {
           errEnd = Math.max(tok.end, errStart + 1);
           break;
         }
+      }
+      // A PROTOCOL name in type position gets its own diagnostic, pointing at
+      // the constrained-variable spelling rather than reporting an unknown type.
+      const protocol = protocolInTypePosition(e);
+      if (protocol !== null) {
+        this.error(
+          ['protocol-in-type-position', protocol],
+          errStart,
+          Math.max(errEnd, errStart + 1)
+        );
+        return null;
       }
       this.error(['type-annotation-error', message], errStart, errEnd);
       return null;
@@ -5126,10 +6116,18 @@ export class Parser {
    * The field name is a symbol (or verbatim symbol); whitespace after the
    * dot is tolerated (`p. x`), the dot itself must abut the base. Chains
    * left-associate: `a.b.c` → `Field(Field(a, "b"), "c")`. Positional access
-   * (`t.1`) is NOT claimed — fields are names; positions are `t[1]`. */
+   * (`t.1`) is NOT claimed — fields are names; positions are `t[1]`.
+   *
+   * A PARENTHESIZED qualified name — `p.(Nameable.name)` — names a protocol
+   * property explicitly, and lowers to `["ProtocolProperty", "Nameable",
+   * "name", base]`. This is the field-grammar amendment the protocols design
+   * makes to D16 of the nominal-types design (ruling P6): exactly
+   * SYMBOL `.` SYMBOL inside the parentheses, nothing else. */
   private parseField(base: MathJsonExpression): MathJsonExpression {
     const start = this.localStart(base) ?? this.current.start;
     this.advance(); // '.'
+    if (this.current.type === 'OPEN_PAREN')
+      return this.parseQualifiedField(base, start);
     const nameTok = this.current;
     if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
       this.error(['symbol-expected'], nameTok.start, nameTok.end);
@@ -5142,6 +6140,56 @@ export class Parser {
       ['Field', base, { str: name }] as MathJsonExpression[],
       start,
       nameTok.end
+    );
+  }
+
+  /** The parenthesized qualified field name `( Protocol . name )`, positioned
+   * just after the `(` (P6). Anything that is not exactly SYMBOL `.` SYMBOL
+   * `)` takes the same `symbol-expected` recovery an ordinary bad field name
+   * does. */
+  private parseQualifiedField(
+    base: MathJsonExpression,
+    start: number
+  ): MathJsonExpression {
+    /** A SYMBOL / VERBATIM_SYMBOL at the cursor, consumed; `null` otherwise
+     * (with the diagnostic already emitted). */
+    const symbolName = (): string | null => {
+      const tok = this.current;
+      if (tok.type !== 'SYMBOL' && tok.type !== 'VERBATIM_SYMBOL') {
+        this.error(['symbol-expected'], tok.start, tok.end);
+        return null;
+      }
+      this.advance();
+      return tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
+    };
+
+    this.advance(); // '('
+    const protocol = symbolName();
+    if (protocol === null) return base;
+    const dot = this.current;
+    if (dot.type !== 'OPERATOR' || dot.text !== '.') {
+      this.error(['symbol-expected'], dot.start, dot.end);
+      return base;
+    }
+    this.advance(); // '.'
+    const name = symbolName();
+    if (name === null) return base;
+    const close = this.current;
+    if (close.type !== 'CLOSE_PAREN') {
+      this.error(['symbol-expected'], close.start, close.end);
+      return base;
+    }
+    const end = close.end;
+    this.advance(); // ')'
+    return this.wrap(
+      [
+        'ProtocolProperty',
+        { str: protocol },
+        { str: name },
+        base,
+      ] as MathJsonExpression[],
+      start,
+      end
     );
   }
 
@@ -6046,6 +7094,13 @@ function bindingTargetRoot(
   if (symbolNameOf(expr) !== null) return expr;
   const ops = fnOps(expr);
   if (ops === null || ops.length < 2) return null;
+  // A QUALIFIED protocol property (`p.(P.name)`, protocols design P6) carries
+  // its receiver third. It is a binding-target SHAPE — so a bare `=` against
+  // one reads as the assignment it looks like, and the engine answers with
+  // `property-assignment-target-invalid` — rather than silently becoming a
+  // comparison whose result is discarded.
+  if (ops[0] === 'ProtocolProperty')
+    return ops.length >= 4 ? bindingTargetRoot(ops[3]) : null;
   if (ops[0] !== 'Field' && ops[0] !== 'At') return null;
   return bindingTargetRoot(ops[1]);
 }

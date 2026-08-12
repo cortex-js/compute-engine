@@ -42,9 +42,9 @@ export const LITERAL_WORDS: ReadonlySet<string> = new Set<string>([
 
 /**
  * The words the grammar consumes today: statement/expression heads (`if`,
- * `match`, `do`, `for`, `while`, `function`, `const`), the `else` clause
- * separator, the loop separator and membership operator `in`, and the loop
- * control transfers `break`/`continue`.
+ * `match`, `do`, `for`, `while`, `function`, `const`, `protocol`), the `else`
+ * clause separator, the loop separator and membership operator `in`, and the
+ * loop control transfers `break`/`continue`.
  *
  * `let`, `type`, and `alias` are deliberately absent: they are already
  * contextual (`let type = 5` and `type = 5` both parse), so they are not
@@ -61,6 +61,7 @@ export const ACTIVE_WORDS: ReadonlySet<string> = new Set<string>([
   'if',
   'in',
   'match',
+  'protocol',
   'while',
 ]);
 
@@ -143,7 +144,7 @@ export const RESERVED_WORDS = new Set<string>([
   'parallel', // Not in use
   'private', // Not in use
   'protected', // Not in use
-  'protocol', // Not in use
+  'protocol', // ACTIVE — protocol declaration head (parser `parseProtocolStatement`)
   'public', // Not in use
   'repeat', // Not in use
   'return', // Not in use

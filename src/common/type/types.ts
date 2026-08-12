@@ -179,10 +179,10 @@ export type TypeParameter = {
   /** Declaration-level variance, on a parameterized NOMINAL type only.
    * Absent means the default (`out`, verified — §4.4). */
   variance?: TypeVariance;
-  /** The reserved `is` protocol-conformance slot of a `where` clause
-   * (`where T: collection is Hashable`). Parsed and stored, but semantically
-   * INERT: a declared type carrying one is rejected with
-   * `protocol-conformance-unsupported` until protocols land. */
+  /** The `is` protocol-conformance slot of a `where` clause
+   * (`where T: collection is Hashable`). Checked after S1-S3 have solved the
+   * variable, against {@link TypeResolver.conformsTo} (protocols design P19);
+   * a declaration route with no such oracle rejects the slot outright. */
   protocols?: string[];
 };
 
@@ -633,6 +633,21 @@ export type TypeResolver = {
   get names(): string[];
   forward: (name: string) => TypeReference | undefined;
   resolve: (name: string) => TypeReference | undefined;
+  /**
+   * The CONFORMANCE oracle — the `where T is Comparable` slot's only window
+   * onto the protocol registry (protocols design P19).
+   *
+   * `common/type` may not import the engine (zero-cycle budget), so
+   * conformance reaches the type layer exactly the way name resolution does:
+   * through the resolver. `conformsTo(t, p)` answers "does the GROUND type `t`
+   * conform to the protocol named `p`", inheritance included (a conformance
+   * registered for a supertype answers for its subtypes).
+   *
+   * OPTIONAL: a resolver without it has no protocol registry to consult, and a
+   * declared type carrying an `is` slot is rejected outright
+   * (`protocol-conformance-unsupported`) rather than silently unchecked.
+   */
+  conformsTo?: (type: Type, protocol: string) => boolean;
 };
 
 /**

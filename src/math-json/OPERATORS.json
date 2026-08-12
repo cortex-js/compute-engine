@@ -1528,6 +1528,30 @@
       "description": "Declare a symbol in the current scope, optionally assigning a type and an initial value. An optional trailing attributes dictionary (with keys `type`, `value`, `constant` and `holdUntil`) can further describe the definition, e.g. to declare a constant. With a value, evaluates to that value; otherwise evaluates to `Nothing`."
     },
     {
+      "name": "DeclareConformance",
+      "category": "Core",
+      "arity": "optional",
+      "signature": "(target: string|symbol, protocols: any, implementation: dictionary?) scope -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Declare that a type CONFORMS to one or more protocols — the lowering of the Epsil `type string is Hashable & Comparable` statement. The target rides as a type-expression string and must be named and ground (not a union, an anonymous structural type or a `type alias` name); the protocols ride as a `List` of names. An optional trailing dictionary carries the implementation block, member name -> function literal (property handlers under the mangled keys `__get__x` / `__set__x`); it may only accompany a SINGLE protocol. Conformance is monotone — it can be added but never removed — and a re-declaration is a no-op. Evaluates to `Nothing`."
+    },
+    {
+      "name": "DeclareProtocol",
+      "category": "Core",
+      "arity": "optional",
+      "signature": "(symbol|string, members: dictionary?) scope -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> [\"Pair\", \"function\"|\"readonly\"|\"readwrite\", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). Evaluates to `Nothing`."
+    },
+    {
       "name": "DeclareSumType",
       "category": "Core",
       "arity": "variadic",
@@ -5417,6 +5441,30 @@
       "broadcastable": false,
       "description": "`Product(f, a, b)` computes the product of `f` from `a` to `b`",
       "wikidata": "Q901718"
+    },
+    {
+      "name": "ProtocolMember",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(protocol: string, member: string, arguments: any*) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, which parses as `Apply(Field(Comparable, \"compare\"), x, y)`). The first two operands name the protocol and the member; the rest are the call arguments. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the first argument is invoked. Several equally specific implementations are `protocol-call-ambiguous`; none is `protocol-implementation-missing`; an argument whose type cannot decide the question leaves the call symbolic."
+    },
+    {
+      "name": "ProtocolProperty",
+      "category": "Core",
+      "arity": "optional",
+      "signature": "(protocol: string, property: string, receiver: any, value: any?) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Read (or write) a protocol PROPERTY through a NAMED protocol \u2014 the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). The first two operands name the protocol and the property; the third is the receiver. A fourth operand makes it a SET invocation \u2014 the rebinding sugar `p.name = v` lowers to `p = ProtocolProperty(P, \"name\", p, v)` (P2) \u2014 which has no surface spelling of its own: qualified property ASSIGNMENT is not supported. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the receiver is invoked."
     },
     {
       "name": "PseudoInverse",

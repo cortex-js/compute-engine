@@ -135,7 +135,7 @@ function parseTypeUncached(
     // Polytypes are validated where they are boxed (§7.2). Gated on the parse
     // having seen a `where` clause: a variable can only be introduced by one,
     // so a type string without a clause pays nothing.
-    if (parser.sawWhereClause) validateDeclaredType(type);
+    if (parser.sawWhereClause) validateDeclaredType(type, typeResolver);
 
     return { type, sawForwardRef: parser.sawForwardRef };
   } catch (error) {
@@ -203,7 +203,7 @@ export function parseTypePrefix(
   });
   const ast = parser.parseTypePrefix();
   const type = buildTypeFromAST(ast, typeResolver, typeVars);
-  if (parser.sawWhereClause) validateDeclaredType(type);
+  if (parser.sawWhereClause) validateDeclaredType(type, typeResolver);
   return { type, end: parser.endOffset };
 }
 

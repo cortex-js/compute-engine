@@ -69,9 +69,11 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 
 <where_clause> ::= "where" <var_decl> ( "," <var_decl> )*
 
-(* The bound must be GROUND. The `is` protocol slot parses and is stored, but
-   is semantically INERT: a type carrying one fails at declaration time with
-   `protocol-conformance-unsupported` until protocols land. *)
+(* The bound must be GROUND. The `is` protocol slot parses and is stored; it
+   is checked at each call site against the engine's conformance registry
+   (protocols design P19). A route with no registry to consult — a
+   resolver-less parse — rejects it with `protocol-conformance-unsupported`
+   rather than dropping it. *)
 <var_decl> ::= <identifier> ( ":" <union_type> )?
                ( "is" <identifier> ( "&" <identifier> )* )?
 
@@ -812,9 +814,9 @@ export class Parser {
           );
       }
 
-      // The reserved `is` protocol-conformance slot: parsed and stored, but
-      // semantically inert — rejected at declaration time with
-      // `protocol-conformance-unsupported` until protocols land.
+      // The `is` protocol-conformance slot: parsed and stored here, checked
+      // at each call site by the solver against the resolver's conformance
+      // oracle (protocols design P19).
       let protocols: string[] | undefined;
       if (this.current.type === 'IDENTIFIER' && this.current.value === 'is') {
         this.advance(); // consume 'is'

@@ -25,6 +25,7 @@ import {
   resolveOverload,
 } from './overload.js';
 import { parseType } from '../../common/type/parse.js';
+import { typeToString } from '../../common/type/serialize.js';
 import { reduceType } from '../../common/type/reduce.js';
 import {
   freeTypeVariables,
@@ -743,7 +744,12 @@ export function validateArguments(
   const polyArm = polytypeArm(sig);
   const solved = polyArm
     ? (armSolution ??
-      solveArm(polyArm, ops, { threadable, stripMissing, lazy }))
+      solveArm(polyArm, ops, {
+        threadable,
+        stripMissing,
+        lazy,
+        resolver: ce._typeResolver,
+      }))
     : undefined;
   let paramStillOpen = false;
   const groundParam = (param: Type): Type => {
@@ -1212,6 +1218,21 @@ export function validateArguments(
       const idx = f.index ?? 0;
       if (idx >= result.length) continue;
       if (!result[idx].isValid) continue;
+      // A `where T is P` constraint (protocols design P19) is not a subtype
+      // violation, so it does not report as one: the offending operand carries
+      // `protocol-constraint-unsatisfied`, naming the protocol and the type
+      // the variable solved to.
+      if (f.kind === 'protocol') {
+        result[idx] = ce.error(
+          [
+            'protocol-constraint-unsatisfied',
+            `\`${typeToString(f.solution)}\` does not conform to the \`${f.protocol}\` protocol (\`${f.variable}\` is constrained by \`where ${f.variable} is ${f.protocol}\`)`,
+          ],
+          ops[idx]?.toString()
+        );
+        isValid = false;
+        continue;
+      }
       // For a contravariant (callback) conflict the expected type displayed is
       // the blamed position's parameter with the variable set to what the
       // OTHER constraints pin it to — §8's `(integer) -> boolean`, not the

@@ -65,6 +65,7 @@ import type {
   SymbolDefinitions,
   DictionaryInterface,
   CanonicalForm,
+  ProtocolMembersInput,
 } from '../global-types.js';
 import type { FunctionInterface } from '../types-expression.js';
 import type { Type, TypeParameter } from '../../common/type/types.js';
@@ -97,6 +98,17 @@ import {
   declareSumType,
 } from '../engine-declarations.js';
 import type { SumTypeVariant } from '../engine-declarations.js';
+import {
+  canonicalProtocolMember,
+  declareConformance,
+  declareProtocolImpl,
+  evaluateProtocolMember,
+  evaluateProtocolPropertyOperator,
+  isProtocolDispatcher,
+  protocolMemberResultType,
+  protocolPropertyAssignment,
+  protocolPropertyResultType,
+} from '../engine-protocols.js';
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
   effectContractErrorValue,
@@ -901,6 +913,262 @@ function declareSumTypeStatement(
     );
   }
   return null;
+}
+
+/**
+ * The top-level gate shared by every DECLARATION statement: protocols, like
+ * types, are engine-global, so a declaration is legal only at the top level of
+ * a program. The Epsil static pre-pass frame is a top-level SURROGATE,
+ * recognized by frame name AND `_staticTypeCheckDepth` (the name alone is
+ * host-forgeable) — the identical rule as `declareTypeStatement`; see its
+ * comment for the full reasoning.
+ */
+function notAtTopLevel(ce: ComputeEngine): boolean {
+  const globalScope = ce._evalContextStack[1]?.lexicalScope;
+  const ctx = ce.context;
+  const inSurrogate =
+    ce._staticTypeCheckDepth > 0 && ctx.name === 'epsil:static-check';
+  return (
+    globalScope !== undefined &&
+    ctx.lexicalScope !== globalScope &&
+    !inSurrogate
+  );
+}
+
+/**
+ * The entries of a RAW `["Dictionary", ["KeyValuePair", key, value], …]`
+ * operand, or `null` when the operand is not that shape.
+ *
+ * Read from the raw structure rather than through `isDictionary`, which needs
+ * a canonical operand: the implementation block of a `DeclareConformance`
+ * carries function literals whose annotations mention `Self` — a token no type
+ * resolver knows — so it must reach the handler UNCANONICALIZED (phase 2 owns
+ * its validation).
+ */
+function rawDictionaryEntries(
+  op: Expression | undefined
+): [string, Expression][] | null {
+  if (op === undefined || !isFunction(op, 'Dictionary')) return null;
+  const entries: [string, Expression][] = [];
+  for (const kv of op.ops) {
+    if (!isFunction(kv, 'KeyValuePair') || kv.nops !== 2) return null;
+    const key = declarationName(kv.ops[0]);
+    if (key === undefined) return null;
+    entries.push([key, kv.ops[1]]);
+  }
+  return entries;
+}
+
+/**
+ * Register the protocol declared by a `DeclareProtocol` statement in the
+ * ENGINE-LEVEL protocol registry. Returns an `Error` value on failure, `null`
+ * on success — the `declareTypeStatement` contract in every respect (called
+ * from BOTH the canonical and the evaluate handler, idempotent through the
+ * statement-replace rule, top-level only because protocols are engine-global).
+ *
+ * The members ride as a dictionary of `member -> ["Pair", kind, signature]`,
+ * with the signature as SOURCE TEXT parsed here (so `Self` handling stays
+ * engine-side, P11/P12).
+ */
+function declareProtocolStatement(
+  ce: ComputeEngine,
+  nameOp: Expression | undefined,
+  membersOp: Expression | undefined
+): Expression | null {
+  const name = declarationName(nameOp);
+  if (!name)
+    return ce.error(['protocol-name-expected', 'Expected a protocol name']);
+
+  if (notAtTopLevel(ce))
+    return ce.error(
+      [
+        'protocol-scope-invalid',
+        'Protocol declarations must be at the top level of a program, not inside a block or function body',
+      ],
+      name
+    );
+
+  const members: ProtocolMembersInput = {};
+  if (membersOp !== undefined) {
+    const entries = rawDictionaryEntries(membersOp);
+    if (entries === null)
+      return ce.error(
+        [
+          'invalid-protocol-declaration',
+          'Expected a dictionary of protocol members',
+        ],
+        name
+      );
+    const seen = new Set<string>();
+    for (const [member, spec] of entries) {
+      // The raw dictionary preserves duplicate keys, but a bucket does not —
+      // two `function compare` entries would silently keep the last. Same
+      // message shape as the cross-kind duplicate check in `engine-protocols`.
+      if (seen.has(member))
+        return ce.error(
+          [
+            'invalid-protocol-declaration',
+            `The protocol "${name}" declares the member "${member}" twice`,
+          ],
+          name
+        );
+      seen.add(member);
+      const kind = isFunction(spec, 'Pair')
+        ? declarationName(spec.ops[0])
+        : undefined;
+      const text = isFunction(spec, 'Pair')
+        ? declarationName(spec.ops[1])
+        : undefined;
+      if (
+        text === undefined ||
+        (kind !== 'function' && kind !== 'readonly' && kind !== 'readwrite')
+      )
+        return ce.error(
+          [
+            'invalid-protocol-declaration',
+            `Expected the member \`${member}\` as \`["Pair", "function"|"readonly"|"readwrite", signature]\``,
+          ],
+          name
+        );
+      const slot = kind === 'function' ? 'functions' : kind;
+      const bucket = (members[slot] ??= {});
+      bucket[member] = text;
+    }
+  }
+
+  // Errors are values: a malformed signature must not throw to the host.
+  try {
+    declareProtocolImpl(ce, name, members, { fromStatement: true });
+  } catch (e) {
+    return ce.error(
+      [
+        'invalid-protocol-declaration',
+        e instanceof Error ? e.message : String(e),
+      ],
+      name
+    );
+  }
+  return null;
+}
+
+/**
+ * Register the conformance declared by a `DeclareConformance` statement.
+ * Returns an `Error` value on failure, `null` on success.
+ *
+ * `["DeclareConformance", {str: target}, ["List", P₁, …], where?, impl?]` — the
+ * target rides as type-expression SOURCE (like `DeclareType`'s body) and the
+ * implementation block, when present, is stored RAW (phase 2 validates it
+ * against the protocol's requirements).
+ *
+ * The optional `where` operand is the trailing clause of a CONDITIONAL
+ * conformance, as SOURCE TEXT (`{str: "where T is Comparable"}`) — the P11
+ * pattern `DeclareType`'s `typeParams` attribute uses, re-parsed by the engine.
+ * It is told apart from the implementation block by its HEAD: a clause is a
+ * string, a block a `Dictionary` (the same by-head rule `DeclareSumType` uses
+ * for its attributes bag).
+ */
+function declareConformanceStatement(
+  ce: ComputeEngine,
+  targetOp: Expression | undefined,
+  protocolsOp: Expression | undefined,
+  whereOrImplOp: Expression | undefined,
+  implOp: Expression | undefined
+): Expression | null {
+  const target = declarationName(targetOp);
+  if (!target)
+    return ce.error([
+      'protocol-conformance-target-invalid',
+      'Expected a conformance target type',
+    ]);
+
+  if (notAtTopLevel(ce))
+    return ce.error(
+      [
+        'protocol-scope-invalid',
+        'Conformance declarations must be at the top level of a program, not inside a block or function body',
+      ],
+      target
+    );
+
+  const names: string[] = [];
+  if (protocolsOp !== undefined && isFunction(protocolsOp, 'List')) {
+    for (const p of protocolsOp.ops) {
+      const n = declarationName(p);
+      if (n === undefined)
+        return ce.error(
+          ['protocol-unknown', 'Expected a protocol name'],
+          target
+        );
+      names.push(n);
+    }
+  } else {
+    const n = declarationName(protocolsOp);
+    if (n === undefined)
+      return ce.error(['protocol-unknown', 'Expected a protocol name'], target);
+    names.push(n);
+  }
+
+  // A STRING at operand 2 is the `where` clause of a conditional conformance;
+  // a `Dictionary` there is the implementation block (the pre-phase-5 shape).
+  let where: string | undefined;
+  if (whereOrImplOp !== undefined && isString(whereOrImplOp))
+    where = whereOrImplOp.string;
+  else if (whereOrImplOp !== undefined && implOp === undefined)
+    implOp = whereOrImplOp;
+  else if (whereOrImplOp !== undefined)
+    return ce.error(
+      [
+        'invalid-protocol-declaration',
+        'Expected the `where` clause of a conditional conformance as a string',
+      ],
+      target
+    );
+
+  let impl: Record<string, Expression> | undefined;
+  if (implOp !== undefined) {
+    const entries = rawDictionaryEntries(implOp);
+    if (entries === null)
+      return ce.error(
+        [
+          'invalid-protocol-declaration',
+          'Expected a dictionary of implementation members',
+        ],
+        target
+      );
+    impl = Object.create(null) as Record<string, Expression>;
+    const seen = new Set<string>();
+    for (const [member, value] of entries) {
+      // The raw dictionary preserves duplicate keys, but the block does not —
+      // two `compare` entries would silently keep the last. Same message shape
+      // as the duplicate check in `declareProtocolStatement`.
+      if (seen.has(member))
+        return ce.error(
+          [
+            'invalid-protocol-declaration',
+            `The implementation of "${target}" declares the member "${member}" twice`,
+          ],
+          target
+        );
+      seen.add(member);
+      impl[member] = value;
+    }
+  }
+
+  // Errors are values: the overlap check reaches `reduceType`, which throws on
+  // an unknown type kind, so a throw must not escape through the lazy
+  // operator's canonical/evaluate handler (the `declareProtocolStatement`
+  // contract).
+  try {
+    return declareConformance(ce, target, names, impl, { where });
+  } catch (e) {
+    return ce.error(
+      [
+        'invalid-protocol-declaration',
+        e instanceof Error ? e.message : String(e),
+      ],
+      target
+    );
+  }
 }
 
 export const CORE_LIBRARY: SymbolDefinitions[] = [
@@ -1718,6 +1986,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // current-scope shell first: `defineFunctionClause` will shadow the
         // builtin at install, and without the shell a recursive clause's
         // self-call would canonicalize against — and keep — the builtin.
+        // A protocol DISPATCHER inherited from an OUTER scope is pre-shadowed
+        // for the same reason (protocols design P13/P33): `defineFunctionClause`
+        // shadows it rather than replacing it, so every LATER call in this
+        // scope — the recursive self-call and the block's own bare calls —
+        // must canonicalize against the shell, not against the dispatcher.
+        // A same-scope dispatcher is REPLACED, so it needs no shell.
         if (symbolName !== undefined && !isCtorTarget) {
           const existing = ce.lookupDefinition(symbolName);
           const systemScope = ce.contextStack[0]?.lexicalScope;
@@ -1726,8 +2000,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             systemScope !== undefined &&
             systemScope.bindings.get(symbolName) === existing &&
             ce.context.lexicalScope !== systemScope;
+          const isInheritedDispatcher =
+            isProtocolDispatcher(existing) &&
+            ce.context.lexicalScope.bindings.get(symbolName) !== existing;
           if (existing === undefined) ce.symbol(symbolName);
-          else if (isBuiltin) ce.declare(symbolName, 'function');
+          else if (isBuiltin || isInheritedDispatcher)
+            ce.declare(symbolName, 'function');
           const def = ce.lookupDefinition(symbolName);
           if (def && isValueDef(def) && def.value.inferredType)
             def.value.type = ce.type('function');
@@ -1869,13 +2147,32 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return ce._fn('Assign', [lhs, args[1]]);
         }
 
+        // P2 — protocol-property assignment is REBINDING SUGAR: `p.name = v`
+        // canonicalizes to `p = «set name»(p, v)`. Runs BEFORE the symbol
+        // check below, which would otherwise reject the `Field` target as
+        // `incompatible-type`. A `Field` that names no protocol property is
+        // left to that existing path; one whose target is not yet TYPED (the
+        // Epsil pre-pass canonicalizes the batch before anything runs) keeps
+        // its raw `Field` LHS and is resolved again from `evaluate`.
+        const property = protocolPropertyAssignment(ce, lhs, args[1]);
+        if (property?.kind === 'error') return property.error;
+        if (property?.kind === 'rebind')
+          return ce._fn('Assign', [
+            ce.symbol(property.symbol),
+            property.setter,
+          ]);
+
         // Note: we can't use checkType() because it canonicalized/bind the argument.
         // As in `Declare`, a `Tuple` first operand is a destructuring pattern
         // (`(x, y) := v`) and is kept raw: canonicalizing it would fold a
         // single-letter target into the constant of that name (`(i, j) := …`
         // would write `ImaginaryUnit`).
         let symbol = lhs;
-        if (!isSymbol(symbol) && !isFunction(symbol, 'Tuple')) {
+        if (
+          property === undefined &&
+          !isSymbol(symbol) &&
+          !isFunction(symbol, 'Tuple')
+        ) {
           // If the argument was not a symbol literal, see if we can evaluate it to a symbol
           symbol = checkType(ce, lhs, 'symbol');
         }
@@ -2147,6 +2444,41 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return err ?? val;
         }
 
+        //
+        // P2 — the DEFERRED protocol-property assignment: canonicalization
+        // could not read the target's type yet (the Epsil pre-pass runs before
+        // anything is evaluated), so the `Field` LHS survived. The type is
+        // settled now, so the rebinding is resolved and performed here.
+        //
+        if (isFunction(op1, 'Field')) {
+          const property = protocolPropertyAssignment(ce, op1, op2);
+          if (property?.kind === 'error') return property.error;
+          if (property === undefined) {
+            // The deferred target is NOT a protocol property after all (the
+            // root settled to an ordinary record/dictionary, or to a type that
+            // does not conform). That is the plain `Field`-assignment refusal
+            // the canonical route makes with `checkType(lhs, 'symbol')` — emit
+            // it here, since falling through would evaluate the `Field` and
+            // return `undefined`, swallowing the error entirely.
+            const target = checkType(ce, op1, 'symbol');
+            if (!target.isValid) return target;
+          }
+          if (property?.kind === 'rebind') {
+            const val = property.setter.evaluate();
+            if (!val.isValid) return val;
+            try {
+              ce.assign(property.symbol, val);
+            } catch (e) {
+              if (isEffectContractError(e))
+                return effectContractErrorValue(ce, e);
+              if (isTypeCompatibilityError(e))
+                return typeCompatibilityErrorValue(ce, e);
+              throw e;
+            }
+            return val;
+          }
+        }
+
         // Regular symbol assignment
         // The LHS is held RAW on purpose: it is a NAME, not a reference. Read
         // the name directly; `evaluate()` is only the fallback for a non-symbol
@@ -2158,6 +2490,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const symbolName = sym(symbol);
         if (!symbolName) return undefined;
         const val = op2.evaluate();
+        // P2's rebinding sugar, canonicalized form: `p.name = v` lowered to
+        // `p = «set name»(p, v)`. A REFUSED write — a setter result that does
+        // not fit the receiver (P25 amendment), a missing implementation —
+        // must not be stored: the error is the value of the statement, exactly
+        // as on the deferred route above.
+        if (!val.isValid && isFunction(op2, 'ProtocolProperty')) return val;
         // A violated definition-annotation contract (an explicit effect
         // annotation the body's inferred effects do not fit) is not installed
         // and surfaces as an `incompatible-type` error VALUE — the same shape
@@ -2622,6 +2960,113 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }) =>
         declareSumTypeStatement(ce, ops) ?? ce.Nothing,
+    },
+
+    DeclareProtocol: {
+      description:
+        'Declare a PROTOCOL: a set of function and property requirements a ' +
+        'type may declare itself to satisfy. Protocols are engine-global ' +
+        '(not lexically scoped) and are NOT types, so this is only valid at ' +
+        'the top level of a program. The name is a symbol (or a string); the ' +
+        'optional members ride as a dictionary of ' +
+        '`member -> ["Pair", "function"|"readonly"|"readwrite", signature]`, ' +
+        'with the signature as a type-expression string. A `function` ' +
+        "member's first parameter must be typed `Self`, the substitution " +
+        'token standing for the conforming type. A protocol with no members ' +
+        'is a SEMANTIC protocol (a marker). Evaluates to `Nothing`.',
+      lazy: true,
+      // Introduces an engine-global declaration that outlives the
+      // application: the `scope` label (see `DeclareType`).
+      signature: '(symbol|string, members: dictionary?) scope -> nothing',
+      // A STORING writer, like `DeclareType`: no position applies a
+      // function-valued operand.
+      invokes: false,
+      canonical: (args, { engine: ce }) => {
+        // Every operand is kept RAW: canonicalizing the name would
+        // auto-declare it as a variable, and the members dictionary carries
+        // `Self`-typed signatures no type resolver knows.
+        const err = declareProtocolStatement(ce, args[0], args[1]);
+        if (err) return err;
+        return ce._fn('DeclareProtocol', args);
+      },
+      evaluate: (ops, { engine: ce }) =>
+        declareProtocolStatement(ce, ops[0], ops[1]) ?? ce.Nothing,
+    },
+
+    DeclareConformance: {
+      description:
+        'Declare that a type CONFORMS to one or more protocols — the ' +
+        'lowering of the Epsil `type string is Hashable & Comparable` ' +
+        'statement. The target rides as a type-expression string and must be ' +
+        'named and ground (not a union, an anonymous structural type or a ' +
+        '`type alias` name); the protocols ride as a `List` of names. An ' +
+        'optional trailing dictionary carries the implementation block, ' +
+        'member name -> function literal (property handlers under the ' +
+        'mangled keys `__get__x` / `__set__x`); it may only accompany a ' +
+        'SINGLE protocol. A CONDITIONAL conformance carries, ahead of that ' +
+        'block, the source text of its trailing `where` clause as a string: ' +
+        'the target is then a head pattern naming the variables the clause ' +
+        'binds (`list<T>` with `"where T is Comparable"`). Conformance is ' +
+        'monotone — it can be added but ' +
+        'never removed — and a re-declaration is a no-op. Evaluates to ' +
+        '`Nothing`.',
+      lazy: true,
+      signature:
+        '(target: string|symbol, protocols: any, whereClauseOrImplementation: any?, implementation: dictionary?) scope -> nothing',
+      invokes: false,
+      canonical: (args, { engine: ce }) => {
+        const err = declareConformanceStatement(
+          ce,
+          args[0],
+          args[1],
+          args[2],
+          args[3]
+        );
+        if (err) return err;
+        return ce._fn('DeclareConformance', args);
+      },
+      evaluate: (ops, { engine: ce }) =>
+        declareConformanceStatement(ce, ops[0], ops[1], ops[2], ops[3]) ??
+        ce.Nothing,
+    },
+
+    ProtocolMember: {
+      description:
+        'Invoke a protocol member on a value — the lowering of a QUALIFIED ' +
+        'protocol call (`Comparable.compare(x, y)` in Epsil, which parses as ' +
+        '`Apply(Field(Comparable, "compare"), x, y)`). The first two operands ' +
+        'name the protocol and the member; the rest are the call arguments. ' +
+        'Dispatch is dynamic and restricted to the named protocol: the most ' +
+        'specific conformance implementation for the runtime type of the ' +
+        'first argument is invoked. Several equally specific implementations ' +
+        'are `protocol-call-ambiguous`; none is ' +
+        '`protocol-implementation-missing`; an argument whose type cannot ' +
+        'decide the question leaves the call symbolic.',
+      signature:
+        '(protocol: string, member: string, arguments: any*) -> unknown',
+      canonical: (ops, { engine: ce }) => canonicalProtocolMember(ce, ops),
+      type: (ops, { engine: ce }) => protocolMemberResultType(ce, ops),
+      evaluate: (ops, options) =>
+        evaluateProtocolMember(options.engine, ops, options),
+    },
+
+    ProtocolProperty: {
+      description:
+        'Read (or write) a protocol PROPERTY through a NAMED protocol — the ' +
+        'lowering of the qualified field form `person.(Nameable.name)` ' +
+        '(protocols design P6, amending the D16 field grammar). The first ' +
+        'two operands name the protocol and the property; the third is the ' +
+        'receiver. A fourth operand makes it a SET invocation — the ' +
+        'rebinding sugar `p.name = v` lowers to `p = ProtocolProperty(P, ' +
+        '"name", p, v)` (P2) — which has no surface spelling of its own: ' +
+        'qualified property ASSIGNMENT is not supported. Dispatch is dynamic ' +
+        'and restricted to the named protocol: the most specific conformance ' +
+        'implementation for the runtime type of the receiver is invoked.',
+      signature:
+        '(protocol: string, property: string, receiver: any, value: any?) -> unknown',
+      type: (ops, { engine: ce }) => protocolPropertyResultType(ce, ops),
+      evaluate: (ops, options) =>
+        evaluateProtocolPropertyOperator(options.engine, ops, options),
     },
 
     /** Return the type of an expression */

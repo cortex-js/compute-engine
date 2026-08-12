@@ -113,7 +113,15 @@ function shapeOf(def: Type): { shape: SumShape; arity: number } {
 
 /** The declaration record for `name`, or `undefined`. */
 function record(ce: IComputeEngine, name: string): TypeReference | undefined {
-  const r = ce._typeResolver.resolve(name);
+  // `name` is an expression OPERATOR, not necessarily a type: a protocol
+  // name here must read as "not a variant", but the resolver throws
+  // `protocol-in-type-position` for protocol names (P8/engine-type-resolver).
+  let r: Type | undefined;
+  try {
+    r = ce._typeResolver.resolve(name);
+  } catch {
+    return undefined;
+  }
   return r === undefined ? undefined : declarationOf(r);
 }
 

@@ -242,15 +242,14 @@ describe('EPSIL `where` ANNOTATIONS (D13: full-literal positions)', () => {
     ]);
   });
 
-  test('the reserved `is` slot parses and is rejected as unsupported', () => {
+  // Phase 4 of the protocols design (P19) activated the slot: the PARSER
+  // admits it (it has no protocol registry, so conformance is not a question
+  // it can answer), and the engine checks the constraint at each call site —
+  // see `where-clause.test.ts` and `protocol-constraints.test.ts`.
+  test('the `is` slot parses with no diagnostic', () => {
     expect(
       parseDiagnostics('let f: (T) -> T where T: collection is Hashable')
-    ).toEqual([
-      [
-        'type-annotation-error',
-        'protocol-conformance-unsupported: Protocol conformance constraints (`where T is Hashable`) are not supported yet',
-      ],
-    ]);
+    ).toEqual([]);
   });
 });
 

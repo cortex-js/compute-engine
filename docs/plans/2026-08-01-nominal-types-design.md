@@ -656,6 +656,21 @@ preceding whitespace.
   an identifier-shaped string, the `Field(base, "…")` call form
   otherwise; MathJSON is the plain application either way.
 
+**Amendment (2026-08-12) — the parenthesized qualified field name.** The
+field grammar above pins `.` + SYMBOL only. Protocol PROPERTIES (see
+`docs/plans/2026-08-12-protocols-design.md`, ruling P6, and
+`docs/TYPE_SYSTEM_ROADMAP.md` Appendix A "Properties") ride the same `.`
+surface, and two protocols may declare the same property name for one
+receiver — so the grammar gains one production for disambiguation: a field
+clause may also be a parenthesized qualified name, exactly SYMBOL `.` SYMBOL
+inside the parentheses. `person.(Nameable.name)` lowers to
+`["ProtocolProperty", "Nameable", "name", person]`, a new operator that runs
+the protocol dispatch restricted to the named protocol. Everything else after
+`.(` keeps the ordinary bad-field-name recovery. The form is a READ only:
+qualified property assignment (`person.(P.name) = v`) is
+`property-assignment-target-invalid` in v1. The unqualified `.name` spelling,
+and every ruling above about it, is unchanged.
+
 #### Addendum test additions (extends §9)
 
 - Recognition: constructor installs on all three routes (Cortex

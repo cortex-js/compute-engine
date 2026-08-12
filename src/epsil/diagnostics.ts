@@ -27,6 +27,12 @@ export type DiagnosticCode =
   | 'duplicate-type-parameter-clause' // %0 = function name — BOTH binder spellings on one definition (`function f<T>(x: T) -> T where T`); `<T>` and `where T` are the same binding site
   | 'generic-clause-unsupported' // %0 = function name — a generic (`function f<T>(…)`) definition cannot take part in a multi-clause set
   | 'type-declaration-not-top-level' // %0 = type name — a `type` statement inside a block or function body; types are engine-global, so declarations are legal only at the top level of a program
+  | 'protocol-declaration-not-top-level' // %0 = protocol name — a `protocol` statement inside a block or function body; protocols are engine-global, so declarations are legal only at the top level of a program
+  | 'protocol-name-expected' // a `protocol` statement whose head is not followed by a name
+  | 'protocol-member-keyword-missing' // %0 = member name — a bare `value: string` protocol member; every member starts with `function`, `readonly` or `readwrite`
+  | 'protocol-member-signature-expected' // %0 = protocol name — a protocol member that is neither `function IDENT(…) -> type` nor `readonly`/`readwrite` IDENT: type`
+  | 'protocol-implementation-pending' // (warning) %0 = conformance target, %1 = protocol name — a conformance still without an implementation at the end of a `ce.parse()` batch
+  | 'protocol-in-type-position' // %0 = protocol name — a PROTOCOL used where a type is expected (`function f(x: Comparable)`); protocols are not types (ruling P8), so the annotation must be a constrained variable instead
   | 'host-pragma-disabled' // %0 = pragma name (host-state pragmas gated off)
   | 'error-directive' // %0 = message from a `#error` pragma
   | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value), %1 = breadcrumb frame chain, if the error bubbled (e.g. "in Ln argument 1, in Add argument 2")

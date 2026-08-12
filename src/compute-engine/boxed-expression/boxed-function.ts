@@ -4655,7 +4655,12 @@ function resolvedArm(
   // with `arms`, so `verdict.index`/`nonRefuted` carry over unchanged; the
   // identity on a set with no generic arm.
   if (!def?.lazy && arms.some(armHasValueParam)) {
-    const ground = instantiateArms(arms, expr.ops, policies);
+    const ground = instantiateArms(
+      arms,
+      expr.ops,
+      policies,
+      expr.engine._typeResolver
+    );
     const verdict = triStateSelect(expr.ops, ground);
     if (verdict.kind === 'selected') return ground[verdict.index];
     if (verdict.kind === 'blocked')

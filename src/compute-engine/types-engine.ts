@@ -6,6 +6,7 @@ import type {
   TypeString,
   TypeResolver,
   TypeReference,
+  TypeParameter,
   TypeParamsOption,
 } from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
@@ -167,6 +168,93 @@ export type IntegrationProvider = (
   trace?: RuleStep[]
 ) => Expression | null;
 
+//
+// ── Protocols (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix A) ─────────────────────
+//
+// A protocol is a set of function and property REQUIREMENTS a type may declare
+// itself to satisfy (`type string is Hashable`). Protocol records live in the
+// engine-level `_protocolRegistry` and, like type records, mutate IN PLACE
+// (captured references must see the update).
+//
+
+/** One requirement of a protocol. A `function` member's signature is stored
+ * VERBATIM, with `Self` unsubstituted: `Self` is a textual substitution token
+ * (ruling P12), never a type the registry can resolve. */
+export type ProtocolMember =
+  | { kind: 'function'; signature: string }
+  | { kind: 'readonly' | 'readwrite'; type: string };
+
+/** A HOST (JavaScript) implementation of a protocol member. A callback carries
+ * no type information the engine can read, so — like a host-declared operator
+ * handler — it is TRUSTED: only member-name coverage is checked, never its
+ * signature. Boxed in a wrapper so it stays distinguishable from an Epsil
+ * function literal (design P10). */
+export type JSImplementation = {
+  /** The host callback. */
+  host: ProtocolHostHandler;
+};
+
+/** A host callback implementing one protocol member. Its arguments arrive as
+ * boxed engine values (the receiver first, per P1); its result is boxed by the
+ * engine. The engine cannot type-check it — that is what "trusted" means
+ * here. */
+export type ProtocolHostHandler = (...args: Expression[]) => unknown;
+
+/** One conformance edge: "this target type conforms to this protocol".
+ * Conformances are add-only (monotone); only their implementations replace. */
+export type ConformanceRecord = {
+  /** The conforming type — named and ground (Appendix A "Conformance
+   * targets"). */
+  target: Type;
+  /** The target's canonical serialization: the dedup/replace key. For a
+   * CONDITIONAL edge it also carries the clause, so two different conditions on
+   * one head are two keys (and collide under the one-per-head rule) rather than
+   * one silently replacing the other. */
+  targetKey: string;
+  /** CONDITIONAL conformance (Appendix A "Conditional Conformance"): the
+   * variables the trailing `where` clause binds, with their bounds and `is`
+   * entries. When present, {@link ConformanceRecord.target} is a HEAD PATTERN
+   * (`list<T>`) rather than a ground type, and the edge applies to exactly
+   * those instantiations whose arguments satisfy the clause. */
+  where?: TypeParameter[];
+  /** Member name → implementation: an Epsil function literal, or a
+   * {@link JSImplementation} wrapper for a host callback. Property handlers
+   * ride under the mangled keys `__get__<name>` / `__set__<name>`. Validated
+   * against the protocol's requirements before it is stored (P17). */
+  impl?: Record<string, Expression | JSImplementation>;
+  /** No implementation yet: an end-of-batch `protocol-implementation-pending`
+   * warning (ruling P3). A SEMANTIC protocol (no members) is never pending. */
+  pending: boolean;
+  declaredByStatement: boolean;
+};
+
+/** A protocol declaration and every conformance registered against it. */
+export type ProtocolRecord = {
+  name: string;
+  members: Record<string, ProtocolMember>;
+  conformances: ConformanceRecord[];
+  declaredByStatement: boolean;
+};
+
+/** The host-API shape of a protocol's requirements. A flat
+ * `Record<string, string>` cannot represent properties, hence the three
+ * buckets (Appendix A "Host API"). */
+export type ProtocolMembersInput = {
+  functions?: Record<string, string>;
+  readonly?: Record<string, string>;
+  readwrite?: Record<string, string>;
+};
+
+/** The host-API shape of an IMPLEMENTATION block. Property handlers are given
+ * under their surface names (`getters.hash`), not under the internal
+ * `__get__hash` mangling (Appendix A "Properties": the mangling is an
+ * implementation detail, not part of the public surface). */
+export type ProtocolImplementationInput = {
+  functions?: Record<string, ProtocolHostHandler>;
+  getters?: Record<string, ProtocolHostHandler>;
+  setters?: Record<string, ProtocolHostHandler>;
+};
+
 export interface IComputeEngine {
   /** The LatexSyntax instance used for LaTeX parsing/serialization.
    *  `undefined` when no LatexSyntax was provided to the constructor.
@@ -238,6 +326,50 @@ export interface IComputeEngine {
    * type registrations (see `ComputeEngine._typeRegistryRollbackPoint`).
    * @internal */
   _typeRegistryRollbackPoint(): () => void;
+
+  /** The engine-level PROTOCOL registry — the second kind of registry entry
+   * the global-type-registry design pre-writes (its §5), not a second scoping
+   * regime. Protocols are engine-global, like types: a protocol name means the
+   * same thing everywhere in the engine, for the engine's lifetime.
+   *
+   * Protocol names are NOT types (ruling P8): they never enter
+   * `_typeRegistry`, `knownTypeNames` or the type resolver.
+   * @internal */
+  readonly _protocolRegistry: Record<string, ProtocolRecord>;
+
+  /** Capture the protocol registry's state; the returned thunk restores it.
+   * The protocol mirror of {@link _typeRegistryRollbackPoint}, invoked by the
+   * Epsil static pre-pass alongside it.
+   * @internal */
+  _protocolRegistryRollbackPoint(): () => void;
+
+  /** Declare a protocol (Appendix A "Host API"). Throws on error, including
+   * on re-declaration — the Epsil statement route replaces instead (P5). */
+  declareProtocol(name: string, members: ProtocolMembersInput): void;
+
+  /** Implement `protocol` for `type`, declaring the conformance edge if it is
+   * not already registered (Appendix A "Host API").
+   *
+   * THROWS on every error — the host channel; the Epsil statement route
+   * returns error VALUES instead. A second host implementation of the same
+   * (type, protocol) pair throws rather than replacing (P5).
+   *
+   * The callbacks are JavaScript functions, so they carry no signature the
+   * engine can check: they are trusted like host-declared operator handlers,
+   * and only member-name coverage, unknown members and a `set` handler on a
+   * `readonly` property are validated.
+   *
+   * `options.where` declares a CONDITIONAL conformance: `type` is then a HEAD
+   * PATTERN naming the variables (`'list<T>'`) and `where` is the clause SOURCE
+   * that binds them (`'where T is Comparable'`; the `where` word may be
+   * omitted). A malformed clause, or a head variable the clause does not bind,
+   * throws. */
+  declareProtocolImplementation(
+    type: string,
+    protocol: string,
+    impl: ProtocolImplementationInput,
+    options?: { where?: string }
+  ): void;
 
   /** Depth of enclosing static type-check passes (the Epsil pre-pass).
    * Non-zero while `staticDiagnostics` canonicalizes a program under its

@@ -120,6 +120,11 @@ export function staticDiagnostics(
   // conflict must not have half-registered, and a checked-but-never-run
   // program must not mutate the engine's types.
   const rollbackTypes = ce._typeRegistryRollbackPoint();
+  // The PROTOCOL registry needs the identical transaction, for the identical
+  // reason: `DeclareProtocol`/`DeclareConformance` register at canonicalization
+  // time so later statements of the same program check against them, and a
+  // checked-but-never-run program must not mutate the engine's protocols.
+  const rollbackProtocols = ce._protocolRegistryRollbackPoint();
   // The engine requires the depth counter IN ADDITION to the frame name (so a
   // host `pushScope(undefined, 'epsil:static-check')` cannot forge the
   // surrogate and smuggle a nested `DeclareType` past the top-level rule).
@@ -131,6 +136,7 @@ export function staticDiagnostics(
     ce.popScope();
     ce._staticTypeCheckDepth -= 1;
     rollbackTypes();
+    rollbackProtocols();
   }
 }
 

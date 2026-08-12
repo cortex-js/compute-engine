@@ -65,6 +65,9 @@ import type {
   DefinitionSearchResult,
   ParseDiagnostic,
   BoxedValueDefinition,
+  ProtocolRecord,
+  ProtocolMembersInput,
+  ProtocolImplementationInput,
 } from './global-types.js';
 
 import type {
@@ -153,6 +156,10 @@ import {
   declareFn as declareFnImpl,
   assignFn as assignFnImpl,
 } from './engine-declarations.js';
+import {
+  declareProtocolImpl,
+  declareProtocolImplementationImpl,
+} from './engine-protocols.js';
 
 import {
   pushScope as pushScopeImpl,
@@ -489,6 +496,14 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   readonly _typeRegistry: Record<string, TypeReference> = Object.create(null);
 
+  /** The engine-level PROTOCOL registry — the second kind of registry entry
+   * (`docs/plans/2026-08-10-global-type-registry.md` §5), engine-global for the
+   * same reason types are: a conformance is a fact about a TYPE, not about a
+   * position in a scope chain. Protocol names are NOT types (P8).
+   * @internal */
+  readonly _protocolRegistry: Record<string, ProtocolRecord> =
+    Object.create(null);
+
   /** See `IComputeEngine._staticTypeCheckDepth`. @internal */
   _staticTypeCheckDepth = 0;
 
@@ -603,6 +618,91 @@ export class ComputeEngine implements IComputeEngine {
         this._noteStateEvent({ kind: 'config' });
       }
     };
+  }
+
+  /** Capture the PROTOCOL registry's state and return a rollback thunk — the
+   * protocol mirror of {@link _typeRegistryRollbackPoint}, and invoked
+   * alongside it by the Epsil static pre-pass. Same contract in every respect:
+   * records are replaced IN PLACE elsewhere, so the snapshot is per-record
+   * FIELDS (with the conformance ARRAY copied, since it is pushed to in
+   * place), and the thunk bumps the invalidation axes only when it actually
+   * restored something.
+   * @internal */
+  _protocolRegistryRollbackPoint(): () => void {
+    const registry = this._protocolRegistry;
+    const names = new Set(Object.keys(registry));
+    const fields = [...names].map((name) => {
+      const r = registry[name];
+      return {
+        r,
+        members: r.members,
+        conformances: [...r.conformances],
+        // Conformance records are mutated in place too (an implementation
+        // block fulfils a pending edge), so their fields are snapshotted with
+        // the list.
+        edges: r.conformances.map((c) => ({
+          c,
+          impl: c.impl,
+          pending: c.pending,
+        })),
+        declaredByStatement: r.declaredByStatement,
+      };
+    });
+    return () => {
+      let changed = false;
+      for (const k of Object.keys(registry))
+        if (!names.has(k)) {
+          delete registry[k];
+          changed = true;
+        }
+      for (const s of fields) {
+        const r = s.r;
+        if (r.members !== s.members) changed = true;
+        r.members = s.members;
+        if (r.declaredByStatement !== s.declaredByStatement) changed = true;
+        r.declaredByStatement = s.declaredByStatement;
+        // The conformance list is MUTATED in place (pushed to), so the
+        // snapshot took a copy and the comparison is on contents.
+        if (
+          r.conformances.length !== s.conformances.length ||
+          s.conformances.some((c, i) => r.conformances[i] !== c)
+        )
+          changed = true;
+        r.conformances = s.conformances;
+        for (const e of s.edges) {
+          if (e.c.impl !== e.impl) changed = true;
+          if (e.impl === undefined) delete e.c.impl;
+          else e.c.impl = e.impl;
+          if (e.c.pending !== e.pending) changed = true;
+          e.c.pending = e.pending;
+        }
+        // A record that vanished from the table but is still captured keeps
+        // its restored fields — the type-registry contract.
+        if (!(r.name in registry)) {
+          registry[r.name] = r;
+          changed = true;
+        }
+      }
+      if (changed) this._noteStateEvent({ kind: 'config' });
+    };
+  }
+
+  /** See `IComputeEngine.declareProtocol`. Throws on error, including on
+   * re-declaration (P5) — the Epsil statement route replaces instead. */
+  declareProtocol(name: string, members: ProtocolMembersInput): void {
+    declareProtocolImpl(this, name, members);
+  }
+
+  /** See `IComputeEngine.declareProtocolImplementation`. Throws on error —
+   * including on a second implementation of the same (type, protocol) pair
+   * (P5) — where the Epsil statement route returns an error value. */
+  declareProtocolImplementation(
+    type: string,
+    protocol: string,
+    impl: ProtocolImplementationInput,
+    options?: { where?: string }
+  ): void {
+    declareProtocolImplementationImpl(this, type, protocol, impl, options);
   }
 
   /** @internal */

@@ -31,9 +31,9 @@ export interface FunctionSignatureNode extends ASTNode {
 }
 
 /** One `<identifier> (":" <bound>)? ("is" <protocol> ("&" <protocol>)*)?`
- * entry of a `where` clause. The `is` protocol slot is parsed and stored but
- * semantically inert: a type carrying one is rejected at declaration time
- * with `protocol-conformance-unsupported` until protocols land. */
+ * entry of a `where` clause. The `is` protocol slot is parsed and stored here
+ * and checked at each call site against the conformance registry (protocols
+ * design P19). */
 export interface TypeParamNode extends ASTNode {
   kind: 'type_param';
   name: string;

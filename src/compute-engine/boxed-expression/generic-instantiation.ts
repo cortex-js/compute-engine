@@ -15,6 +15,7 @@ import type {
   FunctionSignature,
   Type,
   TypeParameter,
+  TypeResolver,
 } from '../../common/type/types.js';
 
 import { couldBeCollectionOperand } from '../collection-utils.js';
@@ -102,6 +103,12 @@ export interface ArmInferenceContext {
   threadable?: Threadable;
   /** Strip-before-validate eligibility, per position. */
   stripMissing?: (index: number) => boolean;
+  /** The resolver whose `conformsTo` oracle decides a `where T is P` slot
+   * (P19). It belongs to the engine the CALL is made on — the protocol
+   * registry is per-engine, and an operand boxed under a different engine
+   * would otherwise answer from the wrong registry. Every caller has that
+   * engine in hand, so it is threaded rather than scavenged off an operand. */
+  resolver?: TypeResolver;
   /** The operator is `lazy: true`. The whole mechanism is IDLE (§4.5): a lazy
    * operator's operands are not validated and arrive unbound, so their types
    * are noise — no position contributes a bound, and every variable falls to
@@ -146,6 +153,9 @@ export function solveArm(
     arm,
     ops.map((op) => op?.type.type),
     {
+      // The `where T is P` oracle (protocols design P19), supplied by the
+      // CALLER's engine — see `ArmInferenceContext.resolver`.
+      resolver: ctx?.resolver,
       skip: (i) => {
         if (ctx?.lazy) return true;
         const op = ops[i];

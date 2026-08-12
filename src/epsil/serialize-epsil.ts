@@ -91,6 +91,13 @@ const PERMISSIVE_TYPE_RESOLVER: TypeResolver = {
     alias: false,
     def: undefined,
   }),
+  // Serialization is a purely syntactic reading: a marker signature carrying
+  // the `is` slot of a `where` clause (a conditional conformance's member) must
+  // DECOMPOSE here, and the type grammar refuses the slot outright when no
+  // conformance oracle is in reach (`validatePolytypeArm`). There is no registry
+  // on this side, so every conformance is admitted — the engine checked it when
+  // the statement ran.
+  conformsTo: () => true,
 };
 
 /**
@@ -414,6 +421,31 @@ export function serializeEpsil(
           ? fmt.line('(', serializeExpression(base), ')')
           : serializeExpression(base);
       return fmt.line(baseBlock, fmt.text('.' + name));
+    },
+
+    //
+    // Qualified protocol property: `["ProtocolProperty", "P", "name", base]`
+    // → `base.(P.name)` — the parenthesized field production the protocols
+    // design adds to the D16 grammar (P6). The four-operand SET form has no
+    // surface spelling (it is the `Assign` sugar's lowering, P2), so it falls
+    // back to the generic call form.
+    //
+    ProtocolProperty: (expr: MathJsonExpression): FormattingBlock => {
+      if (nops(expr) !== 3) return serializeGenericFunction(expr);
+      const protocol =
+        stringValue(operand(expr, 1)) ?? symbol(operand(expr, 1));
+      const name = stringValue(operand(expr, 2)) ?? symbol(operand(expr, 2));
+      const base = operand(expr, 3);
+      if (protocol === null || name === null || base === null)
+        return serializeGenericFunction(expr);
+      const baseBlock =
+        OPERATORS[operator(base)] !== undefined
+          ? fmt.line('(', serializeExpression(base), ')')
+          : serializeExpression(base);
+      return fmt.line(
+        baseBlock,
+        fmt.text(`.(${escapeSymbol(protocol)}.${escapeSymbol(name)})`)
+      );
     },
 
     //
@@ -753,6 +785,116 @@ export function serializeEpsil(
         return serializeGenericFunction(expr);
 
       return fmt.line(kind, name, '<', clause, '> = ', body);
+    },
+
+    //
+    // Protocol declarations: reconstruct the `protocol NAME { … }` statement.
+    //
+    //   ["DeclareProtocol", "Comparable",
+    //     ["Dictionary", ["KeyValuePair", "compare",
+    //       ["Pair", {str:"function"}, {str:"(self: Self) -> string"}]]]]
+    //     → protocol Comparable {
+    //         function compare(self: Self) -> string
+    //       }
+    //
+    // A member's signature rides as the SOURCE TEXT the parser captured, so
+    // re-emitting it after the keyword and the member name reproduces the
+    // statement verbatim. A protocol with no members is a SEMANTIC protocol
+    // and prints as `protocol NAME {}`.
+    //
+    DeclareProtocol: (expr: MathJsonExpression): FormattingBlock => {
+      const args = operands(expr);
+      if (args.length !== 1 && args.length !== 2)
+        return serializeGenericFunction(expr);
+      const rawName = symbol(args[0]) ?? stringValue(args[0]);
+      if (rawName === null) return serializeGenericFunction(expr);
+      const name = escapeSymbol(rawName);
+      if (args.length === 1) return fmt.line('protocol ', name, ' {}');
+
+      const entries = attributeEntries(args[1]);
+      if (entries === null) return serializeGenericFunction(expr);
+      const members: FormattingBlock[] = [];
+      for (const [member, spec] of Object.entries(entries)) {
+        if (operator(spec) !== 'Pair' || nops(spec) !== 2)
+          return serializeGenericFunction(expr);
+        const kind = stringValue(operand(spec, 1)) ?? symbol(operand(spec, 1));
+        const text = stringValue(operand(spec, 2)) ?? symbol(operand(spec, 2));
+        if (text === null) return serializeGenericFunction(expr);
+        if (kind === 'function')
+          members.push(fmt.text(`function ${escapeSymbol(member)}${text}`));
+        else if (kind === 'readonly' || kind === 'readwrite')
+          members.push(fmt.text(`${kind} ${escapeSymbol(member)}: ${text}`));
+        else return serializeGenericFunction(expr);
+      }
+      if (members.length === 0) return fmt.line('protocol ', name, ' {}');
+      return fmt.stack(
+        fmt.line('protocol ', name, ' {'),
+        fmt.indent(fmt.stack(...members)),
+        fmt.text('}')
+      );
+    },
+
+    //
+    // Conformance declarations: reconstruct `type <target> is P₁ & P₂ [{ … }]`.
+    //
+    //   ["DeclareConformance", {str:"string"}, ["List", "Hashable"]]
+    //     → type string is Hashable
+    //
+    // The implementation block, when present, is a dictionary of member name
+    // → function literal; a `__get__x` / `__set__x` key is a property handler
+    // and prints back in its `get x(…)` / `set x(…)` spelling.
+    //
+    DeclareConformance: (expr: MathJsonExpression): FormattingBlock => {
+      const args = operands(expr);
+      if (args.length < 2 || args.length > 4)
+        return serializeGenericFunction(expr);
+      const target = stringValue(args[0]) ?? symbol(args[0]);
+      if (target === null) return serializeGenericFunction(expr);
+
+      const listed =
+        operator(args[1]) === 'List' ? operands(args[1]) : [args[1]];
+      const names = listed.map((p) => symbol(p) ?? stringValue(p));
+      if (names.length === 0 || names.some((n) => n === null))
+        return serializeGenericFunction(expr);
+      let head = `type ${target} is ${names.map((n) => escapeSymbol(n!)).join(' & ')}`;
+
+      // A CONDITIONAL conformance carries its trailing `where` clause as SOURCE
+      // TEXT, ahead of the implementation block and told apart from it by its
+      // head (a string, where a block is a `Dictionary`). The text is verbatim,
+      // so re-emitting it reproduces the statement.
+      let rest = args.slice(2);
+      if (rest.length > 0 && stringValue(rest[0]) !== null) {
+        const clause = stringValue(rest[0])!;
+        rest = rest.slice(1);
+        head += /^\s*where\b/.test(clause)
+          ? ` ${clause.trim()}`
+          : ` where ${clause.trim()}`;
+      }
+      if (rest.length > 1) return serializeGenericFunction(expr);
+      if (rest.length === 0) return fmt.text(head);
+
+      const entries = attributeEntries(rest[0]);
+      if (entries === null) return serializeGenericFunction(expr);
+      const members: FormattingBlock[] = [];
+      for (const [key, fn] of Object.entries(entries)) {
+        if (operator(fn) !== 'Function') return serializeGenericFunction(expr);
+        const get = key.startsWith('__get__');
+        const set = key.startsWith('__set__');
+        const member = get || set ? key.slice('__get__'.length) : key;
+        members.push(
+          serializeImplMember(
+            get ? 'get' : set ? 'set' : 'function',
+            member,
+            fn
+          )
+        );
+      }
+      if (members.length === 0) return fmt.line(head, ' {}');
+      return fmt.stack(
+        fmt.text(`${head} {`),
+        fmt.indent(fmt.stack(...members)),
+        fmt.text('}')
+      );
     },
 
     //
@@ -1184,6 +1326,38 @@ export function serializeEpsil(
       ')',
       params.map((p, i) => serializeParam(p, markerTypes[i]))
     );
+
+  /**
+   * One member of a protocol-implementation block:
+   * `function|get|set NAME(params) ‹effects› -> ret { … }`.
+   *
+   * The `function` branch of {@link serializeNamedDef} with the keyword made
+   * a parameter (a property handler spells `get`/`set` instead) and the body
+   * always braced — an implementation member has no math form.
+   */
+  const serializeImplMember = (
+    keyword: 'function' | 'get' | 'set',
+    member: string,
+    fn: MathJsonExpression
+  ): FormattingBlock => {
+    const params = operands(fn).slice(1);
+    const { bodyExpr, retType, specifier, argTypes } = fnLiteralParts(fn);
+    const specPart = specifier !== null ? ` ${specifier}` : '';
+    const retPart = retType !== null ? ` -> ${retType}` : '';
+    return fmt.line(
+      `${keyword} ${escapeSymbol(member)}`,
+      serializeParamList(params, argTypes),
+      `${specPart}${retPart} `,
+      fmt.fencedList(
+        '{',
+        fmt.separator(';'),
+        '}',
+        operator(bodyExpr) === 'Block'
+          ? mapArgs<FormattingBlock>(bodyExpr!, serializeExpression)
+          : [serializeExpression(bodyExpr)]
+      )
+    );
+  };
 
   // Reconstruct a named function definition from `f` and its `Function`
   // literal: `f(params) ‹effects› -> ret = body`, or

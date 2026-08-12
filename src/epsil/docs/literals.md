@@ -65,7 +65,7 @@ claims.
 **Words the grammar claims** — the only ones a plain symbol may not spell —
 are the literals `true`, `false`, `Infinity`, `oo`, `NaN`, and the active
 keywords and word operators `break`, `const`, `continue`, `do`, `else`, `for`,
-`function`, `if`, `in`, `match`, `while`.
+`function`, `if`, `in`, `match`, `protocol`, `while`.
 
 Every other reserved word listed below is an ordinary identifier today: it can
 name a binding, be assigned to, be a `|->` parameter, and be called. The words

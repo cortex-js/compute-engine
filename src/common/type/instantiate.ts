@@ -5,6 +5,7 @@ import type {
   Type,
   TypeParameter,
   TypeReference,
+  TypeResolver,
 } from './types.js';
 import { typeToString } from './serialize.js';
 import { declarationOf, withTypeArguments } from './reference.js';
@@ -36,10 +37,18 @@ export type TypeVariableErrorCode =
   | 'unsolvable-type-variable'
   | 'unsupported-variable-position'
   | 'reserved-type-name'
-  /** The `is` protocol-conformance slot of a `where` clause is parsed and
-   * stored, but semantically inert until protocols land: declaring a type
-   * that carries one fails with this code. */
+  /** The `is` protocol-conformance slot of a `where` clause needs a
+   * conformance ORACLE to mean anything (`TypeResolver.conformsTo`, supplied
+   * by the engine). Declaring a type that carries one through a resolver-less
+   * route — where the constraint could only be silently ignored — fails with
+   * this code. */
   | 'protocol-conformance-unsupported'
+  /** A PROTOCOL name used where a type is expected (`(x: Comparable) -> …`).
+   * Protocols are not types (P8: they share no names with them), so the name
+   * never resolves; without this code the author only sees a generic "unknown
+   * type" and no way to the constrained-variable spelling that is meant. Raised
+   * by the ENGINE's resolver, the only route that can see a protocol registry. */
+  | 'protocol-in-type-position'
   /** A generic alias applied to the wrong number of type arguments — including
    * a bare use (`let p: Pair`), an empty list (`Pair<>`), and arguments on a
    * name that takes none. */
@@ -75,8 +84,16 @@ function fail(code: TypeVariableErrorCode, message: string): never {
   throw new TypeVariableError(code, message);
 }
 
-/** Type names that cannot be declared (`ce.declareType('where', …)`). */
-export const RESERVED_TYPE_NAMES: ReadonlySet<string> = new Set(['where']);
+/** Type names that cannot be declared (`ce.declareType('where', …)`).
+ *
+ * `where` is the quantifier clause keyword of the type grammar. `Self` is the
+ * protocol substitution token (ruling P12): it is resolved by the protocol
+ * wrapper BEFORE the registry is consulted, so it must never enter the
+ * registry — as a type name or as a type-variable name. */
+export const RESERVED_TYPE_NAMES: ReadonlySet<string> = new Set([
+  'where',
+  'Self',
+]);
 
 export function isReservedTypeName(name: string): boolean {
   return RESERVED_TYPE_NAMES.has(name);
@@ -512,24 +529,24 @@ function substituteElements(
  * Runs where a declared type is BOXED: `parseType()` (whenever the parse saw a
  * clause) and the `BoxedType` constructor's object route.
  */
-export function validateDeclaredType(t: Type): void {
+export function validateDeclaredType(t: Type, resolver?: TypeResolver): void {
   if (typeof t === 'object' && t.kind === 'intersection') {
     // An overload set: each arm carries (and is validated against) its own
     // clause.
-    for (const arm of t.types) validateArm(arm);
+    for (const arm of t.types) validateArm(arm, resolver);
     return;
   }
-  validateArm(t);
+  validateArm(t, resolver);
 }
 
-function validateArm(t: Type): void {
+function validateArm(t: Type, resolver?: TypeResolver): void {
   if (
     typeof t === 'object' &&
     t.kind === 'signature' &&
     t.typeParams !== undefined &&
     t.typeParams.length > 0
   ) {
-    validatePolytypeArm(t, t.typeParams);
+    validatePolytypeArm(t, t.typeParams, resolver);
     return;
   }
 
@@ -542,7 +559,8 @@ function validateArm(t: Type): void {
 
 function validatePolytypeArm(
   arm: FunctionSignature,
-  typeParams: TypeParameter[]
+  typeParams: TypeParameter[],
+  resolver?: TypeResolver
 ): void {
   const declared = new Set<string>();
   for (const p of typeParams) {
@@ -552,12 +570,18 @@ function validatePolytypeArm(
         `The type variable \`${p.name}\` is declared more than once in the same \`where\` clause`
       );
     declared.add(p.name);
-    // The reserved `is` slot is parsed and stored, but semantically inert
-    // until protocols land: a declared type carrying one is rejected here.
-    if (p.protocols !== undefined && p.protocols.length > 0)
+    // The `is` slot is ACCEPTED (protocols design P19) — but only where a
+    // conformance oracle exists to check it against at the call site. Without
+    // one the constraint could only be silently dropped, so a resolver-less
+    // route keeps rejecting it: the type layer alone stays safe.
+    if (
+      p.protocols !== undefined &&
+      p.protocols.length > 0 &&
+      resolver?.conformsTo === undefined
+    )
       fail(
         'protocol-conformance-unsupported',
-        `Protocol conformance constraints (\`where ${p.name} is ${p.protocols.join(' & ')}\`) are not supported yet`
+        `Protocol conformance constraints (\`where ${p.name} is ${p.protocols.join(' & ')}\`) require an engine's protocol registry; this type was declared without one`
       );
   }
 
@@ -784,6 +808,10 @@ export interface InferenceOptions {
    * bound, and the symbol stays eligible for post-solve narrowing to the
    * instantiated ground parameter (§4.3 bound-join table, last row). */
   inferable?: (index: number) => boolean;
+  /** The resolver whose {@link TypeResolver.conformsTo} oracle decides the
+   * `where T is P` constraints (protocols design P19). Omitted ⇒ the
+   * constraints are not checked (the type layer has no registry of its own). */
+  resolver?: TypeResolver;
   /** The operand was admitted by a broadcast LIFT (D10, re-ruled 2026-08-04):
    * the runtime MAPS at such a position, so a bare-variable pattern binds the
    * operand's ELEMENT type (a scalar actual contributes itself). Admission
@@ -795,10 +823,15 @@ export interface InferenceOptions {
 /** Why an instantiation is unsatisfiable (§8 blame). */
 export interface TypeInferenceFailure {
   /** `'bound'` — the solved value violates the variable's DECLARED bound;
-   * `'upper'` — it violates an upper bound collected contravariantly. */
-  kind: 'bound' | 'upper';
+   * `'upper'` — it violates an upper bound collected contravariantly;
+   * `'protocol'` — it does not conform to a protocol the `is` slot requires
+   * (P19). */
+  kind: 'bound' | 'upper' | 'protocol';
   /** The offending variable. */
   variable: string;
+  /** For a `'protocol'` failure: the protocol the solution fails to conform
+   * to. */
+  protocol?: string;
   /** The value the variable solved to. */
   solution: Type;
   /** The GROUND type to display as "expected" (§8 rule 1). For `'bound'` this
@@ -1045,7 +1078,69 @@ export function solveTypeArguments(
     });
   }
 
+  checkProtocolConstraints(params, bindings, s, opts?.resolver, failures);
+
   return { bindings, absorbed, unbound, matched: s.matched, failures };
+}
+
+/**
+ * The `is` slot's satisfiability phase (P19), run beside the §5 bound check
+ * above and on the same footing: S1–S3 have solved every variable, so each
+ * solved binding is substituted and the conformance ORACLE on the resolver is
+ * consulted.
+ *
+ * An UNDECIDABLE solution passes — the open-world posture the dispatcher
+ * already takes (P32/P35): conformance is monotone and a top or compound type
+ * refutes nothing. Without an oracle nothing is checked at all; declaring such
+ * a type was already refused (see {@link validatePolytypeArm}).
+ */
+function checkProtocolConstraints(
+  params: readonly TypeParameter[],
+  bindings: TypeBindings,
+  s: SolverState,
+  resolver: TypeResolver | undefined,
+  failures: TypeInferenceFailure[]
+): void {
+  const conformsTo = resolver?.conformsTo;
+  if (conformsTo === undefined) return;
+  for (const p of params) {
+    if (p.protocols === undefined || p.protocols.length === 0) continue;
+    const solution = bindings[p.name];
+    if (solution === undefined || !isDecidedConstraintType(solution)) continue;
+    for (const protocol of p.protocols) {
+      if (conformsTo(solution, protocol)) continue;
+      failures.push({
+        kind: 'protocol',
+        variable: p.name,
+        protocol,
+        solution,
+        expected: solution,
+        index: (s.lower.get(p.name) ?? [])[0]?.index,
+        detail: `\`${p.name}\` was solved to \`${typeToString(solution)}\`, which does not conform to the \`${protocol}\` protocol`,
+      });
+      break; // One verdict per variable — the first unmet protocol.
+    }
+  }
+}
+
+/**
+ * Can this solved binding decide a conformance question?
+ *
+ * A deliberate REPLICA of the engine-side `isDecidedReceiverType`
+ * (`engine-protocols.ts`, ruling P32) — the type layer may not import the
+ * engine — and it must answer the same way: a TOP type (`unknown`, `any`,
+ * `value`, `expression`) and a COMPOUND one (a union some arms of which may
+ * conform, an intersection, a variable) leave the question open, so the call
+ * is admitted and decided at run time.
+ */
+export function isDecidedConstraintType(t: Type): boolean {
+  if (typeof t === 'string')
+    return (
+      t !== 'unknown' && t !== 'any' && t !== 'value' && t !== 'expression'
+    );
+  return (
+    t.kind !== 'union' && t.kind !== 'intersection' && t.kind !== 'variable'
+  );
 }
 
 /**

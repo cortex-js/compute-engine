@@ -738,15 +738,31 @@ describe('WHERE-CLAUSE BINDER — binding, bounds and generic behavior', () => {
     ]);
   });
 
-  test('the reserved `is` slot parses, and is rejected as unsupported', () => {
+  // The `is` slot is ACTIVE since phase 4 of the protocols design (P19): the
+  // parser admits it (conformance is not a syntactic property — it has no
+  // registry), and the engine checks the constraint at each call site.
+  test('the `is` slot parses with no diagnostic', () => {
     expect(
       parseDiagnostics('function f(x: T) -> T where T is Hashable { x }')
-    ).toEqual([
-      [
-        'type-annotation-error',
-        'protocol-conformance-unsupported: Protocol conformance constraints (`where T is Hashable`) are not supported yet',
-      ],
-    ]);
+    ).toEqual([]);
+  });
+
+  test('…and the constraint is checked at the call site', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Hashable', {});
+    ce.box([
+      'DeclareConformance',
+      { str: 'string' },
+      ['List', 'Hashable'],
+    ] as any).evaluate();
+    const conforming = executeEpsil(
+      ce,
+      'function f(x: T) -> T where T is Hashable { x }\nf("a")'
+    );
+    expect(String(conforming.value)).toBe('"a"');
+    expect(String(executeEpsil(ce, 'f(1)').value)).toContain(
+      'protocol-constraint-unsatisfied'
+    );
   });
 });
 

@@ -39,7 +39,11 @@ import {
 } from './boxed-expression/function-literal.js';
 import { apply, lookup } from './function-utils.js';
 import { isMintedConstructor } from './type-constructors.js';
-import { reconcileFunctionLiteralReturn } from './engine-declarations.js';
+import { isProtocolDispatcher } from './engine-protocols.js';
+import {
+  assignValueAsOperatorDef,
+  reconcileFunctionLiteralReturn,
+} from './engine-declarations.js';
 
 /**
  * Multi-clause function definitions — the engine half of
@@ -394,6 +398,26 @@ export function defineFunctionClause(
     scope !== systemScope;
   if (isBuiltin) existing = undefined;
 
+  // A protocol DISPATCHER is shadowed the same way (protocols design P13,
+  // Appendix A name-resolution step 1: "a lexically visible user definition of
+  // the name shadows all protocol members"). Without this the dispatcher —
+  // an operator definition with a native handler — would be read as an opaque
+  // builtin below and REJECT the user's definition instead of replacing it.
+  // The qualified form (`Comparable.compare(…)`) keeps reaching the protocol.
+  //
+  // Same-scope vs INHERITED, exactly as for a builtin: a dispatcher bound in
+  // THIS scope is ours to replace (the top-level case), but one inherited from
+  // an outer scope must be SHADOWED — and `ce.assign`, which the single-clause
+  // path below delegates to, resolves the name through the whole scope chain
+  // and mutates the definition it finds IN PLACE. A `function compare(…)`
+  // inside a block would therefore replace the global dispatcher permanently,
+  // the replacement outliving the block. `installClauseList` already declares
+  // into the current scope when `existing` is undefined; only the single-clause
+  // shortcut needs the flag.
+  const shadowsDispatcher =
+    isProtocolDispatcher(existing) && scope.bindings.get(id) !== existing;
+  if (isProtocolDispatcher(existing)) existing = undefined;
+
   if (existing !== undefined && isMintedConstructor(existing)) {
     // A same-scope ALIAS's minted identity constructor is a placeholder:
     // the first clause replaces it (the single-clause `ce.assign` below
@@ -515,7 +539,8 @@ export function defineFunctionClause(
     (declared === undefined ||
       sameParameterDomain(incoming.signature, declared))
   ) {
-    ce.assign(id, literal);
+    if (shadowsDispatcher) declareShadowingFunction(ce, id, literal);
+    else ce.assign(id, literal);
     return;
   }
 
@@ -585,6 +610,26 @@ function lookupInScope(
   id: string
 ): BoxedDefinition | undefined {
   return lookup(id, ce.context.lexicalScope) ?? undefined;
+}
+
+/**
+ * Install `literal` as a NEW definition in the CURRENT scope, leaving whatever
+ * the enclosing scopes bind `id` to untouched. The definition is the one
+ * `ce.assign` builds for a function literal — so a shadowing clause and a
+ * replacing clause install the same representation — but it is DECLARED here
+ * rather than assigned, and assignment is what walks the scope chain.
+ */
+function declareShadowingFunction(
+  ce: IComputeEngine,
+  id: string,
+  literal: Expression
+): void {
+  const def = assignValueAsOperatorDef(ce, literal);
+  // `assignValueAsOperatorDef` returns `undefined` only for values that are
+  // not function literals — which the caller has already excluded — but a
+  // shadowing install must never be the thing that drops a definition.
+  if (def === undefined) ce.assign(id, literal);
+  else ce.declare(id, def);
 }
 
 /**

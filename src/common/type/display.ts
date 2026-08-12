@@ -6,7 +6,25 @@ import {
 } from './instantiate.js';
 import { reduceType } from './reduce.js';
 import { typeToString } from './serialize.js';
-import type { FunctionSignature, Type } from './types.js';
+import type { FunctionSignature, Type, TypeResolver } from './types.js';
+
+/**
+ * The resolver `groundedDisplayType` validates its projection through.
+ *
+ * A projection is a PRINTING device: what it re-validates is that the
+ * variables it KEPT still form a declarable clause, and a protocol constraint
+ * has no bearing on that question — the type was already accepted, by the
+ * engine's own resolver, where it was declared. Answering `true` keeps the
+ * `is` slot from turning a legitimate projection into a fallback.
+ */
+const DISPLAY_RESOLVER: TypeResolver = {
+  get names(): string[] {
+    return [];
+  },
+  forward: () => undefined,
+  resolve: () => undefined,
+  conformsTo: () => true,
+};
 
 /**
  * The GROUND display form of a type (Design D, R-D5, ruled 2026-08-09).
@@ -107,7 +125,7 @@ function groundVacuousVariables(erased: Type): Type {
   const grounded = substituteTypeVariables(erased, bindings);
   // The variables the projection KEPT must still form a declarable clause.
   // `validateDeclaredType` throws when they do not; the caller falls back.
-  validateDeclaredType(grounded);
+  validateDeclaredType(grounded, DISPLAY_RESOLVER);
   return grounded;
 }
 

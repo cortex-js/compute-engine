@@ -90,6 +90,10 @@ export function executeEpsil(
       // The engine's already-declared type names, so an annotation naming a
       // host type resolves at parse time. `names` walks the scope chain.
       typeNames: ce._typeResolver.names,
+      // The engine's PROTOCOL names — a separate set (protocols are not types,
+      // ruling P8), consulted only on the unknown-type path so that
+      // `function f(x: Comparable)` is reported as `protocol-in-type-position`.
+      protocolNames: Object.keys(ce._protocolRegistry),
       // …and which of those names are sum VARIANTS, so re-running a
       // sugar-declared sum still reads as the sugar (see `parseEpsil`).
       sumVariants: sumVariantNames(ce),
@@ -225,6 +229,26 @@ export function executeEpsil(
       source
     );
   }
+
+  // PENDING CONFORMANCES (protocols design P3). A conformance declared without
+  // an implementation block is *pending*, and the state persists across
+  // batches — so the notebook pattern (declare in one cell, implement in the
+  // next) works. Every batch re-reports each still-pending edge as a WARNING
+  // until it is fulfilled, so the reminder cannot be lost with the cell that
+  // produced it. A SEMANTIC protocol (no requirements) is complete at
+  // declaration and is never pending.
+  for (const protocol of Object.values(ce._protocolRegistry))
+    for (const conformance of protocol.conformances)
+      if (conformance.pending)
+        diagnostics.push({
+          severity: 'warning',
+          message: [
+            'protocol-implementation-pending',
+            conformance.targetKey,
+            protocol.name,
+          ],
+          range: [0, source.length],
+        });
 
   return { value, diagnostics };
 }

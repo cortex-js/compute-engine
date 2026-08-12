@@ -21,6 +21,7 @@ import type {
   NegationType,
   DictionaryType,
   RecordType,
+  TypeReference,
 } from './types.js';
 import { isValidPrimitiveType, NUMERIC_TYPES_SET } from './primitive.js';
 import { normalizeStatedEffectSet } from './effects.js';
@@ -455,6 +456,87 @@ function reduceIntersectionType(type: AlgebraicType): Type {
   }
 
   return decorate(result);
+}
+
+/**
+ * Do the two types have an INHABITED meet, i.e. is there a value that both
+ * admit?
+ *
+ * The predicate protocol conformance uses to decide whether two conformance
+ * targets collide (`docs/plans/2026-08-12-protocols-design.md` P4/P9). It is
+ * built on the intersection REDUCTION above — `meet2`/`meetNumericRanges`/
+ * `meetUnion` — deliberately NOT on `subtype.ts`'s `narrow()`, which
+ * short-circuits incomparable pairs to `never` without consulting the numeric
+ * ranges and so cannot decide `integer<1..10>` vs `integer<5..20>` (meet
+ * `integer<5..10>`, inhabited).
+ *
+ * The bottom type has TWO spellings here — `reduceIntersectionType` returns
+ * `'nothing'` for a disjoint pair while an empty numeric range reduces to
+ * `'never'` — and both mean "no value", so both count as empty.
+ */
+export function typesOverlap(a: Type, b: Type): boolean {
+  // Same-head applications are decided ARGUMENT-WISE, not by the reduction:
+  // `meet2` treats an incomparable non-primitive pair as disjoint, so
+  // `list<integer<1..10>>` and `list<integer<5..20>>` would reduce to
+  // `nothing` even though `[7]` inhabits both. Only this predicate takes the
+  // shortcut — `meet2`/`reduceType` keep their semantics for every other
+  // caller.
+  //
+  // Residual, deliberately accepted (protocols design P4): two same-head
+  // COLLECTIONS with disjoint element types still share the EMPTY value
+  // (`[]`), so strictly they are not disjoint. The ruling counts them as
+  // non-overlapping — an empty collection carries no element a conformance
+  // could ever dispatch on.
+  const args = sameHeadArguments(a, b);
+  if (args !== null)
+    return args[0].every((t, i) => typesOverlap(t, args[1][i]));
+
+  const meet = reduceType({ kind: 'intersection', types: [a, b] });
+  return meet !== 'nothing' && meet !== 'never';
+}
+
+/**
+ * The type ARGUMENTS of two applications of the SAME head constructor, or
+ * `null` when `a` and `b` are not such a pair (different heads, a non-applied
+ * type, or a mismatched argument count — all of which fall back to the
+ * reduction path).
+ */
+function sameHeadArguments(a: Type, b: Type): [Type[], Type[]] | null {
+  if (typeof a !== 'object' || typeof b !== 'object') return null;
+  if (a.kind !== b.kind) return null;
+
+  switch (a.kind) {
+    case 'list': {
+      const other = b as ListType;
+      // A differing shape is not an argument-wise question.
+      const da = a.dimensions?.join() ?? '';
+      const db = other.dimensions?.join() ?? '';
+      if (da !== db) return null;
+      return [[a.elements], [other.elements]];
+    }
+
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return [[a.elements], [(b as SetType | CollectionType).elements]];
+
+    case 'dictionary':
+      return [[a.values], [(b as DictionaryType).values]];
+
+    case 'reference': {
+      const other = b as TypeReference;
+      if (a.name !== other.name) return null;
+      // A parameterized NOMINAL application keeps its arguments; a bare
+      // reference has none to compare, so it takes the reduction path.
+      if (a.args === undefined || other.args === undefined) return null;
+      if (a.args.length !== other.args.length) return null;
+      return [a.args, other.args];
+    }
+
+    default:
+      return null;
+  }
 }
 
 function reduceCollectionType(

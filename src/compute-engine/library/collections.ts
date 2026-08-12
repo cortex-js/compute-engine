@@ -89,6 +89,13 @@ import {
 import { typeMembership } from './sets.js';
 import { isRingConstant } from './ring-constructions.js';
 import { adjoinType } from './type-handlers.js';
+import {
+  evaluateProtocolProperty,
+  protocolMemberSignature,
+  protocolMemberValue,
+  protocolOfSymbol,
+  protocolPropertyType,
+} from '../engine-protocols.js';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
@@ -4117,32 +4124,66 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature: '(value: any, field: string) -> unknown',
-    type: (ops) => {
+    type: (ops, { engine: ce }) => {
+      // A QUALIFIED protocol member (P14): `Comparable.compare` is a function
+      // VALUE, whose type is the requirement's signature (with `Self` left
+      // opaque — the receiver is only known at the call site).
+      const protocol = protocolOfSymbol(ce, ops[0]);
+      if (protocol !== undefined) {
+        const name = isString(ops[1]) ? ops[1].string : undefined;
+        if (name === undefined) return 'unknown';
+        return protocolMemberSignature(ce, protocol, name) ?? 'error';
+      }
       const rt = fieldBearingType(ops[0].type.type);
       if (rt === undefined) return 'unknown';
-      // A settled non-field-bearing operand type is a static defect.
-      if (rt === 'none') return 'error';
       const name = isString(ops[1]) ? ops[1].string : undefined;
-      if (rt.kind === 'record') {
-        if (name !== undefined) {
+      // The ORDINARY field routes. `undefined` means none of them answered —
+      // a settled non-field-bearing operand, or a name the record/named-tuple
+      // body does not carry — which is where a protocol PROPERTY gets its turn
+      // (P18) before the static defect is reported.
+      const ordinary = ((): Type | undefined => {
+        if (rt === 'none') return undefined;
+        if (rt.kind === 'record') {
           // A record's key set is fixed: a known-absent field is a static
           // defect, not an out-of-band access.
-          return rt.elements[name] ?? 'error';
+          if (name !== undefined) return rt.elements[name];
+          return withMarker(widen(...Object.values(rt.elements)) as Type);
         }
-        return withMarker(widen(...Object.values(rt.elements)) as Type);
+        if (rt.kind === 'tuple') {
+          if (name !== undefined)
+            return rt.elements.find((x) => x.name === name)?.type;
+          return widen(...rt.elements.map((x) => x.type)) as Type;
+        }
+        // Dictionary: the key set is not part of the type — absence marker
+        // (`At` parity).
+        return withMarker(rt.values);
+      })();
+      if (ordinary !== undefined) return ordinary;
+      if (name !== undefined) {
+        const property = protocolPropertyType(ce, ops[0], name);
+        if (property !== undefined) return property;
       }
-      if (rt.kind === 'tuple') {
-        if (name !== undefined)
-          return rt.elements.find((x) => x.name === name)?.type ?? 'error';
-        return widen(...rt.elements.map((x) => x.type)) as Type;
-      }
-      // Dictionary: the key set is not part of the type — absence marker
-      // (`At` parity).
-      return withMarker(rt.values);
+      return 'error';
     },
-    evaluate: ([base, field], { engine: ce }) => {
+    evaluate: ([base, field], { engine: ce, numericApproximation }) => {
       if (!isString(field)) return undefined;
       const name = field.string;
+
+      // A QUALIFIED protocol member (P14). Keyed off the protocol REGISTRY,
+      // never off a declaration: `DeclareProtocol` declares no value, so a
+      // bare `Comparable` anywhere else stays an ordinary undeclared symbol.
+      const protocol = protocolOfSymbol(ce, base);
+      if (protocol !== undefined) {
+        const value = protocolMemberValue(ce, protocol, name);
+        // An unknown member (or a PROPERTY, which is phase 4) takes the
+        // existing `unknown-field` path.
+        return value ?? ce.error(['unknown-field', name], protocol.name);
+      }
+
+      /** The protocol-PROPERTY route (P18), consulted wherever the ordinary
+       * field routes come up empty. `undefined` = no protocol answers. */
+      const property = (): Expression | undefined =>
+        evaluateProtocolProperty(ce, base, name, { numericApproximation });
 
       // An ABSENT base propagates the marker, exactly as a chained `At` does
       // (`d.zz.x` ≡ `d["zz"]["x"]` even through the miss).
@@ -4155,13 +4196,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       const rt = fieldBearingType(base.type.type);
       if (rt === undefined) return undefined; // unknown operand: stay symbolic
-      // A settled non-field-bearing operand: a static defect, surfaced as an
-      // error value on the evaluation route.
+      // A settled non-field-bearing operand: a protocol property if one
+      // answers, else the static defect it has always been.
       if (rt === 'none')
-        return ce.typeError(
-          parseType('record | dictionary | tuple'),
-          base.type,
-          base
+        return (
+          property() ??
+          ce.typeError(
+            parseType('record | dictionary | tuple'),
+            base.type,
+            base
+          )
         );
 
       if (rt.kind === 'record') {
@@ -4174,14 +4218,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // evaluating.
             const v = payload.get(name);
             if (v !== undefined) return v.canonical.evaluate();
-            return ce.error(['unknown-field', name], base.toString());
+            return (
+              property() ?? ce.error(['unknown-field', name], base.toString())
+            );
           }
         }
         return undefined;
       }
       if (rt.kind === 'tuple') {
         const i = rt.elements.findIndex((x) => x.name === name);
-        if (i < 0) return ce.error(['unknown-field', name], base.toString());
+        if (i < 0)
+          return (
+            property() ?? ce.error(['unknown-field', name], base.toString())
+          );
         // A tagged nominal value spreads its tuple payload inline
         // (`["pt", 1, 2]`); a plain `Tuple` value has the same shape.
         if (isFunction(base) && i < base.ops.length) return base.ops[i];

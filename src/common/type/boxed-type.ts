@@ -104,7 +104,7 @@ export class BoxedType {
     // boxing it silently is what lets it escape into the algebra, whose helpers
     // assert on an open input.
     if (typeof this.type === 'object' && typeof type !== 'string') {
-      if (this.isPolymorphic) validateDeclaredType(this.type);
+      if (this.isPolymorphic) validateDeclaredType(this.type, typeResolver);
       else if (hasFreeTypeVariables(this.type))
         throw new TypeVariableError(
           'unresolved-type-variable',

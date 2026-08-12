@@ -603,10 +603,14 @@ protocol_decl    ::= "protocol" IDENT "{" protocol_member* "}"
 protocol_member  ::= "function" IDENT "(" param_list ")" "->" type
                    | ("readonly" | "readwrite") IDENT ":" type
 
-conformance_decl ::= "type" conf_target "is" protocol_names impl_block?
+conformance_decl ::= "type" conf_target "is" protocol_names where_clause?
+                     impl_block?                       // the clause BINDS the
+                                                       // head's variables
 conf_target      ::= <named ground type>               // see “Conformance targets”
                    | IDENT "<" IDENT ("," IDENT)* ">"  // conditional head, see
                                                        // “Conditional Conformance”
+                                                       // (a bound belongs in the
+                                                       // clause, never the head)
 protocol_names   ::= IDENT ("&" IDENT)*                // protocol NAMES — not a
                                                        // type intersection
 
@@ -883,9 +887,9 @@ conforms to multiple protocols, it has multiple implementation blocks:
 type string is Comparable {
   // Provide an implementation of the `compare` function for `string`
   function compare(self: string, other: string) -> "<" | "=" | ">" {
-    if (self < other) return "<";
-    if (self > other) return ">";
-    return "=";
+    if (self < other) { "<" }
+    else if (self > other) { ">" }
+    else { "=" }
   }
 }
 ```
@@ -921,8 +925,11 @@ type boolean is Comparable
 // -> ok, no-op re-declaration
 
 type boolean is Comparable {
-  // -> protocol-implementation-duplicate: the type `boolean` already has
-  //    an implementation of the `Comparable` protocol
+  // -> replaces the previous implementation (statement re-run semantics —
+  //    the engine cannot distinguish a re-run from a duplicate; the HOST
+  //    route throws protocol-implementation-duplicate instead).
+  //    Validation runs first: an invalid block leaves the previous valid
+  //    implementation intact.
   function compare(self: Self, other: Self) -> "<" | "=" | ">" { ... }
 }
 ```
@@ -948,9 +955,9 @@ type string is Comparable {
     // -> protocol-signature-mismatch: the signature of `compare` does not
     //    match `Comparable.compare` at `Self = string` (argument 2 is
     //    `number`; expected `string` or a supertype)
-    if (self.length < other) return "<";
-    if (self.length > other) return ">";
-    return "=";
+    if (self.length < other) { "<" }
+    else if (self.length > other) { ">" }
+    else { "=" }
   }
 }
 ```
@@ -1026,6 +1033,16 @@ Rules (rulings):
 - Parameterized *protocols* (`protocol Mappable<...>`) are **not** in v1 —
   protocols that abstract over their element type belong to the §6 HKT
   track. (An earlier draft's example here implied them; withdrawn.)
+- Every variable of the head must be bound by the clause, and every variable
+  of the clause must occur in the head. A bound written **in the head**
+  (`type list<T: number> is P`) is a parse error steering to the clause:
+  the clause is the single binding site, so it is where a bound belongs.
+- The clause's variables are in scope for the implementation block's member
+  signatures, and `Self` is the head pattern — `function compare(self: Self,
+  …)` and `function compare(self: list<T>, …)` are the same declaration.
+  Requirement matching (`protocol-signature-mismatch`) is checked at the
+  *widest* instantiation, i.e. with each variable read as its bound: a
+  signature that holds there holds for every instantiation.
 
 ### Protocol Constraints
 
@@ -1151,9 +1168,9 @@ is called on an `integer`, the `integer` implementation is dispatched:
 ```epsil
 type number is Comparable {
   function compare(self: number, other: number) -> "<" | "=" | ">" {
-    if (self < other) return "<";
-    if (self > other) return ">";
-    return "=";
+    if (self < other) { "<" }
+    else if (self > other) { ">" }
+    else { "=" }
   }
 }
 ```

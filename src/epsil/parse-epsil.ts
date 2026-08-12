@@ -61,6 +61,12 @@ export function analyzeErrors(
  * `type` statement in the program extends the set. A name in neither is still a
  * parse-time `type-annotation-error`, so typos are caught early.
  *
+ * `options.protocolNames` seeds the PROTOCOL names the engine knows. They are
+ * deliberately NOT type names (ruling P8): the set is consulted only on the
+ * unknown-type path, where a name it holds is reported as
+ * `protocol-in-type-position` — with the constrained-variable spelling that was
+ * meant — instead of a generic `Unknown type`.
+ *
  * `options.sumVariants` maps each already-declared sum VARIANT name to the sum
  * that declared it. It is what keeps the sum-sugar trigger stable across
  * re-runs: `type X = red | green` is the sugar the first time (no arm names a
@@ -74,6 +80,7 @@ export function parseEpsil(
     parseLatex?: (latex: string) => MathJsonExpression;
     allowHostPragmas?: boolean;
     typeNames?: readonly string[];
+    protocolNames?: readonly string[];
     sumVariants?: Readonly<Record<string, string>>;
   }
 ): [MathJsonExpression, ParsingDiagnostic[]] {
@@ -82,6 +89,7 @@ export function parseEpsil(
     parseLatex: options?.parseLatex,
     allowHostPragmas: options?.allowHostPragmas,
     typeNames: options?.typeNames,
+    protocolNames: options?.protocolNames,
     sumVariants: options?.sumVariants,
   });
 

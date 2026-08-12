@@ -185,23 +185,88 @@ describe('WHERE CLAUSE — clause shapes (diagnostics)', () => {
   });
 });
 
-describe('WHERE CLAUSE — the reserved `is` protocol slot', () => {
-  test('parses, then fails with protocol-conformance-unsupported', () => {
+//
+// The `is` protocol-conformance slot (protocols design P19, phase 4). These
+// three cases were pinned as `protocol-conformance-unsupported` rejections
+// while the slot was inert; they now DECLARE, and the constraint is checked at
+// the call site against the engine's conformance registry.
+//
+// The type layer alone still has no registry to consult, so a RESOLVER-LESS
+// parse keeps rejecting the slot rather than silently dropping the constraint.
+//
+describe('WHERE CLAUSE — the `is` protocol slot', () => {
+  /** `type <target> is P₁ & P₂ …` — the conformance statement, box route. */
+  function conform(
+    ce: ComputeEngine,
+    target: string,
+    protocols: string[]
+  ): void {
+    ce.box([
+      'DeclareConformance',
+      { str: target },
+      ['List', ...protocols],
+    ] as any).evaluate();
+  }
+
+  /** An engine with `Hashable` and `Comparable` declared, `string` conforming
+   * to both and `boolean` to neither. */
+  function engineWithProtocols(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Hashable', {});
+    ce.declareProtocol('Comparable', {});
+    conform(ce, 'string', ['Hashable', 'Comparable']);
+    return ce;
+  }
+
+  test('bounded form declares and round-trips', () => {
+    const ce = engineWithProtocols();
+    expect(ce.type('(T) -> T where T: collection is Hashable').toString()).toBe(
+      '(T) -> T where T: collection is Hashable'
+    );
+  });
+
+  test('bound-less `is` form declares and round-trips', () => {
+    const ce = engineWithProtocols();
+    expect(ce.type('(T) -> T where T is Hashable').toString()).toBe(
+      '(T) -> T where T is Hashable'
+    );
+  });
+
+  test('conjunction of protocols declares and round-trips', () => {
+    const ce = engineWithProtocols();
+    expect(
+      ce
+        .type('(xs: list<T>) -> list<T> where T is Comparable & Hashable')
+        .toString()
+    ).toBe('(xs: list<T>) -> list<T> where T is Comparable & Hashable');
+  });
+
+  test('a conforming solved type passes; a non-conforming one does not', () => {
+    const ce = engineWithProtocols();
+    ce.declare('idOf', { signature: '(T) -> T where T is Hashable' });
+    expect(ce.box(['idOf', { str: 'a' }]).isValid).toBe(true);
+    expect(ce.box(['idOf', true]).toString()).toContain(
+      'protocol-constraint-unsatisfied'
+    );
+  });
+
+  test('`&` requires EVERY protocol', () => {
+    const ce = engineWithProtocols();
+    ce.declareProtocol('Countable', {});
+    ce.declare('bothOf', {
+      signature: '(T) -> T where T is Hashable & Countable',
+    });
+    expect(ce.box(['bothOf', { str: 'a' }]).toString()).toContain(
+      'protocol-constraint-unsatisfied'
+    );
+    conform(ce, 'string', ['Countable']);
+    expect(ce.box(['bothOf', { str: 'a' }]).isValid).toBe(true);
+  });
+
+  test('a RESOLVER-LESS parse still refuses the slot', () => {
     expect(parseError('(T) -> T where T: collection is Hashable')).toMatch(
       /protocol-conformance-unsupported/
     );
-  });
-
-  test('bound-less `is` form', () => {
-    expect(parseError('(T) -> T where T is Hashable')).toMatch(
-      /protocol-conformance-unsupported/
-    );
-  });
-
-  test('conjunction of protocols', () => {
-    expect(
-      parseError('(xs: list<T>) -> list<T> where T is Comparable & Hashable')
-    ).toMatch(/protocol-conformance-unsupported/);
   });
 });
 
