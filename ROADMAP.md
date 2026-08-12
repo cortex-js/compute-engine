@@ -218,24 +218,28 @@ standing polytype behavior).
   (`Take(RandomShuffle(xs), 2)`) still walks empty — the fallback is
   pure-only by ruling (per-generation re-draws would mix draw-sets);
   that case belongs to the draw-coherence item below.
-- **`Quartiles` throws a `TypeError` on a symbolic operand**
-  (pre-existing, found 2026-08-11 during the `canEnumerate` sweep):
-  `Quartiles(z)` for a valueless `number`-typed `z` crashes in
-  `bigMedian` (`numerics/statistics.ts:38`, via `bigQuartiles` ←
-  `library/statistics.ts`) instead of staying inert;
-  `InterquartileRange` shares `bigQuartiles`/`exactData` and is likely
-  affected identically. Also blocks its `canEnumerate` adoption (no
-  tier is honest while evaluation can throw). Fix = a ground-data
-  guard at the `exactData` seam.
-- **`ListFrom(xs)` over a VALUELESS collection-typed symbol wraps the
-  symbol as a scalar** (pre-existing, surfaced 2026-08-11): the
-  handler's `if (!xs.isCollection)` branch reads a valueless
-  `list<integer>` symbol as a scalar and answers `["xs"]` — a
-  one-element list containing the symbol — where every sibling
-  operator stays inert. Same `isCollection`-as-enumerability
-  misreading the facet round fixed elsewhere; needs its own ruling
-  (inert, or keep the scalar reading?). `SetFrom`/`TupleFrom` share
-  the branch.
+- ~~`Quartiles` throws a `TypeError` on a symbolic operand~~ — CLOSED
+  2026-08-11. The crash was `bigMedian` of an EMPTY half
+  (`sorted[-1].add`), reachable from a fully-ground single inexact
+  datum too (`Quartiles(2.5)` threw). Two fixes: `bigMedian([])` now
+  returns NaN (matching `median([])`'s arithmetic), and both
+  `Quartiles` and `InterquartileRange` stay INERT on symbolic data
+  (a NaN LITERAL still takes the §3.C absence path). With inertness
+  in place `Quartiles` also gained its decline-only `canEnumerate`.
+  Pinned in `eager-collection-enumerability.test.ts`.
+- ~~`ListFrom(xs)` over a VALUELESS collection-typed symbol wraps the
+  symbol as a scalar~~ — CLOSED 2026-08-11, USER-RULED: inert. The
+  `*From` scalar branch now treats a collection-TYPED operand that is
+  not a collection right now (valueless symbol, unevaluated eager
+  producer — `ListFrom(Divisors(n))` was also scalar-wrapped) as
+  UNRESOLVED and stays inert; genuine scalars still contribute
+  themselves (`ListFrom(5)` → `[5]`).
+  `canEnumerateCollectionOperands` mirrors the guard, so the facet
+  answers `false` without evaluating. `Dot` also adopted
+  `canEnumerate` in this pass, fixing a latent wrong-`false` facet on
+  matrix·matrix (result typed `value`, misread by the type
+  fallthrough; unreachable through wrappers, which reject `value`
+  operands, but wrong at the API surface).
 - **An eager IMPURE collection source is evaluated several times**
   (pre-existing, measured 2026-08-09 during the above): counting
   handler invocations over a 5-element source,

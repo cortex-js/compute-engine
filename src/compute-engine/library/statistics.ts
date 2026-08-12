@@ -18,6 +18,7 @@ import {
 import {
   MAX_SIZE_EAGER_COLLECTION,
   canEnumerateFiniteSource,
+  groundEnumerationOperand,
   windowedCollectionOps,
 } from '../collection-utils.js';
 import { aggregateAbsence } from './missing-data.js';
@@ -526,6 +527,16 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         '((collection|number)+) -> tuple<mid:number, lower:number, upper:number>',
       missingBehavior: 'handle',
       examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)'],
+      // Decline-only: a definitively-unavailable datum (a valueless symbol)
+      // leaves the operator inert — see the symbolic-data guard in the
+      // evaluate handler. Success is not cheaply decidable (exact/absence
+      // semantics), so never `true`.
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        for (const op of expr.ops)
+          if (groundEnumerationOperand(op) === null) return false;
+        return undefined;
+      },
       evaluate: (ops, { engine, numericApproximation }) => {
         // Absent datum or empty input ⇒ `(NaN, NaN, NaN)` (§3.C).
         if (aggregateAbsence(engine, ops))
@@ -537,6 +548,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return engine.tuple(q1, q2, q3);
           }
         }
+        // SYMBOLIC data (a valueless symbol, an unresolved expression) has no
+        // numeric reading: stay inert rather than sort NaN placeholders into
+        // the quantile split and bake a definite `(…, NaN, …)` tuple that a
+        // later assignment contradicts. A NaN LITERAL is a number and still
+        // flows through (absent-datum semantics, §3.C).
+        for (const v of flattenArguments(ops))
+          if (!isNumber(v)) return undefined;
         const xs = ops;
         const [mid, lower, upper] = (
           bignumPreferred(engine)
@@ -565,6 +583,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return subtract(engine, q3, q1);
           }
         }
+        // Symbolic data: stay inert — see `Quartiles`.
+        for (const v of flattenArguments(ops))
+          if (!isNumber(v)) return undefined;
         const xs = ops;
         return engine.number(
           bignumPreferred(engine)

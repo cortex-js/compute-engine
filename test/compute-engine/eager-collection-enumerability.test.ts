@@ -432,3 +432,148 @@ describe('adoption round 2', () => {
     }
   });
 });
+
+/**
+ * # Follow-up fixes (2026-08-11, post-sweep)
+ *
+ * Three items closed after the adoption sweep: the `Quartiles` crash, the
+ * `ListFrom`-family inertness ruling, and the `Dot` facet.
+ */
+describe('post-sweep fixes', () => {
+  describe('Quartiles/InterquartileRange no longer crash', () => {
+    // `bigMedian` of an empty half threw a TypeError (`sorted[-1].add`):
+    // reachable from a fully-GROUND single inexact datum, and from any
+    // symbolic datum reaching the numeric path.
+    it('a single inexact datum computes instead of throwing', () => {
+      const e = ce();
+      expect(e.box(['Quartiles', 2.5]).evaluate().toString()).toBe(
+        '(NaN, 2.5, NaN)'
+      );
+      expect(
+        e
+          .box(['InterquartileRange', ['List', 2.5]])
+          .evaluate()
+          .toString()
+      ).toBe('NaN');
+    });
+
+    // Symbolic data stays INERT — not `(…, NaN, …)`, which a later
+    // assignment contradicts.
+    it('symbolic data leaves the operators inert', () => {
+      const e = ce();
+      e.declare('z', 'number');
+      expect(e.box(['Quartiles', 'z']).evaluate().operator).toBe('Quartiles');
+      expect(e.box(['InterquartileRange', 'z']).evaluate().operator).toBe(
+        'InterquartileRange'
+      );
+      expect(
+        e.box(['Quartiles', ['List', 1, 2], 'z']).evaluate().operator
+      ).toBe('Quartiles');
+      e.assign('z', e.box(3));
+      expect(
+        e
+          .box(['Quartiles', ['List', 1, 2], 'z'])
+          .evaluate()
+          .toString()
+      ).toBe('(1, 2, 3)');
+    });
+
+    // A NaN LITERAL is a number, not symbolic data: it takes the documented
+    // absent-datum path (§3.C — an absent datum poisons the whole tuple),
+    // not the inertness guard.
+    it('a NaN literal still takes the absence path', () => {
+      expect(
+        ce()
+          .box(['Quartiles', ['List', 1, 2], { sym: 'NaN' }])
+          .evaluate()
+          .toString()
+      ).toBe('(NaN, NaN, NaN)');
+    });
+
+    it('Quartiles has its decline-only canEnumerate', () => {
+      const e = ce();
+      e.declare('z', 'number');
+      expect(e.box(['Quartiles', 'z']).isEnumerableCollection).toBe(false);
+      expect(
+        e.box(['Quartiles', ['List', 1, 2, 3, 4, 5]]).isEnumerableCollection
+      ).toBeUndefined();
+      expect(
+        e
+          .box(['Take', ['Quartiles', ['List', 1, 2, 3, 4, 5]], 2])
+          .evaluate()
+          .toString()
+      ).toBe('[3/2,3]');
+    });
+  });
+
+  // USER-RULED 2026-08-11: a collection-TYPED operand that is not a
+  // collection right now (a valueless symbol, an unevaluated eager producer)
+  // is UNRESOLVED, not a scalar datum — the `*From` conversions stay inert
+  // instead of wrapping it (`ListFrom(xs)` answered `["xs"]`).
+  describe('the *From family is inert on an unresolved collection operand', () => {
+    it.each(['ListFrom', 'SetFrom', 'TupleFrom'])(
+      '%s(xs) stays inert for a valueless xs',
+      (op) => {
+        const e = ce();
+        expect(e.box([op, 'xs']).evaluate().operator).toBe(op);
+        expect(e.box([op, 'xs']).isEnumerableCollection).toBe(false);
+      }
+    );
+
+    it('a genuine scalar still contributes itself', () => {
+      const e = ce();
+      expect(e.box(['ListFrom', 5]).evaluate().toString()).toBe('[5]');
+      expect(
+        e
+          .box(['ListFrom', 5, ['List', 1, 2]])
+          .evaluate()
+          .toString()
+      ).toBe('[5,1,2]');
+    });
+
+    it('an unevaluated eager producer operand is unresolved, not scalar', () => {
+      const e = ce();
+      expect(e.box(['ListFrom', ['Divisors', 'n']]).evaluate().operator).toBe(
+        'ListFrom'
+      );
+      expect(
+        e
+          .box(['ListFrom', ['Divisors', 12]])
+          .evaluate()
+          .toString()
+      ).toBe('[1,2,3,4,6,12]');
+    });
+
+    it('the inert form resolves after assignment', () => {
+      const e = ce();
+      e.assign('xs', e.box(['List', 1, 5]));
+      expect(e.box(['ListFrom', 'xs']).evaluate().toString()).toBe('[1,5]');
+    });
+  });
+
+  // `Dot` types its result as the wide `value` for matrix operands, which
+  // the facet's type fallthrough misread as a definite `false` while
+  // `Dot(m1, m2)` evaluates to a matrix. Sharpened scalar result → `false`
+  // (nothing to walk); matrix-ish → from the operands, never `true`.
+  describe('Dot facet', () => {
+    const m = ['List', ['List', 1, 2], ['List', 3, 4]];
+    it('matrix·matrix is undecided, not false', () => {
+      const e = ce();
+      expect(e.box(['Dot', m, m]).isEnumerableCollection).toBeUndefined();
+      expect(e.box(['Dot', m, m]).evaluate().toString()).toBe(
+        '[[7,10],[15,22]]'
+      );
+    });
+    it('vector·vector is false (a number has nothing to walk)', () => {
+      const e = ce();
+      const d = e.box(['Dot', ['List', 1, 2], ['List', 3, 4]]);
+      expect(d.isEnumerableCollection).toBe(false);
+      expect(d.evaluate().toString()).toBe('11');
+    });
+    it('valueless operands are a provable decline', () => {
+      const e = ce();
+      e.declare('M', 'matrix');
+      expect(e.box(['Dot', 'M', 'M']).isEnumerableCollection).toBe(false);
+    });
+  });
+});

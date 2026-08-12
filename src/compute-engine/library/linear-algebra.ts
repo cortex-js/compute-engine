@@ -1051,6 +1051,18 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // type language has no variadic tuple, so the bare `tuple` param does
       // the admission (the `Norm` pattern) and the handlers narrow.
       signature: '(matrix|vector|tuple, matrix|vector|tuple) -> value',
+      // The result is a collection only for matrix-ish operands, and the
+      // static type stays the wide `value` there — which the facet's type
+      // fallthrough misread as a definite `false` while `Dot(m1, m2)`
+      // evaluates to a matrix. Two-tier answer: a SHARPENED scalar result
+      // (two provable rank-1 numeric operands — see the `type` handler) has
+      // nothing to walk, definite `false`; otherwise answer from the
+      // operands like the other tensor products (never `true`).
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (isSubtype(expr.type.type, 'number')) return false;
+        return canEnumerateTensorOperands(expr);
+      },
       // Two provable rank-1 numeric operands reduce to the inner product, a
       // number. A `tuple` operand only counts when every element is provably
       // numeric (`isNumericTuple`, strict): a point-list-shaped tuple (a

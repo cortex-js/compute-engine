@@ -2,6 +2,32 @@
 
 ### Issues Resolved
 
+- **`Quartiles` and `InterquartileRange` no longer throw on thin or symbolic
+  data.** `Quartiles(2.5)` — a single inexact datum — threw a `TypeError`
+  (median of an empty quartile half), as did any symbolic datum reaching the
+  numeric path (`Quartiles(z)` for an unassigned `z`). The empty median is
+  now NaN, matching the machine-float path, and symbolic data leaves both
+  operators **inert** instead of baking a `(…, NaN, …)` tuple that a later
+  assignment contradicts: `Quartiles([1, 2], z)` stays symbolic and answers
+  `(1, 2, 3)` once `z := 3`. A NaN *literal* datum still takes the documented
+  absence path.
+
+- **`ListFrom`/`SetFrom`/`TupleFrom` no longer wrap an unresolved collection
+  operand as a scalar.** For a valueless `list`-typed symbol `xs`,
+  `ListFrom(xs)` answered `["xs"]` — a one-element list containing the
+  symbol — and `ListFrom(Divisors(n))` similarly wrapped the unevaluated
+  producer. A collection-typed operand that is not a collection in the
+  current state is unresolved, not a datum: the conversions now stay inert
+  (and report `isEnumerableCollection: false` without evaluating). Genuine
+  scalars still contribute themselves: `ListFrom(5, [1, 2])` is `[5, 1, 2]`.
+
+- **`Dot`'s `isEnumerableCollection` no longer misreports a matrix product.**
+  The result type of `Dot` is the wide `value`, which the facet read as
+  "not a collection" even when `Dot(m1, m2)` evaluates to a matrix. `Dot`
+  now answers per shape: a provably scalar inner product is `false`, a
+  matrix-ish product is decided by its operands (`Quartiles` also gained a
+  decline-only `canEnumerate` now that its symbolic case is inert).
+
 - **Stacked restrictions no longer depend on the order they were written.**
   `When(When(e, c1), c2)` merges to `When(e, And(c1, c2))`, but the merged
   conjunction was built without going through canonical `And`, so it kept the

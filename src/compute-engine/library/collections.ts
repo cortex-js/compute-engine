@@ -22,6 +22,7 @@ import {
   isTuple,
   lazyBroadcastMap,
   MAX_SIZE_EAGER_COLLECTION,
+  typeCouldBeCollection,
   windowedCollectionOps,
 } from '../collection-utils.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
@@ -152,12 +153,20 @@ function isProvablyScalar(operand: Expression): boolean {
  * walk, which is not cheaply decidable (same reasoning as
  * `canEnumerateFiniteSource`).
  */
-function canEnumerateCollectionOperands(
-  expr: Expression
-): boolean | undefined {
+function canEnumerateCollectionOperands(expr: Expression): boolean | undefined {
   if (!isFunction(expr)) return undefined;
   for (const op of expr.ops) {
-    if (op.isCollection !== true) continue;
+    if (op.isCollection !== true) {
+      // Mirror the evaluate handlers' unresolved-operand guard: a
+      // collection-TYPED operand that is not a collection right now leaves
+      // them inert (USER-RULED 2026-08-11), and its own facet says whether
+      // that is definite (a valueless symbol: `false`) or undecidable (an
+      // unevaluated eager producer: `undefined`).
+      if (!typeCouldBeCollection(op.type.type)) continue; // a scalar datum
+      const e = op.isEnumerableCollection;
+      if (e === false) return false;
+      continue;
+    }
     if (op.isEnumerableCollection === false) return false;
     if (op.isFiniteCollection === false) return false;
   }
@@ -7148,8 +7157,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
       for (const xs of ops) {
-        if (!xs.isCollection) elements.push(xs);
-        else {
+        if (!xs.isCollection) {
+          // A collection-TYPED operand that is not a collection right now (a
+          // valueless `list<integer>` symbol, an unevaluated eager producer)
+          // is UNRESOLVED, not a scalar datum: wrapping it (`["xs"]`) bakes
+          // an answer a later `xs := [1, 5]` contradicts. Stay inert
+          // (USER-RULED 2026-08-11); genuine scalars contribute themselves.
+          if (typeCouldBeCollection(xs.type.type)) return undefined;
+          elements.push(xs);
+        } else {
           if (!xs.isFiniteCollection) return undefined;
           elements.push(...(Array.from(xs.each()) as Expression[]));
         }
@@ -7215,8 +7231,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
       for (const xs of ops) {
-        if (!xs.isCollection) elements.push(xs);
-        else {
+        if (!xs.isCollection) {
+          // A collection-TYPED operand that is not a collection right now (a
+          // valueless `list<integer>` symbol, an unevaluated eager producer)
+          // is UNRESOLVED, not a scalar datum: wrapping it (`["xs"]`) bakes
+          // an answer a later `xs := [1, 5]` contradicts. Stay inert
+          // (USER-RULED 2026-08-11); genuine scalars contribute themselves.
+          if (typeCouldBeCollection(xs.type.type)) return undefined;
+          elements.push(xs);
+        } else {
           if (!xs.isFiniteCollection) return undefined;
           elements.push(...(Array.from(xs.each()) as Expression[]));
         }
@@ -7234,8 +7257,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
       for (const xs of ops) {
-        if (!xs.isCollection) elements.push(xs);
-        else {
+        if (!xs.isCollection) {
+          // A collection-TYPED operand that is not a collection right now (a
+          // valueless `list<integer>` symbol, an unevaluated eager producer)
+          // is UNRESOLVED, not a scalar datum: wrapping it (`["xs"]`) bakes
+          // an answer a later `xs := [1, 5]` contradicts. Stay inert
+          // (USER-RULED 2026-08-11); genuine scalars contribute themselves.
+          if (typeCouldBeCollection(xs.type.type)) return undefined;
+          elements.push(xs);
+        } else {
           if (!xs.isFiniteCollection) return undefined;
           elements.push(...(Array.from(xs.each()) as Expression[]));
         }

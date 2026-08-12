@@ -32,6 +32,11 @@ export function median(values: Iterable<number>): number {
 
 export function bigMedian(values: Iterable<BigDecimal>): BigDecimal {
   const sorted = [...values].sort((a, b) => a.cmp(b));
+  // Median of nothing is NaN — matching `median([])`, whose
+  // `sorted[-1] + sorted[0]` arithmetic yields NaN naturally. Without this,
+  // `bigQuartiles` of a SINGLE datum crashed: its lower/upper halves are
+  // empty, and `sorted[-1].add` is a TypeError (`Quartiles(2.5)` threw).
+  if (sorted.length === 0) return BigDecimal.NAN;
   const mid = Math.floor(sorted.length / 2);
 
   if (sorted.length % 2 === 0)
