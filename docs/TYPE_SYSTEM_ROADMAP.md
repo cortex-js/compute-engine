@@ -366,9 +366,15 @@ Protocol dispatch is this criterion's second consumer (Appendix A,
 tag at runtime exactly as `match` needs a sum's; a statically resolved call
 discharges it and erases.
 
-## 4. Protocols and conformance (long term)
+## 4. Protocols and conformance
 
-See also: Appendix A below.
+**Status: SHIPPED 2026-08-12** (all five phases — declarations,
+conformance, implementations, dispatch, `is`-slot constraints, properties,
+conditional conformance). Surface spec = Appendix A below; implementation
+architecture and ruling record (P1–P46) =
+`docs/plans/2026-08-12-protocols-design.md`. The `Iterable`/`Indexable`
+bridge below is the remaining unshipped piece of this section (needs its
+own requirement-table design doc, §7 item 6(h)).
 
 Two distinct gaps stand between today and a user-facing `mappable`:
 
@@ -563,8 +569,10 @@ with three rulings needed in order (see §7).
    rebind — the smaller theory); (b) the per-head rebind/fallback table,
    seeded from what the builtin type handlers already do; (c) whether the
    operators are user-visible type syntax or declarations-only at first.
-6. Protocol rulings introduced by the 2026-08-12 revision of Appendix A,
-   to ratify: (a) dispatch on the first `Self` argument, with `Self` bound
+6. Protocol rulings introduced by the 2026-08-12 revision of Appendix A —
+   **ratified 2026-08-12 and shipped the same day** (record: P1–P46 in
+   `docs/plans/2026-08-12-protocols-design.md`); only (h) remains open:
+   (a) dispatch on the first `Self` argument, with `Self` bound
    statically from that argument (the join-across-arguments rule is
    withdrawn); (b) property assignment as rebinding sugar, non-variable
    LHS rejected in v1; (c) pending-conformance lifecycle — end-of-batch

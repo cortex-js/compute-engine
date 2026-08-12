@@ -2,6 +2,39 @@
 
 ### New Features
 
+- **Protocols.** A protocol declares a set of functions and properties a
+  type implements to **conform**; conformance drives dynamic dispatch:
+
+  ```epsil
+  protocol Comparable {
+    function compare(self, other: Self) -> "<" | "=" | ">"
+  }
+  type string is Comparable {
+    function compare(self: Self, other: string) -> "<" | "=" | ">" {
+      if (self < other) { "<" } else if (self > other) { ">" } else { "=" }
+    }
+  }
+  compare("a", "b")            // dispatches on the first argument -> "<"
+  Comparable.compare("a", "b") // qualified form
+  ```
+
+  Includes: `readonly`/`readwrite` properties with getter/setter
+  implementations (`person.name`, and `person.name = v` as rebinding sugar
+  over the immutable value model); protocol constraints in `where` clauses
+  (`function sort(xs: list<T>) -> list<T> where T is Comparable` — the
+  `is` slot reserved by the `where`-clause release is now checked);
+  conditional conformance
+  (`type list<T> is Comparable where T is Comparable { … }`, recursive:
+  `list<list<string>>` conforms when `string` does); qualified property
+  disambiguation `person.(Protocol.name)`; and the host API
+  (`ce.declareProtocol`, `ce.declareProtocolImplementation`). Protocols
+  are engine-global, statement re-runs replace (host redeclaration
+  throws), and conformance is monotone — declared-but-unimplemented
+  conformance warns at the end of each batch until fulfilled. Protocol
+  names are not types (`protocol-in-type-position` steers to a
+  constrained variable). Design record:
+  `docs/plans/2026-08-12-protocols-design.md` (rulings P1–P46).
+
 - **Sum-type declaration sugar.** One statement now declares a tagged sum —
   the variants and the union together:
 
