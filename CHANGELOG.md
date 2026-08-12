@@ -2,6 +2,30 @@
 
 ### New Features
 
+- **`isEnumerableCollection` now answers for arithmetic broadcasts** (Tycho
+  item-169 ruling). A broadcast node (`x + [1,2]`, `Sin(1..99)` — a
+  `broadcastable` operator whose collection-ness is a lift over its
+  operands) previously fell through to `undefined` for the whole class; it
+  now answers from its participants: `true` when they agree on a length,
+  evaluation is draw-free, and every collection-typed participant is itself
+  enumerable; `false` when a participant is definitively unwalkable —
+  including an application of an *unbound* head (`x + Total([1,2])` with
+  `Total` undeclared, the item-169 witness), which now answers `false`
+  everywhere rather than `undefined`; `undefined` when participant lengths
+  disagree or an impure participant (`RandomShuffle(xs) + 1`) makes
+  per-index draw coherence unpromisable. `true` is a delivery promise:
+  `each()` and `at()` are guaranteed to serve the elements.
+
+- **`at()` now works on impure broadcasts whose randomness is confined to a
+  lifted scalar.** `([1,2] + RandomInteger(1,10)).at(1)` answered
+  `undefined` (the materialize fallback declined all impure expressions);
+  since such a broadcast distributes structurally without consuming
+  randomness — the random family is inert under `evaluate()` — `at()` now
+  serves the same unevaluated element `each()` yields
+  (`1 + RandomInteger(1,10)`), at any nesting depth. An impure
+  *participant* (`RandomShuffle(xs) + 1`) still declines: per-index reads
+  spanning generations could mix draw sets.
+
 - **Protocols.** A protocol declares a set of functions and properties a
   type implements to **conform**; conformance drives dynamic dispatch:
 
@@ -88,6 +112,89 @@
   declines); Python/GPU/interval targets keep failing closed.
 
 ### Bug Fixes
+
+- **A parenthesized juxtaposition on a collection-valued symbol is a product
+  regardless of the argument's type** (Tycho item 173). With `A` a list (or
+  any collection-typed value) and `B` a list, `A(B)` and `A(t-B)`
+  canonicalized to function APPLICATIONS of a non-function — evaluating to
+  `Error("incompatible-type", "function", …)` — while `A(m)` with scalar `m`
+  correctly multiplied. The multiply-vs-apply decision keyed on the
+  *argument*'s type; it now keys on the head: a head whose value is
+  multiplicative (a number, matrix, list, collection, `broadcastable`, or
+  numeric tuple) always reads as a product. Undeclared or function-typed
+  heads still read as applications, and non-multiplicative values (a
+  string, a set) still surface the illegal application.
+
+- **A comprehension with a `Block` body now round-trips through LaTeX
+  without changing value** (Tycho item 172). `Comprehension(Block(d ≔ [n,2];
+  Σd), n ∈ 1..3)` serialized its body as a bare `;`-statement list, and `;`
+  binds looser than the `for` clause — the reparse absorbed the `for` into
+  the last block statement, the local no longer scoped over the body, and
+  the value changed. A `Block` body is now fenced (`\left(…\right)`), which
+  reparses to the identical canonical form.
+
+- **A `Sum`/`Product` whose body applies a list-valued user function to
+  another user-function call no longer compiles to garbage** (Tycho item
+  171, the root cause of item 121's remaining witness). With `a(t) ≔
+  [cos t, sin t]` declared under an open `(unknown) -> unknown` signature,
+  `Σ_i a(h(i))` compiled `success: true` and returned a JS *string* (scalar
+  `+` concatenating stringified arrays): the `broadcastable<T>` arm of the
+  JS collection-typedness gate trusted the *declared* scalar-ish result for
+  user functions. A user-function application now takes the same body
+  look-through the plain-`unknown` arm already used, so the shape compiles
+  to the element-wise broadcast fold and returns the correct array —
+  byte-identical treatment to the un-nested `Σ_i a(t+i)`.
+
+- **A negated product no longer produces an unflattened `Multiply`** (Tycho
+  item 170, both shapes). `canonicalMultiply` flattened nested products
+  *before* stripping negations, so `(b·-a)c` built
+  `Negate(Multiply(c, Multiply(a, b)))` — a canonical-looking node whose
+  `.json` serialized flat (ordered `abc`) while `isSame`/`hash` saw the
+  nesting, violating the documented `isSame ⇒ equal hash` contract; a
+  negated rational coefficient with a `Power` factor hit the same mechanism
+  through `negateProduct`. The unnegate pass now re-flattens any product it
+  exposes, so `.json`, `isSame`, and `hash` agree again.
+
+- **A protocol-property write in a loop body no longer silently no-ops.**
+  The deferred `p.name = v` route checked the value's fit against the
+  property's declared type on the RAW right-hand side — `10 * i` in a loop
+  body statically types `finite_number` against an `integer` property — so
+  the write was refused, and the refusal was discarded in statement
+  position: each iteration silently kept the old value (and diverged from
+  compiled code, which performed the write). The check now runs on the
+  evaluated, concrete value; genuinely mistyped writes are still refused.
+
+- **A statement that evaluates to an error value now stops the enclosing
+  block or loop.** A non-final statement's value was discarded — including
+  a refusal that *is* the statement's value (a mistyped write, a rejected
+  indexed assignment) — so execution continued past the fault. An `Error`
+  result now propagates like `Return`: it becomes the block's value, and a
+  loop stops iterating and surfaces it. (Top-level Epsil statements already
+  reported these as `runtime-error` diagnostics; this extends the posture
+  inside function bodies, blocks, and loops.)
+
+- **Typed locals now compile inside loop bodies.** A `let q: Person = …`
+  declared in a loop body rides a different statement path than a block
+  local, so a protocol property GET/SET on it failed to compile — and an
+  *ordinary* named-tuple field read (`q.y`) on a typed local failed on
+  every path, since the raw local's own static type is `unknown`. Both now
+  resolve through the declared-type map that parameters already used —
+  nested chains (`q.inner.y`) included — and the reference analysis no
+  longer mislabels such reads as unsupported.
+
+- **A loop index over an integer range is now integer-typed.** The index of
+  `for i in 1..3` was bound wide (`number`), so expressions like `10 * i`
+  typed `finite_number` — wide enough to trip integer-typed checks. The
+  `Element` clause now types the fresh binding from the collection's
+  element type (`Range(1, 3)` → `integer`, a float list → `real`), and an
+  ALIAS collection type (`type ints = list<integer>`) is resolved to its
+  element type too.
+
+- **Compiling an assignment to a non-variable target now fails closed.**
+  A sequence definition (`L_0 := 5`) inside a compiled body emitted the
+  silent no-op `_ = 5` behind `success: true` (and, in sloppy mode, wrote a
+  stray global `_`). Any non-symbol assignment target now declines
+  compilation explicitly (D6) and falls back to the interpreter.
 
 - **A nominal-typed argument no longer broadcasts at compiled call sites.**
   With `type bag = list<number>` and `function size(b: bag) -> number`,
