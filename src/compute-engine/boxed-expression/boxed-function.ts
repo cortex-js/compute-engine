@@ -2238,6 +2238,16 @@ export class BoxedFunction
     // Only a collection-SHAPED result can have an element count. `Add(1, 2)`
     // types `finite_integer` and must keep answering `undefined`.
     if (!typeCouldBeCollection(this.type.type)) return undefined;
+    // An UNBOUND head does not broadcast (Tycho item 169). An undeclared call
+    // binds vacuously (item 152) and its result type lifts over a collection
+    // argument, so `Total([1, 2])` types `list<unknown^2>` and looks countable
+    // — but there is no evaluation rule to produce those elements, and `each()`
+    // walks none. Reading the operand count there reported 2 for a collection
+    // that can never yield an element, and the disagreement propagated: `x +
+    // Total([1, 2])` counted 2 through `Add` while walking 0. A count nobody
+    // can walk is worse than no count, so this is the same `undefined`
+    // `Add([1,2], [1,2,3])` already gets.
+    if (this.operatorDefinition === undefined) return undefined;
     const ops = this.ops;
     if (ops === undefined) return undefined;
     let count: number | undefined;

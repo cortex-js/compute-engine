@@ -98,3 +98,43 @@ describe('Tycho item 167: count of an un-evaluated broadcast', () => {
     });
   });
 });
+
+// Tycho item 169 (2026-08-11): the shape that fell out of item 167 landing.
+// An UNDECLARED call head binds vacuously (item 152) and its result type lifts
+// over a collection argument, so `Total([1,2])` types `list<unknown^2>` — but
+// nothing produces those elements and `each()` walks none. Reading the operand
+// count there answered 2 for a collection that can never yield an element, and
+// it propagated through `Add`.
+//
+// Ruled: `count` reports `undefined` when the head is unbound, so it agrees
+// with the walk. A count nobody can walk is worse than no count.
+describe('Tycho item 169: count does not outrun the walk', () => {
+  let ce: ComputeEngine;
+  beforeEach(() => {
+    ce = new ComputeEngine();
+  });
+
+  const walked = (expr: ReturnType<ComputeEngine['parse']>): number =>
+    [...expr.each()].length;
+
+  test('an undeclared head reports no count, matching its empty walk', () => {
+    const expr = ce.parse('\\operatorname{Total}\\left(\\left[1,2\\right]\\right)');
+    expect(expr.type.toString()).toBe('list<unknown^2>');
+    expect(expr.count).toBe(undefined);
+    expect(walked(expr)).toBe(0);
+  });
+
+  test('the disagreement does not propagate through a broadcast', () => {
+    const expr = ce.parse('x+\\operatorname{Total}\\left(\\left[1,2\\right]\\right)');
+    expect(expr.count).toBe(undefined);
+    expect(walked(expr)).toBe(0);
+    // ...and evaluating does not resurrect it.
+    expect(expr.evaluate().count).toBe(undefined);
+  });
+
+  test('a broadcast over a DECLARED head is unaffected', () => {
+    const expr = ce.parse('x+\\left[1,2\\right]');
+    expect(expr.count).toBe(2);
+    expect(walked(expr)).toBe(2);
+  });
+});

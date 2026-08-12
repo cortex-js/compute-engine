@@ -2,6 +2,30 @@
 
 ### Issues Resolved
 
+- **`Equal`/`NotEqual` against a list no longer overflows the stack when the
+  other operand is opaque.** `ce.parse('A(t) = [t]').evaluate()` — one line on a
+  bare engine — threw `RangeError: Maximum call stack size exceeded`, as did
+  `q(2) = [1, 2]` with `q` declared `(number) -> unknown`. These operators
+  broadcast element-wise only in the list-vs-scalar case, and that decision was
+  taken twice with two different rules: before evaluation the engine skips
+  broadcasting when two or more operands are collections **or
+  possibly-collection typed**, then defers to the evaluate handler — which
+  counted only actual collections. A top-typed application is
+  possibly-collection typed and stays so after evaluation, so the handler kept
+  rebuilding the identical node. The two rules now agree. Such a comparison also
+  stays **inert** instead of answering `False`: an opaque operand may still be
+  that collection, so a structural mismatch is not something the engine can
+  claim.
+
+- **`.count` no longer outruns `each()` on a broadcast over an unbound head.** An
+  undeclared call binds vacuously and its result type lifts over a collection
+  argument, so `Total([1, 2])` types `list<unknown^2>` and looked countable —
+  but nothing produces those elements and the walk yields none. `count` answered
+  2 for a collection that can never yield an element, and it propagated:
+  `x + Total([1, 2])` counted 2 while walking 0. An unbound head now reports
+  `undefined`, the same honesty `Add([1,2], [1,2,3])` already gets. Broadcasts
+  over declared operators are unchanged.
+
 - **`Quartiles` and `InterquartileRange` no longer throw on thin or symbolic
   data.** `Quartiles(2.5)` — a single inexact datum — threw a `TypeError`
   (median of an empty quartile half), as did any symbolic datum reaching the

@@ -6,7 +6,11 @@ import type {
 } from '../global-types.js';
 
 import { isRelationalOperator } from '../latex-syntax/utils.js';
-import { isFiniteIndexedCollection, isTuple } from '../collection-utils.js';
+import {
+  isFiniteIndexedCollection,
+  isPossiblyCollectionTyped,
+  isTuple,
+} from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { eq, eqIdentical } from '../boxed-expression/compare.js';
 import {
@@ -363,10 +367,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // there would also recurse forever, since re-dispatching `Equal` on the
       // same two collections re-enters this handler (`skipBroadcastForVectorOps`
       // enforces the same rule for the engine-level broadcast).
-      if (ops.filter((op) => op.isCollection).length < 2) {
+      if (broadcastableComparisonOperands(ops)) {
         const bc = broadcastComparison(ce, 'Equal', ops, numericApproximation);
         if (bc) return bc;
       }
+      if (undecidedCollectionComparison(ops))
+        return inertRelation(ce, 'Equal', rawOps, ops);
       // Absence semantics (§3.D, amended 2026-07-24): once broadcast has had
       // its chance (so a list-vs-scalar operand comparison is per-cell), a
       // SCALAR `Missing` operand makes the comparison `Missing` (Kleene), while
@@ -595,7 +601,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // `R^2` with `R = [1,2,3]`), matching `Equal` and the literal-list form;
       // list-vs-scalar only (see `Equal`'s handler for why 2+ collections stay
       // a scalar boolean and would otherwise recurse).
-      if (ops.filter((op) => op.isCollection).length < 2) {
+      if (broadcastableComparisonOperands(ops)) {
         const bc = broadcastComparison(
           ce,
           'NotEqual',
@@ -604,6 +610,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         );
         if (bc) return bc;
       }
+      if (undecidedCollectionComparison(ops))
+        return inertRelation(ce, 'NotEqual', rawOps, ops);
       // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`
       // (`NotEqual(Missing, x) = Missing`), IEEE over `NaN` (`NotEqual(NaN, x)
       // = True`). `Missing` wins over `NaN`; a numeric-domain slot's `Missing`
@@ -1056,6 +1064,55 @@ function readComparisonAbsence(
     isSymbol(op, 'Missing') && numericMissingSlot(rawOps[i].type.type)
       ? ce.NaN
       : op
+  );
+}
+
+/**
+ * May an `Equal`/`NotEqual` over these EVALUATED operands broadcast
+ * element-wise, or does it stay a whole-collection boolean?
+ *
+ * This must apply the same rule as `skipBroadcastForVectorOps` (step 2 in
+ * `boxed-function`), because that is the step this handler defers from: step 2
+ * skips whenever two or more operands are collections **or possibly-collection
+ * typed**, and hands the decision here "with full information".
+ *
+ * Counting only `isCollection` here made the two rules DISAGREE, and the
+ * disagreement was an infinite loop rather than a wrong answer. An application
+ * with a top type (`A(t)` with `A` undeclared) is possibly-collection typed and
+ * stays so after evaluation — it never resolves. Step 2 therefore skipped
+ * forever, this handler counted one collection, `broadcastComparison` rebuilt
+ * the identical node, and evaluating it re-entered step 2: `A(t) = [1, 2]`
+ * overflowed the stack out of `evaluate()` on a bare engine.
+ *
+ * Deferring is still what step 2 intends: an opaque operand that turns out to
+ * be a genuine scalar has a concrete type by the time it reaches here, so it no
+ * longer counts and the element-wise broadcast happens exactly as before.
+ */
+function broadcastableComparisonOperands(
+  ops: ReadonlyArray<Expression>
+): boolean {
+  return (
+    ops.filter((op) => op.isCollection || isPossiblyCollectionTyped(op))
+      .length < 2
+  );
+}
+
+/**
+ * Is a whole-collection `Equal`/`NotEqual` over these operands UNDECIDED?
+ *
+ * Once the element-wise broadcast has declined, a collection operand is
+ * compared structurally against the other side. That is only sound when both
+ * sides have resolved: an opaque operand (a top-typed application such as
+ * `q(2)`, or a `broadcastable<T>` node) may still BE that collection, so
+ * answering `False` would claim a mismatch the engine cannot see. Stay inert
+ * instead — the same rule the handlers already apply to `x^2 = 4`.
+ */
+function undecidedCollectionComparison(
+  ops: ReadonlyArray<Expression>
+): boolean {
+  return (
+    ops.some((op) => isPossiblyCollectionTyped(op)) &&
+    ops.some((op) => op.isCollection)
   );
 }
 
