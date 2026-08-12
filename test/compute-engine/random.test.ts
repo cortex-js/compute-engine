@@ -44,8 +44,14 @@ function expectedDraw(seed: number | string, n: number): number {
  * `with-random-seed.test.ts`).
  */
 function drawsConsumed(body: any, seed = 42): number {
+  // `body` is wrapped in a `List` rather than standing as its own statement:
+  // a validation-error probe (`Random(List())`) evaluates to an `Error`
+  // VALUE, and an error-valued STATEMENT short-circuits the block — the
+  // trailing `Random()` would never run. As a `List` element the error is an
+  // ordinary value, the body still evaluates (consuming its draws), and the
+  // trailing draw measures the stream position either way.
   const trailing = ce
-    .box(['WithRandomSeed', seed, ['Block', body, ['Random']]])
+    .box(['WithRandomSeed', seed, ['Block', ['List', body], ['Random']]])
     .evaluate().re;
   for (let n = 0; n < 64; n++)
     if (Math.abs(expectedDraw(seed, n) - trailing) < 1e-15) return n;

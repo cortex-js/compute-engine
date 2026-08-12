@@ -449,10 +449,11 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
     }
   });
 
-  // E3: the number×collection→Multiply branch is restricted to NUMERIC-valued
-  // symbols. A non-numeric non-function value (a string) must NOT become a
-  // `Multiply` (whose type error would blame multiplication); it falls back to
-  // the application-of-non-function route, whose error correctly blames the
+  // E3: the value×collection→Multiply branch is restricted to MULTIPLICATIVE
+  // values (numbers and linear-algebra values, see item 173 below). A value
+  // with no scaling semantics (a string) must NOT become a `Multiply` (whose
+  // type error would blame multiplication); it falls back to the
+  // application-of-non-function route, whose error correctly blames the
   // illegal application of `t` (`function` expected, `string` given).
   test('a string-valued symbol applied to a collection is an application error, not Multiply', () => {
     const ce = new ComputeEngine();
@@ -461,6 +462,123 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
     expect(e.operator).toBe('t'); // application, NOT Multiply
     expect(e.evaluate().operator).toBe('Error');
     expect(errorCode(e.evaluate())).toBe('incompatible-type');
+  });
+
+  // Tycho item 173: the same single-argument branch read `A(arg)` — with `A`
+  // a declared/bound COLLECTION (so `A.isFunction === false`) — as a product
+  // when `arg` was scalar-typed but as an APPLICATION when `arg` was
+  // collection-typed, yielding `Error(incompatible-type, function,
+  // list<number>)`. The raw parse is a uniform `InvisibleOperator(A,
+  // Delimiter(…))` in every case: the reading must depend on the HEAD, never
+  // on the argument's type. (USER RULING: a declared/bound non-function head
+  // juxtaposed with parens multiplies.)
+  describe('collection-typed head · parenthesized arg is Multiply (item 173)', () => {
+    const setups: [string, (ce: ComputeEngine) => void][] = [
+      [
+        'declared indexed_collection',
+        (ce) => {
+          ce.declare('A', 'indexed_collection');
+          ce.declare('B', 'indexed_collection');
+        },
+      ],
+      [
+        'declared list<number>',
+        (ce) => {
+          ce.declare('A', ce.type('list<number>'));
+          ce.declare('B', ce.type('list<number>'));
+        },
+      ],
+      [
+        'assigned a concrete list',
+        (ce) => {
+          ce.assign('A', ce.box(['List', 1, 2, 3]));
+          ce.assign('B', ce.box(['List', 4, 5, 6]));
+        },
+      ],
+      [
+        // A `broadcastable<…>`-typed head is a number OR an indexed
+        // collection of numbers — never a function. The multi-operand gate
+        // always read it as value-like; the single-argument branch omitted
+        // it, so the reading depended on the argument's shape again.
+        'declared broadcastable<number>',
+        (ce) => {
+          ce.declare('A', ce.type('broadcastable<number>'));
+          ce.declare('B', ce.type('list<number>'));
+        },
+      ],
+    ];
+
+    for (const [label, setup] of setups) {
+      test(`${label}: the argument's type does not change the reading`, () => {
+        const ce = new ComputeEngine();
+        setup(ce);
+        ce.declare('m', 'number');
+        expect(ce.box('A').isFunction).toBe(false);
+
+        // Scalar-typed argument (already worked)
+        expect(ce.parse('A(m)').json).toEqual(['Multiply', 'A', 'm']);
+        expect(ce.parse('A(t-m)').json).toEqual([
+          'Multiply',
+          'A',
+          ['Add', ['Negate', 'm'], 't'],
+        ]);
+        // Collection-typed argument (was an illegal application)
+        expect(ce.parse('A(B)').json).toEqual(['Multiply', 'A', 'B']);
+        expect(ce.parse('A(t-B)').json).toEqual([
+          'Multiply',
+          'A',
+          ['Add', ['Negate', 'B'], 't'],
+        ]);
+        expect(ce.parse('A(t-B+m)').json).toEqual([
+          'Multiply',
+          'A',
+          ['Add', ['Negate', 'B'], 'm', 't'],
+        ]);
+      });
+
+      test(`${label}: same on the box route (raw MathJSON)`, () => {
+        const ce = new ComputeEngine();
+        setup(ce);
+        expect(
+          ce.box(['InvisibleOperator', 'A', ['Delimiter', 'B']]).json
+        ).toEqual(['Multiply', 'A', 'B']);
+      });
+    }
+
+    test('the product of two bound lists evaluates element-wise', () => {
+      const ce = new ComputeEngine();
+      ce.assign('A', ce.box(['List', 1, 2, 3]));
+      ce.assign('B', ce.box(['List', 4, 5, 6]));
+      expect(ce.parse('A(B)').evaluate().json).toEqual(['List', 4, 10, 18]);
+    });
+
+    // The head decides, so heads that ARE (or could become) functions keep
+    // applying: an undeclared head binds vacuously as a function (item 152),
+    // and a declared function obviously applies.
+    test('an undeclared or function-typed head still applies', () => {
+      const ce = new ComputeEngine();
+      ce.declare('B', 'indexed_collection');
+      ce.declare('g', 'function');
+      expect(ce.parse('f(B)').operator).toBe('f');
+      expect(ce.parse('g(B)').operator).toBe('g');
+    });
+
+    // A `set` has no scaling semantics (same carve-out as the juxtaposition
+    // path and as the string case in E3 above): it stays an application, whose
+    // error blames the illegal application rather than a `Multiply`.
+    test('a set-typed head stays an application', () => {
+      const ce = new ComputeEngine();
+      ce.declare('S', ce.type('set<number>'));
+      ce.declare('B', 'indexed_collection');
+      expect(ce.parse('S(B)').operator).toBe('S');
+    });
+
+    test('a matrix head juxtaposed with a matrix is a product', () => {
+      const ce = new ComputeEngine();
+      ce.declare('M', 'matrix');
+      ce.declare('P', 'matrix');
+      expect(ce.parse('M(P)').json).toEqual(['Multiply', 'M', 'P']);
+    });
   });
 });
 

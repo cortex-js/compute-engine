@@ -1504,8 +1504,20 @@ export function evaluateStatements(
     // value, so it propagates through nested blocks up to the enclosing
     // `Loop` (which consumes `Break`/`Continue`) or function application
     // (which unwraps `Return` — see `unwrapReturn`).
+    //
+    // An `Error` VALUE short-circuits the same way: a non-final statement's
+    // value is nobody's, so a refusal that is the statement's value (a
+    // mistyped write, a `const` reassignment, a readonly protocol-property
+    // set) would otherwise VANISH and execution would continue past the
+    // fault — `executeEpsil` already surfaces exactly these as
+    // `runtime-error` diagnostics for top-level statements; inside a
+    // function body or block the error value propagating out IS the
+    // diagnostic channel. Top-level `Error` operator only: a still-symbolic
+    // statement carrying an embedded error operand is an ordinary inert
+    // value, not a fault.
     const h = result.operator;
-    if (h === 'Return' || h === 'Break' || h === 'Continue') break;
+    if (h === 'Return' || h === 'Break' || h === 'Continue' || h === 'Error')
+      break;
   }
   return result;
 }

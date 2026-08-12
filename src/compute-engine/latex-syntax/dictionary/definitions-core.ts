@@ -2259,8 +2259,22 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           ]);
         })
         .join(', ');
+      // A `Block` body (block-local `Declare`/`Assign` in front of the value
+      // expression — what the `body with d = …` dialect produces inside a
+      // comprehension) serializes as a bare `;`-separated statement list. In
+      // the comprehension slot that is NOT round-trip faithful: `;` (19) binds
+      // looser than the `for` clause, so `[d≔[n,2]; \sum d for n=1..3]`
+      // re-parses as a one-statement-list `[Block(d≔[n,2], Comprehension(\sum
+      // d, …))]` — the local no longer scopes over the body and the VALUE
+      // changes. Fence the block so the `for` binds to the whole body:
+      // `(…)` re-parses as `Delimiter(Block(…))`, which canonicalizes back to
+      // the same `Block` (Tycho item 172).
+      const bodyLatex =
+        operator(body) === 'Block'
+          ? joinLatex(['\\left(', serializer.serialize(body), '\\right)'])
+          : serializer.serialize(body);
       const comprehension = joinLatex([
-        serializer.serialize(body),
+        bodyLatex,
         ' \\operatorname{for} ',
         bindings,
       ]);

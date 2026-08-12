@@ -197,6 +197,77 @@ describe('Field compile lowering (D16/§4.6)', () => {
       /Field/
     );
   });
+
+  test('JS: a typed body LOCAL resolves through the declared-type map', () => {
+    // A canonical function body's locals are unbound, so the receiver of
+    // `q.y` types `unknown` and the Field compile handler — which resolves
+    // named-tuple fields positionally from the receiver's static type —
+    // declined, while the same read on a PARAMETER compiled. The declared
+    // type now comes from `CompileTarget.declaredVarTypes` (the protocol
+    // GET/SET fallback), for block locals and loop-body locals alike.
+    const {
+      compile,
+    } = require('../../src/compute-engine/compilation/compile-expression');
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      `type pt = tuple<x: integer, y: integer>
+function g(p: pt) -> integer {
+  let q: pt = p
+  q.y
+}
+function h() -> integer {
+  let acc = 0
+  for i in 1..3 {
+    let q: pt = pt(i, 10 * i)
+    acc = acc + q.y
+  }
+  acc
+}`
+    ).diagnostics;
+    expect(r).toEqual([]);
+    const g = compile(ce.box('g'));
+    expect(g.success).toBe(true);
+    expect(g.run?.()([3, 4])).toBe(4);
+    const h = compile(ce.box('h'));
+    expect(h.success).toBe(true);
+    expect(h.run?.()()).toBe(60);
+    expect(ce.box(['h'] as any).evaluate().toString()).toBe('60');
+    // An UNTYPED local still fails closed (no declared entry to read).
+    const u = executeEpsil(
+      ce,
+      `function u(p: pt) -> unknown {
+  let q = p
+  q.y
+}`
+    ).diagnostics;
+    expect(u).toEqual([]);
+    expect(compile(ce.box('u')).success).toBe(false);
+  });
+
+  test('JS: a NESTED field chain on a typed local resolves too', () => {
+    // `q.inner.y` — the outer Field's receiver is another Field, so the
+    // receiver chain is rebuilt from its ascribed root: each intermediate
+    // access then resolves statically (it used to fail closed while the
+    // one-level `q.y` compiled).
+    const {
+      compile,
+    } = require('../../src/compute-engine/compilation/compile-expression');
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      `type pt = tuple<x: integer, y: integer>
+type seg = tuple<inner: pt, w: integer>
+function g(s: seg) -> integer {
+  let q: seg = s
+  q.inner.y
+}`
+    ).diagnostics;
+    expect(r).toEqual([]);
+    const g = compile(ce.box('g'));
+    expect(g.success).toBe(true);
+    expect(g.run?.()([[3, 4], 9])).toBe(4);
+  });
 });
 
 //

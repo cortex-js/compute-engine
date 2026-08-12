@@ -7,6 +7,7 @@ import { indexingSetSites } from '../boxed-expression/binding-sites.js';
 import {
   broadcastElementType,
   collectionElementType,
+  resolveTypeForCompilation,
   widen,
 } from '../../common/type/utils.js';
 import {
@@ -1281,7 +1282,28 @@ function canonicalLoopLike(
       collCanonical.type.type === 'unknown'
     )
       collCanonical.infer('collection', 'narrow');
-    return ce._fn('Element', [indexExpr.canonical, collCanonical]);
+    // …and nothing typed the INDEX, either (the same bypass): the binder
+    // hook declares each index `unknown`, and the body's arithmetic use
+    // then widened it to `number` — so `for i in 1..3` typed `10 * i` as
+    // `finite_number`, wide enough to falsely refuse an `integer`-declared
+    // protocol-property write. Narrow the fresh binding to the collection's
+    // ELEMENT type when it is known, BEFORE the body canonicalizes against
+    // it (the `Element` canonical handler's own inference, sets.ts, which
+    // this `_fn` rebuild bypasses). `.infer()` accepts an explicit-`unknown`
+    // binding and carries the machinery a raw `def.type` write skips (the
+    // resolve-only guard, the inference state event, the same-type no-op
+    // that preserves `BoxedType` identity). The collection type is resolved
+    // first so an ALIAS (`type ints = list<integer>`) contributes its
+    // element type too.
+    const idxCanonical = indexExpr.canonical;
+    if (isSymbol(idxCanonical)) {
+      const elt = collectionElementType(
+        resolveTypeForCompilation(collCanonical.type.type)
+      );
+      if (elt !== undefined && elt !== 'any' && elt !== 'unknown')
+        idxCanonical.infer(elt, 'narrow');
+    }
+    return ce._fn('Element', [idxCanonical, collCanonical]);
   });
   const canonicalBody: Expression = canonicalStatement(ce, body);
 
@@ -1323,6 +1345,10 @@ function* runLoop(
       if (isFunction(result, 'Break'))
         return result.ops.length > 0 ? result.op1 : ce.Nothing;
       if (result.operator === 'Return') return result;
+      // An `Error` value — the body's statement list short-circuited on a
+      // fault (see `evaluateStatements`). Stop and surface it as the loop's
+      // value rather than iterating past it forever.
+      if (result.operator === 'Error') return result;
       i += 1;
       yield result;
       if (i > ce.iterationLimit)
@@ -1341,6 +1367,14 @@ function* runLoop(
     }
     if (result.operator === 'Return') {
       // Return propagation: forward the Return expression unchanged.
+      state.stopped = true;
+      state.value = result;
+      return;
+    }
+    if (result.operator === 'Error') {
+      // A fault the body's statement list short-circuited on (see
+      // `evaluateStatements`): stop, and the error is the loop's value —
+      // iterating on would silently repeat (or compound) the fault.
       state.stopped = true;
       state.value = result;
       return;

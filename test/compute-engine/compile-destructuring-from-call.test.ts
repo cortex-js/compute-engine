@@ -363,8 +363,8 @@ describe('a destructuring assign the interpreter would refuse fails closed', () 
 
   test('a DECLARED-TYPE target fails closed (it wrote both, atomically refused)', () => {
     // `x, y: integer` and a float leaf: the interpreter rejects the assignment
-    // whole, so neither target moves and the block is `100*1 + 2`. Compiled, the
-    // writes went through and the block ran to 704.5.
+    // whole, so neither target moves. Compiled, the writes went through and
+    // the block ran to 704.5.
     const expr = boxedBlock(
       'do { let x: integer = 1; let y: integer = 2; (x, y) := (7, 4.5); 100*x + y }'
     );
@@ -372,7 +372,11 @@ describe('a destructuring assign the interpreter would refuse fails closed', () 
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/declared type|declared type of/);
     expect(r?.error).toMatch(/Fail closed \(D6\)/);
-    expect(expr.evaluate().isSame(102)).toBe(true);
+    // The refusal is the statement's value, and an error value short-circuits
+    // the block (it used to be discarded, and the block continued to 102).
+    const result = expr.evaluate();
+    expect(result.operator).toBe('Error');
+    expect(result.toString()).toMatch(/incompatible-type/);
   });
 
   test('a declared-type target fails closed even when the value FITS', () => {
@@ -453,7 +457,10 @@ describe('a destructuring assign the interpreter would refuse fails closed', () 
     const r = compile(expr);
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/destructuring assignment/);
-    expect(expr.evaluate().isSame(1)).toBe(true);
+    // The refused assignment's error value now short-circuits the body (it
+    // used to be discarded every iteration, and the call answered 1); an
+    // application whose body faults declines and stays inert.
+    expect(expr.evaluate().toString()).toBe('g(1)');
   });
 
   test('an UNTYPED / inferred target still compiles, byte-identically', () => {
@@ -577,8 +584,10 @@ describe('an annotated PARAMETER as a destructuring-assign target', () => {
     expect(r?.error).toMatch(/declared type|declared as a constant/);
     expect(r?.error).toMatch(/Fail closed \(D6\)/);
     // The interpreter refuses the assignment atomically: neither parameter
-    // moves, so the body is 100*1 + 2. Compiled, it ran to 704.5.
-    expect(expr.evaluate().isSame(102)).toBe(true);
+    // moves. Compiled, it ran to 704.5. The refusal's error value now
+    // short-circuits the body (it used to be discarded, and the call
+    // answered 102); an application whose body faults declines, inert.
+    expect(expr.evaluate().toString()).toBe('f(1, 2)');
   });
 
   test('an annotated parameter NOT targeted by the pattern still compiles', () => {
@@ -618,8 +627,10 @@ describe('an annotated PARAMETER as a destructuring-assign target', () => {
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/destructuring assignment/);
     // Every iteration's assignment is refused whole, so neither `x` nor `j`
-    // moves: 100*1 + 1.
-    expect(expr.evaluate().isSame(101)).toBe(true);
+    // moves. The refusal's error value now stops the loop on iteration 1 and
+    // short-circuits the body (it used to be discarded, and the call
+    // answered 101); an application whose body faults declines, inert.
+    expect(expr.evaluate().toString()).toBe('f(1, 1)');
   });
 
   test('an UNANNOTATED parameter target still compiles (state threading)', () => {

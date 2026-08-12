@@ -148,19 +148,21 @@ export function canonicalInvisibleOperator(
 
       // The single argument is non-numeric (e.g. a collection like `\cos(S)`
       // where `S` is bound to a list). If the leading symbol is KNOWN to be a
-      // NUMERIC value — declared with a numeric type or assigned a number — it
-      // cannot be a function application, so the juxtaposition is multiplication
-      // (scaling / broadcast over the collection), matching the scalar-arg case
-      // above and the multi-operand invisible-multiplication path. Only a
-      // numeric value scales a collection: a non-numeric non-function value
-      // (e.g. a string) falls through to the function-call route below, which
+      // MULTIPLICATIVE value — declared with (or assigned) a numeric or
+      // linear-algebra type — it cannot be a function application, so the
+      // juxtaposition is multiplication (scaling / broadcast over the
+      // collection), matching the scalar-arg case above and the multi-operand
+      // invisible-multiplication path. A value that does not multiply (e.g. a
+      // string, a set) falls through to the function-call route below, which
       // surfaces the actual mistake (an illegal application of a non-function)
       // rather than a `Multiply` whose type error blames multiplication. An
       // undeclared or unknown-typed symbol stays genuinely ambiguous and also
       // falls through. (Tycho item 13: `k(\cos(S))` with `k` a number and `S` a
       // collection parsed as `k` applied — an illegal application of a number —
-      // instead of `k·\cos(S)`.)
-      if (def && !isOperatorDef(def) && def.value?.type?.matches('number')) {
+      // instead of `k·\cos(S)`. Tycho item 173: same divergence with a
+      // COLLECTION-typed head, `A(t-B)` with `A` and `B` lists — the reading
+      // must not depend on the argument's type.)
+      if (def && !isOperatorDef(def) && def.value && isScalable(lhsCanon)) {
         return ce.function('Multiply', [lhsCanon, ...args]);
       }
 
@@ -444,6 +446,36 @@ function combineFunctionApplications(
     i++;
   }
   return result;
+}
+
+/**
+ * Whether a value-typed operand MULTIPLIES: a number, or a linear-algebra
+ * value (matrix, list/vector, abstract `collection`/`indexed_collection`,
+ * numeric tuple). These are exactly the value-like operands the multi-operand
+ * invisible-multiplication path below reads as a product, so a juxtaposition
+ * `A(…)` on such a head is a product too — whatever the parenthesized
+ * argument's type (Tycho items 13 and 173).
+ *
+ * Deliberately excludes `unknown`/`any`/`expression`/`value` (a head that
+ * could still turn out to be a function stays an application — item 152) and
+ * values with no scaling semantics (`string`, `set`), whose application error
+ * correctly blames the illegal application rather than a `Multiply`.
+ */
+function isScalable(x: Expression): boolean {
+  return (
+    x.type.matches('number') ||
+    x.type.matches(MATRIX_TYPE) ||
+    x.type.matches(LIST_TYPE) ||
+    // A `broadcastable<…>`-typed head is a number OR an indexed collection
+    // of numbers (never a function), exactly as the multi-operand gate
+    // below reads it — omitting it here made `A(B)` on such a head an
+    // application while `A B` multiplied, the argument-shape dependence
+    // item 173 removed.
+    (typeof x.type.type !== 'string' &&
+      x.type.type.kind === 'broadcastable') ||
+    isLinearAlgebraCollection(x) ||
+    couldBeNumericTuple(x)
+  );
 }
 
 /** Whether a later definition could turn a juxtaposition on this symbol into a

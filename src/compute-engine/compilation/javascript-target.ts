@@ -877,6 +877,25 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
     // scalar operands it is a scalar boolean. A broadcastable-typed
     // non-application (a declared symbol) keeps the conservative answer.
     if (isFunction(e) && (e.ops ?? []).length > 0) {
+      // "The lift cannot fire, so the result is the plain scalar `T`" holds
+      // only when the operator's own BASE result is scalar. For a builtin
+      // broadcastable operator that is true by definition of the lift. For a
+      // USER function it is not: the `broadcastable<T>` wrapper carries the
+      // DECLARED result, and under the open `(unknown) -> unknown` head the
+      // consumers use, `T` is `unknown` no matter what the body returns —
+      // `a(t) = [cos t, sin t]` applied to a SCALAR is still a list. So a
+      // user-function application takes the item-86 look-through instead,
+      // which reads the body and declines on a collection constructor
+      // (Tycho item 171: `Σ_i a(h(i))` reached the scalar accumulation arm
+      // and `+`-concatenated the arrays into a string, where the
+      // type-`unknown` spellings `Σ_i a(i)` / `Σ_i a(t+i)` took the
+      // element-wise `_SYS.bcast` fold).
+      if (userFunctionLiteral(e) !== undefined)
+        return !isProvablyScalarApplication(
+          e,
+          new Set(),
+          (a) => !a.type.matches('collection') && !isPossiblyCollectionTypedJS(a)
+        );
       return (e.ops ?? []).some(
         (a) => a.type.matches('collection') || isPossiblyCollectionTypedJS(a)
       );
@@ -884,6 +903,22 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * The `Function`-literal value of `e`'s operator when `e` is an application of
+ * a USER-defined function (a symbol whose value is a `Function` literal), and
+ * `undefined` otherwise — builtin operators have their own compile handlers and
+ * no body to look through.
+ */
+function userFunctionLiteral(
+  e: Expression
+): (Expression & FunctionInterface) | undefined {
+  if (!isFunction(e)) return undefined;
+  const op = e.operator;
+  if (typeof op !== 'string') return undefined;
+  const value = e.engine.box(op).value;
+  return isFunction(value, 'Function') ? value : undefined;
 }
 
 /**
@@ -922,8 +957,8 @@ function isProvablyScalarApplication(
   if (visited.has(op)) return false;
   // Only a USER function — a symbol whose value is a `Function` literal — is
   // looked through; built-in operators have their own compile handlers.
-  const fnVal = e.engine.box(op).value;
-  if (!isFunction(fnVal, 'Function')) return false;
+  const fnVal = userFunctionLiteral(e);
+  if (fnVal === undefined) return false;
   const fnOps = fnVal.ops;
   const params = fnOps
     .slice(1)

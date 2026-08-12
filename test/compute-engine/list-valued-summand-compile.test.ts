@@ -165,3 +165,123 @@ describe('big-op bodies that cannot accumulate numerically (item 121 residue)', 
     expect(ce.box(['Product', ['List', 1, 2, 3, 4]]).evaluate().re).toEqual(24);
   });
 });
+
+// Tycho item 171: the same defect, reached through the OTHER gate. A
+// list-valued user function applied to a NESTED user-function call —
+// `Σ_{i=0}^{2} a(h(i))` with `a(t) = [cos t, sin t]` — types
+// `broadcastable<unknown>` (the lift wrapper fires because the argument `h(i)`
+// is possibly-collection-typed, and `unknown` is `a`'s DECLARED result under
+// the open `(unknown) -> unknown` head the consumers register). The JS
+// element-wise gate's broadcastable arm then reasoned "no operand is
+// collection-ish, so the lift cannot fire and the result is the plain scalar
+// `T`" — sound for a BUILTIN broadcastable operator, whose base signature is
+// scalar → scalar by definition of the lift, but not for a user function whose
+// body returns a `List`. The body took the scalar accumulation arm and JS `+`
+// concatenated the arrays: `run()` answered the STRING
+// "1,00.5403…,0.8414…-0.4161…,0.9092…" behind `success: true`, including under
+// `realOnly: true`.
+//
+// The type-`unknown` spellings of the same shape (`Σ_i a(i)`, `Σ_i a(t+i)` —
+// no nested call, so no lift wrapper) went through the gate's unknown arm,
+// which already applied the item-86 look-through and declined on the `List`
+// body, taking the element-wise `_SYS.bcast` fold. The nested-call spelling
+// now matches them exactly.
+describe('a list-valued call inside a big-op body is element-wise, not scalar (item 171)', () => {
+  // The consumer registration shape: declare an open head, then assign the
+  // lambda. It is what makes the declared result `unknown` rather than the
+  // inferred `vector<finite_number^2>`.
+  const setup = (hBody: any) => {
+    const ce = new ComputeEngine();
+    for (const id of ['h', 'a', 'A'])
+      ce.declare(id, { signature: '(unknown) -> unknown' });
+    ce.assign('h', ce.box(['Function', ['Block', hBody], 'i']));
+    ce.assign(
+      'a',
+      ce.box(['Function', ['Block', ['List', ['Cos', 't'], ['Sin', 't']]], 't'])
+    );
+    ce.assign(
+      'A',
+      ce.box([
+        'Function',
+        ['Block', ['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]],
+        't',
+      ])
+    );
+    return ce;
+  };
+
+  test.each([
+    ['identity', 'i'],
+    ['affine', ['Add', 'i', 1]],
+    ['mod(sin)', ['Mod', ['Multiply', 10000, ['Sin', ['Multiply', 10000, 'i']]], 1]],
+  ])('`Sum a(h(i))` with h = %s agrees with the interpreter', (_label, hBody) => {
+    const ce = setup(hBody);
+    // The body is the lift-wrapped shape that used to slip the gate.
+    const sumBody = (ce.box('A').value as any).ops[0].ops[0].ops[0];
+    expect(sumBody.type.toString()).toEqual('broadcastable<unknown>');
+
+    const [x, y] = [...ce.parse('A(0.3)').N().each()].map((e) => e.re);
+    // Both option shapes — `realOnly` is irrelevant to the emission.
+    for (const opts of [{ realOnly: true }, undefined] as const) {
+      const r = compile(ce.parse('A(t)', { strict: false }), {
+        fallback: true,
+        ...(opts ?? {}),
+      });
+      expect(r?.success).toBe(true);
+      const v = (r as any).run({ t: 0.3 });
+      // Was a JS string: `+` over the arrays `a` really returns.
+      expect(typeof v).not.toEqual('string');
+      expect(Array.isArray(v)).toBe(true);
+      expect(v[0]).toBeCloseTo(x!, 10);
+      expect(v[1]).toBeCloseTo(y!, 10);
+    }
+  });
+
+  test('the un-nested spellings are unchanged', () => {
+    // `Σ a(t+i)` and `Σ a(i)` never had the lift wrapper and already compiled
+    // element-wise — they must keep the same emitted code and value.
+    for (const arg of [['Add', 't', 'i'], 'i'] as any[]) {
+      const ce = setup('i');
+      ce.assign(
+        'A',
+        ce.box([
+          'Function',
+          ['Block', ['Sum', ['a', arg], ['Limits', 'i', 0, 2]]],
+          't',
+        ])
+      );
+      const r = compile(ce.parse('A(t)', { strict: false }), { fallback: true });
+      expect(r?.success).toBe(true);
+      const v = (r as any).run({ t: 0.3 });
+      expect(Array.isArray(v)).toBe(true);
+      const [x, y] = [...ce.parse('A(0.3)').N().each()].map((e) => e.re);
+      expect(v[0]).toBeCloseTo(x!, 10);
+      expect(v[1]).toBeCloseTo(y!, 10);
+    }
+  });
+
+  test('a provably-scalar user function in the same position stays scalar', () => {
+    // The look-through must still ADMIT the scalar case: `g(t) = 2t+1` under
+    // the same open head and the same nested-call argument keeps the bare
+    // scalar accumulation (no `_SYS.bcast` fold), and answers a number.
+    const ce = new ComputeEngine();
+    for (const id of ['h', 'g', 'G'])
+      ce.declare(id, { signature: '(unknown) -> unknown' });
+    ce.assign('h', ce.box(['Function', ['Block', 'i'], 'i']));
+    ce.assign(
+      'g',
+      ce.box(['Function', ['Block', ['Add', ['Multiply', 2, 't'], 1]], 't'])
+    );
+    ce.assign(
+      'G',
+      ce.box([
+        'Function',
+        ['Block', ['Sum', ['g', ['h', 'i']], ['Limits', 'i', 0, 2]]],
+        't',
+      ])
+    );
+    const r = compile(ce.parse('G(t)', { strict: false }), { fallback: true });
+    expect(r?.success).toBe(true);
+    expect((r as any).run({ t: 0.3 })).toBeCloseTo(9, 10); // 1 + 3 + 5
+  });
+});

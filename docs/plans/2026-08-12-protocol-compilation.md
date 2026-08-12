@@ -191,7 +191,15 @@ would die inside the protocol-naming `Field` operand).
   write, diverging from the compiled tier, which performed it. The deferred
   route now evaluates the RHS first (the `ProtocolProperty` operator is not
   lazy, so this is the same single evaluation every other route does) and
-  checks the CONCRETE value.
+  checks the CONCRETE value. A follow-up round (same day) closed the
+  swallow itself engine-wide: an `Error`-valued statement now
+  short-circuits `evaluateStatements` like `Return` (the error is the
+  block's value) and stops `runLoop` — extending to function bodies, blocks
+  and loops the posture `executeEpsil` already took for top-level
+  statements (`runtime-error` diagnostics). An application whose body
+  faults keeps the standing decline convention (`result.isValid ? result :
+  undefined`): the call stays inert rather than answering a value computed
+  past the fault.
 - The per-plan result convention (`branchComplexCoercion` across the arms)
   is part of the helper cache key (`$cx` suffix): the same edge emitted by a
   coercion-free plan and reused by a mixed real/complex chain gets two

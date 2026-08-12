@@ -60,6 +60,82 @@ describe('COMPREHENSION - SERIALIZATION', () => {
   });
 });
 
+describe('COMPREHENSION with a Block body (Tycho item 172)', () => {
+  // `["Comprehension", ["Block", …locals…, value], ["Element", n, …]]` — the
+  // shape the `body with d = …` dialect produces when the local depends on
+  // the loop index. The block body serializes as a `;`-separated statement
+  // list, which binds LOOSER than the `for` clause: unfenced, the emitted
+  // LaTeX re-parsed as a one-element list wrapping
+  // `Block(d≔[n,2], Comprehension(Σd, …))` — the local no longer scoped over
+  // the body and the value silently changed. The body is fenced with `(…)`.
+  const blockComprehension = [
+    'Comprehension',
+    ['Block', ['Declare', 'd'], ['Assign', 'd', ['List', 'n', 2]], ['Sum', 'd']],
+    ['Element', 'n', ['Range', 1, 3]],
+  ] as any;
+
+  test('box route: the block body is fenced', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(blockComprehension).latex).toMatchInlineSnapshot(
+      `\\left[\\left(d\\coloneq\\bigl\\lbrack n, 2\\bigr\\rbrack; \\sum d\\right) \\operatorname{for} n = 1..3\\right]`
+    );
+  });
+
+  test('box route: round-trips without changing the value', () => {
+    const ce = new ComputeEngine();
+    const original = ce.box(blockComprehension);
+    const roundTripped = ce.parse(original.latex);
+    expect(roundTripped.operator).toBe('Comprehension');
+    expect(roundTripped.json).toEqual(original.json);
+    // A `Comprehension` is a lazy collection: materialize to read the values.
+    expect(
+      roundTripped.evaluate({ materialization: true }).json
+    ).toEqual(original.evaluate({ materialization: true }).json);
+    expect([...roundTripped.each()].map((x) => x.json)).toEqual([3, 4, 5]);
+  });
+
+  test('parse route: the fenced spelling parses to a Block-bodied Comprehension', () => {
+    const ce = new ComputeEngine();
+    const parsed = ce.parse(
+      '\\left[\\left(d\\coloneq\\bigl\\lbrack n, 2\\bigr\\rbrack; \\sum d\\right) \\operatorname{for} n = 1..3\\right]'
+    );
+    expect(parsed.json).toEqual(blockComprehension);
+    expect([...parsed.each()].map((x) => x.json)).toEqual([3, 4, 5]);
+  });
+
+  test('a block-local shadows an outer symbol without leaking', () => {
+    const ce = new ComputeEngine();
+    ce.assign('d', ce.box(99));
+    const e = ce.box([
+      'Comprehension',
+      [
+        'Block',
+        ['Declare', 'd'],
+        ['Assign', 'd', ['Multiply', 'n', 10]],
+        ['Add', 'd', 1],
+      ],
+      ['Element', 'n', ['Range', 1, 3]],
+    ] as any);
+    expect([...e.each()].map((x) => x.json)).toEqual([11, 21, 31]);
+    expect(ce.box('d').evaluate().json).toEqual(99);
+    // …and the round trip keeps that shape.
+    expect(ce.parse(e.latex).json).toEqual(e.json);
+  });
+
+  test('a comprehension WITHOUT a block body is not fenced', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Comprehension',
+      ['Add', 'n', 1],
+      ['Element', 'n', ['Range', 1, 3]],
+    ] as any);
+    expect(e.latex).toMatchInlineSnapshot(
+      `\\left[n+1 \\operatorname{for} n = 1..3\\right]`
+    );
+    expect(ce.parse(e.latex).json).toEqual(e.json);
+  });
+});
+
 describe('MAP / FILTER - SERIALIZATION (Tycho item 26)', () => {
   // A canonical `Map`/`Filter` is a lazy collection. Its `.latex` must be the
   // faithful operator form, not a materialized preview List. Materializing is

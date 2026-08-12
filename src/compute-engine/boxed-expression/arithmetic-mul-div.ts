@@ -1213,12 +1213,26 @@ export function canonicalMultiply(
   //
   // Remove negations and negative numbers
   //
+  // Stripping a `Negate` can EXPOSE a nested product that the flatten pass
+  // above could not see: `Multiply(Negate(Multiply(a, b)), c)` has no direct
+  // `Multiply` operand, but `unnegate` leaves one behind. A canonical
+  // `Multiply` must never have a `Multiply` operand — `.json` flattens on
+  // serialization, so an unflattened node serializes identically to a
+  // flattened one while `isSame`/`hash` disagree about them (Tycho item 170).
+  // Re-enter the lifted operands so the sign channel and the flattening stay
+  // in lockstep, at any depth. A nested product that is an ellipsis-fold
+  // barrier is left alone, as in the pass above.
   let sign = 1;
   let xs: Expression[] = [];
-  for (const op of ops) {
-    const [o, s] = unnegate(op);
-    sign *= s;
-    xs.push(o);
+  {
+    const unnegateInto = (op: Expression) => {
+      const [o, s] = unnegate(op);
+      sign *= s;
+      if (isFunction(o, 'Multiply') && !containsContinuationOperand(o))
+        for (const x of o.ops) unnegateInto(x);
+      else xs.push(o);
+    };
+    for (const op of ops) unnegateInto(op);
   }
 
   //

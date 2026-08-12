@@ -1341,7 +1341,12 @@ export class BaseCompiler {
         typeof customDef.operator.compile === 'function'
       ) {
         const custom = customDef.operator.compile(
-          args,
+          BaseCompiler.fieldArgsWithDeclaredReceiver(
+            engine,
+            h,
+            args,
+            target.declaredVarTypes
+          ) ?? args,
           (expr) => BaseCompiler.compileValueOperand(expr, target),
           { language: target.language ?? 'javascript' }
         );
@@ -7339,6 +7344,66 @@ export class BaseCompiler {
    *   receiver may be an ordinary record/dictionary at runtime, whose keys
    *   beat protocol properties (P46) — a guard chain cannot arbitrate that.
    */
+  /**
+   * For a bare `Field` read whose receiver is a RAW body local — `q.n`
+   * where an enclosing statement list declared `q: Person` — the receiver's
+   * own static type is `unknown` (a canonical function body's locals are
+   * unbound), so the `Field` compile handler, which resolves record /
+   * named-tuple fields from the receiver's static type, declines. Re-type
+   * the receiver from the declared parameter/local map
+   * (`CompileTarget.declaredVarTypes` — the same fallback the protocol
+   * GET/SET tier applies) by ascribing it: `Typed` is transparent at
+   * evaluation and compiles to its operand, so only the static type the
+   * handler sees changes. Returns the substituted operand list, or `null`
+   * when the fallback does not apply (any head other than `Field`, a
+   * non-symbol or already-typed receiver, no declared entry).
+   */
+  private static fieldArgsWithDeclaredReceiver(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    declaredVarTypes: Readonly<Record<string, Type>> | undefined
+  ): ReadonlyArray<Expression> | null {
+    if (h !== 'Field' || declaredVarTypes === undefined) return null;
+    const receiver = BaseCompiler.receiverWithDeclaredType(
+      engine,
+      args[0],
+      declaredVarTypes
+    );
+    if (receiver === null) return null;
+    return [receiver, ...args.slice(1)];
+  }
+
+  /** The `Field` receiver with its declared-type ascription applied — a raw
+   * symbol becomes `Typed(sym, "<declared>")`, and a nested `Field` CHAIN
+   * (`q.address.zip`) is rebuilt from its ascribed root so each intermediate
+   * access resolves statically too. `null` when the fallback does not
+   * apply. */
+  private static receiverWithDeclaredType(
+    engine: ComputeEngine,
+    root: Expression | undefined,
+    declaredVarTypes: Readonly<Record<string, Type>>
+  ): Expression | null {
+    if (root === undefined) return null;
+    if (isSymbol(root)) {
+      const t = root.type.type;
+      if (t !== 'unknown' && t !== 'any') return null;
+      const declared = declaredVarTypes[root.symbol];
+      if (declared === undefined) return null;
+      return engine._fn('Typed', [root, engine.string(typeToString(declared))]);
+    }
+    if (isFunction(root, 'Field') && isString(root.ops[1])) {
+      const inner = BaseCompiler.receiverWithDeclaredType(
+        engine,
+        root.ops[0],
+        declaredVarTypes
+      );
+      if (inner === null) return null;
+      return engine._fn('Field', [inner, root.ops[1]]);
+    }
+    return null;
+  }
+
   private static protocolCallParts(
     engine: ComputeEngine,
     h: string,
@@ -7917,7 +7982,15 @@ export class BaseCompiler {
         ) {
           try {
             const probe = customCompileDef.operator.compile(
-              ops,
+              // The declared-type receiver fallback the compile path applies
+              // (see `fieldArgsWithDeclaredReceiver`), with the analysis
+              // walk's own frame standing in for the target's map.
+              BaseCompiler.fieldArgsWithDeclaredReceiver(
+                engine,
+                h,
+                ops,
+                declaredTypes
+              ) ?? ops,
               (e) => BaseCompiler.compileValueOperand(e, target),
               { language: target.language ?? 'javascript' }
             );

@@ -2397,6 +2397,24 @@ is in git history. The only items deliberately left open:
   operand `.evaluate()`); the cheap mitigation is adding `Max`/`Min`/`Inverse`
   to the denylist to honor the documented contract.
 
+- **List-valued big-op bodies on non-JS targets (2026-08-12, Tycho item 171
+  residue), flagged not fixed:** the JS fix routes a user-function application
+  in a big-op body through the item-86 body look-through
+  (`isPossiblyCollectionTypedJS`, `javascript-target.ts`), so `Σ_i a(h(i))`
+  with `a` list-valued takes the element-wise `_SYS.bcast` fold. Python, GPU
+  and interval have no `isElementwiseBigOpBody` equivalent and call
+  `assertScalarBigOpBody` directly, where `broadcastable<unknown>` is admitted
+  by the ruled item-121 exemption — the same shape presumably still emits
+  scalar accumulation over a list there (unverified; Python string-concats,
+  GPU/GLSL likely fails to compile the emitted code). Widening the base
+  assert is forbidden by the item-121 ruling (it would break working
+  boolean/broadcastable shader bodies); the fix is a target-local elementwise
+  arm (or the same look-through) per target. Also note the JS
+  `isPossiblyCollectionTypedJS` fix incidentally corrected the
+  comparison/equality gates for the same shape (`a(h(i)) < y` no longer
+  compiles a scalar `<` against an array) — that side effect has no dedicated
+  pin yet.
+
 - **Degenerate big-op round (2026-08-03), flagged not fixed:**
   - `sameSyntactic` (`boxed-expression/compare.ts`) is mis-named: despite its
     "compares symbols by NAME, ignoring bindings" doc, the symbol-vs-non-symbol
