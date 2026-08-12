@@ -6,6 +6,10 @@ run that day against the parameterized-nominal-types working tree.
 Updated 2026-08-08 after reviewing the system against Hindley–Milner and
 assessing the cost of F-bounded bounds (§5) and constrained HKT (§6);
 the `Map`-precision probes cited in §6 were run that day.
+Updated 2026-08-11: the forward-ref-to-alias ruling (former §2.2) is
+**closed** — Rule U (defined in §2.1) admits a type variable under a union
+arm, so the three spellings it was about no longer diverge. Section 2
+renumbered accordingly; re-probed that day.
 
 Design docs for the shipped and in-flight tiers (each §1 item points to
 its own):
@@ -13,8 +17,8 @@ its own):
 - `docs/plans/2026-08-01-nominal-types-design.md` — nominal types,
   constructors, D1–D11 (D11 = compile erasure, amended by §3 below)
 - `docs/plans/2026-08-06-parameterized-nominal-types-design.md` —
-  parameterized nominals, variance, N1–N10 ruling record (owns the §2.2
-  ruling below)
+  parameterized nominals, variance, N1–N12 ruling record (N11 = Rule U,
+  variables under a union arm)
 - `docs/plans/2026-08-04-generic-type-aliases-design.md` — A1–A8
 - `docs/plans/2026-08-01-type-variables-design.md` — forall/generics v1
 - `docs/plans/2026-08-04-generic-function-literals-design.md` — G1–G11,
@@ -29,19 +33,15 @@ its own):
   `type alias` statements, plus user-facing background on how the type
   system works (lattice, local generics, evidence-based inference)
 
-### In flight as of 2026-08-06
+### Known residuals — parameterized nominal types
 
-Parameterized nominal types: all five phases implemented in the working
-tree, **uncommitted**. Known residuals that this roadmap builds on:
-`couldMatch` reports different-argument applications as could-not-match
-(conservative); variable-carrying union bodies are unwritable for
-parameterized nominals (`unsupported-variable-position` — the restriction
-behind the §2.2 ruling); wrong-arity result type in a constructor-function
-literal gets a misleading E1-sugar diagnostic; re-declaring a type throws
-on the host API but replaces via Epsil statement. The Epsil-surface doc
-(`src/epsil/docs/types.md`) still says constructing/reading parameterized
-nominal values is unsupported — stale once the working tree lands; update
-it with the same commit.
+All five phases landed (2026-08-06), Rule U (§2.1) included. Residuals this
+roadmap builds on, still current as of 2026-08-11: `couldMatch` reports
+different-argument applications as could-not-match (`bag<integer>` vs
+`bag<string>` — conservative); a wrong-arity result type in a
+constructor-function literal gets a misleading E1-sugar diagnostic;
+re-declaring a type throws on the host API but replaces via Epsil
+statement.
 
 ## 1. Where the type system is today
 
@@ -68,9 +68,10 @@ it with the same commit.
 - **Parameterized nominal types** (`type tree<out T> = …`): opaque
   applications, recursive bodies, declaration-site variance (`in`/`out`/
   `inout`; unannotated = out-verified), forward references via the inline
-  `type name<T>` marker with defer-and-fulfil SCC verification
-  (parameterized-nominal-types design, N1–N10; N10 = ruling C; in flight,
-  see above).
+  `type name<T>` marker with defer-and-fulfil SCC verification, and a type
+  variable under a single union arm (Rule U, §2.1)
+  (parameterized-nominal-types design, N1–N12; N10 = ruling C; residuals
+  above).
 - **Compilation is type erasure** (D11, nominal-types design §4.6):
   nominal tags are static information, discharged before codegen;
   `meters(x)` compiles to `x`.
@@ -98,14 +99,105 @@ sessions — the right trade for a CAS. User-facing background lives in
 
 ## 2. Sum types (near term)
 
+A **sum type** expresses a choice: a value is exactly one of several
+**variants**, each optionally carrying a payload. It is the choice half of
+algebraic data types — the other half, the product, is the tuple/record
+already in §1 — and is also called a **tagged union**, the tag being what
+keeps two variants apart even when their payloads have the same shape.
+
+The natural spelling is the sugar **proposed** in §2.3. It does not parse
+today:
+
+```epsil
+type TrafficLight = red | green | yellow      // §2.3 sugar — not yet
+```
+
+Today each variant is its own nominal declaration and the union is named
+with `type alias`. That union of nominal types already *is* a tagged sum
+(§2.1) — this whole program runs as written:
+
+```epsil
+type red = nothing
+type green = nothing
+type yellow = nothing
+type alias TrafficLight = red | green | yellow
+
+function canGo(t: TrafficLight) -> boolean {
+  match t {
+    green() => true
+    _       => false
+  }
+}
+
+[canGo(green()), canGo(red())]
+// ➔ [True, False]
+```
+
+`nothing` is the unit type, so a variant declared with it carries no
+payload and its constructor is nullary. What distinguishes the three is
+their nominal identity, not their contents — which is exactly what a tag
+is.
+
+Sums earn their keep on recursive data; an AST is the standard example.
+Variants are read back with `match`, which selects on the variant and binds
+its payload in one step:
+
+```epsil
+type node =                                   // §2.3 sugar — not yet
+    lit(num: number)
+  | plus(op1: node, op2: node)
+  | times(op1: node, op2: node)
+
+function ev(n: node) -> number {
+  match n {
+    lit(v)      => v
+    plus(a, b)  => ev(a) + ev(b)
+    times(a, b) => ev(a) * ev(b)
+  }
+}
+
+ev(plus(lit(5), times(lit(2), lit(5))))
+// ➔ 15
+```
+
+The variants are named `plus`/`times` rather than `Add`/`Multiply` on
+purpose: a variant declared today is a free-floating global name, and
+those two are builtin operators. `type Add = tuple<op1: node, op2: node>`
+is accepted, but `Add(1, 2)` then still evaluates the builtin to `3` — the
+constructor is silently unreachable. Scoping variants to their sum is one
+of the things §2.3 buys.
+
+Desugared, that AST is what runs today. A recursive variant names the sum
+in its own payload through the forward-reference marker, since the sum
+cannot be declared before the variants it lists:
+
+```epsil
+type lit = tuple<num: number>
+type plus = tuple<op1: type expr, op2: type expr>   // fwd ref to the sum
+type times = tuple<op1: type expr, op2: type expr>
+type alias expr = lit | plus | times
+
+function ev(n: expr) -> number { … }                // exactly as above
+ev(plus(lit(5), times(lit(2), lit(5))))
+// ➔ 15
+```
+
+Recursion here only works as of 2026-08-11: the declarations were accepted
+and the first nested construction failed, because the alias reference
+captured inside a variant's payload was never unfolded by the subtype
+check. Fixed in `subtype.ts` and `reference.ts`, and pinned by
+`test/compute-engine/sum-types.test.ts` — which is what a future resolver
+or canonicalization change will trip over first.
+
 ### 2.1 Semantics by detection — largely done
 
 A union of nominal types **is** a tagged sum: disjoint variants (nominal
 opacity), per-variant constructors, `match` discrimination, no nesting
 collapse. No dedicated syntax is required for the semantics — this is the
 OCaml-polymorphic-variant / TS-discriminated-union "detected shape" model.
-Probed working end to end (2026-08-06), including the recursive generic
-case with the sum's own name at recursive positions:
+Working end to end, including the recursive generic case with the sum's own
+name at recursive positions — construction, field access and `match`
+(declared 2026-08-06, actually usable 2026-08-11, see below):
 
 ```epsil
 type leaf = nothing
@@ -116,6 +208,78 @@ type alias tree<T> = leaf | node<T>                            // fulfilment: OK
 Mutual recursion (JSON's `jarr`/`jobj`) likewise works via `type` markers,
 order-independent. The forward-ref machinery covers both the ordering and
 the naming problem — no inlined-union repetition is needed.
+
+**Rule U** — the rule that makes a union of variants declarable in the
+first place. Ruled 2026-08-06 as N11 of the parameterized-nominal-types
+design (which owns the full statement and its rationale); the sum track
+depends on it, so the operative content:
+
+- A type variable may stand **under a union arm**, in any rank-1 polytype.
+  `type opt<T> = T | missing` is the flagship — before the rule it was
+  undeclarable, rejected with `unsupported-variable-position`.
+- **At most one arm may mention variables.** `type both<T, U> = T | U` is
+  rejected: nothing at a call site says which arm a value took, so neither
+  variable could be solved.
+- At a call, an actual accepted by a **ground** arm binds the variables to
+  `never` — the bottom of the family (`opt(Missing)` types `opt<never>`);
+  otherwise the single open arm solves and refutes as usual
+  (`opt(3)` types `opt<finite_integer>`). Contravariant union positions
+  contribute no bound in v1.
+- A variable in an **intersection** or a **negation** is still rejected;
+  the intersection message steers to the replacement spelling, a bound
+  (`forall T: number.`).
+
+Consequence for sums: all three spellings of a recursive generic sum are
+now **declarable** — the union inlined directly in a parameterized nominal
+body; a forward reference fulfilled by a nominal; and one fulfilled by a
+generic alias, as above. They do **not** mean the same thing, and only the
+last is a sum (re-probed 2026-08-11): `type alias tree<T> = leaf | node<T>`
+is transparent, so `node<integer> <: tree<integer>` and
+`leaf <: tree<integer>` both hold, while `type tree<T> = leaf | node<T>`
+declares a *new opaque nominal* whose definition happens to be a union —
+neither member is a member of it. The former §2.2 ruling read the three as
+interchangeable, which they never were; the distinction is pinned by
+`test/compute-engine/sum-types.test.ts`.
+
+**Sums did not actually run until 2026-08-11.** Everything above declared,
+and every use of a sum through a named alias failed — found while
+re-probing this section, fixed the same day. Three defects had to line up,
+all in the unfolding of a structural alias standing on the RIGHT of a
+subtype check:
+
+- `isSubtype` short-circuited to `sameTypeApplication` whenever BOTH sides
+  were references, so a reference lhs never reached the rhs unfold at all:
+  `lit <: solo` was false while `solo <: lit` was true, for
+  `type alias solo = lit`. Now the name check is asked first and the unfold
+  runs when it fails.
+- `applyTypeReference` **snapshotted** the `alias` flag while delegating
+  `def` to the declaration record. A forward reference is created by use,
+  when the record is still the nominal-by-default placeholder, so an
+  application captured inside a variant's payload kept `alias: false` after
+  a `type alias` fulfilled it — and an unfold gated on that flag never
+  fired. `alias` now delegates, like `def` and for the same reason.
+- The unfold compared against the alias's OPEN body without substituting
+  the application's arguments, so `node<integer> <: tree<integer>` asked
+  `node<integer> <: leaf | node<T>` and failed on the variable.
+
+The guard on that unfold is keyed on the **pair** (record + lhs identity),
+not the record: an equirecursive alias reaches itself through a
+constructor, so `list<list<number>> <: json` must unfold `json` once per
+level, each time against a smaller lhs. A record-keyed guard cuts that off
+and reports a non-subtype — it broke every recursive-JSON test when tried.
+
+Two adjacent defects fell out of the same root and were fixed with it. A
+**payload-free variant** had no callable constructor: `type leaf = nothing`
+minted `(nothing) -> leaf`, and `nothing`'s sole inhabitant elides as an
+operand, so `leaf()` was a missing argument and `leaf(Nothing)` collapsed
+to the same call — it is nullary now, like an empty tuple body. And **Rule
+U's ground-arm binding did not fire through an alias**: the rule lives in
+the solver's union case, which a parameter still spelled as a
+forward-reference alias never reached, so `plus(lit(5), lit(2))` solved to
+`plus<unknown>` (rejected by an `expr<number>` parameter) instead of
+`plus<never>`. The solver's pattern walk now unfolds a structural alias,
+sharing one instantiating-unfold helper with `subtype.ts` so the two cannot
+drift.
 
 **Untagged unions** are the right choice when variants are pairwise
 runtime-disjoint (the payload is its own tag). The fully untagged,
@@ -137,27 +301,7 @@ semantics — notably `missing` as JSON null rides the absence machinery
 (`IsMissing`, `Coalesce`, `Missing + 1 → NaN`) and loses "present null" vs
 "absent key"; tagging exactly that variant (`type jnull = nothing`) fixes it.
 
-### 2.2 OPEN RULING — the forward-ref-to-alias loophole (load-bearing)
-
-Three spellings of the same effective type diverge (probed 2026-08-06):
-direct inlining of a variable-carrying union in a parameterized nominal
-body is rejected (`unsupported-variable-position`, §5 syntactic validator);
-fulfilling a forward ref with a *nominal* union body is rejected the same
-way; fulfilling with the generic *alias* passes. Coherent mechanically (§5
-restricts directly declared bodies; fulfilment runs the §4.2 variance
-walker, which handles unions; deferred occurrences are recorded, not
-judged) — but it makes the alias-fulfilment route a loophole through §5,
-and that route is now **the only spelling of recursive generic sums**.
-Ruling needed:
-
-- (a) **Bless and pin**: arguably principled — the alias keeps the union
-  out of any variance-verified body and the nominal members stay opaque.
-  If blessed, add a test pinning the route so a future §5 tightening
-  cannot silently break recursive sums.
-- (b) **Close**: recursive generic sums become unwritable until sugar
-  exists (non-generic sums unaffected — no type variables, §5 not in play).
-
-### 2.3 Exhaustiveness checking
+### 2.2 Exhaustiveness checking
 
 Per-scrutinee exhaustiveness over a detected sum is sound and closed: the
 union lists its members. Fires at canonicalization when the scrutinee's
@@ -167,12 +311,12 @@ For untagged unions, arms dispatch on runtime type tests and exhaustiveness
 becomes type-coverage reasoning — feasible, heavier machinery, lower
 priority.
 
-### 2.4 Sum-declaration sugar (mid term, modest priority)
+### 2.3 Sum-declaration sugar (mid term, modest priority)
 
 `type json = jnull | jbool(boolean) | … | jarr(list<json>)` desugaring to
 the N variant declarations + 1 alias. With detection + forward refs
-covering expressiveness (conditional on ruling 2.2 (a)), sugar buys:
-one statement instead of N+1; a variant set closed *by declaration*; the
+already covering expressiveness, sugar buys: one statement instead of N+1;
+a variant set closed *by declaration*; the
 sum's name usable in variant payloads without `type` markers; variants
 scoped to the sum instead of N free-floating global names (builtin-name
 collision hazard); one-edit variant addition. Cosmetic-adjacent —
@@ -346,16 +490,14 @@ with three rulings needed in order (see §7).
 
 ## 7. Open rulings and questions
 
-1. **§2.2**: bless-and-pin or close the forward-ref-to-alias route for
-   recursive generic sums. Load-bearing; decide before documenting sums.
-2. Sum sugar (§2.4): adopt a desugaring form? Variants scoped to the sum?
-3. `match` over untagged unions (§2.3): type-test patterns +
+1. Sum sugar (§2.3): adopt a desugaring form? Variants scoped to the sum?
+2. `match` over untagged unions (§2.2): type-test patterns +
    type-coverage exhaustiveness — wanted?
-4. D11 amendment (§3): land with (or before) constructing/reading values
+3. D11 amendment (§3): land with (or before) constructing/reading values
    of parameterized nominal types in compiled code.
-5. JSON-null vs absence (§2.1): recommend the `jnull`-tagged hybrid in
+4. JSON-null vs absence (§2.1): recommend the `jnull`-tagged hybrid in
    docs/examples, or accept the conflation?
-6. Constrained HKT (§6.1), when the trigger fires — three rulings in
+5. Constrained HKT (§6.1), when the trigger fires — three rulings in
    order: (a) `elem`/`rebind` operators vs constructor variables (lean
    rebind — the smaller theory); (b) the per-head rebind/fallback table,
    seeded from what the builtin type handlers already do; (c) whether the
@@ -656,10 +798,6 @@ function baz<T>(x: T) -> boolean where T: collection is Hashable { ...}
 
 // Also acceptable
 function baz<T>(x: T) -> boolean where T: collection, T is Hashable { ...}
-
-
-// Alternative syntax:
-const sort : forall T is Comparable & Hashable . (xs: list<T>) -> list<T> = { ... }
 ```
 
 A type may be required to conform to multiple protocols (not an *OR*, an *AND*).

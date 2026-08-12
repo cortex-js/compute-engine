@@ -29,42 +29,12 @@ import { deepEraseCallbackTypes, eraseCallbackType } from './callback.js';
 import { isEffectSubset } from './effects.js';
 import {
   _setTypeAlgebra,
+  aliasDefinitionAt,
   instantiatesTo,
   substituteTypeVariables,
 } from './instantiate.js';
 import { typeToDedupKey } from './serialize.js';
-import { declarationOf } from './reference.js';
 import { subtypingVarianceOf } from './variance.js';
-
-/**
- * The definition a STRUCTURAL alias reference stands for, instantiated at that
- * reference's own arguments.
- *
- * A generic alias is normally expanded eagerly at parse time, so a consumer
- * rarely meets one as a reference. A reference captured BEFORE its declaration
- * landed — a forward reference inside another type's body — is the exception:
- * it is still a reference when the check runs, and its `def` is the OPEN body
- * (`leaf | node<T>`). Unfolding to that body without substituting the
- * application's arguments compares a ground type against a type VARIABLE and
- * fails, which is what made `node<integer> <: tree<integer>` false for exactly
- * the recursive shapes a sum needs.
- *
- * Returns `undefined` when there is nothing to unfold to, or when the arity
- * does not line up (a mismatch is a declaration-time error; here it just means
- * "cannot decide structurally").
- */
-function aliasDefinitionAt(ref: Readonly<TypeReference>): Type | undefined {
-  const def = ref.def;
-  if (def === undefined) return undefined;
-  const params = declarationOf(ref as TypeReference).typeParams;
-  const args = ref.args;
-  if (params === undefined || params.length === 0 || args === undefined)
-    return def;
-  if (params.length !== args.length) return undefined;
-  const bindings: Record<string, Type> = {};
-  params.forEach((p, i) => (bindings[p.name] = args[i]));
-  return substituteTypeVariables(def, bindings);
-}
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {

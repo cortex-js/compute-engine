@@ -170,23 +170,36 @@ standing polytype behavior).
   `Filter`/`TakeWhile`/`DropWhile`/`Dedup`/`ChunkBy` — all finite
   because `Take(xs, 2)` caps at 2, all walkable only if `xs` is); they
   are fixed and pinned too.
-- **An EAGER collection leaf under a wrapper is still read as empty**
-  (pre-existing, surfaced 2026-08-10 by the review of the above):
-  `Filter(Take(Characters(s), 2), p)` answers `[]` and
-  `Any(Take(Characters(s), 2), p)` `False` for a valueless `s`. The
-  eager leaf is the one shape `isEnumerableCollection` reports
-  `undefined` for, a wrapper propagates that `undefined` up, and
-  `isEnumerableSource`'s evaluate-fallback then sees a
-  collection-shaped wrapper (`Take(…)` evaluates to itself) and reads
-  it as walkable. Re-asking the facet on the evaluated form does NOT
-  fix it: a lazy wrapper over a REACHABLE eager leaf
-  (`Filter(Characters("aab"), p)`) also evaluates to a wrapper whose
-  facet is `undefined`, so that spelling would newly declare a working
-  expression inert. The real fix is to give the 73 eager
-  collection-returning operators (`Characters`, `Divisors`,
-  `Eigenvalues`, `Flatten`, …) lazy collection handlers, which would
-  also retire the evaluate-fallback entirely — a per-operator round,
-  not a predicate change.
+- **Eager collection leaves under wrappers: wrong values on GROUND
+  input, empty-reads on symbolic input** (pre-existing; surfaced
+  2026-08-10 by the enumerability review, upgraded 2026-08-11 when the
+  ground-argument half was found — design ratified in
+  `docs/plans/2026-08-11-eager-collection-enumerability.md`, not yet
+  implemented). Two defects, one root. (A) **Wrong values with no free
+  variables**: `Filter(Take(Divisors(12), 3), _ > 1)` → `[]` (should
+  be `[2,3]`), `Any(Reverse(Divisors(12)), _ > 1)` → `False` (should
+  be `True`) — `each()` has the eager-source materialize fallback but
+  `at()` does NOT (`if (!handler) return undefined`), so every wrapper
+  that reads its source via `src.at(i)` (`Take`/`Drop`/`Reverse`/
+  `Rest`/`Slice`/`RotateLeft`) walks empty over any of the 73
+  handler-less eager producers, while the streaming wrappers
+  (`Map`/`Filter`/`Dedup`/`Zip`) work. (B) **Symbolic-argument
+  residue**: `Filter(Take(Characters(s), 2), p)` → `[]` for a
+  valueless `s` — the eager leaf's facet is `undefined`, and
+  `isEnumerableSource`'s evaluate-fallback misreads the still-lazy
+  wrapper's collection-ness as walkability. 32 of the 73 operators
+  confirmed reproducing (a floor; only ~11 are string-related).
+  The fix is NOT per-operator lazy collection blocks: (1) give `at()`
+  the materialize fallback `each()` already has (one seam, pure
+  sources only, evaluated form reused across indices — fixes A), then
+  (2) a `canEnumerate` operator-definition handler exposing the
+  decline test each eager `evaluate` handler already starts with
+  (O(1), no evaluation, no draws — fixes B per adopted operator), then
+  (3) retire the `isEnumerableSource` evaluate-fallback once adoption
+  covers the producers. Order is load-bearing: a cheap `true` is a
+  promise the access routes must honor, so delivery lands before the
+  predicate. See the plan for the probe tables and the coupling
+  argument.
 - **An eager IMPURE collection source is evaluated several times**
   (pre-existing, measured 2026-08-09 during the above): counting
   handler invocations over a 5-element source,

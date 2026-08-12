@@ -177,6 +177,54 @@ describe('a RECURSIVE sum survives its own payload', () => {
     ).toBe('15');
   });
 
+  test('a payload-free variant is constructible', () => {
+    // `nothing` is the unit type and the natural spelling of a variant that
+    // carries nothing. Its sole inhabitant `Nothing` ELIDES as an operand, so
+    // a unary `(nothing) -> leaf` constructor could never be called: `leaf()`
+    // was a missing argument and `leaf(Nothing)` collapsed to the same call.
+    // The constructor is nullary, like the one an empty tuple body gets.
+    expect(value(`type leaf = nothing\nType(leaf)`)).toBe('"() -> leaf"');
+    expect(value(`type leaf = nothing\nType(leaf())`)).toBe('"leaf"');
+  });
+
+  test('a payload-free variant discriminates in a sum', () => {
+    expect(
+      value(`
+        type red = nothing
+        type green = nothing
+        type alias light = red | green
+        function canGo(t: light) -> boolean {
+          match t {
+            green() => true
+            _       => false
+          }
+        }
+        [canGo(green()), canGo(red())]
+      `)
+    ).toBe('["True","False"]');
+  });
+
+  test('a ground arm binds the variables to `never`, through an alias', () => {
+    // Rule U: an actual accepted by a GROUND arm says nothing about the
+    // variable, so it contributes `never` — the bottom of the family. That
+    // rule lives in the solver's union case, which a parameter still spelled
+    // as a forward-reference ALIAS never reached: the union was hidden behind
+    // the reference, nothing was contributed, and the variable fell through to
+    // the `unknown` default. `plus<unknown>` is then rejected by an
+    // `expr<number>` parameter, where `plus<never>` is accepted.
+    const AST = `
+      type lit = tuple<num: number>
+      type plus<T> = tuple<op1: type expr<T>, op2: type expr<T>>
+      type alias expr<T> = lit | plus<T>
+    `;
+    expect(value(`${AST}\nType(plus(lit(5), lit(2)))`)).toBe('"plus<never>"');
+    // The flagship bare-variable arm, for contrast — same rule, and the shape
+    // that already worked because no alias stood in the way.
+    expect(value(`type opt<T> = T | missing\nType(opt(Missing))`)).toBe(
+      '"opt<never>"'
+    );
+  });
+
   test('the GENERIC recursive sum works through a collection payload', () => {
     // The roadmap's flagship shape (§2.1). The payload reaches the sum inside
     // a `list`, and the alias is parameterized — so the unfold has to

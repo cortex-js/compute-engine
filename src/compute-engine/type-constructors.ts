@@ -208,6 +208,14 @@ function deriveConstructorSignature(
   const close = (sig: FunctionSignature): FunctionSignature =>
     typeParams === undefined ? sig : { ...sig, typeParams };
   if (body === 'record') return undefined;
+  // `nothing` is the UNIT type — its sole inhabitant is `Nothing`, which
+  // ELIDES as an operand. A unary `(nothing) -> leaf` constructor is therefore
+  // uncallable: `leaf()` is a missing argument, and `leaf(Nothing)` collapses
+  // to the same call. Mint the NULLARY constructor instead, the shape an empty
+  // tuple body (`type unit = tuple<>`) already gets. This is what makes a
+  // payload-free sum variant constructible — `type leaf = nothing` is the
+  // natural spelling of one and was unbuildable.
+  if (body === 'nothing') return close({ kind: 'signature', args: [], result });
   if (typeof body === 'object') {
     if (body.kind === 'record') return undefined;
     if (body.kind === 'tuple') {

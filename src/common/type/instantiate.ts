@@ -4,6 +4,7 @@ import type {
   NamedElement,
   Type,
   TypeParameter,
+  TypeReference,
 } from './types.js';
 import { typeToString } from './serialize.js';
 import { declarationOf, withTypeArguments } from './reference.js';
@@ -322,6 +323,42 @@ function hasOwn(map: Readonly<Record<string, unknown>>, key: string): boolean {
  * call-site instantiation means; there is no rank-2 nesting in v1 for the
  * shadowing reading to matter to.
  */
+/**
+ * The definition a STRUCTURAL alias reference stands for, instantiated at that
+ * reference's own arguments.
+ *
+ * A generic alias is normally expanded eagerly at parse time, so a consumer
+ * rarely meets one as a reference. A reference captured BEFORE its declaration
+ * landed — a forward reference inside another type's body — is the exception:
+ * it is still a reference when the check runs, and its `def` is the OPEN body
+ * (`leaf | node<T>`). Unfolding to that body without substituting the
+ * application's arguments compares a ground type against a type VARIABLE, which
+ * is what made `node<integer> <: tree<integer>` false, and what made the
+ * solver read `plus(lit(5), lit(2))` as `plus<unknown>` instead of applying
+ * Rule U's ground-arm binding.
+ *
+ * Returns `undefined` when there is nothing to unfold to, or when the arity
+ * does not line up (a mismatch is a declaration-time error; here it just means
+ * "cannot decide structurally").
+ *
+ * Shared by `subtype.ts`'s alias unfold and `walkPattern`'s below, so the two
+ * cannot drift.
+ */
+export function aliasDefinitionAt(
+  ref: Readonly<TypeReference>
+): Type | undefined {
+  const def = ref.def;
+  if (def === undefined) return undefined;
+  const params = declarationOf(ref as TypeReference).typeParams;
+  const args = ref.args;
+  if (params === undefined || params.length === 0 || args === undefined)
+    return def;
+  if (params.length !== args.length) return undefined;
+  const bindings: Record<string, Type> = {};
+  params.forEach((p, i) => (bindings[p.name] = args[i]));
+  return substituteTypeVariables(def, bindings);
+}
+
 export function substituteTypeVariables(
   t: Type,
   bindings: Readonly<Record<string, Type>>
@@ -1535,6 +1572,12 @@ const MAPPED_KINDS: ReadonlySet<string> = new Set([
  * waiver is about. Every recursive call is a constructor descent and passes
  * false.
  */
+
+/** Alias records currently being unfolded by {@link walkPattern}'s `reference`
+ * case — its cycle cutoff. Allocated lazily and released at depth zero, so a
+ * walk that meets no alias allocates nothing. */
+let unfoldingPatterns: Set<TypeReference> | null = null;
+
 function walkPattern(
   s: SolverState,
   pattern: Type,
@@ -1757,6 +1800,41 @@ function walkPattern(
     }
 
     case 'reference': {
+      // A STRUCTURAL alias is its definition here too. Normally an alias is
+      // expanded before the solver ever sees it, so this only fires for one
+      // captured as a FORWARD reference inside another type's body — and
+      // without it Rule U never runs for such a parameter: the union it should
+      // have matched is hidden behind the reference, no arm contributes, and
+      // the variable falls through to the S3 default. That is what typed
+      // `plus(lit(5), lit(2))` as `plus<unknown>` (rejected by an `expr<number>`
+      // parameter) where the ground-arm rule gives `plus<never>`.
+      //
+      // Guarded on record identity: an alias chain that cycles through bare
+      // references would otherwise recurse forever. An EQUIRECURSIVE alias
+      // (`json`) does not re-enter — its arms are ground, and a ground arm is
+      // settled by `isSubtype`, not by another walk.
+      if (pattern.alias === true && pattern.def !== undefined) {
+        if (unfoldingPatterns === null) unfoldingPatterns = new Set();
+        const record = declarationOf(pattern);
+        if (unfoldingPatterns.has(record)) return true;
+        unfoldingPatterns.add(record);
+        try {
+          const def = aliasDefinitionAt(pattern);
+          if (def !== undefined)
+            return walkPattern(
+              s,
+              def,
+              actual,
+              index,
+              phase,
+              covariant,
+              topLevel
+            );
+        } finally {
+          unfoldingPatterns.delete(record);
+          if (unfoldingPatterns.size === 0) unfoldingPatterns = null;
+        }
+      }
       // An APPLIED nominal reference unifies by NAME plus pairwise argument
       // unification — the body is never consulted, so recursion costs nothing
       // here (parameterized-nominal design §3/§4.3). A different name, a

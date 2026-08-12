@@ -1,5 +1,57 @@
 ## [Unreleased]
 
+### Issues Resolved
+
+- **A type alias naming a union of nominal types now confers membership**, so a
+  sum type is usable through its own name. Given
+
+  ```epsil
+  type lit = tuple<num: number>
+  type plus = tuple<op1: type expr, op2: type expr>
+  type alias expr = lit | plus
+  ```
+
+  every declaration was accepted and then every *use* failed: `lit <: expr`
+  answered false, so passing a `lit` where an `expr` was expected was an
+  `incompatible-type` error. Recursive shapes failed at the first nested
+  construction — `total(node(1, [node(2, [])]))` reported `expected
+  list<tree<finite_integer>>, got list<node<finite_integer>^1>` even though
+  `node<integer> <: tree<integer>` held when asked directly.
+
+  Three defects in the unfolding of a structural alias standing on the RIGHT of
+  a subtype check: `isSubtype` short-circuited to a name comparison whenever
+  both sides were references, so a reference on the left never reached the
+  unfold at all (which is why the relation was asymmetric — `expr <: lit` held
+  while `lit <: expr` did not); an applied reference SNAPSHOTTED its `alias`
+  flag while delegating `def` to the declaration record, so a forward reference
+  captured inside a variant's payload kept the placeholder's `alias: false`
+  after a `type alias` fulfilled it; and the unfold compared against the
+  alias's open body without substituting the application's arguments, so
+  `node<integer> <: tree<integer>` asked `node<integer> <: leaf | node<T>` and
+  failed on the type variable.
+
+  Nominal opacity is unchanged: `type X = A | B` still declares a new opaque
+  type that neither `A` nor `B` inhabits — only `type alias X = A | B` is a
+  sum.
+
+- **A type whose body is `nothing` now has a nullary constructor**, so a
+  payload-free variant can be built. `type leaf = nothing` minted
+  `(nothing) -> leaf`, which no call could satisfy: `nothing` is the unit type
+  and its sole inhabitant `Nothing` elides as an operand, so `leaf()` was a
+  missing argument and `leaf(Nothing)` collapsed to the same call. The
+  constructor is now `() -> leaf`, the shape an empty tuple body
+  (`type unit = tuple<>`) already had.
+
+- **A ground union arm binds its type variables to `never` even when the union
+  is reached through an alias.** Rule U gives an operand accepted by a ground
+  arm no say over the variable, so it contributes `never` and a constraining
+  operand wins outright — but the rule lives in the solver's union case, which
+  a parameter still spelled as a forward-reference alias never reached. The
+  union was hidden behind the reference, no arm contributed, and the variable
+  fell through to the `unknown` default: `plus(lit(5), lit(2))` typed
+  `plus<unknown>` and was then rejected by an `expr<number>` parameter, where
+  `plus<never>` is accepted.
+
 ## 0.104.0 _2026-08-11_
 
 ### Breaking Changes
