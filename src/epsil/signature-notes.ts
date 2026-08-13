@@ -1,4 +1,8 @@
-import type { FunctionSignature, NamedElement, Type } from '../common/type/types.js';
+import type {
+  FunctionSignature,
+  NamedElement,
+  Type,
+} from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
 import { signatureArms } from '../common/type/utils.js';
 import type { MathJsonExpression } from '../math-json/types.js';
@@ -103,7 +107,6 @@ export function signatureNotes(
   return notes;
 }
 
-
 /** The error code of an `["Error", cause, …]` node — the head of its
  * `ErrorCode` payload, or the bare cause. (A local copy of the same reading
  * `static-diagnostics.ts` does, kept here so this module stands alone.) */
@@ -124,9 +127,7 @@ function errorCodeOf(error: MathJsonExpression): string {
  * outer frame's index counts arguments of a DIFFERENT call, so falling
  * through to it would attribute the fault to the wrong argument.
  */
-function innermostFrame(
-  error: MathJsonExpression
-): ErrorFrameRef | undefined {
+function innermostFrame(error: MathJsonExpression): ErrorFrameRef | undefined {
   const frame = traceFrames(error)[0];
   if (frame === undefined) return undefined;
   return frame.name === 'Block' || frame.name === 'Function'

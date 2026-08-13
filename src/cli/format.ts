@@ -356,8 +356,7 @@ function renderExcerpt(
   const pad = ' '.repeat(String(line).length);
   const arrow = `${pad}${paint(ANSI.blue, '-->')} ${paint(ANSI.dim, location)}`;
 
-  if (text === undefined)
-    return { arrow, body: '', pad, text: '', lineStart };
+  if (text === undefined) return { arrow, body: '', pad, text: '', lineStart };
 
   const bar = paint(ANSI.blue, `${pad} |`);
   const codeLine = `${paint(ANSI.blue, `${line} |`)} ${text}`;

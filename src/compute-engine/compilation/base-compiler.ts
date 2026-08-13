@@ -2507,7 +2507,12 @@ export class BaseCompiler {
       if (record !== undefined && member !== undefined) {
         const code = BaseCompiler.tryCompileProtocolDispatch(
           engine,
-          { implKey: member, member, protocol: record.name, args: args.slice(1) },
+          {
+            implKey: member,
+            member,
+            protocol: record.name,
+            args: args.slice(1),
+          },
           target
         );
         if (code !== undefined) return code;
@@ -8347,8 +8352,7 @@ export class BaseCompiler {
     if (!registry) return undefined;
     // JS-only (§8): the interval target's runtime values are intervals and
     // the shader targets cannot express the dispatcher. Fail closed there.
-    if (target.language !== 'javascript' || registry.lowering)
-      return undefined;
+    if (target.language !== 'javascript' || registry.lowering) return undefined;
 
     const receiver = call.args[0];
     if (receiver === undefined) return undefined;
@@ -8452,9 +8456,7 @@ export class BaseCompiler {
             BaseCompiler.compile(bodyExpr, bodyTarget)
           )
         );
-        const body = coerceResult
-          ? coerceResult(bodyExpr, compiled)
-          : compiled;
+        const body = coerceResult ? coerceResult(bodyExpr, compiled) : compiled;
         registry.defs.set(
           name,
           `const ${name} = (${params.join(', ')}) => ${body};`
@@ -8745,10 +8747,8 @@ export class BaseCompiler {
         h === 'Assign' &&
         isFunction(ops[0], 'Field') &&
         isString(ops[0].ops[1]) &&
-        protocolDispatchCandidates(
-          engine,
-          `__set__${ops[0].ops[1].string}`
-        ) !== null
+        protocolDispatchCandidates(engine, `__set__${ops[0].ops[1].string}`) !==
+          null
       ) {
         const name = ops[0].ops[1].string;
         const root = ops[0].ops[0];

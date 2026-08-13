@@ -4729,8 +4729,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Take: {
     description: ['Return `n` elements from a collection.'],
     complexity: 8200,
-    signature:
-      '(xs: indexed_collection<T>, count: number) -> list<T> where T',
+    signature: '(xs: indexed_collection<T>, count: number) -> list<T> where T',
     // No `evaluate` handler: materialization goes through the generic lazy-
     // collection path, driven by the `count`/`at`/`iterator` handlers below.
     // (A previous handler materialized eagerly from its operands — but the
@@ -4822,8 +4821,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Drop: {
     description: ['Return the collection without the first n elements.'],
     complexity: 8200,
-    signature:
-      '(xs: indexed_collection<T>, count: number) -> list<T> where T',
+    signature: '(xs: indexed_collection<T>, count: number) -> list<T> where T',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,

@@ -896,7 +896,10 @@ function declareSumTypeStatement(
     const payload = declarationName(op.ops[1]);
     if (!variantName || !payload)
       return ce.error(
-        ['invalid-type-declaration', 'Expected a variant name and payload type'],
+        [
+          'invalid-type-declaration',
+          'Expected a variant name and payload type',
+        ],
         name
       );
     variants.push({ name: variantName, payload });

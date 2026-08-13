@@ -12,7 +12,11 @@ import {
   type DispatchCandidate,
 } from '../engine-protocols.js';
 
-import { bucketOf, sumVariantInfo, type SumBucket } from './sum-representation.js';
+import {
+  bucketOf,
+  sumVariantInfo,
+  type SumBucket,
+} from './sum-representation.js';
 
 /**
  * PROTOCOL DISPATCH COMPILATION PLANNING — the JS-target lowering of protocol

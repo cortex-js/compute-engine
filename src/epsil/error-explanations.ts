@@ -20,7 +20,7 @@ The message reads "expected \`T\`, got \`U\`": T is what the context requires, U
 
 The check runs twice by design: once statically, when the program is canonicalized (reported before anything runs), and again during evaluation, where the mismatch becomes an error value that propagates outward (see "epsil doc runtime-error").`,
 
-  missing: `A function was called with fewer arguments than its signature requires; the error marks the position of the argument that was not provided.
+  'missing': `A function was called with fewer arguments than its signature requires; the error marks the position of the argument that was not provided.
 
 Check the signature with "epsil doc <FunctionName>". Optional parameters never produce this error — only required ones do.`,
 

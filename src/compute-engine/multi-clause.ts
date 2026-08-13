@@ -277,7 +277,9 @@ function hasLiteralPatternParam(literal: Expression): boolean {
  */
 const CANON_INSTALL_SKIPPED = new WeakSet<object>();
 
-export function noteCanonInstallSkipped(def: BoxedDefinition | undefined): void {
+export function noteCanonInstallSkipped(
+  def: BoxedDefinition | undefined
+): void {
   if (def !== undefined) CANON_INSTALL_SKIPPED.add(def);
 }
 

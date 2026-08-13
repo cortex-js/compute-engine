@@ -489,8 +489,7 @@ function isScalable(x: Expression): boolean {
     // below reads it — omitting it here made `A(B)` on such a head an
     // application while `A B` multiplied, the argument-shape dependence
     // item 173 removed.
-    (typeof x.type.type !== 'string' &&
-      x.type.type.kind === 'broadcastable') ||
+    (typeof x.type.type !== 'string' && x.type.type.kind === 'broadcastable') ||
     isLinearAlgebraCollection(x) ||
     couldBeNumericTuple(x)
   );

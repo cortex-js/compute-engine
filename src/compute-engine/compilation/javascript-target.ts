@@ -894,7 +894,8 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
         return !isProvablyScalarApplication(
           e,
           new Set(),
-          (a) => !a.type.matches('collection') && !isPossiblyCollectionTypedJS(a)
+          (a) =>
+            !a.type.matches('collection') && !isPossiblyCollectionTypedJS(a)
         );
       return (e.ops ?? []).some(
         (a) => a.type.matches('collection') || isPossiblyCollectionTypedJS(a)
