@@ -16,8 +16,8 @@
   // Index of the first non-whitespace character at or after i
   skipWs(cs, i) = skipWs(cs, i + 1) if i <= Length(cs) && isWs(cs[i]) else i
 
-  // A run of digits starting at i, as (value, indexAfter); acc accumulates
-  function parseDigits(cs, i, acc) {
+  /// A run of digits starting at i, as (value, indexAfter); acc accumulates
+  function parseDigits(cs: list<string>, i, acc) {
     if i <= Length(cs) && isDigit(cs[i]) {
       parseDigits(cs, i + 1, 10 * acc + IndexOf(digits, cs[i]) - 1)
     } else { (acc, i) }

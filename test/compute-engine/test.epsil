@@ -1,0 +1,12 @@
+const s1 = "Sightglass Coffee Shop"
+const s2 = "Le café des Deux Magots"
+const s3 = "singer 👨🏻‍🎤"
+const s4 = "Mühlenstraße"
+const s5 = "Mühlenstrasse"
+
+function foo(s: string) { s }
+
+const s = [s1, s2, s3, s4, s5]
+s |> Map(_, Length(s))
+
+const f = x -> x + 1
