@@ -538,7 +538,8 @@ function withDevolveRepair(
   // Nested constructions join the active root (withRootRepair returns
   // build() directly), so the persistence classifier below would be built
   // and discarded — skip the allocation on this per-node hot path.
-  if (ce._boxingState.isRootActive) return ce._boxingState.withRootRepair(build);
+  if (ce._boxingState.isRootActive)
+    return ce._boxingState.withRootRepair(build);
 
   // Persistence classifier for the first-boxing binding-divergence repair
   // (`EngineBoxingState.noteDeclarationIn`): a scope outlives this

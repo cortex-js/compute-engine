@@ -1011,7 +1011,8 @@ function normalizeErrorSubject(
   let ops = errorOpsWithoutTrace(subject);
   if (isFunction(pattern, 'Error')) {
     const wantsAll = pattern.ops.some(
-      (p) => wildcardType(p) === 'Sequence' || wildcardType(p) === 'OptionalSequence'
+      (p) =>
+        wildcardType(p) === 'Sequence' || wildcardType(p) === 'OptionalSequence'
     );
     if (!wantsAll && ops.length === 2 && ops.length > pattern.ops.length)
       ops = ops.slice(0, 1);

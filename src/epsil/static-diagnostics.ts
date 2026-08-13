@@ -239,10 +239,10 @@ function canonicalizationDiagnostics(
         // module cannot prove without engine runtime guards; read them
         // structurally. `values` exists on no other expression kind, so the
         // read cannot trigger a collection materialization.
-        const values = (node as { values?: readonly typeof node[] }).values;
+        const values = (node as { values?: readonly (typeof node)[] }).values;
         if (Array.isArray(values))
           for (let i = values.length - 1; i >= 0; i--) stack.push(values[i]);
-        const ops = (node as { ops?: readonly typeof node[] }).ops;
+        const ops = (node as { ops?: readonly (typeof node)[] }).ops;
         if (ops !== undefined)
           for (let i = ops.length - 1; i >= 0; i--) stack.push(ops[i]);
       }

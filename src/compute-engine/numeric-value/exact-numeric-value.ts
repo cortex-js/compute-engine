@@ -139,7 +139,10 @@ export class ExactNumericValue extends NumericValue {
       // contract. Reported by the Tycho team as item 178(b). Magnitudes beyond
       // the safe range stay bigint, so bignum results keep their compact
       // exponent form.
-      if (value <= BigInt(Number.MAX_SAFE_INTEGER) && value >= BigInt(Number.MIN_SAFE_INTEGER)) {
+      if (
+        value <= BigInt(Number.MAX_SAFE_INTEGER) &&
+        value >= BigInt(Number.MIN_SAFE_INTEGER)
+      ) {
         this.rational = [Number(value), 1];
         this.radical = 1;
         return;

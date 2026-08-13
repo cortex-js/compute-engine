@@ -878,7 +878,13 @@ export function triStateSelect(
     if (admissions[i] !== 'undecidable') continue;
     if (
       best < 0 ||
-      !isMoreSpecific(arms[best], arms[i], ops.length, named?.[best], named?.[i])
+      !isMoreSpecific(
+        arms[best],
+        arms[i],
+        ops.length,
+        named?.[best],
+        named?.[i]
+      )
     ) {
       blocked = true;
       break;

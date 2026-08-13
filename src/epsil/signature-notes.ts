@@ -183,9 +183,8 @@ function provenanceNote(
   // narrowed interfaces that only engine-side type guards can prove, and
   // this module may not import engine runtime code — so they are read
   // structurally.
-  const whereOp = (
-    boxedError as { ops?: ReadonlyArray<BoxedExpr> } | undefined
-  )?.ops?.[1];
+  const whereOp = (boxedError as { ops?: ReadonlyArray<BoxedExpr> } | undefined)
+    ?.ops?.[1];
   if (whereOp !== undefined && whereOp.operator !== 'ErrorTrace') {
     const name = (whereOp as { symbol?: string }).symbol;
     if (typeof name === 'string')
