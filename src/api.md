@@ -446,6 +446,77 @@ set precision(p: number | "auto" | "machine"): void
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~declareProtocol()~~
+
+```ts
+declareProtocol(name, members): void
+```
+
+Declare a protocol (Appendix A "Host API"). Throws on error, including
+on re-declaration — the Epsil statement route replaces instead (P5).
+
+####### name
+
+`string`
+
+####### members
+
+[`ProtocolMembersInput`](#protocolmembersinput)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.~~declareProtocolImplementation()~~
+
+```ts
+declareProtocolImplementation(
+   type, 
+   protocol, 
+   impl, 
+   options?): void
+```
+
+Implement `protocol` for `type`, declaring the conformance edge if it is
+not already registered (Appendix A "Host API").
+
+THROWS on every error — the host channel; the Epsil statement route
+returns error VALUES instead. A second host implementation of the same
+(type, protocol) pair throws rather than replacing (P5).
+
+The callbacks are JavaScript functions, so they carry no signature the
+engine can check: they are trusted like host-declared operator handlers,
+and only member-name coverage, unknown members and a `set` handler on a
+`readonly` property are validated.
+
+`options.where` declares a CONDITIONAL conformance: `type` is then a HEAD
+PATTERN naming the variables (`'list<T>'`) and `where` is the clause SOURCE
+that binds them (`'where T is Comparable'`; the `where` word may be
+omitted). A malformed clause, or a head variable the clause does not bind,
+throws.
+
+####### type
+
+`string`
+
+####### protocol
+
+`string`
+
+####### impl
+
+[`ProtocolImplementationInput`](#protocolimplementationinput)
+
+####### options?
+
+####### where?
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~withTimeLimit()~~
 
 ```ts
@@ -1249,6 +1320,7 @@ declare(id, def, scope?): IComputeEngine
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
+  `elementCount`: (`expr`) => `number` \| `undefined`;
  \}\>\>
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
@@ -1339,6 +1411,7 @@ declare(id, def, scope?): IComputeEngine
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
+  `elementCount`: (`expr`) => `number` \| `undefined`;
  \}\>\>
 
 ####### scope?
@@ -1464,6 +1537,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
+  `elementCount`: (`expr`) => `number` \| `undefined`;
  \}\>\>
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
@@ -1554,6 +1628,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
+  `elementCount`: (`expr`) => `number` \| `undefined`;
  \}\>\>
 
 ####### arg3?
@@ -3434,6 +3509,7 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   neq: (a, b) => boolean | undefined;
   collection: CollectionHandlers;
   canEnumerate: (expr) => boolean | undefined;
+  elementCount: (expr) => number | undefined;
 };
 ```
 
@@ -3746,6 +3822,38 @@ This is the operator's own decline test — the guard at the top of its
 
 Ignored (never consulted) when the definition has `collection`
 handlers — those own enumerability via `collection.isEnumerable`.
+
+#### OperatorDefinition.elementCount?
+
+```ts
+optional elementCount?: (expr) => number | undefined;
+```
+
+For an operator that RETURNS a collection but has no `collection`
+handlers (an EAGER producer — `Sort`, `Chunk`, `Ordering`, …): how many
+elements would `evaluate()` produce?
+
+The `count` twin of [canEnumerate](#operatordefinition), and the honest replacement for
+the broadcast count fallback: `count` reads the operands' agreed length
+only for a `broadcastable` operator, where agreement IS the semantics
+(`docs/BROADCAST-MODEL.md`). A reshaping operator's length is its own
+business, so it must say so here or report `undefined`.
+
+Contract, mirroring `canEnumerate`:
+
+- MUST be O(1), evaluation-free and side-effect free. An impure producer
+  (`RandomShuffle`) answers from its operands' facets, consuming ZERO
+  draws.
+- The operands seen here are the CANONICAL ones. Anything not cheaply
+  knowable — a non-literal shape argument, an unknown source length —
+  must report `undefined` (decline), never a guess.
+- A returned number is a hard promise: it must equal
+  `expr.evaluate().count`. When evaluation would DECLINE (an infinite or
+  unknown-length source), report `undefined` — a count nobody can walk is
+  worse than no count (Tycho item-169 ruling).
+
+Consulted only when the definition has no `collection.count` handler —
+a declared `count` owns the answer, including its `undefined`.
 
 </MemberCard>
 
@@ -4726,6 +4834,19 @@ optional canEnumerate?: (expr) => boolean | undefined;
 
 The eager producer's enumerability precondition — see the
 `canEnumerate` contract on [OperatorDefinition](#operatordefinition).
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.elementCount?
+
+```ts
+optional elementCount?: (expr) => number | undefined;
+```
+
+The eager producer's element count — see the `elementCount` contract on
+[OperatorDefinition](#operatordefinition).
 
 </MemberCard>
 
@@ -8264,6 +8385,139 @@ antiderivative was found. The argument is backward-compatible: the plain
 
 </MemberCard>
 
+<MemberCard>
+
+### ProtocolMember
+
+```ts
+type ProtocolMember = 
+  | {
+  kind: "function";
+  signature: string;
+ }
+  | {
+  kind: "readonly" | "readwrite";
+  type: string;
+};
+```
+
+One requirement of a protocol. A `function` member's signature is stored
+VERBATIM, with `Self` unsubstituted: `Self` is a textual substitution token
+(ruling P12), never a type the registry can resolve.
+
+</MemberCard>
+
+<MemberCard>
+
+### JSImplementation
+
+```ts
+type JSImplementation = {
+  host: ProtocolHostHandler;
+};
+```
+
+A HOST (JavaScript) implementation of a protocol member. A callback carries
+no type information the engine can read, so — like a host-declared operator
+handler — it is TRUSTED: only member-name coverage is checked, never its
+signature. Boxed in a wrapper so it stays distinguishable from an Epsil
+function literal (design P10).
+
+</MemberCard>
+
+<MemberCard>
+
+### ProtocolHostHandler
+
+```ts
+type ProtocolHostHandler = (...args) => unknown;
+```
+
+A host callback implementing one protocol member. Its arguments arrive as
+boxed engine values (the receiver first, per P1); its result is boxed by the
+engine. The engine cannot type-check it — that is what "trusted" means
+here.
+
+</MemberCard>
+
+<MemberCard>
+
+### ConformanceRecord
+
+```ts
+type ConformanceRecord = {
+  target: Type;
+  targetKey: string;
+  where: TypeParameter[];
+  impl: Record<string, Expression | JSImplementation>;
+  _implOrigin: {
+     batch: number;
+     block: Expression;
+    };
+  pending: boolean;
+  declaredByStatement: boolean;
+};
+```
+
+One conformance edge: "this target type conforms to this protocol".
+Conformances are add-only (monotone); only their implementations replace.
+
+</MemberCard>
+
+<MemberCard>
+
+### ProtocolRecord
+
+```ts
+type ProtocolRecord = {
+  name: string;
+  members: Record<string, ProtocolMember>;
+  conformances: ConformanceRecord[];
+  declaredByStatement: boolean;
+};
+```
+
+A protocol declaration and every conformance registered against it.
+
+</MemberCard>
+
+<MemberCard>
+
+### ProtocolMembersInput
+
+```ts
+type ProtocolMembersInput = {
+  functions: Record<string, string>;
+  readonly: Record<string, string>;
+  readwrite: Record<string, string>;
+};
+```
+
+The host-API shape of a protocol's requirements. A flat
+`Record<string, string>` cannot represent properties, hence the three
+buckets (Appendix A "Host API").
+
+</MemberCard>
+
+<MemberCard>
+
+### ProtocolImplementationInput
+
+```ts
+type ProtocolImplementationInput = {
+  functions: Record<string, ProtocolHostHandler>;
+  getters: Record<string, ProtocolHostHandler>;
+  setters: Record<string, ProtocolHostHandler>;
+};
+```
+
+The host-API shape of an IMPLEMENTATION block. Property handlers are given
+under their surface names (`getters.hash`), not under the internal
+`__get__hash` mangling (Appendix A "Properties": the mangling is an
+implementation detail, not part of the public surface).
+
+</MemberCard>
+
 ### IComputeEngine
 
 #### Extended by
@@ -8654,6 +8908,77 @@ A list of the function calls to the current evaluation context
 get precision(): number
 set precision(p: number | "auto" | "machine"): void
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.declareProtocol()
+
+```ts
+declareProtocol(name, members): void
+```
+
+Declare a protocol (Appendix A "Host API"). Throws on error, including
+on re-declaration — the Epsil statement route replaces instead (P5).
+
+####### name
+
+`string`
+
+####### members
+
+[`ProtocolMembersInput`](#protocolmembersinput)
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.declareProtocolImplementation()
+
+```ts
+declareProtocolImplementation(
+   type, 
+   protocol, 
+   impl, 
+   options?): void
+```
+
+Implement `protocol` for `type`, declaring the conformance edge if it is
+not already registered (Appendix A "Host API").
+
+THROWS on every error — the host channel; the Epsil statement route
+returns error VALUES instead. A second host implementation of the same
+(type, protocol) pair throws rather than replacing (P5).
+
+The callbacks are JavaScript functions, so they carry no signature the
+engine can check: they are trusted like host-declared operator handlers,
+and only member-name coverage, unknown members and a `set` handler on a
+`readonly` property are validated.
+
+`options.where` declares a CONDITIONAL conformance: `type` is then a HEAD
+PATTERN naming the variables (`'list<T>'`) and `where` is the clause SOURCE
+that binds them (`'where T is Comparable'`; the `where` word may be
+omitted). A malformed clause, or a head variable the clause does not bind,
+throws.
+
+####### type
+
+`string`
+
+####### protocol
+
+`string`
+
+####### impl
+
+[`ProtocolImplementationInput`](#protocolimplementationinput)
+
+####### options?
+
+####### where?
+
+`string`
 
 </MemberCard>
 
@@ -9462,6 +9787,7 @@ declare(id, def, scope?): IComputeEngine
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
+  `elementCount`: (`expr`) => `number` \| `undefined`;
  \}\>\>
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
@@ -9552,6 +9878,7 @@ declare(id, def, scope?): IComputeEngine
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
+  `elementCount`: (`expr`) => `number` \| `undefined`;
  \}\>\>
 
 ####### scope?
@@ -9677,6 +10004,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
+  `elementCount`: (`expr`) => `number` \| `undefined`;
  \}\>\>
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
@@ -9767,6 +10095,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
+  `elementCount`: (`expr`) => `number` \| `undefined`;
  \}\>\>
 
 ####### arg3?
@@ -12506,6 +12835,21 @@ produce nothing:
   operator (`Characters(s)`, `UnicodeScalars(s)`) has no collection
   handlers until it is evaluated, yet `each()` walks it through the
   materialize-then-iterate path.
+
+An arithmetic **broadcast** (`x + [1, 2]`, `Sin(1..99)` — a
+`broadcastable` operator whose collection-ness is a lift over its
+operands) answers from its participants: `true` when they agree on a
+length, evaluation is draw-free, and every collection-typed participant
+is itself enumerable; `false` when a participant is definitively
+unwalkable (a valueless symbol, an application of an UNBOUND head —
+`x + Total([1, 2])` with `Total` undeclared binds vacuously and can
+never produce elements); `undefined` when the lengths disagree or an
+impure participant (`RandomShuffle(xs) + 1`) makes per-index reads
+unable to promise draw coherence — there `each()` still walks, but
+`at()` declines. Impurity confined to a *scalar* (lifted) operand does
+not demote the answer: `[1, 2] + RandomInteger(1, 10)` is `true` — its
+evaluation distributes structurally without consuming randomness, and
+both `each()` and `at()` serve the unevaluated elements.
 
 Independent of `count`: a collection can know its size and still not be
 enumerable (`Linspace(a, 1, 3)` has a count of 3 and no computable
@@ -15690,6 +16034,11 @@ type TypeReference = {
   args: Type[];
   _varianceState: "deferred" | "verified";
   _varianceBlockedOn: string[];
+  _sumOf: string;
+  _sumVariants: {
+     name: string;
+     typeParams: string[];
+    }[];
 };
 ```
 
@@ -15897,6 +16246,7 @@ type TypeResolver = {
   get names: string[];
   forward: (name) => TypeReference | undefined;
   resolve: (name) => TypeReference | undefined;
+  conformsTo: (type, protocol) => boolean;
 };
 ```
 
