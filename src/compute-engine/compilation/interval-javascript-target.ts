@@ -500,20 +500,15 @@ function extractIntervalLimits(limitsExpr: Expression): {
   const index = isSymbol(fn.op1) ? fn.op1.symbol : '_';
   const lowerExpr = fn.op2;
   const upperExpr = fn.op3;
-  const lowerRe = lowerExpr.re;
-  const upperRe = upperExpr.re;
+  // A bound mentioning a compile-bound name (a user function's parameter, an
+  // enclosing binder's index) is NOT a compile-time constant — see
+  // `BaseCompiler.bigOpBoundConstant`.
   return {
     index,
     lowerExpr,
     upperExpr,
-    lowerNum:
-      !isNaN(lowerRe) && Number.isFinite(lowerRe)
-        ? Math.floor(lowerRe)
-        : undefined,
-    upperNum:
-      !isNaN(upperRe) && Number.isFinite(upperRe)
-        ? Math.floor(upperRe)
-        : undefined,
+    lowerNum: BaseCompiler.bigOpBoundConstant(lowerExpr),
+    upperNum: BaseCompiler.bigOpBoundConstant(upperExpr),
   };
 }
 

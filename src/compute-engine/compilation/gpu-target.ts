@@ -3605,16 +3605,12 @@ function compileGPUSumProduct(
   const index = isSymbol(limitsOps[0]) ? limitsOps[0].symbol : '_';
   assertFiniteGPUBound(kind, limitsOps[1], 'lower');
   assertFiniteGPUBound(kind, limitsOps[2], 'upper');
-  const lowerRe = limitsOps[1].re;
-  const upperRe = limitsOps[2].re;
-  const lowerNum =
-    !isNaN(lowerRe) && Number.isFinite(lowerRe)
-      ? Math.floor(lowerRe)
-      : undefined;
-  const upperNum =
-    !isNaN(upperRe) && Number.isFinite(upperRe)
-      ? Math.floor(upperRe)
-      : undefined;
+  // A bound mentioning a compile-bound name (a user function's parameter, an
+  // enclosing binder's index) is NOT a compile-time constant — see
+  // `BaseCompiler.bigOpBoundConstant`. Reading one folded
+  // `F(i) = Σ_{m=1..i} m` to `float _fn_F(float i) { return 0.0; }`.
+  const lowerNum = BaseCompiler.bigOpBoundConstant(limitsOps[1]);
+  const upperNum = BaseCompiler.bigOpBoundConstant(limitsOps[2]);
 
   const isSum = kind === 'Sum';
   const op = isSum ? '+' : '*';

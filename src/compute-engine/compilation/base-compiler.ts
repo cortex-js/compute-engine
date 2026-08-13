@@ -1040,6 +1040,63 @@ export class BaseCompiler {
   private static _boundVarsCtx: ReadonlySet<string> | undefined;
 
   /**
+   * Whether `expr` mentions any name that is BOUND in the current compilation
+   * context — a user function's parameter, an enclosing binder's index, a
+   * broadcast element (`_boundVarsCtx`, synced from `target.boundVars` by
+   * `compile()`), or a name shielded by a binder being analyzed rather than
+   * compiled (`_binderShield`).
+   *
+   * Such a name shadows any same-named engine symbol, so reading a VALUE
+   * through it (`.re`, `_getSymbolValue`) dereferences the wrong definition.
+   * This is the predicate half of the rule `isComplexValued` already applies
+   * for complex-ness.
+   */
+  private static mentionsCompileBoundName(expr: Expression): boolean {
+    if (isSymbol(expr)) {
+      const s = expr.symbol;
+      if (BaseCompiler._boundVarsCtx?.has(s)) return true;
+      for (let i = BaseCompiler._binderShield.length - 1; i >= 0; i--)
+        if (BaseCompiler._binderShield[i].has(s)) return true;
+      return false;
+    }
+    if (isFunction(expr))
+      return expr.ops.some((op) => BaseCompiler.mentionsCompileBoundName(op));
+    return false;
+  }
+
+  /**
+   * The compile-time integer value of a `Sum`/`Product` bound, or `undefined`
+   * when the bound is not a compile-time constant and must instead be emitted
+   * as code and evaluated at run time.
+   *
+   * A bound that mentions a compile-bound name has NO compile-time value, and
+   * reading one anyway is not a harmless miss: with the library's single-letter
+   * constants it yields a plausible number instead of `NaN`, and the caller
+   * then folds the whole big op against it behind `success: true`. With
+   * `F(i) = Σ_{m=1..i} m`, the parameter `i` resolved to the imaginary unit
+   * (`re` 0), so `lower 1 > upper 0` read as an empty range and the body
+   * compiled to the identity `0` — `_fn_F = (i) => 0` — while the interpreter
+   * answered 6. A parameter named `e` picked up Euler's number and summed two
+   * terms (`3`). Reported by the Tycho team as item 176; the same shape on the
+   * GPU targets emitted `float _fn_F(float i) { return 0.0; }`.
+   *
+   * Callers must treat `undefined` as "symbolic bound" and emit the loop form,
+   * which compiles the bound expression in a target that maps the bound name to
+   * its emitted local.
+   */
+  static bigOpBoundConstant(expr: Expression | undefined): number | undefined {
+    if (expr === undefined) return undefined;
+    if (BaseCompiler.mentionsCompileBoundName(expr)) return undefined;
+    // A nonzero imaginary part leaves no iteration count; folding on the real
+    // part alone would silently discard it (`Σ_{n=1}^{i}` → the empty range).
+    const im = expr.im;
+    if (!isNaN(im) && im !== 0) return undefined;
+    const re = expr.re;
+    if (isNaN(re) || !Number.isFinite(re)) return undefined;
+    return Math.floor(re);
+  }
+
+  /**
    * Statically splice `Spread` operands (`f(...p)`) into the call's argument
    * list. A literal tuple splices directly; a symbolic argument whose STATIC
    * type is a tuple of known arity n rewrites to n positional `At` accesses

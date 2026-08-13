@@ -490,6 +490,74 @@ describe('Derivatives of declared-then-assigned functions', () => {
   );
 });
 
+describe('Derivatives of container-valued bodies', () => {
+  // Regression (Tycho item 174, 0.104.1): a `Tuple` is a container, not a
+  // function of its elements, so it must differentiate componentwise —
+  // d/dt (fₓ, f_y, f_z) = (fₓ', f_y', f_z'). Before the fix a `Tuple` fell
+  // through to the generic chain rule and differentiated the `Tuple`
+  // OPERATOR, leaving inert `Apply(Derivative("Tuple", 0, 1, 0), …)` nodes.
+  // A Frenet frame built on `f'(t)/|f'(t)|` therefore never closed.
+  it('differentiates a Tuple literal componentwise', () => {
+    expect(
+      engine.expr(['D', ['Tuple', ['Square', 't'], ['Power', 't', 3]], 't'])
+        .evaluate()
+        .toString()
+    ).toEqual('(2t, 3t^2)');
+  });
+
+  it('preserves the container head and nests', () => {
+    const result = engine
+      .expr([
+        'D',
+        ['Tuple', ['Tuple', ['Square', 't'], 't'], ['Sin', 't']],
+        't',
+      ])
+      .evaluate();
+    expect(result.operator).toEqual('Tuple');
+    expect(result.toString()).toEqual('((2t, 1), cos(t))');
+  });
+
+  it('closes the derivative of a tuple-valued space curve', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(number) -> tuple<number, number, number>');
+    ce.assign(
+      'g',
+      ce.expr([
+        'Function',
+        [
+          'Tuple',
+          ['Cos', ['Multiply', 2, 'Pi', 't']],
+          ['Sin', ['Multiply', 2, 'Pi', 't']],
+          't',
+        ],
+        't',
+      ])
+    );
+    // Neither spelling may leave an inert `Derivative` node behind.
+    for (const d of [
+      ce.expr(['Apply', ['Derivative', 'g', 1], 0.25]),
+      ce.expr(['D', ['g', 't'], 't']),
+    ])
+      expect(d.evaluate().toString()).not.toContain('Derivative');
+
+    expect(
+      ce.expr(['Apply', ['Derivative', 'g', 1], 0.25]).evaluate().toString()
+    ).toEqual('(-2pi, 0, 1)');
+    expect(ce.expr(['D', ['g', 't'], 't']).evaluate().toString()).toEqual(
+      '(-2pi * sin(2pi * t), 2pi * cos(2pi * t), 1)'
+    );
+  });
+
+  it('leaves an unregistered container head opaque (item-152 contract)', () => {
+    // `Point` is not a registered operator — it types `unknown` — so it stays
+    // an application rather than acquiring invented componentwise semantics.
+    const result = engine
+      .expr(['D', ['Point', ['Square', 't'], ['Power', 't', 3]], 't'])
+      .evaluate();
+    expect(result.operator).not.toEqual('Point');
+  });
+});
+
 describe('Prime notation applies the derivative function to its argument', () => {
   // f'(expr) denotes (Df)(expr) — Lagrange semantics: the derivative
   // function evaluated at the argument, NOT d/dx of the applied expression.

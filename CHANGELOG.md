@@ -386,6 +386,39 @@
 
 ### Issues Resolved
 
+- **A compiled big op whose bound is a function parameter no longer folds
+  against a same-named library constant** (Tycho item 176). Compiling a
+  `Sum`/`Product` folds its bounds at compile time when both are constant, but
+  that fold read the bound's value through the ENGINE symbol, ignoring that the
+  name might be bound in the compilation context. A user function's parameter
+  named after a library constant therefore produced silently wrong code behind
+  `success: true`: in `F(i) = \sum_{m=1}^{i} m` the bound `i` resolved to the
+  imaginary unit, whose real part is `0`, so `lower 1 > upper 0` read as an
+  empty range and the entire body folded to the identity —
+  `const _fn_F = (i) => 0`, against an interpreted `6`. A parameter named `e`
+  picked up Euler's number and summed two terms (`3`). The same shape emitted
+  `float _fn_F(float i) { return 0.0; }` on the GPU targets. A bound that
+  mentions any compile-bound name — a function parameter, an enclosing binder's
+  index, a broadcast element — is now treated as symbolic and emitted as a loop
+  over the parameter, matching the interpreter on every parameter name. This
+  affected the javascript, GLSL, WGSL and interval-js targets; Python was
+  already immune. A bound naming a constant that is NOT shadowed still folds as
+  before.
+
+- **The derivative of a tuple-valued function differentiates componentwise**
+  (Tycho item 174). A `Tuple` is a container, not a function of its elements,
+  but it had no case in the differentiation rules, so it fell through to the
+  generic chain rule and differentiated the `Tuple` **operator**: with
+  `g(t) = (\cos 2\pi t, \sin 2\pi t, t)`, both `g'(t)` and `D(g(t), t)` left
+  inert `Apply(Derivative("Tuple", 0, 1, 0), …)` nodes. `Tuple` now takes the
+  same elementwise branch `List` already had, preserving the container head and
+  nesting — `d/dt (fₓ, f_y, f_z) = (fₓ', f_y', f_z')`, so
+  `g'(0.25)` is `(-2\pi, 0, 1)`. This closes the Frenet-frame idiom
+  (`F_0 = f'/|f'|`, `F_1 = F_0'/|F_0'|`), which never closed before because
+  `f'` stayed inert. Unregistered heads are unaffected: `Point` types
+  `unknown`, so it stays an opaque application rather than acquiring invented
+  componentwise semantics.
+
 - **`Equal`/`NotEqual` against a list no longer overflows the stack when the
   other operand is opaque.** `ce.parse('A(t) = [t]').evaluate()` — one line on a
   bare engine — threw `RangeError: Maximum call stack size exceeded`, as did

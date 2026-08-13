@@ -678,19 +678,28 @@ function differentiateNode(
     return differentiate(expr.op1, v, depth + 1, trace);
   }
 
-  // List (vector/matrix literal): a `List` is a container, not a function of
-  // its elements, so it has no chain-rule semantics. Differentiate elementwise,
-  // preserving shape (recursively for nested lists — matrices are lists of
-  // lists). Only literal `List` operands broadcast this way; a symbol declared
-  // as a matrix/vector has no visible elements and never reaches this branch.
-  if (expr.operator === 'List') {
+  // List/Tuple (vector/matrix/point literal): these are containers, not
+  // functions of their elements, so they have no chain-rule semantics.
+  // Differentiate elementwise, preserving both shape and the container head
+  // (recursively for nested containers — matrices are lists of lists). Only
+  // literal operands broadcast this way; a symbol declared as a matrix/vector
+  // has no visible elements and never reaches this branch.
+  //
+  // `Tuple` is the parse of a parenthesized vector `(f(t), g(t))`, so this is
+  // the branch that gives a tuple-valued space curve the standard
+  // vector-calculus rule d/dt (fₓ, f_y, f_z) = (fₓ', f_y', f_z'). Without it a
+  // `Tuple` fell through to the generic chain rule below and differentiated the
+  // `Tuple` OPERATOR, leaving inert `Apply(Derivative("Tuple", …), …)` nodes
+  // (reported by the Tycho team as item 174; a Frenet-frame document built on
+  // `f'(t)/|f'(t)|` never closed and drew nothing).
+  if (expr.operator === 'List' || expr.operator === 'Tuple') {
     const elements = expr.ops.map(
       (op) =>
         differentiate(op, v, depth + 1, trace) ??
         ce._fn('D', [op, ce.symbol(v)])
     );
     if (elements.some((e) => !e.isValid)) return undefined;
-    return ce.function('List', elements);
+    return ce.function(expr.operator, elements);
   }
 
   // D - evaluate the derivative first, then differentiate the result

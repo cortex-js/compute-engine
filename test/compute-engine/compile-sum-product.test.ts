@@ -211,6 +211,61 @@ describe('COMPILE Sum - symbolic bounds', () => {
   });
 });
 
+describe('COMPILE Sum - a bound naming a library constant (Tycho item 176)', () => {
+  // A user function's parameter shadows the engine, but the compile-time
+  // constant fold for a big-op bound read the shadowed ENGINE symbol: with
+  // `F(i) = Σ_{m=1..i} m` the bound `i` resolved to the imaginary unit
+  // (`re` 0), so `lower 1 > upper 0` looked like an empty range and the whole
+  // body folded to the identity — `_fn_F = (i) => 0` behind `success: true`,
+  // against an interpreted `6`. A parameter named `e` picked up Euler's number
+  // and summed two terms instead of three. Silent wrong data on the compiled
+  // path, so the pin asserts VALUES, not just that it compiled.
+  const build = (param: string) => {
+    const engine = new ComputeEngine();
+    engine.declare('F', '(number) -> number');
+    engine.assign(
+      'F',
+      engine.expr(['Function', ['Sum', 'm', ['Limits', 'm', 1, param]], param])
+    );
+    return engine;
+  };
+
+  // `i` and `e` are the library constants that made this silent; the rest are
+  // controls that were always correct.
+  test.each(['i', 'e', 'k', 'n', 'x'])(
+    'a parameter named `%s` sums 1..3 = 6',
+    (param) => {
+      const engine = build(param);
+      const result = compile(engine.expr(['F', 3]));
+      expect(result.success).toBe(true);
+      expect(result.run!({})).toBe(6);
+      // The compiled answer must agree with the interpreter.
+      expect(engine.expr(['F', 3]).N().re).toBe(6);
+    }
+  );
+
+  test('GPU: the emitted loop does not depend on the parameter name', () => {
+    const strip = (param: string) =>
+      compile(build(param).expr(['F', 3]), { to: 'glsl' })
+        .preamble!.replace(new RegExp(`\\b${param}\\b`, 'g'), 'P')
+        .replace(/\s+/g, ' ')
+        .trim();
+    // `i` used to emit `float _fn_F(float i) { return 0.0; }`.
+    expect(strip('i')).toEqual(strip('k'));
+    expect(strip('i')).toContain('for');
+  });
+
+  test("a bound naming a constant still folds when it is NOT shadowed", () => {
+    // The guard must not blind the fold to a genuine constant bound: `e` here
+    // is the engine's Euler number, not a parameter, so `Σ_{m=1..e} m` is the
+    // 2-term sum 1 + 2.
+    const engine = new ComputeEngine();
+    const result = compile(engine.expr(['Sum', 'm', ['Limits', 'm', 1, 'e']]));
+    expect(result.success).toBe(true);
+    expect(result.run!({})).toBe(3);
+  });
+});
+
 describe('COMPILE Sum - iterationBudget', () => {
   // The budget keeps a single compiled call cheap enough for the engine
   // deadline to be honored between calls on the numeric limit ladder (the

@@ -185,12 +185,25 @@ export function convertInfiniteSetToLimits(
  * see the value `P` holds when the operator RUNS, not when it was parsed.
  */
 export function bigopBoundValue(bound: Expression): number {
+  // A bound with a NONZERO imaginary part has no iteration count. Reading its
+  // real part alone silently drops the imaginary part, and for the imaginary
+  // unit that real part is `0` — so `Σ_{n=1}^{i} n` folded to an empty range
+  // and answered `0` instead of staying symbolic.
+  if (hasNonZeroImaginaryPart(bound)) return NaN;
   const r = bound.re;
   if (!Number.isNaN(r)) return r;
   // A free symbol (or an expression over one) has no value to read.
   if (bound.unknowns.length > 0) return r;
   if (!bound.isPure) return r;
-  return bound.evaluate({ numericApproximation: true }).re;
+  const value = bound.evaluate({ numericApproximation: true });
+  if (hasNonZeroImaginaryPart(value)) return NaN;
+  return value.re;
+}
+
+/** Whether `expr` has a KNOWN imaginary part that is not zero. */
+function hasNonZeroImaginaryPart(expr: Expression): boolean {
+  const im = expr.im;
+  return !Number.isNaN(im) && im !== 0;
 }
 
 export function classifyBigopDomain(
