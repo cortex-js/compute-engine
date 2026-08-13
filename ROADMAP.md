@@ -89,6 +89,34 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### `Derivative` compile time vs body nesting depth (perf ask)
+
+Order-1 `Derivative` compile time grows steeply with the nesting depth
+of the body — 6/21/77/429 ms at depth 1/4/8/16, and it throws at depth
+37 — while the undifferentiated body compiles in single-digit
+milliseconds at every depth. A capability/perf ask, not a correctness
+defect. (Reported by the Tycho project as its item 177,
+`docs/COMPUTE_ENGINE.md` in `dev/tycho`; bare-engine repro
+`docs/scratch/d209-ce-asks-repro.mts` there.)
+
+Its sibling report, Tycho item 176 (a lambda `i ↦ Σ_{n=1..i} …`
+compiling to all zeros with `success: true`), was root-caused and FIXED
+the same day it was filed (2026-08-12, staged): a big-operator bound
+whose name collides with a library constant (`i`, the imaginary unit;
+`e`) was read through the shadowed engine symbol — `.re` of the
+imaginary unit is `0`, so the range `1..0` folded empty — both when the
+name was really a compile-bound parameter (fixed via
+`BaseCompiler.bigOpBoundConstant()` refusing the constant fold for
+compile-bound names, applied in the javascript/gpu/interval targets)
+and at top level, where `bigopBoundValue` (`library/utils.ts`) dropped
+a nonzero imaginary part instead of staying symbolic. Pinned in
+`test/compute-engine/compile-sum-product.test.ts`, parameterized over
+`i`/`e`/`k`/`n`/`x`. An earlier revision of this entry misattributed
+the cause to enumerability of `Range` with undeclared bounds — the
+enumerability tier was never implicated (an undeclared non-constant
+bound always stayed symbolic; declaring `i: number` shadowed the
+constant, which is what made declaredness look like the trigger).
+
 ### Static argument-checking of user-defined callees — residue
 
 Tier 1 landed 2026-08-12; what remains is generic functions (below) and
