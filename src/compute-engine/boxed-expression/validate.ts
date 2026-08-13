@@ -48,10 +48,7 @@ import type {
   BoxedValueDefinition,
   TypeProvenanceEntry,
 } from '../global-types.js';
-import {
-  recordTypeProvenance,
-  currentBoxingEpoch,
-} from './type-provenance.js';
+import { recordTypeProvenance, currentBoxingEpoch } from './type-provenance.js';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isTensorValue } from './tensor-view.js';
@@ -1467,7 +1464,12 @@ function repairFreshMatrixInference(
         // Report the COMMITTED net transition to a contained parse's
         // narrowing capture — only now, when the write is permanent.
         if (sink !== undefined)
-          sink._recordNarrowing(name, def, beforeTypes.get(name)!, def.value.type);
+          sink._recordNarrowing(
+            name,
+            def,
+            beforeTypes.get(name)!,
+            def.value.type
+          );
       }
     }
     return repaired;
