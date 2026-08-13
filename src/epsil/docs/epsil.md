@@ -142,6 +142,11 @@ annotations that bind their parameters, scopes, and named types.
 **Types** — annotations, named types, effects, and absence values.
 </ReadMore>
 
+<ReadMore path="/epsil/protocols/">
+**Protocols** — declaring operation sets, conforming types to them, and
+dispatching on the receiver.
+</ReadMore>
+
 <ReadMore path="/epsil/comments/">
 **Comments** — line and block comments.
 </ReadMore>

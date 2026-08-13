@@ -1,0 +1,300 @@
+---
+title: Epsil Protocols
+sidebar_label: Protocols
+slug: /epsil/protocols/
+description: "Protocols in Epsil: declaring a set of operations, conforming types to it, dynamic dispatch on the receiver, properties, and conditional conformance."
+hide_title: true
+date: Last Modified
+---
+# Protocols
+
+A **protocol** names a set of operations. A type **conforms** to a protocol
+by providing an implementation of each of them, and a call to a protocol
+function then runs the implementation for the value it is given — `compare`
+means one thing for strings and another for numbers, and each call picks the
+right one at run time.
+
+Protocols are how code gets written once against "anything that supports
+these operations": a `smallest` that works for every comparable type, a
+formatter that works for everything hashable. The alternative — a
+multi-clause function with one clause per type — requires editing the
+function each time a type is added. With a protocol, adding a type means
+declaring its conformance, and every existing call site picks it up.
+
+## Declaring a protocol
+
+A `protocol` declaration lists function and property requirements —
+signatures only, no bodies:
+
+```epsil
+protocol Comparable {
+  function compare(self: Self, other: Self) -> "<" | "=" | ">"
+}
+```
+
+Inside a protocol, the type `Self` stands for whichever type conforms. The
+**first parameter of every protocol function must be `Self`** — it is the
+value the call dispatches on. Writing the first parameter without a type
+means the same thing (`function compare(self, other: Self)`); explicitly
+typing it as anything else is the `protocol-self-required` error.
+
+Protocols are engine-global, like [named types](/epsil/types/): a protocol
+declared anywhere is visible everywhere after, and declaring one inside a
+local scope is `protocol-scope-invalid`. Re-executing a `protocol`
+statement — the notebook pattern — replaces the previous declaration and
+revalidates every implementation against the new requirements.
+
+A protocol may also be empty. Such a **marker protocol** documents a
+semantic promise rather than an operation set, and a bare conformance
+declaration completes it:
+
+```epsil
+protocol Copyable {}
+type string is Copyable
+```
+
+## Conforming a type
+
+The `is` keyword declares that a type conforms, and a braced block after it
+supplies the implementations:
+
+```epsil-live
+protocol Comparable {
+  function compare(self: Self, other: Self) -> "<" | "=" | ">"
+}
+
+type string is Comparable {
+  function compare(self: string, other: string) -> "<" | "=" | ">" {
+    if (self < other) { "<" } else if (self > other) { ">" } else { "=" }
+  }
+}
+
+compare("crimson", "cyan")
+// ➔ "<"
+```
+
+In an implementation, `Self` and the conforming type's own name are
+synonyms — `compare(self: Self, …)` and `compare(self: string, …)` declare
+the same thing.
+
+The conforming type must be a **named, concrete type**: a built-in
+(`string`, `integer`, `list<integer>`) or a [declared nominal
+type](/epsil/types/#nominal-type). A union, an anonymous tuple or
+record shape, or a `type alias` name cannot conform
+(`protocol-conformance-target-invalid`) — wrap the shape in a nominal type
+first. A new nominal type can declare its conformance in the same
+statement:
+
+```epsil-live
+protocol Area { function area(self: Self) -> number }
+
+type Circle = tuple<radius: number> is Area {
+  function area(self: Circle) -> number { Pi * self.radius^2 }
+}
+
+area(Circle(1)) == Pi
+// ➔ True
+```
+
+Conformance may also be declared **ahead of** its implementation — declare
+in one statement (or one notebook cell), implement in a later one. Until
+the implementation arrives the conformance is *pending*: each program run
+that leaves it pending ends with a `protocol-implementation-pending`
+warning, and dispatching through it produces the ordinary
+`protocol-implementation-missing` error value.
+
+An implementation block is checked as it lands: a member the protocol does
+not declare is `protocol-member-unknown` (with a "did you mean"), a missing
+one is `protocol-implementation-missing`, and a signature that does not
+match the requirement — after substituting the conforming type for `Self` —
+is `protocol-signature-mismatch`. Parameter types may be *wider* than the
+requirement and the result *narrower*; parameter names are not significant
+for matching. Implementing the same protocol twice for one type in a single
+program is `protocol-implementation-duplicate`; a later run replaces.
+
+## Calling a protocol function
+
+A protocol function is called like any function. The implementation is
+chosen by the **runtime type of the first argument**, and the most specific
+conformance wins:
+
+```epsil-live
+protocol Describable { function describe(self: Self) -> string }
+type number is Describable { function describe(self) -> string { "a number" } }
+type integer is Describable { function describe(self) -> string { "an integer" } }
+
+(describe(3), describe(2.5))
+// ➔ ("an integer", "a number")
+```
+
+Subtypes inherit conformance: with only the `number` implementation
+declared, `describe(3)` still answers `"a number"` — an `integer` *is* a
+`number`, and the `number` implementation witnesses it. Declaring the
+`integer` implementation as well, as above, is not a conflict: it is a more
+specific implementation, and values that are integers get it. (Two
+conformances whose types overlap without one containing the other are
+rejected — `protocol-conformance-overlap` — because a value in the
+intersection would have no best implementation.)
+
+Calling a protocol function on a value with **no** applicable
+implementation produces the `protocol-implementation-missing` error value;
+a call whose receiver's type cannot be decided yet simply stays symbolic
+until it can.
+
+### When the bare name is taken, qualify
+
+Two situations take the bare name away. A lexically visible definition of
+the same name **shadows** protocol members — your `size` wins over any
+protocol's. And two protocols can both declare a member that applies to the
+same receiver, making the bare call ambiguous. Both have the same escape
+hatch: qualify the member with the protocol's name.
+
+```epsil
+compare("a", "b")
+// -> protocol-call-ambiguous: `compare` applies to a value of type
+//    `string` through `Comparable(string)` and `Comparator(string)`.
+//    Use a qualified name to narrow the one you meant.
+
+Comparable.compare("a", "b")   // ➔ "<" — just Comparable's
+Comparator.compare("a", "b")   // ➔ -1  — just Comparator's
+```
+
+The qualified name is also a first-class **value** — pass it wherever a
+function is expected:
+
+```epsil-live
+protocol Negatable { function negated(self: Self) -> Self }
+type number is Negatable { function negated(self) -> number { -self } }
+
+Map([1, 2, 3], Negatable.negated)
+// ➔ [-1, -2, -3]
+```
+
+[Named arguments](/epsil/syntax/#named-arguments) work with protocol
+functions in both spellings, and the call dispatches on the argument bound
+to the declared first parameter wherever it is written:
+`tag(prefix: "n", self: 5)` and `Tagged.tag(prefix: "n", self: 5)` both
+dispatch on `5`.
+
+## Properties
+
+A protocol can require **properties**, read with ordinary field syntax.
+`readonly` requires a getter; `readwrite` a getter and a setter:
+
+```epsil-live
+protocol Signed { readonly sign: string }
+
+type number is Signed {
+  get sign(self) -> string { if (self < 0) { "-" } else { "+" } }
+}
+
+let x = -12
+x.sign
+// ➔ "-"
+```
+
+A `get` implementation takes `self` and returns the property's type. A
+`set` implementation takes `self` and the new value, and **returns the
+updated value** — Epsil values are immutable, so assigning to a property is
+sugar for rebinding the variable to what the setter returns:
+
+```epsil-live
+protocol Nameable { readwrite name: string }
+
+type Person = tuple<first: string, last: string> is Nameable {
+  get name(self) -> string { "\(self.first) \(self.last)" }
+  set name(self, value: string) -> Person { Person(value, self.last) }
+}
+
+let p = Person("Ada", "Lovelace")
+p.name = "Augusta"        // rebinds p to the Person the setter returned
+p.name
+// ➔ "Augusta Lovelace"
+```
+
+Because the assignment rebinds, the left-hand side must be an assignable
+variable: assigning through a `const` binding is the ordinary
+cannot-assign-a-constant error, and a target that is not a variable at
+all (`xs[1].name = …` — there is no binding to rebind) is
+`property-assignment-target-invalid`. Providing a `set` for a `readonly`
+property is `protocol-property-readonly-set`.
+
+If two protocols declare a property with the same name, the qualified
+form disambiguates: `person.(Nameable.name)`.
+
+## Conditional conformance
+
+A parameterized type can conform **only when its arguments do**. The head
+names the type's variables, and the trailing `where` clause constrains
+them:
+
+```epsil-live
+protocol Summable { function total(self: Self) -> number }
+type integer is Summable { function total(self) -> number { self } }
+
+type list<T> is Summable where T is Summable {
+  function total(self: list<T>) -> number {
+    Reduce(self, (acc, x) |-> acc + total(x), 0)
+  }
+}
+
+(total([1, 2, 3]), total([[1, 2], [3]]))
+// ➔ (6, 6)
+```
+
+`list<integer>` conforms because `integer` does; `list<string>` does not,
+unless `string` is made `Summable` too. The conformance is recursive for
+free — `list<list<integer>>` conforms because `list<integer>` does, as the
+second call shows.
+
+## Requiring conformance in a signature
+
+A generic function can require its type variable to conform, with the `is`
+slot of the [`where` clause](/epsil/types/#generic-functions):
+
+```epsil-live
+protocol Comparable {
+  function compare(self: Self, other: Self) -> "<" | "=" | ">"
+}
+type string is Comparable {
+  function compare(self, other: Self) -> "<" | "=" | ">" {
+    if (self < other) { "<" } else if (self > other) { ">" } else { "=" }
+  }
+}
+
+function smallest(a: T, b: T) -> T where T is Comparable {
+  if (compare(a, b) == "<") { a } else { b }
+}
+
+smallest("pear", "fig")
+// ➔ "fig"
+```
+
+Multiple protocols are an *and*, joined with `&`:
+`where T is Comparable & Hashable`. A call whose solved type does not
+conform is rejected — `smallest(True, False)` above reports
+`protocol-constraint-unsatisfied`, naming the protocol and the type.
+
+A protocol name is **not a type**: `function sort(xs: list<Comparable>)`
+is `protocol-in-type-position`, and the diagnostic shows the constrained
+spelling to use instead.
+
+## Diagnostics
+
+The protocol diagnostics carry their explanation in the message itself —
+each names the protocol, the type, and the way out. The full set of codes,
+grouped by when they fire:
+
+- **Declaring**: `protocol-member-keyword-missing`,
+  `protocol-self-required`, `protocol-scope-invalid`.
+- **Conforming**: `protocol-conformance-target-invalid`,
+  `protocol-target-unknown`, `protocol-conformance-overlap`,
+  `protocol-implementation-split` (an implementation block on a
+  multi-protocol `is A & B` — provide one block per protocol),
+  `protocol-implementation-pending` (a warning).
+- **Implementing**: `protocol-implementation-missing`,
+  `protocol-implementation-duplicate`, `protocol-member-unknown`,
+  `protocol-signature-mismatch`, `protocol-property-readonly-set`.
+- **Calling**: `protocol-call-ambiguous`, `protocol-property-ambiguous`,
+  `protocol-constraint-unsatisfied`, `protocol-in-type-position`,
+  `property-assignment-target-invalid`.

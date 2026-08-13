@@ -2027,10 +2027,36 @@ function dispatcherResultType(
   for (const record of records) {
     const requirement = requirementAt(ce, record, member, selfType);
     if (requirement === null) return undefined;
-    results.push(requirement.result);
+    results.push(unwrapIndeterminateSelf(requirement.result));
   }
   if (results.length === 0) return undefined;
   return results.length === 1 ? results[0] : (widen(...results) as Type);
+}
+
+/**
+ * A `Self`-typed RESULT at an INDETERMINATE receiver, unwrapped to the
+ * primitive. `requirementAt` substitutes `Self` as an alias `TypeReference`
+ * whose `def` is the receiver's static type (P12 — so diagnostics quote the
+ * substituted spelling); when that type is `unknown` or `any` the wrapper is
+ * a trap: the reference PRINTS like the primitive but defeats every
+ * primitive-keyed acceptance gate downstream — `BoxedType.isUnknown` is
+ * false for it, so e.g. `checkNumericArgs` (which admits a primitive
+ * `unknown` operand as "infer later") rejected `negated(_) * 10` with
+ * `incompatible-type number/unknown` while the identical shape through a
+ * plain function worked. There is no diagnostic-spelling benefit to keep the
+ * wrapper for: its name IS "unknown"/"any". Only the top level needs
+ * unwrapping — a reference nested inside a composite (`list<Self>`) is
+ * consumed by subtyping, where alias references are transparent.
+ */
+function unwrapIndeterminateSelf(t: Type): Type {
+  if (
+    typeof t !== 'string' &&
+    t.kind === 'reference' &&
+    t.alias &&
+    (t.def === 'unknown' || t.def === 'any')
+  )
+    return t.def;
+  return t;
 }
 
 //

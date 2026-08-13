@@ -255,6 +255,24 @@ export function canonicalFunctionLiteral(
     return canonicalFunctionLiteralOperands(expr.engine, expr.ops);
 
   //
+  // 5.5/ An expression that DENOTES a function without being a literal — a
+  //      qualified protocol member `Comparable.compare` (which is
+  //      `Field(Comparable, "compare")`), `InverseFunction(f)`,
+  //      `Derivative(f, n)` — is a function VALUE, exactly like the symbol
+  //      case 2: return it unchanged and let application reach the value
+  //      through evaluation (`makeLambda` routes it through `Apply`).
+  //      Without this gate the shorthand path below reads it as a lambda
+  //      BODY and turns its free symbols into parameters, so
+  //      `Map(xs, Comparable.compare)` bound each ELEMENT to `Comparable`
+  //      and mapped `Field(element, "compare")` — an absence marker per
+  //      element. Same predicate as `apply()`'s symbolic-application gate,
+  //      so the two tiers agree — plus its syntactic sibling for a RAW
+  //      operand (a lazy operator's held callback), whose type still reads
+  //      `unknown` and cannot answer the type-based predicate.
+  //
+  if (denotesFunction(expr) || isQualifiedProtocolMember(expr)) return expr;
+
+  //
   // 6/ Shorthand function literal,
   // e.g. `["Add", "_", 1]` or `["Add", "x", 1]`
   //
@@ -1432,6 +1450,67 @@ function firstErrorArg(
 }
 
 /**
+ * A function-valued expression that is not itself a `Function` literal
+ * DENOTES a function (e.g. `Derivative(f, n)`, `InverseFunction(f)`, a
+ * qualified protocol member `Comparable.compare` — which is
+ * `Field(Comparable, "compare")`); it cannot be beta-reduced and must reach
+ * its function value through evaluation. Letting the shorthand-lambda path
+ * treat such an expression as a lambda BODY would substitute the argument
+ * for its free symbol (`Apply(InverseFunction(f), 2)` → `InverseFunction(2)`;
+ * `Map(xs, Comparable.compare)` → each element read as the base of a `Field`
+ * access), or, for `Derivative(f, n)` whose `derivative()` representation is
+ * the self-applied lambda `Apply(Derivative(f, n), _)`, re-evaluate the inner
+ * `Derivative`, regenerating the same lambda and recursing forever (stack
+ * overflow). Wildcards (`_`, `_1`…`_9`) mark a genuine shorthand body, so an
+ * expression containing one is NOT gated here and still beta-reduces. (The
+ * `lazy` attribute was considered as the gate and rejected: laziness governs
+ * whether operands are evaluated, not whether the expression is
+ * function-valued.)
+ *
+ * Consulted by `apply()` (stay symbolic, as `Apply(fn, args)`) and by
+ * `canonicalFunctionLiteral` (return the expression unchanged instead of
+ * running the shorthand path), so the application tier and the
+ * canonicalization tier agree on which expressions are function VALUES.
+ */
+function denotesFunction(e: Expression | undefined | null): boolean {
+  return (
+    isFunction(e) &&
+    e.operator !== 'Function' &&
+    e.type.matches('function') &&
+    !e.has(WILDCARD_SYMBOLS)
+  );
+}
+
+/**
+ * A `Field(⟨symbol⟩, ⟨string⟩)` expression whose base names a protocol with
+ * that FUNCTION member — the qualified protocol member `Comparable.compare`,
+ * which evaluates to the protocol-dispatching function literal.
+ *
+ * This is {@link denotesFunction}'s syntactic sibling, needed because a lazy
+ * operator's held operand arrives RAW (`Map` holds its callback), where every
+ * type still reads `unknown` and the type-based predicate cannot answer.
+ * Recognition is registry-keyed, never scope-keyed — matching what `Field`'s
+ * own evaluation does (`protocolOfSymbol`, engine-protocols.ts), including
+ * its guard: a base symbol that HOLDS a value is that value, and `Field`
+ * reads the value's field, not the protocol. (Checked by name via `lookup`,
+ * not `.canonical`, so an undeclared protocol name is not auto-declared as a
+ * side effect of asking.)
+ */
+function isQualifiedProtocolMember(e: Expression): boolean {
+  if (!isFunction(e, 'Field')) return false;
+  const base = sym(e.op1);
+  const member = isString(e.op2) ? e.op2.string : undefined;
+  if (base === undefined || member === undefined) return false;
+  const ce = e.engine;
+  if (ce._protocolRegistry[base]?.members[member]?.kind !== 'function')
+    return false;
+  const def = lookup(base, ce.context.lexicalScope);
+  if (def !== undefined && 'value' in def && def.value.value !== undefined)
+    return false;
+  return true;
+}
+
+/**
  * Apply arguments to an expression which is either:
  * - a `["Function"]` expression
  * - the symbol for a function, e.g. `Sin`.
@@ -1454,25 +1533,6 @@ export function apply(
     const err = errorValue(fn) ?? firstErrorArg(args);
     if (err !== undefined) return err;
   }
-
-  // A function-valued expression that is not itself a `Function` literal
-  // DENOTES a function (e.g. `Derivative(f, n)`, `InverseFunction(f)`); it
-  // cannot be beta-reduced and must stay symbolic when applied. Letting
-  // `makeLambda` treat such an expression as a shorthand lambda body would
-  // substitute the argument for its free symbol (`Apply(InverseFunction(f), 2)`
-  // → `InverseFunction(2)`), or, for `Derivative(f, n)` whose `derivative()`
-  // representation is the self-applied lambda `Apply(Derivative(f, n), _)`,
-  // re-evaluate the inner `Derivative`, regenerating the same lambda and
-  // recursing forever (stack overflow). Wildcards (`_`, `_1`…`_9`) mark a
-  // genuine shorthand body, so an expression containing one is NOT gated here
-  // and still beta-reduces. (The `lazy` attribute was considered as the gate
-  // and rejected: laziness governs whether operands are evaluated, not whether
-  // the expression is function-valued.)
-  const denotesFunction = (e: Expression | undefined | null): boolean =>
-    isFunction(e) &&
-    e.operator !== 'Function' &&
-    e.type.matches('function') &&
-    !e.has(WILDCARD_SYMBOLS);
 
   if (denotesFunction(fn)) return fn.engine._fn('Apply', [fn, ...args]);
 
@@ -1949,6 +2009,18 @@ function makeLambda(
   if (!canonicalExpr) return undefined;
 
   expr = canonicalExpr;
+
+  // An expression that DENOTES a function without being a literal (a
+  // qualified protocol member `Comparable.compare`, `InverseFunction(f)`, …)
+  // came back unchanged from `canonicalFunctionLiteral` (its case 5.5). It
+  // cannot be beta-reduced here: apply it through `Apply`, whose strict
+  // evaluation reduces the callee to its function value first (a qualified
+  // member evaluates to the protocol-dispatching literal), then applies.
+  if (expr.operator !== 'Function') {
+    const fnExpr = expr;
+    return (args, options) =>
+      ce.function('Apply', [fnExpr, ...args]).evaluate(options);
+  }
 
   console.assert(expr.operator === 'Function');
   console.assert(expr.isCanonical);

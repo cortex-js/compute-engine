@@ -39,11 +39,7 @@ function engineFor(source: string): ComputeEngine {
 }
 
 /** The evaluated bare call `member(args…)`, as a string. */
-function call(
-  ce: ComputeEngine,
-  member: string,
-  ...args: unknown[]
-): string {
+function call(ce: ComputeEngine, member: string, ...args: unknown[]): string {
   return ce
     .box([member, ...args] as any)
     .evaluate()
@@ -59,11 +55,7 @@ function qualified(
   ...args: unknown[]
 ): string {
   return ce
-    .box([
-      'Apply',
-      ['Field', protocol, { str: member }],
-      ...args,
-    ] as any)
+    .box(['Apply', ['Field', protocol, { str: member }], ...args] as any)
     .evaluate()
     .toString();
 }
@@ -164,7 +156,10 @@ type integer is Describable {
   test('the bare call dispatches through the Epsil parse route too', () => {
     const ce = new ComputeEngine();
     expect(
-      run(ce, `${NUMBER_AND_INTEGER}\nlet a = describe(3)\nlet b = describe(3.5)`)
+      run(
+        ce,
+        `${NUMBER_AND_INTEGER}\nlet a = describe(3)\nlet b = describe(3.5)`
+      )
     ).toEqual([]);
     expect(ce.box('a').evaluate().toString()).toBe('"integer"');
     expect(ce.box('b').evaluate().toString()).toBe('"number"');
@@ -206,9 +201,9 @@ type string is Describable {
       { str: 'string' },
       ['List', 'Comparable'],
     ] as any).evaluate();
-    expect(
-      errorCode(call(ce, 'compare', { str: 'a' }, { str: 'b' }))
-    ).toBe('protocol-implementation-missing');
+    expect(errorCode(call(ce, 'compare', { str: 'a' }, { str: 'b' }))).toBe(
+      'protocol-implementation-missing'
+    );
   });
 
   test('a SYMBOLIC receiver leaves the application symbolic', () => {
@@ -246,12 +241,12 @@ type string is Comparator {
 
   test('…and the qualified call resolves it, either way', () => {
     const ce = engineFor(TWO_PROTOCOLS);
-    expect(qualified(ce, 'Comparable', 'compare', { str: 'a' }, { str: 'b' })).toBe(
-      '"able"'
-    );
-    expect(qualified(ce, 'Comparator', 'compare', { str: 'a' }, { str: 'b' })).toBe(
-      '"ator"'
-    );
+    expect(
+      qualified(ce, 'Comparable', 'compare', { str: 'a' }, { str: 'b' })
+    ).toBe('"able"');
+    expect(
+      qualified(ce, 'Comparator', 'compare', { str: 'a' }, { str: 'b' })
+    ).toBe('"ator"');
   });
 
   test('an EMPTY collection ties two incomparable targets (P29)', () => {
@@ -407,7 +402,10 @@ type integer is Beta {
     ce.declare('u', 'string|integer');
     ce.assign('u', ce.string('a'));
     expect(
-      ce.box(['compare', 'u', { str: 'b' }] as any).evaluate().toString()
+      ce
+        .box(['compare', 'u', { str: 'b' }] as any)
+        .evaluate()
+        .toString()
     ).toBe('"proto"');
   });
 
@@ -418,7 +416,9 @@ type integer is Beta {
 type string is Copyable {
   function copy(self: Self) -> Self { self }
 }`);
-    expect(ce.box(['copy', { str: 'a' }] as any).type.toString()).toBe('string');
+    expect(ce.box(['copy', { str: 'a' }] as any).type.toString()).toBe(
+      'string'
+    );
     expect(call(ce, 'copy', { str: 'a' })).toBe('"a"');
   });
 });
@@ -583,7 +583,10 @@ type string is Comparable {
     const e = ce();
     expect(
       errorCode(
-        e.box(['Field', 'Comparable', { str: 'nope' }] as any).evaluate().toString()
+        e
+          .box(['Field', 'Comparable', { str: 'nope' }] as any)
+          .evaluate()
+          .toString()
       )
     ).toBe('unknown-field');
     expect(
@@ -596,7 +599,10 @@ type string is Comparable {
     e.declareProtocol('Named', { readonly: { label: 'string' } });
     expect(
       errorCode(
-        e.box(['Field', 'Named', { str: 'label' }] as any).evaluate().toString()
+        e
+          .box(['Field', 'Named', { str: 'label' }] as any)
+          .evaluate()
+          .toString()
       )
     ).toBe('unknown-field');
   });
@@ -624,6 +630,69 @@ let q = Comparable.compare("a", "b")`
     expect(bare.symbol).toBe('Comparable');
     expect(bare.type.toString()).toBe('unknown');
     expect(bare.evaluate().symbol).toBe('Comparable');
+  });
+
+  test('a dispatcher call works inside a SHORTHAND lambda body', () => {
+    // `Self` at an indeterminate receiver substitutes as an alias
+    // `TypeReference` whose def is `unknown` — a wrapper that PRINTS like the
+    // primitive but defeated every primitive-keyed acceptance gate: the
+    // shorthand `negated(_) * 10` typed its dispatcher call as that
+    // reference, `checkNumericArgs`' "primitive unknown → infer later" gate
+    // missed it, and the multiplication rejected the operand with
+    // `incompatible-type number/unknown` while the identical shape through a
+    // plain declared function worked. `unwrapIndeterminateSelf`
+    // (engine-protocols.ts) reduces the top-level wrapper to the primitive.
+    const e = new ComputeEngine();
+    run(
+      e,
+      `protocol Negatable { function negated(self: Self) -> Self }
+type number is Negatable { function negated(self) -> number { -self } }
+const r = Map([1, 2, 3], negated(_) * 10)`
+    );
+    expect(e.box('r').evaluate().toString()).toBe('[-10,-20,-30]');
+    // An undecided receiver still DEFERS — symbolic, not an error.
+    const e2 = new ComputeEngine();
+    run(
+      e2,
+      `protocol Negatable { function negated(self: Self) -> Self }
+type number is Negatable { function negated(self) -> number { -self } }
+let u
+const s = negated(u) * 10`
+    );
+    expect(e2.box('s').evaluate().toString()).toBe('10negated(u)');
+  });
+
+  test('a qualified member works as a CALLBACK (`Map(xs, P.m)`)', () => {
+    // `Map` holds its callback raw, and `canonicalFunctionLiteral`'s
+    // shorthand path used to read the `Field(Comparable, "compare")`
+    // expression as a lambda BODY — turning its free symbol into the
+    // parameter, so every element was bound to the protocol-name slot and
+    // mapped through `Field(element, "m")`, an absence marker per element.
+    // The qualified member is a function VALUE (`isQualifiedProtocolMember`,
+    // function-utils.ts): the callback stays intact and applies through
+    // `Apply`, which evaluates the `Field` to the dispatching literal.
+    const e = new ComputeEngine();
+    run(
+      e,
+      `protocol Negatable { function negated(self: Self) -> Self }
+type number is Negatable { function negated(self) -> number { -self } }
+const r = Map([1, 2, 3], Negatable.negated)`
+    );
+    expect(e.box('r').evaluate().toString()).toBe('[-1,-2,-3]');
+    // A base symbol SHADOWED by a valued binding is not a protocol
+    // reference: the callback is an ordinary (non-function) field read and
+    // reports incompatible-type rather than silently dispatching.
+    const shadowed = new ComputeEngine();
+    run(
+      shadowed,
+      `protocol Negatable { function negated(self: Self) -> Self }
+type number is Negatable { function negated(self) -> number { -self } }
+const Negatable = 5
+const r = Map([1, 2], Negatable.negated)`
+    );
+    expect(shadowed.box('r').evaluate().toString()).toContain(
+      'incompatible-type'
+    );
   });
 
   test('a QUALIFIED call is validated statically too', () => {
@@ -681,7 +750,12 @@ let q = Comparable.compare("a", "b")`
     expect(
       errorCode(
         e
-          .box(['ProtocolMember', { str: 'Nope' }, { str: 'compare' }, 1] as any)
+          .box([
+            'ProtocolMember',
+            { str: 'Nope' },
+            { str: 'compare' },
+            1,
+          ] as any)
           .evaluate()
           .toString()
       )

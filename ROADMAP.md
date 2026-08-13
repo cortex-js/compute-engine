@@ -223,6 +223,22 @@ functions.
 
 ### Protocols residue (protocols + compiled dispatch landed 2026-08-12)
 
+- **`InverseFunction(f)` / `Derivative(f, n)` as a lazy operator's
+  callback are rejected** (found 2026-08-13; same family as the
+  qualified-protocol-member callback fix that landed that day).
+  `Map([1, 0], InverseFunction(Sin))` reports
+  `incompatible-type function/unknown`: the held callback arrives RAW,
+  where its type reads `unknown`, so the function-value gate
+  (`denotesFunction`, function-utils.ts) cannot answer and the
+  constant-nullary reject fires. A loud error, not silent wrong values
+  — and the explicit-lambda spelling
+  (`Map(xs, (x) |-> InverseFunction(Sin)(x))`) works. The protocol-member
+  case was fixable with a registry-keyed syntactic recognizer
+  (`isQualifiedProtocolMember`); these shapes need per-operator
+  knowledge ("which operator applications denote function values when
+  raw?") — a small denotes-function operator table, or canonicalizing
+  the callback operand before the gate, would lift them.
+
 - **Sum-name conformance** — `type shape is Area`, where `shape` is a sum
   type, is rejected with `protocol-conformance-target-invalid`: the sum
   sugar registers the sum name as an alias, and an alias cannot conform.
