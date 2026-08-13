@@ -663,6 +663,17 @@ auto-declare and inference lands rooted there. Discarding the scope
 discards the writes. Use `ce.createScope()` to make one that can be read
 back.
 
+`options.speculative` leaves NO trace in the engine's type state: the
+parse runs inside a transient scope (auto-declares land there and are
+discarded with it), and every ambient symbol whose type is currently
+inferred is shadowed in that scope with its current type — so a
+narrowing use in `latex` refines the discarded shadow instead of
+persistently narrowing the ambient symbol. Use it for derive-style
+parses that only READ the result (its type, structure, or
+serialization): the result's bindings refer to the discarded scope, so
+do not retain, evaluate, or compare it against later expressions.
+Mutually exclusive with `scope`.
+
 ####### latex
 
 `string`
@@ -672,6 +683,7 @@ back.
 `Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
   `form`: [`FormOption`](#formoption);
   `scope`: `Scope`;
+  `speculative`: `boolean`;
  \}
 
 ###### parse(latex, options)
@@ -689,6 +701,7 @@ parse(latex, options?): Expression | null
 `Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
   `form`: [`FormOption`](#formoption);
   `scope`: `Scope`;
+  `speculative`: `boolean`;
  \}
 
 </MemberCard>
@@ -3766,8 +3779,25 @@ or a re-mapped `Add`/`Multiply`/`Power`/relational operator).
 It does NOT override the structural / control-flow heads, which have
 their own bespoke lowering: `Sequence`, `Sum`, `Product`, `Function`,
 `Declare`, `Assign`, `Return`, `Break`, `Continue`, `Loop`,
-`Comprehension`, `If`, `Which`, `When`, `Match`, `Block`. A handler
+`Comprehension`, `If`, `When`, `Match`, `Block`. A handler
 declared on one of those heads is ignored.
+
+Exception: `Which` IS overridable (it has no binding structure — its
+operands are plain condition/value pairs a handler can compile through
+the callback it is given). To customize how `Which` compiles while
+keeping its stock evaluation semantics, attach the handler to the
+engine's own definition rather than re-declaring the operator (a
+re-declaration replaces the stock `evaluate`/`canonical` handlers):
+
+```ts
+const def = ce.lookupDefinition('Which');
+if (def && 'operator' in def) def.operator.compile = myWhichHandler;
+```
+
+The override is per-engine (each `ComputeEngine` builds its own
+standard-library definitions), and the decline contract applies: a
+handler returning `undefined` falls back to the built-in `Which`
+lowering, coercion and frame-protocol wrapping included.
 
 Return `undefined` (or an empty string) to fall back to the
 default compilation (a `null` returned from untyped JavaScript is
@@ -4337,6 +4367,39 @@ A definition can be either a value or an operator.
 It is collected in a tagged object literal, instead of being a simple union
 type, so that the type of the definition can be changed while keeping
 references to the definition in bound expressions.
+
+</MemberCard>
+
+<MemberCard>
+
+### TypeProvenanceEntry
+
+```ts
+type TypeProvenanceEntry = {
+  type: BoxedType;
+  kind: "declared" | "auto-declared" | "inferred" | "assumed" | "value-derived";
+  axis: "type" | "effects";
+  cause: Expression;
+  epoch: number;
+  span: {
+     start: number;
+     end: number;
+    };
+};
+```
+
+One recorded write to a definition's type (or an operator definition's
+signature): the type the write installed, the mechanism that installed it,
+and — for writes triggered by canonicalizing an expression — that
+expression.
+
+Provenance can never live on `Type`/`BoxedType` objects themselves: parsed
+types are interned, deep-frozen, and shared across engines (the
+`TYPE_CACHE` in `common/type/parse.ts`), so two occurrences of `boolean`
+are the same object. The history therefore lives on the per-engine
+definition, next to `inferredType`.
+
+Design: `docs/plans/2026-08-13-inference-provenance-journal.md`, phase 1.
 
 </MemberCard>
 
@@ -8409,6 +8472,53 @@ VERBATIM, with `Self` unsubstituted: `Self` is a textual substitution token
 
 <MemberCard>
 
+### InferenceWriteEvent
+
+```ts
+type InferenceWriteEvent = {
+  name: string;
+  binding: BoxedDefinition;
+  target:   | BoxedValueDefinition
+     | BoxedOperatorDefinition;
+  valueDef: BoxedValueDefinition;
+  from: BoxedType;
+  to: BoxedType;
+  kind: "inferred" | "assumed";
+};
+```
+
+One write of inference evidence onto a definition, as delivered to
+`IComputeEngine._noteInferenceWrite` — the single emission point whose
+subscribers are the provenance history, the fresh-inference set, and the
+narrowing sink. See `docs/plans/2026-08-13-inference-provenance-journal.md`
+(phase 1).
+
+</MemberCard>
+
+<MemberCard>
+
+### InferenceCauseContext
+
+```ts
+type InferenceCauseContext = {
+  operator: string;
+  ops: ReadonlyArray<ExpressionInput>;
+  expr: Expression;
+};
+```
+
+The ambient canonicalization context recorded as the `cause` of provenance
+entries: the operator expression being canonicalized when an inference
+write fires. Kept as the operator name + the operand array as the
+canonicalizer received it (possibly raw MathJSON — canonicalization has
+not run yet); `expr` is the non-canonical materialization, built lazily on
+the first write that records it (writes are rare — building an expression
+per canonicalization would not be).
+
+</MemberCard>
+
+<MemberCard>
+
 ### JSImplementation
 
 ```ts
@@ -9130,6 +9240,17 @@ auto-declare and inference lands rooted there. Discarding the scope
 discards the writes. Use `ce.createScope()` to make one that can be read
 back.
 
+`options.speculative` leaves NO trace in the engine's type state: the
+parse runs inside a transient scope (auto-declares land there and are
+discarded with it), and every ambient symbol whose type is currently
+inferred is shadowed in that scope with its current type — so a
+narrowing use in `latex` refines the discarded shadow instead of
+persistently narrowing the ambient symbol. Use it for derive-style
+parses that only READ the result (its type, structure, or
+serialization): the result's bindings refer to the discarded scope, so
+do not retain, evaluate, or compare it against later expressions.
+Mutually exclusive with `scope`.
+
 ####### latex
 
 `string`
@@ -9139,6 +9260,7 @@ back.
 `Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
   `form`: [`FormOption`](#formoption);
   `scope`: `Scope`;
+  `speculative`: `boolean`;
  \}
 
 ###### parse(latex, options)
@@ -9156,6 +9278,7 @@ parse(latex, options?): Expression | null
 `Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
   `form`: [`FormOption`](#formoption);
   `scope`: `Scope`;
+  `speculative`: `boolean`;
  \}
 
 </MemberCard>

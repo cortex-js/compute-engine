@@ -10,6 +10,7 @@
     "start": "bash ./scripts/start.sh",
     "snapshot": "bash ./scripts/test.sh snapshot",
     "version": "bash ./scripts/version.sh",
+    "postpublish": "bash ./scripts/package-vsix.sh",
     "test": "bash ./scripts/test.sh",
     "test:nodenext": "node ./test/consumer/nodenext-smoke.mjs",
     "test:epsil-runtime": "node ./test/consumer/epsil-runtime-smoke.mjs",
