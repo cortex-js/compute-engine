@@ -135,7 +135,7 @@ describe('Epsil CLI check: canonicalization-time type errors', () => {
     const { io, stderr } = makeIo();
     expect(await main(['check', '-e', '"a" + 1'], io)).toBe(1);
     expect(stderr()).toContain(
-      'error: Type error: expected `number`, got `string` in `"a" + 1`'
+      'error: Type error: expected `number`, got `string` at `a` in `"a" + 1`'
     );
     expect(stderr()).toContain('--> 1:1');
   });

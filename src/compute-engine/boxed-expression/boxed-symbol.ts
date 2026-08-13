@@ -461,21 +461,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
     const def = this._def;
 
-    // Narrowing capture (`InspectableScope.narrowings()`): while a parse/box
-    // runs against a caller-owned scope, every type this call writes onto a
-    // definition that lives OUTSIDE that scope is reported back to the caller —
-    // the phase-1 residual of scope containment, made observable. `undefined`
-    // — the normal case — costs one property read.
-    const sink = this.engine._narrowingSink;
-
     if (isValueDef(def)) {
       // The type of a constant cannot be changed, so it is never inferred,
       // even if it is unknown (e.g. `ContinuationPlaceholder`)
       if (def.value.isConstant) return false;
 
       if (def.value.inferredType || def.value.type.isUnknown) {
-        const wasUnknown = def.value.type.isUnknown;
-        const previousType = sink ? def.value.type : undefined;
+        const previousType = def.value.type;
         const inferred = this.engine.type(
           inferenceMode === 'widen'
             ? widen(def.value.type.type, t)
@@ -501,22 +493,26 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // no counter advance; future axes subscribe to the event.
         this.engine._noteStateEvent({ kind: 'inference', valueType: true });
         def.value.type = inferred;
-        // A first inference (unknown → concrete) during a boxing operation is
-        // recorded as forward provenance for the fresh-matrix-inference
-        // repair ("first inferred while canonicalizing this argument"); a
-        // re-inference of an already-concrete type is not "fresh" and is
-        // deliberately not recorded.
-        if (wasUnknown && this.engine._inferenceTxDepth > 0)
-          (this.engine._freshlyInferred ??= new Set()).add(def.value);
-        if (sink && previousType !== undefined)
-          sink._recordNarrowing(this._id, def, previousType, inferred);
+        // Single emission point for the write's passive observers: the
+        // provenance history, the fresh-inference set (unknown → concrete
+        // during a boxing, for the fresh-matrix-inference repair), and the
+        // narrowing sink (`InspectableScope.narrowings()`).
+        this.engine._noteInferenceWrite({
+          name: this._id,
+          binding: def,
+          target: def.value,
+          valueDef: def.value,
+          from: previousType,
+          to: inferred,
+          kind: 'inferred',
+        });
         return true;
       }
       return false;
     }
 
     if (isOperatorDef(def)) {
-      const previousType = sink ? def.operator.signature : undefined;
+      const previousType = def.operator.signature;
       const newType = this.engine.type(
         inferenceMode === 'widen'
           ? widen(def.operator.signature.type, t)
@@ -541,8 +537,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           kind: 'inference',
           symbolSignature: true,
         });
-        if (sink && previousType !== undefined)
-          sink._recordNarrowing(this._id, def, previousType, newType);
+        this.engine._noteInferenceWrite({
+          name: this._id,
+          binding: def,
+          target: def.operator,
+          from: previousType,
+          to: newType,
+          kind: 'inferred',
+        });
         return true;
       }
       // The type is no longer a function, use a value definition.
@@ -555,8 +557,21 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         callableBefore: true,
         callableAfter: containsSignatureArm(newType.type),
       });
-      if (sink && previousType !== undefined)
-        sink._recordNarrowing(this._id, def, previousType, newType);
+      // `updateDef` swapped the binding's halves in place: the write landed
+      // on the NEW value definition the swap installed, so provenance is
+      // recorded there (falling back to the original operator half only if
+      // the swap somehow left no value half). `valueDef` is deliberately NOT
+      // passed: the fresh-inference set never tracked this swap path (the
+      // pre-swap signature is never the `unknown` type), and the emission
+      // must not change that.
+      this.engine._noteInferenceWrite({
+        name: this._id,
+        binding: def,
+        target: isValueDef(def) ? def.value : def.operator,
+        from: previousType,
+        to: newType,
+        kind: 'inferred',
+      });
       return true;
     }
 

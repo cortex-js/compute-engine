@@ -199,7 +199,11 @@ describe('Phase 2 — apply-time enforcement (§6.4, §6.5)', () => {
     expect(r.json).toEqual([
       'Apply',
       ['Function', ['Block', ['Add', 'x', 1]], ['Typed', 'x', "'integer'"]],
-      ['Error', ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"]],
+      [
+        'Error',
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        2.5,
+      ],
     ]);
   });
 
@@ -210,7 +214,11 @@ describe('Phase 2 — apply-time enforcement (§6.4, §6.5)', () => {
     // The named-operator path produces the same incompatible-type ErrorCode.
     expect(named.json).toEqual([
       'g',
-      ['Error', ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"]],
+      [
+        'Error',
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        2.5,
+      ],
     ]);
   });
 
@@ -368,7 +376,11 @@ describe('Phase 3 — signature derivation for annotated literals (§9.2)', () =
     // named `Declare(f, "(integer) -> any", …)` side channel.
     expect(ce.box(['f', 2.5]).json).toEqual([
       'f',
-      ['Error', ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"]],
+      [
+        'Error',
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        2.5,
+      ],
     ]);
     // A well-typed argument evaluates.
     expect(ce.box(['f', 3]).evaluate().json).toBe(4);
@@ -413,7 +425,11 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     expect(ce.box('f').type.toString()).toBe('(integer) -> integer');
     expect(ce.box(['f', 2.5]).json).toEqual([
       'f',
-      ['Error', ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"]],
+      [
+        'Error',
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        2.5,
+      ],
     ]);
     expect(ce.box(['f', 3]).evaluate().json).toBe(4);
   });
@@ -430,7 +446,11 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     expect(ce.box('f').type.toString()).toBe('(integer) -> integer');
     expect(ce.box(['f', 2.5]).json).toEqual([
       'f',
-      ['Error', ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"]],
+      [
+        'Error',
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        2.5,
+      ],
     ]);
     expect(ce.box(['f', 3]).evaluate().json).toBe(4);
   });
@@ -446,7 +466,11 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     expect(ce.box('f').type.toString()).toBe('(integer) -> integer');
     expect(ce.box(['f', 2.5]).json).toEqual([
       'f',
-      ['Error', ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"]],
+      [
+        'Error',
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        2.5,
+      ],
     ]);
     expect(ce.box(['f', 3]).evaluate().json).toBe(4);
   });
@@ -527,6 +551,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
           "'tuple<number, number>'",
           "'finite_integer'",
         ],
+        3,
       ],
     ]);
     // …and a tuple call evaluates: the point binds whole and scales
@@ -636,6 +661,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
           "'tuple<number, number>'",
           "'finite_integer'",
         ],
+        3,
       ],
     ]);
     // …and a tuple call evaluates (the point binds atomically and scales).
@@ -659,6 +685,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
           "'tuple<number, number>'",
           "'finite_integer'",
         ],
+        3,
       ],
     ]);
     expect(ce.parse('f((3, 4))').evaluate().toString()).toBe('(6, 8)');
@@ -706,7 +733,11 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     expect(ce.box('f').type.toString()).toBe('(integer) -> integer');
     expect(ce.box(['f', 2.5]).json).toEqual([
       'f',
-      ['Error', ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"]],
+      [
+        'Error',
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        2.5,
+      ],
     ]);
     expect(ce.box(['f', 3]).evaluate().json).toBe(4);
   });

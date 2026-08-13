@@ -175,7 +175,7 @@ describe('NOMINAL constructor — the tagged value (§4.1)', () => {
     const ce = new ComputeEngine();
     ce.declareType('point', 'tuple<x: number, y: number>');
     expect(ce.box(['point', { str: 'a' }, 2]).toString()).toBe(
-      'point(Error(ErrorCode("incompatible-type", "number", "string")), 2)'
+      'point(Error(ErrorCode("incompatible-type", "number", "string"), "a"), 2)'
     );
   });
 
@@ -252,7 +252,7 @@ describe('OPACITY (D3) — a nominal value does not pierce', () => {
   test('`First` rejects', () => {
     const ce = engine();
     expect(ce.box(['First', ['point', 1, 2]]).toString()).toBe(
-      'First(Error(ErrorCode("incompatible-type", "indexed_collection", "point")))'
+      'First(Error(ErrorCode("incompatible-type", "indexed_collection", "point"), point(1, 2)))'
     );
   });
 

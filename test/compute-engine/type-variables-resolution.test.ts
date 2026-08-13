@@ -296,7 +296,7 @@ describe('§4.5 parity on the VALUE-definition route', () => {
       // §8: the reported expected type is the ground BOUND, never variable
       // syntax — and it is the same string on every route.
       expect(JSON.stringify(e.json)).toBe(
-        `["${f}",["Error",["ErrorCode","'incompatible-type'","'indexed_collection'","'set<finite_integer>'"]]]`
+        `["${f}",["Error",["ErrorCode","'incompatible-type'","'indexed_collection'","'set<finite_integer>'"],["Set",1,2]]]`
       );
     }
   });

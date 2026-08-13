@@ -288,6 +288,7 @@ function executeEpsilBatch(
         const notes = signatureNotes(ce, errors[0].json, {
           definitionSites: defSites,
           primaryRange: range,
+          boxedError: errors[0],
         });
         if (notes.length > 0) diagnostic.notes = notes;
         diagnostics.push(diagnostic);
@@ -340,6 +341,7 @@ function executeEpsilBatch(
       ? signatureNotes(ce, value.errors[0].json, {
           definitionSites: defSites,
           primaryRange: valueRange,
+          boxedError: value.errors[0],
         })
       : [];
 

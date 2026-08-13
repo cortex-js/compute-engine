@@ -93,7 +93,7 @@ describe('ERROR PROPAGATION — rung 2: bubbling at application', () => {
   test('an operand that merely EMBEDS an error bubbles its first error', () => {
     const { ce, calls } = setup();
     const expected =
-      'Error(ErrorCode("incompatible-type", "number", "string"))';
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")';
     expect(ce.box(['f', BAD]).evaluate().toString()).toBe(expected);
     expect(ce.box(['Pipe', BAD, 'f']).evaluate().toString()).toBe(expected);
     expect(calls()).toBe(0);
@@ -107,7 +107,7 @@ describe('ERROR PROPAGATION — rung 2: bubbling at application', () => {
         .box(['Pipe', BAD, ['Function', 99, 'x']])
         .evaluate()
         .toString()
-    ).toBe('Error(ErrorCode("incompatible-type", "number", "string"))');
+    ).toBe('Error(ErrorCode("incompatible-type", "number", "string"), "a")');
   });
 
   test('an argument that only FAILS when evaluated bubbles too', () => {
@@ -144,10 +144,10 @@ describe('ERROR PROPAGATION — rung 2: bubbling at application', () => {
     );
     expect(ce.box(['f', ERR]).evaluate().toString()).toBe('Error("oops")');
     expect(epsil('let f = x |-> x + 1; f("a" + 1)')).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
     expect(epsil('let f = x |-> x + 1; ("a" + 1) |> f')).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
   });
 });
@@ -175,7 +175,7 @@ describe('ERROR PROPAGATION — rung 3: operators bubble', () => {
     // `"a" + 1` is an invalid frozen `Add`; `Sin` of it bubbles the embedded
     // validation error, not the frozen tree.
     expect(ce.box(['Sin', BAD]).evaluate().toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
   });
 });
@@ -189,6 +189,7 @@ describe('ERROR PROPAGATION — rung 3: the breadcrumb (§2a)', () => {
     expect(err.json).toEqual([
       'Error',
       ['ErrorCode', "'incompatible-type'", "'number'", "'string'"],
+      "'a'",
       ['ErrorTrace', ['ErrorFrame', "'Ln'", 1], ['ErrorFrame', "'Add'", 2]],
     ]);
   });
@@ -200,6 +201,7 @@ describe('ERROR PROPAGATION — rung 3: the breadcrumb (§2a)', () => {
     expect(ce.box(['Sin', BAD]).evaluate().json).toEqual([
       'Error',
       ['ErrorCode', "'incompatible-type'", "'number'", "'string'"],
+      "'a'",
       ['ErrorTrace', ['ErrorFrame', "'Add'", 1], ['ErrorFrame', "'Sin'", 1]],
     ]);
   });
@@ -211,9 +213,10 @@ describe('ERROR PROPAGATION — rung 3: the breadcrumb (§2a)', () => {
       { operator: 'Add', index: 1 },
       { operator: 'Sin', index: 1 },
     ]);
-    // The `where` slot is EMPTY here: the breadcrumb occupies operand 2, and
-    // reading it positionally would misreport it as the error context.
-    expect(errorWhere(err)).toBeUndefined();
+    // The `where` slot carries the SITE (the faulted operand, attached at
+    // mint time since 2026-08-13) — and the reader must not confuse it with
+    // the breadcrumb, which sits AFTER it and is identified by head.
+    expect(errorWhere(err)?.toString()).toBe('"a"');
     const withWhere = ce.expr(['Negate', 2.5, 1.1]).evaluate();
     expect(errorWhere(withWhere)?.toString()).toBe('"1.1"');
   });
@@ -245,6 +248,26 @@ describe('ERROR PROPAGATION — rung 3: the breadcrumb (§2a)', () => {
     ).toBe('"caught"');
   });
 
+  test('an `Error(c, w)` pattern binds the site operand when it wants it', () => {
+    // One-slot `Error(c)` ignores the where slot (site or legacy string
+    // context — same slot, same rule); a two-slot pattern reaches it.
+    expect(
+      epsil('match Sin("a" + 1) {\n  Error(c, w) => w\n  _ => "no"\n}')
+    ).toBe('"a"');
+  });
+
+  test('the where-slot rule is uniform: a legacy string context is ignored and bindable the same way', () => {
+    // `Negate(2.5, 1.1)` mints the pre-2026-08-13 shape — a string context
+    // in the where slot. `Error(c)` catches it (uniform provenance-not-
+    // payload rule), and `Error(c, w)` binds it.
+    expect(
+      epsil('match Negate(2.5, 1.1) {\n  Error(c) => "caught"\n  _ => "no"\n}')
+    ).toBe('"caught"');
+    expect(
+      epsil('match Negate(2.5, 1.1) {\n  Error(c, w) => w\n  _ => "no"\n}')
+    ).toBe('"1.1"');
+  });
+
   test('the Epsil runtime-error diagnostic renders the frame chain', () => {
     const ce = new ComputeEngine();
     const { diagnostics } = executeEpsil(
@@ -267,7 +290,7 @@ describe('ERROR PROPAGATION — rung 3: collections freeze, they never bubble', 
     expect(list.operator).toBe('List');
     expect(list.count).toBe(3);
     expect(list.toString()).toBe(
-      '[1,ln(Error(ErrorCode("incompatible-type", "number", "string"))),3]'
+      '[1,ln(Error(ErrorCode("incompatible-type", "number", "string"), "a")),3]'
     );
   });
 
@@ -289,7 +312,7 @@ describe('ERROR PROPAGATION — rung 3: collections freeze, they never bubble', 
       .box(['Dictionary', ['KeyValuePair', { str: 'k' }, BAD]])
       .evaluate();
     expect(dict.get('k')?.toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
   });
 
@@ -299,7 +322,7 @@ describe('ERROR PROPAGATION — rung 3: collections freeze, they never bubble', 
       ce.box(['Length', ['List', 1, ['Ln', { str: 'a' }], 3]]).evaluate().json
     ).toEqual([
       'Length',
-      ['List', 1, ['Ln', ['Error', ['ErrorCode', "'incompatible-type'", "'number'", "'string'"]]], 3],
+      ['List', 1, ['Ln', ['Error', ['ErrorCode', "'incompatible-type'", "'number'", "'string'"], "'a'"]], 3],
     ]);
   });
 });
@@ -431,7 +454,7 @@ describe('ERROR PROPAGATION — collection-embedded errors do not bubble', () =>
     const { ce, calls } = setup();
     const list: MathJsonExpression = ['List', 1, BAD];
     const frozen =
-      'f([1,Error(ErrorCode("incompatible-type", "number", "string")) + 1])';
+      'f([1,Error(ErrorCode("incompatible-type", "number", "string"), "a") + 1])';
     expect(ce.box(['f', list]).evaluate().toString()).toBe(frozen);
     expect(ce.box(['Pipe', list, 'f']).evaluate().toString()).toBe(frozen);
     expect(calls()).toBe(0);
@@ -449,7 +472,7 @@ describe('ERROR PROPAGATION — collection-embedded errors do not bubble', () =>
       ce.box(['f', ['Add', ERR, 1]]).evaluate().toString()
     ).toBe('Error("oops")');
     expect(ce.box(['f', BAD]).evaluate().toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
   });
 
@@ -480,7 +503,7 @@ describe('ERROR PROPAGATION — a non-callable value def reports the CALLEE', ()
     const ce = new ComputeEngine();
     ce.box(['Assign', 'b', ['Function', ['Add', 'x', 1], 'x']]).evaluate();
     expect(ce.box(['b', BAD]).evaluate().toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
     expect(ce.box(['b', 2]).evaluate().toString()).toBe('3');
   });
@@ -514,7 +537,7 @@ describe('ERROR PROPAGATION — async, first-error and partial application', () 
     const { ce, calls } = setup();
     // Bubble: a user-function application.
     expect((await ce.box(['f', BAD]).evaluateAsync()).toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
     expect((await ce.box(['Pipe', ERR, 'f']).evaluateAsync()).toString()).toBe(
       'Error("oops")'
@@ -571,7 +594,7 @@ describe('ERROR PROPAGATION — rung 3: the §8a route-divergence residue is clo
    * handler must run on both routes.
    */
   const embedded =
-    'Error(ErrorCode("incompatible-type", "number", "string")) + 1';
+    'Error(ErrorCode("incompatible-type", "number", "string"), "a") + 1';
 
   test.each([
     ['Expand', embedded],
@@ -590,7 +613,7 @@ describe('ERROR PROPAGATION — rung 3: the §8a route-divergence residue is clo
     // evaluation bubbles on its own terms — so both routes yield the bare
     // error rather than the frozen tree.
     const ce = new ComputeEngine();
-    const bare = 'Error(ErrorCode("incompatible-type", "number", "string"))';
+    const bare = 'Error(ErrorCode("incompatible-type", "number", "string"), "a")';
     expect(ce.box(['Simplify', BAD]).evaluate().toString()).toBe(bare);
     expect(ce.box(['Pipe', BAD, 'Simplify']).evaluate().toString()).toBe(bare);
   });

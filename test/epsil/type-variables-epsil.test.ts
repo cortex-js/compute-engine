@@ -161,7 +161,7 @@ describe('EPSIL `where` ANNOTATIONS (D13: full-literal positions)', () => {
     const source = 'let f: (x: T) -> T where T: number = x |-> x\nf("a")';
     expect(parseDiagnostics(source)).toEqual([]);
     expect(run(source).value).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
   });
 
@@ -362,7 +362,7 @@ describe('EPSIL `where` × the `type` statement (D13: shadowing)', () => {
       'type point = tuple<number, number>\nlet g: (point) -> point\ng(5)'
     );
     expect(r.value).toBe(
-      'g(Error(ErrorCode("incompatible-type", "point", "finite_integer")))'
+      'g(Error(ErrorCode("incompatible-type", "point", "finite_integer"), 5))'
     );
   });
 

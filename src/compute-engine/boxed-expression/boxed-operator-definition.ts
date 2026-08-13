@@ -36,6 +36,7 @@ import type {
   Scope,
   Sign,
   BindingSiteSelector,
+  TypeProvenanceEntry,
 } from '../global-types.js';
 
 import { applicable } from '../function-utils.js';
@@ -323,6 +324,14 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   signature: BoxedType;
   inferredSignature = true;
+
+  // History of writes to this definition's signature — the operator-side
+  // analog of `BoxedValueDefinition._typeProvenance` (see
+  // `TypeProvenanceEntry` in `types-definitions.ts`). Declared upfront for
+  // shape stability; allocated on the first recorded write. NOT a
+  // user-definition key (`OPERATOR_DEF_KEYS` above): it is engine-written
+  // state, never supplied by a definition author.
+  _typeProvenance: TypeProvenanceEntry[] | undefined = undefined;
 
   /** See `OperatorDefinition._derivedSignature`. */
   _derivedSignature = false;

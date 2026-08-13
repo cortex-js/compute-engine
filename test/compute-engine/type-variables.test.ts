@@ -1029,7 +1029,7 @@ describe('END TO END — a user-declared generic operator', () => {
     expect(g.isValid).toBe(false);
     expect(g.op1.isValid).toBe(true);
     expect(g.op2.toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "integer", "real"))'
+      'Error(ErrorCode("incompatible-type", "integer", "real"), "rSym")'
     );
   });
 

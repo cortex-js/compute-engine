@@ -98,7 +98,11 @@ describe('STEFNOTCH #12', () => {
       [
         "Power",
         "ExponentialE",
-        ["Error", ["ErrorCode", "incompatible-type", "'number'", "'string'"]]
+        [
+          "Error",
+          ["ErrorCode", "incompatible-type", "'number'", "'string'"],
+          ["Text", ["Complex", 0, 1], "Pi", "nope!?\\lparensum"]
+        ]
       ]
     `);
   });

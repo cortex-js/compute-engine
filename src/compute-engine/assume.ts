@@ -6,11 +6,16 @@ import type { Type } from '../common/type/types.js';
 
 import {
   AssumeResult,
+  BoxedValueDefinition,
   Expression,
   IComputeEngine as ComputeEngine,
   IntervalBounds,
   Sign,
 } from './global-types.js';
+import {
+  recordTypeProvenance,
+  currentBoxingEpoch,
+} from './boxed-expression/type-provenance.js';
 
 import { findUnivariateRoots } from './boxed-expression/solve.js';
 import {
@@ -37,6 +42,53 @@ import {
   getFactIndex,
   hasAssumptions,
 } from './boxed-expression/constraint-subject.js';
+
+/**
+ * Record an assumption-driven type write in the definition's provenance
+ * history (`_typeProvenance` — see `TypeProvenanceEntry` in
+ * `types-definitions.ts`). Called AFTER the write, so the entry reads the
+ * installed type back off the definition. Assumption writes are deliberately
+ * NOT routed through `_noteInferenceWrite`: they never reported to the
+ * narrowing sink or the fresh-inference set, and recording provenance must
+ * not change that — the history is their only observer.
+ */
+function recordAssumedType(
+  ce: ComputeEngine,
+  value: BoxedValueDefinition,
+  cause?: Expression,
+  previous?: BoxedType
+): void {
+  // Append-on-change: a re-assertion that lands on the type already recorded
+  // (repeating `assume(q > 0)`) records nothing — a duplicate entry would
+  // burn the history cap and let a later no-op assertion masquerade as the
+  // type's source. Only the history entry is skipped: the caller's WRITE
+  // (and its `_writeVersion` bump) is pre-existing behavior and stands.
+  if (previous !== undefined && previous.toString() === value.type.toString())
+    return;
+  recordTypeProvenance(value, {
+    type: value.type,
+    kind: 'assumed',
+    axis: 'type',
+    cause,
+    epoch: currentBoxingEpoch(ce),
+  });
+}
+
+/**
+ * Record provenance on a binding the assumption itself installed via
+ * `ce.declare()` — a symbol the assumption CREATED, or a current-scope
+ * shadow of a parent binding (P1-6). Declaration is unconditional evidence
+ * (there is no previous type to compare against), so no append-on-change
+ * skip applies.
+ */
+function recordDeclaredByAssumption(
+  ce: ComputeEngine,
+  symbol: string,
+  cause?: Expression
+): void {
+  const def = ce.lookupDefinition(symbol);
+  if (isValueDef(def)) recordAssumedType(ce, def.value, cause);
+}
 
 /**
  * Infer a promoted type from a value expression.
@@ -398,7 +450,11 @@ function assumeEquality(proposition: Expression): AssumeResult {
       // yields for a free-symbol rhs like `a = b`); doing it after
       // `_setSymbolValue` would silently wipe the assigned value. Setting the
       // value last guarantees it survives.
-      if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
+      if (def.value.inferredType) {
+        const previous = def.value.type;
+        def.value.type = inferTypeFromValue(ce, val);
+        recordAssumedType(ce, def.value, proposition, previous);
+      }
       ce._setSymbolValue(lhs, val);
     }
     return 'ok';
@@ -456,7 +512,11 @@ function assumeEquality(proposition: Expression): AssumeResult {
     } else {
       // Set the (inferred) type before the value: see the note in Case 2. A
       // `set type(unknown)` would otherwise wipe the value assigned just below.
-      if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
+      if (def.value.inferredType) {
+        const previous = def.value.type;
+        def.value.type = inferTypeFromValue(ce, val);
+        recordAssumedType(ce, def.value, proposition, previous);
+      }
       ce._setSymbolValue(lhs, val);
     }
     return 'ok';
@@ -608,7 +668,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
       numericBoundValue(newBounds.upper) !== undefined
         ? 'finite_number'
         : 'number';
-    refineTypeIfUnknown(ce, partSubject.symbol, impliedType);
+    refineTypeIfUnknown(ce, partSubject.symbol, impliedType, result);
 
     // Store the normalized part-bound (normal form §3.2)
     ce.context.assumptions.set(result, true);
@@ -783,6 +843,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
     if (!def) {
       // Symbol not defined yet - declare with type 'real'
       ce.declare(symbol, { type: 'real' });
+      recordDeclaredByAssumption(ce, symbol, result);
     } else if (isValueDef(def) && def.value.inferredType) {
       // Symbol was auto-declared with inferred type - update to 'real'.
       // If the definition lives in a parent scope, shadow it in the current
@@ -791,8 +852,11 @@ function assumeInequality(proposition: Expression): AssumeResult {
       // `real` type into the parent scope after `popScope()`.
       if (!ce.context?.lexicalScope?.bindings.has(symbol)) {
         ce.declare(symbol, { type: 'real' });
+        recordDeclaredByAssumption(ce, symbol, result);
       } else {
+        const previous = def.value.type;
         def.value.type = ce.type('real');
+        recordAssumedType(ce, def.value, result, previous);
       }
     }
   }
@@ -828,7 +892,8 @@ function assumeElement(proposition: Expression): AssumeResult {
 
   // Case 1: bare symbol — decompose the set
   const propOp1 = proposition.op1;
-  if (isSymbol(propOp1)) return assumeElementOfSet(ce, propOp1.symbol, dom);
+  if (isSymbol(propOp1))
+    return assumeElementOfSet(ce, propOp1.symbol, dom, proposition);
 
   // Case 2: compound lhs
   // Note: this is not 'unknowns' because proposition is not canonical (so
@@ -838,6 +903,7 @@ function assumeElement(proposition: Expression): AssumeResult {
     const type = domainToType(dom);
     if (type !== 'unknown') {
       ce.declare(undefs[0], type);
+      recordDeclaredByAssumption(ce, undefs[0], proposition);
       return 'ok';
     }
     // The domain does not map to a type: fall through to storing the
@@ -873,11 +939,12 @@ function assumeElement(proposition: Expression): AssumeResult {
 function assumeElementOfSet(
   ce: ComputeEngine,
   symbol: string,
-  setExpr: Expression
+  setExpr: Expression,
+  cause?: Expression
 ): AssumeResult {
   // 1. Primitive number sets → pure type refinement
   const type = domainToType(setExpr);
-  if (type !== 'unknown') return refineSymbolType(ce, symbol, type);
+  if (type !== 'unknown') return refineSymbolType(ce, symbol, type, cause);
 
   // 1b. Signed number sets (SYM P2-11): the positive/negative/non-negative/
   //     non-positive integer and real sets decompose into a base type
@@ -887,7 +954,7 @@ function assumeElementOfSet(
   if (isSymbol(setExpr)) {
     const signed = SIGNED_NUMBER_SETS[setExpr.symbol];
     if (signed !== undefined) {
-      if (refineSymbolType(ce, symbol, signed.type) === 'contradiction')
+      if (refineSymbolType(ce, symbol, signed.type, cause) === 'contradiction')
         return 'contradiction';
       const b = assumeBound(ce, symbol, signed.op, ce.number(signed.value));
       return b === 'contradiction' ? 'contradiction' : 'ok';
@@ -897,7 +964,7 @@ function assumeElementOfSet(
   // 2. Range(lo, hi[, step]): integer-valued (`ZZGreaterEqual(1)`
   //    translates to Range(1, +∞))
   if (isFunction(setExpr, 'Range') && setExpr.ops.length >= 2) {
-    const result = refineSymbolType(ce, symbol, 'integer');
+    const result = refineSymbolType(ce, symbol, 'integer', cause);
     if (result === 'contradiction') return result;
 
     let [lo, hi] = setExpr.ops;
@@ -915,7 +982,7 @@ function assumeElementOfSet(
 
   // 3. Interval(lo, hi), endpoints possibly wrapped in `Open`
   if (isFunction(setExpr, 'Interval') && setExpr.ops.length === 2) {
-    const result = refineSymbolType(ce, symbol, 'real');
+    const result = refineSymbolType(ce, symbol, 'real', cause);
     if (result === 'contradiction') return result;
 
     let [lo, hi] = setExpr.ops;
@@ -968,14 +1035,14 @@ function assumeElementOfSet(
   //    which the fact layer does not represent)
   if (isFunction(setExpr, 'Union') && setExpr.ops.length > 0) {
     if (setExpr.ops.every((s) => isFunction(s, 'Range'))) {
-      if (refineSymbolType(ce, symbol, 'integer') === 'contradiction')
+      if (refineSymbolType(ce, symbol, 'integer', cause) === 'contradiction')
         return 'contradiction';
     } else if (
       setExpr.ops.every(
         (s) => isFunction(s, 'Interval') || isFunction(s, 'Range')
       )
     ) {
-      if (refineSymbolType(ce, symbol, 'real') === 'contradiction')
+      if (refineSymbolType(ce, symbol, 'real', cause) === 'contradiction')
         return 'contradiction';
     }
     // ...fall through to store the membership fact
@@ -997,16 +1064,24 @@ function assumeElementOfSet(
 function refineSymbolType(
   ce: ComputeEngine,
   symbol: string,
-  type: Type
+  type: Type,
+  cause?: Expression
 ): AssumeResult {
   if (!hasDef(ce, symbol)) {
     ce.declare(symbol, type);
+    recordDeclaredByAssumption(ce, symbol, cause);
     return 'ok';
   }
 
   // Shadow a parent-scope declaration in the current scope so the
-  // assumption is reverted when the scope is popped.
-  if (!ce.context?.lexicalScope?.bindings.has(symbol)) ce.declare(symbol, type);
+  // assumption is reverted when the scope is popped. The shadow's creation
+  // is recorded here — the write below then only appends when it actually
+  // changes the shadow's type (append-on-change), so the creation entry is
+  // the shadow's one guaranteed provenance record.
+  if (!ce.context?.lexicalScope?.bindings.has(symbol)) {
+    ce.declare(symbol, type);
+    recordDeclaredByAssumption(ce, symbol, cause);
+  }
 
   const def = ce.lookupDefinition(symbol);
   if (isValueDef(def)) {
@@ -1027,14 +1102,18 @@ function refineSymbolType(
         types: [type, def.value.type.type],
       });
       if (meet === 'nothing') return 'contradiction';
+      const previousMeet = def.value.type;
       def.value.type = new BoxedType(meet, ce._typeResolver);
       def.value.inferredType = false;
+      recordAssumedType(ce, def.value, cause, previousMeet);
       return 'ok';
     }
+    const previous = def.value.type;
     def.value.type = new BoxedType(type, ce._typeResolver);
     // The type was explicitly asserted: it is no longer an inferred type
     // (so a subsequent bare-symbol inequality won't widen it to 'real')
     def.value.inferredType = false;
+    recordAssumedType(ce, def.value, cause, previous);
     return 'ok';
   }
   if (isOperatorDef(def)) {
@@ -1198,11 +1277,13 @@ function boundsExcludeZero(bounds: IntervalBounds): boolean {
 function refineTypeIfUnknown(
   ce: ComputeEngine,
   symbol: string,
-  type: Type
+  type: Type,
+  cause?: Expression
 ): void {
   const def = ce.lookupDefinition(symbol);
   if (!def) {
     ce.declare(symbol, type);
+    recordDeclaredByAssumption(ce, symbol, cause);
     return;
   }
   if (!isValueDef(def) || def.value.isConstant) return;
@@ -1218,9 +1299,12 @@ function refineTypeIfUnknown(
   // reverted when the scope is popped.
   if (!ce.context?.lexicalScope?.bindings.has(symbol)) {
     ce.declare(symbol, type);
+    recordDeclaredByAssumption(ce, symbol, cause);
     return;
   }
+  const previous = def.value.type;
   def.value.type = ce.type(type);
+  recordAssumedType(ce, def.value, cause, previous);
 }
 
 function hasDef(ce: ComputeEngine, s: string): boolean {

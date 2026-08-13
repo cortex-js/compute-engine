@@ -116,6 +116,18 @@ interface BoxedBaseDefinition extends Partial<BaseDefinition> {
   collection?: CollectionHandlers;
 }
 
+/** Structural mirror of `TypeProvenanceEntry` (`types-definitions.ts`) —
+ * one recorded write to a definition's type. Kept field-for-field identical;
+ * the canonical documentation lives on the original. */
+type TypeProvenanceEntryMirror = {
+  type: BoxedType;
+  kind: 'declared' | 'auto-declared' | 'inferred' | 'assumed' | 'value-derived';
+  axis: 'type' | 'effects';
+  cause?: Expression;
+  epoch?: number;
+  span?: { start: number; end: number };
+};
+
 interface BoxedValueDefinition extends BoxedBaseDefinition {
   /** Release resources owned by this definition when its scope is disposed. */
   dispose(): void;
@@ -136,6 +148,12 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   neq?: (a: Expression) => boolean | undefined;
   cmp?: (a: Expression) => '=' | '>' | '<' | undefined;
   inferredType: boolean;
+  /** History of writes to this definition's type. Structural mirror of
+   * `TypeProvenanceEntry[]` — the full type lives in `types-definitions.ts`,
+   * which imports this file, so it cannot be named from here (same
+   * containment as `bindingSites` on the operator mirror below).
+   * @internal */
+  _typeProvenance: TypeProvenanceEntryMirror[] | undefined;
   /** True when the declaration STATED the arrow's effects (a non-empty
    * specifier, or the `pure` keyword) rather than leaving them on the inferred
    * track. See `types-definitions.ts`. */
@@ -197,6 +215,10 @@ interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
   complexity: number;
   inferredSignature: boolean;
+  /** History of writes to this definition's signature — see the mirror note
+   * on `BoxedValueDefinition._typeProvenance` above.
+   * @internal */
+  _typeProvenance: TypeProvenanceEntryMirror[] | undefined;
   /** See `OperatorDefinition._derivedSignature` (types-definitions.ts): the
    * pinned signature was derived from an annotated function literal at assign
    * time, not declared by the author. @internal */

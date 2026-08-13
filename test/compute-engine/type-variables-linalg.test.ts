@@ -111,7 +111,7 @@ describe('Conjugate — (T) -> T where T: number', () => {
     // §8: the displayed expected type is the ground bound, never variable
     // syntax.
     expect(JSON.stringify(e.json)).toBe(
-      '["Conjugate",["Error",["ErrorCode","\'incompatible-type\'","\'number\'","\'string\'"]]]'
+      '["Conjugate",["Error",["ErrorCode","\'incompatible-type\'","\'number\'","\'string\'"],"\'ab\'"]]'
     );
   });
 
@@ -205,7 +205,7 @@ describe('Inverse — (T) -> T where T: matrix', () => {
     expect(e.type.toString()).toBe('error');
     // §8: the declared bound `matrix` is what is displayed as expected.
     expect(JSON.stringify(e.json)).toBe(
-      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'set<finite_integer>\'"]]]'
+      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'set<finite_integer>\'"],["Set",1,2]]]'
     );
   });
 
@@ -214,7 +214,7 @@ describe('Inverse — (T) -> T where T: matrix', () => {
     const e = ce.function('Inverse', [ce.number(4)]);
     expect(e.type.toString()).toBe('error');
     expect(JSON.stringify(e.json)).toBe(
-      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'finite_integer\'"]]]'
+      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'finite_integer\'"],4]]'
     );
   });
 
@@ -223,7 +223,7 @@ describe('Inverse — (T) -> T where T: matrix', () => {
     const e = ce.box(['Inverse', ['List', 1, 2, 3]]);
     expect(e.type.toString()).toBe('error');
     expect(JSON.stringify(e.json)).toBe(
-      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'vector<finite_integer^3>\'"]]]'
+      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'vector<finite_integer^3>\'"],["List",1,2,3]]]'
     );
   });
 

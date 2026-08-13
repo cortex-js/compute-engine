@@ -458,13 +458,11 @@ function canonicalCallbackOperand(
   const fn = canonicalFunctionLiteral(op);
   // The operand a canonical handler REJECTS is replaced by the error, which is
   // how such a handler reports one, so the diagnostic matches the eager
-  // operators' `validateArguments` verdict byte for byte.
+  // operators' `validateArguments` verdict byte for byte — including the SITE
+  // operand (the faulted operand itself) `validateArguments` attaches via
+  // `ce.typeError`.
   const reject = (actual?: Type) =>
-    op.engine.error([
-      'incompatible-type',
-      'function',
-      typeToString(actual ?? op.type.type),
-    ]);
+    op.engine.typeError('function', actual ?? op.type.type, op);
   // A STRING is `canonicalFunctionLiteral`'s own step-0 exclusion, declined
   // there for this very reason — reported here instead of leaving the
   // application silently inert.

@@ -100,6 +100,123 @@ Not yet chosen. Each needs the full suite plus a snapshot blast-radius count.
    yet. Cleanest statement of the invariant — the auto-declare target must not
    depend on engine history — but likely the widest blast radius.
 
+### Attempt 1 (2026-08-13): promote free body symbols outward — REJECTED
+
+Implemented and measured, then reverted. Recording it so the next attempt does
+not repeat it.
+
+**What was tried.** A function body's `Block` scope cannot be marked
+`noAutoDeclare` (that flag is read by the PARAMETER branches of
+`createSymbolExpression` too, and promoting a parameter out of its own body is
+exactly wrong). So the body was recognized from the shadowed-parameter stack —
+each frame recording the lexical scope in force when the body's canonicalization
+began — and a genuinely free symbol auto-declared into the scope enclosing the
+OUTERMOST literal instead of into the body scope.
+
+**It worked on the target invariant and preserved capture.** Seven
+closure-capture probes
+(`docs/scratch/2026-08-13-closure-capture-invariants.mts`) were recorded before
+and after; the only line that moved was the defect —
+`ce.box(J).isSame(ce.box(J))` false → true. Type behaviour was untouched
+(witness and control both moved exactly as before), which is the measurement
+that refuted the claim that the witness's type movement was this same leak.
+
+**Why it is rejected: it violates a deliberately pinned contract.** Promoting a
+free body symbol outward LEAKS the name into the enclosing scope. Five tests
+fail on a quiet machine (zero snapshot churn), and the decisive one is explicit:
+
+```js
+const t = ce.box(['Function', [op, ['List', 1, 2], 'q'], 'xs']).type;
+expect(t.toString()).toContain(') any ->');
+// …and the READ itself declared nothing.
+expect(ce.lookupDefinition('q')).toBeUndefined();
+```
+
+(`test/compute-engine/design-d-callback-contract.test.ts`, and the ASYNC LANE
+suite's "the index does not leak into the global scope" guards the same
+property.) Boxing a function body must not declare its free symbols anywhere the
+caller can see. The other four failures — callable-transition invalidation, CSE
+over a forward-referencing definition, callback-list purity — are the same leak
+reaching effects and forward-reference machinery.
+
+**What this rules out.** Any fix that resolves the asymmetry by moving the
+DECLARATION outward. The asymmetry must instead be resolved in a direction that
+leaves the body's free symbols exactly as invisible as they are today — which
+means the sibling occurrence outside the binder is the side that has to change,
+or the two have to be reconciled without either becoming globally visible.
+
+**Method note:** `CLAUDE.md` says to grep for a pin locking the odd side BEFORE
+writing a fix. That was not done here, and it is what the detour cost.
+
+### Attempt 2 (2026-08-13): keep it body-local, ignore auto-declared outward
+### candidates — ALSO REJECTED
+
+Reading the pins first paid off twice, and then the attempt still failed.
+
+**What the pins bought.** Paper reasoning said two independently-created
+body-local definitions could not compare equal (`sameBinding` falls through to
+`sameBindingDef` for a free symbol). **That was wrong, and measuring it is what
+unlocked the attempt:** `box(F).isSame(box(F))` is TRUE for
+`Function(Multiply(x, y_r), x)` even though the two body-local definitions are
+different objects, and `y_r` stays invisible to `lookupDefinition`. So the
+defect is a mismatch of KIND — one pass body-local, the other resolving outward
+— not of identity.
+
+**What was tried.** Inside a function body, ignore an outward candidate whose
+binding is auto-declared (`inferredType === true`) and take the body-local route
+instead; resolve outward only to a STATED binding (explicit `declare`/`assign`
+or a library symbol, both `inferredType === false`).
+
+**It fixed all four filed families, including the two attempt 1 could not
+reach.** (a), (b), (c) and (d) of Tycho item 178 all passed — `isSame`, `hash`,
+`.json` and `box(json)` agreeing — and the seven closure-capture probes were
+unchanged, with only the defect line moving.
+
+**Why it is rejected: `inferredType` is the wrong discriminator.** It does not
+mean "auto-declared scratch binding"; it also marks a symbol that was
+auto-declared and THEN ASSIGNED A VALUE — which is exactly the declare-then-
+assign registration style the Tycho importer uses. 28 tests fail on a quiet
+machine (still zero snapshot churn), and the diagnostic one names it:
+
+```
+● a lambda body with an unbound free symbol
+  › sees a free symbol reachable only through an assigned value
+```
+
+The rest cluster where that severed capture reaches: CSE and compile regions,
+recursive definitions, `Map` element memo, element-type inference for
+parameters, and the item-127 dependency-precise invalidation suite.
+
+**What this rules out.** Any discriminator based on how the outward binding was
+CREATED. `inferredType` and the provenance `'auto-declared'` kind both persist
+after the symbol acquires a value, so neither separates "scratch binding my own
+sibling just made" from "document variable that happens to have been inferred".
+The boxing epoch does not separate them either: the sibling's binding is created
+in the SAME pass on the first boxing and in an EARLIER pass on every later one,
+so an epoch test flips exactly the wrong way.
+
+### Where that leaves it
+
+Two attempts, from opposite directions, both measured and both rejected:
+
+| attempt | direction | verdict |
+| --- | --- | --- |
+| 1 | promote the body's declaration outward | leaks the name to the caller — 5 pinned tests |
+| 2 | keep it body-local, ignore auto-declared outward candidates | severs capture through assigned values — 28 tests |
+
+The asymmetry is inherent to "on the first boxing nothing exists yet", and no
+local rule at the auto-declare decision point separates the two cases, because
+by the time the body asks, the sibling's binding is indistinguishable from a
+genuine one.
+
+That points at a PRE-PASS rather than a decision-point tweak: collect the
+expression's free symbols and settle their bindings BEFORE canonicalizing any
+part of it, so both boxings begin from identical state. That is an
+architectural change to the boxing entry point, not a local fix, and it should
+be designed deliberately — including what it means for `autoDeclare: false` and
+the resolve-only depth, which exist precisely to suppress declarations during a
+read.
+
 **A mechanism for (3) is arriving from elsewhere.** Phase 1 of
 `docs/plans/2026-08-13-inference-provenance-journal.md` adds an
 `'auto-declared'` provenance kind, recorded at the auto-declare path in
@@ -108,6 +225,27 @@ makes "was this binding pre-existing, or created by the pass currently running?"
 answerable from provenance alone — which is precisely the history-independence
 predicate (3) turns on, and it does not depend on the transaction primitive
 landing.
+
+**The predicate is now O(1) — use `entry.epoch`, not a containment walk.**
+Phase 1 landed a boxing epoch after this fix asked for one:
+`TypeProvenanceEntry.epoch === ce._boxingEpoch` iff the entry was recorded by
+the outermost pass running now (`_boxingEpoch` increments on the
+`_inferenceTxDepth` 0→1 transition). `epoch === undefined` means the write
+happened outside any boxing pass — a few `assume` routes — and only there does
+the containment fallback apply.
+
+Verified on this defect's own witness, epoch and containment agreeing:
+
+```
+_boxingEpoch after box1 / box2 : 26 / 27
+all four occurrences' auto-declared entries : epoch 26   (created during pass 1)
+as of pass 2: "created by THIS pass?"  epoch says false, containment says false
+defect still reproduces: true            (instrumentation has not perturbed it)
+```
+
+Within one pass the epoch does not distinguish "created a moment ago" from
+"created earlier in this same pass" — and it must not: same-pass is exactly the
+case this fix wants to treat as shareable.
 
 **Ordering agreed 2026-08-13 with the inference-provenance owner, and recorded
 on both sides** (their copy is in that plan's phase-1 data-model section):
@@ -157,11 +295,52 @@ same first-boxing state leak wearing a different hat: on the first boxing the
 outer occurrence's binding sees only the assignment, while on later boxings the
 shared binding already carries the body's usage evidence.
 
-The corrected second criterion is therefore about CONSISTENCY, not a particular
-value: **the inferred type must be identical across boxings of the same
-expression**, whatever value the model settles on. A fix that makes the type
-consistent has done its job; choosing which of `integer`/`number` is *right* is
-a question about the inference model, not about binder scope.
+**SECOND CORRECTION, 2026-08-13 — the type criterion is WITHDRAWN entirely, and
+the acceptance criterion for this fix is (1) alone.** A draft of this section
+replaced the value-pinning criterion with a consistency one ("identical across
+boxings"). The Tycho team's type-stability audit refuted that too, and their
+order matrix reproduces here verbatim on the published 0.105.0
+(`docs/scratch/ce-item178-type-stability-order-matrix.mts` in their repo):
+
+| ordering | witness (binder) | control (NO binder) |
+| --- | --- | --- |
+| assign-first, boxings 0/1/2 | `integer` at every count — stable | `integer` at every count — stable |
+| box-first, boxings 0/1/2 | `integer` → `finite_integer` — MOVES | `integer` → `number` — **MOVES** |
+| no declaration event at all | stable at every count | stable at every count |
+
+Two things follow, and both cut against what this note previously said:
+
+- **Pure boxing count moves nothing.** The movement needs a DECLARATION EVENT
+  landing after a boxing. "Identical across boxings" therefore passes
+  *vacuously* on 0.105.0 — it would have been a criterion no fix could fail.
+- **It is not binder-specific.** The no-binder control moves too. So this fix
+  CANNOT deliver type stability, and pinning it here would pin something the
+  change has no power over.
+
+**My earlier "control" was inadequate, and the reason is worth keeping.** It was
+`List(z_q, z_q)` — two bare symbols with no numeric USE, so there was no
+evidence to narrow from and nothing could have moved. "Stable" was uninformative
+for the same reason the `v!` probe was: a control has to be capable of showing
+the effect. Tycho's control (`List(Add(n, y_r), y_r)`) supplies the use and does
+move. This is the no-move-control trap in its second costume, caught by them
+one exchange after I handed it to them.
+
+What the binder actually contributes is DECOUPLING, not movement: with a binder
+the sibling's type stops tracking the body's evidence. That decoupling is what
+makes their one live classification gate reachable (their D-235), which is why
+the audit was worth running even though it cost me a criterion.
+
+**Criterion (1) survives and is binder-specific**, control-verified on the
+published bundle: `box(J).isSame(box(J))` is `false` for the binder witness and
+`true` for both the no-binder control and my old one. That is the defect this
+fix owns, and the only thing it should be judged on.
+
+The residual type movement is explained by the documented direction rules and
+is NOT a defect: box-first lets a numeric use narrow the symbol to `number`
+first, after which an assignment cannot narrow it back to `integer`;
+assign-first fixes `integer` first, and a use does not widen. See
+[[reference_inference_direction_rules]] — same fixpoint, reached from a
+different starting order.
 
 **Adjacent finding, and it is behaving as §1 describes — not a defect.** The
 direction rules were probed individually

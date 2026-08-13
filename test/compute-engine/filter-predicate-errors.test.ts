@@ -54,8 +54,8 @@ describe('Filter with an Error-valued predicate result', () => {
       .evaluate();
     expect(filtered.toString()).toBe(mapped.toString());
     expect(filtered.toString()).toBe(
-      '[Error(ErrorCode("incompatible-type", "finite_integer", "finite_real")),' +
-        'Error(ErrorCode("incompatible-type", "finite_integer", "finite_real"))]'
+      '[Error(ErrorCode("incompatible-type", "finite_integer", "finite_real"), 1.5),' +
+        'Error(ErrorCode("incompatible-type", "finite_integer", "finite_real"), 2.5)]'
     );
   });
 
@@ -243,8 +243,11 @@ describe('Any/All with an Error-valued predicate result', () => {
  *  - `DropWhile` emits it, then passes the rest of the source through (the
  *    predicate is never applied past the first non-True element).
  */
-const ERR =
-  'Error(ErrorCode("incompatible-type", "finite_integer", ' + '"finite_real"))';
+/** The failing element's value is now appended to the error, right after
+ * `ErrorCode`, so the four call sites below each pass their own site value. */
+const ERR = (site: string) =>
+  'Error(ErrorCode("incompatible-type", "finite_integer", ' +
+  `"finite_real"), ${site})`;
 
 describe('While family with an Error-valued predicate result', () => {
   test('TakeWhile emits the error, then stops', () => {
@@ -258,7 +261,7 @@ describe('While family with an Error-valued predicate result', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe(`[${ERR}]`);
+    ).toBe(`[${ERR('1.5')}]`);
   });
 
   test('TakeWhile keeps the valid prefix before the error', () => {
@@ -272,7 +275,7 @@ describe('While family with an Error-valued predicate result', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe(`[1,${ERR}]`);
+    ).toBe(`[1,${ERR('2.5')}]`);
   });
 
   test('TakeWhile reports the error prefix as non-empty, of length 1', () => {
@@ -323,7 +326,7 @@ describe('While family with an Error-valued predicate result', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe(`[${ERR},2.5]`);
+    ).toBe(`[${ERR('1.5')},2.5]`);
   });
 
   test('DropWhile drops the valid True run before the error', () => {
@@ -337,7 +340,7 @@ describe('While family with an Error-valued predicate result', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe(`[${ERR},3,4]`);
+    ).toBe(`[${ERR('2.5')},3,4]`);
   });
 
   test('DropWhile with a genuine False stop is unchanged', () => {

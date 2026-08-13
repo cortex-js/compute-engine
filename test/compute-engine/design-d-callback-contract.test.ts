@@ -526,7 +526,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
     const e = ce.box(['Filter', XS, 5]);
     expect(e.isValid).toBe(false);
     expect(e.errors[0]?.toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "function", "finite_integer"))'
+      'Error(ErrorCode("incompatible-type", "function", "finite_integer"), 5)'
     );
   });
 });
@@ -1213,7 +1213,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
     // The diagnostic names the GROUND union (clause 1's deep erasure), which
     // is what it named before the conversion.
     expect(ce.box(['Partition', 'cs', { str: 'banana' }]).toString()).toBe(
-      'Partition("cs", Error(ErrorCode("incompatible-type", "function | integer", "string")))'
+      'Partition("cs", Error(ErrorCode("incompatible-type", "function | integer", "string"), "banana"))'
     );
   });
 
@@ -1404,7 +1404,7 @@ describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
         .evaluate()
         .toString()
     ).toBe(
-      'Map("cs", Error(ErrorCode("incompatible-type", "function", "string")))'
+      'Map("cs", Error(ErrorCode("incompatible-type", "function", "string"), "banana"))'
     );
     // A union source still declines the stamp (the permanent union ruling).
     executeEpsil(ce, 'let mixed: list<integer|string> = [1,"a",2]');

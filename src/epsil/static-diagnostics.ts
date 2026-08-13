@@ -208,6 +208,45 @@ function canonicalizationDiagnostics(
 
     const errors: MathJsonExpression[] = [];
     collectErrors(canonical, errors);
+    // Pair each collected JSON error with its BOXED twin, keyed by serialized
+    // identity: the boxed error's site operand carries the faulted operand's
+    // own binding, which the provenance note reads scope-accurately
+    // (`signatureNotes`' `boxedError` option). The boxed walk mirrors
+    // `collectErrors`' traversal (operands AND dictionary values), so the
+    // JSON walk stays authoritative and the map is a lookup aside. Two
+    // byte-identical errors in one statement collide on the key — they also
+    // dedup to one diagnostic below, so first-wins is sufficient.
+    const boxedErrorByJson = new Map<
+      string,
+      ReturnType<ComputeEngine['box']>
+    >();
+    {
+      // Depth-first, LEFT-TO-RIGHT — the same visit order as
+      // `collectErrors`' JSON walk, so when two byte-identical errors exist
+      // the first-wins entry pairs with the FIRST collected JSON error (the
+      // one the dedup loop keeps) rather than a same-looking twin with a
+      // different binding. Children are pushed reversed because the stack
+      // pops from the end.
+      const stack = [boxed];
+      while (stack.length > 0) {
+        const node = stack.pop()!;
+        if (node.operator === 'Error') {
+          const key = JSON.stringify(node.json);
+          if (!boxedErrorByJson.has(key)) boxedErrorByJson.set(key, node);
+        }
+        // `ops` (functions) and `values` (dictionaries — the `let` initializer
+        // shape `collectErrors` descends) live on narrowed interfaces this
+        // module cannot prove without engine runtime guards; read them
+        // structurally. `values` exists on no other expression kind, so the
+        // read cannot trigger a collection materialization.
+        const values = (node as { values?: readonly typeof node[] }).values;
+        if (Array.isArray(values))
+          for (let i = values.length - 1; i >= 0; i--) stack.push(values[i]);
+        const ops = (node as { ops?: readonly typeof node[] }).ops;
+        if (ops !== undefined)
+          for (let i = ops.length - 1; i >= 0; i--) stack.push(ops[i]);
+      }
+    }
     // A declaration whose initializer PROVABLY cannot satisfy the annotation
     // is a static problem too, even though `Declare` only enforces it at
     // evaluation time (see `declaredTypeMismatch`).
@@ -235,16 +274,22 @@ function canonicalizationDiagnostics(
       const code = errorCode(error);
       if (!isCanonicalizationError(code)) continue;
       const description = describeError(error);
+      // Dedup and authored-subtraction key on the SITE-LESS description
+      // (`dedupKey`): the site operand the engine now attaches names WHERE,
+      // not WHAT, so it must not split one problem into per-site diagnostics
+      // or stop an authored (site-less) error from matching the engine-minted
+      // equivalent. The rendered `description` keeps the site.
+      const key = dedupKey(error);
       // Subtract the authored errors, one occurrence at a time: a program that
       // builds `Error(ErrorCode("incompatible-type", …))` twice and hits one
       // real type error still gets exactly one diagnostic.
-      const authoredCount = authored.get(description);
+      const authoredCount = authored.get(key);
       if (authoredCount !== undefined && authoredCount > 0) {
-        authored.set(description, authoredCount - 1);
+        authored.set(key, authoredCount - 1);
         continue;
       }
-      if (seen.has(description)) continue;
-      seen.add(description);
+      if (seen.has(key)) continue;
+      seen.add(key);
 
       // Where the error sits in the canonical tree names the call it belongs
       // to — the stand-in for the `ErrorTrace` breadcrumb a runtime error
@@ -279,6 +324,8 @@ function canonicalizationDiagnostics(
         definitionSites: defSites,
         primaryRange: [from, to],
         enclosingFrame: frame,
+        call: located.call,
+        boxedError: boxedErrorByJson.get(JSON.stringify(error)),
       });
       if (notes.length > 0) diagnostic.notes = notes;
       diagnostics.push(diagnostic);
@@ -369,10 +416,25 @@ function authoredErrors(statement: MathJsonExpression): Map<string, number> {
   collectErrors(statement, errors);
   const result = new Map<string, number>();
   for (const error of errors) {
-    const description = describeError(error);
+    const description = dedupKey(error);
     result.set(description, (result.get(description) ?? 0) + 1);
   }
   return result;
+}
+
+/**
+ * The per-statement dedup / authored-subtraction key: the error's
+ * description WITHOUT its site operand. The site names WHERE the mistake
+ * happened, not WHAT it is — two occurrences of the same mistake in one
+ * statement are one distinct problem ("one diagnostic per problem, not per
+ * cascade"), and a program-AUTHORED error value (typically site-less) must
+ * keep matching the engine-minted equivalent it stands for. The RENDERED
+ * message still uses the full `describeError`, site included — the site is
+ * detail, never identity.
+ */
+function dedupKey(error: MathJsonExpression): string {
+  const cause = operand(error, 1);
+  return describeError(cause === null ? error : ['Error', cause]);
 }
 
 /**

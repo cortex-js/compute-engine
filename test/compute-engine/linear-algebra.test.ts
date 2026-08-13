@@ -322,7 +322,10 @@ describe('Multiply over matrices is presentation-independent (contracts)', () =>
     engine.declare('w', '(number) -> unknown');
     engine.assign('w', engine.parse('n \\mapsto [[n, n + 1],[n + 2, n + 3]]'));
     expect(
-      engine.box(['Multiply', ['w', 1], ['w', 5]]).evaluate().toString()
+      engine
+        .box(['Multiply', ['w', 1], ['w', 5]])
+        .evaluate()
+        .toString()
     ).toBe(PRODUCT);
   });
 
@@ -709,9 +712,9 @@ describe('Matrix juxtaposition and subtraction', () => {
   // left undistributed, so `Add`/`Subtract` broadcast it into a bogus
   // rank-4 result).
   it('subtracts two matrix products to zero', () => {
-    expect(
-      evL(M + N + '-' + M + String.raw`\cdot ` + N)
-    ).toMatchInlineSnapshot(`[[0,0],[0,0]]`);
+    expect(evL(M + N + '-' + M + String.raw`\cdot ` + N)).toMatchInlineSnapshot(
+      `[[0,0],[0,0]]`
+    );
   });
 
   it('computes the commutator AB - BA', () => {
@@ -720,7 +723,10 @@ describe('Matrix juxtaposition and subtraction', () => {
 
   it('negates a matrix product element-wise', () => {
     expect(
-      ce.box(['Negate', ['Multiply', sq2_n, sq2_n2]]).evaluate().toString()
+      ce
+        .box(['Negate', ['Multiply', sq2_n, sq2_n2]])
+        .evaluate()
+        .toString()
     ).toMatchInlineSnapshot(`[[-19,-22],[-43,-50]]`);
   });
 });
@@ -896,11 +902,7 @@ describe('Transpose', () => {
   // generic `value`, so an unevaluated `Transpose(m)` was rejected as an
   // operand of matrix arithmetic (`incompatible-type` inside `Multiply`).
   it('reports the transposed static type (element type kept, axes swapped)', () => {
-    const m23 = ce.expr([
-      'List',
-      ['List', 1, 2, 3],
-      ['List', 4, 5, 6],
-    ]);
+    const m23 = ce.expr(['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
     expect(ce.expr(['Transpose', m23]).type.toString()).toBe(
       'matrix<finite_integer^(3x2)>'
     );
@@ -966,7 +968,7 @@ describe('Determinant', () => {
     const result = ce.expr(['Determinant', 42]).evaluate();
     // Type checking rejects scalar before evaluation can return the scalar
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"), 42)`
     );
   });
 
@@ -976,7 +978,7 @@ describe('Determinant', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"), [7,-2,11,-5,13,-7,17])`
     );
   });
 
@@ -994,14 +996,14 @@ describe('Determinant', () => {
     const result = ce.expr(['Determinant', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   });
 
   it('should calculate the determinant of a tensor with unknowns', () => {
     const result = ce.expr(['Determinant', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"), [[[a,b],[c,d],["e_1","f_1"],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
     );
   });
 });
@@ -1140,7 +1142,7 @@ describe('Inverse', () => {
     const result = ce.expr(['Inverse', 42]).evaluate();
     // Type checking rejects scalar before evaluation can return 1/scalar
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"), 42)`
     );
   });
 
@@ -1150,7 +1152,7 @@ describe('Inverse', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"), [7,-2,11,-5,13,-7,17])`
     );
   });
 
@@ -1170,14 +1172,14 @@ describe('Inverse', () => {
     const result = ce.expr(['Inverse', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   });
 
   it('should calculate the inverse of a numeric tensor', () => {
     const result = ce.expr(['Inverse', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"), [[[a,b],[c,d],["e_1","f_1"],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
     );
   });
 
@@ -1244,9 +1246,12 @@ describe('Inverse', () => {
     const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
     const b: Expression = ['List', 1, 1];
     // Dot(A⁻¹, b) solves A·x = b: x = [2/5, 1/5].
-    expect(ce.expr(['Dot', ['Inverse', A], b]).evaluate().toString()).toEqual(
-      '[2/5,1/5]'
-    );
+    expect(
+      ce
+        .expr(['Dot', ['Inverse', A], b])
+        .evaluate()
+        .toString()
+    ).toEqual('[2/5,1/5]');
   });
 });
 
@@ -1298,7 +1303,7 @@ describe('PseudoInverse', () => {
     const result = ce.expr(['PseudoInverse', 42]).evaluate();
     // Type checking rejects scalar before evaluation can return 1/scalar
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"), 42)`
     );
   });
 
@@ -1308,7 +1313,7 @@ describe('PseudoInverse', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"), [7,-2,11,-5,13,-7,17])`
     );
   });
 
@@ -1332,14 +1337,14 @@ describe('PseudoInverse', () => {
     const result = ce.expr(['PseudoInverse', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   });
 
   it('should calculate the pseudo inverse of a numeric tensor', () => {
     const result = ce.expr(['PseudoInverse', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"), [[[a,b],[c,d],["e_1","f_1"],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
     );
   });
 });
@@ -1422,7 +1427,7 @@ describe('IdentityMatrix', () => {
     const result = ce.expr(['IdentityMatrix', 2.5]).evaluate();
     // Type signature validation catches this before evaluate runs
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "integer", "finite_real"))`
+      `Error(ErrorCode("incompatible-type", "integer", "finite_real"), 2.5)`
     );
   });
 });
@@ -1545,7 +1550,10 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
   });
 
   it('builds a huge Diagonal matrix from a vector lazily', () => {
-    const vec = ce.box(['List', ...Array.from({ length: 150 }, (_, k) => k + 1)]);
+    const vec = ce.box([
+      'List',
+      ...Array.from({ length: 150 }, (_, k) => k + 1),
+    ]);
     const result = ce.box(['Diagonal', vec]).evaluate();
     expect(ce.box(['Length', result]).evaluate().re).toBe(150);
     // Entry (7,7) is the 7th vector element; off-diagonal is 0.
@@ -1585,9 +1593,12 @@ describe('Norm — result type is real', () => {
     // Finiteness is not provable for a bare `complex`, so `real`, not
     // `finite_real` — but real either way, which is the point.
     expect(eng.expr(['Norm', ['Tuple', 'z', 1]]).type.toString()).toBe('real');
-    expect(eng.expr(['Norm', ['Tuple', 'z', 1]]).evaluate().toString()).toBe(
-      'sqrt(|z|^2 + 1)'
-    );
+    expect(
+      eng
+        .expr(['Norm', ['Tuple', 'z', 1]])
+        .evaluate()
+        .toString()
+    ).toBe('sqrt(|z|^2 + 1)');
   });
 
   it('composes into a `real`-declared slot', () => {
@@ -2739,11 +2750,7 @@ describe('Dot / Cross', () => {
         eng.expr(['Dot', ['Tuple', 'z', 'r2'], ['Tuple', 1, 2]]).type.toString()
       ).toBe(
         eng
-          .expr([
-            'Add',
-            ['Multiply', 'z', 1],
-            ['Multiply', 'r2', 2],
-          ])
+          .expr(['Add', ['Multiply', 'z', 1], ['Multiply', 'r2', 2]])
           .type.toString()
       );
     });
@@ -2771,7 +2778,10 @@ describe('Dot / Cross', () => {
 
     it('accepts a mixed tuple · list product', () => {
       expect(
-        ce.expr(['Dot', ['Tuple', 1, 2], ['List', 3, 4]]).evaluate().toString()
+        ce
+          .expr(['Dot', ['Tuple', 1, 2], ['List', 3, 4]])
+          .evaluate()
+          .toString()
       ).toBe('11');
     });
 
@@ -2941,9 +2951,9 @@ describe('MatrixPower', () => {
         ['Rational', 1, 2],
       ])
       .evaluate();
-    expect(
-      ce.function('MatrixMultiply', [root, root]).evaluate().json
-    ).toEqual(['List', ['List', 10, 7], ['List', 7, 17]]);
+    expect(ce.function('MatrixMultiply', [root, root]).evaluate().json).toEqual(
+      ['List', ['List', 10, 7], ['List', 7, 17]]
+    );
   });
 
   it('supports a half-integer exponent (3/2 = √A cubed)', () => {
@@ -2992,7 +3002,10 @@ describe('Power of a matrix (^)', () => {
 
   it('parses and evaluates from LaTeX', () => {
     expect(
-      ce.parse(String.raw`\begin{pmatrix}1&2\\3&4\end{pmatrix}^2`).evaluate().toString()
+      ce
+        .parse(String.raw`\begin{pmatrix}1&2\\3&4\end{pmatrix}^2`)
+        .evaluate()
+        .toString()
     ).toBe('[[7,10],[15,22]]');
   });
 
@@ -3137,10 +3150,7 @@ describe('RowReduce', () => {
     // rationals — checks the exact fraction arithmetic end to end.
     expect(
       ce
-        .expr([
-          'RowReduce',
-          ['List', ['List', 2, 3], ['List', 4, 6]],
-        ])
+        .expr(['RowReduce', ['List', ['List', 2, 3], ['List', 4, 6]]])
         .evaluate().json
     ).toEqual(['List', ['List', 1, ['Rational', 3, 2]], ['List', 0, 0]]);
   });
@@ -3201,9 +3211,8 @@ describe('Exact linear algebra (rational null space / rank / eigenvectors)', () 
 
   it('returns the full standard basis for the zero matrix kernel', () => {
     expect(
-      ce
-        .expr(['Kernel', ['List', ['List', 0, 0], ['List', 0, 0]]])
-        .evaluate().json
+      ce.expr(['Kernel', ['List', ['List', 0, 0], ['List', 0, 0]]]).evaluate()
+        .json
     ).toEqual(['List', ['List', 1, 0], ['List', 0, 1]]);
   });
 
@@ -3270,11 +3279,7 @@ describe('Exact linear algebra (rational null space / rank / eigenvectors)', () 
       ce
         .expr(['Eigenvectors', ['List', ['List', 4, 1], ['List', 2, 3]]])
         .evaluate().json
-    ).toEqual([
-      'List',
-      ['List', 1, 1],
-      ['List', ['Rational', -1, 2], 1],
-    ]);
+    ).toEqual(['List', ['List', 1, 1], ['List', ['Rational', -1, 2], 1]]);
   });
 
   it('exact eigenvectors satisfy A·v = λ·v', () => {

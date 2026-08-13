@@ -482,6 +482,10 @@ function boxFunctionInternal(
  */
 export function beginInferenceTransaction(ce: ComputeEngine): void {
   ce._inferenceTxDepth += 1;
+  // A new OUTERMOST pass gets a new epoch; nested begins share the outer
+  // pass's. Provenance entries stamp the current epoch so consumers can ask
+  // "recorded by the pass running now?" in O(1) (`TypeProvenanceEntry.epoch`).
+  if (ce._inferenceTxDepth === 1) ce._boxingEpoch += 1;
 }
 
 export function endInferenceTransaction(ce: ComputeEngine): void {
@@ -1283,6 +1287,30 @@ function admissibleElementType(t: Type): boolean {
 }
 
 function makeCanonicalFunction(
+  ce: ComputeEngine,
+  name: string,
+  ops: ReadonlyArray<ExpressionInput>,
+  metadata: Metadata | undefined,
+  scope: Scope | undefined
+): Expression {
+  // Ambient inference-cause context: while this operator canonicalizes, any
+  // `infer()` write onto a definition records THIS expression as the cause
+  // of the write in the definition's provenance history (`_noteInferenceWrite`
+  // in `index.ts`). Save/restore rather than set/clear so nested
+  // canonicalizations (a canonical handler boxing sub-expressions) resolve
+  // to the innermost enclosing operator. The context stores only
+  // `{operator, ops}` — two field writes on this hot path; the expression is
+  // materialized lazily by the (rare) write that records it.
+  const previousCause = ce._inferenceCause;
+  ce._inferenceCause = { operator: name, ops };
+  try {
+    return makeCanonicalFunctionCore(ce, name, ops, metadata, scope);
+  } finally {
+    ce._inferenceCause = previousCause;
+  }
+}
+
+function makeCanonicalFunctionCore(
   ce: ComputeEngine,
   name: string,
   ops: ReadonlyArray<ExpressionInput>,

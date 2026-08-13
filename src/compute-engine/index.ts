@@ -68,6 +68,8 @@ import type {
   ProtocolRecord,
   ProtocolMembersInput,
   ProtocolImplementationInput,
+  InferenceWriteEvent,
+  InferenceCauseContext,
 } from './global-types.js';
 
 import type {
@@ -77,6 +79,10 @@ import type {
 } from './latex-syntax/types.js';
 import { validateStyleOptions } from './latex-syntax/style-options.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
+import {
+  recordTypeProvenance,
+  currentBoxingEpoch,
+} from './boxed-expression/type-provenance.js';
 import { provisionalRegistryRollbackPoint } from './boxed-expression/provisional-application.js';
 import { isSymbol } from './boxed-expression/type-guards.js';
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
@@ -855,6 +861,11 @@ export class ComputeEngine implements IComputeEngine {
    */
   _inferenceTxDepth = 0;
 
+  /** Outermost-boxing counter — see `IComputeEngine._boxingEpoch`.
+   * @internal
+   */
+  _boxingEpoch = 0;
+
   /** When true, a scope being discarded tombstones its value definitions and
    * the symbol resolution sites report a use of a dead binding with both
    * stacks (`boxed-expression/binding-tombstone.ts`). Debugging aid, not a
@@ -867,10 +878,61 @@ export class ComputeEngine implements IComputeEngine {
   /** Value definitions whose type was first inferred (unknown → concrete)
    * during the current top-level boxing operation — forward-computed
    * provenance for the fresh-matrix-inference repair. Lazily allocated by
-   * `BoxedSymbol.infer()`; reset when the outermost boxing ends.
+   * `_noteInferenceWrite()`; reset when the outermost boxing ends.
    * @internal
    */
   _freshlyInferred: Set<BoxedValueDefinition> | null = null;
+
+  /** The operator expression being canonicalized, recorded as the `cause` of
+   * provenance entries — see `IComputeEngine._inferenceCause`. Installed
+   * with save/restore around `makeCanonicalFunction` (`box.ts`), so nested
+   * canonicalizations resolve to the innermost enclosing operator.
+   * @internal
+   */
+  _inferenceCause: InferenceCauseContext | null = null;
+
+  /** The inference-write choke point — see
+   * `IComputeEngine._noteInferenceWrite`. Subscribers, in order: the
+   * provenance history on the written definition, the fresh-inference set
+   * (unknown → concrete transitions during a boxing, consumed by the
+   * fresh-matrix-inference repair in `box.ts`), and the narrowing sink
+   * (writes onto definitions outside a contained scope, reported back to
+   * `InspectableScope.narrowings()`).
+   * @internal */
+  _noteInferenceWrite(event: InferenceWriteEvent): void {
+    // The cause is materialized lazily: canonicalization is hot and stores
+    // only {operator, ops}; the non-canonical wrapper expression is built on
+    // the first write that records it. Raw-form boxing binds nothing and
+    // canonicalizes nothing, so this cannot recurse into inference.
+    const ctx = this._inferenceCause;
+    if (ctx && ctx.expr === undefined)
+      ctx.expr = this._fn(
+        ctx.operator,
+        ctx.ops.map((o) => this.expr(o, { form: 'raw' })),
+        { canonical: false }
+      );
+    recordTypeProvenance(event.target, {
+      type: event.to,
+      kind: event.kind,
+      axis: 'type',
+      cause: ctx?.expr,
+      epoch: currentBoxingEpoch(this),
+    });
+
+    if (
+      event.valueDef !== undefined &&
+      event.from.isUnknown &&
+      this._inferenceTxDepth > 0
+    )
+      (this._freshlyInferred ??= new Set()).add(event.valueDef);
+
+    this._narrowingSink?._recordNarrowing(
+      event.name,
+      event.binding,
+      event.from,
+      event.to
+    );
+  }
 
   /** In strict mode (the default) the Compute Engine performs
    * validation of domains and signature and may report errors.
@@ -2793,7 +2855,7 @@ export class ComputeEngine implements IComputeEngine {
   typeError(
     expected: Type,
     actual: undefined | Type | BoxedType,
-    where?: string
+    where?: string | Expression
   ): Expression {
     return createTypeErrorExpression(this, expected, actual, where);
   }

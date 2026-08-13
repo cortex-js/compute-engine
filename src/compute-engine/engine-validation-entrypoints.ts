@@ -18,7 +18,7 @@ type ValidationHost = {
 export function createErrorExpression(
   engine: ValidationHost,
   message: string | string[],
-  where?: string
+  where?: string | Expression
 ): Expression {
   let msg: Expression;
   if (typeof message === 'string') msg = engine.string(message);
@@ -29,7 +29,17 @@ export function createErrorExpression(
     );
 
   let whereExpr: Expression | undefined;
-  if (where && isLatexString(where)) {
+  if (where !== undefined && typeof where !== 'string') {
+    // An EXPRESSION site: the offending operand itself, attached AS-IS so it
+    // keeps its binding — a symbol operand still reaches its (possibly
+    // scope-dead) value definition through `.valueDefinition`, which is what
+    // lets diagnostics read the binding's own `_typeProvenance` instead of
+    // re-resolving the bare name in the ambient scope (where a same-named
+    // outer binding would shadow the one that actually faulted). The
+    // `IComputeEngine.typeError` interface always declared an expression
+    // `where`; until 2026-08-13 the implementation silently dropped it.
+    whereExpr = where;
+  } else if (where && isLatexString(where)) {
     whereExpr = engine.function('LatexString', [
       engine.string(asLatexString(where)!),
     ]);
@@ -47,7 +57,7 @@ export function createTypeErrorExpression(
   engine: ValidationHost,
   expected: Type,
   actual: undefined | Type | BoxedType,
-  where?: string
+  where?: string | Expression
 ): Expression {
   if (actual) {
     return createErrorExpression(

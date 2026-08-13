@@ -64,11 +64,7 @@ describe('LIST TENSOR ELIGIBILITY', () => {
     const expressions = [
       ce.parse('[(1,2),(3,4)]'),
       ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]),
-      ce.box([
-        'List',
-        ['Hold', ['Tuple', 1, 2]],
-        ['Hold', ['Tuple', 3, 4]],
-      ]),
+      ce.box(['List', ['Hold', ['Tuple', 1, 2]], ['Hold', ['Tuple', 3, 4]]]),
       ce.box([
         'List',
         ['If', 'c', ['Tuple', 1, 2], ['Tuple', 3, 4]],
@@ -154,11 +150,7 @@ describe('LIST TENSOR ELIGIBILITY', () => {
   test('genuine numeric vectors and matrices remain tensors', () => {
     const ce = new ComputeEngine();
     const vector = ce.box(['List', 1, 2, 3]);
-    const matrix = ce.box([
-      'List',
-      ['List', 1, 2],
-      ['List', 3, 4],
-    ]);
+    const matrix = ce.box(['List', ['List', 1, 2], ['List', 3, 4]]);
 
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
@@ -190,6 +182,7 @@ describe('COUNT', () => {
       [
         "Error",
         ["ErrorCode", "incompatible-type", "'collection'", "'finite_number'"],
+        ["Add", ["Multiply", 3, "x"], 2],
         ["ErrorTrace", ["ErrorFrame", "'Count'", 1]]
       ]
     `));
@@ -199,6 +192,7 @@ describe('COUNT', () => {
       [
         "Error",
         ["ErrorCode", "incompatible-type", "'collection'", "'number'"],
+        "x",
         ["ErrorTrace", ["ErrorFrame", "'Count'", 1]]
       ]
     `));
@@ -228,9 +222,7 @@ describe('COUNT', () => {
 
   test('Count linspace with symbolic count stays inert', () =>
     expect(
-      exprToString(
-        engine.expr(['Count', ['Linspace', 0, 1, 'n']]).evaluate()
-      )
+      exprToString(engine.expr(['Count', ['Linspace', 0, 1, 'n']]).evaluate())
     ).toMatchInlineSnapshot(`["Count", ["Linspace", 0, 1, "n"]]`));
 });
 
@@ -270,9 +262,7 @@ describe('EXACT NUMERICALLY-KNOWN BOUNDS (item 117)', () => {
       .evaluate();
     expect(v.count).toEqual(3);
     expect([...v.each()].map((e) => e.re)).toEqual([
-      0,
-      2.0943951023931957,
-      4.188790204786391,
+      0, 2.0943951023931957, 4.188790204786391,
     ]);
   });
 
@@ -291,9 +281,7 @@ describe('EXACT NUMERICALLY-KNOWN BOUNDS (item 117)', () => {
   });
 
   test('Linspace with exact endpoints counts and enumerates', () => {
-    const v = engine
-      .expr(['Linspace', 0, ['Multiply', 2, 'Pi'], 5])
-      .evaluate();
+    const v = engine.expr(['Linspace', 0, ['Multiply', 2, 'Pi'], 5]).evaluate();
     expect(v.count).toEqual(5);
     const els = [...v.each()].map((e) => e.re);
     expect(els.length).toEqual(5);
@@ -336,8 +324,12 @@ describe('COUNT — 2-argument value and predicate forms', () => {
   });
 
   test('predicate form counts satisfying elements', () => {
-    expect(count(['List', 1, 2, 3], ['Function', ['Greater', '_', 1], '_'])).toEqual('2');
-    expect(count(['Range', 1, 10], ['Function', ['Greater', '_', 5], '_'])).toEqual('5');
+    expect(
+      count(['List', 1, 2, 3], ['Function', ['Greater', '_', 1], '_'])
+    ).toEqual('2');
+    expect(
+      count(['Range', 1, 10], ['Function', ['Greater', '_', 5], '_'])
+    ).toEqual('5');
     // Same answer as the long way round.
     expect(
       count(['Range', 1, 10], ['Function', ['Greater', '_', 5], '_'])
@@ -357,8 +349,8 @@ describe('COUNT — 2-argument value and predicate forms', () => {
     expect(() =>
       engine.expr(['Count', ['List', 1, 'x', 3], pred]).evaluate()
     ).toThrow(/must return "True" or "False"/);
-    expect(() =>
-      engine.expr(['Filter', ['List', 1, 'x', 3], pred]).evaluate().count
+    expect(
+      () => engine.expr(['Filter', ['List', 1, 'x', 3], pred]).evaluate().count
     ).toThrow(/must return "True" or "False"/);
   });
 
@@ -369,7 +361,11 @@ describe('COUNT — 2-argument value and predicate forms', () => {
     expect(
       exprToString(
         engine
-          .expr(['Count', ['Range', 1, 'n'], ['Function', ['Greater', '_', 5], '_']])
+          .expr([
+            'Count',
+            ['Range', 1, 'n'],
+            ['Function', ['Greater', '_', 5], '_'],
+          ])
           .evaluate()
       )
     ).toContain('"Count"');
@@ -383,9 +379,13 @@ describe('COUNT — 2-argument value and predicate forms', () => {
     // and the answer is unchanged since these are permutations.
     expect(count(['Sort', ['List', 2, 1, 1]], 1)).toEqual('2');
     expect(count(['Reverse', ['List', 2, 1, 1]], 1)).toEqual('2');
-    expect(engine.expr(['Count', ['Sort', ['List', 2, 1, 1]], 1]).op1.operator).toEqual('Sort');
+    expect(
+      engine.expr(['Count', ['Sort', ['List', 2, 1, 1]], 1]).op1.operator
+    ).toEqual('Sort');
     // ...while the 1-arg form still strips it.
-    expect(engine.expr(['Count', ['Sort', ['List', 2, 1, 1]]]).op1.operator).toEqual('List');
+    expect(
+      engine.expr(['Count', ['Sort', ['List', 2, 1, 1]]]).op1.operator
+    ).toEqual('List');
   });
 
   test('sgn: a matching count over a non-empty collection may be zero', () => {
@@ -446,7 +446,8 @@ describe('TAKE', () => {
             "incompatible-type",
             "'indexed_collection'",
             "'finite_number'"
-          ]
+          ],
+          ["Add", ["Multiply", 3, "x"], 2]
         ],
         1
       ]
@@ -462,7 +463,8 @@ describe('TAKE', () => {
             "incompatible-type",
             "'indexed_collection'",
             "'number'"
-          ]
+          ],
+          "x"
         ],
         1
       ]
@@ -478,7 +480,8 @@ describe('TAKE', () => {
             "incompatible-type",
             "'indexed_collection'",
             "record<x: finite_integer, y: finite_integer, z: finite_integer>"
-          ]
+          ],
+          {dict: {x: 1; y: 2; z: 3}}
         ],
         1
       ]
@@ -494,7 +497,8 @@ describe('TAKE', () => {
             "incompatible-type",
             "'indexed_collection'",
             "record<x: finite_integer, y: finite_integer, z: finite_integer>"
-          ]
+          ],
+          {dict: {x: 1; y: 2; z: 3}}
         ],
         1
       ]
@@ -586,7 +590,8 @@ describe('DROP 2', () => {
             "incompatible-type",
             "'indexed_collection'",
             "'finite_number'"
-          ]
+          ],
+          ["Add", ["Multiply", 3, "x"], 2]
         ],
         2
       ]
@@ -602,7 +607,8 @@ describe('DROP 2', () => {
             "incompatible-type",
             "'indexed_collection'",
             "'number'"
-          ]
+          ],
+          "x"
         ],
         2
       ]
@@ -618,7 +624,8 @@ describe('DROP 2', () => {
             "incompatible-type",
             "'indexed_collection'",
             "record<x: finite_integer, y: finite_integer, z: finite_integer>"
-          ]
+          ],
+          {dict: {x: 1; y: 2; z: 3}}
         ],
         2
       ]
@@ -637,7 +644,10 @@ describe('SLICE facet coherence over infinite/unknown sources (2026-07-19)', () 
     // Counting from the end of an infinite tail is unresolvable.
     expect(s.at(-1)).toBeUndefined();
     expect(
-      engine.box(['Take', ['Slice', inf, 5, -1], 3]).evaluate().toString()
+      engine
+        .box(['Take', ['Slice', inf, 5, -1], 3])
+        .evaluate()
+        .toString()
     ).toBe('[5,6,7]');
   });
 
@@ -670,7 +680,10 @@ describe('SLICE facet coherence over infinite/unknown sources (2026-07-19)', () 
     expect(s.count).toBe(5);
     expect(s.isFiniteCollection).toBe(true);
     expect(
-      engine.box(['ListFrom', ['Slice', inf, 1, 5]]).evaluate().toString()
+      engine
+        .box(['ListFrom', ['Slice', inf, 1, 5]])
+        .evaluate()
+        .toString()
     ).toBe('[1,2,3,4,5]');
   });
 });
@@ -717,7 +730,8 @@ describe('SLICE (2,3)', () => {
             "incompatible-type",
             "'indexed_collection'",
             "'finite_number'"
-          ]
+          ],
+          ["Add", ["Multiply", 3, "x"], 2]
         ],
         2,
         3
@@ -734,7 +748,8 @@ describe('SLICE (2,3)', () => {
             "incompatible-type",
             "'indexed_collection'",
             "'number'"
-          ]
+          ],
+          "x"
         ],
         2,
         3
@@ -751,7 +766,8 @@ describe('SLICE (2,3)', () => {
             "incompatible-type",
             "'indexed_collection'",
             "record<x: finite_integer, y: finite_integer, z: finite_integer>"
-          ]
+          ],
+          {dict: {x: 1; y: 2; z: 3}}
         ],
         2,
         3
@@ -767,9 +783,14 @@ describe('SLICE (2,3)', () => {
     const e = engine.box(['Slice', ['Range', 1, 'PositiveInfinity'], 1, 5]);
     expect(e.count).toBe(5);
     expect(e.isFiniteCollection).toBe(true);
-    expect(
-      engine.box(['ListFrom', e]).evaluate().json
-    ).toEqual(['List', 1, 2, 3, 4, 5]);
+    expect(engine.box(['ListFrom', e]).evaluate().json).toEqual([
+      'List',
+      1,
+      2,
+      3,
+      4,
+      5,
+    ]);
   });
 });
 
@@ -808,7 +829,8 @@ describe('SLICE -1,1', () => {
             "incompatible-type",
             "'indexed_collection'",
             "'finite_number'"
-          ]
+          ],
+          ["Add", ["Multiply", 3, "x"], 2]
         ],
         -1,
         1
@@ -826,7 +848,8 @@ describe('SLICE -1,1', () => {
             "incompatible-type",
             "'indexed_collection'",
             "'number'"
-          ]
+          ],
+          "x"
         ],
         -1,
         1
@@ -844,7 +867,8 @@ describe('SLICE -1,1', () => {
             "incompatible-type",
             "'indexed_collection'",
             "record<x: finite_integer, y: finite_integer, z: finite_integer>"
-          ]
+          ],
+          {dict: {x: 1; y: 2; z: 3}}
         ],
         -1,
         1
@@ -891,9 +915,8 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     ).toMatchInlineSnapshot(`["List", 7, 5]`));
 
   test('At with a mask of the wrong length is an error', () =>
-    expect(
-      evaluate(['At', list, ['List', 'True', 'False', 'True']])
-    ).toMatchInlineSnapshot(`
+    expect(evaluate(['At', list, ['List', 'True', 'False', 'True']]))
+      .toMatchInlineSnapshot(`
       [
         "Error",
         "The mask (length 3) must have the same length as the collection (length 7)"
@@ -934,7 +957,9 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     const m = engine.box('mtx');
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
-    expect(m.type.toString()).toMatchInlineSnapshot(`matrix<finite_integer^(3x3)>`);
+    expect(m.type.toString()).toMatchInlineSnapshot(
+      `matrix<finite_integer^(3x3)>`
+    );
     // A single index into the matrix yields a row (vector), not a scalar. The
     // access may be out of band, so the honest type carries the `| missing`
     // arm (§3.C `T | marker(T)`).
@@ -972,7 +997,10 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // which for a numeric `T` absorbs to `number`.)
     expect(at.type.toString()).toMatchInlineSnapshot(`finite_integer`);
     expect(
-      engine.box(['Add', ['At', dict, { str: 'x' }], 10]).evaluate().toString()
+      engine
+        .box(['Add', ['At', dict, { str: 'x' }], 10])
+        .evaluate()
+        .toString()
     ).toMatchInlineSnapshot(`11`);
   });
 
@@ -990,7 +1018,9 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // so it types as `marker(⊔S)` — the absence marker over the widened slots,
     // NOT the widened slots themselves (the value is absent).
     // `marker(integer ⊔ string ⊔ boolean)` = `number ⊔ missing ⊔ missing`.
-    expect(ce.box(['At', 'tpl', 5]).type.toString()).toEqual('missing | number');
+    expect(ce.box(['At', 'tpl', 5]).type.toString()).toEqual(
+      'missing | number'
+    );
   });
 
   test('First', () =>
@@ -1055,7 +1085,10 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
   // raw "Cannot read properties of undefined" instead of a MathJSON error.
   test('Reverse (short list, regression for out-of-range iterator crash)', () => {
     expect(() =>
-      engine.box(['Reverse', ['List', 1, 2, 3]]).evaluate().toString()
+      engine
+        .box(['Reverse', ['List', 1, 2, 3]])
+        .evaluate()
+        .toString()
     ).not.toThrow();
     expect(evaluate(['Reverse', ['List', 1, 2, 3]])).toMatchInlineSnapshot(
       `["List", 3, 2, 1]`
@@ -1063,9 +1096,7 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     expect(evaluate(['Reverse', ['List', 1]])).toMatchInlineSnapshot(
       `["List", 1]`
     );
-    expect(evaluate(['Reverse', emptyList])).toMatchInlineSnapshot(
-      `["List"]`
-    );
+    expect(evaluate(['Reverse', emptyList])).toMatchInlineSnapshot(`["List"]`);
   });
 });
 
@@ -1238,11 +1269,7 @@ describe('MATERIALIZATION PRESERVES STRUCTURAL ELEMENTS (enlist regression)', ()
     const e = engine
       .box(['List', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]])
       .evaluate({ materialization: true });
-    expect(e.json).toEqual([
-      'List',
-      ['Tuple', "'a'", 1],
-      ['Tuple', "'b'", 2],
-    ]);
+    expect(e.json).toEqual(['List', ['Tuple', "'a'", 1], ['Tuple', "'b'", 2]]);
   });
 
   test('materialization keeps a nested literal List nested', () => {
@@ -1484,7 +1511,11 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
     // complex so the fast path is correctly skipped.
     const p: Expression = [
       'Product',
-      ['Map', ['Range', 1, 3], ['Function', ['Add', 'k', 'ImaginaryUnit'], 'k']],
+      [
+        'Map',
+        ['Range', 1, 3],
+        ['Function', ['Add', 'k', 'ImaginaryUnit'], 'k'],
+      ],
     ];
     expect(engine.box(p).evaluate().toString()).toMatchInlineSnapshot(`10i`);
   });
@@ -1533,9 +1564,9 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
   });
 
   test('Append', () =>
-    expect(
-      evaluate(['Append', ['List', 1, 2, 3], 4])
-    ).toMatchInlineSnapshot(`["List", 1, 2, 3, 4]`));
+    expect(evaluate(['Append', ['List', 1, 2, 3], 4])).toMatchInlineSnapshot(
+      `["List", 1, 2, 3, 4]`
+    ));
 
   test('Append to an empty list', () =>
     expect(evaluate(['Append', ['List'], 9])).toMatchInlineSnapshot(
@@ -1629,9 +1660,9 @@ describe('ANY / ALL QUANTIFIERS', () => {
     ).toMatchInlineSnapshot(`False`));
 
   test('All without predicate: all True', () =>
-    expect(
-      evaluate(['All', ['List', 'True', 'True']])
-    ).toMatchInlineSnapshot(`True`));
+    expect(evaluate(['All', ['List', 'True', 'True']])).toMatchInlineSnapshot(
+      `True`
+    ));
 
   test('Empty collection: Any is False (vacuous)', () =>
     expect(evaluate(['Any', emptyList, gt(0)])).toMatchInlineSnapshot(`False`));
@@ -1745,8 +1776,10 @@ describe('SCAN / DIFFERENCES / TAKEWHILE / DROPWHILE / FLATMAP', () => {
 
   test('Differences reports its count without enumerating', () => {
     const t0 = Date.now();
-    const count = engine.box(['Differences', ['Range', 1, 1_000_000_000]])
-      .count;
+    const count = engine.box([
+      'Differences',
+      ['Range', 1, 1_000_000_000],
+    ]).count;
     const elapsed = Date.now() - t0;
     expect(count).toBe(999_999_999);
     expect(elapsed).toBeLessThan(1000);
@@ -1824,18 +1857,12 @@ describe('MAP (variadic / zipWith)', () => {
 
   const add: Expression = ['Function', ['Add', 'a', 'b'], 'a', 'b'];
   const mul: Expression = ['Function', ['Multiply', 'a', 'b'], 'a', 'b'];
-  const add3: Expression = [
-    'Function',
-    ['Add', 'a', 'b', 'c'],
-    'a',
-    'b',
-    'c',
-  ];
+  const add3: Expression = ['Function', ['Add', 'a', 'b', 'c'], 'a', 'b', 'c'];
 
   test('two collections combine element-wise', () =>
-    expect(
-      str(['Map', ['List', 1, 2, 3], ['List', 10, 20, 30], add])
-    ).toEqual('[11,22,33]'));
+    expect(str(['Map', ['List', 1, 2, 3], ['List', 10, 20, 30], add])).toEqual(
+      '[11,22,33]'
+    ));
 
   test('result has the length of the shortest input', () =>
     expect(str(['Map', ['List', 1, 2, 3], ['List', 10, 20], add])).toEqual(
@@ -1848,27 +1875,17 @@ describe('MAP (variadic / zipWith)', () => {
     ).toEqual('[9,12]'));
 
   test('laziness: .count and head of two infinite ranges are fast', () => {
-    const expr = engine.box([
-      'Map',
-      ['Range', 1, 1e9],
-      ['Range', 1, 1e9],
-      add,
-    ]);
+    const expr = engine.box(['Map', ['Range', 1, 1e9], ['Range', 1, 1e9], add]);
     expect(expr.count).toBe(1e9);
     expect(expr.isFiniteCollection).toBe(true);
     expect(expr.at(2)?.toString()).toEqual('4');
-    expect(str(['Take', ['Map', ['Range', 1, 1e9], ['Range', 1, 1e9], add], 3])).toEqual(
-      '[2,4,6]'
-    );
+    expect(
+      str(['Take', ['Map', ['Range', 1, 1e9], ['Range', 1, 1e9], add], 3])
+    ).toEqual('[2,4,6]');
   });
 
   test('mixed finite/infinite: bounded by the finite input', () => {
-    const expr = engine.box([
-      'Map',
-      ['Range', 1, 1e9],
-      ['List', 1, 2, 3],
-      mul,
-    ]);
+    const expr = engine.box(['Map', ['Range', 1, 1e9], ['List', 1, 2, 3], mul]);
     expect(expr.count).toBe(3);
     expect(str(['Map', ['Range', 1, 1e9], ['List', 1, 2, 3], mul])).toEqual(
       '[1,4,9]'
@@ -2342,9 +2359,9 @@ describe('ISEMPTY / CONTAINS ARE THREE-VALUED (regression)', () => {
   });
 
   it('IsEmpty still resolves for a small never-matching Filter (walk completes)', () => {
-    expect(
-      evaluate(['IsEmpty', ['Filter', ['List', 1, 2], neverMatch]])
-    ).toBe('True');
+    expect(evaluate(['IsEmpty', ['Filter', ['List', 1, 2], neverMatch]])).toBe(
+      'True'
+    );
   });
 
   it('IsEmpty resolves for a non-empty literal list', () => {
@@ -2403,7 +2420,10 @@ describe('LAZY BROADCAST N-WRAP HONORS numericApproximation (regression)', () =>
   // reached the elements and both access routes (each()/at) stayed exact.
   // `x.evaluate().N()` must behave like `x.N()`.
   it('N() of an already-evaluated lazy Map floats elements (evaluate-then-N route)', () => {
-    const e = engine.box(['Sin', ['Range', 1, 200]]).evaluate().N();
+    const e = engine
+      .box(['Sin', ['Range', 1, 200]])
+      .evaluate()
+      .N();
     expect(e.operator).toBe('Map');
     // at() route
     expect(e.at(1)?.isNumberLiteral).toBe(true);
@@ -2412,14 +2432,18 @@ describe('LAZY BROADCAST N-WRAP HONORS numericApproximation (regression)', () =>
     const first = e.each().next().value;
     expect(first?.re).toBeCloseTo(0.8414709848, 9);
     // At() operator route (Tycho's probe)
-    expect(
-      engine.box(['At', e.json, 1]).evaluate().re
-    ).toBeCloseTo(0.8414709848, 9);
+    expect(engine.box(['At', e.json, 1]).evaluate().re).toBeCloseTo(
+      0.8414709848,
+      9
+    );
   });
 
   it('evaluate-then-N is idempotent and shape-stable', () => {
     const direct = engine.box(['Sin', ['Range', 1, 200]]).N();
-    const staged = engine.box(['Sin', ['Range', 1, 200]]).evaluate().N();
+    const staged = engine
+      .box(['Sin', ['Range', 1, 200]])
+      .evaluate()
+      .N();
     // The rewrapped Map has the same shape as the directly-N'd one
     expect(staged.json).toEqual(direct.json);
     // Repeated N() does not grow the wrapping
@@ -2529,7 +2553,11 @@ describe('SYMBOLIC-BOUND COLLECTIONS STAY INERT', () => {
         engine
           .expr([
             'Min',
-            ['Filter', ['List', 1, 2, 8], ['Function', ['Greater', '_', 1], '_']],
+            [
+              'Filter',
+              ['List', 1, 2, 8],
+              ['Function', ['Greater', '_', 1], '_'],
+            ],
           ])
           .evaluate()
       )
@@ -2537,9 +2565,9 @@ describe('SYMBOLIC-BOUND COLLECTIONS STAY INERT', () => {
   });
 
   test('concrete controls are unaffected', () => {
-    expect(exprToString(engine.expr(['Sum', ['Range', 1, 10]]).evaluate())).toBe(
-      '55'
-    );
+    expect(
+      exprToString(engine.expr(['Sum', ['Range', 1, 10]]).evaluate())
+    ).toBe('55');
     expect(
       exprToString(engine.expr(['Sum', ['Linspace', 0, 1, 3]]).evaluate())
     ).toBe('1.5');
@@ -2705,12 +2733,7 @@ describe('KEYS / VALUES', () => {
 
   test('Values returns the values in iteration order', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Values', dict]).evaluate().json).toEqual([
-      'List',
-      1,
-      2,
-      3,
-    ]);
+    expect(ce.box(['Values', dict]).evaluate().json).toEqual(['List', 1, 2, 3]);
   });
 
   test('Values type reflects the value types', () => {
@@ -2957,9 +2980,9 @@ describe('Scan invalid initial value (finding 6)', () => {
     // rather than fold unseeded.
     const expr = engine.box(['Scan', ['List', 1, 2], add, ['Divide', 1]]);
     expect(expr.isValid).toBe(false);
-    expect(
-      evaluate(['Scan', ['List', 1, 2], add, ['Divide', 1]])
-    ).not.toEqual('["List", 1, 3]');
+    expect(evaluate(['Scan', ['List', 1, 2], add, ['Divide', 1]])).not.toEqual(
+      '["List", 1, 3]'
+    );
   });
 });
 
@@ -2995,9 +3018,7 @@ describe('SORT KEY MODE / MAXBY / MINBY / ARGMAX / ARGMIN', () => {
     ));
 
   test('Sort with no function uses the default ascending order', () =>
-    expect(evaluate(['Sort', ['List', 3, 1, 2]])).toEqual(
-      '["List", 1, 2, 3]'
-    ));
+    expect(evaluate(['Sort', ['List', 3, 1, 2]])).toEqual('["List", 1, 2, 3]'));
 
   test('Sort key mode is stable: equal keys keep their original order', () =>
     // Keys: 3->9, -3->9, 2->4. The two elements with key 9 keep their
@@ -3025,9 +3046,9 @@ describe('SORT KEY MODE / MAXBY / MINBY / ARGMAX / ARGMIN', () => {
     expect(evaluate(['ArgMax', ['List', 1, 3, 3]])).toEqual('2'));
 
   test('MaxBy on an empty collection stays inert', () =>
-    expect(
-      engine.box(['MaxBy', emptyList, identity]).evaluate().operator
-    ).toBe('MaxBy'));
+    expect(engine.box(['MaxBy', emptyList, identity]).evaluate().operator).toBe(
+      'MaxBy'
+    ));
 
   test('ArgMax on an empty collection stays inert', () =>
     expect(engine.box(['ArgMax', emptyList]).evaluate().operator).toBe(
@@ -3048,7 +3069,12 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
 
   const identity: Expression = ['Function', 'x', 'x'];
   const square: Expression = ['Function', ['Power', 'x', 2], 'x'];
-  const doubleAcc: Expression = ['Function', ['Multiply', 2, 'acc'], 'n', 'acc'];
+  const doubleAcc: Expression = [
+    'Function',
+    ['Multiply', 2, 'acc'],
+    'n',
+    'acc',
+  ];
 
   // --- ChunkBy -----------------------------------------------------------
   test('ChunkBy splits into consecutive runs sharing the key', () =>
@@ -3070,9 +3096,8 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
 
   test('ChunkBy is inert on a non-finite collection', () =>
     expect(
-      engine
-        .box(['ChunkBy', ['Iterate', doubleAcc, 1], identity])
-        .evaluate().operator
+      engine.box(['ChunkBy', ['Iterate', doubleAcc, 1], identity]).evaluate()
+        .operator
     ).toBe('ChunkBy'));
 
   // --- Partition / Chunk -------------------------------------------------
@@ -3122,12 +3147,17 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
 
   test('Partition(xs, predicate) splits into [matching, non-matching]', () =>
     expect(
-      str(['Partition', ['List', 1, 2, 3, 4, 5], ['Function', ['Greater', 'x', 2], 'x']])
+      str([
+        'Partition',
+        ['List', 1, 2, 3, 4, 5],
+        ['Function', ['Greater', 'x', 2], 'x'],
+      ])
     ).toEqual('[[3,4,5],[1,2]]'));
 
   test('Partition is inert on a non-finite collection', () =>
     expect(
-      engine.box(['Partition', ['Iterate', doubleAcc, 1], 2]).evaluate().operator
+      engine.box(['Partition', ['Iterate', doubleAcc, 1], 2]).evaluate()
+        .operator
     ).toBe('Partition'));
 
   // --- Hybrid-lazy Partition / SlidingWindow / ChunkBy (Tycho item 52) ----
@@ -3142,9 +3172,12 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     expect(p.evaluate().operator).toBe('Partition');
     expect(engine.box(['Count', p]).evaluate().toString()).toBe('1000');
     // 2nd chunk is [1001..2000]; its first element is 1001.
-    expect(engine.box(['At', ['At', p, 2], 1]).evaluate().toString()).toBe(
-      '1001'
-    );
+    expect(
+      engine
+        .box(['At', ['At', p, 2], 1])
+        .evaluate()
+        .toString()
+    ).toBe('1001');
     expect(Date.now() - t0).toBeLessThan(1500);
   });
 
@@ -3154,9 +3187,12 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     // Complete windows only: floor((1e6 - 1000)/1) + 1 = 999001.
     expect(engine.box(['Count', sw]).evaluate().toString()).toBe('999001');
     // 2nd window is [2..1001]; its first element is 2.
-    expect(engine.box(['At', ['At', sw, 2], 1]).evaluate().toString()).toBe(
-      '2'
-    );
+    expect(
+      engine
+        .box(['At', ['At', sw, 2], 1])
+        .evaluate()
+        .toString()
+    ).toBe('2');
   });
 
   test('ChunkBy(large) reports its run count without materializing', () => {
@@ -3218,16 +3254,30 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     const pred: Expression = ['Function', ['Greater', 'x', 50], 'x'];
     const p: Expression = ['Partition', ['Range', 1, 101], pred];
     expect(engine.box(p).evaluate().operator).toBe('List');
-    expect(engine.box(['Count', ['At', p, 1]]).evaluate().toString()).toBe(
-      '51'
-    );
-    expect(engine.box(['Count', ['At', p, 2]]).evaluate().toString()).toBe(
-      '50'
-    );
-    expect(engine.box(['At', ['At', p, 1], 1]).evaluate().toString()).toBe(
-      '51'
-    );
-    expect(engine.box(['At', ['At', p, 2], 1]).evaluate().toString()).toBe('1');
+    expect(
+      engine
+        .box(['Count', ['At', p, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('51');
+    expect(
+      engine
+        .box(['Count', ['At', p, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('50');
+    expect(
+      engine
+        .box(['At', ['At', p, 1], 1])
+        .evaluate()
+        .toString()
+    ).toBe('51');
+    expect(
+      engine
+        .box(['At', ['At', p, 2], 1])
+        .evaluate()
+        .toString()
+    ).toBe('1');
   });
 
   test('Partition(predicate) on an infinite source is fully inert', () => {
@@ -3273,11 +3323,7 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
   test('Dedup composes lazily with an infinite source', () => {
     // Iterate doubles: 2,4,8,16,… (all distinct); Take 4 without materializing
     // the infinite source.
-    const d = engine.box([
-      'Take',
-      ['Dedup', ['Iterate', doubleAcc, 1]],
-      4,
-    ]);
+    const d = engine.box(['Take', ['Dedup', ['Iterate', doubleAcc, 1]], 4]);
     expect(str(d)).toEqual('[2,4,8,16]');
   });
 
@@ -3405,9 +3451,8 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
 
   test('ReplaceAt with a symbolic index is inert', () =>
     expect(
-      engine
-        .box(['ReplaceAt', ['List', 10, 20, 30], 'k', 99])
-        .evaluate().operator
+      engine.box(['ReplaceAt', ['List', 10, 20, 30], 'k', 99]).evaluate()
+        .operator
     ).toBe('ReplaceAt'));
 });
 
@@ -3526,9 +3571,9 @@ describe('ZIP-SHAPED LAZINESS (review findings)', () => {
     ).toBe('Sort'));
 
   test('ArgMax over a non-indexed collection stays inert', () =>
-    expect(
-      engine.box(['ArgMax', ['Set', 1, 2]]).evaluate().operator
-    ).toBe('ArgMax'));
+    expect(engine.box(['ArgMax', ['Set', 1, 2]]).evaluate().operator).toBe(
+      'ArgMax'
+    ));
 });
 
 describe('COLLECTION NITS (Take preview, Sort boolean comparator, GroupBy typo)', () => {
@@ -3539,7 +3584,11 @@ describe('COLLECTION NITS (Take preview, Sort boolean comparator, GroupBy typo)'
     const t = engine
       .box([
         'Take',
-        ['TakeWhile', ['Range', 1, 1000], ['Function', ['Less', 'x', 100], 'x']],
+        [
+          'TakeWhile',
+          ['Range', 1, 1000],
+          ['Function', ['Less', 'x', 100], 'x'],
+        ],
         50,
       ])
       .evaluate({ materialization: [5, 5] });
@@ -3586,7 +3635,11 @@ describe('COLLECTION NITS (Take preview, Sort boolean comparator, GroupBy typo)'
     expect(
       JSON.stringify(
         engine
-          .box(['GroupBy', ['List', 1, 2, 3, 4], ['Function', ['IsEven', 'x'], 'x']])
+          .box([
+            'GroupBy',
+            ['List', 1, 2, 3, 4],
+            ['Function', ['IsEven', 'x'], 'x'],
+          ])
           .evaluate().json
       )
     ).toBe('{"dict":{"False":[1,3],"True":[2,4]}}');
@@ -3652,9 +3705,9 @@ describe('Lambda application substitutes the element into an undetermined body',
     // old, corrupted `k === m`. Filter surfaces the undetermined predicate as
     // an error rather than silently dropping the element.
     const undeterminedPred: Expression = ['Function', ['Equal', 'k', 'm'], 'k'];
-    expect(() => [
-      ...ce.box(['Filter', 'd', undeterminedPred]).each(),
-    ]).toThrow(/True.+False/);
+    expect(() => [...ce.box(['Filter', 'd', undeterminedPred]).each()]).toThrow(
+      /True.+False/
+    );
     // A fully-decidable predicate still filters correctly (regression guard on
     // the value flowing through the choke point).
     ce.assign('q', ce.box(['List', 1, 2, 3, 4, 5]));
@@ -3680,7 +3733,11 @@ describe('Lambda application substitutes the element into an undetermined body',
       ce
         .box([
           'Take',
-          ['Map', ['Range', 1, 'PositiveInfinity'], ['Function', ['Power', 'k', 2], 'k']],
+          [
+            'Map',
+            ['Range', 1, 'PositiveInfinity'],
+            ['Function', ['Power', 'k', 2], 'k'],
+          ],
           3,
         ])
         .evaluate()
@@ -3735,10 +3792,18 @@ describe('At: lenient over-narrowed base (Tycho 19.3)', () => {
     const ce = new ComputeEngine();
     ce.assign('h', ce.parse('(u, v) \\mapsto \\lbrack u, v, u+v \\rbrack'));
     expect(
-      ce.parse('a[1]').subs({ a: ce.parse('h(3,4)') }).evaluate().toString()
+      ce
+        .parse('a[1]')
+        .subs({ a: ce.parse('h(3,4)') })
+        .evaluate()
+        .toString()
     ).toBe('3');
     expect(
-      ce.parse('a[3]').subs({ a: ce.parse('h(3,4)') }).evaluate().toString()
+      ce
+        .parse('a[3]')
+        .subs({ a: ce.parse('h(3,4)') })
+        .evaluate()
+        .toString()
     ).toBe('7');
   });
 
@@ -3757,7 +3822,10 @@ describe('At: lenient over-narrowed base (Tycho 19.3)', () => {
     expect(inert.isValid).toBe(true);
     // `h` now returns a scalar: the base evaluates to a number and `At` errors.
     ce.assign('h', ce.parse('(u, v) \\mapsto u+v'));
-    const r = ce.parse('a[1]').subs({ a: ce.parse('2h(3,4)-1') }).evaluate();
+    const r = ce
+      .parse('a[1]')
+      .subs({ a: ce.parse('2h(3,4)-1') })
+      .evaluate();
     expect(r.isValid).toBe(false);
     expect(errorCode(r)).toBe('incompatible-type');
   });
@@ -4118,16 +4186,13 @@ describe('A collection parameter that does not resolve stays indeterminate', () 
     expect(e.evaluate().operator).toBe(e.operator);
   });
 
-  test.each(CALLS)(
-    '%s does not collapse through a consumer',
-    (_name, call) => {
-      const ce = fresh();
-      // `ListFrom` must not read the indeterminate iterator as an empty
-      // collection, and `Count` must not answer a length no element backs.
-      expect(ce.box(['ListFrom', call]).evaluate().operator).toBe('ListFrom');
-      expect(ce.box(['Count', call]).evaluate().operator).toBe('Count');
-    }
-  );
+  test.each(CALLS)('%s does not collapse through a consumer', (_name, call) => {
+    const ce = fresh();
+    // `ListFrom` must not read the indeterminate iterator as an empty
+    // collection, and `Count` must not answer a length no element backs.
+    expect(ce.box(['ListFrom', call]).evaluate().operator).toBe('ListFrom');
+    expect(ce.box(['Count', call]).evaluate().operator).toBe('Count');
+  });
 
   test.each(CALLS)(
     '%s survives a broadcast instead of throwing',
@@ -4169,14 +4234,23 @@ describe('A collection parameter that does not resolve stays indeterminate', () 
     const ce = fresh();
     const inf: Expression = ['Range', 1, { num: '+Infinity' }];
     expect(ce.box(['Take', inf, 3]).evaluate().toString()).toBe('[1,2,3]');
-    expect(ce.box(['Take', ['Drop', inf, 2], 3]).evaluate().toString()).toBe(
-      '[3,4,5]'
-    );
     expect(
-      ce.box(['Take', ['Cycle', ['List', 1, 2]], 5]).evaluate().toString()
+      ce
+        .box(['Take', ['Drop', inf, 2], 3])
+        .evaluate()
+        .toString()
+    ).toBe('[3,4,5]');
+    expect(
+      ce
+        .box(['Take', ['Cycle', ['List', 1, 2]], 5])
+        .evaluate()
+        .toString()
     ).toBe('[1,2,1,2,1]');
     expect(
-      ce.box(['Take', ['Slice', inf, 5, -1], 3]).evaluate().toString()
+      ce
+        .box(['Take', ['Slice', inf, 5, -1], 3])
+        .evaluate()
+        .toString()
     ).toBe('[5,6,7]');
   });
 });
@@ -4254,7 +4328,10 @@ describe('Partition and Fill with an unresolved argument', () => {
     const ce = fresh();
     const f = ce.parse('(i,j) \\mapsto i \\cdot j').json as Expression;
     expect(
-      ce.box(['Fill', f, ['Tuple', 2, 3]]).evaluate().toString()
+      ce
+        .box(['Fill', f, ['Tuple', 2, 3]])
+        .evaluate()
+        .toString()
     ).toBe('[[1,2,3],[2,4,6]]');
   });
 });
@@ -4276,12 +4353,12 @@ describe('Indeterminate collection facets stay coherent (review round)', () => {
     const ce = fresh();
     for (const op of ['RotateLeft', 'RotateRight']) {
       expect(
-        ce.box(['Contains', [op, 'Sz', 'nz'], 1] as Expression).evaluate().symbol
+        ce.box(['Contains', [op, 'Sz', 'nz'], 1] as Expression).evaluate()
+          .symbol
       ).toBe('True');
       expect(
-        ce
-          .box(['Contains', [op, 'Sz', 'nz'], 99] as Expression)
-          .evaluate().symbol
+        ce.box(['Contains', [op, 'Sz', 'nz'], 99] as Expression).evaluate()
+          .symbol
       ).toBe('False');
     }
   });
@@ -4291,7 +4368,11 @@ describe('Indeterminate collection facets stay coherent (review round)', () => {
     // zip trusted `count` and built a `List` whose cells were `undefined`;
     // every later reader crashed with a raw TypeError far from the cause.
     const ce = fresh();
-    const sum = ce.box(['Add', ['RotateLeft', 'Sz', 'nz'], ['RotateLeft', 'Sz', 'nz']]);
+    const sum = ce.box([
+      'Add',
+      ['RotateLeft', 'Sz', 'nz'],
+      ['RotateLeft', 'Sz', 'nz'],
+    ]);
     const v = sum.evaluate();
     expect(() => v.toString()).not.toThrow();
     for (const cell of v.ops ?? []) expect(cell).toBeDefined();
@@ -4308,7 +4389,9 @@ describe('Indeterminate collection facets stay coherent (review round)', () => {
     expect(ce.box(['IsEmpty', ['Take', inf, 3]]).evaluate().symbol).toBe(
       'False'
     );
-    expect(ce.box(['IsEmpty', ['Take', inf, 0]]).evaluate().symbol).toBe('True');
+    expect(ce.box(['IsEmpty', ['Take', inf, 0]]).evaluate().symbol).toBe(
+      'True'
+    );
   });
 
   test('a NaN parameter is unresolved, not absent', () => {
@@ -4610,8 +4693,9 @@ describe('TAKE IS FINITE WHEN ITS BOUND IS (regression)', () => {
   test('a symbolic bound stays indeterminate', () => {
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
-    expect(ce.box(['Take', ['Range', 1, 'Infinity'], 'n']).isFiniteCollection)
-      .toBeUndefined();
+    expect(
+      ce.box(['Take', ['Range', 1, 'Infinity'], 'n']).isFiniteCollection
+    ).toBeUndefined();
   });
 });
 
@@ -4658,19 +4742,31 @@ describe('FIRST/SECOND/THIRD/LAST REQUIRE AN INDEXED COLLECTION (regression)', (
   });
 
   test('indexed collections are unaffected', () => {
-    expect(engine.box(['First', ['List', 7, 13, 5]]).evaluate().toString()).toBe(
-      '7'
-    );
-    expect(engine.box(['Last', ['List', 7, 13, 5]]).evaluate().toString()).toBe(
-      '5'
-    );
-    expect(engine.box(['Second', ['Range', 1, 10]]).evaluate().toString()).toBe(
-      '2'
-    );
+    expect(
+      engine
+        .box(['First', ['List', 7, 13, 5]])
+        .evaluate()
+        .toString()
+    ).toBe('7');
+    expect(
+      engine
+        .box(['Last', ['List', 7, 13, 5]])
+        .evaluate()
+        .toString()
+    ).toBe('5');
+    expect(
+      engine
+        .box(['Second', ['Range', 1, 10]])
+        .evaluate()
+        .toString()
+    ).toBe('2');
     // A tuple IS indexed (`First` of a point is its x-coordinate).
-    expect(engine.box(['First', ['Tuple', 'x', 'y']]).evaluate().toString()).toBe(
-      'x'
-    );
+    expect(
+      engine
+        .box(['First', ['Tuple', 'x', 'y']])
+        .evaluate()
+        .toString()
+    ).toBe('x');
   });
 
   test('the ABSENCE marker is unchanged for a genuinely missing position', () => {

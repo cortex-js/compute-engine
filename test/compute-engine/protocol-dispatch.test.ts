@@ -288,7 +288,7 @@ type string is Comparable {
     const ce = engineFor(STRING_ONLY);
     const expr = ce.box(['compare', { str: 'a' }, 3] as any);
     expect(expr.toString()).toBe(
-      'compare("a", Error(ErrorCode("incompatible-type", "string", "finite_integer")))'
+      'compare("a", Error(ErrorCode("incompatible-type", "string", "finite_integer"), 3))'
     );
     expect(expr.type.toString()).toBe('error');
   });
@@ -374,7 +374,7 @@ type integer is Beta {
   function pair(self: Self, other: integer) -> string { "b" }
 }`);
     expect(ce.box(['pair', { str: 'a' }, 3] as any).toString()).toBe(
-      'pair("a", Error(ErrorCode("incompatible-type", "string", "finite_integer")))'
+      'pair("a", Error(ErrorCode("incompatible-type", "string", "finite_integer"), 3))'
     );
   });
 
@@ -652,7 +652,7 @@ let q = Comparable.compare("a", "b")`
     // qualified spelling of Appendix A's `compare("a", 3)`.
     const mismatch = member({ str: 'a' }, 3);
     expect(mismatch.toString()).toBe(
-      'ProtocolMember("Comparable", "compare", "a", Error(ErrorCode("incompatible-type", "string", "finite_integer")))'
+      'ProtocolMember("Comparable", "compare", "a", Error(ErrorCode("incompatible-type", "string", "finite_integer"), 3))'
     );
     expect(mismatch.type.toString()).toBe('error');
 
@@ -900,7 +900,7 @@ type string is Counter {
     const ce = engineFor(COUNTER);
     const expr = ce.box(['step', { str: 'a' }, { str: 'b' }] as any);
     expect(expr.toString()).toBe(
-      'step("a", Error(ErrorCode("incompatible-type", "integer", "string")))'
+      'step("a", Error(ErrorCode("incompatible-type", "integer", "string"), "b"))'
     );
     expect(expr.type.toString()).toBe('error');
     // …and a well-typed one is untouched.
@@ -920,7 +920,7 @@ type string is Counter {
         ] as any)
         .toString()
     ).toBe(
-      'ProtocolMember("Counter", "step", "a", Error(ErrorCode("incompatible-type", "integer", "string")))'
+      'ProtocolMember("Counter", "step", "a", Error(ErrorCode("incompatible-type", "integer", "string"), "b"))'
     );
   });
 

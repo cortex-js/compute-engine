@@ -1137,6 +1137,78 @@ export type TaggedOperatorDefinition = {
 export type BoxedDefinition = TaggedValueDefinition | TaggedOperatorDefinition;
 
 /**
+ * One recorded write to a definition's type (or an operator definition's
+ * signature): the type the write installed, the mechanism that installed it,
+ * and — for writes triggered by canonicalizing an expression — that
+ * expression.
+ *
+ * Provenance can never live on `Type`/`BoxedType` objects themselves: parsed
+ * types are interned, deep-frozen, and shared across engines (the
+ * `TYPE_CACHE` in `common/type/parse.ts`), so two occurrences of `boolean`
+ * are the same object. The history therefore lives on the per-engine
+ * definition, next to `inferredType`.
+ *
+ * Design: `docs/plans/2026-08-13-inference-provenance-journal.md`, phase 1.
+ *
+ * @category Definitions
+ */
+export type TypeProvenanceEntry = {
+  /** The type this write installed (for inference writes, the post-fold
+   * result, not the raw evidence). */
+  type: BoxedType;
+  /** How the type was installed:
+   * - `'declared'` — an explicit declaration (reserved: declarations
+   *   currently record no entry; `inferredType === false` is the marker).
+   * - `'auto-declared'` — the binding was *created* as a side effect of
+   *   boxing a free symbol or a function parameter, before any evidence.
+   * - `'inferred'` — an `infer()` write: narrowed from an argument use or
+   *   widened from a result/value position.
+   * - `'assumed'` — written by the assumptions machinery (`ce.assume`).
+   * - `'value-derived'` — reserved: a type promoted from an assigned
+   *   value currently records no entry; `inferredType === true` with a
+   *   value is the marker. */
+  kind: 'declared' | 'auto-declared' | 'inferred' | 'assumed' | 'value-derived';
+  /** Which axis of the declaration contract the write touched. Phase 1
+   * records only `'type'` (value types and operator signatures); the
+   * effects axis (`effectsDeclared`) is the planned second user. */
+  axis: 'type' | 'effects';
+  /** The expression whose canonicalization triggered the write — the
+   * enclosing `And(…)`, call, or arithmetic operation for an inference
+   * write; the symbol occurrence itself for an auto-declaration. Kept as an
+   * expression (not a rendered string): consumers compare it **by
+   * containment** against the expression currently being canonicalized to
+   * answer "was this written by the pass running now?" (first-boxing
+   * binding-divergence fix, Tycho item 178). Containment, not identity: an
+   * auto-declare cause is a symbol OCCURRENCE, so identity against the root
+   * being canonicalized is always false — the discriminating test is "is
+   * the cause a node within that tree". For an O(1) answer to the same
+   * question, compare {@link epoch} instead. */
+  cause?: Expression;
+  /** The outermost-boxing epoch (`ce._boxingEpoch`) during which this entry
+   * was recorded — the O(1) form of the "written by the pass running now?"
+   * question: inside a boxing pass, `entry.epoch === ce._boxingEpoch` iff
+   * the entry was recorded by that same pass. `undefined` when the write
+   * happened outside any boxing operation (e.g. an assumption made between
+   * evaluations, or a route that does not open an inference transaction);
+   * consumers needing a verdict then fall back to the containment test on
+   * {@link cause}.
+   *
+   * Pass granularity is a CONTRACT, not an implementation accident: within
+   * one outermost pass every entry reads the same epoch, deliberately not
+   * distinguishing "created a moment ago" from "created earlier in this
+   * pass". The first-boxing binding-divergence fix (Tycho item 178) treats
+   * same-pass bindings as shareable and relies on them comparing equal — a
+   * finer-grained stamp would break that consumer, so do not "improve" the
+   * resolution. */
+  epoch?: number;
+  /** Original-input span of the cause, when the parse that produced it
+   * stamped one. Composed by the caller that knows the base offset — the
+   * type parser only ever reports offsets local to the string it was
+   * handed. Unset in phase 1. */
+  span?: { start: number; end: number };
+};
+
+/**
  * @category Definitions
  *
  */
@@ -1211,6 +1283,20 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * A type that is not inferred, but has been set explicitly, cannot be updated.
    */
   inferredType: boolean;
+
+  /** History of writes to this definition's type: which type each write
+   * installed, by which mechanism, and — for inference writes — the
+   * expression whose canonicalization triggered it. Appended only when a
+   * write actually changes the type (no-op re-inferences are skipped by the
+   * write sites), so the list stays short; it is capped, keeping the oldest
+   * entry and the most recent ones. `undefined` until the first recorded
+   * write — an explicitly declared type has no entry (its provenance is the
+   * declaration itself, `inferredType === false`), and a type promoted from
+   * an assigned value has none either (`inferredType === true` with a
+   * value). Used by diagnostics to name the site that committed a
+   * conflicting type ("inferred from its use in `And(x, y)`").
+   * @internal */
+  _typeProvenance: TypeProvenanceEntry[] | undefined;
 
   /** Annotation provenance on the EFFECTS axis — the effects-axis analog of
    * {@link inferredType} (`docs/EFFECTS-MODEL.md`, "Annotation provenance").
@@ -1659,6 +1745,12 @@ export interface BoxedOperatorDefinition
    * as more information becomes available.
    */
   inferredSignature: boolean;
+
+  /** History of writes to this definition's signature — the operator-side
+   * analog of {@link BoxedValueDefinition._typeProvenance}, with the same
+   * append-on-change and capping rules.
+   * @internal */
+  _typeProvenance: TypeProvenanceEntry[] | undefined;
 
   /** See {@link OperatorDefinition._derivedSignature}: the pinned signature
    * came from an annotated function literal at assign time, not from an

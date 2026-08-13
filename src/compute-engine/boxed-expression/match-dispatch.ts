@@ -986,12 +986,38 @@ function errorSubjectMayMatch(pattern: Expression): boolean {
   return isWildcard(pattern) || isFunction(pattern, 'Error');
 }
 
-/** An `Error` value with its `ErrorTrace` breadcrumb removed (§2a); any other
- * value unchanged. */
-function withoutErrorTrace(subject: Expression): Expression {
-  if (!isFunction(subject, 'Error') || errorTrace(subject) === undefined)
-    return subject;
-  return subject.engine._fn('Error', [...errorOpsWithoutTrace(subject)]);
+/** An `Error` subject normalized for pattern matching: the `ErrorTrace`
+ * breadcrumb removed (§2a), and — when the pattern asks for fewer operands
+ * than remain — the WHERE operand removed too. The where slot covers both
+ * shapes it can hold: the faulted-operand SITE attached at mint time (since
+ * 2026-08-13) and the older string context some minters wrote — they are
+ * the same slot, so `Error(c)` uniformly ignores it, deliberately. Both
+ * trace and where are provenance, not payload: `Error(c)` must destructure
+ * a sited or bubbled error exactly as it destructures a hand-written
+ * `Error(c)`, while `Error(c, w)` still reaches the where for a case that
+ * wants it — and a SEQUENCE wildcard (`Error(__all)`) asks for the whole
+ * operand list, so nothing is removed for it despite its syntactic arity
+ * of one.
+ *
+ * Root-only, matching the trace-stripping that preceded it: a sited error
+ * NESTED as another error's cause is not normalized, so `Error(Error(c))`
+ * does not see through the inner error's where (recorded in ROADMAP.md).
+ * Any non-`Error` value is returned unchanged. */
+function normalizeErrorSubject(
+  subject: Expression,
+  pattern: Expression
+): Expression {
+  if (!isFunction(subject, 'Error')) return subject;
+  let ops = errorOpsWithoutTrace(subject);
+  if (isFunction(pattern, 'Error')) {
+    const wantsAll = pattern.ops.some(
+      (p) => wildcardType(p) === 'Sequence' || wildcardType(p) === 'OptionalSequence'
+    );
+    if (!wantsAll && ops.length === 2 && ops.length > pattern.ops.length)
+      ops = ops.slice(0, 1);
+  }
+  if (ops.length === subject.ops!.length) return subject;
+  return subject.engine._fn('Error', [...ops]);
 }
 
 /**
@@ -1024,10 +1050,11 @@ function matchPattern(
   if (isErrorSubject(subject)) {
     if (!errorSubjectMayMatch(raw)) return null;
     // Rung 3: an error that BUBBLED carries a breadcrumb operand (design
-    // §2a). It is provenance, not payload — `Error(c) => c` must destructure
-    // a bubbled error exactly as it destructures a hand-written one, so the
-    // pattern is matched against the historical `Error` shape.
-    subject = withoutErrorTrace(subject);
+    // §2a), and a validation error carries its SITE operand. Both are
+    // provenance, not payload — `Error(c) => c` must destructure a sited or
+    // bubbled error exactly as it destructures a hand-written one, so the
+    // subject is normalized against the pattern's arity.
+    subject = normalizeErrorSubject(subject, raw);
   }
 
   // Range membership is decided on the raw pattern (v1: at the top level of a

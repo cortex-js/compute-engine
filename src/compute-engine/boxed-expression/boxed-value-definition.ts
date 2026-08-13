@@ -5,6 +5,7 @@ import type {
   BoxedValueDefinition,
   CollectionHandlers,
   IComputeEngine as ComputeEngine,
+  TypeProvenanceEntry,
 } from '../global-types.js';
 
 import type { Type, TypeString } from '../../common/type/types.js';
@@ -80,6 +81,15 @@ export class _BoxedValueDefinition
 
   // If true, the `_type` is inferred
   inferredType = false;
+
+  // History of writes to this definition's type (see `TypeProvenanceEntry`
+  // in `types-definitions.ts` and the phase-1 design in
+  // `docs/plans/2026-08-13-inference-provenance-journal.md`). Declared here
+  // — rather than assigned on demand — so recording provenance does not
+  // change the object's shape; allocated on the first recorded write.
+  // Explicit declarations and value-promoted types record no entry (they
+  // are derivable from `inferredType`), so most definitions never allocate.
+  _typeProvenance: TypeProvenanceEntry[] | undefined = undefined;
 
   // Annotation provenance on the EFFECTS axis of a function-typed declaration
   // — the effects-axis analog of `inferredType` (`docs/EFFECTS-MODEL.md`,

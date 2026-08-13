@@ -443,12 +443,7 @@ export class BoxedFunction
     // every call site is fire-and-forget, so declining is safe.
     if (this.engine._resolveOnlyDepth > 0) return false;
 
-    // Narrowing capture (`InspectableScope.narrowings()`): a contained parse
-    // that refines the signature of an OUTER inferred function reports it back
-    // to the caller, same as `BoxedSymbol.infer()` does for symbols.
-    // `undefined` — the normal case — costs one property read.
-    const sink = this.engine._narrowingSink;
-    const previousSignature = sink ? def.signature : undefined;
+    const previousSignature = def.signature;
 
     // If the signature was inferred, refine it by narrowing the result
     if (def.signature.is('function')) {
@@ -497,18 +492,25 @@ export class BoxedFunction
     // semantic change other expressions may depend on.
     this.engine._noteStateEvent({ kind: 'inference' });
 
+    // Single emission point for the write's passive observers (provenance
+    // history, narrowing sink — see `_noteInferenceWrite` in `index.ts`).
+    // The rebuild above always creates a FRESH `BoxedType`, so object
+    // identity cannot detect a no-op refinement; compare serializations and
+    // skip the emission when the signature did not actually change (the
+    // sink used to apply this same filter internally).
     if (
-      sink &&
-      previousSignature !== undefined &&
+      this._def &&
       previousSignature !== def.signature &&
-      this._def
+      previousSignature.toString() !== def.signature.toString()
     )
-      sink._recordNarrowing(
-        this._operator,
-        this._def,
-        previousSignature,
-        def.signature
-      );
+      this.engine._noteInferenceWrite({
+        name: this._operator,
+        binding: this._def,
+        target: def,
+        from: previousSignature,
+        to: def.signature,
+        kind: 'inferred',
+      });
 
     return true;
   }

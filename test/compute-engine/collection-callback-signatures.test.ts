@@ -120,7 +120,7 @@ describe('a parameterless operand is rejected at every callback slot', () => {
   it.each([...eager, ...lazy])('%s reports incompatible-type', (op) => {
     const ce = new ComputeEngine();
     expect(ce.box([op, XS, 5]).errors[0]?.toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "function", "finite_integer"))'
+      'Error(ErrorCode("incompatible-type", "function", "finite_integer"), 5)'
     );
   });
 });

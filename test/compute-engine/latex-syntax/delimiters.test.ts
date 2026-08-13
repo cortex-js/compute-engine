@@ -88,6 +88,7 @@ describe('DELIMITERS', () => {
             'dictionary | indexed_collection',
             'function',
           ],
+          f,
         ],
         3,
       ]
@@ -103,6 +104,7 @@ describe('DELIMITERS', () => {
             'dictionary | indexed_collection',
             'function',
           ],
+          f,
         ],
         3,
         4,
@@ -131,7 +133,8 @@ describe('DELIMITERS', () => {
   // `A\left[1\right]` parsed to just `["A"]`), losing the index — which broke
   // every Desmos list-indexing row, since Desmos always emits `\left[...\right]`.
   test('Indexed access with \\left[...\\right] fences (parity with plain brackets)', () => {
-    const raw = (s: string) => JSON.stringify(ce.parse(s, { canonical: false }).json);
+    const raw = (s: string) =>
+      JSON.stringify(ce.parse(s, { canonical: false }).json);
 
     // Single index
     expect(raw('A\\left[1\\right]')).toEqual(raw('A[1]'));
@@ -194,12 +197,8 @@ describe('DELIMITERS', () => {
 
     // A non-tuple (scalar-valued) parenthesized group still parses to an
     // indexing `At`; the type layer decides whether the target is indexable.
-    expect(raw('(x+1)[2]')).toEqual(
-      '["At",["Delimiter",["Add","x",1]],2]'
-    );
-    expect(raw('(x+1)[1,2]')).toEqual(
-      '["At",["Delimiter",["Add","x",1]],1,2]'
-    );
+    expect(raw('(x+1)[2]')).toEqual('["At",["Delimiter",["Add","x",1]],2]');
+    expect(raw('(x+1)[1,2]')).toEqual('["At",["Delimiter",["Add","x",1]],1,2]');
     expect(raw('(x+1)[1...5]')).toEqual(
       '["At",["Delimiter",["Add","x",1]],["Range",1,5]]'
     );
@@ -261,9 +260,9 @@ describe('DELIMITERS', () => {
 
     // A built-in `\operatorname{...}` call (parses to a function head) indexes
     // identically, plain and fenced.
-    expect(raw('\\operatorname{sphere}\\left(a,b\\right)\\left[1\\right]')).toEqual(
-      '["At",["Sphere","a","b"],1]'
-    );
+    expect(
+      raw('\\operatorname{sphere}\\left(a,b\\right)\\left[1\\right]')
+    ).toEqual('["At",["Sphere","a","b"],1]');
     expect(raw('\\operatorname{sphere}(a,b)[1]')).toEqual(
       '["At",["Sphere","a","b"],1]'
     );

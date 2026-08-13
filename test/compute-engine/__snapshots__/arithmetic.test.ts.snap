@@ -339,7 +339,11 @@ exports[`INVALID LOG Ln 1`] = `invalid   =["Ln", ["Error", "'missing'"]]`;
 exports[`INVALID LOG Ln with string argument 1`] = `
 invalid   =[
   "Ln",
-  ["Error", ["ErrorCode", "incompatible-type", "'number'", "'string'"]]
+  [
+    "Error",
+    ["ErrorCode", "incompatible-type", "'number'", "'string'"],
+    "'string'"
+  ]
 ]
 `;
 
@@ -974,11 +978,13 @@ invalid   =[
   "Rational",
   [
     "Error",
-    ["ErrorCode", "incompatible-type", "'integer'", "'finite_real'"]
+    ["ErrorCode", "incompatible-type", "'integer'", "'finite_real'"],
+    2.5
   ],
   [
     "Error",
-    ["ErrorCode", "incompatible-type", "'integer'", "'finite_real'"]
+    ["ErrorCode", "incompatible-type", "'integer'", "'finite_real'"],
+    -1.1
   ],
   ["Error", "unexpected-argument", "'18.4'"]
 ]

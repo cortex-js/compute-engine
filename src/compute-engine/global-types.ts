@@ -34,6 +34,7 @@ export type {
   TaggedValueDefinition,
   TaggedOperatorDefinition,
   BoxedDefinition,
+  TypeProvenanceEntry,
   BoxedBaseDefinition,
   BoxedValueDefinition,
   OperatorDefinitionFlags,

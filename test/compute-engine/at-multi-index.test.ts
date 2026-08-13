@@ -80,7 +80,7 @@ describe('At: single-index and edge conventions preserved', () => {
 
   test('a string base still reports its (pre-existing) type error', () =>
     expect(boxEval(['At', "'hello'", 2])).toBe(
-      'Error(ErrorCode("incompatible-type", "dictionary | indexed_collection", "string"))'
+      'Error(ErrorCode("incompatible-type", "dictionary | indexed_collection", "string"), "hello")'
     ));
 });
 

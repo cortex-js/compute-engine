@@ -13,7 +13,8 @@ import {
  *
  * These pin the DISPLAY layer only: the values are unchanged, an error element
  * is still an error element, and a non-broadcast error keeps its historical
- * shape byte for byte.
+ * shape aside from the site operand every `incompatible-type` error now
+ * carries.
  */
 
 /** `bump(n: integer) = n + 1` — a scalar-parameter lambda, so it broadcasts. */
@@ -44,6 +45,7 @@ describe('BROADCAST ERROR CONTEXT — box route', () => {
       [
         'Error',
         ['ErrorCode', "'incompatible-type'", "'integer'", "'string'"],
+        "'b'",
         ['ErrorTrace', ['ErrorBroadcast', "'bump'", 2, 3]],
       ],
     ]);
@@ -58,7 +60,7 @@ describe('BROADCAST ERROR CONTEXT — box route', () => {
         .evaluate()
         .toString()
     ).toBe(
-      `[2,Apply((n) |-> n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
+      `[2,Apply((n) |-> n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
     );
   });
 
@@ -122,7 +124,7 @@ describe('BROADCAST ERROR CONTEXT — value-definition route', () => {
       { operator: 'bump', index: 2, length: 3 },
     ]);
     expect(result.toString()).toBe(
-      `[2,Apply((n) |-> n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
+      `[2,Apply((n) |-> n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
     );
   });
 
@@ -173,7 +175,7 @@ describe('BROADCAST ERROR CONTEXT — Epsil route', () => {
       `function bump(n: integer) { n + 1 }\nbump([1, "b", 3])`
     );
     expect(value.toString()).toBe(
-      `[2,Apply((n) |-> n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
+      `[2,Apply((n) |-> n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
     );
   });
 
@@ -211,16 +213,17 @@ describe('BROADCAST ERROR CONTEXT — nothing else moves', () => {
     expect(result.toString()).toBe('[2,3,4]');
   });
 
-  test('an ordinary (non-broadcast) error keeps its historical shape', () => {
+  test('an ordinary (non-broadcast) error keeps its historical shape aside from the site operand', () => {
     const ce = new ComputeEngine();
     const err = ce.box(['Sin', ['Add', { str: 'a' }, 1]]).evaluate();
     expect(err.json).toEqual([
       'Error',
       ['ErrorCode', "'incompatible-type'", "'number'", "'string'"],
+      "'a'",
       ['ErrorTrace', ['ErrorFrame', "'Add'", 1], ['ErrorFrame', "'Sin'", 1]],
     ]);
     expect(err.toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
     expect(broadcastFrames(err)).toEqual([]);
   });

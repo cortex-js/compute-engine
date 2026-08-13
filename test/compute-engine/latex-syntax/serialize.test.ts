@@ -271,6 +271,7 @@ describe('LATEX', () => {
           'string',
           'finite_integer',
         ],
+        22,
         [
           ErrorTrace,
           [
@@ -337,6 +338,11 @@ describe('LATEX', () => {
           'incompatible-type',
           'string',
           'finite_real',
+        ],
+        [
+          Add,
+          2,
+          Pi,
         ],
         [
           ErrorTrace,

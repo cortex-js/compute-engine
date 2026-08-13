@@ -669,7 +669,7 @@ describe('overloads (§4) — per-arm permutation', () => {
     const call = ce.box(['ov', N('a', { str: 'q' })] as any);
     expect(errorCodes(call)).toEqual(['incompatible-type']);
     expect(call.toString()).toBe(
-      'ov(Error(ErrorCode("incompatible-type", "number", "string")))'
+      'ov(Error(ErrorCode("incompatible-type", "number", "string"), "q"))'
     );
     // The arm the name DOES fit is unaffected.
     expect(errorCodes(ce.box(['ov', N('a', 1)] as any))).toEqual([]);

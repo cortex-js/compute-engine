@@ -13,6 +13,10 @@ import {
   canonicalNumber,
 } from './boxed-expression/boxed-number.js';
 import { isValueDef } from './boxed-expression/utils.js';
+import {
+  recordTypeProvenance,
+  currentBoxingEpoch,
+} from './boxed-expression/type-provenance.js';
 import { NumericValue } from './numeric-value/types.js';
 import { isRational } from './numerics/rationals.js';
 import type { Rational } from './numerics/types.js';
@@ -152,15 +156,34 @@ export function createSymbolExpression(
         autoScope = autoScope.parent;
       // Reuse an existing local in this exact scope (a prior reference here)
       // rather than re-declaring.
+      const existingTyped = autoScope.bindings.get(name);
       const pdef =
-        autoScope.bindings.get(name) ??
+        existingTyped ??
         engine._declareSymbolValue(
           name,
           { type: declaredType, inferred: false },
           autoScope
         );
       engine._setShadowedParameterDef(name, pdef);
-      return new BoxedSymbol(engine, name, { metadata, def: pdef });
+      const typedParamSym = new BoxedSymbol(engine, name, {
+        metadata,
+        def: pdef,
+      });
+      // Provenance: this binding was CREATED as a side effect of boxing (an
+      // annotated parameter's first reference), not by a user declaration —
+      // recorded only on creation, never on reuse of an existing local. The
+      // occurrence is the cause: consumers compare it against the expression
+      // being canonicalized to answer "was this binding created by the pass
+      // running now?" (first-boxing binding divergence, Tycho item 178).
+      if (existingTyped === undefined && isValueDef(pdef))
+        recordTypeProvenance(pdef.value, {
+          type: pdef.value.type,
+          kind: 'auto-declared',
+          axis: 'type',
+          cause: typedParamSym,
+          epoch: currentBoxingEpoch(engine),
+        });
+      return typedParamSym;
     }
 
     // Reuse the binding a prior reference to this bare parameter already
@@ -184,15 +207,28 @@ export function createSymbolExpression(
     // binding — a parameter shadows, so resolving to a same-named global
     // would write the body's type evidence onto it (and sever the
     // parameter's own binding from that evidence).
+    const existingBare = autoScope.bindings.get(name);
     const pdef =
-      autoScope.bindings.get(name) ??
+      existingBare ??
       engine._declareSymbolValue(
         name,
         { type: 'unknown', inferred: true },
         autoScope
       );
     engine._setShadowedParameterDef(name, pdef);
-    return new BoxedSymbol(engine, name, { metadata, def: pdef });
+    const bareParamSym = new BoxedSymbol(engine, name, { metadata, def: pdef });
+    // Provenance: binding created as a side effect of boxing a bare
+    // parameter's first reference — see the annotated-parameter branch above
+    // for the contract (creation only, occurrence as cause).
+    if (existingBare === undefined && isValueDef(pdef))
+      recordTypeProvenance(pdef.value, {
+        type: pdef.value.type,
+        kind: 'auto-declared',
+        axis: 'type',
+        cause: bareParamSym,
+        epoch: currentBoxingEpoch(engine),
+      });
+    return bareParamSym;
   }
 
   const result = commonSymbols[name];
@@ -220,7 +256,19 @@ export function createSymbolExpression(
     { type: 'unknown', inferred: true },
     autoScope
   );
-  return new BoxedSymbol(engine, name, { metadata, def });
+  const freeSym = new BoxedSymbol(engine, name, { metadata, def });
+  // Provenance: binding created as a side effect of boxing a free symbol —
+  // see the annotated-parameter branch above for the contract (creation
+  // only, occurrence as cause).
+  if (isValueDef(def))
+    recordTypeProvenance(def.value, {
+      type: def.value.type,
+      kind: 'auto-declared',
+      axis: 'type',
+      cause: freeSym,
+      epoch: currentBoxingEpoch(engine),
+    });
+  return freeSym;
 }
 
 /**

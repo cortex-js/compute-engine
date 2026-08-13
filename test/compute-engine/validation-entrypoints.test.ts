@@ -53,7 +53,11 @@ describe('Validation Entrypoints', () => {
     expect(result).toEqual([
       'Add',
       1,
-      ['Error', ['ErrorCode', 'incompatible-type', 'number', 'boolean']],
+      [
+        'Error',
+        ['ErrorCode', 'incompatible-type', 'number', 'boolean'],
+        ['Equal', 2, 2],
+      ],
       3,
     ]);
   });

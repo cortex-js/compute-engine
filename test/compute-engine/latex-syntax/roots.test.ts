@@ -46,7 +46,8 @@ describe('ROOT FUNCTION (INVALID FORMS)', () => {
             "incompatible-type",
             "dictionary | indexed_collection",
             "'finite_real'"
-          ]
+          ],
+          ["Sqrt", 5]
         ],
         3
       ]

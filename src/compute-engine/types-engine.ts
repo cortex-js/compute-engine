@@ -51,6 +51,7 @@ import type {
   OEISOptions,
   InterpretResult,
   BoxedValueDefinition,
+  BoxedOperatorDefinition,
 } from './types-definitions.js';
 import type {
   AssumeResult,
@@ -183,6 +184,49 @@ export type IntegrationProvider = (
 export type ProtocolMember =
   | { kind: 'function'; signature: string }
   | { kind: 'readonly' | 'readwrite'; type: string };
+
+/**
+ * One write of inference evidence onto a definition, as delivered to
+ * `IComputeEngine._noteInferenceWrite` — the single emission point whose
+ * subscribers are the provenance history, the fresh-inference set, and the
+ * narrowing sink. See `docs/plans/2026-08-13-inference-provenance-journal.md`
+ * (phase 1).
+ */
+export type InferenceWriteEvent = {
+  /** The symbol whose binding was written. */
+  name: string;
+  /** The binding wrapper, as the narrowing sink consumes it. */
+  binding: BoxedDefinition;
+  /** The definition object the write landed on — the carrier of the
+   * `_typeProvenance` history. Exactly one of the two definition shapes. */
+  target: BoxedValueDefinition | BoxedOperatorDefinition;
+  /** The value definition written, when the write was on a value binding —
+   * what the fresh-inference set (`_freshlyInferred`) tracks. Omitted for
+   * signature writes on operator definitions. */
+  valueDef?: BoxedValueDefinition;
+  /** The type before the write. */
+  from: BoxedType;
+  /** The type the write installed. */
+  to: BoxedType;
+  /** `'inferred'` for `infer()` writes, `'assumed'` for writes by the
+   * assumptions machinery. */
+  kind: 'inferred' | 'assumed';
+};
+
+/**
+ * The ambient canonicalization context recorded as the `cause` of provenance
+ * entries: the operator expression being canonicalized when an inference
+ * write fires. Kept as the operator name + the operand array as the
+ * canonicalizer received it (possibly raw MathJSON — canonicalization has
+ * not run yet); `expr` is the non-canonical materialization, built lazily on
+ * the first write that records it (writes are rare — building an expression
+ * per canonicalization would not be).
+ */
+export type InferenceCauseContext = {
+  operator: string;
+  ops: ReadonlyArray<ExpressionInput>;
+  expr?: Expression;
+};
 
 /** A HOST (JavaScript) implementation of a protocol member. A callback carries
  * no type information the engine can read, so — like a host-declared operator
@@ -489,6 +533,15 @@ export interface IComputeEngine {
    * @internal */
   _inferenceTxDepth: number;
 
+  /** Monotonically increasing count of OUTERMOST boxing operations —
+   * incremented when `_inferenceTxDepth` transitions 0 → 1, constant for
+   * the duration of that pass. Stamped onto provenance entries
+   * (`TypeProvenanceEntry.epoch`) so "was this entry recorded by the pass
+   * running now?" is one integer comparison instead of a containment walk
+   * over the tree being canonicalized.
+   * @internal */
+  _boxingEpoch: number;
+
   /** Per-engine state for construction-local boxing repairs.
    * @internal */
   readonly _boxingState: EngineBoxingState<Scope>;
@@ -506,6 +559,29 @@ export interface IComputeEngine {
    * allocated; `null` when empty or no boxing is in progress.
    * @internal */
   _freshlyInferred: Set<BoxedValueDefinition> | null;
+
+  /** The single emission point for a write of inference evidence onto a
+   * definition's type (or an operator definition's signature). Every
+   * subscriber of "a definition's type was changed by inference" hangs off
+   * this call: the provenance history (`_typeProvenance`), the
+   * fresh-inference set (`_freshlyInferred`), and the narrowing sink
+   * (`_narrowingSink`). Callers emit only for writes that actually changed
+   * the type — no-op re-inferences are skipped at the write site. This is
+   * deliberately NOT `_noteStateEvent`: that channel is the sole writer of
+   * the cache-invalidation axes and stays payload-free; this one is passive
+   * data recording with no invalidation effects.
+   * @internal */
+  _noteInferenceWrite(event: InferenceWriteEvent): void;
+
+  /** The expression whose canonicalization is currently running — the
+   * ambient `cause` recorded by `_noteInferenceWrite` into provenance
+   * entries. Installed (saved/restored, so nesting resolves to the
+   * innermost) around operator canonicalization; `null` outside. Stored as
+   * operator + operands and materialized into a non-canonical expression
+   * only when a write actually records it, so the hot path pays two field
+   * writes and nothing else.
+   * @internal */
+  _inferenceCause: InferenceCauseContext | null;
 
   /**
    * Run `fn` with at most `ms` milliseconds (numeric form) or `limit.ms`

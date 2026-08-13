@@ -89,6 +89,19 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### `Error` match normalization is root-only (limitation)
+
+An `Error` subject is normalized for pattern matching at the ROOT of the
+match only: its `ErrorTrace` breadcrumb is stripped, and its where/site
+operand is stripped when the pattern's arity doesn't ask for it
+(`normalizeErrorSubject`, `match-dispatch.ts`). A sited or bubbled error
+NESTED as another error's cause is not normalized, so an `Error(Error(c))`
+pattern does not see through the inner error's where or trace. This
+predates the 2026-08-13 site operand — trace-stripping was always
+root-only — and extending it needs the generic recursive matcher to
+normalize `Error`/`Error` subject–pattern pairs as it descends. Surfaced
+by the dual review of the site-operand change; no known user report.
+
 ### `isSame` and inferred type depend on the first boxing of a shape (defect)
 
 `ce.box(J).isSame(ce.box(J))` can be **false** — same engine, same
@@ -109,29 +122,47 @@ Two consequences, and the second is the one with reach:
    dedup/matching key" (`CLAUDE.md`). Measured false-negative-only —
    no constructible false positive — so a cache keyed on it degrades
    to a miss and a recompute rather than wrong reuse.
-2. **The inferred TYPE also moves**: the same expression with the same
-   assigned value types `finite_integer` on the first boxing and
-   `number` on every later one (a binder-free control is stable at
-   `finite_integer`). The FIRST boxing is the precise one; the settled
-   behaviour is the degraded one. Anything keyed on `.type` —
-   compile gating, broadcast decisions — can therefore depend on
-   boxing order.
+2. **The inferred TYPE also moves** when a declaration event lands after
+   a boxing — but that movement is NOT part of this defect and not a
+   degradation; see the criterion paragraph below. It is recorded here
+   only because the two were conflated in the original filing.
 
 The fix must make the auto-declare target structural — independent of
-engine history — and the second acceptance criterion is that the
-inferred type be IDENTICAL across boxings, not that it be pinned to a
-particular value. (An earlier draft demanded the precise
-`finite_integer`; that was wrong. Inference is one-shot and
-order-sensitive by construction — with `x` declared `number`, boxing
-`x·v` before `v := 5` yields `number` while the reverse order yields
-`integer`, same value both ways — so `number` is what the model
-returns once a numeric use has been seen, not a degraded answer.)
-Both criteria, three candidate approaches, and an adjacent unfiled
-question about that general order-sensitivity are in
+engine history — and its acceptance criterion is
+`ce.box(J).isSame(ce.box(J))` ALONE. Two successive drafts added a
+type-stability criterion (first pinning `finite_integer`, then
+"identical across boxings"); both are withdrawn. The Tycho
+type-stability audit showed the type movement needs a DECLARATION
+EVENT after a boxing — pure boxing count moves nothing, so the
+consistency version passes vacuously — and that it is NOT
+binder-specific: a no-binder control moves too (`integer` → `number`).
+This fix therefore cannot deliver type stability and must not be
+judged on it. The movement is explained by the documented direction
+rules (a use narrows to `number` first; an assignment cannot narrow
+back) and is not a defect. Criterion (1) is control-verified
+binder-specific: `false` for the binder witness, `true` for the
+no-binder control. The criterion, three candidate approaches, and the
+inadequate-control lesson that cost two drafts are in
 [`docs/plans/2026-08-13-first-boxing-binding-divergence.md`](./docs/plans/2026-08-13-first-boxing-binding-divergence.md).
 (Reported by the Tycho project as items 178(a) and 178(c), two surfaces
 of this one defect; their siblings 178(b) and 178(d) are fixed and in
 `[Unreleased]`.)
+
+**Status 2026-08-13: TWO fixes attempted, both measured and REJECTED.**
+Promoting the body's declaration outward leaks the name to the caller
+(5 pinned tests, including "the READ itself declared nothing"); keeping
+it body-local and ignoring auto-declared outward candidates severs
+capture through assigned values — the declare-then-assign registration
+style the Tycho importer uses — and fails 28 tests. Together they rule
+out **any discriminator based on how the outward binding was created**:
+`inferredType`, the provenance `'auto-declared'` kind and the boxing
+epoch all fail to separate "scratch binding my own sibling just made"
+from "document variable that happens to have been inferred". The next
+approach is therefore a PRE-PASS that settles an expression's free
+symbols before canonicalizing any part of it — an architectural change
+to the boxing entry point, interacting with `autoDeclare: false` and
+the resolve-only depth. Both attempts, their measurements and the
+closure-capture invariants they must preserve are in the plan doc.
 
 ### Named-argument calls — v1 residuals
 

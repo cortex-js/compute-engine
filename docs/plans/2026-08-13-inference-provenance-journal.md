@@ -138,13 +138,112 @@ twice at this boundary (`_narrowingSink`, `_inferenceTxDepth`):
 
 ### Copy / rollback integration
 
-- `BoxedValueDefinition.copy()` (which already carries `inferredType`) copies
-  the provenance array **sliced**, so a per-call activation
-  (`_activationOf`) does not share and pollute the parent's history.
+- (Corrected during implementation: there is no `.copy()` on
+  `BoxedValueDefinition` — the earlier draft misread `toJSON()`. Per-call
+  activations reference the static binding via `_activationOf` rather than
+  copying it, so there is no copy path to slice; nothing to do.)
 - The static checking pass's provisional-registry rollback must not leave
   orphaned entries: if it rolls back by swapping definition objects the
   history travels for free; if it mutates in place, the history needs the
   same rollback. Verify at implementation time.
+
+### As implemented (2026-08-13, same day)
+
+Deviations from the sketch above, chosen during implementation:
+
+- **No recorded `'declared'` / `'value-derived'` anchors.** Recording an
+  entry in the `BoxedValueDefinition` constructor would tax engine
+  construction (~2000 library definitions per `new ComputeEngine()`). Both
+  anchors are derivable — `inferredType === false` means declared,
+  `inferredType === true` with a value means value-promoted — so the enum
+  keeps the kinds (reserved) but nothing writes them. Entries are recorded
+  only at inference writes, assumption writes, and auto-declarations.
+- **Assumption writes record provenance directly, not via
+  `_noteInferenceWrite`.** Routing them through the channel would have
+  reported them to the narrowing sink for the first time — a behavior
+  change in `InspectableScope.narrowings()`, not a refactor. The channel
+  aggregates exactly the observers `infer()` already had; `assume.ts` calls
+  `recordTypeProvenance` alone (`recordAssumedType` helper).
+- **The ambient cause holds `{operator, ops}` raw inputs**, installed by a
+  save/restore wrapper around `makeCanonicalFunction` (`box.ts`), and is
+  materialized into a NON-canonical expression lazily by the first write
+  that records it — raw-form boxing binds nothing, so materialization
+  cannot recurse into inference.
+- **Diagnostics ride the existing `DiagnosticNote` channel**:
+  `provenanceNote` in `src/epsil/signature-notes.ts` names the committing
+  site for an `incompatible-type` diagnostic. Resolution is
+  **binding-accurate** (user-ruled 2026-08-13, accepting the snapshot blast
+  radius): the engine attaches the faulted operand ITSELF as the error's
+  site operand — `createErrorExpression` had been silently dropping the
+  expression `where` that every `validate.ts` mint site already passed and
+  that `IComputeEngine.typeError` always declared — so the note reads
+  provenance off `whereOp.valueDefinition` directly. Scope-correct even for
+  a parameter or local whose scope is gone at diagnostic time, and immune
+  to a same-named outer binding shadowing it (the ambient-lookup fallback
+  remains only for callers holding no boxed error). Two consequences of the
+  new operand: every argument-validation `incompatible-type` error gains a
+  site operand (`["Error", EC]` → `["Error", EC, operand]`) — the measured
+  snapshot blast radius is recorded below — and `describeError` now renders
+  the site ("expected `number`, got `boolean` **at `p`**"); the dedup key
+  stays deterministic. The static tier pairs JSON errors with their boxed
+  twins via a local walker that mirrors `collectErrors`' traversal
+  (operands AND dictionary values — the boxed `.errors` getter walks `ops`
+  only and misses a `let` initializer's dictionary value). The runtime
+  tier passes its boxed errors directly and mints notes too.
+
+  Three follow-on contract repairs the site operand forced, all landed the
+  same day:
+  - **Dedup stays site-less** (`dedupKey`, static-diagnostics.ts): the
+    per-statement diagnostic dedup and the authored-error subtraction key
+    on the description WITHOUT the site — the site names WHERE, not WHAT,
+    so it must not split one problem into per-site diagnostics nor stop an
+    authored (site-less) error value from matching the engine-minted
+    equivalent. The rendered message keeps the site. (Caught by the CLI
+    "one diagnostic per problem, not per cascade" pin: 2 → 3 without this.)
+  - **`Error(c)` match patterns ignore the site** (`normalizeErrorSubject`,
+    match-dispatch.ts): like the `ErrorTrace` breadcrumb, the site is
+    provenance, not payload — `Error(c)` destructures a sited or bubbled
+    error exactly as a hand-written one, while `Error(c, w)` still binds
+    the site. Without this every existing `Error(c)` rescue arm silently
+    stopped matching engine-minted errors.
+  - **`errorWhere()`** now (correctly) returns the site for validation
+    errors — its pin recorded the empty-slot era and was updated.
+
+  Measured blast radius of the shape change: 42 snapshots + ~73 inline
+  pins across 33 suites, all updated; final full suite green.
+
+  A second dual review (Claude + Codex) scoped to this round's files ran
+  2026-08-13 PM. Outcomes: (1) a sequence wildcard (`Error(__all)`) no
+  longer triggers where-stripping despite its syntactic arity of one;
+  (2) the boxed-error pairing walker visits depth-first left-to-right,
+  matching `collectErrors`' order, so identical-JSON twins pair with the
+  error the dedup loop keeps; (3) the where-slot match rule is documented
+  and pinned as UNIFORM — a legacy string context and the new site are the
+  same slot, `Error(c)` ignores either, `Error(c, w)` binds either;
+  (4) root-only normalization (nested `Error(Error(c))` does not see
+  through the inner where/trace — a pre-existing trace-era limitation) is
+  recorded in `ROADMAP.md`; (5) a claimed dedup regression was REFUTED —
+  its baseline was the intermediate post-site state, not the pre-site
+  behavior the CLI pin records, which `dedupKey` restores exactly.
+- **Mirror obligation**: `types-expression.ts` keeps structural mirrors of
+  the definition interfaces; `_typeProvenance` had to land there too
+  (`TypeProvenanceEntryMirror`). Any future field on these interfaces has
+  the same two-file obligation.
+- **`epoch` field** (added same day at the 178-fix owner's request, after
+  they verified the cause predicate against their witness): the
+  "was this entry recorded by the pass running now?" query on `cause` is a
+  CONTAINMENT test (an auto-declare cause is a symbol occurrence, so
+  identity against the root being canonicalized is always false), which is
+  O(tree) — too hot for their auto-declare decision path. Each entry now
+  also stamps `ce._boxingEpoch`, a counter incremented on the
+  `_inferenceTxDepth` 0 → 1 transition in `beginInferenceTransaction`, so
+  the same question is one integer comparison. `undefined` epoch = the
+  write happened outside any boxing pass; fall back to containment.
+  **Pass granularity is contractual** (stated by the 178-fix owner after
+  verifying on their witness, 2026-08-13): all entries within one
+  outermost pass share one epoch, deliberately — same-pass bindings are
+  exactly what that fix treats as shareable. A finer-grained stamp would
+  break the consumer; do not increase the resolution.
 
 ### Diagnostics consumption
 

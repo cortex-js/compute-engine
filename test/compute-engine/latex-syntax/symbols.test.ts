@@ -318,11 +318,13 @@ describe('SYMBOLS', () => {
             "Add",
             [
               "Error",
-              ["ErrorCode", "incompatible-type", "'number'", "'string'"]
+              ["ErrorCode", "incompatible-type", "'number'", "'string'"],
+              "🥤"
             ],
             [
               "Error",
-              ["ErrorCode", "incompatible-type", "'number'", "'string'"]
+              ["ErrorCode", "incompatible-type", "'number'", "'string'"],
+              "🍔🍟"
             ]
           ],
           3

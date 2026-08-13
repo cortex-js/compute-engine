@@ -12,6 +12,7 @@ import {
   operands,
   operator,
   stringValue,
+  symbol,
 } from '../math-json/utils.js';
 import { isLiteralParamName } from '../math-json/symbols.js';
 
@@ -23,6 +24,10 @@ import type { ComputeEngine } from '../compute-engine.js';
 import type { DefinitionSite } from './definition-sites.js';
 import type { DiagnosticNote } from './diagnostics.js';
 import { traceFrames, type ErrorFrameRef } from './error-location.js';
+
+/** The engine's boxed-expression type, named without a static engine import
+ * (same containment as the `ComputeEngine` type-only import above). */
+type BoxedExpr = ReturnType<ComputeEngine['box']>;
 
 /**
  * The error codes that mean "the call did not match the callee's signature",
@@ -71,6 +76,17 @@ export function signatureNotes(
      * fallback: an error that BUBBLED knows its own origin, and the tree
      * position it ended up in would name the wrong callee. */
     enclosingFrame?: ErrorFrameRef;
+    /** The RAW call node the error sits in (`locateError().call`), when the
+     * caller located one. Read only by the provenance note's FALLBACK route,
+     * which needs the faulted argument AS WRITTEN — a bare symbol — to look
+     * up how that symbol's type was inferred. */
+    call?: MathJsonExpression;
+    /** The BOXED error value, when the caller holds one. The preferred
+     * provenance route: since 2026-08-13 the engine attaches the faulted
+     * operand itself as the error's site operand, so a symbol operand still
+     * carries its own binding (`.valueDefinition`) — scope-accurate even
+     * for a parameter or local whose scope is gone by diagnostic time. */
+    boxedError?: BoxedExpr;
   }
 ): DiagnosticNote[] {
   if (!SIGNATURE_ERROR_CODES.has(errorCodeOf(error))) return [];
@@ -104,7 +120,120 @@ export function signatureNotes(
       range: site.name,
     });
 
+  const provenance = provenanceNote(
+    ce,
+    error,
+    frame,
+    options?.call,
+    options?.boxedError
+  );
+  if (provenance !== undefined) notes.push(provenance);
+
   return notes;
+}
+
+/**
+ * The second site of a two-site type conflict: when the faulted argument is a
+ * bare symbol whose type the engine committed from earlier evidence, name
+ * that evidence — "`v` was inferred to have type `boolean` from its use in
+ * `And(v, w)`". The bare `incompatible-type` message shows only the failing
+ * use; where the conflicting type CAME from is recorded in the definition's
+ * provenance history (`_typeProvenance`, see `TypeProvenanceEntry` in the
+ * engine's `types-definitions.ts` and
+ * `docs/plans/2026-08-13-inference-provenance-journal.md`).
+ *
+ * Two resolution routes, in preference order:
+ *
+ * 1. **Binding-accurate** (`boxedError`): the engine attaches the faulted
+ *    operand itself as the error's site operand, so a symbol operand still
+ *    carries its own binding — the provenance is read off
+ *    `whereOp.valueDefinition` directly, scope-accurately, even for a
+ *    parameter or local whose scope is gone by diagnostic time. When this
+ *    route sees a symbol operand it is AUTHORITATIVE: no fallback runs, so
+ *    an ambient lookup can never contradict the binding the fault actually
+ *    involved.
+ * 2. **Fallback** (`call`, raw + ambient lookup): for callers holding only
+ *    the error JSON. Guarded against misattribution: the note is minted only
+ *    when (a) the raw operand at the faulted position is a bare symbol (a
+ *    named-argument call may permute positions — a permuted operand is a
+ *    carrier node, not a symbol, and is skipped), and (b) the provenance
+ *    entry that would be named installed EXACTLY the type the error reports.
+ *    This route can still resolve a same-named outer binding when name AND
+ *    type coincide across scopes — which is why route 1 exists and wins.
+ */
+function provenanceNote(
+  ce: ComputeEngine,
+  error: MathJsonExpression,
+  frame: ErrorFrameRef,
+  call: MathJsonExpression | undefined,
+  boxedError: BoxedExpr | undefined
+): DiagnosticNote | undefined {
+  if (errorCodeOf(error) !== 'incompatible-type') return undefined;
+
+  // `["ErrorCode", "'incompatible-type'", expected, actual]` — the actual
+  // type is what the definition's provenance must corroborate.
+  const cause = operand(error, 1);
+  if (operator(cause) !== 'ErrorCode') return undefined;
+  const actual = stringValue(operand(cause, 3));
+  if (actual === null) return undefined;
+
+  // Route 1: the boxed error's site operand (2nd operand — but the
+  // breadcrumb `ErrorTrace` is identified by HEAD, never position, so a
+  // trace sitting there means "no site"). `ops` and `symbol` live on
+  // narrowed interfaces that only engine-side type guards can prove, and
+  // this module may not import engine runtime code — so they are read
+  // structurally.
+  const whereOp = (
+    boxedError as { ops?: ReadonlyArray<BoxedExpr> } | undefined
+  )?.ops?.[1];
+  if (whereOp !== undefined && whereOp.operator !== 'ErrorTrace') {
+    const name = (whereOp as { symbol?: string }).symbol;
+    if (typeof name === 'string')
+      return noteFromHistory(
+        name,
+        whereOp.valueDefinition?._typeProvenance,
+        actual
+      );
+    // A non-symbol faulted operand has no binding to explain; route 2's
+    // raw-position heuristic would be a downgrade, not a fallback.
+    return undefined;
+  }
+
+  // Route 2: raw call + ambient lookup.
+  if (call === undefined) return undefined;
+  // `frame.index` is 1-based, matching `locateError`'s consumption.
+  const arg = [...operands(call)][frame.index - 1] ?? null;
+  const name = arg === null ? null : symbol(arg);
+  if (name === null) return undefined;
+  const def = ce.lookupDefinition(name);
+  const history =
+    def !== undefined && 'value' in def ? def.value._typeProvenance : undefined;
+  return noteFromHistory(name, history, actual);
+}
+
+/** The note for the most recent history entry that (1) resulted from
+ * evidence (inference or an assumption — a creation anchor explains
+ * nothing), (2) knows what expression committed it, and (3) installed the
+ * type the error reports as the actual type. */
+function noteFromHistory(
+  name: string,
+  history: NonNullable<BoxedExpr['valueDefinition']>['_typeProvenance'],
+  actual: string
+): DiagnosticNote | undefined {
+  if (history === undefined) return undefined;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const entry = history[i];
+    if (entry.kind !== 'inferred' && entry.kind !== 'assumed') continue;
+    if (entry.cause === undefined) continue;
+    if (entry.type.toString() !== actual) continue;
+    return {
+      message:
+        entry.kind === 'assumed'
+          ? `\`${name}\` was assumed to have type \`${actual}\` (from \`${entry.cause.toString()}\`)`
+          : `\`${name}\` was inferred to have type \`${actual}\` from its use in \`${entry.cause.toString()}\``,
+    };
+  }
+  return undefined;
 }
 
 /** The error code of an `["Error", cause, …]` node — the head of its

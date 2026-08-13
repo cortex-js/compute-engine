@@ -367,7 +367,9 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       ce.box(['Assign', 'numericK2', 5]).evaluate();
       expect(
         ce.box(['Map', ['List', 1, 2], 'numericK2']).errors[0]?.toString()
-      ).toBe('Error(ErrorCode("incompatible-type", "function", "integer"))');
+      ).toBe(
+        'Error(ErrorCode("incompatible-type", "function", "integer"), "numericK2")'
+      );
     });
 
     it('the installed arrow is a construction-time SNAPSHOT; the runtime channel is the honest one', () => {

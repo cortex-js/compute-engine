@@ -388,7 +388,9 @@ describe('EPSIL EXECUTE — static (canonicalization-time) type errors', () => {
   test('reports the error and still evaluates the program', () => {
     const { value, diagnostics } = run('"a" + 1\n2');
     expect(diagnostics[0].message[0]).toBe('static-type-error');
-    expect(diagnostics[0].message[1]).toBe('expected `number`, got `string`');
+    expect(diagnostics[0].message[1]).toBe(
+      'expected `number`, got `string` at `a`'
+    );
     // Anchored to the offending operand — the `"a"`, not all of `"a" + 1`.
     expect(diagnostics[0].range.slice(0, 2)).toEqual([0, 3]);
     // Evaluation proceeded: the final statement's value is unchanged.
@@ -710,7 +712,7 @@ describe('EPSIL EXECUTE — Count(xs, v) and Count(xs, p)', () => {
 describe('EPSIL EXECUTE — error propagation', () => {
   test('an error argument bubbles out of a call and out of a pipe', () => {
     const expected =
-      'Error(ErrorCode("incompatible-type", "number", "string"))';
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")';
     expect(run('let f = x |-> x + 1\nf("a" + 1)').value.toString()).toBe(
       expected
     );
@@ -733,7 +735,7 @@ describe('EPSIL EXECUTE — error propagation', () => {
     expect(value.operator).toBe('Error');
     expect(value.isValid).toBe(false);
     expect(value.toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
   });
 

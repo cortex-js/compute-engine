@@ -258,7 +258,7 @@ describe('M2 SUGARED GENERICS — end to end', () => {
       type: 'finite_integer',
     });
     expect(run(`${def}\ng("a")`).value).toBe(
-      'Error(ErrorCode("incompatible-type", "number", "string"))'
+      'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
   });
 
@@ -286,7 +286,7 @@ describe('M2 SUGARED GENERICS — end to end', () => {
       value: '6',
     });
     expect(run(`${def}h("a", 3)`).value).toBe(
-      'Error(ErrorCode("incompatible-type", "(real) -> real", "string"))'
+      'Error(ErrorCode("incompatible-type", "(real) -> real", "string"), "a")'
     );
   });
 
@@ -298,7 +298,7 @@ describe('M2 SUGARED GENERICS — end to end', () => {
       type: 'string',
     });
     expect(run(`${def}\nf(1, "a")`).value).toBe(
-      'Error(ErrorCode("incompatible-type", "integer", "string"))'
+      'Error(ErrorCode("incompatible-type", "integer", "string"), "a")'
     );
   });
 
@@ -686,7 +686,7 @@ describe('WHERE-CLAUSE BINDER — binding, bounds and generic behavior', () => {
   test('a bound is enforced at the call', () => {
     expect(
       run('function f(x: T) -> T where T: number { x }\nf("a")').value
-    ).toBe('Error(ErrorCode("incompatible-type", "number", "string"))');
+    ).toBe('Error(ErrorCode("incompatible-type", "number", "string"), "a")');
   });
 
   test('a BOUND containing `->` and brackets keeps the clause extent right', () => {

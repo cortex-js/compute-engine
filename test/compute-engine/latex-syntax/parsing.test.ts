@@ -397,7 +397,8 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
           "p",
           [
             "Error",
-            ["ErrorCode", "incompatible-type", "'boolean'", "'function'"]
+            ["ErrorCode", "incompatible-type", "'boolean'", "'function'"],
+            "q"
           ]
         ]
       `);

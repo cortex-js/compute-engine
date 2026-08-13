@@ -314,7 +314,7 @@ describe('Apply', () => {
     expect(
       ce.box(['Map', ['List', 1, 2], 3]).errors[0]?.toString()
     ).toBe(
-      'Error(ErrorCode("incompatible-type", "function", "finite_integer"))'
+      'Error(ErrorCode("incompatible-type", "function", "finite_integer"), 3)'
     );
   });
 });
