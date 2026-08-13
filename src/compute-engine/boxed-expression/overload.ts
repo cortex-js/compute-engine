@@ -98,6 +98,16 @@ export interface OverloadResolution {
    * carried: the two real callers need the JOIN over `viable` (ground, §4.3)
    * and this one solve. */
   selectedSolution: TypeInferenceResult | undefined;
+  /** NAMED CALLS ONLY (see the `named` parameter of {@link resolveOverload}):
+   * the winning arm's permutation, source slot → declaration slot. `undefined`
+   * for every all-positional call, where the permutation is the identity. */
+  selectedPermutation?: number[];
+  /** NAMED CALLS ONLY — sub-ruling R3: another arm survived whose permutation
+   * of the written names DIFFERS from the winner's, and the winner does not
+   * strictly outrank it. Selecting by declaration order would then also be
+   * selecting an argument ORDER, so the caller must reject the call and steer
+   * the author to a positional one. */
+  permutationAmbiguous?: boolean;
 }
 
 /**
@@ -408,7 +418,49 @@ interface ArmInstance {
    * diagnosis name the declared bound rather than the solution that violated
    * it. */
   ok: boolean;
+  /** NAMED CALLS ONLY: this arm's map from the call's SOURCE slot (the
+   * argument as written) to the declaration slot its name selects. `undefined`
+   * for an all-positional call, where the map is the identity and every
+   * position lookup below stays what it was. */
+  permutation?: number[];
 }
+
+/** `ops` reordered into `permutation`'s target order: the operand written at
+ * source slot `j` moves to declaration slot `permutation[j]`. A named call's
+ * per-arm normalization guarantees a bijection over `[0, ops.length)`, so the
+ * result has no holes. */
+function permuteOps(
+  ops: ReadonlyArray<Expression>,
+  permutation: ReadonlyArray<number>
+): ReadonlyArray<Expression> {
+  const out = new Array<Expression>(ops.length);
+  for (let j = 0; j < ops.length; j++) out[permutation[j]] = ops[j];
+  return out;
+}
+
+/** Do two arms consume the written arguments in the same order? Two
+ * `undefined`s (a positional call) agree by definition. */
+function samePermutation(
+  a: ReadonlyArray<number> | undefined,
+  b: ReadonlyArray<number> | undefined
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+/**
+ * A named call's per-arm normalization, index-aligned with the `arms` passed to
+ * {@link resolveOverload}: entry `k` is arm `k`'s permutation (source slot →
+ * declaration slot), or `undefined` when the written names make that arm
+ * INADMISSIBLE (an unknown name, a duplicate, an unsaturated required
+ * parameter, an optional hole). Name compatibility filters arms BEFORE type
+ * admission, mirroring the arity pre-filter.
+ *
+ * `docs/plans/2026-08-12-named-arguments-design.md` §4. Computed by
+ * `named-arguments.ts`, which owns the per-arm algorithm; this module only
+ * consumes the result.
+ */
+export type NamedCallPermutations = ReadonlyArray<number[] | undefined>;
 
 /** Does this arm carry a `where` clause? O(1) — the gate that keeps a ground
  * overload set on the pre-generics path. */
@@ -511,16 +563,25 @@ export function instantiateArms(
  * - `'equal'` — every position is mutually interchangeable: a tie;
  * - `undefined` — incomparable (a position where neither is a subtype, or a
  *   slot only one arm binds).
+ *
+ * The loop runs over the call's SOURCE slots — the arguments as the author
+ * wrote them — not over declaration positions, because the two arms may bind
+ * the same written argument to differently placed parameters. `permA`/`permB`
+ * (source slot → declaration slot, from a named call's per-arm normalization)
+ * translate; a positional call passes neither and every lookup is `paramAt(·,
+ * i)`, exactly as before named arguments existed.
  */
 function argSpecificity(
   a: FunctionSignature,
   b: FunctionSignature,
-  arity: number
+  arity: number,
+  permA?: ReadonlyArray<number>,
+  permB?: ReadonlyArray<number>
 ): 'more' | 'equal' | undefined {
   let strict = false;
   for (let i = 0; i < arity; i++) {
-    const pa = paramAt(a, i);
-    const pb = paramAt(b, i);
+    const pa = paramAt(a, permA === undefined ? i : permA[i]);
+    const pb = paramAt(b, permB === undefined ? i : permB[i]);
     // A missing slot on either side means the arms bind this call differently;
     // they are not comparable on specificity.
     if (pa === undefined || pb === undefined) return undefined;
@@ -544,9 +605,13 @@ function argSpecificity(
 export function isMoreSpecific(
   a: FunctionSignature,
   b: FunctionSignature,
-  arity: number
+  arity: number,
+  /** See {@link argSpecificity}: each arm's source-slot → declaration-slot map
+   * for a named call. Omitted for a positional call. */
+  permA?: ReadonlyArray<number>,
+  permB?: ReadonlyArray<number>
 ): boolean {
-  const byArgs = argSpecificity(a, b, arity);
+  const byArgs = argSpecificity(a, b, arity, permA, permB);
   if (byArgs === 'more') return true;
   if (byArgs !== 'equal') return false;
   return (
@@ -572,12 +637,14 @@ export function isMoreSpecific(
  * still wins.
  */
 function outranks(a: ArmInstance, b: ArmInstance, arity: number): boolean {
-  if (isMoreSpecific(a.instance, b.instance, arity)) return true;
+  const pa = a.permutation;
+  const pb = b.permutation;
+  if (isMoreSpecific(a.instance, b.instance, arity, pa, pb)) return true;
   return (
     !a.generic &&
     b.generic &&
-    argSpecificity(a.instance, b.instance, arity) === 'equal' &&
-    !isMoreSpecific(b.instance, a.instance, arity)
+    argSpecificity(a.instance, b.instance, arity, pa, pb) === 'equal' &&
+    !isMoreSpecific(b.instance, a.instance, arity, pb, pa)
   );
 }
 
@@ -588,12 +655,24 @@ function outranks(a: ArmInstance, b: ArmInstance, arity: number): boolean {
  * most-specific-first, tie-breaking by D11 and then by declaration order.
  *
  * Never writes. `selected` is `undefined` exactly when `viable` is empty.
+ *
+ * **Named calls (§4).** With `named`, `ops` is the call as WRITTEN and each arm
+ * consumes its own permutation of it: admission and generic solving run on the
+ * arm's permuted operand array, and ranking compares the parameters that
+ * receive the same written argument. `viable` is then a set of arms that need
+ * not agree on which parameter sits at which source slot, so it must NOT be fed
+ * to `joinParamAt` (whose index is a declaration position); the named caller
+ * reads `selectedPermutation`, reorders the operands once, and every consumer
+ * downstream sees an ordinary positional call.
  */
 export function resolveOverload(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
   arms: ReadonlyArray<FunctionSignature>,
-  policies?: AdmissionPolicies
+  policies?: AdmissionPolicies,
+  /** A named call's per-arm normalization; omitted for a positional call, which
+   * then takes byte-identical code paths to the pre-feature ones. */
+  named?: NamedCallPermutations
 ): OverloadResolution {
   const arity = ops.length;
 
@@ -608,7 +687,12 @@ export function resolveOverload(
   // A pure SPECIALIZATION of the general path below, not a second policy:
   // `instantiateArm` is the identity on a ground arm and `outranks` reduces to
   // `isMoreSpecific` when no arm is generic.
-  if (!arms.some(isGenericArm)) {
+  //
+  // A NAMED call skips the specialization and takes the general path below: it
+  // needs per-arm permutations, which is exactly the per-arm bookkeeping this
+  // shortcut exists to avoid. The gate reads `named` first, so a positional
+  // call is unaffected.
+  if (named === undefined && !arms.some(isGenericArm)) {
     const viable = arms.filter(
       (arm) =>
         arityAdmits(arm, arity) &&
@@ -638,17 +722,28 @@ export function resolveOverload(
   }
 
   const candidates: ArmInstance[] = [];
-  for (const arm of arms) {
+  for (let k = 0; k < arms.length; k++) {
+    const arm = arms[k];
+    const permutation = named?.[k];
+    // A named call's name filter runs BEFORE arity and type admission: an arm
+    // whose parameter names the call cannot fill is not a candidate at all.
+    if (named !== undefined && permutation === undefined) continue;
     if (!arityAdmits(arm, arity)) continue;
-    const candidate = instantiateArm(arm, ops, policies, ce._typeResolver);
+    // Every index-keyed decision below — the generic solver's `actuals` array
+    // and its `skip`/`inferable`/`lifted` callbacks, then `operandAdmits` —
+    // reads operands at DECLARATION positions, so the permutation is applied
+    // here, once, before any of them runs.
+    const armOps =
+      permutation === undefined ? ops : permuteOps(ops, permutation);
+    const candidate = instantiateArm(arm, armOps, policies, ce._typeResolver);
     // An unsatisfiable instantiation (violated bound) is not an arm this call
     // can take.
     if (!candidate.ok) continue;
-    const admits = ops.every((op, i) => {
+    const admits = armOps.every((op, i) => {
       const param = paramAt(candidate.instance, i);
       return param !== undefined && operandAdmits(ce, op, param, i, policies);
     });
-    if (admits) candidates.push(candidate);
+    if (admits) candidates.push({ ...candidate, permutation });
   }
 
   if (candidates.length === 0)
@@ -665,11 +760,27 @@ export function resolveOverload(
   for (let i = 1; i < candidates.length; i++)
     if (outranks(candidates[i], best, arity)) best = candidates[i];
 
+  // Sub-ruling R3: declaration order may break a tie between arms that consume
+  // the written arguments in the SAME order — the pick is then only an
+  // implementation. It may not break a tie between arms that consume them in
+  // DIFFERENT orders, because that pick would silently choose which argument
+  // goes to which parameter. Flag it and let the caller reject the call.
+  const permutationAmbiguous =
+    named !== undefined &&
+    candidates.some(
+      (c) =>
+        c !== best &&
+        !samePermutation(c.permutation, best.permutation) &&
+        !outranks(best, c, arity)
+    );
+
   return {
     selected: best.declared,
     selectedInstance: best.instance,
     selectedSolution: best.solution,
     viable: candidates.map((c) => c.instance),
+    selectedPermutation: best.permutation,
+    permutationAmbiguous,
   };
 }
 

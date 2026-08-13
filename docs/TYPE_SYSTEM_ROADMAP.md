@@ -2029,6 +2029,13 @@ interest(rate: 0.05, 1000, years: 10)  // error: positional after named
 interest(1000, principal: 2000)        // error: `principal` given twice
 ```
 
+A call that uses any name is a **complete** call (ruling C5): omitted
+`?`-optional parameters are fine, but a missing *required* parameter is
+an error — it never curries into a partial application — and a variadic
+tail cannot be supplied through a named call (tails are
+positional-only). Partial application stays available through purely
+positional calls, exactly as today.
+
 A named call needs a callee whose declaration the engine can see, and
 **the declaration the call resolves through supplies the names**: for
 `let g: (a: number) -> number = f`, the call `g(a: 1)` checks against
@@ -2070,19 +2077,22 @@ re-derive names from the signature for readability is part of C4.
   applicability checking, generic solving, and ranking; the call is
   normalized to positional only after one arm wins; several surviving
   name-compatible arms are ambiguous (existing overload-ambiguity
-  behavior). This is the meatiest sub-question and likely needs its own
-  design doc when this appendix moves to implementation.
+  behavior). **Approach ratified 2026-08-12**; the opening step of
+  implementation is a short design doc pinning its interaction with
+  generic solving and ranking.
 - **C4 — serialization.** Names erase at canonicalization (proposed
   above); should the Epsil serializer re-derive them for readability,
   and if so, when?
-- **C5 — variadic and optional parameters.** How names interact with
-  `?`-optional parameters (a natural fit: name exactly the options you
-  pass) and with variadic tails (no per-argument name exists —
-  presumably positional only). Must also reconcile C2's "every required
-  parameter filled" with the engine's partial-application behavior —
-  does an under-filled named call error, or curry? The library leans
-  heavily on optional and variadic signatures, so C is not
-  implementable ahead of this ruling.
+- **C5 — variadic and optional parameters (RULED 2026-08-12: saturated
+  calls only).** A call that uses any name is a *complete* call:
+  omitted `?`-optional parameters are fine; a missing required
+  parameter is an error, never a partial application; the variadic tail
+  must be empty (tails are supplied by positional calls only). Partial
+  application remains available through purely positional calls,
+  unchanged. Rationale: an under-filled call silently becoming a
+  function instead of an error is the same silent-failure class named
+  arguments exist to prevent. A name-aware partial-application form can
+  be added later without breaking anything.
 - **C6 — protocol dispatch.** A named call to a protocol function
   dispatches on the argument bound to the *declared first parameter*
   (`self`), wherever the caller wrote it: written position never

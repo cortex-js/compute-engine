@@ -486,6 +486,24 @@ export function serializeEpsil(
       return fmt.line('...', serializeExpression(operand(expr, 1)));
     },
 
+    //
+    // NamedArgument — `name: value` in an argument list
+    //
+    // `["NamedArgument", "'rate'", 0.05]` → `rate: 0.05`. The carrier only
+    // exists between parsing and canonicalization (the call's normalization
+    // consumes it), so this row serves the RAW tree: formatting a source file
+    // and quoting the offending statement back in a diagnostic.
+    //
+    NamedArgument: (expr: MathJsonExpression): FormattingBlock => {
+      if (nops(expr) !== 2) return serializeGenericFunction(expr);
+      const name = stringValue(operand(expr, 1));
+      if (name === null) return serializeGenericFunction(expr);
+      return fmt.line(
+        `${escapeSymbol(name)}: `,
+        serializeExpression(operand(expr, 2))
+      );
+    },
+
     Negate: (expr: MathJsonExpression): FormattingBlock => {
       if (nops(expr) !== 1) return serializeGenericFunction(expr);
       const arg = operand(expr, 1);

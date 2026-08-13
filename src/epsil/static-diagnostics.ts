@@ -55,6 +55,15 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   // blocks in one compilation unit), which is exactly what a static diagnostic
   // reports.
   'protocol-implementation-duplicate',
+  // Named-argument matching (`f(rate: 0.05)`): the engine matches the parse
+  // carriers against the callee's declared parameter names while it
+  // canonicalizes the call, so every failure of that match is a
+  // canonicalization error and belongs on the static route.
+  'argument-name-unknown',
+  'argument-order-invalid',
+  'argument-name-duplicate',
+  'argument-names-unavailable',
+  'argument-optional-skipped',
   'incompatible-type',
   'incompatible-dimensions',
   'invalid-axis',

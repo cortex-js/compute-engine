@@ -1740,7 +1740,9 @@ function installDispatcher(
  * result in the `type` handler. What the signature DOES carry is the
  * requirement's declared EFFECTS — the union across the protocols sharing the
  * name (Appendix A "Effects": implementations may not be more effectful than
- * the requirement, so the requirement's effect is sound for every target).
+ * the requirement, so the requirement's effect is sound for every target) —
+ * and the requirement's parameter NAMES, so that a named call can be permuted
+ * into declaration order ({@link sharedParameterName}).
  */
 function dispatcherDefinition(
   ce: IComputeEngine,
@@ -1759,9 +1761,12 @@ function dispatcherDefinition(
     arities.size === 1
       ? {
           kind: 'signature',
-          args: Array.from({ length: [...arities][0]! }, () => ({
-            type: 'any' as Type,
-          })),
+          args: Array.from({ length: [...arities][0]! }, (_, i) => {
+            const name = sharedParameterName(shapes, i);
+            return name === undefined
+              ? { type: 'any' as Type }
+              : { name, type: 'any' as Type };
+          }),
           result: 'unknown',
         }
       : {
@@ -1790,6 +1795,36 @@ function dispatcherDefinition(
     evaluate: (ops, options) =>
       dispatchMember(options.engine, member, null, ops, options),
   };
+}
+
+/**
+ * The parameter name that EVERY requirement shape declares at position
+ * `index`, or `undefined` when they disagree or any of them leaves the
+ * position unnamed.
+ *
+ * The dispatcher erases the requirement's parameter TYPES (they depend on
+ * `Self`, known only per call site) but must keep its parameter NAMES: a call
+ * that names its arguments — `tag(prefix: "p", self: x)` — is permuted into
+ * the callee's declaration order at canonicalization, and the dispatcher's
+ * synthesized signature is the only declaration that call has to match names
+ * against. Without the names, no name matches and the call is rejected instead
+ * of dispatched; with them, `dispatcherCanonical` keeps reading the receiver as
+ * `ops[0]` unchanged, whatever position the author wrote it in. See
+ * `docs/plans/2026-08-12-named-arguments-design.md` §5 (ruling C6).
+ *
+ * Several protocols may declare a member of the same name with differently
+ * named parameters. One dispatcher serves them all, so a position they do not
+ * agree on is left unnamed — positional-only, exactly as before.
+ */
+function sharedParameterName(
+  shapes: ReadonlyArray<FunctionSignature>,
+  index: number
+): string | undefined {
+  const name = shapes[0].args?.[index]?.name;
+  if (name === undefined) return undefined;
+  for (let i = 1; i < shapes.length; i++)
+    if (shapes[i].args?.[index]?.name !== name) return undefined;
+  return name;
 }
 
 //

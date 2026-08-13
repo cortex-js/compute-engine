@@ -43,6 +43,12 @@ import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
 
+import {
+  hasNamedArguments,
+  normalizeNamedArguments,
+  splitNamedArguments,
+} from './named-arguments.js';
+
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import {
   BoxedFunction,
@@ -1282,15 +1288,31 @@ function makeCanonicalFunction(
   metadata: Metadata | undefined,
   scope: Scope | undefined
 ): Expression {
-  const result = makeNumericFunction(ce, name, ops, metadata, scope);
-  if (result) return result;
+  // A `NamedArgument` carrier among the operands (`f(rate: 0.05)`) makes the
+  // written order NOT the declaration order, so the call must be permuted
+  // before anything reads an operand by position. The scan is a head
+  // comparison per operand and nothing else: when no carrier is present every
+  // path below is exactly what it was before named arguments existed.
+  //
+  // The three short paths are skipped for a named call so that it routes
+  // through definition lookup and its names can be checked against a
+  // signature. (`Add` and `List` declare no parameter names, so a named call
+  // to either correctly reports `argument-name-unknown` rather than silently
+  // taking the fast path.) See
+  // `docs/plans/2026-08-12-named-arguments-design.md` §3.
+  const named = hasNamedArguments(ops);
+
+  if (!named) {
+    const result = makeNumericFunction(ce, name, ops, metadata, scope);
+    if (result) return result;
+  }
 
   //
   // A `List` is always a plain canonical `List` `BoxedFunction` — tensor-ness
   // is a lazy view over its ops (`tensor-view.ts`), never a distinct
   // representation (§D1). Metadata is forwarded so latex/... survives boxing.
   //
-  if (name === 'List') {
+  if (name === 'List' && !named) {
     const boxedOps = ops.map((x) => ce.expr(x, { form: 'raw' }));
     // `Nothing` is an ERASURE marker (an empty-sequence splice): it is elided
     // from a collection literal, so `[12, Nothing, 34]` is a 2-element list.
@@ -1304,7 +1326,7 @@ function makeCanonicalFunction(
     });
   }
 
-  if (name === 'Dictionary') {
+  if (name === 'Dictionary' && !named) {
     const boxedOps = ops.map((x) => ce.expr(x, { form: 'raw' }));
     return new BoxedDictionary(ce, ce._fn('Dictionary', boxedOps), {
       canonical: true,
@@ -1343,6 +1365,61 @@ function makeCanonicalFunction(
       metadata,
       canonical: true,
     });
+  }
+
+  //
+  // A named call is permuted into declaration order HERE — after the callee's
+  // definition is known, and before every consumer that reads an operand by
+  // position: `annotateCallbacksFromSignature` (whose contextual arm selection
+  // keys on `ops.length`), `semiCanonical`/`flatten`, the binder pre-phase
+  // (`canonicalizeBinder` picks binding sites by raw operand index), the lazy
+  // split, and `validateArguments`. Placing the seam above all of them is what
+  // makes per-position effects metadata and binder site selection correct with
+  // no changes of their own.
+  //
+  // The no-definition branch above is deliberately NOT covered: a call ahead
+  // of its definition has no names to check, so its carriers are left
+  // untouched and each reports `argument-names-unavailable` when it
+  // canonicalizes (design doc §6).
+  //
+  // `Apply` is EXCLUDED (sub-ruling R4). Its own parameters are `(name,
+  // arguments*)` — the first one IS the callee — so a name written in an
+  // `Apply` argument list is meant for that callee, not for `Apply`, and
+  // matching it against `Apply`'s signature would answer a question nobody
+  // asked. `(⟨literal⟩)(x: 1)` canonicalizes to `Apply` too, so this one
+  // exclusion covers the whole non-symbol-callee spelling. Declining here
+  // leaves the carriers to report `argument-names-unavailable`; teaching the
+  // function-literal application path to permute is the recorded follow-up.
+  //
+  // It also catches the QUALIFIED protocol-member call, which parses as
+  // `Apply(Field(Protocol, "member"), …)`: the bare `member(self: x, …)` form
+  // is permuted (the dispatcher's synthesized signature carries the
+  // requirement's parameter names — `sharedParameterName` in
+  // engine-protocols.ts), while `Protocol.member(self: x, …)` declines. Both
+  // spellings work again as soon as `Apply` learns to read its callee's names,
+  // which is the same follow-up.
+  if (named && name !== 'Apply') {
+    const split = splitNamedArguments(ops);
+    if (split) {
+      const normalized = normalizeNamedArguments(
+        ce,
+        split,
+        isValueDef(def)
+          ? calleeSignatureType(def.value)
+          : def.operator.signature.type
+      );
+      if (normalized.kind === 'error')
+        return new BoxedFunction(
+          ce,
+          name,
+          flatten(semiCanonical(ce, normalized.ops)),
+          { metadata, canonical: true }
+        );
+      // `unavailable` leaves `ops` alone: the carriers survive to their own
+      // canonicalization, which is where `argument-names-unavailable` is
+      // minted.
+      if (normalized.kind === 'ok') ops = normalized.ops;
+    }
   }
 
   if (isValueDef(def)) {

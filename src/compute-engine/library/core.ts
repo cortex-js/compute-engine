@@ -1790,6 +1790,46 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    NamedArgument: {
+      description: [
+        'NamedArgument(name, value): one named argument of a call (Epsil',
+        'surface syntax: `f(rate: 0.05)`).',
+        'A parse-level carrier, like `Spread`, but one that never survives:',
+        'the enclosing call consumes it at canonicalization, permuting the',
+        'written arguments into the order its callee declares.',
+        'Reaching this definition therefore means the carrier was NOT',
+        'consumed — the callee supplied no parameter names to match — which',
+        'is the `argument-names-unavailable` error.',
+      ],
+      lazy: true,
+      signature: '(string, any) -> nothing',
+      // Consumed by `makeCanonicalFunction` (see
+      // `boxed-expression/named-arguments.ts`) before this handler could run,
+      // for every callee whose declaration supplies parameter names — a single
+      // signature or an overload set, whose arms are permuted individually.
+      // What is left is the set of callees that supply none: an unknown or
+      // forward-referenced name, a value declared with the bare `function`
+      // wildcard, a non-symbol callee applied through `Apply` (sub-ruling R4),
+      // and a carrier written outside any call. All four report the same
+      // thing — the names could not be checked — so one handler covers them.
+      //
+      // MUST stay: a `lazy` operator with no `canonical` handler is inert on
+      // the box and parse routes, and the carrier would then survive into a
+      // canonical expression instead of erroring.
+      canonical: (args, { engine: ce }) => {
+        const nameOp = args[0];
+        const name =
+          nameOp !== undefined && isString(nameOp)
+            ? (nameOp.string ?? undefined)
+            : undefined;
+        return ce.error([
+          'argument-names-unavailable',
+          name ?? '',
+          'the callee has no declaration with parameter names to match; call it with positional arguments',
+        ]);
+      },
+    },
+
     Identity: {
       description: 'Return the argument unchanged',
       signature: '(T) -> T where T',

@@ -6096,12 +6096,13 @@ export class Parser {
     // keeps the surrounding context: a `do` block or a `match` inside a loop
     // body is still inside that loop.
     const isFunctionLiteral = symbolNameOf(callee) === 'Function';
-    // Spread arguments (`f(...t)`) are admitted in call argument lists only.
+    // Spread arguments (`f(...t)`) and named arguments (`f(rate: 0.05)`) are
+    // admitted in call argument lists only.
     const { values, end } = isFunctionLiteral
       ? this.inLoopContext(0, () =>
-          this.parseBracketedList('CLOSE_PAREN', ')', false, true)
+          this.parseBracketedList('CLOSE_PAREN', ')', false, true, true)
         )
-      : this.parseBracketedList('CLOSE_PAREN', ')', false, true);
+      : this.parseBracketedList('CLOSE_PAREN', ')', false, true, true);
     const head = symbolNameOf(callee);
     if (head !== null)
       return this.wrap([head, ...values] as MathJsonExpression[], start, end);
@@ -6650,17 +6651,46 @@ export class Parser {
     );
   }
 
+  /** Consume the `:` that introduces a named argument's value. `:` is not in
+   * Epsil's operator table, so the lexer's maximal munch glues it to any
+   * following operator characters (the `:-` of `f(a:-1)` is ONE token). When
+   * that happened, rewrite the current token in place to drop the leading `:`,
+   * leaving the remainder (`-`) to start the value expression. The rewritten
+   * token's `start` advances by one so diagnostics still point at the right
+   * character. Mirrors `consumeAlternativeSeparator()`, which splits a munched
+   * `|` the same way. */
+  private consumeNamedArgumentColon(): void {
+    const t = this.current;
+    if (t.text === ':') {
+      this.advance();
+      return;
+    }
+    this.tokens[this.pos] = {
+      ...t,
+      text: t.text.slice(1),
+      start: t.start + 1,
+      precededByWhitespace: false,
+      precededByLinebreak: false,
+    };
+  }
+
   /**
    * Parse a comma-separated list of expressions delimited by the current
    * opening bracket and `closeType`. Trailing commas are allowed. On a missing
    * or mismatched closer, a `closing-bracket-expected` diagnostic is emitted
    * and (for a mismatched closer) the stray bracket is consumed for recovery.
+   *
+   * `allowNamedArgs` admits the named-argument production `name: value`, and
+   * is passed only by `parseCall` — a `name: value` element means a type guard
+   * in pattern position and a lambda parameter annotation in a mapsto list, so
+   * the production is claimed in call argument lists and nowhere else.
    */
   private parseBracketedList(
     closeType: TokenType,
     closeText: string,
     allowTypedParams = false,
-    allowSpread = false
+    allowSpread = false,
+    allowNamedArgs = false
   ): {
     values: MathJsonExpression[];
     open: Token;
@@ -6693,6 +6723,50 @@ export class Parser {
               ['Spread', arg] as MathJsonExpression[],
               dots.start,
               this.localEnd(arg) ?? this.previousEnd()
+            )
+          );
+          if (!this.match('COMMA')) break;
+          if (this.check(closeType)) break; // trailing comma
+          continue;
+        }
+        // `name: value` — a named argument (call argument lists only), carried
+        // to canonicalization as `["NamedArgument", {str: name}, value]`.
+        // The name is a bare (or verbatim) symbol. `:` is not in Epsil's
+        // operator table, so the lexer's maximal munch glues it to a following
+        // operator character: the `:-` of `f(a:-1)` is one token. An OPERATOR
+        // token merely STARTING with `:` therefore also opens a named
+        // argument, and `consumeNamedArgumentColon()` splits the leading `:`
+        // off it so the remainder (`-`) starts the value expression — valid
+        // syntax must not depend on the space in `f(a: -1)`. A token starting
+        // with `:=` is excluded so `f(a := 1)` keeps its assignment reading.
+        if (
+          allowNamedArgs &&
+          (this.check('SYMBOL') || this.check('VERBATIM_SYMBOL')) &&
+          this.peek(1).type === 'OPERATOR' &&
+          this.peek(1).text.startsWith(':') &&
+          !this.peek(1).text.startsWith(':=')
+        ) {
+          const nameTok = this.advance();
+          this.consumeNamedArgumentColon();
+          const name =
+            nameTok.type === 'VERBATIM_SYMBOL'
+              ? (nameTok.value ?? '')
+              : nameTok.text;
+          const value = this.parseExpression(0);
+          if (value === null) {
+            this.reportUnexpected(this.current);
+            this.recoverInBracket();
+            break;
+          }
+          values.push(
+            this.wrap(
+              [
+                'NamedArgument',
+                this.wrap({ str: name }, nameTok.start, nameTok.end),
+                value,
+              ] as MathJsonExpression[],
+              nameTok.start,
+              this.localEnd(value) ?? this.previousEnd()
             )
           );
           if (!this.match('COMMA')) break;

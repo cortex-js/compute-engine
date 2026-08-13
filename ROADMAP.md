@@ -89,6 +89,35 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### Named-argument calls — v1 residuals
+
+Named-argument calls shipped 2026-08-12 (design record:
+`docs/plans/2026-08-12-named-arguments-design.md`, §9 has the full
+statements). Four deliberate v1 limits remain open, in rough priority
+order:
+
+- **Arm substitution after name filtering**: with overloads
+  `((a: number) -> number) & ((s: string) -> string)`, the call
+  `ov(a: "q")` evaluates the string arm (as if written `ov("q")`)
+  instead of erroring — the name was validated against an arm that did
+  not execute. No values land in wrong parameters; closing it costs a
+  boxed re-resolution on every named overloaded call.
+- **Unannotated function literals are not addressable by name** — type
+  inference drops parameter names (`effects-inference.ts` types a bare
+  parameter as `{ type: 'unknown' }`). MEASURED 2026-08-13: the
+  one-line fix breaks 37 tests across 11 suites + 1 snapshot,
+  including semantic suites (`effects-contracts`,
+  `application-validation-regressions`, callback-contract and
+  lambda-inference batteries) — a dedicated follow-up round, not a
+  snapshot refresh.
+- **Error anchoring inside a reordered call** can underline the wrong
+  argument: `locateError` maps canonical operand index into the raw
+  AST by the same index, and after reordering the indices differ.
+- **Qualified protocol spelling** `Protocol.member(self: x, …)` and
+  inline-literal callees decline (`argument-names-unavailable`) —
+  lifting both means teaching `Apply` to read its callee's parameter
+  names.
+
 ### `Derivative` compile time vs body nesting depth (perf ask)
 
 Order-1 `Derivative` compile time grows steeply with the nesting depth

@@ -429,7 +429,12 @@ describe('Appendix A "Effects": the dispatcher carries the REQUIREMENT effect', 
     ce.declareProtocol('Logger', {
       functions: { log: '(self: Self) console -> nothing' },
     });
-    expect(ce.symbol('log').type.toString()).toBe('(any) console -> unknown');
+    // The parameter TYPE is erased to `any` (it depends on `Self`); the
+    // parameter NAME survives, so a named call can be permuted into
+    // declaration order (`sharedParameterName`, named-arguments design §5).
+    expect(ce.symbol('log').type.toString()).toBe(
+      '(self: any) console -> unknown'
+    );
   });
 
   test('protocols sharing a name contribute the JOIN of their effects', () => {
@@ -440,14 +445,34 @@ describe('Appendix A "Effects": the dispatcher carries the REQUIREMENT effect', 
     ce.declareProtocol('Tracer', {
       functions: { emit: '(self: Self) time -> nothing' },
     });
+    // Both requirements name the position `self`, so the shared name survives
+    // the merge; a position the protocols disagreed on would print as `any`.
     expect(ce.symbol('emit').type.toString()).toBe(
-      '(any) console time -> unknown'
+      '(self: any) console time -> unknown'
+    );
+  });
+
+  test('protocols that DISAGREE on a parameter name leave it unnamed', () => {
+    // One dispatcher serves every protocol declaring the name, so it can only
+    // carry a parameter name the requirements agree on. Here they do not, and
+    // the position stays positional-only.
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Left', {
+      functions: { pick: '(self: Self, a: number) -> number' },
+    });
+    ce.declareProtocol('Right', {
+      functions: { pick: '(self: Self, b: number) -> number' },
+    });
+    expect(ce.symbol('pick').type.toString()).toBe(
+      '(self: any, any) -> unknown'
     );
   });
 
   test('a pure requirement leaves the dispatcher pure', () => {
     const ce = engineFor(COMPARABLE);
-    expect(ce.symbol('compare').type.toString()).toBe('(any, any) -> unknown');
+    expect(ce.symbol('compare').type.toString()).toBe(
+      '(self: any, other: any) -> unknown'
+    );
   });
 });
 

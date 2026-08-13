@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+### New Features
+
+- **Named-argument calls.** An Epsil call can pass arguments by parameter
+  name: `interest(principal: 1000, rate: 0.05)`. Named arguments may be
+  given in any order, may follow positional arguments (never precede
+  them), and are matched against the parameter names of the declaration
+  the call resolves through — including overloaded and multi-clause
+  functions (each overload is matched with its own parameter order) and
+  protocol members (`tag(prefix: "→", self: s)` dispatches on `self`
+  wherever it is written). A call that uses any name is a complete call:
+  omitted optional parameters are fine, but it never curries, and it
+  cannot fill a variadic tail. New diagnostics: `argument-name-unknown`
+  (with a "did you mean"), `argument-order-invalid`,
+  `argument-name-duplicate`, `argument-names-unavailable`, and
+  `argument-optional-skipped`, all covered by `epsil doc <code>`.
+  Parameters without a declared name remain positional-only, as do
+  unannotated function literals. Design record:
+  `docs/plans/2026-08-12-named-arguments-design.md` (spec:
+  `docs/TYPE_SYSTEM_ROADMAP.md` Appendix C, rulings C1–C6).
+
 ## 0.105.0 _2026-08-12_
 
 ### Breaking Changes

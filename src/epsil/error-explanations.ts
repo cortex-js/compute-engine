@@ -28,6 +28,28 @@ Check the signature with "epsil doc <FunctionName>". Optional parameters never p
 
 Check the signature with "epsil doc <FunctionName>". A common cause is passing a collection's elements separately where the function expects the collection itself (or the reverse).`,
 
+  'argument-name-unknown': `A call passed an argument by name ("f(rate: 0.05)"), but the called function declares no parameter with that name; the message lists the names it does declare, and a "did you mean" points at the closest one.
+
+Only parameters that carry a name in the function's declaration can be addressed by name — an unnamed parameter is positional-only. Check the signature with "epsil doc <FunctionName>".`,
+
+  'argument-order-invalid': `In a call that mixes positional and named arguments, all positional arguments must come first: once one argument is named, every later argument must be named too.
+
+"f(1, rate: 0.05)" is fine; "f(rate: 0.05, 1)" is this error — after "rate:" there is no position left for a bare "1" to occupy unambiguously.`,
+
+  'argument-name-duplicate': `The same parameter was supplied twice — either two named arguments used the same name, or a named argument repeats a parameter that an earlier positional argument already filled.
+
+In "f(1000, principal: 2000)" the first positional argument already occupies "principal", so naming it again is this error, not an override.`,
+
+  'argument-names-unavailable': `A call passed arguments by name, but the called function has no declaration the engine can read parameter names from — it is undefined, defined later in the program, or held in a value typed only as "function".
+
+Named arguments are checked against the declaration the call resolves through; with no declaration visible there is nothing to check the names against. Call it positionally, or move the definition before the call.
+
+The same error covers an OVERLOADED function whose overloads accept the call but disagree about which argument fills which parameter — the names then pick an argument order rather than just an implementation, and the engine will not guess. Call it positionally, or give the overloads distinct parameter types.`,
+
+  'argument-optional-skipped': `A named argument supplied an optional parameter while an optional parameter declared before it was left out.
+
+Arguments are matched to declared positions, and there is no way to leave a hole in the argument list — so an optional parameter can only be named when every optional parameter declared before it is also supplied (by position or by name). Supply the earlier optional too, or omit both.`,
+
   'zero-index': `Indexing is 1-based: "xs[1]" is the first element of a collection and "xs[n]" the n-th, so the literal index 0 never names an element (it yields NaN).
 
 The last element is "xs[-1]" — negative indices count from the end, which is usually what a 0-index habit is reaching for.`,
