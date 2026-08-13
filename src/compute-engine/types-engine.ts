@@ -701,12 +701,24 @@ export interface IComputeEngine {
    * auto-declare and inference lands rooted there. Discarding the scope
    * discards the writes. Use `ce.createScope()` to make one that can be read
    * back.
+   *
+   * `options.speculative` leaves NO trace in the engine's type state: the
+   * parse runs inside a transient scope (auto-declares land there and are
+   * discarded with it), and every ambient symbol whose type is currently
+   * inferred is shadowed in that scope with its current type — so a
+   * narrowing use in `latex` refines the discarded shadow instead of
+   * persistently narrowing the ambient symbol. Use it for derive-style
+   * parses that only READ the result (its type, structure, or
+   * serialization): the result's bindings refer to the discarded scope, so
+   * do not retain, evaluate, or compare it against later expressions.
+   * Mutually exclusive with `scope`.
    */
   parse(
     latex: string,
     options?: Partial<ParseLatexOptions> & {
       form?: FormOption;
       scope?: Scope;
+      speculative?: boolean;
     }
   ): Expression;
   parse(
@@ -714,6 +726,7 @@ export interface IComputeEngine {
     options?: Partial<ParseLatexOptions> & {
       form?: FormOption;
       scope?: Scope;
+      speculative?: boolean;
     }
   ): Expression | null;
 

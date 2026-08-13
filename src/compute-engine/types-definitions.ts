@@ -637,8 +637,25 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * It does NOT override the structural / control-flow heads, which have
      * their own bespoke lowering: `Sequence`, `Sum`, `Product`, `Function`,
      * `Declare`, `Assign`, `Return`, `Break`, `Continue`, `Loop`,
-     * `Comprehension`, `If`, `Which`, `When`, `Match`, `Block`. A handler
+     * `Comprehension`, `If`, `When`, `Match`, `Block`. A handler
      * declared on one of those heads is ignored.
+     *
+     * Exception: `Which` IS overridable (it has no binding structure — its
+     * operands are plain condition/value pairs a handler can compile through
+     * the callback it is given). To customize how `Which` compiles while
+     * keeping its stock evaluation semantics, attach the handler to the
+     * engine's own definition rather than re-declaring the operator (a
+     * re-declaration replaces the stock `evaluate`/`canonical` handlers):
+     *
+     * ```ts
+     * const def = ce.lookupDefinition('Which');
+     * if (def && 'operator' in def) def.operator.compile = myWhichHandler;
+     * ```
+     *
+     * The override is per-engine (each `ComputeEngine` builds its own
+     * standard-library definitions), and the decline contract applies: a
+     * handler returning `undefined` falls back to the built-in `Which`
+     * lowering, coercion and frame-protocol wrapping included.
      *
      * Return `undefined` (or an empty string) to fall back to the
      * default compilation (a `null` returned from untyped JavaScript is

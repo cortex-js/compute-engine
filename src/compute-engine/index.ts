@@ -2581,8 +2581,19 @@ export class ComputeEngine implements IComputeEngine {
    * and inference lands rooted there. Discarding the scope discards the
    * writes. Use `ce.createScope()` to make one that can be read back.
    *
+   * `options.speculative` leaves NO trace in the engine's type state: the
+   * parse runs inside a transient scope (auto-declares land there and are
+   * discarded with it), and every ambient symbol whose type is currently
+   * inferred is shadowed in that scope with its current type — so a narrowing
+   * use in `latex` refines the discarded shadow instead of persistently
+   * narrowing the ambient symbol. Use it for derive-style parses that only
+   * READ the result (its type, structure, or serialization): the result's
+   * bindings refer to the discarded scope, so do not retain, evaluate, or
+   * compare it against later expressions. Mutually exclusive with `scope`.
+   *
    * @throws Only in edge cases:
    * - the argument is neither a string nor `null`/`undefined`;
+   * - both `speculative` and `scope` are passed;
    * - no LaTeX syntax is available (minimal entry point without a
    *   `LatexSyntax` instance passed to the `ComputeEngine` constructor);
    * - an internal parser safety guard trips (e.g. the infinite-loop
@@ -2595,6 +2606,7 @@ export class ComputeEngine implements IComputeEngine {
       canonical?: CanonicalOptions;
       structural?: boolean;
       scope?: Scope | undefined;
+      speculative?: boolean;
     }
   ): Expression;
   parse(
@@ -2604,6 +2616,7 @@ export class ComputeEngine implements IComputeEngine {
       canonical?: CanonicalOptions;
       structural?: boolean;
       scope?: Scope | undefined;
+      speculative?: boolean;
     }
   ): Expression | null;
   parse(
@@ -2613,11 +2626,79 @@ export class ComputeEngine implements IComputeEngine {
       canonical?: CanonicalOptions;
       structural?: boolean;
       scope?: Scope | undefined;
+      speculative?: boolean;
     }
   ): Expression | null {
     if (latex === null || latex === undefined) return null;
     if (typeof latex !== 'string')
       throw Error('ce.parse(): expected a LaTeX string');
+
+    // A SPECULATIVE parse leaves no trace in the engine's type state. Two
+    // leaks are closed, and they need different mechanisms:
+    // - auto-declares: confined by running the whole parse in a transient
+    //   scope, discarded on the way out;
+    // - narrowing writes: a use in `latex` can NARROW an ambient symbol whose
+    //   type is inferred (e.g. `Fibonacci(u)` moves an inferred `u: number`
+    //   to `integer`), and that write lands on the resolved definition
+    //   wherever it lives — a child scope alone does not confine it. So every
+    //   symbol the string mentions whose ambient definition is
+    //   inferred-typed is SHADOWED in the transient scope, seeded with its
+    //   current type: the narrowing refines the shadow, and the shadow is
+    //   discarded. Symbols with a declared (non-inferred) type are not
+    //   shadowed — uses cannot narrow them, and shadowing a constant (`Pi`)
+    //   or an operator would change how the string parses.
+    // The returned expression is for INSPECTION (its type, structure,
+    // serialization): its bindings refer to the discarded scope. This is the
+    // engine-side isolation for consumer derive-style parses (Tycho item
+    // 179: a type-deriving parse must not side-effect-declare into, or
+    // narrow, the parent scope).
+    if (options?.speculative) {
+      if (options.scope !== undefined)
+        throw Error(
+          'ce.parse(): the `speculative` and `scope` options are mutually ' +
+            "exclusive — `speculative` discards the parse's writes, `scope` " +
+            'harvests them'
+        );
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { speculative, ...rest } = options;
+      // The raw pre-parse (no binding, so no declarations and no inference
+      // writes) supplies the symbols the string mentions, so the shadows can
+      // be declared before the real parse runs.
+      const raw = this.parse(latex, { ...rest, form: 'raw' });
+      this.pushScope(undefined, 'speculative-parse');
+      try {
+        const scope = this.context.lexicalScope!;
+        if (raw !== null)
+          for (const name of new Set(raw.symbols)) {
+            const incumbent = this.lookupDefinition(name);
+            if (
+              incumbent !== undefined &&
+              'value' in incumbent &&
+              incumbent.value.inferredType
+            )
+              this.declare(
+                name,
+                {
+                  inferred: true,
+                  type: incumbent.value.type.type,
+                  // Parse-affecting metadata must survive onto the shadow, or
+                  // the speculative parse diverges from a normal one: the
+                  // parser's symbol oracle reads `subscriptEvaluate` through
+                  // the RESOLVED definition to keep `S_5` parsing as
+                  // `Subscript(S, 5)` (see `parse-symbol.ts`), and during a
+                  // speculative parse the shadow is what resolves.
+                  ...(incumbent.value.subscriptEvaluate
+                    ? { subscriptEvaluate: incumbent.value.subscriptEvaluate }
+                    : {}),
+                },
+                scope
+              );
+          }
+        return this.parse(latex, rest);
+      } finally {
+        this.popScope();
+      }
+    }
 
     // The supplied scope RECEIVES the call's writes, so the WHOLE parse runs
     // with it as the current lexical scope: the LaTeX pass (whose symbol
@@ -2634,11 +2715,12 @@ export class ComputeEngine implements IComputeEngine {
     const syntax = this._requireLatexSyntax();
 
     // `form` / `canonical` / `structural` control how the parsed MathJSON is
-    // boxed, and `scope` was consumed by the re-entry above; none of them are
-    // LaTeX-parser options, so keep them out of `parseOpts` (which is
-    // forwarded to the LaTeX parser).
+    // boxed, and `scope` / `speculative` were consumed by the re-entries
+    // above; none of them are LaTeX-parser options, so keep them out of
+    // `parseOpts` (which is forwarded to the LaTeX parser).
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { form, canonical, structural, scope, ...parseOpts } = options ?? {};
+    const { form, canonical, structural, scope, speculative, ...parseOpts } =
+      options ?? {};
 
     // Opt-in parse diagnostics: the parser reports each diagnostic through an
     // internal sink; collect them here and attach the (possibly empty) array

@@ -711,6 +711,23 @@ export class BaseCompiler {
   ]);
 
   /**
+   * The control-flow heads a custom per-operator `compile` handler MAY
+   * override after all — the carve-out from the `CONTROL_FLOW_HEADS` guard
+   * (Tycho item 180). `Which` qualifies because it has no binding structure:
+   * its operands are plain condition/value pairs a handler can compile
+   * operand-wise through the callback it is given, unlike a `Sum` index or
+   * a `Function` parameter list. The handler keeps the standard
+   * decline-falls-back contract — returning `undefined`/`null`/`''` falls
+   * through to the bespoke `Which` lowering below — and the override is
+   * per-engine (definition lookup), not process-global like a target
+   * function-table entry. Extend deliberately: any head added here must not
+   * bind variables, or the handler cannot see the binding structure its
+   * lowering must respect.
+   */
+  private static readonly OVERRIDABLE_CONTROL_FLOW_HEADS: ReadonlySet<string> =
+    new Set(['Which']);
+
+  /**
    * Operator symbols that lower to a valid *binary infix* lambda
    * (`(a, b) => a ∘ b`) when a bare operator symbol is used in value position —
    * a first-class function such as a `Reduce` combiner. Only the binary
@@ -1409,16 +1426,22 @@ export class BaseCompiler {
     // handler is an explicit opt-in that takes precedence over the built-in
     // lowering, even for an operator-mapped head (e.g. a custom-tolerance `GCD`
     // or a re-mapped `Add`). Structural/control-flow heads
-    // (`CONTROL_FLOW_HEADS`: Sum/Product/If/Which/When/Match/Block/Function/
+    // (`CONTROL_FLOW_HEADS`: Sum/Product/If/When/Match/Block/Function/
     // Loop/Comprehension/Sequence, …) are handled by their own bespoke lowering
-    // and are NOT overridable. A handler that returns `undefined`/`null` OR an
+    // and are NOT overridable — except the carve-outs in
+    // `OVERRIDABLE_CONTROL_FLOW_HEADS` (`Which`, Tycho item 180), which have
+    // no binding structure and keep the decline-falls-back contract. A handler
+    // that returns `undefined`/`null` OR an
     // empty string falls through to the default compilation (finding A5).
     // Set when a per-operator `compile` handler ran and DECLINED — the head is
     // known and lowerable in general, it just has no lowering for THIS operand
     // shape or target. Read by the fall-through diagnostic below so the decline
     // is not reported as `Unknown operator` (Tycho item 109a).
     let declinedByCustomHandler = false;
-    if (!BaseCompiler.CONTROL_FLOW_HEADS.has(h)) {
+    if (
+      !BaseCompiler.CONTROL_FLOW_HEADS.has(h) ||
+      BaseCompiler.OVERRIDABLE_CONTROL_FLOW_HEADS.has(h)
+    ) {
       // `lookupApplicable`, not `lookupDefinition`: `h` is by construction in
       // OPERATOR position, and a user value that shadows a builtin of the same
       // name — `D` as a diffusion coefficient, `N` as a count — must not hide
@@ -8793,10 +8816,13 @@ export class BaseCompiler {
       // declined. Executing the handler here is safe — the compile path would
       // run the same handler on the same expression anyway. The probe only runs
       // when no other lowering applies (structural/control-flow heads are not
-      // overridable and are excluded, matching the consult in `compileExpr`).
+      // overridable and are excluded — except the
+      // `OVERRIDABLE_CONTROL_FLOW_HEADS` carve-out — matching the consult in
+      // `compileExpr`; the two guards must stay identical).
       let hasCustomCompile = false;
       if (
-        !BaseCompiler.CONTROL_FLOW_HEADS.has(h) &&
+        (!BaseCompiler.CONTROL_FLOW_HEADS.has(h) ||
+          BaseCompiler.OVERRIDABLE_CONTROL_FLOW_HEADS.has(h)) &&
         target.functions?.(h) === undefined &&
         target.operators?.(h) === undefined &&
         userLiteral === undefined

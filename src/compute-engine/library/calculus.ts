@@ -1347,34 +1347,40 @@ volumes
 
         const limits = canonicalLimitsSequence(ops.slice(1), { engine: ce });
 
-        let f = canonicalFunctionLiteral(ops[0]);
-        if (!f) return null;
-
         // Bind only the integration variable(s) from the limits, not every
-        // free symbol. `canonicalFunctionLiteral` infers a parameter for each
-        // free symbol in the body, so a free coefficient (e.g. `a` in
-        // `∫ a·sin(x) dx`, or the wrongly-inferred `F` in `∫ (G−F) dt`) would
-        // become a spurious integrand parameter. Reuse its already-processed
-        // body and re-bind with just the (de-duplicated) integration
-        // variable(s). Skip when the integrand is already an explicit
-        // `Function` (preserve user-supplied parameters) or a bare symbol.
-        if (isFunction(f, 'Function') && ops[0].operator !== 'Function') {
-          const seen = new Set<string>();
-          const vars: Expression[] = [];
-          for (const l of limits) {
-            const v = isFunction(l) ? l.op1 : undefined;
-            if (
-              v &&
-              isSymbol(v) &&
-              v.symbol !== 'Nothing' &&
-              !seen.has(v.symbol)
-            ) {
-              seen.add(v.symbol);
-              vars.push(v);
-            }
+        // free symbol of the integrand: a free coefficient (e.g. `a` in
+        // `∫ a·sin(x) dx`, or the wrongly-inferred `F` in `∫ (G−F) dt`) must
+        // not become an integrand parameter. The (de-duplicated) integration
+        // variables are passed to `canonicalFunctionLiteral` as the intended
+        // parameter list, so a shorthand integrand's body canonicalizes with
+        // exactly those parameters declared. (Deriving the literal by
+        // unknowns-inference and swapping its parameter list afterwards left
+        // the body's occurrences bound to the discarded inferred parameters
+        // — Tycho item 178(a): the parsed `∫_{-x}^{x} cos(x) dn` compared
+        // `isSame` false against `ce.box()` of its own `.json`, because the
+        // body's `x` stayed bound to a discarded parameter while the bounds'
+        // `x` bound the engine's.) An explicit `Function` integrand keeps its
+        // user-supplied parameters; a bare-symbol integrand stays bare.
+        const seen = new Set<string>();
+        const vars: Expression[] = [];
+        for (const l of limits) {
+          const v = isFunction(l) ? l.op1 : undefined;
+          if (
+            v &&
+            isSymbol(v) &&
+            v.symbol !== 'Nothing' &&
+            !seen.has(v.symbol)
+          ) {
+            seen.add(v.symbol);
+            vars.push(v);
           }
-          if (vars.length > 0) f = ce._fn('Function', [f.op1, ...vars]);
         }
+
+        const f = canonicalFunctionLiteral(
+          ops[0],
+          vars.length > 0 ? { params: vars } : undefined
+        );
+        if (!f) return null;
 
         return ce._fn('Integrate', [f, ...limits]);
       },

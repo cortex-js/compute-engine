@@ -608,14 +608,16 @@ describe('Function call frames are activations of the literal binding', () => {
     expect(ce.expr(['bm_g', 10]).evaluate().re).toEqual(13);
   });
 
-  test('a HAND-BUILT literal activates its own Block binding', () => {
-    // `Integrate`'s canonical handler rebuilds the integrand literal with
-    // `ce._fn('Function', [f.op1, ...vars])`, taking the parameter operands
-    // from the `Limits` — a route that never runs `bindParameterOperands`, so
-    // the operand is a RAW symbol carrying no binding at all. The activation
-    // must still link to the literal's OWN Block binding (via the body-scope
-    // fallback in `staticParameterBinding`), NOT to whatever the enclosing
-    // `Integrate` node binds for the same name.
+  test('an Integrate-derived literal binds its parameter to the Block binding', () => {
+    // `Integrate`'s canonical handler passes the integration variables to
+    // `canonicalFunctionLiteral` as the intended parameter list, so a
+    // shorthand integrand's literal is built by
+    // `canonicalFunctionLiteralArguments` — the parameter operand comes back
+    // BOUND to the body Block's own binding, and the activation must link to
+    // that same binding. (An earlier version of the handler rebuilt the
+    // literal with `ce._fn('Function', [f.op1, ...vars])`, leaving the
+    // parameter operand raw; that route is gone — the raw-parameter fallback
+    // is covered by the hand-built test below.)
     const ce = new ComputeEngine();
     const frames: any[] = [];
     ce.declare('BmIntProbe', {
@@ -633,11 +635,55 @@ describe('Function call frames are activations of the literal binding', () => {
     ]);
     const literal = integral.op1;
     expect(literal.operator).toBe('Function');
-    // The parameter operand is raw: the body scope is the only authority.
+    const binding: any = literal.op1.localScope!.bindings.get('x');
+    const blockDef = binding && 'value' in binding ? binding.value : undefined;
+    expect(blockDef).toBeDefined();
+    // The parameter operand is bound, to the body Block's own binding.
+    expect((literal.ops[1] as any).valueDefinition).toBe(blockDef);
+
+    integral.N();
+    expect(frames.length).toBeGreaterThan(0);
+    expect(frames[0]._activationOf).toBe(blockDef);
+    expect(sameBindingDef(frames[0], blockDef)).toBe(true);
+  });
+
+  test('a HAND-BUILT literal activates its own Block binding', () => {
+    // A literal assembled directly from canonical parts —
+    // `ce._fn('Function', [canonicalBlock, rawSymbol])` — never runs
+    // `bindParameterOperands`, so the parameter operand is a RAW symbol
+    // carrying no binding at all. The activation must still link to the
+    // literal's OWN Block binding (via the body-scope fallback in
+    // `staticParameterBinding`), NOT to whatever an enclosing node binds for
+    // the same name.
+    const ce = new ComputeEngine();
+    const frames: any[] = [];
+    ce.declare('BmIntProbe', {
+      signature: '() -> number',
+      evaluate: () => {
+        const binding = ce.context.lexicalScope?.bindings.get('x');
+        frames.push(binding && 'value' in binding ? binding.value : undefined);
+        return ce.number(0);
+      },
+    });
+    // Canonical Block body (auto-declares its free `x` in its own scope),
+    // then a Function literal around it with a raw parameter operand.
+    const block = ce.box(['Block', ['Add', ['Power', 'x', 2], ['BmIntProbe']]]);
+    const literal: any = ce._fn('Function', [
+      block,
+      ce.symbol('x', { canonical: false }),
+    ]);
     expect((literal.ops[1] as any).valueDefinition).toBeUndefined();
     const binding: any = literal.op1.localScope!.bindings.get('x');
     const blockDef = binding && 'value' in binding ? binding.value : undefined;
     expect(blockDef).toBeDefined();
+
+    // An explicit `Function` integrand keeps its user-supplied literal
+    // untouched, raw parameter included.
+    const integral: any = ce.function('Integrate', [
+      literal,
+      ce.expr(['Limits', 'x', 0, 1], { form: 'raw' }),
+    ]);
+    expect(integral.op1).toBe(literal);
 
     integral.N();
     expect(frames.length).toBeGreaterThan(0);

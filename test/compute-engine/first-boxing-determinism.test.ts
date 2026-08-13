@@ -146,3 +146,58 @@ describe('first-boxing determinism (Tycho 178(a)+(c))', () => {
     expect(ce.box(WITNESS).isSame(ce.box(WITNESS))).toBe(true);
   });
 });
+
+/**
+ * The second mechanism behind Tycho 178(a) — parse-route stale parameter
+ * bindings, distinct from the first-boxing divergence above (it was
+ * order-independent and pre-declaring the symbol did NOT heal it).
+ *
+ * `Integrate`'s canonical handler used to derive a shorthand integrand's
+ * `Function` literal by unknowns-inference (each free body symbol became a
+ * parameter, declared in the body scope with the body's occurrences bound to
+ * it) and then swap the parameter list for the integration variables. The
+ * swap left the body's occurrences bound to the DISCARDED inferred
+ * parameters, so on the parse route a body symbol that also occurred in the
+ * bounds compared `isSame` false against the same symbol boxed from the
+ * canonical `.json` (byte-equal JSON, engine-bound bounds occurrence vs
+ * stale body occurrence). The handler now passes the integration variables
+ * to `canonicalFunctionLiteral` as the intended parameter list, so the body
+ * canonicalizes with exactly those parameters declared — the same binding
+ * structure the explicit-`Function` route produces.
+ */
+describe('Integrate parse-route binding parity (Tycho 178(a) residual)', () => {
+  test('the filed witness: ∫ with a body symbol shared with the bounds', () => {
+    const ce = new ComputeEngine();
+    // `x` occurs in the integrand body AND in both bounds; `n` is the
+    // integration variable. Box-vs-parse is the route the family was filed
+    // with; parse-vs-rebox is the tightest self-contained statement.
+    const a = ce.box([
+      'Integrate',
+      ['Function', ['Cos', 'x'], 'n'],
+      ['Limits', 'n', ['Negate', 'x'], 'x'],
+    ]);
+    const b = ce.parse('\\int_{-x}^{x}\\cos(x)\\,\\mathrm{d}n');
+    expect(a.isSame(b)).toBe(true);
+    expect(b.isSame(ce.box(b.json))).toBe(true);
+  });
+
+  test('pre-declared shared symbol: same parity', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    const b = ce.parse('\\int_{-x}^{x}\\cos(x)\\,\\mathrm{d}n');
+    expect(b.isSame(ce.box(b.json))).toBe(true);
+  });
+
+  test('a free coefficient does not become a stale parameter', () => {
+    const ce = new ComputeEngine();
+    // `a` is free in the body and must not be inferred as a parameter (nor
+    // left bound to a discarded one): the parsed form and the rebox of its
+    // own json agree, and the coefficient still resolves an assignment.
+    const b = ce.parse('\\int_0^1 a\\cdot x\\,\\mathrm{d}x');
+    expect(b.isSame(ce.box(b.json))).toBe(true);
+    ce.box(['Assign', 'a', 3]).evaluate();
+    // Numeric quadrature result (`∫₀¹ 3x dx`), carries an error bound: compare
+    // the real part rather than `.isEqual`, which stays undecided on it.
+    expect(b.N().re).toBeCloseTo(1.5, 10);
+  });
+});

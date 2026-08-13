@@ -12,8 +12,9 @@
   declare the written names is never chosen, so with clauses `(z: 0)`
   and `(n: integer)`, `f(n: 0)` runs the general `n` clause while
   `f(0)` runs the base clause) and
-  protocol members (`tag(prefix: "→", self: s)` dispatches on `self`
-  wherever it is written). A call that uses any name is a complete call:
+  protocol members — bare (`tag(prefix: "→", self: s)`) and qualified
+  (`Tagged.tag(prefix: "→", self: s)`) alike, dispatching on `self`
+  wherever it is written. A call that uses any name is a complete call:
   omitted optional parameters are fine, but it never curries, and it
   cannot fill a variadic tail. New diagnostics: `argument-name-unknown`
   (with a "did you mean"), `argument-order-invalid`,
@@ -37,7 +38,73 @@
   since `DefineFunction` has no lowering in any target) reports the
   compiler's explanation in the pane instead.
 
+### New Features
+
+- **A definition-level `compile` handler on `Which` is now honored** (Tycho
+  item 180). The per-operator compilation extension point excluded every
+  control-flow head; `Which` is now the carve-out, because it has no binding
+  structure — its operands are plain condition/value pairs a handler can
+  compile through the callback it is given (unlike a `Sum` index or a
+  `Function` parameter list, which remain non-overridable). The handler has
+  the same contract as every other operator `compile` handler: it takes
+  precedence over the built-in lowering, and returning `undefined` falls back
+  to the stock `Which` compilation, complex-branch coercion and
+  frame-protocol wrapping included. The override is **per-engine** — attach
+  it to the engine's own definition, which keeps the stock evaluation
+  semantics:
+
+  ```ts
+  const def = ce.lookupDefinition('Which');
+  if (def && 'operator' in def) def.operator.compile = myWhichHandler;
+  ```
+
+  (Do not `ce.declare('Which', {...})` for this: a re-declaration replaces
+  the stock `evaluate`/`canonical` handlers, so the operator would compile
+  with the custom handler but no longer evaluate correctly.)
+
+- **Speculative parsing: `ce.parse(latex, { speculative: true })` leaves no
+  trace in the engine's type state** (Tycho item 179). A normal parse has two
+  persistent side effects: an undeclared symbol is auto-declared into the
+  current scope, and a narrowing use moves the inferred type of an
+  already-declared symbol (`Fibonacci(u)` narrows an inferred `u: number` to
+  `integer`) — and the second one is not confined by parsing inside a child
+  scope, since the write lands on the resolved definition wherever it lives.
+  With `speculative: true` the parse runs in a transient scope that is
+  discarded on the way out, and every mentioned symbol whose ambient type is
+  inferred is shadowed in that scope with its current type, so narrowing
+  refines the discarded shadow instead of the ambient symbol. Symbols with a
+  declared (non-inferred) type, constants, and operators are not shadowed, so
+  the string parses exactly as it would without the option, and the result's
+  type and MathJSON are identical to a normal parse's. Intended for
+  derive-style parses that only read the result (its type, structure, or
+  serialization): the result's bindings refer to the discarded scope, so it
+  should not be retained, evaluated, or compared against later expressions.
+  Mutually exclusive with the `scope` option, which has the opposite
+  contract (the scope receives the writes, to be read back).
+
 ### Issues Resolved
+
+- **A parsed integral now binds its integrand's free symbols the same way as
+  boxing its canonical MathJSON does** (the residual surface of Tycho item
+  178(a), distinct from the first-boxing divergence below — it was
+  order-independent, and pre-declaring the symbol did not remove it).
+  `Integrate`'s canonical handler derived a shorthand integrand's `Function`
+  literal by inferring a parameter for each free body symbol — declaring
+  those parameters in the body scope, with the body's occurrences bound to
+  them — and then swapped the parameter list for the integration variables,
+  leaving the body's occurrences bound to the discarded parameters. A parsed
+  `\int_{-x}^{x} \cos(x)\,dn` therefore carried a body `x` bound to a
+  discarded parameter while the bounds' `x` bound the engine's definition,
+  and compared `isSame` false against `ce.box()` of its own `.json` (and
+  against the box route generally) with byte-equal MathJSON. The handler now
+  passes the integration variables to `canonicalFunctionLiteral` as the
+  intended parameter list, so the body canonicalizes with exactly those
+  parameters declared — the same binding structure the explicit-`Function`
+  route produces. A knock-on repair: a parenthesized explicit `Function`
+  integrand (`Delimiter`-wrapped) now keeps its user-supplied parameters
+  instead of having them overwritten by the integration variables. Values
+  were never affected — evaluation resolved identically on both routes —
+  and serialization is unchanged (zero snapshot churn).
 
 - **Boxing the same MathJSON twice now produces `isSame` expressions —
   including the first-ever boxing of a shape** (Tycho items 178(a) and

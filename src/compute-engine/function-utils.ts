@@ -183,7 +183,8 @@ export function order(
  *
  */
 export function canonicalFunctionLiteral(
-  expr: Expression | undefined
+  expr: Expression | undefined,
+  options?: { params?: ReadonlyArray<Expression> }
 ): Expression | undefined {
   if (!expr) return undefined;
 
@@ -233,12 +234,16 @@ export function canonicalFunctionLiteral(
         expr = exprOp1;
       } else {
         return canonicalFunctionLiteral(
-          expr.engine._fn('Block', exprOp1.ops, { canonical: false })
+          expr.engine._fn('Block', exprOp1.ops, { canonical: false }),
+          options
         );
       }
     }
 
-    return canonicalFunctionLiteral(isFunction(expr) ? expr.op1 : undefined);
+    return canonicalFunctionLiteral(
+      isFunction(expr) ? expr.op1 : undefined,
+      options
+    );
   }
 
   //
@@ -260,6 +265,22 @@ export function canonicalFunctionLiteral(
 
   if (params.length === 0) {
     // There are no wildcards
+
+    // The caller knows the intended parameter list (`Integrate` passes its
+    // integration variables): build the literal from the RAW body with those
+    // parameters, so body occurrences bind to them through the normal §6.1
+    // pre-declare mechanism in `canonicalFunctionLiteralArguments`. Inferring
+    // parameters from the body's unknowns and swapping the parameter list
+    // afterwards is NOT equivalent: the inferred parameters are declared in
+    // the body scope and the body's occurrences bound to them, so the swap
+    // leaves those occurrences bound to discarded parameters (Tycho item
+    // 178(a): a parsed `∫_{-x}^{x} cos(x) dn` compared `isSame` false
+    // against `ce.box()` of its own `.json`, because the body's `x` stayed
+    // bound to a discarded inferred parameter while the bounds' `x` bound
+    // the engine's). Wildcard parameters win over caller-supplied ones: a
+    // body using `_` names its own parameters.
+    if (options?.params !== undefined && options.params.length > 0)
+      return canonicalFunctionLiteralArguments(ce, [body, ...options.params]);
 
     // Check if we have some unknowns
     // We'll need the canonical form of the expression, so we'll create a block if necessary
