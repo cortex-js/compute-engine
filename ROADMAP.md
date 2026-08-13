@@ -102,68 +102,6 @@ root-only — and extending it needs the generic recursive matcher to
 normalize `Error`/`Error` subject–pattern pairs as it descends. Surfaced
 by the dual review of the site-operand change; no known user report.
 
-### `isSame` and inferred type depend on the first boxing of a shape (defect)
-
-`ce.box(J).isSame(ce.box(J))` can be **false** — same engine, same
-MathJSON, byte-identical `.json` on both sides. The first boxing
-auto-declares a free symbol as a side effect, and during that first
-call an occurrence INSIDE a binder's scope binds to a scope-local
-declaration while a sibling occurrence outside binds to the enclosing
-scope; from the second boxing on, the name already exists and both
-resolve to it. So the first-ever boxing of a shape is structurally
-unequal to every later one. It needs a not-yet-declared symbol
-occurring both inside a binder's scope and outside it; pre-declaring
-the symbol removes it.
-
-Two consequences, and the second is the one with reach:
-
-1. It contradicts the documented contract that `.isSame()` is "an
-   unconditional equivalence relation, so it is safe as a
-   dedup/matching key" (`CLAUDE.md`). Measured false-negative-only —
-   no constructible false positive — so a cache keyed on it degrades
-   to a miss and a recompute rather than wrong reuse.
-2. **The inferred TYPE also moves** when a declaration event lands after
-   a boxing — but that movement is NOT part of this defect and not a
-   degradation; see the criterion paragraph below. It is recorded here
-   only because the two were conflated in the original filing.
-
-The fix must make the auto-declare target structural — independent of
-engine history — and its acceptance criterion is
-`ce.box(J).isSame(ce.box(J))` ALONE. Two successive drafts added a
-type-stability criterion (first pinning `finite_integer`, then
-"identical across boxings"); both are withdrawn. The Tycho
-type-stability audit showed the type movement needs a DECLARATION
-EVENT after a boxing — pure boxing count moves nothing, so the
-consistency version passes vacuously — and that it is NOT
-binder-specific: a no-binder control moves too (`integer` → `number`).
-This fix therefore cannot deliver type stability and must not be
-judged on it. The movement is explained by the documented direction
-rules (a use narrows to `number` first; an assignment cannot narrow
-back) and is not a defect. Criterion (1) is control-verified
-binder-specific: `false` for the binder witness, `true` for the
-no-binder control. The criterion, three candidate approaches, and the
-inadequate-control lesson that cost two drafts are in
-[`docs/plans/2026-08-13-first-boxing-binding-divergence.md`](./docs/plans/2026-08-13-first-boxing-binding-divergence.md).
-(Reported by the Tycho project as items 178(a) and 178(c), two surfaces
-of this one defect; their siblings 178(b) and 178(d) are fixed and in
-`[Unreleased]`.)
-
-**Status 2026-08-13: TWO fixes attempted, both measured and REJECTED.**
-Promoting the body's declaration outward leaks the name to the caller
-(5 pinned tests, including "the READ itself declared nothing"); keeping
-it body-local and ignoring auto-declared outward candidates severs
-capture through assigned values — the declare-then-assign registration
-style the Tycho importer uses — and fails 28 tests. Together they rule
-out **any discriminator based on how the outward binding was created**:
-`inferredType`, the provenance `'auto-declared'` kind and the boxing
-epoch all fail to separate "scratch binding my own sibling just made"
-from "document variable that happens to have been inferred". The next
-approach is therefore a PRE-PASS that settles an expression's free
-symbols before canonicalizing any part of it — an architectural change
-to the boxing entry point, interacting with `autoDeclare: false` and
-the resolve-only depth. Both attempts, their measurements and the
-closure-capture invariants they must preserve are in the plan doc.
-
 ### Named-argument calls — v1 residuals
 
 Named-argument calls shipped 2026-08-12 (design record:
@@ -186,10 +124,21 @@ the design doc §4; not remaining work.)
 - **Error anchoring inside a reordered call** can underline the wrong
   argument: `locateError` maps canonical operand index into the raw
   AST by the same index, and after reordering the indices differ.
-- **Qualified protocol spelling** `Protocol.member(self: x, …)` and
-  inline-literal callees decline (`argument-names-unavailable`) —
-  lifting both means teaching `Apply` to read its callee's parameter
-  names.
+- **Qualified protocol spelling** `Protocol.member(self: x, …)`
+  declines named arguments (`argument-names-unavailable`) — it
+  canonicalizes through `Apply`, which does not run name
+  normalization. This bites harder than the other `Apply`-routed case
+  (below): qualification is the escape hatch the
+  `protocol-call-ambiguous` diagnostic steers to, so a user whose
+  *named* bare call is ambiguous is told to qualify and then loses the
+  names as well — and protocol members are the one callee class whose
+  parameter names are guaranteed to exist (requirements always carry
+  them). Lifting it means teaching `Apply` to read parameter names
+  from its callee; the protocol-member case should come first.
+- **Inline-literal callees** `((x: number) |-> x + 1)(x: 5)` decline
+  the same way and share the same `Apply` fix, but the spelling is
+  rare and the workaround trivial (bind the literal to a name);
+  lower priority than the qualified-protocol case.
 
 ### `Derivative` compile time vs body nesting depth (perf ask)
 

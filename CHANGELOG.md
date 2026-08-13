@@ -39,6 +39,26 @@
 
 ### Issues Resolved
 
+- **Boxing the same MathJSON twice now produces `isSame` expressions —
+  including the first-ever boxing of a shape** (Tycho items 178(a) and
+  178(c), two surfaces of one defect). A not-yet-declared symbol occurring
+  both inside a binder's scope and outside it (e.g.
+  `["List", ["Integrate", ["Function", … y_r …], …], "y_r"]`) made the
+  first boxing bind the two occurrences differently: the occurrence inside
+  the function body auto-declared into a scope local to that one
+  canonicalization, while the sibling outside declared into the surrounding
+  scope. Every later boxing found the surviving surrounding binding first
+  and resolved *both* occurrences to it — so on a fresh engine
+  `ce.box(J).isSame(ce.box(J))` was `false` (and a box and a parse of the
+  same integral disagreed), breaking the documented contract that `isSame`
+  is safe as a dedup/matching key. The boxing machinery now detects the
+  conflict — one construction both auto-declaring a name into a scope it
+  created and then declaring the same name into a scope that outlives it —
+  and rebuilds the construction once, so the first result is the same one
+  every later boxing produces. No resolution rule changed and nothing new
+  is declared: a function body's free symbols remain invisible to the
+  caller, and capture through assigned document variables is untouched.
+
 - **`.json` no longer reports a different operand order than the expression it
   serializes** (Tycho item 178(d)). `.json` goes through the structural form,
   which re-sorted a commutative operator's operands — but a CANONICAL

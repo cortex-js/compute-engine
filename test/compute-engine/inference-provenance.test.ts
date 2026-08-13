@@ -104,6 +104,76 @@ describe('INFERENCE PROVENANCE — assumption writes', () => {
   });
 });
 
+describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type (ruled 2026-08-13)', () => {
+  test('the inferred type no longer depends on site order', () => {
+    // Use first, then assign: the assignment refines `number` → `integer`,
+    // landing exactly where the reverse order lands.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    ce.box(['Multiply', 'x', 'v']);
+    expect(ce.box('v').type.toString()).toBe('number');
+    ce.assign('v', 5);
+    expect(ce.box('v').type.toString()).toBe('integer');
+    // Control: assign first, then use — same landing type.
+    const ce2 = new ComputeEngine();
+    ce2.declare('x', 'number');
+    ce2.assign('v', 5);
+    ce2.box(['Multiply', 'x', 'v']);
+    expect(ce2.box('v').type.toString()).toBe('integer');
+  });
+
+  test('widening from a wider value still works (direction rules intact)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('v', 5);
+    expect(ce.box('v').type.toString()).toBe('integer');
+    ce.assign('v', 2.5);
+    expect(ce.box('v').type.toString()).toBe('real');
+  });
+
+  test('a DECLARED type is never narrowed by an assignment', () => {
+    const ce = new ComputeEngine();
+    ce.declare('d', 'number');
+    ce.assign('d', 5);
+    expect(ce.box('d').type.toString()).toBe('number');
+  });
+
+  test('an assignment-derived incumbent stays widen-only', () => {
+    // No use ever informed `vasg`'s type — only assignments did. Narrowing
+    // it would make the type oscillate as the assigned values alternate.
+    const ce = new ComputeEngine();
+    ce.assign('vasg', 2.5);
+    expect(ce.box('vasg').type.toString()).toBe('real');
+    ce.assign('vasg', 5);
+    expect(ce.box('vasg').type.toString()).toBe('real');
+  });
+
+  test('the promoted type is never installed when it escapes a recorded use', () => {
+    // `gfin(wfin)` infers `wfin: finite_real`. Assigning 5 refines it, but
+    // the promotion `finite_integer` → `integer` would leave the incumbent's
+    // `finite_real` constraint, so the value's raw type is adopted instead.
+    const ce = new ComputeEngine();
+    ce.declare('gfin', '(finite_real) -> real');
+    ce.box(['gfin', 'wfin']);
+    expect(ce.box('wfin').type.toString()).toBe('finite_real');
+    ce.assign('wfin', 5);
+    expect(ce.box('wfin').type.toString()).toBe('finite_integer');
+    expect(ce.type('finite_integer').matches('finite_real')).toBe(true);
+  });
+
+  test('the narrow records a value-derived provenance entry with the value as cause', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    ce.box(['Multiply', 'x', 'v']);
+    ce.assign('v', 5);
+    const history = historyOf(ce, 'v');
+    expect(history[history.length - 1]).toEqual([
+      'value-derived',
+      'integer',
+      '5',
+    ]);
+  });
+});
+
 describe('INFERENCE PROVENANCE — the boxing epoch', () => {
   test('entries from different top-level boxings carry different epochs; same boxing, same epoch', () => {
     const ce = new ComputeEngine();

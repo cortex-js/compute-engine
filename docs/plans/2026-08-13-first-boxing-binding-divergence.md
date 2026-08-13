@@ -1,7 +1,9 @@
 # First-boxing binding divergence (Tycho item 178(a)+(c))
 
-**Status:** root-caused, NOT fixed. Design note only — the fix touches binder
-scope construction and should be made deliberately.
+**Status:** FIXED 2026-08-13 (attempt 3 below — detect-and-rebuild in
+`EngineBoxingState`). Attempts 1 and 2 are kept as the record of what the fix
+must NOT do; the acceptance criterion history is kept because it cost two
+drafts to get right.
 
 **Filed as:** Tycho items 178(a) (`Integrate` with symbolic limits) and 178(c)
 (`PointList(∫…)`), in `docs/COMPUTE_ENGINE.md` of the Tycho repo. They are one
@@ -264,6 +266,67 @@ on both sides** (their copy is in that plan's phase-1 data-model section):
 Whichever is chosen, the invariant to pin is: **`ce.box(J).isSame(ce.box(J))`
 for every J, on a fresh engine, independent of call order.** That is a property
 worth testing directly rather than through any one witness.
+
+### Attempt 3 (2026-08-13): detect the conflict, rebuild the construction —
+### SHIPPED
+
+The pre-pass idea above assumed the free symbols had to be settled BEFORE
+canonicalization, which requires recognizing binder positions in raw MathJSON
+(Function bodies, `scoped` operators' binding sites, parse sugar, held
+operands) — a walker whose conservative gaps would each leave a shape
+divergent. The shipped fix inverts it: let the first pass run, DETECT that it
+diverged from what every later pass would do, and run the construction again.
+The second pass starts from exactly the state every later boxing starts from,
+so its output is the stable one by construction — no resolution rule changes,
+nothing new is declared, and no discriminator inspects how a binding was
+created (the trap both prior attempts died on).
+
+The vehicle already existed: `EngineBoxingState`
+(`engine-boxing-state.ts`) rebuilds a root boxing construction when the
+un-applied-operator repair invents a binding partway through — the same
+symptom family ("occurrences boxed before the binding existed keep a
+different binding; byte-identical MathJSON compares `isSame` false"), and its
+contract already requires builds to be side-effect-free-except-boxing,
+i.e. redo-safe. The fix adds a second trigger to that machinery:
+
+- **Classifier.** `withDevolveRepair` (`box.ts`) captures, at root
+  construction entry, which scopes PRE-EXIST the construction: anything on
+  the engine's current lexical chain or on the caller-supplied `scope`
+  option's chain. Scopes created during the construction (a binder body's
+  scope, recreated fresh by every boxing of the same input) are never
+  members of those chains. `parent` links are immutable, so the chains can
+  be walked lazily at query time.
+- **Record.** The free-symbol auto-declare branch of
+  `createSymbolExpression` (`engine-expression-entrypoints.ts`), when its
+  target scope is construction-created, records the name
+  (`noteTransientAutoDeclare`). The PARAMETER branches do not record:
+  parameters shadow unconditionally on every pass, so they never diverge.
+- **Trigger.** `declareSymbolValue` / `declareSymbolOperator`
+  (`engine-declarations.ts`) report every declaration to
+  `noteDeclarationIn(scope, name)`: if the running construction had
+  transiently auto-declared the same name and the target scope outlives the
+  construction, the root frame's rebuild is requested. The rebuild converges
+  in one pass — the persistent binding now exists before any occurrence is
+  processed, so the transient auto-declare cannot recur (same argument as
+  the sibling-first operand order being clean).
+
+Measured on the shipped change:
+
+- The witness flips false → true; sibling-first, no-binder, inside-only and
+  pre-declared controls all stay true; the Block-statement cousin
+  (`List(Block(m+1), m)` — same divergence via a Block scope instead of a
+  function body) is fixed by the same mechanism with no binder-kind
+  enumeration; box-vs-parse of the 178(a) integral agrees.
+- All seven closure-capture invariant probes
+  (`docs/scratch/2026-08-13-closure-capture-invariants.mts`) unchanged; only
+  the defect line moved. The attempt-1 leak pins and the attempt-2
+  assigned-value-capture cluster pass.
+- Type movement (the withdrawn criterion below) is untouched, as required.
+
+Pinned in `test/compute-engine/first-boxing-determinism.test.ts`: the
+witness, both operand orders, the Block cousin, box-vs-parse parity, the
+no-leak contract from attempt 1, the assigned-value capture contract from
+attempt 2, and the two-bodies-no-sibling shape (stable AND undeclared).
 
 ## The type criterion, corrected
 

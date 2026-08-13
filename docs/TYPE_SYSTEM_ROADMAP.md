@@ -10,6 +10,10 @@ Updated 2026-08-11: the forward-ref-to-alias ruling (former §2.2) is
 **closed** — Rule U (defined in §2.1) admits a type variable under a union
 arm, so the three spellings it was about no longer diverge. Section 2
 renumbered accordingly; re-probed that day.
+Updated 2026-08-13: Appendix C (named arguments) is **shipped** — the
+prose rewritten as the spec (decisions folded in where they apply,
+with a compact decision record at the end) and the diagnostics table
+brought in line with the implementation; behaviors re-probed that day.
 
 Design docs for the shipped and in-flight tiers (each §1 item points to
 its own):
@@ -95,9 +99,11 @@ unification; generics are explicitly quantified and solved locally at each
 call site by a bound-collection/join fold (D2: `(T, T) -> T where T` at
 `(integer, real)` solves `T = real` where HM would fail to unify); and
 inference of unannotated symbols is evidence-based and *revisable* (narrow
-from argument use, widen from value assignment, non-monotone override per
-D11, forward-ref re-derivation) rather than a once-and-final principal
-type. Principal types and whole-program inference are traded away for
+from argument use, widen from value assignment, narrow from a REFINING
+value assignment — ruled 2026-08-13, so `x·v` then `v := 5` lands on
+`integer` exactly like the reverse order; sound because use-narrowing is
+monotone-down — non-monotone override per D11, forward-ref re-derivation)
+rather than a once-and-final principal type. Principal types and whole-program inference are traded away for
 subtyping, unions, refinements, overloads, and open-world incremental
 sessions — the right trade for a CAS. User-facing background lives in
 `src/epsil/docs/types.md` ("How the type system works").
@@ -589,8 +595,11 @@ with three rulings needed in order (see §7).
 7. Mutable objects (Appendix B): rulings B1–B13 — proposal under review;
    nothing ratified. B10 amends item 6(b) above and
    `docs/EFFECTS-MODEL.md` (the `state` label).
-8. Named arguments (Appendix C): rulings C1–C6 — proposal under review,
-   sequenced before Appendix B (whose constructors require it).
+8. Named arguments (Appendix C): **shipped 2026-08-12**, all
+   decisions ratified (see the appendix's decision record); the
+   deliberate v1 limits are tracked in `ROADMAP.md` ("Named-argument
+   calls — v1 residuals"). Appendix B's constructors can now build on
+   it.
 
 
 ## Appendix A: Protocol Syntax
@@ -1361,8 +1370,8 @@ is an open ruling — §7 item 6(g).
 
 > Status: **proposal**, 2026-08-12 — nothing below is implemented. The
 > decisions it needs are collected as rulings B1–B13 at the end. It
-> depends on Appendix C (named arguments), which is proposed to land
-> first. Landing it
+> depends on Appendix C (named arguments), which shipped 2026-08-12.
+> Landing it
 > supersedes two shipped decisions of Appendix A; the exact amendments are
 > listed under "Changes to Appendix A".
 
@@ -1423,9 +1432,8 @@ Constructor arguments are named, never positional: `Person` has two
 adjacent `string` fields, and a positional call that swapped them would
 be accepted silently. Because the arguments are named, their order does
 not matter. Named-argument calls are their own language feature —
-Appendix C, proposed to be ratified and implemented before this
-appendix — and object constructors are simply the first place where
-names are *required* (ruling B11).
+Appendix C, shipped 2026-08-12 — and object constructors are simply
+the first place where names are *required* (ruling B11).
 
 The constructor requires every field, so an object never exists in a
 half-initialized state, and no rule is needed for "reading a field that
@@ -1922,8 +1930,8 @@ a fresh object type instead of being caught.
   results decline, GPU declines entirely.
 - **B10 — the Appendix A amendments** below.
 - **B11 — named constructors.** Object constructors require named
-  arguments. Depends on Appendix C (named-argument calls), which is its
-  own proposal, sequenced before this one.
+  arguments. Depends on Appendix C (named-argument calls), which
+  shipped 2026-08-12.
 - **B12 — lifetime.** Objects are reclaimed by the host's garbage
   collector; engine-held caches must not keep objects alive; an object
   never outlives or crosses its engine; no destructors in v1 (see
@@ -1973,11 +1981,19 @@ To `docs/EFFECTS-MODEL.md`:
 
 ## Appendix C: Named arguments
 
-> Status: **proposal**, 2026-08-12 — nothing below is implemented. This
-> appendix stands on its own and is proposed to be ratified and
-> implemented **before** Appendix B: object constructors require named
-> arguments, but nothing here depends on objects. Rulings C1–C6 at the
-> end.
+> Status: **shipped 2026-08-12**. The prose below is the spec — every
+> decided behavior is stated where it applies. The decisions behind it
+> (C1–C6, the proposal's open questions, ratified 2026-08-12; R1–R5,
+> decisions that surfaced during implementation, ratified 2026-08-13)
+> are collected with their dates in the decision record at the end of
+> this appendix; the implementation design — seam placement, per-arm
+> permutations, the branch-elimination enforcement guard — is
+> `docs/plans/2026-08-12-named-arguments-design.md` (the "design
+> record"), and the deliberate v1 limits are tracked in `ROADMAP.md`
+> ("Named-argument calls — v1 residuals"). This appendix stands on its
+> own and landed **before** Appendix B, which needs it: object
+> constructors require named arguments, but nothing here depends on
+> objects.
 
 ### The idea
 
@@ -1992,8 +2008,9 @@ function interest(principal: number, rate: number, years: integer)
 interest(principal: 1000, rate: 0.05, years: 10)
 ```
 
-Today `f(name: value)` is a parse error (probed 2026-08-12), so the
-syntax is free to claim: no existing program changes meaning.
+Before this landed, `f(name: value)` was a parse error (probed
+2026-08-12), so the syntax was free to claim: no pre-existing program
+changed meaning.
 
 What it buys:
 
@@ -2029,21 +2046,43 @@ interest(rate: 0.05, 1000, years: 10)  // error: positional after named
 interest(1000, principal: 2000)        // error: `principal` given twice
 ```
 
-A named argument is also a **branch selector** (design ruling R5,
-ratified 2026-08-13): when a function has several overloads or clauses,
-a branch that does not declare the written names is eliminated — even
-if the runtime value would have selected it. With clauses `(z: 0)`,
-`(o: 1)`, and `(n: integer)`, the call `f(n: 0)` runs the general `n`
-clause with argument 0, while `f(0)` runs the `z: 0` base clause.
-Among the branches that do declare the names, selection then proceeds
-exactly as for a positional call.
+Only an **exact `:`** introduces a named argument: `f(a := 1)` keeps
+its assignment reading, and a colon glued to the next operator by the
+lexer — `f(a:-1)`, `f(a:!true)` — is split back apart, so those parse
+as `a: -1` and `a: !true`.
 
-A call that uses any name is a **complete** call (ruling C5): omitted
-`?`-optional parameters are fine, but a missing *required* parameter is
-an error — it never curries into a partial application — and a variadic
-tail cannot be supplied through a named call (tails are
+A call that uses any name is a **complete** call: trailing
+`?`-optional parameters may be omitted, but a missing *required*
+parameter is an error — it never curries into a partial application —
+and a variadic tail cannot be supplied through a named call (tails are
 positional-only). Partial application stays available through purely
-positional calls, exactly as today.
+positional calls, exactly as today. Optionals can only be omitted from
+the **tail**: supplying an optional by name while an
+optional declared before it is left out is `argument-optional-skipped`,
+never a call with a hole — the engine has no absent-argument
+placeholder that survives canonicalization, so a hole would silently
+shift later arguments into the wrong parameters, the exact failure
+class this feature exists to prevent.
+
+The written order of named arguments is surface syntax only:
+after normalization, the arguments of a named call
+evaluate in **declaration order**. Where evaluation order is
+observable (effects today; pervasively under Appendix B's objects), a
+reordered named call is therefore not equivalent to the same call
+evaluated in its written order.
+
+
+  ```epsil
+  function f(a: number, b: number) -> number { 10 * a + b }
+
+  let n = 0
+  function next() -> number { n = n + 1; n }
+
+  f(b: next(), a: next())
+```
+
+  Reading left to right you'd expect `b = 1, a = 2`, giving 21. What actually happens: the call canonicalizes to  `f(next(), next())` in declaration order `(a, b)`, so `a` evaluates first — `a = 1, b = 2`, result 12.
+
 
 A named call needs a callee whose declaration the engine can see, and
 **the declaration the call resolves through supplies the names**: for
@@ -2056,6 +2095,80 @@ that naming an argument of a callee with no visible declaration — an
 unresolved forward reference, or a bare value only known to be of type
 `function` — is an error, `argument-names-unavailable`: there is
 nothing to check the names against.
+
+Two consequences of that rule are sharper in the implementation than
+this appendix originally anticipated (both deliberate, v1):
+
+- **Parameters without declared names are positional-only.** Most of
+  the built-in library declares unnamed parameters (only ~60 of ~530
+  library signatures carry any name), and an **unannotated** function
+  literal is not name-addressable at all — signature inference drops
+  the names of bare parameters (`(a, b) |-> a + b` types as
+  `(unknown, unknown) -> …`), so only annotated literals and explicit
+  declarations supply names. Carrying inferred names through is a
+  measured follow-up (ROADMAP, v1 residuals).
+- **Inline-literal and `Apply`-routed callees decline**:
+  `((x: number) |-> x + 1)(x: 5)` and the qualified protocol
+  spelling `Comparable.compare(self: x, …)` report
+  `argument-names-unavailable` in v1, even though the names are
+  syntactically visible — the `Apply` path does not yet run name
+  normalization. Bare protocol calls dispatch by name (see "Protocol
+  dispatch" below).
+
+### Overloaded callees
+
+When the callee has several overload arms or clauses, names take part
+in selection — and they act **before** types and values do. A named
+argument is a **branch selector**: a branch that does not declare the
+written names is eliminated, even if the runtime value would have
+selected it. With clauses `(z: 0)`, `(o: 1)`, and `(n: integer)`, the
+call `f(n: 0)` runs the general `n` clause with argument 0, while
+`f(0)` runs the `z: 0` base clause. Naming a parameter pins the clause
+family that declares that name.
+
+Among the branches that do declare the names, selection then proceeds
+exactly as for a positional call — types statically, values at
+runtime: `f(a: 0)` against clauses `(a: 0)`, `(a: integer)`, and
+`(b: integer)` eliminates only the `b` clause and still value-selects
+`(a: 0)` among the survivors.
+
+Two arms may map the same names to *different* positions, so each
+candidate arm carries its own name→position permutation through
+applicability checking, generic solving, and ranking; the call is
+rewritten to positional order only after one arm wins. Two
+consequences:
+
+- **Elimination is enforced, not advisory.** The rewritten positional
+  call is emitted only when re-resolving it provably lands on a
+  name-surviving branch that reads the arguments in the winner's
+  order; otherwise the call is pinned directly to the winning clause's
+  implementation. A declared-only overload set with no implementation
+  to pin to **declines**, steering to a positional call: when the
+  names and the positional ranking disagree and there is nothing to
+  pin the call to, the engine asks the author to be explicit rather
+  than guess which reading was meant.
+- **Disagreeing name orders never resolve silently.** If several
+  branches survive the names, their name→position permutations
+  disagree, and ranking does not produce a unique winner, the call is
+  an error — a silent pick would choose an argument *order*, not just
+  an implementation.
+
+### Protocol dispatch
+
+A named call to a protocol function dispatches on the argument bound
+to the *declared first parameter* (`self`), wherever the caller wrote
+it: written position never changes dispatch. (Appendix A's
+"Dispatching" keys on the first argument; with names in play, "first"
+means the declaration's first.) The requirement's parameter names are
+carried into the dispatcher's synthesized signature when every
+requirement shape agrees on them. The qualified spelling
+`Protocol.member(self: x, …)` routes through `Apply` and declines in
+v1, like other `Apply`-routed callees (see "Rules" above). That
+decline is the sharpest v1 limit of this feature: qualification is
+exactly what the `protocol-call-ambiguous` diagnostic steers to, so a
+named bare call that turns out ambiguous must currently drop its
+names to disambiguate. Lifting it is first in line among the v1
+residuals (`ROADMAP.md`).
 
 ### What the names are, and what they are not
 
@@ -2070,48 +2183,40 @@ call is matched against the signature and normalized to positional
 order, and everything downstream — evaluation, compilation, MathJSON —
 sees an ordinary positional call. A round trip through MathJSON
 therefore comes back positional; whether the Epsil serializer should
-re-derive names from the signature for readability is part of C4.
+re-derive names from the signature for readability is an open
+question, deferred (decision record, C4).
 
-### Rulings needed
+### Decision record
 
-- **C1 — grammar.** `name: value` in call-argument position, as
-  sketched above.
-- **C2 — mixing.** Positional first, then named; nothing positional
-  after a named argument; no parameter twice; every required parameter
-  filled.
-- **C3 — overload resolution.** The shipped resolution machinery
-  (per-position join over intersection arms) is positional, and two
-  arms may map the same names to *different* positions. Proposed: each
-  candidate arm carries its own name-to-position permutation through
-  applicability checking, generic solving, and ranking; the call is
-  normalized to positional only after one arm wins; several surviving
-  name-compatible arms are ambiguous (existing overload-ambiguity
-  behavior). **Approach ratified 2026-08-12**; the opening step of
-  implementation is a short design doc pinning its interaction with
-  generic solving and ranking.
-- **C4 — serialization.** Names erase at canonicalization (proposed
-  above); should the Epsil serializer re-derive them for readability,
-  and if so, when?
-- **C5 — variadic and optional parameters (RULED 2026-08-12: saturated
-  calls only).** A call that uses any name is a *complete* call:
-  omitted `?`-optional parameters are fine; a missing required
-  parameter is an error, never a partial application; the variadic tail
-  must be empty (tails are supplied by positional calls only). Partial
-  application remains available through purely positional calls,
-  unchanged. Rationale: an under-filled call silently becoming a
-  function instead of an error is the same silent-failure class named
-  arguments exist to prevent. A name-aware partial-application form can
-  be added later without breaking anything.
-- **C6 — protocol dispatch.** A named call to a protocol function
-  dispatches on the argument bound to the *declared first parameter*
-  (`self`), wherever the caller wrote it: written position never
-  changes dispatch. (Appendix A's "Dispatching" keys on the first
-  argument; with names in play, "first" means the declaration's first.)
+The behavior above is the product of eleven decisions, each stated in
+the prose where it applies; this list only anchors their identifiers —
+which tests, `ROADMAP.md`, and the design record cite — to their dates.
+C1–C6 were this appendix's open questions when it was a proposal,
+ratified 2026-08-12; R1–R5 surfaced during implementation and were
+ratified 2026-08-13. Full statements with rationale:
+`docs/plans/2026-08-12-named-arguments-design.md` (§9 for R1–R5).
+
+- **C1** — grammar: `name: value` in call-argument position ("Rules").
+- **C2** — mixing: positional first, then named ("Rules").
+- **C3** — overload resolution by per-arm permutation ("Overloaded
+  callees").
+- **C4** — names erase at canonicalization ("What the names are");
+  serializer name re-derivation is the one part still open, deferred.
+- **C5** — saturated calls only: a named call never curries ("Rules").
+- **C6** — protocol dispatch on the declared first parameter
+  ("Protocol dispatch").
+- **R1** — no optional holes: `argument-optional-skipped` ("Rules").
+- **R2** — declaration-order evaluation ("Rules").
+- **R3** — disagreeing name orders never resolve silently ("Overloaded
+  callees").
+- **R4** — `Apply`-routed callees decline in v1 ("Rules").
+- **R5** — names eliminate branches, persistently ("Overloaded
+  callees").
 
 ## Appendix D: Diagnostics
 
-Codes from Appendix A are shipped. Codes marked † are proposed by
-Appendix B or Appendix C and are not implemented.
+Codes from Appendix A and Appendix C are shipped. Codes marked † are
+proposed by Appendix B and are not implemented.
 
 | Code | Emitted when |
 |---|---|
@@ -2136,9 +2241,10 @@ Appendix B or Appendix C and are not implemented.
 | `protocol-requires-object` † | a protocol with settable properties (or Self-modifying members) conformed to by a non-object type |
 | `immutable-value-assignment` † | property assignment on a record or other immutable value |
 | `object-serialization-unsupported` † | serializing an expression that contains an object (if B5 rules "refuse") |
-| `argument-name-unknown` † | a named argument names a parameter the function does not declare (Appendix C) |
-| `argument-order-invalid` † | a positional argument follows a named argument (Appendix C) |
-| `argument-name-duplicate` † | the same parameter supplied more than once (Appendix C) |
-| `argument-names-unavailable` † | a named argument used with a callee that has no visible declaration — unresolved forward reference, bare `function`-typed value (Appendix C) |
+| `argument-name-unknown` | a named argument names a parameter the function does not declare (Appendix C) |
+| `argument-order-invalid` | a positional argument follows a named argument (Appendix C) |
+| `argument-name-duplicate` | the same parameter supplied more than once (Appendix C) |
+| `argument-names-unavailable` | a named argument used with a callee whose parameter names cannot be read: no visible declaration (forward reference, bare `function`-typed value), unnamed or inferred parameters, an `Apply`-routed callee, or surviving overload arms whose name orders disagree (Appendix C) |
+| `argument-optional-skipped` | a named optional supplied while an optional declared before it is not — the no-optional-holes rule (Appendix C) |
 | `object-property-conflict` † | both a stored field and an explicit accessor declared for the same property name (Appendix B) |
 | `object-type-not-inline` † | `object<…>` used inline in an annotation rather than as the definition of a named type (Appendix B) |

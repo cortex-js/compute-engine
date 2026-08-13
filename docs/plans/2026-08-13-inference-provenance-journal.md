@@ -375,18 +375,23 @@ fixpoint of the direction rules — a wide inferred type after a use is the
 model's answer, not a degradation (see the
 `reference_inference_direction_rules` memory entry and Tycho item 178).
 
-### The question provenance makes decidable
+### The question provenance makes decidable — RESOLVED 2026-08-13
 
-**Should an assignment be allowed to narrow?** §1 excludes it, and it is not
-recorded anywhere whether that exclusion is deliberate or inherited. Today
-the exclusion is forced: without provenance, a write cannot know whether the
-incumbent type came from a use (evidence about how the symbol is *consumed*
-— narrowing over it risks invalidating other sites) or from a value (a fact
-about what it *holds*). With provenance, precedence can differ by origin:
-e.g. a value assignment may refine a type whose only support is inferred
-uses that the narrower type still satisfies. That is a ruling for the user,
-posed with the fixture's concrete before/after, and a semantic change with
-snapshot blast radius: measure before wanting it.
+**Should an assignment be allowed to narrow? RULED: YES** (same day, after
+measurement). The prototype was implemented and the full suite run against
+it: **zero** test or snapshot changes — nothing in the corpus pinned the
+stays-wide behavior, so the documented exclusion was inherited, not chosen.
+As shipped (`engine-declarations.ts`, the assign path): when the assigned
+value's type strictly refines a use-inferred incumbent, the type adopts the
+value's promoted type (the same promotion a fresh declaration applies), so
+the inferred type no longer depends on site order. Sound because
+use-narrowing is monotone-down — any type below the incumbent satisfies
+every use that produced it. Declared types are untouched (the branch is
+gated on `inferredType`). All assignment-driven type updates (widen, D11
+adopt, narrow) now record a `'value-derived'` provenance entry with the
+assigned value as cause — activating the kind previously reserved.
+`TYPE_SYSTEM_ROADMAP.md` §1 updated; pinning tests in
+`inference-provenance.test.ts` ("ASSIGNMENT NARROWING").
 
 ### Two distinct fixes — do not conflate
 

@@ -256,6 +256,19 @@ export function createSymbolExpression(
     { type: 'unknown', inferred: true },
     autoScope
   );
+  // When the target scope was created BY the running boxing construction (a
+  // function body's scope — recreated fresh by every boxing of the same
+  // input), record the name with the boxing state. If a sibling occurrence
+  // OUTSIDE the binder later declares the same name into a scope that
+  // outlives the construction, the construction is rebuilt so this occurrence
+  // resolves to that binding — the resolution every later boxing of the same
+  // input performs. Without the rebuild, the first-ever boxing of such a
+  // shape binds the two occurrences differently and compares `isSame` false
+  // against every later one.
+  // (First-boxing binding divergence, Tycho item 178(a)+(c) —
+  // `docs/plans/2026-08-13-first-boxing-binding-divergence.md`.)
+  if (engine._boxingState.isPersistentScope(autoScope) === false)
+    engine._boxingState.noteTransientAutoDeclare(name);
   const freeSym = new BoxedSymbol(engine, name, { metadata, def });
   // Provenance: binding created as a side effect of boxing a free symbol —
   // see the annotated-parameter branch above for the contract (creation

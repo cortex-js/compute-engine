@@ -25,15 +25,51 @@ export class EngineBoxingState<Scope extends object> {
   private _frames: DevolveRepairFrame<Scope>[] = [];
   private _rootActive = false;
 
-  withRootRepair<T>(build: () => T): T {
+  /**
+   * Classifier for the active root construction: `true` for a scope that
+   * PRE-EXISTS the construction (it will outlive it), `false` for a scope the
+   * construction itself created (a binder's body scope, which is recreated
+   * fresh by every boxing of the same input). Captured by `withRootRepair`;
+   * `null` while no root construction is active or none was supplied.
+   */
+  private _isPersistentScope: ((scope: Scope) => boolean) | null = null;
+
+  /**
+   * Names the current build pass auto-declared into a construction-created
+   * scope. Cleared at the start of every build pass (a rebuild re-resolves
+   * every occurrence, so records from the abandoned pass no longer describe
+   * anything). Lazily allocated: `null` until the first record.
+   */
+  private _transientAutoDeclares: Set<string> | null = null;
+
+  withRootRepair<T>(
+    build: () => T,
+    isPersistentScope?: (scope: Scope) => boolean
+  ): T {
     if (this._rootActive) return build();
 
     this._rootActive = true;
+    this._isPersistentScope = isPersistentScope ?? null;
     try {
-      return this._withRepairFrame(undefined, build);
+      return this._withRepairFrame(undefined, () => {
+        this._transientAutoDeclares = null;
+        return build();
+      });
     } finally {
       this._rootActive = false;
+      this._isPersistentScope = null;
+      this._transientAutoDeclares = null;
     }
+  }
+
+  /**
+   * True while a root construction is running. Nested `box()`/`boxFunction()`
+   * calls join that construction (`withRootRepair` returns `build()` directly
+   * and ignores its classifier argument), so entry-point setup — building the
+   * persistence classifier — can be skipped for them.
+   */
+  get isRootActive(): boolean {
+    return this._rootActive;
   }
 
   withScopedRepair<T>(scope: Scope, build: () => T): T {
@@ -55,6 +91,55 @@ export class EngineBoxingState<Scope extends object> {
    */
   get isRebuilding(): boolean {
     return this._frames.some((frame) => frame.rebuilding);
+  }
+
+  /**
+   * Whether `scope` outlives the active root construction, per the classifier
+   * captured when the construction began. `undefined` when no root
+   * construction is active (or no classifier was supplied) — callers must
+   * treat that as "don't know" and record nothing.
+   */
+  isPersistentScope(scope: Scope): boolean | undefined {
+    if (!this._rootActive || !this._isPersistentScope) return undefined;
+    return this._isPersistentScope(scope);
+  }
+
+  /**
+   * Record that the running construction auto-declared `name` into a scope it
+   * itself created — a binder body's free symbol. If the same construction
+   * later declares the same name into a persistent scope (see
+   * `noteDeclarationIn`), the two occurrences denote different bindings, and
+   * only the persistent one survives to the next boxing of the same input:
+   * the first-ever boxing of that shape would compare `isSame` false against
+   * every later one. Recording the name here is what lets `noteDeclarationIn`
+   * detect the conflict.
+   * (First-boxing binding divergence, Tycho item 178(a)+(c) —
+   * `docs/plans/2026-08-13-first-boxing-binding-divergence.md`.)
+   */
+  noteTransientAutoDeclare(name: string): void {
+    if (!this._rootActive || !this._isPersistentScope) return;
+    (this._transientAutoDeclares ??= new Set()).add(name);
+  }
+
+  /**
+   * A declaration of `name` just landed in `scope`. If the running root
+   * construction had earlier auto-declared the same name into a scope of its
+   * own making, and `scope` is persistent, the construction's output binds the
+   * two occurrences differently — while every LATER boxing of the same input
+   * will find the persistent binding first and resolve both occurrences to it.
+   * Request a rebuild of the whole construction: the rebuild starts from the
+   * state every later boxing starts from, so its output is the stable one. The
+   * rebuild converges in one pass — the persistent binding now exists before
+   * any occurrence is processed, so no transient auto-declare of `name`
+   * recurs.
+   */
+  noteDeclarationIn(scope: Scope, name: string): void {
+    if (!this._rootActive) return;
+    if (!this._transientAutoDeclares?.has(name)) return;
+    if (this._isPersistentScope?.(scope) !== true) return;
+
+    const root = this._frames.find((frame) => frame.scope === undefined);
+    if (root) root.repairRequested = true;
   }
 
   /** Request a rebuild at the nearest frame that owns `scope`. */

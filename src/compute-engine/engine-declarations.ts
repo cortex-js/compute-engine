@@ -17,7 +17,12 @@ import {
   containsSignatureArm,
 } from '../common/type/utils.js';
 import { parseType, parseTypeParameterClause } from '../common/type/parse.js';
+import { isSubtype } from '../common/type/subtype.js';
 import { isEffectSubset } from '../common/type/effects.js';
+import {
+  recordTypeProvenance,
+  currentBoxingEpoch,
+} from './boxed-expression/type-provenance.js';
 import {
   freeTypeVariables,
   hasFreeTypeVariables,
@@ -421,6 +426,18 @@ export function declareSymbolValue(
 ): BoxedDefinition {
   scope ??= ce.context.lexicalScope;
 
+  // If a boxing construction is running and it had earlier auto-declared this
+  // same name into a scope of its own making (a binder body's free symbol),
+  // this declaration into a longer-lived scope makes the construction's two
+  // occurrences denote different bindings — while every later boxing of the
+  // same input finds this binding first and resolves both occurrences to it.
+  // The boxing state then rebuilds the construction so its output matches
+  // every later one. A no-op outside a boxing construction, and for any name
+  // the construction did not transiently auto-declare.
+  // (First-boxing binding divergence, Tycho item 178(a)+(c) —
+  // `docs/plans/2026-08-13-first-boxing-binding-divergence.md`.)
+  ce._boxingState.noteDeclarationIn(scope, name);
+
   // State event: `shadowsCallable` must be captured BEFORE the placeholder
   // install below, while the chain still shows any shadowed binding — and
   // resolved through the TARGET scope's chain, not the engine's current
@@ -455,6 +472,12 @@ export function declareSymbolOperator(
   scope?: Scope
 ): BoxedDefinition {
   scope ??= ce.context.lexicalScope;
+
+  // Same first-boxing divergence check as `declareSymbolValue` above: an
+  // operator declaration for a name the running construction transiently
+  // auto-declared also changes what later boxings resolve that name to.
+  ce._boxingState.noteDeclarationIn(scope, name);
+
   // State event: capture the shadow BEFORE the placeholder install, through
   // the TARGET scope's chain.
   const shadowsCallable = defIsCallableShaped(lookup(name, scope));
@@ -2214,8 +2237,64 @@ export function assignFn(
       // juxtaposition parser now given a scalar value (`number | function`) —
       // the guess was simply wrong: adopt the value's own type instead (D11).
       const widened = widen(current, vt);
-      const adopted =
-        typeof widened === 'object' && widened.kind === 'union' ? vt : widened;
+      const d11 = typeof widened === 'object' && widened.kind === 'union';
+      let adopted = d11 ? vt : widened;
+      // Assignment NARROWING (user-ruled 2026-08-13; the phase-3 question of
+      // docs/plans/2026-08-13-inference-provenance-journal.md): when the
+      // assigned value's type strictly REFINES a use-inferred guess (`x·v`
+      // inferred `v: number`, now `v := 5`), adopt the value's promoted type
+      // instead of keeping the wider guess — landing exactly where the
+      // reverse site order (`v := 5` then `x·v`) already lands, so the
+      // inferred type no longer depends on which site the engine saw first.
+      // Sound wrt recorded uses: use-narrowing is monotone-down, so any
+      // type below the current one satisfies every use that produced it.
+      // A DECLARED type is never touched (this whole branch is gated on
+      // `inferredType`). Three constraints bound the rewrite:
+      //
+      // (a) The incumbent must have come from a USE: the latest type-axis
+      //     provenance entry is an inference write. An assignment-derived
+      //     incumbent stays widen-only — otherwise alternating `v := 2.5`
+      //     and `v := 5` would oscillate the type — and a binding whose type
+      //     was only ever set by an assignment has no `'inferred'` entry at
+      //     all. (This block records `'value-derived'` after it moves a
+      //     type, so a second assignment after a narrow no longer narrows.)
+      // (b) The D11 union-adopt above must not have fired: adopting the
+      //     value's raw type when the guess is incompatible is established
+      //     semantics, and re-promoting that result would change it.
+      // (c) The promoted type is installed only when it is itself below the
+      //     incumbent; otherwise the value's raw type is (which is always
+      //     sound, having just passed the strict-subtype test). Promotion
+      //     can widen — `finite_integer` promotes to `integer`, which is NOT
+      //     below a `finite_real` incumbent — and installing it would break
+      //     a use that the incumbent recorded.
+      const prov = def.value._typeProvenance;
+      let incumbentFromUse = false;
+      if (prov !== undefined) {
+        for (let i = prov.length - 1; i >= 0; i--) {
+          if (prov[i].axis !== 'type') continue;
+          incumbentFromUse = prov[i].kind === 'inferred';
+          break;
+        }
+      }
+      if (
+        incumbentFromUse &&
+        !d11 &&
+        vt !== current &&
+        isSubtype(vt, current) &&
+        !isSubtype(current, vt) // strict refinement only; equal types no-op
+      ) {
+        // Same promotion a FRESH `v := 5` declaration applies
+        // (`inferTypeFromValue`, boxed-value-definition.ts): a value's
+        // narrow literal type promotes to the natural variable type.
+        const promoted = value.type.matches('integer')
+          ? 'integer'
+          : value.type.matches('rational') || value.type.matches('real')
+            ? 'real'
+            : value.type.matches('complex')
+              ? 'number'
+              : vt;
+        adopted = isSubtype(promoted, current) ? promoted : vt;
+      }
       // State event (§2c): the D11 adopt branch can REMOVE a callable arm
       // (a `function` guess replaced by the scalar value's own type) before
       // the value write below classifies — emit `type-write` when the
@@ -2228,7 +2307,23 @@ export function assignFn(
           callableBefore: armBefore,
           callableAfter: armAfter,
         });
+      const previousType = def.value.type;
       def.value.type = ce.type(adopted);
+      // Provenance: an assignment-driven type update (widen, D11 adopt, or
+      // the narrowing above) records kind 'value-derived' with the assigned
+      // value as cause — activating the kind reserved for exactly this in
+      // `TypeProvenanceEntry`. Recorded only when the type actually moved;
+      // constructor-time promotion on a FRESH declaration stays unrecorded
+      // (engine-construction cost — `inferredType === true` with a value is
+      // its marker).
+      if (previousType.type !== def.value.type.type)
+        recordTypeProvenance(def.value, {
+          type: def.value.type,
+          kind: 'value-derived',
+          axis: 'type',
+          cause: value,
+          epoch: currentBoxingEpoch(ce),
+        });
     }
 
     // ... and set the value

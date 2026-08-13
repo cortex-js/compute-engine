@@ -229,7 +229,7 @@ export function boxFunction(
   ops: readonly ExpressionInput[],
   options?: BoxFunctionOptions
 ): Expression {
-  return withDevolveRepair(ce, () =>
+  return withDevolveRepair(ce, options?.scope, () =>
     boxFunctionInternal(ce, name, ops, options)
   );
 }
@@ -529,9 +529,33 @@ function stringifyForError(value: unknown): string {
  */
 function withDevolveRepair(
   ce: ComputeEngine,
+  scope: Scope | undefined,
   build: () => Expression
 ): Expression {
-  return ce._boxingState.withRootRepair(build);
+  // Persistence classifier for the first-boxing binding-divergence repair
+  // (`EngineBoxingState.noteDeclarationIn`): a scope outlives this
+  // construction iff it is on a lexical chain that existed when the
+  // construction began — the engine's current chain, or the caller-supplied
+  // `scope` option's chain (a harvest scope from `ce.createScope()` is
+  // persistent but not on the engine's chain). Scopes created DURING the
+  // construction (a binder body's scope) are parented onto these chains but
+  // never members of them. `parent` links are immutable after creation, so
+  // walking at query time sees the same chains that existed at capture time.
+  const bases: Scope[] = [ce.context.lexicalScope];
+  if (scope !== undefined) bases.push(scope);
+  return ce._boxingState.withRootRepair(build, (s) => {
+    for (const base of bases) {
+      // A chain may terminate with `parent: undefined` rather than `null`
+      // (`pushScope` builds scopes with `ce.context?.lexicalScope`), so test
+      // truthiness, not `!== null`.
+      let cur: Scope | null | undefined = base;
+      while (cur) {
+        if (cur === s) return true;
+        cur = cur.parent;
+      }
+    }
+    return false;
+  });
 }
 
 /**
@@ -580,7 +604,9 @@ export function box(
 ): Expression {
   beginInferenceTransaction(ce);
   try {
-    return withDevolveRepair(ce, () => boxInternal(ce, expr, options));
+    return withDevolveRepair(ce, options?.scope, () =>
+      boxInternal(ce, expr, options)
+    );
   } finally {
     endInferenceTransaction(ce);
   }
