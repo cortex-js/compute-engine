@@ -1,0 +1,4 @@
+Sum(Take(Map(1..oo, _ |-> _^2), 10))
+
+// JS: the infinite array is an issue. We should materialize the Take on an infinite collection.
+// ((((_f) => (Array.from({length: Infinity}, (_e, i) => 1 + i)).map((_x) => _f(_x)))(((_) => (_ * _)))).slice(0, Math.max(0, 10))).reduce((_a, _b) => _a + _b, 0)

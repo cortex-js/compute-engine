@@ -17,10 +17,13 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 
 // The engine is bundled from source: esbuild resolves the repo's
 // `.js`-suffixed TypeScript imports the same way the repo's own build does.
-import { checkSource } from '../../src/cli/check.js';
+import { checkSource, parseSource } from '../../src/cli/check.js';
 import { describeName } from '../../src/cli/doc.js';
 import { diagnosticToJson } from '../../src/cli/format.js';
+import { compile } from '../../src/compute-engine/compilation/compile-expression.js';
 import { ComputeEngine, parseEpsil } from '../../src/epsil.js';
+import type { MathJsonExpression } from '../../src/math-json/types.js';
+import { operator, operands } from '../../src/math-json/utils.js';
 import {
   definitionSites,
   type DefinitionSite,
@@ -507,4 +510,199 @@ function severityOf(severity: string): DiagnosticSeverity {
   if (severity === 'error') return DiagnosticSeverity.Error;
   if (severity === 'warning') return DiagnosticSeverity.Warning;
   return DiagnosticSeverity.Information;
+}
+
+//
+// ─── Representation views ───────────────────────────────────────────────────
+//
+// The `epsil/view` request (custom, client → server) renders a document into
+// one of the engine's representations, for the editor's read-only side pane:
+//
+//   - `ast`        — the MathJSON the parser produced, before canonicalization
+//   - `canonical`  — each top-level statement in canonical form
+//   - `javascript` — the program compiled by the JavaScript target
+//
+// Everything here parses, canonicalizes, or compiles — nothing is ever
+// evaluated, so rendering a view cannot run user code.
+//
+
+type ViewKind = 'ast' | 'canonical' | 'javascript';
+
+connection.onRequest(
+  'epsil/view',
+  (params: { uri: string; view: ViewKind }): { content: string } | null => {
+    const document = documents.get(params.uri);
+    if (document === undefined) return null;
+    try {
+      return {
+        content: renderView(document.getText(), params.uri, params.view),
+      };
+    } catch (error) {
+      // A view that throws is a bug in the engine, not in the user's program:
+      // put the failure where the reader is looking instead of going silent.
+      const message =
+        error instanceof Error ? error.stack ?? error.message : String(error);
+      return {
+        content: [
+          '// This view could not be computed (this is a bug in the engine):',
+          ...message.split('\n').map((line) => `// ${line}`),
+        ].join('\n'),
+      };
+    }
+  }
+);
+
+function renderView(text: string, uri: string, view: ViewKind): string {
+  // A fresh engine per request, same rule as `validate()`: canonicalization
+  // can retype symbols, so a shared engine would leak state between renders.
+  const engine = new ComputeEngine();
+  const { ast, diagnostics } = parseSource(text, uri, engine);
+  const errors = diagnostics.filter((x) => x.severity === 'error');
+
+  if (view === 'ast') {
+    const lines = ['// MathJSON as parsed — before binding and canonicalization.'];
+    if (diagnostics.length > 0)
+      lines.push('//', ...diagnosticComments(diagnostics, text));
+    lines.push('');
+    if (ast === null) lines.push('// The program could not be parsed.');
+    // Boxing with `form: 'raw'` neither binds nor canonicalizes; it is how
+    // the parser's output serializes to shorthand MathJSON (full-form
+    // `{fn: …}` nodes and their `sourceOffsets` collapse away).
+    else lines.push(prettyJson(engine.box(ast, { form: 'raw' }).json));
+    return lines.join('\n');
+  }
+
+  // The views below canonicalize. The recovered AST of a program with parse
+  // errors is a guess, and its canonical form would be noise — same policy
+  // as `epsil check`, which skips its canonicalization pass on parse errors.
+  if (ast === null || errors.length > 0)
+    return [
+      '// This view needs a program that parses. Fix these first:',
+      '//',
+      ...diagnosticComments(errors, text),
+    ].join('\n');
+
+  if (view === 'canonical') return renderCanonical(engine, ast);
+  return renderJavaScript(engine, ast);
+}
+
+/**
+ * Each top-level statement boxed canonically, in order, on the request's
+ * engine — a statement's declarations are visible to the statements after it.
+ *
+ * Statement by statement, not the whole program at once: the parser wraps a
+ * multi-statement program in `Block`, but its statements execute at the TOP
+ * level (`executeEpsil` unwraps it), and canonicalizing the `Block` itself
+ * would put them in a block scope — where a legal top-level `type` statement
+ * is an error.
+ */
+function renderCanonical(
+  engine: ComputeEngine,
+  ast: MathJsonExpression
+): string {
+  const statements =
+    operator(ast) === 'Block' ? [...operands(ast)] : undefined;
+
+  if (statements === undefined) {
+    // A single statement is not `Block`-wrapped; show its value bare.
+    return [
+      '// Canonical MathJSON (nothing evaluated).',
+      '',
+      prettyJson(engine.box(ast).json),
+    ].join('\n');
+  }
+
+  const entries = statements.map((statement, i) => {
+    try {
+      return '  ' + prettyJson(engine.box(statement).json, '  ');
+    } catch (error) {
+      // Canonicalization is best-effort, as in `epsil check`: a statement the
+      // engine cannot box gets a placeholder instead of crashing the view.
+      const message = (
+        error instanceof Error ? error.message : String(error)
+      ).replaceAll(/\s+/g, ' ');
+      return `  // Statement ${i + 1} could not be canonicalized: ${message}\n  null`;
+    }
+  });
+
+  return [
+    '// Canonical MathJSON — one entry per top-level statement (nothing evaluated).',
+    '',
+    '[',
+    entries.join(',\n'),
+    ']',
+  ].join('\n');
+}
+
+/**
+ * The whole program compiled by the JavaScript target. `fallback: false`:
+ * an operator the target has no lowering for should say so here, not be
+ * papered over with an interpreter thunk whose source is unprintable.
+ */
+function renderJavaScript(
+  engine: ComputeEngine,
+  ast: MathJsonExpression
+): string {
+  const header = '// Compiled to JavaScript by the Compute Engine.';
+  try {
+    const result = compile(engine.box(ast), {
+      to: 'javascript',
+      fallback: false,
+    });
+    return [header, '', result.code, ''].join('\n');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return [
+      header,
+      '',
+      '// This program cannot be compiled to JavaScript:',
+      ...message.split('\n').map((line) => `// ${line}`),
+    ].join('\n');
+  }
+}
+
+/** One `// severity, line N: message` comment per diagnostic. */
+function diagnosticComments(
+  diagnostics: ParsingDiagnostic[],
+  text: string
+): string[] {
+  return diagnostics.map((diagnostic) => {
+    const json = diagnosticToJson(diagnostic, text);
+    const message = json.message.replaceAll(/\s*\n\s*/g, ' — ');
+    return `// ${json.severity}, line ${json.line}: ${message}`;
+  });
+}
+
+/** Longest line `prettyJson` tries to keep a subtree on. */
+const PRETTY_WIDTH = 76;
+
+/**
+ * JSON with MathJSON-friendly line breaks: a subtree stays on one line when
+ * it fits in `PRETTY_WIDTH` columns, and opens out one operand per line when
+ * it does not — unlike `JSON.stringify(x, null, 2)`, which would spread
+ * `["Add", "x", 1]` over five lines.
+ */
+function prettyJson(value: unknown, indent = ''): string {
+  const flat = JSON.stringify(value);
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    indent.length + flat.length <= PRETTY_WIDTH
+  )
+    return flat;
+
+  const inner = indent + '  ';
+  if (Array.isArray(value))
+    return [
+      '[',
+      value.map((x) => inner + prettyJson(x, inner)).join(',\n'),
+      indent + ']',
+    ].join('\n');
+  return [
+    '{',
+    Object.entries(value)
+      .map(([k, v]) => `${inner}${JSON.stringify(k)}: ${prettyJson(v, inner)}`)
+      .join(',\n'),
+    indent + '}',
+  ].join('\n');
 }

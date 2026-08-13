@@ -21,6 +21,8 @@ let bundledCliPath = '';
 export async function activate(
   context: vscode.ExtensionContext
 ): Promise<void> {
+  const viewProvider = new EpsilViewProvider();
+
   // Registered before the client is built, so `Epsil: Restart Language
   // Server` is available to recover from a server that failed to start.
   context.subscriptions.push(
@@ -32,6 +34,19 @@ export async function activate(
     vscode.commands.registerCommand('epsil.clearInlineResults', () =>
       clearInlineResults()
     ),
+    vscode.commands.registerCommand('epsil.showRepresentation', () =>
+      showRepresentation(viewProvider)
+    ),
+    vscode.workspace.registerTextDocumentContentProvider(
+      VIEW_SCHEME,
+      viewProvider
+    ),
+    viewProvider,
+    // Keep open view panes tracking their source as it is edited.
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (event.document.languageId === 'epsil')
+        scheduleViewRefresh(event.document.uri, viewProvider);
+    }),
     // Inline results are positioned by line: any edit invalidates them.
     vscode.workspace.onDidChangeTextDocument((event) => {
       if (decoratedDocument === event.document.uri.toString())
@@ -344,6 +359,151 @@ async function showInlineResults(
   editor.setDecorations(valueType, values);
   editor.setDecorations(errorType, errors);
   decoratedDocument = document.uri.toString();
+}
+
+// ── Representation views ───────────────────────────────────────────────────
+//
+// `Epsil: Show Representation` opens a read-only pane beside the source
+// showing what the engine makes of it: the MathJSON it parses to, its
+// canonical form, or the JavaScript it compiles to. The content comes from
+// the language server (the `epsil/view` request), which parses the live
+// buffer — nothing is saved to disk and nothing is evaluated.
+
+/** URI scheme of the virtual documents holding a rendered view. */
+const VIEW_SCHEME = 'epsil-view';
+
+/** Idle time before an edited source re-renders its open view panes. */
+const VIEW_REFRESH_MS = 300;
+
+const VIEWS = [
+  {
+    id: 'ast',
+    label: 'MathJSON (as parsed)',
+    description: 'What the parser produced, before canonicalization',
+    // The suffix appended to the source path names the pane's tab AND picks
+    // its syntax highlighting: both MathJSON views are JSON-with-comments.
+    suffix: '.parsed.jsonc',
+  },
+  {
+    id: 'canonical',
+    label: 'MathJSON (canonical)',
+    description: 'Each top-level statement in canonical form',
+    suffix: '.canonical.jsonc',
+  },
+  {
+    id: 'javascript',
+    label: 'Compiled JavaScript',
+    description: 'The program compiled by the JavaScript target',
+    suffix: '.compiled.js',
+  },
+] as const;
+
+class EpsilViewProvider implements vscode.TextDocumentContentProvider {
+  private readonly emitter = new vscode.EventEmitter<vscode.Uri>();
+  readonly onDidChange = this.emitter.event;
+
+  async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+    const params = new URLSearchParams(uri.query);
+    const view = params.get('view');
+    const source = params.get('src');
+    if (view === null || source === null) return '// Malformed view URI.';
+    if (client === undefined || !client.isRunning())
+      return '// The Epsil language server is not running (try “Epsil: Restart Language Server”).';
+    try {
+      const result = await client.sendRequest<{ content: string } | null>(
+        'epsil/view',
+        { uri: source, view }
+      );
+      // `null` means the server is not tracking the document — it was closed.
+      return result?.content ?? '// The source document is no longer open.';
+    } catch (error) {
+      return `// The view could not be computed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+  }
+
+  refresh(uri: vscode.Uri): void {
+    this.emitter.fire(uri);
+  }
+
+  dispose(): void {
+    this.emitter.dispose();
+  }
+}
+
+/** The virtual URI of `view` over `source`. Stable for a given pair, so
+ * reopening a view reuses its pane instead of stacking new tabs. */
+function viewUri(
+  source: vscode.Uri,
+  view: (typeof VIEWS)[number]
+): vscode.Uri {
+  return vscode.Uri.from({
+    scheme: VIEW_SCHEME,
+    path: source.path + view.suffix,
+    query: new URLSearchParams({
+      view: view.id,
+      src: source.toString(),
+    }).toString(),
+  });
+}
+
+async function showRepresentation(provider: EpsilViewProvider): Promise<void> {
+  const document = vscode.window.activeTextEditor?.document;
+  if (!document || document.languageId !== 'epsil') {
+    void vscode.window.showErrorMessage(
+      'Epsil: Show Representation needs an Epsil file in the active editor.'
+    );
+    return;
+  }
+
+  const picked = await vscode.window.showQuickPick(
+    VIEWS.map((view) => ({
+      label: view.label,
+      description: view.description,
+      view,
+    })),
+    { placeHolder: 'Show this file as…' }
+  );
+  if (picked === undefined) return;
+
+  const uri = viewUri(document.uri, picked.view);
+  // If this view is already open on a pane, its content may predate the
+  // latest edits; opening must re-render, not just reveal.
+  provider.refresh(uri);
+  const pane = await vscode.workspace.openTextDocument(uri);
+  await vscode.window.showTextDocument(pane, {
+    viewColumn: vscode.ViewColumn.Beside,
+    preserveFocus: true,
+    preview: true,
+  });
+}
+
+/** Pending view-refresh timer, per source-document URI. */
+const viewRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** After `VIEW_REFRESH_MS` of idle time, re-render every open view pane that
+ * is showing `source`. The panes read through the language server, which the
+ * LSP client keeps in sync with the buffer, so the render is always of the
+ * text as it stands when the timer fires. */
+function scheduleViewRefresh(
+  source: vscode.Uri,
+  provider: EpsilViewProvider
+): void {
+  const key = source.toString();
+  const timer = viewRefreshTimers.get(key);
+  if (timer !== undefined) clearTimeout(timer);
+  viewRefreshTimers.set(
+    key,
+    setTimeout(() => {
+      viewRefreshTimers.delete(key);
+      for (const open of vscode.workspace.textDocuments) {
+        if (open.uri.scheme !== VIEW_SCHEME) continue;
+        if (new URLSearchParams(open.uri.query).get('src') === key)
+          provider.refresh(open.uri);
+      }
+    }, VIEW_REFRESH_MS)
+  );
 }
 
 async function restartServer(): Promise<void> {

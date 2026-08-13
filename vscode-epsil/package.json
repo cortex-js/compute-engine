@@ -67,12 +67,24 @@
       {
         "command": "epsil.clearInlineResults",
         "title": "Epsil: Clear Inline Results"
+      },
+      {
+        "command": "epsil.showRepresentation",
+        "title": "Epsil: Show Representation",
+        "icon": "$(json)"
       }
     ],
     "menus": {
       "editor/title/run": [
         {
           "command": "epsil.runFile",
+          "when": "resourceLangId == epsil",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "epsil.showRepresentation",
           "when": "resourceLangId == epsil",
           "group": "navigation"
         }
@@ -92,6 +104,10 @@
         },
         {
           "command": "epsil.clearInlineResults",
+          "when": "resourceLangId == epsil"
+        },
+        {
+          "command": "epsil.showRepresentation",
           "when": "resourceLangId == epsil"
         }
       ]

@@ -171,5 +171,69 @@ await scenario('fixit diagnostic', undefined, async (c) => {
   );
 });
 
+// ── Representation views (the `epsil/view` request) ────────────────────
+await scenario('representation views', undefined, async (c) => {
+  await c.open(URI, 'let x = 42\nx + Sin(Pi / 6)');
+
+  const ast = await c.request('epsil/view', { uri: URI, view: 'ast' });
+  check(
+    'the parsed view shows shorthand MathJSON of the raw parse',
+    ast?.content.includes('"Block"') === true &&
+      ast.content.includes('"Declare"') &&
+      // `let` parse sugar, still undesugared at this stage.
+      ast.content.includes('"KeyValuePair"') &&
+      ast.content.startsWith('// MathJSON as parsed'),
+    JSON.stringify(ast)
+  );
+
+  const canonical = await c.request('epsil/view', {
+    uri: URI,
+    view: 'canonical',
+  });
+  check(
+    'the canonical view lists one entry per statement',
+    canonical?.content.startsWith('// Canonical MathJSON') === true &&
+      canonical.content.includes('["Declare","x"') &&
+      canonical.content.includes('"Sin"'),
+    JSON.stringify(canonical)
+  );
+
+  const js = await c.request('epsil/view', { uri: URI, view: 'javascript' });
+  check(
+    'the JavaScript view shows the compiled program',
+    js?.content.includes('let x = 42') === true &&
+      js.content.includes('Math.sin'),
+    JSON.stringify(js)
+  );
+
+  const unknown = await c.request('epsil/view', {
+    uri: 'file:///tmp/not-open.epsil',
+    view: 'ast',
+  });
+  check('a document the server is not tracking yields null', unknown === null, JSON.stringify(unknown));
+});
+
+await scenario('representation views on a broken program', undefined, async (c) => {
+  await c.open(URI, 'let = 42');
+
+  const ast = await c.request('epsil/view', { uri: URI, view: 'ast' });
+  check(
+    'the parsed view reports the errors and still shows the recovered AST',
+    ast?.content.includes('// error, line 1:') === true,
+    JSON.stringify(ast)
+  );
+
+  const canonical = await c.request('epsil/view', {
+    uri: URI,
+    view: 'canonical',
+  });
+  check(
+    'the canonicalizing views decline until the program parses',
+    canonical?.content.includes('needs a program that parses') === true &&
+      canonical.content.includes('// error, line 1:'),
+    JSON.stringify(canonical)
+  );
+});
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

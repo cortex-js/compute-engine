@@ -1,3 +1,8 @@
+Sum(Take(Map(1..oo, _ |-> _^2), 10))
+
+// JS: the infinite array is an issue. We should materialize the Take on an infinite collection.
+// ((((_f) => (Array.from({length: Infinity}, (_e, i) => 1 + i)).map((_x) => _f(_x)))(((_) => (_ * _)))).slice(0, Math.max(0, 10))).reduce((_a, _b) => _a + _b, 0)
+
 
 /// ## Auto-Map
 
@@ -17,7 +22,7 @@
 
 /// ## Roman Numerals
 
-const n = 2026
+// const n = 2026
 
 
 // @fixme: no `Replace`
@@ -27,24 +32,24 @@ const n = 2026
 
 // StringMatch(s, regex | string) -> none | list<string>
 
-StringJoin(Repeat("I", 4)) 
-// -> should output "IIII", actual: ["I", "I", "I", "I"]
+// StringJoin(Repeat("I", 4)) 
+// // -> should output "IIII", actual: ["I", "I", "I", "I"]
 
-String(Repeat("I", 4)) 
-// -> should output "IIII", actual: ["I", "I", "I", "I"]
+// String(Repeat("I", 4)) 
+// // -> should output "IIII", actual: ["I", "I", "I", "I"]
 
-xs = Join(xs, [k]) 
+// xs = Join(xs, [k]) 
 
-xs = Append(xs, k)
-xs = [...xs, k]
-xs += k
+// xs = Append(xs, k)
+// xs = [...xs, k]
+// xs += k
 
-xs = xs + [k]
-xs += [k]   // Join, if "+" is join
+// xs = xs + [k]
+// xs += [k]   // Join, if "+" is join
 
-// Scala: :+ append, +: prepend, ++ concatenation, += append in place
+// // Scala: :+ append, +: prepend, ++ concatenation, += append in place
 
-xs = [k, ...xs]
+// xs = [k, ...xs]
 
-// Copy/materialzize a collection
-ys = [...xs]
+// // Copy/materialzize a collection
+// ys = [...xs]

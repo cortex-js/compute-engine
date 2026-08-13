@@ -30,6 +30,12 @@ fib(n: integer) = fib(n - 1) + fib(n - 2)
   `epsil doc <name>` prints; for a name your file declares, the declaration as
   you wrote it. Hovering a word inside a string or a comment shows nothing, so
   prose is never mistaken for code.
+- **Epsil: Show Representation** (`epsil.showRepresentation`, the `{}` button
+  in the editor title bar) — opens a read-only pane beside your file showing
+  what the engine makes of it: the **MathJSON** it parses to, its **canonical
+  form**, or the **JavaScript** it compiles to. The pane tracks the buffer as
+  you type. Nothing is saved and nothing is evaluated — rendering a view never
+  runs your program.
 - **Epsil: Run File** (`epsil.runFile`) — saves the active file and runs it in
   an integrated terminal named _Epsil_. By default it runs the Epsil CLI bundled
   with the extension — the same engine build used for diagnostics, inline
