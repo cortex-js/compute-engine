@@ -141,6 +141,13 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _isDevolvedShadow: true | undefined;
 
+  /** Opaque snapshot/restore of the coupled type/value slots — mirror of
+   * the members documented in `types-definitions.ts`.
+   * @internal */
+  _typeSlotSnapshot(): unknown;
+  /** @internal */
+  _restoreTypeSlots(snapshot: unknown): void;
+
   holdUntil: 'never' | 'evaluate' | 'N';
   value: Expression | undefined;
   readonly isSelfReferential: boolean;

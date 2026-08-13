@@ -2239,6 +2239,31 @@ export function assignFn(
       const widened = widen(current, vt);
       const d11 = typeof widened === 'object' && widened.kind === 'union';
       let adopted = d11 ? vt : widened;
+      // The same promotion a FRESH `v := 5` declaration applies
+      // (`inferTypeFromValue`, boxed-value-definition.ts): a value's narrow
+      // literal type promotes to the natural variable type. Shared by the
+      // unknown-incumbent branch just below and the narrowing branch further
+      // down.
+      const promotedValueType = () =>
+        value.type.matches('integer')
+          ? 'integer'
+          : value.type.matches('rational') || value.type.matches('real')
+            ? 'real'
+            : value.type.matches('complex')
+              ? 'number'
+              : vt;
+      // An `unknown` incumbent is an auto-declare that recorded no type
+      // evidence (the symbol's uses were all type-vacuous — a bare `List`
+      // sibling, a binder-body occurrence). Treat the assignment as the
+      // DECLARATION it would have been had it come first: apply the literal
+      // promotion, so `y_r := 5` settles on `integer` whether or not a boxing
+      // auto-declared `y_r` beforehand. Without this the widen above installs
+      // the value's RAW type (`finite_integer`), and the settled type
+      // depended on the boxing-vs-assignment order (observed by the Tycho
+      // team's order-matrix probe at their 0.106.0 adoption). Skipped when
+      // D11 fired: adopting the raw type for an incompatible guess is
+      // established semantics.
+      if (!d11 && current === 'unknown') adopted = promotedValueType();
       // Assignment NARROWING (user-ruled 2026-08-13; the phase-3 question of
       // docs/plans/2026-08-13-inference-provenance-journal.md): when the
       // assigned value's type strictly REFINES a use-inferred guess (`x·v`
@@ -2283,16 +2308,7 @@ export function assignFn(
         isSubtype(vt, current) &&
         !isSubtype(current, vt) // strict refinement only; equal types no-op
       ) {
-        // Same promotion a FRESH `v := 5` declaration applies
-        // (`inferTypeFromValue`, boxed-value-definition.ts): a value's
-        // narrow literal type promotes to the natural variable type.
-        const promoted = value.type.matches('integer')
-          ? 'integer'
-          : value.type.matches('rational') || value.type.matches('real')
-            ? 'real'
-            : value.type.matches('complex')
-              ? 'number'
-              : vt;
+        const promoted = promotedValueType();
         adopted = isSubtype(promoted, current) ? promoted : vt;
       }
       // State event (§2c): the D11 adopt branch can REMOVE a callable arm

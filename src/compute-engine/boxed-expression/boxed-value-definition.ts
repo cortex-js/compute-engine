@@ -355,6 +355,55 @@ export class _BoxedValueDefinition
     // don't reference the index (the event's `ephemeral` flag carries this).
   }
 
+  /** Snapshot the coupled type/value slots for an exact later restore —
+   * see `_restoreTypeSlots`. The result is OPAQUE to callers (typed
+   * `unknown` on the public interface): it captures private fields,
+   * including states the public setters cannot express (`_type === null`
+   * means "type derived from the value"), so peeking or constructing one
+   * outside this class is meaningless.
+   * @internal */
+  _typeSlotSnapshot(): unknown {
+    return {
+      _type: this._type,
+      _value: this._value,
+      _defValue: this._defValue,
+      inferredType: this.inferredType,
+      _isSelfReferential: this._isSelfReferential,
+    };
+  }
+
+  /** Restore the slots captured by `_typeSlotSnapshot`, verbatim and
+   * setter-bypassing. The public `type` setter is a computed view — it
+   * always allocates a fresh `BoxedType`, and writing `unknown` through it
+   * WIPES `_value`/`_defValue` — so a faithful restore must write the
+   * private fields directly. `_isSelfReferential` rides along because the
+   * value setter recomputes it on every value write; restoring `_value`
+   * without it would leave the recursion guard stale. `_writeVersion` is
+   * deliberately bumped, not restored: monotone invalidation counters only
+   * ever advance (over-invalidation is a recompute; resurrection of a
+   * stale cache entry would be a wrong answer). Phase 2a of
+   * `docs/plans/2026-08-13-inference-tx-design.md`.
+   * @internal */
+  _restoreTypeSlots(snapshot: unknown): void {
+    const s = snapshot as {
+      _type: BoxedType | undefined | null;
+      _value: Expression | undefined | null;
+      _defValue:
+        | LatexString
+        | ExpressionInput
+        | ((ce: ComputeEngine) => ExpressionInput | null)
+        | undefined;
+      inferredType: boolean;
+      _isSelfReferential: boolean;
+    };
+    this._type = s._type;
+    this._value = s._value;
+    this._defValue = s._defValue;
+    this.inferredType = s.inferredType;
+    this._isSelfReferential = s._isSelfReferential;
+    this._writeVersion += 1;
+  }
+
   get type(): BoxedType {
     return this._type ?? this._value?.type ?? BoxedType.unknown;
   }

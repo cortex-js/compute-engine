@@ -296,3 +296,67 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     expect(sym(ce, 'B')).toBe('matrix');
   });
 });
+
+describe('Fresh-matrix repair — phase 2a slot restore (docs/plans/2026-08-13-inference-tx-design.md)', () => {
+  const historyOf = (ce: ComputeEngine, name: string) =>
+    (ce.lookupDefinition(name) as any).value._typeProvenance?.map(
+      (e: any) => [e.kind, e.type.toString(), e.cause?.toString()]
+    ) ?? [];
+
+  test('success leg: the repair write records provenance with the operand as cause', () => {
+    const ce = new ComputeEngine();
+    const e = ce.parse('\\det(A+2B)');
+    expect(e.isValid).toBe(true);
+    const history = historyOf(ce, 'A');
+    // Creation, bottom-up numeric inference, then the repair's matrix write —
+    // previously channel-invisible, now recorded as evidence.
+    expect(history[history.length - 1]).toEqual([
+      'inferred',
+      'matrix',
+      'A + 2B',
+    ]);
+  });
+
+  test('failure leg: type restored and provenance byte-identical (no phantom matrix entry)', () => {
+    const ce = new ComputeEngine();
+    const e = ce.parse('\\det(\\frac{A}{B})');
+    expect(e.isValid).toBe(false);
+    expect(ce.symbol('A').type.toString()).toBe('number');
+    // The failed repair's matrix entry must NOT survive in the history.
+    const kinds = historyOf(ce, 'A').map(([, t]: [string, string]) => t);
+    expect(kinds).not.toContain('matrix');
+  });
+
+  test('the slot restore preserves an assigned value and BoxedType identity', () => {
+    // The OLD restore wrote through the `type` setter: restoring `unknown`
+    // wiped the value, and every restore allocated a fresh BoxedType
+    // (defeating identity-keyed caches). `_restoreTypeSlots` writes the
+    // private slots verbatim.
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    const def: any = (ce.lookupDefinition('w') as any).value;
+    const beforeType = def.type;
+    const snapshot = def._typeSlotSnapshot();
+    def.type = ce.type('matrix'); // simulate a repair write
+    expect(def.type.toString()).toBe('matrix');
+    def._restoreTypeSlots(snapshot);
+    expect(def.type).toBe(beforeType); // same BoxedType OBJECT — identity
+    expect(ce.box('w').evaluate().toString()).toBe('5'); // value survived
+  });
+
+  test('the slot restore round-trips a self-referential value flag', () => {
+    const ce = new ComputeEngine();
+    ce.declare('r', 'number');
+    const def: any = (ce.lookupDefinition('r') as any).value;
+    expect(def.isSelfReferential).toBe(false);
+    const snapshot = def._typeSlotSnapshot();
+    // Mutate to a SELF-REFERENTIAL value between snapshot and restore, so
+    // the assertion actually exercises the flag's restoration (the value
+    // setter recomputes the flag; a verbatim `_value` restore without the
+    // flag would leave it stale at `true`).
+    def.value = ce.box(['Add', 'r', 1]);
+    expect(def.isSelfReferential).toBe(true);
+    def._restoreTypeSlots(snapshot);
+    expect(def.isSelfReferential).toBe(false);
+  });
+});

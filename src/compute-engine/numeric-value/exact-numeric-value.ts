@@ -121,6 +121,21 @@ export class ExactNumericValue extends NumericValue {
 
     if (typeof value === 'number') {
       console.assert(!Number.isFinite(value) || Number.isInteger(value));
+      // The symmetric half of the bigint normalization below (the Tycho item
+      // 178(b) residual): an integer-valued machine number BEYOND the safe
+      // range is stored as a bigint — the storage the parse route produces —
+      // so one exact integer has ONE storage form on either side of 2^53
+      // (machine below, bigint above) and `isSame ⇒ equal hash` holds across
+      // construction routes (`ce.box(1e16)` vs the parse of its own
+      // serialization hashed differently; `2^53` itself was clean). The
+      // conversion is exact: every integer-valued float64 converts to BigInt
+      // losslessly. Serialization follows the storage, so such literals now
+      // format with the bigint compaction (`1e+16`, not `10000000000000000`).
+      if (Number.isFinite(value) && !Number.isSafeInteger(value)) {
+        this.rational = [BigInt(value), BigInt(1)];
+        this.radical = 1;
+        return;
+      }
       this.rational = [value, 1];
       this.radical = 1;
       return;

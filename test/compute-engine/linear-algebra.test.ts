@@ -1544,8 +1544,11 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
   });
 
   it('rejects unsafe-integer dimensions instead of building an unusable lazy matrix', () => {
+    // `1e+16` (not `10000000000000000`): an integer-valued machine number
+    // beyond the safe range stores as a bigint and prints in the compact
+    // exponent form (the item-178(b) residual storage normalization).
     expect(ce.expr(['IdentityMatrix', 1e16]).evaluate().toString()).toBe(
-      'Error("expected-positive-integer", "10000000000000000")'
+      'Error("expected-positive-integer", "1e+16")'
     );
   });
 

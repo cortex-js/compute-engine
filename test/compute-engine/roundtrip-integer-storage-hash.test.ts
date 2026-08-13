@@ -37,21 +37,28 @@ describe('an exact integer round-trips with all four predicates agreeing', () =>
   // 1e11 is the filed witness; 1e6 is the smallest value that reached the
   // bigint compaction (more than five trailing zeros); 100000 has exactly five
   // and always agreed, so it guards the boundary from the other side.
-  test.each([100000000000, 1000000, 100000, 12345678, 0, 1, -1000000])(
-    '%p',
-    (value) => {
-      const p = predicates(value);
-      expect(p).toMatchObject({
-        jsonEq: true,
-        isSame: true,
-        hashEq: true,
-        rebox: true,
-      });
-      // The two routes must also AGREE on the printed form, which is what the
-      // hash was keyed on.
-      expect(p.aStr).toEqual(p.bStr);
-    }
-  );
+  // The values past 2^53 pin the 178(b) RESIDUAL (Tycho, filed at the 0.106.0
+  // adoption): the original fix normalized bigint→machine WITHIN the safe
+  // range only, so an integer-valued machine number BEYOND it (`ce.box(1e16)`,
+  // seed witness 8e19) kept a second storage form and hashed differently from
+  // the parse of its own serialization. The constructor now stores those as
+  // bigint — one canonical form on each side of 2^53 (machine below, bigint
+  // above). 2^53 itself was always clean and guards the boundary.
+  test.each([
+    100000000000, 1000000, 100000, 12345678, 0, 1, -1000000, 1e16, 8e19,
+    -8e19, 2 ** 53, 2 ** 53 + 2,
+  ])('%p', (value) => {
+    const p = predicates(value);
+    expect(p).toMatchObject({
+      jsonEq: true,
+      isSame: true,
+      hashEq: true,
+      rebox: true,
+    });
+    // The two routes must also AGREE on the printed form, which is what the
+    // hash was keyed on.
+    expect(p.aStr).toEqual(p.bStr);
+  });
 });
 
 describe('bignum magnitudes keep their compact exponent form', () => {

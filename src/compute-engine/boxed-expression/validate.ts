@@ -40,12 +40,18 @@ import {
   type Threadable,
 } from './generic-instantiation.js';
 import { FunctionSignature, Type } from '../../common/type/types.js';
+import type { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
   Scope,
   BoxedValueDefinition,
+  TypeProvenanceEntry,
 } from '../global-types.js';
+import {
+  recordTypeProvenance,
+  currentBoxingEpoch,
+} from './type-provenance.js';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isTensorValue } from './tensor-view.js';
@@ -1394,34 +1400,87 @@ function repairFreshMatrixInference(
   const names = matrixInferencePlan(op, eligible);
   if (!names || names.size === 0) return null;
 
-  const previous = new Map<string, Type>();
+  // Per-name repair-local records for an EXACT failure-leg restore (phase 2a
+  // of docs/plans/2026-08-13-inference-tx-design.md). Three families:
+  // - `snapshots`: the coupled type/value slots, restored setter-bypassing
+  //   via `_restoreTypeSlots` — the old restore wrote through the `type`
+  //   setter, which allocates fresh `BoxedType`s (defeating identity-keyed
+  //   caches) and, when the previous type was `unknown` (eligible above),
+  //   WIPED the definition's assigned value.
+  // - `histories`: the provenance array as it stood before the write — the
+  //   write below records a provenance entry, and a failed repair must leave
+  //   the history byte-identical (including a cap-displaced entry, which the
+  //   slice preserves wholesale).
+  // - `freshlyAdded`: definitions this repair itself added to
+  //   `_freshlyInferred` (an `unknown` → `matrix` transition during a boxing
+  //   pass), removed again on failure so a rolled-back repair leaves no
+  //   phantom repair eligibility.
+  // The narrowing sink is notified only on the SUCCESS path (below): sink
+  // retraction machinery is a phase-2b journal family, so an entry recorded
+  // at write time for a repair the failure leg then undoes would report a
+  // narrowing that never took effect — but a SUCCESSFUL repair permanently
+  // narrows an (possibly enclosing) definition, and a contained parse's
+  // `scope.narrowings()` must see that.
+  const snapshots = new Map<string, unknown>();
+  const histories = new Map<string, TypeProvenanceEntry[] | undefined>();
+  const beforeTypes = new Map<string, BoxedType>();
+  const freshlyAdded: BoxedValueDefinition[] = [];
   for (const name of names) {
     const def = ce.lookupDefinition(name);
     if (!def || !isValueDef(def) || !def.value.inferredType) return null;
-    previous.set(name, def.value.type.type);
+    snapshots.set(name, def.value._typeSlotSnapshot());
+    histories.set(name, def.value._typeProvenance?.slice());
+    beforeTypes.set(name, def.value.type);
+    const wasUnknown = def.value.type.isUnknown;
     def.value.type = ce.type('matrix');
     // Freeze the contextual assignment during re-canonicalization so the
     // numeric fast path cannot immediately narrow it back to `real`.
     def.value.inferredType = false;
+    // The write is now channel-visible where it matters: provenance (the
+    // matrix inference is evidence, with the operand as its cause) and the
+    // fresh-inference set (matching `_noteInferenceWrite`'s condition).
+    recordTypeProvenance(def.value, {
+      type: def.value.type,
+      kind: 'inferred',
+      axis: 'type',
+      cause: op,
+      epoch: currentBoxingEpoch(ce),
+    });
+    if (
+      wasUnknown &&
+      ce._inferenceTxDepth > 0 &&
+      !ce._freshlyInferred?.has(def.value)
+    ) {
+      (ce._freshlyInferred ??= new Set()).add(def.value);
+      freshlyAdded.push(def.value);
+    }
   }
   ce._noteStateEvent({ kind: 'inference' });
 
   const repaired = ce.box(op.json);
   if (repaired.type.matches(expected)) {
+    const sink = ce._narrowingSink;
     for (const name of names) {
       const def = ce.lookupDefinition(name);
-      if (def && isValueDef(def)) def.value.inferredType = true;
+      if (def && isValueDef(def)) {
+        def.value.inferredType = true;
+        // Report the COMMITTED net transition to a contained parse's
+        // narrowing capture — only now, when the write is permanent.
+        if (sink !== undefined)
+          sink._recordNarrowing(name, def, beforeTypes.get(name)!, def.value.type);
+      }
     }
     return repaired;
   }
 
-  for (const [name, type] of previous) {
+  for (const name of names) {
     const def = ce.lookupDefinition(name);
     if (def && isValueDef(def)) {
-      def.value.type = ce.type(type);
-      def.value.inferredType = true;
+      def.value._restoreTypeSlots(snapshots.get(name));
+      def.value._typeProvenance = histories.get(name);
     }
   }
+  for (const fresh of freshlyAdded) ce._freshlyInferred?.delete(fresh);
   ce._noteStateEvent({ kind: 'inference' });
   return null;
 }

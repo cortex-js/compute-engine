@@ -52,10 +52,15 @@ reverse order within the frame). The stack empty ⇒ every journaling hook is
 one null check; a frame allocates its journal lazily on the first write
 (consumer constraint: canonicalization-adjacent paths are hot).
 
-Exceptions **during undo** are a broken-engine condition: undo entries
-restore raw slots (below) and do not run user code, so a throw there is a
-bug; it is allowed to propagate after the frame completes as much undo as
-it can (best-effort unwind, then rethrow the first undo error).
+Exceptions, the precise contract (r2 asked for one): a throw from `fn`
+triggers rollback and is rethrown — the BODY error is what the caller
+sees. A throw **during undo** is a broken-engine condition (undo restores
+raw slots and runs no user code): the unwind continues best-effort past
+it, the failure is reported via `console.assert` (visible in dev, stripped
+in production), and in debug builds (`_debugBindings`) it is then thrown
+with the body error attached as `cause`. The body error is never masked by
+an undo error in release — a JS `finally`-throw would do exactly that, so
+the implementation must catch around each undo entry.
 
 ### The escape rule (narrowed from r1)
 
@@ -87,15 +92,24 @@ object identity plus one `_activationOf` hop — restoring fields on the same
 object is the only identity-safe rollback; discard-and-recreate is
 forbidden).
 
-1. **Value-definition type slots** — recorded in `_noteInferenceWrite`
-   (one added branch) and in the phase-2a repair-write helper (below).
-   Entry: `{def, _type, _value, _defValue, inferredType}` — the FULL slot
-   tuple, because the public `type` setter is a computed view: it always
-   allocates, and writing `unknown` through it wipes `_value`/`_defValue`
-   (this is precisely how the current fresh-matrix restore corrupts state).
-   Restore: `def._restoreTypeSlots(entry)`, a new internal method writing
-   the private fields verbatim. A pre-write `_type === null` (type derived
-   from the value) round-trips exactly, which the setter cannot express.
+1. **Value-definition type slots** — recorded by a **pre-mutation** hook:
+   `_noteInferenceWrite` fires AFTER the write (its event carries only
+   `from`/`to` types), so it cannot snapshot the private slots. Instead,
+   every in-frame type write goes through `def._journalAndWriteType(...)`
+   (equivalently: the write sites call `frame.journalTypeSlots(def)`
+   immediately BEFORE mutating — one call added at each of the write
+   sites the phase-1 channel already enumerates, plus the 2a repair
+   helper). Entry: `{def, _type, _value, _defValue, inferredType,
+   _isSelfReferential}` — the FULL coupled-slot tuple: the public `type`
+   setter is a computed view (always allocates; `unknown` wipes
+   `_value`/`_defValue` — precisely how the current fresh-matrix restore
+   corrupts state), and `_isSelfReferential` is recomputed on every value
+   write, so a verbatim `_value` restore without it leaves the
+   recursion-guard flag stale. Restore: `def._restoreTypeSlots(entry)`,
+   writing the private fields verbatim. A pre-write `_type === null`
+   (type derived from the value) round-trips exactly, which the setter
+   cannot express. `_noteInferenceWrite` remains the unchanged POST-write
+   observer channel.
 2. **Operator signature writes** — entry `{operatorDef, signature}`;
    restore writes `operatorDef.signature` back and re-runs
    `_resyncEffects()` (the arrow and the cached effect set must stay in
@@ -107,11 +121,24 @@ forbidden).
    enumeration. Entry: `{binding, previousValueHalf, previousOperatorHalf,
    installedHalf}`. Restore: re-install the previous half objects on the
    SAME binding record via the same delete/assign mechanism `updateDef`
-   uses, and hand the installed half to the same
-   forward-reference-registry unregistration `updateDef` performs for
-   superseded halves. The previous half objects still exist (nothing
-   disposed them mid-frame — see family 4's ordering note), so identity is
-   preserved for every expression that bound them before the frame opened.
+   uses; unregister the installed half from the forward-reference
+   registry; and — the r2 gap — **re-register the restored previous half**
+   when it was callable and had a live registration before the frame
+   (the forward write's own `unregisterProvisionalDependent` severed it).
+   Registry membership AND its `REGISTRATIONS` reverse-index metadata are
+   journaled by hooks on `registerProvisionalDependents` /
+   `unregisterProvisionalDependent` themselves (family 5 covers both
+   directions), so the restore is index-consistent. The
+   `repairProvisionalDependents` cascade that a newly-callable name can
+   trigger re-derives OTHER definitions **through `updateDef`** — the
+   implementation must verify this routing (it is what makes the cascade's
+   rebuilds captured automatically by this same family) and the 2b
+   acceptance suite includes the cascade-abort test: a provisional literal
+   re-derived because a symbol became callable inside a frame must be back
+   to its pre-frame form after rollback. The previous half objects still
+   exist (nothing disposed them mid-frame — see family 4's ordering note),
+   so identity is preserved for every expression that bound them before
+   the frame opened.
 4. **Declarations** — recorded in `declareSymbolValue` /
    `declareSymbolOperator`. Entry: `{scope, name, previousBinding | ABSENT,
    installedBinding}` — capturing the binding **replaced** by the declare
@@ -175,12 +202,31 @@ internal `trial: true` mode in which the two construction-level repairs are
   admits its slot; the repair does not run.
 
 The WINNING arm is then re-validated for real — non-trial mode, no frame —
-exactly once, and performs any repairs there, exactly as today. Guard rails:
-`noteDevolvedShadow` and `noteDeclarationIn` assert that no rollback frame
-is open (they are unreachable in trial mode by construction; the assert
-catches drift), and a rollback frame asserts at open that it is inside a
-single build pass and at close that no rebuild was requested during its
-lifetime.
+exactly once, and performs any repairs there. **A precondition is not a
+proof**: `couldRepairFreshMatrixInference` is documented as conservative,
+so the winner's real validation can fail where its trial passed. The rule
+is **no fallback**: that failure surfaces as the call's error — which is
+byte-identical to TODAY's behavior (the current filter admits by the same
+precondition, ranks, selects once, and a failed repair errors with no
+second chance), so a trial-passing runner-up going unused is pre-existing
+semantics, not a regression of this design. Stated as an acceptance test:
+an arm whose trial passes via the repair precondition but whose real
+repair fails, with a lower-ranked cleanly-validating arm, must produce
+the same error before and after this change.
+
+Guard rails, precisely scoped (r2 caught the blanket version breaking the
+static-pass consumer, whose ORDINARY declarations inside its frame are
+exactly what family 4 exists for): the asserts live in the two REPAIR
+helpers (`devolveUnappliedOperator`, `repairFreshMatrixInference`) — each
+asserts no rollback frame is open when it runs — never in
+`noteDeclarationIn`/`noteDevolvedShadow` themselves. Additionally a
+rollback frame records `EngineBoxingState._frames.length` at open and, at
+close, asserts `repairRequested` is unset on every frame pushed at or
+above that depth during its lifetime (a repair frame that was pushed AND
+popped inside the rollback frame's lifetime has already been consumed by
+its own rebuild loop — that rebuild ran inside the rollback frame and is
+covered by the open-time containment assert, so the close-time scan only
+needs the still-live frames).
 
 Consequence for r1's "cheap prefilter" defect: the prefilter rejects ONLY
 what is provably impossible — arity (`arityAdmits`) and
@@ -196,15 +242,39 @@ trial because the trial IS `validateArguments`.
 
 `validate.ts` already imports and calls `resolveOverload`; the reverse call
 (overload → validate) would close a cycle the overload design explicitly
-avoided, in a repo with a zero-cycle budget. **The trial loop therefore
-lives in `validate.ts`**: `resolveOverload` keeps only the cheap prefilter
-and returns the surviving CANDIDATE arms; `validateArguments` (which owns
-both the policies and the trial mode) trials candidates in declaration
-order under `_withRolledBackInference`, selects the winner, re-validates it
-for real, and applies §4.3's join (`joinParamAt`) over the arms whose
-trials succeeded — the join survives unchanged; the frame changes how
-viability is DECIDED, not what is inferred. `operandAdmits` gates 6–13 are
-deleted; `overload.ts` never imports `validate.ts`.
+avoided, in a repo with a zero-cycle budget. **Mechanism: dependency
+inversion, not a split.** `resolveOverload` KEEPS its fused loop —
+instantiation (`instantiateArm`), ranking (`isMoreSpecific`/`outranks`,
+D11 tie-break), and named-permutation bookkeeping all stay where they are
+— but its admission step becomes a caller-supplied callback:
+`resolveOverload(..., {admit: (arm, ground, permutedOps) => boolean})`.
+`validate.ts` passes a trial closure (run `validateArguments` in trial
+mode under `_withRolledBackInference`); nothing in `overload.ts` imports
+`validate.ts`. Trials therefore run in ranking order inside the existing
+loop, the selected arm and its ground instance come out exactly as today,
+and §4.3's join (`joinParamAt`) applies over the arms whose trials
+succeeded — unchanged.
+
+Three consumers the r2 review found dangling, resolved:
+
+- **Result typing** (`resolvedArm` in `boxed-function.ts` re-derives the
+  resolution independently): the resolution computed at validation time is
+  CACHED on the call (the same per-expression slot pattern the match plan
+  uses), and `resolvedArm` reads the cache when present. Its cold path
+  (reached on expressions that never validated) passes NO admit callback,
+  and `resolveOverload` then falls back to the cheap prefilter alone —
+  typing-only resolution needs no writes and tolerates the wider candidate
+  set (result types JOIN over candidates there, per its existing
+  docblock).
+- **`diagnoseNoMatch`** (blame diagnostics when no arm fits): switches to
+  the same admit callback, scoring refutations by which trial failed at
+  which operand — its per-position `operandAdmits` probing is deleted with
+  the gates. Runs only on the already-failing path, so trial cost is not a
+  perf concern there.
+- **All trials fail**: the existing no-match path (`diagnoseNoMatch` →
+  blamed operands) — unchanged in shape, now fed by trial outcomes.
+
+`operandAdmits` gates 6–13 are then deleted.
 
 ## Phasing — each phase correct and landable on its own
 
@@ -213,12 +283,19 @@ deleted; `overload.ts` never imports `validate.ts`.
   the fresh-matrix repair's writes (`validate.ts:1402`) AND its restore to
   them. This fixes, standalone, the three diagnosed defects: the
   channel-invisible write (no provenance, no `_freshlyInferred`), the
-  value-wiping restore, and the identity-defeating re-allocation. 2a's
+  value-wiping restore, and the identity-defeating re-allocation. Because
+  the now-channel-visible write appends provenance, the repair's FAILURE
+  leg must also reverse that append (and reinsert a cap-displaced entry,
+  and remove any fresh `_freshlyInferred` membership it created) — a
+  repair-local record, since 2b's journal does not exist yet; an aborted
+  repair must leave provenance byte-identical (r2 finding). 2a's
   acceptance tests: repair success and failure legs, an eligible symbol
   with an assigned value (survives a failed repair), `BoxedType` identity
-  across the restore, and provenance entries now recorded for repair
-  writes. No rollback frames yet — the restore is still repair-local, but
-  it is CORRECT, discharging the discovered-defects rule immediately.
+  across the restore, provenance recorded on success and byte-identical
+  history on failure, and a self-referential value surviving the
+  round-trip (`_isSelfReferential` in the tuple). No rollback frames yet —
+  the restore is still repair-local, but it is CORRECT, discharging the
+  discovered-defects rule immediately.
 - **2b — rollback frames.** The frame stack, all eight journal families,
   the guard-rail asserts, and static-pass adoption (delete
   `provisionalRegistryRollbackPoint`). Acceptance suite (the r1 gap):

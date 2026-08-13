@@ -1328,6 +1328,22 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _isDevolvedShadow: true | undefined;
 
+  /** Snapshot the coupled type/value slots for an exact later restore via
+   * {@link _restoreTypeSlots}. The result is OPAQUE — it captures private
+   * fields, including states the public setters cannot express — so it is
+   * typed `unknown` and only meaningful when handed back unchanged.
+   * @internal */
+  _typeSlotSnapshot(): unknown;
+
+  /** Restore the slots captured by {@link _typeSlotSnapshot}, verbatim and
+   * setter-bypassing (the `type` setter is a computed view whose `unknown`
+   * write wipes the value — a faithful restore cannot go through it).
+   * Bumps `_writeVersion` rather than restoring it: monotone invalidation
+   * counters only advance. Phase 2a of
+   * `docs/plans/2026-08-13-inference-tx-design.md`.
+   * @internal */
+  _restoreTypeSlots(snapshot: unknown): void;
+
   type: BoxedType;
 
   /**

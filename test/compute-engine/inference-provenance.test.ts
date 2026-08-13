@@ -137,6 +137,35 @@ describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type 
     expect(ce.box('d').type.toString()).toBe('number');
   });
 
+  test('an unknown incumbent takes the declaration promotion, so the settled type does not depend on a prior auto-declare', () => {
+    // Boxing the witness auto-declares `y_r` with type `unknown` (its uses —
+    // a bare `List` sibling, a binder-body occurrence — record no type
+    // evidence). The assignment must then land exactly where it lands on a
+    // fresh symbol: promoted `integer`, not the value's raw
+    // `finite_integer`. Observed by the Tycho team's order-matrix probe at
+    // their 0.106.0 adoption: box-first orderings settled on
+    // `finite_integer` while assign-first settled on `integer`.
+    const J = [
+      'List',
+      [
+        'Integrate',
+        ['Function', ['Block', ['n', 'x', 'y_r']], 'x'],
+        ['Limits', 'x', -10, 10],
+      ],
+      'y_r',
+    ] as const;
+    const ce = new ComputeEngine();
+    ce.box(J as any);
+    expect(ce.box('y_r').type.toString()).toBe('unknown');
+    ce.assign('y_r', 5);
+    expect(ce.box('y_r').type.toString()).toBe('integer');
+    // Control: assign-first lands on the same type.
+    const ce2 = new ComputeEngine();
+    ce2.assign('y_r', 5);
+    ce2.box(J as any);
+    expect(ce2.box('y_r').type.toString()).toBe('integer');
+  });
+
   test('an assignment-derived incumbent stays widen-only', () => {
     // No use ever informed `vasg`'s type — only assignments did. Narrowing
     // it would make the type oscillate as the assigned values alternate.
