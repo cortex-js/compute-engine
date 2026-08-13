@@ -2674,18 +2674,20 @@ is in git history. The only items deliberately left open:
     accept the shape).
 
 - **`compileToSource()` and `compileShader()` splice statement blocks into
-  expression positions (found 2026-08-12 at the GPU Return-gate round),
-  RULING NEEDED:** both routes are ungated for multi-statement `Block`s —
-  `compileToSource(Block(Declare s; s≔x; Return(s)))` returns bare
-  statements (`"float s;\ns = x;\nreturn return s;"`) where the contract
-  promises an expression, and `compileShader()` splices the same into an
-  assignment RHS (`gl_FragColor = float s;…`). The `Return` is a symptom;
-  the root is a statement block escaping into expression-only routes (the
-  `bareStatementBlocks` gate does not cover them). The fork: fail closed
-  on multi-statement blocks in both routes (consistent with today's
-  doctrine), or teach the routes to wrap statement blocks in an
-  IIFE-equivalent where the target language has one (GLSL does not — so
-  for shaders the decline is likely the only honest option).
+  expression positions — RESOLVED FAIL-CLOSED under standing doctrine,
+  GPU routes FIXED 2026-08-12:** both GPU routes now throw (their
+  measured error convention) on any body that lowers to a statement
+  sequence or bare `return`, with a message pointing statement bodies at
+  `compile()`; expression bodies byte-identical; the shader `stmts`
+  hoisting path (loop-form `Sum`/`Product` in shader bodies) preserved.
+  Note `compileToSource` also now declines loop-form `Sum`/`Product`
+  (previously returned a multi-line block from an expression-contract
+  route — same class, was never pinned). Residues in flight same day:
+  the identical hole in `PythonTarget.compileToSource` (incl. the same
+  `return return` doubling; blast-radius measurement against its positive
+  pins first), and the WGSL-only single-line case (`Assign` is a
+  statement in WGSL, an expression in GLSL — needs a structural check,
+  not a token scan).
 
 - **A raw-MathJSON `Loop` inside a compiled function body ran to
   `undefined` behind `success: true` — FIXED 2026-08-12 (same day), and

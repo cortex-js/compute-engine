@@ -586,6 +586,10 @@ with three rulings needed in order (see §7).
    stays a pure type, no dual-role names) — confirm the two-protocol
    split and names, and the membership-granting conformance rule,
    when the requirement tables get their design doc.
+7. Mutable objects (Appendix B): rulings B1–B12 — proposal under review;
+   nothing ratified. B10 amends item 6(b) above.
+8. Named arguments (Appendix C): rulings C1–C5 — proposal under review,
+   sequenced before Appendix B (whose constructors require it).
 
 
 ## Appendix A: Protocol Syntax
@@ -1280,6 +1284,11 @@ rebinds the left-hand variable to it. The left-hand side's root must
 therefore be an assignable binding; a non-variable target
 (`xs[i].name = v`) emits `property-assignment-target-invalid` in v1.
 
+Appendix B proposes superseding this sugar with true mutable objects:
+assignment would then modify the object in place, be legal only on
+object-backed types, and be rejected on records. Until that proposal is
+ratified, the sugar above is the shipped behavior.
+
 If there are conflicting properties from protocols with overlapping
 property names, the property name can be prefixed with the protocol name to
 disambiguate, enclosed in parentheses:
@@ -1347,127 +1356,594 @@ domain. Whether a host-side control is warranted (freezing the registry, or
 restricting conformance on built-in types to host-authorized declarations)
 is an open ruling — §7 item 6(g).
 
-## Appendix B: object
+## Appendix B: Mutable objects
 
-A protocol with at least one settable property requirement can only be conformed to by an `object`-backed type.
-If a protocl has read-only properties, but no setters, any type can conform to it.
+> Status: **proposal**, 2026-08-12 — nothing below is implemented. The
+> decisions it needs are collected as rulings B1–B12 at the end. It
+> depends on Appendix C (named arguments), which is proposed to land
+> first. Landing it
+> supersedes two shipped decisions of Appendix A; the exact amendments are
+> listed under "Changes to Appendix A".
+
+### The idea
+
+Every value in the engine today is immutable. A record, once built, never
+changes; "changing a field" really means building a new record that
+differs in one field. This appendix adds exactly one mutable thing to the
+language: the **object**. An object is a reference to a record whose
+fields can be changed in place. Two names can refer to the same object,
+and a change made through one is visible through the other. Everything
+else — numbers, strings, lists, tuples, records, nominal values — stays
+immutable.
+
+The motivation comes from protocols. A protocol can declare a settable
+property (`readwrite age: integer`), but with only immutable values there
+is nothing a setter can genuinely set:
+
+```epsil
+const p: Person = getUser()
+p.age = p.age + 1
+```
+
+Appendix A makes property assignment work through rebinding sugar — the
+setter returns an updated copy and the variable `p` is rebound to it.
+That reading has hard limits: it fails on this very example (`p` is
+`const`, and rebinding a `const` variable is an error); it cannot work at
+all when the value lives inside a list or another structure (there is no
+variable to rebind); and a "change" made this way is invisible to anyone
+else still holding the old value. With objects, the statement does what
+it looks like it does: `p` keeps naming the same object, and that
+object's `age` field changes. `const` protects the *binding* — which
+object `p` names — not the object's contents; the same rule as
+JavaScript's `const`.
+
+### Declaring an object type
+
+An object type is declared like other nominal types, with `object<…>`
+listing its stored fields:
+
+```epsil
+type Person = object<
+  firstName: string,
+  lastName: string,
+  age: integer,
+  role: string
+>
+```
+
+The constructor takes one value per stored field, passed by name:
+
+```epsil
+const p = Person(firstName: "Alan", lastName: "Turing",
+                 age: 42, role: "scientist")
+```
+
+Constructor arguments are named, never positional: `Person` has two
+adjacent `string` fields, and a positional call that swapped them would
+be accepted silently. Because the arguments are named, their order does
+not matter. Named-argument calls are their own language feature —
+Appendix C, proposed to be ratified and implemented before this
+appendix — and object constructors are simply the first place where
+names are *required* (ruling B11).
+
+The constructor requires every field, so an object never exists in a
+half-initialized state, and no rule is needed for "reading a field that
+was never set". (A create-empty-then-fill-in style would need one;
+ruling B7 defers it.)
+
+In v1, `object<…>` may appear only as the definition of a named type, as
+above — not inline in an annotation (`let x: object<id: string>` is
+rejected). Objects are nominal.
+
+### Objects and protocols
+
+With objects, a protocol with settable properties can finally mean what
+it says:
 
 ```epsil
 protocol Identifiable {
-  readwrite firstName: string;
-  readWrite lastName: string;
-  readonly fullName: string;
-  readwrtie age: integer;
-  readwrite role: string;
-  function birthday(Self) -> Self
+  readwrite firstName: string
+  readwrite lastName: string
+  readonly fullName: string
+  readwrite age: integer
+  readwrite role: string
+  function birthday(self: Self) scope -> Self
 }
+```
 
+Note the `scope` effect label on `birthday`: the requirement itself must
+declare that `birthday` modifies its argument — see "Changing a field is
+an effect" below for why.
 
-type People : record<id: string> is Identifiable;
-// -> diagnostic error: The `Identifiable` protocol has setters and an immutable type cannot conform to it. Use a mutable `object` instead.
+A conforming object type:
 
-
-type Person : object<
-  name: tuple<firs: string, last: string>,
+```epsil
+type Person = object<
+  firstName: string,
+  lastName: string,
   age: integer,
   role: string
 > is Identifiable {
-    function birthday(q: Person) {
-    q.age = q.age + 1;
+  // fullName is not a stored field: it is computed on demand.
+  get fullName(self: Person) -> string {
+    "\(self.firstName\) \(self.lastName\)"
+  }
+  function birthday(self: Person) -> Person {
+    self.age = self.age + 1
+    self   // the protocol promises that birthday returns Self
   }
 }
-
-// Alternative: the field/properties of `objects` are derived from the properties declared on the protocol(s)
-type Person : object is Identifiable {
-    function birthday(q: Person) {
-    q.age = q.age + 1;
-  }
-}
-
-// Maybe could even accept type declaration without type definition as a shorthand
-type Person is Identifiable {
-  // storage shape could be determined based on which accessors are provided: skip the ones that have a get/set
-  get fullName(q: Person) {
-    "\(q.firstName\) \(q.lastName\)"
-  }
-  function birthday(q: Person) {
-    q.age = q.age + 1;
-  }
-}
-
-
-// @fixme: that works if the Person type defines the shape. If the shape is inferred from the protocol, the type may need to define an explicit constructor, or there could be a default "empty" constructor, i.e. `p = Person(); p.name = "Alan", ...`
-
-const p = Person(("Alan", "Turing"), 42, "scientist");
-
-
-"Happy birthday, \(birthday(p).fullName\)! You are \(p.age\)"
-// -> Happy birthday, Alan Turing! You are 43"
-
 ```
 
-### Cycles
+Two rules make this work:
 
-Because objects are references, they can create cycles that need to be handled.
+- A `readwrite` property requirement is satisfied automatically by a
+  stored field with the same name and the same type — no `get`/`set`
+  needs to be written. `firstName`, `lastName`, `age`, and `role` are
+  covered this way.
+- A property implemented with an explicit `get` (plus `set`, for a
+  `readwrite` property) is **computed**: it has no stored field, and its
+  accessors run on each access. `fullName` is computed here. This is how
+  a type can present a different surface than what it stores.
 
+Using it:
+
+```epsil
+const p = Person(firstName: "Alan", lastName: "Turing",
+                 age: 42, role: "scientist")
+"Happy birthday, \(birthday(p).fullName\)! You are \(p.age\)."
+// ➔ Happy birthday, Alan Turing! You are 43.
+```
+
+Note that `p.age` reads 43: `birthday(p)` changed the object, and the
+pieces of the string evaluate left to right. Mutation makes evaluation
+order observable — left-to-right stops being an implementation detail
+and becomes part of the language's meaning (ruling B8 pins it).
+
+### Which types can conform (the mutability gate)
+
+A protocol that can *modify* the value it is called on — because it has
+at least one `readwrite` property, or a function member whose declared
+effect says it modifies its `Self` argument — can only be conformed to
+by object types. A protocol with only `readonly` properties and
+non-modifying functions can be conformed to by any type, exactly as
+today.
+
+```epsil
+type Badge = record<id: string> is Identifiable
+// -> protocol-requires-object: the `Identifiable` protocol has settable
+//    properties. `Badge` is a record, and records are immutable; declare
+//    `Badge` as an object type to conform.
+```
+
+### Assigning to a property
+
+Property assignment is a real modification, and it is only legal on
+objects. On a record — or any other immutable value — it is an error
+that names the two ways out:
+
+```epsil
+type Data = record<id: string, value: string>
+let d = Data(id: "1234", value: "foo")
+d.id = "456"
+// -> immutable-value-assignment: `d` is a record, and records cannot be
+//    modified. Build an updated copy, or declare `Data` as an object
+//    type.
+```
+
+```epsil
+type MutableData = object<id: string, value: string>
+let d = MutableData(id: "1234", value: "foo")
+d.id = "456"   // ok — the object now has id "456"
+```
+
+The assignment target no longer needs to be a variable: any expression
+that evaluates to an object can be stored into (`xs[i].name = v` works
+when the list holds objects). This replaces Appendix A's rebinding sugar
+and its `property-assignment-target-invalid` restriction — see "Changes
+to Appendix A".
+
+### References, not copies
+
+Binding an object to another name does not copy it; both names refer to
+the same object:
+
+```epsil
+const d = MutableData(id: "1234", value: "foo")
+const e = d
+d.id = "0000"
+e.id
+// ➔ "0000" — d and e are the same object
+```
+
+The same holds for function arguments: the function receives the object
+itself, not a copy, and can modify it:
+
+```epsil
+function rename(x: MutableData) {
+  x.id = "XXXX"
+}
+rename(d)
+d.id
+// ➔ "XXXX"
+```
+
+### Every construction makes a new object
+
+Two constructor calls make two different objects, even with identical
+arguments:
+
+```epsil
+MutableData(id: "1", value: "x") == MutableData(id: "1", value: "x")
+// ➔ False — two distinct objects whose contents happen to be equal
+```
+
+This is a real departure. Everywhere else in the engine, evaluating the
+same expression twice produces interchangeable results — `3 + 4` is `7`
+both times, and the engine freely reuses cached results because nothing
+can tell the difference. With objects, something *can* tell the
+difference (the two results answer `==` differently), so construction
+must be treated the way drawing a random number already is:
+
+- an expression that constructs an object must not have its result
+  served from an evaluation cache;
+- the engine's habit of sharing one boxed value for equal literals never
+  applies to objects.
+
+Ruling B3 covers the mechanics (which caches must check, and whether
+construction needs its own effect label).
 
 ### Equality
 
-`Equal()` for objects would only be true if both objects are the same reference.
-
-`IsSame()` could use a `Comparable` protocol to delegate to an object type the chance to perform comparison.
-
-### Setters
-
-Assignment to a property can only be applied to `objects`.
-
-```
-type Data = record<id: string, value: string>
-let d = Data({id -> "1234", value -> "foo"})
-d.id = "456"
-// -> diagnostic error: a record is immutable
-```
-
-```
-type MutableData = object<id: string, value: string>
-let d = MutableData({id -> "1234", value -> "foo"})
-d.id = "456"
-// -> ok
-```
-
-
-### References
-
-Objects are references to a mutable record. Binding an object to an identifier does not copy it.
-
-```
-type MutableData = object<id: string, value: string>
-const d = MutableData({id -> "1234", value -> "foo"})
-const p = d;
-d.id = "0000" // "const" refers to the binding, not the object: the object is mutable
-p.id
-// -> "0000"
-```
-
-Passing an object as an argument to a function does not copy it, it passes a reference to the object, which the function can modify.
+`==` on two objects is true exactly when they are the same object.
+Contents play no part:
 
 ```epsil
-function foo(d: MutableData) {
-  d.id = "XXXX"
-}
-
-foo(d)
-d.id
-// -> "XXXX"
-// p.id
-// -> "XXXX"
-
+let a = MutableData(id: "1", value: "x")
+let b = MutableData(id: "1", value: "x")
+let c = a
+a == b   // ➔ False — different objects
+a == c   // ➔ True  — same object
 ```
 
+Why not compare contents? Because contents change. Two objects that are
+equal by contents now can differ a moment later; "are these the same
+object" is the only question whose answer stays true. Comparing contents
+is a legitimate but *different* question. If it turns out to be wanted,
+it should be an explicit opt-in — a protocol a type conforms to,
+consulted by a dedicated operation — and never the meaning of `==`
+itself (ruling B4, deferred).
 
+Engine note: all of the engine's comparison tiers (`isSame`, `isEqual`,
+`isIdenticallyEqual`) answer with reference identity for objects. In
+particular `isSame` — the strict, cheap check used internally as a
+deduplication key — must never run user code, so no protocol can be
+involved at that tier; and `isIdenticallyEqual`'s sampling-and-proof
+machinery has nothing to prove about a reference.
 
+### Cycles
 
-### Diagnostics
+Because objects are references, they can end up referring to each other
+in a loop:
+
+```epsil
+type Buddy = object<name: string, friend: type Buddy | missing>
+let alice = Buddy(name: "Alice", friend: Missing)
+let bob = Buddy(name: "Bob", friend: alice)
+alice.friend = bob
+// alice's friend is bob, and bob's friend is alice — a cycle
+```
+
+Every part of the engine that walks a value recursively — printing,
+serializing, comparing contents, inspecting types — must now be prepared
+to meet a value it has already visited, or it will loop forever. The
+engine has an established pattern for this (cycle guards on
+definition-following walks); what is new is that ordinary user *data*
+can be cyclic, so the guards must extend to value walks.
+
+### Lifetime
+
+Objects need no new memory management. The engine runs on a JavaScript
+host, and an object is an ordinary heap value there: it lives exactly
+as long as something still refers to it — a variable in scope, a field
+of another live object, a closure that captured it — and is reclaimed
+by the host's garbage collector when nothing does. Cycles are not a
+problem either: a tracing garbage collector (unlike reference counting)
+reclaims two objects that only refer to each other.
+
+Three consequences are worth pinning (ruling B12):
+
+- **The engine must not secretly keep objects alive.** Engine-global
+  machinery that remembers values — evaluation caches, dispatch caches,
+  interned literals — must either exclude objects (B3 already excludes
+  them from caching for correctness reasons) or hold them weakly.
+  Otherwise an object constructed once in a notebook session would live
+  until the engine is discarded, even after nothing in the program
+  refers to it. A binding in the global scope does keep its object
+  alive, of course — that is released by rebinding or forgetting the
+  symbol.
+- **An object belongs to one engine instance.** It cannot be
+  serialized out (see "Serialization") and cannot be handed to a
+  different engine; its identity is meaningful only within the engine
+  that constructed it.
+- **No destructors.** Nothing runs when an object is reclaimed, and v1
+  offers no way to ask for that. If a future object ever holds an
+  external resource (a file handle, a network connection), that is the
+  effects/capability tier's problem (`docs/EFFECTS-MODEL.md`), not the
+  object system's: reclaiming memory and releasing resources are
+  different problems, and tying resource release to garbage collection
+  is a classic mistake this proposal declines to make.
+
+### Serialization
+
+MathJSON has no way to express "these two places refer to the same
+object", and no way at all to express a cycle. Two candidate postures
+(ruling B5):
+
+- **Refuse** (recommended for v1): serializing an expression that
+  contains an object emits `object-serialization-unsupported`. Nothing
+  is silently lost.
+- **Snapshot**: serialize a copy of the object's current contents.
+  Sharing is silently lost — two references to one object come back as
+  two unrelated records — and cycles still need an answer.
+
+The recommended pairing: refuse implicitly, and provide an explicit
+operation (`Snapshot(p)`, name open) that returns an immutable record
+copying the object's current contents. Whether a snapshot is shallow or
+deep, and what a deep snapshot does on a cycle, is part of B5.
+
+### Changing a field is an effect
+
+A function that changes a field of one of its arguments does something
+its caller can observe beyond the returned value. The effects system
+already has a label for exactly this — `scope`, a write whose
+consequences outlive the call (`docs/EFFECTS-MODEL.md`). Whether field
+stores reuse `scope` or get a label of their own is ruling B2; either
+way, two things follow:
+
+- The implicit setter behind every `readwrite` property carries the
+  label, so property stores are never invisible to the effects system.
+- A protocol function whose implementations modify `Self` must declare
+  the label in the requirement — as `birthday` does above. Appendix A's
+  signature-matching rule says an implementation may be *purer* than its
+  requirement but never more effectful, so an effect-free `birthday`
+  requirement would reject every implementation that actually mutates.
+
+Stores also feed the engine's cache invalidation: each field store
+registers a state event through the same machinery that
+protocol-registry changes already use (Appendix A, "Registry changes are
+state events"). Every store goes through one operation, so this is a
+single emission point, not a scattering.
+
+### No subtyping between object types
+
+Object types are unrelated to each other, even when their shapes look
+compatible. To see why the flexibility records enjoy would be unsound
+here, suppose it were allowed:
+
+```epsil
+type Counter = object<count: integer>
+type Gauge   = object<count: number>
+
+let c: Counter = Counter(count: 1)
+let g: Gauge = c        // suppose this were allowed…
+g.count = 1.5           // …then this is fine for a Gauge…
+c.count                 // …and the Counter now holds 1.5 — its type lied
+```
+
+With immutable records the first step would be harmless, because nobody
+can write `1.5` into anything — which is precisely why records get to
+have subtyping and objects do not. Code that should work across several
+object types says so with a protocol, which is also the only
+relationship this appendix needs.
+
+### The rest of the system
+
+- **Broadcast**: an object is a single value; it is never iterated into
+  or broadcast over (the same atomicity ruling as sum values).
+- **Compilation**: JavaScript and Python have native reference
+  semantics, so objects compile naturally there. The GPU target has no
+  references and declines, fail-closed like its other capability gates.
+  At the engine⇄compiled boundary, the tagged-sum rule of §3 is
+  mirrored: object-typed *parameters* into a compiled unit are
+  supported; object-typed unit *results* decline in v1 (ruling B9).
+- **Where `object` sits in the type lattice** — is bare `object` a
+  usable type meaning "any object"? are objects disjoint from `record`?
+  — is ruling B6. Lean: yes and yes.
+- **Property-name resolution**: stored fields and protocol properties
+  share one namespace via the satisfied-by-a-field rule above, and the
+  qualified form `p.(Protocol.name)` remains available for conflicts
+  between protocols. The dictionary-key precedence rule (P46) is not
+  implicated: objects are not dictionaries.
+
+### Deferred: deriving the shape from the protocol
+
+It is tempting to skip the field list and let the protocol supply it:
+
+```epsil
+type Person = object is Identifiable   // shape derived from the protocol?
+```
+
+Deferred, because two problems need solving first:
+
+1. **Protocol replacement.** Re-running a `protocol` statement replaces
+   the protocol (Appendix A, "Scope and lifecycle"). If the protocol
+   defines the storage shape, replacing it changes the layout of every
+   derived conformer — and objects constructed before the replacement
+   still have the old shape.
+2. **Multiple protocols.** Implementation blocks are per-protocol and
+   may arrive in later statements or later notebook cells, so a shape
+   derived from "all properties not covered by an accessor" is not known
+   until every block has been seen — but the constructor may be called
+   in between.
+(A third problem a positional constructor would have had — parameter
+order coming from protocol member order, so that reordering the
+protocol's members silently breaks every construction call — does not
+arise: constructor arguments are named and order-free; see Appendix C.)
+
+Neither problem is fatal (freeze the shape at declaration time), but
+each needs its own ruling, and an explicit field list has neither
+problem — so v1 requires the explicit list.
+
+One thing this proposal deliberately does **not** change: bare
+`type Person is Identifiable` (without `= object`) keeps its shipped
+meaning — a conformance declaration for an *existing* type, with
+`protocol-target-unknown` when no such type exists. If that spelling
+could also declare a new type, a typo in a type name would silently mint
+a fresh object type instead of being caught.
+
+### Rulings needed
+
+- **B1 — the mutability gate.** A protocol that can modify `Self`
+  (a `readwrite` property, or a function member with a declared
+  Self-modifying effect) is conformable only by object types;
+  `protocol-requires-object` otherwise.
+- **B2 — the store effect.** Whether field stores reuse the `scope`
+  label or get their own; implicit property setters carry it;
+  requirements for mutating functions must declare it.
+- **B3 — construction is observable.** Fresh identity per construction;
+  exclusion from evaluation caches and literal interning; whether
+  construction needs its own effect label.
+- **B4 — contents equality (deferred).** `==` stays reference identity;
+  an opt-in contents-comparison protocol, if ever, is a separate
+  operation.
+- **B5 — serialization.** Refuse + explicit `Snapshot` (recommended) vs
+  silent snapshot; snapshot depth; behavior on cycles.
+- **B6 — lattice placement.** Bare `object` as "any object";
+  disjointness from `record`.
+- **B7 — initialization.** v1: constructors take every stored field; a
+  create-empty-then-fill style would need a missing-field story first.
+- **B8 — evaluation order.** Left-to-right evaluation of arguments and
+  interpolation segments becomes observable; pin it.
+- **B9 — compile boundary.** Mirror the §3 sum rule: parameters in,
+  results decline, GPU declines entirely.
+- **B10 — the Appendix A amendments** below.
+- **B11 — named constructors.** Object constructors require named
+  arguments. Depends on Appendix C (named-argument calls), which is its
+  own proposal, sequenced before this one.
+- **B12 — lifetime.** Objects are reclaimed by the host's garbage
+  collector; engine-held caches must not keep objects alive; an object
+  never outlives or crosses its engine; no destructors in v1 (see
+  "Lifetime").
+
+### Changes to Appendix A when this lands
+
+1. **"Properties"** — the property-assignment paragraph (rebinding
+   sugar, `property-assignment-target-invalid`) is replaced: assignment
+   is a store, legal only on objects; on records and other immutable
+   values it emits `immutable-value-assignment`; non-variable targets
+   become legal when they evaluate to objects. The `Person`/`Nameable`
+   example becomes an object-backed example.
+2. **§7 item 6(b)** (property assignment as rebinding sugar) is
+   superseded by B10.
+3. **"Signature matching"** is unchanged as a rule, but gains the
+   consequence spelled out under "Changing a field is an effect":
+   requirements for mutating functions must declare the effect, or no
+   mutating implementation can satisfy them.
+
+## Appendix C: Named arguments
+
+> Status: **proposal**, 2026-08-12 — nothing below is implemented. This
+> appendix stands on its own and is proposed to be ratified and
+> implemented **before** Appendix B: object constructors require named
+> arguments, but nothing here depends on objects. Rulings C1–C5 at the
+> end.
+
+### The idea
+
+A call may pass an argument by the name of the parameter it is for:
+
+```epsil
+function interest(principal: number, rate: number, years: integer)
+    -> number {
+  principal * (1 + rate) ^ years
+}
+
+interest(principal: 1000, rate: 0.05, years: 10)
+```
+
+Today `f(name: value)` is a parse error (probed 2026-08-12), so the
+syntax is free to claim: no existing program changes meaning.
+
+What it buys:
+
+- **Error-proofing.** `Person(firstName: "Alan", lastName: "Turing")`
+  cannot silently swap the two strings; `Person("Alan", "Turing")` can.
+  This is the constructor case that motivated the feature (Appendix B).
+- **Readable call sites.** `interest(1000, 0.05, 10)` makes the reader
+  guess which number is which; the named call does not.
+- **Order independence.** Named arguments may be given in any order,
+  which matters most for functions with several rarely-used options.
+
+### Rules
+
+A named argument must use a parameter name the function declares.
+Signatures already carry parameter names (`(predicate: function,
+initial: any?) -> …`), so there is something to match against. An
+unknown name is an error that lists the real ones:
+
+```epsil
+interest(1000, rte: 0.05, years: 10)
+// -> argument-name-unknown: `interest` has no parameter named `rte`.
+//    Its parameters are `principal`, `rate`, and `years`.
+```
+
+Positional and named arguments can mix: positional arguments come
+first and fill parameters left to right, then named arguments fill the
+rest. Once one argument is named, the remaining arguments must be named
+too, and no parameter may be given twice:
+
+```epsil
+interest(1000, rate: 0.05, years: 10)  // ok: 1000 fills `principal`
+interest(rate: 0.05, 1000, years: 10)  // error: positional after named
+interest(1000, principal: 2000)        // error: `principal` given twice
+```
+
+Naming an argument of a function whose parameters the engine does not
+know — an unresolved forward reference, or a value only known to be of
+type `function` — is an error too: there is nothing to check the name
+against.
+
+### What the names are, and what they are not
+
+Parameter names become part of a function's public interface: once
+callers can write `rate: 0.05`, renaming the parameter breaks them.
+(The library's parameter names — `predicate:`, `key:`, `mapping:`,
+`reducer:` and friends — were made uniform in 2026-08; this feature is
+what turns that grooming into API surface.)
+
+The names are surface syntax, not data: at canonicalization a named
+call is matched against the signature and normalized to positional
+order, and everything downstream — evaluation, compilation, MathJSON —
+sees an ordinary positional call. A round trip through MathJSON
+therefore comes back positional; whether the Epsil serializer should
+re-derive names from the signature for readability is part of C4.
+
+### Rulings needed
+
+- **C1 — grammar.** `name: value` in call-argument position, as
+  sketched above.
+- **C2 — mixing.** Positional first, then named; nothing positional
+  after a named argument; no parameter twice; every required parameter
+  filled.
+- **C3 — overload resolution.** The shipped resolution machinery
+  (per-position join over intersection arms) is positional. Proposed:
+  filter arms by name compatibility first, normalize the call to
+  positional per surviving arm, then resolve exactly as today. This is
+  the meatiest sub-question and likely needs its own design doc when
+  this appendix moves to implementation.
+- **C4 — serialization.** Names erase at canonicalization (proposed
+  above); should the Epsil serializer re-derive them for readability,
+  and if so, when?
+- **C5 — variadic and optional parameters.** How names interact with
+  `?`-optional parameters (a natural fit: name exactly the options you
+  pass) and with variadic tails (no per-argument name exists —
+  presumably positional only).
+
+## Appendix D: Diagnostics
+
+Codes from Appendix A are shipped. Codes marked † are proposed by
+Appendix B or Appendix C and are not implemented.
 
 | Code | Emitted when |
 |---|---|
@@ -1488,6 +1964,10 @@ d.id
 | `protocol-in-type-position` | protocol name used where a type is expected |
 | `protocol-call-ambiguous` | bare call resolves to several applicable protocols |
 | `protocol-property-ambiguous` | property name resolves to several protocols |
-| `property-assignment-target-invalid` | property assignment whose LHS root is not an assignable binding |
-
-
+| `property-assignment-target-invalid` | property assignment whose LHS root is not an assignable binding (retired by Appendix B when it lands) |
+| `protocol-requires-object` † | a protocol with settable properties (or Self-modifying members) conformed to by a non-object type |
+| `immutable-value-assignment` † | property assignment on a record or other immutable value |
+| `object-serialization-unsupported` † | serializing an expression that contains an object (if B5 rules "refuse") |
+| `argument-name-unknown` † | a named argument names a parameter the function does not declare (Appendix C) |
+| `argument-order-invalid` † | a positional argument follows a named argument (Appendix C) |
+| `argument-name-duplicate` † | the same parameter supplied more than once (Appendix C) |
