@@ -1347,6 +1347,126 @@ domain. Whether a host-side control is warranted (freezing the registry, or
 restricting conformance on built-in types to host-authorized declarations)
 is an open ruling — §7 item 6(g).
 
+## Appendix B: object
+
+A protocol with at least one settable property requirement can only be conformed to by an `object`-backed type.
+If a protocl has read-only properties, but no setters, any type can conform to it.
+
+```epsil
+protocol Identifiable {
+  readwrite firstName: string;
+  readWrite lastName: string;
+  readonly fullName: string;
+  readwrtie age: integer;
+  readwrite role: string;
+  function birthday(Self) -> Self
+}
+
+
+type People : record<id: string> is Identifiable;
+// -> diagnostic error: The `Identifiable` protocol has setters and an immutable type cannot conform to it. Use a mutable `object` instead.
+
+
+type Person : object<
+  name: tuple<firs: string, last: string>,
+  age: integer,
+  role: string
+> is Identifiable {
+    function birthday(q: Person) {
+    q.age = q.age + 1;
+  }
+}
+
+// Alternative: the field/properties of `objects` are derived from the properties declared on the protocol(s)
+type Person : object is Identifiable {
+    function birthday(q: Person) {
+    q.age = q.age + 1;
+  }
+}
+
+// Maybe could even accept type declaration without type definition as a shorthand
+type Person is Identifiable {
+  // storage shape could be determined based on which accessors are provided: skip the ones that have a get/set
+  get fullName(q: Person) {
+    "\(q.firstName\) \(q.lastName\)"
+  }
+  function birthday(q: Person) {
+    q.age = q.age + 1;
+  }
+}
+
+
+// @fixme: that works if the Person type defines the shape. If the shape is inferred from the protocol, the type may need to define an explicit constructor, or there could be a default "empty" constructor, i.e. `p = Person(); p.name = "Alan", ...`
+
+const p = Person(("Alan", "Turing"), 42, "scientist");
+
+
+"Happy birthday, \(birthday(p).fullName\)! You are \(p.age\)"
+// -> Happy birthday, Alan Turing! You are 43"
+
+```
+
+### Cycles
+
+Because objects are references, they can create cycles that need to be handled.
+
+
+### Equality
+
+`Equal()` for objects would only be true if both objects are the same reference.
+
+`IsSame()` could use a `Comparable` protocol to delegate to an object type the chance to perform comparison.
+
+### Setters
+
+Assignment to a property can only be applied to `objects`.
+
+```
+type Data = record<id: string, value: string>
+let d = Data({id -> "1234", value -> "foo"})
+d.id = "456"
+// -> diagnostic error: a record is immutable
+```
+
+```
+type MutableData = object<id: string, value: string>
+let d = MutableData({id -> "1234", value -> "foo"})
+d.id = "456"
+// -> ok
+```
+
+
+### References
+
+Objects are references to a mutable record. Binding an object to an identifier does not copy it.
+
+```
+type MutableData = object<id: string, value: string>
+const d = MutableData({id -> "1234", value -> "foo"})
+const p = d;
+d.id = "0000" // "const" refers to the binding, not the object: the object is mutable
+p.id
+// -> "0000"
+```
+
+Passing an object as an argument to a function does not copy it, it passes a reference to the object, which the function can modify.
+
+```epsil
+function foo(d: MutableData) {
+  d.id = "XXXX"
+}
+
+foo(d)
+d.id
+// -> "XXXX"
+// p.id
+// -> "XXXX"
+
+```
+
+
+
+
 ### Diagnostics
 
 | Code | Emitted when |
@@ -1369,3 +1489,5 @@ is an open ruling — §7 item 6(g).
 | `protocol-call-ambiguous` | bare call resolves to several applicable protocols |
 | `protocol-property-ambiguous` | property name resolves to several protocols |
 | `property-assignment-target-invalid` | property assignment whose LHS root is not an assignable binding |
+
+
