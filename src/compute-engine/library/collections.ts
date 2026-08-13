@@ -63,7 +63,7 @@ import {
 import { mapAutoCompileRunner } from './map-auto-compile.js';
 import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
-import { sumVariantInfo } from '../compilation/sum-representation.js';
+import { sumVariantInfo } from '../sum-representation.js';
 import type {
   Expression,
   FunctionInterface,

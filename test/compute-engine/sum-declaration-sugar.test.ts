@@ -3,7 +3,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { sumVariantInfo } from '../../src/compute-engine/compilation/sum-representation';
+import { sumVariantInfo } from '../../src/compute-engine/sum-representation';
 
 import type { MathJsonExpression } from '../../src/math-json/types';
 

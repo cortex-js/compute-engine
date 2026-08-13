@@ -1,9 +1,9 @@
-import type { Type, TypeReference } from '../../common/type/types.js';
-import { declarationOf } from '../../common/type/reference.js';
-import { resolveTypeForCompilation } from '../../common/type/utils.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import type { Type, TypeReference } from '../common/type/types.js';
+import { declarationOf } from '../common/type/reference.js';
+import { resolveTypeForCompilation } from '../common/type/utils.js';
+import { isSubtype } from '../common/type/subtype.js';
 
-import type { IComputeEngine } from '../global-types.js';
+import type { IComputeEngine } from './global-types.js';
 
 /**
  * SUM-TYPE COMPILATION POLICY —
@@ -21,6 +21,15 @@ import type { IComputeEngine } from '../global-types.js';
  * sum's), so a hand-assembled union of nominals carries neither and keeps
  * today's behavior exactly — erased constructors, constructor-pattern `match`
  * failing closed.
+ *
+ * Placement: this module lives at the engine root, not under `compilation/`,
+ * even though the policy it computes is a compilation concern. It reads only
+ * `ce._typeResolver` and the `common/type` helpers, and two of its consumers
+ * sit below `compilation/` in the layering — `type-constructors.ts` (minting a
+ * variant's constructor) and `library/collections.ts` (the `At` accessor's
+ * compile handler). Filing it under `compilation/` makes those imports cross a
+ * layer boundary that the `import/no-restricted-paths` zones in
+ * `.eslintrc.cjs` reject.
  */
 
 /** The JavaScript representation bucket of an erased variant payload. The

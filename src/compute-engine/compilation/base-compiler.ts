@@ -62,8 +62,8 @@ import {
   wildcardName,
   wildcardType,
 } from '../boxed-expression/pattern-utils.js';
-import { sumVariantInfo, taggedSumInType } from './sum-representation.js';
-import type { SumBucket } from './sum-representation.js';
+import { sumVariantInfo, taggedSumInType } from '../sum-representation.js';
+import type { SumBucket } from '../sum-representation.js';
 import {
   buildCaseClosure,
   getMatchPlan,

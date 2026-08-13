@@ -23,7 +23,7 @@ import { isDictionary, isFunction } from './boxed-expression/type-guards.js';
 import { updateDef, defIsCallableShaped } from './boxed-expression/utils.js';
 import { functionLiteralParameters } from './boxed-expression/function-literal.js';
 import { apply } from './function-utils.js';
-import { sumVariantInfo } from './compilation/sum-representation.js';
+import { sumVariantInfo } from './sum-representation.js';
 
 /**
  * Value constructors minted by a type declaration

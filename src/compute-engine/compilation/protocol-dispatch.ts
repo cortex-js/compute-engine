@@ -16,7 +16,7 @@ import {
   bucketOf,
   sumVariantInfo,
   type SumBucket,
-} from './sum-representation.js';
+} from '../sum-representation.js';
 
 /**
  * PROTOCOL DISPATCH COMPILATION PLANNING — the JS-target lowering of protocol
