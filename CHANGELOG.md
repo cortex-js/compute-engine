@@ -7,7 +7,11 @@
   given in any order, may follow positional arguments (never precede
   them), and are matched against the parameter names of the declaration
   the call resolves through — including overloaded and multi-clause
-  functions (each overload is matched with its own parameter order) and
+  functions (each overload is matched with its own parameter order; a
+  named argument is also a **branch selector** — a clause that does not
+  declare the written names is never chosen, so with clauses `(z: 0)`
+  and `(n: integer)`, `f(n: 0)` runs the general `n` clause while
+  `f(0)` runs the base clause) and
   protocol members (`tag(prefix: "→", self: s)` dispatches on `self`
   wherever it is written). A call that uses any name is a complete call:
   omitted optional parameters are fine, but it never curries, and it

@@ -96,12 +96,16 @@ Named-argument calls shipped 2026-08-12 (design record:
 statements). Four deliberate v1 limits remain open, in rough priority
 order:
 
-- **Arm substitution after name filtering**: with overloads
-  `((a: number) -> number) & ((s: string) -> string)`, the call
-  `ov(a: "q")` evaluates the string arm (as if written `ov("q")`)
-  instead of erroring — the name was validated against an arm that did
-  not execute. No values land in wrong parameters; closing it costs a
-  boxed re-resolution on every named overloaded call.
+- **Declared-only overload sets can decline a named call R5 could
+  otherwise type.** (The former "arm substitution" residual was FIXED
+  2026-08-13 by ruling R5 — names now eliminate branches persistently,
+  enforced at the seam.) The remaining conservative case: an overload
+  set declared as a type with no clause implementations, where the
+  name-ELIMINATED arm is more specific than the survivor — there is no
+  clause literal to pin the call to, so it declines
+  (`argument-names-unavailable`) rather than letting the eliminated
+  arm type the call. Lifting it means threading the survivor set into
+  `validateArguments`/result typing.
 - **Unannotated function literals are not addressable by name** — type
   inference drops parameter names (`effects-inference.ts` types a bare
   parameter as `{ type: 'unknown' }`). MEASURED 2026-08-13: the

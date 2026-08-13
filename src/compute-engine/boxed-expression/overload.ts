@@ -832,21 +832,41 @@ export function armHasValueParam(arm: FunctionSignature): boolean {
  *   runtime.
  * - `{ kind: 'none' }` — every arm is refuted.
  *
+ * **Named calls (§4).** With `named`, `ops` is the call as WRITTEN and each arm
+ * is admitted and ranked on its OWN permutation of it, exactly as in
+ * {@link resolveOverload}: an arm the written names cannot fill (no
+ * permutation) is not a candidate at all, which is what makes sub-ruling R5's
+ * elimination survive into dispatch. `index` still indexes `arms`.
+ *
  * Write-free.
  */
 export function triStateSelect(
   ops: ReadonlyArray<Expression>,
-  arms: ReadonlyArray<FunctionSignature>
+  arms: ReadonlyArray<FunctionSignature>,
+  /** A named call's per-arm normalization; omitted for a positional call,
+   * which then takes byte-identical code paths to the pre-feature ones. */
+  named?: NamedCallPermutations
 ):
   | { kind: 'selected'; index: number }
   | { kind: 'blocked'; nonRefuted: number[] }
   | { kind: 'none' } {
-  const admissions = arms.map((a) => armAdmission(ops, a));
+  const admissions = arms.map((a, k): Admission => {
+    const permutation = named?.[k];
+    if (named !== undefined && permutation === undefined) return 'refute';
+    return armAdmission(
+      permutation === undefined ? ops : permuteOps(ops, permutation),
+      a
+    );
+  });
 
   let best = -1;
   for (let i = 0; i < arms.length; i++) {
     if (admissions[i] !== 'admit') continue;
-    if (best < 0 || isMoreSpecific(arms[i], arms[best], ops.length)) best = i;
+    if (
+      best < 0 ||
+      isMoreSpecific(arms[i], arms[best], ops.length, named?.[i], named?.[best])
+    )
+      best = i;
   }
 
   // An undecidable arm blocks unless the best admitted arm is STRICTLY more
@@ -856,7 +876,10 @@ export function triStateSelect(
   let blocked = false;
   for (let i = 0; i < arms.length; i++) {
     if (admissions[i] !== 'undecidable') continue;
-    if (best < 0 || !isMoreSpecific(arms[best], arms[i], ops.length)) {
+    if (
+      best < 0 ||
+      !isMoreSpecific(arms[best], arms[i], ops.length, named?.[best], named?.[i])
+    ) {
       blocked = true;
       break;
     }

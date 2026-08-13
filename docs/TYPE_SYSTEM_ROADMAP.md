@@ -2029,6 +2029,15 @@ interest(rate: 0.05, 1000, years: 10)  // error: positional after named
 interest(1000, principal: 2000)        // error: `principal` given twice
 ```
 
+A named argument is also a **branch selector** (design ruling R5,
+ratified 2026-08-13): when a function has several overloads or clauses,
+a branch that does not declare the written names is eliminated — even
+if the runtime value would have selected it. With clauses `(z: 0)`,
+`(o: 1)`, and `(n: integer)`, the call `f(n: 0)` runs the general `n`
+clause with argument 0, while `f(0)` runs the `z: 0` base clause.
+Among the branches that do declare the names, selection then proceeds
+exactly as for a positional call.
+
 A call that uses any name is a **complete** call (ruling C5): omitted
 `?`-optional parameters are fine, but a missing *required* parameter is
 an error — it never curries into a partial application — and a variadic

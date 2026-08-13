@@ -179,15 +179,22 @@ Design: `resolveOverload` (overload.ts:592) accepts the SPLIT call
   names. With arms like `(x: integer, y: string)` & `(y: number, x:
   string)`, the named winner's emitted order can satisfy the OTHER arm
   positionally; re-resolution picks it in declaration order, and the
-  author's named values land in the wrong parameters. The
-  implementation therefore re-resolves the emitted array
-  (`orderSurvivesReordering`, named-arguments.ts) and REJECTS the call
-  when the positional winner would read the operands in a different
-  order than the named winner. The guard runs only in the
-  disagreeing-permutation branch (zero cost elsewhere). Consequence:
-  when arms' parameter types cross-match positionally, even a uniquely
-  name-determined call declines (steering to a positional call) rather
-  than risk mis-binding.
+  author's named values land in the wrong parameters. Under R5 (ratified
+  2026-08-13) the response is ENFORCEMENT, not decline: the seam checks
+  whether the emitted plain call is FAITHFUL (`plainCallIsFaithful`,
+  named-arguments.ts) — statically, re-resolution must land on a
+  name-survivor reading the winner's order; at runtime (multi-clause
+  callees), every eliminated clause must be provably unreachable
+  (refuted by the operands, or beaten by a strictly-more-specific
+  survivor the call definitely admits — both stable under evaluation,
+  which only narrows operand types). When faithful, the ordinary call
+  is emitted unchanged (so `fib(n: 5)` still prints `fib(5)`); when
+  not, the call is pinned to the determined clause's literal via the
+  existing application path (`Apply(⟨clause literal⟩, …)` — so
+  `f(n: 0)` runs the `n` clause). A callee with no clause literal to
+  pin to (a declared-only overload set whose eliminated arm is more
+  specific) declines deterministically — the sanctioned conservative
+  residual, pinned by a test.
 - **Disagreeing permutations without a unique winner (sub-ruling R3,
   §9):** if several arms survive AND their permutations of the provided
   names differ AND ranking does not produce a unique winner, the call
@@ -309,7 +316,11 @@ sweep; `npx madge --circular` unchanged; full-suite snapshot blast
 radius measured and reported (expected zero — no canonical-form change
 for existing programs).
 
-## 9. Sub-rulings adopted here, for ratification
+## 9. Sub-rulings
+
+> R1–R4 RATIFIED 2026-08-13. R5 (names eliminate branches) RATIFIED the
+> same day — it supersedes the former "arm substitution" open residual
+> and upgrades the §4 guard from decline to enforcement.
 
 - **R1 — no optional holes** (`argument-optional-skipped`): named
   arguments cannot skip an earlier unsupplied optional. Forced by
@@ -324,16 +335,33 @@ for existing programs).
 - **R4 — `Apply`/inline-literal callees decline in v1**
   (`argument-names-unavailable`); mechanical follow-up recorded in §6.
   Includes the qualified `Protocol.member(...)` spelling (§5).
-- **Open residual — arm substitution after name filtering** (found in
-  implementation): when the name filter leaves exactly one arm and that
-  arm's TYPES then refuse the call, a different arm can still claim it
-  positionally downstream — with `ov: ((a: number) -> number) & ((s:
-  string) -> string)`, `ov(a: "q")` evaluates the STRING arm (exactly
-  as if written `ov("q")`) instead of erroring. No argument changes
-  position, so no wrong values — but the name was validated against an
-  arm that did not execute. Closing it means re-resolving with boxed
-  operands on every named overloaded call; left open for a ruling on
-  whether that cost is warranted.
+- **R5 — names eliminate branches, persistently (RATIFIED
+  2026-08-13).** A named argument is a STRONGER selector than a type or
+  a runtime value: a branch (overload arm, multi-clause clause) that
+  does not declare the written names is eliminated from consideration,
+  and the elimination is semantic — it survives past static resolution
+  into validation and runtime dispatch. Consequences:
+  - The former "arm substitution" residual is a BUG under this ruling,
+    not an accepted behavior: with `ov: ((a: number) -> number) & ((s:
+    string) -> string)`, the call `ov(a: "q")` name-eliminates the
+    string arm and must ERROR against the number arm
+    (`incompatible-type`), never run the string arm.
+  - Named calls are branch SELECTORS, stronger than positional sugar:
+    with clauses `(z: 0) -> …`, `(o: 1) -> …`, `(n: integer) -> …`, the
+    call `f(n: 0)` runs the GENERAL `n` clause with argument 0 — while
+    `f(0)` runs the `z: 0` base clause. Naming a parameter pins the
+    clause family that declares that name, even where runtime
+    value-dispatch would have chosen an eliminated clause.
+  - Within the name-surviving set, resolution proceeds exactly as
+    before (types statically, values at runtime): `f(a: 0)` against
+    clauses `(a: 0)`, `(a: integer)`, `(b: integer)` eliminates only
+    the `b` clause and still value-selects `(a: 0)` among the
+    survivors.
+  - The §4 guard upgrades from decline to ENFORCEMENT where the named
+    winner is unique; R3's error narrows to genuine ties (same types,
+    disagreeing name orders).
+  Cost: enforcement work (boxed re-resolution / restricted dispatch)
+  runs only on named calls to overloaded callees.
 - **Open — unannotated literals are not name-addressable** (§6).
   MEASURED 2026-08-13: applying the one-line `effects-inference.ts` fix
   (carry `p.name` in the bare-parameter fallback) breaks 37 tests

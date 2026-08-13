@@ -590,12 +590,16 @@ describe('overloads (§4) — per-arm permutation', () => {
     expect(errorCodes(ce.box(['tie', 1, 2] as any))).toEqual([]);
   });
 
-  test('swapped names: an order the reordered call would lose is an error', () => {
-    // What the seam emits is an operand ARRAY, never an arm selection, and the
-    // call is resolved again below it. Here the names select the second clause,
-    // but its reordered operands are ALSO accepted by the first — which reads
-    // them in the other order and would bind each value to the parameter the
-    // author did not name. Rejected rather than emitted.
+  test('swapped names: an order the reordered call would lose is ENFORCED (R5)', () => {
+    // What the seam normally emits is an operand ARRAY, never an arm
+    // selection, and the call is resolved again below it. Here the names
+    // select the second clause, but its reordered operands are ALSO accepted
+    // by the first — which reads them in the other order and would bind each
+    // value to the parameter the author did not name. The names determine ONE
+    // clause (the first refuses `x: "q"`), so the call is pinned to that
+    // clause's function literal rather than re-dispatched: that is what makes
+    // the name-elimination semantic (sub-ruling R5), and it is why the printed
+    // form is the direct application.
     const ce = new ComputeEngine();
     clause(ce, 'sel', [
       'Function',
@@ -610,15 +614,16 @@ describe('overloads (§4) — per-arm permutation', () => {
       T('x', 'string'),
     ]);
     const call = ce.box(['sel', N('x', { str: 'q' }), N('y', 7)] as any);
-    expect(errorCodes(call)).toEqual(['argument-names-unavailable']);
-    expect(call.toString()).toContain('disagree about the order');
-    // The unambiguous direction still resolves.
-    expect(
-      ce
-        .box(['sel', N('y', { str: 's' }), N('x', 7)] as any)
-        .evaluate()
-        .toString()
-    ).toBe('8');
+    expect(errorCodes(call)).toEqual([]);
+    expect(call.toString()).toBe('Apply((y, x) |-> y + 100, 7, "q")');
+    expect(call.evaluate().toString()).toBe('107');
+
+    // The unambiguous direction needs no pinning — the positional call it
+    // emits resolves to the very clause the names chose — so it keeps the
+    // ordinary printed form.
+    const other = ce.box(['sel', N('y', { str: 's' }), N('x', 7)] as any);
+    expect(other.toString()).toBe('sel(7, "s")');
+    expect(other.evaluate().toString()).toBe('8');
   });
 
   test('an all-positional call through the same overload sets is unchanged', () => {
@@ -644,6 +649,127 @@ describe('overloads (§4) — per-arm permutation', () => {
     expect(
       errorCodes(ce2.box(['sw', { str: 'q' }, 2] as any)).length
     ).toBeGreaterThan(0);
+  });
+
+  //
+  // Sub-ruling R5 — a name ELIMINATES every branch that does not declare it,
+  // and the elimination is semantic: it survives past static resolution into
+  // validation and into runtime clause dispatch. Within the surviving set,
+  // resolution proceeds exactly as it does for a positional call (types
+  // statically, values at runtime).
+  //
+
+  test('a single surviving arm whose types refuse is an error, not another arm (R5)', () => {
+    // `a` is declared by the number arm alone, so the string arm is gone
+    // before any type is looked at. The call must then be judged against the
+    // arm the name chose — which refuses a string — and never quietly handed
+    // to the arm that would have accepted it.
+    const ce = new ComputeEngine();
+    ce.declare('ov', '((a: number) -> number) & ((s: string) -> string)');
+    const call = ce.box(['ov', N('a', { str: 'q' })] as any);
+    expect(errorCodes(call)).toEqual(['incompatible-type']);
+    expect(call.toString()).toBe(
+      'ov(Error(ErrorCode("incompatible-type", "number", "string")))'
+    );
+    // The arm the name DOES fit is unaffected.
+    expect(errorCodes(ce.box(['ov', N('a', 1)] as any))).toEqual([]);
+    expect(ce.box(['ov', N('a', 1)] as any).type.toString()).toBe('number');
+  });
+
+  /** The `fib` clause shape with distinguishable bodies: which clause ran is
+   * readable off the result. */
+  function engineWithZON(): ComputeEngine {
+    const ce = new ComputeEngine();
+    clause(ce, 'f', ['Function', { str: 'zero' }, T('z', '0')]);
+    clause(ce, 'f', ['Function', { str: 'one' }, T('o', '1')]);
+    clause(ce, 'f', ['Function', { str: 'many' }, T('n', 'integer')]);
+    return ce;
+  }
+
+  test('a name outranks a runtime value: `f(n: 0)` runs the `n` clause (R5)', () => {
+    const ce = engineWithZON();
+    // Positionally, 0 dispatches to the base clause.
+    expect(ce.box(['f', 0] as any).evaluate().toString()).toBe('"zero"');
+    // Naming `n` eliminates the `z` and `o` clauses, and the elimination
+    // survives into dispatch: the call is pinned to the `n` clause's literal,
+    // which is what the changed printed form records.
+    const named = ce.box(['f', N('n', 0)] as any);
+    expect(errorCodes(named)).toEqual([]);
+    expect(named.toString()).toBe('Apply((n) |-> "many", 0)');
+    expect(named.evaluate().toString()).toBe('"many"');
+    // Naming the clause the value would have chosen anyway needs no pinning,
+    // so those calls keep the ordinary printed form.
+    expect(ce.box(['f', N('z', 0)] as any).toString()).toBe('f(0)');
+    expect(ce.box(['f', N('z', 0)] as any).evaluate().toString()).toBe(
+      '"zero"'
+    );
+    expect(ce.box(['f', N('o', 1)] as any).toString()).toBe('f(1)');
+    expect(ce.box(['f', N('o', 1)] as any).evaluate().toString()).toBe('"one"');
+    // No value divergence at all: an `n` call outside the base cases is the
+    // plain call it always was.
+    expect(ce.box(['f', N('n', 5)] as any).toString()).toBe('f(5)');
+    expect(ce.box(['f', N('n', 5)] as any).evaluate().toString()).toBe(
+      '"many"'
+    );
+  });
+
+  test('within the surviving family the VALUE still selects the clause (R5)', () => {
+    // `a` is declared by two clauses and `b` by a third. `f(a: …)` eliminates
+    // the `b` clause only, and the two `a` clauses are then discriminated by
+    // the argument's value exactly as a positional call discriminates them.
+    const ce = new ComputeEngine();
+    clause(ce, 'f', ['Function', { str: 'azero' }, T('a', '0')]);
+    clause(ce, 'f', ['Function', { str: 'aint' }, T('a', 'integer')]);
+    clause(ce, 'f', ['Function', { str: 'bnum' }, T('b', 'number')]);
+
+    // The eliminated `b` clause is less specific than the `a` clause this call
+    // admits, so the ordinary dispatch cannot reach it — no pinning needed,
+    // and the value picks between the two survivors.
+    expect(ce.box(['f', N('a', 0)] as any).toString()).toBe('f(0)');
+    expect(ce.box(['f', N('a', 0)] as any).evaluate().toString()).toBe(
+      '"azero"'
+    );
+    expect(ce.box(['f', N('a', 2)] as any).evaluate().toString()).toBe(
+      '"aint"'
+    );
+    // Naming `b` leaves a clause the value dispatch would NOT have chosen (the
+    // `a: 0` clause is more specific), so that call is pinned.
+    const b = ce.box(['f', N('b', 0)] as any);
+    expect(b.toString()).toBe('Apply((b) |-> "bnum", 0)');
+    expect(b.evaluate().toString()).toBe('"bnum"');
+  });
+
+  test('a declared overload set with nothing to pin the call to declines (R5)', () => {
+    // The name leaves the `number` arm, but the `integer` arm the name ruled
+    // out is more specific and would win the positional call this seam emits —
+    // and a set that is only DECLARED has no implementation to pin the call
+    // to (there is no clause literal to apply). Rather than let the
+    // eliminated arm type the call, the call declines and steers the author to
+    // a positional one.
+    const ce = new ComputeEngine();
+    ce.declare('ov', '((a: number) -> number) & ((s: integer) -> string)');
+    const call = ce.box(['ov', N('a', 3)] as any);
+    expect(errorCodes(call)).toEqual(['argument-names-unavailable']);
+    expect(call.toString()).toContain('call it with positional arguments');
+    // With an eliminated arm the positional call cannot reach, the same call
+    // shape is emitted untouched.
+    ce.declare('ov2', '((a: number) -> number) & ((s: string) -> string)');
+    expect(ce.box(['ov2', N('a', 3)] as any).toString()).toBe('ov2(3)');
+  });
+
+  test('the parse route runs the clause the names select (R5)', () => {
+    const ce = new ComputeEngine();
+    const result = executeEpsil(
+      ce,
+      `function f(z: 0) { "zero" }
+function f(o: 1) { "one" }
+function f(n: integer) { "many" }
+[f(0), f(n: 0), f(z: 0), f(n: 5)]`
+    );
+    expect(result.diagnostics).toEqual([]);
+    expect(JSON.stringify(result.value)).toBe(
+      '["List","\'zero\'","\'many\'","\'zero\'","\'many\'"]'
+    );
   });
 
   test('the parse route selects each clause by name', () => {

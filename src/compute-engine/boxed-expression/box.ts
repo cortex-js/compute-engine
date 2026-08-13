@@ -48,6 +48,7 @@ import {
   normalizeNamedArguments,
   splitNamedArguments,
 } from './named-arguments.js';
+import { multiClauseState } from '../multi-clause.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import {
@@ -1406,8 +1407,21 @@ function makeCanonicalFunction(
         split,
         isValueDef(def)
           ? calleeSignatureType(def.value)
-          : def.operator.signature.type
+          : def.operator.signature.type,
+        multiClauseState(def)?.clauses
       );
+      // Sub-ruling R5 enforcement: the names determined ONE clause of a
+      // multi-clause callee and the ordinary call would dispatch elsewhere, so
+      // the emitted expression applies that clause's literal directly instead
+      // of re-entering the callee (which has no names left to filter its
+      // clauses with). The printed form changes — `Apply(⟨literal⟩, …)` rather
+      // than `f(…)` — and only for a call whose value would otherwise diverge
+      // from what the names asked for.
+      if (normalized.kind === 'apply')
+        return ce.function('Apply', [normalized.literal, ...normalized.ops], {
+          metadata,
+          scope,
+        });
       if (normalized.kind === 'error')
         return new BoxedFunction(
           ce,

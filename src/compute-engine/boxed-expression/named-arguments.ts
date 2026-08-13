@@ -7,8 +7,16 @@ import type {
   ExpressionInput,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { overloadArms, resolveOverload } from './overload.js';
+import {
+  armAdmission,
+  diagnoseNoMatch,
+  isMoreSpecific,
+  overloadArms,
+  resolveOverload,
+  triStateSelect,
+} from './overload.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
+import type { FunctionClause } from '../multi-clause.js';
 
 /**
  * Named-argument calls: `f(rate: 0.05, years: 3)`.
@@ -85,6 +93,11 @@ export type NamedArgumentNormalization =
   | { kind: 'unavailable' }
   /** The written arguments, permuted into declaration order. */
   | { kind: 'ok'; ops: ExpressionInput[] }
+  /** Sub-ruling R5 enforcement: the names determined ONE clause of a
+   * multi-clause callee, and the ordinary call would not land on it — the
+   * emitted expression applies that clause's function literal directly instead
+   * of re-entering the callee's dispatch. */
+  | { kind: 'apply'; literal: Expression; ops: ExpressionInput[] }
   /** A diagnostic. `ops` is an operand list embedding one or more `Error`
    * expressions, to be used as the operands of the call being canonicalized so
    * the error surfaces where the offending argument was written. */
@@ -308,7 +321,12 @@ function blame(
 export function normalizeNamedArguments(
   ce: ComputeEngine,
   split: NamedArgumentSplit,
-  signature: Type | undefined
+  signature: Type | undefined,
+  /** The callee's clauses, when it is a multi-clause user function
+   * (`multiClauseState(def)?.clauses`). Their function literals are what
+   * sub-ruling R5 enforcement applies when the names determine a clause the
+   * ordinary dispatch would not select ({@link normalizeAgainstArms}). */
+  clauses?: ReadonlyArray<FunctionClause>
 ): NamedArgumentNormalization {
   if (split.malformed) return { kind: 'unavailable' };
 
@@ -344,7 +362,7 @@ export function normalizeNamedArguments(
 
   const arms = overloadArms(signature);
   if (arms === undefined || arms.length === 0) return { kind: 'unavailable' };
-  return normalizeAgainstArms(ce, split, arms);
+  return normalizeAgainstArms(ce, split, arms, clauses);
 }
 
 /**
@@ -650,25 +668,33 @@ function unknownNameCount(
  * …)`). So the §3 algorithm runs against each arm separately and the names
  * themselves filter arms, before any type is consulted:
  *
- * 1. One name-admissible arm — the answer, with no type work at all.
- * 2. Several arms that agree on the ORDER — the operand list is the same
- *    whichever of them wins, so emit it and let ordinary positional overload
- *    resolution choose the arm downstream, exactly as for a positional call.
- * 3. Several arms that DISAGREE on the order — only then are operand types
- *    consulted: `resolveOverload` admits and ranks each arm on its OWN
- *    permutation of the call, and the winner's order is emitted. Ranking that
- *    leaves the order undecided is sub-ruling R3, an error.
+ * 1. Every arm survives the names and they all agree on the ORDER — the
+ *    operand list is the same whichever of them wins, so emit it and let
+ *    ordinary positional resolution choose the arm downstream, exactly as for
+ *    a positional call. This is the zero-extra-work path.
+ * 2. Some arm is ELIMINATED by the names, or the survivors disagree about the
+ *    order — then operand types are consulted, and sub-ruling R5 applies: the
+ *    surviving arms are the only candidates, statically AND at runtime.
  *
- * "Normalize after win" — what is emitted is an operand array, never an arm
- * selection. The downstream machinery (`validateArguments`, and the runtime
- * clause dispatch of a multi-clause function) resolves the call again on those
- * operands as an ordinary positional call, which is what keeps static and
- * runtime selection sharing one decision procedure.
+ * **Sub-ruling R5 — names eliminate branches, persistently.** What the seam
+ * normally emits is an operand array, never an arm selection, and everything
+ * below it (`validateArguments`, and the runtime clause dispatch of a
+ * multi-clause function) resolves that array again with no names left to
+ * eliminate anything. That re-resolution may land on an arm the names ruled
+ * out — a more specific value clause, or an arm that reads the same operands
+ * in the other order. So the emitted call is checked against both
+ * re-resolutions ({@link plainCallIsFaithful}) and, when it would diverge,
+ * the winning CLAUSE's function literal is applied directly instead of the
+ * callee (`kind: 'apply'`), which is what makes the elimination semantic. A
+ * callee with no clause literals to apply (an overload set that is only
+ * declared) cannot be pinned that way, so a divergence there is an error
+ * steering the author to a positional call.
  */
 function normalizeAgainstArms(
   ce: ComputeEngine,
   split: NamedArgumentSplit,
-  arms: ReadonlyArray<FunctionSignature>
+  arms: ReadonlyArray<FunctionSignature>,
+  clauses: ReadonlyArray<FunctionClause> | undefined
 ): NamedArgumentNormalization {
   const perArm = arms.map((arm) => normalizeAgainstSignature(ce, split, arm));
   const permutations = perArm.map((r) =>
@@ -681,83 +707,231 @@ function normalizeAgainstArms(
   if (admissible.length === 0)
     return { kind: 'error', ops: blameNoArm(ce, split, arms, perArm) };
 
-  if (
-    admissible.every((r) => sameOrder(r.permutation, admissible[0].permutation))
-  )
-    return { kind: 'ok', ops: admissible[0].ops };
+  const agree = admissible.every((r) =>
+    sameOrder(r.permutation, admissible[0].permutation)
+  );
+  /** Did the names rule out an arm? Then R5's enforcement work is owed. */
+  const eliminated = admissible.length < arms.length;
 
-  // Only the disagreeing case pays for boxing the arguments: the types are
-  // what decide which order the call means. These boxed operands are used for
-  // resolution alone — the operand list handed back is the RAW one, so the
-  // ordinary path below the seam boxes each argument in its own context
-  // (contextual callback annotation, the binder pre-phase) as it always does.
+  if (agree && !eliminated) return { kind: 'ok', ops: admissible[0].ops };
+
+  // Past this point the call pays for boxing the arguments: the types are what
+  // decide which arm the names left, and in which order it reads them. These
+  // boxed operands are used for resolution alone — the operand list handed
+  // back is the RAW one, so the ordinary path below the seam boxes each
+  // argument in its own context (contextual callback annotation, the binder
+  // pre-phase) as it always does.
   const ops = fillingArguments(split).map((a) => ce.expr(a.value));
-  const resolved = resolveOverload(ce, ops, arms, undefined, permutations);
 
-  const winner = resolved.selectedPermutation;
-  // No arm survives TYPE admission. Emit the first name-admissible arm's order
-  // and let `validateArguments` report the type error on those operands: it
-  // owns the no-matching-overload diagnosis, and duplicating it here would
-  // give the same call two opinions.
-  if (winner === undefined) return { kind: 'ok', ops: admissible[0].ops };
-
-  if (
-    resolved.permutationAmbiguous ||
-    !orderSurvivesReordering(ce, ops, arms, permutations, winner)
-  ) {
-    const culprit = split.args.find((a) => a.name !== undefined)!;
-    return {
-      kind: 'error',
-      ops: blame(
-        split,
-        culprit.index,
-        ce.error([
-          'argument-names-unavailable',
-          culprit.name!,
-          'these names do not determine which parameter each argument fills: several overloads of this function accept the call and they disagree about the order; call it with positional arguments',
-        ])
-      ),
-    };
+  let winner: number[];
+  if (agree) {
+    winner = admissible[0].permutation;
+  } else {
+    // The surviving arms read the call in different orders, so which order it
+    // means is a typing question. `resolveOverload` admits and ranks each
+    // survivor on its OWN permutation (an arm with no permutation was
+    // name-eliminated and is not a candidate).
+    const resolved = resolveOverload(ce, ops, arms, undefined, permutations);
+    if (resolved.permutationAmbiguous)
+      return orderUndetermined(ce, split, ambiguousOrderDetail);
+    // No surviving arm admits the call's types. The refusal is reported below
+    // when it is PROVABLE (R5: the names picked those arms, so their refusal is
+    // the call's answer); otherwise emit the first survivor's order and let
+    // `validateArguments` own the no-matching-overload diagnosis, as before.
+    winner = resolved.selectedPermutation ?? admissible[0].permutation;
   }
 
-  return { kind: 'ok', ops: applyPermutation(split, winner) };
+  const emitted = applyPermutation(split, winner);
+  const reordered = new Array<Expression>(ops.length);
+  for (let j = 0; j < ops.length; j++) reordered[winner[j]] = ops[j];
+
+  // Which arm do the SURVIVORS give the call, by the same tri-state procedure
+  // the runtime clause dispatch uses?
+  const survivorPick = triStateSelect(ops, arms, permutations);
+
+  // Every surviving arm refutes the call. Under R5 that verdict is the call's:
+  // the names chose these arms, and a type they refuse may not be quietly
+  // handed to an arm the names ruled out (the arm-substitution bug). Reported
+  // here because `validateArguments` below the seam has no names left to know
+  // which arms were eliminated.
+  if (eliminated && survivorPick.kind === 'none')
+    return {
+      kind: 'error',
+      ops: blameRefusedBySurvivors(ce, reordered, arms, permutations, winner),
+    };
+
+  const clauseLiterals = alignedClauseLiterals(arms, clauses);
+
+  if (
+    plainCallIsFaithful(
+      ce,
+      reordered,
+      arms,
+      permutations,
+      winner,
+      clauseLiterals !== undefined
+    )
+  )
+    return { kind: 'ok', ops: emitted };
+
+  // The plain call would not land where the names point. Pin it to the clause
+  // the names determined, when there is a literal to pin it to — and when that
+  // clause reads the operands in the order they are emitted in. (The two
+  // procedures can disagree: `survivorPick` admits values, the ranking above
+  // admits types, so the clause the values select may not be the arm whose
+  // order `emitted` is in. Applying a literal to the other arm's order would
+  // bind each argument to the wrong parameter — the failure this whole feature
+  // exists to prevent — so that case declines instead.)
+  if (
+    clauseLiterals !== undefined &&
+    survivorPick.kind === 'selected' &&
+    sameOrder(permutations[survivorPick.index]!, winner)
+  )
+    return {
+      kind: 'apply',
+      literal: clauseLiterals[survivorPick.index],
+      ops: emitted,
+    };
+
+  return orderUndetermined(
+    ce,
+    split,
+    eliminated ? eliminatedBranchDetail : ambiguousOrderDetail
+  );
+}
+
+const ambiguousOrderDetail =
+  'these names do not determine which parameter each argument fills: several overloads of this function accept the call and they disagree about the order; call it with positional arguments';
+
+const eliminatedBranchDetail =
+  'these names select an overload that the same arguments would not select positionally, and this function has no single implementation the call can be pinned to; call it with positional arguments';
+
+/** The `argument-names-unavailable` decline, blamed on the first named
+ * argument — the call is well-formed, so what is at fault is the naming, not
+ * one particular value. */
+function orderUndetermined(
+  ce: ComputeEngine,
+  split: NamedArgumentSplit,
+  detail: string
+): NamedArgumentNormalization {
+  const culprit = split.args.find((a) => a.name !== undefined)!;
+  return {
+    kind: 'error',
+    ops: blame(
+      split,
+      culprit.index,
+      ce.error(['argument-names-unavailable', culprit.name!, detail])
+    ),
+  };
 }
 
 /**
- * Would the reordered call still bind each argument to the parameter its name
- * asked for?
+ * Would the ordinary positional call — the operand array this seam emits,
+ * resolved again with no names left to eliminate anything — still honor the
+ * names?
  *
- * What a named call emits is an operand ARRAY, never an arm selection: below
- * the seam the call is an ordinary positional one and is resolved again, by
- * `validateArguments` statically and by the clause selector at runtime. When
- * two arms take the same parameter TYPES in a different order — the swapped-
- * names shape — that second resolution can land on an arm that reads the very
- * same operands in the OTHER order, silently binding each argument to the
- * parameter the author did not name. That is the wrong-values failure the
- * whole feature exists to prevent, so it is rejected rather than emitted.
+ * Two re-resolutions run below the seam and neither may reach an arm the names
+ * ruled out:
  *
- * The test is on the ORDER, not on the arm: an arm that binds the same names
- * to the same slots is interchangeable here, whatever else distinguishes it.
- * `undefined` from the re-resolution is fine — no arm accepts the reordered
- * call, so `validateArguments` will report the type error on those operands.
- *
- * Only the disagreeing-permutation branch of {@link normalizeAgainstArms} runs
- * this: when every surviving arm consumes the arguments in the same order there
- * is no other order to be confused with.
+ * - `validateArguments` and result typing pick an arm with `resolveOverload`.
+ *   The arm it picks must be one the names left AND must read the operands in
+ *   the winning order. (Which of several surviving arms it picks does not
+ *   matter: within the surviving set, resolution proceeds exactly as it does
+ *   for a positional call — that is R5's third clause.)
+ * - a multi-clause callee dispatches again at runtime, over ALL its clauses,
+ *   with `triStateSelect` on the EVALUATED operands. Two facts about an
+ *   eliminated arm `E` put it out of reach whatever those values turn out to
+ *   be, because both are stable under evaluation (evaluation only narrows an
+ *   operand's type): `E` is REFUTED here, or a surviving arm that this call
+ *   definitely admits is strictly more specific than `E` — dispatch takes the
+ *   most specific admitted arm, so `E` can never be the one.
  */
-function orderSurvivesReordering(
+function plainCallIsFaithful(
   ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>,
+  reordered: ReadonlyArray<Expression>,
+  arms: ReadonlyArray<FunctionSignature>,
+  permutations: ReadonlyArray<number[] | undefined>,
+  winner: ReadonlyArray<number>,
+  dispatches: boolean
+): boolean {
+  const selected = resolveOverload(ce, reordered, arms).selected;
+  if (selected !== undefined) {
+    const order = permutations[arms.indexOf(selected)];
+    if (order === undefined || !sameOrder(order, winner)) return false;
+  }
+
+  if (!dispatches) return true;
+
+  /** The surviving arms this call definitely admits, read in the emitted
+   * order — the arms that beat a less specific one at every dispatch. */
+  const admitted = arms.filter(
+    (arm, k) =>
+      permutations[k] !== undefined &&
+      sameOrder(permutations[k]!, winner) &&
+      armAdmission(reordered, arm) === 'admit'
+  );
+
+  return arms.every((arm, k) => {
+    if (permutations[k] !== undefined) return true; // a survivor
+    if (armAdmission(reordered, arm) === 'refute') return true;
+    return admitted.some((s) => isMoreSpecific(s, arm, reordered.length));
+  });
+}
+
+/** The clause function literals of a multi-clause callee, index-aligned with
+ * `arms`, or `undefined` when there are none to apply or the alignment cannot
+ * be established.
+ *
+ * A clause list installs the intersection of the CLAUSE signatures as the
+ * definition's signature, so `arms[k]` is clause `k` — except when the symbol
+ * was declared before it was defined, where the author's declared signature is
+ * the definition's instead and its arms are unrelated to the clause list. The
+ * parameter names are what the elimination keys on, so they are what the
+ * alignment is checked with. */
+function alignedClauseLiterals(
+  arms: ReadonlyArray<FunctionSignature>,
+  clauses: ReadonlyArray<FunctionClause> | undefined
+): Expression[] | undefined {
+  if (clauses === undefined || clauses.length !== arms.length) return undefined;
+  for (let k = 0; k < arms.length; k++) {
+    const a = slotNames(arms[k]);
+    const b = slotNames(clauses[k].signature);
+    if (a.length !== b.length || a.some((n, i) => n !== b[i])) return undefined;
+  }
+  return clauses.map((c) => c.literal);
+}
+
+/** The diagnostic for a call every SURVIVING arm refuses on types (R5): the
+ * operands the survivors reject, marked where they were rejected. The same
+ * blame `validateArguments` computes, restricted to the arms the names left —
+ * and computed here because the names are gone below the seam.
+ *
+ * Only the survivors that read the operands in the winner's order can be
+ * diagnosed against one operand array; a survivor with another permutation
+ * has a different array and is left out (it refutes the call too, so no arm
+ * is exonerated by the omission). */
+function blameRefusedBySurvivors(
+  ce: ComputeEngine,
+  reordered: ReadonlyArray<Expression>,
   arms: ReadonlyArray<FunctionSignature>,
   permutations: ReadonlyArray<number[] | undefined>,
   winner: ReadonlyArray<number>
-): boolean {
-  const reordered = new Array<Expression>(ops.length);
-  for (let j = 0; j < ops.length; j++) reordered[winner[j]] = ops[j];
-  const selected = resolveOverload(ce, reordered, arms).selected;
-  if (selected === undefined) return true;
-  const order = permutations[arms.indexOf(selected)];
-  return order !== undefined && sameOrder(order, winner);
+): ExpressionInput[] {
+  const survivors = arms.filter((_, k) => {
+    const order = permutations[k];
+    return order !== undefined && sameOrder(order, winner);
+  });
+  const { refuted } = diagnoseNoMatch(ce, reordered, survivors);
+  const blamed = reordered.map((op, i) => {
+    const expected = refuted.get(i);
+    return expected === undefined ? op : ce.typeError(expected, op.type, op);
+  });
+  // A refusal must never come back fully valid: the same backstop
+  // `validateArguments` keeps for a `refuted` map that came back empty (an arm
+  // refused on arity alone, say).
+  if (blamed.every((x) => x.isValid))
+    blamed[0] = ce.error('unexpected-argument', reordered[0]?.toString() ?? '');
+  return blamed;
 }
 
 /**
