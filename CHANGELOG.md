@@ -114,6 +114,30 @@
 
 ### Issues Resolved
 
+- **A qualified protocol member now works as a collection callback.**
+  `Map([1, 2, 3], Negatable.negated)` used to answer
+  `["Missing", "Missing", "Missing"]`: the callback arrives at
+  canonicalization as the field expression `Field(Negatable, "negated")`,
+  and the shorthand-lambda lift read it as a lambda *body*, turning the
+  protocol name into the parameter — so every element was bound to the
+  protocol-name slot and read as the base of a field access. A qualified
+  protocol member is now recognized as a function *value* (the same
+  contract that already kept `Apply(InverseFunction(f), 2)` from
+  beta-reducing) and the callback dispatches per element. A protocol name
+  shadowed by a valued binding is not a protocol reference and reports the
+  ordinary not-a-function error instead of silently dispatching.
+
+- **A protocol dispatcher call inside a shorthand lambda body no longer
+  errors.** `Map([1, 2, 3], negated(_) * 10)` reported
+  `incompatible-type number/unknown` on the dispatcher call, while the
+  identical shape through a plain declared function worked. Cause: at an
+  undecided receiver, the requirement's `Self`-typed result substituted as
+  a type *reference* named "unknown" — printing exactly like the primitive
+  but defeating every gate that admits a primitive `unknown` operand as
+  "defer and infer later". The reference is now reduced to the primitive,
+  so the shorthand evaluates (`[-10, -20, -30]`) and an undecided receiver
+  defers symbolically as before.
+
 - **An assignment can now refine a use-inferred symbol type, so the inferred
   type no longer depends on whether the first use or the assignment came
   first.** Previously the inference direction rules were strictly one-way:
