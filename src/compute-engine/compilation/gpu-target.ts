@@ -27,7 +27,11 @@ import type {
   CompilationOptions,
   CompilationResult,
 } from './types.js';
-import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
+import {
+  BaseCompiler,
+  pointHasBroadcastComponent,
+  statementBodyHead,
+} from './base-compiler.js';
 import {
   isNonRealNumber,
   resolveTypeForCompilation,
@@ -395,6 +399,111 @@ function gpuAssertReturnPlacement(
       );
     }
   }
+}
+
+/**
+ * Fail closed (D6) when `code`, produced by an **expression-only** route, is
+ * not a single expression of the target language.
+ *
+ * `compileToSource()` answers with a bare expression string, and each
+ * `compileShader()` body statement is spliced into an assignment RHS
+ * (`<variable> = <code>;`). Neither position accepts a statement, and neither
+ * GLSL nor WGSL has an expression-level block or immediately-invoked function
+ * to wrap one in — so a body that lowers to a statement sequence (a `Block`
+ * with more than one statement, a loop-form `Sum`/`Product`/`Loop`) or to a
+ * bare `return` has no honest emission here. Before this gate both routes
+ * spliced the statements in verbatim, producing source no driver accepts
+ * (`gl_FragColor = float s;\ns = x;\nreturn return s;;`).
+ *
+ * The shapes that DO reduce to an expression are untouched: a single-statement
+ * `Block` already unwraps to its expression in the base compiler, so it never
+ * reaches this check with a newline.
+ *
+ * A token scan on the source about to be emitted, deliberately — the same
+ * technique (and the same two signals) as `gpuAssertReturnPlacement` and
+ * `BaseCompiler.compileValueOperand`'s `bareStatementBlocks` gate: a multi-line
+ * emission is a statement sequence on these targets, and `return` is a reserved
+ * word (`gpuCheckIdentifier`) so it cannot match a user identifier.
+ *
+ * The statement-capable route is `compile()`, which emits a function body — it
+ * is what the message points at.
+ */
+function gpuAssertExpressionOnly(
+  subject: string,
+  code: string,
+  language: string
+): void {
+  const multiStatement = code.includes('\n');
+  if (!multiStatement && !/\breturn\b/.test(code)) return;
+  const lang = language.toUpperCase();
+  const excerpt = (multiStatement ? code.split('\n')[0] : code).trim();
+  throw new Error(
+    `${subject}: this route emits a single ${lang} EXPRESSION, but the body ` +
+      `lowers to ${
+        multiStatement ? 'a statement sequence' : 'a bare `return` statement'
+      } (\`${excerpt}${multiStatement ? '…' : ''}\`). ${lang} has no ` +
+      `expression-level block or immediately-invoked function to wrap ` +
+      `statements in, so there is no valid emission for this position. ` +
+      `Compile a statement body with compile() instead — that route emits a ` +
+      `function body. Fail closed (D6).`
+  );
+}
+
+/**
+ * Fail closed (D6) on an expression-only GPU route whose body is STRUCTURALLY a
+ * statement — an assignment (WGSL only) or a declaration (both languages).
+ *
+ * `gpuAssertExpressionOnly` scans the emitted source for the two signals a
+ * statement leaves there — a newline and a `return` token — but these two
+ * shapes leave neither. Both are single-line emissions:
+ *
+ * - `Assign(s, x)` emits `s = x` on both targets. The languages then diverge.
+ *   In GLSL assignment is an OPERATOR, so `fragColor = s = x;` is valid source
+ *   and the emission is honest. In WGSL assignment is a STATEMENT, so the same
+ *   emission produces `output.fragColor = s = input.x;` — source no WGSL
+ *   compiler accepts, behind a reported success.
+ * - A root `Declare(s, 'number', x)` emits `float s` / `var s: f32` on BOTH
+ *   targets — a declaration is a statement in both languages, and the emission
+ *   silently DROPS the initializer `x` as well. Only the bare-`Declare` root
+ *   shape reaches here; wrapped in a multi-statement `Block` the declaration is
+ *   followed by more lines, which the emitted-source scan already declines.
+ *
+ * Structural, on the body BEFORE it is compiled (`statementBodyHead`),
+ * deliberately: the emitted `=` is not distinguishable by a token scan from the
+ * `=` of `==`/`<=`/`>=`/`!=` without re-deriving the emitter's precedence
+ * rules, so there is no textual check that cannot false-positive on a
+ * comparison.
+ *
+ * As everywhere in this class, the statement-capable route is `compile()`.
+ */
+export function gpuAssertExpressionBody(
+  subject: string,
+  expr: Expression,
+  language: string
+): void {
+  const head = statementBodyHead(expr);
+  if (head === undefined) return;
+  const lang = language.toUpperCase();
+  // GLSL assignment is an operator, so only WGSL declines an assignment body.
+  if (head === 'Assign') {
+    if (language !== 'wgsl') return;
+    throw new Error(
+      `${subject}: this route emits a single WGSL EXPRESSION, but the body is ` +
+        `an assignment. WGSL assignment is a STATEMENT (unlike GLSL, where it ` +
+        `is an operator), so the emitted \`… = <target> = <value>\` is not ` +
+        `valid source. Compile a statement body with compile() instead — that ` +
+        `route emits a function body. Fail closed (D6).`
+    );
+  }
+  throw new Error(
+    `${subject}: this route emits a single ${lang} EXPRESSION, but the body ` +
+      `is a declaration. A declaration is a STATEMENT in ${lang}, so the ` +
+      `emitted \`${language === 'wgsl' ? 'var s: f32' : 'float s'}\`-shaped ` +
+      `source is not valid in an expression position — and it carries no ` +
+      `initializer, so the declared value would be silently DROPPED. Compile ` +
+      `a statement body with compile() instead — that route emits a function ` +
+      `body. Fail closed (D6).`
+  );
 }
 
 /** Return the vec2 constructor name for the target language. */
@@ -8737,11 +8846,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // Deliberately NOT `compileFunctionBody`: this is not a statement position,
     // so there is nowhere to put a hoisted loop (Tycho item 110). With no sink
     // installed, a loop-form `Sum` falls back to the legacy block exactly as it
-    // did before hoisting existed.
-    return BaseCompiler.compile(
+    // did before hoisting existed — which is a statement sequence, so the gate
+    // below declines it rather than handing back statements as an "expression".
+    // The single-line statements the emitted-source scan below cannot see: on
+    // WGSL an assignment body emits `s = x`, which is a statement there, and on
+    // BOTH targets a root `Declare` emits a bare declaration (dropping its
+    // initializer). Checked structurally, before the body is compiled (D6).
+    gpuAssertExpressionBody('compileToSource()', expr, this.languageId);
+    const code = BaseCompiler.compile(
       expr,
       this.createTargetFor(expr, undefined, { userFunctions: undefined })
     );
+    // The contract of this route is an EXPRESSION. A body that lowers to
+    // statements has no emission here (D6) — this route throws, as it already
+    // does for a user-function head with no definition channel.
+    gpuAssertExpressionOnly('compileToSource()', code, this.languageId);
+    return code;
   }
 
   /**
@@ -8817,9 +8937,26 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       gpuDeclaredShapeFrame(declarations),
       () =>
         body.map((assignment) => {
+          // Same single-line holes as `compileToSource()`: `code` lands on the
+          // right of `${variable} = …;`, where neither a WGSL assignment nor a
+          // declaration (either language) is an expression. Checked on the
+          // body, before it is compiled.
+          gpuAssertExpressionBody(
+            `compileShader() body statement "${assignment.variable}"`,
+            assignment.expression,
+            this.languageId
+          );
           const { stmts, code } = BaseCompiler.compileStatementBody(
             assignment.expression,
             target
+          );
+          // `stmts` are hoisted STATEMENTS and the assembly emits them ahead of
+          // the assignment, so they are legal. `code` is not: it lands on the
+          // right of `${variable} = …;`, an expression position (D6).
+          gpuAssertExpressionOnly(
+            `compileShader() body statement "${assignment.variable}"`,
+            code,
+            this.languageId
           );
           return { variable: assignment.variable, code, stmts };
         })

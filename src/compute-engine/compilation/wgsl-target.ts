@@ -5,6 +5,7 @@ import {
   compileGPUMatrix,
   assertGPUScalarComponents,
   gpuOperandShape,
+  gpuAssertExpressionBody,
   type GPUShapeRules,
 } from './gpu-target.js';
 import { BaseCompiler } from './base-compiler.js';
@@ -195,6 +196,12 @@ export class WGSLTarget extends GPUShaderTarget {
     returnType: string,
     parameters: Array<[name: string, type: string]>
   ): string {
+    // Both branches below put the body in a position that requires a VALUE:
+    // the single-line one wraps it in `return`, the multi-line one relies on
+    // the block hook having done so. A body whose value statement is an
+    // assignment or a declaration has neither emission (D6) — WGSL
+    // assignment is a STATEMENT, unlike GLSL (see `gpuAssertExpressionBody`).
+    gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
     // Compiled under the caller's declared parameter shapes, so the body
     // analysis agrees with the signature emitted below.
     const body = this.compileDeclaredFunctionBody(expr, parameters);

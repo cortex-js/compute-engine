@@ -17,6 +17,7 @@ import {
   isProvablyStringComparisonParticipant,
   isProvablyStringOperand,
   isProvablyTupleParticipant,
+  statementBodyHead,
   unfaithfulComparisonAggregate,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -1009,6 +1010,140 @@ function withPythonHelpers(code: string): string {
   if (out.includes('_ce_indexof(')) out = `${PYTHON_INDEXOF_HELPER}\n${out}`;
   if (out.includes('_ce_ord(')) out = `${PYTHON_ORD_HELPER}\n${out}`;
   return out;
+}
+
+/**
+ * Fail closed (D6) when `code`, produced by the **expression-only**
+ * `compileToSource()` route, is not a single Python expression.
+ *
+ * `compileToSource()` answers with a bare expression string, and every consumer
+ * splices it into an expression position (`_value = (<code>)` in the pyexec
+ * harness, a `lambda` body, an f-string). Python `return`, `for` and `while`
+ * are STATEMENTS with no expression form, and Python has no expression-level
+ * block to wrap a statement sequence in — so a body that lowers to statements
+ * (a multi-statement `Block`, a statement-form `Loop`) has no honest emission
+ * here. Before this gate the route handed the statements back verbatim behind
+ * the string contract: `Block(s ≔ x; s)` returned `"s = x\nreturn s"`, and
+ * `Block(Declare s; s ≔ x; Return s)` returned `"s = x\nreturn return s"` —
+ * neither of which Python parses.
+ *
+ * Python does have expression-level binding forms — the immediately-applied
+ * `lambda` and the flat comprehension this target already uses for chained
+ * relations and CSE — so a general statement→expression lowering is
+ * conceivable. That is a FEATURE, not a gate: this declines and points at
+ * `compileFunction()`, the statement-capable route (it emits a `def`, and
+ * already special-cases a multi-line block body).
+ *
+ * Run on the code BEFORE `withPythonHelpers`/`withImports`: both legitimately
+ * prepend module-level `def`/`import` lines, which are this route's own
+ * documented preamble, not the body's shape.
+ *
+ * A token scan on the source about to be emitted, deliberately — the same
+ * technique (and the same two signals) as the GPU targets'
+ * `gpuAssertExpressionOnly` and `BaseCompiler.compileValueOperand`'s
+ * `bareStatementBlocks` gate. One Python-specific step: unlike the shader
+ * languages this target emits STRING literals (`string: JSON.stringify`), and
+ * a string whose content is `return` is an expression, so the `return` scan
+ * runs with the literals blanked out. The multi-line signal needs no such step
+ * — `JSON.stringify` escapes newlines.
+ */
+function pythonAssertExpressionOnly(subject: string, code: string): void {
+  const multiStatement = code.includes('\n');
+  if (
+    !multiStatement &&
+    !/\breturn\b/.test(code.replace(/"(?:[^"\\]|\\.)*"/g, '""'))
+  )
+    return;
+  const excerpt = (multiStatement ? code.split('\n')[0] : code).trim();
+  throw new Error(
+    `${subject}: this route emits a single Python EXPRESSION, but the body ` +
+      `lowers to ${
+        multiStatement ? 'a statement sequence' : 'a bare `return` statement'
+      } (\`${excerpt}${multiStatement ? '…' : ''}\`). Python has no ` +
+      `expression-level block, and \`return\`/\`for\`/\`while\` are ` +
+      `statements, so there is no valid emission for this position. Compile a ` +
+      `statement body with compileFunction() instead — that route emits a ` +
+      `\`def\`. Fail closed (D6).`
+  );
+}
+
+/**
+ * Fail closed (D6) on a Python **expression-only** route (`compileToSource()`,
+ * `compileLambda()`) whose body is STRUCTURALLY a statement.
+ *
+ * The companion to `pythonAssertExpressionOnly`, which scans the EMITTED source
+ * for a newline or a `return` token. Two body shapes leave neither signal, so
+ * they went out behind the expression contract:
+ *
+ * - `Assign(s, x)` (and `Block(s ≔ x)`, which unwraps to it) emits the single
+ *   line `s = x`. Python assignment is a STATEMENT: `compileToSource()`
+ *   returned `"s = x"` and `compileLambda()` returned `"lambda x: s = x"`,
+ *   neither of which parses. This target does not emit the walrus operator,
+ *   the only expression-level binding form that could carry an assignment here
+ *   — and `:=` is not a drop-in for `=` (different precedence, and it is
+ *   rejected at statement level and for attribute/subscript targets).
+ * - A root `Declare(s, 'number', x)` emits the EMPTY string — Python has no
+ *   declaration statement, so the target emits nothing for it, silently
+ *   dropping the declared name AND its initializer. `compileToSource()`
+ *   returned `""` and `compileLambda()` returned `"lambda x: "`.
+ *
+ * Structural, on the body BEFORE it is compiled — see `statementBodyHead` for
+ * why a textual `=` scan cannot do this job.
+ */
+function pythonAssertExpressionBody(subject: string, expr: Expression): void {
+  const head = statementBodyHead(expr);
+  if (head === undefined) return;
+  throw new Error(
+    `${subject}: this route emits a single Python EXPRESSION, but the body ` +
+      (head === 'Assign'
+        ? 'is an assignment. Python assignment is a STATEMENT (this target ' +
+          'does not emit the walrus operator), so the emitted `s = x` is not ' +
+          'valid in an expression position.'
+        : 'is a declaration. Python has no declaration statement, so this ' +
+          'target emits the EMPTY string for it — the declared name and its ' +
+          'initializer would be silently DROPPED.') +
+      ` Give the block a VALUE statement (\`Block(s ≔ x; s)\`) and compile it ` +
+      `with compileFunction() instead — that route emits a \`def\`. Fail ` +
+      `closed (D6).`
+  );
+}
+
+/**
+ * Fail closed (D6) when `compileFunction()`'s body is STRUCTURALLY a statement.
+ *
+ * `compileFunction()` is the statement-capable route the rest of this class
+ * points at, but neither of its two branches can carry a body whose VALUE
+ * statement is an assignment or a declaration:
+ *
+ * - The single-line branch wraps the body in `return`, so `Block(s ≔ x)` came
+ *   out as `def f(x):\n    return s = x\n` — invalid Python. So did the
+ *   `Declare` shapes (`return `, dropping the initializer; `return return s =
+ *   x` when block-wrapped).
+ * - The multi-line branch cannot take over: it emits the body verbatim under
+ *   the `def` and adds no `return` of its own — it relies on the block hook
+ *   having placed one on a VALUE statement. Routing `s = x` through it would
+ *   emit `def f(x):\n    s = x\n`, a `def` returning `None`, where the
+ *   interpreter gives the block the assigned value. And the branch has the
+ *   same hole at its own last line: `Block(s ≔ x; t ≔ s)` emitted
+ *   `    return t = s`.
+ *
+ * The fix is on the caller's side and the message says so: a block whose value
+ * statement is an EXPRESSION already compiles correctly through the multi-line
+ * branch (`Block(s ≔ x; s)` → `def f(x):\n    s = x\n    return s\n`).
+ */
+function pythonAssertReturnableBody(subject: string, expr: Expression): void {
+  const head = statementBodyHead(expr);
+  if (head === undefined) return;
+  throw new Error(
+    `${subject}: the body's value statement is ` +
+      (head === 'Assign'
+        ? 'an assignment'
+        : 'a declaration (which this target emits as nothing at all)') +
+      `, and a Python statement cannot be returned — this route would emit ` +
+      `\`return ${head === 'Assign' ? 's = x' : ''}\`, which does not parse. ` +
+      `Give the block a VALUE statement (\`Block(s ≔ x; s)\`), which compiles ` +
+      `to \`def f(x):\\n    s = x\\n    return s\`. Fail closed (D6).`
+  );
 }
 
 /**
@@ -2619,6 +2754,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): string {
+    // The single-line statements the emitted-source scan below cannot see: an
+    // assignment body emits `s = x` and a root `Declare` emits the empty
+    // string. Checked structurally, before the body is compiled (D6).
+    pythonAssertExpressionBody('compileToSource()', expr);
     const vars = options.vars as Record<string, string> | undefined;
     // Root compilation boundary (see `compile`).
     const target = this.createTarget({
@@ -2635,7 +2774,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
       isVarsKey: (name) =>
         vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
-    const code = withPythonHelpers(BaseCompiler.compileCseRoot(expr, target));
+    const body = BaseCompiler.compileCseRoot(expr, target);
+    // The contract of this route is an EXPRESSION. A body that lowers to
+    // statements has no emission here (D6). Checked on the BODY, before the
+    // helper/import preamble — those lines are the route's own, not the
+    // body's.
+    pythonAssertExpressionOnly('compileToSource()', body);
+    const code = withPythonHelpers(body);
     return this.includeImports ? this.withImports(code) : code;
   }
 
@@ -2655,6 +2800,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
     docstring?: string,
     options?: { cse?: boolean }
   ): string {
+    // Both branches below put the body in a position that requires a VALUE: the
+    // single-line one wraps it in `return`, the multi-line one relies on the
+    // block hook having done so. A body whose value statement is an assignment
+    // or a declaration has neither emission (D6).
+    pythonAssertReturnableBody('compileFunction()', expr);
     // Shadow the declared parameters so they stay bare identifiers (never
     // folded to an assigned engine value).
     // Root compilation boundary (see `compile`). The declared parameters are
@@ -2756,6 +2906,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
     parameters: string[],
     options?: { cse?: boolean }
   ): string {
+    // A lambda body is an EXPRESSION position, so the same two single-line
+    // statement shapes `compileToSource()` declines have no emission here
+    // either — the `\n` check below is blind to both (D6).
+    pythonAssertExpressionBody('compileLambda()', expr);
     // Root compilation boundary (see `compile` and `compileFunction`).
     const target = this.createTarget({
       var: this.makeVarResolver(undefined, parameters),

@@ -625,6 +625,40 @@ export function pointHasBroadcastComponent(expr: Expression): boolean {
 }
 
 /**
+ * The STATEMENT head `expr` lowers to at a body position — `'Assign'` or
+ * `'Declare'` — or `undefined` when the body is (or reduces to) an expression.
+ *
+ * The structural half of the expression-only contract, shared by the GPU and
+ * Python targets (each applies its own language policy to the answer: GLSL
+ * assignment is an OPERATOR and stays legal, WGSL and Python assignment are
+ * STATEMENTS; a declaration is a statement on all three).
+ *
+ * Structural, on the body BEFORE it is compiled, deliberately — the two
+ * emitted-source scans those targets already run (a newline, a `return` token)
+ * are blind to both shapes: `Assign(s, x)` emits the single line `s = x` and a
+ * root `Declare(s, 'number', x)` emits the single line `float s` / `var s: f32`
+ * (Python: the EMPTY string), each with the initializer silently dropped. A
+ * textual `=` scan cannot replace this without re-deriving the emitters'
+ * precedence rules — it would false-positive on `==`/`<=`/`>=`/`!=`.
+ *
+ * A `Block` delegates to its VALUE statement (its last operand), following the
+ * base compiler, which unwraps a single-statement block to that statement. A
+ * multi-statement `Block` is normally declined by the emitted-source scan
+ * anyway, but the two answers must agree on WHICH statement carries the value.
+ */
+export function statementBodyHead(
+  expr: Expression | undefined
+): 'Assign' | 'Declare' | undefined {
+  let body = expr;
+  while (body !== undefined && isFunction(body, 'Block') && body.ops.length > 0)
+    body = body.ops[body.ops.length - 1];
+  if (body === undefined) return undefined;
+  if (isFunction(body, 'Assign')) return 'Assign';
+  if (isFunction(body, 'Declare')) return 'Declare';
+  return undefined;
+}
+
+/**
  * Base compiler class containing language-agnostic compilation logic
  */
 export class BaseCompiler {

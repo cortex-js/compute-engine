@@ -3412,7 +3412,11 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
   it('JS: a top-level (non-lambda) block declares its assigned local', () => {
     const e = new ComputeEngine();
     e.declare('t', 'number');
-    const expr = e.box(['Block', ['Assign', 'w', ['Multiply', 2, 't']], ['Add', 'w', 1]]);
+    const expr = e.box([
+      'Block',
+      ['Assign', 'w', ['Multiply', 2, 't']],
+      ['Add', 'w', 1],
+    ]);
     const r = compile(expr);
     expect(r?.success).toBe(true);
     expect(r!.code).toContain('let w');
@@ -3802,7 +3806,13 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
     const e = new ComputeEngine();
     e.declare('t', 'number');
     const r = compile(
-      e.box(['Block', ['Declare', 's', 'number'], ['Assign', 's', 0], LOOP, 's'])
+      e.box([
+        'Block',
+        ['Declare', 's', 'number'],
+        ['Assign', 's', 0],
+        LOOP,
+        's',
+      ])
     );
     expect(r?.success).toBe(true);
     expect(r!.code).toContain('let s;');
@@ -4090,5 +4100,472 @@ describe('a GPU user-function body with an early `Return`', () => {
         12
       );
     }
+  });
+});
+
+// The expression-only GPU routes. `compileToSource()` answers with a bare
+// expression string, and each `compileShader()` body statement is spliced into
+// an assignment RHS (`fragColor = <code>;`) — both are EXPRESSION positions.
+// Neither was gated, so a multi-statement `Block` went out as bare statements
+// behind the expression contract: `compileToSource` returned
+// `"float s;\ns = x;\nreturn return s;"`, and `compileShader` emitted
+// `fragColor = float s;\ns = x;\nreturn return s;;`. Neither language has an
+// expression-level block or IIFE to wrap statements in, so both routes now
+// decline and point at `compile()`, which IS statement-capable.
+describe('the expression-only GPU routes decline statement bodies', () => {
+  const engineWithX = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('x', 'number');
+    return e;
+  };
+
+  /** `float s; s = x; return return s;` before the gate. */
+  const DECLARE_ASSIGN_RETURN: MathJsonExpression = [
+    'Block',
+    ['Declare', 's', 'number'],
+    ['Assign', 's', 'x'],
+    ['Return', 's'],
+  ];
+  /** `s = x;\nreturn s;` before the gate — a statement sequence, no `Return`. */
+  const ASSIGN_THEN_VALUE: MathJsonExpression = [
+    'Block',
+    ['Assign', 's', 'x'],
+    's',
+  ];
+  /** `return x` before the gate — a bare statement, not an expression. */
+  const BARE_RETURN: MathJsonExpression = ['Block', ['Return', 'x']];
+  /**
+   * The single-line hole the emitted-source scan cannot see: an assignment
+   * body emits `s = x` — one line, no `return` token — on BOTH targets. GLSL
+   * assignment is an OPERATOR, so `fragColor = s = x;` is valid there; WGSL
+   * assignment is a STATEMENT, so the same emission is invalid source behind a
+   * reported success. Declined structurally on WGSL only.
+   */
+  const ASSIGN_ONLY: MathJsonExpression = ['Block', ['Assign', 's', 'x']];
+  /**
+   * The other single-line hole the emitted-source scan cannot see: a ROOT
+   * `Declare` emits one bare declaration — `float s` / `var s: f32` — on both
+   * targets. A declaration is a STATEMENT in BOTH languages (unlike the
+   * assignment above, which GLSL keeps), and the emission also silently DROPS
+   * the initializer `x`. Only the bare root shape leaks: block-wrapped with
+   * anything after it, the declaration is followed by more lines and the
+   * multi-line gate already declines it.
+   */
+  const DECLARE_ONLY: MathJsonExpression = ['Declare', 's', 'number', 'x'];
+
+  const gpuTargets = () => [new GLSLTarget(), new WGSLTarget()];
+
+  const shaderFor = (
+    target: GLSLTarget | WGSLTarget,
+    expr: MathJsonExpression,
+    e: ComputeEngine
+  ): string =>
+    target.compileShader({
+      type: 'fragment',
+      inputs: [{ name: 'x', type: 'float' }],
+      outputs: [{ name: 'fragColor', type: 'vec4' }],
+      body: [
+        {
+          variable:
+            target instanceof WGSLTarget ? 'output.fragColor' : 'fragColor',
+          expression: e.box(expr),
+        },
+      ],
+    } as never);
+
+  it('compileToSource() declines a multi-statement block', () => {
+    for (const body of [DECLARE_ASSIGN_RETURN, ASSIGN_THEN_VALUE])
+      for (const target of gpuTargets()) {
+        const e = engineWithX();
+        expect(() => target.compileToSource(e.box(body))).toThrow(
+          /compileToSource\(\): this route emits a single (GLSL|WGSL) EXPRESSION, but the body lowers to a statement sequence/
+        );
+        expect(() => target.compileToSource(e.box(body))).toThrow(
+          /Compile a statement body with compile\(\) instead/
+        );
+      }
+  });
+
+  it('compileToSource() declines a body that lowers to a bare `return`', () => {
+    for (const target of gpuTargets())
+      expect(() =>
+        target.compileToSource(engineWithX().box(BARE_RETURN))
+      ).toThrow(
+        /compileToSource\(\): this route emits a single (GLSL|WGSL) EXPRESSION, but the body lowers to a bare `return` statement \(`return (x|input\.x)`\)/
+      );
+  });
+
+  it('compileShader() declines the same statement bodies', () => {
+    for (const body of [DECLARE_ASSIGN_RETURN, ASSIGN_THEN_VALUE, BARE_RETURN])
+      for (const target of gpuTargets())
+        expect(() => shaderFor(target, body, engineWithX())).toThrow(
+          /compileShader\(\) body statement "(fragColor|output\.fragColor)": this route emits a single (GLSL|WGSL) EXPRESSION/
+        );
+  });
+
+  it('expression bodies are untouched on both routes', () => {
+    // The controls that MUST keep working, byte for byte. A single-statement
+    // `Block` already unwraps to its expression in the base compiler, so it
+    // never reaches the gate — no new lowering was built for it.
+    const EXPR: MathJsonExpression = ['Add', 'x', 1];
+    const WRAPPED: MathJsonExpression = ['Block', ['Add', 'x', 1]];
+
+    for (const target of gpuTargets()) {
+      const e = engineWithX();
+      expect(target.compileToSource(e.box(EXPR))).toBe('x + 1.0');
+      expect(target.compileToSource(e.box(WRAPPED))).toBe('x + 1.0');
+
+      const bare = shaderFor(target, EXPR, engineWithX());
+      const wrapped = shaderFor(target, WRAPPED, engineWithX());
+      expect(wrapped).toBe(bare);
+      expect(bare).toContain(
+        target instanceof WGSLTarget
+          ? '  output.fragColor = input.x + 1.0;\n'
+          : '  fragColor = x + 1.0;\n'
+      );
+    }
+  });
+
+  it('WGSL declines an assignment body on both routes', () => {
+    // A `Block` nests too: the base compiler unwraps a single-statement block
+    // to its statement, so the check follows the block's value statement down.
+    const NESTED: MathJsonExpression = ['Block', ASSIGN_ONLY];
+    const wgsl = new WGSLTarget();
+
+    for (const body of [
+      ASSIGN_ONLY,
+      NESTED,
+      ['Assign', 's', 'x'] as MathJsonExpression,
+    ])
+      expect(() => wgsl.compileToSource(engineWithX().box(body))).toThrow(
+        /compileToSource\(\): this route emits a single WGSL EXPRESSION, but the body is an assignment/
+      );
+
+    expect(() => wgsl.compileToSource(engineWithX().box(ASSIGN_ONLY))).toThrow(
+      /WGSL assignment is a STATEMENT \(unlike GLSL, where it is an operator\)/
+    );
+    expect(() => shaderFor(wgsl, ASSIGN_ONLY, engineWithX())).toThrow(
+      /compileShader\(\) body statement "output\.fragColor": this route emits a single WGSL EXPRESSION, but the body is an assignment/
+    );
+  });
+
+  it('both languages decline a bare-`Declare` body, whose initializer was dropped', () => {
+    // Before the gate: `compileToSource` returned `"float s"` / `"var s: f32"`
+    // and `compileShader` emitted `fragColor = float s;` — a statement in an
+    // expression position, with the initializer `x` nowhere in the output.
+    const NESTED: MathJsonExpression = ['Block', DECLARE_ONLY];
+    for (const target of gpuTargets())
+      for (const body of [DECLARE_ONLY, NESTED]) {
+        expect(() => target.compileToSource(engineWithX().box(body))).toThrow(
+          /compileToSource\(\): this route emits a single (GLSL|WGSL) EXPRESSION, but the body is a declaration/
+        );
+        expect(() => target.compileToSource(engineWithX().box(body))).toThrow(
+          /carries no initializer, so the declared value would be silently DROPPED/
+        );
+        expect(() => shaderFor(target, body, engineWithX())).toThrow(
+          /compileShader\(\) body statement "(fragColor|output\.fragColor)": this route emits a single (GLSL|WGSL) EXPRESSION, but the body is a declaration/
+        );
+      }
+    // A declaration with no initializer at all is the same statement shape.
+    for (const target of gpuTargets())
+      expect(() =>
+        target.compileToSource(engineWithX().box(['Declare', 's', 'number']))
+      ).toThrow(/but the body is a declaration/);
+  });
+
+  it('GLSL keeps the same assignment body — it IS an expression there', () => {
+    // The control for the WGSL decline: byte-identical to before the gate.
+    const glsl = new GLSLTarget();
+    expect(glsl.compileToSource(engineWithX().box(ASSIGN_ONLY))).toBe('s = x');
+    expect(glsl.compileToSource(engineWithX().box(['Assign', 's', 'x']))).toBe(
+      's = x'
+    );
+    expect(shaderFor(glsl, ASSIGN_ONLY, engineWithX())).toContain(
+      '  fragColor = s = x;\n'
+    );
+  });
+
+  it('compile() — the statement-capable route — is unchanged', () => {
+    // The escape hatch the message names still emits the statement block.
+    for (const target of gpuTargets()) {
+      const r = target.compile(engineWithX().box(ASSIGN_THEN_VALUE));
+      expect(r.success).toBe(true);
+      expect(r.code).toBe('s = x;\nreturn s;');
+    }
+    // And it still emits the assignment WGSL declines above, and the
+    // declaration both languages now decline.
+    expect(new WGSLTarget().compile(engineWithX().box(ASSIGN_ONLY)).code).toBe(
+      's = x'
+    );
+    expect(new GLSLTarget().compile(engineWithX().box(DECLARE_ONLY)).code).toBe(
+      'float s'
+    );
+    expect(new WGSLTarget().compile(engineWithX().box(DECLARE_ONLY)).code).toBe(
+      'var s: f32'
+    );
+  });
+
+  // `compileFunction()` — the route every message above points at — had the
+  // same defect one level down, in BOTH its branches: the single-line one
+  // wraps the body in `return`, the multi-line one relies on the block hook
+  // having placed one on the last line. Neither an assignment (WGSL) nor a
+  // declaration (both languages) has that emission — GLSL keeps the
+  // assignment, since assignment is an operator there.
+  it('compileFunction() declines a statement body in either branch', () => {
+    // Declaration: declined on BOTH languages, single-line branch — emitted
+    // `return float s;` / `return var s: f32;` before, dropping `x`.
+    for (const target of gpuTargets()) {
+      const lang = target instanceof WGSLTarget ? 'WGSL' : 'GLSL';
+      expect(() =>
+        target.compileFunction(engineWithX().box(DECLARE_ONLY), 'f', 'float', [
+          ['x', 'float'],
+        ])
+      ).toThrow(
+        new RegExp(
+          `compileFunction\\(\\): this route emits a single ${lang} EXPRESSION, but the body is a declaration`
+        )
+      );
+    }
+
+    const wgsl = new WGSLTarget();
+    // Assignment: declined on WGSL only, single-line branch — emitted
+    // `return s = x;` before.
+    expect(() =>
+      wgsl.compileFunction(engineWithX().box(ASSIGN_ONLY), 'f', 'float', [
+        ['x', 'float'],
+      ])
+    ).toThrow(
+      /compileFunction\(\): this route emits a single WGSL EXPRESSION, but the body is an assignment/
+    );
+    // Assignment: declined on WGSL, multi-line branch — the same hole at its
+    // own last line (`Block(s ≔ x; t ≔ s)` emitted `… return t = s;\n}`).
+    expect(() =>
+      wgsl.compileFunction(
+        engineWithX().box(['Block', ['Assign', 's', 'x'], ['Assign', 't', 's']]),
+        'f',
+        'float',
+        [['x', 'float']]
+      )
+    ).toThrow(
+      /compileFunction\(\): this route emits a single WGSL EXPRESSION, but the body is an assignment/
+    );
+  });
+
+  it('GLSL compileFunction() keeps an assignment body — it IS an expression there', () => {
+    // The control for the WGSL decline above: byte-identical to before the
+    // gate.
+    const glsl = new GLSLTarget();
+    expect(
+      glsl.compileFunction(engineWithX().box(ASSIGN_ONLY), 'f', 'float', [
+        ['x', 'float'],
+      ])
+    ).toBe('float f(float x) {\n  return s = x;\n}');
+    expect(
+      glsl.compileFunction(
+        engineWithX().box(['Block', ['Assign', 's', 'x'], ['Assign', 't', 's']]),
+        'f',
+        'float',
+        [['x', 'float']]
+      )
+    ).toBe('float f(float x) {\n  float t;\n  s = x;\n  return t = s;\n}');
+  });
+});
+
+// The expression-only PYTHON route, the same defect one target over.
+// `PythonTarget.compileToSource()` answers with a bare expression string, but
+// this is a `bareStatementBlocks: true` target: a `Block` lowers to a
+// newline-joined statement sequence with the last statement `return`-prefixed.
+// Ungated, that went out behind the expression contract — `Block(s ≔ x; s)`
+// returned `"s = x\nreturn s"`, and `Block(Declare s; s ≔ x; Return s)`
+// returned `"s = x\nreturn return s"` (a doubled `return`). Neither parses.
+// Python's expression-level binding forms (the applied `lambda`, the flat CSE
+// comprehension) could in principle carry a lowering, but that is a feature —
+// this declines and points at `compileFunction()`, which emits a `def`.
+describe('the expression-only Python route declines statement bodies', () => {
+  const engineWithX = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('x', 'number');
+    return e;
+  };
+
+  /** `s = x\nreturn s` before the gate. */
+  const ASSIGN_THEN_VALUE: MathJsonExpression = [
+    'Block',
+    ['Assign', 's', 'x'],
+    's',
+  ];
+  /** `s = x\nreturn return s` before the gate — the doubled `return`. */
+  const DECLARE_ASSIGN_RETURN: MathJsonExpression = [
+    'Block',
+    ['Declare', 's', 'number'],
+    ['Assign', 's', 'x'],
+    ['Return', 's'],
+  ];
+  /** `return x` before the gate — a bare statement. */
+  const BARE_RETURN: MathJsonExpression = ['Block', ['Return', 'x']];
+  /**
+   * The two single-line holes the emitted-source scan cannot see. An
+   * assignment body emits `s = x` — one line, no `return` token — and Python
+   * assignment is a STATEMENT (this target emits no walrus operator). A root
+   * `Declare` emits the EMPTY string: Python has no declaration statement, so
+   * the name and its initializer both vanish.
+   */
+  const ASSIGN_ONLY: MathJsonExpression = ['Block', ['Assign', 's', 'x']];
+  const DECLARE_ONLY: MathJsonExpression = ['Declare', 's', 'number', 'x'];
+
+  it('declines a multi-statement block', () => {
+    for (const body of [ASSIGN_THEN_VALUE, DECLARE_ASSIGN_RETURN]) {
+      const python = new PythonTarget();
+      expect(() => python.compileToSource(engineWithX().box(body))).toThrow(
+        /compileToSource\(\): this route emits a single Python EXPRESSION, but the body lowers to a statement sequence \(`s = x…`\)/
+      );
+      expect(() => python.compileToSource(engineWithX().box(body))).toThrow(
+        /Compile a statement body with compileFunction\(\) instead/
+      );
+    }
+  });
+
+  it('declines a body that lowers to a bare `return`', () => {
+    expect(() =>
+      new PythonTarget().compileToSource(engineWithX().box(BARE_RETURN))
+    ).toThrow(
+      /compileToSource\(\): this route emits a single Python EXPRESSION, but the body lowers to a bare `return` statement \(`return x`\)/
+    );
+  });
+
+  it('expression bodies are untouched, byte for byte', () => {
+    // The controls that MUST keep working. A single-statement `Block` unwraps
+    // to its expression in the base compiler, so it never reaches the gate.
+    const python = new PythonTarget();
+    const e = engineWithX();
+    expect(python.compileToSource(e.box(['Add', 'x', 1]))).toBe('x + 1');
+    expect(python.compileToSource(e.box(['Block', ['Add', 'x', 1]]))).toBe(
+      'x + 1'
+    );
+    // A CSE emission is a flat comprehension — one line, and it stays one.
+    expect(
+      python.compileToSource(
+        e.parse('\\sin(6u)^2+\\frac{\\sin(6u)}{\\sin(6u)+2}')
+      )
+    ).toBe(
+      '[_cse1 ** 2 + _cse1 / (_cse1 + 2) for _cse1 in [np.sin(6 * u)]][0]'
+    );
+  });
+
+  it('a string literal containing `return` is an expression, not a statement', () => {
+    // The `return` token scan runs with Python string literals blanked out —
+    // this target emits them, and their CONTENT is not source.
+    expect(
+      new PythonTarget().compileToSource(
+        engineWithX().box({ str: 'a return b' })
+      )
+    ).toBe('"a return b"');
+  });
+
+  it('compileFunction() — the statement-capable route — is unchanged', () => {
+    // The escape hatch the message names still emits the statement block,
+    // indented under the `def` with the `return` the block hook placed.
+    expect(
+      new PythonTarget().compileFunction(
+        engineWithX().box(ASSIGN_THEN_VALUE),
+        'f',
+        ['x']
+      )
+    ).toBe('def f(x):\n    s = x\n    return s\n');
+  });
+
+  it('declines an assignment body — a statement, not an expression', () => {
+    // Before the gate: `compileToSource` returned `"s = x"` and `compileLambda`
+    // returned `"lambda x: s = x"`. Neither parses — unlike GLSL (see the GPU
+    // block above), Python assignment is not an operator, and this target does
+    // not emit `:=`. A `Block` nests: the check follows its value statement.
+    const python = new PythonTarget();
+    for (const body of [
+      ASSIGN_ONLY,
+      ['Assign', 's', 'x'] as MathJsonExpression,
+      ['Block', ASSIGN_ONLY] as MathJsonExpression,
+    ]) {
+      expect(() => python.compileToSource(engineWithX().box(body))).toThrow(
+        /compileToSource\(\): this route emits a single Python EXPRESSION, but the body is an assignment/
+      );
+      expect(() => python.compileLambda(engineWithX().box(body), ['x'])).toThrow(
+        /compileLambda\(\): this route emits a single Python EXPRESSION, but the body is an assignment/
+      );
+    }
+    expect(() => python.compileToSource(engineWithX().box(ASSIGN_ONLY))).toThrow(
+      /Python assignment is a STATEMENT \(this target does not emit the walrus operator\)/
+    );
+  });
+
+  it('declines a bare-`Declare` body, which emitted nothing at all', () => {
+    // Before the gate `compileToSource` returned `""` and `compileLambda`
+    // returned `"lambda x: "` — the declared name AND its initializer dropped.
+    const python = new PythonTarget();
+    for (const body of [
+      DECLARE_ONLY,
+      ['Declare', 's', 'number'] as MathJsonExpression,
+      ['Block', DECLARE_ONLY] as MathJsonExpression,
+    ]) {
+      expect(() => python.compileToSource(engineWithX().box(body))).toThrow(
+        /compileToSource\(\): this route emits a single Python EXPRESSION, but the body is a declaration/
+      );
+      expect(() => python.compileLambda(engineWithX().box(body), ['x'])).toThrow(
+        /compileLambda\(\): this route emits a single Python EXPRESSION, but the body is a declaration/
+      );
+    }
+    expect(() => python.compileToSource(engineWithX().box(DECLARE_ONLY))).toThrow(
+      /the declared name and its initializer would be silently DROPPED/
+    );
+  });
+
+  // `compileFunction()` — the route every message above points at — had the
+  // same defect one level down, in BOTH its branches. DECLINE, not a reroute:
+  // the multi-line branch adds no `return` of its own (it relies on the block
+  // hook having placed one on a VALUE statement), so routing `s = x` through it
+  // emits `def f(x):\n    s = x\n` — a `def` returning `None`, where the
+  // interpreter gives `Block(s ≔ x)` the assigned value. That is a different
+  // answer, not the pinned `…\n    return s\n` shape, so there is no honest
+  // reuse. The caller's fix — give the block a value statement — already works
+  // and is pinned by the test above.
+  it('compileFunction() declines a statement body in either branch', () => {
+    const python = new PythonTarget();
+    // Single-line branch: emitted `def f(x):\n    return s = x\n` before.
+    for (const body of [ASSIGN_ONLY, ['Assign', 's', 'x'] as MathJsonExpression])
+      expect(() =>
+        python.compileFunction(engineWithX().box(body), 'f', ['x'])
+      ).toThrow(
+        /compileFunction\(\): the body's value statement is an assignment, and a Python statement cannot be returned/
+      );
+    // Multi-line branch, same hole at its own last line: `Block(s ≔ x; t ≔ s)`
+    // emitted `def f(x):\n    s = x\n    return t = s\n`.
+    expect(() =>
+      python.compileFunction(
+        engineWithX().box(['Block', ['Assign', 's', 'x'], ['Assign', 't', 's']]),
+        'f',
+        ['x']
+      )
+    ).toThrow(
+      /compileFunction\(\): the body's value statement is an assignment/
+    );
+    // A declaration value statement: emitted `def f(x):\n    return \n` (root,
+    // initializer dropped) and `def f(x):\n    return return s = x\n` (wrapped).
+    for (const body of [DECLARE_ONLY, ['Block', DECLARE_ONLY] as MathJsonExpression])
+      expect(() =>
+        python.compileFunction(engineWithX().box(body), 'f', ['x'])
+      ).toThrow(
+        /compileFunction\(\): the body's value statement is a declaration \(which this target emits as nothing at all\)/
+      );
+    // The message names the caller-side fix, and that fix is what works.
+    expect(() =>
+      python.compileFunction(engineWithX().box(ASSIGN_ONLY), 'f', ['x'])
+    ).toThrow(/Give the block a VALUE statement/);
+  });
+
+  it('compile() — the raw statement route — is unchanged', () => {
+    // The control for all four declines above: `compile()` never claimed an
+    // expression, and still emits exactly what it did.
+    const python = new PythonTarget();
+    expect(python.compile(engineWithX().box(ASSIGN_ONLY)).code).toBe('s = x');
+    expect(python.compile(engineWithX().box(DECLARE_ONLY)).code).toBe('');
   });
 });
