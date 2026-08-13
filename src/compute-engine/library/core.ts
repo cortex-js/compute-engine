@@ -90,6 +90,10 @@ import {
   ClauseDefinitionError,
   clauseListing,
   defineFunctionClause,
+  canonInstallSkipped,
+  isGenericClauseLiteral,
+  isGenericTarget,
+  noteCanonInstallSkipped,
   loosenForClauseDefinition,
 } from '../multi-clause.js';
 import {
@@ -2089,6 +2093,73 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 callableBefore: true,
                 callableAfter: true,
               });
+            }
+          }
+        }
+        // Install the clause NOW, not only when the definition evaluates, so
+        // that a later statement's calls validate against the real signature.
+        // Without this the target keeps the loosened `function` type set
+        // above — the top type, which promises no arity — so `foo("hello")`
+        // against `function foo(x: string, n: integer)` type-checks
+        // vacuously. That is invisible when a program runs (the definition
+        // has evaluated by the time the call does), but the Epsil static
+        // pre-pass canonicalizes EVERY statement before anything runs, so
+        // there it is the difference between `epsil check` catching a wrong
+        // call to a user-defined function and passing it clean.
+        //
+        // Same reason — and the same canonicalization-time timing — as the
+        // constructor-function recognition above (§4.5b D13).
+        //
+        // Placement is load-bearing twice over: after `args[1].canonical`, so
+        // the recursion knot above still holds while the body canonicalizes;
+        // and after `restoreClause()`, so the install lands on the restored
+        // binding rather than the loosened one.
+        //
+        // The evaluate route runs `defineFunctionClause` again on this same
+        // clause. For an ordinary clause that is a no-op rather than a
+        // duplicate arm: a clause whose parameter domain matches an installed
+        // one replaces it in place.
+        //
+        // ANYTHING GENERIC is excluded, because that no-op does not hold for
+        // it. `defineFunctionClause` refuses ANY clause onto an
+        // already-generic definition (rule G2: generic functions are
+        // single-clause), and that gate runs before the replace logic — so an
+        // install here would make the evaluate route reject its own
+        // re-installation with `generic-clause-unsupported`. Both directions
+        // have to be excluded: a generic CLAUSE (`function f<T>(x: T) { … }`)
+        // would make the target generic, and a plain clause onto a target
+        // that is ALREADY generic (`ce.declare('k', '(T) -> T where T')` then
+        // `function k(x) { … }`) installs through the generic boundary and
+        // leaves it generic just the same. The cost is that calls to a
+        // generic function are still not argument-checked until it has
+        // evaluated; closing that needs the two routes to agree on which one
+        // owns the install, which is a larger change than this one.
+        if (
+          !isCtorTarget &&
+          !isAliasTarget &&
+          symbolName !== undefined &&
+          isFunction(canonFn, 'Function')
+        ) {
+          const target = ce.lookupDefinition(symbolName);
+          if (
+            isGenericClauseLiteral(canonFn) ||
+            isGenericTarget(target) ||
+            canonInstallSkipped(target)
+          ) {
+            // Skipping one clause of a name obliges us to skip the rest of
+            // them; `canonInstallSkipped` explains why.
+            noteCanonInstallSkipped(target);
+          } else {
+            try {
+              defineFunctionClause(ce, symbolName, canonFn);
+            } catch {
+              // A malformed or conflicting clause is diagnosed on the
+              // evaluate route, which runs the same installation and turns
+              // the failure into an error VALUE with the full message;
+              // canonicalization stays silent, exactly as the constructor
+              // branch does. The target keeps whatever it had, so nothing
+              // downstream validates against a half-built signature.
+              noteCanonInstallSkipped(target);
             }
           }
         }

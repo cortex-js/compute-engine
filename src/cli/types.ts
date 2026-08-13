@@ -1,5 +1,8 @@
 import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
-import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
+import type {
+  DiagnosticNote,
+  ParsingDiagnostic,
+} from '../epsil/diagnostics.js';
 
 export type OutputMode = 'value' | 'json' | 'epsil';
 
@@ -51,6 +54,10 @@ export interface EvaluationResult {
    * `ExecuteEpsilResult.valueRange`) — the anchor for rendering an
    * error-valued result. */
   valueRange?: [start: number, end: number];
+  /** Explanations for an error-valued result (see
+   * `ExecuteEpsilResult.valueNotes`) — rendered under the report the same way
+   * a diagnostic's own notes are. */
+  valueNotes?: DiagnosticNote[];
   elapsedMs: number;
 }
 

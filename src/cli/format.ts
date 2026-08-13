@@ -1,5 +1,8 @@
 import { serializeEpsil } from '../epsil.js';
-import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
+import type {
+  DiagnosticNote,
+  ParsingDiagnostic,
+} from '../epsil/diagnostics.js';
 import { explainErrorCode } from '../epsil/error-explanations.js';
 import { describeError, errorCode } from '../epsil/static-diagnostics.js';
 
@@ -86,6 +89,17 @@ export interface JsonDiagnostic {
   line: number;
   column: number;
   fixits?: { start: number; end: number; value: string }[];
+  /** Supplementary explanations (see `DiagnosticNote`). A note's `start`/`end`
+   * — and the `line`/`column` derived from `start` — are present only when it
+   * points at a second place in the source, such as the definition of the
+   * function whose call failed. */
+  notes?: {
+    message: string;
+    start?: number;
+    end?: number;
+    line?: number;
+    column?: number;
+  }[];
 }
 
 export function diagnosticToJson(
@@ -115,6 +129,18 @@ export function diagnosticToJson(
       end,
       value,
     }));
+  if (diagnostic.notes && diagnostic.notes.length > 0)
+    result.notes = diagnostic.notes.map((note) => {
+      if (note.range === undefined) return { message: note.message };
+      const at = sourceLocation(source, note.range[0]);
+      return {
+        message: note.message,
+        start: note.range[0],
+        end: note.range[1],
+        line: at.line,
+        column: at.column,
+      };
+    });
   return result;
 }
 
@@ -132,7 +158,8 @@ function formatDiagnostic(
     url,
     color,
     diagnostic.fixits,
-    diagnosticDocCode(diagnostic)
+    diagnosticDocCode(diagnostic),
+    diagnostic.notes
   );
 }
 
@@ -195,9 +222,13 @@ export function formatRuntimeError(
     url,
     color,
     undefined,
-    docCode
+    docCode,
+    result.valueNotes
   );
 }
+
+/** Column at which a rendered annotation wraps its prose lines. */
+const WRAP_COLUMN = 80;
 
 /**
  * One annotated source block, in the style popularized by Elm and rustc: the
@@ -215,6 +246,28 @@ export function formatRuntimeError(
  * The excerpt is the line holding the diagnostic's position (its explicit
  * `position`, or the span start); a span reaching past that line is
  * underlined to the end of the line.
+ *
+ * A diagnostic's `notes` (see `DiagnosticNote`) follow: a note without a range
+ * is a wrapped `= note:` line under the excerpt, and a note WITH one gets a
+ * sub-block of its own — its message, its location, and its own excerpt — so
+ * that "`foo` is defined here" points at the definition the way the primary
+ * block points at the call:
+ *
+ *     error: Runtime error: a required argument is missing
+ *      --> example.epsil:3:1
+ *       |
+ *     3 | foo("hello")
+ *       | ^^^^^^^^^^^^
+ *       = note: `foo` has signature `(x: string, n: integer) -> string`; …
+ *
+ *     note: `foo` is defined here
+ *      --> example.epsil:1:10
+ *       |
+ *     1 | function foo(x: string, n: integer) { x }
+ *       |          ^^^
+ *
+ * The `epsil doc …` footer stays last, so it reads as a footer for the whole
+ * report rather than for the final sub-block.
  */
 function renderAnnotation(
   severity: 'error' | 'warning',
@@ -224,22 +277,87 @@ function renderAnnotation(
   url: string | undefined,
   color: boolean,
   fixits?: ParsingDiagnostic['fixits'],
-  docCode?: string
+  docCode?: string,
+  notes?: readonly DiagnosticNote[]
 ): string {
   const paint = (code: string, s: string) =>
     color ? `${code}${s}${ANSI.reset}` : s;
   const label = severity === 'error' ? 'error' : 'warning';
   const labelColor = severity === 'error' ? ANSI.red : ANSI.yellow;
 
+  const head = `${paint(labelColor, `${label}:`)} ${message}`;
+  const excerpt = renderExcerpt(range, source, url, paint, labelColor);
+  const { pad } = excerpt;
+
+  if (excerpt.body === '') return `${head}\n${excerpt.arrow}`;
+
+  const suggestion = fixitSuggestion(fixits, excerpt.lineStart, excerpt.text);
+  const help =
+    suggestion === ''
+      ? ''
+      : `\n${pad} ${paint(ANSI.blue, '=')} help: ${suggestion}`;
+
+  // A ranged note is a second annotated block; a bare one is a `= note:` line
+  // under the primary excerpt.
+  let inlineNotes = '';
+  let siteBlocks = '';
+  for (const note of notes ?? []) {
+    if (note.range === undefined) {
+      inlineNotes += `\n${noteLines(note.message, pad, paint)}`;
+      continue;
+    }
+    const site = renderExcerpt(
+      [note.range[0], note.range[1], note.range[0]],
+      source,
+      url,
+      paint,
+      ANSI.blue
+    );
+    siteBlocks += `\n\n${paint(ANSI.blue, 'note:')} ${note.message}\n${site.arrow}${site.body}`;
+  }
+
+  const docNote =
+    docCode === undefined
+      ? ''
+      : `\n${pad} ${paint(ANSI.blue, '=')} ${paint(
+          ANSI.dim,
+          `note: \`epsil doc ${docCode}\` explains this ${label}`
+        )}`;
+
+  return `${head}\n${excerpt.arrow}${excerpt.body}${help}${inlineNotes}${siteBlocks}${docNote}`;
+}
+
+/**
+ * The location line and source excerpt of one span — everything below an
+ * annotation's message. Shared by the primary block and by each ranged note's
+ * sub-block, so a "defined here" note is rendered exactly like the error it
+ * explains (`caretColor` is the only difference: a secondary span underlines
+ * in blue, not in the severity's color).
+ *
+ * `body` is empty when the anchor falls past the end of the source (nothing to
+ * excerpt); the caller then prints the location alone.
+ */
+function renderExcerpt(
+  range: ParsingDiagnostic['range'],
+  source: string,
+  url: string | undefined,
+  paint: (code: string, s: string) => string,
+  caretColor: string
+): {
+  arrow: string;
+  body: string;
+  pad: string;
+  text: string;
+  lineStart: number;
+} {
   const anchor = range[2] ?? range[0];
   const { line, column, text, lineStart } = sourceLocation(source, anchor);
   const location = `${url ? `${url}:` : ''}${line}:${column}`;
-
-  const head = `${paint(labelColor, `${label}:`)} ${message}`;
   const pad = ' '.repeat(String(line).length);
   const arrow = `${pad}${paint(ANSI.blue, '-->')} ${paint(ANSI.dim, location)}`;
 
-  if (text === undefined) return `${head}\n${arrow}`;
+  if (text === undefined)
+    return { arrow, body: '', pad, text: '', lineStart };
 
   const bar = paint(ANSI.blue, `${pad} |`);
   const codeLine = `${paint(ANSI.blue, `${line} |`)} ${text}`;
@@ -253,22 +371,55 @@ function renderAnnotation(
     to > from
       ? [from, to - from]
       : [Math.max(0, Math.min(column - 1, text.length)), 1];
-  const underline = `${bar} ${' '.repeat(mark)}${paint(labelColor, '^'.repeat(width))}`;
+  const underline = `${bar} ${' '.repeat(mark)}${paint(caretColor, '^'.repeat(width))}`;
 
-  const suggestion = fixitSuggestion(fixits, lineStart, text);
-  const help =
-    suggestion === ''
-      ? ''
-      : `\n${pad} ${paint(ANSI.blue, '=')} help: ${suggestion}`;
-  const note =
-    docCode === undefined
-      ? ''
-      : `\n${pad} ${paint(ANSI.blue, '=')} ${paint(
-          ANSI.dim,
-          `note: \`epsil doc ${docCode}\` explains this ${label}`
-        )}`;
+  return {
+    arrow,
+    body: `\n${bar}\n${codeLine}\n${underline}`,
+    pad,
+    text,
+    lineStart,
+  };
+}
 
-  return `${head}\n${arrow}\n${bar}\n${codeLine}\n${underline}${help}${note}`;
+/** A `= note:` footer, wrapped at {@link WRAP_COLUMN} with its continuation
+ * lines hanging under the note's text column. */
+function noteLines(
+  message: string,
+  pad: string,
+  paint: (code: string, s: string) => string
+): string {
+  const prefix = `${pad} = note: `;
+  const indent = ' '.repeat(prefix.length);
+  const [first, ...rest] = wrapText(message, WRAP_COLUMN - prefix.length);
+  const head = `${pad} ${paint(ANSI.blue, '=')} note: ${first}`;
+  return [head, ...rest.map((x) => `${indent}${x}`)].join('\n');
+}
+
+/**
+ * Greedy word wrap. A word longer than `width` (a long type, a URL) overflows
+ * rather than being broken: splitting it would break the thing the reader most
+ * needs to copy.
+ *
+ * A backtick-quoted span is one unbreakable word even though it contains
+ * spaces — these messages quote types and signatures that way
+ * (`` `(x: string, n: integer) -> string` ``), and a line break inside one
+ * reads as two mangled types instead of one.
+ */
+function wrapText(text: string, width: number): string[] {
+  const words = text.match(/(?:`[^`]*`|\S)+/g) ?? [];
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (current === '') current = word;
+    else if (current.length + 1 + word.length <= width) current += ` ${word}`;
+    else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current !== '') lines.push(current);
+  return lines.length === 0 ? [''] : lines;
 }
 
 /**

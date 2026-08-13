@@ -158,6 +158,38 @@ const REGISTRATIONS = new WeakMap<
   { ce: IComputeEngine; names: Set<string> }
 >();
 
+/**
+ * Snapshot the forward-reference registry for `ce`, returning a function that
+ * restores it.
+ *
+ * For a caller that installs definitions it is going to THROW AWAY: the Epsil
+ * static pre-pass canonicalizes each statement in a scope it pops on the way
+ * out, and canonicalizing a function definition installs a definition object
+ * that registers here. Popping the scope does not unregister it — the
+ * registry is keyed by engine, not by scope — so without this the pass leaves
+ * one orphan per definition it checked, and a later real definition of the
+ * same name is counted twice among the dependents waiting on its callees.
+ *
+ * Restores which definitions are waiting on which names. It does not evict
+ * the `REGISTRATIONS` entries of definitions created inside the transaction:
+ * that index is weakly keyed, so those die with the definitions themselves.
+ */
+export function provisionalRegistryRollbackPoint(
+  ce: IComputeEngine
+): () => void {
+  const byName = DEPENDENTS.get(ce);
+  if (byName === undefined) return () => DEPENDENTS.delete(ce);
+  const snapshot = new Map(
+    [...byName].map(([name, defs]) => [name, new Set(defs)] as const)
+  );
+  return () => {
+    const current = DEPENDENTS.get(ce);
+    if (current === undefined) return;
+    current.clear();
+    for (const [name, defs] of snapshot) current.set(name, defs);
+  };
+}
+
 /** Register `def` to be re-derived when one of the symbols its body read
  * provisionally gains an operator definition. A no-op for a literal with no
  * provisional reading (the overwhelmingly common case). */

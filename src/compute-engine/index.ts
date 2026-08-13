@@ -77,6 +77,7 @@ import type {
 } from './latex-syntax/types.js';
 import { validateStyleOptions } from './latex-syntax/style-options.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
+import { provisionalRegistryRollbackPoint } from './boxed-expression/provisional-application.js';
 import { isSymbol } from './boxed-expression/type-guards.js';
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
 
@@ -695,6 +696,15 @@ export class ComputeEngine implements IComputeEngine {
       }
       if (changed) this._noteStateEvent({ kind: 'config' });
     };
+  }
+
+  /** See `IComputeEngine._provisionalRegistryRollbackPoint`. Unlike the type
+   * and protocol rollbacks, this one bumps no invalidation axis: the registry
+   * records which definitions are WAITING to be re-derived, and nothing reads
+   * a cached result through it.
+   * @internal */
+  _provisionalRegistryRollbackPoint(): () => void {
+    return provisionalRegistryRollbackPoint(this);
   }
 
   /** See `IComputeEngine.declareProtocol`. Throws on error, including on

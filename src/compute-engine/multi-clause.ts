@@ -239,7 +239,7 @@ function declaredSignatureOf(
 
 /** True when a canonical `Function` literal states its own `where` clause
  * (the E1/E2/E4 spellings) — i.e. the incoming clause is GENERIC. */
-function isGenericClauseLiteral(literal: Expression): boolean {
+export function isGenericClauseLiteral(literal: Expression): boolean {
   return isPolymorphicType(literal.type.type);
 }
 
@@ -259,7 +259,56 @@ function hasLiteralPatternParam(literal: Expression): boolean {
  * generic literal, not a bare generic declaration (which is the ordinary
  * declare-then-define shape and delegates to `ce.assign`).
  */
-function holdsGenericDefinition(def: BoxedDefinition | undefined): boolean {
+/**
+ * Definition records whose canonicalization-time clause install was SKIPPED.
+ *
+ * Skipping one clause of a name obliges the canonical route to skip every
+ * later clause of that name too, or its picture of the definition diverges
+ * from what the program will actually build. Concretely: a generic first
+ * clause is skipped (see {@link isGenericTarget}); if a plain second clause
+ * were then installed, canonicalization would believe the target is that
+ * plain clause, while the run rejects the second clause under G2 and keeps
+ * the generic one — and every later call would be checked against a signature
+ * the program never has. Skipping both leaves the target at the top
+ * `function` type, which checks nothing and so cannot be wrong.
+ *
+ * Weakly keyed on the definition RECORD, which is mutated in place across
+ * installs and dies with its scope.
+ */
+const CANON_INSTALL_SKIPPED = new WeakSet<object>();
+
+export function noteCanonInstallSkipped(def: BoxedDefinition | undefined): void {
+  if (def !== undefined) CANON_INSTALL_SKIPPED.add(def);
+}
+
+export function canonInstallSkipped(def: BoxedDefinition | undefined): boolean {
+  return def !== undefined && CANON_INSTALL_SKIPPED.has(def);
+}
+
+/**
+ * True when installing a clause onto `def` would produce a GENERIC target —
+ * either because it already holds a generic function, or because it DECLARES
+ * a polytype that a plain definition installs through (§2.4), which leaves
+ * the target generic just the same.
+ *
+ * The distinction matters to a caller that must not install the same clause
+ * twice: rule G2 refuses any clause onto a generic target, so an install that
+ * makes the target generic cannot be repeated.
+ * {@link holdsGenericDefinition} alone does not answer this — a bare
+ * declaration has neither a value nor an evaluate handler, so it reads as
+ * non-generic right up until the install that makes it generic.
+ */
+export function isGenericTarget(def: BoxedDefinition | undefined): boolean {
+  if (def === undefined) return false;
+  if (holdsGenericDefinition(def)) return true;
+  if (isValueDef(def)) return isPolymorphicType(def.value.type.type);
+  if (isOperatorDef(def)) return isPolymorphicType(def.operator.signature.type);
+  return false;
+}
+
+export function holdsGenericDefinition(
+  def: BoxedDefinition | undefined
+): boolean {
   if (def === undefined) return false;
   const state = multiClauseState(def);
   if (state !== undefined)

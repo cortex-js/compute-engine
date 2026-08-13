@@ -22,7 +22,14 @@ fib(n: integer) = fib(n - 1) + fib(n - 2)
 - **Live diagnostics** as you type: parse errors, lints, and the static type
   errors the engine catches when it canonicalizes a program. This is exactly
   what `epsil check` reports — nothing is evaluated, so checking a program has
-  no side effects and never runs a long computation.
+  no side effects and never runs a long computation. A call that does not match
+  the function's signature explains itself: the diagnostic names the signature
+  and which argument was at fault.
+- **Hover** over a name to see what it is: for a library function or constant,
+  its signature (or type and value) and description — the same entry
+  `epsil doc <name>` prints; for a name your file declares, the declaration as
+  you wrote it. Hovering a word inside a string or a comment shows nothing, so
+  prose is never mistaken for code.
 - **Epsil: Run File** (`epsil.runFile`) — saves the active file and runs it in
   an integrated terminal named _Epsil_. By default it runs the Epsil CLI bundled
   with the extension — the same engine build used for diagnostics, inline

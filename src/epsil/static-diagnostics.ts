@@ -27,6 +27,9 @@ import {
 
 import type { ParsingDiagnostic } from './diagnostics.js';
 import { serializeEpsil } from './serialize-epsil.js';
+import { definitionSites } from './definition-sites.js';
+import { enclosingFrame, locateError } from './error-location.js';
+import { signatureNotes } from './signature-notes.js';
 
 /** Longest Epsil snippet quoted in a `static-type-error` message. */
 const SNIPPET_LENGTH = 60;
@@ -77,10 +80,17 @@ function isCanonicalizationError(code: string): boolean {
  * runs user code — a `RandomInteger` call stays symbolic, an infinite `while`
  * lowers to a `Loop` that is not iterated, an unknown `print(…)` stays inert.
  *
- * **Anchoring is statement-level (v1).** The canonical tree carries no source
- * offsets, so each diagnostic points at the start of the enclosing
- * statement's `sourceOffsets` range — or at the whole program when the
- * statement carries no offsets, rather than dropping the diagnostic.
+ * **Anchoring.** The canonical tree carries no source offsets, so a
+ * diagnostic cannot read its position off the node that failed. Instead the
+ * error's POSITION in that tree names the call it belongs to
+ * (`enclosingFrame`), and that call is matched back onto the raw AST by
+ * operator name (`locateError`) — the same matcher the run phase uses on its
+ * breadcrumb frames. So `IndexOf(xs, v, 23)` inside a forty-line definition
+ * underlines the `23`, not the definition. When the match is ambiguous (two
+ * `IndexOf` calls in one statement) or the operator does not survive
+ * canonicalization, the anchor falls back to the enclosing statement's range
+ * — or to the whole program when the statement carries no offsets, rather
+ * than dropping the diagnostic.
  *
  * The caller supplies the engine: `epsil check` uses a fresh one, and
  * `executeEpsil()` uses the session engine (so the pass sees the same
@@ -132,6 +142,15 @@ export function staticDiagnostics(
   // time so later statements of the same program check against them, and a
   // checked-but-never-run program must not mutate the engine's protocols.
   const rollbackProtocols = ce._protocolRegistryRollbackPoint();
+  // The FORWARD-REFERENCE registry needs the same transaction, and for a
+  // reason the other two do not have: canonicalizing a `function` definition
+  // installs a definition object (so that later statements' calls validate
+  // against its signature), and a definition whose body reads a not-yet-known
+  // symbol registers itself there to be re-derived later. That registry is
+  // keyed by ENGINE, not by scope, so popping this pass's scope does not
+  // remove it — and the program's real definition of the same function would
+  // then be the second entry waiting on the same callee.
+  const rollbackProvisional = ce._provisionalRegistryRollbackPoint();
   // The engine requires the depth counter IN ADDITION to the frame name (so a
   // host `pushScope(undefined, 'epsil:static-check')` cannot forge the
   // surrogate and smuggle a nested `DeclareType` past the top-level rule).
@@ -144,6 +163,7 @@ export function staticDiagnostics(
     ce._staticTypeCheckDepth -= 1;
     rollbackTypes();
     rollbackProtocols();
+    rollbackProvisional();
   }
 }
 
@@ -155,6 +175,10 @@ function canonicalizationDiagnostics(
   // The parser wraps a multi-statement program in `Block` (see
   // `executeEpsil()`); a single statement is not wrapped.
   const statements = operator(ast) === 'Block' ? [...operands(ast)] : [ast];
+
+  // Where this program binds each of its names, for the "defined here" note a
+  // signature error carries (see `signatureNotes()`).
+  const defSites = definitionSites(ast);
 
   const diagnostics: ParsingDiagnostic[] = [];
   for (const statement of statements) {
@@ -212,11 +236,43 @@ function canonicalizationDiagnostics(
       }
       if (seen.has(description)) continue;
       seen.add(description);
-      diagnostics.push({
+
+      // Where the error sits in the canonical tree names the call it belongs
+      // to — the stand-in for the `ErrorTrace` breadcrumb a runtime error
+      // carries (canonicalization records none). It does double duty: it
+      // narrows the ANCHOR from the whole statement onto the offending
+      // argument, so a mistake inside a 40-line function definition does not
+      // underline the definition; and it names the callee whose signature the
+      // notes explain.
+      const frame = enclosingFrame(canonical, error);
+      const located = locateError(
+        frame === undefined ? [] : [frame],
+        statement,
+        [start, end]
+      );
+      const [from, to] = located.range;
+
+      const diagnostic: ParsingDiagnostic = {
         severity: 'error',
-        message: ['static-type-error', description, snippet, code],
-        range: [start, end, start],
+        // Quote the CALL that failed rather than the whole statement: with
+        // the anchor narrowed onto one argument, quoting a 40-line definition
+        // describes the wrong thing — and a host that shows only the message
+        // (an editor hover) would have nothing else to go on.
+        message: [
+          'static-type-error',
+          description,
+          located.call === undefined ? snippet : epsilSnippet(located.call),
+          code,
+        ],
+        range: [from, to, from],
+      };
+      const notes = signatureNotes(ce, error, {
+        definitionSites: defSites,
+        primaryRange: [from, to],
+        enclosingFrame: frame,
       });
+      if (notes.length > 0) diagnostic.notes = notes;
+      diagnostics.push(diagnostic);
     }
   }
 

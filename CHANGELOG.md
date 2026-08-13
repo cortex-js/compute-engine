@@ -2,6 +2,64 @@
 
 ### New Features
 
+- **Signature errors in the `epsil` CLI now explain the signature.** A call
+  that does not match its callee — a missing argument, an extra one, an
+  argument of the wrong type — used to report only what went wrong
+  ("a required argument is missing"), leaving the reader to look up what the
+  function takes. The report now carries the callee's signature and the
+  faulted position, plus a second annotated block pointing at the definition
+  when the program defines it:
+
+  ```
+  error: Runtime error: a required argument is missing
+   --> example.epsil:3:1
+    |
+  3 | foo("hello")
+    | ^^^^^^^^^^^^
+    = note: `foo` has signature `(x: string, n: integer) -> string`; argument 2
+            (`n: integer`) was not supplied
+
+  note: `foo` is defined here
+   --> example.epsil:1:10
+    |
+  1 | function foo(x: string, n: integer) { x }
+    |          ^^^
+    = note: `epsil doc missing` explains this error
+  ```
+
+  The same notes reach `epsil check`, the REPL, and — machine-readable, with
+  the definition's location — the `--diagnostics json` and `check --json`
+  output, where a diagnostic may now carry a `notes` array. In the VS Code
+  extension the signature appears in the diagnostic's hover, and a note that
+  points at a second place in the file is published as related information
+  (folded into the message for a client that does not support it).
+
+- **Calls to a function the program defines are now checked statically.**
+  `epsil check` (and the VS Code extension) reported wrong calls to library
+  functions but passed wrong calls to the program's own functions — so
+  `function foo(x: string, n: integer) { x }` followed by `foo("hello")`
+  checked clean and only failed when it ran. A function definition now
+  installs its clause when it CANONICALIZES, not only when it evaluates, so
+  every later statement is checked against the real signature: wrong arity,
+  wrong argument type, and extra arguments are all reported before anything
+  runs, with the signature note and the definition site. Multi-clause
+  definitions accumulate clause by clause, and a definition inside a block
+  stays scoped to that block.
+
+  Two exclusions keep the pass free of false positives: a GENERIC definition
+  (`function id<T>(x: T) -> T`) is left unchecked until it evaluates, because
+  a generic function is single-clause and re-installing its clause is an
+  error rather than a no-op; and once a definition is skipped for that
+  reason, later clauses of the same name are skipped too.
+
+- **The VS Code extension answers hovers.** Hovering a library name shows its
+  signature (or, for a symbol, its type and value) with its description — the
+  same entry `epsil doc <name>` prints, so the editor and the CLI cannot
+  drift. Hovering a name the file itself declares shows that declaration as
+  written: a function's header without its body, a `let`/`const`'s statement.
+  Which word a hover resolves is decided by the lexer, so a name inside a
+  string or a comment is not one.
+
 - **`isEnumerableCollection` now answers for arithmetic broadcasts** (Tycho
   item-169 ruling). A broadcast node (`x + [1,2]`, `Sin(1..99)` — a
   `broadcastable` operator whose collection-ness is a lift over its
@@ -113,6 +171,18 @@
 
 ### Bug Fixes
 
+- **A static diagnostic no longer underlines a whole function definition.**
+  `epsil check` (and the VS Code extension, which reports the same
+  diagnostics) anchored every canonicalization-time error on the enclosing
+  *statement*, so one wrong argument four lines inside a definition flagged
+  the entire definition and quoted it in the message. The error's position in
+  the canonical tree now names the call it belongs to, and that call is
+  matched back onto the source with the matcher the run phase already used
+  for its breadcrumb frames — so `IndexOf(digits, cs[i], 23)` underlines the
+  `23`, and the message quotes the failing call rather than the definition.
+  An ambiguous match (two `IndexOf` calls in one statement) or an operator
+  that does not survive canonicalization still falls back to the statement.
+
 - **A list-valued big-op body no longer compiles to garbage on the GPU
   targets** (Tycho item 171, non-JS residue). `Σ_i a(h(i))` with `a`
   list-valued under an open `(unknown) -> unknown` head compiled
@@ -145,6 +215,95 @@
   application route so the error blames the actual mistake. Numeric and
   collection heads, undeclared heads, and wide-typed heads (`x(x+1)`)
   are unchanged.
+
+- **A fully-known argument now always dispatches a multi-clause
+  function.** With clauses `a(t: integer)` and `a(t: real)`, calling
+  `a(0.3)` stayed inert under `evaluate()` (the `integer` clause was
+  "undecidable" because the concrete value was never tested against it)
+  while compiled code correctly selected the `real` clause — two
+  observably different answers for one input. Concrete values now consult
+  the membership oracle for both admission and refutation, so interpreted
+  and compiled dispatch agree; the NaN special case this generalizes is
+  subsumed. Symbolic arguments keep their deliberate inertness (a call
+  whose argument is not yet known still refuses to commit to a clause).
+
+- **A `Block` of bare equations now round-trips through LaTeX.**
+  `Block(x=1, y=2)` serialized to the one-column cases spelling, which
+  the system-of-equations reading (the `Solve` convention, deliberately
+  kept) turned into a `List`. That shape now serializes as explicit
+  `\operatorname{Block}(x=1, y=2)`, which round-trips exactly; equation
+  systems, mixed-statement blocks, and piecewise are all byte-identical.
+
+- **A block-local introduced by bare assignment now compiles correctly.**
+  A multi-statement function body (or top-level block, or loop body) that
+  binds a local with a plain assignment — `t ↦ (w ≔ 2t; w + 1)` — compiled
+  behind `success: true` but ran to `NaN`: the block's canonicalization
+  hoists the assign-introduced local into the block's scope without
+  leaving a `Declare` statement, so the compiler wrote a bare `w` and read
+  the free-variable spelling `_.w`, which nothing ever set (on GLSL the
+  emitted local was simply undeclared). The compiler now synthesizes the
+  missing declaration and the existing locals pipeline handles the rest;
+  compiled results match the interpreter, and GLSL declares its locals.
+
+- **Compiled writes to an outer binding now reach the same place reads
+  look.** An `Assign` emitted the bare identifier while reads of the same
+  symbol resolve through the vars object, so a block assigning a name the
+  enclosing scope already binds — including the library-predeclared
+  single letters `e`, `i`, `m`, `s` — wrote a stray global and read
+  `undefined`: `(s ≔ 0; s + 1)` compiled to `NaN` (interpreter: 1), and a
+  function body accumulating into `s` through a loop returned `undefined`
+  behind `success: true`. Writes now use the same spelling as reads
+  (`_.s = …`, mutating the caller-supplied vars object exactly as the
+  interpreter mutates the outer binding); where reads bake a folded value
+  or a constant so no coherent write target exists, compilation declines.
+  Shader and Python emission are byte-identical.
+
+- **Complex-valued locals compile correctly.** A loop-body local bound to
+  a complex value miscompiled on JavaScript (`Math.abs` over an `{re, im}`
+  object → `NaN` behind `success: true`; the interpreter answered `3√10`)
+  because the loop-body route pushed no complex frame; and a GPU user
+  function whose body merely *contained* a complex local — while
+  returning a real — got a poisoned `vec2` return type over a `float`
+  return value (invalid shader source behind success). Loop bodies now
+  share the block compiler's complex inference, and the GPU return type
+  is derived from the body's VALUE, not from interior locals.
+
+- **A `Return` in a GPU function body now emits valid source or
+  declines.** Measurement showed every route was broken: a
+  final-statement `Return` emitted `return return …` (user-function,
+  top-level, and `compileFunction` routes alike), and a `Return` inside a
+  conditional emitted `return` in expression position — not GLSL/WGSL at
+  all — all behind `success: true`. Two gates now hold: a shape gate (a
+  `Return` whose value shape disagrees with the function's synthesized
+  signature declines with both shapes named) and a placement scan on the
+  finished body (a `return` anywhere the language cannot host one
+  declines with the offending source quoted). Early `Return`s of matching
+  shape in plain statement position — the shapes that were already
+  valid — compile unchanged, as does every JS path.
+
+- **A cyclic type alias no longer overflows the stack during dispatch.**
+  A non-progressing structural alias cycle (`type a = a | 0`) crashed
+  with `RangeError` when a concrete value was tested against it — from
+  multi-clause dispatch, and (pre-existing) from `typeAcceptsValue`. The
+  alias-unfolding membership check now carries a cycle guard keyed on the
+  alias + value-identity pair, so genuinely recursive VALUES against
+  recursive aliases still admit (a nested list against a recursive list
+  alias), while a non-progressing back edge answers definitively — exact
+  under the least-fixed-point reading of recursive types, not merely
+  conservative.
+
+- **Contradiction gates hardened (review round):** multi-statement lambda
+  bodies are judged by their final statement (a body ending in a list
+  no longer slips past the declaration-contradiction gates), `-> boolean`
+  declarations over collection-constructing bodies now decline everywhere
+  a condition or logical operand consumes them (an `If` no longer takes a
+  branch off array truthiness), a nested `Block(Block(…))` operand no
+  longer defeats the cases-environment fence, an authored trailing
+  `\mathrm{Nothing}` statement survives parsing, `\mleft…\mright`
+  delimiters get the same interval reading as their siblings (and the
+  delimiter-prefix list is now derived from the parser's own table), and
+  `SymmetricDifference` reads and writes its operands with the same
+  interval/list conventions as the other set operators.
 
 - **A function declaration contradicted by its own body no longer
   compiles to wrong results — the compiler declines and the interpreter

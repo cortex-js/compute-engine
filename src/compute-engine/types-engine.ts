@@ -359,6 +359,17 @@ export interface IComputeEngine {
    * @internal */
   _protocolRegistryRollbackPoint(): () => void;
 
+  /** Capture the FORWARD-REFERENCE registry's state; the returned thunk
+   * restores it. The third registry the Epsil static pre-pass rolls back,
+   * alongside {@link _typeRegistryRollbackPoint} and
+   * {@link _protocolRegistryRollbackPoint}: canonicalizing a function
+   * definition installs a definition object, and one whose body reads a
+   * not-yet-known symbol registers there to be re-derived. That registry is
+   * keyed by engine rather than by scope, so popping the pass's scope does
+   * not clear it.
+   * @internal */
+  _provisionalRegistryRollbackPoint(): () => void;
+
   /** Declare a protocol (Appendix A "Host API"). Throws on error, including
    * on re-declaration — the Epsil statement route replaces instead (P5). */
   declareProtocol(name: string, members: ProtocolMembersInput): void;

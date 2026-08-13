@@ -96,6 +96,24 @@ export class FatalParsingError extends Error {
 
 export type Fixit = [start: number, end: number, value: string];
 
+/**
+ * A supplementary explanation attached to a diagnostic: the context that
+ * makes the primary message actionable — the signature of the function whose
+ * call failed, the place that function was defined.
+ *
+ * A note carrying a `range` points at a *second* place in the source, and a
+ * renderer that shows source excerpts is expected to show that place too
+ * (the CLI renders a sub-block with its own `-->` location line); a note
+ * without one is a plain sentence appended under the primary excerpt.
+ *
+ * Notes are advisory: dropping them loses explanation, never meaning, so a
+ * host is free to render only `message`.
+ */
+export type DiagnosticNote = {
+  message: string;
+  range?: [start: number, end: number];
+};
+
 export type ParsingDiagnostic = {
   // A `warning` is a diagnostic that indicate something that does not
   // prevent the code from being compiled. It could be a linting issue for
@@ -109,4 +127,7 @@ export type ParsingDiagnostic = {
   // The fixit for a warning is always safe to apply. The fixit for an error
   // is a guess and should be reviewed before being applied.
   fixits?: Fixit[];
+  // Supplementary explanations — see {@link DiagnosticNote}. They add context
+  // to the message; they never change what the diagnostic means.
+  notes?: DiagnosticNote[];
 };

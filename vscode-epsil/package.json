@@ -196,7 +196,7 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "pretest": "node build.mjs",
-    "test": "node test/dap.test.mjs",
+    "test": "node test/dap.test.mjs && node test/lsp.test.mjs",
     "package": "vsce package --out epsil.vsix",
     "publish:marketplace": "vsce publish --packagePath epsil.vsix",
     "vscode:prepublish": "node build.mjs"

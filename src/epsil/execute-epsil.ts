@@ -16,8 +16,15 @@ import type { CancellationCause } from '../common/interruptible.js';
 // `parseLatex`/`ILatexSyntax` injection pattern used elsewhere in `src/epsil`.
 import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
 
-import { FatalParsingError, ParsingDiagnostic } from './diagnostics.js';
+import {
+  DiagnosticNote,
+  FatalParsingError,
+  ParsingDiagnostic,
+} from './diagnostics.js';
 import { parseEpsil } from './parse-epsil.js';
+import { definitionSites } from './definition-sites.js';
+import { narrowToFrames, traceFrames } from './error-location.js';
+import { signatureNotes } from './signature-notes.js';
 import {
   describeError,
   errorCode,
@@ -53,6 +60,15 @@ export interface ExecuteEpsilResult {
    * since a program may legitimately *author* an `Error` value — so a host
    * that wants to point at the failing site anchors on this range instead. */
   valueRange?: [start: number, end: number];
+  /** Explanations for the final statement's error value — the callee's
+   * signature and where it was defined, when the value is an error raised by
+   * a call that did not match its signature (see `signatureNotes()`).
+   *
+   * Present for the same reason as `valueRange`: the final statement gets no
+   * diagnostic, so a host that renders its error has nowhere else to read the
+   * notes a `runtime-error` diagnostic would have carried. Absent when there
+   * are none. */
+  valueNotes?: DiagnosticNote[];
 }
 
 /**
@@ -157,6 +173,11 @@ function executeEpsilBatch(
   // single-statement program is returned unwrapped.
   const statements = operator(ast) === 'Block' ? [...operands(ast)] : [ast];
 
+  // Where this program binds each of its names, for the "defined here" note a
+  // signature error carries. Read from the raw AST, the only tree with source
+  // offsets — so it must be collected before anything canonicalizes.
+  const defSites = definitionSites(ast);
+
   // Static (canonicalization-time) type errors, reported *before* anything
   // runs — `"a" + 1` is a static failure, not a runtime one (plan §5). The
   // program then evaluates exactly as it otherwise would: the same mistake
@@ -246,22 +267,30 @@ function executeEpsilBatch(
         // statement range below supplies the source anchoring.
         const frames = errorFrameChain(errors[0].json);
         const description = describeError(errors[0].json);
-        diagnostics.push(
-          makeDiagnostic(
-            cancellation !== undefined
-              ? ['evaluation-canceled', cancellation, errors[0].toString()]
-              : // `%2` (the frame chain) is `''` when the error was raised in
-                // place, so `%3` — the machine-readable engine error code,
-                // which keys extended docs (`epsil doc <code>`) — has a
-                // stable position.
-                ['runtime-error', description, frames, errorCode(errors[0].json)],
-            narrowErrorRange(
-              errors[0].json,
-              stmt,
-              statementRange(stmt, source)
-            )
-          )
+        const range = narrowErrorRange(
+          errors[0].json,
+          stmt,
+          statementRange(stmt, source)
         );
+        const diagnostic = makeDiagnostic(
+          cancellation !== undefined
+            ? ['evaluation-canceled', cancellation, errors[0].toString()]
+            : // `%2` (the frame chain) is `''` when the error was raised in
+              // place, so `%3` — the machine-readable engine error code,
+              // which keys extended docs (`epsil doc <code>`) — has a
+              // stable position.
+              ['runtime-error', description, frames, errorCode(errors[0].json)],
+          range
+        );
+        // A call that did not match its callee's signature gets the signature
+        // and the callee's definition site as notes — the context the bare
+        // "a required argument is missing" leaves the reader to hunt for.
+        const notes = signatureNotes(ce, errors[0].json, {
+          definitionSites: defSites,
+          primaryRange: range,
+        });
+        if (notes.length > 0) diagnostic.notes = notes;
+        diagnostics.push(diagnostic);
       }
     }
 
@@ -302,9 +331,24 @@ function executeEpsilBatch(
           range: [0, source.length],
         });
 
-  return valueRange === undefined
-    ? { value, diagnostics }
-    : { value, diagnostics, valueRange };
+  // The final statement's error stays a VALUE (no diagnostic, by design), so
+  // the notes that would have travelled on a diagnostic are returned beside
+  // it — computed here because only this function has the engine, the raw AST
+  // and the source together, exactly as for `valueRange`.
+  const valueNotes =
+    value.errors.length > 0
+      ? signatureNotes(ce, value.errors[0].json, {
+          definitionSites: defSites,
+          primaryRange: valueRange,
+        })
+      : [];
+
+  return {
+    value,
+    diagnostics,
+    ...(valueRange === undefined ? {} : { valueRange }),
+    ...(valueNotes.length === 0 ? {} : { valueNotes }),
+  };
 }
 
 /**
@@ -354,68 +398,19 @@ export function errorFrameChain(error: MathJsonExpression): string {
 }
 
 /**
- * Narrow an error's source anchor from the whole statement down to the
- * innermost breadcrumb frame that still maps onto the parsed source — the
- * difference between underlining all of `s |> Map(_, _ |-> Length(Characters(s)))`
- * and underlining the `s` inside `Characters(s)`.
- *
- * The frames were recorded against the EVALUATED tree, which is structurally
- * different from the raw AST (pipe sugar is applied, `Block` wrappers are
- * inserted), so frames cannot be walked positionally. Instead they are
- * matched by operator name: innermost first, the first frame whose operator
- * occurs exactly ONCE in the statement subtree wins, and the frame's operand
- * (or, when that operand carries no offsets, the matched call) supplies the
- * range. An ambiguous name (two `Characters` calls) or a vanished one (a
- * canonicalization-minted wrapper) falls through to the next outer frame;
- * the fallback is the statement range.
+ * Narrow a RUNTIME error's source anchor from the whole statement down to the
+ * frame that produced it, using the error's own `ErrorTrace` breadcrumb — the
+ * difference between underlining all of
+ * `s |> Map(_, _ |-> Length(Characters(s)))` and underlining the `s` inside
+ * `Characters(s)`. See `narrowToFrames()` for how a frame is matched onto the
+ * source.
  */
 function narrowErrorRange(
   error: MathJsonExpression,
   stmt: MathJsonExpression,
   fallback: [number, number]
 ): [number, number] {
-  const ops = [...operands(error)];
-  const trace = ops[ops.length - 1];
-  if (trace === undefined || operator(trace) !== 'ErrorTrace') return fallback;
-
-  for (const frame of operands(trace)) {
-    // `ErrorBroadcast` frames locate an ELEMENT, not a source span.
-    if (operator(frame) !== 'ErrorFrame') continue;
-    const name = stringValue(operand(frame, 1));
-    const index = machineValue(operand(frame, 2));
-    if (name === null || index === null) continue;
-
-    const matches: MathJsonExpression[] = [];
-    findByOperator(stmt, name, matches);
-    if (matches.length !== 1) continue;
-
-    const arg = [...operands(matches[0])][index - 1] ?? null;
-    const range = nodeOffsets(arg) ?? nodeOffsets(matches[0]);
-    if (range !== undefined) return range;
-  }
-  return fallback;
-}
-
-/** Collect every node of `expr` whose operator is `name` (early-exits once
- * ambiguous — two matches decide `narrowErrorRange` as surely as ten). */
-function findByOperator(
-  expr: MathJsonExpression | null,
-  name: string,
-  matches: MathJsonExpression[]
-): void {
-  if (expr === null || matches.length > 1) return;
-  if (operator(expr) === '') return;
-  if (operator(expr) === name) matches.push(expr);
-  for (const op of operands(expr)) findByOperator(op, name, matches);
-}
-
-/** The `sourceOffsets` of a raw AST node, when it carries them. */
-function nodeOffsets(
-  node: MathJsonExpression | null
-): [number, number] | undefined {
-  return typeof node === 'object' && node !== null && !Array.isArray(node)
-    ? (node as { sourceOffsets?: [number, number] }).sourceOffsets
-    : undefined;
+  return narrowToFrames(traceFrames(error), stmt, fallback);
 }
 
 /** The source range of a statement AST node, falling back to the whole

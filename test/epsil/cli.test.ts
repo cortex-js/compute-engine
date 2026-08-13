@@ -140,7 +140,7 @@ describe('Epsil CLI check: canonicalization-time type errors', () => {
     expect(stderr()).toContain('--> 1:1');
   });
 
-  test('anchors to the offending statement of a multi-statement program', async () => {
+  test('anchors to the offending operand of a multi-statement program', async () => {
     const { io, stdout } = makeIo();
     expect(
       await main(['check', '-e', 'let x = 5\nx + "a"', '--json'], io)
@@ -148,14 +148,19 @@ describe('Epsil CLI check: canonicalization-time type errors', () => {
     const envelope = JSON.parse(stdout());
     expect(envelope.ok).toBe(false);
     expect(envelope.diagnostics).toHaveLength(1);
+    // The `"a"` on line 2, not the statement that contains it: the error's
+    // position in the canonical tree names the call it belongs to, which is
+    // matched back onto the source (see `locateError`).
     expect(envelope.diagnostics[0]).toMatchObject({
       severity: 'error',
       code: 'static-type-error',
       line: 2,
-      column: 1,
-      start: 10,
+      column: 5,
+      start: 14,
       end: 17,
     });
+    // The message quotes the CALL that failed — here the whole statement,
+    // since `x + "a"` is the call.
     expect(envelope.diagnostics[0].message).toContain('x + "a"');
   });
 
@@ -430,6 +435,220 @@ describe('Epsil CLI runtime error reporting', () => {
     expect(stderr()).toContain('--> 2:37');
     // A single-character span: one caret, not a statement-wide underline.
     expect(stderr()).toMatch(/\n\s*\| {37}\^\n/);
+  });
+});
+
+describe('Epsil CLI signature error notes', () => {
+  const FOO = 'function foo(x: string, n: integer) { x }\n';
+  /** A report with its layout flattened away — notes are wrapped at a column,
+   * so a sentence-level assertion must not depend on where the break fell. */
+  const prose = (report: string) => report.replaceAll(/\s+/g, ' ');
+
+  test('names the signature and the argument that was not supplied', async () => {
+    const { io, stderr } = makeIo();
+    expect(await main(['-e', `${FOO}foo("hello")`], io)).toBe(1);
+    // The message alone ("a required argument is missing") does not say which
+    // argument, or what `foo` takes.
+    expect(prose(stderr())).toContain(
+      '= note: `foo` has signature `(x: string, n: integer) -> string`; ' +
+        'argument 2 (`n: integer`) was not supplied'
+    );
+  });
+
+  test('wraps a long note without breaking a quoted type in half', async () => {
+    const { io, stderr } = makeIo();
+    expect(await main(['-e', `${FOO}foo("hello")`], io)).toBe(1);
+    // Every line stays within the wrap column, and no line ends or starts
+    // inside a backtick-quoted span (each line has an even number of them).
+    for (const line of stderr().split('\n')) {
+      expect(line.length).toBeLessThanOrEqual(80);
+      expect([...line].filter((c) => c === '`').length % 2).toBe(0);
+    }
+  });
+
+  test('points at the definition with a second annotated block', async () => {
+    const { io, stderr } = makeIo();
+    expect(await main(['-e', `${FOO}foo("hello")`], io)).toBe(1);
+    expect(stderr()).toContain('note: `foo` is defined here');
+    // Its own location line, and an excerpt underlining the NAME.
+    expect(stderr()).toContain('--> 1:10');
+    expect(stderr()).toContain('1 | function foo(x: string, n: integer) { x }');
+    expect(stderr()).toMatch(/\n\s*\| {10}\^{3}\n/);
+    // The extended-docs footer stays last: it is a footer for the report, not
+    // for the definition block.
+    expect(stderr().trimEnd()).toMatch(
+      /= note: `epsil doc missing` explains this error$/
+    );
+  });
+
+  test('reports the arity for an extra argument, and the parameter for a type mismatch', async () => {
+    const extra = makeIo();
+    expect(await main(['-e', `${FOO}foo("a", 1, 2)`], extra.io)).toBe(1);
+    expect(prose(extra.stderr())).toContain(
+      'it takes 2 arguments, so argument 3 is extra'
+    );
+
+    const mismatch = makeIo();
+    expect(await main(['-e', `${FOO}foo(1, 2)`], mismatch.io)).toBe(1);
+    expect(prose(mismatch.stderr())).toContain('argument 1 is `x: string`');
+  });
+
+  test('lists every arm of an overload set', async () => {
+    const { io, stderr } = makeIo();
+    expect(
+      await main(
+        ['-e', 'function fib(0) { 0 }\nfunction fib(n: integer) { n }\nfib()'],
+        io
+      )
+    ).toBe(1);
+    // The breadcrumb does not say which arm was being checked, so all of them
+    // are shown — and the synthetic name of a literal-pattern parameter
+    // (`literalParam_1`) is not, since the source never wrote it.
+    expect(prose(stderr())).toContain('`fib` has 2 overloads: `(0) ->');
+    expect(stderr()).not.toContain('literalParam');
+  });
+
+  test('explains a builtin, which has a signature but no definition site', async () => {
+    const { io, stderr } = makeIo();
+    expect(await main(['-e', 'Ln()\n42'], io)).toBe(1);
+    expect(stderr()).toContain(
+      '`Ln` has signature `(number, base: number?) -> number`'
+    );
+    expect(stderr()).not.toContain('is defined here');
+  });
+
+  test('stays silent when the signature explains nothing', async () => {
+    const { io, stderr } = makeIo();
+    // `"a" + 1` faults inside `Add`, whose signature is the fully variadic
+    // `(value+) -> value`: a note would name an operator the source spells
+    // `+` and then explain nothing about it.
+    expect(await main(['-e', '"a" + 1\n2'], io)).toBe(1);
+    expect(stderr()).not.toContain('has signature');
+  });
+
+  test('carries the notes, and the definition location, into JSON diagnostics', async () => {
+    const { io, stderr } = makeIo();
+    expect(
+      await main(['-e', `${FOO}foo("hello")\n42`, '--diagnostics', 'json'], io)
+    ).toBe(1);
+    const runtime = JSON.parse(stderr()).find(
+      (x: { code: string }) => x.code === 'runtime-error'
+    );
+    expect(runtime.notes[0].message).toContain('has signature');
+    // A note pointing at a second place carries that place, machine-readable.
+    expect(runtime.notes[1]).toMatchObject({
+      message: '`foo` is defined here',
+      line: 1,
+      column: 10,
+    });
+    // A prose note carries no location.
+    expect(runtime.notes[0].line).toBeUndefined();
+  });
+
+  test('underlines the argument, not the definition that contains it', async () => {
+    const { io, stdout } = makeIo();
+    const source = [
+      'const digits = "0123456789"',
+      'function parseDigits(cs, i, acc) {',
+      '  if i <= Length(cs) {',
+      '    parseDigits(cs, i + 1, IndexOf(digits, cs[i], 23))',
+      '  } else { (acc, i) }',
+      '}',
+    ].join('\n');
+    expect(await main(['check', '-e', source, '--json'], io)).toBe(1);
+    const [diagnostic] = JSON.parse(stdout()).diagnostics;
+
+    // The extra argument is `23`, four lines into a function definition.
+    // Anchoring on the statement would underline the whole definition.
+    expect(source.slice(diagnostic.start, diagnostic.end)).toBe('23');
+    expect(diagnostic.line).toBe(4);
+    // And the message quotes the CALL that failed, not the definition —
+    // which is all a host that shows only the message (an editor hover) has.
+    expect(diagnostic.message).toBe(
+      'Static error: unexpected argument in `IndexOf(digits, cs[i], 23)`'
+    );
+  });
+
+  test('checks calls to a function the program itself defines', async () => {
+    const { io, stdout } = makeIo();
+    // Nothing is evaluated, so this works only because `DefineFunction`
+    // installs its clause when it CANONICALIZES: without that the target
+    // keeps the top `function` type, which promises no arity, and the call
+    // type-checks vacuously.
+    const source = 'function foo(x: string, n: integer) { x }\nfoo("hello")';
+    expect(await main(['check', '-e', source, '--json'], io)).toBe(1);
+    const [diagnostic] = JSON.parse(stdout()).diagnostics;
+    expect(diagnostic.message).toContain('a required argument is missing');
+    // And the definition site is reachable from a static diagnostic, which is
+    // what makes the "defined here" note appear in an editor.
+    expect(diagnostic.notes[1]).toMatchObject({
+      message: '`foo` is defined here',
+      line: 1,
+    });
+  });
+
+  test('a multi-clause definition checks against every clause', async () => {
+    const { io, stdout, stderr } = makeIo();
+    // Each clause installs as it canonicalizes, so the accumulated overload
+    // set — not just the first clause — is what a later call is checked
+    // against. `fib(10)` matches the third clause and must pass clean.
+    expect(
+      await main(
+        [
+          'check',
+          '-e',
+          'function fib(0) { 0 }\nfunction fib(1) { 1 }\nfunction fib(n: integer) { fib(n-1) + fib(n-2) }\nfib(10)',
+        ],
+        io
+      )
+    ).toBe(0);
+    expect(stdout()).toBe('');
+    expect(stderr()).toBe('');
+  });
+
+  test('a definition inside a block does not check calls outside it', async () => {
+    const { io, stdout } = makeIo();
+    // The definition is scoped to the branch, so the outer `f` is unknown and
+    // stays unchecked. Reporting against either branch's signature would be a
+    // false positive — the pass is incomplete rather than unsound.
+    expect(
+      await main(
+        [
+          'check',
+          '-e',
+          'if true { function f(x: integer) { x } } else { function f(x: integer, y: integer) { x } }\nf(1)',
+          '--json',
+        ],
+        io
+      )
+    ).toBe(0);
+    expect(JSON.parse(stdout()).diagnostics).toEqual([]);
+  });
+
+  test('a generic definition is left unchecked rather than checked wrongly', async () => {
+    const { io, stdout } = makeIo();
+    // Generic clauses are excluded from the canonicalization-time install
+    // (rule G2 makes it non-repeatable), so `id(5)` is simply not checked
+    // here. What matters is that nothing is reported: a skipped install must
+    // not leave a half-built signature behind.
+    expect(
+      await main(
+        ['check', '-e', 'function id<T>(x: T) -> T { x }\nid(5)', '--json'],
+        io
+      )
+    ).toBe(0);
+    expect(JSON.parse(stdout()).diagnostics).toEqual([]);
+  });
+
+  test('explains a static-pass signature error too', async () => {
+    const { io, stdout } = makeIo();
+    // `epsil check` never evaluates, so the note has to come from the
+    // canonicalization pass — where the error carries no breadcrumb and its
+    // position in the canonical tree names the callee instead.
+    expect(await main(['check', '-e', 'Ln()', '--json'], io)).toBe(1);
+    expect(JSON.parse(stdout()).diagnostics[0].notes[0].message).toContain(
+      '`Ln` has signature'
+    );
   });
 });
 

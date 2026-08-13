@@ -122,7 +122,15 @@ export function lookupDoc(
   };
 }
 
-function describeName(
+/**
+ * The documentation entry for one exact name, or `undefined` when the engine
+ * has no definition for it.
+ *
+ * Exported as the single describer of a library name: `epsil doc` prints it,
+ * and the language server renders it as a hover, so the editor and the CLI
+ * cannot drift apart on what a function is or what it takes.
+ */
+export function describeName(
   engine: ComputeEngine,
   name: string
 ): DocEntry | undefined {
