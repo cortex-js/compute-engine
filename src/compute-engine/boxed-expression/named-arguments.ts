@@ -1,6 +1,6 @@
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { osaDistance } from '../../common/fuzzy-string-match.js';
-import { stringValue } from '../../math-json/utils.js';
+import { stringValue, symbol } from '../../math-json/utils.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import type {
   Expression,
@@ -159,6 +159,72 @@ export function hasNamedArguments(
   ops: ReadonlyArray<ExpressionInput>
 ): boolean {
   return ops.some(isCarrier);
+}
+
+/** The operand list of a raw (possibly unboxed) function application whose
+ * operator is `op`, or `undefined` when `x` is not one — the same three input
+ * spellings {@link isCarrier} distinguishes. */
+function rawOperands(
+  x: ExpressionInput,
+  op: string
+): ReadonlyArray<ExpressionInput> | undefined {
+  if (x instanceof _BoxedExpression)
+    return x.operator === op ? (x.ops ?? undefined) : undefined;
+  if (typeof x !== 'object' || x === null) return undefined;
+  if (Array.isArray(x))
+    return x[0] === op ? (x.slice(1) as ExpressionInput[]) : undefined;
+  if ('fn' in x) {
+    const fn = (x as { fn: ReadonlyArray<unknown> }).fn;
+    return fn[0] === op ? (fn.slice(1) as ExpressionInput[]) : undefined;
+  }
+  return undefined;
+}
+
+/** The name of a raw operand that is a SYMBOL, in any input spelling. */
+function rawSymbolName(x: ExpressionInput | undefined): string | undefined {
+  if (x === undefined) return undefined;
+  if (x instanceof _BoxedExpression) return x.symbol ?? undefined;
+  return symbol(x as MathJsonExpression) ?? undefined;
+}
+
+/** The value of a raw operand that is a STRING, in any input spelling. */
+function rawStringValue(x: ExpressionInput | undefined): string | undefined {
+  if (x === undefined) return undefined;
+  if (x instanceof _BoxedExpression) return x.string ?? undefined;
+  return stringValue(x as MathJsonExpression) ?? undefined;
+}
+
+/** The `(base, member)` names of a raw callee spelled as a
+ * `Field(⟨symbol⟩, ⟨string⟩)` application — the shape a QUALIFIED protocol
+ * call `P.m(…)` parses to, since `Comparable.compare(x, y)` is
+ * `Apply(Field(Comparable, "compare"), x, y)`. Purely syntactic, over the
+ * same input spellings as {@link isCarrier}, because it runs before any
+ * operand is boxed. Whether `base` actually names a protocol is the
+ * registry's question (`qualifiedMemberRequirementShape`,
+ * engine-protocols.ts), not this one's. */
+export function qualifiedFieldParts(
+  x: ExpressionInput | undefined
+): { base: string; member: string } | undefined {
+  if (x === undefined) return undefined;
+  const ops = rawOperands(x, 'Field');
+  if (ops === undefined || ops.length !== 2) return undefined;
+  const base = rawSymbolName(ops[0]);
+  const member = rawStringValue(ops[1]);
+  if (base === undefined || member === undefined) return undefined;
+  return { base, member };
+}
+
+/** The `(protocol, member)` names of a raw `ProtocolMember(P, m, …)` operand
+ * list — the box-route spelling of a qualified protocol call, where the first
+ * two operands name the protocol and the member as strings (or symbols, which
+ * `protocolMemberOperandsOf` also accepts at evaluation). */
+export function protocolMemberParts(
+  ops: ReadonlyArray<ExpressionInput>
+): { base: string; member: string } | undefined {
+  const base = rawStringValue(ops[0]) ?? rawSymbolName(ops[0]);
+  const member = rawStringValue(ops[1]) ?? rawSymbolName(ops[1]);
+  if (base === undefined || member === undefined) return undefined;
+  return { base, member };
 }
 
 /** The `[nameExpression, valueExpression]` operands of a carrier, whatever

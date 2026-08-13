@@ -2107,13 +2107,14 @@ this appendix originally anticipated (both deliberate, v1):
   `(unknown, unknown) -> …`), so only annotated literals and explicit
   declarations supply names. Carrying inferred names through is a
   measured follow-up (ROADMAP, v1 residuals).
-- **Inline-literal and `Apply`-routed callees decline**:
-  `((x: number) |-> x + 1)(x: 5)` and the qualified protocol
-  spelling `Comparable.compare(self: x, …)` report
-  `argument-names-unavailable` in v1, even though the names are
-  syntactically visible — the `Apply` path does not yet run name
-  normalization. Bare protocol calls dispatch by name (see "Protocol
-  dispatch" below).
+- **Inline-literal callees decline**: `((x: number) |-> x + 1)(x: 5)`
+  reports `argument-names-unavailable`, even though the names are
+  syntactically visible — the `Apply` path does not run name
+  normalization for a literal callee. One `Apply`-routed callee is
+  carved out: the qualified protocol spelling
+  `Comparable.compare(self: x, …)`, whose names are supplied by the
+  named protocol's requirement (see "Protocol dispatch" below; fixed
+  2026-08-13 — it declined in the original v1).
 
 ### Overloaded callees
 
@@ -2161,14 +2162,20 @@ it: written position never changes dispatch. (Appendix A's
 "Dispatching" keys on the first argument; with names in play, "first"
 means the declaration's first.) The requirement's parameter names are
 carried into the dispatcher's synthesized signature when every
-requirement shape agrees on them. The qualified spelling
-`Protocol.member(self: x, …)` routes through `Apply` and declines in
-v1, like other `Apply`-routed callees (see "Rules" above). That
-decline is the sharpest v1 limit of this feature: qualification is
-exactly what the `protocol-call-ambiguous` diagnostic steers to, so a
-named bare call that turns out ambiguous must currently drop its
-names to disambiguate. Lifting it is first in line among the v1
-residuals (`ROADMAP.md`).
+requirement shape agrees on them.
+
+The qualified spelling `Protocol.member(self: x, …)` works too (fixed
+2026-08-13; it declined in the original v1). It routes through
+`Apply`, which normally does not read names — but this callee's
+parameter names are statically known (the named protocol's requirement
+declares them), so the call is permuted against that requirement.
+This matters because qualification is exactly what the
+`protocol-call-ambiguous` diagnostic steers to: a named bare call
+that turns out ambiguous can qualify without dropping its names. A
+qualified name that does not designate a protocol requirement — the
+protocol is unknown, the member is not one of its functions, or the
+protocol's name is shadowed by a valued binding (so `Field` reads the
+value instead) — declines as before.
 
 ### What the names are, and what they are not
 
@@ -2209,7 +2216,9 @@ ratified 2026-08-13. Full statements with rationale:
 - **R2** — declaration-order evaluation ("Rules").
 - **R3** — disagreeing name orders never resolve silently ("Overloaded
   callees").
-- **R4** — `Apply`-routed callees decline in v1 ("Rules").
+- **R4** — `Apply`-routed callees decline in v1 ("Rules"); narrowed
+  2026-08-13 to inline-literal callees only, when the qualified
+  protocol spelling gained name support ("Protocol dispatch").
 - **R5** — names eliminate branches, persistently ("Overloaded
   callees").
 

@@ -2318,6 +2318,41 @@ export function protocolMemberSignature(
   return requirementShape(ce, record, member);
 }
 
+/**
+ * The requirement signature behind a QUALIFIED protocol call, for the
+ * named-argument seam (`makeCanonicalFunction`, box.ts): given the two names
+ * of a raw `Apply(Field(P, "m"), …)` or `ProtocolMember(P, m, …)` callee,
+ * the signature whose parameter names a named call is checked against —
+ * `compare(self, other: Self)` carries `self`/`other`, so
+ * `Comparable.compare(other: y, self: x)` can be permuted into declaration
+ * order before the carriers canonicalize (a carrier that reaches
+ * canonicalization reports `argument-names-unavailable`).
+ *
+ * `null` when the names do not designate a protocol requirement: `P` is not
+ * in the registry, `m` is not one of its FUNCTION members, or — when
+ * `shadowScope` is given (the `Field` route, whose base is a SYMBOL) — the
+ * symbol `P` holds a value, in which case `Field` reads that value's field at
+ * evaluation instead of the protocol ({@link protocolOfSymbol}'s guard,
+ * mirrored here by name because the seam runs before anything is boxed). A
+ * `null` leaves the call exactly as it was: the carriers decline as before.
+ */
+export function qualifiedMemberRequirementShape(
+  ce: IComputeEngine,
+  protocolName: string,
+  member: string,
+  shadowScope?: Scope
+): FunctionSignature | null {
+  const record = ce._protocolRegistry[protocolName];
+  if (record === undefined) return null;
+  if (record.members[member]?.kind !== 'function') return null;
+  if (shadowScope !== undefined) {
+    const def = lookup(protocolName, shadowScope);
+    if (def !== undefined && isValueDef(def) && def.value.value !== undefined)
+      return null;
+  }
+  return requirementShape(ce, record, member);
+}
+
 /** The value of `P.m`: a function literal that dispatches inside `P` only. */
 export function protocolMemberValue(
   ce: IComputeEngine,

@@ -435,12 +435,15 @@ describe('callees without a usable declaration (§6)', () => {
     ]);
   });
 
-  test('the QUALIFIED protocol-member spelling declines (R4)', () => {
-    // `Protocol.member(…)` parses as `Apply(Field(Protocol, "member"), …)`,
-    // and `Apply` is excluded from the seam: its own first parameter IS the
-    // callee, so a name written in its argument list is meant for that callee.
-    // The BARE spelling of the same call is permuted (see "protocol dispatch"
-    // below); this one waits on `Apply` learning to read its callee's names.
+  test('the QUALIFIED protocol-member spelling is permuted against the requirement', () => {
+    // `Protocol.member(…)` parses as `Apply(Field(Protocol, "member"), …)`.
+    // `Apply` is otherwise excluded from the seam (its own first parameter IS
+    // the callee), but this callee's parameter names are statically known —
+    // the requirement of the named protocol declares them — so the seam
+    // permutes the call against that requirement
+    // (`qualifiedMemberRequirementShape`, engine-protocols.ts). Qualification
+    // is the escape hatch the `protocol-call-ambiguous` diagnostic steers to,
+    // so a named call must not have to drop its names to use it.
     const ce = new ComputeEngine();
     ce.declareProtocol('Tagged', {
       functions: { tag: '(self: Self, prefix: string) -> string' },
@@ -448,16 +451,15 @@ describe('callees without a usable declaration (§6)', () => {
     ce.declareProtocolImplementation('integer', 'Tagged', {
       functions: { tag: (_self: any, prefix: any) => `${prefix.string}:int` },
     });
+    // `self` written LAST still dispatches on it (C6: dispatch keys on the
+    // declaration's first parameter, wherever the caller wrote it).
     const qualified: any = [
       'Apply',
       ['Field', 'Tagged', { str: 'tag' }],
       N('prefix', { str: 'p' }),
       N('self', 5),
     ];
-    expect(errorCodes(ce.box(qualified))).toEqual([
-      'argument-names-unavailable',
-      'argument-names-unavailable',
-    ]);
+    expect(ce.box(qualified).evaluate().toString()).toBe('"p:int"');
     // The positional qualified call is untouched.
     expect(
       ce
@@ -465,6 +467,62 @@ describe('callees without a usable declaration (§6)', () => {
         .evaluate()
         .toString()
     ).toBe('"p:int"');
+    // An unknown name is checked against the REQUIREMENT's names.
+    const unknown = ce.box([
+      'Apply',
+      ['Field', 'Tagged', { str: 'tag' }],
+      N('prefx', { str: 'p' }),
+      N('self', 5),
+    ] as any);
+    expect(errorCodes(unknown)).toEqual(['argument-name-unknown']);
+    expect(unknown.toString()).toContain('did you mean `prefix`?');
+    // The box-route `ProtocolMember` spelling reaches the same seam.
+    expect(
+      ce
+        .box([
+          'ProtocolMember',
+          { str: 'Tagged' },
+          { str: 'tag' },
+          N('prefix', { str: 'p' }),
+          N('self', 5),
+        ] as any)
+        .evaluate()
+        .toString()
+    ).toBe('"p:int"');
+  });
+
+  test('a qualified name that does NOT designate a protocol requirement still declines', () => {
+    const ce = new ComputeEngine();
+    // No such protocol: the carriers survive and decline as before.
+    expect(
+      errorCodes(
+        ce.box([
+          'Apply',
+          ['Field', 'Nowhere', { str: 'tag' }],
+          N('self', 5),
+        ] as any)
+      )
+    ).toEqual(['argument-names-unavailable']);
+    // A protocol whose base symbol is SHADOWED by a valued binding reads the
+    // value's field at evaluation, not the protocol — the seam must not
+    // permute against a requirement `Field` will not dispatch to.
+    ce.declareProtocol('Tagged', {
+      functions: { tag: '(self: Self, prefix: string) -> string' },
+    });
+    ce.assign('Tagged', ce.box(5));
+    expect(
+      errorCodes(
+        ce.box([
+          'Apply',
+          ['Field', 'Tagged', { str: 'tag' }],
+          N('prefix', { str: 'p' }),
+          N('self', 5),
+        ] as any)
+      )
+    ).toEqual([
+      'argument-names-unavailable',
+      'argument-names-unavailable',
+    ]);
   });
 });
 
@@ -854,6 +912,41 @@ type string is Tagged { function tag(self: Self, prefix: string) -> string { "st
     const other = executeEpsil(ce2, `${source}tag(prefix: "p", self: "q")`);
     expect(other.diagnostics).toEqual([]);
     expect(String(other.value)).toBe('"str"');
+  });
+
+  test('the parse route dispatches a QUALIFIED `self`-last member call', () => {
+    // The qualified spelling parses as `Apply(Field(Tagged, "tag"), …)` and is
+    // permuted against the named protocol's requirement — so the spelling the
+    // `protocol-call-ambiguous` diagnostic steers to keeps its names.
+    const source = `protocol Tagged { function tag(self: Self, prefix: string) -> string }
+type integer is Tagged { function tag(self: Self, prefix: string) -> string { "int" } }
+type string is Tagged { function tag(self: Self, prefix: string) -> string { "str" } }
+`;
+    const ce = new ComputeEngine();
+    const result = executeEpsil(ce, `${source}Tagged.tag(prefix: "p", self: 5)`);
+    expect(result.diagnostics).toEqual([]);
+    expect(String(result.value)).toBe('"int"');
+
+    const ce2 = new ComputeEngine();
+    const other = executeEpsil(ce2, `${source}Tagged.tag(prefix: "p", self: "q")`);
+    expect(other.diagnostics).toEqual([]);
+    expect(String(other.value)).toBe('"str"');
+  });
+
+  test('an ambiguous bare call can qualify WITHOUT dropping its names', () => {
+    // The collision this fix exists for: `protocol-call-ambiguous` steers to
+    // qualification, and qualification must not cost the caller their names.
+    const source = `protocol Left { function pick(self: Self, level: integer) -> string }
+protocol Right { function pick(self: Self, level: integer) -> string }
+type integer is Left { function pick(self: Self, level: integer) -> string { "left" } }
+type integer is Right { function pick(self: Self, level: integer) -> string { "right" } }
+`;
+    const ce = new ComputeEngine();
+    const ambiguous = executeEpsil(ce, `${source}pick(level: 1, self: 5)`);
+    expect(String(ambiguous.value)).toContain('protocol-call-ambiguous');
+    const qualified = executeEpsil(ce, 'Left.pick(level: 1, self: 5)');
+    expect(qualified.diagnostics).toEqual([]);
+    expect(String(qualified.value)).toBe('"left"');
   });
 });
 

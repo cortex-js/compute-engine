@@ -124,21 +124,20 @@ the design doc §4; not remaining work.)
 - **Error anchoring inside a reordered call** can underline the wrong
   argument: `locateError` maps canonical operand index into the raw
   AST by the same index, and after reordering the indices differ.
-- **Qualified protocol spelling** `Protocol.member(self: x, …)`
-  declines named arguments (`argument-names-unavailable`) — it
-  canonicalizes through `Apply`, which does not run name
-  normalization. This bites harder than the other `Apply`-routed case
-  (below): qualification is the escape hatch the
-  `protocol-call-ambiguous` diagnostic steers to, so a user whose
-  *named* bare call is ambiguous is told to qualify and then loses the
-  names as well — and protocol members are the one callee class whose
-  parameter names are guaranteed to exist (requirements always carry
-  them). Lifting it means teaching `Apply` to read parameter names
-  from its callee; the protocol-member case should come first.
 - **Inline-literal callees** `((x: number) |-> x + 1)(x: 5)` decline
-  the same way and share the same `Apply` fix, but the spelling is
-  rare and the workaround trivial (bind the literal to a name);
-  lower priority than the qualified-protocol case.
+  named arguments (`argument-names-unavailable`): the call
+  canonicalizes through `Apply`, which does not run name
+  normalization, so the literal's syntactically visible parameter
+  names are never read. The workaround is trivial (bind the literal
+  to a name) and the spelling rare. (The qualified protocol spelling
+  `Protocol.member(self: x, …)` used to share this decline — worse,
+  because qualification is what the `protocol-call-ambiguous`
+  diagnostic steers to — and was FIXED 2026-08-13: the seam now
+  permutes it against the named protocol's requirement signature,
+  `qualifiedMemberRequirementShape` in engine-protocols.ts, both the
+  `Apply(Field(P, "m"), …)` parse shape and the box-route
+  `ProtocolMember(P, m, …)` spelling. Only the inline-literal case
+  remains.)
 
 ### `Derivative` compile time vs body nesting depth (perf ask)
 

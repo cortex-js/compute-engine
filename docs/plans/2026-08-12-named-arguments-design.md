@@ -230,10 +230,37 @@ arity-only (`(any, any) -> unknown`), erasing requirement names — fixed
 by carrying each position's requirement parameter name into the
 synthesized args when every requirement shape agrees on it
 (`sharedParameterName`, engine-protocols.ts); positions with
-disagreeing names stay unnamed. The QUALIFIED spelling
-`Protocol.member(self: x, …)` canonicalizes through `Apply` and
-therefore declines under R4 (`argument-names-unavailable`) — pinned;
-lifting it rides the same follow-up as inline-literal callees (§6).
+disagreeing names stay unnamed.
+
+**Qualified spelling — LIFTED 2026-08-13** (originally declined under
+R4, which now covers inline-literal callees only). The QUALIFIED
+spelling `Protocol.member(self: x, …)` canonicalizes through `Apply`
+— it parses as `Apply(Field(P, "m"), …)`, and `Field` only lowers to
+the `ProtocolMember`-dispatching literal at *evaluate*, so the
+carriers used to die at canonicalization before any protocol code saw
+them. Unlike an inline literal, though, this callee's parameter names
+are statically known: the named protocol's requirement declares them.
+The §3 seam therefore carves the shape out of the `Apply` exclusion:
+`qualifiedFieldParts` (named-arguments.ts) recognizes the raw
+`Field(⟨symbol⟩, ⟨string⟩)` callee syntactically, and
+`qualifiedMemberRequirementShape` (engine-protocols.ts) supplies the
+requirement signature — `null`, leaving the decline in place, when the
+protocol is unknown, the member is not a function member, or the
+protocol's symbol is shadowed by a valued binding (mirroring
+`protocolOfSymbol`'s guard: `Field` would read the value, not the
+protocol). Normalization runs against that one signature (`kind:
+'apply'` cannot occur — a requirement is never an overload set), and
+the permuted call proceeds through the unchanged `Apply` → `Field` →
+literal application, receiver first — C6 dispatch falls out. The
+box-route spelling `ProtocolMember(P, m, ⟨carriers⟩)` reaches the same
+seam via `protocolMemberParts` (route parity; no shadow guard there —
+its protocol operand is data, not a symbol `Field` resolves).
+Pinned in named-arguments.test.ts (both routes, `self` written last,
+unknown-name against the requirement's names, unknown-protocol and
+shadowed-base declines, and the ambiguity→qualification flow that
+motivated the lift). `box.ts` imports `engine-protocols.ts` for the
+requirement lookup — verified cycle-free (madge; engine-protocols
+never reaches box.ts).
 
 ## 6. Callees without a usable declaration
 
@@ -339,7 +366,12 @@ for existing programs).
   order, not just an implementation).
 - **R4 — `Apply`/inline-literal callees decline in v1**
   (`argument-names-unavailable`); mechanical follow-up recorded in §6.
-  Includes the qualified `Protocol.member(...)` spelling (§5).
+  NARROWED 2026-08-13: the qualified `Protocol.member(...)` spelling,
+  originally included, now normalizes against the named protocol's
+  requirement signature (§5, "Qualified spelling — LIFTED") — its
+  names are statically known, unlike an inline literal's, and the
+  decline collided with the `protocol-call-ambiguous` diagnostic's
+  advice to qualify. Inline-literal callees still decline.
 - **R5 — names eliminate branches, persistently (RATIFIED
   2026-08-13).** A named argument is a STRONGER selector than a type or
   a runtime value: a branch (overload arm, multi-clause clause) that

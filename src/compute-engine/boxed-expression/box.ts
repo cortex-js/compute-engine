@@ -46,8 +46,11 @@ import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
 import {
   hasNamedArguments,
   normalizeNamedArguments,
+  protocolMemberParts,
+  qualifiedFieldParts,
   splitNamedArguments,
 } from './named-arguments.js';
+import { qualifiedMemberRequirementShape } from '../engine-protocols.js';
 import { multiClauseState } from '../multi-clause.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
@@ -532,6 +535,11 @@ function withDevolveRepair(
   scope: Scope | undefined,
   build: () => Expression
 ): Expression {
+  // Nested constructions join the active root (withRootRepair returns
+  // build() directly), so the persistence classifier below would be built
+  // and discarded — skip the allocation on this per-node hot path.
+  if (ce._boxingState.isRootActive) return ce._boxingState.withRootRepair(build);
+
   // Persistence classifier for the first-boxing binding-divergence repair
   // (`EngineBoxingState.noteDeclarationIn`): a scope outlives this
   // construction iff it is on a lexical chain that existed when the
@@ -539,8 +547,13 @@ function withDevolveRepair(
   // `scope` option's chain (a harvest scope from `ce.createScope()` is
   // persistent but not on the engine's chain). Scopes created DURING the
   // construction (a binder body's scope) are parented onto these chains but
-  // never members of them. `parent` links are immutable after creation, so
-  // walking at query time sees the same chains that existed at capture time.
+  // never members of them. Walking at query time sees the same chains that
+  // existed at capture time: scopes created during canonicalization never
+  // reparent, and the engine's one reparenting site (nullary-closure
+  // invocation in `function-utils.ts`, which swaps a stored closure body
+  // scope's parent around an evaluation call and restores it in a `finally`)
+  // targets closure-owned scopes, not the pre-existing lexical chains
+  // captured here.
   const bases: Scope[] = [ce.context.lexicalScope];
   if (scope !== undefined) bases.push(scope);
   return ce._boxingState.withRootRepair(build, (s) => {
@@ -1437,23 +1450,66 @@ function makeCanonicalFunctionCore(
   // untouched and each reports `argument-names-unavailable` when it
   // canonicalizes (design doc §6).
   //
-  // `Apply` is EXCLUDED (sub-ruling R4). Its own parameters are `(name,
-  // arguments*)` — the first one IS the callee — so a name written in an
-  // `Apply` argument list is meant for that callee, not for `Apply`, and
-  // matching it against `Apply`'s signature would answer a question nobody
-  // asked. `(⟨literal⟩)(x: 1)` canonicalizes to `Apply` too, so this one
-  // exclusion covers the whole non-symbol-callee spelling. Declining here
-  // leaves the carriers to report `argument-names-unavailable`; teaching the
-  // function-literal application path to permute is the recorded follow-up.
+  // `Apply` is EXCLUDED (sub-ruling R4), with one carve-out below. Its own
+  // parameters are `(name, arguments*)` — the first one IS the callee — so a
+  // name written in an `Apply` argument list is meant for that callee, not
+  // for `Apply`, and matching it against `Apply`'s signature would answer a
+  // question nobody asked. `(⟨literal⟩)(x: 1)` canonicalizes to `Apply` too,
+  // so this one exclusion covers the whole non-symbol-callee spelling.
+  // Declining here leaves the carriers to report
+  // `argument-names-unavailable`; teaching the function-literal application
+  // path to permute is the recorded follow-up.
   //
-  // It also catches the QUALIFIED protocol-member call, which parses as
-  // `Apply(Field(Protocol, "member"), …)`: the bare `member(self: x, …)` form
-  // is permuted (the dispatcher's synthesized signature carries the
-  // requirement's parameter names — `sharedParameterName` in
-  // engine-protocols.ts), while `Protocol.member(self: x, …)` declines. Both
-  // spellings work again as soon as `Apply` learns to read its callee's names,
-  // which is the same follow-up.
-  if (named && name !== 'Apply') {
+  // The carve-out is the QUALIFIED protocol-member call, which parses as
+  // `Apply(Field(Protocol, "member"), …)` (and can be written directly as
+  // `ProtocolMember(Protocol, "member", …)` on the box route). Unlike an
+  // inline literal, its parameter names are STATICALLY known — the
+  // requirement of the named protocol declares them — so the call is
+  // permuted here, against that requirement, before the carriers would
+  // canonicalize. Without this, qualification (the escape hatch the
+  // `protocol-call-ambiguous` diagnostic steers to) forced a named call to
+  // drop its names. The bare `member(self: x, …)` form needs none of this:
+  // the dispatcher's synthesized signature carries the requirement's names
+  // (`sharedParameterName`, engine-protocols.ts) and the ordinary seam
+  // below permutes it.
+  const qualified = !named
+    ? undefined
+    : name === 'Apply'
+      ? qualifiedFieldParts(ops[0])
+      : name === 'ProtocolMember'
+        ? protocolMemberParts(ops)
+        : undefined;
+  if (qualified !== undefined) {
+    const requirement = qualifiedMemberRequirementShape(
+      ce,
+      qualified.base,
+      qualified.member,
+      // Only the `Field` route has a SYMBOL base a value binding could
+      // shadow; the `ProtocolMember` operands name the protocol as data.
+      name === 'Apply' ? (scope ?? ce.context.lexicalScope) : undefined
+    );
+    if (requirement !== null) {
+      // The operands before the argument list: the callee for `Apply`, the
+      // protocol and member names for `ProtocolMember`.
+      const prefix = name === 'Apply' ? 1 : 2;
+      const split = splitNamedArguments(ops.slice(prefix));
+      const normalized = normalizeNamedArguments(ce, split, requirement);
+      // `kind: 'apply'` cannot occur: a requirement is one signature, never
+      // an overload set, and no clauses are passed.
+      if (normalized.kind === 'error')
+        return new BoxedFunction(
+          ce,
+          name,
+          flatten(
+            semiCanonical(ce, [...ops.slice(0, prefix), ...normalized.ops])
+          ),
+          { metadata, canonical: true }
+        );
+      if (normalized.kind === 'ok')
+        ops = [...ops.slice(0, prefix), ...normalized.ops];
+      // `unavailable` leaves `ops` alone: the carriers decline as before.
+    }
+  } else if (named && name !== 'Apply') {
     const split = splitNamedArguments(ops);
     if (split) {
       const normalized = normalizeNamedArguments(
