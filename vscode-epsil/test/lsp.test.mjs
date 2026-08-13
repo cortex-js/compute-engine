@@ -206,6 +206,22 @@ await scenario('representation views', undefined, async (c) => {
     JSON.stringify(js)
   );
 
+  const py = await c.request('epsil/view', { uri: URI, view: 'python' });
+  check(
+    'the Python view shows the compiled program, commented in Python',
+    py?.content.startsWith('# Compiled to Python') === true &&
+      py.content.includes('np.sin'),
+    JSON.stringify(py)
+  );
+
+  const glsl = await c.request('epsil/view', { uri: URI, view: 'glsl' });
+  check(
+    'the GLSL view shows the compiled program',
+    glsl?.content.startsWith('// Compiled to GLSL') === true &&
+      glsl.content.includes('float x;'),
+    JSON.stringify(glsl)
+  );
+
   const unknown = await c.request('epsil/view', {
     uri: 'file:///tmp/not-open.epsil',
     view: 'ast',

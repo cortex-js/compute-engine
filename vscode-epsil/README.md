@@ -33,9 +33,10 @@ fib(n: integer) = fib(n - 1) + fib(n - 2)
 - **Epsil: Show Representation** (`epsil.showRepresentation`, the `{}` button
   in the editor title bar) — opens a read-only pane beside your file showing
   what the engine makes of it: the **MathJSON** it parses to, its **canonical
-  form**, or the **JavaScript** it compiles to. The pane tracks the buffer as
-  you type. Nothing is saved and nothing is evaluated — rendering a view never
-  runs your program.
+  form**, or the program as compiled by one of the engine's code-generation
+  targets — **JavaScript**, **Python** (NumPy), or **GLSL**. The pane tracks
+  the buffer as you type. Nothing is saved and nothing is evaluated —
+  rendering a view never runs your program.
 - **Epsil: Run File** (`epsil.runFile`) — saves the active file and runs it in
   an integrated terminal named _Epsil_. By default it runs the Epsil CLI bundled
   with the extension — the same engine build used for diagnostics, inline

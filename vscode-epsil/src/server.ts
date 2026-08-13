@@ -520,13 +520,13 @@ function severityOf(severity: string): DiagnosticSeverity {
 //
 //   - `ast`        — the MathJSON the parser produced, before canonicalization
 //   - `canonical`  — each top-level statement in canonical form
-//   - `javascript` — the program compiled by the JavaScript target
+//   - `javascript` / `python` / `glsl` — the program compiled by that target
 //
 // Everything here parses, canonicalizes, or compiles — nothing is ever
 // evaluated, so rendering a view cannot run user code.
 //
 
-type ViewKind = 'ast' | 'canonical' | 'javascript';
+type ViewKind = 'ast' | 'canonical' | keyof typeof COMPILE_TARGETS;
 
 connection.onRequest(
   'epsil/view',
@@ -583,7 +583,7 @@ function renderView(text: string, uri: string, view: ViewKind): string {
     ].join('\n');
 
   if (view === 'canonical') return renderCanonical(engine, ast);
-  return renderJavaScript(engine, ast);
+  return renderCompiled(engine, ast, view);
 }
 
 /**
@@ -634,29 +634,38 @@ function renderCanonical(
   ].join('\n');
 }
 
+/** The compile targets the views expose. Keys are the names the targets are
+ * registered under (what `compile({to})` accepts); `comment` is the line
+ * comment the rendered header and error messages must use in that language. */
+const COMPILE_TARGETS = {
+  javascript: { title: 'JavaScript', comment: '//' },
+  python: { title: 'Python', comment: '#' },
+  glsl: { title: 'GLSL', comment: '//' },
+} as const;
+
 /**
- * The whole program compiled by the JavaScript target. `fallback: false`:
- * an operator the target has no lowering for should say so here, not be
- * papered over with an interpreter thunk whose source is unprintable.
+ * The whole program compiled by one of the engine's targets.
+ * `fallback: false`: an operator the target has no lowering for should say so
+ * here, not be papered over with an interpreter thunk whose source is
+ * unprintable.
  */
-function renderJavaScript(
+function renderCompiled(
   engine: ComputeEngine,
-  ast: MathJsonExpression
+  ast: MathJsonExpression,
+  target: keyof typeof COMPILE_TARGETS
 ): string {
-  const header = '// Compiled to JavaScript by the Compute Engine.';
+  const { title, comment } = COMPILE_TARGETS[target];
+  const header = `${comment} Compiled to ${title} by the Compute Engine.`;
   try {
-    const result = compile(engine.box(ast), {
-      to: 'javascript',
-      fallback: false,
-    });
+    const result = compile(engine.box(ast), { to: target, fallback: false });
     return [header, '', result.code, ''].join('\n');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return [
       header,
       '',
-      '// This program cannot be compiled to JavaScript:',
-      ...message.split('\n').map((line) => `// ${line}`),
+      `${comment} This program cannot be compiled to ${title}:`,
+      ...message.split('\n').map((line) => `${comment} ${line}`),
     ].join('\n');
   }
 }

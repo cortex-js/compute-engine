@@ -26,15 +26,16 @@
 
 - **The VS Code extension shows what the engine makes of your file.**
   **Epsil: Show Representation** (the `{}` button in the editor title bar)
-  opens a read-only pane beside an Epsil file showing one of three
+  opens a read-only pane beside an Epsil file showing one of five
   representations: the **MathJSON** the parser produced (before
   canonicalization), the **canonical form** of each top-level statement, or
-  the **JavaScript** the program compiles to. The pane tracks the buffer as
-  you type — unsaved and untitled buffers included — and nothing is
-  evaluated, so rendering a view never runs the program. A program the
-  JavaScript target cannot compile (for now that includes any program
-  defining a function, since `DefineFunction` has no JavaScript lowering)
-  reports the compiler's explanation in the pane instead.
+  the program as compiled by one of the engine's code-generation targets —
+  **JavaScript**, **Python** (NumPy), or **GLSL**. The pane tracks the buffer
+  as you type — unsaved and untitled buffers included — and nothing is
+  evaluated, so rendering a view never runs the program. A program a target
+  cannot compile (for now that includes any program defining a function,
+  since `DefineFunction` has no lowering in any target) reports the
+  compiler's explanation in the pane instead.
 
 ### Issues Resolved
 
