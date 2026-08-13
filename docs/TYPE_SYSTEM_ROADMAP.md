@@ -1572,6 +1572,57 @@ when the list holds objects). This replaces Appendix A's rebinding sugar
 and its `property-assignment-target-invalid` restriction — see "Changes
 to Appendix A".
 
+### A store writes the evaluated value
+
+The right-hand side of a field store is **evaluated, then stored** —
+the same semantics as assignment to an identifier. What that
+semantics is today, verified against the `Assign` evaluate handler in
+`src/compute-engine/library/core.ts` and by probe (2026-08-13): the
+RHS is evaluated at the exact tier (`evaluate()`, never `.N()`),
+symbols with assigned values are dereferenced at store time, and the
+binding holds the result. Concretely: `x := 2 + 3` stores `5`; with
+`x = 5`, `z := x + 1` stores `6`, and a later `x := 100` leaves `z`
+at `6`; `w := sqrt(2)` stores the exact symbolic `√2`; and
+`y := t + 1` with `t` unbound stores the symbolic value `t + 1`.
+Field stores behave identically: after `p.age = p.age + 1` the field
+holds the evaluated result, never the unevaluated expression — and a
+computed property's `set` accessor receives that evaluated value too,
+so the field-backed and computed paths agree. An object-valued RHS
+evaluates to the *reference*: "evaluated" never means copied (that is
+the sharing semantics of "References, not copies" below).
+
+Three consequences, each load-bearing for caching:
+
+- **A field read is a pure load.** Because stored fields hold
+  already-evaluated values, reading one runs no user code and
+  evaluates nothing — which is precisely what makes the per-object
+  version counter (under "Changing a field is an effect") a
+  *sufficient* dependency for cached results that read the field. If
+  a field could hold an unevaluated expression, every read would be
+  an evaluation whose outcome depends on the ambient world, and the
+  version counter alone could not invalidate correctly. A stored
+  value may still be *symbolic* (`t + 1` above): the read returns it
+  as a value, and any further evaluation of it happens in the
+  consumer, which records its own dependencies as usual — nothing is
+  attributed to the read. Computed properties are the deliberate
+  exception: their accessors run on each access.
+- **RHS effects fire once, at the store.** Whatever effects the RHS
+  carries — including `state` from constructions inside it — happen
+  at assignment time, in B8's pinned order, and are never re-fired by
+  later reads. This mirrors `Assign`'s storing-writer contract: a
+  stored function value is stored, not applied.
+- **Stored values may be shared, and identical stores may be
+  elided.** The evaluated result can be an interned node (equal
+  small-integer literals share one boxed value engine-wide) and may
+  be aliased into other expressions and other objects' fields; that
+  is safe because everything storable is immutable except objects,
+  which alias by design. It also licenses a no-op guard: a store
+  whose new value is the *identical node* as the current field value
+  is observably nothing (immutability guarantees no content
+  difference), so the version bump and state event may be skipped —
+  the same identity-only no-op rule the binding machinery already
+  applies to `Assign`.
+
 ### References, not copies
 
 Binding an object to another name does not copy it; both names refer to
@@ -1817,6 +1868,83 @@ b.value = 1.5                // …and the Cell<integer> now holds 1.5
 
 A variable that occurs only in *computed* property signatures is not a
 stored field and keeps the ordinary variance rules. (Ruling B13.)
+
+### Ref cells and mutable collections
+
+An earlier design discussion considered a general **ref cell** — the
+ML-style `ref<T>`, a single mutable slot — as the language's mutability
+primitive. That idea is not dropped; it is subsumed. A ref cell is
+exactly a one-field object, expressible in this appendix's machinery
+as:
+
+```epsil
+type Ref<inout T> = object<value: T>
+```
+
+— the identical shape to the `Cell<inout T>` example under "Generic
+object types". Every piece of engine work a dedicated ref mechanism
+would need — reference identity, the `state` label, per-object version
+counters, serialization refusal, the B12 lifetime rules — is the same
+work objects already require, so a separate primitive would buy
+nothing. The direction of derivation matters too: with objects as the
+primitive, `Ref<T>` is one declaration; with ref as the primitive,
+mutable records come out as either ref-of-record (stores replace the
+whole record, so no field-granular writes and no field-backed property
+satisfaction) or record-of-refs (every field read is a deref, and the
+"stored field satisfies a `readwrite` property" rule collapses). Once
+B13 lands, the library may ship `Ref<T>` as a convenience type; until
+then, `type Counter = object<count: integer>` is the idiom for a
+mutable scalar.
+
+**Mutable lists stay out of v1** — and not merely as a scoping
+economy. Making `list` itself mutable would hand out writable aliases
+to values the engine shares freely: subexpression nodes are reused
+across parents and equal literals are interned, so a write through one
+reference would be visible through structures that never opted into
+sharing. This is the same "permission without uniqueness" hole that
+led to deferring the `inout` parameter mode
+(`docs/EFFECTS-MODEL.md`, "Priority ruling 2026-08-08"). Objects
+avoid the hole because they are a new, opt-in nominal category born
+with identity and excluded from interning and caching (B3); lists are
+not. A separate mutable `array<T>` type would be sound but is a large
+project — invariant element type, reference `==` on list-looking
+values, an answer for every collection handler, broadcast,
+iteration-during-mutation, compile targets — with no forcing
+function: the *performance* half of the ask is already answered by
+rebinding forms plus copy-elision-when-unique
+(`docs/EFFECTS-MODEL.md`, "Implementing the optimization — two tiers,
+one guarantee"), and the *sharing* half is expressible by putting a
+list inside an object:
+
+```epsil
+type MutList<inout T> = object<items: list<T>>
+
+let ml = MutList(items: [1, 2, 3])
+let other = ml                    // same object
+ml.items = Append(ml.items, 4)
+other.items                       // ➔ [1, 2, 3, 4] — sharing observed
+```
+
+The interior `list` stays immutable — the store rebinds the field —
+so this composes with the copy-elision tier: the object's `items`
+reference is typically the only live one, and the rebuild can then
+update in place.
+
+### Deferred: indexed stores through an object
+
+The `MutList` idiom above has no spelling for `ml[i] = v`; today the
+update must be written as a whole-field store on `items`. The natural
+extension is a **subscript accessor** on object types — a `get`/`set`
+pair addressed by index rather than by property name, with the setter
+carrying `state`, so that `ml[i] = v` desugars to a setter call the
+effects system sees (the Swift `subscript` / Python `__setitem__`
+analogue). This is deliberately not in v1: it needs its own
+surface-syntax design and a protocol-requirement story (can a
+protocol require a subscript?), and nothing in the object core
+depends on it. It is recorded here so that "mutable collections" has
+an honest placeholder: the intended answer is a library object type
+plus subscript accessors — never a new value-semantics category for
+lists.
 
 ### The rest of the system
 

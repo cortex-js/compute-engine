@@ -1,5 +1,35 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The `Error` JSON shape gains an operand: argument-validation errors now
+  carry the FAULTED OPERAND as a site operand, before the trace.** An
+  `incompatible-type` error minted while validating an argument reports which
+  operand faulted:
+
+  ```
+  before   f("str")            ["Error", EC]
+           Sqrt("s").evaluate  ["Error", EC, ["ErrorTrace", …]]
+
+  now      f("str")            ["Error", EC, "'str'"]
+           Sqrt("s").evaluate  ["Error", EC, "'s'", ["ErrorTrace", …]]
+  ```
+
+  `ErrorTrace` stays LAST and is head-identified, as always — code that finds
+  the trace by scanning for the `ErrorTrace` head is unaffected. **Code that
+  reads the trace positionally as operand 2 now gets the faulted operand
+  instead** — a plausible-looking value rather than an error node, so that
+  failure mode is a silently wrong read, not a crash: grep for positional
+  `Error` operand reads before adopting. Rendered messages now name the site
+  ("… at `p`"). Two contract repairs ride with the change: `match`'s
+  `Error(c)` patterns ignore the site the way they already ignore the trace
+  (pattern arity decides — `Error(c, w)` binds the site), and
+  static-diagnostic deduplication keys on a SITE-LESS description so one
+  problem does not split into per-site diagnostics. Any stored/expected
+  MathJSON containing `Error` nodes (snapshots, seed corpora) will change
+  shape even where nothing is wrong — re-baseline those deliberately rather
+  than reading the churn as a regression.
+
 ### Epsil
 
 - **Named-argument calls.** An Epsil call can pass arguments by parameter
@@ -83,6 +113,24 @@
   contract (the scope receives the writes, to be read back).
 
 ### Issues Resolved
+
+- **An assignment can now refine a use-inferred symbol type, so the inferred
+  type no longer depends on whether the first use or the assignment came
+  first.** Previously the inference direction rules were strictly one-way:
+  uses narrow, assignments widen. A symbol whose numeric use was seen before
+  its assignment therefore settled on a wider type than the same symbol
+  assigned first (`v` used in `x·v` then assigned `5` stayed `number`, while
+  assign-first gave `integer`) — a divergence between orderings, not a wrong
+  type under the rules. Now, when a symbol's current type came from USE
+  inference (not from a previous assignment or a declaration), an assignment
+  refines it to the assigned value's type, with three guards: the promoted
+  type installs only when it is a subtype of the current one; a symbol whose
+  latest type evidence is itself assignment-derived stays widen-only, so
+  alternating assignments (`v := 2.5` then `v := 5`) do not oscillate the
+  type; and the union-adoption path for declared unions is unchanged.
+  Declared types are never affected. If you probe type stability across
+  orderings (box-first vs assign-first), expect both orderings to converge on
+  the assignment's type now — a deliberate change, not drift.
 
 - **A parsed integral now binds its integrand's free symbols the same way as
   boxing its canonical MathJSON does** (the residual surface of Tycho item
