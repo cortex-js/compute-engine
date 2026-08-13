@@ -1801,26 +1801,87 @@ Three consequences are worth pinning (ruling B12):
 ### Serialization
 
 MathJSON has no way to express "these two places refer to the same
-object", and no way at all to express a cycle. Two candidate postures
-(ruling B5):
+object", and no way at all to express a cycle. The posture (ruling B5,
+direction settled 2026-08-13): **refuse implicitly, convert
+explicitly.**
 
-- **Refuse** (recommended for v1): serializing an expression that
-  contains an object emits `object-serialization-unsupported`. Nothing
-  is silently lost.
-- **Snapshot**: serialize a copy of the object's current contents.
-  Sharing is silently lost — two references to one object come back as
-  two unrelated records — and cycles still need an answer.
-
-Refusal is **subexpression-local**, following the engine's
+**Refuse by default.** Serializing an expression that contains an
+object emits `object-serialization-unsupported`. Nothing is silently
+lost. Refusal is **subexpression-local**, following the engine's
 errors-as-values convention: inside a larger, otherwise-serializable
 structure, the object's position serializes as an error expression
 (`object-serialization-unsupported`) and the rest serializes normally —
 the whole call does not throw.
 
-The recommended pairing: refuse implicitly, and provide an explicit
-operation (`Snapshot(p)`, name open) that returns an immutable record
-copying the object's current contents. Whether a snapshot is shallow or
-deep, and what a deep snapshot does on a cycle, is part of B5.
+**Convert explicitly with `RecordFrom`.** The engine already ships a
+conversion family — `ListFrom`, `SetFrom`, `TupleFrom`,
+`DictionaryFrom`, `RecordFrom(collection of pairs) -> record`
+(`library/collections.ts`) — and the explicit escape is a new arm on
+that family, not a new operator: `RecordFrom(object)` returns an
+immutable record of the object's current contents. (`Snapshot` was
+considered as a name and rejected: the family already covers the
+meaning, and the point-in-time detachment it would advertise is implied
+by the result being an immutable record.) Its semantics:
+
+- **Deep, necessarily.** A shallow record whose fields still held live
+  object references would be neither detached nor serializable — it
+  would not solve the problem the operator exists for. The walk
+  converts every object it meets, wherever it sits, including inside
+  lists and records held in fields.
+- **Stored fields only, and the walk runs no user code.** Because a
+  store writes the evaluated value (see "A store writes the evaluated
+  value"), field reads are pure loads: the whole walk executes no user
+  code, is atomic — nothing can mutate mid-walk — and terminates.
+  Computed properties are deliberately excluded: their accessors are
+  user code (possible mutation, possible divergence), and they are
+  surface, not state. `RecordFrom` captures the stored layout.
+- **A read, not an action.** `RecordFrom(p)` carries no `state` label —
+  it observes. It records version-counter dependencies on every object
+  it reads, so a cached result containing a snapshot invalidates
+  correctly when any snapshotted object is later stored to.
+- **Cycles become `CircularReference` markers.** A true back-edge — an
+  object already on the current walk path — serializes as
+  `["CircularReference", n]`, where `n` counts how many levels up the
+  ancestor chain the cycle points; an optional third operand names the
+  nominal type of the object referred back to:
+  `["CircularReference", 2, "Buddy"]`. The marker is inert data, not an
+  error — the caller asked for the snapshot, so a cycle is not a
+  failure of the request — and the depth-plus-type encoding is
+  loss-free: a future inverse (`ObjectFrom`, not proposed here) could
+  reconstruct the loop. The walker emits the type operand (it knows the
+  type at the back-edge for free); the shape remains valid without it.
+  The back-edge guard is exactly the value-walk cycle guard the
+  "Cycles" section mandates — `RecordFrom` is its first named consumer.
+- **Two documented losses.** Sharing: a shared but acyclic reference (a
+  cross-edge, not a back-edge) has a perfectly good tree representation
+  and is simply duplicated — two references to one object come back as
+  two unrelated records. Nominal identity: records are structural, so
+  `RecordFrom` returns a plain `record<firstName: string, …>` — the
+  `Person`-ness is gone from the *value*. In `RecordFrom`'s own result
+  the type name survives only in `CircularReference` markers; the
+  serializer route below does better.
+
+**An opt-in serializer option.** `toMathJSON()` gains an option
+(spelling open, e.g. `objects: 'reject' | 'record'`, default
+`'reject'`) that, when set, serializes each object position as the
+record `RecordFrom` would produce, **wrapped in a `Typed` ascription
+carrying the object's nominal type**:
+
+```json
+["Typed", ["Record", ["Tuple", "'firstName'", "'Alan'"], …], "'Person'"]
+```
+
+`Typed` is the shipped ascription operator (evaluation-transparent,
+type operand a string), so the nominal identity that the record value
+itself cannot carry survives in the serialized form at every object
+position — not just at cycle markers. Constraints pinned now: **one
+walk, one mechanism** — the record inside the wrapper is byte-identical
+to explicit `RecordFrom` output, the serializer only adds the `Typed`
+wrapper — and it is a **one-way door**: `Typed` is transparent at
+evaluation, so the output parses back as type-ascribed records, never
+objects; identity, sharing, and conformances do not survive. Opt-in per
+call is what makes the silent-loss objection acceptable — the caller
+asked.
 
 ### Changing a field is an effect
 
@@ -2103,8 +2164,17 @@ a fresh object type instead of being caught.
   (internal dedup key; must not run user code). Residue before ruling:
   the time-varying-equality audit of `assume`/rule consumers that
   record `==` verdicts as durable facts.
-- **B5 — serialization.** Refuse + explicit `Snapshot` (recommended) vs
-  silent snapshot; snapshot depth; behavior on cycles.
+- **B5 — serialization (direction settled 2026-08-13).** Refuse by
+  default (`object-serialization-unsupported`, subexpression-local);
+  explicit conversion via a `RecordFrom(object)` arm on the existing
+  `…From` family — deep walk, stored fields only (no user code runs),
+  no `state` label, back-edges marked `["CircularReference", n,
+  Type?]`, cross-edges duplicated; plus an opt-in `toMathJSON()` option
+  that applies the same walk (byte-identical record, one mechanism) at
+  each object position and wraps it in a `Typed` ascription carrying
+  the nominal type (`["Typed", record, "'Person'"]`). Remaining
+  bikeshed: the serializer option's spelling. See "Serialization" for
+  the full semantics.
 - **B6 — lattice placement.** Bare `object` as "any object";
   disjointness from `record`.
 - **B7 — initialization.** v1: constructors take every stored field; a
