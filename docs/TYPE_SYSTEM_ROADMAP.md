@@ -1817,10 +1817,23 @@ answer, and labels are the wrong tool for them — the effects model
 deliberately treats reads of non-local state as label-free, relying on
 precise invalidation channels instead. This proposal follows that
 precedent: every object carries a **version counter**, bumped on each
-field store, and reading a field records a dependency on that counter
-the same way reading a global binding records a generation dependency
-today. A cached result that read `p.age` is invalidated by the next
-store to `p` — not by stores to unrelated objects. Each store also
+field store. An evaluation whose result is cached records, *in that
+cache entry*, a dependency on the counters of the objects it read —
+the same way it records a generation dependency when it reads a
+global binding today. The dependency belongs to the cache entry,
+never to the value read: a field read yields an immutable value (or a
+reference), and once stored elsewhere that value carries nothing with
+it — "A store writes the evaluated value" cuts the chain at every
+store, for fields exactly as for bindings. A cached result that read
+`p.age` is invalidated by the next store to `p` — not by stores to
+unrelated objects, and not retroactively: invalidation only means the
+memo can no longer stand in for a fresh evaluation; the value it
+produced stays a perfectly good value. The counters compose at
+per-object granularity through reference-valued fields: a cached
+`p.friend` depends only on `p`'s counter — the result is a reference,
+and it is still the right reference whatever the friend's own fields
+do — while a cached `p.friend.name` depends on both objects'
+counters, one per object read through on the way. Each store also
 registers a state event through the engine's event machinery (Appendix
 A, "Registry changes are state events"); since every store goes through
 one operation, both the version bump and the event have a single
