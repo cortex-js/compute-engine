@@ -193,8 +193,13 @@ Design: `resolveOverload` (overload.ts:592) accepts the SPLIT call
   existing application path (`Apply(⟨clause literal⟩, …)` — so
   `f(n: 0)` runs the `n` clause). A callee with no clause literal to
   pin to (a declared-only overload set whose eliminated arm is more
-  specific) declines deterministically — the sanctioned conservative
-  residual, pinned by a test.
+  specific) declines deterministically — RATIFIED as the correct
+  behavior, not a residual (user, 2026-08-13): when the names and
+  positional ranking disagree and there is no implementation to pin
+  the call to, the engine asks the author to be explicit rather than
+  guessing which reading was meant. The diagnostic steers to a
+  positional call; pinned by a test. Do not "lift" this by threading
+  survivor sets into result typing — the decline is the design.
 - **Disagreeing permutations without a unique winner (sub-ruling R3,
   §9):** if several arms survive AND their permutations of the provided
   names differ AND ranking does not produce a unique winner, the call

@@ -1,6 +1,6 @@
 ## [Unreleased]
 
-### New Features
+### Epsil
 
 - **Named-argument calls.** An Epsil call can pass arguments by parameter
   name: `interest(principal: 1000, rate: 0.05)`. Named arguments may be
@@ -23,6 +23,18 @@
   unannotated function literals. Design record:
   `docs/plans/2026-08-12-named-arguments-design.md` (spec:
   `docs/TYPE_SYSTEM_ROADMAP.md` Appendix C, rulings C1–C6).
+
+- **The VS Code extension shows what the engine makes of your file.**
+  **Epsil: Show Representation** (the `{}` button in the editor title bar)
+  opens a read-only pane beside an Epsil file showing one of three
+  representations: the **MathJSON** the parser produced (before
+  canonicalization), the **canonical form** of each top-level statement, or
+  the **JavaScript** the program compiles to. The pane tracks the buffer as
+  you type — unsaved and untitled buffers included — and nothing is
+  evaluated, so rendering a view never runs the program. A program the
+  JavaScript target cannot compile (for now that includes any program
+  defining a function, since `DefineFunction` has no JavaScript lowering)
+  reports the compiler's explanation in the pane instead.
 
 ### Issues Resolved
 

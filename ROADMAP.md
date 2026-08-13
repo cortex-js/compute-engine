@@ -137,19 +137,13 @@ of this one defect; their siblings 178(b) and 178(d) are fixed and in
 
 Named-argument calls shipped 2026-08-12 (design record:
 `docs/plans/2026-08-12-named-arguments-design.md`, §9 has the full
-statements). Four deliberate v1 limits remain open, in rough priority
-order:
-
-- **Declared-only overload sets can decline a named call R5 could
-  otherwise type.** (The former "arm substitution" residual was FIXED
-  2026-08-13 by ruling R5 — names now eliminate branches persistently,
-  enforced at the seam.) The remaining conservative case: an overload
-  set declared as a type with no clause implementations, where the
-  name-ELIMINATED arm is more specific than the survivor — there is no
-  clause literal to pin the call to, so it declines
-  (`argument-names-unavailable`) rather than letting the eliminated
-  arm type the call. Lifting it means threading the survivor set into
-  `validateArguments`/result typing.
+statements). Three deliberate v1 limits remain open, in rough priority
+order. (A fourth candidate — a declared-only overload set declining a
+named call whose name-eliminated arm is more specific — was RULED
+correct behavior on 2026-08-13, not a limit: when names and positional
+ranking disagree and there is no implementation to pin the call to, the
+engine asks the author to be explicit rather than guessing. Recorded in
+the design doc §4; not remaining work.)
 - **Unannotated function literals are not addressable by name** — type
   inference drops parameter names (`effects-inference.ts` types a bare
   parameter as `{ type: 'unknown' }`). MEASURED 2026-08-13: the

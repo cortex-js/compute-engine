@@ -154,7 +154,9 @@ const g : (number) -> number = (x) |-> x + 1
 ```
 
 So a name appears in **one** place (or in both, agreeing) — never with two
-meanings. When the annotation is named, the initializer is read as a pointwise
+meanings. These declared names are also what callers use to pass
+[named arguments](/epsil/syntax/#named-arguments) — `f(x: 3)` — so
+renaming a parameter is a visible change to the function's interface. When the annotation is named, the initializer is read as a pointwise
 *body*; when it is unnamed, the initializer must *be* a function value, as in
 `const h : (number) -> number = g`.
 

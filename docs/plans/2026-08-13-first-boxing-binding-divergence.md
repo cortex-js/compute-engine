@@ -100,6 +100,29 @@ Not yet chosen. Each needs the full suite plus a snapshot blast-radius count.
    yet. Cleanest statement of the invariant — the auto-declare target must not
    depend on engine history — but likely the widest blast radius.
 
+**A mechanism for (3) is arriving from elsewhere.** Phase 1 of
+`docs/plans/2026-08-13-inference-provenance-journal.md` adds an
+`'auto-declared'` provenance kind, recorded at the auto-declare path in
+`engine-expression-entrypoints.ts` with the boxed expression as its cause. That
+makes "was this binding pre-existing, or created by the pass currently running?"
+answerable from provenance alone — which is precisely the history-independence
+predicate (3) turns on, and it does not depend on the transaction primitive
+landing.
+
+**Ordering agreed 2026-08-13 with the inference-provenance owner, and recorded
+on both sides** (their copy is in that plan's phase-1 data-model section):
+
+- **They go first.** The `'auto-declared'` provenance write is ADDITIVE — it
+  records a kind at an existing decision point. This fix CHANGES what that
+  decision point does, so rebasing the scope-target change onto the provenance
+  write is cheaper than making them resolve a conflict against a moved target.
+- **Mutual ping before either side opens `createSymbolExpression`.** Both
+  changes land in the same function, within roughly the same lines.
+- As of 2026-08-13 their phase 1 has NOT started and is gated on their user's
+  go-ahead; this fix is gated on the inference question in the section below.
+  Neither side is blocked on the other — the ordering only settles who edits
+  that function first if both become actionable.
+
 Whichever is chosen, the invariant to pin is: **`ce.box(J).isSame(ce.box(J))`
 for every J, on a fresh engine, independent of call order.** That is a property
 worth testing directly rather than through any one witness.
@@ -144,17 +167,33 @@ a question about the inference model, not about binder scope.
 direction rules were probed individually
 (`docs/scratch/2026-08-13-inference-direction-rules.mts`):
 
-| probe | result |
-| --- | --- |
-| widen from value assignment (`v := 5` then `v := 2.5`) | `integer` → `real` ✓ |
-| narrow from argument use, starting at `unknown` | `unknown` → `number` ✓ |
-| narrow further from a later, narrower use (`v!` after `x·v`) | `number` → `number` — no further narrowing |
-| narrow from a value assignment (`v := 5` after `x·v`) | `number` → `number` — excluded, as §1 implies |
+| probe | control on a fresh symbol | result |
+| --- | --- | --- |
+| widen from value assignment (`v := 5` then `v := 2.5`) | — | `integer` → `real` ✓ |
+| narrow from argument use, starting at `unknown` | — | `unknown` → `number` ✓ |
+| narrow further via a declared signature (`g(v)` after `x·v`, `g: (integer) -> integer`) | `g(v)` alone pins `integer` | `number` → `integer` — DOES narrow |
+| narrow further via an operator context (`Fibonacci(v)` after `x·v`) | `Fibonacci(w)` alone pins `integer` | `number` → `integer` — DOES narrow |
+| narrow further via `v!` after `x·v` | `w!` alone pins `number` — **vacuous** | no move, but the probe could not have shown one |
+| narrow from a value assignment (`v := 5` after `x·v`) | — | `number` → `number` — excluded, as §1 implies |
 
-So a use narrows an unannotated symbol out of `unknown`, an assignment widens,
-and neither narrows an already-narrowed type. Order-sensitivity is the fixpoint
-of those rules rather than a missing revision step, and `number` after a
-numeric use is the model's answer, not a degradation.
+So a use narrows an unannotated symbol, **including narrowing one that is
+already narrowed**, through both the declared-signature and operator-context
+routes; an assignment widens and never narrows. Order-sensitivity is the
+fixpoint of those rules rather than a missing revision step, and `number` after
+a numeric use is the model's answer, not a degradation.
+
+**An earlier revision of this table claimed a later use never narrows further.
+That was wrong, and the reason it was wrong is worth keeping:** the `v!` probe
+that "showed" it is VACUOUS — `Factorial` contributes `number`, not `integer`,
+so a fresh-symbol control also pins `number` and "no move" was the expected
+outcome either way. Refuted by the named-arguments session with the declared-
+signature probe; the operator-context row above is the follow-up that closes the
+route-split question they left open (there is no split — `Fibonacci` is a
+non-vacuous operator context and it narrows too).
+
+**General trap this cost us:** a "no move" probe proves nothing unless a
+fresh-symbol control shows the probe WOULD have moved the type from `unknown`.
+Always run the control.
 
 The one question the table leaves open is whether an assignment SHOULD be
 allowed to narrow — §1 excludes it, and it is not obvious that is deliberate
