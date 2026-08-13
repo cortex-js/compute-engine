@@ -89,6 +89,60 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### Static argument-checking of user-defined callees — residue
+
+Tier 1 landed 2026-08-12; what remains is generic functions (below) and
+`let`/`const` bindings. The history is kept because it explains the shape of
+both.
+
+`function foo(x: string, n: integer) { x }` followed by `foo("hello")` used to
+pass `epsil check` clean; only the run phase reported the missing argument.
+Builtins (`Ln()`, `Sqrt(1, 2, 3)`) were checked, since the library already
+holds their signatures.
+
+The cause was narrower than "the pass does not model prior declarations".
+`staticDiagnostics()` boxes every statement in ONE pushed scope in source
+order, and `DefineFunction`'s **canonical** handler already declares the name
+there — so `foo` does exist when `foo("hello")` canonicalizes. What is missing
+was its SIGNATURE: the handler deliberately loosens the target to the top type
+`function` so that a recursive self-call inside the body does not validate
+against a signature that does not exist yet (`library/core.ts`, "Tie the
+recursion knot"), and nothing tightened it afterwards. The top `function` type
+promises no arity, so every call type-checked vacuously.
+
+Measured 2026-08-12: declaring the annotated signature by hand before boxing
+the call makes the engine report `incompatible-type`, `missing` and
+`unexpected-argument` for it immediately — the validator needed no new code,
+only the signature.
+
+**Tier 1 — `function` definitions — LANDED 2026-08-12.** `DefineFunction`'s
+canonical handler now installs the clause once the body has canonicalized and
+the recursion-knot loosening has been restored, so later statements validate
+against the real signature. Multi-clause sets accumulate clause by clause; a
+definition inside a block stays scoped to that block, so it cannot make an
+outer call a false positive. GENERIC definitions are excluded and remain
+unchecked until they evaluate — rule G2 refuses any clause onto a generic
+target, which makes the install non-repeatable, and the evaluate route would
+then reject its own re-installation.
+
+**Tier 1 residue — generic functions.** Closing that exclusion means deciding
+which route OWNS the clause install, so the second one can recognise its own
+work rather than re-running it. Worth doing together with anything else that
+wants canonicalization and evaluation to share an installation step.
+
+**Tier 2 — `let`/`const` bindings.** `let g = (a: integer) |-> a` declares
+NOTHING at canonicalization, so this tier is a genuine gap rather than a
+loosened signature. It needs a decision on how much of an initializer the pass
+may believe: an explicit annotation is safe, an inferred type less so, and a
+binding that is reassigned or conditionally bound less so again.
+
+Why it mattered beyond the CLI: the VS Code extension's diagnostics come only
+from `checkSource()`, which is static-only by hard rule (it must never
+evaluate the user's buffer). Before tier 1 the signature notes explained calls
+to *builtins* only, and the "`foo` is defined here" related-information
+pointer had nothing that could trigger it; both now work for the file's own
+functions.
+
 ### Protocols residue (protocols + compiled dispatch landed 2026-08-12)
 
 - **Sum-name conformance** — `type shape is Area`, where `shape` is a sum
@@ -2510,13 +2564,18 @@ is in git history. The only items deliberately left open:
     an environment but harmless (measured). The trailing-`;` promotion
     alternative was REJECTED: it would flip `(1;2;)` from `Tuple(1,2)` to
     a block. Pins in `block-cases-roundtrip.test.ts`.
-  - RESIDUE, RULING NEEDED (low priority): a `Block` whose statements are
-    ALL equations/inequalities — `Block(x=1, y=2)` — serializes to the
-    cases spelling, which the system-of-equations branch (load-bearing
-    `Solve` convention, runs first) reads back as `List(x=1, y=2)`. NOT a
-    regression: before the fix it reparsed as `Tuple(…)` — both readings
-    wrong, one wrong answer swapped for another. A fix needs a third
-    spelling for this shape; the Solve convention outranks.
+  - All-equation Block — RULED AND FIXED 2026-08-12: a `Block` whose
+    emitted statements are ≥2, contain no `Assign`, and are ALL
+    equations/inequalities serializes as explicit
+    `\operatorname{Block}(x=1, y=2)` (parses via the default function
+    parser; round-trips at every position). The diversion predicate is
+    the exact dual of the cases parser's system-of-equations test (same
+    `isEquationOperator`/`isInequalityOperator` helpers), so the two
+    cannot drift; the Solve convention is byte-identical. The
+    self-delimiting fence test gained a paren-depth match for the call
+    spelling AND an environment-depth walk for the cases spelling (a
+    `;`-list starting and ending with environments fooled the old
+    prefix/suffix test — reproduced, fixed, pinned).
   - `Element(i, List(1,2))` reparsing as `Element(i, Interval(1,2))` —
     RULED AND FIXED 2026-08-12: the membership serializers (the
     `Element`/`NotElement` family in `definitions-sets.ts` AND the big-op
@@ -2548,24 +2607,102 @@ is in git history. The only items deliberately left open:
     keep the interval reading everywhere. Pins in
     `tycho-items-93-94.test.ts`; the deliberate current-state pin ("a
     union of two-element lists") was flipped as designed.
-  - Adjacent, pre-existing, noted not fixed: `SymmetricDifference`
-    (`\triangle`) has no parse handler at all — its serialization does
-    not round-trip for ANY operand shape, which is a missing-notation
-    gap, not the 2-list collision. A fix is a serialize/parse pair like
-    the other set operators.
+  - Adjacent: `SymmetricDifference` (`\triangle`) — FIXED 2026-08-12 at
+    the review round: it now has explicit parse/serialize handlers
+    matching its siblings (bracket-gated interval reading both sides,
+    `\operatorname{List}` spelling for 2-element lists). Note the earlier
+    "round-trips for NO shape" characterization was measured FALSE (the
+    default infix paths were mutually consistent); the real defect was
+    operand-reading asymmetry with the other set operators.
 
-- **Multi-clause dispatch: compiled and interpreted answers diverge on a
-  non-integer argument (found 2026-08-12 at the wave-4 contradiction gate,
-  PRE-EXISTING and independent of it — reproduces with truthful clauses
-  and with no declaration at all), RULING NEEDED:** with clauses
-  `t: integer` and `t: real`, `ce.box(['a', 0.3]).evaluate()` stays INERT
-  (`a(0.3)` — the interpreter's overload resolution does not select the
-  `real` clause) while the COMPILED dispatcher selects it and runs,
-  returning a value. One of the two is wrong: either the interpreter
-  should dispatch (a resolution gap) or the compiled dispatcher
-  over-selects. Needs deciding against the function-polymorphism /
-  overload-resolution design record before touching either side. The
-  wave-4 tests deliberately assert compiled values only at `0.3`.
+- **Compiled assignment to an OUTER binding — RESOLVED 2026-08-12 by the
+  `assignLValue` fix above; the standing product question is now
+  narrower.** The witness (`w` declared outside;
+  `Block(Assign(w, 2t), Add(w, 1))`, `run({t:4, w:0})`) now answers 9,
+  matching the interpreter: compiled writes go through the vars object
+  (`_.w = …`) exactly where reads already resolve there — the vars object
+  IS the compiled analogue of the interpreter's outer scope, and the
+  interpreter demonstrably writes that binding. Where no coherent write
+  target exists (reads bake a folded assigned value or a constant), the
+  compile DECLINES. SETTLED UNDER STANDING DOCTRINE (2026-08-12):
+  compiled and interpreted behavior must agree — the same principle that
+  ruled the multi-clause dispatch divergence. The interpreter writes the
+  outer binding, so compiled code writing the vars object is the agreeing
+  behavior; declining would have created a NEW divergence. Escape hatch
+  documented: if mutating caller-supplied vars objects ever proves
+  unacceptable in the field, narrowing to decline-all-outer-writes is a
+  three-line change to `assignLValue`. RESIDUE, same mechanism, fix
+  queued: the protocol property rebind (base-compiler.ts ~1985) still
+  emits the bare-identifier write for a non-hoisted outer receiver —
+  route it through `assignLValue`; deferred one session only because the
+  protocol subsystem carries active concurrent WIP today.
+
+- **Multi-clause dispatch divergence on a non-integer argument — RULED
+  AND FIXED 2026-08-12 (audit-first, per user ruling):** with clauses
+  `t: integer` / `t: real`, interpreted `a(0.3)` stayed INERT while the
+  compiled dispatcher selected the `real` clause. The design-record audit
+  (function-polymorphism design §4.4/§4.1/§8, the WRITE-FREE ruling's
+  actual scope, and the NaN carve-out precedent whose test comment states
+  "a fully-known value never keeps dispatch inert") found no letter-level
+  ruling but every weight pointing one way: fully-known arguments must be
+  DECIDED, and §8 makes compiled/interpreted agreement an obligation.
+  Fixed in `admissionOf` (value-membership.ts): a concrete value now
+  consults the membership oracle (`accepts`) for admission AND refutation
+  regardless of `hasValueComponent` — the old fast-bail was sound for
+  admission only. The NaN carve-out is subsumed (no longer a named case).
+  Symbolic operands stay undecidable/inert (the design's protected case,
+  pinned); selection stays write-free; compiled dispatch untouched.
+  Residue worth watching, no witness yet: concrete non-numeric values
+  (a `Tuple` against a nominal-reference clause) now refute where they
+  previously blocked — oracle-consistent by construction, untested in
+  the wild.
+  - Follow-up 2026-08-12 (review round 2): a cycle guard was added to
+    `accepts`'s structural-alias unfolding (a non-progressing alias cycle
+    — `type a = a | 0` — overflowed the stack from dispatch; the
+    value-component-carrying shape already overflowed pre-change via
+    `typeAcceptsValue`). Guard keys on the alias+value-identity PAIR
+    (`beginUnfoldAgainst` discipline) so progressing recursive values
+    still admit; the cut answers `refute`, exact under the
+    least-fixed-point reading. Two residues flagged with mechanism, no
+    witness constructed: `accepts` (like `valueComponent`) reads `t.def`
+    directly instead of `aliasDefinitionAt(t)`, so a PARAMETERIZED
+    structural alias unfolds without substituting its type arguments — a
+    pre-existing divergence from `subtype.ts`, wrong-verdict-capable if a
+    parameterized alias with a value component reaches dispatch; and a
+    self-negating alias (`type n = !n`) has no fixed point, so the
+    guard's cut there is arbitrary-but-terminating (parser may not even
+    accept the shape).
+
+- **`compileToSource()` and `compileShader()` splice statement blocks into
+  expression positions (found 2026-08-12 at the GPU Return-gate round),
+  RULING NEEDED:** both routes are ungated for multi-statement `Block`s —
+  `compileToSource(Block(Declare s; s≔x; Return(s)))` returns bare
+  statements (`"float s;\ns = x;\nreturn return s;"`) where the contract
+  promises an expression, and `compileShader()` splices the same into an
+  assignment RHS (`gl_FragColor = float s;…`). The `Return` is a symptom;
+  the root is a statement block escaping into expression-only routes (the
+  `bareStatementBlocks` gate does not cover them). The fork: fail closed
+  on multi-statement blocks in both routes (consistent with today's
+  doctrine), or teach the routes to wrap statement blocks in an
+  IIFE-equivalent where the target language has one (GLSL does not — so
+  for shaders the decline is likely the only honest option).
+
+- **A raw-MathJSON `Loop` inside a compiled function body ran to
+  `undefined` behind `success: true` — FIXED 2026-08-12 (same day), and
+  the `Loop` was a RED HERRING:** the real defect was an `Assign`-emission
+  asymmetry — writes hard-coded the bare identifier while reads resolve
+  through `target.var()` (`_.name` on JS) — triggered by any bare-assigned
+  name the enclosing scope already binds. The witness's `s` is
+  library-predeclared (`e`/`i`/`m`/`s` exist on a fresh engine), so it was
+  never hoisted as a block-local; the write created a stray global and
+  every read saw `_.s === undefined`. Minimal reproducer, no loop:
+  `Block(Assign(s,0), Add(s,1))` → NaN vs interpreter 1. Fixed by routing
+  the `Assign` LHS through a shared `assignLValue` helper: bare write for
+  true locals (unchanged); `_.name` write when reads resolve there; a
+  documented DECLINE when reads bake a folded value or a constant (no
+  coherent write target). GLSL/WGSL/Python byte-identical. This also
+  RESOLVED the "compiled assignment to an outer binding is write-lost"
+  entry below by mechanism, not by fiat — see there.
 
 - **Degenerate big-op round (2026-08-03), flagged not fixed:**
   - `sameSyntactic` (`boxed-expression/compare.ts`) is mis-named: despite its
