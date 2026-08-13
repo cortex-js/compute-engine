@@ -81,11 +81,14 @@ describe('Tycho item 93 — `Interval` survives a LaTeX round-trip', () => {
       ['closed', ['Interval', 0, 1]],
       ['open', OPEN_0_1],
       ['half-open', HALF_OPEN_0_1],
-    ])('%s interval survives as a `RandomChoice` argument', (_label, domain) => {
-      const ce = new ComputeEngine();
-      const json = ['RandomChoice', domain, 'n'];
-      expect(roundTrip(ce, json)).toEqual(json);
-    });
+    ])(
+      '%s interval survives as a `RandomChoice` argument',
+      (_label, domain) => {
+        const ce = new ComputeEngine();
+        const json = ['RandomChoice', domain, 'n'];
+        expect(roundTrip(ce, json)).toEqual(json);
+      }
+    );
 
     test('a round-tripped uniform draw is still uniform, not Bernoulli', () => {
       const ce = new ComputeEngine();
@@ -122,7 +125,11 @@ describe('Tycho item 93 — `Interval` survives a LaTeX round-trip', () => {
     // These are the positions where the parse side restores the set reading,
     // so the ambiguous — but readable — spelling is safe.
     test.each([
-      ['Element', ['Element', 'x', ['Interval', 0, 1]], 'x\\in\\lbrack0, 1\\rbrack'],
+      [
+        'Element',
+        ['Element', 'x', ['Interval', 0, 1]],
+        'x\\in\\lbrack0, 1\\rbrack',
+      ],
       [
         'Element, open',
         ['Element', 'x', OPEN_0_1],
@@ -253,5 +260,393 @@ describe('Tycho item 94 — `ListFrom` compiles', () => {
     expect(first).toEqual(interpreted);
     // The frame replays: a second call reproduces the same stream.
     expect(r.run!()).toEqual(first);
+  });
+});
+
+/**
+ * The mirror image of item 93, ruled 2026-08-12: with the set positions
+ * reading a bracket pair as an interval, a genuine TWO-element `List` domain
+ * had no faithful spelling there — `Element(i, List(1, 2))` serialized as
+ * `i\in\lbrack1, 2\rbrack` and came back as `Element(i, Interval(1, 2))`, a
+ * different value class ("i is one of two points" became "i is anywhere
+ * between them"). Only length 2 collides; lists of any other length are
+ * unambiguous.
+ *
+ * The ruling: a membership position spells a two-element list domain
+ * `\operatorname{List}(1, 2)`; everything else keeps bracket notation, and
+ * `\in\lbrack a, b\rbrack` still READS as an interval.
+ */
+describe('a two-element `List` domain survives a LaTeX round-trip', () => {
+  test.each([
+    [
+      'Element',
+      ['Element', 'n', ['List', 1, 2]],
+      'n\\in\\operatorname{List}(1, 2)',
+    ],
+    [
+      'NotElement',
+      ['NotElement', 'n', ['List', 1, 2]],
+      'n\\notin\\operatorname{List}(1, 2)',
+    ],
+    [
+      'symbolic elements',
+      ['Element', 'n', ['List', 'a', 'b']],
+      'n\\in\\operatorname{List}(a, b)',
+    ],
+  ])('%s', (_label, json, expected) => {
+    const ce = new ComputeEngine();
+    expect(ce.box(json, { canonical: false }).latex).toBe(expected);
+    expect(roundTrip(ce, json)).toEqual(json);
+  });
+
+  test('the round trip is a fixpoint after a second cycle', () => {
+    const ce = new ComputeEngine();
+    const once = ce.box(['Element', 'n', ['List', 1, 2]], {
+      canonical: false,
+    }).latex;
+    expect(ce.parse(once, { canonical: false }).latex).toBe(once);
+  });
+
+  test('the round-tripped membership keeps the list VALUE class', () => {
+    // The point of the fix: 1.5 is between 1 and 2 but is not one of them.
+    const ce = new ComputeEngine();
+    const json = ['Element', 1.5, ['List', 1, 2]];
+    expect(ce.box(json).evaluate().toString()).toBe('"False"');
+    const latex = ce.box(json, { canonical: false }).latex;
+    expect(ce.parse(latex).evaluate().toString()).toBe('"False"');
+  });
+
+  describe('other domains keep their spelling', () => {
+    test.each([
+      // Only a PAIR collides with interval notation.
+      [
+        'one element',
+        ['Element', 'n', ['List', 1]],
+        'n\\in\\bigl\\lbrack1\\bigr\\rbrack',
+      ],
+      [
+        'three elements',
+        ['Element', 'n', ['List', 1, 2, 3]],
+        'n\\in\\bigl\\lbrack1, 2, 3\\bigr\\rbrack',
+      ],
+      [
+        'a closed interval',
+        ['Element', 'n', ['Interval', 1, 2]],
+        'n\\in\\lbrack1, 2\\rbrack',
+      ],
+      ['a range', ['Element', 'n', ['Range', 1, 2]], 'n\\in1..2'],
+      ['a set', ['Element', 'n', ['Set', 1, 2]], 'n\\in\\lbrace1, 2\\rbrace'],
+      ['a symbol', ['Element', 'n', 'Integers'], 'n\\in\\Z'],
+      // The residue of the same collision, fixed 2026-08-12: EVERY set
+      // position — not just a membership domain — spells a two-element list
+      // operand `\operatorname{List}(a, b)`. (This row previously pinned the
+      // unfixed state, `\bigl\lbrack1, 2\bigr\rbrack\cup…`.)
+      [
+        'a union of two-element lists',
+        ['Union', ['List', 1, 2], ['List', 3, 4]],
+        '\\operatorname{List}(1, 2)\\cup\\operatorname{List}(3, 4)',
+      ],
+    ])('%s', (_label, json, expected) => {
+      const ce = new ComputeEngine();
+      expect(ce.box(json, { canonical: false }).latex).toBe(expected);
+    });
+  });
+
+  describe('the bracket spelling still READS as an interval', () => {
+    test.each([
+      ['\\lbrack', 'n\\in\\lbrack1, 2\\rbrack'],
+      ['sized brackets', 'n\\in\\bigl\\lbrack1, 2\\bigr\\rbrack'],
+      ['\\left[', 'n\\in \\left[1, 2\\right]'],
+      // `\mleft`/`\mright` (mleftright package) is an open-delimiter prefix the
+      // parser accepts like `\left`, so the probe has to see through it too.
+      ['\\mleft[', 'n\\in\\mleft[1, 2\\mright]'],
+      ['plain brackets', 'n\\in[1, 2]'],
+    ])('%s', (_label, latex) => {
+      const ce = new ComputeEngine();
+      expect(ce.parse(latex, { canonical: false }).json).toEqual([
+        'Element',
+        'n',
+        ['Interval', 1, 2],
+      ]);
+    });
+
+    test('a `\\mleft` paren pair is an OPEN interval', () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce.parse('n\\in\\mleft(1, 2\\mright)', { canonical: false }).json
+      ).toEqual(['Element', 'n', ['Interval', ['Open', 1], ['Open', 2]]]);
+    });
+
+    test('a `\\mleft` bracket of any other length stays a `List`', () => {
+      const ce = new ComputeEngine();
+      for (const [latex, expected] of [
+        ['n\\in\\mleft[1\\mright]', ['List', 1]],
+        ['n\\in\\mleft[1, 2, 3\\mright]', ['List', 1, 2, 3]],
+      ] as [string, any][])
+        expect(ce.parse(latex, { canonical: false }).json).toEqual([
+          'Element',
+          'n',
+          expected,
+        ]);
+    });
+  });
+
+  describe('in a binder position', () => {
+    test('a big-op indexing set round-trips', () => {
+      const ce = new ComputeEngine();
+      const json = ['Sum', ['Power', 'n', 2], ['Element', 'n', ['List', 1, 2]]];
+      expect(ce.box(json, { canonical: false }).latex).toBe(
+        '\\sum_{n\\in \\operatorname{List}(1, 2)}n^2'
+      );
+      expect(roundTrip(ce, json)).toEqual(json);
+      // …and sums the two VALUES (1 + 4), rather than an interval.
+      expect(ce.parse(ce.box(json).latex).evaluate().toString()).toBe('5');
+    });
+
+    test('an indexing set of any other length is unchanged', () => {
+      const ce = new ComputeEngine();
+      const json = [
+        'Sum',
+        ['Power', 'n', 2],
+        ['Element', 'n', ['List', 1, 2, 3]],
+      ];
+      expect(ce.box(json, { canonical: false }).latex).toBe(
+        '\\sum_{n\\in \\bigl\\lbrack1, 2, 3\\bigr\\rbrack}n^2'
+      );
+      expect(roundTrip(ce, json)).toEqual(json);
+    });
+
+    test('a `Loop` domain round-trips', () => {
+      const ce = new ComputeEngine();
+      const json = [
+        'Loop',
+        ['Function', 'n', 'n'],
+        ['Element', 'n', ['List', 1, 2]],
+      ];
+      expect(ce.box(json, { canonical: false }).latex).toBe(
+        '\\operatorname{Loop}(n\\mapsto n, n\\in\\operatorname{List}(1, 2))'
+      );
+      expect(roundTrip(ce, json)).toEqual(json);
+    });
+
+    test('a `Comprehension` domain uses the `for n = …` spelling', () => {
+      // Not a membership position: the comprehension binder spells its domain
+      // after `=`, which reads back as a list. Unchanged by the ruling.
+      const ce = new ComputeEngine();
+      const json = [
+        'Comprehension',
+        ['Power', 'n', 2],
+        ['Element', 'n', ['List', 1, 2]],
+      ];
+      expect(ce.box(json, { canonical: false }).latex).toBe(
+        '\\left[n^2 \\operatorname{for} n = \\bigl\\lbrack1, 2\\bigr\\rbrack\\right]'
+      );
+      expect(roundTrip(ce, json)).toEqual(json);
+    });
+
+    test('a `ForAll` domain round-trips', () => {
+      const ce = new ComputeEngine();
+      const json = [
+        'ForAll',
+        ['Element', 'n', ['List', 1, 2]],
+        ['Greater', 'n', 0],
+      ];
+      expect(ce.box(json, { canonical: false }).latex).toBe(
+        '\\forall n\\in\\operatorname{List}(1, 2), n\\gt0'
+      );
+      expect(roundTrip(ce, json)).toEqual(json);
+    });
+  });
+});
+
+/**
+ * The residue of the same collision, ruled and fixed 2026-08-12: the
+ * NON-membership set operators re-read a two-element list operand as an
+ * interval too, on BOTH sides (`Union(List(1, 2), X)` serialized
+ * `\bigl\lbrack1, 2\bigr\rbrack\cup X` and came back
+ * `Union(Interval(1, 2), X)`).
+ *
+ * The serialize side is the same ruling widened: every SET position — not only
+ * a membership domain — spells a two-element list `\operatorname{List}(a, b)`.
+ *
+ * The parse side needed a new mechanism. The rhs token-peek gate could not be
+ * reused for the lhs, which an infix parselet receives already parsed: the
+ * parser now exposes `operandStartIndex`, the token position the innermost
+ * `parseExpression` began its left operand at (mirroring the existing
+ * `operandDiagnosticCheckpoint` hook), so the lhs can be probed for the same
+ * open-bracket token. Authored bracket spellings keep their interval reading
+ * on both sides.
+ */
+describe('a two-element `List` survives a round-trip through a set operator', () => {
+  /** Drop `Delimiter` wrappers, recursively — parenthesization is not the
+   * subject of these tests (see the notes at the two call sites). */
+  const stripDelimiter = (json: any): any => {
+    if (!Array.isArray(json)) return json;
+    if (json[0] === 'Delimiter' && json.length === 2)
+      return stripDelimiter(json[1]);
+    return [json[0], ...json.slice(1).map(stripDelimiter)];
+  };
+
+  // Every operator sharing the `sides: 'both'` parselet.
+  const OPERATORS: [string, string][] = [
+    ['Union', '\\cup'],
+    ['Intersection', '\\cap'],
+    ['SetMinus', '\\setminus'],
+    ['Subset', '\\subset'],
+    ['SubsetEqual', '\\subseteq'],
+    ['Superset', '\\supset'],
+    ['SupersetEqual', '\\supseteq'],
+    // `\triangle` had a dictionary entry with neither handler, so it neither
+    // read its bracket operands as intervals nor spelled a two-element list
+    // operand `\operatorname{List}(a, b)`. Completed 2026-08-12 by wiring it to
+    // the same pair of handlers as its siblings.
+    ['SymmetricDifference', '\\triangle'],
+  ];
+
+  describe.each(OPERATORS)('%s', (op, latex) => {
+    test('a two-element list on the LEFT', () => {
+      const ce = new ComputeEngine();
+      const json = [op, ['List', 1, 2], 'X'];
+      expect(ce.box(json, { canonical: false }).latex).toBe(
+        `\\operatorname{List}(1, 2)${latex} X`
+      );
+      expect(roundTrip(ce, json)).toEqual(json);
+    });
+
+    test('a two-element list on the RIGHT', () => {
+      const ce = new ComputeEngine();
+      const json = [op, 'X', ['List', 1, 2]];
+      expect(ce.box(json, { canonical: false }).latex).toBe(
+        `X${latex}\\operatorname{List}(1, 2)`
+      );
+      expect(roundTrip(ce, json)).toEqual(json);
+    });
+
+    test('a two-element list on BOTH sides', () => {
+      const ce = new ComputeEngine();
+      const json = [op, ['List', 1, 2], ['List', 3, 4]];
+      expect(roundTrip(ce, json)).toEqual(json);
+    });
+
+    test('nested inside a membership domain', () => {
+      const ce = new ComputeEngine();
+      const json = ['Element', 'x', [op, ['List', 1, 2], 'Y']];
+      // Pre-existing and unrelated to this fix: the `\subset` family binds
+      // LOOSER than `\in` (240 vs 241), so its serialization is parenthesized
+      // and comes back wrapped in a `Delimiter`. Unwrap it to compare the
+      // operand, which is what this fix is about.
+      expect(stripDelimiter(roundTrip(ce, json))).toEqual(json);
+    });
+
+    test('lists of any other length keep bracket notation', () => {
+      const ce = new ComputeEngine();
+      for (const list of [
+        ['List', 1],
+        ['List', 1, 2, 3],
+      ]) {
+        const json = [op, list, 'X'];
+        expect(ce.box(json, { canonical: false }).latex).toContain(
+          '\\bigl\\lbrack'
+        );
+        expect(roundTrip(ce, json)).toEqual(json);
+      }
+    });
+
+    test('genuine `Interval`/`Set`/`Range` operands are unchanged', () => {
+      const ce = new ComputeEngine();
+      for (const [domain, expected] of [
+        [['Interval', 1, 2], '\\lbrack1, 2\\rbrack'],
+        [['Set', 1, 2], '\\lbrace1, 2\\rbrace'],
+      ] as [any, string][]) {
+        const json = [op, domain, 'X'];
+        expect(ce.box(json, { canonical: false }).latex).toBe(
+          `${expected}${latex} X`
+        );
+        expect(roundTrip(ce, json)).toEqual(json);
+      }
+      // Pre-existing and unrelated to this fix: `\cup` and kin bind tighter
+      // than `..`, so a `Range` operand is parenthesized and comes back
+      // wrapped in a `Delimiter`. The `Range` itself is preserved.
+      expect(stripDelimiter(roundTrip(ce, [op, ['Range', 1, 5], 'X']))).toEqual(
+        [op, ['Range', 1, 5], 'X']
+      );
+    });
+  });
+
+  describe('the bracket spelling still READS as an interval on either side', () => {
+    test.each([
+      ['\\lbrack, lhs', '\\lbrack1, 2\\rbrack\\cup X', 1],
+      ['\\lbrack, rhs', 'X\\cup\\lbrack1, 2\\rbrack', 2],
+      ['plain brackets, lhs', '[1, 2]\\cap X', 1],
+      ['sized brackets, lhs', '\\bigl\\lbrack1, 2\\bigr\\rbrack\\subset X', 1],
+      ['\\left[, lhs', '\\left[1, 2\\right]\\setminus X', 1],
+      ['grouped, lhs', '{[1, 2]}\\cup X', 1],
+      [
+        '\\mathopen, lhs',
+        '\\mathopen\\lbrack1, 2\\mathclose\\rbrack\\cup X',
+        1,
+      ],
+      ['\\mleft[, lhs', '\\mleft[1, 2\\mright]\\cup X', 1],
+      ['\\mleft[, rhs', 'X\\cup\\mleft[1, 2\\mright]', 2],
+      ['\\triangle, lhs', '\\lbrack1, 2\\rbrack\\triangle X', 1],
+      ['\\triangle, rhs', 'X\\triangle\\lbrack1, 2\\rbrack', 2],
+    ])('%s', (_label, latex, position) => {
+      const ce = new ComputeEngine();
+      const json = ce.parse(latex, { canonical: false }).json as any;
+      expect(json[position]).toEqual(['Interval', 1, 2]);
+    });
+
+    test('a parenthesized pair is still an OPEN interval', () => {
+      const ce = new ComputeEngine();
+      expect(ce.parse('(1, 2)\\cup X', { canonical: false }).json).toEqual([
+        'Union',
+        ['Interval', ['Open', 1], ['Open', 2]],
+        'X',
+      ]);
+    });
+  });
+
+  describe('the named spelling stays a `List` in the other parselets', () => {
+    test('`\\ni` (the collection is the lhs)', () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce.parse('\\operatorname{List}(1, 2)\\ni x', { canonical: false }).json
+      ).toEqual(['Element', 'x', ['List', 1, 2]]);
+      expect(
+        ce.parse('\\lbrack1, 2\\rbrack\\ni x', { canonical: false }).json
+      ).toEqual(['Element', 'x', ['Interval', 1, 2]]);
+    });
+
+    test('`\\not\\subseteq`', () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce.parse('\\operatorname{List}(1, 2)\\not\\subseteq X', {
+          canonical: false,
+        }).json
+      ).toEqual(['Not', ['SubsetEqual', ['List', 1, 2], 'X']]);
+      expect(
+        ce.parse('\\lbrack1, 2\\rbrack\\not\\subseteq X', { canonical: false })
+          .json
+      ).toEqual(['Not', ['SubsetEqual', ['Interval', 1, 2], 'X']]);
+    });
+
+    test('the Unicode glyph aliases (∪, ∩)', () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce.parse('\\operatorname{List}(1, 2)∪X', { canonical: false }).json
+      ).toEqual(['Union', ['List', 1, 2], 'X']);
+      expect(
+        ce.parse('\\lbrack1, 2\\rbrack∩X', { canonical: false }).json
+      ).toEqual(['Intersection', ['Interval', 1, 2], 'X']);
+    });
+  });
+
+  test('the round-tripped union keeps the list VALUE class', () => {
+    // The point of the fix: 1.5 is between 1 and 2 but is not one of them.
+    const ce = new ComputeEngine();
+    const json = ['Element', 1.5, ['Union', ['List', 1, 2], ['List', 3, 4]]];
+    expect(ce.box(json).evaluate().toString()).toBe('"False"');
+    const latex = ce.box(json, { canonical: false }).latex;
+    expect(ce.parse(latex).evaluate().toString()).toBe('"False"');
   });
 });

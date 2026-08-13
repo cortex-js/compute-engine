@@ -593,11 +593,16 @@ export function mapAutoCompileRunner(
     fn = marked.fn;
     inner = marked.inner;
   } else {
-    // The exact tier (R1/R4): an unmarked broadcast-shaped lambda that the
-    // static proof shows integer-closed and overflow-free. No precision gate
-    // — a proven-safe integer has the same value in float64 and Decimal. The
-    // proof runs BEFORE any attempt is recorded, so a declining instance
-    // never counts as a compile attempt.
+    // The exact tier: an unmarked broadcast-shaped lambda may compile to
+    // float64 with NO precision gate — unlike the marked tier above —
+    // provided `exactTierShape()` proves every intermediate integer-closed
+    // and overflow-free. A proven-safe integer has the same value in float64
+    // and Decimal, so even a bignum-preferred engine loses no digits. That
+    // proof runs BEFORE any attempt is recorded: a declining instance never
+    // counts as a compile attempt, so it cannot burn the instance's
+    // permanent no-compile state. (Rulings R1 "gated on a proof, not a
+    // marker" and R4 "precision independence" in
+    // docs/plans/2026-07-31-exact-map-drain-compile-design.md.)
     const shape = exactTierShape(ce, expr);
     if (shape === undefined) return undefined;
     // Size floor: see `MIN_EXACT_COMPILE_COUNT`.

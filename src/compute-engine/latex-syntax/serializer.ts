@@ -29,7 +29,10 @@ import type {
 import { countTokens, supsub } from './tokenizer.js';
 import { serializeNumber } from './serialize-number.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
-import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core.js';
+import {
+  DELIMITERS_SHORTHAND,
+  isSelfDelimitingBlockLatex,
+} from './dictionary/definitions-core.js';
 import { EMOJIS } from '../../math-json/symbols.js';
 
 // ---------------------------------------------------------------------------
@@ -314,7 +317,28 @@ export class Serializer {
   wrapArguments(expr: MathJsonExpression): string {
     return this.wrapString(
       operands(expr)
-        .map((x) => this.serialize(x))
+        .map((x) =>
+          // A `Block` operand serializes as a bare `;`-separated statement
+          // list, and `;` (precedence 19) binds LOOSER than the `,` that
+          // separates arguments: unfenced, `\mathrm{Repeat}(s≔2; s+1, 3)`
+          // re-parses with the block swallowing the `, 3` into its last
+          // statement — a VALUE-CHANGING round trip. Fence it so the block
+          // stays one argument: `(…)` re-parses as `Delimiter(Block(…))`,
+          // which canonicalizes back to the same `Block` (braces would give
+          // `Set(Block(…))`, which does not). Same mechanism, same fence as
+          // the `Comprehension` body and the two `Loop` spellings in
+          // `definitions-core.ts` (Tycho item 172). A Block that serialized
+          // ENTIRELY as a `cases` environment is SELF-delimiting —
+          // `\begin{…}\end{…}` cannot leak into the argument list — so it
+          // takes no fence (see `isSelfDelimitingBlockLatex`): the test is
+          // on the emitted string, so this can never drift from the Block
+          // serializer's choice of spelling.
+          {
+            if (operator(x) !== 'Block') return this.serialize(x);
+            const s = this.serialize(x);
+            return isSelfDelimitingBlockLatex(s) ? s : `\\left(${s}\\right)`;
+          }
+        )
         .join(', '),
       this.options.applyFunctionStyle(expr, this.level)
     );

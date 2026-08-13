@@ -341,6 +341,62 @@ function gpuCheckIdentifier(id: string, language?: string): string {
   return id;
 }
 
+/**
+ * Fail closed (D6) when the compiled shader body `body` places a `return`
+ * anywhere but at the start of a statement.
+ *
+ * `Return` is emitted by the base compiler as the bare statement `return <v>`,
+ * which is correct only where a statement is expected. Three positions in a
+ * shader body are NOT that, and each emitted source no driver accepts behind
+ * `success: true`:
+ *
+ * - the block's VALUE (its last statement), which the caller return-prefixes —
+ *   `return return s;`;
+ * - a conditional ARM, which both languages lower to an EXPRESSION (a `?:`
+ *   ternary in GLSL, `select(…)` in WGSL) — `((0.0 < t) ? (return t) : …)`;
+ * - a branch of a conditional nested in a loop body, for the same reason.
+ *
+ * Lowering an early return properly means restructuring the body into a result
+ * flag and guarded statements, which is a feature, not a gate — so this refuses
+ * the shapes it cannot emit and lets the interpreter evaluate them. The one
+ * shape that IS valid, an early `Return` as a plain statement of the body, is
+ * untouched: its `return` starts its line.
+ *
+ * `singleLine` bodies are EXPRESSIONS — the caller wraps them in
+ * `return <body>;` — so a `return` anywhere in them is misplaced, including at
+ * offset 0.
+ *
+ * A token scan, deliberately: it reads the source that is actually about to be
+ * emitted, so it covers every shape (including ones no probe enumerated)
+ * rather than mirroring the emitter's position rules. `return` is a reserved
+ * word in both languages (`gpuCheckIdentifier`), so `\breturn\b` cannot match a
+ * user identifier.
+ */
+function gpuAssertReturnPlacement(
+  subject: string,
+  body: string,
+  language: string
+): void {
+  if (!/\breturn\b/.test(body)) return;
+  const lines = body.split('\n');
+  const singleLine = lines.length === 1;
+  for (const line of lines) {
+    const start = line.length - line.trimStart().length;
+    for (const m of line.matchAll(/\breturn\b/g)) {
+      if (!singleLine && m.index === start) continue;
+      throw new Error(
+        `${subject}: an early \`Return\` here has no ` +
+          `${language.toUpperCase()} lowering — the emitted source would place ` +
+          `a \`return\` where the language requires an expression ` +
+          `(\`${line.trim()}\`). A shader function returns once, at the end of ` +
+          `its body, so a \`Return\` inside a conditional — or one that IS the ` +
+          `body's final value — cannot be emitted. Rewrite it as a conditional ` +
+          `VALUE, or evaluate instead. Fail closed (D6).`
+      );
+    }
+  }
+}
+
 /** Return the vec2 constructor name for the target language. */
 function gpuVec2(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? 'vec2f' : 'vec2';
@@ -8130,6 +8186,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // GLSL and WGSL both forbid recursion outright.
         noRecursion: true,
 
+        // `define` below synthesizes the return type with `gpuTypeOfValue` on
+        // the body, which reads the body's DECLARED (ascribed) type — so a
+        // scalar declaration contradicted by a collection-constructing body
+        // fails closed in the shared emission path instead of emitting a
+        // `float` declaration around a `vecN` return (wave 3).
+        staticReturnType: true,
+
         define: ({ id, name, params, body, literal, target }) => {
           // The generated name is emitted bare; a shader reserved word here
           // would be source no driver accepts (D6).
@@ -8211,11 +8274,47 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 );
               return {
                 ret,
-                code: BaseCompiler.compileFunctionBody(body, target),
+                // Every `Return` in the body must yield the shape the
+                // signature just synthesized: a shader function has ONE return
+                // type and neither language converts between a scalar, a
+                // `bool` and a `vecN`. Checked AT the emission, not by a
+                // pre-walk, because the shape of a `Return`'s value is only
+                // knowable while the emitter's local frames are pushed — a
+                // `Return(z)` naming a `vec2` block-local reads as a scalar
+                // once `compileBlock` has popped its frame, which is exactly
+                // how `float _fn_a(float t) { … return z; }` went out behind
+                // `success: true`.
+                code: BaseCompiler.compileFunctionBody(body, {
+                  ...target,
+                  onReturn: (value) => {
+                    const t =
+                      value === undefined
+                        ? undefined
+                        : gpuTypeOfValue(value, isWGSL);
+                    if (t === ret) return;
+                    throw new Error(
+                      `${id}: a \`Return\` in this body yields ` +
+                        (t === undefined
+                          ? `a value with no static ${language.toUpperCase()} type`
+                          : `a "${t}" value`) +
+                        `, but "${id}" is declared to return "${ret}" (the ` +
+                        `shape of the body's own final value). ` +
+                        `${language.toUpperCase()} has no implicit conversion ` +
+                        `between them, and a shader function has a single ` +
+                        `return type. Make every \`Return\` — and the body's ` +
+                        `final value — the same shape. Fail closed (D6).`
+                    );
+                  },
+                }),
               };
             },
             true
           );
+
+          // …and every `Return` that survived that check must also be in a
+          // position the language can express. Run on the EMITTED body, after
+          // the shape gate above (whose message is the more specific one).
+          gpuAssertReturnPlacement(id, code, language);
 
           signatures.set(name, { names: params, params: paramTypes, ret });
           return declareFn(
@@ -8370,7 +8469,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       this.createTargetFor(expr),
       declarations
     );
-    return BaseCompiler.withLocalShapeFrame(
+    const body = BaseCompiler.withLocalShapeFrame(
       new Map(),
       gpuDeclaredShapeFrame(declarations),
       () =>
@@ -8379,6 +8478,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // 110).
         BaseCompiler.compileFunctionBody(expr, target)
     );
+    // The caller's declared return type is not this analysis's to check, but
+    // the PLACEMENT of an emitted `return` is: a `Return` in a conditional arm,
+    // or in the body's value position (which `compileFunction` return-prefixes),
+    // is source no driver accepts (D6).
+    gpuAssertReturnPlacement('this function body', body, this.languageId);
+    return body;
   }
 
   compile(
@@ -8456,6 +8561,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // of the value (Tycho item 110). With nothing hoisted this is byte-identical
     // to a plain `compile()`.
     const code = BaseCompiler.compileFunctionBody(expr, target);
+    // `code` is spliced into a shader function body by the caller, so the same
+    // placement rule applies here as inside an emitted definition (D6).
+    gpuAssertReturnPlacement('this expression', code, this.languageId);
     const result: CompilationResult = {
       target: this.languageId,
       success: true,

@@ -388,6 +388,9 @@ describe('DELIMITERS PARSING', () => {
       box-latex = a,b;k,l,m;f;g,h
       latex     = ((a,b),(k,l,m),f,(g,h))
     `);
+    // The TRAILING `;` leaves no `Nothing` statement behind: it is the
+    // single-statement-block marker, dropped by the `;` handler. The two
+    // LEADING empties are interior and survive as `Nothing` (item 172).
     expect(check(';;a;')).toMatchInlineSnapshot(`
       [
         "Delimiter",
@@ -395,13 +398,12 @@ describe('DELIMITERS PARSING', () => {
           "Sequence",
           ["Error", "'missing'", ["LatexString", ";"]],
           "Nothing",
-          "a",
-          "Nothing"
+          "a"
         ],
         ";"
       ]
-      box-latex = \\error{\\blacksquare};\\mathrm{Nothing};a;\\mathrm{Nothing}
-      latex     = \\error{\\blacksquare};\\mathrm{Nothing};a;\\mathrm{Nothing}
+      box-latex = \\error{\\blacksquare};\\mathrm{Nothing};a
+      latex     = \\error{\\blacksquare};\\mathrm{Nothing};a
     `);
   });
 });

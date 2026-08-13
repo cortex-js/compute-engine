@@ -52,14 +52,14 @@ export function typeAcceptsValue(
  * implementation consumed by both static resolution and the runtime clause
  * selector, so the two can never disagree.
  *
- * - `'admit'` — the operand certainly satisfies the parameter: a concrete
- *   value passing membership on a value-component parameter, or a static
- *   type that is a subtype of the parameter.
- * - `'refute'` — certainly not: a concrete value failing membership on a
- *   value-component parameter, or a static type PROVABLY disjoint from the
- *   parameter. Refutation uses `provablyDisjoint` — `couldMatch` answers
- *   "could be" and `!isDisjointFrom` is not the same claim; only proven
- *   disjointness refutes.
+ * - `'admit'` — the operand certainly satisfies the parameter: a fully-known
+ *   concrete value passing membership, or a static type that is a subtype of
+ *   the parameter.
+ * - `'refute'` — certainly not: a fully-known concrete value failing
+ *   membership, or a static type PROVABLY disjoint from the parameter.
+ *   Refutation from a static type uses `provablyDisjoint` — `couldMatch`
+ *   answers "could be" and `!isDisjointFrom` is not the same claim; only
+ *   proven disjointness refutes.
  * - `'undecidable'` — neither: e.g. a symbolic operand against a value-type
  *   parameter. Unknown/`any` operands are always undecidable (an unknown
  *   operand never refutes — same rule as `validateArguments`).
@@ -80,29 +80,31 @@ export function admissionOf(op: Expression, param: Type): Admission {
   // result types.
   if (opType.matches(param)) return 'admit';
 
-  // A concrete NaN decides EXACTLY against any parameter: its synthesized
-  // type is the wide `number`, so neither the subtype match above nor
-  // disjointness below can ever settle it (`NaN` vs a `real` parameter was
-  // "undecidable", blocking dispatch and keeping calls inert even though the
-  // value is fully known). `number` IS NaN's principal type — NaN inhabits
-  // exactly the supertypes of `number` plus the value type `nan` — so
-  // `accepts`, whose fallback subtypes the synthesized type, is a precise
-  // membership oracle for it.
-  const nan = concreteValueOf(op);
-  if (nan !== undefined && isNumber(nan) && nan.isNaN === true)
-    return accepts(nan, param) ? 'admit' : 'refute';
+  // A FULLY-KNOWN concrete value decides EXACTLY, in BOTH directions, against
+  // ANY parameter (USER RULING 2026-08-12): a fully-known value never keeps
+  // dispatch inert. `accepts` implements the total §4.1 membership definition
+  // — value components test the value, everything else falls back to
+  // subtyping the value's synthesized type, which for a literal IS its
+  // principal type — so it refutes as precisely as it admits.
+  //
+  // The `hasValueComponent` fast bail (`typeAcceptsValue`) is sound for
+  // ADMISSION only: without a value component, membership coincides with the
+  // subtype check already made above. It is NOT sound for REFUTATION —
+  // failing to match `integer` is a refutation for the value `0.3` but only
+  // an open question for a symbol. That asymmetry is why the verdict is
+  // taken here, on the value, rather than through `typeAcceptsValue`.
+  //
+  // This subsumes the former NaN carve-out (`NaN` vs a `real` parameter was
+  // "undecidable" — its synthesized type is the wide `number`, so neither
+  // the subtype match above nor disjointness below could settle it): NaN is
+  // simply one fully-known value among all the others.
+  const v = concreteValueOf(op);
+  if (v !== undefined) return accepts(v, param) ? 'admit' : 'refute';
 
-  if (hasValueComponent(param)) {
-    // A concrete value decides membership exactly; without one the value
-    // component keeps the answer open unless the STATIC types are already
-    // disjoint (an operand typed `string` can never inhabit `0`).
-    if (typeAcceptsValue(op, param)) return 'admit';
-    if (concreteValueOf(op) !== undefined) return 'refute';
-    return provablyDisjoint(opType.type, param) ? 'refute' : 'undecidable';
-  }
-
-  if (provablyDisjoint(opType.type, param)) return 'refute';
-  return 'undecidable';
+  // No concrete value: a value component keeps the answer open, and so does
+  // any other parameter, unless the STATIC types are already disjoint (an
+  // operand typed `string` can never inhabit `0`).
+  return provablyDisjoint(opType.type, param) ? 'refute' : 'undecidable';
 }
 
 /** Does `type` contain a component whose membership depends on the VALUE
@@ -194,8 +196,18 @@ function isBooleanLiteral(expr: Expression): boolean {
 }
 
 /** Recursive membership of the concrete literal `v` in `t`. Components with
- * no value dependence fall back to subtyping on the synthesized type. */
-function accepts(v: Expression, t: Type): boolean {
+ * no value dependence fall back to subtyping on the synthesized type.
+ *
+ * `seen` carries the alias unfolds live on THIS path — see the `reference`
+ * case. It is threaded rather than module-level because the recursion never
+ * leaves this file (`isSubtype` cannot call back into `accepts`), and it is
+ * allocated lazily at the first structural alias, so the ground-type path
+ * allocates nothing. */
+function accepts(
+  v: Expression,
+  t: Type,
+  seen?: Map<TypeReference, Set<Expression>>
+): boolean {
   if (typeof t === 'string') return isSubtype(v.type.type, t);
 
   switch (t.kind) {
@@ -226,15 +238,57 @@ function accepts(v: Expression, t: Type): boolean {
     }
 
     case 'union':
-      return t.types.some((u) => accepts(v, u));
+      return t.types.some((u) => accepts(v, u, seen));
     case 'intersection':
-      return t.types.every((u) => accepts(v, u));
+      return t.types.every((u) => accepts(v, u, seen));
     case 'negation':
-      return !accepts(v, t.type);
-    case 'reference':
-      if (t.alias && t.def !== undefined) return accepts(v, t.def);
+      return !accepts(v, t.type, seen);
+    case 'reference': {
       // Nominal references are opaque — synthesized subtyping decides.
-      return isSubtype(v.type.type, t);
+      if (!t.alias || t.def === undefined) return isSubtype(v.type.type, t);
+
+      // Structural aliases unfold, under a cycle guard keyed on the PAIR
+      // (the alias record + the IDENTITY of the value being tested) — the
+      // same discriminator `isSubtype`'s rhs unfold uses
+      // (`beginUnfoldAgainst`, `common/type/subtype.ts`). Keying on the
+      // record alone would be wrong here for exactly the reason it is wrong
+      // there: an equirecursive alias legitimately reaches itself through a
+      // CONSTRUCTOR (`type alias json = number | list<json>`), once per level
+      // of a nested list, each time against a strictly SMALLER value — a
+      // record-keyed guard would cut that off and report a non-member. A
+      // value is an immutable tree, so descending into a `list`/`tuple`
+      // element always yields a different object; re-entering with the same
+      // value object is therefore exactly the non-progressing cycle
+      // (`type alias a = a | number`, or a mutual alias chain), which
+      // recursed forever and overflowed the stack.
+      //
+      // VERDICT ON A CYCLE: `false`. Membership in an equirecursive alias is
+      // the LEAST fixed point — a member needs a finite unfolding that makes
+      // progress, and a back edge reached at the same value witnesses
+      // nothing, so no member can be lost by cutting it. `false` is EXACT
+      // here, not merely conservative, the same claim `valueComponent`'s
+      // guard makes above: for `type alias a = a | number` the members are
+      // exactly `number`, which the non-cyclic union arm already supplies.
+      // That is the right answer for BOTH callers. `typeAcceptsValue` reads
+      // it as its documented "not provably a member". `admissionOf` reads it
+      // as `'refute'`, which is both sound (the value genuinely is not a
+      // member) and the verdict its contract wants — a fully-known value
+      // must never leave dispatch inert — and it keeps this predicate
+      // agreeing with `isSubtype`/`provablyDisjoint`, which likewise answer
+      // negatively when they cut an alias cycle.
+      if (seen === undefined) seen = new Map();
+      let values = seen.get(t);
+      if (values === undefined) seen.set(t, (values = new Set()));
+      else if (values.has(v)) return false;
+      values.add(v);
+      try {
+        return accepts(v, t.def, seen);
+      } finally {
+        // Path-scoped: each frame drops its OWN entry, so a sibling arm asked
+        // later at the same value still gets a full unfold.
+        values.delete(v);
+      }
+    }
 
     // Fully-known constructor shapes recurse element-wise (spec §4.1):
     // `List(0)` inhabits `list<0>`. `concreteValueOf` only admits List/Tuple
@@ -252,7 +306,7 @@ function accepts(v: Expression, t: Type): boolean {
       }
       return v.ops.every((op) => {
         const el = concreteValueOf(op);
-        return el !== undefined && accepts(el, t.elements);
+        return el !== undefined && accepts(el, t.elements, seen);
       });
     }
     case 'tuple': {
@@ -260,7 +314,7 @@ function accepts(v: Expression, t: Type): boolean {
       if (v.ops.length !== t.elements.length) return false;
       return v.ops.every((op, i) => {
         const el = concreteValueOf(op);
-        return el !== undefined && accepts(el, t.elements[i].type);
+        return el !== undefined && accepts(el, t.elements[i].type, seen);
       });
     }
 

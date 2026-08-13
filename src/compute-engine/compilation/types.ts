@@ -414,6 +414,23 @@ export interface CompileTarget<Expr = unknown> {
   mangleId?: (id: string) => string;
 
   /**
+   * Called with the VALUE operand of every `Return` the base compiler emits
+   * against this target. **Throw to fail closed (D6).**
+   *
+   * A target that bakes a STATIC return type into the signature it is emitting
+   * (`userFunctions.lowering.staticReturnType` — the shader targets) needs the
+   * value SHAPE of each `Return` to agree with that signature, and the shape of
+   * a name is only knowable while the emitter's own local frames are pushed:
+   * a `Return(z)` naming a `vec2` block-local reads as a scalar once
+   * `compileBlock` has popped its frame. Hooking the emission is what puts the
+   * check inside those frames.
+   *
+   * Absent on every other target: the JavaScript family declares no return
+   * type, so a `Return` of any shape is valid there.
+   */
+  onReturn?: (value: Expr | undefined) => void;
+
+  /**
    * When `true`, this target's multi-statement constructs (loop-form
    * `Sum`/`Product`, `Loop`, `Block`) are emitted as **bare statement
    * sequences** — valid only at statement position (a function body), never
@@ -718,6 +735,26 @@ export interface CompileTarget<Expr = unknown> {
        * deliberately does NOT carry over.
        */
       noRecursion?: boolean;
+
+      /**
+       * `define` synthesizes a STATIC return type for the declaration it emits,
+       * and takes it from the body's declared/ascribed type (GLSL and WGSL both
+       * do — a shader function declaration must be fully typed).
+       *
+       * Such a lowering cannot survive a function whose declared scalar result
+       * type is contradicted by a collection-constructing body: the declaration
+       * would say `float`/`f32` while the `return` statement emits a `vecN`.
+       * `emitFunctionLiteralDefinition` fails closed (D6) on that pair, after
+       * `define` has had its own (more specific) chance to decline — see
+       * `isContradictedScalarFunctionBody`.
+       *
+       * Absent ⇒ the emitted definition carries no return type (the JS arrow
+       * form, and any future dynamically-typed lowering such as a Python
+       * `def`), so there is nothing for the body to contradict and the
+       * definition keeps compiling. Only the CONSUMING positions are gated
+       * there, by `assertNoContradictedScalarOperand`.
+       */
+      staticReturnType?: boolean;
     };
   };
 }

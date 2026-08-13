@@ -22,6 +22,7 @@ import {
   POSTFIX_PRECEDENCE,
 } from '../types.js';
 import { tryInferRangeFromElements } from './definitions-core.js';
+import { OPEN_DELIMITER_PREFIX } from '../parse.js';
 
 /**
  * Parse the body of an interval expression and create an Interval MathJSON expression.
@@ -109,6 +110,61 @@ function parsedIntervalOperand(
   }
 
   return expr;
+}
+
+/**
+ * Tokens that may precede an opening bracket or paren without changing what
+ * the operand is: a group start, plus every open-delimiter prefix the parser
+ * accepts — `\left`/`\mleft`, the delimiter-class command `\mathopen` and the
+ * delimiter-size commands.
+ *
+ * Derived from `OPEN_DELIMITER_PREFIX` (`parse.ts`), the authoritative table
+ * the delimiter matcher itself uses, so this probe cannot drift from it as
+ * spellings are added.
+ */
+const DELIMITER_SIZE_PREFIXES = ['<{>', ...Object.keys(OPEN_DELIMITER_PREFIX)];
+
+/** The opening delimiters of the two ambiguous interval spellings. */
+const AMBIGUOUS_OPEN_DELIMITERS = ['[', '\\lbrack', '(', '\\lparen'];
+
+/**
+ * True if the operand at token index `at` (the one about to be parsed, by
+ * default) is spelled with a bracket or paren pair — the only spellings
+ * `parsedIntervalOperand()` may re-read as an interval. An explicitly-named
+ * `\operatorname{List}(a, b)` stays a `List`: that is how
+ * `serializeSetOperand()` spells a two-element list in a set position, which
+ * has no unambiguous bracket notation.
+ *
+ * For an operand that is ALREADY parsed — the lhs of an infix set operator —
+ * pass `parser.operandStartIndex`, the position the innermost
+ * `parseExpression` started its left operand at.
+ *
+ * Does not consume anything: the parser index is restored before returning.
+ */
+function atAmbiguousOpenDelimiter(parser: Parser, at?: number): boolean {
+  const start = parser.index;
+  if (at !== undefined) parser.index = at;
+  parser.skipVisualSpace();
+  while (DELIMITER_SIZE_PREFIXES.includes(parser.peek)) {
+    parser.nextToken();
+    parser.skipVisualSpace();
+  }
+  const result = AMBIGUOUS_OPEN_DELIMITERS.includes(parser.peek);
+  parser.index = start;
+  return result;
+}
+
+/**
+ * The lhs counterpart of `atAmbiguousOpenDelimiter()`: re-read an
+ * already-parsed left operand as an interval only if it was spelled with a
+ * bracket or paren pair.
+ */
+function parsedIntervalLhs(
+  parser: Parser,
+  lhs: MathJsonExpression
+): MathJsonExpression {
+  if (!atAmbiguousOpenDelimiter(parser, parser.operandStartIndex)) return lhs;
+  return parsedIntervalOperand(lhs)!;
 }
 
 /** Split an `Interval`'s operands into endpoints plus their openness. */
@@ -199,6 +255,9 @@ function serializeInterval(
  * forces the set reading when this is parsed back, an `Interval` here can use
  * the conventional bracket notation even in the two spellings that are
  * ambiguous on their own.
+ *
+ * The flip side of that reading: a two-element `List` here cannot use its
+ * bracket notation — see `serializeListDomain()`.
  */
 function serializeSetOperand(
   serializer: Serializer,
@@ -207,7 +266,35 @@ function serializeSetOperand(
 ): LatexString {
   if (expr !== null && operator(expr) === 'Interval')
     return serializeIntervalBrackets(serializer, expr);
+  const listDomain = serializeListDomain(serializer, expr);
+  if (listDomain !== null) return listDomain;
   return serializer.wrap(expr, prec);
+}
+
+/**
+ * The spelling of a two-element `List` sitting in a set position (the rhs of
+ * `\in`, a big-op indexing set, either side of `\cup`/`\subset`/…):
+ * `\operatorname{List}(a, b)`.
+ *
+ * Its bracket notation `[a, b]` is not available there — a set position reads
+ * a bracket pair back as an `Interval` (see `parsedIntervalOperand()`), a
+ * different value class. Lists of any other length are unambiguous and keep
+ * bracket notation, so this returns `null` for them (and for any other
+ * expression): the caller serializes as usual.
+ */
+export function serializeListDomain(
+  serializer: Serializer,
+  expr: MathJsonExpression | null
+): LatexString | null {
+  if (expr === null || operator(expr) !== 'List' || nops(expr) !== 2)
+    return null;
+  return joinLatex([
+    '\\operatorname{List}(',
+    serializer.serialize(operand(expr, 1)),
+    ', ',
+    serializer.serialize(operand(expr, 2)),
+    ')',
+  ]);
 }
 
 /**
@@ -250,14 +337,16 @@ function parseSetOperator(name: string, prec: number, sides: 'both' | 'rhs') {
     until: Readonly<Terminator>
   ): MathJsonExpression | null => {
     if (lhs === null) return null;
+    // In a set position the operand may be spelled `\operatorname{List}(a, b)`
+    // (see `serializeSetOperand()`); only a bracket/paren pair is ambiguous
+    // enough to be re-read as an interval there. Both probes have to be taken
+    // BEFORE the rhs is parsed: they move the parser index.
+    const newLhs = sides === 'both' ? parsedIntervalLhs(parser, lhs) : lhs;
+    const ambiguousRhs = atAmbiguousOpenDelimiter(parser);
     const rhs = missingIfEmpty(
       parser.parseExpression({ ...until, minPrec: prec })
     );
-    return [
-      name,
-      sides === 'both' ? parsedIntervalOperand(lhs)! : lhs,
-      parsedIntervalOperand(rhs)!,
-    ];
+    return [name, newLhs, ambiguousRhs ? parsedIntervalOperand(rhs)! : rhs!];
   };
 }
 
@@ -1084,6 +1173,16 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     // @todo: parser could check that lhs and rhs are sets
     precedence: COMPARISON_PRECEDENCE,
+    parse: parseSetOperator(
+      'SymmetricDifference',
+      COMPARISON_PRECEDENCE,
+      'both'
+    ),
+    serialize: serializeSetOperator(
+      '\\triangle',
+      COMPARISON_PRECEDENCE,
+      'both'
+    ),
   },
 
   // Predicates/Relations
@@ -1093,11 +1192,12 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     associativity: 'none',
     precedence: 160, // As per MathML, lower precedence
     parse: (parser, lhs, terminator): MathJsonExpression | null => {
+      // The collection side is the lhs, so probe its spelling before parsing
+      // the rhs moves the parser index.
+      const collection = parsedIntervalLhs(parser, lhs);
       const rhs = parser.parseExpression(terminator);
       // Reversed membership: the COLLECTION is the lhs (`[1,5] \ni x`)
-      return rhs === null
-        ? null
-        : ['Element', rhs, parsedIntervalOperand(lhs)!];
+      return rhs === null ? null : ['Element', rhs, collection];
     },
   },
   {
@@ -1193,14 +1293,17 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     associativity: 'none',
     precedence: 240,
     parse: (parser, lhs, terminator): MathJsonExpression | null => {
+      // Both spelling probes have to be taken before the rhs is parsed.
+      const newLhs = parsedIntervalLhs(parser, lhs);
+      const ambiguousRhs = atAmbiguousOpenDelimiter(parser);
       const rhs = parser.parseExpression({ ...terminator, minPrec: 240 });
       if (rhs === null) return null;
       return [
         'Not',
         [
           'SubsetEqual',
-          parsedIntervalOperand(lhs)!,
-          parsedIntervalOperand(rhs)!,
+          newLhs,
+          ambiguousRhs ? parsedIntervalOperand(rhs)! : rhs,
         ],
       ];
     },

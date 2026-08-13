@@ -2448,6 +2448,126 @@ is in git history. The only items deliberately left open:
     (`N`, `Evaluate`, `Identity`, `Typed`, `Matrix`, `Transpose`, …). Each is
     an `elementCount` handler away from answering again; adopt on demand,
     never as a name list in engine code.
+  - Residue: whether `Prime` (and other type-handler-lifting operators)
+    should carry the `broadcastable` definition flag is undecided. Today is
+    consistent (`Prime([1,2,3]).count` and its `evaluate().count` are both
+    `undefined`), so nothing is wrong — but the flag would give such
+    operators the broadcast count AND the `isEnumerableCollection` broadcast
+    tier. Deciding needs a sweep of every flag consumer (canonicalization,
+    compile gates, the facet), for the whole class at once, not per operator.
+
+- **Statement-list operands are not round-trip-safe in the DEFAULT function
+  serializer (2026-08-12, found at the item-172 Loop fix), FIXED 2026-08-12
+  (same day):** the item-172 mechanism (a `Block` operand serializes as a
+  bare `;`-list that binds looser than the surrounding syntax) —
+  `["Repeat", ["Block", …], 3]` reparsed with the block swallowing the `3`,
+  a VALUE-CHANGING round trip. Fixed in `Serializer.wrapArguments()`
+  (serializer.ts), the single join point behind both the generic
+  `\mathrm{Op}(…)` fallback and the ~30 dedicated `\operatorname` entries
+  that reuse it: a `Block` operand is fenced `\left(…\right)`, same
+  mechanism as the item-172 comprehension/Loop fixes. Blast radius
+  measured: ZERO snapshot churn across 59 serialization-heavy suites
+  (1,813 snapshots). `Block` is the only dictionary serializer emitting a
+  bare `;`-list; other loose shapes (`Delimiter(Sequence)`, `If`, `Assign`,
+  `Comprehension`) were probed and already round-trip. Pins in
+  `serialize-for.test.ts` (witness + first/middle/last operand positions +
+  unfenced control). Three adjacent gaps, all RULED 2026-08-12:
+  - Typed `Declare` (annotation dropped on reparse:
+    `["Declare","s","'number'"]` comes back untyped) and the vanishing
+    leading `Declare` in an outer `Block` — RULED DEMAND-GATED ("wait for
+    a real need"): LaTeX has no spelling for a type annotation, no
+    consumer round-trips typed declarations through LaTeX today (Tycho
+    emits untyped ones), and the first real consumer's usage should pick
+    the notation. Re-open when one appears; until then the drop is silent
+    — the accepted cost of not guessing a notation.
+  - A SINGLE-statement `Block` losing its scope wrapper on reparse —
+    RULED AND FIXED 2026-08-12: spelled with a trailing semicolon,
+    `(s\coloneq2;)` (braces are unavailable — `\left\lbrace…\right\rbrace`
+    is `Set(…)`, measured). Serializer emits the trailing `;` when exactly
+    one statement is EMITTED (`Declare`s emit nothing, so
+    `Block(Declare s, Assign s 2)` counts as one and round-trips exactly);
+    the `;` parser drops the vestigial trailing `Nothing` (value was
+    `Nothing` instead of 2) and promotes a one-element trailing-marker
+    sequence to `Block` (without that, `Block(s+1)` would have regressed
+    to a 1-tuple). Multi-statement blocks byte-identical; one deliberate
+    inline-snapshot edit (`sequences.test.ts`, `;;a;` loses its trailing
+    `Nothing`); scope-leak pin in `serialize-for.test.ts`.
+
+- **Two more value-changing LaTeX round trips, found 2026-08-12 at the
+  single-statement-Block fix — both RULED same day, fixes in flight:**
+  - A multi-statement `Block` with NO `Assign` reparsing as a `Tuple` —
+    RULED AND FIXED 2026-08-12: spelled as a ONE-COLUMN `cases`
+    environment (user's design) — `\begin{cases}s+1\\s+2\end{cases}` —
+    core amsmath, renders everywhere, cleanly separable from piecewise:
+    `Which` always serializes TWO columns (otherwise = `& \top`), mixed
+    rows (any `&`) stay `Which` (the bare-otherwise-row idiom included),
+    the system-of-equations branch keeps precedence, and the only
+    repurposed reading is the ≥2-row all-single-column class, which
+    previously parsed as a DEAD-BRANCH `Which` (rows 2+ unreachable).
+    Single-row cases, trailing-`;`, and with-`Assign` `;`-list spellings
+    byte-identical; nested cases (a `Which` inside a `Block`) round-trip;
+    the `\left(…\right)` operand fences are cosmetically redundant around
+    an environment but harmless (measured). The trailing-`;` promotion
+    alternative was REJECTED: it would flip `(1;2;)` from `Tuple(1,2)` to
+    a block. Pins in `block-cases-roundtrip.test.ts`.
+  - RESIDUE, RULING NEEDED (low priority): a `Block` whose statements are
+    ALL equations/inequalities — `Block(x=1, y=2)` — serializes to the
+    cases spelling, which the system-of-equations branch (load-bearing
+    `Solve` convention, runs first) reads back as `List(x=1, y=2)`. NOT a
+    regression: before the fix it reparsed as `Tuple(…)` — both readings
+    wrong, one wrong answer swapped for another. A fix needs a third
+    spelling for this shape; the Solve convention outranks.
+  - `Element(i, List(1,2))` reparsing as `Element(i, Interval(1,2))` —
+    RULED AND FIXED 2026-08-12: the membership serializers (the
+    `Element`/`NotElement` family in `definitions-sets.ts` AND the big-op
+    subscript emitter `serializeIndexingSet` in
+    `definitions-arithmetic.ts` — a second, independent `\in` emitter)
+    spell exactly the 2-element-list domain as `\operatorname{List}(1,2)`.
+    A parse-side companion was REQUIRED: `parsedIntervalOperand()`
+    converted ANY top-level 2-element List to an Interval, including one
+    parsed from an explicitly named `\operatorname{List}` head — the
+    interval re-reading is now gated on the operand actually opening with
+    a bracket token. Authored bracket spellings keep their interval
+    reading. Pins in `tycho-items-93-94.test.ts`.
+  - RESIDUE of the same collision — FIXED 2026-08-12 (same day): all
+    seven interval-converting set operators (`Union`, `Intersection`,
+    `SetMinus`, the `Subset`/`Superset` families, plus the hand-written
+    `\ni` and `\not\subseteq` parselets) now round-trip a 2-element list
+    on both sides and nested. The lhs gate uses a NEW parser hook,
+    `Parser.operandStartIndex`, published from the infix loop beside the
+    existing `operandDiagnosticCheckpoint` (the `\mapsto` precedent for
+    "an infix parselet needs facts about an already-parsed operand");
+    the bracket-token probe (`atAmbiguousOpenDelimiter`) now serves both
+    sides, and the `sides:'both'` unconditional-conversion short-circuit
+    is gone. Serializer: `\operatorname{List}(…)` for 2-element lists in
+    ALL set-operator positions. ALSO REPAIRED, same change: the
+    membership fix earlier today had silently flipped
+    `\mathopen\lbrack a,b\mathclose\rbrack` from Interval to List on the
+    `\in` rhs (`\mathopen` was missing from `DELIMITER_SIZE_PREFIXES`) —
+    caught by A/B measurement, fixed, pinned. Authored bracket spellings
+    keep the interval reading everywhere. Pins in
+    `tycho-items-93-94.test.ts`; the deliberate current-state pin ("a
+    union of two-element lists") was flipped as designed.
+  - Adjacent, pre-existing, noted not fixed: `SymmetricDifference`
+    (`\triangle`) has no parse handler at all — its serialization does
+    not round-trip for ANY operand shape, which is a missing-notation
+    gap, not the 2-list collision. A fix is a serialize/parse pair like
+    the other set operators.
+
+- **Multi-clause dispatch: compiled and interpreted answers diverge on a
+  non-integer argument (found 2026-08-12 at the wave-4 contradiction gate,
+  PRE-EXISTING and independent of it — reproduces with truthful clauses
+  and with no declaration at all), RULING NEEDED:** with clauses
+  `t: integer` and `t: real`, `ce.box(['a', 0.3]).evaluate()` stays INERT
+  (`a(0.3)` — the interpreter's overload resolution does not select the
+  `real` clause) while the COMPILED dispatcher selects it and runs,
+  returning a value. One of the two is wrong: either the interpreter
+  should dispatch (a resolution gap) or the compiled dispatcher
+  over-selects. Needs deciding against the function-polymorphism /
+  overload-resolution design record before touching either side. The
+  wave-4 tests deliberately assert compiled values only at `0.3`.
+
+- **Degenerate big-op round (2026-08-03), flagged not fixed:**
   - `sameSyntactic` (`boxed-expression/compare.ts`) is mis-named: despite its
     "compares symbols by NAME, ignoring bindings" doc, the symbol-vs-non-symbol
     branch of `same()` dereferences `sym.value` unconditionally — the

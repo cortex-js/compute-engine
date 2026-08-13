@@ -349,7 +349,7 @@ const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
  * closing commands.
  */
 
-const OPEN_DELIMITER_PREFIX: Record<string, string> = {
+export const OPEN_DELIMITER_PREFIX: Record<string, string> = {
   '\\left': '\\right',
   '\\bigl': '\\bigr',
   '\\Bigl': '\\Bigr',
@@ -783,6 +783,19 @@ export class _Parser implements Parser {
     return this._operandDiagnosticCheckpoint;
   }
   private _operandDiagnosticCheckpoint = 0;
+
+  /**
+   * The token index at which the left operand of the innermost in-progress
+   * {@link parseExpression} began. Infix parselets receive their left operand
+   * already parsed, so this is the only way for them to inspect how it was
+   * SPELLED: the set operators use it to tell an ambiguous bracket pair
+   * (`[1, 2]`, re-read as an `Interval`) from an explicitly named
+   * `\operatorname{List}(1, 2)` (which stays a `List`).
+   */
+  get operandStartIndex(): number {
+    return this._operandStartIndex;
+  }
+  private _operandStartIndex = 0;
 
   /**
    * The single symbol oracle (see {@link Parser.resolveSymbol}): parser-local
@@ -3552,9 +3565,11 @@ export class _Parser implements Parser {
       while (!done && !this.atTerminator(until)) {
         this.skipSpace();
 
-        // Expose this expression's operand checkpoint to the infix parselet
-        // about to run (it consumes `lhs`, the already-parsed left operand).
+        // Expose this expression's operand checkpoint and start position to
+        // the infix parselet about to run (it consumes `lhs`, the
+        // already-parsed left operand).
         this._operandDiagnosticCheckpoint = operandDiagCheckpoint;
+        this._operandStartIndex = start;
         let result = this.parseInfixOperator(lhs, until);
         if (result === null && until.minPrec <= INVISIBLE_OP_PRECEDENCE) {
           // If any operator, no sequence to apply

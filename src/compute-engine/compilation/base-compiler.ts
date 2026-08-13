@@ -1396,6 +1396,16 @@ export class BaseCompiler {
       if (broadcast !== null) return broadcast;
     }
 
+    // A declaration CONTRADICTED by its body, sitting in a scalar-consuming
+    // position (2026-08-12 ruling — the adjacency half of the
+    // `assertScalarBigOpBody` clause of the same name). Target-agnostic, and
+    // deliberately AFTER the JavaScript broadcast attempt above: a shape that
+    // already had a value-safe element-wise route (a sibling operand made the
+    // whole form broadcast) keeps it; what reaches here is the scalar emission
+    // the contradiction makes wrong. See
+    // `assertNoContradictedScalarOperand`.
+    BaseCompiler.assertNoContradictedScalarOperand(engine, h, args);
+
     // A broadcastable head with a list/collection-typed operand that
     // `tryCompileBroadcast` did NOT handle would otherwise fall through to the
     // legacy scalar path and silently return garbage behind a `success: true`.
@@ -1993,10 +2003,17 @@ export class BaseCompiler {
             `'${args[0].operator}' is not a variable, and this target ` +
             `shape has no lowering. Fail closed (D6).`
         );
-      return `${args[0].symbol} = ${BaseCompiler.compileOp(node, 1, target, 0, args[1])}`;
+      // The write must use the SAME spelling a READ of this name compiles to,
+      // or the two halves of the variable disagree (`assignLValue`).
+      return `${BaseCompiler.assignLValue(engine, args[0].symbol, target)} = ${BaseCompiler.compileOp(node, 1, target, 0, args[1])}`;
     }
-    if (h === 'Return')
+    if (h === 'Return') {
+      // A target with a statically typed signature checks the returned value's
+      // shape against it HERE, while the emitter's local frames are still
+      // pushed (see `CompileTarget.onReturn`).
+      target.onReturn?.(args[0]);
       return `return ${BaseCompiler.compileOp(node, 0, target, 0, args[0])}`;
+    }
     if (h === 'Break') return 'break';
     if (h === 'Continue') return 'continue';
 
@@ -3765,6 +3782,142 @@ export class BaseCompiler {
   }
 
   /**
+   * Prepend the `Declare` statements a statement list is MISSING: one per
+   * block-local that the block introduces by bare ASSIGNMENT.
+   *
+   * `canonicalBlock` hoists a top-level `Assign(w, …)` whose target is not
+   * visible in the enclosing scope chain into the block's OWN scope — that is
+   * the interpreter's block-local, and it is why `{ w ⩴ 2t; w + 1 }` answers
+   * `2t+1` rather than leaking a `w`. No `Declare` statement records it, so
+   * the locals harvest below never saw it and the two halves of the local
+   * disagreed: the write emitted a bare `w = …` (a stray global in sloppy JS,
+   * an undeclared identifier no shader compiler accepts) while every read
+   * resolved to the free-variable spelling `_.w`, which nothing ever wrote.
+   * The block then answered `NaN` behind `success: true` — and since a
+   * canonical `Function`-literal body IS such a block, so did every emitted
+   * user-function definition with a multi-statement body (`_fn_a(_.u)`).
+   *
+   * Synthesizing the declaration — rather than special-casing the emission —
+   * routes the implicit local through the machinery the declared one already
+   * has: the `let`/`float` declaration, the bare-name reads, and the
+   * complex-ness / vector-width inference the shader targets need to give it
+   * a type.
+   *
+   * Three shapes are deliberately left alone, each because it is NOT a
+   * block-local: a name the enclosing compilation already binds (a parameter,
+   * an outer block's local, a loop index — `boundVars`), a name this list
+   * declares explicitly, and a name the canonicalizer did not hoist, which
+   * means the assignment writes an OUTER binding (that shape has its own
+   * pre-existing asymmetry, tracked separately).
+   */
+  private static withImplicitLocalDeclares(
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): ReadonlyArray<Expression> {
+    const scope = node?.localScope;
+    if (!scope) return args;
+
+    const implicit: Expression[] = [];
+    const seen = new Set<string>();
+    for (const arg of args) {
+      if (!isFunction(arg, 'Assign')) continue;
+      const lhs = arg.ops[0];
+      if (!isSymbol(lhs)) continue;
+      const name = lhs.symbol;
+      if (seen.has(name)) continue;
+      if (target.boundVars?.has(name)) continue;
+      if (!scope.bindings.has(name)) continue;
+      if (
+        args.some(
+          (a) =>
+            isFunction(a, 'Declare') &&
+            isSymbol(a.ops[0]) &&
+            a.ops[0].symbol === name
+        )
+      )
+        continue;
+      seen.add(name);
+      // Raw (unbound): this is a synthetic statement, and canonicalizing a
+      // `Declare` would register the name in whatever scope the compilation
+      // happens to run under. Nothing below does arithmetic on it — the
+      // emission paths read `ops[0]` (the name) and `declareValueOperand`
+      // (none here) only.
+      implicit.push(
+        lhs.engine._fn('Declare', [lhs, lhs.engine.string('unknown')], {
+          canonical: false,
+        })
+      );
+    }
+
+    return implicit.length === 0 ? args : [...implicit, ...args];
+  }
+
+  /**
+   * The target-language lvalue an `Assign` writes for the variable `name` —
+   * the SAME spelling a READ of that name compiles to.
+   *
+   * The two halves of a variable must agree. A bound name (a block local, a
+   * parameter, a loop index, a desugar temporary) is resolved to its own bare
+   * identifier by the enclosing binding form's `var` override, and a target
+   * that resolves nothing (the shader targets, which declare a free symbol as
+   * a bare identifier) also keeps the bare write — both unchanged. But a
+   * target that spells a FREE symbol as something else — JavaScript's
+   * vars-object lookup `_.<name>` — used to get a bare `name = …` write while
+   * every read compiled to `_.<name>`: in sloppy mode the write created a
+   * stray global and the read saw `undefined`. `{ s ⩴ 0; for k ∈ 1..3 { s ⩴ s
+   * + … }; s }` therefore ran to `undefined` behind `success: true` whenever
+   * the name was NOT hoisted to a block-local — which is exactly what happens
+   * for a name the enclosing scope chain already binds (the library scope
+   * pre-declares `e`, `i`, `m` and `s`), where the interpreter writes the
+   * outer binding and reads it back.
+   *
+   * A resolution that is not an assignable REFERENCE — a baked constant
+   * (`Pi` → `Math.PI`), a folded assigned value, a non-string `vars` mapping —
+   * has nowhere to write: fail closed (D6) rather than emit a write the reads
+   * cannot see.
+   */
+  private static assignLValue(
+    engine: ComputeEngine,
+    name: string,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    const resolved = target.var?.(name);
+    if (resolved === undefined) {
+      // The target resolved nothing. The read path then FOLDS an assigned
+      // value (`tryFoldKnownSymbol`) before falling back to a bare identifier,
+      // so a symbol the engine has a value for reads as that value and no
+      // write can reach it — fail closed. Otherwise (a genuinely free symbol,
+      // which is how every shader target spells one) the bare identifier is
+      // both the read and the write.
+      if (engine._getSymbolValue(name) !== undefined)
+        throw new Error(
+          `Assign: cannot compile — "${name}" has an assigned value, which ` +
+            `every read of it bakes into the generated source, so this write ` +
+            `would be invisible to them. Fail closed (D6).`
+        );
+      return target.mangleId ? target.mangleId(name) : name;
+    }
+    if (resolved === name) return resolved;
+    // A vars-object member access naming this very symbol (`_.s`) is the only
+    // other assignable form the built-in targets produce. Matched by string
+    // surgery, not a regexp built from `name` (a symbol may hold regexp
+    // metacharacters).
+    if (
+      resolved.endsWith(`.${name}`) &&
+      /^[A-Za-z_$][\w$]*$/.test(resolved.slice(0, -(name.length + 1)))
+    )
+      return resolved;
+    throw new Error(
+      `Assign: cannot compile — target '${target.language ?? 'javascript'}' ` +
+        `compiles reads of "${name}" as \`${resolved}\`, which is not an ` +
+        `assignable reference (a constant, a folded value, or a baked ` +
+        `\`vars\` mapping), so the write would be invisible to every read. ` +
+        `Fail closed (D6).`
+    );
+  }
+
+  /**
    * Compile a block expression
    */
   private static compileBlock(
@@ -3828,6 +3981,11 @@ export class BaseCompiler {
             ])
       );
     }
+
+    // …then the block-locals introduced by bare ASSIGNMENT, which carry no
+    // `Declare` statement of their own. Synthesize the missing declaration so
+    // everything below treats them exactly like a declared local.
+    args = BaseCompiler.withImplicitLocalDeclares(args, target, node);
 
     // Get all the Declare statements
     const locals: string[] = [];
@@ -3947,22 +4105,15 @@ export class BaseCompiler {
     if (pushedEnforced) BaseCompiler._enforcedTargets.push(enforcedLocals!);
     try {
       for (const arg of args) {
+        // Complex-ness first, then width — the width of a complex value is
+        // read THROUGH the complex frame (`aggregateComponentCount`).
+        BaseCompiler.noteLocalComplex(arg, complexFrame);
         if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0])) {
-          const name = arg.ops[0].symbol;
-          if (isSymbol(arg.ops[1], 'complex'))
-            BaseCompiler._setLocalComplex(complexFrame, name, true);
           const value = BaseCompiler.declareValueOperand(arg.ops);
-          if (value !== undefined && BaseCompiler.isComplexValued(value))
-            BaseCompiler._setLocalComplex(complexFrame, name, true);
-          if (value !== undefined) noteVectorWidth(name, value);
+          if (value !== undefined) noteVectorWidth(arg.ops[0].symbol, value);
         } else if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0])) {
-          const name = arg.ops[0].symbol;
-          if (
-            complexFrame.get(name) === false &&
-            BaseCompiler.isComplexValued(arg.ops[1])
-          )
-            BaseCompiler._setLocalComplex(complexFrame, name, true);
-          if (arg.ops[1] !== undefined) noteVectorWidth(name, arg.ops[1]);
+          if (arg.ops[1] !== undefined)
+            noteVectorWidth(arg.ops[0].symbol, arg.ops[1]);
         }
       }
 
@@ -4502,13 +4653,51 @@ export class BaseCompiler {
       // too, or the pair-carrying loop step this feature exists for
       // (`(a, b) := (b, a + b)`) would fail closed. A body's value is
       // discarded, so no trailing value tuple (`isLast: false`).
+      // For the same reason the implicit-block-local desugar runs here too: a
+      // loop body that binds a scratch variable by bare assignment
+      // (`q ⩴ 2i; s ⩴ s + q`) has no `Declare` for it either, so the write
+      // emitted a bare `q` while every read emitted `_.q` — `NaN`.
+      //
+      // …and so does the COMPLEX-ness inference `compileBlock` runs over its
+      // locals: without the frame, a loop-body local bound to a complex value
+      // (`z ⩴ t + i; s ⩴ s + |z|`) was written as a `{re, im}` object but read
+      // back as a real — `Abs(z)` lowered to `Math.abs` on an object, i.e.
+      // `NaN` behind `success: true` — and an explicitly declared local
+      // behaved identically.
+      //
+      // The VECTOR-width frame is deliberately NOT pushed here. Its only
+      // consumer is the shader declaration type hint, and no shader target
+      // reaches this routine: the GPU targets define their own `Loop`
+      // (`GPU_FUNCTIONS.Loop`), which compiles the body with
+      // `compileStatementList` — a `Block` body goes straight to
+      // `compileBlock`, inference included. This is the JavaScript-family
+      // path, whose locals are untyped `let`s, and a vector-valued loop-body
+      // local already agrees with the interpreter there.
       const stmts = expr.ops.flatMap(
         (s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]
       );
-      const bodyTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
-      return BaseCompiler.withCseScope(expr, -1, bodyTarget, () =>
-        stmts.map((s) => BaseCompiler.compileLoopBody(s, bodyTarget)).join('; ')
+      const withDecls = BaseCompiler.withImplicitLocalDeclares(
+        stmts,
+        target,
+        expr
       );
+      const bodyTarget = BaseCompiler.loopBodyTempTarget(withDecls, target);
+      const complexFrame = new Map<string, boolean>();
+      for (const s of withDecls)
+        if (isFunction(s, 'Declare') && isSymbol(s.ops[0]))
+          complexFrame.set(s.ops[0].symbol, false);
+      BaseCompiler._pushLocalComplex(complexFrame);
+      try {
+        for (const s of withDecls)
+          BaseCompiler.noteLocalComplex(s, complexFrame);
+        return BaseCompiler.withCseScope(expr, -1, bodyTarget, () =>
+          withDecls
+            .map((s) => BaseCompiler.compileLoopBody(s, bodyTarget))
+            .join('; ')
+        );
+      } finally {
+        BaseCompiler._popLocalComplex();
+      }
     }
 
     // …and the same statement as a bare (unwrapped) loop body.
@@ -4886,6 +5075,42 @@ export class BaseCompiler {
   }
 
   /**
+   * Record what the statement `arg` says about the complex-ness of the local
+   * it binds, into the (already PUSHED) frame `frame`.
+   *
+   * The per-statement step of the incremental inference `compileBlock`
+   * performs over its locals — factored out because two other statement-list
+   * routes run the same inference: `compileLoopBody`'s `Block` branch (a JS
+   * loop body is a statement list of its own, which does NOT go through
+   * `compileBlock`) and the `Block` arm of `isComplexValued` (which types a
+   * block from its VALUE, and so must know its locals' shapes).
+   *
+   * Sources, per local: an explicit `complex` type on the `Declare`, a
+   * `Declare` initial value, or the FIRST `Assign` RHS (a local already known
+   * complex is never demoted). The frame must be pushed while this runs, so a
+   * later local whose RHS reads an earlier one resolves it through the frame.
+   * A name with no entry in `frame` is not a local of this list and is left
+   * alone.
+   */
+  private static noteLocalComplex(
+    arg: Expression,
+    frame: Map<string, boolean>
+  ): void {
+    if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0])) {
+      const name = arg.ops[0].symbol;
+      if (isSymbol(arg.ops[1], 'complex'))
+        BaseCompiler._setLocalComplex(frame, name, true);
+      const value = BaseCompiler.declareValueOperand(arg.ops);
+      if (value !== undefined && BaseCompiler.isComplexValued(value))
+        BaseCompiler._setLocalComplex(frame, name, true);
+    } else if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0])) {
+      const name = arg.ops[0].symbol;
+      if (frame.get(name) === false && BaseCompiler.isComplexValued(arg.ops[1]))
+        BaseCompiler._setLocalComplex(frame, name, true);
+    }
+  }
+
+  /**
    * The binding structure of `expr` if it is a binder form, else `null`.
    *
    * A binder's operands are not all values: `Sum`/`Product`/`Loop`/
@@ -5120,7 +5345,71 @@ export class BaseCompiler {
         binder.bodies.some((b) => BaseCompiler.isComplexValued(b))
       );
 
+    // A `Block`'s value is its LAST statement, not any of them: an interior
+    // statement that binds a complex LOCAL says nothing about the value the
+    // block produces. Under the conservative recursion it did — a body such as
+    // `{ s ⩴ 0; z ⩴ t + i; s ⩴ s + |z|; s }` reported complex even though it
+    // yields the real `s`, and the GPU user-function emission (whose return
+    // type is `gpuTypeOfValue` of the body) declared `vec2 _fn_a(float t)`
+    // around a `return s;` — source no driver accepts, behind
+    // `success: true`.
+    if (expr.operator === 'Block')
+      return BaseCompiler.isBlockValueComplexValued(expr);
+
     return expr.ops.some((arg) => BaseCompiler.isComplexValued(arg));
+  }
+
+  /**
+   * Is the VALUE of the `Block` `expr` complex-valued?
+   *
+   * A block's value is its last statement, evaluated under its own locals —
+   * so the locals' complex-ness has to be inferred first, exactly as
+   * `compileBlock` infers it before compiling the statements (`{ z ⩴ t + i;
+   * z² }` is complex through the local `z`, whose declared type is real). The
+   * set of locals mirrors `withImplicitLocalDeclares`: the explicit `Declare`s
+   * plus the bare assignments `canonicalBlock` hoisted into the block's OWN
+   * scope. A name the enclosing compilation already binds is NOT a local of
+   * this block, so it keeps whatever the enclosing analysis says.
+   */
+  private static isBlockValueComplexValued(
+    expr: Expression & { ops: ReadonlyArray<Expression> }
+  ): boolean {
+    const args = expr.ops;
+    if (args.length === 0) return false;
+
+    const frame = new Map<string, boolean>();
+    for (const arg of args)
+      if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0]))
+        frame.set(arg.ops[0].symbol, false);
+    const scope = expr.localScope;
+    if (scope)
+      for (const arg of args)
+        if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0])) {
+          const name = arg.ops[0].symbol;
+          if (
+            !frame.has(name) &&
+            scope.bindings.has(name) &&
+            !BaseCompiler._boundVarsCtx?.has(name)
+          )
+            frame.set(name, false);
+        }
+
+    BaseCompiler._pushLocalComplex(frame);
+    try {
+      for (const arg of args) BaseCompiler.noteLocalComplex(arg, frame);
+      // The value statement, skipping the `Nothing` no-ops `compileBlock`
+      // filters out. A trailing `Assign` yields the value it wrote; a trailing
+      // `Declare` yields no value at all.
+      let i = args.length - 1;
+      while (i >= 0 && isSymbol(args[i], 'Nothing')) i -= 1;
+      if (i < 0) return false;
+      const last = args[i];
+      if (isFunction(last, 'Declare')) return false;
+      const value = isFunction(last, 'Assign') ? last.ops[1] : last;
+      return value !== undefined && BaseCompiler.isComplexValued(value);
+    } finally {
+      BaseCompiler._popLocalComplex();
+    }
   }
 
   /**
@@ -5438,6 +5727,193 @@ export class BaseCompiler {
           `(At(${kind}(…), k) → ${kind}(At(…, k))) or evaluate instead. ` +
           `Fail closed (D6).`
       );
+    if (BaseCompiler.isContradictedScalarDeclaration(body))
+      throw new Error(
+        `${kind}: the declaration of '${
+          isFunction(body) ? body.operator : body.toString()
+        }' says it returns a scalar ` +
+          `('${body.type.toString()}'), but its body constructs a collection. ` +
+          `The declaration is contradicted by the body, so the numeric ` +
+          `accumulation would produce a wrong value. Fix the declaration ` +
+          `(e.g. '-> list<number>') or evaluate instead. Fail closed (D6).`
+      );
+  }
+
+  /**
+   * The LYING-declaration clause (2026-08-12 ruling): the body's DECLARED type
+   * PROVES a scalar (`isScalarDeclaredType` — an `integer`/`real`/`number` or
+   * `boolean` head, the spellings that sail through every gate above), yet the
+   * item-86 body look-through PROVES the named function's `Function` literal
+   * constructs a collection. Declaration and body contradict each other, and
+   * the compiler can see it.
+   *
+   * Declarations stay authoritative everywhere else in the compiler — this is
+   * not a re-inference. It fires only where the contradiction is PROVEN, and
+   * the only sound response is to refuse to emit code we know is wrong (D6):
+   * JS emitted `_fn_a(0) + _fn_a(1) + _fn_a(2)`, which string-concatenates the
+   * arrays at run time ("1,00.5403…,0.8414…-0.4161…,0.9092…") behind
+   * `success: true`, and GLSL/WGSL emitted a `vec2` sum returned from a `float`
+   * function — shader source that does not even compile.
+   *
+   * Unlike `isCollectionValuedBigOpBodyByLookThrough` (which only fires where
+   * an item-121 EXEMPTION is doing the admitting, and which JS never reaches
+   * because its wider element-wise gate diverts those bodies first), this
+   * clause fires on ALL targets INCLUDING JavaScript: a `number`-declared body
+   * is not possibly-collection-typed, so `isElementwiseBigOpBody` declines it
+   * and there is no element-wise arm to fall into. That JS change is the
+   * ruling: garbage becomes a decline.
+   *
+   * The ruled exemptions are untouched — `isScalarDeclaredType` is disjoint
+   * from every one of them (`broadcastable<T>`, `unknown`/`any` and the union
+   * spelling of the top type all answer `false`), so the `-> unknown` shape
+   * (item 171) still compiles element-wise on JS and still declines on the
+   * non-JS targets through the clause above, on its own message. The `boolean`
+   * arm does not touch the item-121 boolean exemption either: that exemption
+   * protects the ABSENCE of evidence (a genuine boolean body — a comparison —
+   * produces none), while this clause additionally requires the look-through to
+   * PROVE a collection constructor.
+   */
+  static isContradictedScalarDeclaration(body: Expression): boolean {
+    if (!BaseCompiler.isScalarDeclaredType(body)) return false;
+    return BaseCompiler.isProvablyCollectionValuedApplication(body, new Set());
+  }
+
+  /**
+   * The declared-type half of the 2026-08-12 contradicted-declaration ruling:
+   * a declaration that PROMISES a scalar, i.e. a value the emitters read as one
+   * machine word — a number or a boolean.
+   *
+   * `boolean` was originally omitted, which let a head declared
+   * `(number) -> boolean` over a list-constructing body escape every gate.
+   * Measured before this, with `b` declared `(number) -> boolean` and assigned
+   * `t ↦ [cos t, sin t]`, all behind `success: true`:
+   *
+   * | shape             | javascript            | glsl / wgsl                  |
+   * | ----------------- | --------------------- | ---------------------------- |
+   * | `If(b(u), 1, 2)`  | the WRONG branch (`1`)| `bool _fn_b` returning `vec2`|
+   * | `Not(b(u))`       | a wrong `false`       | same                         |
+   * | `b(u) = True`     | a wrong `false`       | same                         |
+   * | `And(b(u), True)` | the ARRAY, unguarded  | same                         |
+   *
+   * — the JS ternary treats the run-time array as truthy and takes a branch the
+   * interpreter never takes (it throws: a condition must be `True`/`False`).
+   */
+  private static isScalarDeclaredType(body: Expression): boolean {
+    const t = body.type;
+    return t.matches('number') || t.matches('boolean');
+  }
+
+  /**
+   * The DEFINITION-SITE half of the same 2026-08-12 ruling (wave 3): the
+   * identical contradiction read off the function's own body rather than off a
+   * call site.
+   *
+   * Waves 1–2 gate CONSUMING positions, so a contradicted application declines
+   * wherever a scalar is read. What they cannot reach is the DEFINITION itself:
+   * a bare `a(u)` as the whole compiled expression has no consuming head, so on
+   * a target whose user functions are statically typed declarations the
+   * definition was still emitted — and its return type is synthesized from the
+   * body's DECLARED type while its `return` statement emits what the body
+   * actually builds. Measured before this gate, with `a` declared
+   * `(number) -> number` and assigned `t ↦ [cos t, sin t]`:
+   *
+   *     glsl:  float _fn_a(float t) { return vec2(cos(t), sin(t)); }
+   *     wgsl:  fn _fn_a(t: f32) -> f32 { return vec2f(cos(t), sin(t)); }
+   *
+   * — a `vec2` returned from a function declared scalar, i.e. shader source no
+   * driver accepts, shipped behind `success: true`.
+   *
+   * Same two halves as `isContradictedScalarDeclaration`, same shared body
+   * look-through and the same `isScalarDeclaredType` test; only the entry point
+   * differs. The body carries the declared result type as an ASCRIPTION
+   * (`Block(Typed(List(…), 'number'))`), so `isScalarDeclaredType` reads the
+   * DECLARATION here exactly as it reads the application's result type there —
+   * including its `boolean` arm, which is what refuses
+   * `bool _fn_b(float t) { return vec2(cos(t), sin(t)); }` and, with it, every
+   * GPU consuming shape whose own lowering has no condition guard (the
+   * `Which` element-wise entry).
+   */
+  static isContradictedScalarFunctionBody(body: Expression): boolean {
+    if (!BaseCompiler.isScalarDeclaredType(body)) return false;
+    return BaseCompiler.isProvablyCollectionValuedBody(body, new Set());
+  }
+
+  /**
+   * The ADJACENCY half of the same 2026-08-12 ruling: the contradicted-scalar
+   * application in an ordinary SCALAR-CONSUMING position, not just as a big-op
+   * body. With `a` declared `(number) -> number` and assigned
+   * `t ↦ [cos t, sin t]`, every such position emitted garbage behind
+   * `success: true` — measured before this gate:
+   *
+   * | shape             | javascript                    | glsl / wgsl        |
+   * | ----------------- | ----------------------------- | ------------------ |
+   * | `a(u) + 1`        | ran to the STRING `"…,…1"`    | `vec2` from `float`|
+   * | `2·a(u)`          | ran to `NaN`                  | `vec2` from `float`|
+   * | `sin(a(u))`       | ran to `NaN`                  | `vec2` from `float`|
+   * | `a(u)^2`          | ran to `NaN`                  | `vec2` from `float`|
+   * | `a(u) < 1`        | ran to a wrong scalar `false` | `vec2` from `float`|
+   * | `a(u) = 1`        | ran to a wrong scalar `false` | `vec2` from `float`|
+   * | `If(a(u)<1, 1, 2)`| took the WRONG branch         | `vec2` from `float`|
+   *
+   * (Python and interval-js already declined every one of them, for their own
+   * unrelated reasons — no user-function lowering / no `List` lowering.)
+   *
+   * ONE policy point rather than one gate per target: the contradiction is a
+   * property of the APPLICATION, not of any target, and `compileExpr` is the
+   * dispatcher every target funnels its operator lowering through — the same
+   * place the GPU non-scalar comparison gate and the JS/Python list-arithmetic
+   * gates already live.
+   *
+   * The position test is the union of the head classifications those gates
+   * already use — scalar arithmetic, a `broadcastable` operator definition, a
+   * relational, a logical connective. Every one of them consumes its operands
+   * as scalars whenever no lift is planned, and no lift is planned here: the
+   * declared type says `number`. Container and access heads (`List`, `Tuple`,
+   * `Block`, `At`, a user function) are NOT in it and keep compiling — probed,
+   * `[a(u), 1]` is correct today, and `At`/`Length` already decline on the
+   * declared type.
+   *
+   * What deliberately does NOT decline:
+   *  - the application as the WHOLE compiled expression (`a(u)`): no head
+   *    consumes it, the JS result coercion handles the array, and it runs
+   *    correctly today;
+   *  - the honest `(unknown) -> unknown` spelling of the same body — its type
+   *    is not `matches('number')`, so it keeps the `_SYS.bcast` route (item
+   *    171);
+   *  - a TRUTHFUL `-> number` head over a scalar body, and a truthful
+   *    `-> list<number>` head, neither of which is a contradiction.
+   */
+  private static assertNoContradictedScalarOperand(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): void {
+    if (args.length === 0) return;
+    const consumesScalarOperands = (): boolean => {
+      if (
+        BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h) ||
+        isRelationalOperator(h) ||
+        BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h)
+      )
+        return true;
+      const def = engine.lookupDefinition(h);
+      return isOperatorDef(def) && def.operator.broadcastable === true;
+    };
+    if (!consumesScalarOperands()) return;
+    const offending = args.find((a) =>
+      BaseCompiler.isContradictedScalarDeclaration(a)
+    );
+    if (offending === undefined) return;
+    throw new Error(
+      `${h}: the declaration of '${
+        isFunction(offending) ? offending.operator : offending.toString()
+      }' says it returns a scalar ` +
+        `('${offending.type.toString()}'), but its body constructs a ` +
+        `collection. The declaration is contradicted by the body, so this ` +
+        `scalar position would consume a run-time collection as a number. ` +
+        `Fix the declaration (e.g. '-> list<number>') or evaluate instead. ` +
+        `Fail closed (D6).`
+    );
   }
 
   /**
@@ -5495,21 +5971,131 @@ export class BaseCompiler {
     if (!isFunction(e)) return false;
     const op = e.operator;
     if (typeof op !== 'string' || visited.has(op)) return false;
-    const literal = BaseCompiler.userFunctionLiteral(e.engine, op);
-    if (literal === undefined) return false;
-    // Canonical parse wraps a lambda body in `Block`; unwrap only the
-    // single-statement form (a multi-statement body is not evidence).
-    let fnBody: Expression | undefined = literal.ops[0];
-    if (fnBody === undefined) return false;
-    while (isFunction(fnBody, 'Block') && fnBody.nops === 1)
-      fnBody = fnBody.ops[0];
-    if (fnBody.type.matches('collection')) return true;
     const nextVisited = new Set(visited);
     nextVisited.add(op);
-    return BaseCompiler.isProvablyCollectionValuedApplication(
-      fnBody,
-      nextVisited
-    );
+    const literal = BaseCompiler.userFunctionLiteral(e.engine, op);
+    // A MULTI-CLAUSE function has no single literal (`userFunctionLiteral`
+    // answers `undefined` — the same test `ensureUserFunctionEmitted` uses to
+    // route to `tryEmitMultiClauseFunction`), so read its clause set instead.
+    if (literal === undefined)
+      return BaseCompiler.isProvablyCollectionValuedClauseSet(
+        e.engine,
+        op,
+        nextVisited
+      );
+    const fnBody = literal.ops[0];
+    if (fnBody === undefined) return false;
+    return BaseCompiler.isProvablyCollectionValuedBody(fnBody, nextVisited);
+  }
+
+  /**
+   * Wave 4 of the 2026-08-12 contradicted-declaration ruling: the same
+   * look-through for a MULTI-CLAUSE function (function-polymorphism design
+   * §8), which `userFunctionLiteral` cannot see — it has no single
+   * `_lambdaLiteral`, one literal per clause instead. Measured before this
+   * arm, with `a` DECLARED `(number) -> number` and two clauses whose bodies
+   * both build `[cos t, sin t]`, the JavaScript target emitted the guard chain
+   * and ran the scalar consuming positions over the returned array behind
+   * `success: true`:
+   *
+   * | shape       | before                                    |
+   * | ----------- | ----------------------------------------- |
+   * | `a(u) + 1`  | the STRING `"-0.98999…,0.141121"`         |
+   * | `2·a(u)`    | `NaN`                                     |
+   * | `sin(a(u))` | `NaN`                                     |
+   *
+   * — the identical failure wave 2 gates for a single-literal function, which
+   * simply never fired here because the literal lookup came back empty.
+   *
+   * Feeding the clause set into the SHARED body predicate (rather than adding
+   * a gate of its own) makes every wave inherit the fix at once: the big-op
+   * body clause (wave 1), the scalar-consuming positions (wave 2) and the
+   * `-> unknown` look-through all read this one predicate.
+   *
+   * ANY clause is enough — the conservative, fail-closed direction. A MIXED
+   * clause set (one scalar clause, one collection-constructing clause) is a
+   * contradiction on SOME branches only, but the consuming position compiles
+   * ONCE, statically, for all of them: measured, mixed `a(u) + 1` ran to `8`
+   * on the scalar branch and to the string `"0.29552…,0.955336…"` on the other.
+   * There is no per-branch code to keep, so the branch that is wrong decides.
+   *
+   * Only JavaScript (and interval-js) ever reach this: `tryEmitMultiClauseFunction`
+   * declines every other target outright (§8), so a multi-clause application on
+   * GLSL/WGSL already fails closed with its own "no lowering" diagnostic.
+   */
+  private static isProvablyCollectionValuedClauseSet(
+    engine: ComputeEngine,
+    op: string,
+    visited: Set<string>
+  ): boolean {
+    const state = multiClauseState(engine.lookupDefinition(op));
+    if (state === undefined) return false;
+    return state.clauses.some((c) => {
+      if (!isFunction(c.literal, 'Function')) return false;
+      const body = c.literal.ops[0];
+      if (body === undefined) return false;
+      return BaseCompiler.isProvablyCollectionValuedBody(body, visited);
+    });
+  }
+
+  /**
+   * The BODY half of `isProvablyCollectionValuedApplication`: does this
+   * function-literal body provably construct a collection?
+   *
+   * Split out so the same evidence can be read from either end — from a CALL
+   * SITE (the application, waves 1–2) or from the body itself at DEFINITION
+   * EMISSION (`isContradictedScalarFunctionBody`, wave 3), which is handed the
+   * body directly and has no application in hand.
+   *
+   * Canonical parse wraps a lambda body in `Block`, whose VALUE is its LAST
+   * statement — so that is the statement to judge, single- or multi-statement.
+   * Measured before this, with `a` DECLARED `(number) -> number` and assigned
+   * `t ↦ { w := cos t; [w, sin t] }`, the single-statement-only unwrap saw no
+   * evidence and every wave passed the call through behind `success: true`:
+   * JS `a(u) + 1` ran to the STRING `",0.29552…"`, `Σ a(i)` to
+   * `",0,0.84147…,0.90929…"`, and GLSL emitted
+   * `float _fn_a(float t) { w = cos(t); return vec2(w, sin(t)); }`.
+   *
+   * A `Return` anywhere in an EARLIER statement disqualifies the block: control
+   * may never reach the last statement, so it is not provably the value and
+   * this predicate — positive-evidence-only, whose admission DECLINES a compile
+   * — must answer `false`.
+   *
+   * A DECLARED result type additionally ASCRIBES the body: the
+   * `ce.declare('a', { signature: '(number) -> number' })` +
+   * `ce.assign('a', λ)` route stores `Block(Typed(List(…), 'number'))`, so the
+   * ascription reports `number` and hides the `List` underneath. Unwrap it: the
+   * constructed value beneath the ascription is precisely the evidence the
+   * declaration is contradicting (the interpreter does not coerce — `a(0.3)`
+   * really answers a 2-list).
+   */
+  private static isProvablyCollectionValuedBody(
+    body: Expression,
+    visited: Set<string>
+  ): boolean {
+    let fnBody: Expression = body;
+    for (;;) {
+      if (isFunction(fnBody, 'Block') && fnBody.nops >= 1) {
+        const stmts = fnBody.ops;
+        if (stmts.slice(0, -1).some(BaseCompiler.containsReturn)) return false;
+        fnBody = stmts[stmts.length - 1];
+      } else if (isFunction(fnBody, 'Typed') && fnBody.nops >= 1)
+        fnBody = fnBody.ops[0];
+      else break;
+    }
+    if (fnBody.type.matches('collection')) return true;
+    return BaseCompiler.isProvablyCollectionValuedApplication(fnBody, visited);
+  }
+
+  /**
+   * Does `e` contain a `Return` anywhere? Read by
+   * `isProvablyCollectionValuedBody` to disqualify a block whose last statement
+   * may not be reached.
+   */
+  private static containsReturn(e: Expression): boolean {
+    if (!isFunction(e)) return false;
+    if (e.operator === 'Return') return true;
+    return e.ops.some(BaseCompiler.containsReturn);
   }
 
   /**
@@ -5589,6 +6175,16 @@ export class BaseCompiler {
    * ("Condition must evaluate to True or False") rather than silently taking a
    * branch — so fail closed (D6) at compile time. Uses the declared type (not
    * `.isCollection`, which is false for a `list<finite_number>`).
+   *
+   * A CONTRADICTED scalar declaration is the same hazard with the declared type
+   * lying about it (2026-08-12 ruling): `b` declared `(number) -> boolean` over
+   * a list-constructing body types the condition `boolean`, so the clause above
+   * sees nothing and the emitted ternary took a branch off the truthiness of a
+   * run-time array. The condition is not an operand of a head in
+   * `assertNoContradictedScalarOperand`'s classification (`If`/`Which`/`When`
+   * are not broadcastable and consume only this one operand as a scalar), so
+   * the gate belongs here — the shared condition guard both `If` and
+   * `guardCondition` already funnel through.
    */
   static assertScalarCondition(cond: Expression): void {
     if (cond.type.matches('collection'))
@@ -5596,6 +6192,16 @@ export class BaseCompiler {
         'Cannot compile: a branch condition is a collection-valued expression, ' +
           'which is never a scalar boolean. Materialize the collection first. ' +
           'Fail closed (D6).'
+      );
+    if (BaseCompiler.isContradictedScalarDeclaration(cond))
+      throw new Error(
+        `Cannot compile: the declaration of '${
+          isFunction(cond) ? cond.operator : cond.toString()
+        }' says it returns a scalar ('${cond.type.toString()}'), but its body ` +
+          `constructs a collection. The declaration is contradicted by the ` +
+          `body, so this branch condition would select on the truthiness of a ` +
+          `run-time collection. Fix the declaration (e.g. '-> list<number>') ` +
+          `or evaluate instead. Fail closed (D6).`
       );
   }
 
@@ -6988,19 +7594,63 @@ export class BaseCompiler {
         // requires declaration before use).
         const lowering = registry.lowering;
         if (lowering) {
-          registry.defs.set(
-            name,
-            BaseCompiler.withEnforcedParams(literal, () =>
-              lowering.define({
-                id: h,
-                name,
-                params,
-                body: bodyExpr,
-                literal,
-                target: bodyTarget,
-              })
-            )
+          const def = BaseCompiler.withEnforcedParams(literal, () =>
+            lowering.define({
+              id: h,
+              name,
+              params,
+              body: bodyExpr,
+              literal,
+              target: bodyTarget,
+            })
           );
+          // Wave 3 of the 2026-08-12 contradicted-declaration ruling, as a
+          // BACKSTOP on what `define` was willing to emit. A lowering that
+          // synthesizes a STATIC return type takes it from the body's
+          // declared/ascribed type, while the `return` statement emits what the
+          // body actually builds — so a scalar-declared, collection-
+          // constructing body yields a declaration that disagrees with its own
+          // return value (`float _fn_a(float t) { return vec2(…); }`), source
+          // no shader compiler accepts, shipped behind `success: true` because
+          // nothing downstream re-checks the preamble. Waves 1–2 gate the
+          // CONSUMING positions of such a call; a bare `a(u)` has no consuming
+          // head, so the definition still went out.
+          //
+          // Deliberately AFTER `define`, not before: every target-specific
+          // decline (`the return value has no static GLSL type`, the `At`
+          // aggregate-index diagnostic, the identifier checks) throws from
+          // inside `define` and is strictly more informative about ITS shape.
+          // Running last means this gate only ever speaks for a definition that
+          // emitted cleanly — exactly the case nothing else catches — and never
+          // masks a better message. The `defs` entry is still written after the
+          // body compiled, so a nested dependency it emitted precedes it (GLSL
+          // requires declaration before use); a throw here aborts the whole
+          // compilation, so the discarded entries do not matter.
+          //
+          // The gate lives in this shared emission path keyed on a property the
+          // TARGET declares, rather than inside the GPU `define` hook: the
+          // contradiction is a property of the FUNCTION, the same one waves 1–2
+          // read from the call site, and every emission route (bare call, value
+          // position, nested dependency) funnels through here. Targets without
+          // a static return type are structurally untouched — JavaScript (no
+          // lowering at all) keeps the bare `a(u)` shape the ruling protects,
+          // interval-js uses that same untyped arrow form, and a future
+          // dynamically-typed definition lowering (a Python `def` — the only
+          // user-function lowering Python could gain; it declines with "Unknown
+          // operator" today) would have no return type to contradict.
+          if (
+            lowering.staticReturnType === true &&
+            BaseCompiler.isContradictedScalarFunctionBody(bodyExpr)
+          )
+            throw new Error(
+              `${h}: the declaration of '${h}' says it returns a scalar ` +
+                `('${bodyExpr.type.toString()}'), but its body constructs a ` +
+                `collection. The declaration is contradicted by the body, so ` +
+                `the emitted definition would declare a scalar return type ` +
+                `over a collection return value. Fix the declaration (e.g. ` +
+                `'-> list<number>') or evaluate instead. Fail closed (D6).`
+            );
+          registry.defs.set(name, def);
           return name;
         }
         // Each emitted definition body gets its OWN nested harvest scope in

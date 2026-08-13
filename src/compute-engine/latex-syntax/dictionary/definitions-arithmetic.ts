@@ -31,7 +31,10 @@ import {
 } from '../types.js';
 import { latexTemplate } from '../serializer-style.js';
 import { PIPE_TOPIC_MARKER } from './definitions-core.js';
-import { parseQuotientRingFraction } from './definitions-sets.js';
+import {
+  parseQuotientRingFraction,
+  serializeListDomain,
+} from './definitions-sets.js';
 import { joinLatex, supsub } from '../tokenizer.js';
 import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 import { roundMeasurementForDisplay } from '../../numerics/strings.js';
@@ -3194,7 +3197,12 @@ function serializeIndexingSet(
   // Serialize as `n\in N`
   if (operator(indexingSet) === 'Element') {
     const indexLatex = serializer.serialize(operand(indexingSet, 1));
-    const collectionLatex = serializer.serialize(operand(indexingSet, 2));
+    const collection = operand(indexingSet, 2);
+    // A two-element list domain has no bracket spelling here: `n\in[1, 2]`
+    // reads back as an interval (see `serializeListDomain()`).
+    const collectionLatex =
+      serializeListDomain(serializer, collection) ??
+      serializer.serialize(collection);
     return { sub: `${indexLatex}\\in ${collectionLatex}` };
   }
 

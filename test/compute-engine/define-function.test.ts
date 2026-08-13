@@ -282,6 +282,101 @@ describe('DEFINE FUNCTION — tri-state dispatch', () => {
   });
 });
 
+// ─── A fully-known value always decides (USER RULING 2026-08-12) ────────────
+
+describe('DEFINE FUNCTION — a fully-known value never keeps dispatch inert', () => {
+  beforeEach(() => {
+    // No clause carries a VALUE component here: before the ruling,
+    // `admissionOf` short-circuited on `hasValueComponent` and `0.3` against
+    // `integer` came back undecidable — the more-specific `integer` clause
+    // blocked and `a(0.3)` stayed inert even though the argument is fully
+    // known. The membership oracle refutes it exactly.
+    clause('a', ['Function', 1, p('t', 'integer')]);
+    clause('a', ['Function', 2, p('t', 'real')]);
+  });
+
+  it('a non-integer literal selects the `real` clause', () => {
+    expect(ce.box(['a', 0.3]).evaluate().toString()).toBe('2');
+    expect(ce.box(['a', 1.5]).evaluate().toString()).toBe('2');
+  });
+
+  it('an integer literal still selects the `integer` clause', () => {
+    expect(ce.box(['a', 2]).evaluate().toString()).toBe('1');
+    expect(ce.box(['a', -7]).evaluate().toString()).toBe('1');
+  });
+
+  it('a value reached through a symbol decides the same way', () => {
+    ce.assign('v', 0.3);
+    expect(ce.box(['a', 'v']).evaluate().toString()).toBe('2');
+  });
+
+  it('a symbolic operand is still undecidable (the blocking rule holds)', () => {
+    // The refutation is a property of the VALUE, not of the type: a symbol
+    // merely DECLARED `real` cannot refute the `0` clause, so the
+    // more-specific clause still blocks.
+    clause('d', ['Function', 10, p('a', '0')]);
+    clause('d', ['Function', 20, p('t', 'real')]);
+    ce.declare('q', 'real');
+    expect(ce.box(['d', 'q']).evaluate().toString()).toBe('d(q)');
+    // …while the concrete values on either side of the value clause decide.
+    expect(ce.box(['d', 0]).evaluate().toString()).toBe('10');
+    expect(ce.box(['d', 0.3]).evaluate().toString()).toBe('20');
+  });
+
+  it('value-type and disjoint clause rows are unchanged', () => {
+    clause('e', ['Function', 10, p('a', '0')]);
+    clause('e', ['Function', 20, p('t', 'real')]);
+    clause('e', ['Function', 30, p('s', 'string')]);
+    expect(ce.box(['e', 0]).evaluate().toString()).toBe('10');
+    expect(ce.box(['e', 2]).evaluate().toString()).toBe('20');
+    expect(ce.box(['e', 0.3]).evaluate().toString()).toBe('20');
+    expect(ce.box(['e', { str: 'hi' }]).evaluate().toString()).toBe('30');
+  });
+});
+
+// ─── Cyclic structural aliases in a clause parameter ────────────────────────
+
+describe('DEFINE FUNCTION — a cyclic alias parameter terminates', () => {
+  it('a NON-PROGRESSING alias cycle decides instead of overflowing', () => {
+    // `type alias cyc = cyc | 0` reaches itself through a bare union arm, so
+    // unfolding it makes no progress. Routing every fully-known argument
+    // through the membership oracle put that shape on the dispatch path:
+    // `accepts` recursed forever and threw `RangeError: Maximum call stack
+    // size exceeded` for EVERY argument, `0` included. Membership is the
+    // least fixed point, so `cyc`'s members are exactly `0`.
+    ce.declareType('cyc', 'cyc | 0', { alias: true });
+    clause('g', ['Function', 1, p('c', 'cyc')]);
+    clause('g', ['Function', 2, p('t', 'number')]);
+    expect(ce.box(['g', 0]).evaluate().toString()).toBe('1');
+    expect(ce.box(['g', 5]).evaluate().toString()).toBe('2');
+    expect(ce.box(['g', 0.3]).evaluate().toString()).toBe('2');
+  });
+
+  it('a PROGRESSING recursive value still admits', () => {
+    // `type alias nz = 0 | list<nz>` reaches itself through a CONSTRUCTOR, so
+    // it legitimately unfolds once per nesting level, each time against a
+    // strictly SMALLER value. The guard is keyed on the alias/value PAIR
+    // precisely so this keeps working: keyed on the alias alone it cuts at
+    // the first element and reports a non-member — `nz` then loses
+    // `List(0, 0)` to the `list<number>` clause (verified by trying it).
+    //
+    // The value component (`0`) is load-bearing in this witness. With a
+    // purely structural recursive alias (`number | list<…>`) the static
+    // `matches` check admits first and the value oracle never runs at all.
+    ce.declareType('nz', '0 | list<nz>', { alias: true });
+    clause('k', ['Function', 1, p('n', 'nz')]);
+    clause('k', ['Function', 2, p('t', 'number | list<number>')]);
+    expect(ce.box(['k', 0]).evaluate().toString()).toBe('1');
+    expect(ce.box(['k', ['List', 0, 0]]).evaluate().toString()).toBe('1');
+    expect(
+      ce.box(['k', ['List', 0, ['List', 0]]]).evaluate().toString()
+    ).toBe('1');
+    // …and a non-member still falls through to the wider clause.
+    expect(ce.box(['k', 1]).evaluate().toString()).toBe('2');
+    expect(ce.box(['k', ['List', 1, 2]]).evaluate().toString()).toBe('2');
+  });
+});
+
 // ─── Effects (D5) ───────────────────────────────────────────────────────────
 
 describe('DEFINE FUNCTION — symbol-level effect row', () => {

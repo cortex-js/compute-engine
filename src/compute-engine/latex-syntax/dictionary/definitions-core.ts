@@ -542,13 +542,21 @@ function parseBareOperatorElement(
 
 /**
  * Parse a sequence of expressions separated with `sep`
+ *
+ * `out.trailingEmpty` reports whether the LAST element came from an EMPTY
+ * token segment (nothing between the final `sep` and the terminator) rather
+ * than from a parsed expression. Both push the symbol `Nothing`, so the
+ * caller cannot tell them apart from the result alone — and the `;` parselet
+ * must, since an empty trailing segment is a block marker to drop while an
+ * authored `\mathrm{Nothing}` is a statement to keep.
  */
 function parseSequence(
   parser: Parser,
   terminator: Readonly<Terminator> | undefined,
   lhs: MathJsonExpression | null,
   prec: number,
-  sep: string
+  sep: string,
+  out?: { trailingEmpty: boolean }
 ): MathJsonExpression[] | null {
   if (terminator && terminator.minPrec >= prec) return null;
 
@@ -576,7 +584,10 @@ function parseSequence(
     parser.skipVisualSpace();
 
     if (parser.atTerminator(terminator)) {
+      // An empty segment at the very end of the sequence. `done` is still
+      // `true`, so this is necessarily the last element.
       result.push('Nothing');
+      if (out) out.trailingEmpty = true;
     } else {
       const bareOp = parseBareOperatorElement(parser, terminator, sep);
       if (bareOp !== null) {
@@ -1143,6 +1154,101 @@ function parsePipelinePrefix(
   const rhs = parser.parseExpression({ minPrec: 21 }) ?? 'Nothing';
   const param = '_';
   return ['Function', buildPipe(rhs, param), param] as MathJsonExpression;
+}
+
+/**
+ * The explicit function-call spelling of a `Block` — the all-relation
+ * statement list's spelling (see the `Block` serializer).
+ */
+const BLOCK_CALL_PREFIX = '\\operatorname{Block}(';
+
+/**
+ * True when a serialized `Block` is ENTIRELY a `cases` environment (the
+ * no-`Assign` multi-statement spelling) or ENTIRELY a
+ * `\operatorname{Block}(…)` call (the all-relation spelling), and therefore
+ * self-delimiting: neither `\begin{…}…\end{…}` nor a closed argument list can
+ * leak into what follows, so it needs no fence.
+ *
+ * The test must match the WHOLE string, not just its start: a `Block` whose
+ * only emitted statement is itself a `cases`-spelled `Block` emits
+ * `\begin{cases}…\end{cases};` (the single-statement trailing-`;` marker),
+ * and `Block(Block(a, b), q≔2)` emits `\begin{cases}…\end{cases}; q≔2`.
+ * Both START with `\begin{cases}` yet trail unfenced syntax that a `for`
+ * clause or an argument-separating comma would swallow. For the call
+ * spelling the same hazard is spelled with parentheses — `Block(Block(x=1,
+ * y=2), q≔f(2))` emits `\operatorname{Block}(x=1, y=2); q≔f(2)`, which both
+ * starts with the prefix and ends with `)` — so the paren opened by the
+ * prefix must be the one closed by the LAST character.
+ */
+export function isSelfDelimitingBlockLatex(s: string): boolean {
+  // The `cases` test must verify the string is ONE environment, not merely
+  // that it starts and ends like one: a `; `-statement list whose FIRST
+  // statement is a cases-spelled block and whose LAST statement's value is
+  // another (`\begin{cases}…\end{cases}; q\coloneq\begin{cases}…\end{cases}`)
+  // passes a prefix/suffix test while its `;` can swallow what follows —
+  // the exact value-changing round trip this predicate exists to prevent.
+  // Walk the environment nesting: self-delimiting iff the `\end{cases}`
+  // that closes the OPENING `\begin{cases}` sits at the end of the string.
+  //
+  // The walk counts raw substrings, so a STRING literal whose text contains
+  // `\begin{cases}`/`\end{cases}` (serialized unescaped inside `\text{…}`)
+  // can desync the counter — but only ever toward a DEEPER depth or an
+  // earlier non-final close, both of which answer false. A false here means
+  // an unnecessary fence, which is lossless (`\left(…\right)` re-parses as
+  // `Delimiter(Block)` and canonicalizes away); the walk can never SKIP a
+  // needed fence, because the genuine closing token of a lone environment
+  // is always the literal tail of the constructed string.
+  const CASES_OPEN = '\\begin{cases}';
+  const CASES_CLOSE = '\\end{cases}';
+  if (s.startsWith(CASES_OPEN)) {
+    let depth = 1;
+    let i = CASES_OPEN.length;
+    while (i < s.length) {
+      if (s.startsWith(CASES_OPEN, i)) {
+        depth += 1;
+        i += CASES_OPEN.length;
+      } else if (s.startsWith(CASES_CLOSE, i)) {
+        depth -= 1;
+        i += CASES_CLOSE.length;
+        if (depth === 0) return i === s.length;
+      } else i += 1;
+    }
+    return false;
+  }
+  if (!s.startsWith(BLOCK_CALL_PREFIX)) return false;
+  let depth = 0;
+  for (let i = BLOCK_CALL_PREFIX.length - 1; i < s.length; i++) {
+    if (s[i] === '(') depth += 1;
+    else if (s[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return i === s.length - 1;
+    }
+  }
+  return false;
+}
+
+/**
+ * Serialize an operand, fencing it with `\left(…\right)` when it is a
+ * `Block` whose spelling needs it: a bare `; `-statement list binds looser
+ * than any surrounding syntax (a `do` clause, a `for` clause, an
+ * argument-separating comma), so an unfenced block swallows what follows —
+ * a value-changing round trip (Tycho item 172). A block that serialized as
+ * a `cases` environment is SELF-delimiting and takes no fence (see
+ * {@link isSelfDelimitingBlockLatex}). The test is on the emitted string,
+ * so it cannot drift from the `Block` serializer's choice of spelling.
+ * (`Serializer.wrapArguments()` applies the same rule to a `Block`
+ * argument.)
+ */
+function fenceBlockBody(
+  serializer: Serializer,
+  body: MathJsonExpression | null
+): string {
+  if (body === null) return '';
+  const s = serializer.serialize(body);
+  if (operator(body) !== 'Block') return s;
+  return isSelfDelimitingBlockLatex(s)
+    ? s
+    : joinLatex(['\\left(', s, '\\right)']);
 }
 
 export const DEFINITIONS_CORE: LatexDictionary = [
@@ -2155,11 +2261,39 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       lhs: MathJsonExpression,
       terminator: Readonly<Terminator>
     ) => {
-      const seq = parseSequence(parser, terminator, lhs, 19, ';');
+      const spelling = { trailingEmpty: false };
+      const seq = parseSequence(parser, terminator, lhs, 19, ';', spelling);
       if (seq === null) return null;
+
+      // A TRAILING `;` (`(s≔2;)`) closes the statement list: the empty segment
+      // it leaves behind is a block MARKER, not a statement. Keeping it would
+      // be value-changing — a block's value is its LAST statement's value, so
+      // `(s≔2;)` would answer `Nothing` instead of `2`. Only the trailing
+      // empty segment is dropped; INTERIOR empties (`(a;;b)`) are left alone.
+      // The marker is recognized from the SPELLING (an empty token segment),
+      // never from the parsed value being the symbol `Nothing`: an AUTHORED
+      // `(a;\mathrm{Nothing})` is a two-statement block whose value is
+      // `Nothing`, and must survive.
+      let trailingMarker = false;
+      if (seq.length > 1 && spelling.trailingEmpty) {
+        seq.pop();
+        trailingMarker = true;
+      }
 
       // If any element is an Assign, produce a Block
       if (seq.some((e) => operator(e) === 'Assign'))
+        return buildBlockFromSequence(seq);
+
+      // A lone statement followed by the trailing-`;` marker is the spelling
+      // of a SINGLE-STATEMENT block (`(x+1;)`) — the dual of the `Block`
+      // serializer, which emits a trailing `;` when it emits exactly one
+      // statement. Without this, such a block would re-parse as a 1-tuple.
+      // A trailing `;` after SEVERAL `;`-separated elements stays a sequence:
+      // `(1;2;)` is still the tuple `(1, 2)`. Its RAW parse did change — it
+      // used to be `Delimiter(Sequence(1, 2, Nothing))`, carrying a vestigial
+      // trailing `Nothing` that is now dropped — but the two are canonically
+      // equivalent, so the value is unchanged.
+      if (trailingMarker && seq.length === 1)
         return buildBlockFromSequence(seq);
 
       return ['Delimiter', ['Sequence', ...seq], "';'"] as MathJsonExpression;
@@ -2176,9 +2310,49 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const args = operands(expr);
       if (!args || args.length === 0) return '';
       // Skip Declare statements (implicit in LaTeX — the := implies declaration)
-      const parts = args
-        .filter((a) => operator(a) !== 'Declare')
-        .map((a) => serializer.serialize(a));
+      const stmts = args.filter((a) => operator(a) !== 'Declare');
+      const parts = stmts.map((a) => serializer.serialize(a));
+      // A single EMITTED statement (a `Declare` emits nothing, so
+      // `Block(Declare s, Assign s 2)` is one) needs the trailing `;` marker
+      // to survive the round trip: without it, `s≔2` re-parses as a bare
+      // `Assign`, and the block — with its local scope — is gone.
+      if (parts.length === 1) return `${parts[0]};`;
+      // Several statements, none of them an `Assign`: the `;`-separated list
+      // is NOT faithful — the `;` parser builds a `Block` only when one of
+      // the elements is an `Assign`, so `s+1; s+2` re-parses as
+      // `Tuple(s+1, s+2)` and the value changes from the last statement to a
+      // tuple. Spell it as a ONE-COLUMN `cases` environment instead: nothing
+      // else emits that spelling (`Which` always serializes two columns), and
+      // its only previous reading was a degenerate `Which` whose rows after
+      // the first were dead branches (2026-08-12 ruling; see
+      // `parseCasesEnvironment`).
+      if (!stmts.some((a) => operator(a) === 'Assign')) {
+        // ...unless EVERY statement is an equation or inequality. That shape
+        // collides with the system-of-equations reading: branch 1 of
+        // `parseCasesEnvironment` (the load-bearing `Solve` convention) runs
+        // FIRST and captures a single-column environment whose every row is a
+        // relation, so `Block(x=1, y=2)` would read back as `List(x=1, y=2)`.
+        // The Solve convention outranks, so the block diverts to the explicit
+        // function-call spelling instead (2026-08-12 ruling). The predicate is
+        // the exact dual of that branch's row test (and of `serializeList`'s
+        // system test), so ONLY the shapes that would be mis-read divert: a
+        // mixed relation/non-relation list falls through the system branch to
+        // the `Block` branch and round-trips faithfully as `cases`.
+        if (
+          stmts.every((a) => {
+            const op = operator(a);
+            return isEquationOperator(op) || isInequalityOperator(op);
+          })
+        )
+          return joinLatex([BLOCK_CALL_PREFIX, parts.join(', '), ')']);
+        return joinLatex([
+          '\\begin{cases}',
+          parts.join('\\\\'),
+          '\\end{cases}',
+        ]);
+      }
+      // With an `Assign`, the `;`-separated list already re-parses as a
+      // `Block`: left byte-identical.
       return parts.join('; ');
     },
   },
@@ -2231,10 +2405,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
             // (and out of the block's scope). Fence it so `do` binds to the
             // whole block: `(…)` re-parses as `Delimiter(Block(…))`, which
             // canonicalizes back to the same `Block` — the same mechanism as
-            // the comprehension body fence (Tycho item 172).
-            operator(body) === 'Block'
-              ? joinLatex(['\\left(', serializer.serialize(body), '\\right)'])
-              : serializer.serialize(body),
+            // the comprehension body fence (Tycho item 172). A block that
+            // serialized as a `cases` environment is self-delimiting and
+            // takes no fence (test on the emitted string, so it cannot
+            // drift from the Block serializer's spelling choice).
+            fenceBlockBody(serializer, body),
           ]);
         }
       }
@@ -2246,13 +2421,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // swallows the following operands into its last statement.
       return joinLatex([
         '\\operatorname{Loop}(',
-        args
-          .map((a) =>
-            operator(a) === 'Block'
-              ? joinLatex(['\\left(', serializer.serialize(a), '\\right)'])
-              : serializer.serialize(a)
-          )
-          .join(', '),
+        args.map((a) => fenceBlockBody(serializer, a)).join(', '),
         ')',
       ]);
     },
@@ -2288,10 +2457,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // changes. Fence the block so the `for` binds to the whole body:
       // `(…)` re-parses as `Delimiter(Block(…))`, which canonicalizes back to
       // the same `Block` (Tycho item 172).
-      const bodyLatex =
-        operator(body) === 'Block'
-          ? joinLatex(['\\left(', serializer.serialize(body), '\\right)'])
-          : serializer.serialize(body);
+      const bodyLatex = fenceBlockBody(serializer, body);
       const comprehension = joinLatex([
         bodyLatex,
         ' \\operatorname{for} ',
@@ -4592,7 +4758,26 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
   }
 
   //
-  // 2/ It's a "Which" expression
+  // 2/ Is it a `Block` (a statement list)?
+  //
+  // Two or more rows, none of them with a condition column. Read as a
+  // `Which`, every row's condition would be `True`, so all rows after the
+  // first would be dead branches (`Which` takes the first true condition) —
+  // a degenerate reading with no use. It is repurposed (2026-08-12 ruling) as
+  // the round-trip spelling of a multi-statement `Block` with no `Assign`,
+  // which has no faithful `;`-list spelling (`s+1; s+2` re-parses as a
+  // `Tuple`). See the `Block` serializer.
+  //
+  // Not repurposed: a SINGLE single-column row keeps its `Which(True, e)`
+  // reading (value-equivalent, and a plausible authored spelling), and any
+  // environment with a `&` in any row stays a `Which` — including the mixed
+  // pattern where a bare "otherwise" row sits among two-column rows.
+  //
+  if (rows.length >= 2 && rows.every((row) => row.length === 1))
+    return ['Block', ...rows.map((row) => row[0])];
+
+  //
+  // 3/ It's a "Which" expression
   //
   // Each row must have 1 or 2 elements:
   // - 1 element: the default value

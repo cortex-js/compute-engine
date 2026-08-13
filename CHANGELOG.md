@@ -146,6 +146,85 @@
   collection heads, undeclared heads, and wide-typed heads (`x(x+1)`)
   are unchanged.
 
+- **A function declaration contradicted by its own body no longer
+  compiles to wrong results — the compiler declines and the interpreter
+  answers instead.** With `a` declared `(number) -> number` but assigned a
+  list-valued body (`a := t ↦ [cos t, sin t]`), compiled code trusted the
+  declaration everywhere the result was consumed as a scalar:
+  `Σᵢ a(h(i))` and `a(u) + 1` returned strings (JS `+` concatenating
+  arrays), `2·a(u)`/`sin(a(u))` returned `NaN`, comparisons returned a
+  wrong scalar boolean, `If` took the wrong branch — all behind
+  `success: true` — and the GPU targets emitted shader source that does
+  not compile (a `vec2` returned from a `float` function), even for a
+  bare `a(u)`. Now, when the body provably constructs a collection while
+  the declared result type says scalar, compilation fails closed with a
+  message naming both sides of the contradiction: in big-op bodies, in
+  every scalar-consuming position, at GPU function emission (a new
+  `staticReturnType` lowering capability marks the targets whose emitted
+  definitions bake in the declared type), and through the separate
+  multi-clause emission route (any lying clause declines — the consuming
+  position is compiled once for all branches, so a mixed clause set is
+  poisoned by its list-valued clause). Deliberately unchanged: a bare
+  `a(u)` on JavaScript still compiles (it returns the correct array
+  today); open declarations (`-> unknown`) keep compiling element-wise;
+  truthful declarations everywhere; and the ruled item-121 exemptions
+  (`boolean` and `broadcastable<T>` big-op bodies) are untouched.
+
+- **A multi-statement `Block` with no assignment now round-trips through
+  LaTeX, spelled as a one-column `cases` environment.**
+  `Block(s+1, s+2)` serialized as `s+1; s+2`, which reparses as the tuple
+  `(s+1, s+2)` — the block's value (its last statement) became a 2-tuple.
+  It now serializes as `\begin{cases}s+1\\s+2\end{cases}` (core amsmath,
+  renders everywhere), and a `cases` environment whose two-or-more rows
+  are ALL single-column parses as a `Block`. The only reading this
+  repurposes is the degenerate dead-branch piecewise (every bare row got
+  condition `True`, making rows 2+ unreachable). Real piecewise
+  (`Which`) always serializes two columns and is byte-identical; mixed
+  rows (a bare "otherwise" row alongside `&` rows) and the
+  system-of-equations reading are unchanged.
+
+- **A two-element list no longer turns into an interval through LaTeX —
+  in any set-operator position.** `Element(i, List(1,2))` — "i ranges
+  over the two-point list" — serialized as `i\in\lbrack1, 2\rbrack`,
+  which reparses as `Element(i, Interval(1,2))` ("i is any real between
+  1 and 2"): a wrong value class that only bites at length two. The same
+  conversion fired unconditionally on both operands of `Union`,
+  `Intersection`, `SetMinus`, and the `Subset`/`Superset` families,
+  including nested (`Element(x, Union(List(1,2), Y))`). All of these now
+  spell exactly the 2-element-list operand as `\operatorname{List}(1, 2)`
+  (membership, both sides of every set operator, and the big-op
+  subscript — a second independent `\in` emitter), and the parser only
+  applies the interval reading to operands actually written with
+  brackets — an explicitly named `List` head is never overridden. The
+  left-operand gate is a new internal parser facility
+  (`operandStartIndex`, following the `operandDiagnosticCheckpoint`
+  precedent). Authored bracket spellings keep their interval meaning
+  everywhere — including `\mathopen\lbrack a,b\mathclose\rbrack`, whose
+  interval reading is now pinned (`\mathopen` was missing from the
+  delimiter-prefix list). Other list lengths are unchanged.
+
+- **A single-statement `Block` now round-trips through LaTeX with its
+  scope intact.** `Block(s ≔ 2)` serialized as bare `s\coloneq2` (or
+  fenced, `\left(s\coloneq2\right)`), which reparses as a plain assignment
+  without the scope wrapper — the block-local `s` leaked into the
+  enclosing scope after a round trip. A single-statement block now
+  serializes with a trailing semicolon, `s\coloneq2;` / `(s\coloneq2;)`,
+  which reparses as the identical `Block`; the parser also drops the
+  vestigial `Nothing` statement a trailing `;` used to produce (the
+  block's value is `2` again, not `Nothing`). Multi-statement blocks are
+  unchanged. LaTeX braces were considered and rejected: `\{…\}` is set
+  notation.
+
+- **A `Block` operand of ANY function call now round-trips through LaTeX**
+  (item-172 mechanism, generic path). `Repeat(d ≔ 2; d+1, 3)`-style calls —
+  any operator serialized through the default `\mathrm{Op}(…)` form with a
+  `Block` argument — emitted the block as a bare `;`-statement list, which
+  binds looser than the argument-separating comma: on reparse the block
+  swallowed the following arguments and the value changed. `Block`
+  operands are now fenced (`\left(…\right)`) at the single join point
+  behind both the generic fallback and the dedicated `\operatorname`
+  entries. Zero snapshot churn across the serialization suites.
+
 - **A `Loop` with a `Block` body now round-trips through LaTeX** (item-172
   sibling). Both `Loop` spellings (`\text{for } i \text{ from } … \text{do}`
   and the `\operatorname{Loop}(…)` fallback) serialized a `Block` body as a

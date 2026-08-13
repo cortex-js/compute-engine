@@ -1047,6 +1047,15 @@ export interface Parser {
    */
   readonly operandDiagnosticCheckpoint: number;
 
+  /**
+   * @internal
+   * The token index at which the left operand of the innermost in-progress
+   * `parseExpression` began. Lets an infix parselet inspect how its
+   * already-parsed left operand was SPELLED (the set operators use it to tell
+   * a bracket pair from an explicit `\operatorname{List}(…)`).
+   */
+  readonly operandStartIndex: number;
+
   /** True if currently parsing inside a quantifier body (ForAll, Exists, etc.) */
   readonly inQuantifierScope: boolean;
 

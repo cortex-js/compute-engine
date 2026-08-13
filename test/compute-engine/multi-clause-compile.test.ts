@@ -117,6 +117,20 @@ describe('MULTI-CLAUSE COMPILE — guard chain (spec §8)', () => {
     expect(ce.box(['g', 7]).evaluate().re).toBe(0);
   });
 
+  it('integer/real clauses agree between the guard chain and the interpreter', () => {
+    // The §8/§9 agreement obligation on a clause set with NO value component:
+    // the guard chain has always selected `real` at 0.3, and since the
+    // 2026-08-12 ruling the interpreter decides it too (a fully-known value
+    // never keeps dispatch inert).
+    clause('a', ['Function', 1, p('t', 'integer')]);
+    clause('a', ['Function', 2, p('t', 'real')]);
+    const r = compile(ce.box(['a', 'y']));
+    expect(r?.run?.({ y: 0.3 })).toBe(2);
+    expect(r?.run?.({ y: 2 })).toBe(1);
+    expect(ce.box(['a', 0.3]).evaluate().re).toBe(2);
+    expect(ce.box(['a', 2]).evaluate().re).toBe(1);
+  });
+
   it('a compiled miss throws no-matching-clause (D7)', () => {
     clause('f', ['Function', 1, p('a', '0')]);
     clause('f', ['Function', 2, p('b', '1')]);

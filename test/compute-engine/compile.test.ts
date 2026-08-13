@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import type { MathJsonExpression } from '../../src/math-json/types';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
@@ -3331,5 +3332,763 @@ describe('COMPILE built-in operator name as a callback', () => {
     ]);
     const r = compile(expr, { fallback: false, functions: { Sin: 'mySin' } })!;
     expect(r.code).toContain('const _fn_Sin = (_tv1) => mySin(_tv1);');
+  });
+});
+
+// A block-local introduced by bare ASSIGNMENT rather than by `Declare`.
+// `canonicalBlock` hoists such a name into the block's OWN scope (that is why
+// `{ w ⩴ 2t; w + 1 }` answers `2t+1` in the interpreter and leaks no `w`), but
+// no `Declare` statement records it — so the compiler's locals harvest missed
+// it entirely and the two halves of the local disagreed: the write emitted a
+// bare `w = …` while every read emitted the free-variable spelling `_.w`,
+// which nothing ever wrote. A canonical `Function`-literal body IS such a
+// block, so every emitted user-function definition with a multi-statement body
+// ran to `NaN` behind `success: true`.
+describe('block-locals bound by bare assignment (no `Declare`)', () => {
+  /** An engine with `a` assigned the one-parameter literal `t ↦ <body>`. */
+  const engineWithA = (body: MathJsonExpression): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('a', { signature: '(number) -> number' });
+    e.assign('a', e.box(['Function', body, 't']));
+    e.declare('u', 'number');
+    return e;
+  };
+
+  const WITNESS: MathJsonExpression = [
+    'Block',
+    ['Assign', 'w', ['Multiply', 2, 't']],
+    ['Add', 'w', 1],
+  ];
+  const TWO_ASSIGNS: MathJsonExpression = [
+    'Block',
+    ['Assign', 'w', ['Multiply', 2, 't']],
+    ['Assign', 'v', ['Add', 'w', 1]],
+    ['Multiply', 'v', 'v'],
+  ];
+  const LOCAL_IN_EXPRESSION: MathJsonExpression = [
+    'Block',
+    ['Assign', 'w', ['Multiply', 2, 't']],
+    ['Add', ['Multiply', 'w', 'w'], 't'],
+  ];
+  const DECLARE_THEN_ASSIGN: MathJsonExpression = [
+    'Block',
+    ['Declare', 'w', 'number'],
+    ['Assign', 'w', ['Multiply', 2, 't']],
+    ['Add', 'w', 1],
+  ];
+
+  /**
+   * The invariant, per shape: a JavaScript compile of `a(u) + 1` either
+   * DECLINES, or answers exactly what the interpreter answers. It must never
+   * report `success: true` and then run to `NaN`/`null`.
+   */
+  const expectJsAgreesWithInterpreter = (
+    body: MathJsonExpression,
+    expected: number
+  ): void => {
+    const e = engineWithA(body);
+    expect(e.box(['Add', ['a', 3], 1]).evaluate().re).toBe(expected);
+    const r = compile(e.box(['Add', ['a', 'u'], 1]));
+    if (!r?.success) return; // a decline is acceptable; a wrong value is not
+    expect(r.run!({ u: 3 })).toBe(expected);
+  };
+
+  it('JS: the witness body runs to the interpreter value (was NaN)', () => {
+    expectJsAgreesWithInterpreter(WITNESS, 8);
+  });
+
+  it('JS: a body with TWO assigned locals runs correctly', () => {
+    expectJsAgreesWithInterpreter(TWO_ASSIGNS, 50);
+  });
+
+  it('JS: a local consumed by a larger last expression runs correctly', () => {
+    expectJsAgreesWithInterpreter(LOCAL_IN_EXPRESSION, 40);
+  });
+
+  it('JS: the `Declare`+`Assign` body is unchanged', () => {
+    expectJsAgreesWithInterpreter(DECLARE_THEN_ASSIGN, 8);
+  });
+
+  it('JS: a top-level (non-lambda) block declares its assigned local', () => {
+    const e = new ComputeEngine();
+    e.declare('t', 'number');
+    const expr = e.box(['Block', ['Assign', 'w', ['Multiply', 2, 't']], ['Add', 'w', 1]]);
+    const r = compile(expr);
+    expect(r?.success).toBe(true);
+    expect(r!.code).toContain('let w');
+    // Symmetric: the read is the same bare name the write binds.
+    expect(r!.code).not.toContain('_.w');
+    expect(r!.run!({ t: 4 })).toBe(9);
+    e.assign('t', 4);
+    expect(expr.evaluate().re).toBe(9);
+  });
+
+  it('JS: a loop body binding a scratch local runs correctly', () => {
+    const e = new ComputeEngine();
+    const expr = e.box([
+      'Block',
+      ['Declare', 's', 'number'],
+      ['Assign', 's', 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['Assign', 'q', ['Multiply', 2, 'i']],
+          ['Assign', 's', ['Add', 's', 'q']],
+        ],
+        ['Element', 'i', ['Range', 1, 3]],
+      ],
+      's',
+    ]);
+    expect(expr.evaluate().re).toBe(12);
+    const r = compile(expr);
+    expect(r?.success).toBe(true);
+    expect(r!.code).not.toContain('_.q');
+    expect(r!.run!({})).toBe(12);
+  });
+
+  it('JS: a multi-statement multi-clause body runs correctly', () => {
+    const e = new ComputeEngine();
+    const p = (n: string, t: string): MathJsonExpression => [
+      'Typed',
+      n,
+      { str: t },
+    ];
+    e.box(['DefineFunction', 'g', ['Function', 0, p('z', '0')]]).evaluate();
+    e.box([
+      'DefineFunction',
+      'g',
+      [
+        'Function',
+        ['Block', ['Assign', 'w', ['Multiply', 2, 'n']], ['Add', 'w', 1]],
+        p('n', 'integer'),
+      ],
+    ]).evaluate();
+    expect(e.box(['g', 3]).evaluate().re).toBe(7);
+    const r = compile(e.box(['g', 'y']));
+    expect(r?.success).toBe(true);
+    expect(r!.run!({ y: 3 })).toBe(7);
+    expect(r!.run!({ y: 0 })).toBe(0);
+  });
+
+  it('GLSL: the emitted definition DECLARES the assigned local', () => {
+    const glsl = new GLSLTarget();
+    const e = engineWithA(WITNESS);
+    const r = glsl.compile(e.box(['Add', ['a', 'u'], 1]));
+    expect(r.success).toBe(true);
+    // Without a declaration this is not GLSL a driver would accept.
+    expect(r.preamble).toContain('float w;');
+    expect(r.preamble).toContain('w = 2.0 * t;');
+    expect(r.preamble).toContain('return w + 1.0;');
+  });
+
+  it('GLSL: the `Declare`+`Assign` body emits the same definition', () => {
+    const glsl = new GLSLTarget();
+    const implicit = glsl.compile(
+      engineWithA(WITNESS).box(['a', 'u'])
+    ).preamble;
+    const declared = glsl.compile(
+      engineWithA(DECLARE_THEN_ASSIGN).box(['a', 'u'])
+    ).preamble;
+    expect(implicit).toBe(declared);
+  });
+
+  it('Python: user-defined functions decline outright (unchanged)', () => {
+    const py = new PythonTarget();
+    for (const body of [WITNESS, TWO_ASSIGNS, DECLARE_THEN_ASSIGN]) {
+      const e = engineWithA(body);
+      expect(() => py.compile(e.box(['Add', ['a', 'u'], 1]))).toThrow(
+        /Unknown operator `a`/
+      );
+    }
+  });
+
+  // Single-statement bodies (including the `Block(Typed(…))` ascription shape)
+  // have no assignment to hoist, so they must stay BYTE-IDENTICAL: the block
+  // is still unwrapped, with no synthesized declaration.
+  it('a single-statement body is unwrapped, unchanged', () => {
+    const glsl = new GLSLTarget();
+    for (const body of [
+      ['Block', ['Add', ['Multiply', 2, 't'], 1]] as MathJsonExpression,
+      [
+        'Block',
+        ['Typed', ['Add', ['Multiply', 2, 't'], 1], { str: 'number' }],
+      ] as MathJsonExpression,
+    ]) {
+      const e = engineWithA(body);
+      // No synthesized declaration, no IIFE — the statement is still unwrapped.
+      expect(glsl.compile(e.box(['a', 'u'])).preamble!.trim()).toBe(
+        'float _fn_a(float t) {\n  return 2.0 * t + 1.0;\n}'
+      );
+      const js = compile(engineWithA(body).box(['Add', ['a', 'u'], 1]));
+      expect(js!.run!({ u: 3 })).toBe(8);
+    }
+  });
+});
+
+// A block-local bound by bare assignment inside a LOOP BODY, on a shader
+// target. `withImplicitLocalDeclares` runs from two places — `compileBlock`
+// and `compileLoopBody` — and only the first pushes the complex-ness /
+// vector-width frames that give a local its shader type. That does NOT leave a
+// GPU loop-body local untyped, because the GPU targets never reach
+// `compileLoopBody`: their own `Loop` handler (`GPU_FUNCTIONS.Loop`) routes the
+// body through `compileStatementList`, which hands a `Block` body straight to
+// `compileBlock` — the same statement-list compiler, inference included.
+// (`compileForLoop`/`compileLoopBody` is the JavaScript-family path, and is
+// reached only when the target declares no `Loop` function.)
+//
+// These pin that routing by its OBSERVABLE consequence: a vector-valued
+// loop-body local is declared `vec2`/`vec2f` (never the `float` default paired
+// with a `vecN` assignment — source no driver accepts), an aggregate wider than
+// 4 gets the matching array type, and a local bound to disagreeing shapes fails
+// closed instead of emitting either.
+describe('GPU loop-body block-locals get the shader type inference', () => {
+  /** An engine with `a` assigned the one-parameter literal `t ↦ <body>`. */
+  const engineWithA = (body: MathJsonExpression): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('a', { signature: '(number) -> number' });
+    e.assign('a', e.box(['Function', body, 't']));
+    e.declare('u', 'number');
+    return e;
+  };
+
+  /** `s ⩴ 0; for k ∈ 1..3 { <stmts> }; s` */
+  const accumulate = (stmts: MathJsonExpression[]): MathJsonExpression => [
+    'Block',
+    ['Declare', 's', 'number'],
+    ['Assign', 's', 0],
+    [
+      'Loop',
+      ['Block', ...stmts] as MathJsonExpression,
+      ['Element', 'k', ['Range', 1, 3]],
+    ],
+    's',
+  ];
+
+  /** The local `p` is bound to a 2-tuple by bare assignment. */
+  const IMPLICIT_VEC2 = accumulate([
+    ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
+    ['Assign', 's', ['Add', 's', ['At', 'p', 1]]],
+  ]);
+  /** …and the `Declare`+`Assign` sibling of the same body. */
+  const DECLARED_VEC2 = accumulate([
+    ['Declare', 'p'],
+    ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
+    ['Assign', 's', ['Add', 's', ['At', 'p', 1]]],
+  ]);
+
+  it('GLSL: a vector-valued loop-body local is declared `vec2`', () => {
+    const glsl = new GLSLTarget();
+    const r = glsl.compile(engineWithA(IMPLICIT_VEC2).box(['a', 'u']));
+    expect(r.success).toBe(true);
+    expect(r.preamble).toContain('vec2 p;');
+    expect(r.preamble).toContain('p = vec2(t, 2.0 * t);');
+    // The `float` default would disagree with that assignment.
+    expect(r.preamble).not.toContain('float p;');
+    // …and the declaration is inside the loop, where the binding is.
+    expect(r.preamble!.indexOf('for (int k')).toBeLessThan(
+      r.preamble!.indexOf('vec2 p;')
+    );
+  });
+
+  it('WGSL: the same local is declared `vec2f`', () => {
+    const wgsl = new WGSLTarget();
+    const r = wgsl.compile(engineWithA(IMPLICIT_VEC2).box(['a', 'u']));
+    expect(r.success).toBe(true);
+    expect(r.preamble).toContain('var p: vec2f;');
+    expect(r.preamble).toContain('p = vec2f(t, 2.0 * t);');
+    expect(r.preamble).not.toContain('var p: f32;');
+  });
+
+  it('GLSL: the `Declare`+`Assign` sibling emits the same definition', () => {
+    const glsl = new GLSLTarget();
+    expect(
+      glsl.compile(engineWithA(IMPLICIT_VEC2).box(['a', 'u'])).preamble
+    ).toBe(glsl.compile(engineWithA(DECLARED_VEC2).box(['a', 'u'])).preamble);
+  });
+
+  it('GLSL: an aggregate wider than 4 gets the array type', () => {
+    const glsl = new GLSLTarget();
+    const r = glsl.compile(
+      engineWithA(
+        accumulate([
+          ['Assign', 'p', ['List', 1, 2, 3, 4, 5]],
+          ['Assign', 's', ['Add', 's', ['At', 'p', 2]]],
+        ])
+      ).box(['a', 'u'])
+    );
+    expect(r.success).toBe(true);
+    expect(r.preamble).toContain('float[5] p;');
+    expect(r.preamble).toContain('p = float[5](1.0, 2.0, 3.0, 4.0, 5.0);');
+  });
+
+  it('GPU: a loop-body local bound to disagreeing shapes fails closed', () => {
+    const body = accumulate([
+      ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
+      ['Assign', 'p', ['Multiply', 3, 't']],
+      ['Assign', 's', ['Add', 's', ['At', 'p', 1]]],
+    ]);
+    for (const target of [new GLSLTarget(), new WGSLTarget()])
+      expect(() => target.compile(engineWithA(body).box(['a', 'u']))).toThrow(
+        /disagreeing shapes/
+      );
+  });
+
+  it('JS: the same loop body agrees with the interpreter', () => {
+    // The JavaScript control for the shapes above: this IS the
+    // `compileLoopBody` path, and its locals are untyped, so the vector local
+    // needs no inference to be correct.
+    const e = engineWithA(IMPLICIT_VEC2);
+    expect(e.box(['a', 3]).evaluate().re).toBe(9);
+    const r = compile(e.box(['a', 'u']));
+    expect(r?.success).toBe(true);
+    expect(r!.run!({ u: 3 })).toBe(9);
+  });
+});
+
+// A loop-body block-local bound to a COMPLEX value, on the JavaScript path.
+// `compileLoopBody`'s `Block` branch is a statement list of its own — it does
+// NOT go through `compileBlock` — and it pushed no complex-ness frame, so
+// `isComplexValued` answered `false` for the local: the write emitted the
+// `{ re, im }` object convention while every read lowered as a real
+// (`|z|` → `Math.abs` on an object), i.e. `NaN` behind `success: true`. The
+// same body WITHOUT the loop was correct, because `compileBlock` pushes the
+// frame. An explicitly declared local behaved identically.
+describe('a COMPLEX loop-body block-local (JavaScript)', () => {
+  const engineWithT = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('t', 'number');
+    return e;
+  };
+
+  /**
+   * `s ⩴ 0; for k ∈ 1..3 { <stmts> }; s` — at TOP LEVEL rather than in a
+   * function literal, so the emitted statements are visible in `code` (a
+   * user-function definition lives in the run closure, not in `code`).
+   */
+  const accumulate = (stmts: MathJsonExpression[]): MathJsonExpression => [
+    'Block',
+    ['Declare', 's', 'number'],
+    ['Assign', 's', 0],
+    [
+      'Loop',
+      ['Block', ...stmts] as MathJsonExpression,
+      ['Element', 'k', ['Range', 1, 3]],
+    ],
+    's',
+  ];
+
+  /** `z ⩴ t + i; s ⩴ s + |z|` — three times, so `s = 3√10` at `t = 3`. */
+  const COMPLEX_STMTS: MathJsonExpression[] = [
+    ['Assign', 'z', ['Add', 't', 'ImaginaryUnit']],
+    ['Assign', 's', ['Add', 's', ['Abs', 'z']]],
+  ];
+  const IMPLICIT_COMPLEX = accumulate(COMPLEX_STMTS);
+  const DECLARED_COMPLEX = accumulate([['Declare', 'z'], ...COMPLEX_STMTS]);
+
+  const expectComplexLoopLocal = (body: MathJsonExpression): void => {
+    // The interpreter's answer: |3 + i| summed three times.
+    const interpreted = engineWithT();
+    const expr = interpreted.box(body);
+    interpreted.assign('t', 3);
+    expect(expr.evaluate().N().re).toBeCloseTo(3 * Math.sqrt(10), 12);
+
+    const r = compile(engineWithT().box(body));
+    expect(r?.success).toBe(true);
+    // The complex-aware modulus, not `Math.abs` on a `{ re, im }` object.
+    expect(r!.code).toContain('_SYS.cabs(z)');
+    expect(r!.code).not.toContain('Math.abs(z)');
+    expect(r!.run!({ t: 3 })).toBeCloseTo(3 * Math.sqrt(10), 12);
+  };
+
+  it('JS: an implicit complex loop-body local runs to 3√10 (was NaN)', () => {
+    expectComplexLoopLocal(IMPLICIT_COMPLEX);
+  });
+
+  it('JS: the `Declare`d sibling runs to 3√10 too (was NaN)', () => {
+    expectComplexLoopLocal(DECLARED_COMPLEX);
+  });
+
+  it('JS: a VECTOR loop-body local is unchanged', () => {
+    // The control for the frame that is deliberately NOT pushed on this route:
+    // a JS local is untyped, so the vector width feeds nothing here, and this
+    // shape already agreed with the interpreter.
+    const body = accumulate([
+      ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
+      ['Assign', 's', ['Add', 's', ['At', 'p', 1]]],
+    ]);
+    const interpreted = engineWithT();
+    const expr = interpreted.box(body);
+    interpreted.assign('t', 3);
+    expect(expr.evaluate().re).toBe(9);
+
+    const r = compile(engineWithT().box(body));
+    expect(r?.success).toBe(true);
+    expect(r!.code).toContain('let p; p = [_.t, 2 * _.t]');
+    expect(r!.run!({ t: 3 })).toBe(9);
+  });
+});
+
+// The sibling of the describe above, which differs from it in ONE statement:
+// it drops the `Declare(s, "number")`. That is enough to change what `s` IS.
+//
+// `canonicalBlock` makes a bare-assigned name a block-local only when the
+// enclosing scope chain does not already bind it — and the library scope
+// PRE-DECLARES `e`, `i`, `m` and `s`. So `s` here is not hoisted: the
+// interpreter writes the OUTER binding and reads it back (`3√10`), while the
+// compiler emitted a bare `s = …` write against `_.s` reads — a stray sloppy
+// global on one side, `undefined` on the other. Both routes ran to `undefined`
+// behind `success: true`.
+//
+// The fix (`BaseCompiler.assignLValue`) makes a write use the SAME spelling a
+// read of that name compiles to.
+describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => {
+  const LOOP: MathJsonExpression = [
+    'Loop',
+    [
+      'Block',
+      ['Assign', 'z', ['Add', 't', 'ImaginaryUnit']],
+      ['Assign', 's', ['Add', 's', ['Abs', 'z']]],
+    ],
+    ['Element', 'k', ['Range', 1, 3]],
+  ];
+  /** `s ⩴ 0; for k ∈ 1..3 { z ⩴ t + i; s ⩴ s + |z| }; s` — no `Declare s`. */
+  const BODY: MathJsonExpression = ['Block', ['Assign', 's', 0], LOOP, 's'];
+  const EXPECTED = 3 * Math.sqrt(10);
+
+  const engineWithA = (declared: boolean): ComputeEngine => {
+    const e = new ComputeEngine();
+    if (declared) e.declare('a', { signature: '(number) -> number' });
+    e.assign('a', e.box(['Function', BODY, 't']));
+    return e;
+  };
+
+  it('the interpreter answers 3√10 (the reference)', () => {
+    const e = new ComputeEngine();
+    e.assign('a', e.box(['Function', BODY, 't']));
+    expect(e.box(['a', 3]).evaluate().N().re).toBeCloseTo(EXPECTED, 12);
+  });
+
+  it('JS: the DECLARED user-function route runs to 3√10 (was undefined)', () => {
+    const r = compile(engineWithA(true).box(['a', 'u']));
+    expect(r?.success).toBe(true);
+    expect(r!.code).toBe('_fn_a(_.u)');
+    expect(r!.run!({ u: 3 })).toBeCloseTo(EXPECTED, 12);
+  });
+
+  it('JS: the UNDECLARED (broadcast-wrapper) route runs to 3√10 too', () => {
+    const r = compile(engineWithA(false).box(['a', 'u']));
+    expect(r?.success).toBe(true);
+    expect(r!.run!({ u: 3 })).toBeCloseTo(EXPECTED, 12);
+  });
+
+  it('JS: the same Loop at the TOP LEVEL of a block writes `_.s`', () => {
+    const e = new ComputeEngine();
+    e.declare('t', 'number');
+    const r = compile(e.box(BODY));
+    expect(r?.success).toBe(true);
+    // Both halves of the variable now agree on the vars-object spelling…
+    expect(r!.code).toContain('_.s = 0');
+    expect(r!.code).toContain('_.s = _.s + _SYS.cabs(z)');
+    expect(r!.code).toContain('return _.s');
+    // …and no bare `s = ` write survives (a sloppy-mode global).
+    expect(r!.code).not.toMatch(/(^|[^.\w])s = /);
+    expect(r!.run!({ t: 3 })).toBeCloseTo(EXPECTED, 12);
+  });
+
+  it('JS: the `Declare`d sibling still emits a BARE block local', () => {
+    // The control: with the `Declare`, `s` IS hoisted to a block-local, and
+    // its emission is unchanged by the fix — `let s`, bare reads and writes.
+    const e = new ComputeEngine();
+    e.declare('t', 'number');
+    const r = compile(
+      e.box(['Block', ['Declare', 's', 'number'], ['Assign', 's', 0], LOOP, 's'])
+    );
+    expect(r?.success).toBe(true);
+    expect(r!.code).toContain('let s;');
+    expect(r!.code).toContain('s = 0');
+    expect(r!.code).toContain('s = s + _SYS.cabs(z)');
+    expect(r!.code).toContain('return s');
+    expect(r!.code).not.toContain('_.s');
+    expect(r!.run!({ t: 3 })).toBeCloseTo(EXPECTED, 12);
+  });
+
+  it('GLSL: the shape is unchanged (a shader spells a free symbol bare)', () => {
+    // The shader targets resolve a free symbol to its own bare identifier, so
+    // reads and writes already agreed there — pinned so the JS fix stays JS's.
+    const e = new ComputeEngine();
+    e.declare('t', 'number');
+    const r = new GLSLTarget().compile(e.box(BODY));
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('s = 0.0;');
+    expect(r.code).toContain('s = s + length(z);');
+    expect(r.code).toContain('return s;');
+  });
+
+  it('a write to a symbol whose value every read BAKES fails closed', () => {
+    // The other half of the asymmetry: when the symbol has an engine value the
+    // target resolves nothing and reads fold the value, so no write can reach
+    // them. Declining hands the expression back to the interpreter (`1`)
+    // rather than compiling the stale `42 + 1`.
+    const e = new ComputeEngine();
+    e.assign('s', 42);
+    const body: MathJsonExpression = [
+      'Block',
+      ['Assign', 's', 0],
+      ['Add', 's', 1],
+    ];
+    expect(() => compile(e.box(body), { fallback: false })).toThrow(
+      /has an assigned value/
+    );
+    const r = compile(e.box(body));
+    expect(r?.success).toBe(false);
+    expect(r!.run!({})).toBe(1);
+  });
+
+  it('a write to a baked CONSTANT fails closed', () => {
+    const e = new ComputeEngine();
+    expect(() =>
+      compile(e.box(['Block', ['Assign', 'Pi', 0], ['Add', 'Pi', 1]]), {
+        fallback: false,
+      })
+    ).toThrow(/not an assignable reference/);
+  });
+});
+
+// The GPU user-function return type is synthesized with `gpuTypeOfValue` on
+// the body. For a multi-statement body that is a `Block`, and `isComplexValued`
+// answered it with the conservative "any operand is complex" recursion — so a
+// body that merely BINDS a complex local, and returns a real, was declared
+// `vec2 _fn_a(float t)` around a `return s;` (a float). That is invalid shader
+// source behind `success: true`. A block's value is its LAST statement.
+describe('GPU user-function return type comes from the body VALUE', () => {
+  const engineWithA = (body: MathJsonExpression): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('a', { signature: '(number) -> number' });
+    e.assign('a', e.box(['Function', body, 't']));
+    e.declare('u', 'number');
+    return e;
+  };
+
+  /** `s ⩴ 0; z ⩴ t + i; s ⩴ s + |z|; s` — a REAL value, a complex local. */
+  const REAL_VALUE_COMPLEX_LOCAL: MathJsonExpression = [
+    'Block',
+    ['Declare', 's', 'number'],
+    ['Assign', 's', 0],
+    ['Assign', 'z', ['Add', 't', 'ImaginaryUnit']],
+    ['Assign', 's', ['Add', 's', ['Abs', 'z']]],
+    's',
+  ];
+  /** …and the control: `z ⩴ t + i; z²` genuinely RETURNS a complex value. */
+  const COMPLEX_VALUE: MathJsonExpression = [
+    'Block',
+    ['Assign', 'z', ['Add', 't', 'ImaginaryUnit']],
+    ['Multiply', 'z', 'z'],
+  ];
+
+  it('GLSL: a real value with a complex local declares `float`', () => {
+    const r = new GLSLTarget().compile(
+      engineWithA(REAL_VALUE_COMPLEX_LOCAL).box(['a', 'u'])
+    );
+    expect(r.success).toBe(true);
+    expect(r.preamble).toContain('float _fn_a(float t)');
+    expect(r.preamble).not.toContain('vec2 _fn_a');
+    // The interior local still gets its `vec2` declaration…
+    expect(r.preamble).toContain('vec2 z;');
+    // …and the returned value is the real accumulator, matching the signature.
+    expect(r.preamble).toContain('return s;');
+  });
+
+  it('WGSL: the same body declares `-> f32`', () => {
+    const r = new WGSLTarget().compile(
+      engineWithA(REAL_VALUE_COMPLEX_LOCAL).box(['a', 'u'])
+    );
+    expect(r.success).toBe(true);
+    expect(r.preamble).toContain('fn _fn_a(t: f32) -> f32');
+    expect(r.preamble).not.toContain('-> vec2f');
+    expect(r.preamble).toContain('var z: vec2f;');
+    expect(r.preamble).toContain('return s;');
+  });
+
+  it('a body that genuinely returns a complex value still gets `vec2`', () => {
+    const glsl = new GLSLTarget().compile(
+      engineWithA(COMPLEX_VALUE).box(['a', 'u'])
+    );
+    expect(glsl.success).toBe(true);
+    expect(glsl.preamble).toContain('vec2 _fn_a(float t)');
+    const wgsl = new WGSLTarget().compile(
+      engineWithA(COMPLEX_VALUE).box(['a', 'u'])
+    );
+    expect(wgsl.success).toBe(true);
+    expect(wgsl.preamble).toContain('fn _fn_a(t: f32) -> vec2f');
+  });
+
+  it('JS: both bodies agree with the interpreter', () => {
+    for (const [body, expected] of [
+      [REAL_VALUE_COMPLEX_LOCAL, Math.sqrt(10)],
+      [COMPLEX_VALUE, 8], // (3 + i)² = 8 + 6i → `.re` is 8
+    ] as const) {
+      const e = engineWithA(body);
+      expect(e.box(['a', 3]).evaluate().N().re).toBeCloseTo(expected, 12);
+      const r = compile(e.box(['a', 'u']));
+      expect(r?.success).toBe(true);
+      const v = r!.run!({ u: 3 });
+      expect(typeof v === 'number' ? v : (v as { re: number }).re).toBeCloseTo(
+        expected,
+        12
+      );
+    }
+  });
+});
+
+// A GPU function body containing an EARLY RETURN. `Return` lowers to the bare
+// statement `return <v>`, which the shader targets can only place where a
+// statement is expected — and their signature is synthesized STATICALLY from
+// the body's own value, so every `return` in the body must also agree with it.
+// Neither held, and the mismatches went out behind `success: true`:
+//
+//  - a `Return` in a conditional arm lands inside the GLSL ternary / WGSL
+//    `select(…)` the branches lower to — `((0.0 < t) ? (return …) : …)`, which
+//    is not GLSL at all;
+//  - a `Return` that IS the block's value gets return-prefixed by the block
+//    emitter — `return return s;`;
+//  - a `Return` whose value has a different shape than the body's value emits
+//    `float _fn_a(float t) { … return vec2(t, 1.0); … }`.
+//
+// Restructuring an early return into flags and guards is a feature, not a
+// gate: these DECLINE, so the interpreter evaluates the expression. The one
+// shape that already lowered validly — an early `Return` as a plain statement
+// of the body, of the body's own shape — keeps compiling.
+describe('a GPU user-function body with an early `Return`', () => {
+  const engineWithA = (body: MathJsonExpression): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('a', { signature: '(number) -> number' });
+    e.assign('a', e.box(['Function', body, 't']));
+    e.declare('u', 'number');
+    return e;
+  };
+
+  /** `s ⩴ 0; Return(t + i); s` — a vec2 `Return` in a float-valued body. */
+  const RETURN_SHAPE_MISMATCH: MathJsonExpression = [
+    'Block',
+    ['Declare', 's', 'number'],
+    ['Assign', 's', 0],
+    ['Return', ['Add', 't', 'ImaginaryUnit']],
+    's',
+  ];
+  /** …and the frame-sensitive sibling: the returned value is a complex LOCAL. */
+  const RETURN_COMPLEX_LOCAL: MathJsonExpression = [
+    'Block',
+    ['Declare', 's', 'number'],
+    ['Assign', 's', 0],
+    ['Assign', 'z', ['Add', 't', 'ImaginaryUnit']],
+    ['Return', 'z'],
+    's',
+  ];
+  /** `s ⩴ 0; if 0 < t { Return(2t) } else { s ⩴ 1 }; s` — a BRANCH position. */
+  const RETURN_IN_BRANCH: MathJsonExpression = [
+    'Block',
+    ['Declare', 's', 'number'],
+    ['Assign', 's', 0],
+    [
+      'If',
+      ['Less', 0, 't'],
+      ['Return', ['Multiply', 2, 't']],
+      ['Assign', 's', 1],
+    ],
+    's',
+  ];
+  /** `s ⩴ 0; s ⩴ s + t; Return(s)` — the block's VALUE is the `Return`. */
+  const RETURN_IS_VALUE: MathJsonExpression = [
+    'Block',
+    ['Declare', 's', 'number'],
+    ['Assign', 's', 0],
+    ['Assign', 's', ['Add', 's', 't']],
+    ['Return', 's'],
+  ];
+  /** The VALID control: an early `Return` of the body's own (float) shape. */
+  const EARLY_RETURN_OK: MathJsonExpression = [
+    'Block',
+    ['Declare', 's', 'number'],
+    ['Assign', 's', 0],
+    ['Return', ['Multiply', 2, 't']],
+    's',
+  ];
+
+  const gpuTargets = () => [new GLSLTarget(), new WGSLTarget()];
+
+  it('a `Return` whose shape disagrees with the body fails closed', () => {
+    for (const body of [RETURN_SHAPE_MISMATCH, RETURN_COMPLEX_LOCAL])
+      for (const target of gpuTargets())
+        expect(() => target.compile(engineWithA(body).box(['a', 'u']))).toThrow(
+          /a `Return` in this body yields a "vec2f?" value, but "a" is declared to return "(float|f32)"/
+        );
+  });
+
+  it('a `Return` in a conditional BRANCH fails closed', () => {
+    for (const target of gpuTargets())
+      expect(() =>
+        target.compile(engineWithA(RETURN_IN_BRANCH).box(['a', 'u']))
+      ).toThrow(
+        /an early `Return` here has no (GLSL|WGSL) lowering .* requires an expression/s
+      );
+  });
+
+  it('a `Return` in the block VALUE position fails closed', () => {
+    // Emitted `return return s;` before the gate.
+    for (const target of gpuTargets())
+      expect(() =>
+        target.compile(engineWithA(RETURN_IS_VALUE).box(['a', 'u']))
+      ).toThrow(/requires an expression \(`return return s;`\)/);
+  });
+
+  it('the decline is reported as `success: false`, not as source', () => {
+    // The documented decline route: with `fallback`, an interpreter-backed
+    // result — never a shader carrying a misplaced `return`.
+    for (const target of gpuTargets()) {
+      const r = target.compile(engineWithA(RETURN_IN_BRANCH).box(['a', 'u']), {
+        fallback: true,
+      });
+      expect(r.success).toBe(false);
+      expect(r.code ?? '').not.toContain('return');
+    }
+  });
+
+  it('an early `Return` of the body’s own shape still compiles', () => {
+    const glsl = new GLSLTarget().compile(
+      engineWithA(EARLY_RETURN_OK).box(['a', 'u'])
+    );
+    expect(glsl.success).toBe(true);
+    expect(glsl.preamble).toContain('float _fn_a(float t)');
+    expect(glsl.preamble).toContain('return 2.0 * t;');
+    expect(glsl.preamble).toContain('return s;');
+
+    const wgsl = new WGSLTarget().compile(
+      engineWithA(EARLY_RETURN_OK).box(['a', 'u'])
+    );
+    expect(wgsl.success).toBe(true);
+    expect(wgsl.preamble).toContain('fn _fn_a(t: f32) -> f32');
+    expect(wgsl.preamble).toContain('return 2.0 * t;');
+  });
+
+  it('JS is unchanged: it lowers every one of these bodies itself', () => {
+    // The JavaScript control. JS declares no return type and has real early
+    // returns, so these are its business, not the gate's — and the two shapes
+    // it already compiled must keep their exact answers.
+    for (const [body, expected] of [
+      [EARLY_RETURN_OK, 6],
+      [RETURN_SHAPE_MISMATCH, 3], // `(3 + i)` → `.re` is 3
+      [RETURN_COMPLEX_LOCAL, 3],
+    ] as const) {
+      const e = engineWithA(body);
+      expect(e.box(['a', 3]).evaluate().N().re).toBeCloseTo(expected, 12);
+      const r = compile(e.box(['a', 'u']));
+      expect(r?.success).toBe(true);
+      const v = r!.run!({ u: 3 });
+      expect(typeof v === 'number' ? v : (v as { re: number }).re).toBeCloseTo(
+        expected,
+        12
+      );
+    }
   });
 });
