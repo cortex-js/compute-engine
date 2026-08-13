@@ -586,9 +586,10 @@ with three rulings needed in order (see §7).
    stays a pure type, no dual-role names) — confirm the two-protocol
    split and names, and the membership-granting conformance rule,
    when the requirement tables get their design doc.
-7. Mutable objects (Appendix B): rulings B1–B12 — proposal under review;
-   nothing ratified. B10 amends item 6(b) above.
-8. Named arguments (Appendix C): rulings C1–C5 — proposal under review,
+7. Mutable objects (Appendix B): rulings B1–B13 — proposal under review;
+   nothing ratified. B10 amends item 6(b) above and
+   `docs/EFFECTS-MODEL.md` (the `state` label).
+8. Named arguments (Appendix C): rulings C1–C6 — proposal under review,
    sequenced before Appendix B (whose constructors require it).
 
 
@@ -1359,7 +1360,7 @@ is an open ruling — §7 item 6(g).
 ## Appendix B: Mutable objects
 
 > Status: **proposal**, 2026-08-12 — nothing below is implemented. The
-> decisions it needs are collected as rulings B1–B12 at the end. It
+> decisions it needs are collected as rulings B1–B13 at the end. It
 > depends on Appendix C (named arguments), which is proposed to land
 > first. Landing it
 > supersedes two shipped decisions of Appendix A; the exact amendments are
@@ -1431,9 +1432,10 @@ half-initialized state, and no rule is needed for "reading a field that
 was never set". (A create-empty-then-fill-in style would need one;
 ruling B7 defers it.)
 
-In v1, `object<…>` may appear only as the definition of a named type, as
-above — not inline in an annotation (`let x: object<id: string>` is
-rejected). Objects are nominal.
+In v1, `object<…>` may appear only as the definition of a named type,
+as above — inline in an annotation it is rejected with
+`object-type-not-inline` (`let x: object<id: string>`). Objects are
+nominal.
 
 ### Objects and protocols
 
@@ -1447,13 +1449,13 @@ protocol Identifiable {
   readonly fullName: string
   readwrite age: integer
   readwrite role: string
-  function birthday(self: Self) scope -> Self
+  function birthday(self: Self) state -> Self
 }
 ```
 
-Note the `scope` effect label on `birthday`: the requirement itself must
-declare that `birthday` modifies its argument — see "Changing a field is
-an effect" below for why.
+Note the `state` effect label on `birthday`: the requirement itself must
+declare that `birthday` touches mutable object state — see "Changing a
+field is an effect" below, where the label is introduced.
 
 A conforming object type:
 
@@ -1475,16 +1477,33 @@ type Person = object<
 }
 ```
 
-Two rules make this work:
+Three rules make this work:
 
 - A `readwrite` property requirement is satisfied automatically by a
-  stored field with the same name and the same type — no `get`/`set`
+  stored field with the same name and **the same type** — no `get`/`set`
   needs to be written. `firstName`, `lastName`, `age`, and `role` are
-  covered this way.
+  covered this way. Exact type match is not an oversight: the getter
+  direction would allow a narrower field, the setter direction a wider
+  one, and the only type satisfying both is the property's own.
+- A `readonly` property requirement is satisfied by a stored field whose
+  type is the property's type **or a subtype** — only the getter
+  direction exists, so the ordinary covariant rule of Appendix A's
+  "Signature matching" applies.
 - A property implemented with an explicit `get` (plus `set`, for a
   `readwrite` property) is **computed**: it has no stored field, and its
   accessors run on each access. `fullName` is computed here. This is how
-  a type can present a different surface than what it stores.
+  a type can present a different surface than what it stores. Declaring
+  both a stored field and an accessor for the same property name is an
+  error (`object-property-conflict`) — a name is field-backed or
+  computed, never both.
+
+When a protocol is *replaced* (statement re-run, Appendix A "Scope and
+lifecycle"), an object type's layout does not change: the stored fields
+are fixed at declaration. The replacement re-runs conformance checking
+against that fixed layout — a property whose name, type, or mutability
+no longer matches a field or accessor leaves the conformance incomplete
+(`protocol-implementation-missing`, as for any other replacement), and
+objects constructed earlier keep their fields. Layouts never migrate.
 
 Using it:
 
@@ -1502,12 +1521,14 @@ and becomes part of the language's meaning (ruling B8 pins it).
 
 ### Which types can conform (the mutability gate)
 
-A protocol that can *modify* the value it is called on — because it has
-at least one `readwrite` property, or a function member whose declared
-effect says it modifies its `Self` argument — can only be conformed to
-by object types. A protocol with only `readonly` properties and
-non-modifying functions can be conformed to by any type, exactly as
-today.
+A protocol that can *modify* object state — because it has at least one
+`readwrite` property, or a function member whose declared effects
+include the `state` label — can only be conformed to by object types. A
+protocol with only `readonly` properties and `state`-free functions can
+be conformed to by any type, exactly as today. (Keying on the label is
+deliberately conservative: a member could carry `state` because it
+mutates some *other* object rather than its `Self`; v1 accepts that
+imprecision, and per-argument effect precision is a future refinement.)
 
 ```epsil
 type Badge = record<id: string> is Identifiable
@@ -1583,15 +1604,18 @@ same expression twice produces interchangeable results — `3 + 4` is `7`
 both times, and the engine freely reuses cached results because nothing
 can tell the difference. With objects, something *can* tell the
 difference (the two results answer `==` differently), so construction
-must be treated the way drawing a random number already is:
+is treated the way drawing a random number already is: **constructing
+an object carries the `state` effect label** (introduced under
+"Changing a field is an effect"), and the rest follows from the effects
+system's standard contract — effect-labeled expressions are not served
+from evaluation caches and are not folded as constants. On the
+observation-vs-action axis, construction is an *action* (re-running it
+is observable), like a draw and unlike a clock read. The engine's habit
+of sharing one boxed value for equal literals never applies to objects.
 
-- an expression that constructs an object must not have its result
-  served from an evaluation cache;
-- the engine's habit of sharing one boxed value for equal literals never
-  applies to objects.
-
-Ruling B3 covers the mechanics (which caches must check, and whether
-construction needs its own effect label).
+Ruling B3 records the residue: an audit of which existing caches assume
+value semantics and must consult the label (or the per-object version,
+below) once objects exist.
 
 ### Equality
 
@@ -1687,6 +1711,12 @@ object", and no way at all to express a cycle. Two candidate postures
   Sharing is silently lost — two references to one object come back as
   two unrelated records — and cycles still need an answer.
 
+Refusal is **subexpression-local**, following the engine's
+errors-as-values convention: inside a larger, otherwise-serializable
+structure, the object's position serializes as an error expression
+(`object-serialization-unsupported`) and the rest serializes normally —
+the whole call does not throw.
+
 The recommended pairing: refuse implicitly, and provide an explicit
 operation (`Snapshot(p)`, name open) that returns an immutable record
 copying the object's current contents. Whether a snapshot is shallow or
@@ -1695,25 +1725,47 @@ deep, and what a deep snapshot does on a cycle, is part of B5.
 ### Changing a field is an effect
 
 A function that changes a field of one of its arguments does something
-its caller can observe beyond the returned value. The effects system
-already has a label for exactly this — `scope`, a write whose
-consequences outlive the call (`docs/EFFECTS-MODEL.md`). Whether field
-stores reuse `scope` or get a label of their own is ruling B2; either
-way, two things follow:
+its caller can observe beyond the returned value. This proposal
+introduces a dedicated effect label for it: **`state`** — the
+expression creates or mutates object state. Reusing the existing
+`scope` label was considered and rejected: `docs/EFFECTS-MODEL.md`
+defines `scope` as mutation of a *binding* on the ambient scope chain
+(`Assign`, `Declare`), and its confinement and dominance analysis is
+written entirely in those terms — a heap store through a reference is a
+different class of write, and stretching the definition would silently
+invalidate that analysis. (The name is the one bikeshed left in B2;
+`mutate` is the alternative.) Three consequences:
 
-- The implicit setter behind every `readwrite` property carries the
-  label, so property stores are never invisible to the effects system.
+- The implicit setter behind every `readwrite` property carries
+  `state`, so property stores are never invisible to the effects
+  system. Object *construction* carries it too (previous section).
 - A protocol function whose implementations modify `Self` must declare
-  the label in the requirement — as `birthday` does above. Appendix A's
-  signature-matching rule says an implementation may be *purer* than its
-  requirement but never more effectful, so an effect-free `birthday`
-  requirement would reject every implementation that actually mutates.
+  `state` in the requirement — as `birthday` does above. Appendix A's
+  signature-matching rule says an implementation may be *purer* than
+  its requirement but never more effectful, so a `state`-free
+  `birthday` requirement would reject every implementation that
+  actually mutates. (Implementations themselves may leave the specifier
+  bare — the shipped inferred-effects model infers their labels from
+  the body.)
+- Landing the label amends `docs/EFFECTS-MODEL.md` (see "Changes to
+  shipped documents"): the label table gains `state`, and the
+  confinement analysis gains a note that it does not apply to `state`
+  in v1 — no escape analysis for objects; every store and construction
+  emits.
 
-Stores also feed the engine's cache invalidation: each field store
-registers a state event through the same machinery that
-protocol-registry changes already use (Appendix A, "Registry changes are
-state events"). Every store goes through one operation, so this is a
-single emission point, not a scattering.
+Writes are only half the caching story; **reads** need their own
+answer, and labels are the wrong tool for them — the effects model
+deliberately treats reads of non-local state as label-free, relying on
+precise invalidation channels instead. This proposal follows that
+precedent: every object carries a **version counter**, bumped on each
+field store, and reading a field records a dependency on that counter
+the same way reading a global binding records a generation dependency
+today. A cached result that read `p.age` is invalidated by the next
+store to `p` — not by stores to unrelated objects. Each store also
+registers a state event through the engine's event machinery (Appendix
+A, "Registry changes are state events"); since every store goes through
+one operation, both the version bump and the event have a single
+emission point.
 
 ### No subtyping between object types
 
@@ -1737,6 +1789,27 @@ have subtyping and objects do not. Code that should work across several
 object types says so with a protocol, which is also the only
 relationship this appendix needs.
 
+### Generic object types
+
+Parameterized object declarations are supported, riding the shipped
+parameterized-nominal machinery (§1, N1–N12), with one new rule for the
+variance walker: **a stored field is an invariant position**. A type
+variable that occurs in a stored field verifies only as `inout`;
+declaring it `out` or `in` is rejected. The unsoundness this blocks is
+the parameterized twin of the Counter/Gauge example:
+
+```epsil
+type Cell<inout T> = object<value: T>
+
+// If `out T` were accepted, Cell<integer> <: Cell<number> would hold:
+let a: Cell<integer> = Cell(value: 1)
+let b: Cell<number> = a      // …this upcast would then be allowed…
+b.value = 1.5                // …and the Cell<integer> now holds 1.5
+```
+
+A variable that occurs only in *computed* property signatures is not a
+stored field and keeps the ordinary variance rules. (Ruling B13.)
+
 ### The rest of the system
 
 - **Broadcast**: an object is a single value; it is never iterated into
@@ -1749,7 +1822,16 @@ relationship this appendix needs.
   supported; object-typed unit *results* decline in v1 (ruling B9).
 - **Where `object` sits in the type lattice** — is bare `object` a
   usable type meaning "any object"? are objects disjoint from `record`?
-  — is ruling B6. Lean: yes and yes.
+  — is ruling B6. Lean: yes and yes. A bare-`object` supertype does not
+  contradict "No subtyping between object types": it relates every
+  object type to one common bound, never to a sibling — the same shape
+  as `collection` membership, and like it a deliberate carve-out from
+  nominal opacity, not a general rule change.
+- **Trust model**: objects raise the stakes of the open host-trust
+  ruling (§7 item 6(g)) — a protocol property getter can now *mutate*
+  any reachable object as a side effect of an ordinary-looking field
+  read, where today it can only compute a value. The 6(g) decision
+  should be made with objects in mind.
 - **Property-name resolution**: stored fields and protocol properties
   share one namespace via the satisfied-by-a-field rule above, and the
   qualified form `p.(Protocol.name)` remains available for conflicts
@@ -1785,6 +1867,18 @@ Neither problem is fatal (freeze the shape at declaration time), but
 each needs its own ruling, and an explicit field list has neither
 problem — so v1 requires the explicit list.
 
+The explicit list has a real cost, recorded here as the standing
+motivation to revisit: the author must **replicate, name for name and
+type for type, the property list the protocol already declares** —
+`Person` restates four of `Identifiable`'s five properties as fields.
+Replication drift is at least caught loudly rather than silently (a
+missing or mistyped field leaves the conformance incomplete, via
+`protocol-implementation-missing` / `protocol-signature-mismatch`), so
+the duplication is checked — but the ergonomics cost is real, and it is
+why the derived-shape idea stays on the table rather than being
+rejected: once the two blockers above get their rulings, synthesis (or
+a lighter sugar over it) should be re-examined.
+
 One thing this proposal deliberately does **not** change: bare
 `type Person is Identifiable` (without `= object`) keeps its shipped
 meaning — a conformance declaration for an *existing* type, with
@@ -1798,12 +1892,18 @@ a fresh object type instead of being caught.
   (a `readwrite` property, or a function member with a declared
   Self-modifying effect) is conformable only by object types;
   `protocol-requires-object` otherwise.
-- **B2 — the store effect.** Whether field stores reuse the `scope`
-  label or get their own; implicit property setters carry it;
-  requirements for mutating functions must declare it.
-- **B3 — construction is observable.** Fresh identity per construction;
-  exclusion from evaluation caches and literal interning; whether
-  construction needs its own effect label.
+- **B2 — the `state` effect (settled in this revision, pending
+  ratification).** A new label: field stores and object construction
+  carry it, implicit property setters carry it, and requirements for
+  mutating functions must declare it; reads are tracked by per-object
+  version counters, not labels. Reusing `scope` is rejected — it is
+  defined as binding mutation and its confinement analysis does not
+  transfer. Remaining bikeshed: the name (`state` vs `mutate`).
+- **B3 — construction is observable.** Fresh identity per construction,
+  carried by the `state` label (an *action* on the
+  observation-vs-action axis); exclusion from literal interning; plus
+  an audit of which existing caches assume value semantics and must
+  consult the label or the per-object version.
 - **B4 — contents equality (deferred).** `==` stays reference identity;
   an opt-in contents-comparison protocol, if ever, is a separate
   operation.
@@ -1813,8 +1913,11 @@ a fresh object type instead of being caught.
   disjointness from `record`.
 - **B7 — initialization.** v1: constructors take every stored field; a
   create-empty-then-fill style would need a missing-field story first.
-- **B8 — evaluation order.** Left-to-right evaluation of arguments and
-  interpolation segments becomes observable; pin it.
+- **B8 — evaluation order.** Left-to-right evaluation becomes
+  observable wherever operands evaluate — arguments, interpolation
+  segments, block statements, collection callbacks; pin it, including
+  for short-circuit forms and lazy materialization, and require
+  compiled targets to preserve the order or decline.
 - **B9 — compile boundary.** Mirror the §3 sum rule: parameters in,
   results decline, GPU declines entirely.
 - **B10 — the Appendix A amendments** below.
@@ -1825,8 +1928,14 @@ a fresh object type instead of being caught.
   collector; engine-held caches must not keep objects alive; an object
   never outlives or crosses its engine; no destructors in v1 (see
   "Lifetime").
+- **B13 — generic object types.** Supported via the
+  parameterized-nominal machinery; a stored field is an invariant
+  position (`inout` only) for the variance walker; computed-property
+  signatures keep ordinary variance (see "Generic object types").
 
-### Changes to Appendix A when this lands
+### Changes to shipped documents when this lands
+
+To Appendix A:
 
 1. **"Properties"** — the property-assignment paragraph (rebinding
    sugar, `property-assignment-target-invalid`) is replaced: assignment
@@ -1834,19 +1943,40 @@ a fresh object type instead of being caught.
    values it emits `immutable-value-assignment`; non-variable targets
    become legal when they evaluate to objects. The `Person`/`Nameable`
    example becomes an object-backed example.
-2. **§7 item 6(b)** (property assignment as rebinding sugar) is
+2. **"Property implementations" and the completeness check** are
+   amended for field-backed satisfaction: a stored field of the right
+   name and type satisfies a property requirement with no accessor
+   written (rules under "Objects and protocols"); an accessor alongside
+   a same-named field is `object-property-conflict`; the completeness
+   diagnostics account for both.
+3. **§7 item 6(b)** (property assignment as rebinding sugar) is
    superseded by B10.
-3. **"Signature matching"** is unchanged as a rule, but gains the
+4. **"Signature matching"** is unchanged as a rule, but gains the
    consequence spelled out under "Changing a field is an effect":
-   requirements for mutating functions must declare the effect, or no
-   mutating implementation can satisfy them.
+   requirements for mutating functions must declare the `state` effect,
+   or no mutating implementation can satisfy them.
+5. **The mutability gate is a breaking change**: a shipped record-backed
+   conformance to a protocol with `readwrite` properties (Appendix A's
+   original `Person`/`Nameable` example was one) becomes illegal —
+   revalidation emits `protocol-requires-object`. Migration is
+   mechanical: redeclare the type as `object<…>` with the same fields.
+   Deliberate, not collateral: the rebinding lowering those
+   conformances relied on only ever worked for variable-rooted access.
+
+To `docs/EFFECTS-MODEL.md`:
+
+6. The label table gains **`state`** (creates or mutates object state;
+   impure; an *action* on the observation-vs-action axis; no frame
+   protocol; not handler-backed), and the confinement analysis gains a
+   note that it does not apply to `state` in v1 — no escape analysis
+   for objects; every store and construction emits.
 
 ## Appendix C: Named arguments
 
 > Status: **proposal**, 2026-08-12 — nothing below is implemented. This
 > appendix stands on its own and is proposed to be ratified and
 > implemented **before** Appendix B: object constructors require named
-> arguments, but nothing here depends on objects. Rulings C1–C5 at the
+> arguments, but nothing here depends on objects. Rulings C1–C6 at the
 > end.
 
 ### The idea
@@ -1899,10 +2029,17 @@ interest(rate: 0.05, 1000, years: 10)  // error: positional after named
 interest(1000, principal: 2000)        // error: `principal` given twice
 ```
 
-Naming an argument of a function whose parameters the engine does not
-know — an unresolved forward reference, or a value only known to be of
-type `function` — is an error too: there is nothing to check the name
-against.
+A named call needs a callee whose declaration the engine can see, and
+**the declaration the call resolves through supplies the names**: for
+`let g: (a: number) -> number = f`, the call `g(a: 1)` checks against
+`g`'s annotation, whatever `f`'s own declaration said. Parameter names
+never participate in type compatibility itself — Appendix A's
+"parameter names are not significant" rule for signature matching is
+unchanged; names matter only at a call site that uses them. It follows
+that naming an argument of a callee with no visible declaration — an
+unresolved forward reference, or a bare value only known to be of type
+`function` — is an error, `argument-names-unavailable`: there is
+nothing to check the names against.
 
 ### What the names are, and what they are not
 
@@ -1927,18 +2064,30 @@ re-derive names from the signature for readability is part of C4.
   after a named argument; no parameter twice; every required parameter
   filled.
 - **C3 — overload resolution.** The shipped resolution machinery
-  (per-position join over intersection arms) is positional. Proposed:
-  filter arms by name compatibility first, normalize the call to
-  positional per surviving arm, then resolve exactly as today. This is
-  the meatiest sub-question and likely needs its own design doc when
-  this appendix moves to implementation.
+  (per-position join over intersection arms) is positional, and two
+  arms may map the same names to *different* positions. Proposed: each
+  candidate arm carries its own name-to-position permutation through
+  applicability checking, generic solving, and ranking; the call is
+  normalized to positional only after one arm wins; several surviving
+  name-compatible arms are ambiguous (existing overload-ambiguity
+  behavior). This is the meatiest sub-question and likely needs its own
+  design doc when this appendix moves to implementation.
 - **C4 — serialization.** Names erase at canonicalization (proposed
   above); should the Epsil serializer re-derive them for readability,
   and if so, when?
 - **C5 — variadic and optional parameters.** How names interact with
   `?`-optional parameters (a natural fit: name exactly the options you
   pass) and with variadic tails (no per-argument name exists —
-  presumably positional only).
+  presumably positional only). Must also reconcile C2's "every required
+  parameter filled" with the engine's partial-application behavior —
+  does an under-filled named call error, or curry? The library leans
+  heavily on optional and variadic signatures, so C is not
+  implementable ahead of this ruling.
+- **C6 — protocol dispatch.** A named call to a protocol function
+  dispatches on the argument bound to the *declared first parameter*
+  (`self`), wherever the caller wrote it: written position never
+  changes dispatch. (Appendix A's "Dispatching" keys on the first
+  argument; with names in play, "first" means the declaration's first.)
 
 ## Appendix D: Diagnostics
 
@@ -1971,3 +2120,6 @@ Appendix B or Appendix C and are not implemented.
 | `argument-name-unknown` † | a named argument names a parameter the function does not declare (Appendix C) |
 | `argument-order-invalid` † | a positional argument follows a named argument (Appendix C) |
 | `argument-name-duplicate` † | the same parameter supplied more than once (Appendix C) |
+| `argument-names-unavailable` † | a named argument used with a callee that has no visible declaration — unresolved forward reference, bare `function`-typed value (Appendix C) |
+| `object-property-conflict` † | both a stored field and an explicit accessor declared for the same property name (Appendix B) |
+| `object-type-not-inline` † | `object<…>` used inline in an annotation rather than as the definition of a named type (Appendix B) |
