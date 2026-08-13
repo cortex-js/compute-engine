@@ -40,7 +40,7 @@ describe('RSolve', () => {
     ];
     const solution = rsolve(recurrence);
 
-    expect(solution.toString()).toMatchInlineSnapshot(`[a(n) === "c_1" * 2^n]`);
+    expect(solution.toString()).toMatchInlineSnapshot(`[a(n) == "c_1" * 2^n]`);
     expect(verifyRecurrence(recurrence, solution, { c_1: 3, n: 5 })).toBe(true);
   });
 
@@ -52,7 +52,7 @@ describe('RSolve', () => {
     ];
     const solution = rsolve(['List', recurrence, ['Equal', ['a', 0], 3]]);
 
-    expect(solution.toString()).toMatchInlineSnapshot(`[a(n) === 3 * 2^n]`);
+    expect(solution.toString()).toMatchInlineSnapshot(`[a(n) == 3 * 2^n]`);
     expect(verifyRecurrence(recurrence, solution, { n: 5 })).toBe(true);
   });
 
@@ -79,7 +79,7 @@ describe('RSolve', () => {
     const solution = rsolve(recurrence);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[a(n) === "c_2" * n + "c_1"]`
+      `[a(n) == "c_2" * n + "c_1"]`
     );
     expect(
       verifyRecurrence(recurrence, solution, { c_1: 3, c_2: 5, n: 4 })
@@ -179,7 +179,7 @@ describe('RSolve', () => {
 
     expect(result.operator).toBe('List');
     expect(result.toString()).toMatchInlineSnapshot(
-      `[a(n) === "c_1" * i^n + "c_2" * (-i)^n]`
+      `[a(n) == "c_1" * i^n + "c_2" * (-i)^n]`
     );
   });
 });

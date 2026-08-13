@@ -347,8 +347,18 @@ const OPERATORS: Record<
     },
     15,
   ],
-  Equal: ['===', 8],
-  NotEqual: ['!==', 8],
+  // Comparison spellings follow Epsil's equality ladder: `==` is arithmetic
+  // equality (`Equal`), `===` is structural sameness (`Same`), and the
+  // identity prover (`IdenticallyEqual`) has NO operator spelling — it
+  // renders in call form, like Epsil, because the equivalence glyphs' bar
+  // counts cross the `=`-run lengths and invite wrong-tier transliteration
+  // (see the ruling note in `src/epsil/operators.ts`). Until 2026-08-13
+  // `Equal` printed as `===` and `NotEqual` as `!==` (a JS-flavored choice
+  // that predates Epsil), which collided with Epsil, where `===` parses as
+  // `Same`.
+  Equal: ['==', 8],
+  NotEqual: ['!=', 8],
+  Same: ['===', 8],
   LessEqual: ['<=', 9],
   GreaterEqual: ['>=', 9],
   Less: ['<', 9],

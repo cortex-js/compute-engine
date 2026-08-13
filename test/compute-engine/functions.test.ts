@@ -289,7 +289,7 @@ describe('Apply', () => {
       1,
     ];
     expect(ce.box(['Apply', residual, 0.5]).evaluate().toString()).toBe(
-      'Apply(NDSolveFunction(Derivative(y, 1) === a * y, y, Limits("Nothing", 0, 1), 1), 0.5)'
+      'Apply(NDSolveFunction(Derivative(y, 1) == a * y, y, Limits("Nothing", 0, 1), 1), 0.5)'
     );
   });
 

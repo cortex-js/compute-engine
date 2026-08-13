@@ -1,5 +1,64 @@
 ## [Unreleased]
 
+### Issues Resolved
+
+- **Epsil no longer silently reads the equivalence glyphs as the wrong
+  equality tier: `≡`, `≢`, and `≣` are now rejected outright**
+  (`unexpected-symbol`). Previously a typed `≡` (IDENTICAL TO) silently
+  weakened to `==` — arithmetic `Equal`, not the identity prover the glyph
+  means in mathematics — `≣` quietly parsed as `===` (`Same`), and `≢` was
+  a broken mapping that errored confusingly. Rejecting all three is
+  deliberate (rather than assigning them tiers): the glyphs' bar counts
+  cross the `=`-run lengths (`≡` has three bars, `≣` four, while `===` has
+  three characters), so a visual transliteration in either direction lands
+  on a *different* comparison that silently answers a different question.
+  The equality tiers in Epsil are ASCII-only — `==` (arithmetic, tolerant,
+  may stay inert as a condition), `===` (`Same`, structural, total) — and
+  the identity-prover tier is spelled as a call, `IdenticallyEqual(a, b)`.
+  LaTeX is unaffected: `\equiv` still parses as `IdenticallyEqual`.
+
+- **`.toString()` no longer prints arithmetic equality in `Same`'s
+  spelling**: `Equal` now serializes as `==` (was `===`) and `NotEqual` as
+  `!=` (was `!==`). The old JS-flavored spellings predate Epsil, where `===`
+  parses as the structural `Same` tier — so the string view printed an
+  `Equal` in the exact spelling that reads back as the other operator.
+  `Same` now also serializes in operator form (`===`) instead of
+  function-call form; `IdenticallyEqual` stays in call form (the same
+  no-equivalence-glyphs ruling as the Epsil entry above). Compiled
+  JavaScript is unchanged (`Equal` still compiles to JS `===`, which is
+  correct there).
+
+- **An exact integer beyond the safe-integer range now has one storage form
+  too, completing the 0.106.0 normalization** (the item-178(b) residual,
+  filed by the Tycho team at their 0.106.0 adoption; witness `8e19` from
+  their seed corpus, minimal witness `1e16`). The 0.106.0 fix normalized a
+  bigint WITHIN the safe range to machine storage but left an integer-valued
+  machine number BEYOND it un-normalized, so `ce.box(1e16)` and the parse of
+  its own serialization were `isSame` with byte-equal MathJSON yet hashed
+  differently — the same `isSame ⇒ equal hash` break, past the boundary
+  (`2^53` itself was clean). The constructor now stores integer-valued
+  machine numbers outside the safe range as bigints — the storage the parse
+  route produces — so each side of `2^53` has one canonical form (machine
+  below, bigint above); the conversion is exact for every integer-valued
+  float64. Serialization follows the storage, so such literals now print in
+  the compact exponent form (`ce.box(1e16).toString()` is `"1e+16"`, no
+  longer `"10000000000000000"`); MathJSON output is unchanged.
+
+- **Assigning to a symbol auto-declared with type `unknown` now applies the
+  same literal-type promotion as a fresh declaration**, so the settled type
+  no longer depends on whether a boxing auto-declared the symbol before the
+  assignment (observed by the Tycho team's order-matrix probe at their
+  0.106.0 adoption). Boxing an expression can auto-declare a mentioned
+  symbol at type `unknown` when its uses record no type evidence (a bare
+  `List` sibling, a binder-body occurrence); assigning `5` to such a symbol
+  then adopted the value's raw type (`finite_integer`), while the same
+  assignment on a fresh symbol declares the promoted `integer`. The
+  `unknown`-incumbent case now takes the declaration promotion, so box-first
+  and assign-first orderings settle on the same type (`integer`). The
+  0.106.0 assignment-narrowing guards are unchanged: declared types are
+  never touched, assignment-derived incumbents stay widen-only, and the D11
+  incompatible-guess adoption keeps the value's raw type.
+
 ## 0.106.0 _2026-08-13_
 
 ### Breaking Changes

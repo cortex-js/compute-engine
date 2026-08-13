@@ -1480,6 +1480,34 @@ describe('EPSIL PARSING OPERATORS', () => {
       'c',
     ]);
   });
+  test('Equality ladder: == / === / IdenticallyEqual(…)', () => {
+    // Three tiers: `==` arithmetic equality (Equal), `===` structural
+    // sameness (Same), and the identity prover, which is deliberately
+    // spelled ONLY as a call — `IdenticallyEqual(a, b)`.
+    expect(validEpsil('a == b')).toStrictEqual(['Equal', 'a', 'b']);
+    expect(validEpsil('a === b')).toStrictEqual(['Same', 'a', 'b']);
+    expect(validEpsil('IdenticallyEqual(a, b)')).toStrictEqual([
+      'IdenticallyEqual',
+      'a',
+      'b',
+    ]);
+    // The equivalence glyphs are rejected outright (ruling 2026-08-13):
+    // their bar counts cross the `=`-run lengths (`≡` three bars, `≣` four,
+    // vs `===`), so a visual transliteration would silently land on the
+    // wrong tier. They must error loudly, never resolve to ANY tier.
+    expect(invalidEpsil('a ≡ b')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '≡']],
+    ]);
+    expect(invalidEpsil('a ≣ b')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '≣']],
+    ]);
+    expect(invalidEpsil('a ≢ b')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '≢']],
+    ]);
+  });
   test('Invisible Operators', () => {
     expect(validEpsil('2x')).toMatchInlineSnapshot(`
       [
@@ -1703,6 +1731,7 @@ describe('EPSIL OPERATOR ROUND-TRIP', () => {
       ['Factorial', 'a'],
       ['Equal', 'a', 'b'],
       ['Same', 'a', 'b'],
+      ['IdenticallyEqual', 'a', 'b'],
       ['And', 'a', 'b'],
       ['Or', 'a', 'b'],
       ['Less', 'a', 'b'],

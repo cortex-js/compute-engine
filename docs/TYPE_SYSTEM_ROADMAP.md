@@ -1678,8 +1678,16 @@ below) once objects exist.
 
 ### Equality
 
-`==` on two objects is true exactly when they are the same object.
-Contents play no part:
+Throughout this section, `==` is the engine's `Equal` operator — the
+**arithmetic-equality tier**, `.isEqual()`. That tier *evaluates* its
+operands, compares numbers within the engine tolerance, and is
+three-valued: an equation it cannot decide stays inert as a condition
+(`x^2 == 4` evaluates to itself). It is a different question from `===`
+(`Same`, `.isSame()` — structural, total, binding-blind) and from
+`IdenticallyEqual` (`.isIdenticallyEqual()` — the prover: equal for
+every value of the free variables). For objects, the `==` tier's answer
+is reference identity, and it always decides — object comparisons are
+never inert:
 
 ```epsil
 let a = MutableData(id: "1", value: "x")
@@ -1692,17 +1700,50 @@ a == c   // ➔ True  — same object
 Why not compare contents? Because contents change. Two objects that are
 equal by contents now can differ a moment later; "are these the same
 object" is the only question whose answer stays true. Comparing contents
-is a legitimate but *different* question. If it turns out to be wanted,
-it should be an explicit opt-in — a protocol a type conforms to,
-consulted by a dedicated operation — and never the meaning of `==`
-itself (ruling B4, deferred).
+is a legitimate but *different* question, and if it is wanted it must be
+an explicit, per-type opt-in (ruling B4, deferred — direction below).
 
-Engine note: all of the engine's comparison tiers (`isSame`, `isEqual`,
-`isIdenticallyEqual`) answer with reference identity for objects. In
-particular `isSame` — the strict, cheap check used internally as a
-deduplication key — must never run user code, so no protocol can be
-involved at that tier; and `isIdenticallyEqual`'s sampling-and-proof
-machinery has nothing to prove about a reference.
+**A possible `Equatable` protocol.** The natural opt-in shape is a
+protocol supplying the comparison:
+
+```epsil
+protocol Equatable {
+  function equals(self: Self, other: Self) -> boolean
+}
+```
+
+A conforming object type's `equals` would be consulted by the `==` tier
+**only**, and only when **both operands are objects of the same
+conforming object type**; every other combination keeps reference
+identity. Hooking this tier is sound where hooking `===` is not: the
+`==` tier already runs user code (it evaluates its operands) and is
+already state-dependent, and the per-object version counters make a
+cached `equals` verdict invalidate correctly when either operand is
+stored to. The same-type-both-sides rule confines the laws the engine
+cannot enforce (symmetry, transitivity are the conformer's contract,
+like every protocol contract) and closes the asymmetric-dispatch trap
+where `a == b` and `b == a` could reach different implementations.
+`isIdenticallyEqual` simply defers to the same answer — there is nothing
+to sample or prove about references. Not `Comparable`: that name is
+reserved for a future *ordering* protocol, which would refine
+`Equatable` (the standard-library shape users expect).
+
+The real cost, and why B4 stays a ruling rather than a footnote: a
+protocol-backed `True` is **time-varying** — two objects equal by
+contents now can be unequal after the next store. Caching is covered by
+the version counters, but anything that records an equality as a durable
+*fact* — `assume(a == b)`, simplification rules that consult the `==`
+tier mid-rewrite — must treat the verdict as state-dependent, never
+eternal. B4's residue is an audit of those consumers, sibling to B3's
+cache audit.
+
+Engine note: absent an `Equatable` conformance, all of the engine's
+comparison tiers (`isSame`, `isEqual`, `isIdenticallyEqual`) answer with
+reference identity for objects — and `isSame` does so **unconditionally,
+protocol or no protocol**: it is the strict, cheap check used internally
+as a deduplication key, it must never run user code, and it must remain
+an unconditional equivalence relation, which user-supplied code cannot
+guarantee. No escape hatch exists at that tier, by design.
 
 ### Cycles
 
@@ -2053,9 +2094,15 @@ a fresh object type instead of being caught.
   observation-vs-action axis); exclusion from literal interning; plus
   an audit of which existing caches assume value semantics and must
   consult the label or the per-object version.
-- **B4 — contents equality (deferred).** `==` stays reference identity;
-  an opt-in contents-comparison protocol, if ever, is a separate
-  operation.
+- **B4 — custom equality (deferred; direction set 2026-08-13).** By
+  default `==` is reference identity for objects. The candidate opt-in
+  is an `Equatable` protocol (`equals(self: Self, other: Self) ->
+  boolean`) consulted by the `==`/`isEqual` tier only, when both
+  operands are objects of the same conforming type — see "A possible
+  `Equatable` protocol" under "Equality". `isSame` is never hookable
+  (internal dedup key; must not run user code). Residue before ruling:
+  the time-varying-equality audit of `assume`/rule consumers that
+  record `==` verdicts as durable facts.
 - **B5 — serialization.** Refuse + explicit `Snapshot` (recommended) vs
   silent snapshot; snapshot depth; behavior on cycles.
 - **B6 — lattice placement.** Bare `object` as "any object";

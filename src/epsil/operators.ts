@@ -237,10 +237,19 @@ export const OPERATORS: OperatorDef[] = [
     kind: 'infix',
     relational: true,
   },
+  // The equality tiers are deliberately ASCII-only (user ruling
+  // 2026-08-13): the equivalence glyphs `≣`, `≡`, and `≢` have NO Epsil
+  // spelling and are rejected at the lexer as unrecognized characters. The
+  // bar counts of the glyphs cross the `=`-run lengths (`≡` has three bars,
+  // `≣` four, while `===` has three characters), so a reader transliterating
+  // visually lands on the wrong tier — and a wrong tier answers a DIFFERENT
+  // QUESTION silently (`===` is structural `Same`; the prover tier is
+  // `IdenticallyEqual`). The prover tier's only Epsil spelling is the call
+  // form `IdenticallyEqual(a, b)`; LaTeX keeps `\equiv`/`≡` (its own
+  // dictionary, unaffected). Do not re-add these glyphs.
   {
     name: 'Same',
     symbol: '===',
-    fancySymbol: '≣',
     precedence: 60,
     kind: 'infix',
     relational: true,

@@ -360,6 +360,19 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
     expect(
       serializeEpsil(['Equal', ['Multiply', 'x', 'y'], ['Add', 'a', 'b']])
     ).toMatchInlineSnapshot(`"x * y == a + b"`);
+    // The equality ladder: `===` is Same; the identity-prover tier has no
+    // operator spelling by design (the equivalence glyphs ≡/≢/≣ are
+    // rejected — see operators.ts), so IdenticallyEqual serializes in call
+    // form, which round-trips through the ordinary call syntax.
+    expect(serializeEpsil(['Same', 'a', 'b'])).toMatchInlineSnapshot(
+      `"a === b"`
+    );
+    expect(
+      serializeEpsil(['IdenticallyEqual', 'a', 'b'])
+    ).toMatchInlineSnapshot(`"IdenticallyEqual(a, b)"`);
+    expect(
+      serializeEpsil(['Not', ['IdenticallyEqual', 'a', 'b']])
+    ).toMatchInlineSnapshot(`"!IdenticallyEqual(a, b)"`);
     expect(
       serializeEpsil(['And', ['And', 'x', 'y'], ['Or', 'a', 'b']])
     ).toMatchInlineSnapshot(`"x && y && (a || b)"`);

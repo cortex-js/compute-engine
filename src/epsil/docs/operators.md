@@ -56,7 +56,7 @@ precedence (for example `+` and `-`, or `*` and `/`).
 | 40   | Or                    | `\|\|` | `⋁`   | infix  | left          |
 | 50   | And                   | `&&`   | `⋀`   | infix  | left          |
 | 60   | Equal                 | `==`   |       | infix  | n-ary chain   |
-| 60   | Same                  | `===`  | `≣`   | infix  | n-ary chain   |
+| 60   | Same                  | `===`  |       | infix  | n-ary chain   |
 | 60   | NotEqual              | `!=`   | `≠`   | infix  | n-ary chain   |
 | 60   | Less                  | `<`    |       | infix  | n-ary chain   |
 | 60   | Greater               | `>`    |       | infix  | n-ary chain   |
@@ -424,6 +424,14 @@ Three spellings, two meanings:
 
 - **`:=` always assigns.**
 - **`==` always compares** (and `===` is `Same`, structural identity).
+  A third comparison tier asks the prover whether the two sides are equal
+  for **every** value of their free variables:
+  `IdenticallyEqual(Sin(t)^2 + Cos(t)^2, 1)` is `True`, where `==` leaves
+  the equation as an inert condition. It is deliberately spelled as a call,
+  never as an operator — the equivalence glyphs `≡`, `≢`, and `≣` are
+  rejected outright, because their bar counts cross the `=`-run lengths
+  (`≡` has three bars, `≣` four) and a visual transliteration would
+  silently land on the wrong tier.
 - **`=` is positional.** It assigns when it is the top-level operator of a
   **statement** whose left side is a binding target — a name, or a field/index
   path rooted at one. Everywhere else it compares.

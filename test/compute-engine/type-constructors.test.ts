@@ -365,7 +365,7 @@ describe('EQUALITY (D9)', () => {
         .box(['Equal', ['foo', 1, 2], ['bar', 1, 2]])
         .evaluate()
         .toString()
-    ).toBe('foo(1, 2) === bar(1, 2)');
+    ).toBe('foo(1, 2) == bar(1, 2)');
   });
 });
 

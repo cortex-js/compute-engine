@@ -22,17 +22,17 @@ describe('Equal/NotEqual over an opaque operand and a list', () => {
 
   test('an undeclared head against a list does not recurse', () => {
     // The reported witness: one line, bare engine, no declarations.
-    expect(ce.parse('A(t) = [t]').evaluate().toString()).toBe('A(t) === [t]');
+    expect(ce.parse('A(t) = [t]').evaluate().toString()).toBe('A(t) == [t]');
   });
 
   test('a top-typed application against a list does not recurse', () => {
     ce.declare('q', '(number) -> unknown');
     expect(ce.box(['Equal', ['q', 2], ['List', 1, 2]]).evaluate().toString()).toBe(
-      'q(2) === [1,2]'
+      'q(2) == [1,2]'
     );
     expect(
       ce.box(['NotEqual', ['q', 2], ['List', 1, 2]]).evaluate().toString()
-    ).toBe('q(2) !== [1,2]');
+    ).toBe('q(2) != [1,2]');
   });
 
   test('the comparison stays INERT rather than claiming a mismatch', () => {
@@ -65,12 +65,12 @@ describe('Equal/NotEqual over an opaque operand and a list', () => {
     // A bare SYMBOL is deliberately not possibly-collection typed, so this
     // broadcasts at step 2 exactly as before.
     expect(ce.box(['Equal', 'x', ['List', 1, 2]]).evaluate().toString()).toBe(
-      '[x === 1,x === 2]'
+      '[x == 1,x == 2]'
     );
     // An application with a CONCRETE result type is not opaque either.
     expect(
       ce.box(['Equal', ['Sin', 't'], ['List', 't']]).evaluate().toString()
-    ).toBe('[sin(t) === t]');
+    ).toBe('[sin(t) == t]');
   });
 
   test('the inequality operators were never affected', () => {

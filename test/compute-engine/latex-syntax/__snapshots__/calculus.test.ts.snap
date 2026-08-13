@@ -163,7 +163,7 @@ exports[`EXOTIC INTEGRALS \\smallint 1`] = `
 
 exports[`INDEFINITE INTEGRAL INVALID index in denominator 1`] = `
 \\int\\!\\frac{3x}{5dx}=2
-int((3x) / (5d * x) dd  dx) === 2
+int((3x) / (5d * x) dd  dx) == 2
 [
   "Equal",
   [
@@ -182,7 +182,7 @@ int((3x) / (5d * x) dd  dx) === 2
 
 exports[`INDEFINITE INTEGRAL Index \\alpha 1`] = `
 \\int\\!\\alpha\\, \\mathrm{d}\\alpha+1=2
-int(alpha) + 1 === 2
+int(alpha) + 1 == 2
 [
   "Equal",
   [
@@ -196,7 +196,7 @@ int(alpha) + 1 === 2
 
 exports[`INDEFINITE INTEGRAL Index after delimiter 1`] = `
 \\int\\!x^2+3x\\, \\mathrm{d}x=2
-int(x^2 + 3x dx) === 2
+int(x^2 + 3x dx) == 2
 [
   "Equal",
   [
@@ -210,7 +210,7 @@ int(x^2 + 3x dx) === 2
 
 exports[`INDEFINITE INTEGRAL Index after implicit trig argument 1`] = `
 \\int\\!\\sin(x)\\, \\mathrm{d}x=2
-int(sin(x) dx) === 2
+int(sin(x) dx) == 2
 [
   "Equal",
   [
@@ -224,7 +224,7 @@ int(sin(x) dx) === 2
 
 exports[`INDEFINITE INTEGRAL Index in addition 1`] = `
 \\int\\!kx+3x\\, \\mathrm{d}x=2
-int(k * x + 3x dx) === 2
+int(k * x + 3x dx) == 2
 [
   "Equal",
   [
@@ -242,7 +242,7 @@ int(k * x + 3x dx) === 2
 
 exports[`INDEFINITE INTEGRAL Index in negate 1`] = `
 \\int\\!-x\\, \\mathrm{d}x=2
-int(-x dx) === 2
+int(-x dx) == 2
 [
   "Equal",
   [
@@ -256,7 +256,7 @@ int(-x dx) === 2
 
 exports[`INDEFINITE INTEGRAL Index in numerator 1`] = `
 \\int\\!\\frac{3x}{5}\\, \\mathrm{d}x=2
-int(3/5 * x dx) === 2
+int(3/5 * x dx) == 2
 [
   "Equal",
   [
@@ -270,7 +270,7 @@ int(3/5 * x dx) === 2
 
 exports[`INDEFINITE INTEGRAL Index in numerator with mathrm 1`] = `
 \\int\\!\\frac{3x}{5}\\, \\mathrm{d}x=2
-int(3/5 * x dx) === 2
+int(3/5 * x dx) == 2
 [
   "Equal",
   [
@@ -284,7 +284,7 @@ int(3/5 * x dx) === 2
 
 exports[`INDEFINITE INTEGRAL Index inside delimiter 1`] = `
 \\int\\!x^2+3x\\, \\mathrm{d}x=2
-int(x^2 + 3x dx) === 2
+int(x^2 + 3x dx) == 2
 [
   "Equal",
   [
@@ -298,7 +298,7 @@ int(x^2 + 3x dx) === 2
 
 exports[`INDEFINITE INTEGRAL Index with \\differentialD 1`] = `
 \\int\\!\\sin(x)\\, \\mathrm{d}x+1=2
-int(sin(x) dx) + 1 === 2
+int(sin(x) dx) + 1 == 2
 [
   "Equal",
   [
@@ -316,7 +316,7 @@ int(sin(x) dx) + 1 === 2
 
 exports[`INDEFINITE INTEGRAL Index with d 1`] = `
 \\int\\!\\sin(x)\\, \\mathrm{d}x+1=2
-int(sin(x) dx) + 1 === 2
+int(sin(x) dx) + 1 == 2
 [
   "Equal",
   [
@@ -334,7 +334,7 @@ int(sin(x) dx) + 1 === 2
 
 exports[`INDEFINITE INTEGRAL Index with mathrm 1`] = `
 \\int\\!\\sin(x)\\, \\mathrm{d}x+1=2
-int(sin(x) dx) + 1 === 2
+int(sin(x) dx) + 1 == 2
 [
   "Equal",
   [
@@ -352,7 +352,7 @@ int(sin(x) dx) + 1 === 2
 
 exports[`INDEFINITE INTEGRAL Index with operatorname 1`] = `
 \\int\\!\\sin(x)\\, \\mathrm{d}x+1=2
-int(sin(x) dx) + 1 === 2
+int(sin(x) dx) + 1 == 2
 [
   "Equal",
   [
@@ -370,7 +370,7 @@ int(sin(x) dx) + 1 === 2
 
 exports[`INDEFINITE INTEGRAL No index 1`] = `
 \\int\\!0+\\sin(x)+1=2
-int(0) + sin(x) + 1 === 2
+int(0) + sin(x) + 1 == 2
 [
   "Equal",
   [
@@ -399,7 +399,7 @@ int(f(t) dt)
 
 exports[`INDEFINITE INTEGRAL Spacing commands 1`] = `
 \\int\\!\\sin(x)\\, \\mathrm{d}x+1=2
-int(sin(x) dx) + 1 === 2
+int(sin(x) dx) + 1 == 2
 [
   "Equal",
   [
@@ -589,7 +589,7 @@ D(D(D((t) |-> y, t), t), t)
 
 exports[`REAL WORLD INTEGRALS Integral with non standard typesetting 1`] = `
 S_{t}=S_0+\\int_{t_{i}}^{t_{e}}\\!G-F\\, \\mathrm{d}t
-"S_t" === "S_0" + int_("t_i")^("t_e")(-F + G dt)
+"S_t" == "S_0" + int_("t_i")^("t_e")(-F + G dt)
 [
   "Equal",
   "S_t",

@@ -3669,15 +3669,15 @@ describe('Lambda application substitutes the element into an undetermined body',
   test('Map each() holds the body but substitutes the element value', () => {
     const e = ce.box(['Map', 'd', undeterminedFn]);
     expect([...e.each()].map((x) => x.toString())).toEqual([
-      'Which(1 === m, 1000000000, "True", 1)',
-      'Which(2 === m, 1000000000, "True", 2)',
-      'Which(3 === m, 1000000000, "True", 3)',
+      'Which(1 == m, 1000000000, "True", 1)',
+      'Which(2 == m, 1000000000, "True", 2)',
+      'Which(3 == m, 1000000000, "True", 3)',
     ]);
   });
 
   test('Map evaluate() holds the body but substitutes the element value', () => {
     expect(ce.box(['Map', 'd', undeterminedFn]).evaluate().toString()).toBe(
-      '[Which(1 === m, 1000000000, "True", 1),Which(2 === m, 1000000000, "True", 2),Which(3 === m, 1000000000, "True", 3)]'
+      '[Which(1 == m, 1000000000, "True", 1),Which(2 == m, 1000000000, "True", 2),Which(3 == m, 1000000000, "True", 3)]'
     );
   });
 
@@ -3687,22 +3687,22 @@ describe('Lambda application substitutes the element into an undetermined body',
         x.toString()
       )
     ).toEqual([
-      'Which(1 === m, 1000000000, "True", 1)',
-      'Which(2 === m, 1000000000, "True", 2)',
-      'Which(3 === m, 1000000000, "True", 3)',
+      'Which(1 == m, 1000000000, "True", 1)',
+      'Which(2 == m, 1000000000, "True", 2)',
+      'Which(3 == m, 1000000000, "True", 3)',
     ]);
   });
 
   test('direct Apply substitutes the argument into an undetermined body', () => {
     expect(ce.box(['Apply', undeterminedFn, 2]).evaluate().toString()).toBe(
-      'Which(2 === m, 1000000000, "True", 2)'
+      'Which(2 == m, 1000000000, "True", 2)'
     );
   });
 
   test('Filter shares the choke point: predicate sees the element value', () => {
     // The predicate below cannot decide (m is undetermined), so once the
-    // element value is substituted the applied predicate is `1 === m`, not the
-    // old, corrupted `k === m`. Filter surfaces the undetermined predicate as
+    // element value is substituted the applied predicate is `1 == m`, not the
+    // old, corrupted `k == m`. Filter surfaces the undetermined predicate as
     // an error rather than silently dropping the element.
     const undeterminedPred: Expression = ['Function', ['Equal', 'k', 'm'], 'k'];
     expect(() => [...ce.box(['Filter', 'd', undeterminedPred]).each()]).toThrow(

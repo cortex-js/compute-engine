@@ -15,7 +15,7 @@ describe('STYLE - MATH MODE', () => {
           "z"
         ]
       ]
-      eval-auto = x === y - z + 1
+      eval-auto = x == y - z + 1
     `);
   });
 
@@ -232,7 +232,7 @@ describe('MATH-MODE BOLD', () => {
     expect(check('\\bold{v} = \\begin{pmatrix} 5 \\\\ -3 \\end{pmatrix}'))
       .toMatchInlineSnapshot(`
       box       = ["Equal", "v_bold", ["Matrix", ["List", ["List", 5], ["List", -3]]]]
-      eval-auto = [["v_bold" === 5],["v_bold" === -3]]
+      eval-auto = [["v_bold" == 5],["v_bold" == -3]]
     `);
   });
 });
@@ -328,10 +328,10 @@ describe('MATH STYLE SWITCHES', () => {
         "a",
         ["Annotated", ["Rational", 1, 2], {dict: {mathStyle: "normal"}}]
       ]
-      eval-auto = a === 1/2
-      eval-mach = a === 1/2
-      N-auto    = a === 0.5
-      N-mach    = a === 0.5
+      eval-auto = a == 1/2
+      eval-mach = a == 1/2
+      N-auto    = a == 0.5
+      N-mach    = a == 0.5
     `);
   });
 

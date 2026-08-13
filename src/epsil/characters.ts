@@ -480,9 +480,13 @@ export const FANCY_UNICODE = new Map<number, string>([
   // [  0x2255,  '=:'], // EQUALS COLON
   [0x2237, '::'],
   [0x2260, '!='], // ≠ NOT EQUAL TO
-  [0x2261, '=='], // ≡ IDENTICAL TO	(==)
-  [0x2262, '!=='], // ≢	NOT IDENTICAL TO	!(==)
-  [0x2263, '==='], // ≣ STRICTLY EQUIVALENT TO
+  // The equivalence glyphs ≡ (U+2261 IDENTICAL TO), ≢ (U+2262), and
+  // ≣ (U+2263 STRICTLY EQUIVALENT TO) are DELIBERATELY absent (user ruling
+  // 2026-08-13): their bar counts cross the `=`-run lengths of the ASCII
+  // equality tiers, so a visual transliteration silently lands on the wrong
+  // tier. They lex as unrecognized characters and error loudly. The prover
+  // tier is spelled `IdenticallyEqual(a, b)`; `≠` above stays — it is
+  // unambiguous. See the matching note in `operators.ts`.
   [0x2a7d, '<='], // LESS-THAN OR SLANTED EQUAL TO
   [0x2a7e, '>='], // GREATER-THAN OR SLANTED EQUAL TO
   [0x2264, '<='],
