@@ -127,6 +127,23 @@ export class ExactNumericValue extends NumericValue {
     }
 
     if (typeof value === 'bigint') {
+      // Store a bigint that fits the safe-integer range as a MACHINE integer.
+      // This is the same normalization `reducedRational()` already applies
+      // (`numerics/rationals.ts`), and one exact integer must not have two
+      // storage forms: `numberToString()` compacts a bigint with more than
+      // five trailing zeros to an exponent (`1e+11`) while formatting the
+      // identical machine integer in full (`100000000000`), and
+      // `BoxedNumber.hash` hashes that string. Without this, `ce.box(1e11)`
+      // (machine) and `ce.parse("100\,000\,000\,000")` (bigint) were `isSame`
+      // yet hashed differently, breaking the documented `isSame ⇒ equal hash`
+      // contract. Reported by the Tycho team as item 178(b). Magnitudes beyond
+      // the safe range stay bigint, so bignum results keep their compact
+      // exponent form.
+      if (value <= BigInt(Number.MAX_SAFE_INTEGER) && value >= BigInt(Number.MIN_SAFE_INTEGER)) {
+        this.rational = [Number(value), 1];
+        this.radical = 1;
+        return;
+      }
       this.rational = [value, BigInt(1)];
       this.radical = 1;
       return;

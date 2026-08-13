@@ -24,6 +24,39 @@
   `docs/plans/2026-08-12-named-arguments-design.md` (spec:
   `docs/TYPE_SYSTEM_ROADMAP.md` Appendix C, rulings C1–C6).
 
+### Issues Resolved
+
+- **`.json` no longer reports a different operand order than the expression it
+  serializes** (Tycho item 178(d)). `.json` goes through the structural form,
+  which re-sorted a commutative operator's operands — but a CANONICAL
+  expression has already had its operands ordered, and that order is the one
+  `.ops`, `.toString()`, `isSame` and `hash` all read, so re-sorting could only
+  disagree with it. It did, because `order()` breaks a tie between two
+  same-operator applications on leaf count, and a complex literal is one atom
+  in canonical form (`i`) but a two-operand application in structural form
+  (`Complex(0, 1)`): the operands of `m(M_1, i, n)·m(M_2, n, j)` counted 6-vs-4
+  structurally where they counted 4-vs-4 canonically, so the tie broke the
+  other way and one object reported two different operand orders depending on
+  which accessor you asked. A canonical expression now keeps its own order;
+  a non-canonical one is still sorted, which is what puts it in structural form
+  at all. Four `arithmetic` snapshots record the corrected order — in each,
+  `.json` now matches `.ops` (`1.1 + 2 + 5 + 5/7 + 7/9 + √2 + π` serialized
+  `√2` before `1.1` while the tree held the reverse).
+
+- **An exact integer now has one storage form, so it hashes the same however it
+  was built** (Tycho item 178(b)). `ExactNumericValue` accepted an integer as
+  either a machine `number` or a `bigint` and kept whichever it was handed, but
+  `numberToString()` formats the two differently — a bigint with more than five
+  trailing zeros compacts to an exponent (`1e+11`) while the identical machine
+  integer prints in full (`100000000000`) — and `BoxedNumber.hash` hashes that
+  string. So `ce.box(100000000000)` and its own reparsed serialization were
+  `isSame` with byte-equal MathJSON yet hashed differently, breaking the
+  documented `isSame ⇒ equal hash` contract; any integer with more than five
+  trailing zeros was affected, `1000000` included. The constructor now applies
+  the same safe-integer normalization `reducedRational()` already used.
+  Magnitudes beyond the safe-integer range are untouched, so bignum results keep
+  their compact exponent form (`√(1234567e+19)` is unchanged).
+
 ## 0.105.0 _2026-08-12_
 
 ### Breaking Changes

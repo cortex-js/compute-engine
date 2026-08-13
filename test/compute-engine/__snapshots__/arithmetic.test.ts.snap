@@ -31,8 +31,8 @@ canonical = [
   ["Rational", 692, 77],
   1.5,
   1.7,
-  "Pi",
-  ["Multiply", 2, ["Sqrt", 5]]
+  ["Multiply", 2, ["Sqrt", 5]],
+  "Pi"
 ]
 simplify  = 16.6591489420125664058 + pi
 eval-auto = 19.8007415956023596443
@@ -177,7 +177,7 @@ box       = [
   ["Sqrt", 2],
   "Pi"
 ]
-canonical = ["Add", ["Rational", 535, 63], ["Sqrt", 2], 1.1, "Pi"]
+canonical = ["Add", ["Rational", 535, 63], 1.1, ["Sqrt", 2], "Pi"]
 simplify  = 11.0062770544365871123 + pi
 eval-auto = 14.1478697080263803508
 eval-mach = 14.147869708026379
@@ -192,7 +192,7 @@ box       = [
   ["Sqrt", 5],
   ["Sqrt", 7]
 ]
-canonical = ["Add", ["Rational", 1, 2], ["Sqrt", 5], ["Sqrt", 7], -2.12, 2.12]
+canonical = ["Add", ["Rational", 1, 2], -2.12, 2.12, ["Sqrt", 5], ["Sqrt", 7]]
 simplify  = 5.38181928856438028691
 eval-auto = 5.38181928856438028691
 eval-mach = 5.3818192885643805
@@ -763,7 +763,7 @@ box       = [
   ["Sqrt", 2],
   "Pi"
 ]
-canonical = ["Multiply", ["Rational", 50, 9], ["Sqrt", 2], 1.1, "Pi"]
+canonical = ["Multiply", 1.1, ["Rational", 50, 9], ["Sqrt", 2], "Pi"]
 simplify  = 8.64241621450224752045 * pi
 eval-auto = 27.1509512887455715095
 eval-mach = 27.15095128874557

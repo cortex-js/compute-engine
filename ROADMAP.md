@@ -89,6 +89,50 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### `isSame` and inferred type depend on the first boxing of a shape (defect)
+
+`ce.box(J).isSame(ce.box(J))` can be **false** — same engine, same
+MathJSON, byte-identical `.json` on both sides. The first boxing
+auto-declares a free symbol as a side effect, and during that first
+call an occurrence INSIDE a binder's scope binds to a scope-local
+declaration while a sibling occurrence outside binds to the enclosing
+scope; from the second boxing on, the name already exists and both
+resolve to it. So the first-ever boxing of a shape is structurally
+unequal to every later one. It needs a not-yet-declared symbol
+occurring both inside a binder's scope and outside it; pre-declaring
+the symbol removes it.
+
+Two consequences, and the second is the one with reach:
+
+1. It contradicts the documented contract that `.isSame()` is "an
+   unconditional equivalence relation, so it is safe as a
+   dedup/matching key" (`CLAUDE.md`). Measured false-negative-only —
+   no constructible false positive — so a cache keyed on it degrades
+   to a miss and a recompute rather than wrong reuse.
+2. **The inferred TYPE also moves**: the same expression with the same
+   assigned value types `finite_integer` on the first boxing and
+   `number` on every later one (a binder-free control is stable at
+   `finite_integer`). The FIRST boxing is the precise one; the settled
+   behaviour is the degraded one. Anything keyed on `.type` —
+   compile gating, broadcast decisions — can therefore depend on
+   boxing order.
+
+The fix must make the auto-declare target structural — independent of
+engine history — and the second acceptance criterion is that the
+inferred type be IDENTICAL across boxings, not that it be pinned to a
+particular value. (An earlier draft demanded the precise
+`finite_integer`; that was wrong. Inference is one-shot and
+order-sensitive by construction — with `x` declared `number`, boxing
+`x·v` before `v := 5` yields `number` while the reverse order yields
+`integer`, same value both ways — so `number` is what the model
+returns once a numeric use has been seen, not a degraded answer.)
+Both criteria, three candidate approaches, and an adjacent unfiled
+question about that general order-sensitivity are in
+[`docs/plans/2026-08-13-first-boxing-binding-divergence.md`](./docs/plans/2026-08-13-first-boxing-binding-divergence.md).
+(Reported by the Tycho project as items 178(a) and 178(c), two surfaces
+of this one defect; their siblings 178(b) and 178(d) are fixed and in
+`[Unreleased]`.)
+
 ### Named-argument calls — v1 residuals
 
 Named-argument calls shipped 2026-08-12 (design record:

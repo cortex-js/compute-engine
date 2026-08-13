@@ -741,17 +741,29 @@ export class BoxedFunction
           else ys.push(x);
         }
       }
-      return this.engine.function(
-        this._operator,
-        this.isValid ? sortOperands(this._operator, ys) : ys,
-        {
-          form: 'structural',
-          metadata: {
-            latex: this.verbatimLatex,
-            sourceOffsets: this.sourceOffsets,
-          },
-        }
-      );
+      // A CANONICAL expression has already had its commutative operands
+      // ordered, and that order is the one `.ops`, `isSame` and `hash` all
+      // read — so re-sorting here can only disagree with it. It did: `order()`
+      // breaks a tie between two same-operator applications on `getLeafCount`,
+      // and a complex literal is one atom canonically (`i`) but a two-operand
+      // application in structural form (`Complex(0, 1)`). So the structural
+      // operands of `m(M_1, i, n) · m(M_2, n, j)` counted 6-vs-4 where the
+      // canonical ones counted 4-vs-4, the tie broke the other way, and
+      // `.json` (which serializes through this form) reported an operand order
+      // that `.ops`/`isSame`/`hash` contradicted for the SAME object.
+      // Reported by the Tycho team as item 178(d). A non-canonical expression
+      // still gets sorted: that is what puts it in structural form at all.
+      const sorted =
+        this.isCanonical || !this.isValid
+          ? ys
+          : sortOperands(this._operator, ys);
+      return this.engine.function(this._operator, sorted, {
+        form: 'structural',
+        metadata: {
+          latex: this.verbatimLatex,
+          sourceOffsets: this.sourceOffsets,
+        },
+      });
     }
     return this.engine.function(
       this._operator,
