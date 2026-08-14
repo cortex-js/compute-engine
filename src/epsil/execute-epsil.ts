@@ -424,7 +424,7 @@ export function errorFrameChain(error: MathJsonExpression): string {
  * Narrow a RUNTIME error's source anchor from the whole statement down to the
  * frame that produced it, using the error's own `ErrorTrace` breadcrumb — the
  * difference between underlining all of
- * `s |> Map(_, _ |-> Length(Characters(s)))` and underlining the `s` inside
+ * `s |> Map(_ |-> Length(Characters(s)), _)` and underlining the `s` inside
  * `Characters(s)`. See `narrowToFrames()` for how a frame is matched onto the
  * source.
  */

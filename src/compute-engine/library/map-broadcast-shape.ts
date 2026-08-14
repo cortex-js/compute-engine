@@ -62,7 +62,7 @@ export interface LoweredLevel {
    *
    * The lowered path evaluates in the AMBIENT scope, so such an operand only
    * resolves while its defining frame is still current. A lazy `Map` returned
-   * from a function outlives that frame: `f(k) = Map([1,2], x ↦ x + k)` drained
+   * from a function outlives that frame: `f(k) = Map(x ↦ x + k, [1,2])` drained
    * by the caller resolved `k` to nothing and produced `[k+1, k+2]`. The
    * closure chain itself is intact (`captureClosures` rebinds the literal), so
    * the fix is for the drain to evaluate INSIDE it.

@@ -3,14 +3,14 @@
  * predicates shared by the two halves of the feature:
  *
  * - emission (`base-compiler.ts`): a bare built-in operator symbol in value
- *   position (`Map(xs, Sin)`, `CountIf(xs, IsPrime)`) is eta-expanded at its
+ *   position (`Map(Sin, xs)`, `CountIf(xs, IsPrime)`) is eta-expanded at its
  *   REQUIRED arity into `(p) ↦ Sin(p)` and emitted through the same
  *   shared-local machinery user functions use, instead of falling through to
  *   a dangling `_.Sin` that throws `_f is not a function` at run time. A
  *   built-in that cannot be expanded at all (variadic, zero-required) fails
  *   closed at COMPILE time instead;
  * - analysis (`cse.ts`): such an operand is no longer an OPAQUE callable, so
- *   an enclosing `Sum(Map(xs, Sin))` can be a CSE candidate.
+ *   an enclosing `Sum(Map(Sin, xs))` can be a CSE candidate.
  *
  * The two must agree: an operand that cannot be eta-expanded must never
  * become CSE-eligible, so {@link isPureBuiltinCallback} is defined in terms
@@ -73,7 +73,7 @@ export function builtinOperatorDefinition(
  *
  * An OPTIONAL tail does not disqualify: calling the operator with only its
  * required arguments is a valid application (the optionals default), which is
- * exactly what a callback site does — `Map(xs, Ln)` applies `Ln` unary — so
+ * exactly what a callback site does — `Map(Ln, xs)` applies `Ln` unary — so
  * the unary wrapper `(p) ↦ Ln(p)` is semantically exact.
  *
  * A VARIADIC tail (`Add`, `Less`) or a zero-required signature (`Random`,
@@ -101,7 +101,7 @@ export function builtinCallbackArity(
  * it does not eta-expand, rather than falling through to a free-symbol read?
  *
  * True for an engine-authored operator name — an un-expandable one there
- * (`Map(xs, Random)`) would otherwise emit `_.Random` and throw
+ * (`Map(Random, xs)`) would otherwise emit `_.Random` and throw
  * `_f is not a function` at run time.
  *
  * False for a single-uppercase-letter name (`D`, `N`): the engine's own

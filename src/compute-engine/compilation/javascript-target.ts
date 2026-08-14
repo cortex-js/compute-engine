@@ -1724,7 +1724,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Rest: (args, compile) => `(${collArg('Rest', args[0], compile)}).slice(1)`,
   Take: (args, compile) => {
     if (args[1] == null) throw new Error('Take: missing count');
-    // A statically infinite operand (`Take(Map(1..∞, f), n)`) compiles as a
+    // A statically infinite operand (`Take(Map(f, 1..∞), n)`) compiles as a
     // lazy stream, materialized here — the one place (with `TakeWhile`) an
     // infinite pipeline becomes finite. The count may be a runtime value;
     // `takeIter` normalizes it. A count that is STATICALLY non-finite
@@ -5976,7 +5976,7 @@ function clampedSliceCount(
  * `undefined` when the range is not one: the stop must be a literal `±∞`,
  * the start anything not statically non-finite (a literal or a runtime
  * value — the stream iterates from wherever it lands, so
- * `Take(Map(Range(n, ∞), f), 10)` with a declared `n` compiles), and the
+ * `Take(Map(f, Range(n, ∞)), 10)` with a declared `n` compiles), and the
  * step a literal finite number whose sign matches
  * the stop's direction (a 2-operand range implies step `±1`, following the
  * auto-descend convention). A sign-mismatched step (`Range(1, ∞, -2)`) is

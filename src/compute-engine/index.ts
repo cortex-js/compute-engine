@@ -1451,7 +1451,14 @@ export class ComputeEngine implements IComputeEngine {
     return this._runtimeState.iterationLimit;
   }
   set iterationLimit(t: number) {
+    if (t === this._runtimeState.iterationLimit) return;
     this._runtimeState.iterationLimit = t;
+    // The iteration limit is a global evaluation input: a collection count
+    // or element walk that gave up under the old limit
+    // (`iteration-limit-exceeded` → "unknown") can answer differently under
+    // the new one, and the facet/element memos key such answers on the
+    // world epoch. Same event, same reason as the `tolerance` setter.
+    this._noteStateEvent({ kind: 'config' });
   }
 
   /** Signal `recursion-depth-exceeded` when the recursion depth for this

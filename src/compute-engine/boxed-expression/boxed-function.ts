@@ -710,7 +710,7 @@ export class BoxedFunction
    * (`docs/EFFECTS-MODEL.md`, "Runtime counterpart"). No longer independently
    * computed — the projection is strictly more precise than the old
    * `def.pure && every operand pure` rule: it resolves a symbol operand through
-   * its binding (so `Map(xs, randomF)` is impure), and it stops at the two
+   * its binding (so `Map(randomF, xs)` is impure), and it stops at the two
    * boundaries where nothing is evaluated — a quote position (`Hold`) and a
    * `Function` literal, whose effects live on its own arrow. */
   get isPure(): boolean {
@@ -3009,8 +3009,8 @@ export class BoxedFunction
         // Hybrid laziness: past the eager threshold — or for a provably-finite
         // collection of unknown size (`Sin(Filter(…))`, whose count is
         // `undefined`; the eager zip would truncate it to one element) — return
-        // the lazy `Map` form (e.g. `Sin(Range(1,1e8))` → `Map(Range(1,1e8),
-        // Sin)`) instead of materializing every element. Operands whose
+        // the lazy `Map` form (e.g. `Sin(Range(1,1e8))` → `Map(Sin,
+        // Range(1,1e8))`) instead of materializing every element. Operands whose
         // collection-ness or size only resolves at evaluation (a symbolic-length
         // `Range`, an infinite `Cycle`) are not finite-reported here and are left
         // to the post-evaluation broadcast (step 4b) once their count is known.
@@ -3940,7 +3940,7 @@ function withBroadcastThrowContext(
  * *expression* in every cell, so an impure scalar was drawn per element:
  * `L < Random()` produced a different number for each comparison, while the
  * arithmetic broadcast (`L + Random()`) had always drawn once. A per-cell draw
- * is written explicitly instead: `Map(L, l ↦ l < Random())`.
+ * is written explicitly instead: `Map(l ↦ l < Random(), L)`.
  *
  * Cell-supplying operands are left untouched — their elements ARE the values
  * being traversed, so `[Random(), Random()]` still draws per cell. Evaluation

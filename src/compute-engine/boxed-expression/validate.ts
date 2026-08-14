@@ -460,7 +460,7 @@ export function checkNumericArgs(
         // the whole collection at parse time (item 16: `\frac{[1...1e8]}{2}`
         // hung `ce.parse`). Skip the walk for ANY lazy collection: the
         // materialization cost is O(size) and does NOT depend on free variables,
-        // so a lazy source with a free variable (`Map(Range(1,2e5), x ↦ x+k)`)
+        // so a lazy source with a free variable (`Map(x ↦ x+k, Range(1,2e5))`)
         // must be skipped just like a variable-free `Range` — walking it just to
         // run element inferences that narrow nothing (`k` stays `unknown`) is
         // pure overhead. Element validation/inference is deferred to evaluate

@@ -276,7 +276,7 @@ export function makeSpineRunner(
             // auto-declared into the inner scope too, so pushing the body
             // scope makes that valueless shadow win over the binding that
             // actually holds the value, and the element comes back symbolic
-            // (Tycho item 160: `Min(Map(L, k ↦ Max(Map(M, j ↦ j·k))))`
+            // (Tycho item 160: `Min(Map(k ↦ Max(Map(j ↦ j·k, M)), L))`
             // evaluated to `Min(Max(k, 3k), …)` with `k` free). This mirrors
             // the general route, which pushes `freshScope` and reaches the
             // closure chain through its parent — `bodyScope` is never in

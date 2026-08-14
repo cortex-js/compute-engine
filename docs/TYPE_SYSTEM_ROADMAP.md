@@ -2327,7 +2327,7 @@ own short ruling list —
   v1 — a callback that only *constructs* objects, or mutates an
   unrelated one, takes the snapshot path unnecessarily; per-argument
   effect precision is the recorded refinement that would sharpen the
-  fork. Results stay immutable: `Map(array, f)` yields a `list`
+  fork. Results stay immutable: `Map(f, array)` yields a `list`
   (`ArrayFrom` converts back when wanted).
 - **Growth and mutation API.** `a[i] = v` as a primitive indexed
   store, plus in-place `Push`/`Pop`/`Insert`/`RemoveAt` — every one

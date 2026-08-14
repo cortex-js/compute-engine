@@ -122,7 +122,7 @@ cell of a returned `List`/`Tuple`; a view that BINDS its own variables, such
 as a `Comprehension`, counts here too — its body is the lambda, spelled
 without a `Function` node), and `Hold` content (inert until
 `Release`, under whatever frame is active then). A lazy view beneath a
-**surviving eager consumer** (`ListFrom(Map(range, x ↦ Random()))` whose
+**surviving eager consumer** (`ListFrom(Map(x ↦ Random(), range))` whose
 length has not resolved) is the opposite case: the materialization was asked
 for *inside* the frame, so its draws are owed and the frame is kept. A body
 that evaluates to a structured error passes the error through (§5: an error
@@ -385,7 +385,7 @@ is free to *not* evaluate what it can prove it does not need, and in every such
 case the counter does not advance:
 
 - a branch not taken — `If(c, Random(), 0)` when `c` is false;
-- a lazy view never materialized — `Map(xs, x |-> Random())` that nobody
+- a lazy view never materialized — `Map(x |-> Random(), xs)` that nobody
   consumes (§6);
 - a wrapper erased at **canonicalization** — `Count(RandomShuffle(xs))`
   canonicalizes to `Count(xs)`, because a count-preserving wrapper cannot change
@@ -403,7 +403,7 @@ before it ever runs; draw explicitly (`Random()`, or a fresh frame) instead.
 **Ruling (2026-07-25): draws happen at materialization, from whatever frame is
 active *then*.**
 
-`Map(xs, …).evaluate()` is a lazy view; its body draws when elements are
+`Map(…, xs).evaluate()` is a lazy view; its body draws when elements are
 actually produced. A view created inside a frame but materialized after the
 frame has exited draws from whatever frame is active at that later moment. This
 is dynamic scoping applied consistently, not a defect.
@@ -411,11 +411,11 @@ is dynamic scoping applied consistently, not a defect.
 A caller who wants framed values therefore **materializes inside the frame**:
 
 ```
-WithRandomSeed(1, ListFrom(Map(Range(1, 3), x |-> Random())))   // replays
-WithRandomSeed(1, At(Map(Range(1, 3), x |-> Random()), 1))      // replays
-WithRandomSeed(1, Sum(Map(Range(1, 3), x |-> Random())))        // replays
+WithRandomSeed(1, ListFrom(Map(x |-> Random(), Range(1, 3))))   // replays
+WithRandomSeed(1, At(Map(x |-> Random(), Range(1, 3)), 1))      // replays
+WithRandomSeed(1, Sum(Map(x |-> Random(), Range(1, 3))))        // replays
 
-ListFrom(WithRandomSeed(1, Map(Range(1, 3), x |-> Random())))   // LIVE draws:
+ListFrom(WithRandomSeed(1, Map(x |-> Random(), Range(1, 3))))   // LIVE draws:
                                                     // the view escaped the frame
 ```
 

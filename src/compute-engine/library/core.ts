@@ -481,7 +481,7 @@ function hasPendingImpureApplication(
     // the definition says the position does not invoke: `invokesAt` defaults
     // TRUE for a missing map index, and an unresolved head has no definition
     // at all, so both fall through to the conservative descend — which is
-    // what keeps the item-104 case (`ListFrom(Map(u, x ↦ Random()))`) pinned.
+    // what keeps the item-104 case (`ListFrom(Map(x ↦ Random(), u))`) pinned.
     if (def?.invokesAt(i) === false && isFunction(op, 'Function')) return false;
     return hasPendingImpureApplication(op, under);
   });

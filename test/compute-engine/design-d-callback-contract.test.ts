@@ -1267,15 +1267,19 @@ describe('phase 3: `Map` — the callback-first signature', () => {
   });
 
   it('displays the GROUND form (R-D5), with the §13 arity delta', () => {
-    // NOT byte-identical to the pre-conversion string, which was
-    // `(mapping: function, collection+) -> indexed_collection`: that spelling
-    // was the parser's HOIST of `(collection+, mapping: function)` — it named
-    // operand 0 the mapping, the artifact §2 recorded as "declares but does
-    // not apply". The ground form now names operand 0 the collection, which is
-    // what `Map(xs, f)` actually passes there. Still no narrowing claim: every
-    // slot reads `function`/`collection`, and the tail keeps the
-    // multi-collection form admitted (`*`, not `+`, so the unary form is not
-    // made to look invalid).
+    // The ground form is the DECLARED signature with its callback type
+    // erased to the bare `function` primitive and its type variables
+    // dropped. Operand 0 is the mapping in both, which is what `Map(f, xs)`
+    // passes there.
+    //
+    // Before the argument-order flip these two disagreed: the signature
+    // declared `(collection+, mapping: function)` while the parser HOISTED
+    // the mapping into display position 0 — the drift the artifact §2
+    // recorded as "declares but does not apply". Callback-first removed the
+    // hoist, so declaration and display now agree on operand order and the
+    // erasure is the only difference between them. Still no narrowing
+    // claim: every slot reads `function`/`collection`, and the tail keeps
+    // the multi-collection form admitted.
     const ce = new ComputeEngine();
     expect(ce.box('Map').type.toString()).toBe(DISPLAY);
     expect(ce.function('Signature', [ce.symbol('Map')]).evaluate().string).toBe(

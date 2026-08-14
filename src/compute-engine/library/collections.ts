@@ -305,7 +305,7 @@ const APPEND_SIGNATURE = parseType('(collection, value+) -> collection');
 // arithmetic (`div`/`mul`) the moment it participates in a computation. The
 // lazy-broadcast machinery hits exactly this: `mod(L, N)` over a
 // declared-`unknown` symbol `L` holding a >100-element `List` builds
-// `Map(L, …)` over the SYMBOL, whose static type is `unknown` even though its
+// `Map(…, L)` over the SYMBOL, whose static type is `unknown` even though its
 // value is a collection. Mirrors the free-variable leniency of the
 // signature-validation path in `box.ts` (an operand whose type is provisional
 // may satisfy the parameter at runtime).
@@ -596,8 +596,8 @@ function iterateArgs(
  * (`UnicodeScalars(s)`). Iteration already copes — the iterator evaluates once
  * and iterates the result — but `count`/`isEmptyCollection`/
  * `isFiniteCollection`/`at` all report `undefined` for such an operand, which
- * stalls `materialize()` and leaves the whole `Map` symbolic: `Map(X - 1, f)`
- * stayed unevaluated while `Map(X, f)` and `Map([0,1,2], f)` did not.
+ * stalls `materialize()` and leaves the whole `Map` symbolic: `Map(f, X - 1)`
+ * stayed unevaluated while `Map(f, X)` and `Map(f, [0,1,2])` did not.
  *
  * Every other lazy collection operator answers those predicates from its own
  * iterator (`Filter`, `Drop`, `Rest`, …, all of which already handle a
@@ -687,7 +687,7 @@ function componentResultType(
 // Build the result type of `Map`: a collection with the same shape and
 // indexed-ness as the `source` collection, but whose elements are the
 // mapping lambda's result type (`elementType`) — not the source element
-// type. `Map(Range(1,3), k |-> k + i)` is thus `indexed_collection<complex>`,
+// type. `Map(k |-> k + i, Range(1,3))` is thus `indexed_collection<complex>`,
 // not `indexed_collection<integer>`.
 function mapResultType(
   source: Readonly<Type>,
@@ -1183,7 +1183,7 @@ function pointComponentType(
 }
 
 // Project a coordinate straight out of the LAZY point-list transpose form —
-// `Map(s1, …, sk, (p1, …, pk) ↦ Tuple(…))` as built by `lazyBroadcastMap` for
+// `Map((p1, …, pk) ↦ Tuple(…), s1, …, sk)` as built by `lazyBroadcastMap` for
 // a large `PointList` — returning the source collection the projected slot
 // binds to. `PointX(PointList(a, b, c))` is then just `a`: no per-element
 // Tuple construction and `At` extraction on drain (Tycho item 52). Sound only
@@ -2721,7 +2721,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) => {
       // Source type for shape propagation. When the source's STATIC type is
       // indeterminate (a declared-`unknown` symbol holding a collection
-      // value — the lazy-broadcast `Map(L, …)` shape), fall back to its
+      // value — the lazy-broadcast `Map(…, L)` shape), fall back to its
       // value-aware indexed-ness so the Map types `indexed_collection<T>`
       // rather than shedding indexed-ness to `collection<T>`.
       const sourceType = (x: Expression): Type => {

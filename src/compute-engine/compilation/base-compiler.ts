@@ -1158,7 +1158,7 @@ export class BaseCompiler {
    * and the raw spellings). Such a node must never constant-fold — see the
    * call site in `tryConstantFold`. The body/collection operand (`ops[0]`) is
    * deliberately not scanned at this node: an `∞` there belongs to a bounded
-   * lazy pipeline (`Take(Map(1..∞, f), n)`), which evaluates finitely — but
+   * lazy pipeline (`Take(Map(f, 1..∞), n)`), which evaluates finitely — but
    * it IS recursed into, so a nested unbounded big op inside it still trips.
    */
   private static containsUnboundedBigOp(expr: Expression): boolean {
@@ -1499,13 +1499,13 @@ export class BaseCompiler {
       // `CompileTarget.varsObjectRefs`), and the lambda route refuses a body
       // holding any. The two function-value routes below never emit that
       // reference, so the record has to be rolled back when one of them
-      // answers — otherwise `t ↦ Sum(Map(xs, Sin))` is refused for a
+      // answers — otherwise `t ↦ Sum(Map(Sin, xs))` is refused for a
       // "dangling" `Sin` the artifact does not contain. Only a record THIS
       // resolution introduced is removed.
       const hadVarsRef = target.varsObjectRefs?.has(s) === true;
       const resolved = target.var?.(s);
       // A bare symbol naming a user-defined function, used in value position (a
-      // higher-order operand such as `Map(list, f)` / `Filter(list, f)`),
+      // higher-order operand such as `Map(f, list)` / `Filter(list, f)`),
       // resolves to the shared emitted local `_fn_f` — the same definition the
       // call-site path emits — rather than a dangling `_.f`. But two kinds of
       // symbol must NOT be captured this way, or a same-named user function
@@ -1549,7 +1549,7 @@ export class BaseCompiler {
         // `lookupDefinition` on every occurrence during this compile.
         (registry.misses ??= new Set()).add(s);
       }
-      // A bare BUILT-IN operator symbol in value position (`Map(xs, Sin)`,
+      // A bare BUILT-IN operator symbol in value position (`Map(Sin, xs)`,
       // `CountIf(xs, IsPrime)`) is eta-expanded into `(p) ↦ Sin(p)` and
       // emitted through the SAME shared-local machinery user functions use.
       // Without this it fell through to the free-symbol read `_.Sin` and the
@@ -7894,7 +7894,7 @@ export class BaseCompiler {
    * once into `registry.defs` as a named local function (`const _fn_h = …`) and
    * return that local name — so both the call-site path
    * (`tryCompileUserFunction`) and the value-position path (a bare symbol used
-   * as a higher-order operand, e.g. `Map(list, h)`) reference the *same* shared
+   * as a higher-order operand, e.g. `Map(h, list)`) reference the *same* shared
    * local rather than inlining or emitting a dangling identifier.
    *
    * Returns `undefined` when `h` is not a user function or the target opts out
@@ -8082,7 +8082,7 @@ export class BaseCompiler {
    * If `s` names an eta-expandable BUILT-IN operator, synthesize the wrapper
    * `(p₁ … pₙ) ↦ s(p₁ … pₙ)`, emit it once into `target.userFunctions.defs`
    * and return that shared local name — so a built-in operator name used as a
-   * higher-order operand (`Map(xs, Sin)`, `CountIf(xs, IsPrime)`) is a real
+   * higher-order operand (`Map(Sin, xs)`, `CountIf(xs, IsPrime)`) is a real
    * function VALUE rather than a dangling `_.Sin`.
    *
    * Eligibility (both halves in `builtin-callback.ts`, shared with the CSE
@@ -8964,7 +8964,7 @@ export class BaseCompiler {
           return;
         }
         // A bare symbol naming a user-defined function, used in value position
-        // (a higher-order operand like `Map(list, f)`), is lowered to the
+        // (a higher-order operand like `Map(f, list)`), is lowered to the
         // shared emitted local `_fn_f` — not a free input. Descend into its
         // body (parameters bound) to surface transitively referenced free
         // symbols; guard against recursion. Mirrors the value-position codegen

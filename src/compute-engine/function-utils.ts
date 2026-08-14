@@ -661,9 +661,9 @@ export function canonicalFunctionLiteralArguments(
   // bound before the literal was built keeps those bindings — and its
   // parameter occurrences then denote whatever the enclosing scope had, not
   // this literal's parameters. The shorthand route does exactly that: `Pipe`
-  // is lazy and takes `.canonical` of its right operand, so `x |> Map(_, f)`
-  // binds `_1` in the CALLER's scope before `Map(_1, f)` is wrapped into
-  // `(_1) ↦ Map(_1, f)`. The parameter then looks like a free variable, and
+  // is lazy and takes `.canonical` of its right operand, so `x |> Map(f, _)`
+  // binds `_1` in the CALLER's scope before `Map(f, _1)` is wrapped into
+  // `(_1) ↦ Map(f, _1)`. The parameter then looks like a free variable, and
   // anything keyed on binding — the post-evaluation substitution in
   // `makeLambda`, symbol equality — cannot see it is the parameter.
   //
@@ -1448,11 +1448,11 @@ export const WILDCARD_SYMBOLS = [
  * (`_`, `_1`…`_9`) bound to FRESH, valueless locals.
  *
  * `Pipe` is lazy, so it canonicalizes its held right operand in the CALLER's
- * scope — before `canonicalFunctionLiteral` wraps `Map(_1, f)` into
- * `(_1) ↦ Map(_1, f)`. A placeholder is a parameter of that literal and must
+ * scope — before `canonicalFunctionLiteral` wraps `Map(f, _1)` into
+ * `(_1) ↦ Map(f, _1)`. A placeholder is a parameter of that literal and must
  * shadow a same-named global, in particular its VALUE: with a global
  * `_1 := 7`, `Map`'s canonical handler saw a non-collection source operand,
- * declined (`checkCollectionOperand`), and `[1,2,3] |> Map(_1, k ↦ k²)`
+ * declined (`checkCollectionOperand`), and `[1,2,3] |> Map(k ↦ k², _1)`
  * returned an unevaluated `Map`.
  *
  * The placeholders are PRE-DECLARED in a throwaway scope rather than left to

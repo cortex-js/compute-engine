@@ -5818,7 +5818,7 @@ export class Parser {
    *    particular it triggers the implicit `Map` over a collection topic; see
    *    the `Pipe` definition in `library/core.ts`). A function CALL is
    *    deliberately NOT wrapped: there `_` is the pipeline-topic placeholder
-   *    (`Take(_, 10)`, `Map(_, _^2)`), bound to the piped value by the
+   *    (`Take(_, 10)`, `Map(_^2, _)`), bound to the piped value by the
    *    existing shorthand machinery. The call-vs-operator split is a SURFACE
    *    distinction — `Power(_, 2)` and `Take(_, 10)` are structurally alike
    *    in MathJSON — so it is decided here in the parser; the `ce.box()`

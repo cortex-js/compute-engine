@@ -105,7 +105,7 @@ describe('a computed collection operand broadcasts element-wise', () => {
 
 describe('ruling 1 — broadcast operands are evaluated ONCE', () => {
   // `L < Random()` draws ONE number and compares every cell against it. A
-  // per-cell draw is written explicitly: `Map(L, l ↦ l < Random())`.
+  // per-cell draw is written explicitly: `Map(l ↦ l < Random(), L)`.
   const cells = ['List', 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
 
   test('an impure scalar operand is drawn once (compiled)', () => {

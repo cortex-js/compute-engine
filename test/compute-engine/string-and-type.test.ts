@@ -239,6 +239,47 @@ describe('StringSplit splits a string into substrings', () => {
       'Error'
     );
   });
+
+  test('an empty separator splits into grapheme clusters, never UTF-16 units', () => {
+    // Regression: JS `split('')` cuts between UTF-16 code units, shattering
+    // surrogate pairs into lone `�`-rendering halves. An empty separator
+    // means "split into user-perceived characters" (docs/STRING_ROADMAP.md,
+    // ruling 2026-08-14). The rainbow flag (flag + VS16 + ZWJ + rainbow) is
+    // one grapheme cluster containing two surrogate pairs.
+    const ce = new ComputeEngine();
+    expect(split(ce, { str: 'a🏳️‍🌈b' }, { str: '' })).toEqual([
+      'a',
+      '🏳️‍🌈',
+      'b',
+    ]);
+    expect(split(ce, { str: '' }, { str: '' })).toEqual([]);
+  });
+});
+
+describe('IntegerString preserves the sign', () => {
+  // Regression: the handler used to take the absolute value, so
+  // `IntegerString(-42)` was `"42"` and the `DigitsFrom` round-trip broke
+  // for negative integers (docs/STRING_ROADMAP.md, ruling 2026-08-14).
+  const intString = (ce: ComputeEngine, ...ops: any[]): string =>
+    ce
+      .box(['IntegerString', ...ops])
+      .evaluate()
+      .string!;
+
+  test('negative integers keep their sign in base 10 and other bases', () => {
+    const ce = new ComputeEngine();
+    expect(intString(ce, -42)).toBe('-42');
+    expect(intString(ce, 42)).toBe('42');
+    expect(intString(ce, -42, 16)).toBe('-2a');
+  });
+
+  test('DigitsFrom(IntegerString(n)) round-trips a negative integer', () => {
+    const ce = new ComputeEngine();
+    const roundTrip = ce
+      .box(['DigitsFrom', ['IntegerString', -42]])
+      .evaluate();
+    expect(roundTrip.re).toBe(-42);
+  });
 });
 
 describe('Type operator reports the canonical type without evaluating', () => {

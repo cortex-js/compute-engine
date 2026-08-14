@@ -275,7 +275,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /** Per operand position (0-based), the effects this operator ABSORBS rather
    * than re-emits — `WithRandomSeed`'s `{ 1: ['random'] }` on its held body.
    * `undefined` (the default) discharges nothing, which is the sound default:
-   * propagation is what gives `Map(xs, f)` per-call-site precision. */
+   * propagation is what gives `Map(f, xs)` per-call-site precision. */
   discharges:
     | { readonly [operandIndex: number]: readonly EffectLabel[] }
     | undefined = undefined;

@@ -358,7 +358,7 @@ export interface CseHarvestOptions {
    *
    * The flag additionally relaxes the opaque-callable-operand gate for a
    * bare-symbol callback that resolves to an ADMISSIBLE pure user-function
-   * literal (`Map(xs, f)`), so such an application is no longer excluded on
+   * literal (`Map(f, xs)`), so such an application is no longer excluded on
    * account of its callback alone. Built-in operator names stay opaque.
    */
   readonly admitPureUserFunctions?: boolean;
@@ -1053,7 +1053,7 @@ class Harvester {
    * - an application whose operator position is not a fixed built-in;
    * - an application with a function-valued operand that is not an inline
    *   `Function` literal (a named callback is invisible to purity inference,
-   *   so `Map(xs, f)` can report pure while `f` draws).
+   *   so `Map(f, xs)` can report pure while `f` draws).
    *
    * Bottom-up and memoized per node object.
    */
@@ -1336,7 +1336,7 @@ class Harvester {
    * operand, never from an operator list.
    *
    * The type is authoritative when it is known; a HELD operand of a lazy
-   * operator may arrive with a `unknown` type (`Map(xs, f)` holds `f`
+   * operator may arrive with a `unknown` type (`Map(f, xs)` holds `f`
    * unbound), so a bare symbol also consults the engine definition.
    */
   private isOpaqueCallableOperand(operand: Expression): boolean {
@@ -1364,7 +1364,7 @@ class Harvester {
     // invisible where the harvest admits pure user functions: the same
     // transitive gate applied to a call site (`isAdmissibleUserFnCallee` —
     // fresh per-level `body.isPure` plus the emission-purity scan) answers
-    // "what does `f` do?" for `Map(xs, f)` too, and G1 (`node.isPure`) still
+    // "what does `f` do?" for `Map(f, xs)` too, and G1 (`node.isPure`) still
     // gates the whole application. Tested BEFORE the type gate below: a
     // DECLARED callback (`CountIf(xs, p)` with `p: (number) -> boolean`)
     // carries a function-matching type on the operand node itself, which
@@ -1384,7 +1384,7 @@ class Harvester {
     )
       return false;
 
-    // A callback naming a PURE BUILT-IN operator (`Map(xs, Sin)`,
+    // A callback naming a PURE BUILT-IN operator (`Map(Sin, xs)`,
     // `CountIf(xs, IsPrime)`) is likewise no longer invisible: the compiler
     // eta-expands it into `(p) ↦ Sin(p)` and emits it as a shared local
     // (`BaseCompiler.ensureBuiltinCallbackEmitted`), so what it does is

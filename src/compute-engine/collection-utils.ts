@@ -78,7 +78,7 @@ export function isFiniteIndexedCollection(col: Expression): boolean {
  * the result away, so an eager IMPURE producer (`RandomShuffle`) runs one
  * extra time. That is a pre-existing property of these paths rather than
  * something this predicate introduced: counting handler invocations for a
- * 5-element source, `Map(RandomShuffle(xs), f)` — which never reaches this
+ * 5-element source, `Map(f, RandomShuffle(xs))` — which never reaches this
  * function — evaluates the shuffle **8** times, `Filter(RandomShuffle(xs), p)`
  * 5 (of which this contributes 1), `Any(…)` 2. The results stay correct (a
  * filtered shuffle is still a filtered shuffle); what is not reproducible is
@@ -988,7 +988,7 @@ export function broadcastOverIndexedCollections(
 
   // Hybrid laziness (OPT-IN via `allowLazy`): past the eager threshold, return
   // the lazy `Map` form instead of materializing the whole result. `Add(Range(
-  // 1,1e8), 1)` becomes `Map(Range(1,1e8), _1 ↦ Add(_1, 1))` — consumable via
+  // 1,1e8), 1)` becomes `Map(_1 ↦ Add(_1, 1), Range(1,1e8))` — consumable via
   // `at`/`Take`/`count` without building 1e8 elements. Below/at the threshold
   // the eager loop below runs unchanged, so small collections stay
   // byte-identical. Callers that require an eager `List` shape at any finite
@@ -1036,9 +1036,9 @@ export function broadcastOverIndexedCollections(
  * Every broadcast operand becomes a source collection of the `Map` and a fresh,
  * non-capturing parameter in the mapping-function body; every other operand
  * (scalars, tuples) is spliced whole into the body. So:
- * - `Add(Range(1,N), 1)` → `Map(Range(1,N), _1 ↦ Add(_1, 1))`
- * - `Add(Range(1,N), Range(1,N))` → `Map(Range(1,N), Range(1,N), (_1,_2) ↦ Add(_1,_2))`
- * - `Multiply(Range(1,N), Tuple(2,3))` → `Map(Range(1,N), _1 ↦ Multiply(_1, Tuple(2,3)))`
+ * - `Add(Range(1,N), 1)` → `Map(_1 ↦ Add(_1, 1), Range(1,N))`
+ * - `Add(Range(1,N), Range(1,N))` → `Map((_1,_2) ↦ Add(_1,_2), Range(1,N), Range(1,N))`
+ * - `Multiply(Range(1,N), Tuple(2,3))` → `Map(_1 ↦ Multiply(_1, Tuple(2,3)), Range(1,N))`
  *
  * The mapping function is a proper canonical `Function` literal (position-bound
  * by `Map`), so the shortest-input / `at` / `count` / lazy-iterator semantics of

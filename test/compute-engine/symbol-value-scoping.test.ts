@@ -303,8 +303,8 @@ describe('SPEC: named-parameter rebind', () => {
     // before the literal existed keeps the bindings it was canonicalized
     // against — and its parameter occurrences then denote whatever the
     // enclosing scope had. `Pipe` does exactly this: it is lazy and takes
-    // `.canonical` of its right operand, so `x |> Map(_, f)` binds `_1` in the
-    // CALLER's scope before `Map(_1, f)` is wrapped into `(_1) ↦ Map(_1, f)`.
+    // `.canonical` of its right operand, so `x |> Map(f, _)` binds `_1` in the
+    // CALLER's scope before `Map(f, _1)` is wrapped into `(_1) ↦ Map(f, _1)`.
     // `rebindParameters` repairs it — for NAMED parameters as well as for the
     // anonymous placeholders it was originally restricted to.
     const ce = engine();

@@ -942,7 +942,7 @@ class Walker {
   /**
    * PROJECTION of a callback passed as an OPERAND of an applied head.
    *
-   * Worked example 1, the headline case: "the literal `(xs) ↦ Map(xs, f)` has
+   * Worked example 1, the headline case: "the literal `(xs) ↦ Map(f, xs)` has
    * type `(list) random -> list` — the application's effects, stamped onto the
    * enclosing literal's own arrow by the static walk". The body adds a
    * callback's effects where it "APPLIES (or **projects**)" it, and handing `f`

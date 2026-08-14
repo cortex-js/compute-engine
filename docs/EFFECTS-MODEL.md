@@ -129,7 +129,7 @@ failing closed on impure seeds/endpoints (`compilation/gpu-target.ts`); and
 
 Three known holes, each addressed below:
 
-1. **Named callbacks are invisible** — `Map(xs, f)` with `f` bound to an
+1. **Named callbacks are invisible** — `Map(f, xs)` with `f` bound to an
    impure function reports pure: bare symbols are always pure and neither
    the `isPure` conjunction nor the pending-draw walk resolves through the
    binding. (→ "Projection and discharge", including its label-aware
@@ -166,7 +166,7 @@ pure, by the noise-floor convention below):
 
 A fourth fact about the frame stream is not a shape but a **boundary**: a
 frame contains only the draws made during its dynamic extent. A lazy view
-whose element work draws — `Map(xs, x ↦ Random())`, a `Comprehension` body
+whose element work draws — `Map(x ↦ Random(), xs)`, a `Comprehension` body
 — is a *completed value* that leaves the frame and draws at materialization
 (`RANDOMNESS-MODEL.md` §6). The `random` label therefore survives
 `WithRandomSeed` for such a body: see the frame-escape bullet under
@@ -647,12 +647,12 @@ Epsil grammars). Rejected for three reasons, the first decisive:
    carries exactly the right intuition (Swift's).
 
 **The `function` primitive.** The bare primitive type `function` (used
-today by e.g. `Map: '(collection, function) -> list'`) is
+today by e.g. `Iterate: '(function, initial: any?) -> list'`) is
 shape-unconstrained and **effect-top as a bound**: any callable of any
 arity and any effect set satisfies it. It is not replaced by a variadic
 signature (contravariance would reject fixed-arity callbacks). Projection
 is unaffected by the looseness of the bound — it always reads the *actual*
-operand's signature, so `Map(xs, pureF)` is still computed pure.
+operand's signature, so `Map(pureF, xs)` is still computed pure.
 
 `!` and `&` are taken in the type grammar (negation, intersection); the
 specifier slot is positionally isolated from both, so no collision
@@ -749,7 +749,7 @@ The **contribution** of operand `aᵢ` separates *producing* the operand from
   evaluation (default `{any}`).
 - Each position may declare a **discharge set** ⊆ its bound: effects the
   operator absorbs rather than re-emits. Default: **discharge nothing** —
-  propagation is the sound default and what gives `Map(xs, f)`
+  propagation is the sound default and what gives `Map(f, xs)`
   per-call-site precision.
 
 `WithRandomSeed` — specified fully, as the canonical discharger:
@@ -765,7 +765,7 @@ The **contribution** of operand `aᵢ` separates *producing* the operand from
 - **The `random` discharge stops at a frame ESCAPE** *(direction A, ruled
   2026-08-02, Tycho item 142)*. A frame contains only the draws made during
   its **dynamic extent**. A body that provably evaluates to a *lazy drawing
-  view* — `WithRandomSeed(42, Map(xs, x ↦ Random()))`, and equally the
+  view* — `WithRandomSeed(42, Map(x ↦ Random(), xs))`, and equally the
   `Comprehension` the `[… for k = …]` syntax parses to — is a **completed
   value** that strips the frame and draws at materialization, from whatever
   frame is active *then* (`RANDOMNESS-MODEL.md` §6, the ruling of
@@ -785,7 +785,7 @@ The **contribution** of operand `aᵢ` separates *producing* the operand from
   collapsed to that statement). A materializer around the view
   (`ListFrom`, an index, a reducer) asked for the draws *inside* the frame
   and keeps the discharge; so does a view whose only draw is in its
-  **source** (`Map(RandomShuffle(…), k ↦ k)` draws when the view is built);
+  **source** (`Map(k ↦ k, RandomShuffle(…))` draws when the view is built);
   so does an uncertain body. Both channels apply this rule through one
   shared `effectiveDischarge` — the runtime `effectsOf` and the
   construction-time inference must not disagree (the item-132 failure
@@ -851,20 +851,20 @@ mechanism.)
 
 ### Worked examples
 
-**1 — `Map(xs, f)` with `f` bound to an effectful function.** First, what
+**1 — `Map(f, xs)` with `f` bound to an effectful function.** First, what
 this is *not*: the operator's `type` handler. The **type** of
-`Map(xs, f)` is `list` — unchanged whether `f` is pure or `random`.
+`Map(f, xs)` is `list` — unchanged whether `f` is pure or `random`.
 Effects never appear in a *value* type; they live only on arrows, and an
 application's result is a value — so there is nothing effect-shaped for
 the `type` handler to compute, and it is unchanged by this design. The
 place the effect *does* become visible in a type is one level up: the
-literal `(xs) ↦ Map(xs, f)` has type `(list) random -> list` — the
+literal `(xs) ↦ Map(f, xs)` has type `(list) random -> list` — the
 application's effects, stamped onto the enclosing literal's own arrow by
 the static walk. The application's effects flow through two channels, one
 dynamic and one static:
 
 - **Runtime — `effectsOf`, computed dynamically.**
-  `effectsOf(Map(xs, f)) = ownEffects(Map) (= ∅) ∪ contribution(xs) ∪
+  `effectsOf(Map(f, xs)) = ownEffects(Map) (= ∅) ∪ contribution(xs) ∪
   contribution(f)`. `f` is a symbol operand, so `effectsOf` resolves it
   **through its current binding** to a function value and reads that
   value's signature arrow — its latent set — *at query time*. `Map`
@@ -874,7 +874,7 @@ dynamic and one static:
   reassigning `f` bumps `ce._generation` and invalidates the cached
   answer. This dynamic resolve-through-the-binding is precisely what
   closes hole 1 — today's `isPure` sees a bare symbol and stops.
-- **Inference-time — the static walk.** When `Map(xs, f)` sits inside a
+- **Inference-time — the static walk.** When `Map(f, xs)` sits inside a
   `Function` literal's body, the effect walk performs the same projection
   with what is knowable at construction: an *annotated parameter* `f`
   contributes its declared arrow effects; an *unannotated parameter* is
@@ -897,7 +897,7 @@ constants; variance lives at applications.** Two cases:
   already-resolved binding still leaves the installed signature stale —
   there, the runtime `effectsOf` channel, which does resolve through
   *current* bindings, keeps the accounting consumers honest.
-- When the function arrives as a **parameter** — `(xs, g) ↦ Map(xs, g)`
+- When the function arrives as a **parameter** — `(xs, g) ↦ Map(g, xs)`
   — the signature never varies per call site: unannotated `g` infers
   optimistically pure (ruling (c)); annotated `g` contributes its
   declared bound, fixed. There is no effect variable to instantiate per
@@ -905,7 +905,7 @@ constants; variance lives at applications.** Two cases:
   precision is recovered **at the application, not the signature**:
   projection unions the *actual* operand's latent effects into each
   application expression's effect set (default discharge: nothing), so
-  the expression `Map(xs, pureF)` computes `∅` and `Map(xs, randomF)`
+  the expression `Map(pureF, xs)` computes `∅` and `Map(randomF, xs)`
   computes `{random}` while `Map`'s one signature stays fixed at its
   effect-top `function` bound.
 
@@ -950,7 +950,7 @@ contributes `{random}` — **never dischargeable**, since the draw happens
 when the operand is evaluated regardless of what `Use` does with the
 result — while the produced value's latent set is `∅`. The mirror image:
 `h : () -> ((real) random -> real)` produces a callback *purely*;
-`Map(xs, h())` is then `{random}` via the latent set — which a
+`Map(h(), xs)` is then `{random}` via the latent set — which a
 discharging operator *could* absorb. Same shapes, opposite channels.
 
 **5 — a bound at the call boundary.** `integrate(f: (real) -> real, a,
@@ -958,7 +958,7 @@ b)` declares a pure-callback bound (form 1 under "Requiring absence").
 `integrate((x) ↦ Random(), 0, 1)` is rejected — an `incompatible-type`
 error value, with the same timing as existing argument validation.
 Contrast `Map`, whose parameter is the bare `function` primitive —
-effect-top by definition — so `Map(xs, (x) ↦ Random())` keeps working,
+effect-top by definition — so `Map((x) ↦ Random(), xs)` keeps working,
 projecting `{random}` instead of rejecting.
 
 **6 — an incomplete estimator keeps the frame without any label.**
@@ -1234,8 +1234,8 @@ callback's effect. Effect variables are the price of opacity.
 of what rows buy, without variables —
 
 - **Propagation**: a function-valued operand contributes its actual
-  signature's latent effects, per call site. `Map(xs, pureF)` is pure;
-  `Map(xs, randomF)` is `{random}`. No variable needed: the engine always
+  signature's latent effects, per call site. `Map(pureF, xs)` is pure;
+  `Map(randomF, xs)` is `{random}`. No variable needed: the engine always
   holds the actual operand.
 - **Handling**: a declared discharge set expresses "accepts, does not
   re-emit" (`WithRandomSeed` for `random`; an internally-awaiting host
@@ -1981,7 +1981,7 @@ Each stage is useful without the next; per-stage pinning tests named.
   library operator whose parameter is a *function signature* (not the bare
   `function` primitive — which is effect-top and never rejects) and confirm
   no currently-passing impure-callback idiom breaks
-  (`Map(xs, x ↦ Random())` keeps working: `Map`'s bound is the `function`
+  (`Map(x ↦ Random(), xs)` keeps working: `Map`'s bound is the `function`
   primitive, effect-top by definition above). **Result** (pinned by
   `effects-call-boundary.test.ts`, "blast radius"): **zero** library
   operators declare a function-*signature* parameter, so the enumeration is
@@ -2242,7 +2242,7 @@ function read(f: file) -> string { ... }   // arrow: (file) file -> string — d
 
 Everything downstream is the standard machinery of "Projection and
 discharge", with **no new application rule**: `read(f)` carries `file`
-(production); `Map(xs, read)` carries it (latent, invoked);
+(production); `Map(read, xs)` carries it (latent, invoked);
 `List(read)` does **not** (container, `invokes: false`); a quote
 position contributes nothing. In particular the label is *not* derived
 from an operand's type at the application site — an earlier draft's

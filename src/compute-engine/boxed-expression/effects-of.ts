@@ -235,7 +235,7 @@ export function applicationEffects(expr: Expression): ComputedEffects {
  * draws is a COMPLETED value that strips the frame and draws from whatever
  * frame is active at materialization (`docs/RANDOMNESS-MODEL.md` §6, and the
  * "completed values strip the frame" rule of §2) — so
- * `WithRandomSeed(42, Map(xs, x ↦ Random()))` draws LIVE, and claiming the
+ * `WithRandomSeed(42, Map(x ↦ Random(), xs))` draws LIVE, and claiming the
  * discharge there would report a genuinely random expression pure.
  *
  * **Positive proof, optimistic otherwise**: only the provable frame-stripping
@@ -271,8 +271,9 @@ export function effectiveDischarge(
  *   variables (`Comprehension`, the shape `[… for k = …]` parses to) it is the
  *   operands that are not clauses, its body spelled without a `Function` node.
  *
- * A view's SOURCE is deliberately excluded on both paths: `Map(RandomShuffle(…),
- * k ↦ k)` draws when the view is built, inside the frame, and stays discharged.
+ * A view's SOURCE is deliberately excluded on both paths: `Map(k ↦ k,
+ * RandomShuffle(…))` draws when the view is built, inside the frame, and
+ * stays discharged.
  *
  * VALUE POSITION propagates, exactly as it does in that walk: §2 states the
  * escape "stays a live-draw escape, whether the view is the result itself or a
@@ -588,7 +589,7 @@ function latentEffectsOf(op: Expression): ComputedEffects {
   // A number, a string, a boolean, a dictionary — nothing callable.
   if (!isFunction(op)) return undefined;
 
-  // An application PRODUCING a callback (`Map(xs, makeCallback())`): its result
+  // An application PRODUCING a callback (`Map(makeCallback(), xs)`): its result
   // type carries the produced arrow. Reading `.type` may force a full type
   // computation of the operand's subtree, so gate it on the (free) declared
   // result type: an operator whose result cannot be callable never needs it.

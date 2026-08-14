@@ -305,7 +305,7 @@ export function functionResult(
   // (`(T) -> T where T` results in `T`). An open type must never escape as
   // an expression's `.type` (§4.2 ground invariant of the type-variables
   // design), and this function is read by a dozen library `type:` handlers
-  // that pass it straight through (`Map(xs, genericFn)`). Callers that CAN
+  // that pass it straight through (`Map(genericFn, xs)`). Callers that CAN
   // instantiate — argument validation and the two result-typing sites — solve
   // the arm at the call site and override this; everyone else gets the honest
   // `unknown`.

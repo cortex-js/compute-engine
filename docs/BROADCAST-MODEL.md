@@ -31,7 +31,7 @@ Corollary rules for the strict regime:
 - A **scalar** operand is a LIFT, not a participant — it never mismatches.
 - A **broadcast operand is evaluated ONCE** (broadcasting is an operation on
   values): `L < Random()` draws once; a per-element draw is written
-  explicitly as `Map(L, l ↦ l < Random())`.
+  explicitly as `Map(l ↦ l < Random(), L)`.
 - An **unbounded** operand against a finite one is a mismatch (`count` is
   `Infinity`, which agrees with no finite length).
 - An operand whose length is **not yet known** is not compared — there is

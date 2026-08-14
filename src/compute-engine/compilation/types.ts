@@ -744,7 +744,7 @@ export interface CompileTarget<Expr = unknown> {
 
       /**
        * A user function referenced in VALUE position (a higher-order operand
-       * such as `Map(xs, f)`). The shader languages have no function values,
+       * such as `Map(f, xs)`). The shader languages have no function values,
        * so their implementation fails closed (D6).
        */
       value: (ctx: {

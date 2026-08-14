@@ -1212,7 +1212,7 @@ describe('END TO END — a user-declared generic operator', () => {
 describe('GROUND-TYPE INVARIANT — no open type escapes as an expression type', () => {
   test('`functionResult` of a polytype is `unknown`, never the OPEN pattern', () => {
     // A dozen library `type:` handlers read `functionResult(callback.type)` and
-    // pass it straight through (`Map(xs, genericFn)`).
+    // pass it straight through (`Map(genericFn, xs)`).
     expect(typeToString(functionResult(parseType('(T) -> T where T'))!)).toBe(
       'unknown'
     );
