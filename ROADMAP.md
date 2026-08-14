@@ -184,7 +184,10 @@ annotation.)
   suppressing the diagnostic: the engine-level "a call ahead of its
   definition has no names to check" decline is deliberate (design doc
   §6), and it is truthful for typo'd callees and unannotated
-  literals.
+  literals. Fix direction USER-RATIFIED 2026-08-13: provisional
+  registration in the static pass (visible to later statements only,
+  mirroring runtime order; skip non-literal RHS; unannotated literals
+  keep erroring), never diagnostic suppression.
 
 ### `Derivative` compile time vs body nesting depth (perf ask)
 
