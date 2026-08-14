@@ -37,7 +37,10 @@ import {
 } from '../../common/type/utils.js';
 import type { Type, TypeReference } from '../../common/type/types.js';
 import { declarationOf } from '../../common/type/reference.js';
-import { requirePrimitiveElements } from './javascript-target.js';
+import {
+  isNonFiniteBound,
+  requirePrimitiveElements,
+} from './javascript-target.js';
 
 /**
  * Python mathematical constants, keyed by MathJSON symbol.
@@ -2059,6 +2062,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // is `⌊(stop − start)/step⌋ + 1`, computed explicitly so a fractional
     // step never overshoots the endpoint; a zero step yields [].
     if (args.length === 0) return '[]';
+    // A non-finite bound never materializes: `int(np.floor(inf))` raises an
+    // OverflowError at run time. Fail closed at compile time instead (the JS
+    // target's `Range` guard; the Python target has no lazy-stream lowering,
+    // so even a `Take`-bounded infinite range fails closed here — a
+    // documented divergence from the JS target).
+    if (args.some((a) => a != null && isNonFiniteBound(a)))
+      throw new Error(
+        `Range: a non-finite bound does not materialize. Fail closed (D6).`
+      );
     const start = args.length === 1 ? '1' : compile(args[0]);
     const stop = args.length === 1 ? compile(args[0]) : compile(args[1]);
     if (args.length <= 2)

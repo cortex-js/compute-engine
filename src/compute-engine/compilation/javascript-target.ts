@@ -1722,14 +1722,30 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `Drop(xs, -2) = xs`), and JS `slice` already clamps a count past the end.
   Rest: (args, compile) => `(${collArg('Rest', args[0], compile)}).slice(1)`,
   Take: (args, compile) => {
-    const coll = collArg('Take', args[0], compile);
     if (args[1] == null) throw new Error('Take: missing count');
-    return `(${coll}).slice(0, Math.max(0, ${compile(args[1])}))`;
+    // A statically infinite operand (`Take(Map(1..∞, f), n)`) compiles as a
+    // lazy stream, materialized here — the one place (with `TakeWhile`) an
+    // infinite pipeline becomes finite. The count may be a runtime value;
+    // `takeIter` normalizes it. A count that is STATICALLY non-finite
+    // (`Take(1..∞, ∞)`) can never bound the stream, so it fails closed at
+    // compile time — the same rule the `Range` handler applies to its bounds
+    // — rather than compiling successfully and producing takeIter's
+    // indeterminate [] at run time.
+    if (isLazyStream(args[0])) {
+      if (isNonFiniteBound(args[1]))
+        throw new Error(
+          `Take: a non-finite count (\`${args[1].toString()}\`) cannot bound ` +
+            `an infinite collection. Fail closed (D6).`
+        );
+      return `_SYS.takeIter(${emitLazyStream(args[0]!, compile)}, ${compile(args[1])})`;
+    }
+    const coll = collArg('Take', args[0], compile);
+    return `(${coll}).slice(0, Math.max(0, ${sliceCount(args[1], compile)}))`;
   },
   Drop: (args, compile) => {
     const coll = collArg('Drop', args[0], compile);
     if (args[1] == null) throw new Error('Drop: missing count');
-    return `(${coll}).slice(Math.max(0, ${compile(args[1])}))`;
+    return `(${coll}).slice(Math.max(0, ${sliceCount(args[1], compile)}))`;
   },
   // Reverse and (ascending, numeric) Sort — copy first so the source array is
   // not mutated. A custom `Sort` comparator is not lowered (fails closed).
@@ -2182,8 +2198,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // Longest prefix satisfying the predicate / the rest after that prefix.
   TakeWhile: (args, compile) => {
-    const coll = collArg('TakeWhile', args[0], compile);
     if (args[1] == null) throw new Error('TakeWhile: missing predicate');
+    // A statically infinite operand compiles as a lazy stream, scanned until
+    // the predicate first fails (see `takeWhileIter` for the
+    // never-false-predicate caveat).
+    if (isLazyStream(args[0]))
+      return `_SYS.takeWhileIter(${emitLazyStream(args[0]!, compile)}, ${fnArg('TakeWhile', args[1], args[0], compile)})`;
+    const coll = collArg('TakeWhile', args[0], compile);
     return `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? _l.slice() : _l.slice(0, _i); })(${fnArg('TakeWhile', args[1], args[0], compile)}, ${coll})`;
   },
   DropWhile: (args, compile) => {
@@ -2660,8 +2681,24 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Range: (args, compile) => {
     if (args.length === 0) return '[]';
+    // A non-finite bound never materializes to an array — historically this
+    // emitted `Array.from({length: Infinity})`, which compiles cleanly and
+    // throws a RangeError at run time. An infinite range compiles only as a
+    // lazy stream under a bounding consumer (`Take`/`TakeWhile`, via
+    // `emitLazyStream`, which never routes through this handler); reached
+    // eagerly, it fails closed at compile time so the caller falls back to
+    // the interpreter (the `Repeat` 1-argument precedent).
+    if (args.some((a) => a != null && isNonFiniteBound(a)))
+      throw new Error(
+        `Range: a non-finite bound (\`${args.find((a) => a != null && isNonFiniteBound(a))!.toString()}\`) does not materialize — an infinite ` +
+          `range compiles only under \`Take\`/\`TakeWhile\`. Fail closed (D6).`
+      );
+    // `Range(n)` is 1..n inclusive (matching the interpreter and the Python
+    // target) — not 0..n-1. Canonicalization normally rewrites the
+    // 1-argument form to `Range(1, n)`, so this branch is a rarely-reached
+    // fallback for non-canonical input.
     if (args.length === 1)
-      return `Array.from({length: ${compile(args[0])}}, (_, i) => i)`;
+      return `Array.from({length: ${compile(args[0])}}, (_e, i) => i + 1)`;
 
     let start = compile(args[0]);
     let stop = compile(args[1]);
@@ -4499,6 +4536,27 @@ const SYS_HELPERS = {
       seg.segment.normalize()
     );
   },
+  // --- Lazy infinite-collection streams ---------------------------------
+  // A STATICALLY infinite collection (`Range(1, ∞)` and the Map/Filter/Drop/
+  // Rest pipeline over it) has no array representation, so it compiles to a
+  // lazy iterator instead, materialized by a bounding consumer
+  // (`takeIter`/`takeWhileIter`). These helpers are emitted ONLY by
+  // `emitLazyStream` — the eager collection lowering never produces or
+  // consumes them, and an infinite pipeline that never reaches `Take`/
+  // `TakeWhile` fails closed at compile time (see the `Range` handler and
+  // `collArg`). Only the two non-scanning helpers live here; the four
+  // SCANNING helpers (`filterIter`/`dropIter`/`takeIter`/`takeWhileIter`)
+  // need the owning engine's iteration limit, so they are bound per compiled
+  // artifact by `makeLazyStreamHelpers(ce)` below, like the random helpers.
+  rangeIter: function* (start: number, step: number): Generator<number> {
+    for (let x = start; ; x += step) yield x;
+  },
+  mapIter: function* (
+    it: Iterable<unknown>,
+    f: (x: unknown) => unknown
+  ): Generator<unknown> {
+    for (const x of it) yield f(x);
+  },
   // NOTE: the random helpers (`drawNextRandomNumber`, `withRandomSeed`, the
   // `domain*` descriptor builders, `randomPick`/`randomChoice`/
   // `randomSample`/`shuffle`) are deliberately NOT defined here: they need the
@@ -4920,7 +4978,20 @@ type RandomSysHelpers = {
 };
 
 /** The `_SYS` bundle injected into a compiled JavaScript function. */
-type SysHelpers = typeof SYS_HELPERS & RandomSysHelpers;
+type LazyStreamSysHelpers = {
+  filterIter: (
+    it: Iterable<unknown>,
+    p: (x: unknown) => unknown
+  ) => Generator<unknown>;
+  dropIter: (it: Iterable<unknown>, n: number) => Generator<unknown>;
+  takeIter: (it: Iterable<unknown>, n: number) => unknown[];
+  takeWhileIter: (
+    it: Iterable<unknown>,
+    p: (x: unknown) => unknown
+  ) => unknown[];
+};
+
+type SysHelpers = typeof SYS_HELPERS & RandomSysHelpers & LazyStreamSysHelpers;
 
 /**
  * The random family of `_SYS`, bound to the engine that compiled the artifact.
@@ -5085,9 +5156,99 @@ function makeRandomHelpers(ce: ComputeEngine): RandomSysHelpers {
  * `_SYS.drawNextRandomNumber()` resolves that engine's active
  * `WithRandomSeed` frame at call time.
  */
+/**
+ * The four SCANNING lazy-stream helpers, bound to the owning engine so each
+ * source walk is capped at `ce.iterationLimit` (read at call time, so later
+ * assignments to the property apply). The interpreter enforces the same
+ * guard on the corresponding walks — the `Filter`/`TakeWhile` iterators in
+ * `library/collections.ts` throw `iteration-limit-exceeded` — and without it
+ * a predicate that never matches on an infinite source
+ * (`Take(Filter(1..∞, x → False), 1)`) would lock the caller's thread.
+ * `rangeIter`/`mapIter` need no cap of their own: they advance exactly one
+ * step per pull, and every pull chain terminates in one of these capped
+ * scanners (only `takeIter`/`takeWhileIter` materialize).
+ */
+function makeLazyStreamHelpers(ce: ComputeEngine): LazyStreamSysHelpers {
+  // The interpreter's integer-count contract (`toInteger`,
+  // `boxed-expression/numerics.ts`): round to the nearest integer; a
+  // non-finite count, or one outside the safe-integer range (|n| > 2^53), does
+  // NOT resolve. An unresolved count is a PRESENT-but-invalid parameter, which
+  // the interpreter's collection handlers route to their indeterminate
+  // channel — an EMPTY walk (`integerParam`, `library/collections.ts`) — never
+  // to a substituted default. So `Take(1..∞, NaN)` is `[]` because the walk is
+  // indeterminate, `Drop(1..∞, NaN)` under a `Take` contributes NO elements
+  // (not "drops nothing"), and a count like `1e100` yields the empty walk
+  // instead of a loop that can never finish over an infinite source.
+  const intCount = (n: number): number | null => {
+    if (!Number.isFinite(n)) return null;
+    const k = Math.round(n);
+    return Number.isSafeInteger(k) ? k : null;
+  };
+  const exceeded = (op: string): Error =>
+    new Error(
+      `Iteration limit of ${ce.iterationLimit} exceeded while evaluating ${op}()`
+    );
+  return {
+    // Predicate TRUTHINESS, matching the eager `Filter` lowering
+    // (`.filter((_x) => _f(_x))`).
+    filterIter: function* (it, p) {
+      let pulls = 0;
+      for (const x of it) {
+        if (++pulls > ce.iterationLimit) throw exceeded('Filter');
+        if (p(x)) yield x;
+      }
+    },
+    // A negative count drops nothing (`Drop(xs, -2)` is `xs`, matching the
+    // eager lowering's clamp and the interpreter).
+    dropIter: function* (it, n) {
+      const k = intCount(n);
+      if (k === null) return;
+      let dropped = 0;
+      let pulls = 0;
+      for (const x of it) {
+        if (++pulls > ce.iterationLimit) throw exceeded('Drop');
+        if (dropped < k) {
+          dropped++;
+          continue;
+        }
+        yield x;
+      }
+    },
+    // Materialize the first k elements of a (possibly infinite) stream — one
+    // of the two points where a lazy pipeline becomes an array. A negative or
+    // invalid count yields [].
+    takeIter: (it, n) => {
+      const k = intCount(n);
+      if (k === null || k <= 0) return [];
+      const out: unknown[] = [];
+      let pulls = 0;
+      for (const x of it) {
+        if (++pulls > ce.iterationLimit) throw exceeded('Take');
+        out.push(x);
+        if (out.length >= k) break;
+      }
+      return out;
+    },
+    // Longest satisfying prefix of a (possibly infinite) stream. A predicate
+    // that never turns false does not produce a prefix; the iteration cap
+    // turns that into the interpreter's iteration-limit error instead of a
+    // hang.
+    takeWhileIter: (it, p) => {
+      const out: unknown[] = [];
+      let pulls = 0;
+      for (const x of it) {
+        if (++pulls > ce.iterationLimit) throw exceeded('TakeWhile');
+        if (!p(x)) break;
+        out.push(x);
+      }
+      return out;
+    },
+  };
+}
+
 function makeSysHelpers(ce: ComputeEngine): SysHelpers {
   const sys = Object.create(SYS_HELPERS) as SysHelpers;
-  Object.assign(sys, makeRandomHelpers(ce));
+  Object.assign(sys, makeRandomHelpers(ce), makeLazyStreamHelpers(ce));
   return sys;
 }
 
@@ -5658,7 +5819,7 @@ function extractLimits(limitsExpr: Expression): {
  * out. A symbolic bound (`n`) is not decided here: it is guarded at run time
  * (see `emitSumProduct`).
  */
-function isNonFiniteBound(expr: Expression): boolean {
+export function isNonFiniteBound(expr: Expression): boolean {
   if (isNumber(expr) && !Number.isFinite(expr.re)) return true;
   return expr.type.matches('non_finite_number');
 }
@@ -5744,6 +5905,119 @@ function compileSumProduct(
 }
 
 /**
+ * The compiled count operand of a `Take`/`Drop` slice. The interpreter
+ * normalizes counts with `Math.round` (`Take([1,2,3,4], 2.5)` takes THREE
+ * elements), while `slice` truncates its argument — so a count that is not
+ * statically a literal integer is wrapped in `Math.round`. A literal-integer
+ * count keeps the bare emission, byte-identical to the historical output.
+ * (`Math.round(NaN)` is NaN, so the NaN-count behavior — slice from/to 0 —
+ * is unchanged.)
+ */
+function sliceCount(
+  count: Expression,
+  compile: (expr: Expression) => string
+): string {
+  const n = tryGetConstant(count);
+  if (n !== undefined && Number.isInteger(n)) return compile(count);
+  return `Math.round(${compile(count)})`;
+}
+
+/**
+ * The step of a STATICALLY infinite, lazily-compilable `Range`, or
+ * `undefined` when the range is not one: the stop must be a literal `±∞`,
+ * the start anything not statically non-finite (a literal or a runtime
+ * value — the stream iterates from wherever it lands, so
+ * `Take(Map(Range(n, ∞), f), 10)` with a declared `n` compiles), and the
+ * step a literal finite number whose sign matches
+ * the stop's direction (a 2-operand range implies step `±1`, following the
+ * auto-descend convention). A sign-mismatched step (`Range(1, ∞, -2)`) is
+ * INERT in the interpreter, so it is not lazily compilable either — it fails
+ * closed and the caller falls back to the interpreter.
+ *
+ * A symbolic step is excluded even though the stream could iterate it: with
+ * the stop at `+∞` a runtime-negative step means an EMPTY range, and the
+ * stream cannot decide that lazily — it would yield a descending infinite
+ * sequence instead. Literal steps keep the decision static.
+ */
+function infiniteRangeStep(expr: Expression): number | undefined {
+  if (!isFunction(expr, 'Range')) return undefined;
+  const ops = expr.ops;
+  if (ops.length < 2 || ops.length > 3) return undefined;
+  const stop = ops[1];
+  if (!isNumber(stop) || stop.im !== 0) return undefined;
+  if (stop.re !== Infinity && stop.re !== -Infinity) return undefined;
+  const dir = stop.re === Infinity ? 1 : -1;
+  if (ops[0] === undefined || isNonFiniteBound(ops[0])) return undefined;
+  if (ops.length === 2) return dir;
+  const step = literalReal(ops[2]);
+  if (step === undefined || step === 0) return undefined;
+  return Math.sign(step) === dir ? step : undefined;
+}
+
+/**
+ * Whether an operand compiles as a LAZY infinite stream: a statically
+ * infinite `Range`, or a `Map`/`Filter`/`Drop`/`Rest` pipeline over one.
+ * This predicate and `emitLazyStream` must cover exactly the same shapes —
+ * a bounding consumer (`Take`/`TakeWhile`) uses the predicate to decide
+ * whether to lower its operand via `emitLazyStream` instead of `collArg`.
+ *
+ * `DropWhile` is deliberately absent: over an infinite source the
+ * interpreter leaves it INERT (it would have to scan an unbounded prefix),
+ * so compiling it lazily would diverge from that; it fails closed instead.
+ */
+function isLazyStream(expr: Expression | undefined): boolean {
+  if (!expr || !isFunction(expr)) return false;
+  const op = expr.operator;
+  if (op === 'Range') return infiniteRangeStep(expr) !== undefined;
+  if (op === 'Map' || op === 'Filter')
+    return expr.nops === 2 && isLazyStream(expr.ops[0]);
+  // A STATICALLY non-finite drop count (`Drop(1..∞, ∞)`) is an unresolvable
+  // parameter in the interpreter (an indeterminate walk, `integerParam` in
+  // `library/collections.ts`); excluding it here makes the whole pipeline
+  // fail closed to the interpreter instead of compiling to a stream that
+  // silently yields nothing.
+  if (op === 'Drop')
+    return (
+      expr.nops === 2 &&
+      !isNonFiniteBound(expr.ops[1]) &&
+      isLazyStream(expr.ops[0])
+    );
+  if (op === 'Rest') return expr.nops === 1 && isLazyStream(expr.ops[0]);
+  return false;
+}
+
+/**
+ * Lower a statically infinite pipeline (see `isLazyStream`) to lazy `_SYS`
+ * iterator code. Only a bounding consumer calls this; the eager handlers for
+ * the same operators never produce iterator code, so array-consuming
+ * lowerings never receive one.
+ */
+function emitLazyStream(
+  expr: Expression,
+  compile: (expr: Expression) => string
+): string {
+  if (!isFunction(expr))
+    throw new Error('emitLazyStream: not a lazily-compilable collection');
+  const op = expr.operator;
+  if (op === 'Range') {
+    const step = infiniteRangeStep(expr);
+    if (step === undefined)
+      throw new Error('Range: not a lazily-compilable infinite range');
+    return `_SYS.rangeIter(${compile(expr.ops[0])}, ${step})`;
+  }
+  const source = expr.ops[0];
+  if (op === 'Map')
+    return `_SYS.mapIter(${emitLazyStream(source, compile)}, ${fnArg('Map', expr.ops[1], source, compile)})`;
+  if (op === 'Filter')
+    return `_SYS.filterIter(${emitLazyStream(source, compile)}, ${fnArg('Filter', expr.ops[1], source, compile)})`;
+  if (op === 'Drop')
+    return `_SYS.dropIter(${emitLazyStream(source, compile)}, ${compile(expr.ops[1])})`;
+  if (op === 'Rest')
+    return `_SYS.dropIter(${emitLazyStream(source, compile)}, 1)`;
+  throw new Error(`${op}: not a lazily-compilable infinite collection`);
+}
+
+/**
  * Compile a collection operand, failing closed (D6) if it is not an indexed
  * collection (list/vector/range) — shared by the list-shaped collection
  * operators. `position` labels the operand in the error (e.g. for `Join`).
@@ -5758,6 +6032,17 @@ function collArg(
     throw new Error(
       `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
         `is not an indexed collection (list/vector/range). Fail closed (D6).`
+    );
+  // An infinite pipeline cannot materialize to an array; only `Take`/
+  // `TakeWhile` bound one (they lower it via `emitLazyStream` before ever
+  // reaching this funnel). Everything else fails closed here — at compile
+  // time, with the bounding fix named — instead of emitting
+  // `Array.from({length: Infinity})` and throwing a RangeError at run time.
+  if (isLazyStream(arg))
+    throw new Error(
+      `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
+        `is an infinite collection — bound it with \`Take\` or \`TakeWhile\` ` +
+        `to compile. Fail closed (D6).`
     );
   return compile(arg);
 }
