@@ -857,7 +857,7 @@ describe('DECLARED broadcastable<T> — `Nothing` rows (finding 7)', () => {
     // switch to `ce.function('Apply', …)` would silently drop the row.
     const ce = new ComputeEngine();
     assignTyped(ce, 'pairUp', ['Tuple', 'x', 'x'], 'broadcastable<any>');
-    const nothings = (n: unknown) => ['Map', n, ['Function', 'Nothing', 'k']];
+    const nothings = (n: unknown) => ['Map', ['Function', 'Nothing', 'k'], n];
     const eager = ce
       .box(['pairUp', nothings(['List', 1, 2, 3]) as any])
       .evaluate();

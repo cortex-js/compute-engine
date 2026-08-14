@@ -781,7 +781,7 @@ describe('EPSIL MATCH — parameterized nominal subjects (§6)', () => {
     const r = run(
       TREE +
         'function mapTree(t) { match t { tree(v, cs) => ' +
-        'tree(v * 10, Map(cs, mapTree)) } }\n' +
+        'tree(v * 10, Map(mapTree, cs)) } }\n' +
         'let t = tree(1, [tree(2, [tree(3, [])]), tree(4, [])])\n' +
         'let m = mapTree(t)\n' +
         '[m.value, m.children[1].value, m.children[1].children[1].value, ' +
@@ -795,7 +795,7 @@ describe('EPSIL MATCH — parameterized nominal subjects (§6)', () => {
     const r = run(
       TREE +
         'function mapTree(t) { match t { tree(v, cs) => ' +
-        'tree(v * 10, Map(cs, mapTree)) } }\n' +
+        'tree(v * 10, Map(mapTree, cs)) } }\n' +
         'mapTree(tree(1, [tree(2, [])]))'
     );
     expect(r.diagnostics).toEqual([]);

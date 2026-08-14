@@ -166,7 +166,7 @@ function is expected:
 protocol Negatable { function negated(self: Self) -> Self }
 type number is Negatable { function negated(self) -> number { -self } }
 
-Map([1, 2, 3], Negatable.negated)
+Map(Negatable.negated, [1, 2, 3])
 // ➔ [-1, -2, -3]
 ```
 

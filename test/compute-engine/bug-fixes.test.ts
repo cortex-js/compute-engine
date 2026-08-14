@@ -336,10 +336,10 @@ describe('Playground regressions', () => {
     // source, which puts `Map` on the same symbolic residual as `Filter`.
     const selfRefMap = (ce: ComputeEngine) => {
       ce.assign('xs', ce.box(['List', 1, 2, 3]));
-      ce.assign('xs', ce.box(['Map', 'xs', ['Function', ['Add', 'v', 1], 'v']]));
+      ce.assign('xs', ce.box(['Map', ['Function', ['Add', 'v', 1], 'v'], 'xs']));
     };
 
-    test('`xs := Map(xs, f)` stays symbolic instead of overflowing', () => {
+    test('`xs := Map(f, xs)` stays symbolic instead of overflowing', () => {
       const ce = new ComputeEngine();
       selfRefMap(ce);
       expect(() => ce.box(['Sum', 'xs']).evaluate()).not.toThrow();
@@ -357,7 +357,7 @@ describe('Playground regressions', () => {
     test('a non-self-referential `Map` source still resolves', () => {
       const ce = new ComputeEngine();
       ce.assign('as', ce.box(['List', 1, 2, 3]));
-      ce.assign('bs', ce.box(['Map', 'as', ['Function', ['Add', 'v', 1], 'v']]));
+      ce.assign('bs', ce.box(['Map', ['Function', ['Add', 'v', 1], 'v'], 'as']));
       expect(ce.box(['Sum', 'bs']).evaluate().json).toEqual(9);
     });
 
@@ -368,8 +368,8 @@ describe('Playground regressions', () => {
       ce.assign('X', ce.box(['List', 1, 2, 3]));
       const expr = ce.box([
         'Map',
-        ['Subtract', 'X', 1],
         ['Function', ['Add', 'v', 1], 'v'],
+        ['Subtract', 'X', 1],
       ]);
       expect(expr.isFiniteCollection).toBe(true);
       expect(ce.box(['Sum', expr]).evaluate().json).toEqual(6);

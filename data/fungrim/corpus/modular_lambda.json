@@ -1090,6 +1090,14 @@
     [
      "Map",
      [
+      "Function",
+      [
+       "ModularLambda",
+       "tau"
+      ],
+      "tau"
+     ],
+     [
       "Filter",
       "HH",
       [
@@ -1104,14 +1112,6 @@
        ],
        "tau"
       ]
-     ],
-     [
-      "Function",
-      [
-       "ModularLambda",
-       "tau"
-      ],
-      "tau"
      ]
     ],
     [
@@ -1624,16 +1624,16 @@
     [
      "Map",
      [
-      "Interior",
-      "ModularLambdaFundamentalDomain"
-     ],
-     [
       "Function",
       [
        "ModularLambda",
        "tau"
       ],
       "tau"
+     ],
+     [
+      "Interior",
+      "ModularLambdaFundamentalDomain"
      ]
     ],
     [
@@ -1753,7 +1753,6 @@
     "Equal",
     [
      "Map",
-     "HH",
      [
       "Function",
       [
@@ -1761,11 +1760,11 @@
        "tau"
       ],
       "tau"
-     ]
+     ],
+     "HH"
     ],
     [
      "Map",
-     "ModularLambdaFundamentalDomain",
      [
       "Function",
       [
@@ -1773,7 +1772,8 @@
        "tau"
       ],
       "tau"
-     ]
+     ],
+     "ModularLambdaFundamentalDomain"
     ],
     [
      "SetMinus",
@@ -1839,7 +1839,6 @@
      "tau",
      [
       "Map",
-      "Integers",
       [
        "Function",
        [
@@ -1848,7 +1847,8 @@
         "n"
        ],
        "n"
-      ]
+      ],
+      "Integers"
      ]
     ],
     [
@@ -2223,6 +2223,14 @@
     [
      "Map",
      [
+      "Function",
+      [
+       "ModularLambda",
+       "tau"
+      ],
+      "tau"
+     ],
+     [
       "Filter",
       "HH",
       [
@@ -2249,14 +2257,6 @@
        ],
        "tau"
       ]
-     ],
-     [
-      "Function",
-      [
-       "ModularLambda",
-       "tau"
-      ],
-      "tau"
      ]
     ],
     [

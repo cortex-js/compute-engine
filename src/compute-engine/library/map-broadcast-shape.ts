@@ -178,7 +178,7 @@ function sourceElementType(source: Expression | undefined): Type | undefined {
 export function sourceElementTypeKey(expr: Expression): string {
   if (!isFunction(expr, 'Map') || expr.nops < 2) return '';
   let key = '';
-  for (const source of expr.ops.slice(0, -1)) {
+  for (const source of expr.ops.slice(1)) {
     const elt = sourceElementType(source);
     key += (elt === undefined ? '?' : typeToString(elt)) + '|';
   }
@@ -196,7 +196,7 @@ export function sourceElementTypeKey(expr: Expression): string {
  */
 export function hasAnnotatedParams(expr: Expression): boolean {
   if (!isFunction(expr, 'Map') || expr.nops < 2) return false;
-  const fn = expr.ops[expr.nops - 1];
+  const fn = expr.op1;
   if (!isFunction(fn, 'Function')) return false;
   return fn.ops.slice(1).some((p) => isFunction(p, 'Typed'));
 }
@@ -217,7 +217,7 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
   if (!isFunction(expr, 'Map')) return undefined;
   if (expr.nops < 2) return undefined;
 
-  const fn = expr.ops[expr.nops - 1];
+  const fn = expr.op1;
   if (!isFunction(fn, 'Function')) return undefined;
 
   // The parameters must be symbols, one per source. A `["Typed", …]`
@@ -227,7 +227,7 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
   // provably satisfies it (see `annotationSatisfiedBySource`); any other
   // annotation declines the level.
   const params = fn.ops.slice(1);
-  const sources = expr.ops.slice(0, -1);
+  const sources = expr.ops.slice(1);
   const arity = sources.length;
   if (params.length !== arity) return undefined;
   const names: string[] = [];

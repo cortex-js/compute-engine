@@ -1497,8 +1497,8 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const e = mkEngine();
     const v = runJs(e, [
       'Map',
-      'd',
       ['Function', ['Add', 'x', 'y'], 'x', 'y'],
+      'd',
     ]) as number[];
     expect(v).toEqual([NaN, NaN, NaN]);
   });
@@ -1746,7 +1746,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   it('Map / Filter compile the lambda and use native map/filter', () => {
     const e = mkEngine();
     expect(
-      runJs(e, ['Map', 'd', ['Function', ['Divide', 'x', 10], 'x']])
+      runJs(e, ['Map', ['Function', ['Divide', 'x', 10], 'x'], 'd'])
     ).toEqual([1, 2, 3]);
     expect(
       runJs(e, ['Filter', 'd', ['Function', ['Greater', 'x', 15], 'x']])
@@ -2850,7 +2850,7 @@ describe('COMPILE collection-op findings', () => {
     // The compiled lambda must be invoked with a single argument; the native
     // `.map((el, index) => …)` index must NOT reach a lambda parameter.
     const rMap = compile(
-      ce.box(['Map', ['List', 10, 20, 30], ['Function', ['Add', 'x', 1], 'x']])
+      ce.box(['Map', ['Function', ['Add', 'x', 1], 'x'], ['List', 10, 20, 30]])
     );
     expect(rMap.code).toContain('(_x) => _f(_x)');
     expect(rMap.code).not.toMatch(/\.map\(\(_f\)/); // no bare fn to native map
@@ -2927,10 +2927,10 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
       js.compile(e.box(['Filter', L, 'Less']), { realOnly: true })
     ).toThrow(/Fail closed/);
     // …but a UNARY one is eta-expanded into a real callback rather than
-    // refused: `Map(L, Negate)` is a valid application at `Negate`'s own
+    // refused: `Map(Negate, L)` is a valid application at `Negate`'s own
     // arity (it is only a *combiner* that needs two parameters). It compiles
     // and agrees with the interpreter.
-    const m = compile(e.box(['Map', L, 'Negate']));
+    const m = compile(e.box(['Map', 'Negate', L]));
     expect(m?.success).toBe(true);
     expect((m?.run as (v: Record<string, number>) => number[])({})).toEqual([
       -1, -2, -3,
@@ -3175,7 +3175,7 @@ describe('ordering over a complex-valued operand fails closed', () => {
 });
 
 /**
- * A BUILT-IN operator name used as a CALLBACK (`Map(xs, Sin)`,
+ * A BUILT-IN operator name used as a CALLBACK (`Map(Sin, xs)`,
  * `CountIf(xs, IsPrime)`). It used to fall through to the free-variable read
  * `_.Sin`, so the artifact compiled "successfully" and then threw
  * `_f is not a function` at RUN time. It is now eta-expanded at its REQUIRED
@@ -3188,13 +3188,13 @@ describe('COMPILE built-in operator name as a callback', () => {
   const XS = ['List', 1, 2, 3, 4, 5];
   /** `sin 1 + … + sin 5`, from the interpreter. */
   const SUM_SIN = new ComputeEngine()
-    .box(['Sum', ['Map', XS, 'Sin']])
+    .box(['Sum', ['Map', 'Sin', XS]])
     .evaluate()
     .N().re!;
 
-  it('compiles and runs `Sum(Map(xs, Sin))`', () => {
+  it('compiles and runs `Sum(Map(Sin, xs))`', () => {
     const e = new ComputeEngine();
-    const expr = e.box(['Sum', ['Map', XS, 'Sin']]);
+    const expr = e.box(['Sum', ['Map', 'Sin', XS]]);
     const r = compile(expr, { fallback: false })!;
 
     expect(r.success).toBe(true);
@@ -3208,7 +3208,7 @@ describe('COMPILE built-in operator name as a callback', () => {
     const e = new ComputeEngine();
     const expr = e.box([
       'Function',
-      ['Add', ['Sum', ['Map', XS, 'Sin']], 't'],
+      ['Add', ['Sum', ['Map', 'Sin', XS]], 't'],
       't',
     ]);
     const r = compile(expr, { fallback: false })!;
@@ -3222,7 +3222,7 @@ describe('COMPILE built-in operator name as a callback', () => {
     // The artifact needs no `Sin` input: the declarative reference analysis
     // must agree with the codegen.
     const e = new ComputeEngine();
-    const r = compile(e.box(['Sum', ['Map', XS, 'Sin']]), { fallback: false })!;
+    const r = compile(e.box(['Sum', ['Map', 'Sin', XS]]), { fallback: false })!;
     expect(r.freeSymbols).toEqual([]);
   });
 
@@ -3241,7 +3241,7 @@ describe('COMPILE built-in operator name as a callback', () => {
     const e = new ComputeEngine();
     const expr = e.box([
       'Function',
-      ['Add', ['Sum', ['Map', XS, 'Sin']], '_tv1'],
+      ['Add', ['Sum', ['Map', 'Sin', XS]], '_tv1'],
       '_tv1',
     ]);
     const r = compile(expr, { fallback: false })!;
@@ -3255,7 +3255,7 @@ describe('COMPILE built-in operator name as a callback', () => {
     // unary (the optional base defaults), so the unary wrapper is exact —
     // it must NOT decline and fall through to a dangling `_.Ln`.
     const e = new ComputeEngine();
-    const expr = e.box(['Sum', ['Map', XS, 'Ln']]);
+    const expr = e.box(['Sum', ['Map', 'Ln', XS]]);
     const r = compile(expr, { fallback: false })!;
 
     expect(r.code).not.toContain('_.Ln');
@@ -3269,7 +3269,7 @@ describe('COMPILE built-in operator name as a callback', () => {
     // (`Not` is mapped and unary as well, but `Not(_tv1)` does not
     // canonicalize over an untyped parameter, so it still fails closed.)
     const e = new ComputeEngine();
-    const expr = e.box(['Sum', ['Map', XS, 'Negate']]);
+    const expr = e.box(['Sum', ['Map', 'Negate', XS]]);
     const r = compile(expr, { fallback: false })!;
 
     expect(r.success).toBe(true);
@@ -3285,7 +3285,7 @@ describe('COMPILE built-in operator name as a callback', () => {
     const e = new ComputeEngine();
     for (const op of ['Random', 'Less', 'NotLess']) {
       expect(() =>
-        compile(e.box(['Map', XS, op]), { fallback: false })
+        compile(e.box(['Map', op, XS]), { fallback: false })
       ).toThrow(
         new RegExp(
           `${op}: cannot compile as a first-class function[\\s\\S]*Fail closed`
@@ -3293,7 +3293,7 @@ describe('COMPILE built-in operator name as a callback', () => {
       );
     }
     // With the default fallback route the interpreter answers instead.
-    const r = compile(e.box(['Map', XS, 'Random']));
+    const r = compile(e.box(['Map', 'Random', XS]));
     expect(r?.success).toBe(false);
   });
 
@@ -3302,7 +3302,7 @@ describe('COMPILE built-in operator name as a callback', () => {
     // a plain unknown symbol in callback position keeps its previous
     // free-variable read.
     const e = new ComputeEngine();
-    const r = compile(e.box(['Map', XS, 'zork']), { fallback: false })!;
+    const r = compile(e.box(['Map', 'zork', XS]), { fallback: false })!;
     expect(r.code).toContain('_.zork');
   });
 
@@ -3327,7 +3327,7 @@ describe('COMPILE built-in operator name as a callback', () => {
     const e = new ComputeEngine();
     const expr = e.box([
       'Function',
-      ['Add', ['Sum', ['Map', XS, 'Sin']], 't'],
+      ['Add', ['Sum', ['Map', 'Sin', XS]], 't'],
       't',
     ]);
     const r = compile(expr, { fallback: false, functions: { Sin: 'mySin' } })!;

@@ -89,6 +89,32 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### Map argument-order flip — residue (flip landed 2026-08-14)
+
+`Map` now takes the mapping function first (`Map(f, xs…)`, signature
+`(function, collection+)`); the flip swept src, tests, docs, and the
+Fungrim corpus/artifact. Two follow-ups:
+
+- **Fungrim translator still emits the old order.** The corpus
+  (`data/fungrim/`) was flipped in place (61 `["Map", set, fn]` →
+  `["Map", fn, set]`; the artifact's 19 Map rules re-spliced from a
+  fresh compile, 0 dropped/0 added), so the corpus no longer reproduces
+  byte-identically from the fork translator. The fork
+  (github.com/arnog/fungrim, `grim2mathjson` — `_comprehension` in
+  structural.py and any other `Map` emission site) must swap its Map
+  operand order and the corpus be regenerated to restore provenance
+  (MANIFEST commit pin bump).
+- **Pre-existing recompile drift, NOT from the flip: 98 rules
+  re-orient.** `recompile-drift.ts` reports 0 dropped / 0 added /
+  98 changed — all match↔replace orientation (and the paired
+  simplify↔expand purpose) flips, zero overlap with the 19 Map rules
+  (which reproduce exactly). A fresh recompile against today's engine
+  orients those 98 rules differently than the committed artifact —
+  cost-function/canonicalization evolution since the last full regen.
+  Needs a decision: absorb via a full regen commit (reviewing that the
+  new orientations are correct), or allowlist. The
+  `ci:corpus-pipeline` drift gate fails until then.
+
 ### String-operation defects (found 2026-08-13, string-roadmap review)
 
 Two confirmed defects in the existing string operators, found while
@@ -335,13 +361,13 @@ functions.
 - **`InverseFunction(f)` / `Derivative(f, n)` as a lazy operator's
   callback are rejected** (found 2026-08-13; same family as the
   qualified-protocol-member callback fix that landed that day).
-  `Map([1, 0], InverseFunction(Sin))` reports
+  `Map(InverseFunction(Sin), [1, 0])` reports
   `incompatible-type function/unknown`: the held callback arrives RAW,
   where its type reads `unknown`, so the function-value gate
   (`denotesFunction`, function-utils.ts) cannot answer and the
   constant-nullary reject fires. A loud error, not silent wrong values
   — and the explicit-lambda spelling
-  (`Map(xs, (x) |-> InverseFunction(Sin)(x))`) works. The protocol-member
+  (`Map((x) |-> InverseFunction(Sin)(x), xs)`) works. The protocol-member
   case was fixable with a registry-keyed syntactic recognizer
   (`isQualifiedProtocolMember`); these shapes need per-operator
   knowledge ("which operator applications denote function values when
@@ -513,7 +539,7 @@ standing polytype behavior).
 - **An eager IMPURE collection source is evaluated several times**
   (pre-existing, measured 2026-08-09 during the above): counting
   handler invocations over a 5-element source,
-  `Map(RandomShuffle(xs), f)` evaluates the shuffle **8** times,
+  `Map(f, RandomShuffle(xs))` evaluates the shuffle **8** times,
   `Filter(RandomShuffle(xs), p)` 5, `Any(…)` 2 — the
   materialize-then-iterate path in `each()` re-evaluates a source that
   has no collection handlers, once per facet query. Results stay
@@ -584,7 +610,7 @@ correctness gaps with a performance-shaped symptom.
 - **Callback parameter complexness is not analyzed (pre-existing, surfaced
   by the 2026-08-03 built-in-callback review).** A callback body — inline
   literal or emitted wrapper alike — compiles its parameter as
-  statically real, so `Map([3+4i], Abs)` (and `x ↦ Abs(x)` over the same
+  statically real, so `Map(Abs, [3+4i])` (and `x ↦ Abs(x)` over the same
   list) emits `Math.abs`, receives the `{re, im}` object at runtime, and
   silently returns `NaN` instead of 5 or failing closed. Verified
   identical for inline literals and named/eta-expanded callbacks, so no
@@ -600,7 +626,7 @@ correctness gaps with a performance-shaped symptom.
   `/^[A-Z]$/` because `devolveUnappliedOperator` reads an un-applied
   single-uppercase-letter symbol as a caller variable by convention
   (`∫ D x² dx` parses `D` as a variable; 9 integrate/derivative tests pin
-  it). Consequence: `Map(xs, D)` keeps the old runtime-throw behavior. A
+  it). Consequence: `Map(D, xs)` keeps the old runtime-throw behavior. A
   position-aware refusal (callback operand positions only) would close it
   but the JS target has ~9 separate callback splice sites and no
   chokepoint — revisit only with a witness.
@@ -727,14 +753,14 @@ axis). Remaining, all demand-gated:
   ROOT of a compiled expression binds once, and a recursive body's repeated
   self-call compiles to linear instead of exponential calls. A NAMED
   callback resolving to a validated pure user-function literal no longer
-  blocks eligibility — two identical `Map(xs, f)` with a pure user `f`
+  blocks eligibility — two identical `Map(f, xs)` with a pure user `f`
   merge; a drawing `f` stays un-merged (draw streams and call counts
   preserved). The measured pass that gated the root flip: admission is
   inert on user-fn-free trees; per-callee validation ≈ 0.02 ms, memoized
   per name per harvest; staleness is handled by per-level re-derivation
   against current bindings at harvest time (post-compile reassignment is
   the compile-wide artifact-snapshot policy). Callbacks naming BUILT-IN
-  operators (`Map(xs, Sin)`, `CountIf(xs, IsPrime)`) landed the same day:
+  operators (`Map(Sin, xs)`, `CountIf(xs, IsPrime)`) landed the same day:
   such a name is eta-expanded into a shared emitted wrapper — which also
   fixed an emission bug where it fell through to a free-variable read and
   the artifact threw `_f is not a function` at run time — and is then

@@ -124,10 +124,10 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
     executeEpsil(ce, POINTS);
     const expr = ce.box([
       'Map',
-      'points',
       ['Function', ['Equal', 'p', ['Tuple', 0, 0]], 'p'],
+      'points',
     ]);
-    expect(expr.ops[1].type.toString()).toBe(
+    expect(expr.ops[0].type.toString()).toBe(
       '(p: tuple<number, number>) -> boolean'
     );
     expect(expr.evaluate().toString()).toBe('["True","False","False"]');
@@ -140,7 +140,7 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
     // the inner level itself produces, so the two levels must agree.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let rows: list<list<number>> = [[1,2],[3,4]]');
-    const inner = ['Map', 'rows', ['Function', ['Reverse', 'r'], 'r']];
+    const inner = ['Map', ['Function', ['Reverse', 'r'], 'r'], 'rows'];
     expect(
       ce
         .box(['Filter', inner, ['Function', ['Equal', ['First', 'q'], 2], 'q']])
@@ -149,7 +149,7 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
     ).toBe('[[2,1]]');
   });
 
-  test('the multi-collection Map(xs, ys, f) form is NOT annotated', () => {
+  test('the multi-collection Map(f, xs, ys) form is NOT annotated', () => {
     // FLIPPED by Design D §6 REVISION 4 (2026-08-09): `Map`'s variadic clause
     // declares no contextual callback slot and never stamps. Follow-up (5) had
     // flipped this pin the other way with the interim `{ last: 'preceding' }`
@@ -160,15 +160,15 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Map',
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
       ['List', 1, 2],
       ['List', 3, 4],
-      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
     ]);
     expect(expr.toMathJson()).toEqual([
       'Map',
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
       ['List', 1, 2],
       ['List', 3, 4],
-      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
     ]);
     expect(expr.evaluate().toString()).toBe('[4,6]');
   });
@@ -336,24 +336,29 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
 // slot, so nothing in this form is stamped, and the pins below now assert the
 // pre-inference bare shape WITH evaluation parity — which is the whole
 // acceptance bar for the variadic form (§10, phase 3).
-describe('§6 rev 4: the multi-collection, callback-LAST form is NOT stamped', () => {
+// Under the callback-first signature (2026-08-14 flip) the declared slot is
+// the unary `(T) -> U`, so the zip form's SUCCESS path — an n-ary callback
+// matching the source count — mismatches S's arity and stays unstamped under
+// R-D6; only a unary literal (which errors at application anyway) stamps.
+// This preserves the observable §6-rev-4 behavior for every working program.
+describe('the multi-collection (zip) form does not stamp its n-ary callback', () => {
   test('no parameter takes a source’s element type — evaluation unchanged', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     executeEpsil(ce, 'let ss: list<string> = ["a","bb","ccc"]');
     const expr = ce.box([
       'Map',
+      ['Function', ['Tuple', 'n', 's'], 'n', 's'],
       'cs',
       'ss',
-      ['Function', ['Tuple', 'n', 's'], 'n', 's'],
     ]);
     expect(expr.toMathJson()).toEqual([
       'Map',
+      ['Function', ['Pair', 'n', 's'], 'n', 's'],
       'cs',
       'ss',
-      ['Function', ['Pair', 'n', 's'], 'n', 's'],
     ]);
-    expect(expr.ops[2].type.toString()).toBe(
+    expect(expr.ops[0].type.toString()).toBe(
       '(unknown, unknown) -> tuple<unknown, unknown>'
     );
     expect(expr.evaluate().toString()).toBe('[(1, "a"),(2, "bb"),(3, "ccc")]');
@@ -366,37 +371,43 @@ describe('§6 rev 4: the multi-collection, callback-LAST form is NOT stamped', (
     ce.assign('us', ce.box(['List', { str: 'a' }, { str: 'b' }, { str: 'c' }]));
     const expr = ce.box([
       'Map',
+      ['Function', ['Tuple', 'n', 's'], 'n', 's'],
       'cs',
       'us',
-      ['Function', ['Tuple', 'n', 's'], 'n', 's'],
     ]);
     // Parameter 0's source was provable under the metadata and stamped; the
     // variadic clause stamps neither.
     expect(expr.toMathJson()).toEqual([
       'Map',
+      ['Function', ['Pair', 'n', 's'], 'n', 's'],
       'cs',
       'us',
-      ['Function', ['Pair', 'n', 's'], 'n', 's'],
     ]);
     expect(expr.evaluate().toString()).toBe('[(1, "a"),(2, "b"),(3, "c")]');
   });
 
   test('an arity-mismatched callback keeps its diagnostic verbatim', () => {
     // The §6/§10 diagnostic-parity pin: a UNARY callback over two sources is
-    // admitted and errors at application, with the same error VALUE the
-    // metadata spelling produced.
+    // admitted and errors at application. Under the callback-first signature
+    // (2026-08-14 flip) the declared slot `(T) -> U` is unary, so a unary
+    // literal matches S's arity and IS stamped from the sources' joined
+    // element type before the call-time arity error fires — the stamp is
+    // visible in the canonical form, while the error VALUE stays byte-
+    // identical to what the metadata spelling produced. (A callback whose
+    // arity matches the CALL — the zip form's success path — mismatches the
+    // unary S and stays unstamped under R-D6, exactly as before.)
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Map',
+      ['Function', ['Add', 'a', 1], 'a'],
       ['List', 1, 2],
       ['List', 3, 4],
-      ['Function', ['Add', 'a', 1], 'a'],
     ]);
     expect(expr.toMathJson()).toEqual([
       'Map',
+      ['Function', ['Add', 'a', 1], ['Typed', 'a', "'finite_integer'"]],
       ['List', 1, 2],
       ['List', 3, 4],
-      ['Function', ['Add', 'a', 1], 'a'],
     ]);
     expect(expr.evaluate().toString()).toBe(
       'Too many arguments for function "(a) |-> a + 1": expected 1, got 2'
@@ -404,14 +415,14 @@ describe('§6 rev 4: the multi-collection, callback-LAST form is NOT stamped', (
   });
 
   test('the multi-collection form has no compiled lowering (unchanged)', () => {
-    // Neither target lowers `Map(xs, ys, f)`; the annotation does not change
+    // Neither target lowers `Map(f, xs, ys)`; the annotation does not change
     // that, and none is added here.
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Map',
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
       ['List', 1, 2],
       ['List', 3, 4],
-      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
     ]);
     expect(() => compile(expr, { fallback: false })).toThrow(
       /multi-collection form is not compiled/
@@ -426,11 +437,11 @@ describe('§6 rev 4: the multi-collection, callback-LAST form is NOT stamped', (
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     executeEpsil(ce, 'let ss: list<string> = ["a","bb","ccc"]');
     executeEpsil(ce, 'let pair = (n, s) |-> (n, s)');
-    expect(ce.box(['Map', 'cs', 'ss', 'pair']).toMathJson()).toEqual([
+    expect(ce.box(['Map', 'pair', 'cs', 'ss']).toMathJson()).toEqual([
       'Map',
+      'pair',
       'cs',
       'ss',
-      'pair',
     ]);
   });
 });
@@ -777,12 +788,16 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     (op, literal, canonicalBody) => {
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-      const expr = ce.box([op, 'cs', literal] as any);
-      expect(expr.toMathJson()).toEqual([
-        op,
-        'cs',
-        ['Function', canonicalBody, ['Typed', 'n', "'integer'"]],
-      ]);
+      const expr = ce.box(
+        (op === 'Map'
+          ? [op, literal, 'cs']
+          : [op, 'cs', literal]) as any
+      );
+      expect(expr.toMathJson()).toEqual(
+        op === 'Map'
+          ? [op, ['Function', canonicalBody, ['Typed', 'n', "'integer'"]], 'cs']
+          : [op, 'cs', ['Function', canonicalBody, ['Typed', 'n', "'integer'"]]]
+      );
     }
   );
 
@@ -804,13 +819,13 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     const ce = new ComputeEngine();
     const m = ce.box([
       'Map',
-      ['Range', 1, 200],
       ['Function', ['Mod', '_1', 7], '_1'],
+      ['Range', 1, 200],
     ]);
     expect(m.toMathJson()).toEqual([
       'Map',
-      ['Range', 1, 200],
       ['Function', ['Mod', '_1', 7], ['Typed', '_1', "'integer'"]],
+      ['Range', 1, 200],
     ]);
     const level = lowerLevel(m);
     expect(level).toBeDefined();
@@ -851,7 +866,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     const ce = new ComputeEngine();
     const { value, diagnostics } = executeEpsil(
       ce,
-      'let inputs = [16, -4, "banana", 81]\nMap(inputs, x |-> Sqrt(x))'
+      'let inputs = [16, -4, "banana", 81]\nMap(x |-> Sqrt(x), inputs)'
     );
     expect(diagnostics).toEqual([]);
     expect(value?.toString()).toBe('[4,2i,NaN,9]');
@@ -864,7 +879,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     const ce = new ComputeEngine();
     const { value, diagnostics } = executeEpsil(
       ce,
-      'let vs: list<scalar> = [1, 2, 3]\nMap(vs, x |-> x + 1)'
+      'let vs: list<scalar> = [1, 2, 3]\nMap(x |-> x + 1, vs)'
     );
     expect(diagnostics).toEqual([]);
     expect(value?.toString()).toBe('[2,3,4]');
@@ -877,11 +892,11 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
       'es',
       ce.box(['List', ['Add', 'q', 2], ['Add', ['Multiply', 2, 'q'], 1]])
     );
-    const expr = ce.box(['Map', 'es', ['Function', ['Multiply', 'x', 2], 'x']]);
+    const expr = ce.box(['Map', ['Function', ['Multiply', 'x', 2], 'x'], 'es']);
     expect(expr.toMathJson()).toEqual([
       'Map',
-      'es',
       ['Function', ['Multiply', 2, 'x'], 'x'],
+      'es',
     ]);
     expect(expr.evaluate().toString()).toBe('[2q + 4,4q + 2]');
   });
@@ -889,11 +904,11 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
   test('`value` elements are not evidence either', () => {
     const ce = new ComputeEngine();
     ce.declare('vs', 'list<value>');
-    const expr = ce.box(['Map', 'vs', ['Function', ['Add', 'x', 1], 'x']]);
+    const expr = ce.box(['Map', ['Function', ['Add', 'x', 1], 'x'], 'vs']);
     expect(expr.toMathJson()).toEqual([
       'Map',
-      'vs',
       ['Function', ['Add', 'x', 1], 'x'],
+      'vs',
     ]);
   });
 
@@ -902,19 +917,19 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     // says only "some tuple, of some arity, of some element types".
     const ce = new ComputeEngine();
     ce.declare('ts', 'list<tuple>');
-    const expr = ce.box(['Map', 'ts', ['Function', ['Length', 't'], 't']]);
+    const expr = ce.box(['Map', ['Function', ['Length', 't'], 't'], 'ts']);
     expect(expr.toMathJson()).toEqual([
       'Map',
-      'ts',
       ['Function', ['Length', 't'], 't'],
+      'ts',
     ]);
   });
 
   test('a nested collection element type IS composite', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let rows: list<list<number>> = [[1,2],[3,4]]');
-    const expr = ce.box(['Map', 'rows', ['Function', ['Length', 'r'], 'r']]);
-    expect(expr.ops[1].type.toString()).toBe('(r: list<number>) -> integer');
+    const expr = ce.box(['Map', ['Function', ['Length', 'r'], 'r'], 'rows']);
+    expect(expr.ops[0].type.toString()).toBe('(r: list<number>) -> integer');
     expect(expr.evaluate().toString()).toBe('[2,2]');
   });
 });
@@ -1076,7 +1091,7 @@ describe('annotation-as-contract', () => {
     // element.
     const ce = new ComputeEngine();
     executeEpsil(ce, POINTS);
-    const expr = ce.box(['Map', 'points', ['Function', ['Add', 'p', 1], 'p']]);
+    const expr = ce.box(['Map', ['Function', ['Add', 'p', 1], 'p'], 'points']);
     expect(expr.isValid).toBe(false);
     expect(expr.toString()).toContain('incompatible-type');
 
@@ -1084,7 +1099,7 @@ describe('annotation-as-contract', () => {
     // and stays symbolic — the error comes from the annotation, nothing else.
     ce.declare('anysrc', 'list');
     expect(
-      ce.box(['Map', 'anysrc', ['Function', ['Add', 'p', 1], 'p']]).isValid
+      ce.box(['Map', ['Function', ['Add', 'p', 1], 'p'], 'anysrc']).isValid
     ).toBe(true);
   });
 

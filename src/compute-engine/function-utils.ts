@@ -196,7 +196,7 @@ export function canonicalFunctionLiteral(
   //
   // 0/ A string literal is never a function. Without this guard a string
   //    falls through to the shorthand path below and becomes a constant
-  //    nullary function `() ↦ "s"`, so e.g. `Map([1,2,3], "nf")` would map to
+  //    nullary function `() ↦ "s"`, so e.g. `Map("nf", [1,2,3])` would map to
   //    `["nf","nf","nf"]` instead of being rejected.
   //
   if (isString(expr)) return undefined;
@@ -212,7 +212,7 @@ export function canonicalFunctionLiteral(
   //    make sure it's a function
   //
   //    Exception: the BARE wildcard `_` is the identity-function shorthand
-  //    (`Map(xs, _)` ≡ `Map(xs, x ↦ x)`). It falls through to the shorthand
+  //    (`Map(_, xs)` ≡ `Map(x ↦ x, xs)`). It falls through to the shorthand
   //    path below, which turns it into `(_1) ↦ _1`. Only the bare `_`
   //    qualifies: `_1`/`_2`/… are positional parameters of an ENCLOSING
   //    shorthand, and a named wildcard is a pattern variable — neither is an
@@ -268,7 +268,7 @@ export function canonicalFunctionLiteral(
   //      through evaluation (`makeLambda` routes it through `Apply`).
   //      Without this gate the shorthand path below reads it as a lambda
   //      BODY and turns its free symbols into parameters, so
-  //      `Map(xs, Comparable.compare)` bound each ELEMENT to `Comparable`
+  //      `Map(Comparable.compare, xs)` bound each ELEMENT to `Comparable`
   //      and mapped `Field(element, "compare")` — an absence marker per
   //      element. Same predicate as `apply()`'s symbolic-application gate,
   //      so the two tiers agree — plus its syntactic sibling for a RAW
@@ -1511,7 +1511,7 @@ function firstErrorArg(
  * its function value through evaluation. Letting the shorthand-lambda path
  * treat such an expression as a lambda BODY would substitute the argument
  * for its free symbol (`Apply(InverseFunction(f), 2)` → `InverseFunction(2)`;
- * `Map(xs, Comparable.compare)` → each element read as the base of a `Field`
+ * `Map(Comparable.compare, xs)` → each element read as the base of a `Field`
  * access), or, for `Derivative(f, n)` whose `derivative()` representation is
  * the self-applied lambda `Apply(Derivative(f, n), _)`, re-evaluate the inner
  * `Derivative`, regenerating the same lambda and recursing forever (stack

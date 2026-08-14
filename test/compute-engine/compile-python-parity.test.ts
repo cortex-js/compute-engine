@@ -719,7 +719,7 @@ const COLLECTION_CASES: Array<{ name: string; expr: any; expected: any }> = (() 
     { name: 'unique', expr: ['Unique', ['List', 3, 1, 3, 2, 1]], expected: [3, 1, 2] },
     { name: 'zip', expr: ['Zip', ['List', 1, 2, 3], ['List', 10, 20]], expected: [[1, 10], [2, 20]] },
     { name: 'linspace', expr: ['Linspace', 0, 1, 5], expected: [0, 0.25, 0.5, 0.75, 1] },
-    { name: 'map', expr: ['Map', L, ['Function', ['Multiply', 'x', 2], 'x']], expected: [2, 10, 4, 8, 6] },
+    { name: 'map', expr: ['Map', ['Function', ['Multiply', 'x', 2], 'x'], L], expected: [2, 10, 4, 8, 6] },
     { name: 'filter', expr: ['Filter', L, gt2], expected: [5, 4, 3] },
     { name: 'count_if', expr: ['CountIf', L, gt2], expected: 3 },
     { name: 'find', expr: ['Find', L, gt2], expected: 5 },

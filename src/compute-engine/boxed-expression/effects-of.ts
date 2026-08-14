@@ -455,7 +455,7 @@ const NOT_CALLABLE = Symbol('not-callable');
  * the polarity the model already commits to:
  *
  * - **operand**: the declared bare arrow IS the bound the operator will invoke
- *   against, and an opaque declaration is trusted there (`Map(xs, opaquePure)`
+ *   against, and an opaque declaration is trusted there (`Map(opaquePure, xs)`
  *   is pure — the residual trust class of any opaque host declaration, pinned
  *   by `effects-contracts.test.ts`). Contribution: nothing;
  * - **head**: evaluating an application of something with no implementation is
@@ -560,7 +560,7 @@ function valueHeadEffects(
  * `undefined` when the operand is not (known to be) function-valued.
  *
  * A symbol resolves through its CURRENT binding, which is the point of the
- * runtime channel: `Map(xs, f)` is `{random}` exactly while `f` is bound to a
+ * runtime channel: `Map(f, xs)` is `{random}` exactly while `f` is bound to a
  * drawing function. An undeclared symbol contributes nothing — the same
  * optimism the inference applies to an unannotated parameter, and the shipped
  * `isPure` behavior for a bare symbol operand.

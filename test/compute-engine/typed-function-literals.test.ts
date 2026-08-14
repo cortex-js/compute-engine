@@ -164,8 +164,8 @@ describe('Annotated function literal — application (values only, no enforcemen
     const r = ce
       .box([
         'Map',
-        ['List', 1, 2, 3],
         ['Function', ['Multiply', 'x', 2], ['Typed', 'x', "'integer'"]],
+        ['List', 1, 2, 3],
       ])
       .evaluate();
     // `Map` yields a lazy collection; materialize it for comparison.
@@ -244,7 +244,7 @@ describe('Phase 2 — apply-time enforcement (§6.4, §6.5)', () => {
 
   test('Map over a typed lambda error-marks only the mismatched element', () => {
     const ce = new ComputeEngine();
-    const m = ce.box(['Map', ['List', 1, 2.5, 3], typedInc]).evaluate();
+    const m = ce.box(['Map', typedInc, ['List', 1, 2.5, 3]]).evaluate();
     const els = [...m.each()].map((el) => el.json);
     expect(els[0]).toBe(2);
     expect(JSON.stringify(els[1])).toContain('incompatible-type');

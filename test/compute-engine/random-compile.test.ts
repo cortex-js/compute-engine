@@ -440,7 +440,7 @@ describe('auto-compiled Map bodies draw from the interpreter frame (§6)', () =>
     ce.precision = 'machine';
     ce.jit = 'auto';
     const m = ce
-      .box(['Map', ['Range', 1, 150], ['Function', ['N', ['Random']], 'i']])
+      .box(['Map', ['Function', ['N', ['Random']], 'i'], ['Range', 1, 150]])
       .evaluate();
     expect(m.operator).toBe('Map');
 
@@ -457,7 +457,7 @@ describe('auto-compiled Map bodies draw from the interpreter frame (§6)', () =>
     // indices consumed.
     ce.jit = 'off';
     const m2 = ce
-      .box(['Map', ['Range', 1, 150], ['Function', ['N', ['Random']], 'i']])
+      .box(['Map', ['Function', ['N', ['Random']], 'i'], ['Range', 1, 150]])
       .evaluate();
     _resetMapAutoCompileStats();
     const probe = withRandomSeedFrame(ce, 11, () => {

@@ -508,7 +508,7 @@ describe('post-evaluation lambda broadcast', () => {
     // handled by step 2b, so nested-list behavior is unchanged.
     expect(
       ce
-        .box(['Map', ['List', ['List', 1, 2], ['List', 3, 4]], 'k'])
+        .box(['Map', 'k', ['List', ['List', 1, 2], ['List', 3, 4]]])
         .evaluate()
         .toString()
     ).toBe('[[1,1],[1,1]]');

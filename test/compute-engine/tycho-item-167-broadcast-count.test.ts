@@ -43,7 +43,7 @@ describe('Tycho item 167: count of an un-evaluated broadcast', () => {
       ['\\frac{2(1..99)}{99}-1', 99],
       ['\\left[1,2,3\\right]', 3],
       ['\\left[1,2,3\\right]+1', 3],
-      ['\\mathrm{Map}(1..99, k \\mapsto 2k)', 99],
+      ['\\mathrm{Map}(k \\mapsto 2k, 1..99)', 99],
     ];
     for (const [latex, expected] of rows) {
       test(`${latex} -> ${expected}`, () => {
@@ -94,7 +94,7 @@ describe('Tycho item 167: count of an un-evaluated broadcast', () => {
     test('a declared count handler still owns its own answer', () => {
       // `Map` has collection handlers; the broadcast fallback must not
       // second-guess them.
-      expect(ce.parse('\\mathrm{Map}(1..99, k \\mapsto 2k)').count).toBe(99);
+      expect(ce.parse('\\mathrm{Map}(k \\mapsto 2k, 1..99)').count).toBe(99);
     });
   });
 });

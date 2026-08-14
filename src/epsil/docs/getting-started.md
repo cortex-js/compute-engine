@@ -53,7 +53,7 @@ Save this program as `squares.epsil`:
 
 ```epsil
 square(x) = x^2
-Map(1..5, square)
+Map(square, 1..5)
 ```
 
 Run it:

@@ -75,7 +75,7 @@ const PURE_LAMBDA = ['Function', ['Add', 'x', 1], 'x'];
 // Spec item 1: "inline / assigned / opaque `{random}` callbacks, direct and
 // through another HOF".
 //
-// This is hole 1 of "Current state": `Map(xs, f)` with `f` bound to an impure
+// This is hole 1 of "Current state": `Map(f, xs)` with `f` bound to an impure
 // function used to report pure, because a bare symbol is always pure and
 // neither the `isPure` conjunction nor the pending-draw walk resolved through
 // the binding. The three flavors are the three ways a function value reaches an
@@ -84,7 +84,7 @@ const PURE_LAMBDA = ['Function', ['Add', 'x', 1], 'x'];
 // ───────────────────────────────────────────────────────────────────────────
 describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
   /** An engine with all three callback flavors installed under one name each,
-   * plus the pure control and the second HOF `applyAll: g ↦ Map([1,2], g)`. */
+   * plus the pure control and the second HOF `applyAll: g ↦ Map(g, [1,2])`. */
   function engine(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.assign('assignedDraw', ce.box(DRAWING_LAMBDA));
@@ -93,51 +93,51 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
     // signature — the case the whole design exists for.
     ce.declare('opaqueDraw', ce.type('(real) random -> real'));
     ce.declare('opaquePure', ce.type('(real) -> real'));
-    ce.assign('applyAll', ce.box(['Function', ['Map', ['List', 1, 2], 'g'], 'g']));
+    ce.assign('applyAll', ce.box(['Function', ['Map', 'g', ['List', 1, 2]], 'g']));
     return ce;
   }
 
-  describe('direct: `Map(xs, f)`', () => {
+  describe('direct: `Map(f, xs)`', () => {
     it('an INLINE literal contributes its arrow effects', () => {
       const ce = engine();
-      expect(eff(ce.box(['Map', ['List', 1, 2], DRAWING_LAMBDA]))).toEqual([
+      expect(eff(ce.box(['Map', DRAWING_LAMBDA, ['List', 1, 2]]))).toEqual([
         'random',
       ]);
-      expect(eff(ce.box(['Map', ['List', 1, 2], PURE_LAMBDA]))).toBe(undefined);
+      expect(eff(ce.box(['Map', PURE_LAMBDA, ['List', 1, 2]]))).toBe(undefined);
     });
 
     it('an ASSIGNED symbol resolves through its CURRENT binding', () => {
       const ce = engine();
-      expect(eff(ce.box(['Map', ['List', 1, 2], 'assignedDraw']))).toEqual([
+      expect(eff(ce.box(['Map', 'assignedDraw', ['List', 1, 2]]))).toEqual([
         'random',
       ]);
-      expect(eff(ce.box(['Map', ['List', 1, 2], 'assignedPure']))).toBe(
+      expect(eff(ce.box(['Map', 'assignedPure', ['List', 1, 2]]))).toBe(
         undefined
       );
     });
 
     it('an OPAQUE declaration contributes its declared arrow effects', () => {
       const ce = engine();
-      expect(eff(ce.box(['Map', ['List', 1, 2], 'opaqueDraw']))).toEqual([
+      expect(eff(ce.box(['Map', 'opaqueDraw', ['List', 1, 2]]))).toEqual([
         'random',
       ]);
-      expect(eff(ce.box(['Map', ['List', 1, 2], 'opaquePure']))).toBe(undefined);
+      expect(eff(ce.box(['Map', 'opaquePure', ['List', 1, 2]]))).toBe(undefined);
     });
 
     it('`isPure` follows, on every flavor — the boolean view of the channel', () => {
       const ce = engine();
       for (const cb of [DRAWING_LAMBDA, 'assignedDraw', 'opaqueDraw'])
-        expect(ce.box(['Map', ['List', 1, 2], cb]).isPure).toBe(false);
+        expect(ce.box(['Map', cb, ['List', 1, 2]]).isPure).toBe(false);
       for (const cb of [PURE_LAMBDA, 'assignedPure', 'opaquePure'])
-        expect(ce.box(['Map', ['List', 1, 2], cb]).isPure).toBe(true);
+        expect(ce.box(['Map', cb, ['List', 1, 2]]).isPure).toBe(true);
     });
 
     it('route parity: box, parse and `ce.function` agree', () => {
       const ce = engine();
       const routes = [
-        ce.box(['Map', ['List', 1, 2], 'assignedDraw']),
-        ce.parse('\\mathrm{Map}(\\lbrack 1, 2 \\rbrack, \\mathrm{assignedDraw})'),
-        ce.function('Map', [ce.box(['List', 1, 2]), ce.symbol('assignedDraw')]),
+        ce.box(['Map', 'assignedDraw', ['List', 1, 2]]),
+        ce.parse('\\mathrm{Map}(\\mathrm{assignedDraw}, \\lbrack 1, 2 \\rbrack)'),
+        ce.function('Map', [ce.symbol('assignedDraw'), ce.box(['List', 1, 2])]),
       ];
       for (const e of routes) {
         expect(eff(e)).toEqual(['random']);
@@ -146,7 +146,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
     });
   });
 
-  describe('through a second HOF — `(g) ↦ Map(xs, g)` applied to each', () => {
+  describe('through a second HOF — `(g) ↦ Map(g, xs)` applied to each', () => {
     // The point of "variance lives at applications, not signatures": `applyAll`
     // has ONE fixed signature (its `g` is unannotated, hence optimistically
     // pure), yet each APPLICATION of it projects the actual operand's latent
@@ -185,9 +185,9 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       for (const e of routes) expect(eff(e)).toEqual(['random']);
     });
 
-    it('an INLINE second HOF (`Apply((g) ↦ Map(xs, g), f)`) agrees', () => {
+    it('an INLINE second HOF (`Apply((g) ↦ Map(g, xs), f)`) agrees', () => {
       const ce = engine();
-      const hof = ['Function', ['Map', ['List', 1, 2], 'g'], 'g'];
+      const hof = ['Function', ['Map', 'g', ['List', 1, 2]], 'g'];
       for (const cb of [DRAWING_LAMBDA, 'assignedDraw', 'opaqueDraw'])
         expect(eff(ce.box(['Apply', hof, cb]))).toEqual(['random']);
       for (const cb of [PURE_LAMBDA, 'assignedPure', 'opaquePure'])
@@ -209,7 +209,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
   describe('the STATIC walk projects a callback operand', () => {
     // Worked example 1, the inference-time channel — its headline sentence:
     //
-    //   > the literal `(xs) ↦ Map(xs, f)` has type `(list) random -> list` —
+    //   > the literal `(xs) ↦ Map(f, xs)` has type `(list) random -> list` —
     //   > the application's effects, stamped onto the enclosing literal's own
     //   > arrow by the static walk
     //
@@ -230,11 +230,11 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
     };
     const RANDOM_ARROW = { str: '(real) random -> real' };
 
-    it('`(g: (real) random -> real) ↦ Map(xs, g)` carries `random` on its own arrow', () => {
+    it('`(g: (real) random -> real) ↦ Map(g, xs)` carries `random` on its own arrow', () => {
       const ce = new ComputeEngine();
       const literal = ce.box([
         'Function',
-        ['Map', ['List', 1, 2], 'g'],
+        ['Map', 'g', ['List', 1, 2]],
         ['Typed', 'g', RANDOM_ARROW],
       ]);
       expect(outerArrowEffects(literal)).toEqual(['random']);
@@ -269,14 +269,14 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       // Ruling (c): no boundary check, no contribution — soundness is opt-in
       // via annotation, and the runtime channel keeps the call sites honest.
       expect(
-        outerArrowEffects(ce.box(['Function', ['Map', ['List', 1, 2], 'g'], 'g']))
+        outerArrowEffects(ce.box(['Function', ['Map', 'g', ['List', 1, 2]], 'g']))
       ).toBe(undefined);
       expect(outerArrowEffects(ce.box(['Function', ['g'], 'g']))).toBe(
         undefined
       );
     });
 
-    it('an INLINE literal operand: `(xs) ↦ Map(xs, x ↦ Random())` carries `random`', () => {
+    it('an INLINE literal operand: `(xs) ↦ Map(x ↦ Random(), xs)` carries `random`', () => {
       // This does NOT reopen "literals are inference boundaries": producing or
       // STORING a literal still contributes ∅ (pinned in
       // `user-function-purity.test.ts`, "Literals are inference boundaries").
@@ -284,7 +284,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       const ce = new ComputeEngine();
       const literal = ce.box([
         'Function',
-        ['Map', ['List', 1, 2], DRAWING_LAMBDA],
+        ['Map', DRAWING_LAMBDA, ['List', 1, 2]],
         'xs',
       ]);
       expect(outerArrowEffects(literal)).toEqual(['random']);
@@ -307,7 +307,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       ce.box([
         'Assign',
         'useGlobal1',
-        ['Function', ['Map', ['List', 1, 2], 'globalDraw1'], 'xs'],
+        ['Function', ['Map', 'globalDraw1', ['List', 1, 2]], 'xs'],
       ]).evaluate();
       const def = ce.lookupDefinition('useGlobal1')!['operator'];
       expect(def.effects).toEqual(['random']);
@@ -323,7 +323,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       const ce = new ComputeEngine();
       expect(
         outerArrowEffects(
-          ce.box(['Function', ['Map', ['List', 1, 2], 'neverDeclared1'], 'xs'])
+          ce.box(['Function', ['Map', 'neverDeclared1', ['List', 1, 2]], 'xs'])
         )
       ).toBe('any');
     });
@@ -340,7 +340,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
     });
 
     it('a NON-function symbol operand contributes nothing', () => {
-      // `Map(xs, k)` with `k := 5`: the binding resolves, and it is not
+      // `Map(k, xs)` with `k := 5`: the binding resolves, and it is not
       // callable, so nothing is projected — the resolved-binding gate.
       //
       // `k` is declared `any` rather than left to infer `finite_integer` from
@@ -355,7 +355,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       ce.box(['Assign', 'numericK1', 5]).evaluate();
       expect(
         outerArrowEffects(
-          ce.box(['Function', ['Map', ['List', 1, 2], 'numericK1'], 'xs'])
+          ce.box(['Function', ['Map', 'numericK1', ['List', 1, 2]], 'xs'])
         )
       ).toBe(undefined);
     });
@@ -366,7 +366,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       const ce = new ComputeEngine();
       ce.box(['Assign', 'numericK2', 5]).evaluate();
       expect(
-        ce.box(['Map', ['List', 1, 2], 'numericK2']).errors[0]?.toString()
+        ce.box(['Map', 'numericK2', ['List', 1, 2]]).errors[0]?.toString()
       ).toBe(
         'Error(ErrorCode("incompatible-type", "function", "integer"), "numericK2")'
       );
@@ -382,7 +382,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       ce.box([
         'Assign',
         'useGlobal2',
-        ['Function', ['Map', ['List', 1, 2], 'globalDraw2'], 'xs'],
+        ['Function', ['Map', 'globalDraw2', ['List', 1, 2]], 'xs'],
       ]).evaluate();
       expect(
         ce.lookupDefinition('useGlobal2')!['operator'].effects
@@ -396,10 +396,10 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
       ).toEqual(['random']);
       // …while the runtime channel, asked about the operand position itself,
       // follows the new binding.
-      expect(eff(ce.box(['Map', ['List', 1, 2], 'globalDraw2']))).toBe(
+      expect(eff(ce.box(['Map', 'globalDraw2', ['List', 1, 2]]))).toBe(
         undefined
       );
-      expect(ce.box(['Map', ['List', 1, 2], 'globalDraw2']).isPure).toBe(true);
+      expect(ce.box(['Map', 'globalDraw2', ['List', 1, 2]]).isPure).toBe(true);
     });
 
     it('the projection is label-blind — a `scope` parameter projects the same way', () => {
@@ -408,7 +408,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
         outerArrowEffects(
           ce.box([
             'Function',
-            ['Map', ['List', 1, 2], 'g'],
+            ['Map', 'g', ['List', 1, 2]],
             ['Typed', 'g', { str: '(real) scope -> real' }],
           ])
         )
@@ -418,7 +418,7 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
         outerArrowEffects(
           ce.box([
             'Function',
-            ['Map', ['List', 1, 2], 'g'],
+            ['Map', 'g', ['List', 1, 2]],
             ['Typed', 'g', { str: '(real) -> real' }],
           ])
         )
@@ -685,7 +685,7 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     expect(ce.box(['Tuple', 1, 2]).operatorDefinition!.invokes).toBe(false);
     // Contrast: an operator that DOES invoke its callback.
     expect(
-      ce.box(['Map', ['List', 1], 'storedDraw']).operatorDefinition!.invokes
+      ce.box(['Map', 'storedDraw', ['List', 1]]).operatorDefinition!.invokes
     ).toBe(true);
   });
 
@@ -708,7 +708,7 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     // Storing it: nothing. Invoking it: `{random}`. Same value, two positions.
     expect(eff(ce.box(['List', 'storedDraw']))).toBe(undefined);
     expect(eff(ce.box(['Apply', 'storedDraw', 0]))).toEqual(['random']);
-    expect(eff(ce.box(['Map', ['List', 1, 2], 'storedDraw']))).toEqual([
+    expect(eff(ce.box(['Map', 'storedDraw', ['List', 1, 2]]))).toEqual([
       'random',
     ]);
   });
@@ -793,7 +793,7 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     // `random` on its arrow, so invoking it is `{random}`.
     ce.box(['Assign', 'g', 'storedDraw']).evaluate();
     expect(ce.box('g').type.effects).toEqual(['random']);
-    expect(eff(ce.box(['Map', ['List', 1, 2], 'g']))).toEqual(['random']);
+    expect(eff(ce.box(['Map', 'g', ['List', 1, 2]]))).toEqual(['random']);
   });
 
   it('a SEQUENCING head — `Block` — returns its last value, it does not apply it', () => {
@@ -843,7 +843,7 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     const released = ce.box([
       'WithRandomSeed',
       7,
-      ['ListFrom', ['Map', 'u', ['Function', ['Block', 'storedDraw'], 'x']]],
+      ['ListFrom', ['Map', ['Function', ['Block', 'storedDraw'], 'x'], 'u']],
     ]);
     expect(released.evaluate().operator).toBe('ListFrom');
 
@@ -852,7 +852,7 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     const kept = ce.box([
       'WithRandomSeed',
       7,
-      ['ListFrom', ['Map', 'u', ['Function', ['Block', ['Random']], 'x']]],
+      ['ListFrom', ['Map', ['Function', ['Block', ['Random']], 'x'], 'u']],
     ]);
     expect(kept.evaluate().operator).toBe('WithRandomSeed');
   });
@@ -876,7 +876,7 @@ describe('5 — `invokes: false` containers are pure to build', () => {
       .box([
         'WithRandomSeed',
         7,
-        ['ListFrom', ['Map', 'u', ['Function', body, 'y']]],
+        ['ListFrom', ['Map', ['Function', body, 'y'], 'u']],
       ] as any)
       .evaluate().operator;
   }
@@ -895,10 +895,10 @@ describe('5 — `invokes: false` containers are pure to build', () => {
   it('…on the PARSE route too', () => {
     const ce = engine();
     for (const [head, latex] of Object.entries({
-      If: '\\mathrm{WithRandomSeed}(7, \\mathrm{ListFrom}(\\mathrm{Map}(u, y \\mapsto \\mathrm{If}(\\mathrm{True}, x \\mapsto \\mathrm{Random}(), x \\mapsto 0))))',
+      If: '\\mathrm{WithRandomSeed}(7, \\mathrm{ListFrom}(\\mathrm{Map}(y \\mapsto \\mathrm{If}(\\mathrm{True}, x \\mapsto \\mathrm{Random}(), x \\mapsto 0), u)))',
       Block:
-        '\\mathrm{WithRandomSeed}(7, \\mathrm{ListFrom}(\\mathrm{Map}(u, y \\mapsto \\mathrm{Block}(x \\mapsto \\mathrm{Random}()))))',
-      List: '\\mathrm{WithRandomSeed}(7, \\mathrm{ListFrom}(\\mathrm{Map}(u, y \\mapsto \\lbrack x \\mapsto \\mathrm{Random}() \\rbrack)))',
+        '\\mathrm{WithRandomSeed}(7, \\mathrm{ListFrom}(\\mathrm{Map}(y \\mapsto \\mathrm{Block}(x \\mapsto \\mathrm{Random}()), u)))',
+      List: '\\mathrm{WithRandomSeed}(7, \\mathrm{ListFrom}(\\mathrm{Map}(y \\mapsto \\lbrack x \\mapsto \\mathrm{Random}() \\rbrack, u)))',
     }))
       expect([head, ce.parse(latex).evaluate().operator]).toEqual([
         head,
@@ -932,7 +932,7 @@ describe('5 — `invokes: false` containers are pure to build', () => {
         .box([
           'WithRandomSeed',
           7,
-          ['ListFrom', ['Map', 'u', DRAWING_LAMBDA]],
+          ['ListFrom', ['Map', DRAWING_LAMBDA, 'u']],
         ])
         .evaluate().operator
     ).toBe('WithRandomSeed');
@@ -1007,7 +1007,7 @@ describe('6 — discharge', () => {
     const ce = new ComputeEngine();
     ce.assign('drawEach', ce.box(DRAWING_LAMBDA));
     expect(
-      eff(ce.box(['WithRandomSeed', 42, ['Map', ['List', 1, 2], 'drawEach']]))
+      eff(ce.box(['WithRandomSeed', 42, ['Map', 'drawEach', ['List', 1, 2]]]))
     ).toEqual(['random']);
     // …while materializing INSIDE the frame asks for the draws there, so the
     // discharge is genuine and still applies.
@@ -1016,7 +1016,7 @@ describe('6 — discharge', () => {
         ce.box([
           'WithRandomSeed',
           42,
-          ['ListFrom', ['Map', ['List', 1, 2], 'drawEach']],
+          ['ListFrom', ['Map', 'drawEach', ['List', 1, 2]]],
         ])
       )
     ).toBe(undefined);
@@ -1104,8 +1104,8 @@ describe('6 — discharge', () => {
   // discharge it does not deliver.
   // ─────────────────────────────────────────────────────────────────────────
   describe('a frame-escaping lazy view is not discharged (item 142)', () => {
-    /** `Map(Range(1, 6), k ↦ Random())` — the lazy drawing view. */
-    const DRAWING_VIEW = ['Map', ['Range', 1, 6], DRAWING_LAMBDA];
+    /** `Map(k ↦ Random(), Range(1, 6))` — the lazy drawing view. */
+    const DRAWING_VIEW = ['Map', DRAWING_LAMBDA, ['Range', 1, 6]];
 
     it('the five shapes', () => {
       const ce = new ComputeEngine();
@@ -1190,7 +1190,7 @@ describe('6 — discharge', () => {
         // Draws made in the frame's own extent — the genuine discharge.
         'framed draws': ['List', ['Random'], ['Random']],
         // A view with nothing to escape.
-        'pure view': ['List', ['Map', ['Range', 1, 6], PURE_LAMBDA], 1],
+        'pure view': ['List', ['Map', PURE_LAMBDA, ['Range', 1, 6]], 1],
         // Materialized in the frame before it is stored.
         materialized: ['List', ['ListFrom', DRAWING_VIEW], 1],
         // The view is a STATEMENT, not the block's result: `Block` evaluates
@@ -1208,7 +1208,7 @@ describe('6 — discharge', () => {
       // A lazy view whose ELEMENT work is pure: discharging nothing is fine,
       // and the shape alone must not flip it.
       expect(
-        eff(ce.box(['WithRandomSeed', 42, ['Map', ['Range', 1, 6], PURE_LAMBDA]]))
+        eff(ce.box(['WithRandomSeed', 42, ['Map', PURE_LAMBDA, ['Range', 1, 6]]]))
       ).toBe(undefined);
       // A view whose SOURCE draws: that draw happens when the view is BUILT,
       // inside the frame, so it is owed to the frame and stays discharged.
@@ -1217,7 +1217,7 @@ describe('6 — discharge', () => {
           ce.box([
             'WithRandomSeed',
             42,
-            ['Map', ['RandomShuffle', ['Range', 1, 5]], PURE_LAMBDA],
+            ['Map', PURE_LAMBDA, ['RandomShuffle', ['Range', 1, 5]]],
           ])
         )
       ).toBe(undefined);
@@ -1234,7 +1234,7 @@ describe('6 — discharge', () => {
         'i',
       ]);
       expect(perSite.isPure).toBe(true);
-      expect(eff(ce.box(['Map', ['Range', 1, 3], perSite]))).toBe(undefined);
+      expect(eff(ce.box(['Map', perSite, ['Range', 1, 3]]))).toBe(undefined);
 
       // …and the escaping shape propagates through the STATIC channel too:
       // the enclosing literal's own arrow carries `random`, so an operator
@@ -1245,7 +1245,7 @@ describe('6 — discharge', () => {
         'i',
       ]);
       expect(escaping.type.effects).toEqual(['random']);
-      expect(eff(ce.box(['Map', ['Range', 1, 3], escaping]))).toEqual([
+      expect(eff(ce.box(['Map', escaping, ['Range', 1, 3]]))).toEqual([
         'random',
       ]);
     });

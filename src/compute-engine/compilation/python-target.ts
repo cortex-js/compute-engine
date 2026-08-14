@@ -2245,12 +2245,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // --- Higher-order collection operators ------------------------------------
   Map: (args, compile) => {
-    const coll = pyCollArg('Map', args[0], compile);
     if (args.length > 2)
       throw new Error('Map: multi-collection form is not compiled');
-    if (args[1] == null) throw new Error('Map: missing mapping function');
-    const fn = pyFnArg('Map', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
+    if (args[1] == null) throw new Error('Map: missing source collection');
+    const coll = pyCollArg('Map', args[1], compile);
+    const fn = pyFnArg('Map', args[0], compile, [
+      BaseCompiler.collectionElementTypeOf(args[1]),
     ]);
     return `(lambda _f: [_f(_x) for _x in ${coll}])(${fn})`;
   },

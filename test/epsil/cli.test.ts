@@ -427,14 +427,14 @@ describe('Epsil CLI runtime error reporting', () => {
     // data-only: the caret says it more clearly, so it is not rendered.
     expect(
       await main(
-        ['-e', 'let s = ["a", "b"]\ns |> Map(_, _ |-> Length(Characters(s)))'],
+        ['-e', 'let s = ["a", "b"]\ns |> Map(_ |-> Length(Characters(s)), _)'],
         io
       )
     ).toBe(1);
     expect(stderr()).not.toContain('in Characters argument');
-    expect(stderr()).toContain('--> 2:37');
+    expect(stderr()).toContain('--> 2:34');
     // A single-character span: one caret, not a statement-wide underline.
-    expect(stderr()).toMatch(/\n\s*\| {37}\^\n/);
+    expect(stderr()).toMatch(/\n\s*\| {34}\^\n/);
   });
 });
 

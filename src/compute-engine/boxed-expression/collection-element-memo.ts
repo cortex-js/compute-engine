@@ -263,7 +263,7 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
     });
     // TRANSITIVE dependencies: a symbol bound by reference to a stored
     // value (a helper function literal, a bound list) pulls that value's
-    // own free symbols into the instance's meaning — `Map(xs, f)` with
+    // own free symbols into the instance's meaning — `Map(f, xs)` with
     // `f(x) = x + q` depends on `q`, which appears nowhere in the tree.
     // No global counter tracks a reassignment of `q` (a plain value write
     // never bumps `_worldVersion`; the DECLARE path a never-declared `q`
@@ -327,7 +327,7 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
             excluded.add(node.valueDefinition);
         }
       // An application whose HEAD is a symbol bound to a value definition
-      // (`Map(xs, f)` applied with `f` a stored literal) reaches that
+      // (`Map(f, xs)` applied with `f` a stored literal) reaches that
       // binding through operator position, where no symbol operand appears —
       // track it like a symbol dependency.
       const headDef = e.valueDefinition;

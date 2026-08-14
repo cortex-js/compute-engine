@@ -1195,6 +1195,15 @@
     [
      "Map",
      [
+      "Function",
+      [
+       "DirichletCharacter",
+       "q",
+       "ell"
+      ],
+      "ell"
+     ],
+     [
       "Filter",
       [
        "Range",
@@ -1222,15 +1231,6 @@
        ],
        "ell"
       ]
-     ],
-     [
-      "Function",
-      [
-       "DirichletCharacter",
-       "q",
-       "ell"
-      ],
-      "ell"
      ]
     ]
    ],
@@ -1822,7 +1822,6 @@
           "Count",
           [
            "Map",
-           "NonNegativeIntegers",
            [
             "Function",
             [
@@ -1835,7 +1834,8 @@
              "p"
             ],
             "k"
-           ]
+           ],
+           "NonNegativeIntegers"
           ]
          ],
          [
@@ -1903,7 +1903,6 @@
      "Union",
      [
       "Map",
-      "Integers",
       [
        "Function",
        [
@@ -1930,7 +1929,8 @@
         ]
        ],
        "k"
-      ]
+      ],
+      "Integers"
      ],
      [
       "Set",
@@ -2502,7 +2502,6 @@
           "Count",
           [
            "Map",
-           "NonNegativeIntegers",
            [
             "Function",
             [
@@ -2515,7 +2514,8 @@
              "p"
             ],
             "k"
-           ]
+           ],
+           "NonNegativeIntegers"
           ]
          ],
          [
@@ -2530,7 +2530,6 @@
           "Count",
           [
            "Map",
-           "NonNegativeIntegers",
            [
             "Function",
             [
@@ -2547,7 +2546,8 @@
              ]
             ],
             "k"
-           ]
+           ],
+           "NonNegativeIntegers"
           ]
          ],
          [
@@ -3065,7 +3065,7 @@
    "guardLevel": "complex-domain",
    "flavor": null,
    "references": [
-    "H. Rademacher, On the Phragm\u00e9n-Lindel\u00f6f theorem and some applications, Mathematische Zeitschrift, December 1959, Volume 72, Issue 1, pp 192-204. Theorem 3. https://doi.org/10.1007/BF01162949"
+    "H. Rademacher, On the Phragmén-Lindelöf theorem and some applications, Mathematische Zeitschrift, December 1959, Volume 72, Issue 1, pp 192-204. Theorem 3. https://doi.org/10.1007/BF01162949"
    ],
    "topics": [
     "dirichlet"
@@ -3449,7 +3449,6 @@
       ],
       [
        "Map",
-       "NonNegativeIntegers",
        [
         "Function",
         [
@@ -3461,7 +3460,8 @@
          ]
         ],
         "n"
-       ]
+       ],
+       "NonNegativeIntegers"
       ],
       [
        "Equal",
@@ -3473,7 +3473,6 @@
       ],
       [
        "Map",
-       "NonNegativeIntegers",
        [
         "Function",
         [
@@ -3489,7 +3488,8 @@
          1
         ],
         "n"
-       ]
+       ],
+       "NonNegativeIntegers"
       ]
      ]
     ],

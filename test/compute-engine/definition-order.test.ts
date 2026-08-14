@@ -177,7 +177,7 @@ describe('definition order does not change semantics', () => {
     test('a nested literal inside the body', () => {
       const ce = new ComputeEngine();
       ce.parse(
-        'g(t)\\coloneq\\operatorname{Map}([1,2,3], u \\mapsto a(u)+t)'
+        'g(t)\\coloneq\\operatorname{Map}(u \\mapsto a(u)+t, [1,2,3])'
       ).evaluate();
       ce.parse('a(t)\\coloneq t^2').evaluate();
       expect(ce.parse('g(0)').evaluate().toString()).toEqual('[1,4,9]');

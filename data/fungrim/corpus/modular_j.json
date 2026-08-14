@@ -1082,7 +1082,6 @@
     "Equal",
     [
      "Map",
-     "ModularGroupFundamentalDomain",
      [
       "Function",
       [
@@ -1090,7 +1089,8 @@
        "tau"
       ],
       "tau"
-     ]
+     ],
+     "ModularGroupFundamentalDomain"
     ],
     "ComplexNumbers"
    ],

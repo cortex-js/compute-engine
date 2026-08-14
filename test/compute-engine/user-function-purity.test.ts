@@ -387,7 +387,7 @@ describe('`any` is impure but never pins a seed frame', () => {
       .box([
         'WithRandomSeed',
         1,
-        ['ListFrom', ['Map', ['Range', 1, 'n'], ['Function', ['mix9w'], 'u']]],
+        ['ListFrom', ['Map', ['Function', ['mix9w'], 'u'], ['Range', 1, 'n']]],
       ])
       .evaluate();
     return {
@@ -632,7 +632,7 @@ describe('The failures the inference prevents', () => {
     const e = ce.box([
       'WithRandomSeed',
       1,
-      ['ListFrom', ['Map', ['Range', 1, 'n'], ['Function', ['f'], 'u']]],
+      ['ListFrom', ['Map', ['Function', ['f'], 'u'], ['Range', 1, 'n']]],
     ]);
     const kept = e.evaluate();
     expect(kept.operator).toBe('WithRandomSeed');

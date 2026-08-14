@@ -76,6 +76,11 @@ import type {
 } from '../global-types.js';
 import type { FunctionInterface } from '../types-expression.js';
 import type { Type, TypeParameter } from '../../common/type/types.js';
+import { deepEraseCallbackTypes } from '../../common/type/callback.js';
+import {
+  freeTypeVariables,
+  substituteTypeVariables,
+} from '../../common/type/instantiate.js';
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import {
@@ -178,10 +183,18 @@ function isRefutablePipeTarget(f: Expression): boolean {
  * complete call:
  * - the stage must be a call `F(…)` on an operator with a known signature;
  * - it must mention no placeholder of its own (an explicit `_`/`_1`…`_9`
- *   already says where the topic goes, e.g. `Take(_, 10)`, `Map(_, _^2)`);
- * - the written argument count must be below EVERY signature arm's required
- *   count (the call is incomplete however it is read), and the completed
- *   count must fit some arm's arity.
+ *   already says where the topic goes, e.g. `Take(_, 10)`, `Map(f, _)`);
+ * - the written argument count must be below EVERY signature arm's minimum
+ *   arity — required parameters plus a one-or-more variadic's minimum (the
+ *   call is incomplete however it is read) — and the completed count must
+ *   fit some arm's arity.
+ *
+ * The placeholder fills the FIRST parameter slot whose declared type the
+ * topic provably satisfies (shifting the written arguments right from that
+ * slot): a collection piped into `Take(10)` goes first (`Take(_, 10)`),
+ * while one piped into the callback-first `Map(f)` goes second
+ * (`Map(f, _)`). When no slot provably fits — an unknown-typed topic — it
+ * defaults to first.
  *
  * A complete call keeps its existing meaning — `5 |> Max(3)` still applies
  * the value of `Max(3)` — so this sugar only gives meaning to stages that
@@ -191,7 +204,8 @@ function isRefutablePipeTarget(f: Expression): boolean {
  */
 function pipeStageWithImplicitTopic(
   ce: ComputeEngine,
-  rhs: Expression
+  rhs: Expression,
+  topic: Expression
 ): Expression | undefined {
   if (!isFunction(rhs)) return undefined;
   const name = rhs.operator;
@@ -203,8 +217,11 @@ function pipeStageWithImplicitTopic(
   const arms = signatureArms(opDef?.signature.type);
   if (arms === undefined) return undefined;
   const n = rhs.nops;
+  const minArity = (a: (typeof arms)[number]): number =>
+    (a.args?.length ?? 0) +
+    (a.variadicArg !== undefined ? (a.variadicMin ?? 0) : 0);
   // Complete under some arm: the written call already means something.
-  if (arms.some((a) => n >= (a.args?.length ?? 0))) return undefined;
+  if (arms.some((a) => n >= minArity(a))) return undefined;
   const fits = arms.some((a) => {
     const req = a.args?.length ?? 0;
     const max =
@@ -212,16 +229,48 @@ function pipeStageWithImplicitTopic(
     return n + 1 <= max;
   });
   if (!fits) return undefined;
-  return ce._fn(name, [ce.symbol('_', { canonical: false }), ...rhs.ops], {
-    canonical: false,
-  });
+
+  // Placement: first slot (across the arms, in order) whose declared
+  // parameter type the topic provably satisfies, bounded by the written
+  // argument count (the topic can at most be appended). The declared type is
+  // GROUNDED for the test: a `callback<S>` slot is the primitive `function`
+  // for every admission decision (Design D contract clause 1), and a free
+  // type variable (`collection<T>`) is substituted with `any` — the question
+  // here is "could the topic belong in this slot", not the solve itself.
+  const slotAccepts = (param: Type): boolean => {
+    let p = deepEraseCallbackTypes(param);
+    const vars = freeTypeVariables(p);
+    if (vars.size > 0) {
+      const bindings: Record<string, Type> = Object.create(null);
+      for (const v of vars) bindings[v] = 'any';
+      p = substituteTypeVariables(p, bindings);
+    }
+    return topic.type.matches(p);
+  };
+  let at = 0;
+  placement: for (const a of arms) {
+    const params = [
+      ...(a.args ?? []).map((p) => p.type),
+      ...(a.optArgs ?? []).map((p) => p.type),
+      ...(a.variadicArg !== undefined ? [a.variadicArg.type] : []),
+    ];
+    for (let i = 0; i < params.length && i <= n; i++)
+      if (slotAccepts(params[i])) {
+        at = i;
+        break placement;
+      }
+  }
+
+  const args = [...rhs.ops];
+  args.splice(at, 0, ce.symbol('_', { canonical: false }));
+  return ce._fn(name, args, { canonical: false });
 }
 
 /**
  * Implicit `Map`: a pipe stage that is a UNARY function literal maps over a
  * collection topic instead of being applied to the collection as a whole —
  * `xs |> x ↦ x^2` and `xs |> _^2` (the Epsil parser wraps the latter as a
- * `Function` literal) both mean `Map(xs, x ↦ x^2)`. Returns the `Map`
+ * `Function` literal) both mean `Map(x ↦ x^2, xs)`. Returns the `Map`
  * expression, or `undefined` when the stage is an ordinary application.
  *
  * The stage must be a LITERAL lambda: a bare function symbol (`xs |> Sum`) or
@@ -255,7 +304,7 @@ function pipeImplicitMap(
     const ts = isString(t) ? t.string : undefined;
     if (ts !== undefined && topic.type.matches(ts)) return undefined;
   }
-  return ce._fn('Map', [topic, f]);
+  return ce._fn('Map', [f, topic]);
 }
 
 /**
@@ -315,7 +364,7 @@ function holdValuesShieldNames(spec: Expression): string[] {
  *
  * 1. the node DRAWS — `random` explicitly in the node's own projected effects
  *    (which includes the LATENT effects of a callback it invokes, e.g.
- *    `Map(xs, randomF)` beneath a survivor), or the derived `drawsRandom`
+ *    `Map(randomF, xs)` beneath a survivor), or the derived `drawsRandom`
  *    getter, which additionally carries the frame protocol and the inference's
  *    positively-observed-draw bit;
  * 2. the node DELIMITS — `frameProtocol === 'seed'` (a nested
@@ -336,7 +385,7 @@ function holdValuesShieldNames(spec: Expression): string[] {
  *   `Release`, under whatever frame is active then. DERIVED from the
  *   definition flag, not a name check — it is the same quote-position rule the
  *   projection uses to make `effectsOf(Hold(Random()))` empty.
- * - A lazy collection VIEW in value position — `Map(xs, x |-> Random())`
+ * - A lazy collection VIEW in value position — `Map(x |-> Random(), xs)`
  *   escaping as the result, directly or inside `List`/`Tuple` cells — is a
  *   COMPLETED value: its lambda draws at materialization (the §6 escape
  *   ruling of `docs/RANDOMNESS-MODEL.md`), so its `Function` subtree is
@@ -347,7 +396,7 @@ function holdValuesShieldNames(spec: Expression): string[] {
  *   derived from the definition's binding-site selector, not from a list of
  *   operator names: the operands that carry binding sites are its clauses
  *   and stay scanned, exactly as a `Map`'s source collection does.
- * - Any OTHER surviving application (`ListFrom(Map(xs, x |-> Random()))`
+ * - Any OTHER surviving application (`ListFrom(Map(x |-> Random(), xs))`
  *   with an unresolved length, an `At` over it, …) is work THIS evaluation
  *   was supposed to finish: everything beneath it — lambdas included — is
  *   scanned, so the draws it still owes are detected and the frame is kept.
@@ -387,7 +436,7 @@ function hasPendingImpureApplication(
     !underEagerSurvivor && (expr.isLazyCollection || isValueContainer(expr));
   const under = underEagerSurvivor || !isValueNode;
   // Mode 1, the LATENT half: a surviving application that INVOKES a
-  // function-valued operand which draws (`Map(xs, randomF)` beneath an
+  // function-valued operand which draws (`Map(randomF, xs)` beneath an
   // unfinished consumer, `Apply(randomF, x)`) still owes those draws. Only in
   // eager-survivor position: a lazy view in VALUE position draws at
   // materialization instead (§6), which is the same reason its `Function`
@@ -2046,7 +2095,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // that strips it.
         //
         // The right operand is the pipe STAGE, and a shorthand-lambda
-        // placeholder in it (`Map(_1, f)`) is that stage's parameter, not a
+        // placeholder in it (`Map(f, _1)`) is that stage's parameter, not a
         // reference to whatever `_1` happens to name in the caller's scope:
         // canonicalize it with the placeholders freshly bound, so a global
         // `_1` — a valued one in particular — cannot capture them.
@@ -2062,13 +2111,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `f` decide whether to evaluate it.
         if (isFunction(x, 'Pipe')) x = x.evaluate({ numericApproximation });
 
-        // Implicit topic argument: `xs |> Take(10)` fills the missing first
-        // argument with `_`, i.e. `xs |> Take(_, 10)` (see
-        // `pipeStageWithImplicitTopic` for the exact gate). The rewritten
-        // stage is raw, exactly like the held operand, so the shorthand
-        // machinery below binds the topic to the placeholder as usual.
+        // Implicit topic argument: `xs |> Take(10)` fills the missing
+        // argument slot with `_`, i.e. `xs |> Take(_, 10)` — and for a
+        // callback-first operator, `xs |> Map(f)` is `xs |> Map(f, _)` (see
+        // `pipeStageWithImplicitTopic` for the gate and slot placement). The
+        // rewritten stage is raw, exactly like the held operand, so the
+        // shorthand machinery below binds the topic to the placeholder as
+        // usual.
         const f = canonicalWithFreshPlaceholders(
-          pipeStageWithImplicitTopic(ce, rawStage) ?? rawStage
+          pipeStageWithImplicitTopic(ce, rawStage, x) ?? rawStage
         );
 
         // The right operand must be applicable. A statically-refutable rhs — a
@@ -2077,8 +2128,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // and an rhs that evaluated to a bare literal at runtime). This check
         // stays here rather than in the type system, which cannot validate the
         // held (lazy) operands, and rather than in `apply()`, whose
-        // constant-nullary shorthand (`Apply(3, 5)` → `3`, relied on by
-        // `Map([1, 2], 3)` → `[3, 3]`) must be preserved: `Pipe` is
+        // constant-nullary shorthand (`Apply(3, 5)` → `3`, a documented
+        // `Apply` behavior with its own pins) must be preserved: `Pipe` is
         // deliberately stricter than `Apply`. Anything else non-applicable
         // stays inert (returns `undefined`).
         if (isRefutablePipeTarget(f))
@@ -2086,7 +2137,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         // Implicit `Map`: a unary LITERAL lambda stage over a collection
         // topic maps instead of applying — `xs |> x ↦ x^2` and `xs |> _^2`
-        // are `Map(xs, x ↦ x^2)` (see `pipeImplicitMap` for the escapes:
+        // are `Map(x ↦ x^2, xs)` (see `pipeImplicitMap` for the escapes:
         // named functions, string topics, whole-collection parameter
         // annotations).
         const mapped = pipeImplicitMap(ce, x, f, rawStage);

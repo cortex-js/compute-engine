@@ -312,7 +312,7 @@ describe('R3 — length policy (strict, lifted regime)', () => {
   test('an unknown-length condition is not compared — the expression stays inert', () => {
     const ce = engine();
     ce.declare('m', 'integer');
-    const unknown = ['Map', ['Range', 1, 'm'], ['Function', ['Greater', '_', 2], '_']];
+    const unknown = ['Map', ['Function', ['Greater', '_', 2], '_'], ['Range', 1, 'm']];
     const r = ce
       .box(['Which', ['List', 'False', 'False'], 1, unknown, 2, 'True', 0])
       .evaluate();
@@ -322,7 +322,7 @@ describe('R3 — length policy (strict, lifted regime)', () => {
   test('an unknown-length selected arm leaves the expression inert', () => {
     const ce = engine();
     ce.declare('m', 'integer');
-    const unknown = ['Map', ['Range', 1, 'm'], ['Function', ['Greater', '_', 2], '_']];
+    const unknown = ['Map', ['Function', ['Greater', '_', 2], '_'], ['Range', 1, 'm']];
     const r = ce.box(['Which', ['List', 'True', 'False'], unknown]).evaluate();
     expect(r.operator).toBe('Which');
   });

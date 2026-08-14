@@ -2524,6 +2524,14 @@
      [
       "Map",
       [
+       "Function",
+       [
+        "GammaLn",
+        "x"
+       ],
+       "x"
+      ],
+      [
        "Interval",
        [
         "Open",
@@ -2533,14 +2541,6 @@
         "Open",
         "PositiveInfinity"
        ]
-      ],
-      [
-       "Function",
-       [
-        "GammaLn",
-        "x"
-       ],
-       "x"
       ]
      ]
     ],
@@ -3189,6 +3189,14 @@
      [
       "Map",
       [
+       "Function",
+       [
+        "Gamma",
+        "x"
+       ],
+       "x"
+      ],
+      [
        "Interval",
        [
         "Open",
@@ -3198,14 +3206,6 @@
         "Open",
         "PositiveInfinity"
        ]
-      ],
-      [
-       "Function",
-       [
-        "Gamma",
-        "x"
-       ],
-       "x"
       ]
      ]
     ],

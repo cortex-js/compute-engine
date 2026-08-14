@@ -102,12 +102,12 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
   // operand to Map/Filter), not just as a call head, resolves to the shared
   // emitted local `_fn_<name>` rather than a dangling `_.<name>` free var.
   describe('user-defined function as a higher-order operand', () => {
-    it('Map(list, userFn) references the shared local and runs', () => {
+    it('Map(userFn, list) references the shared local and runs', () => {
       const ce = new ComputeEngine();
       ce.parse('h(x) := x^2').evaluate();
       const r = ce
         .getCompilationTarget('javascript')!
-        .compile(ce.box(['Map', ['List', 'a', 'b'], 'h']));
+        .compile(ce.box(['Map', 'h', ['List', 'a', 'b']]));
       expect(r.success).toBe(true);
       expect(r.code).toContain('_fn_h');
       expect(r.code).not.toContain('_.h');
@@ -131,7 +131,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       ce.parse('q(x) := x + k').evaluate();
       const r = ce
         .getCompilationTarget('javascript')!
-        .compile(ce.box(['Map', ['List', 'a', 'b'], 'q']));
+        .compile(ce.box(['Map', 'q', ['List', 'a', 'b']]));
       // `k` (free in q's body) is surfaced; `q` itself is not free.
       expect(r.freeSymbols!.sort()).toEqual(['a', 'b', 'k']);
       expect(r.run!({ a: 1, b: 2, k: 10 })).toEqual([11, 12]);
@@ -141,7 +141,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const ce = new ComputeEngine();
       const r = ce
         .getCompilationTarget('javascript')!
-        .compile(ce.parse('\\mathrm{Map}([1,2,3], x \\mapsto x^2)'));
+        .compile(ce.parse('\\mathrm{Map}(x \\mapsto x^2, [1,2,3])'));
       expect(r.run!({})).toEqual([1, 4, 9]);
     });
 
@@ -150,8 +150,8 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
     it('a parameter shadowing a same-named global function wins over the global', () => {
       const ce = new ComputeEngine();
       ce.parse('h(x) := x^2').evaluate(); // global `h`
-      // f(h) := Map([1,2,3], h) — `h` here is f's (function-valued) parameter.
-      ce.assign('f', ce.box(['Function', ['Map', ['List', 1, 2, 3], 'h'], 'h']));
+      // f(h) := Map(h, [1,2,3]) — `h` here is f's (function-valued) parameter.
+      ce.assign('f', ce.box(['Function', ['Map', 'h', ['List', 1, 2, 3]], 'h']));
       const r = ce
         .getCompilationTarget('javascript')!
         .compile(ce.box(['f', ['Function', ['Add', 'y', 10], 'y']]));
@@ -166,7 +166,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       ce.parse('h(x) := x^2').evaluate();
       const r = ce
         .getCompilationTarget('javascript')!
-        .compile(ce.box(['Map', ['List', 'a', 'b'], 'h']), {
+        .compile(ce.box(['Map', 'h', ['List', 'a', 'b']]), {
           vars: { h: 'EXTERNAL_H' },
         });
       // Resolves to the mapped source, not the shared local `_fn_h`.
@@ -192,7 +192,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       );
       const r = ce
         .getCompilationTarget('javascript')!
-        .compile(ce.box(['Map', ['List', 'a', 'b'], 'p']));
+        .compile(ce.box(['Map', 'p', ['List', 'a', 'b']]));
       // `x` is the bound (typed) parameter; only `a`, `b`, `k` are free.
       expect(r.freeSymbols!.sort()).toEqual(['a', 'b', 'k']);
     });

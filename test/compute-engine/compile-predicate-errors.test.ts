@@ -56,6 +56,12 @@ const PREDICATE_OPS = [
 const opBody = (op: string, p: string) =>
   op === 'Map' || op === 'FlatMap' ? ['Add', p, 1] : ['Greater', p, 0];
 
+/** `[op, …]` with the operands in the order that operator declares: `Map`
+ * takes its mapping function FIRST, every other callback consumer here takes
+ * the source collection first. */
+const opCall = (op: string, source: any, callback: any): any =>
+  op === 'Map' ? [op, callback, source] : [op, source, callback];
+
 describe('Compiled callbacks with an unenforceable parameter annotation', () => {
   for (const op of [...PREDICATE_OPS, 'Map', 'FlatMap'] as const) {
     describe(op, () => {
@@ -64,11 +70,9 @@ describe('Compiled callbacks with an unenforceable parameter annotation', () => 
       const violating = () => {
         const ce = new ComputeEngine();
         ce.declare('ds', 'list<number>');
-        return ce.box([
-          op,
-          'ds',
-          annotated('n', 'finite_integer', opBody(op, 'n')),
-        ]);
+        return ce.box(
+          opCall(op, 'ds', annotated('n', 'finite_integer', opBody(op, 'n')))
+        );
       };
 
       it('fails closed on the JavaScript target', () => {
@@ -93,11 +97,9 @@ describe('Compiled callbacks with an unenforceable parameter annotation', () => 
       it('compiles when the element type provably satisfies the annotation', () => {
         const ce = new ComputeEngine();
         ce.declare('ds', 'list<finite_integer>');
-        const expr = ce.box([
-          op,
-          'ds',
-          annotated('n', 'finite_integer', opBody(op, 'n')),
-        ]);
+        const expr = ce.box(
+          opCall(op, 'ds', annotated('n', 'finite_integer', opBody(op, 'n')))
+        );
         const r = js(expr);
         expect(r.success).toBe(true);
         expect(python.compile(expr).success).toBe(true);
@@ -111,7 +113,9 @@ describe('Compiled callback run parity on valid input', () => {
   const interpreted = (op: string, xs: number[]) => {
     const ce = new ComputeEngine();
     return ce
-      .box([op, ['List', ...xs], annotated('n', 'integer', opBody(op, 'n'))])
+      .box(
+        opCall(op, ['List', ...xs], annotated('n', 'integer', opBody(op, 'n')))
+      )
       .evaluate();
   };
 
@@ -133,11 +137,9 @@ describe('Compiled callback run parity on valid input', () => {
       // A LITERAL integer list: its element type provably satisfies the
       // annotation, so the callback compiles with the annotation dropped —
       // provably a no-op.
-      const expr = ce.box([
-        op,
-        ['List', ...XS],
-        annotated('n', 'integer', opBody(op, 'n')),
-      ]);
+      const expr = ce.box(
+        opCall(op, ['List', ...XS], annotated('n', 'integer', opBody(op, 'n')))
+      );
       const r = js(expr);
       expect(r.success).toBe(true);
       expect(r.run!({})).toEqual(expected);

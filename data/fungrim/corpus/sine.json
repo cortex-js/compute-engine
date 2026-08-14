@@ -901,7 +901,6 @@
      "Min",
      [
       "Map",
-      "RealNumbers",
       [
        "Function",
        [
@@ -909,7 +908,8 @@
         "x"
        ],
        "x"
-      ]
+      ],
+      "RealNumbers"
      ]
     ],
     -1
@@ -3078,7 +3078,6 @@
      "z",
      [
       "Map",
-      "Integers",
       [
        "Function",
        [
@@ -3099,7 +3098,8 @@
         2
        ],
        "n"
-      ]
+      ],
+      "Integers"
      ]
     ]
    ],
@@ -3134,7 +3134,6 @@
     ],
     [
      "Map",
-     "Integers",
      [
       "Function",
       [
@@ -3155,7 +3154,8 @@
        ]
       ],
       "n"
-     ]
+     ],
+     "Integers"
     ]
    ],
    "variables": [],
@@ -3484,7 +3484,6 @@
      "Max",
      [
       "Map",
-      "RealNumbers",
       [
        "Function",
        [
@@ -3492,7 +3491,8 @@
         "x"
        ],
        "x"
-      ]
+      ],
+      "RealNumbers"
      ]
     ],
     1
@@ -3592,7 +3592,6 @@
     ],
     [
      "Map",
-     "Integers",
      [
       "Function",
       [
@@ -3613,7 +3612,8 @@
        ]
       ],
       "n"
-     ]
+     ],
+     "Integers"
     ]
    ],
    "variables": [],

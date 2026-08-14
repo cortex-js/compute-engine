@@ -244,7 +244,7 @@
    "guardLevel": "undischargeable",
    "flavor": null,
    "references": [
-    "L. Schoenfeld (1976). Sharper bounds for the Chebyshev functions \u03b8(x) and \u03c8(x). II. Mathematics of Computation. 30 (134): 337-360. DOI: 10.2307/2005976"
+    "L. Schoenfeld (1976). Sharper bounds for the Chebyshev functions θ(x) and ψ(x). II. Mathematics of Computation. 30 (134): 337-360. DOI: 10.2307/2005976"
    ],
    "topics": [
     "prime_numbers",
@@ -258,7 +258,6 @@
     "Primes",
     [
      "Map",
-     "PositiveIntegers",
      [
       "Function",
       [
@@ -266,7 +265,8 @@
        "n"
       ],
       "n"
-     ]
+     ],
+     "PositiveIntegers"
     ]
    ],
    "variables": [],

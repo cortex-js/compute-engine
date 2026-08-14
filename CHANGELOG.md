@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **`Map` now takes its mapping function FIRST: `Map(f, xs)`,
+  `Map(f, xs, ys)`.** The signature is `(function, collection+)` — the
+  operator is variadic over its source collections, and a variadic
+  parameter cannot precede a required one, so the historical
+  collection-first order (`Map(xs, f)`) was not expressible as a
+  positional signature: the declared signature and the handlers had
+  drifted apart, and this repairs them onto the one honest spelling
+  (which also matches Mathematica's `Map[f, xs]` and Lisp's `mapcar`).
+  A call in the legacy order now reports an `incompatible-type` error
+  on the function slot (naming the misplaced collection) rather than
+  evaluating. The pipeline placeholder spelling changes accordingly:
+  `xs |> Map(_, f)` becomes `xs |> Map(f, _)` — or, more simply,
+  `xs |> Map(f)`: the implicit pipe argument now fills the first slot
+  the piped value's type fits, no longer always the first slot.
+  `FlatMap`, `Filter`, `Reduce`, and the other callback-taking
+  collection operators are unchanged — none of them is variadic over
+  collections, so their collection-first spellings remain expressible
+  and true.
+
 ## 0.107.0 _2026-08-13_
 
 ### Epsil

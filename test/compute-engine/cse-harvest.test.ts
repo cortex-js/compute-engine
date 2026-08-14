@@ -298,13 +298,13 @@ describe('CSE HARVEST — G1b emission purity', () => {
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('x \\mapsto x+1'));
 
-    const named = ['Map', 'xs', 'f'] as any;
+    const named = ['Map', 'f', 'xs'] as any;
     const namedHarvest = harvestCse(engine.box(['Add', named, named, named]));
     expect(namedHarvest.candidates.map((c) => c.representative.toString())).toEqual(
       []
     );
 
-    const inline = ['Map', 'xs', ['Function', ['Add', 'x', 1], 'x']] as any;
+    const inline = ['Map', ['Function', ['Add', 'x', 1], 'x'], 'xs'] as any;
     const inlineHarvest = harvestCse(
       engine.box(['Add', inline, inline, inline])
     );

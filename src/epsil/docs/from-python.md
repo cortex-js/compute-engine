@@ -109,7 +109,7 @@ sum(n**2 for n in range(1, 11) if n % 2 == 1)
 ```
 
 ```epsil
-1..10 |> Filter(_, n |-> n % 2 == 1) |> Map(_, n |-> n^2) |> Sum
+1..10 |> Filter(_, n |-> n % 2 == 1) |> Map(n |-> n^2, _) |> Sum
 // ➔ 165
 ```
 
@@ -120,7 +120,7 @@ time, so the same "late binding in a closure" surprise applies:
 
 ```epsil
 let n = 1
-let m = Map(1..3, k |-> k * n)
+let m = Map(k |-> k * n, 1..3)
 n = 10
 Sum(m)
 // ➔ 60
@@ -172,7 +172,7 @@ classify(n) = match n {
   k if k > 0 => "positive"
   _ => "negative"
 }
-Map([-2, 0, 5], classify)
+Map(classify, [-2, 0, 5])
 // ➔ ["negative", "zero", "positive"]
 ```
 
@@ -223,7 +223,7 @@ is the one numeric answer that differs on values you are likely to type:
 Arithmetic broadcasts over a list elementwise, without anything like NumPy:
 
 ```epsil
-([1, 2, 3] + 1, [1, 2, 3] * [4, 5, 6], Sum(Map(1..4, k |-> k^2)))
+([1, 2, 3] + 1, [1, 2, 3] * [4, 5, 6], Sum(Map(k |-> k^2, 1..4)))
 // ➔ ([2,3,4], [4,10,18], 30)
 ```
 
@@ -260,7 +260,7 @@ There are no exceptions. A runtime problem becomes an ordinary
 not abort the rest of the work:
 
 ```epsil
-Map([16, -4, "banana", 81], x |-> Sqrt(x))
+Map(x |-> Sqrt(x), [16, -4, "banana", 81])
 // ➔ [4, 2i, NaN, 9]
 ```
 

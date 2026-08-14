@@ -164,7 +164,7 @@ describe('the repair is limited to single-letter library operators', () => {
   test('a multi-letter operator in value position stays the builtin', () => {
     expect(
       ce
-        .box(['Map', ['List', 0, 1], 'Sin'])
+        .box(['Map', 'Sin', ['List', 0, 1]])
         .evaluate()
         .toString()
     ).toBe('[0,sin(1)]');

@@ -338,14 +338,14 @@ describe('COMPILE CSE — binder bodies', () => {
 });
 
 describe('COMPILE CSE — emission purity (G1b)', () => {
-  /** `Sum(Map([1,2,3,4], cb))` twice, over a fresh engine (assigning a symbol
+  /** `Sum(Map(cb, [1,2,3,4]))` twice, over a fresh engine (assigning a symbol
    * retypes it for the engine's lifetime). */
   const mappedTwice = (engine: ComputeEngine, cb: string) => {
-    const mapped = ['Sum', ['Map', ['List', 1, 2, 3, 4], cb]];
+    const mapped = ['Sum', ['Map', cb, ['List', 1, 2, 3, 4]]];
     return engine.box(['Add', mapped, mapped]);
   };
 
-  it('merges two identical `Map(xs, f)` with a PURE named callback', () => {
+  it('merges two identical `Map(f, xs)` with a PURE named callback', () => {
     // A named callback used to be opaque outright — invisible to purity
     // inference (`docs/EFFECTS-MODEL.md`). It is now resolved through the
     // same transitive admission gate as a call site
@@ -367,9 +367,9 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     expect(value).toBe(expr.evaluate().N().re);
   });
 
-  it('does not merge two identical `Map(xs, f)` with a DRAWING named callback', () => {
+  it('does not merge two identical `Map(f, xs)` with a DRAWING named callback', () => {
     // The relaxation is gated on the callback's body: `f` drawing makes
-    // `Map(xs, f)` impure (G1) and `f` itself inadmissible, so merging — which
+    // `Map(f, xs)` impure (G1) and `f` itself inadmissible, so merging — which
     // would change the draw stream — never happens.
     const engine = new ComputeEngine();
     engine.assign(
@@ -384,7 +384,7 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     expect(occurrences(result.code, '.map(')).toBe(2);
   });
 
-  it('merges two identical `Map(xs, Sin)` with a BUILT-IN operator callback', () => {
+  it('merges two identical `Map(Sin, xs)` with a BUILT-IN operator callback', () => {
     // `Sin` resolves to the engine-authored system-scope operator definition,
     // is `pure`, and has a FIXED unary signature — so the compiler
     // eta-expands it into the shared local `_fn_Sin` and the harvest admits
@@ -403,7 +403,7 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     expect(value).toBeCloseTo(expr.evaluate().N().re!, 12);
   });
 
-  it('merges two identical `Map(xs, Ln)` — an OPTIONAL-tail built-in', () => {
+  it('merges two identical `Map(Ln, xs)` — an OPTIONAL-tail built-in', () => {
     // `Ln` expands at its REQUIRED arity (1 of 1 required + 1 optional), so
     // it is admitted exactly like `Sin`.
     const engine = new ComputeEngine();
@@ -420,7 +420,7 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     expect(value).toBeCloseTo(expr.evaluate().N().re!, 12);
   });
 
-  it('merges two identical `Map(xs, Negate)` — an OPERATOR-MAPPED built-in', () => {
+  it('merges two identical `Map(Negate, xs)` — an OPERATOR-MAPPED built-in', () => {
     const engine = new ComputeEngine();
     const expr = mappedTwice(engine, 'Negate');
     const result = compile(expr, { fallback: false });
@@ -1580,7 +1580,7 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
   it('refuses a named-callback OPERAND that is a lambda parameter', () => {
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
-    const mapped = ['Sum', ['Map', ['List', 1, 2, 3, 4], 'f']];
+    const mapped = ['Sum', ['Map', 'f', ['List', 1, 2, 3, 4]]];
     const expr = engine.box(['Function', ['Add', mapped, mapped], 'f'] as any);
     const result = compile(expr, { fallback: false });
 
@@ -1630,7 +1630,7 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
   it('still merges an UNSHADOWED named callback (canary)', () => {
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
-    const mapped = ['Sum', ['Map', ['List', 1, 2, 3, 4], 'f']];
+    const mapped = ['Sum', ['Map', 'f', ['List', 1, 2, 3, 4]]];
     const result = compile(engine.box(['Add', mapped, mapped] as any), {
       fallback: false,
     });
@@ -1713,7 +1713,7 @@ describe('COMPILE CSE — typed named callback of an eager operator', () => {
     // owns the verdict.
     const engine = new ComputeEngine();
     engine.assign('Sin', engine.parse('x \\mapsto x + 1'));
-    const mapped = ['Sum', ['Map', ['List', 1, 2, 3, 4, 5], 'Sin']];
+    const mapped = ['Sum', ['Map', 'Sin', ['List', 1, 2, 3, 4, 5]]];
     const expr = engine.box(['Add', mapped, mapped] as any);
     const result = compile(expr, { fallback: false });
 

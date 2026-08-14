@@ -426,7 +426,6 @@
    "condition": null,
    "value": [
     "Map",
-    "PSL2Z",
     [
      "Function",
      [
@@ -450,7 +449,8 @@
       ]
      ],
      "gamma"
-    ]
+    ],
+    "PSL2Z"
    ],
    "assumptions": null,
    "topics": [
@@ -900,14 +900,6 @@
    "value": [
     "Map",
     [
-     "SetMinus",
-     "Integers",
-     [
-      "Set",
-      0
-     ]
-    ],
-    [
      "Function",
      [
       "DirichletLZero",
@@ -915,6 +907,14 @@
       "chi"
      ],
      "n"
+    ],
+    [
+     "SetMinus",
+     "Integers",
+     [
+      "Set",
+      0
+     ]
     ]
    ],
    "assumptions": [
@@ -1018,7 +1018,6 @@
    "condition": null,
    "value": [
     "Map",
-    "PositiveIntegers",
     [
      "Function",
      [
@@ -1030,7 +1029,8 @@
       ]
      ],
      "n"
-    ]
+    ],
+    "PositiveIntegers"
    ],
    "assumptions": null,
    "topics": [
@@ -1052,7 +1052,6 @@
    "condition": null,
    "value": [
     "Map",
-    "Integers",
     [
      "Function",
      [
@@ -1061,7 +1060,8 @@
       "n"
      ],
      "n"
-    ]
+    ],
+    "Integers"
    ],
    "assumptions": null,
    "topics": [
@@ -1327,11 +1327,6 @@
    "value": [
     "Map",
     [
-     "Range",
-     0,
-     "n"
-    ],
-    [
      "Function",
      [
       "Cos",
@@ -1346,6 +1341,11 @@
       ]
      ],
      "k"
+    ],
+    [
+     "Range",
+     0,
+     "n"
     ]
    ],
    "assumptions": [
@@ -1606,7 +1606,6 @@
    "condition": null,
    "value": [
     "Map",
-    "NonNegativeIntegers",
     [
      "Function",
      [
@@ -1614,7 +1613,8 @@
       "n"
      ],
      "n"
-    ]
+    ],
+    "NonNegativeIntegers"
    ],
    "assumptions": null,
    "topics": [
@@ -1765,7 +1765,6 @@
     "Union",
     [
      "Map",
-     "PositiveIntegers",
      [
       "Function",
       [
@@ -1777,10 +1776,19 @@
        ]
       ],
       "n"
-     ]
+     ],
+     "PositiveIntegers"
     ],
     [
      "Map",
+     [
+      "Function",
+      [
+       "RiemannZetaZero",
+       "n"
+      ],
+      "n"
+     ],
      [
       "Filter",
       "Integers",
@@ -1793,14 +1801,6 @@
        ],
        "n"
       ]
-     ],
-     [
-      "Function",
-      [
-       "RiemannZetaZero",
-       "n"
-      ],
-      "n"
      ]
     ]
    ],
@@ -2212,11 +2212,6 @@
    "value": [
     "Map",
     [
-     "Range",
-     1,
-     "n"
-    ],
-    [
      "Function",
      [
       "Cos",
@@ -2243,6 +2238,11 @@
       ]
      ],
      "k"
+    ],
+    [
+     "Range",
+     1,
+     "n"
     ]
    ],
    "assumptions": [
@@ -2738,7 +2738,6 @@
     ],
     [
      "Map",
-     "PositiveIntegers",
      [
       "Function",
       [
@@ -2750,7 +2749,8 @@
        ]
       ],
       "n"
-     ]
+     ],
+     "PositiveIntegers"
     ],
     [
      "And",
@@ -2770,7 +2770,6 @@
     ],
     [
      "Map",
-     "NonNegativeIntegers",
      [
       "Function",
       [
@@ -2782,7 +2781,8 @@
        ]
       ],
       "n"
-     ]
+     ],
+     "NonNegativeIntegers"
     ],
     [
      "Equal",
@@ -2794,7 +2794,6 @@
     ],
     [
      "Map",
-     "NonNegativeIntegers",
      [
       "Function",
       [
@@ -2810,7 +2809,8 @@
        1
       ],
       "n"
-     ]
+     ],
+     "NonNegativeIntegers"
     ]
    ],
    "assumptions": [
@@ -2967,6 +2967,14 @@
    "value": [
     "Map",
     [
+     "Function",
+     [
+      "RiemannZetaZero",
+      "n"
+     ],
+     "n"
+    ],
+    [
      "Filter",
      "Integers",
      [
@@ -2978,14 +2986,6 @@
       ],
       "n"
      ]
-    ],
-    [
-     "Function",
-     [
-      "RiemannZetaZero",
-      "n"
-     ],
-     "n"
     ]
    ],
    "assumptions": null,
@@ -3135,6 +3135,15 @@
    "value": [
     "Map",
     [
+     "Function",
+     [
+      "Multiply",
+      "Pi",
+      "n"
+     ],
+     "n"
+    ],
+    [
      "Filter",
      "Integers",
      [
@@ -3146,15 +3155,6 @@
       ],
       "n"
      ]
-    ],
-    [
-     "Function",
-     [
-      "Multiply",
-      "Pi",
-      "n"
-     ],
-     "n"
     ]
    ],
    "assumptions": null,
@@ -3183,18 +3183,6 @@
    "value": [
     "Map",
     [
-     "Range",
-     0,
-     [
-      "Floor",
-      [
-       "Divide",
-       "n",
-       2
-      ]
-     ]
-    ],
-    [
      "Function",
      [
       "Cos",
@@ -3213,6 +3201,18 @@
       ]
      ],
      "k"
+    ],
+    [
+     "Range",
+     0,
+     [
+      "Floor",
+      [
+       "Divide",
+       "n",
+       2
+      ]
+     ]
     ]
    ],
    "assumptions": [
@@ -3376,14 +3376,6 @@
     [
      "Map",
      [
-      "SetMinus",
-      "Integers",
-      [
-       "Set",
-       0
-      ]
-     ],
-     [
       "Function",
       [
        "DirichletLZero",
@@ -3391,6 +3383,14 @@
        "chi"
       ],
       "n"
+     ],
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
      ]
     ]
    ],
@@ -3691,7 +3691,6 @@
    "condition": null,
    "value": [
     "Map",
-    "Integers",
     [
      "Function",
      [
@@ -3707,7 +3706,8 @@
       ]
      ],
      "n"
-    ]
+    ],
+    "Integers"
    ],
    "assumptions": [
     "Element",
@@ -3812,11 +3812,6 @@
    "value": [
     "Map",
     [
-     "Range",
-     1,
-     "n"
-    ],
-    [
      "Function",
      [
       "Cos",
@@ -3835,6 +3830,11 @@
       ]
      ],
      "k"
+    ],
+    [
+     "Range",
+     1,
+     "n"
     ]
    ],
    "assumptions": [
@@ -3932,6 +3932,15 @@
    "value": [
     "Map",
     [
+     "Function",
+     [
+      "LambertW",
+      "z",
+      "k"
+     ],
+     "k"
+    ],
+    [
      "Filter",
      "Integers",
      [
@@ -3951,15 +3960,6 @@
       ],
       "k"
      ]
-    ],
-    [
-     "Function",
-     [
-      "LambertW",
-      "z",
-      "k"
-     ],
-     "k"
     ]
    ],
    "assumptions": [
@@ -4016,22 +4016,6 @@
    "value": [
     "Map",
     [
-     "Range",
-     1,
-     [
-      "Floor",
-      [
-       "Divide",
-       [
-        "Add",
-        "n",
-        1
-       ],
-       2
-      ]
-     ]
-    ],
-    [
      "Function",
      [
       "Cos",
@@ -4054,6 +4038,22 @@
       ]
      ],
      "k"
+    ],
+    [
+     "Range",
+     1,
+     [
+      "Floor",
+      [
+       "Divide",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       2
+      ]
+     ]
     ]
    ],
    "assumptions": [
@@ -4244,7 +4244,6 @@
    "condition": null,
    "value": [
     "Map",
-    "NonNegativeIntegers",
     [
      "Function",
      [
@@ -4269,7 +4268,8 @@
       ]
      ],
      "n"
-    ]
+    ],
+    "NonNegativeIntegers"
    ],
    "assumptions": null,
    "topics": [

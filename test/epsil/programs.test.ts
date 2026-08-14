@@ -45,11 +45,11 @@ total`);
 
   test('FizzBuzz as a value (Map over a Range)', () => {
     const { value, diagnostics } = run(`
-Map(Range(1, 15), k |->
+Map(k |->
   if k % 15 == 0 { "FizzBuzz" }
   else if k % 3 == 0 { "Fizz" }
   else if k % 5 == 0 { "Buzz" }
-  else { k })`);
+  else { k }, Range(1, 15))`);
     expect(diagnostics).toEqual([]);
     // The result of Map is a lazy collection: materialize it with each()
     const items = [...value.each()].map((x) => x.string ?? x.re);
@@ -226,7 +226,7 @@ D(f(t), t)`);
   test('solve a quadratic, then verify the roots by substitution', () => {
     const { text, diagnostics } = run(`
 let roots = Solve(x^2 - 5x + 6 == 0, x)
-Map(roots, r |-> r^2 - 5r + 6)`);
+Map(r |-> r^2 - 5r + 6, roots)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('[0,0]');
   });
@@ -291,7 +291,7 @@ let x = 2^11 - 1
     // control characters; each body row splices computed numbers with `\(…)`.
     const { value, diagnostics } = run(`
 let header = "n\\tn^2\\tn^3\\n"
-let lines = Map(Range(1, 5), n |-> "\\(n)\\t\\(n^2)\\t\\(n^3)\\n")
+let lines = Map(n |-> "\\(n)\\t\\(n^2)\\t\\(n^3)\\n", Range(1, 5))
 StringJoin(header, Fold((acc, line) |-> StringJoin(acc, line), "", lines))`);
     expect(diagnostics).toEqual([]);
     expect(value.string).toBe(
@@ -338,7 +338,7 @@ function shift(s, k) {
     // (`UnicodeScalars`) must still iterate — the source is materialized when
     // iterated rather than yielding nothing. Here the identity Map round-trips.
     const { text, diagnostics } = run(
-      `StringFrom(Map(UnicodeScalars("abc"), c |-> c + 1), "unicode-scalars")`
+      `StringFrom(Map(c |-> c + 1, UnicodeScalars("abc")), "unicode-scalars")`
     );
     expect(diagnostics).toEqual([]);
     expect(text).toBe('"bcd"');
@@ -448,7 +448,7 @@ let sol = Solve([x + y == 3, x - y == 1], [x, y])
     // the valid inputs still compute — the Map never throws.
     const { text, diagnostics } = run(`
 let inputs = [16, -4, "banana", 81]
-Map(inputs, x |-> Sqrt(x))`);
+Map(x |-> Sqrt(x), inputs)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('[4,2i,NaN,9]');
   });
@@ -689,8 +689,8 @@ let y = 5
 
   test('a truth table for logical AND, as a Map over pairs', () => {
     const { text, diagnostics } = run(`
-Map([(True, True), (True, False), (False, True), (False, False)],
-    p |-> p[1] && p[2])`);
+Map(p |-> p[1] && p[2],
+    [(True, True), (True, False), (False, True), (False, False)])`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('["True","False","False","False"]');
   });
@@ -740,7 +740,7 @@ describe('EPSIL PROGRAMS — complex numbers', () => {
   test('a product of complex numbers over a mapped Range', () => {
     // (1+i)(2+i)(3+i) = 10i — the imaginary parts survive the reduction.
     const { text, diagnostics } = run(`
-Product(Map(Range(1, 3), k |-> k + i))`);
+Product(Map(k |-> k + i, Range(1, 3)))`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('10i');
   });

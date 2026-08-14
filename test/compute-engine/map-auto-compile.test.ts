@@ -340,8 +340,8 @@ describe('Map auto-compile', () => {
     // deliberately covered, D2 route table).
     const m = ce.box([
       'Map',
-      ['List', 4, -4],
       ['Function', ['N', ['Sqrt', 'x10']], 'x10'],
+      ['List', 4, -4],
     ]);
     const els = [...m.each()];
     expect(els[0].re).toBe(2);
@@ -524,8 +524,8 @@ describe('Map auto-compile', () => {
     // eligibility, not evaluation speed.
     const over = ce.box([
       'Map',
-      ['List', 1, 2],
       ['Function', ['N', ['Sum', 'j4', ['Limits', 'j4', 1, 150_000]]], 'x4'],
+      ['List', 1, 2],
     ]);
     expect(over.at(1)!.re).toBe((150_000 * 150_001) / 2);
     expect(stats.attempts).toBe(1);
@@ -534,8 +534,8 @@ describe('Map auto-compile', () => {
     _resetMapAutoCompileStats();
     const inCap = ce.box([
       'Map',
-      ['List', 1, 2],
       ['Function', ['N', ['Sum', 'j5', ['Limits', 'j5', 1, 50]]], 'x5'],
+      ['List', 1, 2],
     ]);
     expect(inCap.at(1)!.re).toBe(1275);
     expect(stats.compiledHits).toBe(1);
@@ -605,7 +605,7 @@ describe('Map auto-compile', () => {
         .box([
           'WithRandomSeed',
           42,
-          ['Map', ['Range', 1, 6], ['Function', ['N', ['Random']], 'i']],
+          ['Map', ['Function', ['N', ['Random']], 'i'], ['Range', 1, 6]],
         ])
         .evaluate();
       const values = [...drawn.each()].map((x) => x.re);
@@ -625,14 +625,14 @@ describe('Map auto-compile', () => {
     // (`docs/RANDOMNESS-MODEL.md` §5: a fixed number of indices per operation,
     // whichever implementation serves it.)
 
-    /** Build a fresh `Map(Range(1,n), x |-> body)`, drain it inside a frame,
+    /** Build a fresh `Map(x |-> body, Range(1,n))`, drain it inside a frame,
      * and report the frame's trailing draw index alongside the values. */
     function framedDrain(body: any, n: number, jit: 'auto' | 'off') {
       const engine = new ComputeEngine();
       engine.precision = 'machine';
       engine.jit = jit;
       const m = engine
-        .box(['Map', ['Range', 1, n], ['Function', body, 'x']])
+        .box(['Map', ['Function', body, 'x'], ['Range', 1, n]])
         .evaluate();
       return withRandomSeedFrame(engine, 7, () => {
         const values = [...m.N().each()].map((x) => x.toString());

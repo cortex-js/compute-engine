@@ -18,11 +18,20 @@ import { ComputeEngine } from '../../src/compute-engine';
  *
  * The lazy operators used to defer validation entirely, which made any bound
  * on their slot inert. That carve-out is closed for the operand class it hurt
- * most — a PARAMETERLESS one (`Map(xs, 5)`) is now rejected there too, see
+ * most — a PARAMETERLESS one (`Map(5, xs)`) is now rejected there too, see
  * below — while everything a `function` slot admits still reaches the handler.
  */
 
 const XS = ['List', 1, 2, 3, 4] as const;
+
+/**
+ * Build a `<op>(source, callback)` call for the operator-table tests below.
+ * `Map` is the one operator whose mapping function comes FIRST, ahead of its
+ * one-or-more source collections; every other callback operator takes the
+ * source first.
+ */
+const opCall = (op: string, source: any, callback: any): any[] =>
+  op === 'Map' ? [op, callback, source] : [op, source, callback];
 
 describe('a named library function is a valid callback operand', () => {
   // `IsPrime` has type `(number) -> boolean`. Contravariance means it is NOT a
@@ -87,7 +96,7 @@ describe('a callback whose result type is unknown is a valid operand', () => {
  * operand against the declared `function` slot, while the lazy ones held
  * theirs and routed it through `canonicalFunctionLiteral`, whose shorthand
  * path LIFTED the value into the constant `() ↦ 5` — so `Sort(xs, 5)`
- * reported `incompatible-type` while `Map(xs, 5)` answered `[5, 5, 5]`.
+ * reported `incompatible-type` while `Map(5, xs)` answered `[5, 5, 5]`.
  * `canonicalCallbackOperand` now declines the parameterless lift, and both
  * halves report the same error.
  */
@@ -263,17 +272,17 @@ describe('a valueless source leaves every operator inert', () => {
 
   it.each(OPS)('%s stays inert on a declared-but-unassigned source', (op) => {
     const ce = engineWithValuelessXs();
-    expect(ce.box([op, 'xs', P]).evaluate().operator).toBe(op);
+    expect(ce.box(opCall(op, 'xs', P)).evaluate().operator).toBe(op);
   });
 
   it.each(OPS)('%s stays inert on an UNDECLARED source', (op) => {
     const ce = new ComputeEngine();
-    expect(ce.box([op, 'zz', P]).evaluate().operator).toBe(op);
+    expect(ce.box(opCall(op, 'zz', P)).evaluate().operator).toBe(op);
   });
 
   it.each(OPS)('%s stays inert on an unknown application', (op) => {
     const ce = new ComputeEngine();
-    expect(ce.box([op, ['f', 'x'], P]).evaluate().operator).toBe(op);
+    expect(ce.box(opCall(op, ['f', 'x'], P)).evaluate().operator).toBe(op);
   });
 
   // What the inert answers used to assert, and why they were wrong: the same
@@ -524,7 +533,7 @@ describe('isEnumerableCollection separates empty from unwalkable', () => {
       ['Take', 'xs', 2],
       ['Reverse', ['Take', 'xs', 2]],
       ['Filter', ['Reverse', ['Take', 'xs', 2]], P],
-      ['Map', ['Cycle', ['Range', 'a', 'b']], P],
+      ['Map', P, ['Cycle', ['Range', 'a', 'b']]],
       ['Zip', ['List', 1, 2], ['Range', 'a', 'b']],
       ['Union', ['Range', 'a', 'b'], ['List', 1]],
     ]) {
@@ -621,7 +630,7 @@ describe('isEnumerableCollection separates empty from unwalkable', () => {
     it.each(OPS)('%s over Take(xs, 2)', (op) => {
       expect(
         ce()
-          .box([op, ['Take', 'xs', 2], P])
+          .box(opCall(op, ['Take', 'xs', 2], P))
           .evaluate().operator
       ).toBe(op);
     });
@@ -629,7 +638,7 @@ describe('isEnumerableCollection separates empty from unwalkable', () => {
     it.each(OPS)('%s over Reverse(xs)', (op) => {
       expect(
         ce()
-          .box([op, ['Reverse', 'xs'], P])
+          .box(opCall(op, ['Reverse', 'xs'], P))
           .evaluate().operator
       ).toBe(op);
     });
@@ -637,7 +646,7 @@ describe('isEnumerableCollection separates empty from unwalkable', () => {
     it.each(OPS)('%s over a symbolic Range', (op) => {
       expect(
         ce()
-          .box([op, ['Range', 'a', 'b'], P])
+          .box(opCall(op, ['Range', 'a', 'b'], P))
           .evaluate().operator
       ).toBe(op);
     });
@@ -746,7 +755,7 @@ describe('isEnumerableCollection separates empty from unwalkable', () => {
     it('the variadic Map consults every source', () => {
       const e = ce();
       const f = ['Function', ['Add', '_1', '_2'], '_1', '_2'];
-      const m = ['Map', ['List', 1, 2], 'xs', f];
+      const m = ['Map', f, ['List', 1, 2], 'xs'];
       expect(e.box(m as any).isEnumerableCollection).toBe(false);
       expect(e.box(['Any', m, P] as any).evaluate().operator).toBe('Any');
     });

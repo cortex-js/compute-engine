@@ -161,15 +161,15 @@ describe('Tycho item 52 — lazy PointList transpose and projections', () => {
   });
 
   test('a user-authored Map over a non-indexed Set keeps the generic projection (review finding)', () => {
-    // `Map(Set(…), x ↦ Tuple(x, 0))` matches the transpose SHAPE but not its
+    // `Map(x ↦ Tuple(x, 0), Set(…))` matches the transpose SHAPE but not its
     // contract (the source is not indexed) — the fast-path must decline so
     // the projection stays an indexed List, not the source Set.
     const ce = new ComputeEngine();
     const setElems = Array.from({ length: 150 }, (_, i) => i);
     const m = [
       'Map',
-      ['Set', ...setElems],
       ['Function', ['Tuple', 'x', 0], 'x'],
+      ['Set', ...setElems],
     ];
     const px = ce.box(['PointX', m]).evaluate();
     expect(px.operator).not.toBe('Set');

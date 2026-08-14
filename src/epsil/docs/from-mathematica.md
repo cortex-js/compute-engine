@@ -93,7 +93,7 @@ by exact value, so `0.5 === 1/2` is `True` too.
 | `Total[xs]` | `Sum(xs)` |
 | `Select[xs, f]` | `Filter(xs, f)` |
 | `Count[xs, v]`, `Count[xs, f]` | `Count(xs, v)`, `Count(xs, f)` — `Count(xs)` is the length |
-| `Map[f, xs]`, `f /@ xs` | `Map(xs, f)` — collection **first** |
+| `Map[f, xs]`, `f /@ xs` | `Map(f, xs)` — same order |
 | `Fold[f, init, xs]` | `Fold(f, init, xs)` |
 | `Apply[f, {a, b}]`, `f @@ t` | `Apply(f, (a, b))`, or spread: `f(...t)` |
 | `Position[xs, v]` | `IndexOf(xs, v)` |
@@ -166,7 +166,7 @@ you want an ordinary list, index it, aggregate it, or build it with `Map`:
 
 ```epsil
 let g = x |-> x^2 + 1
-(g(3), Sum(Map(1..4, g)))
+(g(3), Sum(Map(g, 1..4)))
 // ➔ (10, 34)
 ```
 
@@ -194,7 +194,7 @@ classify(z) = match z {
   n if n > 0 => "positive"
   _ => "negative"
 }
-Map([-2, 0, 5], classify)
+Map(classify, [-2, 0, 5])
 // ➔ ["negative", "zero", "positive"]
 ```
 

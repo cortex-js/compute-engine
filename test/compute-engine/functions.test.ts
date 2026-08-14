@@ -304,7 +304,7 @@ describe('Apply', () => {
   // `Apply` keeps the constant-nullary shorthand contract. `Map` no longer
   // shares it: a parameterless operand at a CALLBACK slot is rejected across
   // the whole collection family (ruled 2026-08-09), which is what makes
-  // `Map(xs, 3)` agree with `Sort(xs, 3)` and `CountIf(xs, 3)` — all three
+  // `Map(3, xs)` agree with `Sort(xs, 3)` and `CountIf(xs, 3)` — all three
   // used to disagree. `Apply(3, 5)` is not a callback slot: it is the explicit
   // "apply this thing" operator, and applying a constant is its documented
   // shorthand.
@@ -312,7 +312,7 @@ describe('Apply', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Apply', 3, 5]).evaluate().toString()).toBe('3');
     expect(
-      ce.box(['Map', ['List', 1, 2], 3]).errors[0]?.toString()
+      ce.box(['Map', 3, ['List', 1, 2]]).errors[0]?.toString()
     ).toBe(
       'Error(ErrorCode("incompatible-type", "function", "finite_integer"), 3)'
     );
@@ -399,7 +399,7 @@ describe('Pipe', () => {
       ce.box([
         'Pipe',
         ['List', 1, 2, 3],
-        ['Map', '_1', ['Function', ['Square', 'k'], 'k']],
+        ['Map', ['Function', ['Square', 'k'], 'k'], '_1'],
       ]);
     // `Map` is a lazy collection: `toString` materializes it.
     expect(pipe().evaluate().toString()).toBe('[1,4,9]');
@@ -736,7 +736,7 @@ describe('MAPSTO BODY PRECEDENCE', () => {
       ).json
     ).toEqual([
       'Map',
-      ['Function', ['Greater', 'n', 102], 'n'],
+      ['Function', ['Block', ['Less', 102, 'n']], ['Typed', 'n', "'integer'"]],
       ['Range', 100, 105],
     ]));
 
@@ -1094,7 +1094,6 @@ describe('INVALID EXPLICIT-BLOCK BODY STILL GETS A SCOPED BLOCK', () => {
   test('an invalid function literal inside Map recovers quietly', () => {
     const expr = engine.box([
       'Map',
-      ['Range', 1, 10],
       [
         'Function',
         [
@@ -1113,6 +1112,7 @@ describe('INVALID EXPLICIT-BLOCK BODY STILL GETS A SCOPED BLOCK', () => {
         ],
         'W',
       ],
+      ['Range', 1, 10],
     ]);
     expect(expr.isCanonical).toBe(true);
     expect(expr.isValid).toBe(false);

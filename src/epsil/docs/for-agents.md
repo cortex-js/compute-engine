@@ -160,7 +160,7 @@ Collections pipeline — `Map`/`Filter`/`Reduce` for value-producing iteration,
 `|>` to chain; `1..n` is an inclusive range:
 
 ```epsil
-1..10 |> Filter(_, k |-> k % 2 == 0) |> Map(_, k |-> k^2)
+1..10 |> Filter(_, k |-> k % 2 == 0) |> Map(k |-> k^2, _)
 // ➔ [4, 16, 36, 64, 100]
 ```
 

@@ -1427,6 +1427,18 @@
     [
      "Map",
      [
+      "Function",
+      [
+       "Exp",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "theta"
+       ]
+      ],
+      "theta"
+     ],
+     [
       "Interval",
       [
        "Divide",
@@ -1442,18 +1454,6 @@
        ],
        3
       ]
-     ],
-     [
-      "Function",
-      [
-       "Exp",
-       [
-        "Multiply",
-        "ImaginaryUnit",
-        "theta"
-       ]
-      ],
-      "theta"
      ]
     ]
    ],
@@ -1892,6 +1892,14 @@
       [
        "Map",
        [
+        "Function",
+        [
+         "Abs",
+         "s"
+        ],
+        "s"
+       ],
+       [
         "SetMinus",
         [
          "Lattice",
@@ -1902,14 +1910,6 @@
          "Set",
          0
         ]
-       ],
-       [
-        "Function",
-        [
-         "Abs",
-         "s"
-        ],
-        "s"
        ]
       ]
      ]
@@ -3332,6 +3332,14 @@
       [
        "Map",
        [
+        "Function",
+        [
+         "Abs",
+         "s"
+        ],
+        "s"
+       ],
+       [
         "SetMinus",
         [
          "Lattice",
@@ -3342,14 +3350,6 @@
          "Set",
          0
         ]
-       ],
-       [
-        "Function",
-        [
-         "Abs",
-         "s"
-        ],
-        "s"
        ]
       ]
      ]

@@ -1367,7 +1367,6 @@
      "Min",
      [
       "Map",
-      "RealNumbers",
       [
        "Function",
        [
@@ -1375,7 +1374,8 @@
         "x"
        ],
        "x"
-      ]
+      ],
+      "RealNumbers"
      ]
     ],
     {
@@ -2650,7 +2650,6 @@
      "Max",
      [
       "Map",
-      "RealNumbers",
       [
        "Function",
        [
@@ -2658,7 +2657,8 @@
         "x"
        ],
        "x"
-      ]
+      ],
+      "RealNumbers"
      ]
     ],
     1
@@ -4578,7 +4578,6 @@
      "Min",
      [
       "Map",
-      "RealNumbers",
       [
        "Function",
        [
@@ -4586,7 +4585,8 @@
         "x"
        ],
        "x"
-      ]
+      ],
+      "RealNumbers"
      ]
     ],
     [

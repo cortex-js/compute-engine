@@ -702,6 +702,14 @@
     [
      "Map",
      [
+      "Function",
+      [
+       "LambertW",
+       "x"
+      ],
+      "x"
+     ],
+     [
       "Interval",
       [
        "Open",
@@ -717,29 +725,10 @@
         ]
        ]
       ]
-     ],
-     [
-      "Function",
-      [
-       "LambertW",
-       "x"
-      ],
-      "x"
      ]
     ],
     [
      "Map",
-     [
-      "Interval",
-      [
-       "Open",
-       0
-      ],
-      [
-       "Open",
-       "Pi"
-      ]
-     ],
      [
       "Function",
       [
@@ -762,6 +751,17 @@
        ]
       ],
       "y"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "Pi"
+      ]
      ]
     ]
    ],
@@ -789,6 +789,14 @@
     [
      "Map",
      [
+      "Function",
+      [
+       "LambertW",
+       "x"
+      ],
+      "x"
+     ],
+     [
       "Set",
       [
        "Negate",
@@ -797,14 +805,6 @@
         -1
        ]
       ]
-     ],
-     [
-      "Function",
-      [
-       "LambertW",
-       "x"
-      ],
-      "x"
      ]
     ],
     [
@@ -3779,6 +3779,14 @@
     [
      "Map",
      [
+      "Function",
+      [
+       "LambertW",
+       "x"
+      ],
+      "x"
+     ],
+     [
       "Interval",
       [
        "Open",
@@ -3794,14 +3802,6 @@
        "Open",
        "PositiveInfinity"
       ]
-     ],
-     [
-      "Function",
-      [
-       "LambertW",
-       "x"
-      ],
-      "x"
      ]
     ],
     [

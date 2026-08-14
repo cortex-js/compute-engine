@@ -331,11 +331,11 @@ describe('WithRandomSeed — partial evaluation keeps the frame (Tycho item 104)
   });
 
   it('a lazy view escaping the frame is a COMPLETED value, not a pending draw (§6 ruling)', () => {
-    // `Map(xs, x |-> Random())` evaluates to a lazy view; its lambda draws at
+    // `Map(x |-> Random(), xs)` evaluates to a lazy view; its lambda draws at
     // materialization, from whatever frame is active THEN. The frame is
     // stripped — the ruled live-draw escape — not preserved.
     const result = parsed(
-      `${WRS}(1, \\operatorname{Map}(\\operatorname{Range}(1,3), x \\mapsto ${RANDOM}))`
+      `${WRS}(1, \\operatorname{Map}(x \\mapsto ${RANDOM}, \\operatorname{Range}(1,3)))`
     ).evaluate();
     expect(result.operator).toBe('Map');
   });
@@ -452,7 +452,7 @@ describe('WithRandomSeed — draw-index assignment', () => {
   it('a Map body consumes indices in iteration order (materialized in-frame)', () => {
     const ce = new ComputeEngine();
     const m = ce
-      .box(['Map', ['List', 1, 2, 3], ['Function', ['Random'], 'x']])
+      .box(['Map', ['Function', ['Random'], 'x'], ['List', 1, 2, 3]])
       .evaluate();
     const values = withRandomSeedFrame(ce, 11, () =>
       [...m.each()].map((x) => x.re)
@@ -487,7 +487,7 @@ describe('WithRandomSeed — draw-index assignment', () => {
       boxed([
         'WithRandomSeed',
         11,
-        ['Map', ['List', 1, 2, 3], ['Function', ['Random'], 'x']],
+        ['Map', ['Function', ['Random'], 'x'], ['List', 1, 2, 3]],
       ]).evaluate();
     const view = mkView();
     const mk = () => Array.from(view.each()).map((x) => x.re);
@@ -697,7 +697,7 @@ describe('WithRandomSeed — pending-draw detection (review round, 2026-07-28)',
     const e = boxed([
       'WithRandomSeed',
       1,
-      ['ListFrom', ['Map', ['Range', 1, 'n'], ['Function', ['Random'], 'u']]],
+      ['ListFrom', ['Map', ['Function', ['Random'], 'u'], ['Range', 1, 'n']]],
     ]);
     const kept = e.evaluate();
     expect(kept.operator).toBe('WithRandomSeed');
@@ -710,7 +710,7 @@ describe('WithRandomSeed — pending-draw detection (review round, 2026-07-28)',
     const e = boxed([
       'WithRandomSeed',
       1,
-      ['Map', ['Range', 1, 3], ['Function', ['Random'], 'u']],
+      ['Map', ['Function', ['Random'], 'u'], ['Range', 1, 3]],
     ]);
     expect(e.evaluate().operator).not.toBe('WithRandomSeed');
   });
@@ -768,7 +768,7 @@ describe('WithRandomSeed — pending-draw detection (review round, 2026-07-28)',
 
 describe('WithRandomSeed — a binder LAZY view is a completed value (Tycho item 106)', () => {
   // `Comprehension(body, Element(k, xs))` — what `[… for k = …]` parses to —
-  // is `Map(xs, k |-> body)` spelled without a syntactic `Function` node. The
+  // is `Map(k |-> body, xs)` spelled without a syntactic `Function` node. The
   // pending-draw walk used to read its unevaluated `Random()` body as work the
   // frame still owed, so the whole expression evaluated to ITSELF and, unlike
   // the unbound-symbol case, nothing would ever complete it: the row drew
@@ -801,7 +801,7 @@ describe('WithRandomSeed — a binder LAZY view is a completed value (Tycho item
     const map = boxed([
       'WithRandomSeed',
       424242,
-      ['Map', ['Range', 1, 6], ['Function', ['Random'], 'u']],
+      ['Map', ['Function', ['Random'], 'u'], ['Range', 1, 6]],
     ]).evaluate();
     expect(comprehension.operator).not.toBe('WithRandomSeed');
     expect(map.operator).not.toBe('WithRandomSeed');

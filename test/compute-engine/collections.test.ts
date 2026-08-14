@@ -1380,11 +1380,11 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
 
   test('Map', () =>
     expect(
-      evaluate(['Map', list, ['Function', ['Add', 'x', 1], 'x']])
+      evaluate(['Map', ['Function', ['Add', 'x', 1], 'x'], list])
     ).toMatchInlineSnapshot(`["List", 8, 14, 6, 20, 3, 4, 12]`));
 
   test('Map', () =>
-    expect(evaluate(['Map', list, ['Add', '_', 1]])).toMatchInlineSnapshot(
+    expect(evaluate(['Map', ['Add', '_', 1], list])).toMatchInlineSnapshot(
       `["List", 8, 14, 6, 20, 3, 4, 12]`
     ));
 
@@ -1513,15 +1513,15 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
       'Product',
       [
         'Map',
-        ['Range', 1, 3],
         ['Function', ['Add', 'k', 'ImaginaryUnit'], 'k'],
+        ['Range', 1, 3],
       ],
     ];
     expect(engine.box(p).evaluate().toString()).toMatchInlineSnapshot(`10i`);
   });
 
   test('Map element type reflects the lambda result, not the source', () => {
-    // Regression: `Map(Range(1,3), k |-> k + i)` must NOT be typed with the
+    // Regression: `Map(k |-> k + i, Range(1,3))` must NOT be typed with the
     // source element type (integer). Its element type is the lambda's result
     // type, which keeps it out of the real-only compiled fast path.
     //
@@ -1531,8 +1531,8 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
     // more precise, and still not real.
     const m: Expression = [
       'Map',
-      ['Range', 1, 3],
       ['Function', ['Add', 'k', 'ImaginaryUnit'], 'k'],
+      ['Range', 1, 3],
     ];
     expect(engine.box(m).type.toString()).toMatchInlineSnapshot(
       `indexed_collection<complex>`
@@ -1547,8 +1547,8 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
     // instead of yielding nothing.
     const m: Expression = [
       'Map',
-      ['UnicodeScalars', { str: 'abc' }],
       ['Function', 'c', 'c'],
+      ['UnicodeScalars', { str: 'abc' }],
     ];
     expect(
       [...engine.box(m).evaluate().each()].map((x) => x.toString())
@@ -1860,41 +1860,41 @@ describe('MAP (variadic / zipWith)', () => {
   const add3: Expression = ['Function', ['Add', 'a', 'b', 'c'], 'a', 'b', 'c'];
 
   test('two collections combine element-wise', () =>
-    expect(str(['Map', ['List', 1, 2, 3], ['List', 10, 20, 30], add])).toEqual(
+    expect(str(['Map', add, ['List', 1, 2, 3], ['List', 10, 20, 30]])).toEqual(
       '[11,22,33]'
     ));
 
   test('result has the length of the shortest input', () =>
-    expect(str(['Map', ['List', 1, 2, 3], ['List', 10, 20], add])).toEqual(
+    expect(str(['Map', add, ['List', 1, 2, 3], ['List', 10, 20]])).toEqual(
       '[11,22]'
     ));
 
   test('three collections', () =>
     expect(
-      str(['Map', ['List', 1, 2], ['List', 3, 4], ['List', 5, 6], add3])
+      str(['Map', add3, ['List', 1, 2], ['List', 3, 4], ['List', 5, 6]])
     ).toEqual('[9,12]'));
 
   test('laziness: .count and head of two infinite ranges are fast', () => {
-    const expr = engine.box(['Map', ['Range', 1, 1e9], ['Range', 1, 1e9], add]);
+    const expr = engine.box(['Map', add, ['Range', 1, 1e9], ['Range', 1, 1e9]]);
     expect(expr.count).toBe(1e9);
     expect(expr.isFiniteCollection).toBe(true);
     expect(expr.at(2)?.toString()).toEqual('4');
     expect(
-      str(['Take', ['Map', ['Range', 1, 1e9], ['Range', 1, 1e9], add], 3])
+      str(['Take', ['Map', add, ['Range', 1, 1e9], ['Range', 1, 1e9]], 3])
     ).toEqual('[2,4,6]');
   });
 
   test('mixed finite/infinite: bounded by the finite input', () => {
-    const expr = engine.box(['Map', ['Range', 1, 1e9], ['List', 1, 2, 3], mul]);
+    const expr = engine.box(['Map', mul, ['Range', 1, 1e9], ['List', 1, 2, 3]]);
     expect(expr.count).toBe(3);
-    expect(str(['Map', ['Range', 1, 1e9], ['List', 1, 2, 3], mul])).toEqual(
+    expect(str(['Map', mul, ['Range', 1, 1e9], ['List', 1, 2, 3]])).toEqual(
       '[1,4,9]'
     );
   });
 
   test('single-collection form is unchanged', () =>
     expect(
-      str(['Map', ['List', 1, 2, 3], ['Function', ['Power', 'x', 2], 'x']])
+      str(['Map', ['Function', ['Power', 'x', 2], 'x'], ['List', 1, 2, 3]])
     ).toEqual('[1,4,9]'));
 
   test('arity mismatch: too few lambda params yields an evaluation error', () => {
@@ -1906,9 +1906,9 @@ describe('MAP (variadic / zipWith)', () => {
     // throws the same "Too many arguments" error.
     const expr = engine.box([
       'Map',
+      ['Function', ['Power', 'x', 2], 'x'],
       ['List', 1, 2],
       ['List', 3, 4],
-      ['Function', ['Power', 'x', 2], 'x'],
     ]);
     expect(expr.isValid).toBe(true);
     expect(expr.evaluate().toString()).toContain('Too many arguments');
@@ -1920,7 +1920,7 @@ describe('MAP (variadic / zipWith)', () => {
   // exact symbolic `Sqrt(2)`.
   test('.N() of a lazy user-written Map stays lazy and numericizes on access', () => {
     const e = engine
-      .box(['Map', ['Range', 1, 200], ['Function', ['Sqrt', 'x'], 'x']])
+      .box(['Map', ['Function', ['Sqrt', 'x'], 'x'], ['Range', 1, 200]])
       .N();
     expect(e.operator).toEqual('Map');
     expect(e.isLazyCollection).toBe(true);
@@ -1941,11 +1941,11 @@ describe('CONTINUATION PLACEHOLDER', () => {
 
   // Check various eager evaluation
   test('empty list', () => {
-    const empty_list = engine.expr(['Map', ['List'], ['Square', '_']]);
+    const empty_list = engine.expr(['Map', ['Square', '_'], ['List']]);
     expect(
       empty_list.evaluate({ materialization: false })
     ).toMatchInlineSnapshot(
-      `["Map", ["List"], ["Function", ["Square", "_1"]]]`
+      `["Map", ["Function", ["Square", "_1"]], ["List"]]`
     );
     expect(
       empty_list.evaluate({ materialization: true })
@@ -1959,10 +1959,10 @@ describe('CONTINUATION PLACEHOLDER', () => {
   });
 
   test('empty set', () => {
-    const empty_set = engine.expr(['Map', ['Set'], ['Square', '_']]);
+    const empty_set = engine.expr(['Map', ['Square', '_'], ['Set']]);
     expect(
       empty_set.evaluate({ materialization: false })
-    ).toMatchInlineSnapshot(`["Map", ["Set"], ["Function", ["Square", "_1"]]]`);
+    ).toMatchInlineSnapshot(`["Map", ["Function", ["Square", "_1"]], ["Set"]]`);
     expect(empty_set.evaluate({ materialization: true })).toMatchInlineSnapshot(
       `["Set"]`
     );
@@ -1977,15 +1977,15 @@ describe('CONTINUATION PLACEHOLDER', () => {
   test('finite list', () => {
     const finite_list = engine.expr([
       'Map',
-      ['List', 1, 1, 2, 2, 3, 4, 7, 8, 9, 10, 11, 12, 14],
       ['Square', '_'],
+      ['List', 1, 1, 2, 2, 3, 4, 7, 8, 9, 10, 11, 12, 14],
     ]);
     expect(finite_list.evaluate({ materialization: false }))
       .toMatchInlineSnapshot(`
       [
         "Map",
-        ["List", 1, 1, 2, 2, 3, 4, 7, 8, 9, 10, 11, 12, 14],
-        ["Function", ["Square", "_1"]]
+        ["Function", ["Square", "_1"]],
+        ["List", 1, 1, 2, 2, 3, 4, 7, 8, 9, 10, 11, 12, 14]
       ]
     `);
     expect(finite_list.evaluate({ materialization: true }))
@@ -2026,15 +2026,15 @@ describe('CONTINUATION PLACEHOLDER', () => {
   test('finite set', () => {
     const finite_set = engine.expr([
       'Map',
-      ['Set', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
       ['Square', '_'],
+      ['Set', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
     ]);
     expect(finite_set.evaluate({ materialization: false }))
       .toMatchInlineSnapshot(`
       [
         "Map",
-        ["Set", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-        ["Function", ["Square", "_1"]]
+        ["Function", ["Square", "_1"]],
+        ["Set", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
       ]
     `);
     expect(
@@ -2059,11 +2059,11 @@ describe('CONTINUATION PLACEHOLDER', () => {
   });
 
   test('infinite set', () => {
-    const infinite_set = engine.expr(['Map', 'Integers', ['Square', '_']]);
+    const infinite_set = engine.expr(['Map', ['Square', '_'], 'Integers']);
     expect(
       infinite_set.evaluate({ materialization: false })
     ).toMatchInlineSnapshot(
-      `["Map", "Integers", ["Function", ["Square", "_1"]]]`
+      `["Map", ["Function", ["Square", "_1"]], "Integers"]`
     );
     expect(
       infinite_set.evaluate({ materialization: true })
@@ -2514,8 +2514,8 @@ describe('SYMBOLIC-BOUND COLLECTIONS STAY INERT', () => {
         'Min',
         [
           'Map',
-          ['Interval', ['Open', 0], ['Open', 'PositiveInfinity']],
           ['Function', ['GammaLn', 'x_1'], 'x_1'],
+          ['Interval', ['Open', 0], ['Open', 'PositiveInfinity']],
         ],
       ])
       .evaluate();
@@ -2528,7 +2528,7 @@ describe('SYMBOLIC-BOUND COLLECTIONS STAY INERT', () => {
     const m = engine
       .expr([
         'Min',
-        ['Map', ['Linspace', 'x_1', 1, 3], ['Function', ['Square', '_'], '_']],
+        ['Map', ['Function', ['Square', '_'], '_'], ['Linspace', 'x_1', 1, 3]],
         5,
       ])
       .evaluate();
@@ -2898,10 +2898,10 @@ describe('COLLECTION EQUALITY IS REPRESENTATION-INSENSITIVE', () => {
 
   test('List literal vs lazy Map / Join pipelines', () => {
     const inc: Expression = ['Function', ['Add', '_1', 1], '_1'];
-    expect(T(['Equal', ['Map', ['List', 1, 2], inc], ['List', 2, 3]])).toEqual(
+    expect(T(['Equal', ['Map', inc, ['List', 1, 2]], ['List', 2, 3]])).toEqual(
       'True'
     );
-    expect(T(['Equal', ['Map', ['List', 1, 2], inc], ['List', 2, 4]])).toEqual(
+    expect(T(['Equal', ['Map', inc, ['List', 1, 2]], ['List', 2, 4]])).toEqual(
       'False'
     );
     expect(
@@ -3331,8 +3331,8 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     // floor(k/2) for k=1..10 → 0,1,1,2,2,3,3,4,4,5; deduped → 0,1,2,3,4,5.
     const src: Expression = [
       'Map',
-      ['Range', 1, 10],
       ['Function', ['Floor', ['Divide', 'x', 2]], 'x'],
+      ['Range', 1, 10],
     ];
     const d = engine.box(['Dedup', src]);
     expect(Array.from(d.each()).map((x) => x.toString())).toEqual([
@@ -3552,7 +3552,7 @@ describe('ZIP-SHAPED LAZINESS (review findings)', () => {
   const add2: Expression = ['Function', ['Add', 'x', 'y'], 'x', 'y'];
 
   test('variadic Map bounded by the finite source when zipped with an infinite one', () => {
-    const m = engine.box(['Map', ['Repeat', 7], ['List', 1, 2], add2]);
+    const m = engine.box(['Map', add2, ['Repeat', 7], ['List', 1, 2]]);
     expect(m.count).toBe(2);
     expect(m.evaluate().toString()).toBe('[8,9]');
   });
@@ -3667,7 +3667,7 @@ describe('Lambda application substitutes the element into an undetermined body',
   ];
 
   test('Map each() holds the body but substitutes the element value', () => {
-    const e = ce.box(['Map', 'd', undeterminedFn]);
+    const e = ce.box(['Map', undeterminedFn, 'd']);
     expect([...e.each()].map((x) => x.toString())).toEqual([
       'Which(1 == m, 1000000000, "True", 1)',
       'Which(2 == m, 1000000000, "True", 2)',
@@ -3676,7 +3676,7 @@ describe('Lambda application substitutes the element into an undetermined body',
   });
 
   test('Map evaluate() holds the body but substitutes the element value', () => {
-    expect(ce.box(['Map', 'd', undeterminedFn]).evaluate().toString()).toBe(
+    expect(ce.box(['Map', undeterminedFn, 'd']).evaluate().toString()).toBe(
       '[Which(1 == m, 1000000000, "True", 1),Which(2 == m, 1000000000, "True", 2),Which(3 == m, 1000000000, "True", 3)]'
     );
   });
@@ -3722,7 +3722,7 @@ describe('Lambda application substitutes the element into an undetermined body',
   test('a fully-evaluable body is unchanged (substitution is a no-op)', () => {
     expect(
       ce
-        .box(['Map', 'd', ['Function', ['Power', 'k', 2], 'k']])
+        .box(['Map', ['Function', ['Power', 'k', 2], 'k'], 'd'])
         .evaluate()
         .toString()
     ).toBe('[1,4,9]');
@@ -3735,8 +3735,8 @@ describe('Lambda application substitutes the element into an undetermined body',
           'Take',
           [
             'Map',
-            ['Range', 1, 'PositiveInfinity'],
             ['Function', ['Power', 'k', 2], 'k'],
+            ['Range', 1, 'PositiveInfinity'],
           ],
           3,
         ])
@@ -4788,13 +4788,13 @@ describe('BARE `_` IS THE IDENTITY FUNCTION SHORTHAND (regression)', () => {
   const xs: Expression = ['List', 3, 1, 2];
 
   test('the slot desugars to a canonical identity literal', () => {
-    expect(JSON.stringify(engine.box(['Map', xs, '_']).json)).toContain(
+    expect(JSON.stringify(engine.box(['Map', '_', xs]).json)).toContain(
       '["Function",["Block","_1"],"_1"]'
     );
   });
 
-  test('Map(xs, _) yields the elements unchanged', () => {
-    expect(engine.box(['Map', xs, '_']).evaluate().toString()).toBe('[3,1,2]');
+  test('Map(_, xs) yields the elements unchanged', () => {
+    expect(engine.box(['Map', '_', xs]).evaluate().toString()).toBe('[3,1,2]');
   });
 
   test('ChunkBy(xs, _) groups by the element itself (eager operator)', () => {
@@ -4827,10 +4827,10 @@ describe('BARE `_` IS THE IDENTITY FUNCTION SHORTHAND (regression)', () => {
 
   test('a NUMBERED or named wildcard is NOT the identity shorthand', () => {
     // `_1` stays a symbol naming a (here undefined) function.
-    expect(engine.box(['Map', xs, '_1']).evaluate().toString()).toBe(
+    expect(engine.box(['Map', '_1', xs]).evaluate().toString()).toBe(
       '[_1(3),_1(1),_1(2)]'
     );
-    expect(engine.box(['Map', xs, '_a']).evaluate().toString()).toBe(
+    expect(engine.box(['Map', '_a', xs]).evaluate().toString()).toBe(
       '[_a(3),_a(1),_a(2)]'
     );
   });

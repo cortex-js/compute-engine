@@ -15,18 +15,6 @@
     [
      "Map",
      [
-      "Interval",
-      0,
-      [
-       "Open",
-       [
-        "Multiply",
-        2,
-        "Pi"
-       ]
-      ]
-     ],
-     [
       "Function",
       [
        "Divide",
@@ -67,6 +55,18 @@
        2
       ],
       "theta"
+     ],
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ]
+      ]
      ]
     ]
    ],
@@ -108,18 +108,6 @@
     [
      "Map",
      [
-      "Interval",
-      0,
-      [
-       "Open",
-       [
-        "Multiply",
-        2,
-        "Pi"
-       ]
-      ]
-     ],
-     [
       "Function",
       [
        "Exp",
@@ -130,6 +118,18 @@
        ]
       ],
       "theta"
+     ],
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ]
+      ]
      ]
     ]
    ],

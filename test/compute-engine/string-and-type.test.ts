@@ -90,7 +90,7 @@ describe('StringJoin concatenates strings', () => {
       ce
         .box([
           'StringJoin',
-          ['Map', ['List', { str: 'a' }, { str: 'b' }], ['Function', 'c', 'c']],
+          ['Map', ['Function', 'c', 'c'], ['List', { str: 'a' }, { str: 'b' }]],
         ])
         .evaluate().string
     ).toBe('ab');

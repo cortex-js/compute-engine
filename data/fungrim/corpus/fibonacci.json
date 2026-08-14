@@ -2434,6 +2434,14 @@
     [
      "Map",
      [
+      "Function",
+      [
+       "Fibonacci",
+       "n"
+      ],
+      "n"
+     ],
+     [
       "Filter",
       "NonNegativeIntegers",
       [
@@ -2451,14 +2459,6 @@
        ],
        "n"
       ]
-     ],
-     [
-      "Function",
-      [
-       "Fibonacci",
-       "n"
-      ],
-      "n"
      ]
     ],
     [
@@ -2512,7 +2512,6 @@
      "x",
      [
       "Map",
-      "NonNegativeIntegers",
       [
        "Function",
        [
@@ -2520,7 +2519,8 @@
         "n"
        ],
        "n"
-      ]
+      ],
+      "NonNegativeIntegers"
      ]
     ],
     [

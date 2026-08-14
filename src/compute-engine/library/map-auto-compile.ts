@@ -162,7 +162,7 @@ function markedMapLambda(
   expr: Expression
 ): { fn: Expression; inner: Expression } | undefined {
   if (!isFunction(expr, 'Map') || expr.nops < 2) return undefined;
-  const fn = expr.ops[expr.nops - 1];
+  const fn = expr.op1;
   if (!isFunction(fn, 'Function') || fn.nops < 1) return undefined;
   let body: Expression = fn.op1;
   if (isFunction(body, 'Block') && body.nops === 1) body = body.op1;

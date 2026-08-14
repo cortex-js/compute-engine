@@ -38,8 +38,8 @@ function generalWitness(ce: ComputeEngine): any {
   const level = (src: any, op: string, k: number) =>
     ce.box([
       'Map',
-      src,
       ['Function', ['Block', 0, [op, '_1', k]], '_1'],
+      src,
     ] as any);
   return level(
     level(level(ce.box(['Range', 0, 899] as any), 'Add', 29), 'Mod', 900),
@@ -69,22 +69,22 @@ describe('Map fusion — witness parity', () => {
     // R1: the lowering is a drain-time detail — no canonical churn.
     const w = ce.box(WITNESS as any).evaluate();
     expect(w.operator).toBe('Map');
-    expect(w.op1.operator).toBe('Map');
-    expect(w.op1.op1.operator).toBe('Map');
-    expect(w.op1.op1.op1.operator).toBe('Range');
+    expect(w.op2.operator).toBe('Map');
+    expect(w.op2.op2.operator).toBe('Map');
+    expect(w.op2.op2.op2.operator).toBe('Range');
     expect(JSON.stringify(w.json)).toBe(
       JSON.stringify([
         'Map',
+        ['Function', ['Block', ['Add', '_1', 1]], '_1'],
         [
           'Map',
+          ['Function', ['Block', ['Mod', '_1', 900]], '_1'],
           [
             'Map',
-            ['Range', 0, 899],
             ['Function', ['Block', ['Add', '_1', 29]], '_1'],
+            ['Range', 0, 899],
           ],
-          ['Function', ['Block', ['Mod', '_1', 900]], '_1'],
         ],
-        ['Function', ['Block', ['Add', '_1', 1]], '_1'],
       ])
     );
   });
@@ -123,7 +123,7 @@ describe('Map fusion — the structural gate (R2)', () => {
     // belt-and-suspenders, not the binding mechanism.
     const innerBody = (map: any) => {
       expect(map.operator).toBe('Map');
-      const fn = map.ops[map.nops - 1];
+      const fn = map.op1;
       let body = fn.op1;
       if (body.operator === 'Block' && body.nops === 1) body = body.op1;
       expect(body.operator).toBe('N');
@@ -160,8 +160,8 @@ describe('Map fusion — the structural gate (R2)', () => {
   test('non-broadcast shapes are declined (deep body, unsatisfied annotation)', () => {
     const deep = ce.box([
       'Map',
-      ['Range', 1, 150],
       ['Function', ['Add', ['Power', '_1', 2], 1], '_1'],
+      ['Range', 1, 150],
     ]);
     expect(lowerMapSpine(deep)).toBeUndefined();
 
@@ -171,8 +171,8 @@ describe('Map fusion — the structural gate (R2)', () => {
     // "annotated parameters" block below.
     const typed = ce.box([
       'Map',
-      ['List', 1, 2.5, 3],
       ['Function', ['Add', '_1', 1], ['Typed', '_1', 'integer']],
+      ['List', 1, 2.5, 3],
     ]);
     expect(lowerMapSpine(typed)).toBeUndefined();
   });
@@ -226,8 +226,8 @@ describe('Map fusion — shape-gate negatives fall back correctly', () => {
     // of the body application, so the level is NOT lowerable.
     const m = ce.box([
       'Map',
-      ['Range', 1, 150],
       ['Function', ['Add', ['Power', '_1', 2], 1], '_1'],
+      ['Range', 1, 150],
     ]);
     expect(drainRe(m)).toEqual(
       Array.from({ length: 150 }, (_, i) => (i + 1) ** 2 + 1)
@@ -239,11 +239,11 @@ describe('Map fusion — shape-gate negatives fall back correctly', () => {
   test('an annotated (`Typed`) parameter still evaluates', () => {
     const m = ce.box([
       'Map',
-      ['Range', 1, 5],
       ['Function', ['Add', '_1', 1], ['Typed', '_1', 'number']],
+      ['Range', 1, 5],
     ]);
     // The parameter operand is `["Typed", …]`, not a bare symbol.
-    expect(m.ops[m.nops - 1].ops[1].operator).toBe('Typed');
+    expect(m.op1.ops[1].operator).toBe('Typed');
     expect(drainRe(m)).toEqual([2, 3, 4, 5, 6]);
   });
 
@@ -279,7 +279,7 @@ describe('Map fusion — variadic mid-chain level', () => {
     const v = ce.box(['Mod', ['Add', ['Range', 1, 200], ['Range', 1, 200]], 7]);
     const m = v.evaluate();
     expect(m.operator).toBe('Map');
-    expect(m.op1.nops).toBe(3); // two sources + the mapping function
+    expect(m.op2.nops).toBe(3); // the mapping function + two sources
 
     const expected = Array.from({ length: 200 }, (_, i) => (2 * (i + 1)) % 7);
     expect(drainRe(m)).toEqual(expected);
@@ -391,7 +391,7 @@ describe('Map fusion — the row is EVALUATED before a level applies', () => {
     ce.declare('v', 'number');
     ce.assign('v', 6);
 
-    const m = ce.box(['Map', ['List', 'u', 'v'], ['Function', '_1', '_1']]);
+    const m = ce.box(['Map', ['Function', '_1', '_1'], ['List', 'u', 'v']]);
     expect(lowerMapSpine(m)?.levels[0].identity).toBe(true);
     // `.json`, not `.re`: a raw symbol REPORTS its value's `.re`, so only the
     // serialization distinguishes the pass-through of `u` from the value 5.
@@ -403,8 +403,8 @@ describe('Map fusion — the row is EVALUATED before a level applies', () => {
     // `Block` body).
     const gen = ce.box([
       'Map',
-      ['List', 'u', 'v'],
       ['Function', ['Block', 0, '_1'], '_1'],
+      ['List', 'u', 'v'],
     ]);
     expect(lowerMapSpine(gen)).toBeUndefined();
     expect([...gen.each()].map((x) => x.json)).toEqual([5, 6]);
@@ -420,8 +420,8 @@ describe('Map fusion — the row is EVALUATED before a level applies', () => {
 
     const m = ce.box([
       'Map',
-      ['List', 'u', 'v'],
       ['Function', ['Add', '_1', 1], '_1'],
+      ['List', 'u', 'v'],
     ]);
     expect(lowerMapSpine(m)).toBeDefined();
     expect([...m.each()].map((x) => x.json)).toEqual([6, 7]);
@@ -431,8 +431,8 @@ describe('Map fusion — the row is EVALUATED before a level applies', () => {
 describe('Map fusion — the identity level under the `N` marker', () => {
   const ce = new ComputeEngine();
 
-  test('`Map(Range, x |-> x).N()` lowers as an `N` level and keeps its values', () => {
-    const m = ce.box(['Map', ['Range', 1, 150], ['Function', '_1', '_1']]);
+  test('`Map(x |-> x, Range).N()` lowers as an `N` level and keeps its values', () => {
+    const m = ce.box(['Map', ['Function', '_1', '_1'], ['Range', 1, 150]]);
     // The bare identity level is a pass-through…
     const plain = lowerMapSpine(m)!;
     expect(plain.levels.map((l) => l.identity)).toEqual([true]);
@@ -453,7 +453,7 @@ describe('Map fusion — the identity level under the `N` marker', () => {
   });
 
   test('a directly-boxed `N`-body identity lowers the same way', () => {
-    const d = ce.box(['Map', ['Range', 1, 5], ['Function', ['N', '_1'], '_1']]);
+    const d = ce.box(['Map', ['Function', ['N', '_1'], '_1'], ['Range', 1, 5]]);
     const spine = lowerMapSpine(d)!;
     expect(spine.levels.map((l) => l.op)).toEqual(['N']);
     expect(spine.levels.map((l) => l.napprox)).toEqual([true]);
@@ -469,8 +469,8 @@ describe('Map fusion — a scope-writing body is NOT lowered', () => {
     const ce = new ComputeEngine();
     const m = ce.box([
       'Map',
-      ['Range', 1, 3],
       ['Function', ['Assign', 'leaked', '_1'], '_1'],
+      ['Range', 1, 3],
     ]);
     expect(lowerMapSpine(m)).toBeUndefined();
     expect(ce.lookupDefinition('leaked')).toBeUndefined();
@@ -548,7 +548,7 @@ describe('Map fusion — laziness and impurity', () => {
         1234,
         [
           'ListFrom',
-          ['Map', ['Range', 1, 5], ['Function', ['Add', 'k', ['Random']], 'k']],
+          ['Map', ['Function', ['Add', 'k', ['Random']], 'k'], ['Range', 1, 5]],
         ],
       ]);
     const a = build().evaluate();
@@ -569,7 +569,7 @@ describe('Map fusion — laziness and impurity', () => {
 // caller's scope resolved the captured variable to nothing and silently
 // produced a symbolic element:
 //
-//   f(k) = Map([1,2], x ↦ x + k);  f(100)   ⇒  [k + 1, k + 2]   (was)
+//   f(k) = Map(x ↦ x + k, [1,2]);  f(100)   ⇒  [k + 1, k + 2]   (was)
 //                                            ⇒  [101, 102]      (now)
 //
 // The closure chain itself was always intact (`captureClosures` rebinds the
@@ -586,14 +586,14 @@ describe('Map fusion: closed-over variables', () => {
 
   test('an escaping lazy Map resolves its captured variable', () => {
     expect(
-      drain(['Map', ['List', 1, 2], ['Function', ['Add', 'x', 'k'], 'x']], 100)
+      drain(['Map', ['Function', ['Add', 'x', 'k'], 'x'], ['List', 1, 2]], 100)
     ).toBe('[101,102]');
   });
 
   test('the same for a multiplicative body', () => {
     expect(
       drain(
-        ['Map', ['List', 1, 2], ['Function', ['Multiply', 'x', 'k'], 'x']],
+        ['Map', ['Function', ['Multiply', 'x', 'k'], 'x'], ['List', 1, 2]],
         100
       )
     ).toBe('[100,200]');
@@ -603,7 +603,7 @@ describe('Map fusion: closed-over variables', () => {
   // operand rather than part of an evaluated arithmetic subexpression.
   test('a captured variable held as a bare operand', () => {
     expect(
-      drain(['Map', ['List', 1, 2], ['Function', ['List', 'x', 'k'], 'x']], 100)
+      drain(['Map', ['Function', ['List', 'x', 'k'], 'x'], ['List', 1, 2]], 100)
     ).toBe('[[1,100],[2,100]]');
   });
 
@@ -612,8 +612,8 @@ describe('Map fusion: closed-over variables', () => {
       drain(
         [
           'Map',
-          ['Map', ['List', 1, 2], ['Function', ['Add', 'x', 'k'], 'x']],
           ['Function', ['Multiply', 'y', 'k'], 'y'],
+          ['Map', ['Function', ['Add', 'x', 'k'], 'x'], ['List', 1, 2]],
         ],
         10
       )
@@ -626,8 +626,8 @@ describe('Map fusion: closed-over variables', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Map',
-      ['List', 1, 2, 3],
       ['Function', ['Add', 'x', 100], 'x'],
+      ['List', 1, 2, 3],
     ]);
     const spine = lowerMapSpine(expr);
     expect(spine).toBeDefined();
@@ -640,8 +640,8 @@ describe('Map fusion: closed-over variables', () => {
     ce.assign('scale', 10);
     const expr = ce.box([
       'Map',
-      ['List', 1, 2],
       ['Function', ['Multiply', 'x', 'scale'], 'x'],
+      ['List', 1, 2],
     ]);
     const spine = lowerMapSpine(expr);
     expect(spine).toBeDefined();
@@ -665,15 +665,15 @@ describe('Map fusion: closed-over variables', () => {
   describe('a nested Map that closes over the outer binder (item 160)', () => {
     const nested = [
       'Map',
-      ['List', 1, 2],
       [
         'Function',
         [
           'Max',
-          ['Map', ['List', 1, 3], ['Function', ['Multiply', 'j', 'k'], 'j']],
+          ['Map', ['Function', ['Multiply', 'j', 'k'], 'j'], ['List', 1, 3]],
         ],
         'k',
       ],
+      ['List', 1, 2],
     ];
 
     test('the reducing drain substitutes the outer element', () => {
@@ -700,21 +700,21 @@ describe('Map fusion: closed-over variables', () => {
       // max over j of (max over i of i·j·k) at k = 2 → i=2, j=3 → 12
       const inner3 = [
         'Map',
-        ['List', 1, 2],
         [
           'Function',
           ['Multiply', 'i', ['Multiply', 'j', 'k']],
           'i',
         ],
+        ['List', 1, 2],
       ];
       const mid = [
         'Map',
-        ['List', 1, 3],
         ['Function', ['Max', inner3], 'j'],
+        ['List', 1, 3],
       ];
       expect(
         ce
-          .box(['ListFrom', ['Map', ['List', 2], ['Function', ['Max', mid], 'k']]])
+          .box(['ListFrom', ['Map', ['Function', ['Max', mid], 'k'], ['List', 2]]])
           .evaluate()
           .toString()
       ).toBe('[12]');
@@ -723,7 +723,7 @@ describe('Map fusion: closed-over variables', () => {
     test('the LaTeX surface the item was filed from', () => {
       const ce = new ComputeEngine();
       const expr = ce.parse(
-        String.raw`\min(\operatorname{Map}([1,2],k\mapsto \max(\operatorname{Map}([1,3],j\mapsto jk))))`,
+        String.raw`\min(\operatorname{Map}(k\mapsto \max(\operatorname{Map}(j\mapsto jk,[1,3])),[1,2]))`,
         { strict: false } as any
       );
       expect(expr.evaluate().toString()).toBe('3');
@@ -749,8 +749,8 @@ describe('Map fusion: annotated parameters', () => {
   const annotated = (ce: ComputeEngine, src: any, type: string): any =>
     ce.box([
       'Map',
-      src,
       ['Function', ['Add', 'x', 1], ['Typed', 'x', type]],
+      src,
     ] as any);
 
   test('a matching annotation fuses, with value parity against the bare spelling', () => {
@@ -758,8 +758,8 @@ describe('Map fusion: annotated parameters', () => {
     const typed = annotated(ce, ['Range', 1, 200], 'number');
     const bare = ce.box([
       'Map',
-      ['Range', 1, 200],
       ['Function', ['Add', 'x', 1], 'x'],
+      ['Range', 1, 200],
     ] as any);
 
     const spine = lowerMapSpine(typed);
@@ -777,7 +777,7 @@ describe('Map fusion: annotated parameters', () => {
   test('a WIDENING annotation is accepted (element finite_integer, annotation number)', () => {
     const ce = new ComputeEngine();
     const m = annotated(ce, ['List', 1, 2, 3], 'number');
-    expect(m.op1.type.toString()).toBe('vector<finite_integer^3>');
+    expect(m.op2.type.toString()).toBe('vector<finite_integer^3>');
     expect(lowerMapSpine(m)).toBeDefined();
     expect(m.evaluate().toString()).toBe('[2,3,4]');
   });
@@ -796,7 +796,7 @@ describe('Map fusion: annotated parameters', () => {
   test('an unprovable source element type declines', () => {
     const ce = new ComputeEngine();
     const m = annotated(ce, 'unknownSource', 'number');
-    expect(m.op1.type.toString()).toBe('unknown');
+    expect(m.op2.type.toString()).toBe('unknown');
     expect(lowerMapSpine(m)).toBeUndefined();
   });
 
@@ -809,8 +809,8 @@ describe('Map fusion: annotated parameters', () => {
     ce.assign('xs', ce.box(['List', 1, 2, 3]));
     const m = ce.box([
       'Map',
-      'xs',
       ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']],
+      'xs',
     ] as any);
     expect(lowerMapSpine(m)).toBeDefined();
     expect([...m.each()].map((x: any) => x.toString())).toEqual([
@@ -836,8 +836,8 @@ describe('Map fusion: annotated parameters', () => {
         'Function',
         [
           'Map',
-          ['List', 1, 2],
           ['Function', ['Add', 'x', 'k'], ['Typed', 'x', 'number']],
+          ['List', 1, 2],
         ],
         'k',
       ]) as any
@@ -853,12 +853,12 @@ describe('Map fusion: annotated parameters', () => {
         'Function',
         [
           'Map',
+          ['Function', ['Multiply', 'y', 'k'], ['Typed', 'y', 'number']],
           [
             'Map',
-            ['List', 1, 2],
             ['Function', ['Add', 'x', 'k'], ['Typed', 'x', 'number']],
+            ['List', 1, 2],
           ],
-          ['Function', ['Multiply', 'y', 'k'], ['Typed', 'y', 'number']],
         ],
         'k',
       ]) as any
@@ -875,13 +875,13 @@ describe('Map fusion: annotated parameters', () => {
     const ce = new ComputeEngine();
     const typed = ce.box([
       'Map',
-      ['Range', -50, 50],
       ['Function', ['Mod', 'x', 7], ['Typed', 'x', 'integer']],
+      ['Range', -50, 50],
     ] as any);
     const bare = ce.box([
       'Map',
-      ['Range', -50, 50],
       ['Function', ['Mod', 'x', 7], 'x'],
+      ['Range', -50, 50],
     ] as any);
     expect(lowerMapSpine(typed)).toBeDefined();
     // Floored convention: the sign follows the divisor, so every element is in
@@ -907,7 +907,7 @@ describe('Map fusion: nominal annotations are not erased', () => {
   /** The unfused spelling of the same level: a two-statement `Block` body,
    * which the structural gate declines. */
   const unfused = (ce: ComputeEngine, src: any, body: any, param: any): any =>
-    ce.box(['Map', src, ['Function', ['Block', 0, body], param]] as any);
+    ce.box(['Map', ['Function', ['Block', 0, body], param], src] as any);
 
   test('a NOMINAL annotation over structural elements declines and errors', () => {
     const ce = new ComputeEngine();
@@ -915,7 +915,7 @@ describe('Map fusion: nominal annotations are not erased', () => {
     const src = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
     const body = ['Equal', 'p', ['pointT', 1, 2]];
     const param = ['Typed', 'p', 'pointT'];
-    const m = ce.box(['Map', src, ['Function', body, param]] as any);
+    const m = ce.box(['Map', ['Function', body, param], src] as any);
 
     expect(lowerMapSpine(m)).toBeUndefined();
     // Byte-identical to the enforcing (unfused) route: a per-element
@@ -939,7 +939,7 @@ describe('Map fusion: nominal annotations are not erased', () => {
 
     const body = ['Equal', 'p', ['Tuple', 1, 2]];
     const param = ['Typed', 'p', 'tuple<number, number>'];
-    const m = ce.box(['Map', 'ps', ['Function', body, param]] as any);
+    const m = ce.box(['Map', ['Function', body, param], 'ps'] as any);
 
     expect(lowerMapSpine(m)).toBeUndefined();
     expect(m.evaluate().toString()).toBe(
@@ -957,8 +957,8 @@ describe('Map fusion: nominal annotations are not erased', () => {
     );
     const m = ce.box([
       'Map',
-      'ps',
       ['Function', ['Equal', 'p', ['pointT', 1, 2]], ['Typed', 'p', 'pointT']],
+      'ps',
     ] as any);
     expect(lowerMapSpine(m)).toBeDefined();
     expect(m.evaluate().toString()).toBe('["True","False"]');
@@ -971,8 +971,8 @@ describe('Map fusion: nominal annotations are not erased', () => {
     ce.declareType('idT', 'integer', { alias: true });
     const m = ce.box([
       'Map',
-      ['List', 1, 2, 3],
       ['Function', ['Add', 'p', 1], ['Typed', 'p', 'idT']],
+      ['List', 1, 2, 3],
     ] as any);
     expect(lowerMapSpine(m)).toBeDefined();
     expect(m.evaluate().toString()).toBe('[2,3,4]');
@@ -988,14 +988,14 @@ describe('Map fusion: Error elements bubble, they are not laundered', () => {
    * it — fused ≡ unfused is the fusion contract, and the drift was silent.
    */
 
-  /** `Map(Map(cs, y ↦ y + 1), z ↦ z * 2)` — both levels lower. The parameters
+  /** `Map(z ↦ z * 2, Map(y ↦ y + 1, cs))` — both levels lower. The parameters
    * are AUTO-STAMPED from `cs`'s element type at box time, so reassigning `cs`
    * to a list with a `finite_real` element makes the inner level error on it. */
   const stack = (ce: ComputeEngine, outerBody: any): any =>
     ce.box([
       'Map',
-      ['Map', 'cs', ['Function', ['Add', 'y', 1], 'y']],
       ['Function', outerBody, 'z'],
+      ['Map', ['Function', ['Add', 'y', 1], 'y'], 'cs'],
     ] as any);
 
   test('the auto-stamped shape propagates the error on each() and at()', () => {
@@ -1029,8 +1029,8 @@ describe('Map fusion: Error elements bubble, they are not laundered', () => {
     ce.assign('cs', ce.box(['List', 1, 2, 3] as any));
     const fused = ce.box([
       'Map',
-      ['Map', 'cs', ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']]],
       ['Function', ['Multiply', 'z', 2], 'z'],
+      ['Map', ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']], 'cs'],
     ] as any);
     expect(lowerMapSpine(fused)).toBeDefined();
     expect(drainRe(fused)).toEqual([4, 6, 8]);
@@ -1052,8 +1052,8 @@ describe('Map fusion: Error elements bubble, they are not laundered', () => {
     const errors = ce
       .box([
         'Map',
-        ['Map', 'cs', ['Function', ['Add', 'y', 1], 'y']],
         ['Function', ['Multiply', 'z', 2], 'z'],
+        ['Map', ['Function', ['Add', 'y', 1], 'y'], 'cs'],
       ] as any)
       .evaluate();
     ce.assign('cs', ce.box(['List', 1, 2.5, 3] as any));
@@ -1067,15 +1067,15 @@ describe('Map fusion: Error elements bubble, they are not laundered', () => {
     ce.assign('us', src);
     const fused = ce.box([
       'Map',
-      'us',
       ['Function', ['Multiply', 'w', 3], 'w'],
+      'us',
     ] as any);
     const general = ce.box([
       'Map',
-      'us',
       ['Function', ['Block', 0, ['Multiply', 'w', 3]], 'w'],
+      'us',
     ] as any);
-    expect(fused.ops[1].json).toEqual([
+    expect(fused.ops[0].json).toEqual([
       'Function',
       ['Block', ['Multiply', 3, 'w']],
       'w',
@@ -1104,8 +1104,8 @@ describe('Map fusion: an annotated spine is REVALIDATED, not re-derived', () => 
     ce.assign('unrelated', ce.box(0));
     const m = ce.box([
       'Map',
-      ['Range', 1, 1000],
       ['Function', ['Add', 'x', 1], ['Typed', 'x', 'number']],
+      ['Range', 1, 1000],
     ] as any);
     const first = lowerMapSpine(m);
     expect(first).toBeDefined();
@@ -1123,8 +1123,8 @@ describe('Map fusion: an annotated spine is REVALIDATED, not re-derived', () => 
     ce.assign('xs', ce.box(['List', 1, 2, 3] as any));
     const m = ce.box([
       'Map',
-      'xs',
       ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']],
+      'xs',
     ] as any);
     const first = lowerMapSpine(m);
     expect(first).toBeDefined();
@@ -1147,8 +1147,8 @@ describe('Map fusion: an annotated spine is REVALIDATED, not re-derived', () => 
     const ce = new ComputeEngine();
     const m = ce.box([
       'Map',
-      ['Map', 'ws', ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']]],
       ['Function', ['Multiply', 'z', 2], 'z'],
+      ['Map', ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']], 'ws'],
     ] as any);
     // `ws` has no value: its element type is unprovable, so the inner level
     // declines and the spine stops there.

@@ -552,7 +552,7 @@ export function exactTierShape(
       ? undefined
       : {
           level,
-          fn: expr.ops[expr.nops - 1],
+          fn: expr.op1,
           sourceBounds: sources.map((s) => s.interval),
           count: proof.count,
         };

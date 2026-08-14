@@ -1132,7 +1132,7 @@ export function lazyBroadcastMap(
   // no risk of double-wrapping on re-evaluation of the returned `Map`.
   if (numericApproximation) body = ce._fn('N', [body], { canonical: false });
   const fn = ce.function('Function', [body, ...params]);
-  return ce.function('Map', [...cols, fn]);
+  return ce.function('Map', [fn, ...cols]);
 }
 
 /**
@@ -1230,7 +1230,7 @@ export function lazyMapNumericApproximation(
   const memo = lazyMapNRewraps.get(expr);
   if (memo !== undefined) return memo;
   if (!isFunction(expr, 'Map')) return undefined;
-  const fn = expr.ops[expr.nops - 1];
+  const fn = expr.op1;
   if (!isFunction(fn, 'Function') || fn.nops < 1) return undefined;
 
   // Wrap the body INSIDE the canonical `Block` wrapper: `Block` evaluates its
@@ -1253,7 +1253,7 @@ export function lazyMapNumericApproximation(
     ...fnJson.slice(2),
   ] as MathJsonExpression);
   if (!wrappedFn.isValid) return undefined;
-  const rewrapped = ce.function('Map', [...expr.ops.slice(0, -1), wrappedFn]);
+  const rewrapped = ce.function('Map', [wrappedFn, ...expr.ops.slice(1)]);
   lazyMapNRewraps.set(expr, rewrapped);
   return rewrapped;
 }

@@ -52,7 +52,7 @@ body:
   expression — a local `let`, a `match`, a loop. It is also the only form that
   carries a name *and* a multi-statement body.
 - **Anonymous** (`x |-> …`) when the function is an argument to another
-  function and a name would add nothing: `Map(xs, x |-> x^2)`.
+  function and a name would add nothing: `Map(x |-> x^2, xs)`.
 
 An anonymous function can have a multi-statement body too, by making that body
 a [`do` block](#do-block-expressions) — but at that point a named `function` is
@@ -635,7 +635,7 @@ Nested calls:
 
 ```epsil-live
 let scores = [88, 42, 95, 61, 73]
-Mean(Map(Filter(scores, s |-> s >= 60), s |-> s + 5))
+Mean(Map(s |-> s + 5, Filter(scores, s |-> s >= 60)))
 // ➔ 337/4
 ```
 
@@ -644,7 +644,7 @@ Named intermediates:
 ```epsil-live
 let scores = [88, 42, 95, 61, 73]
 let passing = Filter(scores, s |-> s >= 60)
-let curved = Map(passing, s |-> s + 5)
+let curved = Map(s |-> s + 5, passing)
 Mean(curved)
 // ➔ 337/4
 ```
@@ -653,7 +653,7 @@ A pipeline:
 
 ```epsil-live
 let scores = [88, 42, 95, 61, 73]
-scores |> Filter(_, s |-> s >= 60) |> Map(_, s |-> s + 5) |> Mean
+scores |> Filter(_, s |-> s >= 60) |> Map(s |-> s + 5, _) |> Mean
 // ➔ 337/4
 ```
 
@@ -682,13 +682,14 @@ argument:
 // ➔ [1, 2]
 ```
 
-When the piped value would fill the **first** slot, the `_` may be left out:
-a call that is missing required arguments receives the piped value as its
-implicit first argument, so these are the same pipeline:
+The `_` may be left out entirely: a call that is missing required arguments
+receives the piped value in the first slot its type fits — first for a
+collection piped into `Take(3)`, second for one piped into the
+callback-first `Map(f)` — so these are the same pipeline:
 
 ```epsil
-[1, 2, 3] |> Map(_, n |-> n^2)      // [1, 4, 9]
-[1, 2, 3] |> Map(n |-> n^2)         // [1, 4, 9] — implicit first argument
+[1, 2, 3] |> Map(n |-> n^2, _)      // [1, 4, 9]
+[1, 2, 3] |> Map(n |-> n^2)         // [1, 4, 9] — implicit argument
 ```
 
 The implicit argument only fills a hole. A call that is already complete is

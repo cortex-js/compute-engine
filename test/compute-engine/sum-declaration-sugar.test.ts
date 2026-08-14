@@ -152,7 +152,7 @@ describe('the sugar reproduces the manual desugaring', () => {
       value(`${TREE}
         function total(t: tree<number>) -> number {
           match t {
-            node(v, cs) => v + Sum(Map(cs, total))
+            node(v, cs) => v + Sum(Map(total, cs))
             _           => 0
           }
         }

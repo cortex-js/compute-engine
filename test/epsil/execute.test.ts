@@ -787,7 +787,7 @@ describe('EPSIL EXECUTE — error propagation', () => {
  * 2/ Stage lambda: a `|->` after a pipe operand binds tighter than the pipe
  *    (only there), so `xs |> x |-> x^2 |> Sum` is `xs |> (x |-> x^2) |> Sum`.
  * 3/ Implicit `Map`: a unary LITERAL lambda stage over a collection topic
- *    maps — `xs |> x |-> x^2` and `xs |> _^2` are `Map(xs, x |-> x^2)`.
+ *    maps — `xs |> x |-> x^2` and `xs |> _^2` are `Map(x |-> x^2, xs)`.
  *    Named-function stages (`xs |> Sum`), string topics, and lambdas whose
  *    authored parameter annotation accepts the whole topic still apply.
  *
@@ -798,7 +798,7 @@ describe('EPSIL EXECUTE — error propagation', () => {
 describe('EPSIL EXECUTE — pipe-stage sugar', () => {
   test('the motivating pipelines are equivalent', () => {
     expect(
-      run('1..oo |> Take(_, 10) |> Map(_, _^2) |> Sum').value.re
+      run('1..oo |> Take(_, 10) |> Map(_^2, _) |> Sum').value.re
     ).toBe(385);
     expect(run('1..oo |> Take(10) |> x |-> x^2 |> Sum').value.re).toBe(385);
     expect(run('1..oo |> Take(10) |> _^2 |> Sum').value.re).toBe(385);
@@ -860,7 +860,7 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
     // `_` as a call argument marks where the piped value goes — no implicit
     // Map, even over a collection topic.
     expect(run('1..10 |> Take(_, 3)').value.toString()).toBe('[1,2,3]');
-    expect(run('1..5 |> Map(_, _^2)').value.toString()).toBe(
+    expect(run('1..5 |> Map(_^2, _)').value.toString()).toBe(
       '[1,4,9,16,25]'
     );
   });
@@ -870,8 +870,8 @@ describe('EPSIL EXECUTE — the bare `_` identity shorthand', () => {
   // A bare `_` in a function slot is the identity function (`x |-> x`). The
   // Epsil parser accepts `_` in argument position (it is an ordinary symbol
   // token there), so the shorthand has to work on this route too.
-  test('Map([1,2,3], _) yields the elements unchanged', () => {
-    const { value, diagnostics } = run('Map([1, 2, 3], _)');
+  test('Map(_, [1,2,3]) yields the elements unchanged', () => {
+    const { value, diagnostics } = run('Map(_, [1, 2, 3])');
     expect(diagnostics).toEqual([]);
     expect(value.toString()).toBe('[1,2,3]');
   });

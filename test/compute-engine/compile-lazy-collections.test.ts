@@ -25,10 +25,10 @@ beforeAll(() => {
 });
 afterAll(() => warnSpy.mockRestore());
 
-const SUM_TAKE_MAP = String.raw`\mathrm{Sum}(\mathrm{Take}(\mathrm{Map}(1..\infty, \_ \mapsto \_^2), 10))`;
+const SUM_TAKE_MAP = String.raw`\mathrm{Sum}(\mathrm{Take}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty), 10))`;
 
 describe('COMPILE lazy infinite collections', () => {
-  it('Sum(Take(Map(1..∞, x → x²), 10)) compiles to a lazy stream (parse route)', () => {
+  it('Sum(Take(Map(x → x², 1..∞), 10)) compiles to a lazy stream (parse route)', () => {
     const r = compile(ce.parse(SUM_TAKE_MAP));
     expect(r?.success).toBe(true);
     expect(r?.code).toBe(
@@ -44,8 +44,8 @@ describe('COMPILE lazy infinite collections', () => {
         'Take',
         [
           'Map',
-          ['Range', 1, { num: '+Infinity' }],
           ['Function', ['Square', 'x'], 'x'],
+          ['Range', 1, { num: '+Infinity' }],
         ],
         10,
       ],
@@ -60,7 +60,7 @@ describe('COMPILE lazy infinite collections', () => {
     ce.declare('n', 'integer');
     const r = compile(
       ce.parse(
-        String.raw`\mathrm{Sum}(\mathrm{Take}(\mathrm{Map}(1..\infty, \_ \mapsto \_^2), n))`
+        String.raw`\mathrm{Sum}(\mathrm{Take}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty), n))`
       )
     );
     ce.popScope();
@@ -83,7 +83,7 @@ describe('COMPILE lazy infinite collections', () => {
   it('Drop and Rest over an infinite pipeline stay lazy', () => {
     const drop = compile(
       ce.parse(
-        String.raw`\mathrm{Take}(\mathrm{Drop}(\mathrm{Map}(1..\infty, \_ \mapsto \_^2), 2), 3)`
+        String.raw`\mathrm{Take}(\mathrm{Drop}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty), 2), 3)`
       )
     );
     expect(drop?.run?.({})).toEqual([9, 16, 25]);
@@ -107,7 +107,7 @@ describe('COMPILE lazy infinite collections', () => {
   it('TakeWhile bounds an infinite pipeline', () => {
     const r = compile(
       ce.parse(
-        String.raw`\mathrm{TakeWhile}(\mathrm{Map}(1..\infty, \_ \mapsto \_^2), \_ \mapsto \_ < 20)`
+        String.raw`\mathrm{TakeWhile}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty), \_ \mapsto \_ < 20)`
       )
     );
     expect(r?.success).toBe(true);
@@ -134,7 +134,7 @@ describe('COMPILE lazy infinite collections', () => {
     ce.declare('n_0', 'integer');
     const r = compile(
       ce.parse(
-        String.raw`\mathrm{Take}(\mathrm{Map}(\mathrm{Range}(n_0, \infty), \_ \mapsto \_^2), 3)`
+        String.raw`\mathrm{Take}(\mathrm{Map}(\_ \mapsto \_^2, \mathrm{Range}(n_0, \infty)), 3)`
       )
     );
     ce.popScope();
@@ -209,7 +209,7 @@ describe('COMPILE lazy infinite collections', () => {
 
     it('Sum over an unbounded infinite Map does not compile', () => {
       const r = compile(
-        ce.parse(String.raw`\mathrm{Sum}(\mathrm{Map}(1..\infty, \_ \mapsto \_^2))`)
+        ce.parse(String.raw`\mathrm{Sum}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty))`)
       );
       expect(r?.success).toBe(false);
     });
@@ -217,7 +217,7 @@ describe('COMPILE lazy infinite collections', () => {
     it('an array-materializing consumer (Reverse) does not compile', () => {
       expect(() =>
         compile(
-          ce.parse(String.raw`\mathrm{Reverse}(\mathrm{Map}(1..\infty, \_ \mapsto \_^2))`),
+          ce.parse(String.raw`\mathrm{Reverse}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty))`),
           { fallback: false }
         )
       ).toThrow(/infinite collection/);

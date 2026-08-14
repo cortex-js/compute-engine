@@ -249,7 +249,7 @@ describe('exact Map compile — closed operands', () => {
   // wrong EXACT integer. (Adversarial review 2026-07-31, finding 1.)
   const BIG = 9000000000000000; // 9·10^15; 2·BIG overflows 2^53 − 1
 
-  /** `Map(Range(1,200), _1 ↦ _1 + s1 + s2 + s3)` with all three at 1, plus a
+  /** `Map(_1 ↦ _1 + s1 + s2 + s3, Range(1,200))` with all three at 1, plus a
    * `revoke()` that swaps in ±BIG — bounds under which the left-to-right
    * partial sum `_1 + BIG + BIG` is no longer exact even though the total is. */
   function overflowRig(jit: 'auto' | 'off') {
@@ -261,8 +261,8 @@ describe('exact Map compile — closed operands', () => {
     ce.assign('os3', 1);
     const m = ce.box([
       'Map',
-      ['Range', 1, 200],
       ['Function', ['Add', '_1', 'os1', 'os2', 'os3'], '_1'],
+      ['Range', 1, 200],
     ]);
     const revoke = () => {
       ce.assign('os1', BIG);
@@ -365,7 +365,7 @@ describe('exact Map compile — symbol-valued sources (amendment R6)', () => {
     ce.assign('L6', ce.box(['List', ...integers(200)]));
     const m = ce.box(['Add', 'L6', 1]).evaluate();
     expect(m.operator).toBe('Map');
-    expect(m.op1.symbol).toBe('L6'); // the source really is the SYMBOL
+    expect(m.op2.symbol).toBe('L6'); // the source really is the SYMBOL
 
     const compiled = drain(m);
     expect(stats.attempts).toBe(1);
@@ -420,7 +420,7 @@ describe('exact Map compile — symbol-valued sources (amendment R6)', () => {
   test('an unassigned symbol source, a non-integer list, and a cycle decline', () => {
     const ce = new ComputeEngine() as any;
     ce.declare('U6', 'collection<integer>');
-    drain(ce.box(['Map', 'U6', ['Function', ['Add', '_1', 1], '_1']]));
+    drain(ce.box(['Map', ['Function', ['Add', '_1', 1], '_1'], 'U6']));
     expect(stats.attempts).toBe(0);
 
     // One inexact element is enough: `literalInteger` rejects it, so the whole
@@ -435,7 +435,7 @@ describe('exact Map compile — symbol-valued sources (amendment R6)', () => {
     ce.assign('C6a', ce.symbol('C6b'));
     ce.assign('C6b', ce.symbol('C6a'));
     _resetMapAutoCompileStats();
-    ce.box(['Map', 'C6a', ['Function', ['Add', '_1', 1], '_1']]).at(1);
+    ce.box(['Map', ['Function', ['Add', '_1', 1], '_1'], 'C6a']).at(1);
     expect(stats.attempts).toBe(0);
   });
 
@@ -457,8 +457,8 @@ describe('exact Map compile — symbol-valued sources (amendment R6)', () => {
     ce.assign('S6', ce.box(['List', ...SMALL]));
     const m = ce.box([
       'Map',
-      'S6',
       ['Function', ['Multiply', '_1', '_1'], '_1'],
+      'S6',
     ]);
     return { ce, m, widen: () => ce.assign('S6', ce.box(['List', ...LARGE])) };
   }
@@ -513,8 +513,8 @@ describe('exact Map compile — symbol-valued sources (amendment R6)', () => {
     ce.assign('G6', ce.box(['List', ...integers(200)]));
     const m = ce.box([
       'Map',
-      'G6',
       ['Function', ['Multiply', '_1', '_1'], '_1'],
+      'G6',
     ]);
     const run = mapAutoCompileRunner(m, { drainStart: true })!;
     expect(run).toBeDefined();
@@ -549,7 +549,7 @@ describe('exact Map compile — the proof declines', () => {
   /** Build a lazy `Map` directly (below the broadcast laziness threshold the
    * engine would evaluate eagerly). */
   function lazyMap(ce: any, source: any, body: any) {
-    return ce.box(['Map', source, ['Function', body, '_1']]);
+    return ce.box(['Map', ['Function', body, '_1'], source]);
   }
 
   test('an overflowing Multiply declines; the interpreter stays exact', () => {
@@ -640,8 +640,8 @@ describe('exact Map compile — the proof declines', () => {
     ce.assign('nn', 200);
     const m = ce.box([
       'Map',
-      ['Range', 1, 'nn'],
       ['Function', ['Add', '_1', 1], '_1'],
+      ['Range', 1, 'nn'],
     ]);
     expect(JSON.stringify(m.json)).toContain('"nn"');
     expect(m.at(1).isSame(2)).toBe(true);
@@ -689,7 +689,7 @@ describe('exact Map compile — the size floor', () => {
     expect(MIN_EXACT_COMPILE_COUNT).toBe(64);
     const ce = new ComputeEngine() as any;
     const map = (n: number) =>
-      ce.box(['Map', ['Range', 1, n], ['Function', ['Add', '_1', 1], '_1']]);
+      ce.box(['Map', ['Function', ['Add', '_1', 1], '_1'], ['Range', 1, n]]);
 
     const below = drain(map(MIN_EXACT_COMPILE_COUNT - 1));
     expect(below).toHaveLength(MIN_EXACT_COMPILE_COUNT - 1);
@@ -707,7 +707,7 @@ describe('exact Map compile — the size floor', () => {
 describe('exact Map compile — supported heads', () => {
   const ce = new ComputeEngine() as any;
   const map = (body: any, source: any = ['Range', -100, 100]) =>
-    ce.box(['Map', source, ['Function', body, '_1']]);
+    ce.box(['Map', ['Function', body, '_1'], source]);
 
   // EVERY head with a rule in the interval table appears here. The table is a
   // hand-written switch on operator NAMES, so a misspelling is silent — it
@@ -759,8 +759,8 @@ describe('exact Map compile — supported heads', () => {
     const items = Array.from({ length: 120 }, (_, i) => i - 60);
     const m = ce.box([
       'Map',
-      ['List', ...items],
       ['Function', ['Mod', '_1', 7], '_1'],
+      ['List', ...items],
     ]);
     const els = drain(m);
     expect(stats.compiledHits).toBe(120);
@@ -848,12 +848,12 @@ describe('exact Map compile — annotated parameters', () => {
    * unfused route raises.
    */
 
-  /** `Map(Range(1, n), (x: T) ↦ body)` — `n` above the size floor. */
+  /** `Map((x: T) ↦ body, Range(1, n))` — `n` above the size floor. */
   const annotatedMap = (
     body: any,
     type: string,
     n = MIN_EXACT_COMPILE_COUNT
-  ) => ['Map', ['Range', 1, n], ['Function', body, ['Typed', '_1', type]]];
+  ) => ['Map', ['Function', body, ['Typed', '_1', type]], ['Range', 1, n]];
 
   test('a matching annotation reaches the exact tier, with element parity', () => {
     const ce = new ComputeEngine() as any;
@@ -874,8 +874,8 @@ describe('exact Map compile — annotated parameters', () => {
       ce
         .box([
           'Map',
-          ['Range', 1, MIN_EXACT_COMPILE_COUNT],
           ['Function', ['Multiply', '_1', 2], '_1'],
+          ['Range', 1, MIN_EXACT_COMPILE_COUNT],
         ])
         .evaluate()
     );
@@ -917,8 +917,8 @@ describe('exact Map compile — annotated parameters', () => {
       ce
         .box([
           'Map',
-          src,
           ['Function', ['Add', '_1', 1], ['Typed', '_1', 'integer']],
+          src,
         ])
         .evaluate()
     );
@@ -932,10 +932,10 @@ describe('exact Map compile — annotated parameters', () => {
     // annotation cannot be discharged.
     const m = ce.box([
       'Map',
-      'noSuchSource',
       ['Function', ['Add', '_1', 1], ['Typed', '_1', 'number']],
+      'noSuchSource',
     ]);
-    expect(m.op1.type.toString()).toBe('unknown');
+    expect(m.op2.type.toString()).toBe('unknown');
     drain(m.evaluate());
     expect(stats.attempts).toBe(0);
   });
@@ -951,12 +951,12 @@ describe('exact Map compile — annotated parameters', () => {
     const ce = new ComputeEngine() as any;
     const { compiled, snapshot } = parityDrain(ce, [
       'Map',
+      ['Function', ['Mod', '_2', 7], ['Typed', '_2', 'integer']],
       [
         'Map',
-        ['Range', -50, 50],
         ['Function', ['Subtract', '_1', 10], ['Typed', '_1', 'integer']],
+        ['Range', -50, 50],
       ],
-      ['Function', ['Mod', '_2', 7], ['Typed', '_2', 'integer']],
     ]);
     expect(snapshot.attempts).toBe(2);
     expect(snapshot.compiledHits).toBe(202);
@@ -984,8 +984,8 @@ describe('exact Map compile — an annotated proof is REVALIDATED, not re-taken'
     ce.assign('unrelated', ce.box(0));
     const m = ce.box([
       'Map',
-      ['Range', 1, 1000],
       ['Function', ['Add', 'x', 1], ['Typed', 'x', 'number']],
+      ['Range', 1, 1000],
     ]);
     const first = exactTierShape(ce, m);
     expect(first).toBeDefined();
@@ -1000,8 +1000,8 @@ describe('exact Map compile — an annotated proof is REVALIDATED, not re-taken'
     ce.assign('xs', ce.box(['List', ...ints]));
     const m = ce.box([
       'Map',
-      'xs',
       ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']],
+      'xs',
     ]);
     expect(exactTierShape(ce, m)).toBeDefined();
 
@@ -1016,8 +1016,8 @@ describe('exact Map compile — an annotated proof is REVALIDATED, not re-taken'
     const ce = new ComputeEngine() as any;
     const m = ce.box([
       'Map',
-      ['Map', 'ws', ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']]],
       ['Function', ['Multiply', 'z', 2], 'z'],
+      ['Map', ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']], 'ws'],
     ]);
     // `ws` has no value: the inner level's annotation is not provably
     // satisfied, so the proof declines.

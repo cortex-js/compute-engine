@@ -48,8 +48,8 @@ describe('Filter with an Error-valued predicate result', () => {
     const mapped = ce
       .box([
         'Map',
-        xs,
         ['Function', ['Add', 'n', 0], ['Typed', 'n', "'finite_integer'"]],
+        xs,
       ])
       .evaluate();
     expect(filtered.toString()).toBe(mapped.toString());
@@ -599,14 +599,14 @@ describe('color is an admissible inferred element type', () => {
     ce.assign('cs', colorList(ce));
     const expr = ce.box([
       'Map',
-      'cs',
       ['Function', ['ColorToString', 'c'], 'c'],
+      'cs',
     ]);
-    expect(expr.ops[1].type.toString()).toBe('(c: color) -> string');
+    expect(expr.ops[0].type.toString()).toBe('(c: color) -> string');
     expect(expr.toMathJson()).toEqual([
       'Map',
-      'cs',
       ['Function', ['ColorToString', 'c'], ['Typed', 'c', "'color'"]],
+      'cs',
     ]);
     expect(expr.evaluate().toString()).toBe('["#d7170b","#0d80f2"]');
   });

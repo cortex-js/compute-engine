@@ -153,7 +153,7 @@ describe('MULTI-CLAUSE COMPILE — guard chain (spec §8)', () => {
   it('a higher-order use compiles to the shared dispatcher', () => {
     clause('f', ['Function', 100, p('a', '0')]);
     clause('f', ['Function', ['Add', 'x', 1], p('x', 'integer')]);
-    const r = compile(ce.box(['Map', ['List', 0, 1, 2], 'f']));
+    const r = compile(ce.box(['Map', 'f', ['List', 0, 1, 2]]));
     expect(r?.run?.({})).toEqual([100, 2, 3]);
   });
 });

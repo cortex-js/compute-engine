@@ -110,9 +110,9 @@ describe('a positive bound tolerates what it lists, and only that', () => {
 });
 
 describe('the bare `function` primitive is effect-top and never rejects', () => {
-  it('`Map(xs, x ↦ Random())` keeps working (worked example 5, the contrast)', () => {
+  it('`Map(x ↦ Random(), xs)` keeps working (worked example 5, the contrast)', () => {
     const ce = new ComputeEngine();
-    const e = ce.box(['Map', ['List', 1, 2, 3], RANDOM_CALLBACK]);
+    const e = ce.box(['Map', RANDOM_CALLBACK, ['List', 1, 2, 3]]);
     expect(e.isValid).toBe(true);
     // …and projects `{random}` rather than rejecting.
     expect(e.isPure).toBe(false);
@@ -121,7 +121,7 @@ describe('the bare `function` primitive is effect-top and never rejects', () => 
   it('an `{any}` opaque callback is admitted there as well', () => {
     const ce = new ComputeEngine();
     ce.declare('opaqueF', ce.type('(any) any -> number'));
-    expect(ce.box(['Map', ['List', 1, 2, 3], 'opaqueF']).isValid).toBe(true);
+    expect(ce.box(['Map', 'opaqueF', ['List', 1, 2, 3]]).isValid).toBe(true);
   });
 });
 

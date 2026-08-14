@@ -430,12 +430,12 @@ describe('nested scoped Block in an escaping closure', () => {
         'Function',
         [
           'Map',
-          ['List', 1, 2],
           [
             'Function',
             ['If', ['Greater', 'x', 1], ['Block', 'k'], ['Block', 0]],
             'x',
           ],
+          ['List', 1, 2],
         ],
         'k',
       ]) as any

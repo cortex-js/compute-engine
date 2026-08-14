@@ -62,19 +62,19 @@ describe('Projection basics', () => {
 });
 
 describe('Resolve through the CURRENT binding (hole 1)', () => {
-  it('Map(xs, randomF) is {random} when `randomF` is bound to a drawing function', () => {
+  it('Map(randomF, xs) is {random} when `randomF` is bound to a drawing function', () => {
     const ce = new ComputeEngine();
     ce.assign('randomF', ce.parse('x \\mapsto \\mathrm{Random}()'));
-    const e = ce.box(['Map', ['List', 1, 2], 'randomF']);
+    const e = ce.box(['Map', 'randomF', ['List', 1, 2]]);
     expect(e.operator).toBe('Map');
     expect(eff(e)).toEqual(['random']);
     expect(e.isPure).toBe(false);
   });
 
-  it('Map(xs, pureF) stays pure — precision per call site, one fixed signature', () => {
+  it('Map(pureF, xs) stays pure — precision per call site, one fixed signature', () => {
     const ce = new ComputeEngine();
     ce.assign('pureF', ce.parse('x \\mapsto x + 1'));
-    const e = ce.box(['Map', ['List', 1, 2], 'pureF']);
+    const e = ce.box(['Map', 'pureF', ['List', 1, 2]]);
     expect(eff(e)).toBe(undefined);
     expect(e.isPure).toBe(true);
   });
@@ -82,7 +82,7 @@ describe('Resolve through the CURRENT binding (hole 1)', () => {
   it('reassigning the symbol invalidates the memo (the generation guard)', () => {
     const ce = new ComputeEngine();
     ce.assign('cb', ce.parse('x \\mapsto \\mathrm{Random}()'));
-    const e = ce.box(['Map', ['List', 1, 2], 'cb']);
+    const e = ce.box(['Map', 'cb', ['List', 1, 2]]);
     expect(eff(e)).toEqual(['random']);
 
     // The SAME boxed expression, after the binding changes: the answer must
@@ -97,7 +97,7 @@ describe('Resolve through the CURRENT binding (hole 1)', () => {
 
   it('an inline literal operand contributes its arrow effects', () => {
     const ce = new ComputeEngine();
-    const e = ce.box(['Map', ['List', 1, 2], ['Function', ['Random'], 'x']]);
+    const e = ce.box(['Map', ['Function', ['Random'], 'x'], ['List', 1, 2]]);
     expect(eff(e)).toEqual(['random']);
   });
 });
@@ -127,7 +127,7 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
           expect(e.isPure).toBe(true);
         }
         // …and in operand position, which never had the blind spot.
-        expect(eff(ce.box(['Map', ['List', 1, 2], 'fib']))).toBe(undefined);
+        expect(eff(ce.box(['Map', 'fib', ['List', 1, 2]]))).toBe(undefined);
       });
 
       it('a scope-writing body surfaces `{scope}`', () => {
@@ -227,14 +227,14 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
     expect(t).toContain('|');
     expect(t).toContain('random');
 
-    expect(eff(ce.box(['Map', ['List', 1, 2], 'picked']))).toEqual(['random']);
-    expect(ce.box(['Map', ['List', 1, 2], 'picked']).isPure).toBe(false);
+    expect(eff(ce.box(['Map', 'picked', ['List', 1, 2]]))).toEqual(['random']);
+    expect(ce.box(['Map', 'picked', ['List', 1, 2]]).isPure).toBe(false);
     expect(eff(ce.box(['picked', 3]))).toEqual(['random']);
 
     // The control: same shape, pure member.
     ce.assign('pf', ce.parse('x \\mapsto x + 1'));
     ce.assign('pickedPure', ce.box(['At', ['List', 'pf'], 1]));
-    expect(eff(ce.box(['Map', ['List', 1, 2], 'pickedPure']))).toBe(undefined);
+    expect(eff(ce.box(['Map', 'pickedPure', ['List', 1, 2]]))).toBe(undefined);
     expect(eff(ce.box(['pickedPure', 3]))).toBe(undefined);
 
     // …and a DECLARED mixed union is read the same way.
@@ -259,7 +259,7 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
       // is trusted at it (`effects-contracts.test.ts` pins that as the case
       // the design exists for). Applying something with no implementation is
       // the case with no contract to trust.
-      expect(eff(ce.box(['Map', ['List', 1, 2], 'unimpl']))).toBe(undefined);
+      expect(eff(ce.box(['Map', 'unimpl', ['List', 1, 2]]))).toBe(undefined);
       // `any` never pins a frame, so this costs a cache, not a frame.
       expect(
         ce.box(['WithRandomSeed', 5, ['unimpl', 'unboundN']]).evaluate().operator
@@ -364,7 +364,7 @@ describe('`invokes: false` — a container is pure to build', () => {
   });
 
   it('the effect surfaces at the application that INVOKES an element', () => {
-    expect(eff(ce.box(['Map', ['List', 1, 2], 'randomF']))).toEqual(['random']);
+    expect(eff(ce.box(['Map', 'randomF', ['List', 1, 2]]))).toEqual(['random']);
   });
 
   it('a container still carries its operands PRODUCTION effects', () => {
@@ -492,7 +492,7 @@ describe('Selecting and storing heads drop the LATENT half', () => {
     const ce = engine();
     ce.box(['Assign', 'stored', 'randomF']).evaluate();
     expect(ce.box('stored').type.effects).toEqual(['random']);
-    expect(eff(ce.box(['Map', ['List', 1, 2], 'stored']))).toEqual(['random']);
+    expect(eff(ce.box(['Map', 'stored', ['List', 1, 2]]))).toEqual(['random']);
   });
 
   it('`Declare` stores too', () => {
@@ -523,7 +523,7 @@ describe('Selecting and storing heads drop the LATENT half', () => {
       'random',
       'scope',
     ]);
-    expect(eff(ce.box(['Block', ['Map', ['List', 1, 2], 'randomF']]))).toEqual([
+    expect(eff(ce.box(['Block', ['Map', 'randomF', ['List', 1, 2]]]))).toEqual([
       'random',
     ]);
     // …and the frame still discharges those draws, not the scope write.
@@ -555,7 +555,7 @@ describe('Selecting and storing heads drop the LATENT half', () => {
 
     // …and the two collection operators now agree with each other.
     const body = ['Function', ['WithRandomSeed', 42, ['Random']], 'i'];
-    expect(ce.box(['Map', ['Range', 1, 5], body]).isPure).toBe(true);
+    expect(ce.box(['Map', body, ['Range', 1, 5]]).isPure).toBe(true);
     expect(
       ce.box(['Comprehension', ['WithRandomSeed', 42, ['Random']], ['Limits', 'i', 1, 5]])
         .isPure
@@ -566,7 +566,7 @@ describe('Selecting and storing heads drop the LATENT half', () => {
       'random',
     ]);
     expect(
-      ce.box(['Map', ['Range', 1, 5], ['Function', ['Random'], 'i']]).isPure
+      ce.box(['Map', ['Function', ['Random'], 'i'], ['Range', 1, 5]]).isPure
     ).toBe(false);
 
     // CONTROL: the frame discharges `random` only — a scope write survives it,
@@ -646,7 +646,7 @@ describe('`WithRandomSeed` — the canonical discharger', () => {
     // The view's callback draws at materialization, outside the frame
     // (`docs/RANDOMNESS-MODEL.md` §6) — the discharge cannot claim it.
     expect(
-      eff(ce.box(['WithRandomSeed', 42, ['Map', ['List', 1, 2], 'drawF']]))
+      eff(ce.box(['WithRandomSeed', 42, ['Map', 'drawF', ['List', 1, 2]]]))
     ).toEqual(['random']);
     // Materialized INSIDE the frame, the draws are owed to it and discharged.
     expect(
@@ -654,7 +654,7 @@ describe('`WithRandomSeed` — the canonical discharger', () => {
         ce.box([
           'WithRandomSeed',
           42,
-          ['ListFrom', ['Map', ['List', 1, 2], 'drawF']],
+          ['ListFrom', ['Map', 'drawF', ['List', 1, 2]]],
         ])
       )
     ).toBe(undefined);
@@ -739,7 +739,7 @@ describe('Frame participation is a different axis from impurity', () => {
     const e = ce.box([
       'WithRandomSeed',
       7,
-      ['ListFrom', ['Map', ['Range', 1, 'unboundLen'], 'drawEach']],
+      ['ListFrom', ['Map', 'drawEach', ['Range', 1, 'unboundLen']]],
     ]);
     expect(e.evaluate().operator).toBe('WithRandomSeed');
   });
@@ -752,7 +752,7 @@ describe('Frame participation is a different axis from impurity', () => {
     const e = ce.box([
       'WithRandomSeed',
       7,
-      ['Map', ['Range', 1, 3], 'drawEach2'],
+      ['Map', 'drawEach2', ['Range', 1, 3]],
     ]);
     expect(e.evaluate().operator).not.toBe('WithRandomSeed');
   });

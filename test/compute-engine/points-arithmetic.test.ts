@@ -879,7 +879,7 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
     start = Date.now();
     const m = ce.box([
       'Add',
-      ['Map', ['Range', 1, 200000], ['Function', ['Add', 'x', 'k'], 'x']],
+      ['Map', ['Function', ['Add', 'x', 'k'], 'x'], ['Range', 1, 200000]],
       1,
     ]);
     expect(m.isValid).toBe(true);
@@ -893,7 +893,7 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
     start = Date.now();
     const u = ce.box([
       'Add',
-      ['Map', 'col', ['Function', ['Add', 'x', 'k'], 'x']],
+      ['Map', ['Function', ['Add', 'x', 'k'], 'x'], 'col'],
       1,
     ]);
     expect(u.isValid).toBe(true);
@@ -912,7 +912,7 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
     const start = Date.now();
     const r = ce.box([
       'Add',
-      ['Map', ['Range', 1, 2000000], ['Function', ['sfn', 'x'], 'x']],
+      ['Map', ['Function', ['sfn', 'x'], 'x'], ['Range', 1, 2000000]],
       1,
     ]);
     expect(r.isValid).toBe(false);
@@ -1838,10 +1838,10 @@ describe('POINT/TUPLE ARITHMETIC — point-valued `\\mapsto` body', () => {
   test('a lambda in an argument list does not swallow the following argument', () => {
     const ce = new ComputeEngine();
     expect(
-      ce.parse('\\mathrm{Map}([1,2,3], x \\mapsto x^2)', {
+      ce.parse('\\mathrm{Map}(x \\mapsto x^2, [1,2,3])', {
         strict: false,
         canonical: false,
       }).json
-    ).toEqual(['Map', ['List', 1, 2, 3], ['Function', ['Power', 'x', 2], 'x']]);
+    ).toEqual(['Map', ['Function', ['Power', 'x', 2], 'x'], ['List', 1, 2, 3]]);
   });
 });

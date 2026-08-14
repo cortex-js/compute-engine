@@ -135,16 +135,17 @@ A stage that takes more than one argument is written as a call, with `_` in the
 slot the piped value fills:
 
 ```epsil-live
-1..10 |> Filter(_, n |-> n % 2 == 1) |> Map(_, n |-> n^2) |> Sum
+1..10 |> Filter(_, n |-> n % 2 == 1) |> Map(n |-> n^2, _) |> Sum
 // ➔ 165
 ```
 
-The `_` may be left out when it would fill the **first** slot: a call stage
-that is missing required arguments receives the piped value as its implicit
-first argument, so `xs |> Take(10)` means `xs |> Take(_, 10)`. This only
-fills a hole — a call that is already complete keeps its ordinary meaning,
-and an explicit `_` anywhere in the call says exactly where the piped value
-goes.
+The `_` may be left out: a call stage that is missing required arguments
+receives the piped value in the first slot its type fits, so
+`xs |> Take(10)` means `xs |> Take(_, 10)` and `xs |> Map(f)` means
+`xs |> Map(f, _)` (the mapping function is `Map`'s first argument). This
+only fills a hole — a call that is already complete keeps its ordinary
+meaning, and an explicit `_` anywhere in the call says exactly where the
+piped value goes.
 
 A stage may also be a **lambda**, written inline without parentheses — after
 `|>` the arrow binds tighter than the pipe, and the lambda's body ends at the
@@ -153,7 +154,7 @@ is applied **to each element** (an implicit `Map`); `_^2` is shorthand for
 such a lambda. The following three pipelines are equivalent:
 
 ```epsil-live
-1..oo |> Take(_, 10) |> Map(_, _^2) |> Sum
+1..oo |> Take(_, 10) |> Map(_^2, _) |> Sum
 // ➔ 385
 ```
 

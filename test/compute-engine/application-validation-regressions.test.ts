@@ -235,7 +235,7 @@ describe('SYM P1-20 — big-op / map validation gaps', () => {
 
   it('Map with a string "function" does not broadcast the string', () => {
     const ce = strictEngine();
-    const m = ce.box(['Map', ['List', 1, 2, 3], "'nf'"]);
+    const m = ce.box(['Map', "'nf'", ['List', 1, 2, 3]]);
     const ev = m.evaluate();
     // Previously produced ["nf","nf","nf"]; now stays a symbolic Map.
     expect(ev.operator).toBe('Map');
@@ -244,7 +244,7 @@ describe('SYM P1-20 — big-op / map validation gaps', () => {
   it('Map with a real function still works', () => {
     const ce = strictEngine();
     const m = ce
-      .box(['Map', ['List', 1, 2, 3], ['Function', ['Multiply', 2, 'x'], 'x']])
+      .box(['Map', ['Function', ['Multiply', 2, 'x'], 'x'], ['List', 1, 2, 3]])
       .evaluate();
     expect(m.toString()).toBe('[2,4,6]');
   });

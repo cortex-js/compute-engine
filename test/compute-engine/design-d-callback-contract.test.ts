@@ -483,8 +483,8 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
       ce
         .box([
           'Map',
-          ['List', 16, -4, { str: 'banana' }, 81],
           ['Function', ['Sqrt', 'x'], 'x'],
+          ['List', 16, -4, { str: 'banana' }, 81],
         ])
         .evaluate()
         .toString()
@@ -1243,18 +1243,17 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
   });
 });
 
-describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
-  // The unary clause is the contextual one; the trailing `collection*` is the
-  // variadic (zipWith) clause and declares NO contextual slot. One LOOSE
-  // signature rather than an overload set — see the §13 addendum: the type
-  // language consumes required→optional→variadic, so a callback-LAST variadic
-  // cannot be spelled positionally, and an intersection would have made every
-  // consumer of `Map`'s signature resolve an overload set for no behavioral
-  // gain.
+describe('phase 3: `Map` — the callback-first signature', () => {
+  // Since the 2026-08-14 argument-order flip, `Map` has ONE honest positional
+  // spelling: the mapping first, then a one-or-more variadic of sources.
+  // (The retired §6-rev-4 two-clause encoding existed because the historical
+  // collection-first order could not put a callback-LAST variadic into the
+  // required→optional→variadic type language.) The callback slot is
+  // contextual at every arity; the zip form's n-ary callback stays unstamped
+  // via the R-D6 arity gate against the unary `(T) -> U`.
   const DECLARED =
-    '(collection<T>, mapping: callback<(T) -> U>, collection*) -> indexed_collection where T, U';
-  const DISPLAY =
-    '(collection, mapping: function, collection*) -> indexed_collection';
+    '(mapping: callback<(T) -> U>, collection<T>+) -> indexed_collection where T, U';
+  const DISPLAY = '(mapping: function, collection+) -> indexed_collection';
 
   it('declares the two clauses in one signature and drops the metadata', () => {
     const ce = new ComputeEngine();
@@ -1292,10 +1291,10 @@ describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
     );
     const e = ce.box([
       'Map',
-      'points',
       ['Function', ['Equal', 'p', ['Tuple', 0, 0]], 'p'],
+      'points',
     ]);
-    expect(e.ops[1].type.toString()).toBe(
+    expect(e.ops[0].type.toString()).toBe(
       '(p: tuple<number, number>) -> boolean'
     );
     expect(e.evaluate().toString()).toBe('["True","False","False"]');
@@ -1309,30 +1308,30 @@ describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
     // Homogeneous zip.
     const homog = ce.box([
       'Map',
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
       ['List', 1, 2],
       ['List', 3, 4],
-      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
     ]);
     expect(homog.toMathJson()).toEqual([
       'Map',
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
       ['List', 1, 2],
       ['List', 3, 4],
-      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
     ]);
     expect(homog.evaluate().toString()).toBe('[4,6]');
 
     // Heterogeneous zip.
     const heterog = ce.box([
       'Map',
+      ['Function', ['Tuple', 'n', 's'], 'n', 's'],
       'cs',
       'ss',
-      ['Function', ['Tuple', 'n', 's'], 'n', 's'],
     ]);
     expect(heterog.toMathJson()).toEqual([
       'Map',
+      ['Function', ['Pair', 'n', 's'], 'n', 's'],
       'cs',
       'ss',
-      ['Function', ['Pair', 'n', 's'], 'n', 's'],
     ]);
     expect(heterog.evaluate().toString()).toBe(
       '[(1, "a"),(2, "bb"),(3, "ccc")]'
@@ -1343,10 +1342,10 @@ describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
       ce
         .box([
           'Map',
+          ['Function', ['Add', 'a', 'b', 'c'], 'a', 'b', 'c'],
           ['List', 1, 2],
           ['List', 3, 4],
           ['List', 5, 6],
-          ['Function', ['Add', 'a', 'b', 'c'], 'a', 'b', 'c'],
         ])
         .evaluate()
         .toString()
@@ -1357,9 +1356,9 @@ describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
       ce
         .box([
           'Map',
+          ['Function', ['Add', 'a', 1], 'a'],
           ['List', 1, 2],
           ['List', 3, 4],
-          ['Function', ['Add', 'a', 1], 'a'],
         ])
         .evaluate()
         .toString()
@@ -1369,15 +1368,15 @@ describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
 
     // A named callback is shared, never rebuilt — on both clauses.
     executeEpsil(ce, 'let pair = (n, s) |-> (n, s)');
-    expect(ce.box(['Map', 'cs', 'ss', 'pair']).toMathJson()).toEqual([
+    expect(ce.box(['Map', 'pair', 'cs', 'ss']).toMathJson()).toEqual([
       'Map',
+      'pair',
       'cs',
       'ss',
-      'pair',
     ]);
     expect(
       ce
-        .box(['Map', ['List', 1, 2], ['List', 3, 4], 'Add'])
+        .box(['Map', 'Add', ['List', 1, 2], ['List', 3, 4]])
         .evaluate()
         .toString()
     ).toBe('[4,6]');
@@ -1387,10 +1386,10 @@ describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     ce.declare('p', 'function');
-    expect(ce.box(['Map', 'cs', 'IsPrime']).evaluate().toString()).toBe(
+    expect(ce.box(['Map', 'IsPrime', 'cs']).evaluate().toString()).toBe(
       '["False","True","True"]'
     );
-    expect(ce.box(['Map', 'cs', 'p']).evaluate().toString()).toBe(
+    expect(ce.box(['Map', 'p', 'cs']).evaluate().toString()).toBe(
       '[p(1),p(2),p(3)]'
     );
     // A non-function operand: the canonical handler replaces it with the
@@ -1400,30 +1399,35 @@ describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
     // validation).
     expect(
       ce
-        .box(['Map', 'cs', { str: 'banana' }])
+        .box(['Map', { str: 'banana' }, 'cs'])
         .evaluate()
         .toString()
     ).toBe(
-      'Map("cs", Error(ErrorCode("incompatible-type", "function", "string"), "banana"))'
+      'Map(Error(ErrorCode("incompatible-type", "function", "string"), "banana"), "cs")'
     );
     // A union source still declines the stamp (the permanent union ruling).
     executeEpsil(ce, 'let mixed: list<integer|string> = [1,"a",2]');
     expect(
-      ce.box(['Map', 'mixed', ['Function', ['Add', 'x', 1], 'x']]).toMathJson()
-    ).toEqual(['Map', 'mixed', ['Function', ['Add', 'x', 1], 'x']]);
+      ce.box(['Map', ['Function', ['Add', 'x', 1], 'x'], 'mixed']).toMathJson()
+    ).toEqual(['Map', ['Function', ['Add', 'x', 1], 'x'], 'mixed']);
   });
 
-  it('the clauses separate by ARITY, with nothing added (§12.2)', () => {
-    // At two operands the contextual slot IS the mapping; at three it lands on
-    // a SOURCE, which is never an inline `Function` literal — so the stamp
-    // declines by construction rather than by a special case.
+  it('the callback slot is contextual at every arity (callback-first)', () => {
+    // Under the 2026-08-14 callback-first signature there is ONE clause: the
+    // mapping is operand 0 at every arity, and every following operand is a
+    // `collection<T>` source contributing to the solve (their JOIN — a union
+    // join declines the stamp, and an arity-mismatched literal is admitted
+    // unstamped under R-D6, which is what keeps the zip form's SUCCESS path
+    // exactly as it was under the retired two-clause spelling of §6 rev 4).
     const ARM = parseType(DECLARED) as FunctionSignature;
     for (const count of [2, 3, 4]) {
       const plan = contextualCallbackPlan(ARM, count)!;
-      expect(plan.callbacks.map((c) => c.index)).toEqual([1]);
-      expect(plan.sources).toEqual([0]);
+      expect(plan.callbacks.map((c) => c.index)).toEqual([0]);
+      expect(plan.sources).toEqual(
+        Array.from({ length: count - 1 }, (_, i) => i + 1)
+      );
     }
-    // …and one operand offers no slot at all.
+    // …and one operand offers no source to solve from.
     expect(contextualCallbackPlan(ARM, 1)).toBeUndefined();
   });
 });
@@ -2024,7 +2028,11 @@ describe('effects: an undeclared symbol at a converted slot reads `any`', () => 
   for (const op of ['FlatMap', 'Map', 'Filter', 'CountIf', 'Scan'] as const) {
     it(`${op} keeps the \`any\` marker`, () => {
       const ce = new ComputeEngine();
-      const t = ce.box(['Function', [op, ['List', 1, 2], 'q'], 'xs']).type;
+      const t = ce.box([
+        'Function',
+        op === 'Map' ? [op, 'q', ['List', 1, 2]] : [op, ['List', 1, 2], 'q'],
+        'xs',
+      ]).type;
       expect(t.toString()).toContain(') any ->');
       // …and the READ itself declared nothing.
       expect(ce.lookupDefinition('q')).toBeUndefined();

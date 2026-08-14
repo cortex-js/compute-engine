@@ -552,8 +552,8 @@ describe('Distribution — objective thresholds under a pinned seed', () => {
         42,
         [
           'Map',
-          ['Range', 1, 10_000],
           ['Function', ['First', ['RandomSample', ['Range', 1, 5], 1]], 'i'],
+          ['Range', 1, 10_000],
         ],
       ])
     );

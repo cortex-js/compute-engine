@@ -49,8 +49,8 @@ describe('Map element memo', () => {
     const m = ce
       .box([
         'Map',
-        ['Range', 1, 20],
         ['Function', ['tick', ['Multiply', 'mfree', 'n']], 'n'],
+        ['Range', 1, 20],
       ])
       .evaluate();
 
@@ -77,7 +77,7 @@ describe('Map element memo', () => {
     ce.assign('pfree', 3);
     const m = ce
       .parse(
-        '\\mathrm{Map}\\left(\\left[1...10\\right], n \\mapsto \\operatorname{tick}(\\mathrm{pfree}\\cdot n)\\right)',
+        '\\mathrm{Map}\\left(n \\mapsto \\operatorname{tick}(\\mathrm{pfree}\\cdot n), \\left[1...10\\right]\\right)',
         { strict: false }
       )
       .evaluate();
@@ -95,9 +95,9 @@ describe('Map element memo', () => {
     const m = ce
       .box([
         'Map',
+        ['Function', ['tick', ['Add', 'a', 'b']], 'a', 'b'],
         ['Range', 1, 5],
         ['Range', 11, 15],
-        ['Function', ['tick', ['Add', 'a', 'b']], 'a', 'b'],
       ])
       .evaluate();
 
@@ -111,7 +111,7 @@ describe('Map element memo', () => {
 
   it('an early-abandoned walk never commits a COMPLETE entry', () => {
     const m = ce
-      .box(['Map', ['Range', 1, 10], ['Function', ['tick', 'n'], 'n']])
+      .box(['Map', ['Function', ['tick', 'n'], 'n'], ['Range', 1, 10]])
       .evaluate();
 
     const [, cPartial] = counting(() => {
@@ -136,7 +136,7 @@ describe('Map element memo', () => {
 
   it('at() serves from a covering cached prefix', () => {
     const m = ce
-      .box(['Map', ['Range', 1, 10], ['Function', ['tick', 'n'], 'n']])
+      .box(['Map', ['Function', ['tick', 'n'], 'n'], ['Range', 1, 10]])
       .evaluate();
 
     counting(() => walkSum(m)); // fill
@@ -161,8 +161,8 @@ describe('Map element memo', () => {
           'Sum',
           [
             'Map',
-            ['Range', 1, 2],
             ['Function', ['tick', ['Multiply', 'i', 'n']], 'n'],
+            ['Range', 1, 2],
           ],
         ],
         ['Tuple', 'i', 1, 3],
@@ -199,8 +199,8 @@ describe('eligibility gates', () => {
     const m = ce
       .box([
         'Map',
-        ['Range', 1, 4],
         ['Function', ['tick', ['htrans', 'n']], 'n'],
+        ['Range', 1, 4],
       ])
       .evaluate();
 
@@ -255,7 +255,7 @@ describe('other flagged operators', () => {
 describe('review fixes (2026-08-02)', () => {
   it('at(-1) serves the memoized last element (negative-index coherence)', () => {
     const m = ce
-      .box(['Map', ['Range', 1, 6], ['Function', ['Random'], 'n']])
+      .box(['Map', ['Function', ['Random'], 'n'], ['Range', 1, 6]])
       .evaluate();
     const walked = [...m.each()].map((el) => el.re);
     // `Last`-style access must agree with the walk on the same instance —
@@ -269,8 +269,8 @@ describe('review fixes (2026-08-02)', () => {
     const m = ce
       .box([
         'Map',
-        ['Range', 1, 3],
         ['Function', ['tick', ['Multiply', 'shadowed', 'n']], 'n'],
+        ['Range', 1, 3],
       ])
       .evaluate();
 
@@ -294,8 +294,8 @@ describe('review fixes (2026-08-02)', () => {
     const m = ce
       .box([
         'Map',
-        ['Range', 1, 4],
         ['Function', ['tick', ['Multiply', 'midwalk', 'n']], 'n'],
+        ['Range', 1, 4],
       ])
       .evaluate();
 
@@ -328,8 +328,8 @@ describe('dependency-precise invalidation (Tycho item 127)', () => {
     const m = ce
       .box([
         'Map',
-        ['Range', 1, 8],
         ['Function', ['tick', ['Multiply', 'kslider', 'n']], 'n'],
+        ['Range', 1, 8],
       ])
       .evaluate();
 
@@ -356,8 +356,8 @@ describe('dependency-precise invalidation (Tycho item 127)', () => {
     const m = ce
       .box([
         'Map',
-        ['Range', 1, 5],
         ['Function', ['tick', ['hwarm', 'n']], 'n'],
+        ['Range', 1, 5],
       ])
       .evaluate();
 
@@ -388,8 +388,8 @@ describe('dependency-precise invalidation (Tycho item 127)', () => {
     const m = ce
       .box([
         'Map',
-        ['Range', 1, 6],
         ['Function', ['tick', ['Multiply', 'kpull', 'n']], 'n'],
+        ['Range', 1, 6],
       ])
       .evaluate();
 
@@ -414,7 +414,7 @@ describe('dependency-precise invalidation (Tycho item 127)', () => {
     // epoch — certifying a straddling buffer as valid in the new world.
     const saved = ce.tolerance;
     const m = ce
-      .box(['Map', ['Range', 1, 5], ['Function', ['tick', 'n'], 'n']])
+      .box(['Map', ['Function', ['tick', 'n'], 'n'], ['Range', 1, 5]])
       .evaluate();
 
     const it1 = m.each();
@@ -433,7 +433,7 @@ describe('dependency-precise invalidation (Tycho item 127)', () => {
 
   it('an abandoned walk commits a prefix that at() serves', () => {
     const m = ce
-      .box(['Map', ['Range', 1, 10], ['Function', ['tick', 'n'], 'n']])
+      .box(['Map', ['Function', ['tick', 'n'], 'n'], ['Range', 1, 10]])
       .evaluate();
 
     const [, cPartial] = counting(() => {
@@ -467,7 +467,7 @@ describe('dependency-precise invalidation (Tycho item 127)', () => {
   it('a tolerance change colds the memo (epoch, not a config stamp)', () => {
     const saved = ce.tolerance;
     const m = ce
-      .box(['Map', ['Range', 1, 4], ['Function', ['tick', 'n'], 'n']])
+      .box(['Map', ['Function', ['tick', 'n'], 'n'], ['Range', 1, 4]])
       .evaluate();
 
     expect(counting(() => walkSum(m))[1]).toBe(4);
@@ -495,8 +495,8 @@ describe('review-round pins (2026-08-02, round 3)', () => {
     const m = ce
       .box([
         'Map',
-        ['Range', 1, 3],
         ['Function', ['tick', ['houter', 'n']], 'n'],
+        ['Range', 1, 3],
       ])
       .evaluate();
 
@@ -521,8 +521,8 @@ describe('review-round pins (2026-08-02, round 3)', () => {
     const m = ce
       .box([
         'Map',
-        ['Range', 1, 6],
         ['Function', ['tick', ['Multiply', 'kbrk', 'n']], 'n'],
+        ['Range', 1, 6],
       ])
       .evaluate();
 
@@ -540,7 +540,7 @@ describe('review-round pins (2026-08-02, round 3)', () => {
     // C4: a partial prefix of a drawing body would be replaced by a later
     // complete walk's fresh draws — at(1) before/after would disagree.
     const r = ce
-      .box(['Map', ['Range', 1, 5], ['Function', ['Random'], 'n']])
+      .box(['Map', ['Function', ['Random'], 'n'], ['Range', 1, 5]])
       .evaluate();
     const it1 = r.each();
     const firstDraw = it1.next().value!.re;
@@ -555,7 +555,7 @@ describe('review-round pins (2026-08-02, round 3)', () => {
     // C3 (revised ruling, RANDOMNESS-MODEL §6): the coherence window is
     // dependency-precise — an unrelated write no longer re-draws.
     const r = ce
-      .box(['Map', ['Range', 1, 5], ['Function', ['Random'], 'n']])
+      .box(['Map', ['Function', ['Random'], 'n'], ['Range', 1, 5]])
       .evaluate();
     const draws = [...r.each()].map((el) => el.re);
     ce.assign('unrelatedDrawTick', 1);
@@ -584,8 +584,8 @@ describe('paranoid canary (CE_MEMO_PARANOID)', () => {
       const m = ce
         .box([
           'Map',
-          ['Range', 1, 6],
           ['Function', ['tick', ['Multiply', 'kcanary', 'n']], 'n'],
+          ['Range', 1, 6],
         ])
         .evaluate();
       const w1 = [...m.each()].map((el) => el.re);
@@ -596,7 +596,7 @@ describe('paranoid canary (CE_MEMO_PARANOID)', () => {
       // Impure body: the canary must SKIP (a re-walk legitimately differs
       // by the draw-set ruling) and the walk stays coherent.
       const r = ce
-        .box(['Map', ['Range', 1, 4], ['Function', ['Random'], 'n']])
+        .box(['Map', ['Function', ['Random'], 'n'], ['Range', 1, 4]])
         .evaluate();
       const r1 = [...r.each()].map((el) => el.re);
       const r2 = [...r.each()].map((el) => el.re);
@@ -613,7 +613,7 @@ describe('paranoid canary (CE_MEMO_PARANOID)', () => {
 describe('impure element bodies (ruled 2026-08-02)', () => {
   it('a random-bodied Map is one draw set per instance', () => {
     const m = ce
-      .box(['Map', ['Range', 1, 6], ['Function', ['Random'], 'n']])
+      .box(['Map', ['Function', ['Random'], 'n'], ['Range', 1, 6]])
       .evaluate();
 
     const walk = () => [...m.each()].map((el) => el.re);
@@ -622,7 +622,7 @@ describe('impure element bodies (ruled 2026-08-02)', () => {
 
     // A re-derived instance is a fresh instance: fresh draws.
     const m2 = ce
-      .box(['Map', ['Range', 1, 6], ['Function', ['Random'], 'n']])
+      .box(['Map', ['Function', ['Random'], 'n'], ['Range', 1, 6]])
       .evaluate();
     const other = [...m2.each()].map((el) => el.re);
     expect(other).not.toEqual(first);

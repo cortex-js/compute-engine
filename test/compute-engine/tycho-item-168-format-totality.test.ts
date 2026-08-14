@@ -93,14 +93,14 @@ describe('Tycho item 168: formatting is total', () => {
     // collection must still materialize into its elided/eager spelling.
     test('a healthy lazy Map still materializes under toLatex', () => {
       const ce = new ComputeEngine();
-      const e = ce.parse('\\mathrm{Map}(1..5, k \\mapsto 2k)');
+      const e = ce.parse('\\mathrm{Map}(k \\mapsto 2k, 1..5)');
       expect(e.toLatex({ materialization: true })).toContain('2');
       expect(e.toLatex({ materialization: true })).not.toContain('Map');
     });
 
     test('materialization:false keeps the operator form', () => {
       const ce = new ComputeEngine();
-      const e = ce.parse('\\mathrm{Map}(1..5, k \\mapsto 2k)');
+      const e = ce.parse('\\mathrm{Map}(k \\mapsto 2k, 1..5)');
       expect(e.toLatex({ materialization: false })).toContain('Map');
     });
 

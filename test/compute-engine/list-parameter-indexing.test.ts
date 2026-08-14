@@ -517,7 +517,7 @@ describe('(f) a declared NON-SCALAR parameter reaches the compiled body', () => 
     // because the body was compiled against a scalar parameter.
     for (const [body, want] of [
       [['Length', 'a'], 2],
-      [['Map', 'a', ['Function', ['Power', 'w', 2], 'w']], [9, 16]],
+      [['Map', ['Function', ['Power', 'w', 2], 'w'], 'a'], [9, 16]],
     ] as [any, any][]) {
       const sig = Array.isArray(want)
         ? '(list<real>) -> list<real>'

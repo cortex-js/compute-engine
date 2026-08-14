@@ -21,7 +21,7 @@ A few idioms these programs rely on:
   `Map`/`Filter`/`Reduce` for value-producing iteration.
 - `1..n` is the **inclusive** range from 1 to n, and `x |> f` pipes a value
   into a function — when the function takes several arguments, `_` marks the
-  piped value's slot (`xs |> Map(_, f)`).
+  piped value's slot (`xs |> Map(f, _)`).
 - `a if c else b` is the conditional expression — the same `If` as
   `if c { a } else { b }`, without the braces.
 - Collection **literals** evaluate their elements; lazy **operators**
@@ -52,11 +52,12 @@ total
 is a single `Map` — no printing, no mutation:
 
 ```epsil
-Map(1..15, k |->
+Map(k |->
   if k % 15 == 0 { "FizzBuzz" }
   else if k % 3 == 0 { "Fizz" }
   else if k % 5 == 0 { "Buzz" }
-  else { k })
+  else { k },
+  1..15)
 // ➔ [1, 2, "Fizz", 4, "Buzz", "Fizz", 7, 8, "Fizz", "Buzz", 11, "Fizz", 13, 14, "FizzBuzz"]
 ```
 
@@ -160,8 +161,8 @@ let y = 5
 **A truth table**, as a `Map` over the four boolean pairs:
 
 ```epsil
-Map([(True, True), (True, False), (False, True), (False, False)],
-    p |-> p[1] && p[2])
+Map(p |-> p[1] && p[2],
+    [(True, True), (True, False), (False, True), (False, False)])
 // ➔ [True, False, False, False]
 ```
 
@@ -223,7 +224,7 @@ fact(10)
 fib(0) = 0
 fib(1) = 1
 fib(n: integer) = fib(n - 1) + fib(n - 2)
-Map(1..10, fib)
+Map(fib, 1..10)
 // ➔ [1, 1, 2, 3, 5, 8, 13, 21, 34, 55]
 ```
 
@@ -440,7 +441,7 @@ $e^{i\pi/3}$
 imaginary part: (1+i)(2+i)(3+i) = 10i:
 
 ```epsil
-Product(Map(Range(1, 3), k |-> k + i))
+Product(Map(k |-> k + i, Range(1, 3)))
 // ➔ 10i
 ```
 
@@ -482,7 +483,7 @@ the polynomial:
 
 ```epsil
 let roots = Solve(x^2 - 5x + 6 == 0, x)
-Map(roots, r |-> r^2 - 5r + 6)
+Map(r |-> r^2 - 5r + 6, roots)
 // ➔ [0, 0]
 ```
 
@@ -585,7 +586,7 @@ per value, folded onto the header with `StringJoin` in a pipeline:
 
 ```epsil
 let header = "n\tn^2\tn^3\n"
-1..5 |> Map(_, n |-> "\(n)\t\(n^2)\t\(n^3)\n") |> Fold(StringJoin, header, _)
+1..5 |> Map(n |-> "\(n)\t\(n^2)\t\(n^3)\n", _) |> Fold(StringJoin, header, _)
 ```
 
 produces (tabs aligned, newline-separated rows):
@@ -623,7 +624,7 @@ into its code points, `Map` shifts each, and `StringFrom(…, "unicode-scalars")
 rebuilds the string. Shifting back decodes, so the cipher round-trips:
 
 ```epsil
-shift(s, k) = s |> UnicodeScalars |> Map(_, c |-> c + k) |> StringFrom(_, "unicode-scalars")
+shift(s, k) = s |> UnicodeScalars |> Map(c |-> c + k, _) |> StringFrom(_, "unicode-scalars")
 (shift("hello", 3), shift(shift("hello", 3), -3))
 // ➔ ("khoor", "hello")
 ```
@@ -736,7 +737,7 @@ computation — it surfaces as `NaN` while the valid inputs still compute. Here
 
 ```epsil
 let inputs = [16, -4, "banana", 81]
-Map(inputs, x |-> Sqrt(x))
+Map(x |-> Sqrt(x), inputs)
 // ➔ [4, 2i, NaN, 9]
 ```
 

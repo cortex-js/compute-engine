@@ -432,11 +432,11 @@ function shorthandFunctionOperand(
 /**
  * The canonical function literal for a higher-order operator's callback slot,
  * or `undefined` when the operand is a plain VALUE that only a PARAMETERLESS
- * lift could turn into a function (`Map(xs, 5)`, `Any(xs, True)`).
+ * lift could turn into a function (`Map(5, xs)`, `Any(xs, True)`).
  *
  * `canonicalFunctionLiteral`'s shorthand path (its step 6) turns any operand
  * into a literal: an operand contributing no wildcard and no free unknown
- * becomes the constant `() ↦ 5`. That is what made `Map(xs, 5)` answer
+ * becomes the constant `() ↦ 5`. That is what made `Map(5, xs)` answer
  * `[5, 5, 5]` and `Any(xs, 5)` carry a thunk, while the EAGER siblings —
  * which route through {@link shorthandFunctionOperand} instead — reported
  * `incompatible-type function/finite_integer` for the identical `Sort(xs, 5)`.
@@ -473,7 +473,7 @@ function canonicalCallbackOperand(
   // contract. One whose DECLARED type is already provably not a function
   // (`Any(xs, True)`, a symbol declared `integer`) defers to nothing: the
   // eager siblings reject it through `validateArguments`, and accepting it
-  // here produced `Map([1,2], True) → [True(1), True(2)]`.
+  // here produced `Map(True, [1,2]) → [True(1), True(2)]`.
   //
   // The type is read from the definition by NAME, not from `op.type`: the
   // operand arrives raw here, where every symbol still reads `unknown`, and
@@ -610,7 +610,7 @@ function iterateArgs(
 function mapSource(xs: Expression): Expression {
   if (xs.isCollection) return xs;
   if (!xs.type.matches('collection')) return xs;
-  // Guard: a self-referential binding (`xs := Map(xs, f)`) resolves to a value
+  // Guard: a self-referential binding (`xs := Map(f, xs)`) resolves to a value
   // that mentions `xs`, and that value's own shape predicates route straight
   // back here — `isFinite` → `mapSource` → `evaluate()` → `isFiniteCollection`
   // → `isFinite`, one stack frame deeper each turn.
@@ -1206,7 +1206,7 @@ function projectLazyPointList(
   numericApproximation: boolean
 ): Expression | undefined {
   if (!isFunction(xs) || xs.operator !== 'Map' || xs.nops < 2) return undefined;
-  const fn = xs.ops[xs.nops - 1];
+  const fn = xs.op1;
   if (!isFunction(fn) || fn.operator !== 'Function') return undefined;
   let body = fn.ops[0];
   // The canonical function literal wraps its body in a single-statement
@@ -1219,7 +1219,7 @@ function projectLazyPointList(
   const slot = body.ops[position - 1];
   if (slot === undefined || !isSymbol(slot)) return undefined;
   const params = fn.ops.slice(1);
-  const sources = xs.ops.slice(0, -1);
+  const sources = xs.ops.slice(1);
   // The transpose contract binds parameters one-to-one to sources, each a
   // distinct plain symbol. A user-authored lookalike with extra or duplicate
   // parameter names could otherwise select the wrong source (`findIndex`
@@ -1283,7 +1283,7 @@ function pointComponentAt(
       if (isPointLike(first)) {
         // Hybrid laziness (Tycho item 52): past the eager threshold — or for
         // an indexed collection of unknown size — return the lazy projection
-        // `Map(xs, p ↦ At(p, position))` instead of materializing every
+        // `Map(p ↦ At(p, position), xs)` instead of materializing every
         // coordinate. At or below the threshold the eager `List` is built
         // unchanged, so small point lists stay byte-identical.
         const n = xs.count;
@@ -2619,35 +2619,32 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the collection where each element has been transformed by the mapping function.',
       'With a single collection, equivalent to `[f(x) for x in xs]`. With',
       'multiple collections, combines them element-wise (like `zipWith`): ',
-      '`Map(xs, ys, f) = [f(x1, y1), f(x2, y2), …]`, with the length of the',
-      'shortest input. The mapping function is always the LAST argument.',
+      '`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the',
+      'shortest input. The mapping function is always the FIRST argument.',
     ],
     complexity: 8200,
     lazy: true,
-    // Design D phase 3 (§6, RE-RULED revision 4). `Map` is the one operator
-    // with TWO clauses, and they get ONE loose signature rather than an
-    // overload set — see the §13 addendum for the decision and its evidence:
+    // The mapping function comes FIRST, the source collections after it
+    // (ruled 2026-08-14, resolving the Map-spelling challenge left open by
+    // Design D phase 3): the operator is variadic over its sources, and the
+    // type language consumes required→optional→variadic, so a callback-LAST
+    // spelling (`(collection+, mapping)`) is not positionally expressible —
+    // the historical order forced a loose signature whose parameter positions
+    // lied about the operands. Callback-first is the one honest spelling:
+    // `(mapping, collection+)` is exactly what the handlers consume.
     //
-    //  - the UNARY clause is the contextual one, and it is what the parameter
-    //    positions above describe: `Map(xs, f)` solves `T` from the source and
-    //    stamps `f`'s parameter with it, exactly as every other converted
-    //    operator does;
-    //  - the VARIADIC (`zipWith`) clause is the trailing `collection*`. It
-    //    declares NO contextual slot, so nothing in the multi-collection form
-    //    is ever stamped — the re-ruled §6 behavior, by construction: at three
-    //    operands the slot below lands on a SOURCE, which is never an inline
-    //    `Function` literal, and the pass declines before it canonicalizes
-    //    anything.
+    // Contextual stamping (Design D) is position-driven and survives the
+    // flip, exactly as it does for the callback-first `Fold`:
     //
-    // The two clauses cannot both be spelled positionally: the type language
-    // consumes required→optional→variadic, so a callback-LAST variadic
-    // (`(collection+, mapping)`) hoists the mapping to operand 0 — which is
-    // why the PRE-conversion spelling declared but never applied (§2). `Map` is
-    // `lazy` with a `canonical` handler, so `validateArguments` never runs on
-    // it and the looseness costs no diagnostic: admission, evaluation and every
-    // error value are byte-identical to the pre-conversion behavior.
+    //  - the UNARY form `Map(f, xs)` solves `T` from the source at operand 1
+    //    and stamps `f`'s parameter with it;
+    //  - the VARIADIC (`zipWith`) form's sources ALL mention `T`, whose
+    //    solution is their join — and the declared slot `(T) -> U` is unary,
+    //    so an n-ary zip mapping is admitted UNSTAMPED under the R-D6
+    //    arity-mismatch rule, preserving the historical no-stamp behavior of
+    //    the multi-collection form.
     signature:
-      '(collection<T>, mapping: callback<(T) -> U>, collection*) -> indexed_collection where T, U',
+      '(mapping: callback<(T) -> U>, collection<T>+) -> indexed_collection where T, U',
     // The mapped collection keeps the source's shape/indexed-ness, but its
     // elements are the lambda's RESULT type — not the source element type.
     // (If the input collection is indexed, the output collection is indexed.)
@@ -2669,19 +2666,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return t;
       };
       if (ops.length <= 2) {
-        const resultType = functionResult(ops[1].type.type);
+        // A source-less `Map(f)` is never canonical (the handler declines
+        // it), but the type can be asked of the raw form.
+        if (ops[1] === undefined) return 'indexed_collection';
+        const resultType = functionResult(ops[0].type.type);
         if (!resultType || resultType === 'unknown' || resultType === 'any') {
           // Unknown element type: still preserve value-aware indexed-ness
           // (the `.N()` route wraps the body in `N`, whose lazy result types
           // `unknown` — without this the whole Map would type `unknown` and
           // the arithmetic broadcast would treat it as a scalar).
-          const s = sourceType(ops[0]);
-          if (s === 'indexed_collection' && ops[0].type.type !== s) return s;
-          return ops[0].type;
+          const s = sourceType(ops[1]);
+          if (s === 'indexed_collection' && ops[1].type.type !== s) return s;
+          return ops[1].type;
         }
-        return mapResultType(sourceType(ops[0]), resultType);
+        return mapResultType(sourceType(ops[1]), resultType);
       }
-      const resultType = functionResult(ops[ops.length - 1].type.type);
+      const resultType = functionResult(ops[0].type.type);
       return mapResultType(
         'indexed_collection',
         !resultType || resultType === 'unknown' || resultType === 'any'
@@ -2690,35 +2690,56 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
     },
     canonical: (ops, { engine }) => {
-      // The mapping function is the LAST argument; every preceding argument is
-      // a source collection. Keep the single-collection form byte-for-byte
-      // identical to its historical behavior.
-      if (ops.length <= 2) {
-        const collection = checkCollectionOperand(engine, ops[0]);
-        const fn = canonicalCallbackOperand(ops[1]);
-        if (!collection.isValid || !fn) return null;
-
-        return engine._fn('Map', [collection, fn]);
+      // The mapping function is the FIRST argument; every following argument
+      // is a source collection.
+      const fn = canonicalCallbackOperand(ops[0]);
+      const collections = ops
+        .slice(1)
+        .map((c) => checkCollectionOperand(engine, c));
+      if (
+        !fn ||
+        collections.length === 0 ||
+        collections.some((c) => !c.isValid)
+      ) {
+        // Migration aid for the 2026-08-14 argument-order flip (the mapping
+        // function moved from last to FIRST): a call written in the legacy
+        // order — a provable collection first, a function-shaped operand
+        // last — would otherwise just decline here and sit as an inert
+        // symbolic `Map`. Surface the callback-slot type error instead, so
+        // the misorder is loud and names the offending operand. The operands
+        // arrive RAW (every type reads `unknown`), so the first is
+        // canonicalized to read its type — but never a bare symbol, whose
+        // canonicalization would DECLARE it as a side effect (and whose
+        // callback slot defers by design anyway).
+        const last = ops[ops.length - 1];
+        const first =
+          ops.length >= 2 && !isSymbol(ops[0]) && !isFunction(ops[0], 'Function')
+            ? ops[0].canonical
+            : undefined;
+        if (
+          first !== undefined &&
+          first.type.matches('collection') &&
+          (isFunction(last, 'Function') || last.type.matches('function'))
+        )
+          return engine._fn('Map', [
+            engine.typeError('function', first.type, first),
+            ...ops.slice(1).map((c) => c.canonical),
+          ]);
+        return null;
       }
 
-      const fn = canonicalCallbackOperand(ops[ops.length - 1]);
-      const collections = ops
-        .slice(0, -1)
-        .map((c) => checkCollectionOperand(engine, c));
-      if (!fn || collections.some((c) => !c.isValid)) return null;
-
-      return engine._fn('Map', [...collections, fn]);
+      return engine._fn('Map', [fn, ...collections]);
     },
     collection: {
       // The multi-source form advances every source in LOCKSTEP, so a single
       // unwalkable source stops the whole walk — mirror `isEmpty`/`count`,
-      // which read the same `ops.slice(0, -1)` (the last operand is the
+      // which read the same `ops.slice(1)` (the first operand is the
       // mapping function, not a source).
       isEnumerable: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (expr.nops <= 2) return expr.op1.isEnumerableCollection;
+        if (expr.nops <= 2) return expr.op2.isEnumerableCollection;
         let unknown = false;
-        for (const x of expr.ops.slice(0, -1)) {
+        for (const x of expr.ops.slice(1)) {
           const e = x.isEnumerableCollection;
           if (e === false) return false;
           if (e === undefined) unknown = true;
@@ -2730,36 +2751,36 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.nops > 2)
-          return minCount(expr.ops.slice(0, -1).map((c) => mapSource(c).count));
-        return mapSource(expr.op1).count;
+          return minCount(expr.ops.slice(1).map((c) => mapSource(c).count));
+        return mapSource(expr.op2).count;
       },
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.nops > 2) {
           // Empty as soon as *any* source is empty (mirrors Zip).
           let anyUnknown = false;
-          for (const x of expr.ops.slice(0, -1)) {
+          for (const x of expr.ops.slice(1)) {
             const e = mapSource(x).isEmptyCollection;
             if (e === true) return true;
             if (e === undefined) anyUnknown = true;
           }
           return anyUnknown ? undefined : false;
         }
-        return mapSource(expr.op1).isEmptyCollection;
+        return mapSource(expr.op2).isEmptyCollection;
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.nops > 2) {
           // Finite as soon as *any* source is finite (mirrors Zip).
           let anyUnknown = false;
-          for (const x of expr.ops.slice(0, -1)) {
+          for (const x of expr.ops.slice(1)) {
             const f = mapSource(x).isFiniteCollection;
             if (f === true) return true;
             if (f === undefined) anyUnknown = true;
           }
           return anyUnknown ? undefined : false;
         }
-        return mapSource(expr.op1).isFiniteCollection;
+        return mapSource(expr.op2).isFiniteCollection;
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -2828,9 +2849,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // counts — so a source with an unknown count (or an infinite one
           // zipped with a finite one) still iterates; the zip ends as soon
           // as any source ends.
-          const f = applicable(expr.ops[expr.nops - 1]);
+          const f = applicable(expr.op1);
           if (!f) return { next: () => ({ value: undefined, done: true }) };
-          const sources = expr.ops.slice(0, -1).map((c) => c.each());
+          const sources = expr.ops.slice(1).map((c) => c.each());
           return {
             next: () => {
               const items: Expression[] = [];
@@ -2852,10 +2873,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           };
         }
 
-        const f = applicable(expr.op2);
+        const f = applicable(expr.op1);
         if (!f) return { next: () => ({ value: undefined, done: true }) };
 
-        const source = expr.op1.each();
+        const source = expr.op2.each();
 
         return {
           next: () => {
@@ -2915,7 +2936,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // Multi-collection (zipWith): f of each source's element at `index`;
           // undefined if any source has no element there — no up-front count
           // needed (a source with an unknown count still answers `at`).
-          const collections = expr.ops.slice(0, -1);
+          const collections = expr.ops.slice(1);
           if (index < 1) return undefined;
           const items = collections.map((c) => mapSource(c).at(index));
           if (items.some((x) => x === undefined)) return undefined;
@@ -2926,7 +2947,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             items as Expression[]
           );
           if (compiled !== undefined) return compiled;
-          return applicable(expr.ops[expr.nops - 1])?.(items as Expression[]);
+          return applicable(expr.op1)?.(items as Expression[]);
         }
 
         // Gate on the SOURCE's indexed-ness (value-aware for a symbol
@@ -2937,7 +2958,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // eager/broadcast source that only becomes a collection on evaluation
         // (else `at` reports `undefined` and a result longer than the
         // materialization head renders head-only).
-        const source = mapSource(expr.op1);
+        const source = mapSource(expr.op2);
         if (source.isIndexedCollection === false) return undefined;
         if (!Number.isFinite(index) || index === 0) return undefined;
         const item = source.at(index);
@@ -2947,7 +2968,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           item,
         ]);
         if (compiled !== undefined) return compiled;
-        return applicable(expr.op2)?.([item]);
+        return applicable(expr.op1)?.([item]);
       },
     },
   },
@@ -6303,7 +6324,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           { canonical: false }
         );
         const fn = ce._fn('Function', [acc, s.index], { canonical: false });
-        acc = ce._fn('Map', [range, fn], { canonical: false });
+        acc = ce._fn('Map', [fn, range], { canonical: false });
       }
       return acc.canonical;
     },

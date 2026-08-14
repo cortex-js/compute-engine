@@ -42,7 +42,7 @@ describe('lazy broadcast over a declared-unknown symbol (Tycho item 42)', () => 
 
   test('Map over an unknown-typed symbol source is canonical and indexed', () => {
     const ce = engineWithCorpusRow();
-    const m = ce.box(['Map', 'L', ['Function', ['Mod', '_1', 'N'], '_1']]);
+    const m = ce.box(['Map', ['Function', ['Mod', '_1', 'N'], '_1'], 'L']);
     expect(m.isCanonical).toBe(true);
     expect(m.type.matches('indexed_collection')).toBe(true);
     expect(m.at(92)?.evaluate().json).toBe(6); // mod(91, 85)
@@ -97,7 +97,7 @@ describe('lazy broadcast over a declared-unknown symbol (Tycho item 42)', () => 
     // An unresolved symbol (no value) stays fail-open (canonical, inert).
     ce.declare('u', { type: 'unknown' });
     expect(
-      ce.box(['Map', 'u', ['Function', ['Add', '_1', 1], '_1']]).isCanonical
+      ce.box(['Map', ['Function', ['Add', '_1', 1], '_1'], 'u']).isCanonical
     ).toBe(true);
   });
 

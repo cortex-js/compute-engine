@@ -179,6 +179,17 @@
        [
         "Map",
         [
+         "Function",
+         [
+          "Abs",
+          [
+           "f",
+           "t"
+          ]
+         ],
+         "t"
+        ],
+        [
          "Filter",
          "ComplexNumbers",
          [
@@ -197,17 +208,6 @@
           ],
           "t"
          ]
-        ],
-        [
-         "Function",
-         [
-          "Abs",
-          [
-           "f",
-           "t"
-          ]
-         ],
-         "t"
         ]
        ]
       ],
@@ -607,6 +607,17 @@
       [
        "Map",
        [
+        "Function",
+        [
+         "Abs",
+         [
+          "f",
+          "t"
+         ]
+        ],
+        "t"
+       ],
+       [
         "Filter",
         "ComplexNumbers",
         [
@@ -625,17 +636,6 @@
          ],
          "t"
         ]
-       ],
-       [
-        "Function",
-        [
-         "Abs",
-         [
-          "f",
-          "t"
-         ]
-        ],
-        "t"
        ]
       ]
      ],

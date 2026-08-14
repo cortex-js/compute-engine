@@ -647,7 +647,7 @@ let q = Comparable.compare("a", "b")`
       e,
       `protocol Negatable { function negated(self: Self) -> Self }
 type number is Negatable { function negated(self) -> number { -self } }
-const r = Map([1, 2, 3], negated(_) * 10)`
+const r = Map(negated(_) * 10, [1, 2, 3])`
     );
     expect(e.box('r').evaluate().toString()).toBe('[-10,-20,-30]');
     // An undecided receiver still DEFERS — symbolic, not an error.
@@ -662,7 +662,7 @@ const s = negated(u) * 10`
     expect(e2.box('s').evaluate().toString()).toBe('10negated(u)');
   });
 
-  test('a qualified member works as a CALLBACK (`Map(xs, P.m)`)', () => {
+  test('a qualified member works as a CALLBACK (`Map(P.m, xs)`)', () => {
     // `Map` holds its callback raw, and `canonicalFunctionLiteral`'s
     // shorthand path used to read the `Field(Comparable, "compare")`
     // expression as a lambda BODY — turning its free symbol into the
@@ -676,7 +676,7 @@ const s = negated(u) * 10`
       e,
       `protocol Negatable { function negated(self: Self) -> Self }
 type number is Negatable { function negated(self) -> number { -self } }
-const r = Map([1, 2, 3], Negatable.negated)`
+const r = Map(Negatable.negated, [1, 2, 3])`
     );
     expect(e.box('r').evaluate().toString()).toBe('[-1,-2,-3]');
     // A base symbol SHADOWED by a valued binding is not a protocol
@@ -688,7 +688,7 @@ const r = Map([1, 2, 3], Negatable.negated)`
       `protocol Negatable { function negated(self: Self) -> Self }
 type number is Negatable { function negated(self) -> number { -self } }
 const Negatable = 5
-const r = Map([1, 2], Negatable.negated)`
+const r = Map(Negatable.negated, [1, 2])`
     );
     expect(shadowed.box('r').evaluate().toString()).toContain(
       'incompatible-type'

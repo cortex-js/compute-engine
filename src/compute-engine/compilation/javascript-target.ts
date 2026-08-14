@@ -1884,9 +1884,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // engine reports success:false and falls back to the interpreter.
     if (args.length > 2)
       throw new Error('Map: multi-collection form is not compiled');
-    const coll = collArg('Map', args[0], compile);
-    if (args[1] == null) throw new Error('Map: missing mapping function');
-    return `((_f) => (${coll}).map((_x) => _f(_x)))(${fnArg('Map', args[1], args[0], compile)})`;
+    if (args[1] == null) throw new Error('Map: missing source collection');
+    const coll = collArg('Map', args[1], compile);
+    return `((_f) => (${coll}).map((_x) => _f(_x)))(${fnArg('Map', args[0], args[1], compile)})`;
   },
   Filter: (args, compile) => {
     const coll = collArg('Filter', args[0], compile);
@@ -5969,8 +5969,9 @@ function isLazyStream(expr: Expression | undefined): boolean {
   if (!expr || !isFunction(expr)) return false;
   const op = expr.operator;
   if (op === 'Range') return infiniteRangeStep(expr) !== undefined;
-  if (op === 'Map' || op === 'Filter')
-    return expr.nops === 2 && isLazyStream(expr.ops[0]);
+  // `Map` is callback-FIRST (`Map(f, xs)`); `Filter` is source-first.
+  if (op === 'Map') return expr.nops === 2 && isLazyStream(expr.ops[1]);
+  if (op === 'Filter') return expr.nops === 2 && isLazyStream(expr.ops[0]);
   // A STATICALLY non-finite drop count (`Drop(1..∞, ∞)`) is an unresolvable
   // parameter in the interpreter (an indeterminate walk, `integerParam` in
   // `library/collections.ts`); excluding it here makes the whole pipeline
@@ -6005,9 +6006,13 @@ function emitLazyStream(
       throw new Error('Range: not a lazily-compilable infinite range');
     return `_SYS.rangeIter(${compile(expr.ops[0])}, ${step})`;
   }
+  // `Map` is callback-FIRST (`Map(f, xs)`); every other stream operator
+  // keeps its source at operand 0.
+  if (op === 'Map') {
+    const mapSource = expr.ops[1];
+    return `_SYS.mapIter(${emitLazyStream(mapSource, compile)}, ${fnArg('Map', expr.ops[0], mapSource, compile)})`;
+  }
   const source = expr.ops[0];
-  if (op === 'Map')
-    return `_SYS.mapIter(${emitLazyStream(source, compile)}, ${fnArg('Map', expr.ops[1], source, compile)})`;
   if (op === 'Filter')
     return `_SYS.filterIter(${emitLazyStream(source, compile)}, ${fnArg('Filter', expr.ops[1], source, compile)})`;
   if (op === 'Drop')

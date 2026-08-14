@@ -91,7 +91,7 @@ describe('P1 — `Nothing` erasure (§3.G)', () => {
     // `First([])`... is a marker, not Nothing; use an explicit Nothing-valued
     // computation: `If`-like via a lazy Map body returning Nothing.
     const mapped = ce
-      .box(['Map', ['List', 1, 2, 3], ['Function', 'Nothing', 'x']])
+      .box(['Map', ['Function', 'Nothing', 'x'], ['List', 1, 2, 3]])
       .evaluate();
     // Every mapped element is `Nothing` → erased from the materialized list.
     expect(mapped.toString()).toBe('[]');
