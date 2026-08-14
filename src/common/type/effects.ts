@@ -18,6 +18,13 @@ export const EFFECT_LABELS: readonly EffectLabel[] = [
   'network',
   'random',
   'scope',
+  // `state` — creates or mutates OBJECT state (a heap store through a
+  // reference, or an object construction), as distinct from `scope`, which is
+  // mutation of a BINDING on the ambient scope chain. Admitted by
+  // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B "Changing a field is an effect";
+  // currently INERT — the type system parses, serializes, and bounds it, but
+  // no evaluator emits it until mutable objects (Appendix B Phase 1) land.
+  'state',
   'time',
 ];
 
@@ -30,7 +37,7 @@ export function isEffectLabel(s: string): s is EffectLabel {
 /**
  * The **impurity axis** of the label metadata (see "Label kinds — the metadata
  * axes" in `docs/EFFECTS-MODEL.md`): the labels that break referential
- * transparency. All nine current labels are impurities; a future non-impurity
+ * transparency. All ten current labels are impurities; a future non-impurity
  * label (e.g. `async`) is exactly why `pure` is "no impurity label present"
  * rather than "the effect set is empty".
  */
@@ -43,6 +50,7 @@ const IMPURITY_LABELS: ReadonlySet<string> = new Set<EffectLabel>([
   'network',
   'random',
   'scope',
+  'state',
   'time',
 ]);
 

@@ -81,6 +81,21 @@ serialization. Effort: M.
 
 ### 0b. `state` label plumbing (inert until Phase 1 emits it)
 
+**Status: IMPLEMENTED 2026-08-14** (unstaged). The roster/serializer/
+inference plumbing all derived from the closed enumeration
+(`EffectLabel` union in `common/type/types.ts`, `EFFECT_LABELS` +
+`IMPURITY_LABELS` in `common/type/effects.ts` — both parsers read the
+list, so the specifier slot and Cortex definition forms picked the label
+up with no parser edits). All three EFFECTS-MODEL.md amendments (items
+6–8) landed, including the v6 `mutable`-note resolution paragraph and
+the confinement-does-not-apply-to-`state` note. Acceptance:
+`test/compute-engine/effects-state-label.test.ts` (round-trips,
+ordinary-label inference/contracts, 0a ceiling participation) + the
+roster pin in `test/common/type/effects.test.ts` updated (the
+minor-version event, deliberate). `src/api.md` regeneration
+(`npm run doc`) deferred — the tree carries concurrent unstaged tracks a
+regeneration would sweep in.
+
 Spec: Appendix B "Changes to shipped documents" items 6–8.
 
 - `docs/EFFECTS-MODEL.md`: label table gains `state` (impure; action;

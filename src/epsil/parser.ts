@@ -63,8 +63,10 @@ const PREFIX_SIGILS = new Set(['!', '-', '+']);
 
 /** The bare words admitted in a definition's **effect specifier slot** — the
  * Swift-style position between the parameter list and `->`
- * (`function roll(n) random -> integer { … }`). The nine effect labels plus the
- * two set spellings `any` (unknown effects) and `pure` (stated-empty). See
+ * (`function roll(n) random -> integer { … }`). The effect labels (the closed
+ * `EFFECT_LABELS` roster, spread below so a label admission needs no edit
+ * here) plus the two set spellings `any` (unknown effects) and `pure`
+ * (stated-empty). See
  * `docs/EFFECTS-MODEL.md`, "Epsil surface". */
 const EFFECT_SPECIFIER_WORDS: ReadonlySet<string> = new Set<string>([
   ...EFFECT_LABELS,

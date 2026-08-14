@@ -129,7 +129,8 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 <effects> ::= "pure" | "any" | <effect_label> ( " " <effect_label> )*
 
 <effect_label> ::= "console" | "entropy" | "environment" | "fs_read"
-                 | "fs_write" | "network" | "random" | "scope" | "time"
+                 | "fs_write" | "network" | "random" | "scope" | "state"
+                 | "time"
 
 <arguments> ::= "()"
               | "(" <argument_list>? ")"

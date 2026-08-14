@@ -8,6 +8,11 @@ with `scope` on all four metadata axes; the want it expresses is
 per-argument and belongs in type position, not on the arrow; admissible
 only if a confined-mutation `region` frame kind ever ships). See "Label
 admission".
+2026-08-14: the roster gains **`state`** (a minor-version event per
+"Labels and lattice") — the v6 `mutable` deferral is **resolved** by it;
+the distinguishing consumers arrived with mutable objects
+(`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B). Inert until the object
+phases emit it; see the resolution paragraph under "Label admission".
 v5 folds in the round-3 dual review
 (`docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R3.md`, 16 findings — all 16
 rulings validated). Headline v5 rulings, each specified in its section:
@@ -224,6 +229,16 @@ provably confined ⇒ `scope`.** Consequences:
   `Block(If(flag, Declare(n, 0)), Assign(n, 5))` is **not** confined
   (on the `flag`-false path the `Assign` writes through).
 
+**Confinement does not apply to `state` — v1.** The confinement
+analysis above is written entirely in terms of *bindings* (a `Declare`
+dominating an `Assign` inside one literal); an object is *heap* state
+reachable through any alias, and proving a store confined would take
+escape analysis the engine does not have. So in v1 every object store
+and every object construction emits `state` unconditionally — there is
+no `state` analog of the confined-write exemption. (Amendment required
+by `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Changes to shipped
+documents" item 6.)
+
 **Confinement is inference-only; runtime accounting stays conservative**
 *(v5, finding 3)*. The runtime `effectsOf` walk contributes `{scope}`
 for **every** writer application (`Assign`/`Declare`/`Assume`), with no
@@ -377,6 +392,7 @@ label name:
 | `random` | May consume draws from the ambient seeded stream (replays under a frame) | yes | `seed` | yes (replays) | `ce.effects.random` — the draw kernel (see "Host capabilities") |
 | `entropy` | Unseeded, non-replayable nondeterminism (`RandomExpression`) | yes | — | yes (non-reproducible) | `ce.effects.entropy` |
 | `scope` | May mutate a scope that outlives the application (`Assign`, `Declare`, `Assume` to non-local bindings — see "Scope writes") | yes | — | no | — internal |
+| `state` | Creates or mutates **object** state — a heap store through a reference, or an object construction (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Changing a field is an effect"). Distinct from `scope`, which is mutation of a *binding* on the ambient scope chain. Currently **inert**: the type system parses, serializes, and bounds it, but no evaluator emits it until mutable objects land | yes | — | no | — internal |
 | `network` | Host network I/O (future `Fetch`) | yes | — | no (a request may be a remote write) | `ce.effects.network` |
 | `fs_read` | Reads the host filesystem | yes | — | yes (non-reproducible) | `ce.effects.filesystem` |
 | `fs_write` | Writes the host filesystem | yes | — | no | `ce.effects.filesystem` |
@@ -442,10 +458,10 @@ with a frame kind — the gate's true key is the axis.
 
 | Axis | Predicate | "Yes" side today | Consumer |
 |---|---|---|---|
-| **Impurity** | breaks referential transparency | all nine current labels (`async`, when admitted, will be the first "no") | caching, `isConstant`, the derived `pure` getter ("no impurity label present") |
-| **Observation vs action** | safe to re-run — an *observation* of the outside world; re-running merely re-asks | observations: `random`, `entropy`, `time`, `environment`, `fs_read`; actions: `scope`, `fs_write`, `console`, `network` (conservatively an action — a request may write) | re-evaluation policy |
+| **Impurity** | breaks referential transparency | all ten current labels (`async`, when admitted, will be the first "no") | caching, `isConstant`, the derived `pure` getter ("no impurity label present") |
+| **Observation vs action** | safe to re-run — an *observation* of the outside world; re-running merely re-asks | observations: `random`, `entropy`, `time`, `environment`, `fs_read`; actions: `scope`, `state`, `fs_write`, `console`, `network` (conservatively an action — a request may write) | re-evaluation policy |
 | **Frame kind** | participates in a delimiting frame protocol — the metadata names *which*, and the mode: draws (label), delimits (`frameProtocol`), or reads (`readsRandomFrame`) | `random` → `seed` draws; `WithRandomSeed` delimits; `Integrate`/`NIntegrate` read (the sole kind today) | the frame kind's obligation protocol (for `seed`: the pending-draw gate, keyed on all three modes) |
-| **Handler-backed** | has a `ce.effects` namespace | the six capability labels, `entropy`, and `random` (at the draw-kernel boundary — "Host capabilities"); internal: `scope` | the registry coupling rule; evaluation-time trust policy |
+| **Handler-backed** | has a `ce.effects` namespace | the six capability labels, `entropy`, and `random` (at the draw-kernel boundary — "Host capabilities"); internal: `scope`, `state` | the registry coupling rule; evaluation-time trust policy |
 
 Why this split is sound — and why it must stay **out of the lattice**:
 the axes are consumer-facing metadata, and different consumers care
@@ -489,8 +505,8 @@ set, attached to the arrow:
 <signature> ::= <arguments> [" " <effects>] " -> " <type>
 <effects>   ::= "pure" | "any" | <label> (" " <label>)*
 <label>     ::= "console" | "entropy" | "environment" | "fs_read"
-              | "fs_write" | "network" | "random" | "scope" | "time"
-                                                 // closed, versioned
+              | "fs_write" | "network" | "random" | "scope" | "state"
+              | "time"                           // closed, versioned
 ```
 
 ```
@@ -1247,6 +1263,28 @@ views extend without redefinition.
 
 **Examined and deferred (v6, 2026-08-08) — not a ruling, a recorded
 disposition so the question is not re-litigated:**
+
+> **Resolution (2026-08-14): `state` is that label, admitted.** The v6
+> deferral below rested on one hinge — no consumer could tell a
+> heap-mutation label apart from `scope` on any metadata axis. The
+> mutable-objects design (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B,
+> "Changing a field is an effect") *specifies* exactly the distinguishing
+> consumers the note found missing — they land with the object phases,
+> while the label itself is admitted ahead of them so declared ceilings
+> can be spelled: the B1 mutability gate keys on the label (a protocol
+> with a *declared* `state` member is object-only — the gate arrives with
+> protocol integration, Phase 2 of the implementation plan; until then a
+> declared-`state` requirement is only an effect ceiling), per-object
+> **version counters** give it an invalidation channel distinct from
+> scope generations, and B3's cache exclusion consumes it (an expression
+> carrying `state` is never constant-folded or served from evaluation
+> caches). The reversal is deliberate and argued there,
+> not a silent re-litigation; the name is `state`, not `mutable` —
+> construction also carries it and creates state while mutating
+> nothing. Finding 2 below (per-argument precision) stands unrefuted
+> and unneeded: the label's admitted consumers are per-arrow ones.
+> The label is in the roster and grammar now, **inert** until the
+> object phases emit it.
 
 - **`mutable`** (application may mutate the *contents* of a value, as
   opposed to a binding) — **deferred; probably never a label.** Three

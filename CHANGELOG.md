@@ -67,6 +67,20 @@
   all — in strict LIFO order, preserving definition identity — when the
   check completes.
 
+### New Features
+
+- **New effect label `state`** (a minor-version event: the effect-label
+  enumeration is closed and versioned, and an older engine parsing a type
+  string that uses `state` errors rather than silently weakening the
+  contract). The label denotes creation or mutation of **object** state —
+  a heap store through a reference, or an object construction — as
+  distinct from `scope`, which is mutation of a *binding*. It parses and
+  serializes in the effect-specifier slot (`(t) state -> u`), inference
+  and contracts treat it as an ordinary label, and it participates in
+  protocol-requirement effect ceilings. It is currently **inert**: no
+  evaluator emits it until mutable objects (`docs/TYPE_SYSTEM_ROADMAP.md`
+  Appendix B) land.
+
 ## 0.106.1 _2026-08-13_
 
 ### Issues Resolved

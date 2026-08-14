@@ -57,6 +57,10 @@ describe('effect labels', () => {
       'network',
       'random',
       'scope',
+      // `state` admitted 2026-08-14 (mutable objects, Appendix B of
+      // `docs/TYPE_SYSTEM_ROADMAP.md`) — a minor-version event; inert until
+      // the object phases emit it.
+      'state',
       'time',
     ]);
     expect([...EFFECT_LABELS].sort()).toEqual([...EFFECT_LABELS]);
@@ -421,7 +425,7 @@ describe('subtyping: the effect set is covariant, by subset inclusion', () => {
     expect(
       sub(
         '(real) any -> real',
-        '(real) console entropy environment fs_read fs_write network random scope time -> real'
+        '(real) console entropy environment fs_read fs_write network random scope state time -> real'
       )
     ).toBe(false);
   });

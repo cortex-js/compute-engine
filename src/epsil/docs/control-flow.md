@@ -67,9 +67,9 @@ sits after the parameter list and before the return arrow:
 function roll(n) random -> integer { Random(n) }
 ```
 
-The nine effect labels are `console`, `entropy`, `environment`, `fs_read`,
-`fs_write`, `network`, `random`, `scope`, and `time`. Several labels may be
-listed with spaces. `pure` explicitly promises no effects; `any` means the
+The ten effect labels are `console`, `entropy`, `environment`, `fs_read`,
+`fs_write`, `network`, `random`, `scope`, `state`, and `time`. Several
+labels may be listed with spaces. `pure` explicitly promises no effects; `any` means the
 effects are unknown. `pure` and `any` must appear alone.
 
 Without a specifier, effects are inferred from the body and may change when

@@ -122,6 +122,7 @@ export type EffectLabel =
   | 'network'
   | 'random'
   | 'scope'
+  | 'state'
   | 'time';
 
 /**

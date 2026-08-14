@@ -192,7 +192,7 @@ _parameters_ → **`(`** \[(_parameter_)#**`,`**\] **`)`**
 
 _effect-label_ → **`console`** | **`entropy`** | **`environment`** |
 **`fs_read`** | **`fs_write`** | **`network`** | **`random`** |
-**`scope`** | **`time`**
+**`scope`** | **`state`** | **`time`**
 
 _effect-specifier_ → **`pure`** | **`any`** | (_effect-label_)+
 &nbsp;&nbsp;&nbsp;&nbsp;— labels are space-separated; duplicates are rejected;
