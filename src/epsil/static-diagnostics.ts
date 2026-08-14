@@ -5,6 +5,7 @@ import {
   operands,
   operator,
   stringValue,
+  symbol,
 } from '../math-json/utils.js';
 import type { Type } from '../common/type/types.js';
 import { isWildcardFunctionType } from '../common/type/utils.js';
@@ -259,13 +260,37 @@ function canonicalizationDiagnostics(
   // core.ts), which resets the target to the wildcard `function` type — the
   // pass re-asserts the pinned signature from this map afterwards.
   const pinned = new Map<string, Type>();
+
+  // REDEFINITION DISCIPLINE, static tier — the names THIS UNIT declares, and
+  // where. A pass-local map, deliberately not the runtime batch stamp: the
+  // static checker also runs with no batch at all (`epsil check` calls
+  // `staticDiagnostics` directly, without `executeEpsil`), so a
+  // stamp-keyed check could never fire on the tier the diagnostic is promised
+  // for. See `docs/plans/2026-08-14-redefinition-discipline.md`.
+  const declaredInThisUnit = new Map<string, [number, number]>();
+
   for (const statement of statements) {
+    const redefinition = redefinitionDiagnostic(
+      statement,
+      source,
+      declaredInThisUnit
+    );
+    if (redefinition !== undefined) diagnostics.push(redefinition);
+
     // Provenance: the `Error` nodes the statement already carries *before*
     // canonicalization are source-authored values, not static problems.
     const authored = authoredErrors(statement);
 
     let canonical: MathJsonExpression;
     let boxed: ReturnType<ComputeEngine['box']> | undefined;
+    // REDEFINITION DISCIPLINE — the statement-route marker. Boxing a
+    // declaration statement registers it, and only a registration made on
+    // THIS route may carry the batch stamp; a `ce.box(["DeclareType", …])`
+    // performed re-entrantly by something the boxing triggers must stay
+    // unstamped. Restored (not cleared) so nesting cannot leak.
+    // See `docs/plans/2026-08-14-redefinition-discipline.md`.
+    const enclosingRoute = ce._epsilDeclarationRoute;
+    ce._epsilDeclarationRoute = isDeclarationStatement(statement);
     try {
       boxed = ce.box(statement);
       canonical = boxed.json;
@@ -273,7 +298,20 @@ function canonicalizationDiagnostics(
       // Canonicalization is best-effort: a statement the engine cannot box is
       // left to the run phase rather than crashing the check.
       continue;
+    } finally {
+      ce._epsilDeclarationRoute = enclosingRoute;
     }
+
+    // REDEFINITION DISCIPLINE — the statement's names enter the unit's
+    // collector only now, once it has actually been canonicalized WITHOUT a
+    // declaration-blocking error. Recording them earlier would let a statement
+    // rejected for an INDEPENDENT reason (a name a host already declared, a
+    // malformed body) become the recorded "first" declaration, so a following
+    // declaration of that name would be reported as a redefinition of
+    // something that never got declared — while the runtime tier reported the
+    // real cause for both. The two tiers must report the same problem.
+    if (redefinition === undefined)
+      recordDeclaredNames(statement, canonical, source, declaredInThisUnit);
 
     // A declaration whose initializer PROVABLY cannot satisfy the annotation
     // is a static problem too, even though `Declare` only enforces it at
@@ -421,6 +459,169 @@ function canonicalizationDiagnostics(
   }
 
   return diagnostics;
+}
+
+/**
+ * The names ONE declaration statement claims, gated on the statement's AST
+ * HEAD — never on the `type` keyword, because `type string is Hashable` is a
+ * bare CONFORMANCE (`DeclareConformance`), declares no type at all and is
+ * deliberately outside this discipline (a re-declared edge is a no-op, and
+ * duplicate implementation blocks are ruling P47's business).
+ *
+ * A sum statement claims N+1 names — its own and every variant's — under that
+ * ONE statement: the sugar is a declaration bundler, and the statement owns
+ * everything it declares
+ * (`docs/plans/2026-08-14-redefinition-discipline.md`, "the generated-name
+ * rule").
+ *
+ * `kind` separates the two namespaces so that `type X = …` followed by
+ * `protocol X { … }` is left to the no-dual-role rule (P8), which explains
+ * that specific mistake better than "declared twice" would.
+ */
+function declaredNamesOf(
+  statement: MathJsonExpression
+): { kind: 'type' | 'protocol'; names: string[] } | undefined {
+  switch (operator(statement)) {
+    case 'DeclareType': {
+      const name = declarationName(operand(statement, 1));
+      return name === undefined ? undefined : { kind: 'type', names: [name] };
+    }
+    case 'DeclareSumType': {
+      const ops = [...operands(statement)];
+      const name = declarationName(ops[0] ?? null);
+      if (name === undefined) return undefined;
+      const names = [name];
+      // Operand 1 may be the attributes dictionary (`typeParams`); a variant
+      // is told apart by its `Tuple` head, exactly as the engine's
+      // `DeclareSumType` handler does it.
+      for (const op of ops.slice(1)) {
+        if (operator(op) !== 'Tuple') continue;
+        const variant = declarationName(operand(op, 1));
+        if (variant !== undefined) names.push(variant);
+      }
+      return { kind: 'type', names };
+    }
+    case 'DeclareProtocol': {
+      const name = declarationName(operand(statement, 1));
+      return name === undefined
+        ? undefined
+        : { kind: 'protocol', names: [name] };
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** The name a declaration operand holds — a string or a symbol, the two
+ * spellings every `Declare*` operand is read in. */
+function declarationName(op: MathJsonExpression | null): string | undefined {
+  if (op === null) return undefined;
+  return stringValue(op) ?? symbol(op) ?? undefined;
+}
+
+/**
+ * Does `statement`'s AST head declare a type or a protocol? The
+ * REDEFINITION DISCIPLINE's statement-route marker
+ * (`IComputeEngine._epsilDeclarationRoute`) is raised only around such a
+ * statement, so that a statement like `let x = f()` — whose callee might
+ * declare something through the box route — never raises it.
+ *
+ * Exported for `execute-epsil.ts`, whose evaluation loop raises the same
+ * marker around the statement it boxes and evaluates.
+ */
+export function isDeclarationStatement(statement: MathJsonExpression): boolean {
+  const head = operator(statement);
+  return (
+    head === 'DeclareType' ||
+    head === 'DeclareSumType' ||
+    head === 'DeclareProtocol'
+  );
+}
+
+/** The engine error codes that mean a declaration statement DID NOT declare.
+ * A statement that produced one of these never becomes the recorded "first"
+ * declaration of its names (see {@link recordDeclaredNames}); the codes are
+ * the ones `declareTypeStatement`/`declareSumTypeStatement`/
+ * `declareProtocolStatement` (`src/compute-engine/library/core.ts`) return. */
+const DECLARATION_BLOCKING_CODES = new Set([
+  'invalid-type-declaration',
+  'invalid-protocol-declaration',
+  'type-redefinition',
+  'protocol-redefinition',
+]);
+
+/**
+ * REDEFINITION DISCIPLINE, static tier: enter the names `statement` declares
+ * into the unit's pass-local collector — name → the range of the statement
+ * that first declared it.
+ *
+ * Called only AFTER the statement has been canonicalized, and only when the
+ * canonical form carries no declaration-blocking error, because a statement
+ * that failed to declare is not the first declaration of anything: recording
+ * it would make the NEXT declaration of that name a `type-redefinition` on
+ * this tier while the runtime tier reported the real cause for both.
+ *
+ * A statement is recorded WHOLE or not at all — all N+1 names of a sum enter
+ * under the one statement, mirroring the runtime tier where a rejected sum
+ * registers none of its names. That is also what makes a PARTIAL collision (a
+ * second sum reusing one variant name while renaming the others) exactly one
+ * diagnostic rather than one per colliding name.
+ *
+ * See `docs/plans/2026-08-14-redefinition-discipline.md`.
+ */
+function recordDeclaredNames(
+  statement: MathJsonExpression,
+  canonical: MathJsonExpression,
+  source: string,
+  declared: Map<string, [number, number]>
+): void {
+  const claimed = declaredNamesOf(statement);
+  if (claimed === undefined) return;
+
+  const errors: MathJsonExpression[] = [];
+  collectErrors(canonical, errors);
+  if (errors.some((e) => DECLARATION_BLOCKING_CODES.has(errorCode(e)))) return;
+
+  const range = statementRange(statement, source);
+  for (const name of claimed.names)
+    declared.set(`${claimed.kind} ${name}`, range);
+}
+
+/**
+ * REDEFINITION DISCIPLINE, static tier: is `statement` a second declaration of
+ * a name this unit already declared? `declared` is the pass-local collector
+ * {@link recordDeclaredNames} fills; this function only consults it.
+ *
+ * The FIRST colliding name wins and the statement yields exactly one
+ * diagnostic, so a sum reusing several of an earlier sum's names is still one
+ * report anchored on the statement.
+ *
+ * See `docs/plans/2026-08-14-redefinition-discipline.md`.
+ */
+function redefinitionDiagnostic(
+  statement: MathJsonExpression,
+  source: string,
+  declared: Map<string, [number, number]>
+): ParsingDiagnostic | undefined {
+  const claimed = declaredNamesOf(statement);
+  if (claimed === undefined) return undefined;
+  const [start, end] = statementRange(statement, source);
+
+  for (const name of claimed.names) {
+    const first = declared.get(`${claimed.kind} ${name}`);
+    if (first === undefined) continue;
+    return {
+      severity: 'error',
+      message: [
+        claimed.kind === 'type' ? 'type-redefinition' : 'protocol-redefinition',
+        name,
+      ],
+      range: [start, end, start],
+      notes: [{ message: `\`${name}\` is first declared here`, range: first }],
+    };
+  }
+
+  return undefined;
 }
 
 /**

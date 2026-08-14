@@ -457,6 +457,10 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `"${args[0]}" is a type, not a function: types have no constructor; annotate instead, e.g. "const p: ${args[0]} = …"`;
     case 'type-declaration-not-top-level':
       return `The type "${args[0]}" is declared inside a block: types are global, so type declarations are only allowed at the top level of a program`;
+    case 'type-redefinition':
+      return `The type "${args[0]}" is declared twice in this program; a name may only be declared once per program (re-running an edited declaration in a later program still replaces it)`;
+    case 'protocol-redefinition':
+      return `The protocol "${args[0]}" is declared twice in this program; a name may only be declared once per program (re-running an edited declaration in a later program still replaces it)`;
     case 'protocol-declaration-not-top-level':
       return `The protocol "${args[0]}" is declared inside a block: protocols are global, so protocol declarations are only allowed at the top level of a program`;
     case 'protocol-name-expected':

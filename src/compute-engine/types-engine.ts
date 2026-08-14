@@ -2,6 +2,7 @@ import type { Complex } from 'complex-esm';
 import type { OneOf } from '../common/one-of.js';
 import type { MathJsonSymbol, MathJsonNumberObject } from '../math-json.js';
 import type {
+  DeclarationOrigin,
   Type,
   TypeString,
   TypeResolver,
@@ -295,6 +296,14 @@ export type ProtocolRecord = {
   members: Record<string, ProtocolMember>;
   conformances: ConformanceRecord[];
   declaredByStatement: boolean;
+  /** REDEFINITION DISCIPLINE — which compilation unit and which declaring
+   * STATEMENT this record came from
+   * (`docs/plans/2026-08-14-redefinition-discipline.md`). The DECLARATION-level
+   * counterpart of {@link ConformanceRecord._implOrigin}, which stamps
+   * implementation blocks: a second `protocol` statement for this name in the
+   * same batch is `protocol-redefinition`, while a later batch replaces.
+   * Absent on a box-route or host-API declaration, which replace freely. */
+  _declOrigin?: DeclarationOrigin;
 };
 
 /** The host-API shape of a protocol's requirements. A flat
@@ -521,6 +530,29 @@ export interface IComputeEngine {
    * re-implementation in a later batch replaces (ruling P47).
    * @internal */
   _epsilBatchId: number | undefined;
+
+  /** `true` only while the Epsil interpreter is canonicalizing or evaluating a
+   * top-level statement whose AST head is `DeclareType`, `DeclareSumType` or
+   * `DeclareProtocol` — the REDEFINITION DISCIPLINE's statement-route marker
+   * (`docs/plans/2026-08-14-redefinition-discipline.md`).
+   *
+   * {@link IComputeEngine._epsilBatchId} alone cannot play this part: it is
+   * ambient for the WHOLE `executeEpsil` extent, so a `ce.box(["DeclareType",
+   * …]).evaluate()` performed re-entrantly from a host operator's evaluate
+   * handler would run with a batch live and be mistaken for a statement of the
+   * program — after which the program's own declaration of that name would
+   * falsely report `type-redefinition`. The marker says WHICH ROUTE is
+   * declaring; the batch id says which unit.
+   *
+   * Set by `src/epsil/execute-epsil.ts` and `src/epsil/static-diagnostics.ts`
+   * around the statement they process, and SAVED AND CLEARED by each
+   * `Declare*` handler for the duration of its own body, so a declaration made
+   * re-entrantly from inside one sees no marker. It is not consumed by being
+   * read: one statement registers up to three times per batch (pre-pass
+   * canonicalize, eval-loop canonicalize, evaluate) and all three must be
+   * stamped, or the statement's own re-registration looks like a duplicate.
+   * @internal */
+  _epsilDeclarationRoute: boolean;
 
   /** Absolute time beyond which evaluation should not proceed.
    * @internal

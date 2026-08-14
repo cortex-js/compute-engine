@@ -451,6 +451,43 @@ export type TypeReference = {
    * parameters it was declared with (A4). The companion of {@link _sumOf};
    * same non-structural status. */
   _sumVariants?: { name: string; typeParams: string[] }[];
+
+  /** REDEFINITION DISCIPLINE bookkeeping — which declaring STATEMENT, of which
+   * compilation unit, this record came from
+   * (`docs/plans/2026-08-14-redefinition-discipline.md`). Present only on a
+   * record registered through an Epsil `type` STATEMENT while a batch was
+   * live; the box route and the host `ce.declareType()` API leave it absent,
+   * which is what makes their records freely replaceable. Metadata about the
+   * DECLARATION, like {@link _sumOf}: never part of a type's structure,
+   * serialization or comparison. */
+  _declOrigin?: DeclarationOrigin;
+};
+
+/**
+ * Which compilation unit and which declaring statement a registry record came
+ * from — the runtime half of the redefinition discipline
+ * (`docs/plans/2026-08-14-redefinition-discipline.md`, "Mechanics").
+ *
+ * A second declaration of a name with the SAME `batch` and a DIFFERENT
+ * `statementId` is a within-unit redefinition and is refused; the same
+ * `statementId` re-registering is the same statement declaring itself again
+ * (one statement registers up to three times per batch — the static pre-pass
+ * canonicalizes it, then the evaluation loop canonicalizes and evaluates it)
+ * and is accepted.
+ *
+ * `statementId` is an opaque IDENTITY token, compared with `!==` and never
+ * inspected: the raw (uncanonicalized) name operand the `Declare*` handlers
+ * thread from their canonical handler into their evaluate handler. It is typed
+ * `unknown` so this engine-free module needs no expression type.
+ */
+export type DeclarationOrigin = {
+  /** The Epsil batch (`ce._epsilBatchId`) the declaration ran under. */
+  batch: number;
+  /** Opaque per-statement identity; see the type's documentation. */
+  statementId: unknown;
+  /** The declaring name's source range, when the operand carried one — the
+   * "first declared here" site a redefinition diagnostic points at. */
+  firstRange?: [start: number, end: number];
 };
 
 export type Type =

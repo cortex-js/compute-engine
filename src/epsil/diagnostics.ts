@@ -27,6 +27,8 @@ export type DiagnosticCode =
   | 'duplicate-type-parameter-clause' // %0 = function name — BOTH binder spellings on one definition (`function f<T>(x: T) -> T where T`); `<T>` and `where T` are the same binding site
   | 'generic-clause-unsupported' // %0 = function name — a generic (`function f<T>(…)`) definition cannot take part in a multi-clause set
   | 'type-declaration-not-top-level' // %0 = type name — a `type` statement inside a block or function body; types are engine-global, so declarations are legal only at the top level of a program
+  | 'type-redefinition' // %0 = type name — a second `type` statement declaring the same name in ONE program (a sum's variant names count as its statement's own). Within one compilation unit a redeclaration is a mistake; across units (a re-run cell) it is the notebook redefinition gesture and stays legal. See `docs/plans/2026-08-14-redefinition-discipline.md`
+  | 'protocol-redefinition' // %0 = protocol name — the protocol counterpart of `type-redefinition`; same rule, same boundary
   | 'protocol-declaration-not-top-level' // %0 = protocol name — a `protocol` statement inside a block or function body; protocols are engine-global, so declarations are legal only at the top level of a program
   | 'protocol-name-expected' // a `protocol` statement whose head is not followed by a name
   | 'protocol-member-keyword-missing' // %0 = member name — a bare `value: string` protocol member; every member starts with `function`, `readonly` or `readwrite`

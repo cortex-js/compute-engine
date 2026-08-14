@@ -112,8 +112,14 @@ import {
   assertAssignable,
   assignValueAsOperatorDef,
   declareSumType,
+  // Called directly rather than through `ce.declareType()`: the redefinition
+  // stamp is a STATEMENT-route concern and is deliberately absent from the
+  // host API's options, which is what keeps host declarations unstamped.
+  declareType,
 } from '../engine-declarations.js';
 import type { SumTypeVariant } from '../engine-declarations.js';
+import { RedefinitionError } from '../declaration-origin.js';
+import type { DeclarationOrigin } from '../../common/type/types.js';
 import {
   canonicalProtocolMember,
   declareConformance,
@@ -827,6 +833,89 @@ function bindTuplePattern(
 }
 
 /**
+ * The REDEFINITION DISCIPLINE's runtime stamp for a `Declare*` STATEMENT
+ * (`docs/plans/2026-08-14-redefinition-discipline.md`, "Mechanics"): which
+ * compilation unit is declaring, and which statement of it.
+ *
+ * `anchor` is the statement's RAW (uncanonicalized) NAME operand. Two
+ * properties make it the identity token:
+ *
+ * - **Distinct per statement.** Boxing does not intern raw operands, so two
+ *   `type Dup = …` statements — even byte-identical ones — hold two different
+ *   objects.
+ * - **Stable across the registrations ONE statement performs.** The canonical
+ *   handler keeps the name operand raw and hands the very same object to
+ *   `ce._fn(…)`, so the evaluate handler that runs afterwards sees the
+ *   identical object. (The static pre-pass boxes the statement independently
+ *   and therefore mints a different token — which is harmless because the
+ *   pre-pass rolls its registrations, stamp included, back.)
+ *
+ * The NAME operand rather than the body/members operand — which is what ruling
+ * P47 anchors implementation blocks on — because every declaration statement
+ * has one: `protocol Marker {}` carries no members operand at all, so a
+ * members-anchored token would be `undefined` for two different member-less
+ * protocol statements and their collision would go unseen.
+ *
+ * Returns `undefined` unless the caller is on the Epsil STATEMENT ROUTE —
+ * `onStatementRoute`, read from `ce._epsilDeclarationRoute` by
+ * {@link withStatementRoute} — and a batch is live. The batch id alone is not
+ * enough: it is ambient for the whole `executeEpsil` extent, so a
+ * `ce.box(["DeclareType", …]).evaluate()` performed re-entrantly from a host
+ * operator's evaluate handler would otherwise be stamped as a statement of the
+ * running program, and the program's own declaration of that name would then
+ * falsely report `type-redefinition`. A box-route declaration runs under no
+ * compilation unit of its own, so it has nothing to collide with. The HOST API
+ * (`ce.declareType()`) is unstamped for a different and stronger reason — it
+ * never calls this function at all, so it throws its already-defined error even
+ * when a batch happens to be live around it.
+ */
+function statementOrigin(
+  ce: ComputeEngine,
+  anchor: Expression | undefined,
+  onStatementRoute: boolean
+): DeclarationOrigin | undefined {
+  if (!onStatementRoute) return undefined;
+  const batch = ce._epsilBatchId;
+  if (batch === undefined || anchor === undefined) return undefined;
+  const origin: DeclarationOrigin = { batch, statementId: anchor };
+  // The name's source range, for the "first declared here" site of a
+  // diagnostic built from the stamp. Absent on a hand-built MathJSON operand.
+  if (anchor.sourceOffsets !== undefined)
+    origin.firstRange = anchor.sourceOffsets;
+  return origin;
+}
+
+/**
+ * Run one `Declare*` handler's body, telling it whether it was reached on the
+ * Epsil STATEMENT ROUTE and clearing the marker for the duration of the call.
+ *
+ * The Epsil interpreter raises `ce._epsilDeclarationRoute` around the statement
+ * it canonicalizes and evaluates (`src/epsil/execute-epsil.ts`,
+ * `src/epsil/static-diagnostics.ts`). Clearing it here — the ambient-cause
+ * save/restore pattern — closes the inner leak path: anything a declaration's
+ * own processing goes on to declare re-entrantly through the box route is NOT
+ * this statement and must stay unstamped. The marker is restored, never
+ * consumed, because the same statement registers up to three times per batch
+ * (pre-pass canonicalize, eval-loop canonicalize, evaluate) and every one of
+ * those registrations needs the stamp — an unstamped third registration would
+ * be indistinguishable from a second declaration of the name.
+ *
+ * See `docs/plans/2026-08-14-redefinition-discipline.md`, "Mechanics".
+ */
+function withStatementRoute<T>(
+  ce: ComputeEngine,
+  body: (onStatementRoute: boolean) => T
+): T {
+  const onStatementRoute = ce._epsilDeclarationRoute;
+  ce._epsilDeclarationRoute = false;
+  try {
+    return body(onStatementRoute);
+  } finally {
+    ce._epsilDeclarationRoute = onStatementRoute;
+  }
+}
+
+/**
  * Register the type declared by a `DeclareType` statement in the ENGINE-LEVEL
  * type registry. Returns an `Error` value on failure, `null` on success.
  *
@@ -850,7 +939,10 @@ function declareTypeStatement(
   ce: ComputeEngine,
   nameOp: Expression | undefined,
   typeOp: Expression | undefined,
-  attrs: Expression | undefined
+  attrs: Expression | undefined,
+  /** Whether this call came from an Epsil `type` STATEMENT — see
+   * {@link withStatementRoute}, which is how every caller obtains it. */
+  onStatementRoute: boolean
 ): Expression | null {
   // The name and the type are read off the RAW operands: a symbol or a string.
   const name = nameOp
@@ -945,8 +1037,18 @@ function declareTypeStatement(
   // Errors are values: an invalid name, a malformed type expression or a
   // conflict with a host declaration must not throw to the host.
   try {
-    ce.declareType(name, typeStr, { alias, fromStatement: true, typeParams });
+    declareType(ce, name, typeStr, {
+      alias,
+      fromStatement: true,
+      typeParams,
+      origin: statementOrigin(ce, nameOp, onStatementRoute),
+    });
   } catch (e) {
+    // A within-unit redefinition carries its own code, the SAME one the static
+    // pass reports (`docs/plans/2026-08-14-redefinition-discipline.md`), so
+    // one problem reads identically on both tiers.
+    if (e instanceof RedefinitionError)
+      return ce.error([e.code, e.message], e.declaredName);
     return ce.error(
       ['invalid-type-declaration', e instanceof Error ? e.message : String(e)],
       name
@@ -977,7 +1079,9 @@ function declarationName(op: Expression | undefined): string | undefined {
  */
 function declareSumTypeStatement(
   ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  /** See `declareTypeStatement`'s parameter of the same name. */
+  onStatementRoute: boolean
 ): Expression | null {
   const name = declarationName(ops[0]);
   if (!name)
@@ -1060,8 +1164,16 @@ function declareSumTypeStatement(
 
   // Errors are values, exactly as for `DeclareType`.
   try {
-    declareSumType(ce, name, variants, { typeParams, fromStatement: true });
+    declareSumType(ce, name, variants, {
+      typeParams,
+      fromStatement: true,
+      // ONE origin for all N+1 registrations: the statement owns every name it
+      // declares, so a collision on any of them is one collision.
+      origin: statementOrigin(ce, ops[0], onStatementRoute),
+    });
   } catch (e) {
+    if (e instanceof RedefinitionError)
+      return ce.error([e.code, e.message], e.declaredName);
     return ce.error(
       ['invalid-type-declaration', e instanceof Error ? e.message : String(e)],
       name
@@ -1128,7 +1240,9 @@ function rawDictionaryEntries(
 function declareProtocolStatement(
   ce: ComputeEngine,
   nameOp: Expression | undefined,
-  membersOp: Expression | undefined
+  membersOp: Expression | undefined,
+  /** See `declareTypeStatement`'s parameter of the same name. */
+  onStatementRoute: boolean
 ): Expression | null {
   const name = declarationName(nameOp);
   if (!name)
@@ -1193,8 +1307,13 @@ function declareProtocolStatement(
 
   // Errors are values: a malformed signature must not throw to the host.
   try {
-    declareProtocolImpl(ce, name, members, { fromStatement: true });
+    declareProtocolImpl(ce, name, members, {
+      fromStatement: true,
+      origin: statementOrigin(ce, nameOp, onStatementRoute),
+    });
   } catch (e) {
+    if (e instanceof RedefinitionError)
+      return ce.error([e.code, e.message], e.declaredName);
     return ce.error(
       [
         'invalid-protocol-declaration',
@@ -3255,7 +3374,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         // Register during the canonical pass, so that the statements
         // canonicalized after this one (in the same `Block`) see the type.
-        const err = declareTypeStatement(ce, args[0], args[1], attrs);
+        const err = withStatementRoute(ce, (route) =>
+          declareTypeStatement(ce, args[0], args[1], attrs, route)
+        );
         if (err) return err;
 
         const ops = [args[0], args[1]];
@@ -3266,7 +3387,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Idempotent: the canonical pass normally already registered the type
         // in this same scope object, and `fromStatement` lets us replace our
         // own record (with a possibly edited body).
-        return declareTypeStatement(ce, ops[0], ops[1], ops[2]) ?? ce.Nothing;
+        return (
+          withStatementRoute(ce, (route) =>
+            declareTypeStatement(ce, ops[0], ops[1], ops[2], route)
+          ) ?? ce.Nothing
+        );
       },
     },
 
@@ -3302,12 +3427,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         // Register during the canonical pass, so that the statements
         // canonicalized after this one see the sum and its variants.
-        const err = declareSumTypeStatement(ce, ops);
+        const err = withStatementRoute(ce, (route) =>
+          declareSumTypeStatement(ce, ops, route)
+        );
         if (err) return err;
         return ce._fn('DeclareSumType', ops);
       },
       evaluate: (ops, { engine: ce }) =>
-        declareSumTypeStatement(ce, ops) ?? ce.Nothing,
+        withStatementRoute(ce, (route) =>
+          declareSumTypeStatement(ce, ops, route)
+        ) ?? ce.Nothing,
     },
 
     DeclareProtocol: {
@@ -3333,12 +3462,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Every operand is kept RAW: canonicalizing the name would
         // auto-declare it as a variable, and the members dictionary carries
         // `Self`-typed signatures no type resolver knows.
-        const err = declareProtocolStatement(ce, args[0], args[1]);
+        const err = withStatementRoute(ce, (route) =>
+          declareProtocolStatement(ce, args[0], args[1], route)
+        );
         if (err) return err;
         return ce._fn('DeclareProtocol', args);
       },
       evaluate: (ops, { engine: ce }) =>
-        declareProtocolStatement(ce, ops[0], ops[1]) ?? ce.Nothing,
+        withStatementRoute(ce, (route) =>
+          declareProtocolStatement(ce, ops[0], ops[1], route)
+        ) ?? ce.Nothing,
     },
 
     DeclareConformance: {

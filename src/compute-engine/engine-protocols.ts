@@ -1,4 +1,5 @@
 import type {
+  DeclarationOrigin,
   EffectSet,
   FunctionSignature,
   Type,
@@ -6,6 +7,7 @@ import type {
   TypeReference,
   TypeResolver,
 } from '../common/type/types.js';
+import { checkSameUnitRedefinition } from './declaration-origin.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
 import { isSubtype, widen } from '../common/type/subtype.js';
@@ -152,7 +154,7 @@ export function declareProtocolImpl(
   ce: IComputeEngine,
   name: string,
   members: ProtocolMembersInput | undefined,
-  options?: { fromStatement?: boolean }
+  options?: { fromStatement?: boolean; origin?: DeclarationOrigin }
 ): void {
   if (!isValidTypeName(name))
     throw Error(`The protocol name "${name}" is invalid`);
@@ -170,7 +172,15 @@ export function declareProtocolImpl(
   const registry = ce._protocolRegistry;
   const existing = registry[name];
   const fromStatement = options?.fromStatement === true;
+  const origin = options?.origin;
   if (existing !== undefined) {
+    // REDEFINITION DISCIPLINE — a second `protocol` statement declaring this
+    // name in the SAME compilation unit is refused; the same statement in a
+    // LATER unit still replaces (P5's notebook pattern, generalized by
+    // `docs/plans/2026-08-14-redefinition-discipline.md`). Checked first, and
+    // before the members are validated: the record is replaced IN PLACE below,
+    // so a rejected duplicate must not have touched it.
+    checkSameUnitRedefinition('protocol', name, existing._declOrigin, origin);
     // P5: a record this engine created from a `protocol` STATEMENT is ours to
     // replace (a notebook re-run with an edited declaration). A host
     // declaration is never replaced — it throws, like `ce.declareType()`.
@@ -246,6 +256,13 @@ export function declareProtocolImpl(
     // conformance is monotone (Appendix A "Conformance").
     existing.members = validated;
     existing.declaredByStatement = fromStatement;
+    // The redefinition stamp rides with the declaration it describes. A
+    // replacement carrying NO origin (the box route, which has no batch)
+    // CLEARS it rather than leaving a stale one behind: an unstamped record is
+    // one no statement of the current unit owns. Undone by the rollback thunk
+    // below if the widening check rejects this replacement.
+    if (origin === undefined) delete existing._declOrigin;
+    else existing._declOrigin = origin;
     // A replaced protocol may have gained, lost or RETYPED requirements, so
     // every conformance is revalidated against the new requirement set
     // (Appendix A "Scope and lifecycle"). An implementation that no longer
@@ -304,6 +321,7 @@ export function declareProtocolImpl(
     conformances: [],
     declaredByStatement: fromStatement,
   };
+  if (origin !== undefined) record._declOrigin = origin;
   registry[name] = record;
   // A FRESH declaration is also a config event: `typesOverlap`/dispatch
   // decisions are keyed on the registry, and phase 3 installs dispatchers here.

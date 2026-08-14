@@ -30,6 +30,7 @@ import {
   describeError,
   errorCode,
   frameOrderOf,
+  isDeclarationStatement,
   staticDiagnostics,
 } from './static-diagnostics.js';
 
@@ -231,6 +232,21 @@ function executeEpsilBatch(
     // `iterationLimit`/`recursionLimit`, which throw a `CancellationError`).
     let cancellation: CancellationCause | undefined;
     valueRange = statementRange(stmt, source);
+    // REDEFINITION DISCIPLINE — the statement-route marker, raised only for a
+    // statement that itself declares. BOTH registrations this loop causes
+    // (canonicalization inside `box`, then evaluation) happen inside the
+    // window, and the static pre-pass raises the same marker around its own
+    // canonicalization, so all three of a statement's registrations carry one
+    // stamp and none of them looks like a second declaration of the name it
+    // declares. A `ce.box(["DeclareType", …]).evaluate()` a host
+    // operator makes re-entrantly runs with the marker DOWN — either because
+    // its enclosing statement is not a declaration, or because the `Declare*`
+    // handler cleared it around its own body — so it stays unstamped and
+    // freely replaceable. Restored, not cleared, so a nested `executeEpsil`
+    // leaves the outer marker intact.
+    // See `docs/plans/2026-08-14-redefinition-discipline.md`.
+    const enclosingRoute = ce._epsilDeclarationRoute;
+    ce._epsilDeclarationRoute = isDeclarationStatement(stmt);
     try {
       value = ce.box(stmt).evaluate();
       // An error value narrows the anchor to its breadcrumb's innermost
@@ -251,6 +267,8 @@ function executeEpsilBatch(
         cancellation !== undefined
           ? ce.box(['Error', { str: message }, { str: cancellation }])
           : ce.box(['Error', { str: message }]);
+    } finally {
+      ce._epsilDeclarationRoute = enclosingRoute;
     }
 
     // A runtime problem in a NON-final statement would otherwise vanish —

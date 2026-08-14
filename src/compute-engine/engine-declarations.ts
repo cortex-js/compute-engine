@@ -1,4 +1,5 @@
 import type {
+  DeclarationOrigin,
   FunctionSignature,
   Type,
   TypeParameter,
@@ -6,6 +7,7 @@ import type {
   TypeReference,
   TypeString,
 } from '../common/type/types.js';
+import { checkSameUnitRedefinition } from './declaration-origin.js';
 import {
   functionResult,
   hasFunctionSignature,
@@ -694,11 +696,19 @@ export function declareType(
     fromStatement,
     mint,
     typeParams,
+    origin,
   }: {
     alias?: boolean;
     fromStatement?: boolean;
     mint?: boolean;
     typeParams?: TypeParamsOption;
+    /** The declaring statement's identity, when this registration comes from
+     * an Epsil `type` STATEMENT running inside a batch — the redefinition
+     * discipline's runtime stamp
+     * (`docs/plans/2026-08-14-redefinition-discipline.md`). Absent on the box
+     * route and on the host `ce.declareType()` API, whose records stay
+     * unstamped and freely replaceable. */
+    origin?: DeclarationOrigin;
   } = {}
 ): void {
   // `where` is a reserved word in type strings (the quantifier clause), so it
@@ -777,6 +787,16 @@ export function declareType(
   const scope = surrogate ? ce.context.lexicalScope : checkScope;
   const registry = ce._typeRegistry;
   const existing = registry[name];
+
+  // REDEFINITION DISCIPLINE — a second `type` statement declaring this name in
+  // the SAME compilation unit is refused, while the same statement re-run in a
+  // LATER unit still replaces (the notebook pattern). Checked HERE, before any
+  // namespace is touched: the replacement path below re-opens the existing
+  // record IN PLACE, so a rejected duplicate that had started writing would
+  // damage the first declaration and every type holding its record. See
+  // `docs/plans/2026-08-14-redefinition-discipline.md`.
+  if (existing !== undefined)
+    checkSameUnitRedefinition('type', name, existing._declOrigin, origin);
 
   // An UNRESOLVED FORWARD REFERENCE is a promise to declare, not a conflict:
   // `type json_array` inside an earlier body made `resolver.forward()` install
@@ -1115,6 +1135,18 @@ export function declareType(
     }
   }
 
+  // The redefinition stamp goes on LAST, once every failure path above is
+  // behind us — so a declaration that rolled back leaves the record's previous
+  // origin exactly as it was. A registration that carries NO origin (the box
+  // route, a host `ce.declareType()`, a bootstrap declaration) CLEARS any
+  // stamp instead of keeping a stale one: an unstamped record is one no
+  // statement of the current unit owns, which is what makes it replaceable
+  // (the route/origin matrix's box-route rows). Mirrors how the P47 batch
+  // stamp rides with the implementation it describes in
+  // `declareConformance()`.
+  if (origin === undefined) delete registry[name]._declOrigin;
+  else registry[name]._declOrigin = origin;
+
   // A5 — replacing a type record is a context change: bump the generation so
   // the caches keyed on it (and every expression boxed AFTER this point) see
   // the new definition. Expressions already boxed keep the type they computed,
@@ -1194,7 +1226,17 @@ export function declareSumType(
   {
     typeParams,
     fromStatement,
-  }: { typeParams?: TypeParamsOption; fromStatement?: boolean } = {}
+    origin,
+  }: {
+    typeParams?: TypeParamsOption;
+    fromStatement?: boolean;
+    /** See `declareType`'s option of the same name. ALL N+1 names this one
+     * statement registers carry the SAME origin: the statement owns every name
+     * it declares, so a collision on any of them is one collision, reported
+     * once (`docs/plans/2026-08-14-redefinition-discipline.md`, "the
+     * generated-name rule"). */
+    origin?: DeclarationOrigin;
+  } = {}
 ): void {
   if (isReservedTypeName(name))
     throw new TypeVariableError(
@@ -1223,6 +1265,25 @@ export function declareSumType(
     );
 
   const registry = ce._typeRegistry;
+
+  // REDEFINITION DISCIPLINE — the whole name set this statement claims (the
+  // sum's own name first, then the variants) is checked against the unit's
+  // existing stamps BEFORE anything is declared. Running it here, ahead of the
+  // A5 variant-collision guard below, is what makes a PARTIAL collision — a
+  // second sum in the same program reusing one variant name — report the
+  // discipline's own `type-redefinition` rather than A5's "already names a
+  // type"; and the first throw aborts the statement, so a collision is
+  // reported ONCE however many of its names collide. See
+  // `docs/plans/2026-08-14-redefinition-discipline.md`.
+  if (origin !== undefined)
+    for (const claimed of [name, ...variants.map((v) => v.name)])
+      checkSameUnitRedefinition(
+        'type',
+        claimed,
+        registry[claimed]?._declOrigin,
+        origin
+      );
+
   const globalScope = ce._evalContextStack[1]?.lexicalScope;
   // Builtins live in the SYSTEM scope — the parent of the global one.
   const systemScope = globalScope?.parent ?? undefined;
@@ -1336,7 +1397,11 @@ export function declareSumType(
         subset = params.filter((p) => free.has(p.name));
         if (subset.length === 0) subset = undefined;
       }
-      declareType(ce, v.name, v.payload, { fromStatement, typeParams: subset });
+      declareType(ce, v.name, v.payload, {
+        fromStatement,
+        typeParams: subset,
+        origin,
+      });
       if (subset !== undefined) subsets.set(v.name, subset);
       registry[v.name]._sumOf = name;
     }
@@ -1351,7 +1416,12 @@ export function declareSumType(
           : `${v.name}<${subset.map((p) => p.name).join(', ')}>`;
       })
       .join(' | ');
-    declareType(ce, name, body, { alias: true, fromStatement, typeParams });
+    declareType(ce, name, body, {
+      alias: true,
+      fromStatement,
+      typeParams,
+      origin,
+    });
 
     // A RE-declaration that drops a variant leaves that variant's record
     // behind — it is still a perfectly good nominal type, only its membership

@@ -533,6 +533,9 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._epsilBatchId`. @internal */
   _epsilBatchId: number | undefined = undefined;
 
+  /** See `IComputeEngine._epsilDeclarationRoute`. @internal */
+  _epsilDeclarationRoute = false;
+
   /** Capture the registry's state and return a rollback thunk restoring it.
    *
    * For the Epsil STATIC PRE-PASS, which canonicalizes every top-level
@@ -564,6 +567,15 @@ export class ComputeEngine implements IComputeEngine {
           r._forwardArity === undefined ? undefined : new Set(r._forwardArity),
         sumOf: r._sumOf,
         sumVariants: r._sumVariants,
+        // REDEFINITION DISCIPLINE — the origin stamp must go back too. The
+        // pre-pass registers a `type` statement and this thunk undoes it; a
+        // LEAKED stamp would make the evaluation loop's registration of that
+        // very statement look like a second declaration of the same unit (its
+        // fresh boxing carries a different statement identity), turning every
+        // checked-then-run `type` statement into a false
+        // `type-redefinition`. See
+        // `docs/plans/2026-08-14-redefinition-discipline.md`.
+        declOrigin: r._declOrigin,
       };
     });
     return () => {
@@ -625,6 +637,14 @@ export class ComputeEngine implements IComputeEngine {
         if (r._sumVariants !== s.sumVariants) changed = true;
         if (s.sumVariants === undefined) delete r._sumVariants;
         else r._sumVariants = s.sumVariants;
+        // The redefinition stamp (see the snapshot above). Deliberately NOT
+        // counted as a `changed` field: it selects nothing a boxed expression
+        // could have read, so restoring it alone must not cold every
+        // mutation-keyed cache — the same reasoning that makes the whole
+        // bump conditional. (The P47 `_implOrigin` restore below is silent for
+        // the same reason.)
+        if (s.declOrigin === undefined) delete r._declOrigin;
+        else r._declOrigin = s.declOrigin;
         // A record that vanished from the table but is still captured by a
         // pre-pass-built type keeps its restored fields — same contract as a
         // statement replacement rollback.
@@ -677,6 +697,13 @@ export class ComputeEngine implements IComputeEngine {
           pending: c.pending,
         })),
         declaredByStatement: r.declaredByStatement,
+        // REDEFINITION DISCIPLINE — the protocol mirror of the type registry's
+        // `declOrigin` snapshot: the pre-pass registers a `protocol` statement
+        // and this thunk undoes it, so a leaked stamp would make the
+        // evaluation loop's registration of that same statement a false
+        // `protocol-redefinition`
+        // (`docs/plans/2026-08-14-redefinition-discipline.md`).
+        declOrigin: r._declOrigin,
       };
     });
     return () => {
@@ -692,6 +719,11 @@ export class ComputeEngine implements IComputeEngine {
         r.members = s.members;
         if (r.declaredByStatement !== s.declaredByStatement) changed = true;
         r.declaredByStatement = s.declaredByStatement;
+        // The redefinition stamp (see the snapshot above); silent, like the
+        // `_implOrigin` restore further down — it selects nothing a boxed
+        // expression could have read.
+        if (s.declOrigin === undefined) delete r._declOrigin;
+        else r._declOrigin = s.declOrigin;
         // The conformance list is MUTATED in place (pushed to), so the
         // snapshot took a copy and the comparison is on contents.
         if (

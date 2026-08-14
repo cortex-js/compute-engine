@@ -107,11 +107,43 @@ default-domain spelling `Limits(x, Nothing, Nothing)` (a bare `Sum(f, x)`
 index) is now recognized by the acceleration as `1..+∞`, so convergent
 open-interval sums compute their true limit (`Σ 1/x² = π²/6`) rather
 than a truncation. Known cost, accepted by the ruling: a convergent
-series the acceleration cannot certify (non-integer-power tails such as
-`Σ 1/n^1.5`) now stays symbolic where it previously returned a
-truncation ~1e-2 off; a designed divergence classification (`+∞` for
-`Σ i`, dedicated handling for oscillating series, p-series recognition)
-remains available as a future refinement.
+series the acceleration cannot certify now stays symbolic where it
+previously returned an uncertified truncation — see the entry below.
+
+### `.N()` declines convergent series whose tail is not an integer power of 1/N
+
+The Richardson/Neville acceleration behind infinite-series `.N()`
+(`acceleratedInfiniteSum`, `library/utils.ts`) extrapolates the partial
+sums with `power: 1` — an asymptotic expansion in **integer** powers of
+`1/N`. A convergent series whose tail does not have that shape never
+certifies, and since the divergence ruling (previous entry) removed the
+truncation fallback, it now evaluates to itself instead of to a number.
+
+Measured 2026-08-14 — the gap is narrow and specific:
+
+| Series | `.N()` | True value |
+| :--- | :--- | :--- |
+| `Σ 1/n^1.5` | symbolic | 2.6123753487 |
+| `Σ 1/n^2.5` | symbolic | 1.3414872573 |
+| `Σ ln(n)/n²` | symbolic | 0.9375482543 |
+| `Σ 1/n^2`, `1/n^3`, `1/n^4` | ✓ computes | — |
+| `Σ 1/2^n`, `Σ 1/n!`, `Σ e^-n` | ✓ computes | — |
+| `Σ 1/(n(n+1))`, `Σ 1/(n²+1)` | ✓ computes | — |
+
+So: integer-power p-series, geometric, factorial and rational tails all
+work; a **non-integer** power (`n^-1.5`) or a logarithmic factor does
+not. For `Σ 1/n^p` the tail is `≈ N^(1-p)/(p-1)`, so the expansion runs
+in powers of `N^(1-p)` — the `power: 1` Neville tableau is fitting the
+wrong sequence.
+
+Two candidate fixes, both standard: extrapolate with a **fitted** power
+(estimate the tail exponent from successive partial-sum differences and
+pass it as `extrapolate`'s `power`), or apply an **Euler–Maclaurin** tail
+correction, which handles the logarithmic factors too. Whichever is
+chosen must keep the divergence guarantee: acceptance stays gated on a
+certified error estimate, so a divergent series still declines rather
+than acquiring a plausible-looking value. Regression-test against the
+table above, and add `Σ 1/n^1.5 = ζ(1.5)` as the headline case.
 
 ### ~~Tycho item 184 — a gather member defeated the count and emptiness of the collection carrying it~~ (FIXED 2026-08-14)
 

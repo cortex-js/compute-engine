@@ -365,16 +365,37 @@ describe('A5 — the variant-name collision guard, atomically', () => {
   });
 
   test('a variant colliding with an EXISTING type is refused', () => {
+    // ACROSS units: A5's own guard. (Within ONE unit the same collision is a
+    // second declaration of `foo` by a second statement of that program, which
+    // the redefinition discipline claims first — see the test below.)
     const ce = new ComputeEngine();
-    const result = executeEpsil(
-      ce,
-      'type foo = tuple<integer>\ntype bad = foo(integer) | other'
-    );
+    executeEpsil(ce, 'type foo = tuple<integer>');
+    const result = executeEpsil(ce, 'type bad = foo(integer) | other');
     expect(result.value.toString()).toContain('already names a type');
     expect(declared(ce, 'other')).toBe(false);
     expect(declared(ce, 'bad')).toBe(false);
     // …and the pre-existing type is untouched.
     expect(ce.type('foo').matches('tuple<integer>')).toBe(false); // opaque nominal
+    expect(declared(ce, 'foo')).toBe(true);
+  });
+
+  test('within ONE program the same collision is `type-redefinition`', () => {
+    // `docs/plans/2026-08-14-redefinition-discipline.md`: a sum statement owns
+    // every name it declares, so reusing a name an earlier statement of the
+    // SAME program declared is a redefinition — reported with that code on
+    // both tiers, ahead of A5, so the static diagnostic and the runtime error
+    // value agree. The atomicity A5 guaranteed is unchanged.
+    const ce = new ComputeEngine();
+    const result = executeEpsil(
+      ce,
+      'type foo = tuple<integer>\ntype bad = foo(integer) | other'
+    );
+    expect(result.value.toString()).toContain('type-redefinition');
+    expect(result.diagnostics.map((d) => String(d.message))).toEqual([
+      'type-redefinition,foo',
+    ]);
+    expect(declared(ce, 'other')).toBe(false);
+    expect(declared(ce, 'bad')).toBe(false);
     expect(declared(ce, 'foo')).toBe(true);
   });
 
