@@ -4405,6 +4405,40 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // machinery (§3.B) now admits a `Missing`/`T | missing` base or index.
     missingBehavior: 'handle',
     missingStrip: 'all',
+    // An integer GATHER knows its own length without evaluating: the gather is
+    // position-preserving (an out-of-range index contributes the absence
+    // marker rather than being dropped — see the `evaluate` handler), so the
+    // result has exactly as many elements as the index collection.
+    //
+    // `At` produces its elements eagerly and carries no `collection` handlers,
+    // so without this it reported `count === undefined` until evaluated. That
+    // `undefined` propagated into every consumer that reads operand counts —
+    // `Zip` takes the min over its members, and a `Map` over that `Zip`
+    // delegates to it — so `Map(f, Zip(At(xs, I), ys))` had no count even
+    // though `At(xs, I)` and the `Zip` both count fine once evaluated
+    // (Tycho item 184).
+    //
+    // Restricted to the shapes whose length is decidable from the operands
+    // alone, mirroring the `evaluate` handler's Case B:
+    //  - a single index only. A chained access (`At(m, i, j)`) peels one level
+    //    at a time and the surviving shape depends on the intermediate.
+    //  - an indexed-collection SOURCE. A dictionary/record source takes the
+    //    `isDictionary` branch, which declines a collection-shaped index.
+    //  - a provably NUMERIC index element type, which is what separates a
+    //    gather from a boolean MASK. A mask filters, so its result length is
+    //    the number of `True` entries — not knowable without walking it, and
+    //    this handler must stay evaluation-free.
+    elementCount: (expr) => {
+      if (!isFunction(expr) || expr.nops !== 2) return undefined;
+      const [xs, idx] = expr.ops;
+      if (!isSubtype(xs.type.type, 'indexed_collection')) return undefined;
+      if (isString(idx) || !isSubtype(idx.type.type, 'indexed_collection'))
+        return undefined;
+      const elt = collectionElementType(idx.type.type);
+      if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
+      const n = idx.count;
+      return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
+    },
     type: (ops) => {
       // Bracket notation over a blackboard-bold RING constant canonicalizes to
       // ring ADJUNCTION (see the `canonical` handler below), so report the same
@@ -6979,7 +7013,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // bounds the result), not only when *every* input is empty.
         let anyUnknown = false;
         for (const x of expr.ops) {
-          const e = x.isEmptyCollection;
+          const e = isEmptySource(x);
           if (e === true) return true;
           if (e === undefined) anyUnknown = true;
         }
@@ -8861,4 +8895,30 @@ function minCount(
 function zipCount(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
   return minCount(expr.ops.map((x) => x.count));
+}
+
+/**
+ * The emptiness of one source operand, with an evaluation-free fallback to its
+ * element COUNT.
+ *
+ * The `isEmptyCollection` getter short-circuits to `undefined` whenever
+ * `isCollection` is false, which includes an EAGER collection operator that
+ * only becomes a concrete collection once evaluated — `At(xs, I)` with a
+ * gather index is typed `list<number>` and iterates fine, but is not itself a
+ * collection until evaluated. Such an operand can still state its length
+ * through the `elementCount` tier of `count`, and a known length settles
+ * emptiness outright.
+ *
+ * Without this, one gather member left the whole `Zip`'s emptiness UNKNOWN,
+ * and `materialize()` returns the lazy form unchanged when emptiness is
+ * indeterminate — so `Map(f, Zip(At(xs, I), ys))` stayed symbolic instead of
+ * producing its elements, even though every member iterated (Tycho item 184).
+ */
+function isEmptySource(x: Expression): boolean | undefined {
+  const empty = x.isEmptyCollection;
+  if (empty !== undefined) return empty;
+  const n = x.count;
+  // `Infinity` correctly answers `false` here — an unbounded source is not
+  // empty. Only a genuinely unknown count leaves the verdict open.
+  return typeof n === 'number' ? n === 0 : undefined;
 }

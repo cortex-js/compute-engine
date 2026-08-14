@@ -113,6 +113,45 @@ truncation ~1e-2 off; a designed divergence classification (`+∞` for
 `Σ i`, dedicated handling for oscillating series, p-series recognition)
 remains available as a future refinement.
 
+### ~~Tycho item 184 — a gather member defeated the count and emptiness of the collection carrying it~~ (FIXED 2026-08-14)
+
+Filed by Tycho against 0.107.0: `Map(f, Zip(At(L, I), L))` reported
+`count === undefined`, while `At(L, I)` and the `Zip` each counted fine
+once evaluated. Found by their elementwise min/max lowering, whose
+emitted shape is exactly `Map(f, Zip(…))`.
+
+Root cause, in two halves. `At(xs, I)` with an integer-collection index
+is a GATHER: it is typed `list<T>` and iterates correctly, but it
+produces elements eagerly and carries no `collection` handlers, so it is
+not `isCollection` until evaluated. (1) `At` had no `elementCount`
+handler, so a raw gather answered `count === undefined`; `Zip` takes the
+MINIMUM over its members' counts, so one gather member erased the whole
+`Zip`'s count, and a `Map` delegating to that `Zip` lost it too. (2) The
+`isEmptyCollection` getter short-circuits to `undefined` whenever
+`isCollection` is false, so a gather member also left the `Zip`'s
+emptiness UNKNOWN — and `materialize()` returns the lazy form unchanged
+when emptiness is indeterminate, so the `Map` stayed SYMBOLIC rather
+than producing its elements. Tycho reported the count; the
+materialization half was found while fixing it and is the more
+user-visible of the two.
+
+Both fixes are evaluation-free, which the item-182 round makes a
+requirement rather than a preference — a facet handler that evaluates is
+how that storm started. An integer gather is POSITION-PRESERVING (an
+out-of-range index contributes the absence marker rather than being
+dropped), so its length is exactly the index's, readable from the
+operands alone: `At` gained an `elementCount` handler restricted to the
+shapes whose length is decidable that way (single index, indexed-collection
+source, provably numeric index element type). A boolean MASK is excluded
+by design — it filters, so its length is the number of `True` entries,
+unknowable without walking it. `Zip`'s `isEmpty` handler gained a
+count-derived fallback (`isEmptySource`) for members whose
+`isEmptyCollection` short-circuits.
+
+Regression pins: `test/compute-engine/tycho-item-184-gather-count.test.ts`
+(14 tests, including the mask/scalar-index/chained-access shapes that must
+keep declining to claim a count).
+
 ### ~~Tycho item 182 — canonicalization-time collection-facet probe storm on a range-broadcast `At` head~~ (FIXED 2026-08-14)
 
 Original filing: parsing `255(0.5 + L[1+3(0..Length(D)-1)]/60)/255` inside
@@ -197,15 +236,28 @@ facet-compute budget (32 measured, 200 pinned, non-vacuity floor), warm
 re-parse, per-instance stability, dependency/ephemeral-write/kind-swap
 invalidation.
 
-**Still OPEN from the same filing** — deadline granularity: the
-canonicalization walk honors a span deadline only BETWEEN stretches, so a
-single long stretch can overrun a `withTimeLimit` budget (a ~2× overrun
-was measured while stretches were storm-inflated). The storm fix shrank
-the stretches that made the overrun visible, but the granularity itself
-is unchanged, and a deadline is a correctness boundary: any future
-long-stretch workload (a huge literal, a pathological rule set) can
-reproduce it. Fix shape when picked up: a strided `checkDeadline` inside
-the canonicalization walk (the pattern `interruptible.ts` documents),
+The filing's second observation is a SEPARATE, still-open item — see
+"Deadline granularity in the canonicalization walk" below. It was
+promoted out of this section deliberately: this heading is struck through
+and moves to the log when Tycho adopts the fixing release, and the
+granularity item must not be archived with it.
+
+### Deadline granularity in the canonicalization walk (OPEN; second observation of Tycho item 182)
+
+The canonicalization walk honors a span deadline only BETWEEN stretches,
+so a single long stretch can overrun a `withTimeLimit` budget — a ~2×
+overrun was measured while the stretches were inflated by the item-182
+probe storm. The storm fix shrank the stretches that made the overrun
+visible; it did NOT change the granularity. A deadline is a correctness
+boundary, and any future long-stretch workload (a huge literal, a
+pathological rule set) reproduces it.
+
+This is load-bearing for a consumer today: Tycho's span-budget math
+assumes a long canonicalization stretch can overrun its deadline by ~2×,
+and stays conservative until this closes (confirmed by them 2026-08-14).
+
+Fix shape when picked up: a strided `checkDeadline` inside the
+canonicalization walk (the pattern `common/interruptible.ts` documents),
 plus a regression bounding parse time against a small multiple of the
 requested limit.
 
