@@ -318,7 +318,8 @@ f()
 ```
 
 An argument may be prefixed with `...` to spread a tuple's elements into the
-call's arguments (valid only in call argument lists — see
+call's arguments (`...` is also valid in list, set, and dictionary
+literals, where it splices non-tuple collections — see
 [Spread](/epsil/operators/#spread)):
 
 ```epsil

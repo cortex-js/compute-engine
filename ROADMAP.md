@@ -89,52 +89,46 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
-### Map argument-order flip — residue (flip landed 2026-08-14)
+### Tycho item 182 — document-scope canonicalization blowup on a range-broadcast `At` head (OPEN, filed 2026-08-14)
+
+Canonically parsing `255(0.5 + L[1+3(0..Length(D)-1)]/60)/255` inside a
+LIVE Tycho document scope — `L` a large literal list, `D` a comprehension
+mapping a user function over slices of `L` — burns ~9.4 s in one span,
+while the SAME expression on a fresh engine (six variants, four sizes) is
+≤21 ms. The trigger is accumulated document scope/declaration state, the
+same flavor as item 181's eval-context sensitivity but NOT fixed by it
+(verified on 0.107.0). Their live stack shows ~130-deep recursive
+`withRootRepair`/`_withRepairFrame` canonicalization-repair frames.
+Second observation from the same filing: the span runs under
+`withTimeLimit({ms: 5000})` yet completes at ~9.4 s wall — the repair
+walk checks the deadline only between stretches, so one stretch can
+overrun ~2×; a more frequent deadline check in the repair walk would
+sharpen refusals for free. Repro requires their document harness
+(`docs/scratch/d21-lizeq-head-extract.mts` in `dev/tycho`, deterministic;
+CDP stack probe `d21-lizeq-stack.mjs`). Their side degrades the head to a
+typed 5 s refusal; a CE fix upgrades it from refused to enrolled.
 
 `Map` now takes the mapping function first (`Map(f, xs…)`, signature
 `(function, collection+)`); the flip swept src, tests, docs, and the
 Fungrim corpus/artifact. Two follow-ups:
 
-- **Fungrim provenance: fork commit + MANIFEST bump pending.** The
-  translator now emits callback-first Map (`_comprehension` in
-  `grim2mathjson/structural.py`, golden `cbce7f.json` updated, 69/69
-  fork tests green — changes sit UNCOMMITTED in ~/dev/fungrim), and the
-  regenerated corpus is byte-identical to the checked-in one (the only
-  regen delta was restoring the translator's `\uXXXX` escape style in
-  two reference strings; `validate --check` green, Stage-1 100%). To
-  close: commit the fork, then set `data/fungrim/MANIFEST.json`
-  `upstream.commit` to the new fork hash and bump `generated`
-  (`pin.sha256` covers only `pygrim/`, which is untouched).
-- **Pre-existing recompile drift, NOT from the flip: 98 rules
-  re-orient.** `recompile-drift.ts` reports 0 dropped / 0 added /
-  98 changed — all match↔replace orientation (and the paired
-  simplify↔expand purpose) flips, zero overlap with the 19 Map rules
-  (which reproduce exactly). A fresh recompile against today's engine
-  orients those 98 rules differently than the committed artifact —
-  cost-function/canonicalization evolution since the last full regen.
-  Needs a decision: absorb via a full regen commit (reviewing that the
-  new orientations are correct), or allowlist. The
-  `ci:corpus-pipeline` drift gate fails until then.
-
-### String-operation defects (found 2026-08-13, string-roadmap review)
-
-Two confirmed defects in the existing string operators, found while
-reviewing the string surface for `docs/STRING_ROADMAP.md` (both verified
-empirically against source):
-
-- **`IntegerString` silently drops the sign**: `IntegerString(-42)` returns
-  `"42"` (the evaluate handler applies `Math.abs` / `bignumRe.abs()`,
-  `library/core.ts`). `DigitsFrom("-42")` returns `-42`, so the pair does
-  not round-trip: `DigitsFrom(IntegerString(-42))` is `42`. No comment or
-  test marks the absolute value as intentional. Proposed fix: preserve the
-  sign (emit a leading `-`); audit callers/snapshots first.
-- **`StringSplit(s, "")` shatters surrogate pairs**: with an empty
-  separator, the handler delegates to JS `String.split('')`, which splits
-  into UTF-16 code units — `StringSplit("a🏳️‍🌈b", "")` yields lone
-  surrogate halves (`�`). Under the string model (strings are sequences of
-  grapheme clusters, `docs/STRING_ROADMAP.md`) an empty separator should
-  either split into grapheme clusters (equivalent to `Characters`) or be
-  rejected; it must never produce invalid scalar sequences.
+- ~~Fungrim provenance~~ **CLOSED 2026-08-14.** The translator emits
+  callback-first Map (fork commit `0bb0a441`, 69/69 fork tests), the
+  regenerated corpus is byte-identical to the checked-in one, and
+  `data/fungrim/MANIFEST.json` pins the new fork commit
+  (`generated` 2026-08-14; `pin.sha256` unchanged — it covers only
+  `pygrim/`). The corpus → artifact chain is fully reproducible again:
+  `validate --check`, drift 0/0/0, freshness, solve-templates and
+  compile-properties checks all green.
+- ~~Pre-existing recompile drift: 98 rules re-orient~~ **ABSORBED via
+  full regen 2026-08-14** (user ruling): 0 dropped / 0 added / 98
+  changed — canonical-form modernization on the match side plus
+  orientation and purpose corrections (e.g. `fungrim:664b4c` now FOLDS
+  the Dedekind-eta quotient into `ModularJ` as simplify, retiring its
+  exiled-to-expand workaround; `033d39` folds into `1/λ(τ)`). Gates
+  green after: drift 0/0/0, artifact-freshness OK, fungrim suites
+  148/148 (count pins updated: byPurpose simplify 1311→1304, expand
+  116→123), rule-dispatch oracle byte-identical (172/172 snapshots).
 
 ### Ground-type invariant leak in `parameterized-nominal-constructor.test.ts` (dev-assert noise)
 
@@ -234,11 +228,28 @@ calls ahead of the assignment, and unannotated literals.)
 
 ### `Derivative` compile time vs body nesting depth (perf ask)
 
-Order-1 `Derivative` compile time grows steeply with the nesting depth
-of the body — 6/21/77/429 ms at depth 1/4/8/16, and it throws at depth
-37 — while the undifferentiated body compiles in single-digit
-milliseconds at every depth. A capability/perf ask, not a correctness
-defect. (Reported by the Tycho project as its item 177,
+**RESOLVED 2026-08-14 (capability half)** — the shared-budget numeric
+fallback (user-ruled): past the differentiation growth budget, the
+javascript compile emits an 8th-order centered-difference stencil
+(`_SYS.nd`) and interpreted `N()` computes the SAME shared function
+(`centeredDiffHigherOrder`, numerics/numeric.ts), bit-identical across
+routes; within budget the exact closed form is unchanged, and plain
+`evaluate()` stays symbolic. `ND` at a runtime point now compiles.
+Pinned in `test/compute-engine/compile-derivative-numeric-fallback.test.ts`.
+
+**Open residual (perf):** the failed symbolic attempt still runs to the
+growth budget before the fallback engages — once per derivative node per
+compile (~1–2 s per node on the deep shapes; Tycho's Taylor witness pays
+it three times, once per order, because each order's `derivative()` call
+re-runs the shared first differentiation). If Tycho's compile-band gates
+trip on this, the fix is an over-budget memo keyed on the resolved
+function LITERAL (shared across the sibling `Derivative(f, k)` nodes) +
+the semantic version — not a lower budget, which would change which
+expressions get exact derivatives.
+
+Historical numbers (pre-fallback): order-1 compile 6/21/77/429 ms at
+depth 1/4/8/16, THROWS at depth 37, undifferentiated body single-digit
+ms at every depth. (Reported by the Tycho project as its item 177,
 `docs/COMPUTE_ENGINE.md` in `dev/tycho`; bare-engine repro
 `docs/scratch/d209-ce-asks-repro.mts` there.)
 

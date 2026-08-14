@@ -1818,6 +1818,74 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     complexity: 8200,
     signature: '(tuple<string, unknown>*) -> dictionary',
+    // The ONLY case that reaches this handler is a literal with a `Spread`
+    // entry — the dictionary MERGE `{-> , ...d, "k" -> v}` (Epsil) or
+    // `["Dictionary", ["Spread", "d"], …]` (MathJSON): boxing's structural
+    // interception is gated on the absence of `Spread` operands (box.ts)
+    // exactly so the merge lowering can run here. Lowered to
+    // `DictionaryFrom(Join(segments…))`: literal entries become lists of
+    // positional `(key, value)` pairs, a spread segment contributes its
+    // entries via `ListFrom` (a dictionary is a collection of pairs), and
+    // `DictionaryFrom` is LAST-wins on key collisions — so a later entry or
+    // spread overrides an earlier one, the merge idiom
+    // (`{-> , ...defaults, "verbose" -> True}`). Duplicate LITERAL keys keep
+    // the literal convention instead (ruled 2026-08-14): FIRST wins, later
+    // duplicates are dropped here (the Epsil parser also diagnoses them).
+    canonical: (ops, { engine: ce }) => {
+      if (!ops.some((op) => isFunction(op, 'Spread') && op.nops === 1))
+        return null;
+      const segments: Expression[] = [];
+      let run: Expression[] = [];
+      const flushRun = () => {
+        if (run.length > 0) {
+          segments.push(ce._fn('List', run));
+          run = [];
+        }
+      };
+      const seenLiteralKeys = new Set<string>();
+      for (const op of ops) {
+        if (isFunction(op, 'Spread') && op.nops === 1) {
+          const x = op.ops[0].canonical;
+          // Tuples do not spread (they are units; a pair is a tuple). A
+          // dictionary has no error CELL to freeze into — entries are
+          // pairs — so the whole literal collapses to the error.
+          if (isFunction(x, 'Tuple') || x.type.matches('tuple'))
+            return ce.error(['spread-tuple'], x.toString());
+          flushRun();
+          segments.push(ce._fn('ListFrom', [x]));
+          // First-wins covers only literal duplicates NOT separated by a
+          // spread: a literal key REAPPEARING after a spread is the
+          // documented override idiom (`{"a" -> 1, ...d, "a" -> 2}` → 2),
+          // resolved by the merge's last-wins, not dropped as a typo.
+          seenLiteralKeys.clear();
+          continue;
+        }
+        // A literal entry: `KeyValuePair` (the Epsil spelling) or a
+        // positional pair `Tuple` (the MathJSON spelling). Both normalize
+        // to the positional pair `BoxedDictionary` stores.
+        const e = op.canonical;
+        if (
+          (isFunction(e, 'KeyValuePair') || isFunction(e, 'Tuple')) &&
+          e.nops === 2
+        ) {
+          // A bare-SYMBOL key is accepted on the plain (no-spread) route —
+          // `BoxedDictionary` reads `key.symbol` — so normalize it to the
+          // string `DictionaryFrom` requires; a spread elsewhere in the
+          // literal must not change which keys are legal.
+          const key = isSymbol(e.op1) ? ce.string(e.op1.symbol) : e.op1;
+          const keyName = isString(key) ? key.string : undefined;
+          if (keyName !== undefined) {
+            if (seenLiteralKeys.has(keyName)) continue; // literal dup: first wins
+            seenLiteralKeys.add(keyName);
+          }
+          run.push(ce._fn('Tuple', [key, e.op2]));
+        } else if (!isSymbol(e, 'Nothing')) {
+          run.push(e); // let `DictionaryFrom` report the malformed entry
+        }
+      }
+      flushRun();
+      return ce._fn('DictionaryFrom', [ce._fn('Join', segments)]);
+    },
   },
 
   Keys: {
@@ -7778,15 +7846,87 @@ function canonicalList(
     }
   }
 
-  const canonicalOps = ops
-    .map((op) => {
-      if (isFunction(op, 'Delimiter')) {
-        if (isFunction(op.op1, 'Sequence'))
-          return ce._fn('List', canonical(ce, op.op1.ops));
-        return ce._fn('List', [op.op1?.canonical ?? ce.Nothing]);
+  // The canonical form of one ordinary (non-spread) element.
+  const element = (op: Expression): Expression => {
+    if (isFunction(op, 'Delimiter')) {
+      if (isFunction(op.op1, 'Sequence'))
+        return ce._fn('List', canonical(ce, op.op1.ops));
+      return ce._fn('List', [op.op1?.canonical ?? ce.Nothing]);
+    }
+    return op.canonical;
+  };
+
+  // Spread elements: `[...xs, c, ...ys]`. `List` is `lazy`, so the raw
+  // `Spread` operands reach this handler (the box-route Spread deferral is
+  // the EAGER path's; a call's positional arity depends on the spread's
+  // runtime value, a list literal's does not) and the rewrite is purely
+  // structural — no deferral needed, the canonical form never contains a
+  // `Spread`. The semantics are `Join`'s (ruled 2026-08-14): any
+  // non-tuple collection splices, an infinite one lazily; a TUPLE does not
+  // spread — tuples are units, and `ListFrom` is the explicit converter —
+  // so a provably-tuple operand is a loud `spread-tuple` error, and one
+  // that only turns out to be a tuple at evaluation contributes itself as
+  // ONE element (`Join`'s atomic-tuple convention). A scalar or string
+  // operand is `Join`'s `incompatible-type` error at evaluation.
+  if (ops.some((op) => isFunction(op, 'Spread') && op.nops === 1)) {
+    const segments: Expression[] = []; // `Join` operands
+    let run: Expression[] = []; // current run of ordinary elements
+    const flushRun = () => {
+      if (run.length > 0) {
+        segments.push(ce._fn('List', run));
+        run = [];
       }
-      return op.canonical;
-    })
+    };
+    for (const op of ops) {
+      if (!isFunction(op, 'Spread') || op.nops !== 1) {
+        const e = element(op);
+        // `Nothing` erasure, as in the no-spread path below.
+        if (!isSymbol(e, 'Nothing')) run.push(e);
+        continue;
+      }
+      // The RAW spread operand, canonicalized value-safely — deliberately
+      // not `op.canonical`: `Spread`'s own canonical handler rewrites a
+      // literal tuple into a `Sequence` for the call route, and here tuples
+      // are handled by the ruling below instead.
+      const x = op.ops[0].canonical;
+      if (isFunction(x, 'List')) {
+        // A literal list splices eagerly: `[...[1,2], 3]` → `[1,2,3]`.
+        // (Canonicalization already erased any `Nothing` elements.)
+        run.push(...x.ops);
+      } else if (isFunction(x, 'Tuple') || x.type.matches('tuple')) {
+        // Tuples do not spread. The error is an ELEMENT, so the list
+        // freezes with the error cell in place (error-propagation §6a.2).
+        run.push(ce.error(['spread-tuple'], x.toString()));
+      } else {
+        flushRun();
+        // A set/dictionary/record-kind segment must materialize through
+        // `ListFrom`: `Join` adopts those kinds from ANY operand
+        // (`joinResultType`), so a direct join made `[...{1,2}, 2]` a
+        // DEDUPLICATING set — a list literal must stay a list. The
+        // provably list/indexed segments (the lazy pipelines: `Range`,
+        // `Take`, `Map`) keep the direct join. A segment whose kind is
+        // only discovered at evaluation still follows `Join`'s adoption —
+        // the literal's kind promise is enforced as far as static types
+        // can prove.
+        segments.push(
+          x.type.matches('set') ||
+            x.type.matches('dictionary') ||
+            x.type.matches('record')
+            ? ce._fn('ListFrom', [x])
+            : x
+        );
+      }
+    }
+    // Every spread spliced eagerly (or errored): an ordinary literal.
+    if (segments.length === 0) return ce._fn('List', run);
+    flushRun();
+    // `Join` — unary for a lone spread: `[...xs]` is `Join(xs)`, the
+    // list materialization of a non-tuple collection.
+    return ce._fn('Join', segments);
+  }
+
+  const canonicalOps = ops
+    .map(element)
     // `Nothing` is an ERASURE marker: it is spliced out of a collection
     // literal (`[12, Nothing, 34]` is a 2-element list). Use `Missing` for
     // an absent-but-positioned value.
@@ -7796,8 +7936,49 @@ function canonicalList(
 
 function canonicalSet(
   ops: ReadonlyArray<Expression>,
-  { engine }: { engine: ComputeEngine; scope: Scope | undefined }
+  ctx: { engine: ComputeEngine; scope: Scope | undefined }
 ): Expression {
+  const { engine } = ctx;
+
+  // Spread elements: `{a, ...s, b}` — the set form of the list-literal
+  // spread (same 2026-08-14 rulings as `canonicalList` above: non-tuple
+  // collections splice, a provable tuple is a loud `spread-tuple` error, a
+  // runtime tuple is one element, a scalar is `Join`'s error). Lowered to
+  // `SetFrom(Join(…))`: `Join` concatenates the segments, `SetFrom`
+  // deduplicates into a set. Handled BEFORE the generic operand
+  // canonicalization below — `Spread`'s own canonical handler would rewrite
+  // a literal tuple into a `Sequence` for the call route.
+  if (ops.some((op) => isFunction(op, 'Spread') && op.nops === 1)) {
+    const segments: Expression[] = [];
+    let run: Expression[] = [];
+    const flushRun = () => {
+      if (run.length > 0) {
+        segments.push(engine._fn('List', run));
+        run = [];
+      }
+    };
+    for (const op of ops) {
+      if (!isFunction(op, 'Spread') || op.nops !== 1) {
+        const e = op.canonical;
+        if (!isSymbol(e, 'Nothing')) run.push(e);
+        continue;
+      }
+      const x = op.ops[0].canonical;
+      if (isFunction(x, 'List') || isFunction(x, 'Set')) run.push(...x.ops);
+      else if (isFunction(x, 'Tuple') || x.type.matches('tuple'))
+        run.push(engine.error(['spread-tuple'], x.toString()));
+      else {
+        flushRun();
+        segments.push(x);
+      }
+    }
+    // Every spread spliced eagerly (or errored): an ordinary literal —
+    // recurse for the comprehension check and the dedup below.
+    if (segments.length === 0) return canonicalSet(run, ctx);
+    flushRun();
+    return engine._fn('SetFrom', [engine._fn('Join', segments)]);
+  }
+
   // Since the `Set` operator is `lazy`, the canonical handler receives raw
   // operands: canonicalize them first
   ops = ops.map((op) => op.canonical);

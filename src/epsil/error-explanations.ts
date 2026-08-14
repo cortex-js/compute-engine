@@ -14,6 +14,10 @@
  * stand alone — it doubles as the summary line.
  */
 export const ERROR_EXPLANATIONS: Record<string, string> = {
+  'spread-tuple': `A spread ("...x") in a list or set literal was given a tuple. Tuples are units — a point, a pair — so they do not splice into a surrounding collection; the spread would silently do nothing, which is why it is rejected instead.
+
+To use a tuple's elements as list elements, convert explicitly: "ListFrom(t)" is the list of t's elements, so "[...ListFrom(t), 3]" splices them. (In a CALL argument list the rule is reversed: argument lists are tuple-shaped, so there "f(...t)" spreads exactly tuples.)`,
+
   'incompatible-type': `A value's type does not match what its context requires — a typed declaration ("let x: string = …") whose initializer has a different type, an argument outside a function's signature, or a value that fails a type ascription.
 
 The message reads "expected \`T\`, got \`U\`": T is what the context requires, U is what the value actually has. A site may follow — "for argument 2" points at a position in a call, "at \`x\`" quotes the offending subexpression. A type like \`list<string^5>\` is a list of exactly 5 strings; \`finite_integer\` is an integer that is not infinite.

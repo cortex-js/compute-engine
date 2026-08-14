@@ -4835,3 +4835,167 @@ describe('BARE `_` IS THE IDENTITY FUNCTION SHORTHAND (regression)', () => {
     );
   });
 });
+
+// Collection-literal spread (2026-08-14, revised same day): a `Spread`
+// operand of a `List`/`Set`/`Dictionary` literal is spliced at
+// canonicalization — the canonical form never contains a `Spread`. The
+// semantics are `Join`'s: any non-tuple collection splices; a TUPLE does not
+// spread (tuples are units; `ListFrom` is the explicit converter) — provably
+// a tuple is a loud `spread-tuple` error, a runtime tuple contributes itself
+// as one element, and a scalar is `Join`'s `incompatible-type` error. The
+// box.ts `List`/`Dictionary` fast paths defer to the canonical handlers
+// whenever a `Spread` operand is present.
+describe('COLLECTION-LITERAL SPREAD (box route)', () => {
+  const ce = engine;
+
+  test('a literal list splices eagerly at canonicalization', () => {
+    const e = ce.box(['List', ['Spread', ['List', 1, 2]], 3]);
+    expect(e.toString()).toBe('[1,2,3]');
+    expect(e.json).toEqual(['List', 1, 2, 3]);
+  });
+
+  test('a literal tuple does NOT spread: loud spread-tuple error', () => {
+    const e = ce.box(['List', ['Spread', ['Tuple', 1, 2]], 3]);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain('spread-tuple');
+  });
+
+  test('a symbolic spread lowers to a direct Join', () => {
+    const ce2 = new ComputeEngine();
+    const e = ce2.box(['List', ['Spread', 'xs'], 3, ['Spread', 'ys']]);
+    expect(e.operator).toBe('Join');
+    expect(e.json).toEqual(['Join', 'xs', ['List', 3], 'ys']);
+    ce2.box(['Assign', 'xs', ['List', 1, 2]]).evaluate();
+    // A spread whose value turns out to be a tuple at evaluation follows
+    // Join's atomic-tuple convention: ONE element, not a splice.
+    ce2.box(['Assign', 'ys', ['Tuple', 4, 5]]).evaluate();
+    expect(e.evaluate().toString()).toBe('[1,2,3,(4, 5)]');
+  });
+
+  test('a lone spread canonicalizes to unary Join (list materialization)', () => {
+    const ce2 = new ComputeEngine();
+    expect(ce2.box(['List', ['Spread', 'xs']]).json).toEqual(['Join', 'xs']);
+    expect(
+      ce2.box(['List', ['Spread', ['Range', 1, 4]]]).evaluate().toString()
+    ).toBe('[1,2,3,4]');
+    // A scalar spread is Join's loud incompatible-type error.
+    expect(ce2.box(['List', ['Spread', 5]]).evaluate().isValid).toBe(false);
+  });
+
+  test('an infinite spread stays lazy', () => {
+    const ce2 = new ComputeEngine();
+    const e = ce2.box([
+      'Take',
+      ['List', ['Spread', ['Range', 1, { num: '+Infinity' }]], 5],
+      3,
+    ]);
+    expect(e.evaluate().toString()).toBe('[1,2,3]');
+  });
+
+  test('a plain literal is untouched (no spread, fast path)', () => {
+    expect(ce.box(['List', 1, 2, 3]).json).toEqual(['List', 1, 2, 3]);
+  });
+
+  test('set spread lowers to SetFrom(Join(…)) and deduplicates', () => {
+    const ce2 = new ComputeEngine();
+    const e = ce2.box(['Set', 1, ['Spread', 'xs']]);
+    expect(e.json).toEqual(['SetFrom', ['Join', ['List', 1], 'xs']]);
+    ce2.box(['Assign', 'xs', ['List', 2, 2, 3]]).evaluate();
+    expect(e.evaluate().toString()).toBe('Set(1, 2, 3)');
+    // A literal set splices eagerly (and the plain dedup path runs).
+    expect(
+      ce2.box(['Set', 1, ['Spread', ['Set', 1, 2]]]).toString()
+    ).toBe('Set(1, 2)');
+  });
+
+  test('dictionary spread merges LAST-wins via DictionaryFrom(Join(…))', () => {
+    const ce2 = new ComputeEngine();
+    const d: Expression = [
+      'Dictionary',
+      ['Tuple', { str: 'a' }, 1],
+      ['Tuple', { str: 'b' }, 2],
+    ];
+    // A later literal entry overrides a spread…
+    expect(
+      ce2
+        .box(['Dictionary', ['Spread', d], ['Tuple', { str: 'b' }, 9]])
+        .evaluate()
+        .toString()
+    ).toBe('{"dict":{"a":1,"b":9}}');
+    // …and a later spread overrides an earlier literal entry.
+    expect(
+      ce2
+        .box(['Dictionary', ['Tuple', { str: 'b' }, 9], ['Spread', d]])
+        .evaluate()
+        .toString()
+    ).toBe('{"dict":{"b":2,"a":1}}');
+    // Duplicate LITERAL keys keep the literal convention: FIRST wins.
+    expect(
+      ce2
+        .box([
+          'Dictionary',
+          ['Tuple', { str: 'a' }, 1],
+          ['Tuple', { str: 'a' }, 9],
+          ['Spread', d],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('{"dict":{"a":1,"b":2}}');
+    // …but a literal key REAPPEARING after a spread is the override idiom,
+    // not a typo: the last one wins (the first-wins seen-set resets at
+    // each spread).
+    expect(
+      ce2
+        .box([
+          'Dictionary',
+          ['Tuple', { str: 'a' }, 1],
+          ['Spread', d],
+          ['Tuple', { str: 'a' }, 7],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('{"dict":{"a":7,"b":2}}');
+  });
+
+  test('a tuple spread in a dictionary literal collapses to the error', () => {
+    // Unlike List/Set — which freeze a per-element `spread-tuple` error
+    // cell in place — a dictionary has no error cell (entries are pairs),
+    // so the WHOLE literal is the error. Deliberate asymmetry.
+    const ce2 = new ComputeEngine();
+    const e = ce2.box([
+      'Dictionary',
+      ['Spread', ['Tuple', 1, 2]],
+      ['Tuple', { str: 'a' }, 1],
+    ]);
+    expect(e.operator).toBe('Error');
+    expect(e.toString()).toContain('spread-tuple');
+  });
+
+  test('a symbol-keyed literal entry survives the merge lowering', () => {
+    // The plain (no-spread) route accepts a bare-symbol key
+    // (`BoxedDictionary` reads `key.symbol`); a spread elsewhere in the
+    // literal must not change which keys are legal, so the merge handler
+    // normalizes the symbol to a string.
+    const ce2 = new ComputeEngine();
+    expect(
+      ce2
+        .box([
+          'Dictionary',
+          ['Tuple', 'x', 1],
+          ['Spread', ['Dictionary', ['Tuple', { str: 'b' }, 2]]],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('{"dict":{"x":1,"b":2}}');
+  });
+
+  test('a set spread into a LIST literal stays a list (no dedup)', () => {
+    // `Join` adopts set/dictionary kind from any operand, so a direct join
+    // of the set segment made the whole list literal a deduplicating SET;
+    // the lowering materializes such segments through `ListFrom` instead.
+    const ce2 = new ComputeEngine();
+    const e = ce2.box(['List', ['Spread', ['Set', 1, 2]], 2]);
+    expect(e.evaluate().toString()).toBe('[1,2,2]');
+    expect(e.type.matches('list')).toBe(true);
+  });
+});

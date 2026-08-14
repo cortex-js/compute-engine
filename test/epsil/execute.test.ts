@@ -866,6 +866,103 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
   });
 });
 
+/**
+ * Collection-literal spread (2026-08-14, rulings revised same day):
+ * `[...xs, c]` splices into list literals, `{a, ...s}` into set literals,
+ * and `{-> , ...d, "k" -> v}` merges dictionaries. Handled at
+ * CANONICALIZATION with `Join` semantics: non-tuple collections splice
+ * (lazily for an infinite segment); a TUPLE does not spread — tuples are
+ * units, `ListFrom` is the explicit converter — so a provable tuple is a
+ * loud `spread-tuple` error and a scalar/string is `Join`'s
+ * `incompatible-type` error. A lone `[...xs]` is `Join(xs)`. Dictionary
+ * merges are LAST-wins on key collisions, while duplicate LITERAL keys
+ * keep the literal convention (first wins + diagnostic). Box-route pins in
+ * `test/compute-engine/collections.test.ts`.
+ */
+describe('EPSIL EXECUTE — collection-literal spread', () => {
+  test('splices lists and ranges', () => {
+    expect(run('let xs = [1, 2]\n[...xs, 3]').value.toString()).toBe(
+      '[1,2,3]'
+    );
+    expect(run('[0, ...(1..3), 9]').value.toString()).toBe('[0,1,2,3,9]');
+    expect(
+      run('let xs = [1,2]\nlet ys = [4,5]\n[...xs, 3, ...ys]').value.toString()
+    ).toBe('[1,2,3,4,5]');
+    expect(run('[...[1, 2], 3]').value.toString()).toBe('[1,2,3]');
+  });
+
+  test('tuples do NOT spread: loud spread-tuple error', () => {
+    const { value } = run('let t = (1, 2)\n[...t, 3]');
+    expect(value.toString()).toContain('spread-tuple');
+    // The explicit conversion is the escape: ListFrom(t) splices.
+    expect(
+      run('let t = (1, 2)\n[...ListFrom(t), 3]').value.toString()
+    ).toBe('[1,2,3]');
+  });
+
+  test('a lone spread is the list materialization (Join)', () => {
+    expect(run('[...(1..4)]').value.toString()).toBe('[1,2,3,4]');
+    expect(run('let xs = [1,2]\n[...xs]').value.toString()).toBe('[1,2]');
+  });
+
+  test('a scalar or string spread is a loud error', () => {
+    expect(run('[...5]').value.isValid).toBe(false);
+    expect(run('[..."ab", 1]').value.isValid).toBe(false);
+  });
+
+  test('an infinite spread stays lazy', () => {
+    expect(run('[...(1..oo), 5] |> Take(3)').value.toString()).toBe('[1,2,3]');
+    expect(run('[...(1..oo), 5] |> Take(8) |> Sum').value.re).toBe(36);
+    expect(run('[0, ...(1..oo)] |> Take(3)').value.toString()).toBe('[0,1,2]');
+  });
+
+  test('`Nothing` erasure still applies around spreads', () => {
+    expect(run('[1, Nothing, ...[2]]').value.toString()).toBe('[1,2]');
+  });
+
+  test('set spread splices and deduplicates', () => {
+    expect(run('let s = {2, 3}\n{1, ...s}').value.toString()).toBe(
+      'Set(1, 2, 3)'
+    );
+    expect(run('{1, ...[2, 2, 3]}').value.toString()).toBe('Set(1, 2, 3)');
+    expect(run('{...{1, 2}, ...{2, 3}}').value.toString()).toBe(
+      'Set(1, 2, 3)'
+    );
+  });
+
+  test('dictionary merge is last-wins; the bare `->` marker forces dictionary', () => {
+    expect(
+      run(
+        'let d = {"a" -> 1, "b" -> 2}\n{...d, "b" -> 9}'
+      ).value.toString()
+    ).toBe('{"dict":{"a":1,"b":9}}');
+    expect(
+      run('let d = {"b" -> 9}\n{"a" -> 1, "b" -> 2, ...d}').value.toString()
+    ).toBe('{"dict":{"a":1,"b":9}}');
+    // A brace of only spreads is a SET-spread; the `->` marker makes the
+    // pure merge a dictionary.
+    expect(
+      run(
+        'let d1 = {"a" -> 1}\nlet d2 = {"b" -> 2}\n{->, ...d1, ...d2}'
+      ).value.toString()
+    ).toBe('{"dict":{"a":1,"b":2}}');
+    expect(run('let a = {1}\nlet b = {2}\n{...a, ...b}').value.toString()).toBe(
+      'Set(1, 2)'
+    );
+    // A literal key reappearing AFTER a spread is the override idiom:
+    // last wins, and no duplicate-key diagnostic fires.
+    const override = run('let d = {"a" -> 5}\n{"a" -> 1, ...d, "a" -> 2}');
+    expect(override.value.toString()).toBe('{"dict":{"a":2}}');
+    expect(override.diagnostics).toEqual([]);
+  });
+
+  test('a set spread into a LIST literal stays a list (no dedup)', () => {
+    const { value } = run('let s = {1, 2}\n[...s, 2]');
+    expect(value.toString()).toBe('[1,2,2]');
+    expect(value.type.matches('list')).toBe(true);
+  });
+});
+
 describe('EPSIL EXECUTE — the bare `_` identity shorthand', () => {
   // A bare `_` in a function slot is the identity function (`x |-> x`). The
   // Epsil parser accepts `_` in argument position (it is an ordinary symbol

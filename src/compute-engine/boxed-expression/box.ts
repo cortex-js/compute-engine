@@ -1387,7 +1387,12 @@ function makeCanonicalFunctionCore(
   // is a lazy view over its ops (`tensor-view.ts`), never a distinct
   // representation (§D1). Metadata is forwarded so latex/... survives boxing.
   //
-  if (name === 'List' && !named) {
+  // A `Spread` element (`[...xs, c]`) takes the NORMAL path below instead:
+  // `List`'s canonical handler owns the splice-and-lower rewrite
+  // (`canonicalList`, library/collections.ts), which this fast path would
+  // bypass.
+  //
+  if (name === 'List' && !named && !ops.some(isSpreadOperand)) {
     const boxedOps = ops.map((x) => ce.expr(x, { form: 'raw' }));
     // `Nothing` is an ERASURE marker (an empty-sequence splice): it is elided
     // from a collection literal, so `[12, Nothing, 34]` is a 2-element list.
@@ -1401,7 +1406,11 @@ function makeCanonicalFunctionCore(
     });
   }
 
-  if (name === 'Dictionary' && !named) {
+  // A `Spread` entry (`{-> , ...d, "k" -> v}` merge) takes the normal path
+  // below instead: the `Dictionary` definition's canonical handler owns the
+  // merge lowering (library/collections.ts), which this structural
+  // construction would bypass.
+  if (name === 'Dictionary' && !named && !ops.some(isSpreadOperand)) {
     const boxedOps = ops.map((x) => ce.expr(x, { form: 'raw' }));
     return new BoxedDictionary(ce, ce._fn('Dictionary', boxedOps), {
       canonical: true,

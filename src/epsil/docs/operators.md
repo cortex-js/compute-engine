@@ -290,9 +290,14 @@ call `Range(a, b, step)`.
 
 ## Spread: `...` {#spread}
 
-In a **call argument list** — and only there — a prefix `...` spreads a tuple
-into the call's arguments: the tuple's elements become ordinary positional
-arguments.
+A prefix `...` splices a value's elements into the surrounding sequence. It
+is accepted in two positions — a **call argument list** and a **list
+literal** — and the three-dot token is distinct from the range operator
+`..`; anywhere else `...` is a diagnostic. (In a `match` pattern, `...rest`
+is the same idea in reverse: it *collects* the remaining elements.)
+
+In a **call argument list**, `...` spreads a tuple into the call's
+arguments: the tuple's elements become ordinary positional arguments.
 
 ```epsil
 f(...t)          // t's elements become f's arguments
@@ -301,12 +306,65 @@ g(...p, ...q)    // several spreads splice in order
 Max(...t)        // variadic built-ins accept spreads
 ```
 
-Only **tuples** spread — a `List` (or any other value) is an
-`incompatible-type` error. A literal tuple splices immediately; a symbolic
-argument is spliced when the call evaluates, and until then the call stays
-symbolic (the spread never binds positionally to a single parameter). The
-three-dot token is distinct from the range operator `..`; outside an argument
-list `...` is a diagnostic.
+In a call, only **tuples** spread — argument lists are tuple-shaped, so a
+`List` (or any other value) is an `incompatible-type` error. A literal tuple
+splices immediately; a symbolic argument is spliced when the call evaluates,
+and until then the call stays symbolic (the spread never binds positionally
+to a single parameter).
+
+In a **list or set literal**, `...` splices a collection — a list, a set, a
+range:
+
+```epsil-live
+let xs = [1, 2]
+[...xs, 3, ...(4..6)]
+// ➔ [1, 2, 3, 4, 5, 6]
+```
+
+```epsil-live
+let s = {2, 3}
+{1, ...s, ...[3, 4]}
+// ➔ Set(1, 2, 3, 4)
+```
+
+The splice happens at canonicalization: literal collections splice
+immediately, and a symbolic or lazy segment lowers to the equivalent
+`Join` expression — a lone spread `[...xs]` is `Join(xs)`, the list
+materialization of `xs`, and an infinite segment stays lazy
+(`[...(1..oo), 5] |> Take(3)` is `[1, 2, 3]`). Set literals deduplicate as
+usual.
+
+**Tuples do not spread here** — a tuple is a unit (a point, a pair), and
+splicing it would quietly discard that; spreading one is a `spread-tuple`
+error. To use a tuple's elements, convert explicitly:
+`[...ListFrom(t), 3]`. A scalar or string operand is an
+`incompatible-type` error (a string is a scalar, not a character
+collection). Note the mirror-image rule in calls: argument lists are
+tuple-shaped, so there exactly tuples spread.
+
+In a **dictionary literal**, `...` merges the entries of a dictionary.
+Entries combine left to right and a **later entry wins** on a key
+collision — so a literal entry after a spread overrides it, the usual
+defaults idiom:
+
+```epsil-live
+let defaults = {"verbose" -> false, "depth" -> 3}
+{...defaults, "verbose" -> true}
+// ➔ {"dict":{"verbose":true,"depth":3}}
+```
+
+(Duplicate **literal** keys are different: they are almost certainly typos,
+so they keep the literal rule — first wins, with a
+`duplicate-dictionary-key` diagnostic.)
+
+A brace of *only* spreads has nothing to mark it as a dictionary, so it is
+read as a **set**-spread. To write a pure merge, lead with the bare `->`
+marker (the same marker as the empty dictionary `{->}`):
+
+```epsil
+{...a, ...b}        // a SET containing the elements of a and b
+{->, ...d1, ...d2}  // a dictionary merge of d1 and d2
+```
 
 ## Unary prefix: `-` and `!` {#unary-prefix}
 

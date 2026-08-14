@@ -1961,11 +1961,10 @@ describe('EPSIL PARSING SPREAD ARGUMENTS', () => {
     ]);
   });
 
-  test('spread is a diagnostic outside a call argument list', () => {
-    const [, inList] = parseEpsil('[...p]');
-    expect(inList.length).toBeGreaterThan(0);
-    expect(inList[0].message).toStrictEqual(['unexpected-symbol', '...']);
-
+  test('spread is a diagnostic outside a spreadable position', () => {
+    // Since 2026-08-14 a LIST literal is a spreadable position too
+    // (`[...p]` is valid — see EPSIL PARSING LIST SPREAD below); a bare
+    // expression position still is not.
     const [, inLet] = parseEpsil('let x = ...p');
     expect(inLet.length).toBeGreaterThan(0);
   });
@@ -2075,6 +2074,76 @@ describe('EPSIL PARSING PIPE-STAGE SUGAR', () => {
 
   test('a bare `_` stage stays the identity shorthand', () => {
     expect(validEpsil('a |> _')).toStrictEqual(['Pipe', 'a', '_']);
+  });
+});
+
+/**
+ * List-literal spread (2026-08-14): `...expr` as a list element parses to
+ * `["Spread", expr]` — the same marker call arguments use — and `List`'s
+ * canonicalization splices it (see `canonicalList`,
+ * `library/collections.ts`; execution pins in `execute.test.ts`).
+ */
+describe('EPSIL PARSING LIST SPREAD', () => {
+  test('spread elements parse to Spread nodes', () => {
+    expect(validEpsil('[...xs, 3]')).toStrictEqual([
+      'List',
+      ['Spread', 'xs'],
+      3,
+    ]);
+    expect(validEpsil('[1, ...xs, ...ys]')).toStrictEqual([
+      'List',
+      1,
+      ['Spread', 'xs'],
+      ['Spread', 'ys'],
+    ]);
+  });
+
+  test('the spread operand is a full expression', () => {
+    expect(validEpsil('[...(1..4)]')).toStrictEqual([
+      'List',
+      ['Spread', ['Range', 1, 4]],
+    ]);
+    expect(validEpsil('[...Join(xs, ys)]')).toStrictEqual([
+      'List',
+      ['Spread', ['Join', 'xs', 'ys']],
+    ]);
+  });
+
+  test('call-argument spread is unchanged', () => {
+    expect(validEpsil('f(...t)')).toStrictEqual(['f', ['Spread', 't']]);
+  });
+
+  test('brace spread: a `->`-free brace is a set-spread', () => {
+    expect(validEpsil('{1, ...s}')).toStrictEqual([
+      'Set',
+      1,
+      ['Spread', 's'],
+    ]);
+    expect(validEpsil('{...a, ...b}')).toStrictEqual([
+      'Set',
+      ['Spread', 'a'],
+      ['Spread', 'b'],
+    ]);
+  });
+
+  test('brace spread: any `->` element makes it a dictionary merge', () => {
+    expect(validEpsil('{...d, "k" -> 1}')).toStrictEqual([
+      'Dictionary',
+      ['Spread', 'd'],
+      ['KeyValuePair', { str: 'k' }, 1],
+    ]);
+    // The bare `->` marker (cf. the empty dictionary `{->}`) forces the
+    // dictionary reading of a pure merge.
+    expect(validEpsil('{->, ...d1, ...d2}')).toStrictEqual([
+      'Dictionary',
+      ['Spread', 'd1'],
+      ['Spread', 'd2'],
+    ]);
+  });
+
+  test('the `->` marker is FIRST-element only; elsewhere it is a diagnostic', () => {
+    const [, diags] = parseEpsil('{"x" -> 1, ->}');
+    expect(diags.length).toBeGreaterThan(0);
   });
 
   test('tighter than `=`, so it is the whole initializer', () => {

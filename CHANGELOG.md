@@ -1,5 +1,30 @@
 ## [Unreleased]
 
+### Epsil
+
+- **Spread expressions in list and set literals, and dictionary
+  merges.** `[...xs, c, ...ys]` splices collections into a list literal,
+  `{1, ...s}` into a set literal (deduplicating), and
+  `{...defaults, "verbose" -> true}` merges dictionaries — completing
+  the `...` trio (call arguments spread, match patterns collect,
+  literals splice). The splice is a canonicalization rewrite on the
+  shared `["Spread", …]` marker, so it works identically for MathJSON
+  (`["List", ["Spread", "xs"], 3]`): literal collections splice
+  eagerly, a lone spread `[...xs]` canonicalizes to `Join(xs)` (the
+  list materialization of `xs`), symbolic or lazy segments lower to the
+  equivalent `Join`/`SetFrom`/`DictionaryFrom` expression, and an
+  infinite segment stays lazy (`[...(1..oo), 5] |> Take(3)` is
+  `[1, 2, 3]`). **Tuples do not spread** — a tuple is a unit, and
+  `ListFrom` is the explicit converter — so spreading one is a loud
+  `spread-tuple` error; scalars and strings are `incompatible-type`
+  errors. (In a call, the rule is mirror-image: argument lists are
+  tuple-shaped, so there exactly tuples spread.) Dictionary merges are
+  **last-wins** on key collisions — a literal entry after a spread
+  overrides it — while duplicate *literal* keys keep the literal
+  convention (first wins, with a diagnostic). A brace of only spreads
+  is a set-spread; lead with the bare `->` marker for a pure dictionary
+  merge: `{->, ...d1, ...d2}`.
+
 ### Breaking Changes
 
 - **`Map` now takes its mapping function FIRST: `Map(f, xs)`,
@@ -20,6 +45,58 @@
   collection operators are unchanged — none of them is variadic over
   collections, so their collection-first spellings remain expressible
   and true.
+
+### New Features
+
+- **A derivative with no tractable symbolic closed form now falls back to
+  numeric differentiation — on both the compiled and interpreted routes.**
+  Differentiating a deeply-nested body (e.g. `√(x + √(x + … + 1))` nested
+  37 deep) grows exponentially; past the engine's differentiation growth
+  budget the javascript compile used to fail closed and the interpreted
+  route hung in the expansion (Tycho item 177). Past that same budget both
+  routes now use one shared 8th-order centered-difference stencil (composed
+  for higher orders, with the sampling window held constant so it does not
+  step outside the function's domain): the compiled target emits it as the
+  `_SYS.nd` runtime helper, and `N()` of an `Apply` of the unresolved
+  `Derivative` computes it with the identical function, so the two routes
+  agree bit-for-bit. Within the budget nothing changes — the exact symbolic
+  closed form is used, as before. Plain `evaluate()` keeps the exactness
+  contract and stays symbolic. Accuracy is stencil-grade (~1e-10 relative
+  at order 1, ~1e-3 envelope at order 3), fit for plotting, not for exact
+  arithmetic. Also new: `ND(f, x)` at a **runtime** point now compiles (it
+  previously required a compile-time numeric point), and `D(body, x)` past
+  the budget lowers the same way. The failed symbolic attempt still runs
+  once per compile before the fallback engages (bounded by the growth
+  budget, roughly a second per derivative node on the deep shapes).
+
+### Issues Resolved
+
+- **Numeric quadrature now honors the evaluation deadline.** The adaptive
+  Gauss–Kronrod kernel never checked the span deadline, so an integral the
+  panel refinement could not finish ran unbounded: a nested oscillatory
+  integral (`∫₀¹(∫ sin(1/(xy+10⁻⁴))dx)dy`) under a 1 s `withTimeLimit`
+  ran for minutes until killed externally, even with the armed span on the
+  stack (Tycho item 183 — a document-open hang in production). The kernel
+  now checks the deadline once per panel and salvages the partial result
+  (the accumulated estimate with `converged: false`, the same in-band
+  behavior the Monte-Carlo fallback already had), and it both inherits and
+  re-publishes the ambient deadline — so an integrand that is itself an
+  integral, including one reached through compiled code
+  (`_SYS.integrate`, which has no engine access), is bounded by the outer
+  span too. The repro now terminates at exactly the 1 s deadline with a
+  clean timeout. Results without a deadline are unchanged.
+
+- **`IntegerString` preserves the sign.** `IntegerString(-42)` returned
+  `"42"` (the handler took the absolute value), so
+  `DigitsFrom(IntegerString(n))` did not round-trip negative integers. It
+  now returns `"-42"` (and `"-2a"` in base 16).
+
+- **`StringSplit` with an empty separator no longer corrupts non-BMP
+  text.** `StringSplit(s, "")` delegated to JavaScript's `split("")`,
+  which cuts between UTF-16 code units — splitting `"a🏳️‍🌈b"` produced
+  lone surrogate halves (rendering as `�`). An empty separator now splits
+  into user-perceived characters (grapheme clusters), the same
+  segmentation `Characters` uses.
 
 ## 0.107.0 _2026-08-13_
 

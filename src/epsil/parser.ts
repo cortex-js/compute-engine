@@ -6657,9 +6657,16 @@ export class Parser {
   // ─── Collections and dictionaries ─────────────────────────────────────────
   //
 
-  /** `[a, b]` → `["List", a, b]`; `[]` → `["List"]`. */
+  /** `[a, b]` → `["List", a, b]`; `[]` → `["List"]`. A `...expr` element is
+   * a spread (`["Spread", expr]`), spliced by `List`'s canonicalization:
+   * `[...xs, c]` is `Join`/`ListFrom` sugar (`library/collections.ts`). */
   private parseList(): MathJsonExpression {
-    const { values, open, end } = this.parseBracketedList('CLOSE_BRACKET', ']');
+    const { values, open, end } = this.parseBracketedList(
+      'CLOSE_BRACKET',
+      ']',
+      false,
+      /* allowSpread */ true
+    );
     return this.wrap(
       ['List', ...values] as MathJsonExpression[],
       open.start,
@@ -6691,11 +6698,24 @@ export class Parser {
       return this.wrap(['Dictionary'], open.start, close.end);
     }
 
-    const { values, open, end } = this.parseBracketedList('CLOSE_BRACE', '}');
+    const { values, open, end, dictMarker } = this.parseBracketedList(
+      'CLOSE_BRACE',
+      '}',
+      false,
+      /* allowSpread */ true,
+      false,
+      /* allowDictionaryMarker */ true
+    );
 
-    // Disambiguate Set vs Dictionary on the first element: a top-level `->`
-    // (a `KeyValuePair`) marks a dictionary.
-    if (values.length > 0 && operator(values[0]) === 'KeyValuePair')
+    // Disambiguate Set vs Dictionary: ANY element with a top-level `->` (a
+    // `KeyValuePair`), or the bare `->` marker, makes it a dictionary
+    // (ruled 2026-08-14 — a `...spread` element carries no `->`, so a pure
+    // merge is spelled `{->, ...d1, ...d2}` while `{...a, ...b}` is a
+    // set-spread).
+    if (
+      dictMarker ||
+      values.some((v) => operator(v) === 'KeyValuePair')
+    )
       return this.buildDictionary(values, open.start, end);
 
     return this.wrap(
@@ -6717,6 +6737,19 @@ export class Parser {
     const seenKeys = new Set<string>();
 
     for (const el of elements) {
+      // A `...d` merge entry passes through verbatim: the `Dictionary`
+      // canonical handler owns the merge lowering (last-wins on key
+      // collisions — see `library/collections.ts`). The parser's
+      // duplicate-key diagnostic below deliberately covers LITERAL keys
+      // only — and only literals NOT separated by a spread: a literal key
+      // reappearing after a `...d` is the documented override idiom
+      // (`{"a" -> 1, ...d, "a" -> 2}`), not a typo, so the seen-set resets
+      // here.
+      if (operator(el) === 'Spread') {
+        entries.push(el);
+        seenKeys.clear();
+        continue;
+      }
       if (operator(el) !== 'KeyValuePair') {
         const o = nodeOffsets(el);
         this.error(
@@ -6797,22 +6830,49 @@ export class Parser {
     closeText: string,
     allowTypedParams = false,
     allowSpread = false,
-    allowNamedArgs = false
+    allowNamedArgs = false,
+    allowDictionaryMarker = false
   ): {
     values: MathJsonExpression[];
     open: Token;
     end: number;
     typed: boolean;
+    dictMarker: boolean;
   } {
     const open = this.advance(); // the opening bracket
     this.brackets.push(open);
 
     const values: MathJsonExpression[] = [];
     let typed = false;
+    let dictMarker = false;
     if (!this.check(closeType)) {
       for (;;) {
-        // `...expr` — a spread argument (call argument lists only): the
-        // elements of the tuple `expr` splice into the call's arguments.
+        // A bare `->` element — the DICTIONARY MARKER (brace literals
+        // only). It contributes no entry; it forces the dictionary reading
+        // of a brace whose other elements are all spreads
+        // (`{->, ...d1, ...d2}` is a dictionary merge — cf. the empty
+        // dictionary `{->}`, which never reaches this list). Recognized
+        // only as the FIRST element and only once — a later or repeated
+        // bare `->` (`{"x" -> 1, ->}`) is a likely typo and follows the
+        // ordinary element-parse error path.
+        if (
+          allowDictionaryMarker &&
+          values.length === 0 &&
+          !dictMarker &&
+          this.check('OPERATOR') &&
+          this.current.text === '->' &&
+          (this.peek().type === 'COMMA' || this.peek().type === closeType)
+        ) {
+          this.advance(); // `->`
+          dictMarker = true;
+          if (!this.match('COMMA')) break;
+          if (this.check(closeType)) break; // trailing comma
+          continue;
+        }
+        // `...expr` — a spread element. In a CALL argument list the elements
+        // of the tuple `expr` splice into the call's arguments (arguments are
+        // tuple-shaped; a list does not spread there). In a LIST literal any
+        // collection spreads (`List`'s canonicalization splices it).
         if (
           allowSpread &&
           this.check('OPERATOR') &&
@@ -6934,7 +6994,7 @@ export class Parser {
       if (isCloseToken(this.current.type)) this.advance();
     }
 
-    return { values, open, end, typed };
+    return { values, open, end, typed, dictMarker };
   }
 
   /** Within a bracketed construct, skip to (but do not consume) the matching
