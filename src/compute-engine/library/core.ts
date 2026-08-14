@@ -145,6 +145,7 @@ import {
 } from '../boxed-expression/effects-of.js';
 import { hasDeclaredEffectLabel } from '../../common/type/effects.js';
 import { canEnumerateOperand } from '../collection-utils.js';
+import { numericDerivativeOfApply } from './calculus.js';
 import {
   isNumber,
   isSymbol,
@@ -2046,7 +2047,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // application stayed symbolic (unresolved symbolic derivative,
         // returned as an `Apply` expression), re-entering N() here would
         // recurse forever.
-        if (isFunction(result, 'Apply')) return result;
+        if (isFunction(result, 'Apply')) {
+          // An application of a `Derivative` with no symbolic closed form
+          // (the differentiation growth budget tripped on a deeply-nested
+          // body, or the head stayed unresolved) numericizes through the
+          // stencil fallback — the SAME `centeredDiffHigherOrder` the
+          // compiled javascript target emits as `_SYS.nd`, so the two
+          // routes agree bit-for-bit (Tycho item 177, user-ruled
+          // shared-budget fallback 2026-08-14). Only under
+          // `numericApproximation`: plain `evaluate()` returned above,
+          // keeping the exactness contract (symbolic, unchanged).
+          return numericDerivativeOfApply(result) ?? result;
+        }
         return result.N();
       },
     },
@@ -4597,16 +4609,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     // Split a string into a list of substrings. With no separator, split on
     // runs of whitespace — the Unicode White_Space set spelled out in
     // `UNICODE_WHITESPACE`, not `\s`, so the behavior does not depend on the
-    // host regex engine — dropping empty parts. With a separator string, use
-    // JS `String.split` semantics (empty parts are kept). A non-string
-    // argument leaves the expression unevaluated.
+    // host regex engine — dropping empty parts. With a non-empty separator
+    // string, use JS `String.split` semantics (empty parts are kept). With an
+    // EMPTY separator, split into grapheme clusters — never into UTF-16 code
+    // units, which would shatter surrogate pairs into lone `�` halves
+    // (JS `split('')` does exactly that). A non-string argument leaves the
+    // expression unevaluated.
     StringSplit: {
       description: [
         'StringSplit(s): split a string on runs of whitespace (the Unicode ' +
           'White_Space code points), dropping empty parts.',
         'StringSplit(s, sep): split a string on the separator string `sep` ' +
-          '(empty parts are kept). A non-string argument leaves the ' +
-          'expression unevaluated.',
+          '(empty parts are kept). An empty separator splits into ' +
+          'user-perceived characters (grapheme clusters), like Characters. ' +
+          'A non-string argument leaves the expression unevaluated.',
       ],
       signature: '(string, string?) -> list<string>',
       // Complete precondition: op1 must be a string; a PRESENT separator must
@@ -4627,7 +4643,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             .filter((p) => p.length > 0);
         } else {
           if (!isString(sep)) return undefined;
-          parts = s.string.split(sep.string);
+          // An empty separator means "split into characters": segment into
+          // grapheme clusters. JS `split('')` would cut between UTF-16 code
+          // units, shattering surrogate pairs — never do that.
+          if (sep.string === '')
+            parts = splitGraphemeClusters(s.string);
+          else parts = s.string.split(sep.string);
         }
         return engine.function(
           'List',
@@ -4841,11 +4862,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (!Number.isFinite(val))
           return ce.typeError('integer', op1.type, op1);
 
+        // The sign is preserved (`IntegerString(-42)` is `"-42"`), so
+        // `DigitsFrom(IntegerString(n))` round-trips for negative integers.
         const op2 = ops[1] ?? ce.Nothing;
         if (sym(op2) === 'Nothing') {
           if (op1.bignumRe !== undefined)
-            return ce.string(op1.bignumRe.abs().toString());
-          return ce.string(Math.abs(val).toString());
+            return ce.string(op1.bignumRe.toString());
+          return ce.string(val.toString());
         }
 
         const base = asSmallInteger(op2);
@@ -4857,7 +4880,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             op2.toString()
           );
 
-        return ce.string(Math.abs(val).toString(base));
+        return ce.string(val.toString(base));
       },
     },
   },

@@ -14,6 +14,11 @@
  * or the engine core (zero-cycle budget).
  */
 
+import {
+  getAmbientDeadline,
+  withAmbientDeadline,
+} from '../../common/interruptible.js';
+
 // GK15 abscissae on [-1, 1], positive half only (symmetric about 0).
 // XGK[1], XGK[3], XGK[5] are the non-central abscissae of the 7-point Gauss
 // rule; XGK[0], XGK[2], XGK[4], XGK[6] are the abscissae optimally added by
@@ -327,7 +332,8 @@ function adaptiveFinite(
   rtol: number,
   atol: number,
   maxIntervals: number,
-  initialPanels: number
+  initialPanels: number,
+  deadline: number | undefined
 ): {
   estimate: number;
   error: number;
@@ -371,6 +377,15 @@ function adaptiveFinite(
     Math.min(Math.floor(initialPanels), Math.floor(maxIntervals))
   );
   for (let i = 0; i < n; i++) {
+    // Deadline check per panel (Tycho item 183): a panel is ≥15 integrand
+    // evaluations, and for an ITERATED integral each evaluation is itself a
+    // full inner quadrature — before this check, a nested oscillatory
+    // integral under a 1 s `withTimeLimit` ran for minutes (unbounded by
+    // any JS-side budget, since the kernel never yields). The break
+    // SALVAGES: the panels built so far stand, `converged` stays false, and
+    // the caller reports the partial result the way the Monte-Carlo
+    // fallback already does at its deadline.
+    if (deadline !== undefined && Date.now() >= deadline) break;
     const lo = i === 0 ? a : a + ((b - a) * i) / n;
     const hi = i === n - 1 ? b : a + ((b - a) * (i + 1)) / n;
     if (!(lo < hi)) {
@@ -398,6 +413,11 @@ function adaptiveFinite(
 
   while (panels.length < maxIntervals) {
     if (badPanels === 0 && totalError <= tolerance()) break;
+    // Deadline check per bisection — same salvage semantics as the
+    // initial-panel loop above (item 183). One check per panel is ample:
+    // each iteration costs two GK15 evaluations (30 integrand calls), so
+    // the overshoot past the deadline is bounded by a single bisection.
+    if (deadline !== undefined && Date.now() >= deadline) break;
 
     // Pick the panel with the largest (or non-finite) error.
     let worst = 0;
@@ -489,6 +509,16 @@ export function adaptiveQuadrature(
     atol?: number;
     maxIntervals?: number;
     initialPanels?: number;
+    /** Absolute timestamp (ms) after which the adaptive loop stops
+     * subdividing and SALVAGES the partial result (`converged: false`,
+     * the accumulated estimate and error bound stand — same in-band
+     * behavior as the Monte-Carlo fallback at its deadline). When omitted,
+     * the AMBIENT deadline is inherited — this is how a nested integral
+     * reached through compiled code (`_SYS.integrate` has no engine
+     * access) stays bounded by the outer `withTimeLimit` span (Tycho
+     * item 183: a nested oscillatory integral under a 1 s limit ran for
+     * minutes because no level of the quadrature ever checked). */
+    deadline?: number;
   }
 ): {
   estimate: number;
@@ -500,6 +530,12 @@ export function adaptiveQuadrature(
   const atol = options?.atol ?? 1e-12;
   const maxIntervals = options?.maxIntervals ?? 1500;
   const initialPanels = options?.initialPanels ?? INITIAL_PANELS;
+  // Inherit the ambient deadline BEFORE publishing (below): when this call
+  // carries no explicit deadline but runs inside a deadline-bounded numeric
+  // routine, the inherited value is what gets re-published — never
+  // `undefined`, which would CLEAR the outer deadline for the duration
+  // (mirrors `monteCarloEstimate`).
+  const deadline = options?.deadline ?? getAmbientDeadline();
 
   if (Number.isNaN(a) || Number.isNaN(b))
     return { estimate: NaN, error: NaN, converged: false, divergent: false };
@@ -508,7 +544,7 @@ export function adaptiveQuadrature(
     return { estimate: 0, error: 0, converged: true, divergent: false };
 
   if (a > b) {
-    const r = adaptiveQuadrature(f, b, a, options);
+    const r = adaptiveQuadrature(f, b, a, { ...options, deadline });
     return {
       estimate: -r.estimate,
       error: r.error,
@@ -538,6 +574,7 @@ export function adaptiveQuadrature(
       atol,
       maxIntervals: Math.ceil(maxIntervals / 2),
       initialPanels,
+      deadline,
     };
     const left = adaptiveQuadrature(f, a, 0, halfOptions);
     const right = adaptiveQuadrature(f, 0, b, halfOptions);
@@ -585,5 +622,11 @@ export function adaptiveQuadrature(
     hi = b;
   }
 
-  return adaptiveFinite(g, lo, hi, rtol, atol, maxIntervals, initialPanels);
+  // Publish the deadline as the ambient one for the duration: the integrand
+  // may itself be (or reach, through compiled code) another quadrature or
+  // sampler, and the nested call inherits this deadline instead of running
+  // unbounded (the item-183 nested-integral hang).
+  return withAmbientDeadline(deadline, () =>
+    adaptiveFinite(g, lo, hi, rtol, atol, maxIntervals, initialPanels, deadline)
+  );
 }

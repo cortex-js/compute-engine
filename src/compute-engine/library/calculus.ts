@@ -15,6 +15,8 @@ import {
   resolveToList,
   collectBinderNames,
   withValueShield,
+  isOperatorDef,
+  isValueDef,
 } from '../boxed-expression/utils.js';
 import {
   isFunction,
@@ -37,6 +39,7 @@ import {
   applicableN1,
   canonicalFunctionLiteral,
   canonicalFunctionLiteralArguments,
+  lookupApplicable,
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { mixTags } from '../numerics/random.js';
@@ -48,6 +51,7 @@ import {
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
 import {
   centeredDiff8thOrder,
+  centeredDiffHigherOrder,
   limit,
   LIMIT_PROBE_ITERATION_BUDGET,
 } from '../numerics/numeric.js';
@@ -370,6 +374,11 @@ function nIntegrateMultiple(
     // it so the floor applies to the whole iterated integral, not each level.
     const gk = adaptiveQuadrature(g, lower, upper, {
       initialPanels: initialPanelsForDimensions(limits.length),
+      // Item 183: every level of an iterated integral checks the span
+      // deadline (per panel) and salvages its partial result — one full
+      // inner quadrature runs per outer node, so an unchecked level made
+      // the whole nest unboundable by any JS-side budget.
+      deadline: ce._deadline,
     });
     if (gk.converged && Number.isFinite(gk.estimate)) return inflate(gk);
     // A level diagnosed as divergent has no finite value: propagate NaN rather
@@ -668,9 +677,17 @@ const DERIVATIVE_HEADS = ['D', 'Derivative', 'ND'] as const;
 function compileDerivative(
   operator: (typeof DERIVATIVE_HEADS)[number],
   args: ReadonlyArray<Expression>,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  context?: { readonly language: string }
 ): string | undefined {
   if (args.length === 0) return undefined;
+
+  // The numeric fallback for the no-closed-form declines below (item 177).
+  // NOT used for the impure decline: an impure body's stencil would re-draw
+  // its random values at every stencil point, and the interpreted route
+  // declines it too — the two routes must fail (or fall back) together.
+  const fallback = (): string | undefined =>
+    compileNumericDerivativeFallback(operator, args, compile, context);
 
   const ce = args[0].engine;
   let node: Expression;
@@ -689,19 +706,23 @@ function compileDerivative(
     if (!node.isPure) return undefined;
     value = node.evaluate();
   } catch {
-    return undefined;
+    return fallback();
   } finally {
     ce.popScope();
   }
-  if (!value.isValid) return undefined;
+  if (!value.isValid) return fallback();
   // Re-entry guard: an unchanged result would compile straight back into this
-  // handler.
-  if (value.isSame(node)) return undefined;
+  // handler. This is also where the differentiation growth budget surfaces:
+  // `differentiate()` declines past `MAX_DERIVATIVE_NODES` (a deeply-nested
+  // body whose derivative's term count grows exponentially), the evaluate
+  // handler then returns the node unchanged, and the numeric fallback takes
+  // over — instead of the compilation failing closed (Tycho item 177).
+  if (value.isSame(node)) return fallback();
   // No closed form: a derivative head survived the evaluation. Head-aware:
   // `has()` would also match a plain symbol named `D`, which is a legitimate
   // free variable in a closed form.
   if (DERIVATIVE_HEADS.some((h) => value.getSubexpressions(h).length > 0))
-    return undefined;
+    return fallback();
 
   try {
     // The closed form is a FRESH expression in the engine's angular
@@ -720,8 +741,168 @@ function compileDerivative(
     // trade-off is deliberate — the inner message names the offending head and
     // is more informative than the generic decline the fallthrough produces,
     // but contract-correctness wins. Do not "restore" the throw.
+    return fallback();
+  }
+}
+
+/**
+ * Emit a NUMERIC differentiation when the symbolic closed form is
+ * unavailable — the shared-budget fallback of Tycho item 177 (user-ruled
+ * 2026-08-14): within the differentiation growth budget both routes use the
+ * exact closed form; past it, the compiled target and the interpreter's
+ * `N()` both fall back to the SAME stencil (`centeredDiffHigherOrder`,
+ * numerics/numeric.ts — injected into emitted code as `_SYS.nd`), so
+ * compiled-vs-interpreted parity holds by construction. Plain `evaluate()`
+ * keeps its exactness contract: it returns the node symbolically unchanged
+ * rather than a stencil float (see `numericDerivativeOfApply`).
+ *
+ * javascript target only: the other targets keep today's decline (each
+ * would need its own `nd` runtime; add per-target when asked). Univariate,
+ * single-order, PURE bodies only — mixed partials and impure bodies decline
+ * on both routes alike.
+ */
+function compileNumericDerivativeFallback(
+  operator: (typeof DERIVATIVE_HEADS)[number],
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  context?: { readonly language: string }
+): string | undefined {
+  if (context?.language !== 'javascript') return undefined;
+  if (args.length === 0) return undefined;
+  const ce = args[0].engine;
+  try {
+    if (operator === 'D') {
+      // `D(body, v)` is EXPRESSION-valued: emit the stencil function applied
+      // at the (free) variable. Multi-variable / repeated-variable partials
+      // keep the symbolic-only behavior.
+      if (args.length !== 2) return undefined;
+      const v = args[1];
+      if (!isSymbol(v)) return undefined;
+      const body = args[0];
+      if (!body.isPure) return undefined;
+      const fn = ce.function('Function', [body, v]);
+      return `_SYS.nd(${compile(rewriteAngularUnit(fn))}, 1)(${compile(v)})`;
+    }
+
+    // `Derivative(f, order?)` is FUNCTION-valued; `ND(f, x)` is a value at a
+    // point. Both need `f` as a compilable univariate function literal
+    // (resolving a symbol callee through its binding). The literal is
+    // rewritten for the angular convention explicitly — as an operand of a
+    // derivative head it was skipped by the entry-point rewrite (see the
+    // closed-form branch above); the interpreted fallback gets the same
+    // rewrite implicitly because `implicitCompile` runs the full compile
+    // entry on the literal.
+    const lit = resolveDerivativeFunctionLiteral(args[0]);
+    if (lit === undefined) return undefined;
+
+    if (operator === 'Derivative') {
+      if (args.length > 2) return undefined;
+      const order = args[1] === undefined ? 1 : Math.floor(args[1].N().re);
+      if (!Number.isFinite(order) || order < 1) return undefined;
+      return `_SYS.nd(${compile(rewriteAngularUnit(lit))}, ${order})`;
+    }
+
+    // `ND` — previously compilable only when the point was numeric at
+    // compile time (the evaluate handler ran the stencil then); a runtime
+    // point now lowers to the same stencil evaluated at run time.
+    if (args.length !== 2) return undefined;
+    return `_SYS.nd(${compile(rewriteAngularUnit(lit))}, 1)(${compile(args[1])})`;
+  } catch {
+    // The body contains a head the target cannot lower — same contract as
+    // the closed-form branch: decline, never let the inner error escape.
     return undefined;
   }
+}
+
+/**
+ * Resolve a derivative-head operand to a compilable univariate `Function`
+ * literal. A literal passes through; a SYMBOL callee (`Derivative(f)` where
+ * `f := x ↦ …`) resolves through its binding — the value-definition's stored
+ * `Function` value, or the operator definition's `_lambdaLiteral` (the
+ * literal a lambda-backed `f(x) := …` was installed from).
+ * `canonicalFunctionLiteral` deliberately returns symbols unchanged (its
+ * case 2), so it cannot do this resolution. Builtin operator symbols
+ * (`Sin`) return `undefined` — their derivatives have closed forms, so the
+ * fallback is never the right tool for them.
+ */
+function resolveDerivativeFunctionLiteral(
+  expr: Expression | undefined
+): Expression | undefined {
+  if (expr === undefined) return undefined;
+  let lit: Expression | undefined;
+  if (isFunction(expr, 'Function')) lit = expr;
+  else if (isSymbol(expr)) {
+    // Prefer the instance's own binding; fall back to a BY-NAME lookup in
+    // the current scope — a symbol operand reaching a compile handler is
+    // not necessarily bound (the compilation walks operand instances that
+    // may predate binding), the same reason `base-compiler.ts` resolves
+    // operator heads with `lookupApplicable` rather than through the
+    // instance.
+    let vdef = expr.valueDefinition;
+    let odef = expr.operatorDefinition;
+    if (vdef === undefined && odef === undefined) {
+      const found = lookupApplicable(
+        expr.symbol,
+        expr.engine.context.lexicalScope
+      );
+      if (found !== undefined && isOperatorDef(found)) odef = found.operator;
+      else if (found !== undefined && isValueDef(found)) vdef = found.value;
+    }
+    const v = vdef?.value;
+    lit =
+      v !== undefined && isFunction(v, 'Function') ? v : odef?._lambdaLiteral;
+  }
+  if (lit === undefined || !isFunction(lit, 'Function')) return undefined;
+  // Univariate only: `Function(body, param)`.
+  if (lit.ops.length !== 2) return undefined;
+  if (!lit.isPure) return undefined;
+  return lit;
+}
+
+/**
+ * The INTERPRETED half of the item-177 numeric-derivative fallback: given an
+ * `Apply(Derivative(f, order?), x)` that stayed symbolic because no closed
+ * form was found (the differentiation growth budget, or an unresolvable
+ * head), compute the same stencil the compiled target emits
+ * (`centeredDiffHigherOrder` — one shared function, so the two routes agree
+ * bit-for-bit). Returns `undefined` — leaving the expression symbolic — when
+ * the shape is not the univariate pure single-point case, mirroring
+ * `compileNumericDerivativeFallback`'s gates.
+ *
+ * Called ONLY from `Apply`'s evaluate handler under `numericApproximation`
+ * (library/core.ts): plain `evaluate()` keeps the exactness contract and
+ * returns the symbolic expression untouched.
+ */
+export function numericDerivativeOfApply(
+  expr: Expression
+): Expression | undefined {
+  if (!isFunction(expr, 'Apply')) return undefined;
+  if (expr.ops.length !== 2) return undefined;
+  const callee = expr.op1;
+  if (!isFunction(callee, 'Derivative')) return undefined;
+  if (callee.ops.length > 2) return undefined;
+  if (!callee.isPure) return undefined;
+
+  const ce = expr.engine;
+  const order =
+    callee.ops.length === 2 ? Math.floor(callee.ops[1].N().re) : 1;
+  if (!Number.isFinite(order) || order < 1) return undefined;
+
+  const lit = resolveDerivativeFunctionLiteral(callee.op1);
+  if (lit === undefined) return undefined;
+
+  const x = expr.ops[1].N().re;
+  if (Number.isNaN(x)) return undefined;
+
+  // Same evaluation vehicle as `ND`'s evaluate handler: the compiled literal
+  // where JIT is available, the interpreted applier otherwise.
+  const compiled = implicitCompile(ce, lit);
+  const fn = (compiled?.run as (x: number) => number) ?? applicableN1(lit);
+  const v = centeredDiffHigherOrder(fn, x, order);
+  if (Number.isNaN(v)) return undefined;
+  // Machine arithmetic throughout (the stencil runs compiled JS), so box a
+  // machine number directly — same rationale as `ND`'s evaluate handler.
+  return new BoxedNumber(ce, v);
 }
 
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
@@ -927,8 +1108,8 @@ volumes
 
         return ce._fn('Derivative', [op, ...orders.map((n) => ce.number(n))]);
       },
-      compile: (args, compile) =>
-        compileDerivative('Derivative', args, compile),
+      compile: (args, compile, context) =>
+        compileDerivative('Derivative', args, compile, context),
     },
 
     //
@@ -1105,7 +1286,8 @@ volumes
           ? undefined
           : rebindEscapingCurrentScope(ce, result);
       },
-      compile: (args, compile) => compileDerivative('D', args, compile),
+      compile: (args, compile, context) =>
+        compileDerivative('D', args, compile, context),
     },
 
     // Evaluate a numerical approximation of a derivative at point x
@@ -1132,7 +1314,8 @@ volumes
           (compiled?.run as (x: number) => number) ?? applicableN1(body);
         return new BoxedNumber(engine, centeredDiff8thOrder(fn, xValue));
       },
-      compile: (args, compile) => compileDerivative('ND', args, compile),
+      compile: (args, compile, context) =>
+        compileDerivative('ND', args, compile, context),
     },
 
     JacobianMatrix: {
@@ -1482,7 +1665,14 @@ volumes
           // for an expensive integrand (an inner quadrature, a compiled model)
           // those samples cost minutes.
           if (compiled?.success) {
-            const gk = adaptiveQuadrature(jsf, lower, upper);
+            // `deadline`: bounds the adaptive loop (per-panel check, partial
+            // salvage) AND is re-published as the ambient deadline so an
+            // integrand that is itself an integral — interpreted, or compiled
+            // to `_SYS.integrate`, which has no engine access — inherits it
+            // (Tycho item 183).
+            const gk = adaptiveQuadrature(jsf, lower, upper, {
+              deadline: ce._deadline,
+            });
             // A diagnosed divergence has no finite value. Monte Carlo would
             // still return one — a mean of samples that never saw the
             // singularity — so the fallback is skipped, not just the report.

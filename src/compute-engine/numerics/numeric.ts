@@ -326,6 +326,52 @@ export function chop(n: number, tolerance = DEFAULT_TOLERANCE): 0 | number {
  *
  * See https://en.wikipedia.org/wiki/Finite_difference_coefficient
  */
+/**
+ * Numeric n-th derivative by COMPOSING the 8th-order centered-difference
+ * stencil: the order-k derivative is the stencil applied to the numeric
+ * order-(k-1) derivative. Cost is 9^order evaluations of `f`; accuracy
+ * degrades with order (roughly 1e-10 relative at order 1, ~1e-4 at
+ * order 3 with the default step).
+ *
+ * This is the SHARED numeric-differentiation route of the item-177
+ * derivative fallback: the interpreter (`Apply` of an unresolved
+ * `Derivative` under `N()`, `ND`) and the emitted JavaScript
+ * (`_SYS.nd`, injected from this same export) both call this one
+ * function, so the two routes produce bit-identical results by
+ * construction — required by Tycho's route-parity net (their D-209
+ * sweep compares compiled vs interpreted at 1e-12).
+ */
+export function centeredDiffHigherOrder(
+  f: (x: number) => number,
+  x: number,
+  order: number,
+  h = 0.1
+): number {
+  if (!Number.isFinite(order) || order <= 0) return f(x);
+  const k = Math.floor(order);
+  // Scale the per-level step so the TOTAL sampling width (k levels × 4·step
+  // on each side) stays 4h — the same window the order-1 stencil uses.
+  // Without this, the composed window grows to k·4h and steps outside the
+  // function's domain near a boundary (√(x + √(x + …)) is real only for
+  // x ≥ −1/4: an order-2 stencil at x = 0.5 with h = 0.1 sampled x − 0.8,
+  // returning NaN where the derivative is perfectly finite).
+  return composedCenteredDiff(f, x, k, h / k);
+}
+
+function composedCenteredDiff(
+  f: (x: number) => number,
+  x: number,
+  k: number,
+  step: number
+): number {
+  if (k <= 1) return centeredDiff8thOrder(f, x, step);
+  return centeredDiff8thOrder(
+    (y) => composedCenteredDiff(f, y, k - 1, step),
+    x,
+    step
+  );
+}
+
 export function centeredDiff8thOrder(
   f: (x: number) => number,
   x: number,

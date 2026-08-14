@@ -140,15 +140,23 @@ describe('COMPILE DERIVATIVE — no closed form declines cleanly', () => {
     expect(result.error).toContain('Fail closed (D6)');
   });
 
-  test('ND at a symbolic point declines with the standard message', () => {
+  test('ND at a RUNTIME point compiles to the numeric stencil', () => {
+    // Changed by the item-177 shared-budget numeric fallback (user-ruled
+    // 2026-08-14): a symbolic (runtime) evaluation point previously
+    // declined ("ND at a symbolic point stays put"); it now lowers to
+    // `_SYS.nd`, the same `centeredDiffHigherOrder` stencil the interpreted
+    // `ND` evaluate handler runs, evaluated at the runtime value.
     const engine = new ComputeEngine();
     engine.declare('y', 'number');
     const result = compile(
       engine.box(['ND', ['Function', ['Power', 'x', 2], 'x'], 'y'])
     );
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('ND: cannot compile');
-    expect(result.error).toContain('Fail closed (D6)');
+    expect(result.success).toBe(true);
+    const run = result.run as (arg: { y: number }) => number;
+    // d/dx x² = 2x; the 8th-order stencil is exact for polynomials up to
+    // roundoff.
+    expect(run({ y: 1.5 })).toBeCloseTo(3, 9);
+    expect(run({ y: -0.25 })).toBeCloseTo(-0.5, 9);
   });
 
   test('the decline does not throw out of compile() on glsl', () => {

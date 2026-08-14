@@ -45,6 +45,7 @@ import {
   realGcd as gcd,
   realLcm as lcm,
   limit,
+  centeredDiffHigherOrder,
 } from '../numerics/numeric.js';
 import {
   parseColor,
@@ -4502,6 +4503,18 @@ const SYS_HELPERS = {
   factorial2,
   gamma,
   gcd,
+  // Numeric-differentiation fallback (item 177): `_SYS.nd(f, k)` returns the
+  // function x ↦ (numeric k-th derivative of f at x). Emitted by
+  // `compileDerivative` (library/calculus.ts) when the symbolic closed form
+  // is unavailable (the differentiation growth budget tripped, or the head
+  // stayed unresolved). The implementation is the SAME exported function the
+  // interpreter's fallback calls (`centeredDiffHigherOrder`,
+  // numerics/numeric.ts), so compiled and interpreted values are
+  // bit-identical — Tycho's route-parity requirement.
+  nd:
+    (f: (x: number) => number, order: number) =>
+    (x: number): number =>
+      centeredDiffHigherOrder(f, x, order),
   // Power with the interpreter's 0^0 = NaN convention. `Math.pow(0, 0)` is 1,
   // but the interpreter treats a genuine 0^0 as indeterminate (NaN). Used only
   // on the variable-exponent path — where the exponent could be 0 at run time
