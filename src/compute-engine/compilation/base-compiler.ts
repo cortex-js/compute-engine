@@ -1289,8 +1289,7 @@ export class BaseCompiler {
     // inside the collection operand, not an indexing set, and still folds.
     if (BaseCompiler.containsUnboundedBigOp(expr)) return undefined;
     if (
-      (target.varsKeys !== undefined ||
-        target.foldExcludedOps !== undefined) &&
+      (target.varsKeys !== undefined || target.foldExcludedOps !== undefined) &&
       BaseCompiler.mentionsExcludedName(
         expr,
         target.varsKeys,

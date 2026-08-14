@@ -6712,10 +6712,7 @@ export class Parser {
     // (ruled 2026-08-14 — a `...spread` element carries no `->`, so a pure
     // merge is spelled `{->, ...d1, ...d2}` while `{...a, ...b}` is a
     // set-spread).
-    if (
-      dictMarker ||
-      values.some((v) => operator(v) === 'KeyValuePair')
-    )
+    if (dictMarker || values.some((v) => operator(v) === 'KeyValuePair'))
       return this.buildDictionary(values, open.start, end);
 
     return this.wrap(

@@ -34,7 +34,6 @@ import { kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
-import { typeToString } from '../../common/type/serialize.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
   DictionaryType,
@@ -2781,7 +2780,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // callback slot defers by design anyway).
         const last = ops[ops.length - 1];
         const first =
-          ops.length >= 2 && !isSymbol(ops[0]) && !isFunction(ops[0], 'Function')
+          ops.length >= 2 &&
+          !isSymbol(ops[0]) &&
+          !isFunction(ops[0], 'Function')
             ? ops[0].canonical
             : undefined;
         if (

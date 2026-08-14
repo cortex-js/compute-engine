@@ -7,7 +7,6 @@ import { typeToString } from '../common/type/serialize.js';
 import { signatureArms } from '../common/type/utils.js';
 import type { MathJsonExpression } from '../math-json/types.js';
 import {
-  machineValue,
   operand,
   operands,
   operator,
@@ -369,13 +368,4 @@ function overlaps(
   b: readonly [number, number] | undefined
 ): boolean {
   return b !== undefined && a[0] < b[1] && b[0] < a[1];
-}
-
-/** The `sourceOffsets` of a raw AST node, when it carries them. */
-function nodeOffsets(
-  node: MathJsonExpression | null
-): [number, number] | undefined {
-  return typeof node === 'object' && node !== null && !Array.isArray(node)
-    ? (node as { sourceOffsets?: [number, number] }).sourceOffsets
-    : undefined;
 }

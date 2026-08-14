@@ -75,7 +75,11 @@ import type {
   ProtocolMembersInput,
 } from '../global-types.js';
 import type { FunctionInterface } from '../types-expression.js';
-import type { Type, TypeParameter } from '../../common/type/types.js';
+import type {
+  Type,
+  TypeParameter,
+  DeclarationOrigin,
+} from '../../common/type/types.js';
 import { deepEraseCallbackTypes } from '../../common/type/callback.js';
 import {
   freeTypeVariables,
@@ -119,7 +123,6 @@ import {
 } from '../engine-declarations.js';
 import type { SumTypeVariant } from '../engine-declarations.js';
 import { RedefinitionError } from '../declaration-origin.js';
-import type { DeclarationOrigin } from '../../common/type/types.js';
 import {
   canonicalProtocolMember,
   declareConformance,
@@ -4779,8 +4782,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // An empty separator means "split into characters": segment into
           // grapheme clusters. JS `split('')` would cut between UTF-16 code
           // units, shattering surrogate pairs — never do that.
-          if (sep.string === '')
-            parts = splitGraphemeClusters(s.string);
+          if (sep.string === '') parts = splitGraphemeClusters(s.string);
           else parts = s.string.split(sep.string);
         }
         return engine.function(

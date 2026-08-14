@@ -884,8 +884,7 @@ export function numericDerivativeOfApply(
   if (!callee.isPure) return undefined;
 
   const ce = expr.engine;
-  const order =
-    callee.ops.length === 2 ? Math.floor(callee.ops[1].N().re) : 1;
+  const order = callee.ops.length === 2 ? Math.floor(callee.ops[1].N().re) : 1;
   if (!Number.isFinite(order) || order < 1) return undefined;
 
   const lit = resolveDerivativeFunctionLiteral(callee.op1);

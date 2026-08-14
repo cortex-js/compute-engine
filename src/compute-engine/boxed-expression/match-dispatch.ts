@@ -14,7 +14,7 @@ import {
   sym,
 } from './type-guards.js';
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
-import { errorOpsWithoutTrace, errorTrace } from './error-value.js';
+import { errorOpsWithoutTrace } from './error-value.js';
 
 /**
  * `Match` dispatch — Epsil structural pattern matching
