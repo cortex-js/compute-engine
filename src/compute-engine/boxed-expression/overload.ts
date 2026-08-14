@@ -427,6 +427,45 @@ export type ArmTrialFn = (
   ops: ReadonlyArray<Expression>
 ) => ReadonlyArray<number> | null;
 
+/**
+ * True when this arm's trial is PROVABLY a pass, so the trial — a full
+ * `validateArguments` run under a rollback frame — can be skipped without
+ * changing the verdict. This is a proof, not a mirror: `op.type.matches
+ * (param)` is validation's own unconditional first admit at every position
+ * (required, optional and variadic loops alike), so an arity-admitted GROUND
+ * instance whose valid operands all plainly match cannot fail validation —
+ * and a LAZY operator's validation pushes every operand through untouched,
+ * so its trial cannot fail either. Anything short of the proof (an invalid
+ * operand, a non-matching position, a slot the arm does not bind) falls
+ * through to the real trial.
+ *
+ * This is what keeps the exact-match fast path — the overwhelmingly common
+ * call shape, and the one the pre-trial filter handled cheapest — at
+ * near-filter cost: the trial machinery is paid for only by calls whose
+ * admission is genuinely undecidable without validation.
+ *
+ * A GENERIC candidate is safe here too: the caller only consults this after
+ * `instantiateArm` succeeded (`candidate.ok` — no bound failures), the trial
+ * reuses that same solve verbatim (`internals.armSolution`), and `instance`
+ * is its ground substitution — the same parameters validation's
+ * `groundParam` projection produces.
+ */
+function trialGuaranteedToPass(
+  ops: ReadonlyArray<Expression>,
+  instance: FunctionSignature,
+  policies?: AdmissionPolicies
+): boolean {
+  if (policies?.lazy) return true;
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    if (!op.isValid) return false;
+    const param = paramAt(instance, i);
+    if (param === undefined) return false;
+    if (!op.type.matches(param)) return false;
+  }
+  return true;
+}
+
 /** A GROUND view of one arm at one call (§4.1 per-arm instantiation). */
 interface ArmInstance {
   /** The arm as DECLARED — a polytype arm keeps its `where` clause. */
@@ -737,8 +776,11 @@ export function resolveOverload(
         // Trials run in declaration order inside the filter, after the cheap
         // prefilter — EVERY prefilter-surviving arm is trialed (not just up
         // to the first success), because `viable` must be complete for the
-        // §4.3 join.
-        (trial === undefined || trial(arm, arm, undefined, ops) === null)
+        // §4.3 join. An arm whose pass is PROVABLE (`trialGuaranteedToPass`)
+        // skips the trial with the identical verdict.
+        (trial === undefined ||
+          trialGuaranteedToPass(ops, arm, policies) ||
+          trial(arm, arm, undefined, ops) === null)
     );
     if (viable.length === 0)
       return {
@@ -784,8 +826,11 @@ export function resolveOverload(
         );
       }) &&
       // The trial validates the DECLARED arm (validation re-instantiates it
-      // through the shared solve, passed along so it is not recomputed).
+      // through the shared solve, passed along so it is not recomputed). A
+      // provable pass (`trialGuaranteedToPass`, on the ground instance)
+      // skips it with the identical verdict.
       (trial === undefined ||
+        trialGuaranteedToPass(armOps, candidate.instance, policies) ||
         trial(
           candidate.declared,
           candidate.instance,

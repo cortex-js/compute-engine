@@ -475,16 +475,20 @@ boundary notes:
   registered in `benchmarks/README.md`; corpus =
   `benchmarks/effects-registration.ts`): baseline measured at committed
   pre-2c HEAD in a worktree, same machine session, full 2/4/8 ×
-  exact/subtype/inferred/rejected/generic matrix. Median per-call ratio
-  ≈1.4×; generic rows ≈1.1× (instantiation dominates, trials add little);
-  worst row 8-arm exact at 1.86× raw — inside the ≤2× gate raw, right at
-  ≈2.0× after normalizing by the untouched-control drift (the two control
-  rows disagree by ±15%, which bounds the measurement's resolution). The
-  corpus (no overload sets on its paths) moved within run-to-run noise,
-  structurally ≈0% — nominally within the ≤3% gate. Decision owner: the
-  user; the recorded fallback if ruled over-budget is re-adding specific
-  cheap gates where the benchmark shows they pay, via the shared
-  validator functions.
+  exact/subtype/inferred/rejected/generic matrix. The first measurement
+  put the worst row (8-arm exact) at 1.86× — inside the ≤2× gate but at
+  its edge once control-row drift was factored in — and the user asked
+  for better. The **provable-pass skip** (`trialGuaranteedToPass`,
+  user-requested 2026-08-13) closed it: an arity-admitted ground instance
+  whose valid operands all plainly `op.type.matches(param)` — validation's
+  own unconditional first admit at every position — cannot fail its
+  trial, and a lazy operator's cannot either, so those trials are skipped
+  as a PROOF, not a mirror. Result: exact/subtype/generic rows at
+  0.9–1.2× (parity), worst row 4-arm rejected at ≈1.5×, median ≈1.15×,
+  with control rows agreeing within ~5%. Trial cost is now paid only by
+  calls whose admission is genuinely undecidable (inferred-narrowing) or
+  failing (the diagnosis path). The corpus (no overload sets on its
+  paths) is unchanged within noise — within the ≤3% gate.
 
 ## Explicitly out of scope
 

@@ -93,19 +93,21 @@ describe('OVERLOAD TRIALS — per-arm blame', () => {
 });
 
 describe('OVERLOAD TRIALS — select once, no fallback', () => {
-  test('resolveOverload runs each surviving arm’s trial exactly once and never re-selects', () => {
-    // The no-fallback contract is structural: resolution trials every
-    // prefilter-surviving arm ONCE (the §4.3 join needs the complete viable
-    // set), selects the most specific, and the winner's real validation has
-    // no second chance — there is no retry loop to fall back into. Pinned
-    // mechanically with a counting stub trial.
+  test('resolveOverload runs each undecidable arm’s trial exactly once and never re-selects', () => {
+    // The no-fallback contract is structural: resolution trials every arm
+    // whose admission is genuinely undecidable ONCE (the §4.3 join needs the
+    // complete viable set), selects the most specific, and the winner's real
+    // validation has no second chance — there is no retry loop to fall back
+    // into. Pinned mechanically with a counting stub trial: an
+    // unknown-typed operand defeats the provable-pass skip, so every
+    // prefilter-surviving arm reaches the stub.
     const ce = new ComputeEngine();
     const arms = overloadArms(
       ce.type(
         '((integer) -> integer) & ((number) -> number) & ((string) -> string)'
       ).type
     )!;
-    const ops = [ce.box(7)];
+    const ops = [ce.box('w0')]; // auto-declared, unknown type
     const trialed: number[] = [];
     const resolution = resolveOverload(
       ce,
@@ -115,17 +117,44 @@ describe('OVERLOAD TRIALS — select once, no fallback', () => {
       undefined,
       (declared) => {
         trialed.push(arms.indexOf(declared));
-        // Reject the most specific arm (integer): selection must fall to
-        // the next survivor rather than ever re-running a trial.
+        // Reject the first arm: selection must fall to the next survivor
+        // rather than ever re-running a trial.
         return declared === arms[0] ? [0] : null;
       }
     );
-    // One trial per prefilter-surviving arm (the string arm is provably
-    // disjoint from an integer literal and is never trialed), in
-    // declaration order, none repeated.
-    expect(trialed).toEqual([0, 1]);
+    // One trial per arm, in declaration order, none repeated.
+    expect(trialed).toEqual([0, 1, 2]);
     expect(resolution.selected).toBe(arms[1]);
-    expect(resolution.viable).toHaveLength(1);
+    expect(resolution.viable).toHaveLength(2);
+  });
+
+  test('a provable pass — every operand plainly matches — skips the trial entirely', () => {
+    // `op.type.matches(param)` is validation's own unconditional first
+    // admit, so an arity-admitted ground arm whose valid operands all match
+    // cannot fail its trial — running it would be pure overhead. The
+    // exact-match call shape therefore stays at near-filter cost: the stub
+    // must never fire.
+    const ce = new ComputeEngine();
+    const arms = overloadArms(
+      ce.type(
+        '((integer) -> integer) & ((number) -> number) & ((string) -> string)'
+      ).type
+    )!;
+    const trialed: number[] = [];
+    const resolution = resolveOverload(
+      ce,
+      [ce.box(7)],
+      arms,
+      undefined,
+      undefined,
+      (declared) => {
+        trialed.push(arms.indexOf(declared));
+        return null;
+      }
+    );
+    expect(trialed).toEqual([]); // integer and number arms proved, string prefiltered
+    expect(resolution.selected).toBe(arms[0]); // most specific of the two
+    expect(resolution.viable).toHaveLength(2);
   });
 
   test('a repair-precondition admission agrees between trial and real validation', () => {
