@@ -87,6 +87,12 @@ compose:
 2. **Duplicate name = error.** No shadowing. The only replacement flow is the
    existing statement-replace (`_declaredByStatement`, notebook re-run) and
    forward-reference fulfillment — both already in-place record updates.
+   **Amended 2026-08-14 by `docs/plans/2026-08-14-redefinition-discipline.md`:**
+   the statement-replace flow gains a SAME-UNIT precondition. Replacement is
+   the ACROSS-unit flow (one `executeEpsil` batch = one unit); a second `type`
+   or `protocol` declaration of a name WITHIN one unit is now the error
+   `type-redefinition` / `protocol-redefinition` on both the static and the
+   runtime tier, instead of silently replacing.
 3. **`type` statement is top-level only.** Inside a `do` block, function body,
    `if` branch, loop body, `match` arm: **hard error**, at parse time *and* at
    the engine (box/parse routes). No hoisting — hoisting reintroduces action

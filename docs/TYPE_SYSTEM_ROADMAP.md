@@ -755,14 +755,20 @@ like types (global-type-registry design). When reading an Epsil file, the
 protocol declarations can be hoisted (or processed in a first pass).
 Protocols declared inside a local scope emit `protocol-scope-invalid`.
 
-**Statement re-run replaces (ruling).** Re-executing a `protocol`
-declaration or an implementation block via an Epsil statement replaces the
-previous one, matching the convention for `type` statements (nominal-types
-D5/D13: notebook hosts re-execute whole scopes). Replacing a protocol whose
-requirement set changed revalidates every registered implementation of it;
-implementations left incomplete emit `protocol-implementation-missing`. On
-the host API, re-declaration throws — the same host/Epsil asymmetry already
-recorded for types under "Known residuals".
+**Statement re-run replaces (ruling; scoped 2026-08-14).** Re-executing a
+`protocol` declaration or an implementation block via an Epsil statement
+replaces the previous one, matching the convention for `type` statements
+(nominal-types D5/D13: notebook hosts re-execute whole scopes). Replacing
+a protocol whose requirement set changed revalidates every registered
+implementation of it; implementations left incomplete emit
+`protocol-implementation-missing`. On the host API, re-declaration throws
+— the same host/Epsil asymmetry already recorded for types under "Known
+residuals". **Replacement is the ACROSS-unit flow only** (amended by
+`docs/plans/2026-08-14-redefinition-discipline.md`): a second `protocol`
+or `type` declaration of the same name WITHIN one Epsil program is a
+diagnostic error (`protocol-redefinition` / `type-redefinition`, on both
+the static and evaluation tiers) — the batch boundary selects the
+regime, generalizing P47's same-batch rule for implementation blocks.
 
 **Registry changes are state events (ruling).** Declaring or replacing a
 protocol, conformance, or implementation registers a state event on the
@@ -2840,6 +2846,8 @@ proposed by Appendix B and are not implemented.
 | `protocol-implementation-pending` | (warning) conformance still unimplemented at end of a `ce.parse()` batch |
 | `protocol-implementation-missing` | requirement unimplemented; or dispatch through a pending conformance (runtime) |
 | `protocol-implementation-duplicate` | second implementation block for the same (type, protocol) pair |
+| `protocol-redefinition` | second `protocol` declaration of one name within one Epsil program (across programs, replacement — `docs/plans/2026-08-14-redefinition-discipline.md`) |
+| `type-redefinition` | second `type` declaration of one name within one Epsil program, including a sum statement's variant names (across programs, replacement — same ruling) |
 | `protocol-member-unknown` | implementation defines a member not in the protocol |
 | `protocol-signature-mismatch` | implementation signature not a subtype of the requirement |
 | `protocol-property-readonly-set` | `set` handler provided for a `readonly` property |

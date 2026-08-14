@@ -2,6 +2,19 @@
 
 ### Epsil
 
+- **A name may only be declared once per program.** A second `type` or
+  `protocol` declaration of the same name inside ONE program is now the
+  error `type-redefinition` / `protocol-redefinition`, reported with the
+  first declaration's location as a note; previously it was accepted
+  silently and the second declaration won. A sum declaration owns every
+  name it introduces (its own and its variants'), so a second sum reusing
+  one variant name is the same error, reported once, and registers none of
+  its names. **Redefinition ACROSS programs is unchanged**: re-running an
+  edited `type` or `protocol` statement in a later program (the notebook
+  gesture) still replaces the previous declaration, as does a nested
+  `executeEpsil` run, which is its own program. A bare conformance
+  (`type point is Hashable`) declares no type and is never affected.
+
 - **Spread expressions in list and set literals, and dictionary
   merges.** `[...xs, c, ...ys]` splices collections into a list literal,
   `{1, ...s}` into a set literal (deduplicating), and
@@ -109,6 +122,20 @@
   budget, roughly a second per derivative node on the deep shapes).
 
 ### Issues Resolved
+
+- **An `At` gather no longer erases the length of the collection carrying
+  it.** `At(xs, I)` with an integer-collection index selects many
+  elements, and the selection is position-preserving, so its length is
+  exactly the index's — but it reported no `count` until evaluated.
+  Because `Zip` takes the minimum over its members' counts, one gather
+  member erased the count of the whole `Zip`, and a `Map` over that `Zip`
+  lost it in turn: `Map(f, Zip(At(xs, I), ys))` answered `count`
+  `undefined` even though every part of it counted fine once evaluated.
+  The same gap left the `Zip`'s emptiness unknown, which kept the `Map`
+  SYMBOLIC instead of producing its elements. Both facets are now
+  answered from the operands without evaluating. A boolean MASK index
+  still reports no count before evaluation — a mask filters, so its
+  length is the number of `True` entries.
 
 - **`expr.unknowns` no longer reports a typed lambda parameter as a free
   variable.** A `Function` literal's annotated parameter — the
