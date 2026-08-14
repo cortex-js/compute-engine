@@ -636,11 +636,22 @@ function renderCanonical(
 
 /** The compile targets the views expose. Keys are the names the targets are
  * registered under (what `compile({to})` accepts); `comment` is the line
- * comment the rendered header and error messages must use in that language. */
+ * comment the rendered header and error messages must use in that language.
+ *
+ * `functionBody` marks a target whose `compile()` output is the BODY of a
+ * function rather than a standalone program: the last statement is emitted as
+ * a bare `return`, which is a syntax error at the top level of a Python module
+ * or a GLSL translation unit. The JavaScript target is the exception — it
+ * wraps its own output in an immediately-invoked arrow function, so what it
+ * emits runs as written. The view says so in its header instead of silently
+ * offering a fragment as a program; wrapping it here is not an option, because
+ * the targets' wrapping routes (`compileFunction()`) need declared parameter
+ * names and types the view does not have, and decline a declaration body
+ * outright. */
 const COMPILE_TARGETS = {
-  javascript: { title: 'JavaScript', comment: '//' },
-  python: { title: 'Python', comment: '#' },
-  glsl: { title: 'GLSL', comment: '//' },
+  javascript: { title: 'JavaScript', comment: '//', functionBody: false },
+  python: { title: 'Python', comment: '#', functionBody: true },
+  glsl: { title: 'GLSL', comment: '//', functionBody: true },
 } as const;
 
 /**
@@ -654,11 +665,16 @@ function renderCompiled(
   ast: MathJsonExpression,
   target: keyof typeof COMPILE_TARGETS
 ): string {
-  const { title, comment } = COMPILE_TARGETS[target];
+  const { title, comment, functionBody } = COMPILE_TARGETS[target];
   const header = `${comment} Compiled to ${title} by the Compute Engine.`;
   try {
     const result = compile(engine.box(ast), { to: target, fallback: false });
-    return [header, '', result.code, ''].join('\n');
+    const note = functionBody
+      ? [`${comment} This is a function BODY — its result leaves through a`,
+         `${comment} \`return\`, so it belongs inside a function, not at the`,
+         `${comment} top level of a ${title} file.`]
+      : [];
+    return [header, ...note, '', result.code, ''].join('\n');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return [

@@ -173,7 +173,11 @@ await scenario('fixit diagnostic', undefined, async (c) => {
 
 // ── Representation views (the `epsil/view` request) ────────────────────
 await scenario('representation views', undefined, async (c) => {
-  await c.open(URI, 'let x = 42\nx + Sin(Pi / 6)');
+  // The trig argument is the variable `x`, not a constant: the compiler folds
+  // any constant subtree at compile time, so `Sin(Pi / 6)` would reach the
+  // compiled views as the literal `0.5` and the checks below could not see
+  // whether each target lowers `Sin` to its own spelling.
+  await c.open(URI, 'let x = 42\nx + Sin(x / 6)');
 
   const ast = await c.request('epsil/view', { uri: URI, view: 'ast' });
   check(
