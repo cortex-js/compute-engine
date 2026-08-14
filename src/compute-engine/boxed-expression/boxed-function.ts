@@ -114,6 +114,7 @@ import { add } from './arithmetic-add.js';
 import { pow } from './arithmetic-power.js';
 import { asSmallInteger } from './numerics.js';
 import { gcd } from '../numerics/numeric.js';
+import { activeRollbackFrame } from '../inference-rollback.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order.js';
 import {
@@ -445,8 +446,25 @@ export class BoxedFunction
 
     const previousSignature = def.signature;
 
+    // Rollback journal (family 2): capture the signature `BoxedType` for an
+    // identity-preserving restore before either branch below replaces it;
+    // `_resyncEffects()` re-attaches the cached effect set so the arrow and
+    // the derived `pure`/`drawsRandom` getters stay in lockstep.
+    const journalSignature = (): void => {
+      const rollbackFrame = activeRollbackFrame(this.engine);
+      if (rollbackFrame === undefined) return;
+      const signature = def.signature;
+      rollbackFrame.record({
+        undo: () => {
+          def.signature = signature;
+          def._resyncEffects();
+        },
+      });
+    };
+
     // If the signature was inferred, refine it by narrowing the result
     if (def.signature.is('function')) {
+      journalSignature();
       def.signature = new BoxedType(
         { kind: 'signature', result: t },
         this.engine._typeResolver
@@ -479,6 +497,7 @@ export class BoxedFunction
       if (oldSig.effects !== undefined) nextSig.effects = oldSig.effects;
       if (oldSig.typeParams !== undefined)
         nextSig.typeParams = oldSig.typeParams;
+      journalSignature();
       def.signature = new BoxedType(nextSig, this.engine._typeResolver);
     }
 

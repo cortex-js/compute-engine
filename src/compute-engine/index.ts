@@ -83,8 +83,11 @@ import {
   recordTypeProvenance,
   currentBoxingEpoch,
 } from './boxed-expression/type-provenance.js';
-import { provisionalRegistryRollbackPoint } from './boxed-expression/provisional-application.js';
 import { isSymbol } from './boxed-expression/type-guards.js';
+import {
+  InferenceRollbackFrame,
+  activeRollbackFrame,
+} from './inference-rollback.js';
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
 
 import { getStandardLibrary } from './library/library.js';
@@ -704,13 +707,73 @@ export class ComputeEngine implements IComputeEngine {
     };
   }
 
-  /** See `IComputeEngine._provisionalRegistryRollbackPoint`. Unlike the type
-   * and protocol rollbacks, this one bumps no invalidation axis: the registry
-   * records which definitions are WAITING to be re-derived, and nothing reads
-   * a cached result through it.
+  /** See `IComputeEngine._rollbackFrames`.
    * @internal */
-  _provisionalRegistryRollbackPoint(): () => void {
-    return provisionalRegistryRollbackPoint(this);
+  _rollbackFrames: InferenceRollbackFrame[] = [];
+
+  /** See `IComputeEngine._withRolledBackInference` — the rollback-frame
+   * primitive of `docs/plans/2026-08-13-inference-tx-design.md`, phase 2b.
+   * @internal */
+  _withRolledBackInference<T>(fn: () => T): T {
+    // A rollback frame nests strictly inside ONE boxing-pass window: the
+    // journal records `_freshlyInferred` membership (a per-window set) and
+    // epoch-stamped provenance, both of which the window lifecycle resets —
+    // a frame straddling a window boundary would replay undo entries
+    // against discarded state. Callers outside `box()`/`parse()` open a
+    // window with `_withBoxingPassWindow` first.
+    console.assert(
+      this._inferenceTxDepth > 0,
+      'A rollback frame must be opened inside a boxing-pass window (see _withBoxingPassWindow)'
+    );
+    const frame = new InferenceRollbackFrame({
+      boxingRepairDepthAtOpen: this._boxingState.frameDepth(),
+    });
+    this._rollbackFrames.push(frame);
+    let bodyError: { error: unknown } | undefined;
+    try {
+      return fn();
+    } catch (error) {
+      bodyError = { error };
+      throw error;
+    } finally {
+      const popped = this._rollbackFrames.pop();
+      console.assert(popped === frame, 'Unbalanced inference rollback frame');
+      // Undo BEFORE the containment scan: the journal replay is what makes
+      // any still-open repair frame's state consistent to inspect.
+      const undoFailure = frame.rollback();
+      // Every repair (devolve-shadow) frame pushed at or above the depth
+      // recorded at open and still live must have consumed its rebuild
+      // request: a request consumed by its own rebuild loop ran INSIDE this
+      // rollback frame; one still pending at close would rebuild against
+      // rolled-back state after the frame is gone.
+      console.assert(
+        !this._boxingState.hasRepairRequestedAtOrAbove(
+          frame.boxingRepairDepthAtOpen
+        ),
+        'A boxing-repair request is still pending as a rollback frame closes'
+      );
+      // The body's error is never masked by an undo error in release: each
+      // undo entry is caught individually (`rollback()`), and only debug
+      // builds escalate the failure — with the body error attached as
+      // `cause` so neither is lost.
+      if (undoFailure !== undefined && this._debugBindings) {
+        throw new Error(
+          'Inference rollback failed: an undo entry threw while unwinding the frame',
+          { cause: bodyError?.error ?? undoFailure.error }
+        );
+      }
+    }
+  }
+
+  /** See `IComputeEngine._withBoxingPassWindow`.
+   * @internal */
+  _withBoxingPassWindow<T>(fn: () => T): T {
+    beginInferenceTransaction(this);
+    try {
+      return fn();
+    } finally {
+      endInferenceTransaction(this);
+    }
   }
 
   /** See `IComputeEngine.declareProtocol`. Throws on error, including on
@@ -911,7 +974,7 @@ export class ComputeEngine implements IComputeEngine {
         ctx.ops.map((o) => this.expr(o, { form: 'raw' })),
         { canonical: false }
       );
-    recordTypeProvenance(event.target, {
+    recordTypeProvenance(this, event.target, {
       type: event.to,
       kind: event.kind,
       axis: 'type',
@@ -923,8 +986,19 @@ export class ComputeEngine implements IComputeEngine {
       event.valueDef !== undefined &&
       event.from.isUnknown &&
       this._inferenceTxDepth > 0
-    )
-      (this._freshlyInferred ??= new Set()).add(event.valueDef);
+    ) {
+      const set = (this._freshlyInferred ??= new Set());
+      // Rollback journal (family 6): `.add()` is a silent no-op on a member
+      // already present, so record the prior-presence bit — the undo must
+      // delete only what this write actually added, never evict pre-frame
+      // evidence.
+      const frame = activeRollbackFrame(this);
+      if (frame !== undefined && !set.has(event.valueDef)) {
+        const added = event.valueDef;
+        frame.record({ undo: () => set.delete(added) });
+      }
+      set.add(event.valueDef);
+    }
 
     this._narrowingSink?._recordNarrowing(
       event.name,

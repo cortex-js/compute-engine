@@ -142,6 +142,25 @@ export class EngineBoxingState<Scope extends object> {
     if (root) root.repairRequested = true;
   }
 
+  /** Number of repair frames currently on the stack. Recorded by an
+   * inference rollback frame at open (`inference-rollback.ts`), so its
+   * close-time scan (`hasRepairRequestedAtOrAbove`) covers exactly the
+   * repair frames pushed during the rollback frame's lifetime. */
+  frameDepth(): number {
+    return this._frames.length;
+  }
+
+  /** True when a still-live repair frame at index `depth` or above has a
+   * pending rebuild request. A request consumed by its own rebuild loop
+   * before the caller asks does not count — only one still pending, which
+   * would rebuild against state the closing rollback frame has already
+   * restored. */
+  hasRepairRequestedAtOrAbove(depth: number): boolean {
+    for (let i = depth; i < this._frames.length; i++)
+      if (this._frames[i].repairRequested) return true;
+    return false;
+  }
+
   /** Request a rebuild at the nearest frame that owns `scope`. */
   noteDevolvedShadow(scope: Scope): void {
     for (let i = this._frames.length - 1; i >= 0; i--) {

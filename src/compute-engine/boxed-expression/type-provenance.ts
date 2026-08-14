@@ -1,4 +1,8 @@
 import type { TypeProvenanceEntry } from '../global-types.js';
+import {
+  activeRollbackFrame,
+  type InferenceRollbackFrame,
+} from '../inference-rollback.js';
 
 /**
  * Record one write to a definition's type (or an operator definition's
@@ -22,12 +26,40 @@ import type { TypeProvenanceEntry } from '../global-types.js';
  * mistake the count cap for a size bound.
  */
 export function recordTypeProvenance(
+  ce: { _rollbackFrames: ReadonlyArray<InferenceRollbackFrame> },
   target: { _typeProvenance: TypeProvenanceEntry[] | undefined },
   entry: TypeProvenanceEntry
 ): void {
+  const wasUnallocated = target._typeProvenance === undefined;
   const list = (target._typeProvenance ??= []);
   list.push(entry);
-  if (list.length > MAX_TYPE_PROVENANCE) list.splice(1, 1);
+  // At the cap the SECOND-oldest entry is displaced (the oldest is the
+  // creation/first-evidence anchor — see the doc comment above).
+  let displaced: TypeProvenanceEntry | undefined;
+  if (list.length > MAX_TYPE_PROVENANCE) displaced = list.splice(1, 1)[0];
+
+  // Rollback journal (family 7): pop the append, and reinsert a
+  // cap-displaced entry at its index — without that, an aborted append at
+  // capacity would permanently destroy a pre-existing entry. Strict-LIFO
+  // replay guarantees the list is exactly in its post-append state when
+  // this undo runs, so a `pop()` is the exact inverse.
+  const frame = activeRollbackFrame(ce);
+  if (frame !== undefined) {
+    frame.record({
+      undo: () => {
+        if (displaced !== undefined) list.splice(1, 0, displaced);
+        const popped = list.pop();
+        console.assert(
+          popped === entry,
+          'Provenance rollback out of order: the journal replay is not LIFO'
+        );
+        // A history this append allocated goes back to unallocated, so an
+        // aborted first write leaves the definition byte-identical.
+        if (wasUnallocated && list.length === 0)
+          target._typeProvenance = undefined;
+      },
+    });
+  }
 }
 
 const MAX_TYPE_PROVENANCE = 8;

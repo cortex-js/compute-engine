@@ -11,6 +11,7 @@ import type {
 } from './global-types.js';
 
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
+import { activeRollbackFrame } from './inference-rollback.js';
 
 /**
  * Is `value` a `BoxedDefinition` (as opposed to a structural `Type` object)?
@@ -69,7 +70,13 @@ class _InspectableScope implements InspectableScope {
 
   private _disposed = false;
 
-  constructor(parent: Scope | null) {
+  /** The engine this scope narrows against — consulted by
+   * `_recordNarrowing` for the open rollback frame, so a rejected trial's
+   * narrowing entry is retracted (journal family 8). */
+  private _engine: IComputeEngine;
+
+  constructor(ce: IComputeEngine, parent: Scope | null) {
+    this._engine = ce;
     this.parent = parent;
     this.bindings = new Map();
   }
@@ -148,6 +155,31 @@ class _InspectableScope implements InspectableScope {
     if (!found) return;
 
     const existing = this._narrowings.get(name);
+
+    // Rollback journal (family 8): a narrowing recorded during a rollback
+    // frame is retracted when the frame aborts — a rejected trial must not
+    // leave `narrowings()` reporting a narrowing that never took effect. A
+    // pre-frame entry is mutated in place (`existing.to`), so the undo
+    // restores its previous `to` on the same object; a frame-created entry
+    // is deleted.
+    const frame = activeRollbackFrame(this._engine);
+    if (frame !== undefined) {
+      if (existing !== undefined) {
+        const previousTo = existing.to;
+        frame.record({
+          undo: () => {
+            existing.to = previousTo;
+          },
+        });
+      } else {
+        frame.record({
+          undo: () => {
+            this._narrowings.delete(name);
+          },
+        });
+      }
+    }
+
     if (existing) existing.to = to;
     else this._narrowings.set(name, { name, from, to, def });
   }
@@ -169,7 +201,7 @@ export function createScope(
   bindings?: Record<string, Type | TypeString | BoxedDefinition>,
   parent?: Scope
 ): InspectableScope {
-  const scope = new _InspectableScope(parent ?? ce.context.lexicalScope);
+  const scope = new _InspectableScope(ce, parent ?? ce.context.lexicalScope);
 
   for (const [name, value] of Object.entries(bindings ?? {})) {
     if (isBoxedDefinition(value)) {

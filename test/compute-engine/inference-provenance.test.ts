@@ -240,7 +240,7 @@ describe('INFERENCE PROVENANCE — the history cap', () => {
       axis: 'type',
       cause: ce.box(i),
     });
-    for (let i = 0; i < 12; i++) recordTypeProvenance(target, entry(i));
+    for (let i = 0; i < 12; i++) recordTypeProvenance(ce, target, entry(i));
     const list = target._typeProvenance!;
     expect(list).toHaveLength(8);
     // Entry 0 — the creation/first-evidence anchor — is retained…

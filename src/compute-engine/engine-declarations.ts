@@ -68,6 +68,11 @@ import type {
 
 import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition.js';
 import {
+  activeRollbackFrame,
+  type InferenceRollbackFrame,
+} from './inference-rollback.js';
+import { tombstoneBinding } from './boxed-expression/binding-tombstone.js';
+import {
   isValidOperatorDef,
   isValidValueDef,
   isValueDef,
@@ -418,6 +423,46 @@ export function suggestOperatorName(
   return undefined;
 }
 
+/**
+ * Rollback journal (family 4, declarations): the declare routes below
+ * unconditionally overwrite `scope.bindings[name]`, so the entry captures
+ * the binding REPLACED by the declare (or its absence) and restores it by
+ * identity — a name-only delete would destroy a binding the frame merely
+ * shadowed, and repeated redeclarations of one name unwind correctly
+ * because entries replay strictly LIFO. Disposal of the installed record
+ * happens only here, at rollback time, never during the frame — every
+ * journal entry recorded after this one (and so replayed before it) sees
+ * the record intact. By replay time the `updateDef` swap entry (family 3)
+ * has restored the record's halves to the placeholder this route installed,
+ * which is frame-created by construction and safe to dispose; in debug
+ * builds it is also tombstoned so a use after the rollback throws with both
+ * stacks (the escape rule).
+ */
+function journalDeclaration(
+  ce: IComputeEngine,
+  frame: InferenceRollbackFrame,
+  scope: Scope,
+  name: string,
+  previousBinding: BoxedDefinition | undefined,
+  installedBinding: BoxedDefinition
+): void {
+  frame.record({
+    undo: () => {
+      if (previousBinding !== undefined)
+        scope.bindings.set(name, previousBinding);
+      else scope.bindings.delete(name);
+      if (isValueDef(installedBinding)) {
+        if (ce._debugBindings)
+          tombstoneBinding(
+            installedBinding.value,
+            'rolled-back inference frame'
+          );
+        installedBinding.value.dispose();
+      }
+    },
+  });
+}
+
 export function declareSymbolValue(
   ce: IComputeEngine,
   name: MathJsonSymbol,
@@ -444,6 +489,10 @@ export function declareSymbolValue(
   // lexical scope (an explicit `scope` argument may differ).
   const shadowsCallable = defIsCallableShaped(lookup(name, scope));
 
+  const rollbackFrame = activeRollbackFrame(ce);
+  const previousBinding =
+    rollbackFrame === undefined ? undefined : scope.bindings.get(name);
+
   // Insert a placeholder in the bindings to handle recursive calls
   // (the value could be a function that references itself)
   scope.bindings.set(name, {
@@ -454,6 +503,15 @@ export function declareSymbolValue(
   });
 
   const boxedDef = scope.bindings.get(name)!;
+  if (rollbackFrame !== undefined)
+    journalDeclaration(
+      ce,
+      rollbackFrame,
+      scope,
+      name,
+      previousBinding,
+      boxedDef
+    );
   updateDef(ce, name, boxedDef, def);
 
   ce._noteStateEvent({
@@ -481,6 +539,10 @@ export function declareSymbolOperator(
   // State event: capture the shadow BEFORE the placeholder install, through
   // the TARGET scope's chain.
   const shadowsCallable = defIsCallableShaped(lookup(name, scope));
+  const rollbackFrame = activeRollbackFrame(ce);
+  const previousBinding =
+    rollbackFrame === undefined ? undefined : scope.bindings.get(name);
+
   // Insert a placeholder in the bindings to handle recursive calls
   // (the function is not yet defined)
   scope.bindings.set(name, {
@@ -488,6 +550,15 @@ export function declareSymbolOperator(
   });
 
   const boxedDef = scope.bindings.get(name)!;
+  if (rollbackFrame !== undefined)
+    journalDeclaration(
+      ce,
+      rollbackFrame,
+      scope,
+      name,
+      previousBinding,
+      boxedDef
+    );
   updateDef(ce, name, boxedDef, def);
 
   ce._noteStateEvent({ kind: 'declare', callable: true, shadowsCallable });
@@ -2333,7 +2404,7 @@ export function assignFn(
       // (engine-construction cost — `inferredType === true` with a value is
       // its marker).
       if (previousType.type !== def.value.type.type)
-        recordTypeProvenance(def.value, {
+        recordTypeProvenance(ce, def.value, {
           type: def.value.type,
           kind: 'value-derived',
           axis: 'type',

@@ -1905,4 +1905,20 @@ export interface BoxedOperatorDefinition
    * truth and must never disagree.
    * @internal */
   _resyncEffects(): void;
+
+  /** Opaque snapshot of every field a provisional re-derivation
+   * (`installRebuiltLiteral` calling `update({ evaluate })` on a
+   * pre-existing definition) can mutate, for an exact restore by an
+   * inference rollback frame — see
+   * {@link _restoreRederivationSnapshot}. The result captures private
+   * fields, so peeking or constructing one outside the implementation is
+   * meaningless.
+   * @internal */
+  _rederivationSnapshot(): unknown;
+
+  /** Restore the fields captured by {@link _rederivationSnapshot},
+   * verbatim and identity-preserving (no effect re-sync: the captured
+   * signature/effect pair was consistent when snapshotted).
+   * @internal */
+  _restoreRederivationSnapshot(snapshot: unknown): void;
 }

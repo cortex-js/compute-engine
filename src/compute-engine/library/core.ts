@@ -1,4 +1,5 @@
 import { joinLatex } from '../latex-syntax/tokenizer.js';
+import { activeRollbackFrame } from '../inference-rollback.js';
 import {
   parse as parseLatex,
   serialize as serializeLatex,
@@ -2060,8 +2061,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           else if (isBuiltin || isInheritedDispatcher)
             ce.declare(symbolName, 'function');
           const def = ce.lookupDefinition(symbolName);
-          if (def && isValueDef(def) && def.value.inferredType)
+          if (def && isValueDef(def) && def.value.inferredType) {
+            // Rollback journal (family 1): this canonical-time recursion-knot
+            // retype can land on a PRE-EXISTING inferred binding from an
+            // enclosing scope (a previous cell's auto-declared symbol), so a
+            // rollback frame — the Epsil static checking pass — must be able
+            // to undo it, like every other inference-driven type write.
+            const frame = activeRollbackFrame(ce);
+            if (frame !== undefined) {
+              const target = def.value;
+              const slots = target._typeSlotSnapshot();
+              frame.record({ undo: () => target._restoreTypeSlots(slots) });
+            }
             def.value.type = ce.type('function');
+          }
         }
         // Loosen the target while the clause body canonicalizes: a recursive
         // clause's self-call must not validate against the PREVIOUS clauses'
@@ -2309,8 +2322,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // Trigger auto-declaration if the symbol isn't declared yet
           if (!ce.lookupDefinition(symbolName)) ce.symbol(symbolName);
           const def = ce.lookupDefinition(symbolName);
-          if (def && isValueDef(def) && def.value.inferredType)
+          if (def && isValueDef(def) && def.value.inferredType) {
+            // Rollback journal (family 1): same as `DefineFunction`'s
+            // recursion-knot retype above — the binding may pre-exist the
+            // rollback frame (an outer scope's inferred symbol), and the
+            // static checking pass must be able to undo the write.
+            const frame = activeRollbackFrame(ce);
+            if (frame !== undefined) {
+              const target = def.value;
+              const slots = target._typeSlotSnapshot();
+              frame.record({ undo: () => target._restoreTypeSlots(slots) });
+            }
             def.value.type = ce.type('function');
+          }
         }
 
         // §4.5b D13/D15: loosen a minted constructor while the literal body

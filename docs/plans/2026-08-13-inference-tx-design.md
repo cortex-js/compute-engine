@@ -3,7 +3,8 @@
 **Date**: 2026-08-13 · **Revision 2** (post dual-spec-review; r1's findings
 and their disposition are in
 `docs/scratch/2026-08-13-inference-tx-design_SPEC_REVIEW.md`) ·
-**Status**: DESIGN — for re-review before implementation · **Builds on**:
+**Status**: phases 2a AND 2b IMPLEMENTED (see "As implemented" below; 2c
+not started) · **Builds on**:
 `docs/plans/2026-08-13-inference-provenance-journal.md` (phase 1, shipped)
 
 ## Goal
@@ -322,6 +323,88 @@ Three consumers the r2 review found dangling, resolved:
   uses (shared code, per the gate-12 precedent), never a re-derived
   mirror. §4.3-preservation and blame tests from the overload design's
   §write-freedom suite are ported to the trial mechanism.
+
+## As implemented (2b, 2026-08-13)
+
+Phase 2b shipped: `ce._withRolledBackInference` (`index.ts`), the frame
+class and journaling gate in `src/compute-engine/inference-rollback.ts` (a
+zero-import leaf module, so every layer can hook into it without a cycle),
+all eight families, the static-pass adoption, and the acceptance suites
+(`test/compute-engine/inference-rollback.test.ts`,
+`test/epsil/static-check-rollback.test.ts`). Deviations from the text
+above, each verified empirically:
+
+- **The repair cascade does NOT route through `updateDef`** — family 3's
+  "must verify this routing" check FAILED. `installRebuiltLiteral`
+  (`function-utils.ts`) mutates a pre-existing dependent IN PLACE:
+  `def.update({evaluate: rebuilt})` on an operator definition, or
+  `def.value = rebuilt` on a value definition — neither passes through
+  `updateDef`. The implementation journals that site directly: the operator
+  kind snapshots exactly the fields an `{evaluate}`-only `update()` can
+  touch (`_rederivationSnapshot`/`_restoreRederivationSnapshot` on
+  `_BoxedOperatorDefinition` — signature, `_isLambda`, `_lambdaLiteral`,
+  `evaluate`, `evaluateAsync`, `readsRandomFrame`, `effectsDeclared`,
+  `_effects`, `_inferredDraws`), the value kind reuses the family-1 slot
+  snapshot. The cascade-abort acceptance test passes with the specified
+  semantics (in-frame re-derivation reverts; a later real definition still
+  re-derives, i.e. the registry rolled back too).
+- **The repair-helper guard asserts are TRIAL-scoped, not
+  any-frame-scoped.** The literal "asserts no rollback frame is open"
+  contradicts this spec's own family 1 ("plus the 2a repair helper" — the
+  repair's writes are journaled precisely so an in-frame run rolls back)
+  and its close-time containment note (which contemplates repair frames
+  consumed inside a rollback frame's lifetime) — and it would fire on
+  legitimate checking: the static pass's frame wraps full canonicalization,
+  which runs `devolveUnappliedOperator` for any `M = N + 1`-shaped
+  statement. The helpers therefore assert
+  `!repairsForbiddenByRollbackFrame(ce)`: a frame carries a
+  `forbidsRepairs` bit, false for every 2b frame, to be set by 2c's trial
+  validation mode — the mode the assert was designed to police. If the
+  literal reading is preferred, the flip is one default in
+  `InferenceRollbackFrame`.
+- **Family 5 hooks all three registry mutators** — `register…`,
+  `unregister…`, AND `takeProvisionalDependents` (the spec named the first
+  two; `take` also mutates membership and the reverse index, and the
+  cascade calls it inside frames).
+- **The frame-in-window contract needed a window opener**: the static pass
+  is not inside `box()`/`parse()`, so `ce._withBoxingPassWindow` (a
+  begin/end`InferenceTransaction` bracket) was added and the pass opens one
+  window around its single pass-wide frame; the per-statement `box()`
+  windows nest inside it. The pass keeps its own scope push/pop and the
+  type/protocol registry rollbacks (different registries, not journal
+  families); `provisionalRegistryRollbackPoint` and
+  `IComputeEngine._provisionalRegistryRollbackPoint` are deleted.
+- **Static-pass behavior change (deliberate)**: inference the checking
+  writes onto PRE-EXISTING outer definitions — which the pushed scope never
+  shielded, per the pass's own doc comment — now rolls back at pass end.
+  Later statements of one checked program still see it (one frame spans the
+  pass, so a `function` defined by statement 1 checks statement 2's call);
+  the whole epsil suite (31 suites / 1324 tests) passes unchanged.
+- **Family 3 disposes only a half `updateDef` itself constructed** (the
+  `isValidValueDef` branch): such a half is frame-created by construction,
+  so releasing a constant's configuration-change subscription is safe; a
+  caller-supplied already-boxed definition may pre-exist the frame and is
+  dropped without disposal, per the text above.
+- **`recordTypeProvenance` gained a leading `ce` parameter** (family 7
+  journals inside the function itself, covering every caller — the
+  channel, `assume.ts`, the auto-declare sites, `assignFn`, the 2a
+  repair).
+- **Review round (dual, 2026-08-13) added two family-1 sites and one
+  boundary note.** The `DefineFunction`/`Assign` canonical handlers'
+  recursion-knot retype (`library/core.ts` — `def.value.type =
+  ce.type('function')` on a possibly PRE-EXISTING inferred binding) is
+  frame-reachable through the static pass and is now journaled (Codex
+  finding, regression-tested in `static-check-rollback.test.ts`).
+  Remaining DIRECT type-slot writes are deliberately unhooked because no
+  2b frame can reach them — they run only at EVALUATE time, and both 2b
+  consumers only canonicalize: the `assume.ts` writes, `assignFn`'s
+  adopted-type write (`engine-declarations.ts`), and the bare route of
+  `BoxedSymbol`'s public `type` setter. Phase 2c must re-audit this
+  boundary if trial validation ever evaluates (it should not — trials run
+  `validateArguments` only). The matrix repair's failure-leg composition
+  with an open frame (repair-local restore first, frame replay second:
+  idempotent slots, no-op set delete, pop on a detached provenance array)
+  is documented at the write site and pinned by tests.
 
 ## Explicitly out of scope
 

@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Issues Resolved
+
+- **Statically checking an Epsil program no longer mutates the engine.**
+  The static checking pass (`epsil check`, and the pre-pass `executeEpsil`
+  runs) could permanently alter session state for a program that never
+  ran: type inference performed while checking wrote through to
+  pre-existing definitions (checking `u + 1` narrowed a previous cell's
+  `u` to `number` for good), and the forward-reference registry's
+  snapshot rollback had a one-shot defect — checking the same
+  forward-referencing program twice on one engine left the registry
+  corrupted. The pass now runs under an inference **rollback frame**, a
+  new engine-internal primitive that journals every inference-driven
+  mutation (type-slot writes, operator-signature writes, binding-half
+  swaps, declarations, forward-reference registry deltas, fresh-inference
+  membership, provenance history, narrowing-sink entries) and undoes them
+  all — in strict LIFO order, preserving definition identity — when the
+  check completes.
+
 ## 0.106.1 _2026-08-13_
 
 ### Issues Resolved

@@ -49,6 +49,8 @@ import type {
   SymbolInterface,
 } from '../global-types.js';
 
+import { activeRollbackFrame } from '../inference-rollback.js';
+
 import { mul, div } from './arithmetic-mul-div.js';
 
 import { replace } from './rules.js';
@@ -492,6 +494,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // a binding can go `unknown` → effect-bearing signature here with
         // no counter advance; future axes subscribe to the event.
         this.engine._noteStateEvent({ kind: 'inference', valueType: true });
+        // Rollback journal (family 1): snapshot the coupled type/value
+        // slots BEFORE the write — the post-write channel below carries
+        // only from/to types and cannot capture them. Restore is verbatim
+        // and setter-bypassing (`_restoreTypeSlots`).
+        const rollbackFrame = activeRollbackFrame(this.engine);
+        if (rollbackFrame !== undefined) {
+          const target = def.value;
+          const slots = target._typeSlotSnapshot();
+          rollbackFrame.record({ undo: () => target._restoreTypeSlots(slots) });
+        }
         def.value.type = inferred;
         // Single emission point for the write's passive observers: the
         // provenance history, the fresh-inference set (unknown → concrete
@@ -529,6 +541,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // engine-wide on every use of the symbol.
       if (newType.type === def.operator.signature.type) return true;
       if (newType.matches('function')) {
+        // Rollback journal (family 2): the previous signature `BoxedType`
+        // is restored by identity, and `_resyncEffects()` keeps the arrow
+        // and the cached effect set in lockstep across the restore.
+        const rollbackFrame = activeRollbackFrame(this.engine);
+        if (rollbackFrame !== undefined) {
+          const target = def.operator;
+          const signature = target.signature;
+          rollbackFrame.record({
+            undo: () => {
+              target.signature = signature;
+              target._resyncEffects();
+            },
+          });
+        }
         // The function signature was modified
         def.operator.signature = newType;
         // Signature inference mutates a SHARED operator definition in place: a

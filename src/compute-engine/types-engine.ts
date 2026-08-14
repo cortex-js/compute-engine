@@ -25,6 +25,7 @@ import type {
 import type { BigNum, Rational } from './numerics/types.js';
 import type { RandomSeedFrame, RandomSubstream } from './numerics/random.js';
 import type { EngineBoxingState } from './engine-boxing-state.js';
+import type { InferenceRollbackFrame } from './inference-rollback.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
@@ -403,16 +404,43 @@ export interface IComputeEngine {
    * @internal */
   _protocolRegistryRollbackPoint(): () => void;
 
-  /** Capture the FORWARD-REFERENCE registry's state; the returned thunk
-   * restores it. The third registry the Epsil static pre-pass rolls back,
-   * alongside {@link _typeRegistryRollbackPoint} and
-   * {@link _protocolRegistryRollbackPoint}: canonicalizing a function
-   * definition installs a definition object, and one whose body reads a
-   * not-yet-known symbol registers there to be re-derived. That registry is
-   * keyed by engine rather than by scope, so popping the pass's scope does
-   * not clear it.
+  /** The stack of open inference **rollback frames**
+   * (`inference-rollback.ts`; phase 2b of
+   * `docs/plans/2026-08-13-inference-tx-design.md`). While a frame is open,
+   * every inference-driven mutation site journals an undo entry into the
+   * innermost frame; `_withRolledBackInference` replays them (strict LIFO)
+   * when the frame closes. Empty on the fast path — every journaling hook
+   * is one length check.
    * @internal */
-  _provisionalRegistryRollbackPoint(): () => void;
+  _rollbackFrames: InferenceRollbackFrame[];
+
+  /**
+   * Run `fn` with a rollback frame open and ALWAYS roll the frame back — on
+   * normal return AND on throw (the body's error is rethrown after the
+   * undo). Returns `fn`'s value. Always-rollback by design: a trial's
+   * outcome is a *decision*, not state, and the static checking pass checks
+   * and then discards — there is no commit form.
+   *
+   * Must be called inside a boxing-pass window (`_inferenceTxDepth > 0`);
+   * open one with {@link _withBoxingPassWindow} when the caller is not
+   * already inside `box()`/`parse()`.
+   *
+   * An expression or definition created inside the frame must not be
+   * evaluated, canonicalized against, or resolved for symbol lookup after
+   * the rollback; retention for *rendering* (`toString()`) is permitted.
+   * @internal */
+  _withRolledBackInference<T>(fn: () => T): T;
+
+  /**
+   * Run `fn` inside one boxing-pass window (the `_inferenceTxDepth` /
+   * `_boxingEpoch` / `_freshlyInferred` lifecycle that `box()` and
+   * `parse()` open around themselves). For callers — the Epsil static
+   * checking pass — that need a rollback frame to span several `box()`
+   * calls: a rollback frame must nest strictly inside ONE window, so the
+   * caller opens this window first and the per-statement `box()` windows
+   * nest inside it.
+   * @internal */
+  _withBoxingPassWindow<T>(fn: () => T): T;
 
   /** Declare a protocol (Appendix A "Host API"). Throws on error, including
    * on re-declaration — the Epsil statement route replaces instead (P5). */

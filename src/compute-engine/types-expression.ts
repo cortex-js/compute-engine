@@ -302,6 +302,12 @@ interface BoxedOperatorDefinition
   /** Re-attach the definition's effect set to its signature after the
    * signature object was replaced by type inference. @internal */
   _resyncEffects(): void;
+  /** Opaque snapshot/restore of the fields a provisional re-derivation can
+   * mutate — mirror of the members documented in `types-definitions.ts`.
+   * @internal */
+  _rederivationSnapshot(): unknown;
+  /** @internal */
+  _restoreRederivationSnapshot(snapshot: unknown): void;
 }
 
 type BoxedDefinition =

@@ -65,7 +65,7 @@ function recordAssumedType(
   // (and its `_writeVersion` bump) is pre-existing behavior and stands.
   if (previous !== undefined && previous.toString() === value.type.toString())
     return;
-  recordTypeProvenance(value, {
+  recordTypeProvenance(ce, value, {
     type: value.type,
     kind: 'assumed',
     axis: 'type',

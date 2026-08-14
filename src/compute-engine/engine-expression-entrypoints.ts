@@ -176,7 +176,7 @@ export function createSymbolExpression(
       // being canonicalized to answer "was this binding created by the pass
       // running now?" (first-boxing binding divergence, Tycho item 178).
       if (existingTyped === undefined && isValueDef(pdef))
-        recordTypeProvenance(pdef.value, {
+        recordTypeProvenance(engine, pdef.value, {
           type: pdef.value.type,
           kind: 'auto-declared',
           axis: 'type',
@@ -221,7 +221,7 @@ export function createSymbolExpression(
     // parameter's first reference — see the annotated-parameter branch above
     // for the contract (creation only, occurrence as cause).
     if (existingBare === undefined && isValueDef(pdef))
-      recordTypeProvenance(pdef.value, {
+      recordTypeProvenance(engine, pdef.value, {
         type: pdef.value.type,
         kind: 'auto-declared',
         axis: 'type',
@@ -274,7 +274,7 @@ export function createSymbolExpression(
   // see the annotated-parameter branch above for the contract (creation
   // only, occurrence as cause).
   if (isValueDef(def))
-    recordTypeProvenance(def.value, {
+    recordTypeProvenance(engine, def.value, {
       type: def.value.type,
       kind: 'auto-declared',
       axis: 'type',

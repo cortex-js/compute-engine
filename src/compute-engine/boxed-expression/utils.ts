@@ -13,6 +13,8 @@ import type {
 } from '../global-types.js';
 
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
+import { activeRollbackFrame } from '../inference-rollback.js';
+import { tombstoneBinding } from './binding-tombstone.js';
 import { foldSeed } from '../numerics/random.js';
 import { Type } from '../../common/type/types.js';
 import { containsSignatureArm } from '../../common/type/utils.js';
@@ -1205,6 +1207,15 @@ export function updateDef(
   const supersededValue = mutableDef.value;
   const supersededOperator = mutableDef.operator;
 
+  // A value definition CONSTRUCTED by this call (as opposed to one the
+  // caller passed in already boxed). Only such a half is disposed by the
+  // rollback journal below: it is frame-created by construction, so
+  // releasing its resources (a constant's configuration-change
+  // subscription) cannot affect anything that outlives the frame — whereas
+  // a caller-supplied definition object may pre-exist the frame and be
+  // shared.
+  let constructedValueHalf: BoxedValueDefinition | undefined;
+
   // Construct BEFORE swapping the record's halves: the definition
   // constructors validate and can throw (a registration conflict, a violated
   // effect contract). Deleting first left the record with NEITHER `value` nor
@@ -1218,6 +1229,7 @@ export function updateDef(
     const built = new _BoxedValueDefinition(ce, name, newDef);
     delete mutableDef.operator;
     mutableDef.value = built;
+    constructedValueHalf = built;
   } else if (newDef instanceof _BoxedOperatorDefinition) {
     delete mutableDef.value;
     mutableDef.operator = newDef;
@@ -1226,6 +1238,41 @@ export function updateDef(
     delete mutableDef.value;
     mutableDef.operator = built;
   } else return;
+
+  // Rollback journal (family 3, binding-half swaps): re-install the
+  // previous half objects on the SAME record, by identity, via the same
+  // delete/assign mechanism the swap above used — `sameBindingDef` is
+  // object identity (plus one `_activationOf` hop), so restoring fields on
+  // the same object is the only identity-safe rollback. Recorded AFTER the
+  // swap so a throwing definition constructor journals nothing (a failed
+  // update leaves the previous definition in place on its own). The
+  // forward-reference registry effects of this update (the unregister/
+  // register calls below and in the definition constructors) are journaled
+  // by the registry's own hooks (family 5); replaying strictly LIFO keeps
+  // the two consistent. The previous half objects still exist — nothing
+  // disposes them mid-frame. The installed half is dropped; only a value
+  // half this call itself constructed is disposed (see
+  // `constructedValueHalf` above), and in debug builds it is tombstoned so
+  // a use after the rollback throws with both stacks (the escape rule of
+  // `docs/plans/2026-08-13-inference-tx-design.md`).
+  const rollbackFrame = activeRollbackFrame(ce);
+  if (rollbackFrame !== undefined) {
+    const disposable = constructedValueHalf;
+    rollbackFrame.record({
+      undo: () => {
+        if (supersededValue !== undefined) mutableDef.value = supersededValue;
+        else delete mutableDef.value;
+        if (supersededOperator !== undefined)
+          mutableDef.operator = supersededOperator;
+        else delete mutableDef.operator;
+        if (disposable !== undefined) {
+          if (ce._debugBindings)
+            tombstoneBinding(disposable, 'rolled-back inference frame');
+          disposable.dispose();
+        }
+      },
+    });
+  }
 
   if (supersededValue !== undefined && supersededValue !== mutableDef.value)
     unregisterProvisionalDependent(supersededValue);

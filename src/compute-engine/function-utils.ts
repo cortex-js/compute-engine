@@ -44,6 +44,7 @@ import {
   takeProvisionalDependents,
   type ProvisionalDependent,
 } from './boxed-expression/provisional-application.js';
+import { activeRollbackFrame } from './inference-rollback.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
 import { isPureComputedEffects } from '../common/type/effects.js';
 import type { FunctionSignature, Type } from '../common/type/types.js';
@@ -717,16 +718,40 @@ function dependentLiteral(def: ProvisionalDependent): Expression | undefined {
   return def.value;
 }
 
-/** Install a re-derived literal on a dependent, whichever kind it is. */
+/** Install a re-derived literal on a dependent, whichever kind it is.
+ *
+ * Rollback journal: this is the ONE site that mutates a pre-existing
+ * definition IN PLACE during the provisional-repair cascade — it does NOT
+ * route through `updateDef`, whose half-swap journaling therefore cannot
+ * capture it (`docs/plans/2026-08-13-inference-tx-design.md`, family 3 "As
+ * implemented" note). While a rollback frame is open, each kind snapshots
+ * exactly what its install mutates: the operator kind the
+ * `update({evaluate})`-reachable fields (`_rederivationSnapshot`), the
+ * value kind the coupled type/value slots (`_typeSlotSnapshot` — the value
+ * setter recomputes `_isSelfReferential`, which rides in the tuple). The
+ * registry re-registrations are journaled by the registry's own hooks
+ * (family 5). */
 function installRebuiltLiteral(
   ce: ComputeEngine,
   def: ProvisionalDependent,
   rebuilt: Expression
 ): void {
+  const frame = activeRollbackFrame(ce);
   // `update()` re-registers the definition for whatever names the rebuilt body
   // still reads provisionally.
-  if ('signature' in def) def.update({ evaluate: rebuilt });
-  else {
+  if ('signature' in def) {
+    if (frame !== undefined) {
+      const snapshot = def._rederivationSnapshot();
+      frame.record({
+        undo: () => def._restoreRederivationSnapshot(snapshot),
+      });
+    }
+    def.update({ evaluate: rebuilt });
+  } else {
+    if (frame !== undefined) {
+      const snapshot = def._typeSlotSnapshot();
+      frame.record({ undo: () => def._restoreTypeSlots(snapshot) });
+    }
     def.value = rebuilt;
     registerProvisionalDependents(ce, rebuilt, def);
   }

@@ -48,6 +48,7 @@ import type {
   IComputeEngine,
   Scope,
 } from '../global-types.js';
+import { activeRollbackFrame } from '../inference-rollback.js';
 
 /** A definition waiting on a symbol. An operator definition built from a
  * `Function` literal, or a VALUE definition holding one: a function-typed
@@ -159,36 +160,19 @@ const REGISTRATIONS = new WeakMap<
 >();
 
 /**
- * Snapshot the forward-reference registry for `ce`, returning a function that
- * restores it.
- *
- * For a caller that installs definitions it is going to THROW AWAY: the Epsil
- * static pre-pass canonicalizes each statement in a scope it pops on the way
- * out, and canonicalizing a function definition installs a definition object
- * that registers here. Popping the scope does not unregister it — the
- * registry is keyed by engine, not by scope — so without this the pass leaves
- * one orphan per definition it checked, and a later real definition of the
- * same name is counted twice among the dependents waiting on its callees.
- *
- * Restores which definitions are waiting on which names. It does not evict
- * the `REGISTRATIONS` entries of definitions created inside the transaction:
- * that index is weakly keyed, so those die with the definitions themselves.
+ * Rollback journal (family 5, the forward-reference registry): every
+ * mutator of `DEPENDENTS`/`REGISTRATIONS` — `registerProvisionalDependents`,
+ * `unregisterProvisionalDependent`, `takeProvisionalDependents` — journals a
+ * delta undo while a rollback frame is open, with prior-presence bits, so
+ * membership AND the `REGISTRATIONS` reverse-index metadata restore
+ * index-consistently. This replaced the snapshot-based
+ * `provisionalRegistryRollbackPoint` (deleted in phase 2b of
+ * `docs/plans/2026-08-13-inference-tx-design.md`), whose one restore
+ * re-installed the snapshot's own `Set` objects — so a second rollback of
+ * the same point restored already-mutated state. Undo actions manipulate
+ * the module maps directly (never through the hooked functions), so a
+ * rollback is never re-journaled into an enclosing frame.
  */
-export function provisionalRegistryRollbackPoint(
-  ce: IComputeEngine
-): () => void {
-  const byName = DEPENDENTS.get(ce);
-  if (byName === undefined) return () => DEPENDENTS.delete(ce);
-  const snapshot = new Map(
-    [...byName].map(([name, defs]) => [name, new Set(defs)] as const)
-  );
-  return () => {
-    const current = DEPENDENTS.get(ce);
-    if (current === undefined) return;
-    current.clear();
-    for (const [name, defs] of snapshot) current.set(name, defs);
-  };
-}
 
 /** Register `def` to be re-derived when one of the symbols its body read
  * provisionally gains an operator definition. A no-op for a literal with no
@@ -205,19 +189,54 @@ export function registerProvisionalDependents(
     byName = new Map();
     DEPENDENTS.set(ce, byName);
   }
-  let registration = REGISTRATIONS.get(def);
+
+  const frame = activeRollbackFrame(ce);
+  const priorRegistration = REGISTRATIONS.get(def);
+
+  let registration = priorRegistration;
   if (registration === undefined || registration.ce !== ce) {
     registration = { ce, names: new Set() };
     REGISTRATIONS.set(def, registration);
   }
+
+  // Delta record for the rollback journal: only what THIS call added is
+  // removed by the undo — prior membership (`def` already waiting on a
+  // name, a name already in the reverse index) is pre-frame evidence and
+  // must survive.
+  const addedToDependents: string[] = [];
+  const addedToReverseIndex: string[] = [];
   for (const name of info.heads) {
     let defs = byName.get(name);
     if (defs === undefined) {
       defs = new Set();
       byName.set(name, defs);
     }
+    if (frame !== undefined && !defs.has(def)) addedToDependents.push(name);
     defs.add(def);
+    if (frame !== undefined && !registration.names.has(name))
+      addedToReverseIndex.push(name);
     registration.names.add(name);
+  }
+
+  if (frame !== undefined) {
+    const installedRegistration = registration;
+    const dependentsForEngine = byName;
+    frame.record({
+      undo: () => {
+        for (const name of addedToDependents) {
+          const defs = dependentsForEngine.get(name);
+          if (defs === undefined) continue;
+          defs.delete(def);
+          if (defs.size === 0) dependentsForEngine.delete(name);
+        }
+        for (const name of addedToReverseIndex)
+          installedRegistration.names.delete(name);
+        if (installedRegistration !== priorRegistration) {
+          if (priorRegistration === undefined) REGISTRATIONS.delete(def);
+          else REGISTRATIONS.set(def, priorRegistration);
+        }
+      },
+    });
   }
 }
 
@@ -230,13 +249,36 @@ export function unregisterProvisionalDependent(def: object | undefined): void {
   const registration = REGISTRATIONS.get(def);
   if (registration === undefined) return;
   REGISTRATIONS.delete(def);
+  const frame = activeRollbackFrame(registration.ce);
   const byName = DEPENDENTS.get(registration.ce);
-  if (byName === undefined) return;
-  for (const name of registration.names) {
-    const defs = byName.get(name);
-    if (defs === undefined) continue;
-    defs.delete(def as ProvisionalDependent);
-    if (defs.size === 0) byName.delete(name);
+  // Names whose dependents set actually held `def` — the delta the rollback
+  // journal re-adds. The `registration` object itself is untouched (only
+  // its index entry is deleted), so the undo restores it by identity.
+  const removedFrom: string[] = [];
+  if (byName !== undefined) {
+    for (const name of registration.names) {
+      const defs = byName.get(name);
+      if (defs === undefined) continue;
+      if (defs.delete(def as ProvisionalDependent) && frame !== undefined)
+        removedFrom.push(name);
+      if (defs.size === 0) byName.delete(name);
+    }
+  }
+  if (frame !== undefined) {
+    frame.record({
+      undo: () => {
+        REGISTRATIONS.set(def, registration);
+        if (byName === undefined) return;
+        for (const name of removedFrom) {
+          let defs = byName.get(name);
+          if (defs === undefined) {
+            defs = new Set();
+            byName.set(name, defs);
+          }
+          defs.add(def as ProvisionalDependent);
+        }
+      },
+    });
   }
 }
 
@@ -250,7 +292,30 @@ export function takeProvisionalDependents(
   const defs = byName?.get(name);
   if (defs === undefined) return undefined;
   byName!.delete(name);
-  for (const def of defs) REGISTRATIONS.get(def)?.names.delete(name);
+  const frame = activeRollbackFrame(ce);
+  // Reverse-index entries this take actually removed `name` from, captured
+  // by identity for the rollback journal.
+  const strippedRegistrations: { names: Set<string> }[] = [];
+  for (const def of defs) {
+    const registration = REGISTRATIONS.get(def);
+    if (registration === undefined) continue;
+    if (registration.names.delete(name) && frame !== undefined)
+      strippedRegistrations.push(registration);
+  }
+  if (frame !== undefined) {
+    frame.record({
+      undo: () => {
+        // The taken `Set` object was detached, not mutated — callers get a
+        // copy — so re-installing it by identity is exact. Any dependents
+        // re-registered under `name` AFTER this take were journaled by
+        // their own hook and removed by the time this (earlier) entry
+        // replays.
+        byName!.set(name, defs);
+        for (const registration of strippedRegistrations)
+          registration.names.add(name);
+      },
+    });
+  }
   return [...defs];
 }
 

@@ -551,6 +551,64 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this._setEffects(this._effects);
   }
 
+  /** Snapshot every field that a provisional re-derivation —
+   * `installRebuiltLiteral` calling `update({ evaluate: rebuilt })` on a
+   * PRE-EXISTING definition (`function-utils.ts`) — can mutate, for an
+   * exact later restore by an inference rollback frame. The result is
+   * OPAQUE to callers (typed `unknown` on the public interface): it
+   * captures private fields (`_effects`, `_inferredDraws`), so constructing
+   * or peeking at one outside this class is meaningless. Only the fields an
+   * `{ evaluate }`-only update can touch are captured; a full-definition
+   * `update()` on a pre-existing object never happens inside a rollback
+   * frame (redefinition routes go through `updateDef`, whose half-swap the
+   * frame journals separately).
+   * @internal */
+  _rederivationSnapshot(): unknown {
+    return {
+      signature: this.signature,
+      inferredSignature: this.inferredSignature,
+      _isLambda: this._isLambda,
+      _lambdaLiteral: this._lambdaLiteral,
+      evaluate: this.evaluate,
+      evaluateAsync: this.evaluateAsync,
+      readsRandomFrame: this.readsRandomFrame,
+      effectsDeclared: this.effectsDeclared,
+      _effects: this._effects,
+      _inferredDraws: this._inferredDraws,
+    };
+  }
+
+  /** Restore the fields captured by `_rederivationSnapshot`, verbatim. No
+   * `_resyncEffects()` follows: the captured `signature`/`_effects` pair
+   * was consistent when snapshotted, and a verbatim restore keeps it so —
+   * re-syncing would rebuild the signature and defeat the
+   * identity-preserving restore.
+   * @internal */
+  _restoreRederivationSnapshot(snapshot: unknown): void {
+    const s = snapshot as {
+      signature: BoxedType;
+      inferredSignature: boolean;
+      _isLambda: boolean;
+      _lambdaLiteral: Expression | undefined;
+      evaluate: _BoxedOperatorDefinition['evaluate'];
+      evaluateAsync: _BoxedOperatorDefinition['evaluateAsync'];
+      readsRandomFrame: boolean;
+      effectsDeclared: boolean;
+      _effects: EffectSet | undefined;
+      _inferredDraws: boolean;
+    };
+    this.signature = s.signature;
+    this.inferredSignature = s.inferredSignature;
+    this._isLambda = s._isLambda;
+    this._lambdaLiteral = s._lambdaLiteral;
+    this.evaluate = s.evaluate;
+    this.evaluateAsync = s.evaluateAsync;
+    this.readsRandomFrame = s.readsRandomFrame;
+    this.effectsDeclared = s.effectsDeclared;
+    this._effects = s._effects;
+    this._inferredDraws = s._inferredDraws;
+  }
+
   update(def: OperatorDefinition): void {
     if (this.engine.strict) {
       for (const key in def) {
