@@ -106,38 +106,36 @@ by the dual review of the site-operand change; no known user report.
 
 Named-argument calls shipped 2026-08-12 (design record:
 `docs/plans/2026-08-12-named-arguments-design.md`, §9 has the full
-statements). Three deliberate v1 limits remain open, in rough priority
-order. (A fourth candidate — a declared-only overload set declining a
-named call whose name-eliminated arm is more specific — was RULED
-correct behavior on 2026-08-13, not a limit: when names and positional
+statements). Two deliberate v1 limits remain open, in rough priority
+order. (Two other candidates are resolved: a declared-only overload set
+declining a named call whose name-eliminated arm is more specific was
+RULED correct behavior on 2026-08-13 — when names and positional
 ranking disagree and there is no implementation to pin the call to, the
-engine asks the author to be explicit rather than guessing. Recorded in
-the design doc §4; not remaining work.)
-- **Unannotated function literals are not addressable by name** — type
-  inference drops parameter names (`effects-inference.ts` types a bare
-  parameter as `{ type: 'unknown' }`). MEASURED 2026-08-13: the
-  one-line fix breaks 37 tests across 11 suites + 1 snapshot,
-  including semantic suites (`effects-contracts`,
+engine asks the author to be explicit rather than guessing (design doc
+§4). And the two `Apply`-routed callee shapes whose names ARE knowable
+were both fixed on 2026-08-13: the qualified protocol spelling
+`Protocol.member(self: x, …)` permutes against the named protocol's
+requirement signature, and an inline function-literal callee
+`((x: number) |-> x + 1)(x: 5)` permutes against its own syntactic
+parameter list — including UNANNOTATED inline literals, whose names
+are read from the expression, not the inferred type. What still
+declines through `Apply` is a callee whose names are genuinely not
+knowable there: a symbol callee (`Apply(f, x: 1)` — write `f(x: 1)`),
+and a literal with a parameter that is not a bare symbol or `Typed`
+annotation.)
+- **Unannotated function literals are not addressable by name through
+  a BINDING** — type inference drops parameter names
+  (`effects-inference.ts` types a bare parameter as
+  `{ type: 'unknown' }`), so `f := (a, b) |-> …; f(a: 1, b: 2)`
+  declines even though the same literal applied inline now works.
+  MEASURED 2026-08-13: the one-line fix breaks 37 tests across 11
+  suites + 1 snapshot, including semantic suites (`effects-contracts`,
   `application-validation-regressions`, callback-contract and
   lambda-inference batteries) — a dedicated follow-up round, not a
   snapshot refresh.
 - **Error anchoring inside a reordered call** can underline the wrong
   argument: `locateError` maps canonical operand index into the raw
   AST by the same index, and after reordering the indices differ.
-- **Inline-literal callees** `((x: number) |-> x + 1)(x: 5)` decline
-  named arguments (`argument-names-unavailable`): the call
-  canonicalizes through `Apply`, which does not run name
-  normalization, so the literal's syntactically visible parameter
-  names are never read. The workaround is trivial (bind the literal
-  to a name) and the spelling rare. (The qualified protocol spelling
-  `Protocol.member(self: x, …)` used to share this decline — worse,
-  because qualification is what the `protocol-call-ambiguous`
-  diagnostic steers to — and was FIXED 2026-08-13: the seam now
-  permutes it against the named protocol's requirement signature,
-  `qualifiedMemberRequirementShape` in engine-protocols.ts, both the
-  `Apply(Field(P, "m"), …)` parse shape and the box-route
-  `ProtocolMember(P, m, …)` spelling. Only the inline-literal case
-  remains.)
 
 ### `Derivative` compile time vs body nesting depth (perf ask)
 

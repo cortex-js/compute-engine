@@ -422,17 +422,21 @@ describe('callees without a usable declaration (§6)', () => {
     ]);
   });
 
-  test('an inline literal applied directly declines (R4)', () => {
+  test('an inline literal applied directly is permuted against its own parameters', () => {
+    // Until 2026-08-13 this spelling DECLINED (`argument-names-unavailable`):
+    // both forms canonicalize to `Apply`, which the seam excludes (R4) because
+    // its own first parameter is the callee. The inline-literal carve-out now
+    // reads the parameter names syntactically from the literal itself
+    // (`inlineLiteralSignature`, named-arguments.ts), the same way the
+    // qualified-protocol carve-out reads them from the requirement.
     const ce = new ComputeEngine();
     const literal: any = ['Function', ['Add', 'x', 1], T('x', 'number')];
-    // Both spellings canonicalize to `Apply`, whose own first parameter is the
-    // callee — so the name is meant for the literal, not for `Apply`.
-    expect(errorCodes(ce.box([literal, N('x', 2)] as any))).toEqual([
-      'argument-names-unavailable',
-    ]);
-    expect(errorCodes(ce.box(['Apply', literal, N('x', 2)] as any))).toEqual([
-      'argument-names-unavailable',
-    ]);
+    const direct = ce.box([literal, N('x', 2)] as any);
+    expect(errorCodes(direct)).toEqual([]);
+    expect(direct.evaluate().toString()).toBe('3');
+    const applied = ce.box(['Apply', literal, N('x', 2)] as any);
+    expect(errorCodes(applied)).toEqual([]);
+    expect(applied.evaluate().toString()).toBe('3');
   });
 
   test('the QUALIFIED protocol-member spelling is permuted against the requirement', () => {

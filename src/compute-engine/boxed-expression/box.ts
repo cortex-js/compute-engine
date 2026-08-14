@@ -45,6 +45,7 @@ import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
 
 import {
   hasNamedArguments,
+  inlineLiteralSignature,
   normalizeNamedArguments,
   protocolMemberParts,
   qualifiedFieldParts,
@@ -1451,15 +1452,16 @@ function makeCanonicalFunctionCore(
   // untouched and each reports `argument-names-unavailable` when it
   // canonicalizes (design doc §6).
   //
-  // `Apply` is EXCLUDED (sub-ruling R4), with one carve-out below. Its own
+  // `Apply` is EXCLUDED (sub-ruling R4), with two carve-outs below. Its own
   // parameters are `(name, arguments*)` — the first one IS the callee — so a
   // name written in an `Apply` argument list is meant for that callee, not
   // for `Apply`, and matching it against `Apply`'s signature would answer a
   // question nobody asked. `(⟨literal⟩)(x: 1)` canonicalizes to `Apply` too,
   // so this one exclusion covers the whole non-symbol-callee spelling.
-  // Declining here leaves the carriers to report
-  // `argument-names-unavailable`; teaching the function-literal application
-  // path to permute is the recorded follow-up.
+  // Declining leaves the carriers to report `argument-names-unavailable`.
+  // The carve-outs are the two `Apply` shapes whose callee's parameter names
+  // ARE knowable here: a qualified protocol member (next comment) and an
+  // inline function literal (below it).
   //
   // The carve-out is the QUALIFIED protocol-member call, which parses as
   // `Apply(Field(Protocol, "member"), …)` (and can be written directly as
@@ -1508,6 +1510,32 @@ function makeCanonicalFunctionCore(
         );
       if (normalized.kind === 'ok')
         ops = [...ops.slice(0, prefix), ...normalized.ops];
+      // `unavailable` leaves `ops` alone: the carriers decline as before.
+    }
+  } else if (named && name === 'Apply') {
+    // Second carve-out: an INLINE function-literal callee,
+    // `((x: number) |-> x + 1)(x: 5)`. Its parameter names sit in the very
+    // expression being applied — read syntactically by
+    // `inlineLiteralSignature`, so an UNANNOTATED literal's names work too,
+    // even though its inferred signature type drops them (that drop is why a
+    // literal bound to a NAME is still not name-addressable; ROADMAP
+    // "Named-argument calls — v1 residuals"). The callee operand itself is
+    // left untouched: only the argument list is permuted, and the literal
+    // canonicalizes downstream exactly as a positional call's would.
+    const literalSignature = inlineLiteralSignature(ops[0]);
+    if (literalSignature !== undefined) {
+      const split = splitNamedArguments(ops.slice(1));
+      const normalized = normalizeNamedArguments(ce, split, literalSignature);
+      // `kind: 'apply'` cannot occur: the synthesized signature is a single
+      // arm, never an overload set, and no clauses are passed.
+      if (normalized.kind === 'error')
+        return new BoxedFunction(
+          ce,
+          name,
+          flatten(semiCanonical(ce, [ops[0], ...normalized.ops])),
+          { metadata, canonical: true }
+        );
+      if (normalized.kind === 'ok') ops = [ops[0], ...normalized.ops];
       // `unavailable` leaves `ops` alone: the carriers decline as before.
     }
   } else if (named && name !== 'Apply') {

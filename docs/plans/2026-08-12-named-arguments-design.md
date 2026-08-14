@@ -233,7 +233,9 @@ synthesized args when every requirement shape agrees on it
 disagreeing names stay unnamed.
 
 **Qualified spelling — LIFTED 2026-08-13** (originally declined under
-R4, which now covers inline-literal callees only). The QUALIFIED
+R4; the inline-literal case was lifted later the same day, see §6, so
+R4's residual decline now covers only `Apply` callees whose names are
+unknowable at the seam). The QUALIFIED
 spelling `Protocol.member(self: x, …)` canonicalizes through `Apply`
 — it parses as `Apply(Field(P, "m"), …)`, and `Field` only lowers to
 the `ProtocolMember`-dispatching literal at *evaluate*, so the
@@ -284,13 +286,24 @@ never reaches box.ts).
   unannotated literal in the codebase — broad snapshot churn, deferred
   to a measured, deliberate change (open item, §9).
 - **Non-symbol callees via `Apply`** — `(g)(x: 1)`, an inline literal
-  applied directly (sub-ruling R4, §9): v1 DECLINES with
+  applied directly (sub-ruling R4, §9): v1 DECLINED with
   `argument-names-unavailable`, even though an inline literal's
-  parameter names are syntactically visible. Supporting it means
-  teaching `Apply`'s canonical handler (library/core.ts:1833) and the
-  function-literal application path (function-utils.ts:2186/2316) the
-  §3 algorithm — mechanical, but it multiplies the surface of v1 for a
-  rare spelling. Recorded as the natural follow-up.
+  parameter names are syntactically visible. **LIFTED 2026-08-13**,
+  and more cheaply than this section anticipated: no change to
+  `Apply`'s canonical handler or the function-literal application path
+  was needed. The §3 seam itself carves the shape out of the `Apply`
+  exclusion (the same move as the qualified-spelling carve-out, §5):
+  `inlineLiteralSignature` (named-arguments.ts) reads the parameter
+  names SYNTACTICALLY from the raw literal — every parameter must be a
+  bare symbol or a `Typed(symbol, …)` annotation, else it bails and
+  the carriers decline as before — and synthesizes a names-only
+  signature for the §3 permutation; typing still happens downstream at
+  application. Reading syntax rather than the literal's TYPE is what
+  makes UNANNOTATED inline literals name-addressable despite inference
+  dropping their parameter names (previous bullet). The remaining
+  `Apply` decline: symbol callees (`Apply(f, x: 1)` — write
+  `f(x: 1)`) and literals with parameter shapes the reader cannot
+  name. Pinned in `test/compute-engine/named-arguments-inline-literal.test.ts`.
 
 ## 7. Diagnostics, serializer, static pass
 
@@ -366,12 +379,17 @@ for existing programs).
   order, not just an implementation).
 - **R4 — `Apply`/inline-literal callees decline in v1**
   (`argument-names-unavailable`); mechanical follow-up recorded in §6.
-  NARROWED 2026-08-13: the qualified `Protocol.member(...)` spelling,
-  originally included, now normalizes against the named protocol's
-  requirement signature (§5, "Qualified spelling — LIFTED") — its
-  names are statically known, unlike an inline literal's, and the
+  NARROWED TWICE on 2026-08-13. First: the qualified
+  `Protocol.member(...)` spelling, originally included, normalizes
+  against the named protocol's requirement signature (§5, "Qualified
+  spelling — LIFTED") — its names are statically known, and the
   decline collided with the `protocol-call-ambiguous` diagnostic's
-  advice to qualify. Inline-literal callees still decline.
+  advice to qualify. Second: inline-literal callees normalize against
+  their own syntactic parameter list (§6, "Non-symbol callees via
+  `Apply` — LIFTED"). The residual decline covers only `Apply` callees
+  whose names are unknowable at the seam: symbol callees, and literals
+  with a parameter that is neither a bare symbol nor a `Typed`
+  annotation.
 - **R5 — names eliminate branches, persistently (RATIFIED
   2026-08-13).** A named argument is a STRONGER selector than a type or
   a runtime value: a branch (overload arm, multi-clause clause) that

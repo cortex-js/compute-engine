@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Epsil
+
+- **An inline function literal now takes named arguments.**
+  `((x: number) |-> x + 1)(x: 5)` evaluates to 6 instead of declining
+  with `argument-names-unavailable`, and the arguments may be written
+  in any order (`((x: number, y: number) |-> x - y)(y: 2, x: 10)` is
+  8). The parameter names are read from the literal expression itself,
+  so this works for **unannotated** literals too
+  (`((x, y) |-> x - y)(y: 2, x: 10)`), even though their inferred
+  signature carries no names — a literal bound to a name first
+  (`f := (x, y) |-> …; f(x: 1, y: 2)`) still requires annotations, as
+  before. All the named-call rules apply unchanged: unknown names get
+  `argument-name-unknown` with the literal's declared names, a
+  positional argument may not follow a named one, duplicates are
+  rejected, and a named call never curries. The same shapes work on
+  the MathJSON route (`["Apply", ⟨literal⟩, ["NamedArgument", …]]` and
+  a function-literal head applied directly).
+
 ### Issues Resolved
 
 - **Statically checking an Epsil program no longer mutates the engine.**

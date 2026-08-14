@@ -227,6 +227,46 @@ export function protocolMemberParts(
   return { base, member };
 }
 
+/**
+ * A signature carrying the parameter names of a raw INLINE `Function` literal
+ * callee — what lets `((x: number) |-> x + 1)(x: 5)` (which canonicalizes
+ * through `Apply`) take named arguments.
+ *
+ * The names are read SYNTACTICALLY from the literal's parameter operands (a
+ * bare symbol, or a `Typed(symbol, …)` annotation), not from its type: an
+ * unannotated literal's inferred signature drops parameter names
+ * (`effects-inference.ts` types a bare parameter with no `name`), but for an
+ * inline literal the names sit in the very expression being applied, so both
+ * annotated and unannotated literals are name-addressable here. The slot
+ * types are all `unknown` because normalization only permutes — it reads slot
+ * NAMES and arity, never slot types; typing happens downstream when the
+ * canonicalized literal is applied.
+ *
+ * Returns `undefined` — the caller then leaves the carriers to decline as
+ * before — when `x` is not a `Function` application, or when ANY parameter is
+ * something other than a bare symbol or a `Typed` annotation (a spread rest
+ * parameter, say): a parameter this function cannot name might also not be
+ * one-slot-per-parameter, and a wrong guess here silently binds arguments to
+ * the wrong parameters. Every parameter it does accept fills exactly one
+ * required slot, which is also why the synthesized signature has no optional
+ * or variadic part: a literal's parameter list has no such syntax.
+ */
+export function inlineLiteralSignature(
+  x: ExpressionInput | undefined
+): Type | undefined {
+  if (x === undefined) return undefined;
+  const ops = rawOperands(x, 'Function');
+  if (ops === undefined || ops.length === 0) return undefined;
+  const args: { name: string; type: Type }[] = [];
+  for (const param of ops.slice(1)) {
+    const name =
+      rawSymbolName(param) ?? rawSymbolName(rawOperands(param, 'Typed')?.[0]);
+    if (name === undefined) return undefined;
+    args.push({ name, type: 'unknown' });
+  }
+  return { kind: 'signature', args, result: 'unknown' };
+}
+
 /** The `[nameExpression, valueExpression]` operands of a carrier, whatever
  * spelling it arrived in. */
 function carrierOperands(

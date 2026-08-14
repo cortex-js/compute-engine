@@ -2590,19 +2590,26 @@ this appendix originally anticipated (both deliberate, v1):
 - **Parameters without declared names are positional-only.** Most of
   the built-in library declares unnamed parameters (only ~60 of ~530
   library signatures carry any name), and an **unannotated** function
-  literal is not name-addressable at all — signature inference drops
-  the names of bare parameters (`(a, b) |-> a + b` types as
-  `(unknown, unknown) -> …`), so only annotated literals and explicit
-  declarations supply names. Carrying inferred names through is a
-  measured follow-up (ROADMAP, v1 residuals).
-- **Inline-literal callees decline**: `((x: number) |-> x + 1)(x: 5)`
-  reports `argument-names-unavailable`, even though the names are
-  syntactically visible — the `Apply` path does not run name
-  normalization for a literal callee. One `Apply`-routed callee is
-  carved out: the qualified protocol spelling
+  literal reached through a BINDING is not name-addressable —
+  signature inference drops the names of bare parameters
+  (`(a, b) |-> a + b` types as `(unknown, unknown) -> …`), so a name
+  can only address it where the literal itself is visible (the inline
+  case below). Carrying inferred names through the type is a measured
+  follow-up (ROADMAP, v1 residuals).
+- **Inline-literal callees permute against their own parameter list**
+  (fixed 2026-08-13 — they declined in the original v1):
+  `((x: number) |-> x + 1)(x: 5)` evaluates to 6. The `Apply` path
+  reads the names SYNTACTICALLY from the literal expression
+  (`inlineLiteralSignature`, `boxed-expression/named-arguments.ts`),
+  so an unannotated inline literal (`((x, y) |-> x - y)(y: 2, x: 10)`)
+  works too, its inferred name-less type notwithstanding. The other
+  `Apply`-routed carve-out is the qualified protocol spelling
   `Comparable.compare(self: x, …)`, whose names are supplied by the
-  named protocol's requirement (see "Protocol dispatch" below; fixed
-  2026-08-13 — it declined in the original v1).
+  named protocol's requirement (see "Protocol dispatch" below; also
+  fixed 2026-08-13). What still declines through `Apply` is a callee
+  whose names are genuinely unknowable there: a symbol callee
+  (`Apply(f, x: 1)` — write `f(x: 1)`), and a literal with a
+  parameter that is not a bare symbol or a `Typed` annotation.
 
 ### Overloaded callees
 
@@ -2705,8 +2712,11 @@ ratified 2026-08-13. Full statements with rationale:
 - **R3** — disagreeing name orders never resolve silently ("Overloaded
   callees").
 - **R4** — `Apply`-routed callees decline in v1 ("Rules"); narrowed
-  2026-08-13 to inline-literal callees only, when the qualified
-  protocol spelling gained name support ("Protocol dispatch").
+  twice on 2026-08-13 — first when the qualified protocol spelling
+  gained name support ("Protocol dispatch"), then when inline-literal
+  callees did ("Two consequences" above). The residual decline covers
+  only callees whose names are unknowable at the `Apply` seam: symbol
+  callees and literals with unnameable parameter shapes.
 - **R5** — names eliminate branches, persistently ("Overloaded
   callees").
 
