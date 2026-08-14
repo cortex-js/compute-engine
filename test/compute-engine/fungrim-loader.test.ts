@@ -104,10 +104,12 @@ describe('loadIdentities (full artifact)', () => {
     });
     expect(report.byPurpose).toEqual({
       // 8 Digamma specific-value rules are tagged 'transform' (cost-gate
-      // exempt) so they fire in simplify() — SYM P2-25.
-      simplify: 1311,
+      // exempt) so they fire in simplify() — SYM P2-25. Counts moved
+      // 1311/116 → 1304/123 in the 2026-08-14 regen (7 net
+      // simplify→expand re-labels among the 98 reoriented rules).
+      simplify: 1304,
       transform: 8,
-      expand: 116,
+      expand: 123,
     });
     expect(
       report.byPurpose.simplify +
@@ -1654,13 +1656,18 @@ describe('Phase 3: theta/modular acceptance (real corpus, Im(τ) > 0 assumptions
     ).toBe(true);
   });
 
-  it('definitional expansions are exiled to expand: ModularJ(τ) does not explode in simplify()', () => {
-    // fungrim:664b4c (j(τ) → Dedekind-eta quotient) is a bare-generic-match
-    // definitional expansion: purpose 'expand', out of simplify()'s scan
+  it('ModularJ(τ) does not explode in simplify()', () => {
+    // fungrim:664b4c historically expanded j(τ) into its Dedekind-eta
+    // quotient and had to be exiled to purpose 'expand' to keep it out of
+    // simplify()'s scan. The 2026-08-14 regen re-ORIENTED it: it now folds
+    // the eta quotient INTO ModularJ (purpose 'simplify'), so the
+    // definitional explosion is structurally impossible — the rule rewrites
+    // toward j(τ), never away from it. The behavioral pin is unchanged.
     const j = ce.expr(['ModularJ', 'tau']);
     expect(j.simplify().isSame(j)).toBe(true);
     const rule = FUNGRIM_CORE.rules.find((r) => r.id === 'fungrim:664b4c')!;
-    expect(rule.purpose).toBe('expand');
+    expect(rule.purpose).toBe('simplify');
+    expect(JSON.stringify(rule.replace)).toBe('["ModularJ","_tau"]');
   });
 
   it('negative controls: no rewrite without the HH assumption', () => {
