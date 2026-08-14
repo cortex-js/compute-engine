@@ -8584,6 +8584,7 @@ type ProtocolRecord = {
   members: Record<string, ProtocolMember>;
   conformances: ConformanceRecord[];
   declaredByStatement: boolean;
+  _declOrigin: DeclarationOrigin;
 };
 ```
 
@@ -16163,10 +16164,41 @@ type TypeReference = {
      name: string;
      typeParams: string[];
     }[];
+  _declOrigin: DeclarationOrigin;
 };
 ```
 
 Nominal typing
+
+</MemberCard>
+
+<MemberCard>
+
+### DeclarationOrigin
+
+```ts
+type DeclarationOrigin = {
+  batch: number;
+  statementId: unknown;
+  firstRange: [number, number];
+};
+```
+
+Which compilation unit and which declaring statement a registry record came
+from — the runtime half of the redefinition discipline
+(`docs/plans/2026-08-14-redefinition-discipline.md`, "Mechanics").
+
+A second declaration of a name with the SAME `batch` and a DIFFERENT
+`statementId` is a within-unit redefinition and is refused; the same
+`statementId` re-registering is the same statement declaring itself again
+(one statement registers up to three times per batch — the static pre-pass
+canonicalizes it, then the evaluation loop canonicalizes and evaluates it)
+and is accepted.
+
+`statementId` is an opaque IDENTITY token, compared with `!==` and never
+inspected: the raw (uncanonicalized) name operand the `Declare*` handlers
+thread from their canonical handler into their evaluate handler. It is typed
+`unknown` so this engine-free module needs no expression type.
 
 </MemberCard>
 
