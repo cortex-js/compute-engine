@@ -5872,11 +5872,7 @@ export class Parser {
     if (!mentionsWildcard(operand)) return operand;
     const start = this.localStart(operand) ?? 0;
     const end = this.localEnd(operand) ?? this.previousEnd();
-    return this.wrap(
-      ['Function', operand] as MathJsonExpression[],
-      start,
-      end
-    );
+    return this.wrap(['Function', operand] as MathJsonExpression[], start, end);
   }
 
   private combineInfix(
