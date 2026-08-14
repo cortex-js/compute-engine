@@ -2,6 +2,59 @@
 
 ### Epsil
 
+- **Pipeline stages are more concise: implicit first argument, inline
+  lambdas, and implicit `Map`.** Three pipe-stage sugars make
+  `1..oo |> Take(10) |> _^2 |> Sum` (and the spelled-out
+  `… |> Take(_, 10) |> Map(_, _^2) |> Sum`) evaluate to 385:
+
+  - a call stage missing required arguments receives the piped value as
+    its implicit **first argument** (`xs |> Take(10)` ≡
+    `xs |> Take(_, 10)`); a complete call keeps its old meaning, and an
+    explicit `_` still marks the slot the piped value fills;
+  - a `|->` lambda may be written **inline after `|>`** without
+    parentheses — in stage position the arrow binds tighter than the
+    pipe, and the body ends at the next `|>` (so
+    `xs |> x |-> x^2 |> Sum` is `xs |> (x |-> x^2) |> Sum`; previously
+    a `symbol-expected` parse error);
+  - a **one-parameter lambda stage over a collection maps** each
+    element (implicit `Map`), and an operator-written placeholder
+    expression (`_^2`, `_ + 1`) is such a lambda. Named-function stages
+    (`xs |> Sum`), string topics, and lambdas whose authored parameter
+    annotation accepts the whole collection still apply to the whole
+    value; in a call stage `_` remains the piped value
+    (`xs |> Take(_, 3)`).
+
+  The first and third rules live in the engine's `Pipe` operator, so
+  they hold on the MathJSON route too; the lambda-reading of `_^2` is
+  an Epsil-surface (parser) rule.
+
+- **`otherwise` is accepted as the wildcard case of a `match`.** The
+  keyword is a synonym for a bare `_` pattern — `otherwise => "other"`,
+  with or without a guard (`otherwise if c => …`) — and lowers to the
+  same `_` node, so serialization and the irrefutable-non-final-case
+  diagnostic are unchanged. It is contextual, not reserved: recognized
+  only when the bare word is the entire pattern of a case, it remains an
+  ordinary identifier everywhere else (including inside structured
+  patterns, where a bare name binds).
+
+- **A named call to a `:=`-assigned callee no longer draws false static
+  diagnostics.** `f := (x: number, y: string) |-> x + 3` followed by
+  `f(y: "ok", x: 1)` runs correctly (the assignment pins a signature
+  carrying the parameter names), but the static pre-pass — which
+  canonicalizes every statement before any evaluates — saw the callee
+  as an auto-declared symbol with no parameter names and emitted one
+  `argument-names-unavailable` diagnostic per argument for a program
+  that is not wrong. The pass now registers the signature such a
+  statement pins — `f := ⟨annotated literal⟩`, and
+  `let/const f : ⟨arrow type⟩` with or without an initializer — for
+  the later statements of the same program, under the pass's inference
+  rollback frame (checking still mutates nothing). Registration is
+  first-wins per name, mirroring the runtime, where a reassignment
+  never re-pins the binding's declared type. The diagnostic still
+  fires where it is a true prediction: a named call written before the
+  assignment, and an **unannotated** literal (whose inferred signature
+  drops its parameter names), both of which fail at runtime too.
+
 - **A diagnostic inside a reordered named call now underlines the
   argument at fault, not a bystander.** With
   `function f(x: number, y: string) {…}`, the call
@@ -35,6 +88,26 @@
 
 ### Issues Resolved
 
+- **Canonicalizing or typing an expression that references a
+  comprehension-bound name is no longer catastrophically slow.** With
+  `B := [case-body for n = C + 1]` (a lazy `Comprehension`) assigned, a
+  single canonical box of a row filtering `B` — e.g. the implicit-surface
+  equation `(x - ⌊(Filter(B, Z↦Z=Z) - 1)/15⌋ + 7)² + … = 0.25` — took
+  ~7–17 s, the first `.type` read ~60–170 s, and a `couldMatch` on that
+  type ~90 s, nearly independent of the collection's size (Tycho
+  item 181). The cause was cache self-invalidation, not the
+  comprehension itself: lazy-collection probes (`Comprehension`
+  count/finiteness scans, `Filter` emptiness walks) bracket each read
+  with an eval-context push/pop, and every pop advanced the version
+  counter that `.type`/`.sgn` caches key on — so each probe threw away
+  the caches the enclosing type derivation was filling, and the
+  recomputation re-ran the probes (measured: 872K pops and 1.85M type
+  recomputes — 100% yielding identical results — in one box). A pop
+  now proves cleanliness with a version stamp taken at push: if nothing
+  advanced any invalidation axis while the context was on the stack and
+  its assumptions are untouched, the pop no longer invalidates. The
+  repro's full pipeline drops from ~3 minutes to ~50 ms.
+
 - **A `Take`-bounded infinite collection now compiles to JavaScript.**
   `Sum(Take(Map(1..oo, _ |-> _^2), 10))` previously compiled to
   `Array.from({length: Infinity}, …)` — code that compiled cleanly and
@@ -50,6 +123,19 @@
   fractional `Take`/`Drop` count now rounds like the interpreter
   (`Take([1,2,3,4], 2.5)` takes three elements; the compiled `slice`
   used to truncate to two).
+
+  The lazy stream helpers enforce the interpreter's runtime guards
+  too: a scan that can never terminate — `Filter` with a never-true
+  predicate, `TakeWhile` with a never-false one — throws the
+  interpreter's `Iteration limit … exceeded` error at
+  `engine.iterationLimit` pulls instead of locking the thread, and an
+  invalid runtime count (`NaN`, `±∞`, or beyond the safe-integer
+  range) is treated as the interpreter treats it — an unresolved
+  parameter yielding an empty walk — rather than being coerced to a
+  default or iterated verbatim. A count that is *statically*
+  non-finite (`Take(1..oo, oo)`) fails closed at compile time, and
+  the range start may be a runtime variable
+  (`Take(Map(Range(n, oo), f), 10)` compiles).
 
 - **Statically checking an Epsil program no longer mutates the engine.**
   The static checking pass (`epsil check`, and the pre-pass `executeEpsil`

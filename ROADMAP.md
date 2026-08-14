@@ -89,6 +89,42 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### String-operation defects (found 2026-08-13, string-roadmap review)
+
+Two confirmed defects in the existing string operators, found while
+reviewing the string surface for `docs/STRING_ROADMAP.md` (both verified
+empirically against source):
+
+- **`IntegerString` silently drops the sign**: `IntegerString(-42)` returns
+  `"42"` (the evaluate handler applies `Math.abs` / `bignumRe.abs()`,
+  `library/core.ts`). `DigitsFrom("-42")` returns `-42`, so the pair does
+  not round-trip: `DigitsFrom(IntegerString(-42))` is `42`. No comment or
+  test marks the absolute value as intentional. Proposed fix: preserve the
+  sign (emit a leading `-`); audit callers/snapshots first.
+- **`StringSplit(s, "")` shatters surrogate pairs**: with an empty
+  separator, the handler delegates to JS `String.split('')`, which splits
+  into UTF-16 code units — `StringSplit("a🏳️‍🌈b", "")` yields lone
+  surrogate halves (`�`). Under the string model (strings are sequences of
+  grapheme clusters, `docs/STRING_ROADMAP.md`) an empty separator should
+  either split into grapheme clusters (equivalent to `Characters`) or be
+  rejected; it must never produce invalid scalar sequences.
+
+### Ground-type invariant leak in `parameterized-nominal-constructor.test.ts` (dev-assert noise)
+
+Every full-suite run emits one `console.assert` failure: `probe() received
+an open type variable \`T\` — the ground-type invariant (§4.2) leaked`
+(`assertGroundType`, `common/type/subtype.ts`), fired from
+`test/compute-engine/parameterized-nominal-constructor.test.ts:243`. The
+test itself passes — the assert is dev-only — but the §4.2 invariant says
+an open type variable must never reach the subtype/membership predicates,
+so either the parameterized-nominal constructor path is leaking an
+uninstantiated `T` into `probe()` (a real gap in the D6 bound-reading) or
+the probe call in the test bypasses the instantiation step the engine
+routes take. Pre-existing (observed in every full run since at least the
+2026-08-13 rollback-frames round; noticed and filed 2026-08-13 during the
+effects-axis-provenance round).
+
+
 ### Lazy infinite-collection compilation — v1 limits (JS target)
 
 `Take`/`TakeWhile`-bounded infinite pipelines compile to lazy `_SYS`
@@ -133,8 +169,8 @@ by the dual review of the site-operand change; no known user report.
 
 Named-argument calls shipped 2026-08-12 (design record:
 `docs/plans/2026-08-12-named-arguments-design.md`, §9 has the full
-statements). Two deliberate v1 limits remain open, in rough priority
-order. (Two other candidates are resolved: a declared-only overload set
+statements). One deliberate v1 limit remains open. (Three other
+candidates are resolved: a declared-only overload set
 declining a named call whose name-eliminated arm is more specific was
 RULED correct behavior on 2026-08-13 — when names and positional
 ranking disagree and there is no implementation to pin the call to, the
@@ -149,7 +185,15 @@ are read from the expression, not the inferred type. What still
 declines through `Apply` is a callee whose names are genuinely not
 knowable there: a symbol callee (`Apply(f, x: 1)` — write `f(x: 1)`),
 and a literal with a parameter that is not a bare symbol or `Typed`
-annotation.)
+annotation. And the false STATIC diagnostics a named call to a
+`:=`-assigned callee used to draw were FIXED on 2026-08-13: the static
+pre-pass now registers the signature a `f := ⟨annotated literal⟩` or
+`let/const f : ⟨arrow type⟩` statement pins, for the later statements
+of the same program, under the pass's inference rollback frame —
+`registerPinnedSignature` in `src/epsil/static-diagnostics.ts`,
+regression tests in `test/epsil/execute.test.ts` "named calls to
+`:=`-assigned callees". The decline still fires where it is truthful:
+calls ahead of the assignment, and unannotated literals.)
 - **Unannotated function literals are not addressable by name through
   a BINDING** — type inference drops parameter names
   (`effects-inference.ts` types a bare parameter as
@@ -160,34 +204,6 @@ annotation.)
   `application-validation-regressions`, callback-contract and
   lambda-inference batteries) — a dedicated follow-up round, not a
   snapshot refresh.
-- **A named call to a `:=`-assigned callee draws false STATIC
-  diagnostics** (defect, discovered 2026-08-13 while fixing the
-  anchoring item below).
-  `f := (x: number, y: string) |-> x + 3` followed by
-  `f(y: "ok", x: 1)` runs correctly — the assignment pins a signature
-  carrying the parameter names, so the runtime canonicalization
-  permutes the call — but `epsil check`/the static pre-pass
-  canonicalizes the CALL before the assignment has executed, finds no
-  parameter names on the auto-declared `f`, and emits one
-  `argument-names-unavailable` static diagnostic per carrier for a
-  program that is not wrong. MEASURED 2026-08-13: the annotated
-  DECLARATION spelling has it too
-  (`const g : (x: number, y: string) -> number = …` — declaration is
-  also an evaluation-time effect), while an UNANNOTATED literal is NOT
-  part of the defect (its named call fails at runtime as well, so the
-  static diagnostic is a true prediction there). The
-  `function f(…) {…}` definition form is immune (the static pass
-  registers its signature up front — provisional registry). The fix
-  direction is making the static pass see `:=`-pinned and
-  declaration-annotated signatures the same way — provisional
-  registration under the static pass's inference rollback frame — not
-  suppressing the diagnostic: the engine-level "a call ahead of its
-  definition has no names to check" decline is deliberate (design doc
-  §6), and it is truthful for typo'd callees and unannotated
-  literals. Fix direction USER-RATIFIED 2026-08-13: provisional
-  registration in the static pass (visible to later statements only,
-  mirroring runtime order; skip non-literal RHS; unannotated literals
-  keep erroring), never diagnostic suppression.
 
 ### `Derivative` compile time vs body nesting depth (perf ask)
 

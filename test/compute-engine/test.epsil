@@ -9,4 +9,4 @@ function foo(s: string) { s }
 const s = [s1, s2, s3, s4, s5]
 s |> Map(_, Length(s))
 
-const f = x -> x + 1
+// const f = x -> x + 1

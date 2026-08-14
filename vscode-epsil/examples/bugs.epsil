@@ -9,6 +9,7 @@ Sum(Take(Map(1..oo, _ |-> _^2), 10))
 
 1..oo |> Take(_, 10) |> Map(_, _^2) |> Sum
 
+
 // The following should be equivalent:
 // 1..oo |> Take(10) |> x |-> x^2 |> Sum
 // 1..oo |> Take(10) |> _^2 |> Sum

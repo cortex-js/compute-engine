@@ -1,4 +1,36 @@
-Sum(Take(Map(1..oo, _ |-> _^2), 10))
+const s1 = "Sightglass Coffee Shop"
+const s2 = "Le café des Deux Magots"
+const s3 = "singer 👨🏻‍🎤"
+const s4 = "Mühlenstraße"
+const s5 = "Mühlenstrasse"
 
-// JS: the infinite array is an issue. We should materialize the Take on an infinite collection.
-// ((((_f) => (Array.from({length: Infinity}, (_e, i) => 1 + i)).map((_x) => _f(_x)))(((_) => (_ * _)))).slice(0, Math.max(0, 10))).reduce((_a, _b) => _a + _b, 0)
+function foo(s: string) { s }
+
+Length(s1)
+
+// const s = [s1, s2, s3, s4, s5]
+// s |> Map(_, Length(s))
+
+// const f = x -> x + 1
+
+// ----
+
+// let digits = Characters("0123456789")
+// "a" in Characters("0123456789")
+
+// This program cannot be compiled to JavaScript:
+// Element: cannot compile — the interpreter compares elements structurally, but only real/boolean/string elements compare by value on the JavaScript target. Fail closed (D6).
+
+// ----
+
+
+// Sum(Take(Map(1..oo, _ |-> _^2), 10))
+
+// (_SYS.takeIter(_SYS.mapIter(_SYS.rangeIter(1, 1), ((_) => (_ * _))), 10)).reduce((_a, _b) => _a + _b, 0)
+
+// ----
+
+// Sum(Take(Map(1..20, _ |-> _^2), 10))
+// -> Math.max(0,10) -> reduce
+// Take(Map()) -> reduce
+// ((((_f) => ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]).map((_x) => _f(_x)))(((_) => (_ * _)))).slice(0, Math.max(0, 10))).reduce((_a, _b) => _a + _b, 0)
