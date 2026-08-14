@@ -24,6 +24,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Bondarenko ∫** | `audit/bondarenko.ts` | CE · CE+R/F · SymPy · Mathematica | `audit/REPORT-bondarenko.md` |
 | **Kernel microbench** | `big-decimal/*` | CE · CE published · SymPy · mpmath | `big-decimal/BIGNUM-COMPARISON.md` |
 | **Engine configuration** | `effects-registration.ts` | CE (self, before/after) | stdout |
+| **Overload resolution** | `overload-resolution.ts` | CE (self, before/after) | stdout |
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 
 The first six are the **release baseline** (see below). Benchmark sources
@@ -385,6 +386,27 @@ ROUNDS=5 FNS=240 ROWS=60 npx tsx benchmarks/effects-registration.ts
 Registration should scale **near-linearly** in `FNS`; a quadratic reading there
 (≈4× per doubling) means some per-node query is re-deriving a whole dependency
 chain — the shape of the 0.100.0 convert-time regression.
+
+---
+
+## Overload-resolution microbenchmark (`overload-resolution.ts`)
+
+A **self-comparison** harness: the per-call cost of applying an operator whose
+signature is an overload set, across arm counts (2/4/8) × operand categories
+(exact, subtype, inferred-narrowing, generic, rejected), plus a
+single-signature control and a plain-boxing canary. Median of `RUNS` runs of
+`ITERS` calls each, µs/call. It is the microbenchmark half of the phase-2c
+perf gate in `docs/plans/2026-08-13-inference-tx-design.md` (trial-based
+overload resolution: per-call ≤ 2× the write-free-filter baseline; the
+canonicalization corpus — `effects-registration.ts` — ≤ 3% median). To
+compare against a committed baseline, run it in a worktree of the baseline
+commit (symlink `node_modules`, copy this file in) in the SAME machine
+session — cross-session absolute numbers vary by ~3×.
+
+```bash
+npx tsx benchmarks/overload-resolution.ts          # RUNS=5 ITERS=2000
+RUNS=7 ITERS=5000 npx tsx benchmarks/overload-resolution.ts
+```
 
 ---
 

@@ -713,8 +713,16 @@ export class ComputeEngine implements IComputeEngine {
 
   /** See `IComputeEngine._withRolledBackInference` — the rollback-frame
    * primitive of `docs/plans/2026-08-13-inference-tx-design.md`, phase 2b.
+   * `options.forbidsRepairs` marks the frame as phase 2c's repair-free TRIAL
+   * validation: the construction-level repair helpers
+   * (`devolveUnappliedOperator`, `repairFreshMatrixInference`) assert they
+   * never execute under such a frame — trials admit repairs by their
+   * write-free preconditions without running them.
    * @internal */
-  _withRolledBackInference<T>(fn: () => T): T {
+  _withRolledBackInference<T>(
+    fn: () => T,
+    options?: { forbidsRepairs?: boolean }
+  ): T {
     // A rollback frame nests strictly inside ONE boxing-pass window: the
     // journal records `_freshlyInferred` membership (a per-window set) and
     // epoch-stamped provenance, both of which the window lifecycle resets —
@@ -727,6 +735,7 @@ export class ComputeEngine implements IComputeEngine {
     );
     const frame = new InferenceRollbackFrame({
       boxingRepairDepthAtOpen: this._boxingState.frameDepth(),
+      forbidsRepairs: options?.forbidsRepairs,
     });
     this._rollbackFrames.push(frame);
     let bodyError: { error: unknown } | undefined;

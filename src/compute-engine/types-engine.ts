@@ -428,8 +428,14 @@ export interface IComputeEngine {
    * An expression or definition created inside the frame must not be
    * evaluated, canonicalized against, or resolved for symbol lookup after
    * the rollback; retention for *rendering* (`toString()`) is permitted.
+   *
+   * `options.forbidsRepairs` marks a repair-free TRIAL frame (phase 2c):
+   * the construction-level repairs assert they never run under one.
    * @internal */
-  _withRolledBackInference<T>(fn: () => T): T;
+  _withRolledBackInference<T>(
+    fn: () => T,
+    options?: { forbidsRepairs?: boolean }
+  ): T;
 
   /**
    * Run `fn` inside one boxing-pass window (the `_inferenceTxDepth` /

@@ -64,6 +64,7 @@ import {
 import {
   armHasValueParam,
   instantiateArms,
+  type OverloadResolution,
   overloadArms,
   resolveOverload,
   triStateSelect,
@@ -261,6 +262,21 @@ export class BoxedFunction
   private _isStructural: boolean;
 
   private _hash: number | undefined;
+
+  /** The overload resolution this call was VALIDATED against, attached by
+   * the construction site (`box.ts`) when the operator's signature is an
+   * overload set (phase 2c of
+   * `docs/plans/2026-08-13-inference-tx-design.md`). Result typing
+   * (`resolvedArm`) reads it so `.type` reports the arm full validation
+   * actually selected — the trial-admission set and the cheap prefilter's
+   * can differ on overlapping-arm calls. `undefined` on expressions that
+   * never went through overload validation (non-strict mode, non-canonical
+   * construction); those fall back to a prefilter-only resolution, whose
+   * wider candidate set result typing tolerates. Deliberately NOT
+   * generation-guarded: validity was decided at construction time, and the
+   * resolution records that decision, not a recomputable view.
+   * @internal */
+  _resolvedOverload: OverloadResolution | undefined = undefined;
 
   // Validity depends only on the (immutable) structure — the operator and
   // the operands' own validity — so it is computed once and cached. Without
@@ -4711,12 +4727,18 @@ function applyFunctionLiteral(
  * every arm's result — NOT `unknown`; the operands have already been marked
  * invalid by `validateArguments`, so the imprecision is not load-bearing.
  *
- * **The policies must match the ones `validateArguments` resolved with.** They
- * are recomputed here rather than threaded through because `.type` is a getter
- * reached on paths that never ran validation; resolving with different
- * policies would let the result type come from a different arm than the one
- * the call was validated against (a lazy operator is the clearest case — its
- * operands are unbound, so type filtering there is noise).
+ * **The resolution computed at validation time wins** (phase 2c): the
+ * construction site attached it to the call (`_resolvedOverload`), and it
+ * records the arm the operands were actually validated against — under trial
+ * admission, which the prefilter-only re-derivation below cannot reproduce.
+ * The re-derivation is the COLD path, for expressions that never validated
+ * (non-strict mode, non-canonical construction): typing-only resolution
+ * needs no writes and tolerates the wider prefilter candidate set.
+ *
+ * **The cold path's policies must match the ones validation would use.** They
+ * are recomputed here because `.type` is a getter reached on paths that never
+ * ran validation (a lazy operator is the clearest case — its operands are
+ * unbound, so type filtering there is noise).
  *
  * Result typing only — see `overload.ts` for why operand *inference* must use
  * the join over every viable arm instead.
@@ -4733,12 +4755,9 @@ function resolvedArm(
     threadable: def?.broadcastable,
     couldBeCollection: couldBeCollectionOperand,
   };
-  const { selected, selectedInstance } = resolveOverload(
-    expr.engine,
-    expr.ops,
-    arms,
-    policies
-  );
+  const { selected, selectedInstance } =
+    expr._resolvedOverload ??
+    resolveOverload(expr.engine, expr.ops, arms, policies);
   if (selected === undefined) return undefined;
 
   // Value-arm JOIN (function-polymorphism design §4.4): when an arm

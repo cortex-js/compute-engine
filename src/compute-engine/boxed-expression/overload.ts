@@ -19,11 +19,8 @@ import {
   type Threadable,
 } from './generic-instantiation.js';
 import {
-  broadcastableBaseMatches,
   narrowingPreservesEffects,
-  overlapsForDeferredValidation,
   signatureArms,
-  stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
 import type {
@@ -51,11 +48,16 @@ import {
  * See `docs/plans/2026-07-25-overload-resolution-design.md`. Two contracts
  * from that document govern everything here:
  *
- * - **§4.2 — resolution is WRITE-FREE.** Nothing in this file mutates a symbol
- *   definition. Resolving by running each arm through `validateArguments` and
- *   keeping the first that succeeds would let its in-loop
- *   `op.infer(param, 'narrow')` mutate symbols on arms that are subsequently
- *   *rejected*.
+ * - **§4.2 — resolution leaves no writes behind.** Nothing in this file
+ *   mutates a symbol definition. Since phase 2c
+ *   (`docs/plans/2026-08-13-inference-tx-design.md`) the guarantee is
+ *   rollback-shaped rather than abstinence-shaped: admission may run a
+ *   caller-supplied TRIAL ({@link ArmTrialFn}) — full `validateArguments`,
+ *   whose in-loop `op.infer(param, 'narrow')` genuinely writes — but the
+ *   caller runs each trial under a rollback frame that undoes every write
+ *   whatever the verdict, so a rejected arm still leaves no trace. The
+ *   trial-less paths (the cheap prefilter alone) remain write-free in the
+ *   original, abstinence sense.
  * - **§4.3 — inference uses the JOIN over the surviving arms, not the winner.**
  *   Hence `resolveOverload` returns the whole `viable` set, not just
  *   `selected`: the result type is read off `selected` (most-specific-wins),
@@ -265,7 +267,7 @@ function arityBounds(sig: FunctionSignature): { min: number; max: number } {
  * to an OPERATOR definition, and a value binding counts only when the repair
  * itself created it (a user-declared symbol keeps its declared-type check).
  */
-function isRepairableOperatorSymbol(
+export function isRepairableOperatorSymbol(
   ce: ComputeEngine,
   op: Expression
 ): boolean {
@@ -300,28 +302,38 @@ export interface AdmissionPolicies {
 }
 
 /**
- * True when `op` does not REFUTE `param` — the write-free admission rule the
- * arm filter uses.
+ * The cheap PREFILTER: true unless `op` **provably** cannot satisfy `param`
+ * (phase 2c of `docs/plans/2026-08-13-inference-tx-design.md`).
  *
- * This must mirror `validateArguments`' admission gates **exactly**, in both
- * directions, and the reason is subtler than "permissive is safe":
+ * This replaced the write-free mirror filter (`operandAdmits`, sixteen
+ * mirrored gate conditions kept in lockstep with `validateArguments` by
+ * hand). Under trial-based resolution the filter no longer needs to predict
+ * what validation will decide — the TRIAL is `validateArguments` itself, run
+ * under a rollback frame — so the only job left here is to prune arms that
+ * cannot possibly fit, cheaply, before paying for a trial. Consequently the
+ * rejection rule is minimal and PROOF-shaped:
  *
- * - Admitting too LITTLE drops an arm full validation would have accepted, so
- *   a legal call is reported as matching no overload.
- * - Admitting too MUCH is *not* harmless. It only widens the §4.3 join (safe),
- *   but it also keeps a bad arm in the running for SELECTION — and a wrongly
- *   selected arm is then handed to full validation, which rejects it, even
- *   though another arm would have validated cleanly.
+ * - reject only on `provablyDisjoint(operand type, param)` — sound by
+ *   construction (true only when the intersection is provably empty), so
+ *   every admission the old gates encoded by overlap (inferred-narrowing,
+ *   value-membership undecidability, `broadcastable<T>` base match,
+ *   overlap-deferred validation) is admitted here for free: overlapping
+ *   types are never disjoint;
+ * - and never on a slot the trial could still admit for a NON-type reason:
+ *   a lazy operator (operands unbound), a threadable-collection operand, an
+ *   invalid operand (full validation owns its error), an eligible
+ *   strip-before-validate position, or an operand one of the two
+ *   construction-level repairs' write-free preconditions rescues.
  *
- * So every gate below carries the same conditions as its counterpart rather
- * than a convenient over-approximation.
+ * This is also the ONLY admission rule on the trial-less cold path (result
+ * typing via `resolvedArm` on a call that never validated): there the wider
+ * candidate set is tolerated — result types JOIN over candidates.
  *
  * `param` is always GROUND: every caller runs the arm through
- * {@link instantiateArm} first (§4.1 per-arm instantiation), which is also what
- * keeps an open pattern out of `overlapsForDeferredValidation`/`typeCategory`,
- * whose §4.2 tripwires assert on `kind: 'variable'`.
+ * {@link instantiateArm} first (§4.1 per-arm instantiation), and
+ * `provablyDisjoint` asserts on an open input.
  */
-function operandAdmits(
+function prefilterAdmits(
   ce: ComputeEngine,
   op: Expression,
   param: Type,
@@ -336,9 +348,8 @@ function operandAdmits(
   // meaningful — `validateArguments` pushes them through untouched.
   if (policies?.lazy) return true;
 
-  // An unknown/`any` operand never refutes an arm (`validate.ts:621-626`).
-  // This is why ambiguity is always "eliminated nothing", never "picked
-  // wrong" (§4.1).
+  // An unknown/`any` operand never refutes an arm. This is why ambiguity is
+  // always "eliminated nothing", never "picked wrong" (§4.1).
   if (op.type.isUnknown || op.type.type === 'any') return true;
 
   if (
@@ -348,58 +359,73 @@ function operandAdmits(
     return true;
   if (op.type.matches(param)) return true;
 
-  // Value-component parameter: tri-state admission — MIRRORS the
-  // `validateArguments` fallback (the filter must admit exactly what
-  // validation admits, both ways): membership or undecidability admits,
-  // only proven refutation drops the arm.
-  if (hasValueComponent(param) && admissionOf(op, param) !== 'refute')
-    return true;
+  // A value-component parameter (`0`, `integer<0..10>`) is refutable by
+  // MEMBERSHIP, which the type-level disjointness test below cannot see: a
+  // literal `1` overlaps the TYPE of the parameter `0` (`0 ⊆ finite_integer`)
+  // while provably not being the value. `admissionOf`'s `'refute'` is a
+  // proof of non-membership — the same tri-state the runtime clause dispatch
+  // trusts (`armAdmission`) — so it is a legitimate "provably impossible"
+  // rejection, and the named-argument faithfulness check
+  // (`plainCallIsFaithful`) depends on it to keep a value-refuted clause out
+  // of the candidate set.
+  const valueRefuted =
+    hasValueComponent(param) && admissionOf(op, param) === 'refute';
 
-  // An inferred (not declared) symbol type that the parameter would narrow —
-  // except on the effect axis, where `validateArguments` declines to narrow
-  // (`narrowingPreservesEffects`), and except a value-component parameter,
-  // to which `validateArguments` also declines to narrow (a call does not
-  // prove the symbol always holds the value).
-  if (
-    op.valueDefinition?.inferredType &&
+  // Effect-axis refutation (the deleted narrowing gate's DECLINING half): for
+  // a callable operand that does not `matches(param)`, validation's only
+  // admission route is the inferred-narrowing write, and validation declines
+  // that narrow when it would erase proven effects
+  // (`narrowingPreservesEffects` — a no-op unless both types are callable
+  // with known arrows, so scalar operands never reach it). Trial-backed
+  // resolution re-derives this verdict in full validation anyway; the
+  // TRIAL-LESS consumers (the effects projection's per-application arm pick,
+  // the named-argument seam) rely on this refutation so an arm whose effect
+  // contract the operand cannot prove is never selected — selecting it would
+  // report a call purer than its operand.
+  const effectsRefuted =
     isSubtype(param, op.type.type) &&
-    !hasValueComponent(param) &&
-    narrowingPreservesEffects(op.type.type, param)
+    !narrowingPreservesEffects(op.type.type, param);
+
+  if (
+    !valueRefuted &&
+    !effectsRefuted &&
+    !provablyDisjoint(op.type.type, param)
   )
     return true;
 
-  // Mirrors `validateArguments`: an inferred SIGNATURE is admitted only when
-  // the operand's type actually matches the parameter. Dropping the second
-  // conjunct would admit a function-typed operand against a scalar parameter.
-  if (op.operatorDefinition?.inferredSignature && op.type.matches(param))
+  // Provably disjoint by TYPE. Three rescues remain, each a write-free
+  // precondition of an admission full validation performs on other grounds:
+  // a `missing`-carrying operand at a strip-eligible position (§3.B — a
+  // scalar `Missing` strips to `never`, admissible everywhere), and the two
+  // construction-level repairs.
+  if (policies?.stripMissing?.(index) && typeContainsMissing(op.type.type))
     return true;
-
-  if (broadcastableBaseMatches(op.type.type, param)) return true;
-
-  // Strip-before-validate (§3.B of the missing-value design). Mirrors
-  // `strippedMatchesParam`: the position must be ELIGIBLE per the caller's
-  // policy, the operand must carry a `missing` arm, and the stripped type must
-  // still satisfy the parameter. Admitting every `missing`-carrying operand
-  // outright would let an arm that full validation rejects win selection.
-  if (policies?.stripMissing?.(index) && typeContainsMissing(op.type.type)) {
-    const stripped = stripMissingFromType(op.type.type);
-    if (stripped === 'never' || isSubtype(stripped, param)) return true;
-  }
-
-  // Overlap-deferred validation (§D6.2).
-  if (overlapsForDeferredValidation(op.type.type, param)) return true;
-
   if (isRepairableOperatorSymbol(ce, op)) return true;
-
-  // The fresh-matrix-inference repair can rescue an operand that no static
-  // check admits. The repair itself mutates and re-boxes, so the filter can
-  // only consult its write-free precondition — conservative in the admitting
-  // direction, which is the correct bias here (a repair that then fails leaves
-  // full validation to produce the error, exactly as for a plain signature).
   if (policies?.freshMatrixRepair?.(op, param)) return true;
 
   return false;
 }
+
+/**
+ * A caller-supplied TRIAL of one arm at one call — the dependency inversion
+ * that keeps `overload.ts` from importing `validate.ts` (which imports this
+ * module): `resolveOverload` keeps its fused
+ * instantiate/filter/rank loop, and `validateArguments` passes a closure that
+ * runs ITSELF on the single arm, in trial mode, under a repair-forbidding
+ * rollback frame — so the trial's inference writes are undone whatever the
+ * outcome, and its verdict is exactly full validation's.
+ *
+ * Returns `null` when the arm ADMITS the call, or the operand indices (in
+ * the arm's own — permuted, for a named call — order) the validation
+ * refuted. The indices feed `diagnoseNoMatch`'s per-arm blame; admission
+ * consumes only the null/non-null bit.
+ */
+export type ArmTrialFn = (
+  declared: FunctionSignature,
+  instance: FunctionSignature,
+  solution: TypeInferenceResult | undefined,
+  ops: ReadonlyArray<Expression>
+) => ReadonlyArray<number> | null;
 
 /** A GROUND view of one arm at one call (§4.1 per-arm instantiation). */
 interface ArmInstance {
@@ -672,14 +698,20 @@ export function resolveOverload(
   policies?: AdmissionPolicies,
   /** A named call's per-arm normalization; omitted for a positional call, which
    * then takes byte-identical code paths to the pre-feature ones. */
-  named?: NamedCallPermutations
+  named?: NamedCallPermutations,
+  /** The trial admission (phase 2c): an arm that survives the cheap prefilter
+   * is admitted iff its trial — full validation under a rollback frame,
+   * supplied by `validateArguments` — returns `null`. Omitted on the
+   * trial-less cold path (`resolvedArm` result typing), where the prefilter
+   * alone decides and the wider candidate set is tolerated. */
+  trial?: ArmTrialFn
 ): OverloadResolution {
   const arity = ops.length;
 
-  // Note `operandAdmits` handles `lazy` itself (a lazy operator's operands are
-  // unbound, so their types are not meaningful and refute nothing). Keeping
-  // that inside the single admission rule is what makes the filter and the
-  // diagnostic agree.
+  // Note `prefilterAdmits` handles `lazy` itself (a lazy operator's operands
+  // are unbound, so their types are not meaningful and refute nothing).
+  // Keeping that inside the single admission rule is what makes the filter
+  // and the diagnostic agree.
 
   // A GROUND overload set — every set in the library today — takes the
   // original path verbatim: no instantiation, no per-arm bookkeeping, and D11
@@ -699,9 +731,14 @@ export function resolveOverload(
         ops.every((op, i) => {
           const param = paramAt(arm, i);
           return (
-            param !== undefined && operandAdmits(ce, op, param, i, policies)
+            param !== undefined && prefilterAdmits(ce, op, param, i, policies)
           );
-        })
+        }) &&
+        // Trials run in declaration order inside the filter, after the cheap
+        // prefilter — EVERY prefilter-surviving arm is trialed (not just up
+        // to the first success), because `viable` must be complete for the
+        // §4.3 join.
+        (trial === undefined || trial(arm, arm, undefined, ops) === null)
     );
     if (viable.length === 0)
       return {
@@ -730,19 +767,31 @@ export function resolveOverload(
     if (named !== undefined && permutation === undefined) continue;
     if (!arityAdmits(arm, arity)) continue;
     // Every index-keyed decision below — the generic solver's `actuals` array
-    // and its `skip`/`inferable`/`lifted` callbacks, then `operandAdmits` —
-    // reads operands at DECLARATION positions, so the permutation is applied
-    // here, once, before any of them runs.
+    // and its `skip`/`inferable`/`lifted` callbacks, then the prefilter and
+    // the trial — reads operands at DECLARATION positions, so the permutation
+    // is applied here, once, before any of them runs.
     const armOps =
       permutation === undefined ? ops : permuteOps(ops, permutation);
     const candidate = instantiateArm(arm, armOps, policies, ce._typeResolver);
     // An unsatisfiable instantiation (violated bound) is not an arm this call
     // can take.
     if (!candidate.ok) continue;
-    const admits = armOps.every((op, i) => {
-      const param = paramAt(candidate.instance, i);
-      return param !== undefined && operandAdmits(ce, op, param, i, policies);
-    });
+    const admits =
+      armOps.every((op, i) => {
+        const param = paramAt(candidate.instance, i);
+        return (
+          param !== undefined && prefilterAdmits(ce, op, param, i, policies)
+        );
+      }) &&
+      // The trial validates the DECLARED arm (validation re-instantiates it
+      // through the shared solve, passed along so it is not recomputed).
+      (trial === undefined ||
+        trial(
+          candidate.declared,
+          candidate.instance,
+          candidate.solution,
+          armOps
+        ) === null);
     if (admits) candidates.push({ ...candidate, permutation });
   }
 
@@ -933,7 +982,15 @@ export function diagnoseNoMatch(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
   arms: ReadonlyArray<FunctionSignature>,
-  options?: AdmissionPolicies
+  options?: AdmissionPolicies,
+  /** The same trial admission `resolveOverload` ran with (phase 2c). Each
+   * arity-viable arm's refuted positions are the operands its TRIAL — full
+   * validation under a rollback frame — actually errored on, which is
+   * strictly more faithful than the old per-position filter probing. Runs
+   * only on the already-failing path, so trial cost is not a concern here.
+   * Without it (the trial-less cold path) the prefilter's per-position
+   * verdicts are used instead. */
+  trial?: ArmTrialFn
 ): {
   arityViable: ReadonlyArray<FunctionSignature>;
   arityTarget: number | undefined;
@@ -973,18 +1030,28 @@ export function diagnoseNoMatch(
   let fewest = Infinity;
   let candidates: { arm: FunctionSignature; refutes: number[] }[] = [];
   for (const declared of arityViable) {
-    const arm = instantiateArm(
+    const instantiated = instantiateArm(
       declared,
       ops,
       options,
       ce._typeResolver
-    ).instance;
-    const refutes: number[] = [];
-    ops.forEach((op, i) => {
-      const param = paramAt(arm, i);
-      if (param === undefined) return;
-      if (!operandAdmits(ce, op, param, i, options)) refutes.push(i);
-    });
+    );
+    const arm = instantiated.instance;
+    let refutes: number[];
+    if (trial !== undefined) {
+      // The trial's verdict IS full validation's: the refuted positions are
+      // the operands it errored on. `null` (the arm admits) cannot happen on
+      // this path — the caller only diagnoses when no arm was selected — but
+      // is mapped to "refutes nothing" defensively.
+      refutes = [...(trial(declared, arm, instantiated.solution, ops) ?? [])];
+    } else {
+      refutes = [];
+      ops.forEach((op, i) => {
+        const param = paramAt(arm, i);
+        if (param === undefined) return;
+        if (!prefilterAdmits(ce, op, param, i, options)) refutes.push(i);
+      });
+    }
     if (refutes.length < fewest) {
       fewest = refutes.length;
       candidates = [{ arm, refutes }];

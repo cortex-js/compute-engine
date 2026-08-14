@@ -3,8 +3,9 @@
 **Date**: 2026-08-13 · **Revision 2** (post dual-spec-review; r1's findings
 and their disposition are in
 `docs/scratch/2026-08-13-inference-tx-design_SPEC_REVIEW.md`) ·
-**Status**: phases 2a AND 2b IMPLEMENTED (see "As implemented" below; 2c
-not started) · **Builds on**:
+**Status**: phases 2a, 2b AND 2c IMPLEMENTED (see the "As implemented"
+sections below; 2c's perf gate awaits the user's sign-off on the recorded
+numbers) · **Builds on**:
 `docs/plans/2026-08-13-inference-provenance-journal.md` (phase 1, shipped)
 
 ## Goal
@@ -405,6 +406,85 @@ above, each verified empirically:
   with an open frame (repair-local restore first, frame replay second:
   idempotent slots, no-op set delete, pop on a detached provenance array)
   is documented at the write site and pinned by tests.
+
+## As implemented (2c, 2026-08-13)
+
+Trial-based overload resolution shipped as specified — dependency inversion
+(`resolveOverload(..., trial)`, the closure supplied by `validateArguments`
+running itself in trial mode under a repair-forbidding rollback frame inside
+its own boxing window), the repair-free trial mode (preconditions admit,
+repairs don't run, winner re-validates for real exactly once, no fallback),
+the minimal prefilter, the per-call resolution cache
+(`BoxedFunction._resolvedOverload`, attached by the three `box.ts`
+construction sites via `validateArguments`' `resolutionOut`), trial-fed
+`diagnoseNoMatch`, and the deletion of the mirror gates. Deviations and
+boundary notes:
+
+- **The prefilter keeps one non-trivial rejection beyond
+  `provablyDisjoint`: value-membership refutation** (`hasValueComponent(param)
+  && admissionOf(op, param) === 'refute'` — the old gate 6's refuting half,
+  via the SAME shared function the runtime clause dispatch uses). It is a
+  genuine proof of impossibility the type-level disjointness test cannot
+  see (`1` overlaps the TYPE of the parameter `0`), and the named-argument
+  faithfulness check (`plainCallIsFaithful`, which resolves WITHOUT a trial)
+  depends on it: without it, a value-refuted clause re-entered the candidate
+  set and the seam lowered plain calls to `Apply` forms
+  (named-arguments.test.ts caught it).
+- **The trial returns refuted operand INDICES, not a boolean**
+  (`ArmTrialFn: ... => number[] | null`): admission consumes the null bit,
+  `diagnoseNoMatch` consumes the positions — one closure serves both, per
+  the "same admit callback" clause.
+- **Trial-less `resolveOverload` consumers**: `resolvedArm`'s cold path (as
+  specified), `effects-of.ts`'s per-application arm selection, and the two
+  `named-arguments.ts` seam resolutions (a concurrent workstream's file,
+  deliberately untouched) all run prefilter-only. The named seam is
+  protected by the value-membership rejection above; the effects projection
+  tolerates the wider set the way result typing does (fallback = the
+  definition-wide union).
+- **The resolution cache is deliberately NOT generation-guarded**: it
+  records how the call was resolved when it was validated — a decision, not
+  a recomputable view — and a re-canonicalization builds a fresh expression
+  and a fresh cache entry.
+- **The 2b guard asserts' `forbidsRepairs` bit is now live**: the trial
+  closure passes `{ forbidsRepairs: true }` to `_withRolledBackInference`,
+  arming the repair-helper asserts exactly as the 2b "As implemented" note
+  anticipated.
+- **Acceptance**: `test/compute-engine/overload-trials.test.ts`
+  (write-freedom via rollback, §4.3 join preservation, per-arm blame,
+  select-once/no-fallback pinned mechanically with a counting stub trial,
+  cache-vs-cold consistency — a declared `number` operand types `number`,
+  not the prefilter's `integer` pick — and trial nesting inside an
+  enclosing rollback frame). The spec's repair-fails-after-trial-passes
+  error-parity scenario could not be made to SURFACE AN ERROR through a
+  declared overload set, and the reason is structural, not one failed
+  construction: in `validateArguments`' admission order the fresh-matrix
+  repair runs BEFORE overlap-deferred validation, and when the repair
+  fails, the operand that reached it types as a collection-shaped value
+  (the repair's plan only fires on matrix-ish algebra — `A·v` re-boxes to
+  a `list<number>`-shaped term), which the overlap-deferral gate then
+  admits — in the arm's trial and in the winner's real validation ALIKE,
+  so the two verdicts agree and no error exists to compare (verified
+  end-to-end: `q(A·v)` resolves to the matrix arm, defers, and leaves `A`
+  untouched — the "repair-precondition admission agrees" test). The
+  no-fallback property the spec's scenario targets is pinned structurally
+  instead (one trial per prefilter-surviving arm, no retry loop —
+  counting-stub test), and the plain-signature repair legs (where
+  `checkType`-based operators like `Determinant` DO surface the failed
+  repair as an error) stay pinned by `matrix-operator-typing.test.ts`.
+- **Perf gate** (microbenchmark `benchmarks/overload-resolution.ts`,
+  registered in `benchmarks/README.md`; corpus =
+  `benchmarks/effects-registration.ts`): baseline measured at committed
+  pre-2c HEAD in a worktree, same machine session, full 2/4/8 ×
+  exact/subtype/inferred/rejected/generic matrix. Median per-call ratio
+  ≈1.4×; generic rows ≈1.1× (instantiation dominates, trials add little);
+  worst row 8-arm exact at 1.86× raw — inside the ≤2× gate raw, right at
+  ≈2.0× after normalizing by the untouched-control drift (the two control
+  rows disagree by ±15%, which bounds the measurement's resolution). The
+  corpus (no overload sets on its paths) moved within run-to-run noise,
+  structurally ≈0% — nominally within the ≤3% gate. Decision owner: the
+  user; the recorded fallback if ruled over-budget is re-adding specific
+  cheap gates where the benchmark shows they pay, via the shared
+  validator functions.
 
 ## Explicitly out of scope
 

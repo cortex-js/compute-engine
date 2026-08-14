@@ -20,9 +20,12 @@ import {
 } from '../../common/type/utils.js';
 import {
   diagnoseNoMatch,
+  isRepairableOperatorSymbol,
   joinParamAt,
   overloadArms,
   resolveOverload,
+  type ArmTrialFn,
+  type OverloadResolution,
 } from './overload.js';
 import { parseType } from '../../common/type/parse.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -587,6 +590,28 @@ function strippedMatchesParam(
   return stripped === 'never' || isSubtype(stripped, param);
 }
 
+/** Engine-internal knobs of {@link validateArguments} (phase 2c of
+ * `docs/plans/2026-08-13-inference-tx-design.md`). Not for library callers. */
+export interface ValidateArgumentsInternals {
+  /** Repair-free TRIAL mode: this call is an overload arm's trial, running
+   * under a repair-forbidding rollback frame. The two construction-level
+   * repairs are admitted by their write-free preconditions and NOT executed
+   * (`devolveUnappliedOperator` would declare a shadow and request a
+   * rebuild; `repairFreshMatrixInference` would retype symbols and re-box).
+   * The winning arm's REAL validation — non-trial, no frame — performs any
+   * repairs, exactly once. */
+  trial?: boolean;
+  /** The solve `resolveOverload` already ran on this (single-arm, polytype)
+   * signature with the identical context — reused instead of re-solving. */
+  armSolution?: TypeInferenceResult;
+  /** Out-slot: the overload resolution computed by this call, when the
+   * signature was an overload set. The caller attaches it to the call
+   * expression it constructs, so result typing (`resolvedArm`) reads the
+   * SAME resolution the call was validated against instead of re-deriving
+   * one with the trial-less prefilter. */
+  resolutionOut?: { resolution?: OverloadResolution };
+}
+
 export function validateArguments(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
@@ -603,7 +628,8 @@ export function validateArguments(
    * `missing` arm is admitted when its stripped type still matches the
    * parameter (a scalar `Missing` → `never`, admissible everywhere). The
    * missing arm is carried by the runtime gate, not the type. */
-  stripMissing?: (index: number) => boolean
+  stripMissing?: (index: number) => boolean,
+  internals?: ValidateArgumentsInternals
 ): ReadonlyArray<Expression> | null {
   // A `Spread` operand (`f(...p)`) makes the effective arity unknown until
   // the enclosing call's evaluation splices the tuple's elements in — defer
@@ -668,9 +694,8 @@ export function validateArguments(
   } else {
     const arms = overloadArms(signature);
     if (!arms) return null;
-    // Every admission policy this function applies must reach the filter, or
-    // the filter and the validator disagree about which arms are viable — a
-    // disagreement that mis-selects arms rather than merely widening the join.
+    // The policies reach both the cheap prefilter and the generic solver, so
+    // resolution and validation see the same call.
     const policies = {
       lazy,
       threadable,
@@ -679,12 +704,56 @@ export function validateArguments(
       freshMatrixRepair: (op: Expression, param: Type) =>
         couldRepairFreshMatrixInference(ce, op, param, freshlyInferred),
     };
-    const { selected, viable, selectedSolution } = resolveOverload(
+    // Trial admission (phase 2c): an arm is viable iff running THIS function
+    // on it, in trial mode, succeeds. The trial runs under a rollback frame,
+    // so every inference write it performs — operand narrowing, signature
+    // refinement, auto-declares — is undone whatever the outcome, and under a
+    // boxing-pass window of its own (a frame must not straddle window
+    // boundaries; opening a nested window inside an existing one is two
+    // counter bumps). `forbidsRepairs` marks it as repair-free: the
+    // construction-level repairs are admitted by precondition inside trial
+    // mode and assert they never execute here. This replaced the write-free
+    // mirror filter, whose gate conditions had to track this function's
+    // admission logic by hand.
+    const trial: ArmTrialFn = (declared, _instance, solution, armOps) =>
+      ce._withBoxingPassWindow(() =>
+        ce._withRolledBackInference(
+          () => {
+            const res = validateArguments(
+              ce,
+              armOps,
+              declared,
+              lazy,
+              threadable,
+              freshlyInferred,
+              stripMissing,
+              { trial: true, armSolution: solution }
+            );
+            // `null` = valid, operands unchanged. In trial mode no repair
+            // executes, so `substituted` is never set and a non-null result
+            // always carries at least one invalid operand — the refuted
+            // positions.
+            if (res === null) return null;
+            const refuted: number[] = [];
+            res.forEach((x, k) => {
+              if (!x.isValid) refuted.push(k);
+            });
+            return refuted.length === 0 ? null : refuted;
+          },
+          { forbidsRepairs: true }
+        )
+      );
+    const resolution = resolveOverload(
       ce,
       ops,
       arms,
-      policies
+      policies,
+      undefined,
+      trial
     );
+    if (internals?.resolutionOut !== undefined)
+      internals.resolutionOut.resolution = resolution;
+    const { selected, viable, selectedSolution } = resolution;
     if (!selected) {
       // No arm fits. Blame the operands actually at fault: an operand every
       // near-miss arm accepts at its position stays untouched, so a bad seed
@@ -693,7 +762,8 @@ export function validateArguments(
         ce,
         ops,
         arms,
-        policies
+        policies,
+        trial
       );
       if (arityViable.length === 0) {
         // Wrong number of arguments for every arm. `arityTarget` is the
@@ -761,6 +831,9 @@ export function validateArguments(
   const polyArm = polytypeArm(sig);
   const solved = polyArm
     ? (armSolution ??
+      // A TRIAL of a single polytype arm: `resolveOverload` already solved
+      // it with this exact context — reuse rather than re-solve.
+      internals?.armSolution ??
       solveArm(polyArm, ops, {
         threadable,
         stripMissing,
@@ -979,26 +1052,45 @@ export function validateArguments(
         deferredIdx.add(result.length - 1);
         continue;
       }
-      const repaired = repairFreshMatrixInference(
-        ce,
-        op,
-        param,
-        freshlyInferred
-      );
-      if (repaired) {
-        result.push(repaired);
-        substituted = true;
-        continue;
-      }
-      // A bare uppercase symbol bound to a standard-library operator (`N`,
-      // `D`) used where a value is required almost always means a variable
-      // (`N \equiv 1 \pmod k`): devolve it to an unknown symbol, mirroring
-      // the checkNumericArgs fallback.
-      const devolved = devolveUnappliedOperator(ce, op);
-      if (devolved !== null) {
-        result.push(devolved);
-        substituted = true;
-        continue;
+      if (internals?.trial) {
+        // TRIAL mode: the two construction-level repairs are admitted by
+        // their write-free preconditions and NOT executed — a repair
+        // entangles state the trial's rollback frame must not touch (the
+        // devolve shadow participates in the boxing-state rebuild loop; the
+        // matrix repair re-boxes). A precondition is not a proof: the
+        // winning arm's REAL validation runs the repair and may fail where
+        // the trial admitted — that failure surfaces as the call's error,
+        // with no second chance, byte-identical to the filter-era behavior.
+        if (couldRepairFreshMatrixInference(ce, op, param, freshlyInferred)) {
+          result.push(op);
+          continue;
+        }
+        if (isRepairableOperatorSymbol(ce, op)) {
+          result.push(op);
+          continue;
+        }
+      } else {
+        const repaired = repairFreshMatrixInference(
+          ce,
+          op,
+          param,
+          freshlyInferred
+        );
+        if (repaired) {
+          result.push(repaired);
+          substituted = true;
+          continue;
+        }
+        // A bare uppercase symbol bound to a standard-library operator (`N`,
+        // `D`) used where a value is required almost always means a variable
+        // (`N \equiv 1 \pmod k`): devolve it to an unknown symbol, mirroring
+        // the checkNumericArgs fallback.
+        const devolved = devolveUnappliedOperator(ce, op);
+        if (devolved !== null) {
+          result.push(devolved);
+          substituted = true;
+          continue;
+        }
       }
       // Overlap-deferred validation (§D6.2): a collection-kind parameter and
       // an operand whose static type does not REFUTE conformance (bare

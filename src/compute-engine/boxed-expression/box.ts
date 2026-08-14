@@ -72,7 +72,12 @@ import { BoxedDictionary } from './boxed-dictionary.js';
 import { canonicalForm } from './canonical.js';
 import { sortOperands } from './order.js';
 import { validateArguments, checkNumericArgs } from './validate.js';
-import { overloadArms, paramAt, resolveContextualArm } from './overload.js';
+import {
+  overloadArms,
+  paramAt,
+  resolveContextualArm,
+  type OverloadResolution,
+} from './overload.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { NUMERIC_TYPES } from '../../common/type/primitive.js';
 import {
@@ -1664,6 +1669,12 @@ function makeCanonicalFunctionCore(
       // collection operand at runtime (`h(L+1)` evaluates to a List), so
       // validation must admit collection-typed operands against the scalar
       // parameter instead of baking `incompatible-type` (Tycho item 73).
+      //
+      // `valueResolutionOut` receives the overload resolution when
+      // `valueType` is an overload set: it is attached to the constructed
+      // call so result typing reads the arm the call was VALIDATED against
+      // (`_resolvedOverload`, phase 2c).
+      const valueResolutionOut: { resolution?: OverloadResolution } = {};
       const invalid = validateArguments(
         ce,
         boxedOps,
@@ -1681,7 +1692,10 @@ function makeCanonicalFunctionCore(
         // binds WHOLE (`list<…>`, `tuple<…>`, a callback) is validated as
         // usual, or `(broadcastable<number>, list<string>)` would admit a
         // `list<number>` at the second slot unchecked.
-        threadableGate(valueType, paramsAreScalar(valueType))
+        threadableGate(valueType, paramsAreScalar(valueType)),
+        undefined,
+        undefined,
+        { resolutionOut: valueResolutionOut }
       );
       if (invalid) {
         // Only reject *closed* operands — literals and constant expressions
@@ -1719,12 +1733,21 @@ function makeCanonicalFunctionCore(
           }
           return r;
         });
-        if (cleaned.some((r) => !r.isValid))
-          return new BoxedFunction(ce, name, cleaned, {
+        if (cleaned.some((r) => !r.isValid)) {
+          const fn = new BoxedFunction(ce, name, cleaned, {
             metadata,
             canonical: true,
           });
+          fn._resolvedOverload = valueResolutionOut.resolution;
+          return fn;
+        }
       }
+      const fn = new BoxedFunction(ce, name, boxedOps, {
+        metadata,
+        canonical: true,
+      });
+      fn._resolvedOverload = valueResolutionOut.resolution;
+      return fn;
     }
 
     return new BoxedFunction(ce, name, boxedOps, {
@@ -1959,7 +1982,10 @@ function applyOperatorDefinition(
       // `valueDefinition`) and there is nothing to wait on.
       narrowArgsFromInferredSignature(opDef.signature.type, xs);
     }
-    result = new BoxedFunction(
+    // See the value-definition site above: the resolution of an overload-set
+    // signature is attached to the constructed call for result typing.
+    const lazyResolutionOut: { resolution?: OverloadResolution } = {};
+    const lazyFn = new BoxedFunction(
       ce,
       name,
       opDef.inferredSignature
@@ -1971,10 +1997,15 @@ function applyOperatorDefinition(
             opDef.lazy,
             // Declared-`broadcastable<T>` slots are threadable by declaration,
             // per position — see the value-definition site above.
-            threadableGate(opDef.signature.type, opDef.broadcastable === true)
+            threadableGate(opDef.signature.type, opDef.broadcastable === true),
+            undefined,
+            undefined,
+            { resolutionOut: lazyResolutionOut }
           ) ?? xs),
       { metadata, canonical: true, scope }
     );
+    lazyFn._resolvedOverload = lazyResolutionOut.resolution;
+    result = lazyFn;
     return result;
   }
 
@@ -2095,6 +2126,10 @@ function applyOperatorDefinition(
       noteProvisionalCall(name);
     narrowArgsFromInferredSignature(opDef.signature.type, args);
   }
+  // See the value-definition site above: the resolution of an overload-set
+  // signature is attached to the constructed call for result typing
+  // (`_resolvedOverload`, phase 2c).
+  const resolutionOut: { resolution?: OverloadResolution } = {};
   const adjustedArgs = opDef.inferredSignature
     ? null
     : validateArguments(
@@ -2114,18 +2149,22 @@ function applyOperatorDefinition(
         // Strip-before-validate (§3.B): a `propagate`/`handle` operator admits
         // an absent (`Missing`) or possibly-absent (`T | missing`) operand in a
         // stripped position; the runtime gate carries the absence.
-        (i) => opDef.stripsMissingAt(i)
+        (i) => opDef.stripsMissingAt(i),
+        { resolutionOut }
       );
 
   if (adjustedArgs) {
     // If any adjusted argument is invalid, the arguments did not match the
     // parameters of the signature. We're done.
-    if (adjustedArgs.some((x) => !x.isValid))
-      return new BoxedFunction(ce, name, adjustedArgs, {
+    if (adjustedArgs.some((x) => !x.isValid)) {
+      const fn = new BoxedFunction(ce, name, adjustedArgs, {
         metadata,
         canonical: true,
         scope,
       });
+      fn._resolvedOverload = resolutionOut.resolution;
+      return fn;
+    }
     // All valid: an operand was substituted (devolved to an unknown symbol,
     // or repaired by matrix inference). Continue canonicalization with the
     // substituted operands.
@@ -2140,23 +2179,36 @@ function applyOperatorDefinition(
     if (opDef.involution && isFunction(args[0])) return args[0].op1;
 
     // f(f(x)) -> f(x)
-    if (opDef.idempotent && isFunction(xs[0]))
-      return new BoxedFunction(ce, name, xs[0].ops, {
+    if (opDef.idempotent && isFunction(xs[0])) {
+      const fn = new BoxedFunction(ce, name, xs[0].ops, {
         metadata,
         canonical: true,
         scope,
       });
+      // The rewrite RETAINS the inner call (same operator, same operands),
+      // so the inner call's validated overload resolution is this
+      // expression's too — without the transfer, `.type` falls to the
+      // prefilter-only cold path and can rank a different arm than the one
+      // the inner call validated against.
+      if (xs[0] instanceof BoxedFunction)
+        fn._resolvedOverload = xs[0]._resolvedOverload;
+      return fn;
+    }
   }
 
   //
   // 5/ Sort the operands
   //
-
-  return new BoxedFunction(ce, name, sortOperands(name, args), {
+  // The attached resolution is index-INSENSITIVE for its consumer: result
+  // typing reads `selected`/`selectedInstance` only, so a commutative sort of
+  // the operands does not invalidate it.
+  const fn = new BoxedFunction(ce, name, sortOperands(name, args), {
     metadata,
     canonical: true,
     scope,
   });
+  fn._resolvedOverload = resolutionOut.resolution;
+  return fn;
 }
 
 /**
