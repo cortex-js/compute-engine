@@ -1457,13 +1457,21 @@ protocol Identifiable {
   readonly fullName: string
   readwrite age: integer
   readwrite role: string
-  function birthday(self: Self) state -> Self
+  function birthday(self: Self) -> Self
 }
 ```
 
-Note the `state` effect label on `birthday`: the requirement itself must
-declare that `birthday` touches mutable object state — see "Changing a
-field is an effect" below, where the label is introduced.
+Note that `birthday` carries no effect specifier, even though every
+realistic implementation will mutate `self`. It does not have to: a
+requirement's bare arrow does not assert purity here, because a
+protocol function is not an opaque declaration but a **dispatcher**
+over an open set of conforming bodies, and its effect set is
+*derived* — the union of the inferred effects of the currently
+registered implementations, re-derived when conformances change. An
+author who wants a durable caller-visible contract may declare one
+(`state`, or `pure`), and the declaration then acts as a ceiling on
+every conformer. See "Changing a field is an effect" below, where
+these rules are laid out.
 
 A conforming object type:
 
@@ -1537,6 +1545,20 @@ be conformed to by any type, exactly as today. (Keying on the label is
 deliberately conservative: a member could carry `state` because it
 mutates some *other* object rather than its `Self`; v1 accepts that
 imprecision, and per-argument effect precision is a future refinement.)
+
+The gate is also what keeps a *declared* `state` on a requirement
+coherent rather than odd. It might seem strange for the *protocol* to
+assert an effect when the protocol does not know who will conform — but
+declaring the effect is one of the gate's two switches, so the
+assertion restricts the conformer pool to exactly the types that can
+discharge it: a protocol that says `state` is thereby object-only, and
+the effect can never end up promised on behalf of a value type that has
+no state to touch. A **bare** requirement, by contrast, never gates:
+its effects are *derived* from whatever conformers exist (see "Changing
+a field is an effect"), and the gate is a property of the protocol's
+declaration alone — a record may conform to a bare-function protocol
+with a pure implementation even while object conformers of the same
+protocol mutate.
 
 ```epsil
 type Badge = record<id: string> is Identifiable
@@ -1802,23 +1824,31 @@ Three consequences are worth pinning (ruling B12):
 
 MathJSON has no way to express "these two places refer to the same
 object", and no way at all to express a cycle. The posture (ruling B5,
-direction settled 2026-08-13): **refuse implicitly, convert
-explicitly.**
+direction settled 2026-08-13): **convert by default, marked; refuse on
+request.**
 
-**Refuse by default.** Serializing an expression that contains an
-object emits `object-serialization-unsupported`. Nothing is silently
-lost. Refusal is **subexpression-local**, following the engine's
-errors-as-values convention: inside a larger, otherwise-serializable
-structure, the object's position serializes as an error expression
-(`object-serialization-unsupported`) and the rest serializes normally —
-the whole call does not throw.
+Why refusal cannot be the default — the reasoning matters because an
+earlier draft of this section had it the other way: refusal here is
+necessarily **subexpression-local**, following the engine's
+errors-as-values convention — the object's position serializes as an
+error expression and the rest serializes normally; the call does not
+throw. (Throwing was considered and rejected: serialization is
+pervasive — `.json`, display paths, debug tooling — and must not
+throw.) A non-throwing refusal is therefore exactly as *silent* at the
+call site as conversion is — and it **destroys the contents outright**,
+where conversion preserves them. A save made under refusal loses the
+object's data irrecoverably: by the time someone notices the error
+node in a stored artifact, the live object may be gone. Between two
+equally silent defaults, the one that keeps the data wins.
 
-**Convert explicitly with `RecordFrom`.** The engine already ships a
+**The conversion is `RecordFrom`.** The engine already ships a
 conversion family — `ListFrom`, `SetFrom`, `TupleFrom`,
 `DictionaryFrom`, `RecordFrom(collection of pairs) -> record`
-(`library/collections.ts`) — and the explicit escape is a new arm on
-that family, not a new operator: `RecordFrom(object)` returns an
-immutable record of the object's current contents. (`Snapshot` was
+(`library/collections.ts`) — and the in-engine conversion is a new arm
+on that family, not a new operator: `RecordFrom(object)` returns an
+immutable record of the object's current contents. It is both the
+operation a program calls directly and the single mechanism the
+serializer default (below) rides on. (`Snapshot` was
 considered as a name and rejected: the family already covers the
 meaning, and the point-in-time detachment it would advertise is implied
 by the result being an immutable record.) Its semantics:
@@ -1861,9 +1891,9 @@ by the result being an immutable record.) Its semantics:
   the type name survives only in `CircularReference` markers; the
   serializer route below does better.
 
-**An opt-in serializer option.** `toMathJSON()` gains an option
-(spelling open, e.g. `objects: 'reject' | 'record'`, default
-`'reject'`) that, when set, serializes each object position as the
+**`toMathJSON()` converts by default.** The serializer gains an option
+(spelling open, e.g. `objects: 'record' | 'reject'`, default
+`'record'`). Under the default, each object position serializes as the
 record `RecordFrom` would produce, **wrapped in a `Typed` ascription
 carrying the object's nominal type**:
 
@@ -1874,14 +1904,31 @@ carrying the object's nominal type**:
 `Typed` is the shipped ascription operator (evaluation-transparent,
 type operand a string), so the nominal identity that the record value
 itself cannot carry survives in the serialized form at every object
-position — not just at cycle markers. Constraints pinned now: **one
-walk, one mechanism** — the record inside the wrapper is byte-identical
-to explicit `RecordFrom` output, the serializer only adds the `Typed`
-wrapper — and it is a **one-way door**: `Typed` is transparent at
-evaluation, so the output parses back as type-ascribed records, never
-objects; identity, sharing, and conformances do not survive. Opt-in per
-call is what makes the silent-loss objection acceptable — the caller
-asked.
+position — not just at cycle markers. The wrapper is also what keeps a
+*default* conversion honest: the artifact itself declares, at every
+converted position, that an object of that nominal type stood here — a
+consumer that must not accept snapshots can detect them and refuse at
+import. Constraints pinned now: **one walk, one mechanism** — the
+record inside the wrapper is byte-identical to explicit `RecordFrom`
+output, the serializer only adds the `Typed` wrapper — and it is a
+**one-way door**: `Typed` is transparent at evaluation, so the output
+parses back as type-ascribed records, never objects; identity, sharing,
+and conformances do not survive.
+
+**`objects: 'reject'` is the strict opt-in** for consumers that would
+rather have a hole than a snapshot — a wire protocol whose peer must
+never mistake a detached copy for the live object. Each object position
+then serializes as a subexpression-local
+`object-serialization-unsupported` error expression and the rest
+serializes normally. Two costs of the *default* are worth opting out
+over, and are documented rather than hidden: a reloaded snapshot is a
+**semantic imposter** — a record, so `==` becomes contents comparison
+and property stores fail `immutable-value-assignment`, far from the
+save that caused it — and shared acyclic structure **duplicates
+multiplicatively** (a diamond-shaped reference graph of depth `n`
+expands toward `2^n` record copies; only true cycles are collapsed
+into markers). Displays (`toString()`, LaTeX) need no option: they
+were never round-trippable, and simply show contents.
 
 ### Changing a field is an effect
 
@@ -1894,20 +1941,83 @@ defines `scope` as mutation of a *binding* on the ambient scope chain
 (`Assign`, `Declare`), and its confinement and dominance analysis is
 written entirely in those terms — a heap store through a reference is a
 different class of write, and stretching the definition would silently
-invalidate that analysis. (The name is the one bikeshed left in B2;
-`mutate` is the alternative.) Three consequences:
+invalidate that analysis. (The name is ruled — `state`, not `mutate`
+or `mutating`: construction also carries the label and creates state
+while mutating nothing, and the label table's names are nouns for the
+state class touched; see B2.) Three consequences:
 
-- The implicit setter behind every `readwrite` property carries
-  `state`, so property stores are never invisible to the effects
-  system. Object *construction* carries it too (previous section).
-- A protocol function whose implementations modify `Self` must declare
-  `state` in the requirement — as `birthday` does above. Appendix A's
-  signature-matching rule says an implementation may be *purer* than
-  its requirement but never more effectful, so a `state`-free
-  `birthday` requirement would reject every implementation that
-  actually mutates. (Implementations themselves may leave the specifier
-  bare — the shipped inferred-effects model infers their labels from
-  the body.)
+- **Setters get `state` automatically, at both levels — nobody writes
+  it.** At the protocol level, a `readwrite` property requirement
+  *implies* `state` on its setter side with no spelled label (which is
+  why the mutability gate keys on "has a `readwrite` property" as its
+  own clause, beside "declares `state`": the property spelling is the
+  state declaration for stores). At the implementation level, the
+  implicit field-backed setter carries `state` by construction — every
+  store goes through the single emission point — and an explicit `set`
+  accessor goes through ordinary body inference like any function
+  (honestly: a computed setter that does not actually store infers
+  purer than the ceiling, and that is fine). Object *construction*
+  carries `state` too (previous section).
+- **Requirements do not anticipate their conformers' effects: a
+  dispatcher's effects are derived by default; a declared specifier is
+  an opt-in ceiling.** An *implementation* may leave its specifier
+  bare — the shipped inferred-effects model reads its labels from the
+  body. A *requirement* with a bare specifier is not thereby pure: a
+  protocol function is not an opaque declaration but a dispatcher over
+  an open, enumerable-at-any-moment set of conforming bodies, and the
+  shipped provenance rule — "what a bare arrow asserts depends on
+  whose it is" (`docs/EFFECTS-MODEL.md`, "The default: bare `->`
+  means pure") — gains a third class: on a **dispatcher** the slot is
+  derived, the **union of the inferred effects of the registered
+  conforming implementations**, exactly as on a defined function it
+  is derived from the one body. This is precision, not pessimism:
+  while every conformer of a bare requirement is pure, calls through
+  it are pure — cacheable, confinable, compile-eligible; the first
+  mutating conformance widens the union to `state`, a drawing one to
+  `state random`, and dependents re-derive. Live derivation is sound
+  here where it would not be in a batch compiler because effects are
+  already an invalidation-tracked quantity in this engine: reassigning
+  an ordinary function re-derives its effects and invalidates
+  dependents through the callable axis, and conformance registration
+  is a registry state event (Appendix A, "Registry changes are state
+  events") — the union rides the same machinery. (Implementation
+  note: the effects cache's key must include the conformance registry
+  among its axes.) Three consequences, and two rejected designs:
+  - A requirement *may* declare a specifier, and the declaration is a
+    **ceiling**: conformers may be purer, never more effectful
+    (Appendix A's signature matching), and callers may rely on the
+    bound durably — `pure` is the strongest such promise, and a
+    declared `state` is also how an author makes a propertyless
+    protocol object-only on purpose (the B1 gate keys on *declared*
+    effects). A rejected conformance's `protocol-signature-mismatch`
+    diagnostic must name the exceeded label and point at the ceiling
+    as a possible fix site.
+  - Widening can falsify a *declared* contract downstream: if `f` is
+    annotated `pure` and calls `birthday`, registering the first
+    drawing conformer makes the union include `random` and `f`'s
+    annotation false. The error surfaces at the **conformance
+    statement** — the statement that changed the world — naming the
+    violated dependent, the same polarity as a type error surfacing
+    at the `Assign` that violates a declared type.
+  - A serialized dispatcher signature records the union **as of
+    serialization** — a snapshot, not a contract, consistent with
+    serialization being resolve-only.
+  - *Rejected: bare-means-pure ceilings on requirements* (an earlier
+    draft of this section). Requirements would have had to anticipate
+    every capability any future conformer might need (`random`,
+    `network`, …) — impractical, and the checked-exceptions social
+    failure follows: authors defensively declare everything, or
+    `any`, and the label carries no information.
+  - *Rejected: `state` by default on bare requirements.* It collides
+    with the B1 gate (every protocol with an unannotated function
+    member would become object-only — `Equatable`'s bare `equals`
+    would gate records out) and silently pessimizes pure members.
+    Derivation subsumes both defaults: it yields `state` exactly when
+    some conformer actually mutates. (Swift is no precedent in either
+    direction: its `mutating` covers value types only and classes
+    mutate keyword-free — affordable there because nothing in Swift's
+    compiler consumes effect information, where this engine's caching
+    and confinement do.)
 - Landing the label amends `docs/EFFECTS-MODEL.md` (see "Changes to
   shipped documents"): the label table gains `state`, and the
   confinement analysis gains a note that it does not apply to `state`
@@ -1915,11 +2025,25 @@ invalidate that analysis. (The name is the one bikeshed left in B2;
   emits.
 
 Writes are only half the caching story; **reads** need their own
-answer, and labels are the wrong tool for them — the effects model
-deliberately treats reads of non-local state as label-free, relying on
-precise invalidation channels instead. This proposal follows that
-precedent: every object carries a **version counter**, bumped on each
-field store. An evaluation whose result is cached records, *in that
+answer — and for a stored field, that answer is not a label, on two
+grounds. The precedent: the effects model's principle is that a read
+goes label-free exactly when the engine has a **precise invalidation
+channel** for the state being read — "reads of non-local scope are not
+an effect" (`docs/EFFECTS-MODEL.md`), because generation guards and
+symbol-dependency tracking already carry the consequence
+per-expression, where a label would infect essentially every arrow
+while carrying no information. Reads of *host* state — the clock, the
+environment, the filesystem — **are** labeled (`time`, `environment`,
+`fs_read`), precisely because no invalidation channel can exist for
+the outside world. The principled ground, new with this appendix: a
+stored-field read runs no code at all — stores write evaluated values
+(see "A store writes the evaluated value"), so a read is a pure load,
+and there is nothing to label *even in principle*. (Computed
+properties are the exception on both counts: their accessors run user
+code, and a computed read carries whatever labels the accessor's body
+infers.) Stored-field reads are therefore the second member of the
+scope-read category, with their own channel: every object carries a
+**version counter**, bumped on each field store. An evaluation whose result is cached records, *in that
 cache entry*, a dependency on the counters of the objects it read —
 the same way it records a generation dependency when it reads a
 global binding today. The dependency belongs to the cache entry,
@@ -2011,25 +2135,118 @@ B13 lands, the library may ship `Ref<T>` as a convenience type; until
 then, `type Counter = object<count: integer>` is the idiom for a
 mutable scalar.
 
-**Mutable lists stay out of v1** — and not merely as a scoping
-economy. Making `list` itself mutable would hand out writable aliases
-to values the engine shares freely: subexpression nodes are reused
-across parents and equal literals are interned, so a write through one
+**`list` stays immutable forever; `array<T>` is the designated
+mutable counterpart (revised 2026-08-13).** The two halves of that
+sentence have different grounds, and an earlier draft of this section
+conflated them.
+
+Making `list` *itself* mutable is permanently off the table: the
+engine shares list nodes structurally — subexpression nodes are reused
+across parents, equal literals are interned — so a write through one
 reference would be visible through structures that never opted into
-sharing. This is the same "permission without uniqueness" hole that
-led to deferring the `inout` parameter mode
-(`docs/EFFECTS-MODEL.md`, "Priority ruling 2026-08-08"). Objects
-avoid the hole because they are a new, opt-in nominal category born
-with identity and excluded from interning and caching (B3); lists are
-not. A separate mutable `array<T>` type would be sound but is a large
-project — invariant element type, reference `==` on list-looking
-values, an answer for every collection handler, broadcast,
-iteration-during-mutation, compile targets — with no forcing
-function: the *performance* half of the ask is already answered by
-rebinding forms plus copy-elision-when-unique
-(`docs/EFFECTS-MODEL.md`, "Implementing the optimization — two tiers,
-one guarantee"), and the *sharing* half is expressible by putting a
-list inside an object:
+sharing, the same "permission without uniqueness" hole that led to
+deferring the `inout` parameter mode (`docs/EFFECTS-MODEL.md`,
+"Priority ruling 2026-08-08").
+
+But that argument says nothing about a **new** type, any more than it
+argued against `object` on behalf of records. An `array<T>` — a
+distinct, unrelated type born with identity, opt-in, never interned,
+excluded from value-sharing machinery — avoids the hole exactly the
+way objects do. It is the same design axis applied to the sequence
+column: immutable / structural / broadcasts (`list`, `record`) versus
+mutable / identity / atomic (`array`, `object`) — one distinction, two
+instances, which is what keeps the pair learnable rather than trappy.
+An earlier draft also called `array` "a large project"; this appendix
+has since dismantled most of that estimate, because nearly everything
+an array needs is object machinery it inherits: reference identity and
+identity `==` (B4's logic), `state` on stores and construction with a
+per-array version counter and the pure-load read story (verbatim),
+lifetime (B12), cache exclusion (B3), cycles (arrays can now form
+them), and serialization via the `…From` family (`ListFrom(array)` as
+the snapshot arm, the `toMathJSON` default wrapping in `Typed`,
+`CircularReference` markers). Even the element-type rule is a
+corollary: every array slot is a readwrite position, so `array<T>` is
+**invariant** in `T` and array types have no subtyping among
+themselves — B13's stored-field rule applied to slots. An
+implementation may even represent an array internally as
+`object<items: list<T>>` with indexing sugar, composing with
+copy-elision-when-unique so the persistent interior updates in place
+when unshared.
+
+**The forcing function is algorithmic code.** A sort — or a sieve, a
+partition, a dynamic-programming table, a Fisher–Yates shuffle — is
+index manipulation in a loop, and it needs two things no idiom
+provides: a **guaranteed O(1) indexed store**, and a per-operation
+spelling a human will write. The interim idiom (below) fails the
+first as a matter of principle, not tuning: its whole-field store is
+O(1) only when the opportunistic uniqueness analysis fires, so the
+algorithm's *complexity class* depends on an invisible optimization —
+quicksort quadratic or not by luck. An asymptotic guarantee has to be
+semantics, and `a[i] = v` on an array is that semantics.
+
+`array` is deliberately **not part of this appendix's v1**: it rides
+the object machinery, so it lands after it, as a follow-on with its
+own short ruling list —
+
+- **Collection integration.** `array` should be a `collection`
+  (enumerable, `at`, `count` — each read recording a version
+  dependency), but **not broadcastable** (lean): `a + 1` on a live
+  mutable reference is a stale-able result with murky provenance;
+  `ListFrom(a) + 1` says what it means. The collection protocol gains
+  an **`isMutable` facet** (sibling to `isIndexedCollection`), so the
+  fork below is written once against the facet, not against the
+  `array` type — any later mutable collection rides it.
+- **Effect-directed traversal.** Iteration-during-mutation does not
+  need one blanket rule; the effects system already knows which
+  callbacks can mutate, so the collection operators (`Map`, `Filter`,
+  `Reduce`, …) fork on `isMutable` **and the callback's effect set**:
+  a callback whose effects lack `state` cannot mutate any object —
+  iteration is single-threaded, so nothing can change mid-traversal —
+  and the operator runs **live, zero-copy**; a callback carrying
+  `state` gets a **snapshot at entry** (`ListFrom`), so the operator
+  has deterministic value semantics over the starting contents rather
+  than an ordering-dependent view of a shifting one. (Operators over
+  immutable collections are unaffected — the fork exists only where
+  `isMutable` is set.) Raw enumeration outside an operator's control
+  (`each()`) keeps the blunt rule: pin the version at start, fault on
+  change. Caveat, same as the mutability gate's: `state` is coarse in
+  v1 — a callback that only *constructs* objects, or mutates an
+  unrelated one, takes the snapshot path unnecessarily; per-argument
+  effect precision is the recorded refinement that would sharpen the
+  fork. Results stay immutable: `Map(array, f)` yields a `list`
+  (`ArrayFrom` converts back when wanted).
+- **Growth and mutation API.** `a[i] = v` as a primitive indexed
+  store, plus in-place `Push`/`Pop`/`Insert`/`RemoveAt` — every one
+  carrying `state`, with `count` version-dependent.
+- **Construction.** `[1, 2, 3]` stays a list literal; the one
+  constructor is **`ArrayFrom(xs)`** — the `…From` family grows the
+  inverse arm, and there is deliberately no variadic `Array(…)`
+  beside it. A variadic constructor would be redundant
+  (`Array(1, 2, 3)` and `ArrayFrom([1, 2, 3])` would build equal
+  fresh arrays — never `===`, construction is a fresh identity every
+  time) and it is the home of JavaScript's arity trap: `Array(3)`
+  must mean either "length 3" or "one element, 3", and both are
+  common intents. With `ArrayFrom` the elements arrive as a
+  collection and arity never signifies; a sized fill is
+  `ArrayFrom(Repeat(0, n))`. No array literal syntax in v1 either:
+  two bracket spellings for two subtly different types is a footgun.
+  The
+  persistent-interior representation makes both bridges nearly free:
+  `ArrayFrom(xs)` is O(1) — it wraps the list as the interior, and
+  the copy is paid lazily at the first store, when the uniqueness
+  analysis sees the interior shared with the caller's list — and
+  `ListFrom(a)` is O(1) whenever the element type contains no mutable
+  types (the whole algorithmic case, `array<number>`): the interior
+  *is* an immutable list, so the snapshot is handing it out, and the
+  array's next store pays the one copy. Only an element type that can
+  contain objects or arrays forces `ListFrom` onto the deep walk
+  (`RecordFrom`'s detachment rule), and that is statically knowable
+  from `T` — the fast path is a type check, not a scan.
+- **Compilation.** JS/Python arrays have native reference semantics;
+  the GPU target and the engine⇄compiled result boundary follow the
+  object rules (B9).
+
+Until then, the interim idiom is a list inside an object:
 
 ```epsil
 type MutList<inout T> = object<items: list<T>>
@@ -2041,25 +2258,21 @@ other.items                       // ➔ [1, 2, 3, 4] — sharing observed
 ```
 
 The interior `list` stays immutable — the store rebinds the field —
-so this composes with the copy-elision tier: the object's `items`
-reference is typically the only live one, and the rebuild can then
-update in place.
+and composes with the copy-elision tier when the interior reference
+is unshared. It covers *shared state*; per the forcing-function
+argument above, it is not a substitute for `array` where asymptotics
+or per-swap ergonomics matter.
 
-### Deferred: indexed stores through an object
+### Deferred: indexed stores through a computed accessor
 
-The `MutList` idiom above has no spelling for `ml[i] = v`; today the
-update must be written as a whole-field store on `items`. The natural
-extension is a **subscript accessor** on object types — a `get`/`set`
+`array` makes `a[i] = v` a *primitive* store on the built-in type. The
+general form — a **subscript accessor** on object types, a `get`/`set`
 pair addressed by index rather than by property name, with the setter
-carrying `state`, so that `ml[i] = v` desugars to a setter call the
-effects system sees (the Swift `subscript` / Python `__setitem__`
-analogue). This is deliberately not in v1: it needs its own
-surface-syntax design and a protocol-requirement story (can a
-protocol require a subscript?), and nothing in the object core
-depends on it. It is recorded here so that "mutable collections" has
-an honest placeholder: the intended answer is a library object type
-plus subscript accessors — never a new value-semantics category for
-lists.
+carrying `state` (the Swift `subscript` / Python `__setitem__`
+analogue, which would also give `MutList`-style wrappers an indexed
+spelling) — stays deferred: it needs its own surface-syntax design
+and a protocol-requirement story (can a protocol require a
+subscript?), and neither the object core nor `array` depends on it.
 
 ### The rest of the system
 
@@ -2143,13 +2356,24 @@ a fresh object type instead of being caught.
   (a `readwrite` property, or a function member with a declared
   Self-modifying effect) is conformable only by object types;
   `protocol-requires-object` otherwise.
-- **B2 — the `state` effect (settled in this revision, pending
-  ratification).** A new label: field stores and object construction
-  carry it, implicit property setters carry it, and requirements for
-  mutating functions must declare it; reads are tracked by per-object
-  version counters, not labels. Reusing `scope` is rejected — it is
-  defined as binding mutation and its confinement analysis does not
-  transfer. Remaining bikeshed: the name (`state` vs `mutate`).
+- **B2 — the `state` effect (settled; name ruled 2026-08-13).** A new
+  label: field stores and object construction carry it, and implicit
+  property setters carry it; protocol function requirements do NOT
+  have to declare it — a dispatcher's effects are **derived** (the
+  union of registered conformers' inferred effects,
+  invalidation-tracked), and a declared specifier on a requirement is
+  an opt-in ceiling (ruled 2026-08-13, superseding this appendix's
+  earlier declare-on-the-requirement draft); reads are tracked by
+  per-object version counters, not labels. Reusing `scope` is rejected — it is defined as binding
+  mutation and its confinement analysis does not transfer. The name is
+  **`state`**; `mutate` and `mutating` were rejected: construction
+  also carries the label and *creates* state while mutating nothing,
+  so a verb-of-mutation misdescribes half the coverage; label names
+  are nouns naming the touched state class, and the specifier slot
+  holds lists (`scope state` reads as a list, `mutating scope` as a
+  dangling participle); and Swift's `mutating` prior mispredicts —
+  there it means value-type copy-write with classes exempt, the
+  opposite of these reference semantics.
 - **B3 — construction is observable.** Fresh identity per construction,
   carried by the `state` label (an *action* on the
   observation-vs-action axis); exclusion from literal interning; plus
@@ -2164,17 +2388,21 @@ a fresh object type instead of being caught.
   (internal dedup key; must not run user code). Residue before ruling:
   the time-varying-equality audit of `assume`/rule consumers that
   record `==` verdicts as durable facts.
-- **B5 — serialization (direction settled 2026-08-13).** Refuse by
-  default (`object-serialization-unsupported`, subexpression-local);
-  explicit conversion via a `RecordFrom(object)` arm on the existing
-  `…From` family — deep walk, stored fields only (no user code runs),
-  no `state` label, back-edges marked `["CircularReference", n,
-  Type?]`, cross-edges duplicated; plus an opt-in `toMathJSON()` option
-  that applies the same walk (byte-identical record, one mechanism) at
-  each object position and wraps it in a `Typed` ascription carrying
-  the nominal type (`["Typed", record, "'Person'"]`). Remaining
-  bikeshed: the serializer option's spelling. See "Serialization" for
-  the full semantics.
+- **B5 — serialization (direction settled 2026-08-13).** Convert by
+  default, marked; refuse on request. `toMathJSON()` serializes each
+  object position as the record a `RecordFrom(object)` arm on the
+  existing `…From` family produces — deep walk, stored fields only (no
+  user code runs), no `state` label, back-edges marked
+  `["CircularReference", n, Type?]`, cross-edges duplicated — wrapped
+  in a `Typed` ascription carrying the nominal type (`["Typed",
+  record, "'Person'"]`); one walk, one mechanism, byte-identical
+  record. `objects: 'reject'` is the strict opt-in
+  (`object-serialization-unsupported` error values,
+  subexpression-local). Refusal cannot be the default: it is exactly
+  as silent as conversion (errors-as-values; the call never throws)
+  and destroys the contents besides. Remaining bikeshed: the option's
+  spelling. See "Serialization" for the full semantics and the two
+  documented costs of the default.
 - **B6 — lattice placement.** Bare `object` as "any object";
   disjointness from `record`.
 - **B7 — initialization.** v1: constructors take every stored field; a
@@ -2217,10 +2445,12 @@ To Appendix A:
    diagnostics account for both.
 3. **§7 item 6(b)** (property assignment as rebinding sugar) is
    superseded by B10.
-4. **"Signature matching"** is unchanged as a rule, but gains the
-   consequence spelled out under "Changing a field is an effect":
-   requirements for mutating functions must declare the `state` effect,
-   or no mutating implementation can satisfy them.
+4. **"Signature matching"** is unchanged as a rule, but is scoped by
+   "Changing a field is an effect": its purer-never-more-effectful
+   check applies only to requirements that *declare* an effect
+   specifier (an opt-in ceiling). A bare requirement imposes no effect
+   bound — the dispatcher's effects are derived from the registered
+   conformers instead.
 5. **The mutability gate is a breaking change**: a shipped record-backed
    conformance to a protocol with `readwrite` properties (Appendix A's
    original `Person`/`Nameable` example was one) becomes illegal —
