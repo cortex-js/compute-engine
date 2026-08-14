@@ -89,6 +89,33 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### Lazy infinite-collection compilation — v1 limits (JS target)
+
+`Take`/`TakeWhile`-bounded infinite pipelines compile to lazy `_SYS`
+iterator streams as of 2026-08-13 (`emitLazyStream`,
+`javascript-target.ts`; tests in `compile-lazy-collections.test.ts`).
+The v1 lazy algebra is deliberately small — sources: `Range` with a
+literal `±∞` stop; transformers: `Map`/`Filter`/`Drop`/`Rest`;
+bounders: `Take`/`TakeWhile`. Everything else fails closed at compile
+time with an error naming the bounding fix. Not defects — each is a
+clean compile-time decline today — but natural extensions:
+
+- **More lazy sources**: 1-argument `Repeat(v)` (its handler still
+  fails closed with the pre-existing "no compiled representation"
+  message, now only true outside a bounding consumer) and `Cycle`
+  (which has no compile handler at all).
+- **More bounding consumers**: `First`/`At(k)`/`Find`/`IndexWhere`
+  over an infinite stream all have finite answers a lazy scan could
+  produce; today they fail closed.
+- **A symbolic step with an infinite stop** (`Range(1, ∞, s)`) is not
+  lazily compilable: a runtime-negative step means an EMPTY range, and
+  a stream cannot decide that lazily (see `infiniteRangeStep`).
+- **Python target**: no lazy lowering — a non-finite `Range` bound
+  fails closed at compile time even under `Take` (a documented
+  divergence from the JS target).
+- `DropWhile` over an infinite source is INERT in the interpreter, so
+  it deliberately does not compile — parity, not a gap.
+
 ### `Error` match normalization is root-only (limitation)
 
 An `Error` subject is normalized for pattern matching at the ROOT of the
@@ -133,9 +160,31 @@ annotation.)
   `application-validation-regressions`, callback-contract and
   lambda-inference batteries) — a dedicated follow-up round, not a
   snapshot refresh.
-- **Error anchoring inside a reordered call** can underline the wrong
-  argument: `locateError` maps canonical operand index into the raw
-  AST by the same index, and after reordering the indices differ.
+- **A named call to a `:=`-assigned callee draws false STATIC
+  diagnostics** (defect, discovered 2026-08-13 while fixing the
+  anchoring item below).
+  `f := (x: number, y: string) |-> x + 3` followed by
+  `f(y: "ok", x: 1)` runs correctly — the assignment pins a signature
+  carrying the parameter names, so the runtime canonicalization
+  permutes the call — but `epsil check`/the static pre-pass
+  canonicalizes the CALL before the assignment has executed, finds no
+  parameter names on the auto-declared `f`, and emits one
+  `argument-names-unavailable` static diagnostic per carrier for a
+  program that is not wrong. MEASURED 2026-08-13: the annotated
+  DECLARATION spelling has it too
+  (`const g : (x: number, y: string) -> number = …` — declaration is
+  also an evaluation-time effect), while an UNANNOTATED literal is NOT
+  part of the defect (its named call fails at runtime as well, so the
+  static diagnostic is a true prediction there). The
+  `function f(…) {…}` definition form is immune (the static pass
+  registers its signature up front — provisional registry). The fix
+  direction is making the static pass see `:=`-pinned and
+  declaration-annotated signatures the same way — provisional
+  registration under the static pass's inference rollback frame — not
+  suppressing the diagnostic: the engine-level "a call ahead of its
+  definition has no names to check" decline is deliberate (design doc
+  §6), and it is truthful for typo'd callees and unannotated
+  literals.
 
 ### `Derivative` compile time vs body nesting depth (perf ask)
 

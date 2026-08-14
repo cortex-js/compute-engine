@@ -872,3 +872,119 @@ describe('EPSIL EXECUTE — `break` and `continue`', () => {
     expect(value.re).toBe(3);
   });
 });
+
+describe('EPSIL EXECUTE — diagnostic anchoring inside a NAMED call', () => {
+  // The named-argument seam permutes a named call into declaration order
+  // before anything downstream runs, so an error's argument index counts
+  // DECLARATION slots — while the raw source still lists the arguments as
+  // written. `locateError` reconciles the two through the callee's declared
+  // parameter names (`argumentAtSlot`, src/epsil/error-location.ts), so the
+  // underline lands on the argument the author has to fix. Before that
+  // mapping, a reordered call underlined whichever argument happened to sit
+  // at the declaration index in WRITTEN order — the wrong one.
+
+  const DEF = 'function f(x: number, y: string) { x + 3 }';
+
+  test('reordered call, faulted argument written LAST', () => {
+    const src = `${DEF}\nf(y: "ok", x: "bad")\n1`;
+    const { diagnostics } = run(src);
+    // Static pass and run both report (same statement, same anchor).
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'static-type-error',
+      'runtime-error',
+    ]);
+    const from = src.indexOf('x: "bad"');
+    for (const d of diagnostics)
+      expect(src.slice(d.range[0], d.range[1])).toBe('x: "bad"');
+    expect(diagnostics[0].range[0]).toBe(from);
+  });
+
+  test('reordered call, faulted argument written FIRST', () => {
+    const src = `${DEF}\nf(y: 7, x: 1)\n1`;
+    const { diagnostics } = run(src);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const d of diagnostics)
+      expect(src.slice(d.range[0], d.range[1])).toBe('y: 7');
+  });
+
+  test('declaration-order named call anchors as before', () => {
+    const src = `${DEF}\nf(x: "bad", y: "ok")\n1`;
+    const { diagnostics } = run(src);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const d of diagnostics)
+      expect(src.slice(d.range[0], d.range[1])).toBe('x: "bad"');
+  });
+
+  test('mixed positional-then-named call anchors on the named argument', () => {
+    const src = `${DEF}\nf(1, y: 9)\n1`;
+    const { diagnostics } = run(src);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const d of diagnostics)
+      expect(src.slice(d.range[0], d.range[1])).toBe('y: 9');
+  });
+
+  test('positional-only call is unaffected by the mapping', () => {
+    const src = `${DEF}\nf("bad", "ok")\n1`;
+    const { diagnostics } = run(src);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const d of diagnostics)
+      expect(src.slice(d.range[0], d.range[1])).toBe('"bad"');
+  });
+
+  // The seam's own normalization FAILURES are reported against the list AS
+  // WRITTEN (`blame()` replaces the offending entry in place — the call was
+  // never permuted), so their frame index needs NO slot-name remapping:
+  // `errorIndexCountsWrittenArguments` (named-arguments.ts) routes them to
+  // direct indexing. Remapping them would move the underline to a bystander.
+
+  test('a duplicate name underlines the second occurrence', () => {
+    const src = `${DEF}\nf(y: 1, y: 2)\n1`;
+    const { diagnostics } = run(src);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const d of diagnostics)
+      expect(src.slice(d.range[0], d.range[1])).toBe('y: 2');
+  });
+
+  test('an unknown name underlines the argument that used it', () => {
+    const src = `${DEF}\nf(z: 1, x: 2)\n1`;
+    const { diagnostics } = run(src);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const d of diagnostics)
+      expect(src.slice(d.range[0], d.range[1])).toBe('z: 1');
+  });
+
+  test('a positional argument after a named one underlines the positional', () => {
+    const src = `${DEF}\nf(y: "ok", 5)\n1`;
+    const { diagnostics } = run(src);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const d of diagnostics)
+      expect(src.slice(d.range[0], d.range[1])).toBe('5');
+  });
+
+  test('a missing required argument anchors on the call', () => {
+    // The faulted SLOT has no written argument to underline — what is
+    // missing is a parameter — so the anchor stays on the whole call.
+    const src = `${DEF}\nf(y: "ok")\n1`;
+    const { diagnostics } = run(src);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    for (const d of diagnostics)
+      expect(src.slice(d.range[0], d.range[1])).toBe('f(y: "ok")');
+  });
+
+  test('a final-statement error narrows valueRange to the written argument', () => {
+    // Errors-are-values: the final statement's RUNTIME error mints no
+    // diagnostic (pinned elsewhere) — its presentation-layer anchor is
+    // `valueRange`, which flows through the same locator and gets the same
+    // mapping. The STATIC pass still reports the type error up front, with
+    // the same corrected anchor.
+    const src = `${DEF}\nf(y: "ok", x: "bad")`;
+    const { diagnostics, valueRange } = run(src);
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'static-type-error',
+    ]);
+    expect(src.slice(diagnostics[0].range[0], diagnostics[0].range[1])).toBe(
+      'x: "bad"'
+    );
+    expect(src.slice(valueRange[0], valueRange[1])).toBe('x: "bad"');
+  });
+});

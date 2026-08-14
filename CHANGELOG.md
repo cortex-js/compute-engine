@@ -2,6 +2,21 @@
 
 ### Epsil
 
+- **A diagnostic inside a reordered named call now underlines the
+  argument at fault, not a bystander.** With
+  `function f(x: number, y: string) {…}`, the call
+  `f(y: "ok", x: "bad")` produces `expected number, got string` — and
+  the underline previously landed on `y: "ok"`: the engine reports the
+  faulted argument by its position in DECLARATION order (named calls
+  are permuted into that order before validation), while the source
+  anchor was read from the argument list as WRITTEN, at the same
+  index. The locator now reconciles the two through the callee's
+  declared parameter names, so the underline lands on `x: "bad"` —
+  in both the static and runtime tiers, for mixed positional-and-named
+  calls, and for a final-statement error's `valueRange`. When the
+  names cannot be resolved, the anchor widens to the whole call
+  rather than guessing. Positional calls are unaffected.
+
 - **An inline function literal now takes named arguments.**
   `((x: number) |-> x + 1)(x: 5)` evaluates to 6 instead of declining
   with `argument-names-unavailable`, and the arguments may be written
@@ -19,6 +34,22 @@
   a function-literal head applied directly).
 
 ### Issues Resolved
+
+- **A `Take`-bounded infinite collection now compiles to JavaScript.**
+  `Sum(Take(Map(1..oo, _ |-> _^2), 10))` previously compiled to
+  `Array.from({length: Infinity}, …)` — code that compiled cleanly and
+  threw `RangeError: Invalid array length` the first time it ran. A
+  statically infinite pipeline — `Range` with an infinite bound, under
+  `Map`/`Filter`/`Drop`/`Rest` — now compiles to a lazy iterator
+  stream, materialized where `Take` or `TakeWhile` bounds it (the take
+  count may be a runtime variable). An infinite pipeline that is never
+  bounded fails closed at **compile** time with a clear error instead
+  of the runtime `RangeError`; the Python target likewise rejects a
+  non-finite `Range` bound at compile time (it previously emitted code
+  that raised `OverflowError` at run time). Also fixed while there: a
+  fractional `Take`/`Drop` count now rounds like the interpreter
+  (`Take([1,2,3,4], 2.5)` takes three elements; the compiled `slice`
+  used to truncate to two).
 
 - **Statically checking an Epsil program no longer mutates the engine.**
   The static checking pass (`epsil check`, and the pre-pass `executeEpsil`

@@ -94,14 +94,41 @@ export function enclosingFrame(
 export function locateError(
   frames: readonly ErrorFrameRef[],
   stmt: MathJsonExpression,
-  fallback: [number, number]
+  fallback: [number, number],
+  /** The declared slot names of a callee, for anchoring inside a NAMED call
+   * (`calleeSlotNames`, boxed-expression/named-arguments.ts, partially
+   * applied to the engine). A frame's argument index counts DECLARATION
+   * slots — the seam permutes a named call into declaration order before
+   * anything downstream runs — while the raw call node here still lists the
+   * arguments AS WRITTEN, wrapped in `NamedArgument` carriers. Without the
+   * names the two orders cannot be reconciled, so the anchor stays on the
+   * whole call rather than guessing an argument. `undefined` (or a resolver
+   * answering `undefined`) only affects calls that contain a carrier;
+   * all-positional calls index directly, as they always did. */
+  slotNamesFor?: (
+    operatorName: string
+  ) => readonly (string | undefined)[] | undefined,
+  /** Which order the frames' argument indexes count in. `'declaration'` (the
+   * default) is every error of a successfully normalized call — the seam
+   * permuted the operands before the error was minted, and `slotNamesFor`
+   * maps the slot back to the written argument. `'written'` is the seam's own
+   * normalization FAILURES (`errorIndexCountsWrittenArguments`,
+   * boxed-expression/named-arguments.ts): the call was never permuted, so
+   * the index already counts written positions and is used directly. */
+  frameIndexOrder: 'declaration' | 'written' = 'declaration'
 ): { range: [number, number]; call?: MathJsonExpression } {
   for (const { name, index } of frames) {
     const matches: MathJsonExpression[] = [];
     findByOperator(stmt, name, matches);
     if (matches.length !== 1) continue;
 
-    const arg = [...operands(matches[0])][index - 1] ?? null;
+    const arg = argumentAtSlot(
+      [...operands(matches[0])],
+      index - 1,
+      name,
+      frameIndexOrder,
+      slotNamesFor
+    );
     const range = nodeOffsets(arg) ?? nodeOffsets(matches[0]);
     // The matched CALL travels with the range: a caller quoting the error's
     // surroundings wants `IndexOf(digits, cs[i], 23)`, not the one argument
@@ -111,13 +138,69 @@ export function locateError(
   return { range: fallback };
 }
 
+/**
+ * The written argument that fills declaration slot `slot` (0-based) of the
+ * call whose raw operands are `rawOps`.
+ *
+ * An all-positional call is the identity mapping. A call containing a
+ * `NamedArgument` carrier was permuted by the normalization seam, and the
+ * permutation is reconstructed here from the same two facts the seam used: a
+ * positional argument fills the next unfilled slot left to right (positional
+ * arguments always precede named ones — the seam rejects the other order, so
+ * a call that produced an ARGUMENT-indexed error has them as a prefix), and
+ * a carrier fills the slot its written name selects among the declared
+ * `slotNames`. When the slot names are not knowable, or nothing matches,
+ * `null` — the caller then anchors on the whole call, which is wide but
+ * never underlines the WRONG argument.
+ */
+function argumentAtSlot(
+  rawOps: readonly MathJsonExpression[],
+  slot: number,
+  calleeName: string,
+  frameIndexOrder: 'declaration' | 'written',
+  slotNamesFor?: (
+    operatorName: string
+  ) => readonly (string | undefined)[] | undefined
+): MathJsonExpression | null {
+  // A written-order index needs no reconciliation — and neither does a call
+  // with no carrier, whose written order IS declaration order.
+  if (
+    frameIndexOrder === 'written' ||
+    !rawOps.some((op) => operator(op) === 'NamedArgument')
+  )
+    return rawOps[slot] ?? null;
+
+  const names = slotNamesFor?.(calleeName);
+  if (names === undefined) return null;
+
+  let nextPositionalSlot = 0;
+  for (const op of rawOps) {
+    if (operator(op) !== 'NamedArgument') {
+      if (nextPositionalSlot === slot) return op;
+      nextPositionalSlot += 1;
+      continue;
+    }
+    const written = stringValue(operand(op, 1));
+    // Return the whole carrier (`x: "bad"`), not just its value: the name is
+    // part of what the author wrote at that spot, and the in-order underline
+    // covers it too.
+    if (written !== null && names.indexOf(written) === slot) return op;
+  }
+  return null;
+}
+
 /** {@link locateError}'s range alone, for a caller that only needs to point. */
 export function narrowToFrames(
   frames: readonly ErrorFrameRef[],
   stmt: MathJsonExpression,
-  fallback: [number, number]
+  fallback: [number, number],
+  slotNamesFor?: (
+    operatorName: string
+  ) => readonly (string | undefined)[] | undefined,
+  frameIndexOrder: 'declaration' | 'written' = 'declaration'
 ): [number, number] {
-  return locateError(frames, stmt, fallback).range;
+  return locateError(frames, stmt, fallback, slotNamesFor, frameIndexOrder)
+    .range;
 }
 
 /** Collect every node of `expr` whose operator is `name` (early-exits once

@@ -29,7 +29,40 @@ import type { ParsingDiagnostic } from './diagnostics.js';
 import { serializeEpsil } from './serialize-epsil.js';
 import { definitionSites } from './definition-sites.js';
 import { enclosingFrame, locateError } from './error-location.js';
+import {
+  calleeSlotNames,
+  errorIndexCountsWrittenArguments,
+} from '../compute-engine/boxed-expression/named-arguments.js';
 import { signatureNotes } from './signature-notes.js';
+
+/**
+ * `locateError`'s slot-name resolver, bound to an engine: the callee's
+ * declared parameter names, by operator name, for anchoring a diagnostic
+ * inside a NAMED call (the seam permutes such a call into declaration order,
+ * so a frame's argument index counts declaration slots while the source
+ * lists the arguments as written).
+ *
+ * Exported for `execute-epsil.ts`, which keeps its no-static-engine-imports
+ * discipline (the engine is injected there); this module already imports
+ * engine internals, so the one runtime dependency lives here. The same
+ * routing applies to {@link frameOrderOf}.
+ */
+export function calleeSlotNamesResolver(
+  ce: ComputeEngine
+): (operatorName: string) => readonly (string | undefined)[] | undefined {
+  return (operatorName) => calleeSlotNames(ce, operatorName);
+}
+
+/**
+ * Which order an error's frame indexes count in — `'written'` for the
+ * named-argument seam's own normalization failures (the call was never
+ * permuted), `'declaration'` for everything else. See
+ * `errorIndexCountsWrittenArguments` (boxed-expression/named-arguments.ts)
+ * for why the two exist.
+ */
+export function frameOrderOf(code: string): 'declaration' | 'written' {
+  return errorIndexCountsWrittenArguments(code) ? 'written' : 'declaration';
+}
 
 /** Longest Epsil snippet quoted in a `static-type-error` message. */
 const SNIPPET_LENGTH = 60;
@@ -321,7 +354,15 @@ function canonicalizationDiagnostics(
       const located = locateError(
         frame === undefined ? [] : [frame],
         statement,
-        [start, end]
+        [start, end],
+        // A named call was permuted into declaration order, so the frame's
+        // argument index counts declaration slots; the callee's declared
+        // names let the locator find the WRITTEN argument that fills the
+        // faulted slot (see `argumentAtSlot`, error-location.ts). The seam's
+        // own normalization failures were never permuted, so their index
+        // counts written positions and is used directly.
+        (operatorName) => calleeSlotNames(ce, operatorName),
+        frameOrderOf(code)
       );
       const [from, to] = located.range;
 

@@ -1,4 +1,5 @@
 import type { FunctionSignature, Type } from '../../common/type/types.js';
+import { isWildcardFunctionType } from '../../common/type/utils.js';
 import { osaDistance } from '../../common/fuzzy-string-match.js';
 import { stringValue, symbol } from '../../math-json/utils.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
@@ -7,6 +8,7 @@ import type {
   ExpressionInput,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
+import { isOperatorDef, isValueDef } from './utils.js';
 import {
   armAdmission,
   diagnoseNoMatch,
@@ -356,6 +358,39 @@ function slotNames(sig: FunctionSignature): (string | undefined)[] {
   ];
 }
 
+/**
+ * The declared slot names of the callee `operatorName` currently resolves to,
+ * or `undefined` when they are not knowable: no definition, a type that is
+ * not a single signature (for an overload set the winning arm depends on the
+ * arguments), or a signature with no parameter list.
+ *
+ * This is the error-anchoring counterpart of the normalization seam: after a
+ * named call is permuted into declaration order, a diagnostic's argument
+ * index counts DECLARATION slots, while the raw source still lists the
+ * arguments as written. `locateError` (`src/epsil/error-location.ts`) uses
+ * these names to find which written argument fills the faulted slot, so the
+ * underline lands on the argument the author has to fix. A value-typed
+ * callee mirrors `calleeSignatureType` (box.ts): a bare-`function` wildcard
+ * declaration carries no parameters, so the assigned value's own signature
+ * is the only one there is.
+ */
+export function calleeSlotNames(
+  ce: ComputeEngine,
+  operatorName: string
+): readonly (string | undefined)[] | undefined {
+  const def = ce.lookupDefinition(operatorName);
+  if (def === undefined) return undefined;
+  let type: Type | undefined;
+  if (isValueDef(def))
+    type = isWildcardFunctionType(def.value.type.type)
+      ? def.value.value?.type.type
+      : def.value.type.type;
+  else if (isOperatorDef(def)) type = def.operator.signature.type;
+  if (type === undefined || typeof type === 'string') return undefined;
+  if (type.kind !== 'signature') return undefined;
+  return slotNames(type);
+}
+
 /** The closest declared name to `spelled`, for a did-you-mean. Conservative,
  * with the same thresholds as the protocol-member suggestion
  * (`unknownMemberProblem`, engine-protocols.ts): a distance of at most 2, and
@@ -411,6 +446,34 @@ function blame(
 ): ExpressionInput[] {
   return split.args.map((a) => (a.index === index ? error : a.value));
 }
+
+/**
+ * Whether an argument diagnostic with this code indexes the argument list AS
+ * WRITTEN rather than in declaration order.
+ *
+ * The seam emits its errors in two different operand orders. A normalization
+ * FAILURE — an unknown or duplicate name, a positional argument after a named
+ * one, a skipped optional, names unavailable — is reported via {@link blame},
+ * which replaces the offending entry of the WRITTEN list in place: the call
+ * was never permuted, so an error frame's operand index counts written
+ * positions. The other argument diagnostics (`missing` and the
+ * variadic-tail shortfall) are appended to a slot-ordered list AFTER the
+ * permutation succeeded, so their index counts declaration slots — as does
+ * every downstream error (a type mismatch) in a successfully normalized
+ * call. Error-anchoring (`argumentAtSlot`, `src/epsil/error-location.ts`)
+ * must know which order it is reconciling: remapping a written-order index
+ * through the declared slot names lands the underline on a bystander.
+ */
+export function errorIndexCountsWrittenArguments(code: string): boolean {
+  return WRITTEN_ORDER_ARGUMENT_CODES.has(code);
+}
+const WRITTEN_ORDER_ARGUMENT_CODES: ReadonlySet<string> = new Set([
+  'argument-name-unknown',
+  'argument-name-duplicate',
+  'argument-order-invalid',
+  'argument-optional-skipped',
+  'argument-names-unavailable',
+]);
 
 /**
  * Permute a written argument list into the positional order the callee

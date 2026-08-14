@@ -26,8 +26,10 @@ import { definitionSites } from './definition-sites.js';
 import { narrowToFrames, traceFrames } from './error-location.js';
 import { signatureNotes } from './signature-notes.js';
 import {
+  calleeSlotNamesResolver,
   describeError,
   errorCode,
+  frameOrderOf,
   staticDiagnostics,
 } from './static-diagnostics.js';
 
@@ -236,7 +238,7 @@ function executeEpsilBatch(
       // offending subexpression, not the whole statement.
       const errors = value.errors;
       if (errors.length > 0)
-        valueRange = narrowErrorRange(errors[0].json, stmt, valueRange);
+        valueRange = narrowErrorRange(ce, errors[0].json, stmt, valueRange);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       cancellation = cancellationCause(e);
@@ -268,6 +270,7 @@ function executeEpsilBatch(
         const frames = errorFrameChain(errors[0].json);
         const description = describeError(errors[0].json);
         const range = narrowErrorRange(
+          ce,
           errors[0].json,
           stmt,
           statementRange(stmt, source)
@@ -408,11 +411,23 @@ export function errorFrameChain(error: MathJsonExpression): string {
  * source.
  */
 function narrowErrorRange(
+  ce: ComputeEngine,
   error: MathJsonExpression,
   stmt: MathJsonExpression,
   fallback: [number, number]
 ): [number, number] {
-  return narrowToFrames(traceFrames(error), stmt, fallback);
+  // The engine resolves the callee's declared parameter names so a NAMED
+  // call's frame index (which counts declaration slots after the seam's
+  // permutation) lands on the argument as WRITTEN — see `argumentAtSlot`
+  // (error-location.ts). The seam's own normalization failures were never
+  // permuted; their index counts written positions and is used directly.
+  return narrowToFrames(
+    traceFrames(error),
+    stmt,
+    fallback,
+    calleeSlotNamesResolver(ce),
+    frameOrderOf(errorCode(error))
+  );
 }
 
 /** The source range of a statement AST node, falling back to the whole
