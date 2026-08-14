@@ -948,6 +948,14 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     }
 
     const target = this.createTarget({
+      // Constant folding is UNSOUND on this target, unconditionally: it bakes
+      // a subtree's `.N()` value as a zero-width point, discarding the
+      // outward-rounded enclosure the structural interval code computes. A
+      // point for a value the doubles cannot represent exactly (`Ln(2)`) no
+      // longer CONTAINS the true value — the guarantee this target exists to
+      // provide. Number LITERALS in the source are exact by definition and
+      // stay point intervals, as before.
+      constantFold: false,
       functions: (id) =>
         namedFunctions?.[id]
           ? namedFunctions[id]

@@ -47,6 +47,7 @@ import { toAsciiMath } from './ascii-math.js';
 import { cmp, eq, eqIdentical, same } from './compare.js';
 import { CancellationError } from '../../common/interruptible.js';
 import { isSymbol, isString, isNumber, isFunction } from './type-guards.js';
+import { functionLiteralParameterName } from './function-literal.js';
 import { symbolAtSite } from './binding-sites.js';
 import { extractIntervalBounds } from './inequality-bounds.js';
 import { labelFor } from './explain-labels.js';
@@ -1415,13 +1416,18 @@ function getReferences(
   // A `Function` literal `["Function", body, ...params]` binds its trailing
   // operands (the parameters) in the body. Recurse into the body and drop the
   // parameters. (Previously the parameters leaked, e.g. the `x` of
-  // `["Function", body, "x"]`.)
+  // `["Function", body, "x"]`.) A parameter operand may be a bare symbol OR
+  // the annotated spelling `["Typed", "x", type]` that canonicalization
+  // produces for `x: type` — `functionLiteralParameterName` unwraps both; a
+  // bare-symbol-only check left every annotated parameter leaking as an
+  // unknown (`Map(_ ↦ _^2, xs)` reported `_` free, because `Map`'s callback
+  // canonicalizes with a typed parameter).
   if (expr.operator === 'Function') {
     const ops = expr.ops;
     const params = new Set<string>();
     for (let i = 1; i < ops.length; i++) {
-      const p = ops[i];
-      if (isSymbol(p)) params.add(p.symbol);
+      const name = functionLiteralParameterName(ops[i]);
+      if (name !== '') params.add(name);
     }
     const innerFree = new Set<string>();
     const innerRef = new Set<string>();

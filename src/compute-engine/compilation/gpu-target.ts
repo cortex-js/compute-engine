@@ -7979,7 +7979,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     expr: Expression,
     functionName: string,
     returnType: string,
-    parameters: Array<[name: string, type: string]>
+    parameters: Array<[name: string, type: string]>,
+    options?: { constantFold?: boolean }
   ): string;
 
   /**
@@ -8567,11 +8568,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    */
   protected compileDeclaredFunctionBody(
     expr: Expression,
-    parameters: ReadonlyArray<[name: string, type: string]>
+    parameters: ReadonlyArray<[name: string, type: string]>,
+    options?: { constantFold?: boolean }
   ): string {
     const declarations = parameters.map(([name, type]) => ({ name, type }));
     const target = gpuDeclaredBodyTarget(
-      this.createTargetFor(expr),
+      this.createTargetFor(expr, undefined, {
+        constantFold: options?.constantFold,
+      }),
       declarations
     );
     const body = BaseCompiler.withLocalShapeFrame(
@@ -8627,6 +8631,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
 
     const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
     const target = this.createTargetFor(expr, undefined, {
+      // Constant-folder contract (`BaseCompiler.tryConstantFold`): a
+      // `vars`-mapped symbol is a live runtime input (a uniform) and a
+      // caller-overridden function must run the caller's implementation, so
+      // subtrees mentioning either are never folded.
+      varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
+      foldExcludedOps: userFunctions
+        ? new Set(Object.keys(userFunctions))
+        : undefined,
+      constantFold: options.constantFold,
       functions: (id) => {
         if (userFunctions && id in userFunctions) {
           const fn = userFunctions[id];
@@ -8831,7 +8844,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
 
   compileToSource(
     expr: Expression,
-    _options: CompilationOptions<Expression> = {}
+    options: CompilationOptions<Expression> = {}
   ): string {
     // This route answers with a bare EXPRESSION string and has no preamble
     // channel — neither for the `_gpu_*` helpers nor for a user-function
@@ -8851,7 +8864,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     gpuAssertExpressionBody('compileToSource()', expr, this.languageId);
     const code = BaseCompiler.compile(
       expr,
-      this.createTargetFor(expr, undefined, { userFunctions: undefined })
+      this.createTargetFor(expr, undefined, {
+        userFunctions: undefined,
+        constantFold: options.constantFold,
+      })
     );
     // The contract of this route is an EXPRESSION. A body that lowers to
     // statements has no emission here (D6) — this route throws, as it already
@@ -8890,7 +8906,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   protected compileShaderBody(
     body: ReadonlyArray<{ variable: string; expression: Expression }>,
     stage: string,
-    declarations: ReadonlyArray<GPUShaderDeclaration> = []
+    declarations: ReadonlyArray<GPUShaderDeclaration> = [],
+    constantFold?: boolean
   ): Array<{ variable: string; code: string; stmts: string[] }> {
     // One name, two declarations (an input AND a uniform) is a redeclaration
     // neither language accepts — and on WGSL the two do not even resolve to
@@ -8916,6 +8933,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // otherwise be shadowed and left unwritten (`_tv1 = _tv1`).
     const target = gpuDeclaredBodyTarget(
       this.createTargetFor(body[0]?.expression, stage, {
+        constantFold,
         naming: BaseCompiler.newNamingContext(
           body.map((a) => a.expression),
           body.map((a) => a.variable)

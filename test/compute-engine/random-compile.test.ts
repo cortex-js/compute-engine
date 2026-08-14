@@ -33,9 +33,12 @@ function draw(seed: number | string, n: number): number {
   return frameDraw(seedLo, seedHi, n);
 }
 
-/** Compile, refusing the interpreter fallback so a missing handler is loud. */
+/** Compile, refusing the interpreter fallback so a missing handler is loud.
+ * Compile-time constant folding is off: a seeded `WithRandomSeed` frame has no
+ * free variables, so folding would replace the whole frame with the value it
+ * produces — correct, but it erases the emitted draws these tests inspect. */
 function compiled(ce: ComputeEngine, json: any) {
-  const r = compile(ce.box(json), { fallback: false })!;
+  const r = compile(ce.box(json), { fallback: false, constantFold: false })!;
   expect(r.success).toBe(true);
   return r;
 }
@@ -569,7 +572,12 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   const wgsl = () => ce.getCompilationTarget('wgsl')!;
   /** GLSL/WGSL source for `json`, unframed (fragment-stage spatial noise). */
   const gpuCode = (json: any, lang: 'glsl' | 'wgsl' = 'glsl'): string =>
-    (lang === 'glsl' ? glsl() : wgsl()).compile(ce.box(json) as any).code ?? '';
+    (lang === 'glsl' ? glsl() : wgsl()).compile(ce.box(json) as any, {
+      // These tests pin emitted GPU source byte for byte (and count the draws
+      // in it), so the constant operands and the seeded frames must survive
+      // to code generation instead of being folded to a literal.
+      constantFold: false,
+    }).code ?? '';
   const gpuDraws = (json: any, lang: 'glsl' | 'wgsl' = 'glsl'): number =>
     (gpuCode(json, lang).match(/_gpu_rnd_draw/g) ?? []).length;
   const jsCode = (json: any): string =>

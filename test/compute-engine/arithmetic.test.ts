@@ -997,11 +997,17 @@ describe('SUM', () => {
     ));
 
   it('should compute the sum of a function over an open interval numerically', () => {
-    // Sums 1/x over the default unbounded range (MAX_ITERATION = 10000 terms).
-    // Fast locally (~60ms); runs unbounded (no enclosing span), with jest's
-    // per-test timeout as the backstop.
-    const result = ce.expr(['Sum', ['Divide', 1, 'x'], 'x']).N();
-    expect(result.re).toBeCloseTo(9.787606036044382);
+    // A CONVERGENT series over the default unbounded range computes its
+    // limit (Richardson-accelerated): Σ 1/x² = π²/6.
+    const conv = ce.expr(['Sum', ['Divide', 1, ['Square', 'x']], 'x']).N();
+    expect(conv.re).toBeCloseTo(1.6449340668482264);
+    // A DIVERGENT series stays unevaluated (ruled 2026-08-14): the harmonic
+    // Σ 1/x has no finite value, and the previous behavior — answering
+    // 9.7876…, the iteration-limit-truncated partial sum — was a silently
+    // wrong number.
+    const div = ce.expr(['Sum', ['Divide', 1, 'x'], 'x']).N();
+    expect(div.operator).toBe('Sum');
+    expect(Number.isNaN(div.re)).toBe(true);
   }, 30_000);
 
   it('should compute the sum of a collection', () =>

@@ -111,7 +111,10 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     });
 
     test('default emits _SYS.integrate, not integrateMC', () => {
-      const r = compile(piecewise(), { realOnly: true });
+      // The integral has constant bounds and no free variables, so compile-time
+      // constant folding would replace the whole quadrature call with its
+      // value; this test pins the EMITTED code, so folding is turned off.
+      const r = compile(piecewise(), { realOnly: true, constantFold: false });
       expect(r.code).toContain('_SYS.integrate(');
       expect(r.code).not.toContain('integrateMC');
     });
@@ -668,7 +671,13 @@ describe('COMPILE — `Nothing` is never emitted as a variable reference', () =>
     // An `If` whose else-arm is the erasure marker.
     ['If else-arm', ['If', 'True', 1, 'Nothing']],
   ])('%s fails closed', (_label, json) => {
-    const r = compile(ce.box(json as any), { realOnly: true });
+    // These expressions have no free variables, so compile-time constant
+    // folding would evaluate them away before the emitter ever sees the
+    // `Nothing` operand; the point here is the EMITTER's fail-closed guard.
+    const r = compile(ce.box(json as any), {
+      realOnly: true,
+      constantFold: false,
+    });
     expect(r.success).toBe(false);
     expect(String((r as any).code ?? '')).not.toContain('_.Nothing');
   });

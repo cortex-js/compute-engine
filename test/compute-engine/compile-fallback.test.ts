@@ -158,7 +158,10 @@ describe('Compilation fallback — numeric value of a symbolic evaluation', () =
   // emitting wrong code.
   test('declined infinite Sum runs to its numeric value, not NaN', () => {
     const e = ce.parse('\\sum_{i=1}^{\\infty} 2^{-i}');
-    const r = compile(e);
+    // `constantFold: false`: the sum has no free variables, so compile-time
+    // constant folding would emit `1` as a literal and report success — the
+    // decline whose fallback runner is under test would never happen.
+    const r = compile(e, { constantFold: false });
     expect(r.success).toBe(false);
     expect(r.run!({})).toBe(1);
   });

@@ -65,7 +65,7 @@ beforeEach(() => {
 /** Assert the expression declines to compile, and that the interpreter — which
  * `compile()` falls back to — still answers `expected`. */
 function failsClosed(expr: BoxedExpression, expected: string): void {
-  expect(compile(expr).success).toBe(false);
+  expect(compile(expr, { constantFold: false }).success).toBe(false);
   expect(expr.evaluate().toString()).toBe(expected);
 }
 
@@ -105,7 +105,7 @@ describe('string comparisons fail closed (D6)', () => {
       ['List', { str: 'a' }, { str: 'b' }],
       { str: 'b' },
     ]);
-    expect(compile(expr).success).toBe(false);
+    expect(compile(expr, { constantFold: false }).success).toBe(false);
     expect(expr.evaluate().toString()).toBe('2');
   });
 });
@@ -327,7 +327,7 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
           ['List', { str: 'a' }, { str: 'b' }],
           ['List', { str: 'a' }, { str: 'b' }],
         ]),
-        { fallback: false }
+        { fallback: false, constantFold: false }
       );
       expect(r.code).toMatchInlineSnapshot(
         `"_SYS.eq((["a", "b"]), (["a", "b"]), 1e-10)"`
@@ -483,7 +483,7 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
         ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
         ['Tuple', 3, 4],
       ]);
-      const r = compile(expr);
+      const r = compile(expr, { constantFold: false });
       expect(r.success).toBe(false);
       expect(r.error).toMatch(/tuple participant/);
       expect(expr.evaluate().re).toBe(2);
@@ -570,6 +570,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
   test('the lowering is the collection dispatch, unchanged from before the gate', () => {
     const r = compile(ce.box(['Equal', ['Tuple', 1, 2], ['Tuple', 1, 2]]), {
       fallback: false,
+      constantFold: false,
     });
     expect(r.code).toMatchInlineSnapshot(
       `"_SYS.eq(([1, 2]), ([1, 2]), 1e-10)"`
@@ -649,7 +650,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
       ['NotEqual', '"False"'],
     ] as const) {
       const expr = ce.box([head, T, T] as any);
-      const r = compile(expr);
+      const r = compile(expr, { constantFold: false });
       expect(r.success).toBe(false);
       expect(r.error).toMatch(/tuple participant/);
       expect(expr.evaluate().toString()).toBe(expected);
@@ -672,7 +673,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     'a tuple with a BOOLEAN component declines: %s over %j / %j',
     (head, a, b, interpreted) => {
       const expr = ce.box([head, a, b] as any);
-      const r = compile(expr);
+      const r = compile(expr, { constantFold: false });
       expect(r.success).toBe(false);
       expect(r.error).toMatch(/tuple participant/);
       expect(expr.evaluate().toString()).toBe(interpreted);
@@ -738,7 +739,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     // operands are collections at run time. The carve-out is binary-only.
     const T = ['Tuple', 1, 2];
     const expr = ce.box(['Equal', T, T, T] as any);
-    expect(compile(expr).success).toBe(false);
+    expect(compile(expr, { constantFold: false }).success).toBe(false);
     expect(expr.evaluate().toString()).toBe('"True"');
   });
 });
@@ -966,10 +967,12 @@ describe('tier 2: scalar string equality lowers to a strict ===', () => {
   test('the emitted code is a strict comparison, not the tolerance test', () => {
     const eq = compile(ce.box(['Equal', { str: 'a' }, { str: 'b' }]), {
       fallback: false,
+      constantFold: false,
     });
     expect(eq.code).toMatchInlineSnapshot(`"(("a") === ("b"))"`);
     const neq = compile(ce.box(['NotEqual', { str: 'a' }, { str: 'b' }]), {
       fallback: false,
+      constantFold: false,
     });
     expect(neq.code).toMatchInlineSnapshot(`"(("a") !== ("b"))"`);
   });

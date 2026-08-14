@@ -37,7 +37,12 @@ import * as path from 'path';
  */
 
 const python = new PythonTarget();
-const src = (expr: any): string => python.compileToSource(ce.box(expr));
+// `constantFold: false`: these assertions pin the LOWERING of each operator,
+// and every operand below is a literal — with compile-time constant folding
+// on (the default) a fully constant call is evaluated at compile time and
+// emitted as a bare number, so there would be no lowering left to inspect.
+const src = (expr: any): string =>
+  python.compileToSource(ce.box(expr), { constantFold: false });
 
 describe('PYTHON ARITY — Round(x, n) rounds to n decimal places', () => {
   it('a constant precision folds the 10ⁿ factor', () => {

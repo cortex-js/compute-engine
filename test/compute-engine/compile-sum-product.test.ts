@@ -246,7 +246,7 @@ describe('COMPILE Sum - a bound naming a library constant (Tycho item 176)', () 
 
   test('GPU: the emitted loop does not depend on the parameter name', () => {
     const strip = (param: string) =>
-      compile(build(param).expr(['F', 3]), { to: 'glsl' })
+      compile(build(param).expr(['F', 3]), { to: 'glsl', constantFold: false })
         .preamble!.replace(new RegExp(`\\b${param}\\b`, 'g'), 'P')
         .replace(/\s+/g, ' ')
         .trim();
@@ -287,7 +287,10 @@ describe('COMPILE Sum - iterationBudget', () => {
 
   test('infinite bound: NaN instead of a non-terminating loop', () => {
     const expr = ce.parse('\\sum_{k=1}^{\\infty} \\frac{1}{k^2}');
-    const result = compile(expr, { iterationBudget: 1e6 });
+    const result = compile(expr, {
+      iterationBudget: 1e6,
+      constantFold: false,
+    });
     expect(result.success).toBe(true);
     expect(result.run!({})).toBeNaN();
   });
@@ -396,7 +399,7 @@ describe('COMPILE Sum/Product - multi-index (P0-43 regression)', () => {
       ['Limits', 'i', 1, 3],
       ['Limits', 'j', 1, 3],
     ]);
-    const result = compile(expr, { to: 'glsl' });
+    const result = compile(expr, { to: 'glsl', constantFold: false });
     expect(result.success).toBe(false);
   });
 });

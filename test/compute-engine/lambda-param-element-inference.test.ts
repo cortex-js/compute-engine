@@ -298,13 +298,18 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
       'cs',
       ['Function', ['Greater', 'n', 1], 'n'],
     ]);
-    const r = compile(expr, { fallback: false });
+    // `constantFold: false`: the expression has no free variables, so
+    // compile-time constant folding would emit the literal `2` and the
+    // codegen under test would never run.
+    const r = compile(expr, { fallback: false, constantFold: false });
     expect(r.success).toBe(true);
     expect(r.code).toBe(
       '((_f) => ([1, 2, 3]).filter((_x) => _f(_x)).length)(((n) => 1 < n))'
     );
     expect((r.run as () => unknown)()).toBe(2);
-    expect(new PythonTarget().compile(expr)?.code).toBe(
+    expect(
+      new PythonTarget().compile(expr, { constantFold: false })?.code
+    ).toBe(
       '(lambda _f: sum(1 for _x in [1, 2, 3] if _f(_x)))((lambda n: 1 < n))'
     );
     expect(expr.evaluate().toString()).toBe('2');

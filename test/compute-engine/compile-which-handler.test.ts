@@ -72,8 +72,11 @@ describe('Which compile handler (Tycho item 180)', () => {
     const a = new ComputeEngine();
     attachWhichHandler(a, () => '(777)');
     const b = new ComputeEngine();
-    const ra = compile(a.box(['Which', 'True', 5]));
-    const rb = compile(b.box(['Which', 'True', 5]));
+    // `constantFold: false`: `Which(True, 5)` has no free variables, so
+    // compile-time constant folding would emit `5` on both engines and the
+    // per-engine handler under test would never run.
+    const ra = compile(a.box(['Which', 'True', 5]), { constantFold: false });
+    const rb = compile(b.box(['Which', 'True', 5]), { constantFold: false });
     expect((ra.run as any)({})).toBe(777);
     expect((rb.run as any)({})).toBe(5);
   });

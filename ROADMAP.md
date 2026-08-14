@@ -89,6 +89,30 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### ~~`.N()` of a divergent infinite `Sum`/`Product` silently returns a truncated partial~~ (FIXED 2026-08-14, same day)
+
+`Sum(i, i=1..∞).N()` answered `50015001` — the 10001-term iteration-limit
+prefix — the harmonic series answered `9.7877…`, and `Product(n, n=1..∞)`
+a huge exact partial product: silently wrong finite numbers for series
+with no finite value. Surfaced by the compile-time constant-folding work
+(the folder would have baked `50015001` behind `success: true`).
+
+**Fixed by ruling (2026-08-14):** an infinite-domain big op under `.N()`
+whose convergence the Richardson acceleration cannot establish now stays
+**unevaluated** instead of falling back to brute truncation (`Sum` and
+`Product` evaluate handlers, `library/arithmetic.ts`; the constant folder
+independently refuses such subtrees via
+`BaseCompiler.containsUnboundedBigOp` as defense in depth). The
+default-domain spelling `Limits(x, Nothing, Nothing)` (a bare `Sum(f, x)`
+index) is now recognized by the acceleration as `1..+∞`, so convergent
+open-interval sums compute their true limit (`Σ 1/x² = π²/6`) rather
+than a truncation. Known cost, accepted by the ruling: a convergent
+series the acceleration cannot certify (non-integer-power tails such as
+`Σ 1/n^1.5`) now stays symbolic where it previously returned a
+truncation ~1e-2 off; a designed divergence classification (`+∞` for
+`Σ i`, dedicated handling for oscillating series, p-series recognition)
+remains available as a future refinement.
+
 ### ~~Tycho item 182 — canonicalization-time collection-facet probe storm on a range-broadcast `At` head~~ (FIXED 2026-08-14)
 
 Original filing: parsing `255(0.5 + L[1+3(0..Length(D)-1)]/60)/255` inside

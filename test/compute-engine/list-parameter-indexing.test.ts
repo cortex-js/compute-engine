@@ -35,8 +35,8 @@ import { ComputeEngine } from '../../src/compute-engine';
  */
 
 /** `h([3,4])`-style compile of an expression, on the JS target. */
-function jsCompile(ce: ComputeEngine, expr: any) {
-  return ce.getCompilationTarget('javascript')!.compile(expr);
+function jsCompile(ce: ComputeEngine, expr: any, options?: any) {
+  return ce.getCompilationTarget('javascript')!.compile(expr, options);
 }
 
 /** The two-component complex-multiply witness from Tycho's library: TWO list
@@ -302,9 +302,12 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
 
   test('JS: the compile declines instead of emitting a silent NaN', () => {
     const ce = keyedEngine();
-    expect(() => jsCompile(ce, ce.box(['k', REC]))).toThrow(
-      /not provably numeric.*Fail closed \(D6\)/
-    );
+    // `constantFold: false`: `k(REC)` has no free variables, so compile-time
+    // constant folding would emit `5` as a literal and the D6 refusal under
+    // test would never be reached.
+    expect(() =>
+      jsCompile(ce, ce.box(['k', REC]), { constantFold: false })
+    ).toThrow(/not provably numeric.*Fail closed \(D6\)/);
     expect(() => jsCompile(ce, ce.box('k'))).toThrow(/Fail closed \(D6\)/);
   });
 
@@ -312,7 +315,7 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
     const ce = keyedEngine();
     const r = ce
       .getCompilationTarget('javascript')!
-      .compile(ce.box(['k', REC]), { fallback: true });
+      .compile(ce.box(['k', REC]), { fallback: true, constantFold: false });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/not provably numeric/);
     // The interpreter-backed fallback returns the stored value — not NaN.

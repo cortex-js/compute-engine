@@ -62,9 +62,14 @@ beforeEach(() => {
   ce = new ComputeEngine();
 });
 
-/** The emitted code for `expr` — `compileFunction` throws when a gate fires. */
+/** The emitted code for `expr` — `compileFunction` throws when a gate fires.
+ * Compiled with `constantFold: false`: this suite pins gate/lowering behavior,
+ * and a constant expression would otherwise fold to a literal before any gate
+ * is consulted. */
 function code(expr: BoxedExpression): string {
-  return python.compileFunction(expr, 'f', []);
+  return python.compileFunction(expr, 'f', [], undefined, {
+    constantFold: false,
+  });
 }
 
 describe('Python: SCALAR string equality is admitted (tier 2, 2026-08-08)', () => {

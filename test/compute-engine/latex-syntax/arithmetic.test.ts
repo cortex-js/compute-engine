@@ -566,27 +566,24 @@ describe('EL-4 (revised): Infinite series with Element notation', () => {
     expect(result.isNaN).not.toBe(true);
   }, 15000);
 
-  test('sum over NonNegativeIntegers numericizes under N()', () => {
-    // Truncated partial sum (triangular number at the iteration cap) — this
-    // verifies the numeric path terminates, not the exact value.
+  test('a DIVERGENT sum over NonNegativeIntegers stays unevaluated under N()', () => {
+    // Σ n diverges: it has no finite value, so `.N()` keeps it symbolic
+    // (ruled 2026-08-14 — the previous behavior, answering the truncated
+    // partial sum at the iteration cap, was a silently wrong number).
     const expr = ce.expr(['Sum', 'n', ['Element', 'n', 'NonNegativeIntegers']]);
     const result = expr.N();
-    expect(result.isNumber).toBe(true);
-    expect(result.operator).not.toBe('Sum');
-    expect(result.isNaN).not.toBe(true);
+    expect(result.operator).toBe('Sum');
   }, 15000);
 
-  test('product over PositiveIntegers stays symbolic under evaluate(), numericizes under N()', () => {
+  test('a DIVERGENT product over PositiveIntegers stays unevaluated under both modes', () => {
+    // Π k diverges — same ruling as the divergent sum above.
     const expr = ce.expr([
       'Product',
       'k',
       ['Element', 'k', 'PositiveIntegers'],
     ]);
     expect(expr.evaluate().operator).toBe('Product');
-    const result = expr.N();
-    expect(result.isNumber).toBe(true);
-    expect(result.operator).not.toBe('Product');
-    expect(result.isNaN).not.toBe(true);
+    expect(expr.N().operator).toBe('Product');
   }, 15000);
 
   test('convergent series over PositiveIntegers gives reasonable approximation under N()', () => {
@@ -617,9 +614,9 @@ describe('EL-4 (revised): Infinite series with Element notation', () => {
       ['Element', 'n', 'PositiveIntegers'],
     ]);
     const result = expr.N();
-    // Returns the truncated numeric partial sum, quickly, without hanging.
-    expect(result.isNumber).toBe(true);
-    expect(Number.isFinite(result.re)).toBe(true);
+    // Stays unevaluated (ruled 2026-08-14 — the truncated partial sum it
+    // used to answer was a silently wrong number), quickly, without hanging.
+    expect(result.operator).toBe('Sum');
     expect(Date.now() - start).toBeLessThan(5000);
   }, 10000);
 

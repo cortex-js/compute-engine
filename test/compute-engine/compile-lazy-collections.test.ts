@@ -29,7 +29,10 @@ const SUM_TAKE_MAP = String.raw`\mathrm{Sum}(\mathrm{Take}(\mathrm{Map}(\_ \maps
 
 describe('COMPILE lazy infinite collections', () => {
   it('Sum(Take(Map(x → x², 1..∞), 10)) compiles to a lazy stream (parse route)', () => {
-    const r = compile(ce.parse(SUM_TAKE_MAP));
+    // `constantFold: false`: the pipeline has no free variables, so
+    // compile-time constant folding would emit the literal `385` and the
+    // `_SYS` stream emission this test pins would not appear in the code.
+    const r = compile(ce.parse(SUM_TAKE_MAP), { constantFold: false });
     expect(r?.success).toBe(true);
     expect(r?.code).toBe(
       '(_SYS.takeIter(_SYS.mapIter(_SYS.rangeIter(1, 1), ((_) => (_ * _))), 10)).reduce((_a, _b) => _a + _b, 0)'

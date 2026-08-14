@@ -224,7 +224,11 @@ describe('MULTI-CLAUSE COMPILE — complex-valued dispatch', () => {
       p('n', 'integer'),
       p('z', 'complex'),
     ]);
-    const rh = compile(ce.box(['h', 1, 0.5]));
+    // `constantFold: false`: the call site has no free variables, so
+    // compile-time constant folding would emit its value (`1.5`) as a literal
+    // and the argument coercion this test reads off the code would not be
+    // emitted at all.
+    const rh = compile(ce.box(['h', 1, 0.5]), { constantFold: false });
     expect(rh?.code).toContain('re: 0.5, im: 0');
     expect((rh?.run?.({}) as { re: number }).re).toBeCloseTo(
       ce.box(['h', 1, 0.5]).N().re,

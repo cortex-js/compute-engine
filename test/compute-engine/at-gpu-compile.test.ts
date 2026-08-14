@@ -45,10 +45,22 @@ ce.declare('_gpu_at5', 'number');
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 
-const g = (expr: any): string => glsl.compile(ce.box(expr)).code!;
-const w = (expr: any): string => wgsl.compile(ce.box(expr)).code!;
-const gPre = (expr: any): string => glsl.compile(ce.box(expr)).preamble ?? '';
-const wPre = (expr: any): string => wgsl.compile(ce.box(expr)).preamble ?? '';
+/**
+ * Compile-time constant folding is off throughout this file. An `At` over a
+ * LITERAL base (`At([1,2,3], 2)`, `At({a: 1}, "a")`) is a pure subtree with no
+ * free variables, so the compiler would evaluate it at compile time and emit
+ * the element as a number — including for the shapes the GPU lowering is
+ * required to DECLINE, which would silently retire those fail-closed
+ * diagnostics.
+ */
+const NO_FOLD = { constantFold: false } as const;
+
+const g = (expr: any): string => glsl.compile(ce.box(expr), NO_FOLD).code!;
+const w = (expr: any): string => wgsl.compile(ce.box(expr), NO_FOLD).code!;
+const gPre = (expr: any): string =>
+  glsl.compile(ce.box(expr), NO_FOLD).preamble ?? '';
+const wPre = (expr: any): string =>
+  wgsl.compile(ce.box(expr), NO_FOLD).preamble ?? '';
 
 /** The decline message a shape produces on GLSL. */
 const why = (expr: any): string => {

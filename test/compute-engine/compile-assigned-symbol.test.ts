@@ -150,9 +150,15 @@ describe('COMPILE: assigned-symbol folding', () => {
     // evaluate folds a → π/2; compile bakes the same value in. The folded
     // compound value parenthesizes itself so it stays correct when spliced into
     // a surrounding operator (the redundant parens here are harmless).
-    expect(ce.getCompilationTarget('javascript')!.compile(expr).code).toBe(
-      'Math.sin((0.5 * Math.PI) * _.x)'
-    );
+    // `constantFold: false`: the spliced value `π/2` is itself a
+    // variable-free subtree, so compile-time constant folding would collapse
+    // it to `1.5707963267948966` and the parenthesization this test pins
+    // would no longer be observable. The splicing under test is unaffected.
+    expect(
+      ce
+        .getCompilationTarget('javascript')!
+        .compile(expr, { constantFold: false }).code
+    ).toBe('Math.sin((0.5 * Math.PI) * _.x)');
   });
 
   // A symbol assigned a *symbolic* value whose value itself references a free

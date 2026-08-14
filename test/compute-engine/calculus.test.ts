@@ -1936,6 +1936,17 @@ describe('DOUBLY-INFINITE SUMS', () => {
       .N();
     expect(r.re).toBeCloseTo(1, 10);
   });
+
+  test('a DIVERGENT doubly-infinite sum stays unevaluated (no principal value)', () => {
+    // Σ n over all of ℤ pairs to 0 at every symmetric step — the Cauchy
+    // PRINCIPAL VALUE, not a sum. Only an absolutely convergent series has a
+    // well-defined unordered doubly-infinite value, so this stays symbolic
+    // (ruled 2026-08-14) rather than answering 0.
+    const r = engine
+      .expr(['Sum', 'n', ['Limits', 'n', 'NegativeInfinity', 'PositiveInfinity']])
+      .N();
+    expect(r.operator).toBe('Sum');
+  });
 });
 
 // Regression: a `D` node with no operand (produced e.g. when upstream LaTeX

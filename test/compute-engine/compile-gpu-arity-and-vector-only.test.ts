@@ -34,10 +34,21 @@ const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 
+/**
+ * Compile-time constant folding is off throughout this file. Most probes here
+ * are fully literal (`Round(3.14159, 2)`, `Gamma(5, 2)`, `Norm([1,2,3])`), i.e.
+ * pure subtrees with no free variables that the compiler would otherwise
+ * evaluate at compile time and emit as one number — erasing both the lowering
+ * these tests read and the fail-closed throws that only the structural path
+ * reaches. Value agreement with the interpreter is still checked, by running
+ * the structural emission through `evalShader`.
+ */
+const NO_FOLD = { constantFold: false } as const;
+
 const g = (expr: any, engine = ce): string =>
-  glsl.compile(engine.box(expr)).code!;
+  glsl.compile(engine.box(expr), NO_FOLD).code!;
 const w = (expr: any, engine = ce): string =>
-  wgsl.compile(engine.box(expr)).code!;
+  wgsl.compile(engine.box(expr), NO_FOLD).code!;
 
 const V3 = ['List', 1, 2, 3];
 const W3 = ['List', 4, 5, 6];

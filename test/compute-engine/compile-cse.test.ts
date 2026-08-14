@@ -295,13 +295,17 @@ describe('COMPILE CSE — binder bodies', () => {
     // region instance (§6.1); a node-keyed reuse would emit iteration 1's
     // temporary for every later iteration — silently wrong values.
     const expr = ce.parse('\\sum_{i=1}^{5}(\\sin(i)\\sin(i)+i)');
-    const result = compile(expr, { fallback: false });
+    // Opt out of constant folding: the body has no free variables, so the
+    // folder would collapse the whole sum to one numeric literal and the
+    // code-shape comparison below would compare two identical literals
+    // instead of the unrolled emission this test is about.
+    const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(
       (result.run as (v: Record<string, number>) => number)({})
     ).toBeCloseTo(expr.evaluate().N().re!, 12);
     expect(result.code).toBe(
-      compile(expr, { fallback: false, cse: false }).code
+      compile(expr, { fallback: false, cse: false, constantFold: false }).code
     );
   });
 
@@ -309,7 +313,7 @@ describe('COMPILE CSE — binder bodies', () => {
     // The candidate-bearing version of the same trap: each term must bind its
     // OWN `_cseN` over its own index value.
     const expr = ce.parse(`\\sum_{i=1}^{4}(${PROBE_LATEX.replace(/u/g, 'i')})`);
-    const result = compile(expr, { fallback: false });
+    const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(4);
     expect(result.code).toContain('const _cse1 = Math.sin(6 * 1)');
@@ -354,7 +358,7 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     const engine = new ComputeEngine();
     engine.assign('mapper', engine.parse('x \\mapsto x^2 + 3x + 1'));
     const expr = mappedTwice(engine, 'mapper');
-    const result = compile(expr, { fallback: false });
+    const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
     // The mapping itself is emitted ONCE.
@@ -362,7 +366,9 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
 
     const value = (result.run as (v: Record<string, number>) => number)({});
     expect(value).toBe(
-      compile(expr, { fallback: false, cse: false }).run!({}) as number
+      compile(expr, { fallback: false, cse: false, constantFold: false }).run!(
+        {}
+      ) as number
     );
     expect(value).toBe(expr.evaluate().N().re);
   });
@@ -391,14 +397,16 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     // it exactly like a pure user-function callback.
     const engine = new ComputeEngine();
     const expr = mappedTwice(engine, 'Sin');
-    const result = compile(expr, { fallback: false });
+    const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
     expect(occurrences(result.code, '.map(')).toBe(1);
 
     const value = (result.run as (v: Record<string, number>) => number)({});
     expect(value).toBe(
-      compile(expr, { fallback: false, cse: false }).run!({}) as number
+      compile(expr, { fallback: false, cse: false, constantFold: false }).run!(
+        {}
+      ) as number
     );
     expect(value).toBeCloseTo(expr.evaluate().N().re!, 12);
   });
@@ -408,14 +416,16 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     // it is admitted exactly like `Sin`.
     const engine = new ComputeEngine();
     const expr = mappedTwice(engine, 'Ln');
-    const result = compile(expr, { fallback: false });
+    const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
     expect(occurrences(result.code, '.map(')).toBe(1);
 
     const value = (result.run as (v: Record<string, number>) => number)({});
     expect(value).toBe(
-      compile(expr, { fallback: false, cse: false }).run!({}) as number
+      compile(expr, { fallback: false, cse: false, constantFold: false }).run!(
+        {}
+      ) as number
     );
     expect(value).toBeCloseTo(expr.evaluate().N().re!, 12);
   });
@@ -423,7 +433,7 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
   it('merges two identical `Map(Negate, xs)` — an OPERATOR-MAPPED built-in', () => {
     const engine = new ComputeEngine();
     const expr = mappedTwice(engine, 'Negate');
-    const result = compile(expr, { fallback: false });
+    const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
     expect(occurrences(result.code, '.map(')).toBe(1);
@@ -1633,6 +1643,7 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
     const mapped = ['Sum', ['Map', 'f', ['List', 1, 2, 3, 4]]];
     const result = compile(engine.box(['Add', mapped, mapped] as any), {
       fallback: false,
+      constantFold: false,
     });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
@@ -1659,14 +1670,18 @@ describe('COMPILE CSE — typed named callback of an eager operator', () => {
       countIf(),
       countIf(),
     ] as any);
-    const result = compile(expr, { fallback: false });
+    const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
     // The whole application binds once — not just its collection operand.
     expect(occurrences(result.code, '.filter(')).toBe(1);
     expect(result.code).toContain('const _cse1 = ((_f)');
 
-    const off = compile(expr, { fallback: false, cse: false });
+    const off = compile(expr, {
+      fallback: false,
+      cse: false,
+      constantFold: false,
+    });
     expect((result.run as (v: any) => number)({})).toBe(
       (off.run as (v: any) => number)({})
     );
@@ -1715,7 +1730,7 @@ describe('COMPILE CSE — typed named callback of an eager operator', () => {
     engine.assign('Sin', engine.parse('x \\mapsto x + 1'));
     const mapped = ['Sum', ['Map', 'Sin', ['List', 1, 2, 3, 4, 5]]];
     const expr = engine.box(['Add', mapped, mapped] as any);
-    const result = compile(expr, { fallback: false });
+    const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
     expect(result.code).not.toContain('Math.sin');
@@ -2003,7 +2018,9 @@ pyDescribe('COMPILE CSE — Python emitted source (pyexec)', () => {
     const expr = ce.parse(
       '\\sin(6n)^2+\\sin(6n)+\\sin(6n)+\\sum_{n=1}^{3}(\\sin(6n)^2+\\sin(6n)+\\sin(6n))'
     );
-    const source = new PythonTarget().compileToSource(expr);
+    const source = new PythonTarget().compileToSource(expr, {
+      constantFold: false,
+    });
     astParse(source, 'capture');
 
     const { calls, value } = run(source, 'capture-run', 'n = 0.3');

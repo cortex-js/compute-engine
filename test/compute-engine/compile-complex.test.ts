@@ -154,8 +154,12 @@ describe('COMPILE COMPLEX - _SYS helpers (execution)', () => {
 
   it('should execute cexp', () => {
     // exp(i*pi) = -1 + 0i
+    // `constantFold: false`: this suite exercises the emitted `_SYS` helper at
+    // run time. With folding on, the whole (variable-free) expression is
+    // evaluated at compile time and emitted as a real literal, so the helper
+    // never runs and the result is a bare number rather than `{re, im}`.
     const expr = ce.expr(['Exp', ['Complex', 0, Math.PI]]);
-    const result = compile(expr, { fallback: false });
+    const result = compile(expr, { fallback: false, constantFold: false });
     const val = result.run!() as { re: number; im: number };
     expect(val.re).toBeCloseTo(-1, 10);
     expect(val.im).toBeCloseTo(0, 10);
@@ -236,7 +240,10 @@ describe('COMPILE COMPLEX - inline arithmetic', () => {
       ['Complex', 2, 1.5],
       ['Complex', 1, -1.5],
     ]);
-    const result = compile(expr, { fallback: false });
+    // `constantFold: false`: the assertion is on the shape of the EMITTED
+    // code, which a compile-time fold of this variable-free product would
+    // replace with a single literal.
+    const result = compile(expr, { fallback: false, constantFold: false });
     // Should be a single IIFE, not nested
     const iifes = result.code.match(/\(\(\) =>/g);
     expect(iifes?.length).toBe(1);
@@ -362,7 +369,10 @@ describe('COMPILE COMPLEX - reciprocal trig functions', () => {
 
   it('should compute complex sec', () => {
     const expr = ce.expr(['Sec', ['Complex', 0, 1]]);
-    const result = compile(expr, { fallback: false });
+    // `constantFold: false`: sec(i) is real, so a compile-time fold of this
+    // variable-free expression emits a bare number and the complex `{re, im}`
+    // lowering under test is never exercised.
+    const result = compile(expr, { fallback: false, constantFold: false });
     const val = result.run!() as { re: number; im: number };
     // sec(i) = 1/cos(i) = 1/cosh(1)
     expect(val.re).toBeCloseTo(1 / Math.cosh(1), 5);
@@ -431,7 +441,10 @@ describe('COMPILE COMPLEX - integration', () => {
       ['Exp', ['Complex', 0, Math.PI]],
       1,
     ]);
-    const result = compile(expr, { fallback: false });
+    // `constantFold: false`: the test checks the `{re, im}` result of the
+    // emitted complex arithmetic; folding this variable-free expression at
+    // compile time would emit a real literal instead.
+    const result = compile(expr, { fallback: false, constantFold: false });
     const val = result.run!() as { re: number; im: number };
     expect(val.re).toBeCloseTo(0, 10);
     expect(val.im).toBeCloseTo(0, 10);

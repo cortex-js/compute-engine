@@ -5,6 +5,15 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const wgsl = new WGSLTarget();
 
+/**
+ * Compile-time constant folding is off for the emissions this suite pins.
+ * A subtree with no free variables is normally evaluated at compile time and
+ * emitted as one literal, which erases the codegen under test here: the
+ * unrolled/looped `Sum` and `Product` shapes, the operand lowerings, and the
+ * fail-closed diagnostics that only the structural path reaches.
+ */
+const NO_FOLD = { constantFold: false } as const;
+
 describe('WGSL COMPILATION', () => {
   describe('Basic Expressions', () => {
     it('should compile simple arithmetic', () => {
@@ -187,7 +196,7 @@ describe('WGSL COMPILATION', () => {
   describe('Constants', () => {
     it('should compile pi', () => {
       const expr = ce.parse('2\\pi');
-      const code = wgsl.compile(expr).code;
+      const code = wgsl.compile(expr, NO_FOLD).code;
       expect(code).toMatchInlineSnapshot(`2.0 * 3.14159265359`);
     });
 
@@ -482,13 +491,13 @@ describe('WGSL COMPILATION', () => {
   describe('Sum and Product', () => {
     it('should unroll Sum with small constant bounds', () => {
       const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
-      const code = wgsl.compile(expr).code;
+      const code = wgsl.compile(expr, NO_FOLD).code;
       expect(code).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
     });
 
     it('should unroll Product with small constant bounds', () => {
       const expr = ce.expr(['Product', 'i', ['Limits', 'i', 1, 4]]);
-      const code = wgsl.compile(expr).code;
+      const code = wgsl.compile(expr, NO_FOLD).code;
       expect(code).toBe('((1.0) * (2.0) * (3.0) * (4.0))');
     });
 
@@ -504,7 +513,7 @@ describe('WGSL COMPILATION', () => {
         ['Sin', 'i'],
         ['Limits', 'i', 1, 1000],
       ]);
-      const fn = wgsl.compileFunction(expr, 'sumSin', 'float', []);
+      const fn = wgsl.compileFunction(expr, 'sumSin', 'float', [], { constantFold: false });
       expect(fn).toContain('fn sumSin() -> f32');
       expect(fn).toContain('for (var i: i32 = 1; i <= 1000; i++)');
       expect(fn).toContain('+= sin(f32(i))');
@@ -677,7 +686,7 @@ describe('WGSL COMPILATION', () => {
     const bigSum = ['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 1000]];
 
     it('hoists the loop when a loop-form Sum is used mid-expression', () => {
-      const code = wgsl.compile(ce.box(['Add', bigSum, 1])).code;
+      const code = wgsl.compile(ce.box(['Add', bigSum, 1]), NO_FOLD).code;
       expect(code).toContain('for (var i: i32 = 1; i <= 1000; i++)');
       const acc = /var (_\w+): f32 = 0\.0;/.exec(code)?.[1];
       expect(acc).toBeDefined();
@@ -689,14 +698,17 @@ describe('WGSL COMPILATION', () => {
     // identical, so the guard is not language-gated.
     it('a conditionally-evaluated branch fails closed', () => {
       expect(() =>
-        wgsl.compile(ce.box(['If', ['Greater', 'x', 0], bigSum, 0] as any))
+        wgsl.compile(
+          ce.box(['If', ['Greater', 'x', 0], bigSum, 0] as any),
+          NO_FOLD
+        )
       ).toThrow(
         /conditionally-evaluated branch contains a multi-statement construct/
       );
     });
 
     it('still compiles a loop-form Sum as a top-level function body', () => {
-      const fn = wgsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', []);
+      const fn = wgsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', [], { constantFold: false });
       expect(fn).toContain('for (var i: i32 = 1; i <= 1000; i++)');
       expect(fn).toContain('sin(f32(i))');
     });
@@ -707,7 +719,8 @@ describe('WGSL COMPILATION', () => {
   describe('CO-P2-23 emission fixes', () => {
     it('negative-index Sum unroll spaces the negation (no `--`)', () => {
       const code = wgsl.compile(
-        ce.box(['Sum', ['Negate', 'i'], ['Tuple', 'i', -3, 3]])
+        ce.box(['Sum', ['Negate', 'i'], ['Tuple', 'i', -3, 3]]),
+        NO_FOLD
       ).code;
       expect(code).not.toContain('--');
       expect(code).toContain('- -3.0');
@@ -942,7 +955,8 @@ describe('WGSL Mod with an impure operand draws once', () => {
   it('a framed Random divisor emits a single draw', () => {
     const target = ce.getCompilationTarget('wgsl')!;
     const code = target.compile(
-      ce.box(['WithRandomSeed', 7, ['Mod', 10, ['Random']]])
+      ce.box(['WithRandomSeed', 7, ['Mod', 10, ['Random']]]),
+      NO_FOLD
     ).code;
     expect((code.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
   });

@@ -622,6 +622,12 @@ describe('Function call frames are activations of the literal binding', () => {
     const frames: any[] = [];
     ce.declare('BmIntProbe', {
       signature: '() -> number',
+      // The probe records the scope it is evaluated in, so it is NOT pure.
+      // Declaring it impure also keeps compile-time constant folding from
+      // evaluating the argument-free `BmIntProbe()` subtree once, at compile
+      // time, outside any call frame — which would replace the activation
+      // frames this test inspects with a single non-activation record.
+      pure: false,
       evaluate: () => {
         const binding = ce.context.lexicalScope?.bindings.get('x');
         frames.push(binding && 'value' in binding ? binding.value : undefined);
@@ -659,6 +665,12 @@ describe('Function call frames are activations of the literal binding', () => {
     const frames: any[] = [];
     ce.declare('BmIntProbe', {
       signature: '() -> number',
+      // The probe records the scope it is evaluated in, so it is NOT pure.
+      // Declaring it impure also keeps compile-time constant folding from
+      // evaluating the argument-free `BmIntProbe()` subtree once, at compile
+      // time, outside any call frame — which would replace the activation
+      // frames this test inspects with a single non-activation record.
+      pure: false,
       evaluate: () => {
         const binding = ce.context.lexicalScope?.bindings.get('x');
         frames.push(binding && 'value' in binding ? binding.value : undefined);

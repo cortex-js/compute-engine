@@ -619,7 +619,9 @@ describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', ()
     const expr = ce.box(['size', ['bag', ['List', 1, 2, 3]]] as never);
     // The interpreter binds the tagged value whole (D3 opacity).
     expect(expr.evaluate().re).toBe(42);
-    const r = compile(expr, { fallback: false });
+    // The call has no free variables, so compile-time constant folding would
+    // emit its value (42) instead of the call these tests pin; off here.
+    const r = compile(expr, { fallback: false, constantFold: false });
     // …and so does the emitted call: no runtime broadcast dispatch at all.
     expect(r.code).toBe('_fn_size([1, 2, 3])');
     expect(r.code).not.toContain('bcastFn');
@@ -676,7 +678,8 @@ describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', ()
       ['jarr', ['List', ['jnum', 1], ['jnum', 2]]],
     ] as never);
     expect(expr.evaluate().re).toBe(7);
-    const r = compile(expr, { fallback: false });
+    // Constant folding off: this pins the emitted call, not its value.
+    const r = compile(expr, { fallback: false, constantFold: false });
     expect(r.code).toBe('_fn_kind([1, 2])');
     expect(r.code).not.toContain('bcastFn');
     expect(r.run!({})).toBe(7);
@@ -701,7 +704,8 @@ describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', ()
     expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
     const expr = ce.box(['f', ['meters', 5]] as never);
     expect(expr.evaluate().re).toBe(3);
-    const r = compile(expr, { fallback: false });
+    // Constant folding off: this pins the emitted call, not its value.
+    const r = compile(expr, { fallback: false, constantFold: false });
     expect(r.code).toBe('_fn_f(5)');
     expect(r.code).not.toContain('bcastFn');
     expect(r.run!({})).toBe(3);
@@ -719,7 +723,8 @@ describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', ()
     expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
     const expr = ce.box(['g', 10, ['bag', ['List', 1, 2, 3]]] as never);
     expect(expr.evaluate().re).toBe(11);
-    const r = compile(expr, { fallback: false });
+    // Constant folding off: this pins the emitted call, not its value.
+    const r = compile(expr, { fallback: false, constantFold: false });
     expect(r.code).toBe('_fn_g(10, [1, 2, 3])');
     expect(r.code).not.toContain('bcastFn');
     expect(r.run!({})).toBe(11);

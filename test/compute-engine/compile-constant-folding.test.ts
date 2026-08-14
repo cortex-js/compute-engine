@@ -447,6 +447,19 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
   // so these inspect the emitted GLSL — asserting the corrected, branch-safe
   // formulas (matching the JS target's math) and no literal `NaN`.
   describe('GPU P0 regressions (emission)', () => {
+    /**
+     * Emit GLSL for a variable-free expression with `constantFold: false`.
+     * These cases pin the GLSL target's OWN negative-base peephole (the branch
+     * decision in `negativeBaseRealPow`, plus its `vec2(re, im)` complex
+     * emission). Whole-expression compile-time constant folding would instead
+     * evaluate the expression through the interpreter and emit that value, so
+     * with folding on these assertions would no longer reach the emission path
+     * they exist to cover — and the two routes round the last digit
+     * differently.
+     */
+    const gpuFold = (e: any) =>
+      glsl.compile(ce.expr(e), { constantFold: false }).code;
+
     it('Arccot uses the branch-free (0, π) form', () => {
       expect(glsl.compile(ce.expr(['Arccot', 'x'])).code).toBe(
         '(1.5707963267948966 - atan(x))'
@@ -460,20 +473,18 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
     });
 
     it('odd root of a negative constant folds to the real value', () => {
-      expect(glsl.compile(ce.expr(['Root', -8, 3])).code).toBe('-2.0');
+      expect(gpuFold(['Root', -8, 3])).toBe('-2.0');
     });
 
     it('even root of a negative constant folds, never a literal NaN', () => {
       // Since D12-A a perfect-square radicand canonicalizes to an exact
       // complex literal, which GLSL emits as a vec2 constant:
-      expect(glsl.compile(ce.expr(['Sqrt', -4])).code).toBe('vec2(0.0, 2.0)');
+      expect(gpuFold(['Sqrt', -4])).toBe('vec2(0.0, 2.0)');
       // A non-square radicand reaches the fold path. `Sqrt(negative)` is typed
       // `complex`, so it folds to the complex principal value — the same
       // vec2(re, im) convention, and the same ruling as the JS target's
       // `complexSqrtLiteral` — rather than declining.
-      expect(glsl.compile(ce.expr(['Sqrt', -5])).code).toBe(
-        `vec2(0.0, ${Math.sqrt(5)})`
-      );
+      expect(gpuFold(['Sqrt', -5])).toBe(`vec2(0.0, ${Math.sqrt(5)})`);
       // SUPERSEDED CONTRACT (2026-07-30 ruling). These two used to assert
       // `_gpu_nan()`, on the then-true grounds that a `Root`/`Power` with no
       // real value was typed `finite_number`. The type handlers now narrow an
@@ -483,27 +494,21 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
       // must match it. A scalar NaN there is silently scalar-broadcast into
       // `vec2(NaN, NaN)`. Do NOT restore the `_gpu_nan()` assertion.
       const r = principalComplexPow(-8, 0.25);
-      expect(glsl.compile(ce.expr(['Root', -8, 4])).code).toBe(
-        `vec2(${r.re}, ${r.im})`
-      );
+      expect(gpuFold(['Root', -8, 4])).toBe(`vec2(${r.re}, ${r.im})`);
       const p = principalComplexPow(-2, 0.3);
-      expect(glsl.compile(ce.expr(['Power', -2, 0.3])).code).toBe(
-        `vec2(${p.re}, ${p.im})`
-      );
+      expect(gpuFold(['Power', -2, 0.3])).toBe(`vec2(${p.re}, ${p.im})`);
       // An ODD denominator keeps a real principal root and stays
       // `finite_number`, so it folds to that real value — `pow` alone yields
       // only NaN for a negative base.
-      expect(glsl.compile(ce.expr(['Power', -8, ['Divide', 2, 3]])).code).toBe(
-        '4.0'
-      );
+      expect(gpuFold(['Power', -8, ['Divide', 2, 3]])).toBe('4.0');
       // …including one whose EXACT denominator is odd but whose double
       // reconstructs to an even one (`100/3` → the dyadic
       // `4691249611844267/140737488355328`). The branch is decided by the exact
       // rational, so this folds to the real `+2^(100/3)`, matching the type
       // (`finite_number`) and `.N()`. It used to fold to `_gpu_nan()`.
-      expect(
-        glsl.compile(ce.expr(['Power', -2, ['Divide', 100, 3]])).code
-      ).toBe(`${Math.pow(2, 100 / 3)}`);
+      expect(gpuFold(['Power', -2, ['Divide', 100, 3]])).toBe(
+        `${Math.pow(2, 100 / 3)}`
+      );
     });
   });
 });

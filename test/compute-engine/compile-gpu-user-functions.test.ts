@@ -25,6 +25,15 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 
+/**
+ * `constantFold: false` for the emissions pinned below whose ARGUMENTS are
+ * literals: a call like `h((1, 2))` or `Match(Sum(…), …)` has no free variable,
+ * so the compiler would evaluate the whole call at compile time and emit one
+ * number — and a folded call emits no definition at all, which is exactly what
+ * the synthesized-signature and hoisting tests read.
+ */
+const NO_FOLD = { constantFold: false } as const;
+
 /** An engine with `f(x) = sin(x) + x²` assigned. */
 function engineWithF(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -128,7 +137,7 @@ describe('GPU USER FUNCTIONS — synthesized signatures', () => {
     const ce = new ComputeEngine();
     ce.declare('h', '(tuple<real,real>) -> real');
     ce.assign('h', ce.parse('v \\mapsto 1'));
-    const r = glsl.compile(ce.expr(['h', ['Tuple', 1, 2]]));
+    const r = glsl.compile(ce.expr(['h', ['Tuple', 1, 2]]), NO_FOLD);
     expect(r.preamble).toContain('float _fn_h(vec2 v)');
     expect(r.code).toBe('_fn_h(vec2(1.0, 2.0))');
   });
@@ -137,7 +146,7 @@ describe('GPU USER FUNCTIONS — synthesized signatures', () => {
     const ce = new ComputeEngine();
     ce.declare('q', '(complex) -> complex');
     ce.assign('q', ce.parse('z \\mapsto z^2'));
-    const r = glsl.compile(ce.expr(['q', ['Complex', 1, 2]]));
+    const r = glsl.compile(ce.expr(['q', ['Complex', 1, 2]]), NO_FOLD);
     expect(r.preamble).toContain('vec2 _fn_q(vec2 z)');
     // The body analysis agrees with the declaration: `z²` lowers through the
     // complex helper, not float multiplication.
@@ -505,7 +514,7 @@ describe('GPU USER FUNCTIONS — a nested definition is scoped to the ROOT, not 
   it('GLSL: the global is folded, whether or not the name collides', () => {
     for (const param of ['z', 'q']) {
       const ce = engineWithNestedG(param);
-      const preamble = glsl.compile(ce.parse('f(u)')).preamble!;
+      const preamble = glsl.compile(ce.parse('f(u)'), NO_FOLD).preamble!;
       // `g` sees the GLOBAL `z` (folded to 10.0), never `f`'s parameter.
       expect(preamble).toContain('float _fn_g(float w) {\n  return w + 10.0;\n}');
       expect(preamble).toContain(`float _fn_f(float ${param})`);
@@ -631,7 +640,8 @@ describe('GPU MATCH — the SUBJECT is unconditional', () => {
         bigSum,
         ['MatchCase', 1, 10],
         ['MatchCase', '_', -1],
-      ] as any)
+      ] as any),
+      NO_FOLD
     ).code;
     // The loop lands ahead of the ternary — it runs on every path anyway.
     expect(code).toContain('for (int i = 1; i <= 1000; i++)');
@@ -647,7 +657,8 @@ describe('GPU MATCH — the SUBJECT is unconditional', () => {
           'x',
           ['MatchCase', 1, bigSum],
           ['MatchCase', '_', -1],
-        ] as any)
+        ] as any),
+        NO_FOLD
       )
     ).toThrow(/Match: a conditionally-evaluated branch/);
   });

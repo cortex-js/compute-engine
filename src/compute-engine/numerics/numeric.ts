@@ -285,7 +285,10 @@ export function realLcm(
 
 export function factorial(n: number): number {
   if (!Number.isInteger(n) || n < 0) return NaN;
-  if (n >= 170) return Infinity;
+  // 171! ≈ 1.24e309 overflows a double, but 170! ≈ 7.26e306 is representable
+  // — the historical `n >= 170` cap saturated the largest representable
+  // factorial to Infinity by one.
+  if (n > 170) return Infinity;
   let val = 1;
   for (let i = 2; i <= n; i++) val = val * i;
   return val;

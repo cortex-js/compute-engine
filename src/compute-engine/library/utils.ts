@@ -1145,7 +1145,68 @@ export function infiniteProductClosedForm(
 }
 
 /**
- * Accelerated `.N()` of a convergent infinite sum `Σ_{k=a}^∞ f(k)`.
+ * Normalize an infinite indexing set into a SCHEDULE WALK for series
+ * acceleration: `termIndexAt(j)` maps the schedule position `j = 0, 1, 2, …`
+ * onto the series index to evaluate, walking the infinite tail from its
+ * finite anchor. Covers the infinite spellings `classifyBigopDomain` admits:
+ *
+ * - `Limits(i, a, +∞)` — and the default-domain `Nothing` bounds (a bare
+ *   `Sum(f, i)` index canonicalizes to `Limits(i, Nothing, Nothing)`,
+ *   meaning `1..+∞`): forward walk `a, a+1, …`;
+ * - `Limits(i, −∞, b)` with finite `b`: reflected walk `b, b−1, …` (the
+ *   tail decays toward −∞, so the finite anchor is the UPPER bound);
+ * - `Limits(i, −∞, +∞)`: symmetric outward walk — `doubly` is set, and one
+ *   schedule step contributes the PAIR `f(j) + f(−j)` (`f(0)` alone at
+ *   `j = 0`);
+ * - `Element(i, ℕ₀ | ℤ⁺)`: the forward walk of the converted range
+ *   (`convertInfiniteSetToLimits`).
+ *
+ * Returns `undefined` for anything else (a finite range, a symbolic bound, a
+ * non-convertible set) — the caller then declines acceleration.
+ */
+function infiniteSeriesWalk(limits: Expression):
+  | {
+      index: string;
+      termIndexAt: (j: number) => number;
+      doubly: boolean;
+    }
+  | undefined {
+  if (isFunction(limits, 'Element')) {
+    const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+    const domain = limits.op2;
+    if (!index || !isSymbol(domain)) return undefined;
+    const converted = convertInfiniteSetToLimits(domain.symbol);
+    if (converted === undefined) return undefined;
+    const a = converted.lower;
+    return { index, termIndexAt: (j) => a + j, doubly: false };
+  }
+  if (!isFunction(limits, 'Limits')) return undefined;
+  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+  const lower = limits.op2;
+  const upper = limits.op3;
+  if (!index || !lower || !upper) return undefined;
+  const upperIsInfinite =
+    (upper.isInfinity === true && upper.isPositive === true) ||
+    isSymbol(upper, 'Nothing');
+  const lowerIsNegInfinite =
+    lower.isInfinity === true && lower.isNegative === true;
+  if (lowerIsNegInfinite && upperIsInfinite)
+    return { index, termIndexAt: (j) => j, doubly: true };
+  if (lowerIsNegInfinite) {
+    const b = Math.round(upper.re);
+    if (!Number.isFinite(b)) return undefined;
+    return { index, termIndexAt: (j) => b - j, doubly: false };
+  }
+  if (!upperIsInfinite) return undefined;
+  const a = isSymbol(lower, 'Nothing') ? 1 : Math.round(lower.re);
+  if (!Number.isFinite(a)) return undefined;
+  return { index, termIndexAt: (j) => a + j, doubly: false };
+}
+
+/**
+ * Accelerated `.N()` of a convergent infinite sum `Σ_{k=a}^∞ f(k)` — or the
+ * reflected `Σ_{k=−∞}^{b}` and doubly-infinite `Σ_{k=−∞}^{∞}` forms, and the
+ * `Element(k, ℕ₀ | ℤ⁺)` spelling (see `infiniteSeriesWalk`).
  *
  * A plain truncation of a smooth monotone-decay series is off by ~ the tail
  * `∫_N^∞ f` (e.g. `Σ 1/k²` truncated at 10⁴ terms is ~1e-4 low). Instead we
@@ -1155,59 +1216,78 @@ export function infiniteProductClosedForm(
  * eliminates term by term, reaching near machine precision from ~2⁹ evaluated
  * terms.
  *
- * Returns undefined — so the caller falls back to plain truncation — when the
- * domain isn't a single `[index, finite, +∞]` range, the body isn't
- * real-numeric, or the extrapolation does not converge within the evaluation
- * budget (divergent or slowly/non-smoothly decaying series, e.g. a half-integer
- * p-series whose expansion is not in integer powers of `1/N`).
+ * Returns undefined — the caller then keeps the sum UNEVALUATED (never a
+ * truncated partial) — when the domain isn't one of the recognized infinite
+ * spellings, the body isn't real-numeric, or the extrapolation does not
+ * converge within the evaluation budget (divergent or slowly/non-smoothly
+ * decaying series, e.g. a half-integer p-series whose expansion is not in
+ * integer powers of `1/N`).
  */
 export function acceleratedInfiniteSum(
   body: Expression | undefined,
   limits: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!body || !isFunction(limits, 'Limits')) return undefined;
-  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
-  const lower = limits.op2;
-  const upper = limits.op3;
-  if (!index || !lower || !upper) return undefined;
-  if (!(upper.isInfinity === true && upper.isPositive === true))
-    return undefined;
-  const a = Math.round(lower.re);
-  if (!Number.isFinite(a)) return undefined;
+  if (!body) return undefined;
+  const walk = infiniteSeriesWalk(limits);
+  if (walk === undefined) return undefined;
+  const { index, termIndexAt, doubly } = walk;
 
   // Numeric value of the body at integer index `k` (real series only).
   const term = (k: number): number => {
     assignLoopIndex(ce, index, k);
     return numericValueOf(body) ?? NaN;
   };
+  // One schedule step contributes one series term — or, on the symmetric
+  // doubly-infinite walk, the pair `f(j) + f(−j)` (`f(0)` alone at j = 0).
+  // `absAccum` tracks the ABSOLUTE series alongside; the doubly-infinite
+  // acceptance requires it to settle (see below).
+  let absAccum = 0;
+  const termAt = doubly
+    ? (j: number): number => {
+        if (j === 0) {
+          const t = term(0);
+          absAccum += Math.abs(t);
+          return t;
+        }
+        const p = term(j);
+        const q = term(-j);
+        absAccum += Math.abs(p) + Math.abs(q);
+        return p + q;
+      }
+    : (j: number): number => {
+        const t = term(termIndexAt(j));
+        absAccum += Math.abs(t);
+        return t;
+      };
 
-  // Partial sum S(N) = Σ_{k=a}^{N} f(k), accumulated across the strictly
+  // Partial sum over schedule steps 0..J, accumulated across the strictly
   // increasing (doubling) schedule `extrapolate` samples. Bound total work: on
   // overflow the sequence stops changing, which would masquerade as
   // convergence, so record it and reject below.
-  // Cap total term evaluations near the plain-truncation budget: convergent
-  // smooth series reach machine precision from ~2¹⁰ terms, well under this,
-  // while a divergent/non-converging series stops here, trips `overflow`, and
-  // is rejected below (caller falls back to truncation) without a runaway grind.
+  // Cap total term evaluations near the historical truncation budget:
+  // convergent smooth series reach machine precision from ~2¹⁰ terms, well
+  // under this, while a divergent/non-converging series stops here, trips
+  // `overflow`, and is rejected below without a runaway grind.
   const MAX_TERMS = 1 << 15; // 32768
-  let cachedN = a - 1;
+  let cachedJ = -1;
   let cachedSum = 0;
   let overflow = false;
   const partialSum = (x: number): number => {
-    let n = Math.round(x);
-    if (n < a) return 0;
-    if (n > MAX_TERMS) {
-      n = MAX_TERMS;
+    let j = Math.round(x);
+    if (j < 0) return 0;
+    if (j > MAX_TERMS) {
+      j = MAX_TERMS;
       overflow = true;
     }
     // The schedule is monotone increasing; guard defensively anyway.
-    if (n < cachedN) {
-      cachedN = a - 1;
+    if (j < cachedJ) {
+      cachedJ = -1;
       cachedSum = 0;
+      absAccum = 0;
     }
-    for (let k = cachedN + 1; k <= n; k++) cachedSum += term(k);
-    cachedN = n;
+    for (let i = cachedJ + 1; i <= j; i++) cachedSum += termAt(i);
+    cachedJ = j;
     return cachedSum;
   };
 
@@ -1223,11 +1303,47 @@ export function acceleratedInfiniteSum(
     deadline: ce._deadline,
   });
 
-  if (overflow || !Number.isFinite(val)) return undefined;
-  // Require genuine convergence (a divergent or non-smooth series stalls with a
-  // large error estimate) before trusting the accelerated value.
-  if (!(err <= Math.max(1e-10, 1e-9 * Math.abs(val)))) return undefined;
-  return ce.number(val);
+  // On the symmetric doubly-infinite walk the ± pairing cancels
+  // STRUCTURALLY, so a divergent series can present perfectly settled
+  // partial sums (`Σ n` over ℤ pairs to 0 at every step — the Cauchy
+  // principal value, not a sum). Require the ABSOLUTE series to settle
+  // over the last doubling windows: only absolute convergence makes the
+  // unordered doubly-infinite sum well-defined.
+  if (doubly) {
+    partialSum(MAX_TERMS / 4);
+    const a1 = absAccum;
+    partialSum(MAX_TERMS / 2);
+    const a2 = absAccum;
+    partialSum(MAX_TERMS);
+    const a3 = absAccum;
+    const absTol = 1e-8 * Math.max(1, a3);
+    if (!Number.isFinite(a3) || a3 - a2 > absTol || a2 - a1 > absTol)
+      return undefined;
+  }
+
+  // Require genuine convergence (a divergent or non-smooth series stalls with
+  // a large error estimate) before trusting the accelerated value.
+  if (!overflow && Number.isFinite(val)) {
+    if (err <= Math.max(1e-10, 1e-9 * Math.abs(val))) return ce.number(val);
+  }
+
+  // Second acceptance, for OSCILLATING absolutely-convergent series
+  // (`Σ sinc³(n)` over ℤ): their partial sums settle but have no smooth
+  // `1/N` expansion, so the Neville tableau above cannot certify them.
+  // Accept the deepest partial sum when the last DOUBLING windows are
+  // Cauchy — each window's contribution ≤ ~1e-8 of the total. A divergent
+  // series cannot pass: even `Σ 1/(n·ln n)` (divergence slower than any
+  // p-series) adds ~3e-2 per doubling at this depth, orders of magnitude
+  // over the tolerance, and anything slower still fails the window test
+  // rather than sneaking through as "settled".
+  const s1 = partialSum(MAX_TERMS / 4);
+  const s2 = partialSum(MAX_TERMS / 2);
+  const s3 = partialSum(MAX_TERMS);
+  if (!Number.isFinite(s3)) return undefined;
+  const tol = 1e-8 * Math.max(1, Math.abs(s3));
+  if (Math.abs(s3 - s2) <= tol && Math.abs(s2 - s1) <= tol)
+    return ce.number(s3);
+  return undefined;
 }
 
 /**
@@ -1236,24 +1352,22 @@ export function acceleratedInfiniteSum(
  * `L(N) = Σ log(f(k))` and Richardson-extrapolate `L(N)` using the same
  * doubling schedule as infinite sums, then return `exp(L(∞))`.
  *
- * Restricting factors to finite positive reals avoids branch/sign ambiguity
- * and makes zero-crossing or oscillatory products fail closed to the existing
- * truncation path.
+ * Restricting factors to finite positive reals avoids branch/sign ambiguity;
+ * a zero-crossing or oscillatory product declines, and the caller keeps the
+ * expression unevaluated (never a truncated partial product).
  */
 export function acceleratedInfiniteProduct(
   body: Expression | undefined,
   limits: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!body || !isFunction(limits, 'Limits')) return undefined;
-  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
-  const lower = limits.op2;
-  const upper = limits.op3;
-  if (!index || !lower || !upper) return undefined;
-  if (!(upper.isInfinity === true && upper.isPositive === true))
-    return undefined;
-  const a = lower.re;
-  if (!Number.isSafeInteger(a)) return undefined;
+  if (!body) return undefined;
+  // Same walk normalization as `acceleratedInfiniteSum` (forward, reflected,
+  // and `Element` spellings). The symmetric doubly-infinite walk is declined:
+  // its per-step PAIRING has no log-domain analog worth the branch risk.
+  const walk = infiniteSeriesWalk(limits);
+  if (walk === undefined || walk.doubly) return undefined;
+  const { index, termIndexAt } = walk;
 
   let invalid = false;
   const logTerm = (k: number): number => {
@@ -1267,23 +1381,23 @@ export function acceleratedInfiniteProduct(
   };
 
   const MAX_TERMS = 1 << 15;
-  const maxN = a + MAX_TERMS - 1;
-  let cachedN = a - 1;
+  let cachedJ = -1;
   let cachedLogSum = 0;
   let overflow = false;
   const partialLogSum = (x: number): number => {
-    let n = Math.round(x);
-    if (n < a) return 0;
-    if (n > maxN) {
-      n = maxN;
+    let j = Math.round(x);
+    if (j < 0) return 0;
+    if (j > MAX_TERMS) {
+      j = MAX_TERMS;
       overflow = true;
     }
-    if (n < cachedN) {
-      cachedN = a - 1;
+    if (j < cachedJ) {
+      cachedJ = -1;
       cachedLogSum = 0;
     }
-    for (let k = cachedN + 1; k <= n; k++) cachedLogSum += logTerm(k);
-    cachedN = n;
+    for (let i = cachedJ + 1; i <= j; i++)
+      cachedLogSum += logTerm(termIndexAt(i));
+    cachedJ = j;
     return cachedLogSum;
   };
 

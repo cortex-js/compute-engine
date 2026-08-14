@@ -214,7 +214,10 @@ describe('destructuring from a non-literal value: what still fails closed', () =
         'function use(k) {\n  let ((a, b), c) = stepn(k)\n  100*a + 10*b + c\n}',
       ['use', 1]
     );
-    const r = compile(expr);
+    // `constantFold: false`: the call has no free variables, so compile-time
+    // constant folding would otherwise evaluate the whole expression and emit
+    // `122` as a literal, bypassing the fail-closed path under test.
+    const r = compile(expr, { constantFold: false });
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/destructuring declaration/);
     // The interpreter handles it: ((1, 2), 2) → 100 + 20 + 2
@@ -318,7 +321,10 @@ describe('non-JavaScript targets keep the fail-closed refusal', () => {
         '}',
       ['g', 1]
     );
-    const r = compile(expr, { to: 'glsl' });
+    // `constantFold: false`: `g(1)` has no free variables, so compile-time
+    // constant folding would otherwise emit a literal and never reach the
+    // destructuring-assignment refusal under test.
+    const r = compile(expr, { to: 'glsl', constantFold: false });
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/destructuring assignment/);
   });
@@ -429,7 +435,10 @@ describe('a destructuring assign the interpreter would refuse fails closed', () 
         '}',
       ['g', 1]
     );
-    const r = compile(expr);
+    // `constantFold: false`: `g(1)` has no free variables, so compile-time
+    // constant folding would otherwise emit a literal and never reach the
+    // destructuring-assignment refusal under test.
+    const r = compile(expr, { constantFold: false });
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/destructuring assignment/);
   });

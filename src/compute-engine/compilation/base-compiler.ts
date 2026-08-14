@@ -101,6 +101,35 @@ import {
  */
 const GENERATED_NAME_RE = /(?<![\p{L}\p{N}_])_(?:tv|cse)[\p{L}\p{N}_]*/gu;
 
+/**
+ * Time budget (ms) for evaluating ONE constant subtree at compile time
+ * (`tryConstantFold`). Typical folds complete in microseconds; the budget
+ * exists so a pathological constant (a `Sum` over millions of terms, a
+ * slow-converging quadrature) degrades to structural compilation instead of
+ * stalling the compile. Armed through `withTimeLimit`, which nests as
+ * `min()` — an already-armed tighter ambient deadline still governs.
+ */
+const CONSTANT_FOLD_BUDGET_MS = 100;
+
+/**
+ * Cap on `engine.maxCollectionSize` while a constant fold evaluates: bounds
+ * the MEMORY a compile-time evaluation can commit to materializing a lazy
+ * collection, complementing the time budget above. Matches the engine's
+ * default (10 000), so it only bites when the caller raised the engine cap
+ * for run-time evaluation — that intent should not implicitly license
+ * compile-time materialization of the same magnitude. An oversized
+ * collection stays lazy under the cap (never truncated), so a clamped
+ * evaluation yields a correct value or a non-literal — never a wrong fold.
+ */
+const CONSTANT_FOLD_MAX_COLLECTION_SIZE = 10_000;
+
+/** The integral operators excluded from constant folding when the caller
+ * requested the stochastic Monte-Carlo quadrature (see `tryConstantFold`). */
+const MONTE_CARLO_FOLD_EXCLUSIONS: ReadonlySet<string> = new Set([
+  'Integrate',
+  'NIntegrate',
+]);
+
 /** Accumulate every symbol name of `expr` into `names`. One walk by node
  * object (a shared subtree is visited once — the set is a union either way). */
 function collectSymbolNames(
@@ -1043,6 +1072,16 @@ export class BaseCompiler {
       BaseCompiler._invalidateComplexMemo();
     }
     try {
+      // Compile-time constant folding, attempted top-down at every function
+      // node so the LARGEST constant subtree folds: a pure subtree with no
+      // free variables evaluates at compile time and emits as a literal
+      // (`Sum(Take(Map(_ ↦ _^2, 1..20), 10))` → `385`) instead of lowering
+      // structurally. Runs BEFORE the CSE walk so eliminated regions are
+      // never inventoried. All the safety gates live in `tryConstantFold`.
+      if (isFunction(expr)) {
+        const folded = BaseCompiler.tryConstantFold(expr, target, prec);
+        if (folded !== undefined) return folded;
+      }
       return BaseCompiler.compileWithCse(expr, target, prec);
     } finally {
       BaseCompiler._compileDepth -= 1;
@@ -1079,6 +1118,251 @@ export class BaseCompiler {
     if (isFunction(expr))
       return expr.ops.some((op) => BaseCompiler.mentionsCompileBoundName(op));
     return false;
+  }
+
+  /**
+   * Whether `expr` mentions — as a value-position symbol OR as an application
+   * head — any name in `vars` (the caller's `vars`-mapped runtime inputs) or
+   * `ops` (`CompileTarget.foldExcludedOps`, operator names whose emission the
+   * caller overrode). Either kind of mention makes a subtree unsafe to
+   * constant-fold: a `vars`-mapped symbol stays a live input even when it has
+   * an engine value, and a caller-overridden operator must run the caller's
+   * implementation, which compile-time evaluation through the engine would
+   * bypass.
+   */
+  private static mentionsExcludedName(
+    expr: Expression,
+    vars: ReadonlySet<string> | undefined,
+    ops: ReadonlySet<string> | undefined
+  ): boolean {
+    if (isSymbol(expr)) {
+      const s = expr.symbol;
+      return vars?.has(s) === true || ops?.has(s) === true;
+    }
+    if (isDictionary(expr))
+      return expr.values.some((v) =>
+        BaseCompiler.mentionsExcludedName(v, vars, ops)
+      );
+    if (isFunction(expr)) {
+      if (ops?.has(expr.operator) === true) return true;
+      return expr.ops.some((op) =>
+        BaseCompiler.mentionsExcludedName(op, vars, ops)
+      );
+    }
+    return false;
+  }
+
+  /**
+   * Whether the subtree contains a `Sum`/`Product` with a non-finite bound in
+   * an INDEXING-SET operand (everything after the body: `Limits`, `Element`,
+   * and the raw spellings). Such a node must never constant-fold — see the
+   * call site in `tryConstantFold`. The body/collection operand (`ops[0]`) is
+   * deliberately not scanned at this node: an `∞` there belongs to a bounded
+   * lazy pipeline (`Take(Map(1..∞, f), n)`), which evaluates finitely — but
+   * it IS recursed into, so a nested unbounded big op inside it still trips.
+   */
+  private static containsUnboundedBigOp(expr: Expression): boolean {
+    if (isDictionary(expr))
+      return expr.values.some((v) => BaseCompiler.containsUnboundedBigOp(v));
+    if (!isFunction(expr)) return false;
+    if (expr.operator === 'Sum' || expr.operator === 'Product') {
+      const ops = expr.ops;
+      for (let i = 1; i < ops.length; i++)
+        if (BaseCompiler.containsNonFiniteLiteral(ops[i])) return true;
+    }
+    return expr.ops.some((op) => BaseCompiler.containsUnboundedBigOp(op));
+  }
+
+  /** Whether the subtree contains a non-finite number literal, one of the
+   * infinity symbols, or a symbol whose VALUE is non-finite (see
+   * `containsUnboundedBigOp`). */
+  private static containsNonFiniteLiteral(expr: Expression): boolean {
+    if (isNumber(expr))
+      return !Number.isFinite(expr.re) || !Number.isFinite(expr.im);
+    if (isSymbol(expr)) {
+      const s = expr.symbol;
+      if (
+        s === 'PositiveInfinity' ||
+        s === 'NegativeInfinity' ||
+        s === 'ComplexInfinity'
+      )
+        return true;
+      // A symbol with an assigned non-finite value (`m := +∞` used as a
+      // bound) is the same divergence hazard as a literal `∞`: it is not an
+      // unknown, so no other gate declines it. `.re`/`.im` dereference the
+      // assigned value; `NaN` (a valueless or non-numeric symbol) is not
+      // "unbounded" — a NaN bound makes an empty walk, never a truncation.
+      const re = expr.re;
+      if (!Number.isNaN(re) && !Number.isFinite(re)) return true;
+      const im = expr.im;
+      if (!Number.isNaN(im) && !Number.isFinite(im)) return true;
+      return false;
+    }
+    if (isDictionary(expr))
+      return expr.values.some((v) => BaseCompiler.containsNonFiniteLiteral(v));
+    if (isFunction(expr))
+      return expr.ops.some((op) => BaseCompiler.containsNonFiniteLiteral(op));
+    return false;
+  }
+
+  /**
+   * Compile-time constant folding: when `expr` is a pure subtree with no free
+   * variables, evaluate it now and emit the value as a target literal,
+   * instead of lowering the computation structurally. Returns `undefined`
+   * whenever folding is unsafe, over budget, or the value is not a number or
+   * boolean — the caller then compiles the subtree as before, so a declined
+   * fold is never an error.
+   *
+   * The folded value is the interpreter's (`.N()`), which is the parity
+   * direction this compiler already commits to elsewhere (see
+   * `negativeBaseRealPow` in constant-folding.ts): compiled output tracks
+   * `evaluate()`, even where the structural code's different operation order
+   * would round the last ulp differently.
+   *
+   * Safety gates, in cost order:
+   * - `constantFold: false` on the target (codegen tests use this);
+   * - free variables (`unknowns`) — checked FIRST and always before `.N()`
+   *   (an argument with unknowns can never become a literal, and `.N()` over
+   *   nested user-function applications is exponentially more expensive than
+   *   the check — the gate convention of `boxed-expression/numerics.ts`);
+   * - impurity (`Random(…)` and friends must keep drawing at run time);
+   * - a static type that provably admits no number or boolean (a list- or
+   *   string-valued subtree cannot fold to a literal; skip the evaluation);
+   * - names bound by an enclosing binding form (lambda parameters, loop
+   *   indices — the evaluator would read the engine symbol they shadow);
+   * - `vars`-mapped symbols and caller-overridden operators
+   *   (`mentionsExcludedName`).
+   *
+   * The evaluation runs under a short deadline (`withTimeLimit` nests as
+   * `min()`, so a tighter ambient deadline still governs) and under the
+   * engine's `maxCollectionSize` clamped to a fold-specific cap, so a
+   * constant subtree over a huge range degrades to structural compilation
+   * instead of stalling the compile. One accepted consequence: a deadline-
+   * degradable numeric operator (adaptive quadrature is best-effort under a
+   * deadline) folds to the estimate the budget allows — for a fully constant
+   * call that is the value computed ONCE at compile time rather than on
+   * every invocation, which is the point of folding it.
+   */
+  private static tryConstantFold(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    prec: number
+  ): TargetSource | undefined {
+    if (target.constantFold === false) return undefined;
+
+    // A caller recording the capture set (`CompileTarget.symbolDeps` — the
+    // implicit-compilation cache key) gets NO subtree folding: the fold
+    // consults engine state TRANSITIVELY (a folded user-function call reads
+    // its callees' definitions, a folded symbol's value may read further
+    // symbols), and unlike the leaf-level `tryFoldKnownSymbol` — whose
+    // recursive compile of the value records each nested read — an evaluation
+    // has no per-read hook, so the capture set would under-report and the
+    // cache would serve the baked constant after a dependency changed.
+    // Declining keeps the capture contract exact; the implicit-compile
+    // kernels are dominated by non-constant subtrees anyway.
+    if (target.symbolDeps !== undefined) return undefined;
+
+    if (expr.unknowns.length > 0) return undefined;
+    if (!expr.isPure) return undefined;
+
+    const t = compilationType(expr);
+    if (
+      t !== 'unknown' &&
+      t !== 'any' &&
+      t !== 'value' &&
+      !isSubtype(t, 'number') &&
+      !isSubtype(t, 'boolean')
+    )
+      return undefined;
+
+    if (BaseCompiler.mentionsCompileBoundName(expr)) return undefined;
+    // A `Sum`/`Product` whose indexing set has a NON-FINITE bound never
+    // folds: for a divergent series the interpreter's `.N()` silently
+    // returns an iteration-limit-truncated PARTIAL sum (`Σ i, i=1..∞` →
+    // 50015001, the 10001-term prefix), and baking that as a compile-time
+    // constant would put a mathematically wrong number behind
+    // `success: true` where the structural lowering deliberately fails
+    // closed (D6). Convergent infinite series decline too — telling the two
+    // apart is exactly what the fold cannot do — and keep their pre-fold
+    // behavior (fail closed, interpreter fallback at run time). A BOUNDED
+    // infinite pipeline (`Sum(Take(Map(_ ↦ _^2, 1..∞), 10))`) has its `∞`
+    // inside the collection operand, not an indexing set, and still folds.
+    if (BaseCompiler.containsUnboundedBigOp(expr)) return undefined;
+    if (
+      (target.varsKeys !== undefined ||
+        target.foldExcludedOps !== undefined) &&
+      BaseCompiler.mentionsExcludedName(
+        expr,
+        target.varsKeys,
+        target.foldExcludedOps
+      )
+    )
+      return undefined;
+    // `quadrature: 'monte-carlo'` is an explicit request for the stochastic
+    // runtime estimator — a DIFFERENT result on each call, by contract.
+    // Folding a constant integral to one fixed value would override that
+    // request, so integrals stay structural under it.
+    if (
+      target.quadrature === 'monte-carlo' &&
+      BaseCompiler.mentionsExcludedName(
+        expr,
+        undefined,
+        MONTE_CARLO_FOLD_EXCLUSIONS
+      )
+    )
+      return undefined;
+
+    const engine = expr.engine;
+    let value: Expression | undefined;
+    // Evaluation may re-enter compilation (large `Map` callbacks are
+    // auto-compiled during evaluate); that inner compilation must not inherit
+    // THIS compilation's bound-name context, or its analysis would treat the
+    // evaluated expression's own names as shadowed.
+    const savedBoundCtx = BaseCompiler._boundVarsCtx;
+    const savedShield = BaseCompiler._binderShield;
+    const savedMaxCollectionSize = engine.maxCollectionSize;
+    BaseCompiler._boundVarsCtx = undefined;
+    BaseCompiler._binderShield = [];
+    try {
+      engine.maxCollectionSize = Math.min(
+        savedMaxCollectionSize,
+        CONSTANT_FOLD_MAX_COLLECTION_SIZE
+      );
+      value = engine.withTimeLimit(
+        { ms: CONSTANT_FOLD_BUDGET_MS, label: 'compile:constant-fold' },
+        () => expr.N()
+      );
+    } catch (e) {
+      // The fold's own expired budget is a quiet decline — but a cancellation
+      // raised because the AMBIENT (outer) deadline expired must keep
+      // cancelling the whole compilation, not be swallowed as a fold miss.
+      if (!engine._shouldContinueExecution()) throw e;
+      value = undefined;
+    } finally {
+      BaseCompiler._boundVarsCtx = savedBoundCtx;
+      BaseCompiler._binderShield = savedShield;
+      engine.maxCollectionSize = savedMaxCollectionSize;
+    }
+    if (value === undefined) return undefined;
+
+    const foldable =
+      isNumber(value) || isSymbol(value, 'True') || isSymbol(value, 'False');
+    if (!foldable) return undefined;
+
+    // A boolean folds only when the target spells the boolean constants (the
+    // JS target's `True`/`False` mappings). A target without a spelling
+    // (Python, the shader targets) keeps its structural lowering.
+    if (isSymbol(value, 'True') || isSymbol(value, 'False'))
+      return target.var?.(value.symbol);
+    // Emit through the ordinary number-literal path so the target's own
+    // spelling applies (float formatting, complex support, negative-literal
+    // parenthesization). A value the target cannot represent throws — decline
+    // and let the structural lowering produce its own (equivalent) failure.
+    try {
+      return BaseCompiler.compile(value, target, prec);
+    } catch {
+      return undefined;
+    }
   }
 
   /**

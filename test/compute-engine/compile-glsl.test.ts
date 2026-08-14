@@ -4,6 +4,17 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 const glsl = new GLSLTarget();
 
+/**
+ * Compile-time constant folding is off for the emissions this suite pins.
+ * A subtree with no free variables is normally evaluated at compile time and
+ * emitted as one literal, which is the right default but erases the codegen
+ * under test here: the unrolled/looped `Sum` and `Product` shapes, the operand
+ * lowerings, and the fail-closed diagnostics that only the structural path
+ * reaches (a constant `Binomial(∞, 0)` or `Mod(√-2, 1)` would fold to a value
+ * instead of throwing).
+ */
+const NO_FOLD = { constantFold: false } as const;
+
 describe('GLSL COMPILATION', () => {
   describe('Basic Expressions', () => {
     it('should compile simple arithmetic', () => {
@@ -208,7 +219,7 @@ describe('GLSL COMPILATION', () => {
   describe('Constants', () => {
     it('should compile pi', () => {
       const expr = ce.parse('2\\pi');
-      const code = glsl.compile(expr).code;
+      const code = glsl.compile(expr, NO_FOLD).code;
       expect(code).toMatchInlineSnapshot(`2.0 * 3.14159265359`);
     });
 
@@ -776,16 +787,16 @@ describe('GLSL COMPILATION', () => {
       // the unroll emitted `1.0` and an ∞-valued falling factorial.
       for (const n of ['PositiveInfinity', 'NegativeInfinity', 'NaN'])
         for (const k of [0, 1, 2])
-          expect(() => glsl.compile(ce.expr(['Binomial', n, k]))).toThrow(
-            /statically non-finite first operand/
-          );
+          expect(() =>
+            glsl.compile(ce.expr(['Binomial', n, k]), NO_FOLD)
+          ).toThrow(/statically non-finite first operand/);
       expect(ce.box(['Binomial', 'PositiveInfinity', 0]).N().re).toBeNaN();
       expect(ce.box(['Binomial', 'PositiveInfinity', 2]).N().re).toBeNaN();
       // A finite literal or symbol is unaffected (byte-identical).
       expect(glsl.compile(ce.expr(['Binomial', 'x', 2])).code).toBe(
         '(((x) * ((x) - 1.0)) / 2.0)'
       );
-      expect(glsl.compile(ce.expr(['Binomial', 5, 2])).code).toBe(
+      expect(glsl.compile(ce.expr(['Binomial', 5, 2]), NO_FOLD).code).toBe(
         '(((5.0) * ((5.0) - 1.0)) / 2.0)'
       );
       expect(glsl.compile(ce.expr(['Binomial', 'x', 0])).code).toBe('1.0');
@@ -795,13 +806,13 @@ describe('GLSL COMPILATION', () => {
   describe('Sum and Product', () => {
     it('should unroll Sum with small constant bounds', () => {
       const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
-      const code = glsl.compile(expr).code;
+      const code = glsl.compile(expr, NO_FOLD).code;
       expect(code).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
     });
 
     it('should unroll Product with small constant bounds', () => {
       const expr = ce.expr(['Product', 'i', ['Limits', 'i', 1, 4]]);
-      const code = glsl.compile(expr).code;
+      const code = glsl.compile(expr, NO_FOLD).code;
       expect(code).toBe('((1.0) * (2.0) * (3.0) * (4.0))');
     });
 
@@ -823,7 +834,7 @@ describe('GLSL COMPILATION', () => {
         ['Sin', 'i'],
         ['Limits', 'i', 1, 1000],
       ]);
-      const fn = glsl.compileFunction(expr, 'sumSin', 'float', []);
+      const fn = glsl.compileFunction(expr, 'sumSin', 'float', [], { constantFold: false });
       expect(fn).toContain('float sumSin()');
       expect(fn).toContain('for (int i = 1; i <= 1000; i++)');
       expect(fn).toContain('+= sin(float(i))');
@@ -956,7 +967,7 @@ describe('GLSL COMPILATION', () => {
     const bigSum = ['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 1000]];
 
     it('hoists the loop when a loop-form Sum is used mid-expression', () => {
-      const code = glsl.compile(ce.box(['Add', bigSum, 1])).code;
+      const code = glsl.compile(ce.box(['Add', bigSum, 1]), NO_FOLD).code;
       expect(code).toContain('for (int i = 1; i <= 1000; i++)');
       // The loop precedes the value, and the value references the accumulator.
       const acc = /float (_\w+) = 0\.0;/.exec(code)?.[1];
@@ -967,7 +978,8 @@ describe('GLSL COMPILATION', () => {
 
     it('scales a hoisted Sum (the item-110 witness shape)', () => {
       const code = glsl.compile(
-        ce.box(['Multiply', 0.03, bigSum]) as any
+        ce.box(['Multiply', 0.03, bigSum]) as any,
+        NO_FOLD
       ).code;
       expect(code).toContain('for (int i = 1; i <= 1000; i++)');
       expect(code).toMatch(/return 0\.03 \* _\w+;$/m);
@@ -999,7 +1011,7 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('still compiles a loop-form Sum as a top-level function body', () => {
-      const fn = glsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', []);
+      const fn = glsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', [], { constantFold: false });
       expect(fn).toContain('for (int i = 1; i <= 1000; i++)');
       expect(fn).toContain('sin(float(i))');
     });
@@ -1032,7 +1044,7 @@ describe('GLSL COMPILATION', () => {
         ['When', ['When', bigSum, ['Greater', 'x', 0]]],
       ] as [string, any][]) {
         it(`${label} arm containing a loop-form Sum`, () => {
-          expect(() => glsl.compile(ce.box(expr))).toThrow(
+          expect(() => glsl.compile(ce.box(expr), NO_FOLD)).toThrow(
             /conditionally-evaluated branch contains a multi-statement construct/
           );
         });
@@ -1087,6 +1099,7 @@ describe('GLSL COMPILATION', () => {
             expression: ce.box(['Add', bigSum, 1] as any),
           },
         ],
+        ...NO_FOLD,
       });
       expect(shader).not.toMatch(/_tv1\s*=\s*_tv1\b/);
       expect(shader).toMatch(/float _tv\d+ = 0\.0;/);
@@ -1106,7 +1119,7 @@ describe('GLSL COMPILATION', () => {
   describe('negative-index Sum unroll does not emit `--`', () => {
     it('parenthesizes/spaces the negation (no `--`)', () => {
       const expr = ce.box(['Sum', ['Negate', 'i'], ['Tuple', 'i', -3, 3]]);
-      const code = glsl.compile(expr).code;
+      const code = glsl.compile(expr, NO_FOLD).code;
       expect(code).not.toContain('--');
       expect(code).toContain('- -3.0');
     });
@@ -1126,7 +1139,8 @@ describe('GLSL COMPILATION', () => {
     it('rejects a reserved word used as a Sum index', () => {
       expect(() =>
         glsl.compile(
-          ce.box(['Sum', 'sample', ['Tuple', 'sample', 1, 1000]])
+          ce.box(['Sum', 'sample', ['Tuple', 'sample', 1, 1000]]),
+          NO_FOLD
         ).code
       ).toThrow(/reserved word/);
     });
@@ -1175,11 +1189,13 @@ describe('GLSL COMPILATION', () => {
 describe('GLSL Length/Norm name collision (Tycho round)', () => {
   it('CE Length fails closed (was: emitted length() = norm, or invalid source)', () => {
     const expr = ce.box(['Length', ['List', 1, 2, 3]]);
-    expect(() => glsl.compile(expr)).toThrow(/Norm|not supported|Fail closed/);
+    expect(() => glsl.compile(expr, NO_FOLD)).toThrow(
+      /Norm|not supported|Fail closed/
+    );
   });
 
   it('CE Norm lowers to the length() builtin', () => {
-    const code = glsl.compile(ce.box(['Norm', ['List', 3, 4]])).code;
+    const code = glsl.compile(ce.box(['Norm', ['List', 3, 4]]), NO_FOLD).code;
     expect(code).toBe('length(vec2(3.0, 4.0))');
   });
 });
@@ -1528,10 +1544,12 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
   });
 
   it('still fails closed on a provably complex operand', () => {
-    expect(() => glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]))).toThrow(
+    expect(() => glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)).toThrow(
       /real-only target helper "mod" cannot represent a complex-valued argument/
     );
-    expect(() => glsl.compile(e.box(['Mod', ['Complex', 1, 2], 1]))).toThrow(
+    expect(() =>
+      glsl.compile(e.box(['Mod', ['Complex', 1, 2], 1]), NO_FOLD)
+    ).toThrow(
       /real-only target helper "mod" cannot represent a complex-valued argument/
     );
     // Propagated through a `Multiply`, the head whose type answer this fix
@@ -1591,7 +1609,7 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
       /real-only target helper "mod" cannot represent a complex-valued argument/
     );
     // The item-144 pins are unchanged.
-    expect(() => glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]))).toThrow(
+    expect(() => glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)).toThrow(
       /real-only target helper "mod" cannot represent a complex-valued argument/
     );
     expect(() =>

@@ -153,11 +153,20 @@ describe('A1 — Range GPU compile', () => {
 });
 
 describe('A1 — Variance/GCD/Median GPU compile', () => {
+  /**
+   * These three probes are fully literal (`var([1..5])`, `median([1,5,3,2,4])`,
+   * `gcd(12, 18)`), so the compiler would constant-fold each to a single number
+   * and emit no lowering at all. What is under test is the LOWERING — the
+   * inline variance shape, the `_gpu_median_5` and `_gpu_gcd` preamble helpers
+   * — so folding is disabled here.
+   */
+  const NO_FOLD = { constantFold: false } as const;
+
   test('Variance compiles for a constant-size list in GLSL', () => {
     const ce = new ComputeEngine();
     const target = new GLSLTarget();
     const expr = ce.parse('\\operatorname{var}([1, 2, 3, 4, 5])');
-    const result = target.compile(expr);
+    const result = target.compile(expr, NO_FOLD);
     expect(result.success).toBe(true);
     expect(result.code.length).toBeGreaterThan(0);
     // Inline variance: each element minus mean, squared, summed, divided by N-1.
@@ -172,7 +181,7 @@ describe('A1 — Variance/GCD/Median GPU compile', () => {
     const ce = new ComputeEngine();
     const target = new GLSLTarget();
     const expr = ce.parse('\\operatorname{median}([1, 5, 3, 2, 4])');
-    const result = target.compile(expr);
+    const result = target.compile(expr, NO_FOLD);
     expect(result.success).toBe(true);
     expect(result.code.length).toBeGreaterThan(0);
     // Emits a call to the preamble helper for the list size.
@@ -183,7 +192,7 @@ describe('A1 — Variance/GCD/Median GPU compile', () => {
     const ce = new ComputeEngine();
     const target = new GLSLTarget();
     const expr = ce.parse('\\operatorname{gcd}(12, 18)');
-    const result = target.compile(expr);
+    const result = target.compile(expr, NO_FOLD);
     expect(result.success).toBe(true);
     expect(result.code.length).toBeGreaterThan(0);
     // Emits a call to the preamble helper (evaluated at shader runtime).

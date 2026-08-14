@@ -27,9 +27,22 @@ const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 
+/**
+ * Compile-time constant folding is off for the emissions this suite pins.
+ * A seeded frame is PURE — `WithRandomSeed(42, Random())` is reproducible, so
+ * it has no free variables and no impurity — which makes the whole frame a
+ * foldable subtree that would be emitted as one f64 literal
+ * (`0.7367300395263549`). That is a legitimate optimization, but it erases
+ * exactly what is under test here: the PCG3D transcription, the seed-word ABI,
+ * the invocation-local counters, and the fail-closed throws that only the
+ * structural lowering reaches. The runtime/on-GPU behaviour of a folded draw is
+ * covered by the numeric tier (`frameDraw`/`pcg3dWords`) below.
+ */
+const NO_FOLD = { constantFold: false } as const;
+
 /** `code + preamble` — the two halves a caller concatenates. */
 function source(target: GLSLTarget | WGSLTarget, expr: any): string {
-  const r = target.compile(expr);
+  const r = target.compile(expr, NO_FOLD);
   expect(r.success).toBe(true);
   return `${r.preamble ?? ''}\n${r.code}`;
 }
@@ -108,7 +121,8 @@ describe('GPU random — the invocation-local counter', () => {
 
   it('two draws in ONE frame share that frame’s counter', () => {
     const code = glsl.compile(
-      framed(42, ce.box(['Add', ['Random'], ['Random']]))
+      framed(42, ce.box(['Add', ['Random'], ['Random']])),
+      NO_FOLD
     ).code;
     expect(code.match(/_gpu_rnd_n0/g)).toHaveLength(2);
     expect(code).not.toContain('_gpu_rnd_n1');
@@ -127,7 +141,7 @@ describe('GPU random — the invocation-local counter', () => {
       1,
       ce.box(['Add', ['Random'], ['WithRandomSeed', 2, ['Random']], ['Random']])
     );
-    const r = glsl.compile(expr);
+    const r = glsl.compile(expr, NO_FOLD);
     const outer = foldSeed(1);
     const inner = foldSeed(2);
     const hex = (w: number) => `0x${w.toString(16).padStart(8, '0')}u`;
@@ -152,10 +166,10 @@ describe('GPU seed ABI (§7)', () => {
 
   it('a compile-time NUMERIC literal folds on the HOST — stream-identical', () => {
     const [lo, hi] = foldSeed(42);
-    expect(glsl.compile(framed(42, ce.expr(['Random']))).code).toContain(
+    expect(glsl.compile(framed(42, ce.expr(['Random'])), NO_FOLD).code).toContain(
       `uvec2(${hex(lo)}, ${hex(hi)})`
     );
-    expect(wgsl.compile(framed(42, ce.expr(['Random']))).code).toContain(
+    expect(wgsl.compile(framed(42, ce.expr(['Random'])), NO_FOLD).code).toContain(
       `vec2<u32>(${hex(lo)}, ${hex(hi)})`
     );
     // The words are the normative `foldSeed` output, not an ad-hoc GPU fold.
@@ -165,15 +179,16 @@ describe('GPU seed ABI (§7)', () => {
   it('a compile-time STRING literal folds on the HOST', () => {
     const [lo, hi] = foldSeed('cell-a7');
     expect(
-      glsl.compile(framed(ce.string('cell-a7'), ce.expr(['Random']))).code
+      glsl.compile(framed(ce.string('cell-a7'), ce.expr(['Random'])), NO_FOLD)
+        .code
     ).toContain(`uvec2(${hex(lo)}, ${hex(hi)})`);
   });
 
   it('a fractional literal keeps BOTH words (no XOR fold)', () => {
     const [lo, hi] = foldSeed(1234.5);
-    expect(glsl.compile(framed(1234.5, ce.expr(['Random']))).code).toContain(
-      `uvec2(${hex(lo)}, ${hex(hi)})`
-    );
+    expect(
+      glsl.compile(framed(1234.5, ce.expr(['Random'])), NO_FOLD).code
+    ).toContain(`uvec2(${hex(lo)}, ${hex(hi)})`);
   });
 
   it('an engine value the compiler folds is still a HOST fold', () => {
@@ -182,7 +197,8 @@ describe('GPU seed ABI (§7)', () => {
     e.assign('k', 1234.5);
     const [lo, hi] = foldSeed(1234.5);
     const code = glsl.compile(
-      e.box(['WithRandomSeed', 'k', ['Random']])
+      e.box(['WithRandomSeed', 'k', ['Random']]),
+      NO_FOLD
     ).code;
     expect(code).toContain(`uvec2(${hex(lo)}, ${hex(hi)})`);
   });
@@ -254,12 +270,14 @@ describe('seed ABI — once-evaluation and the deferred host-uniform row', () =>
   it('an IMPURE Interval endpoint throws — it is spliced more than once', () => {
     expect(() =>
       glsl.compile(
-        framed(42, ce.box(['Random', ['Interval', ['Random'], 1]] as any))
+        framed(42, ce.box(['Random', ['Interval', ['Random'], 1]] as any)),
+        NO_FOLD
       )
     ).toThrow(/not pure/);
     expect(() =>
       glsl.compile(
-        framed(42, ce.box(['Random', ['Interval', 0, ['Random']]] as any))
+        framed(42, ce.box(['Random', ['Interval', 0, ['Random']]] as any)),
+        NO_FOLD
       )
     ).toThrow(/not pure/);
   });
@@ -300,7 +318,7 @@ describe('the random state is per-compilation, never on the caller’s target', 
     // compilation identity; its state lives in a module-level WeakMap, so a
     // caller that reuses the object gets no engine bookkeeping written onto
     // it.
-    const foreign: any = { ...glsl.createTarget() };
+    const foreign: any = { ...glsl.createTarget(), ...NO_FOLD };
     delete foreign.gpuRandomRoot;
     const before = Object.keys(foreign).sort();
     const code = BaseCompiler.compile(
@@ -315,8 +333,8 @@ describe('the random state is per-compilation, never on the caller’s target', 
     // Every internal compilation creates a fresh root target, so repeated
     // compilations of one expression are byte-identical.
     const expr = framed(42, ce.expr(['Random']));
-    const first = glsl.compile(expr);
-    const second = glsl.compile(expr);
+    const first = glsl.compile(expr, NO_FOLD);
+    const second = glsl.compile(expr, NO_FOLD);
     expect(second.code).toBe(first.code);
     expect(second.preamble).toBe(first.preamble);
     expect(second.code).toContain('_gpu_rnd_n0');
@@ -331,8 +349,8 @@ describe('the random state is per-compilation, never on the caller’s target', 
     // replay was broken on the external-target path only.
     const expr = framed(42, ce.expr(['Random']));
     const target = glsl.createTarget();
-    const first = compile(expr as any, { target, fallback: false });
-    const second = compile(expr as any, { target, fallback: false });
+    const first = compile(expr as any, { target, fallback: false, ...NO_FOLD });
+    const second = compile(expr as any, { target, fallback: false, ...NO_FOLD });
     expect(second.code).toBe(first.code);
     expect(second.code).toContain('_gpu_rnd_n0');
     expect(second.code).not.toContain('_gpu_rnd_n1');
@@ -343,7 +361,7 @@ describe('the random state is per-compilation, never on the caller’s target', 
     // hand-rolled target has none at all), so the hook resets through the
     // target it is HANDED, not one captured when the target was created.
     const expr = framed(42, ce.expr(['Random']));
-    const foreign: any = { ...glsl.createTarget() };
+    const foreign: any = { ...glsl.createTarget(), ...NO_FOLD };
     delete foreign.gpuRandomRoot;
     const first = BaseCompiler.compileRoot(expr as any, foreign);
     const second = BaseCompiler.compileRoot(expr as any, foreign);
@@ -365,6 +383,7 @@ describe('the random state is per-compilation, never on the caller’s target', 
         { variable: 'a', expression: framed(1, ce.expr(['Random'])) },
         { variable: 'b', expression: framed(2, ce.expr(['Random'])) },
       ],
+      ...NO_FOLD,
     } as any);
     expect([...new Set(src.match(/_gpu_rnd_n\d+/g) ?? [])].sort()).toEqual([
       '_gpu_rnd_n0',
@@ -403,18 +422,22 @@ describe('§7 form matrix — GLSL', () => {
           expression: framed(42, ce.expr(['Random'])),
         },
       ],
+      ...NO_FOLD,
     });
     expect(shader).toContain('_gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u)');
     expect(shader).not.toContain('gl_FragCoord');
   });
 
   it('Random() / Random(Interval) / Random(Range) inside a frame compile', () => {
-    expect(glsl.compile(framed(42, ce.expr(['Random']))).success).toBe(true);
+    expect(glsl.compile(framed(42, ce.expr(['Random'])), NO_FOLD).success).toBe(
+      true
+    );
     expect(
-      glsl.compile(framed(42, ce.box(['Random', ['Interval', 2, 5]]))).code
+      glsl.compile(framed(42, ce.box(['Random', ['Interval', 2, 5]])), NO_FOLD)
+        .code
     ).toBe('(2.0 + _gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0) * 3.0)');
     expect(
-      glsl.compile(framed(42, ce.box(['Random', ['Range', 1, 6]]))).code
+      glsl.compile(framed(42, ce.box(['Random', ['Range', 1, 6]])), NO_FOLD).code
     ).toBe(
       '(1.0 + floor(_gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0) * 6.0))'
     );
@@ -424,17 +447,18 @@ describe('§7 form matrix — GLSL', () => {
     // `Range(7, 2)` is descending — `range()` infers step −1, count 6 — so the
     // emission must walk DOWN from 7, matching the interpreter.
     expect(
-      glsl.compile(framed(42, ce.box(['Random', ['Range', 7, 2]]))).code
+      glsl.compile(framed(42, ce.box(['Random', ['Range', 7, 2]])), NO_FOLD).code
     ).toContain('(7.0 - floor(');
     // An explicit step.
     expect(
-      glsl.compile(framed(42, ce.box(['Random', ['Range', 1, 9, 2]]))).code
+      glsl.compile(framed(42, ce.box(['Random', ['Range', 1, 9, 2]])), NO_FOLD)
+        .code
     ).toContain('(1.0 + 2.0 * floor(');
   });
 
   it('Random(collection) throws — no general indexing in a shader', () => {
     expect(() =>
-      glsl.compile(framed(42, ce.box(['Random', ['List', 1, 2, 3]])))
+      glsl.compile(framed(42, ce.box(['Random', ['List', 1, 2, 3]])), NO_FOLD)
     ).toThrow(/indexing/i);
   });
 
@@ -486,19 +510,22 @@ describe('§7 form matrix — WGSL', () => {
   });
 
   it('Random() / Random(Interval) / Random(Range) inside a frame compile', () => {
-    expect(wgsl.compile(framed(42, ce.expr(['Random']))).success).toBe(true);
+    expect(wgsl.compile(framed(42, ce.expr(['Random'])), NO_FOLD).success).toBe(
+      true
+    );
     expect(
-      wgsl.compile(framed(42, ce.box(['Random', ['Interval', 2, 5]]))).code
+      wgsl.compile(framed(42, ce.box(['Random', ['Interval', 2, 5]])), NO_FOLD)
+        .code
     ).toContain('vec2<u32>(0x40450000u, 0x00000000u)');
     expect(
-      wgsl.compile(framed(42, ce.box(['Random', ['Range', 1, 6]]))).code
+      wgsl.compile(framed(42, ce.box(['Random', ['Range', 1, 6]])), NO_FOLD).code
     ).toContain('floor(');
   });
 
   it('Random(collection) and the multi-draw operators throw', () => {
     const xs = ['List', 1, 2, 3];
     expect(() =>
-      wgsl.compile(framed(42, ce.box(['Random', xs])))
+      wgsl.compile(framed(42, ce.box(['Random', xs])), NO_FOLD)
     ).toThrow(/indexing/i);
     expect(() =>
       wgsl.compile(ce.box(['RandomChoice', xs, 2] as any))
@@ -529,7 +556,10 @@ describe('cross-domain fail-closed (§4)', () => {
   it('a LEXICAL frame inside the compiled body is fine, host frame or not', () => {
     const e = new ComputeEngine();
     withRandomSeedFrame(e as any, 42, () => {
-      const r = glsl.compile(e.box(['WithRandomSeed', 7, ['Random']]));
+      const r = glsl.compile(
+        e.box(['WithRandomSeed', 7, ['Random']]),
+        NO_FOLD
+      );
       expect(r.success).toBe(true);
       const [lo, hi] = foldSeed(7);
       expect(r.code).toContain(
@@ -591,7 +621,7 @@ describe('GPU tier vectors (§8)', () => {
   it('the seed words a GLSL emission carries reproduce that stream', () => {
     // Parse the folded words back OUT of the emitted source and run the
     // reference generator on them: the shader draws the pinned stream.
-    const code = glsl.compile(framed(42, ce.expr(['Random']))).code;
+    const code = glsl.compile(framed(42, ce.expr(['Random'])), NO_FOLD).code;
     const m = code.match(/uvec2\(0x([0-9a-f]{8})u, 0x([0-9a-f]{8})u\)/);
     expect(m).not.toBeNull();
     const seedLo = parseInt(m![1], 16);
@@ -608,7 +638,7 @@ describe('end-to-end emission (drift guard)', () => {
       42,
       ce.box(['Add', ['Random', ['Interval', 0, 1]], ['Random']])
     );
-    const r = glsl.compile(expr);
+    const r = glsl.compile(expr, NO_FOLD);
     expect(r.code).toMatchInlineSnapshot(
       `"_gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0) + (0.0 + _gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0) * 1.0)"`
     );
@@ -633,7 +663,7 @@ float _gpu_rnd_draw(uvec2 seed, inout uint n) {
   });
 
   it('the WGSL preamble is pinned', () => {
-    expect(wgsl.compile(framed(42, ce.expr(['Random']))).preamble)
+    expect(wgsl.compile(framed(42, ce.expr(['Random'])), NO_FOLD).preamble)
       .toMatchInlineSnapshot(`
 "
 var<private> _gpu_rnd_n0: u32 = 0u;
@@ -663,15 +693,18 @@ describe('route parity — `WithRandomSeed` is lazy', () => {
     '_gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0)';
 
   it('box route', () => {
-    expect(glsl.compile(ce.box(['WithRandomSeed', 42, ['Random']])).code).toBe(
-      expected
-    );
+    expect(
+      glsl.compile(ce.box(['WithRandomSeed', 42, ['Random']]), NO_FOLD).code
+    ).toBe(expected);
   });
 
   it('parse route', () => {
     expect(
       glsl.compile(
-        ce.parse('\\operatorname{WithRandomSeed}(42, \\operatorname{Random}())')
+        ce.parse(
+          '\\operatorname{WithRandomSeed}(42, \\operatorname{Random}())'
+        ),
+        NO_FOLD
       ).code
     ).toBe(expected);
   });
@@ -679,7 +712,8 @@ describe('route parity — `WithRandomSeed` is lazy', () => {
   it('ce.function route', () => {
     expect(
       glsl.compile(
-        ce.function('WithRandomSeed', [ce.number(42), ce.expr(['Random'])])
+        ce.function('WithRandomSeed', [ce.number(42), ce.expr(['Random'])]),
+        NO_FOLD
       ).code
     ).toBe(expected);
   });
@@ -702,6 +736,7 @@ describe('compileShader splices the helper preamble (2026-07-25 fix)', () => {
           expression: framed(42, ['Random']),
         },
       ],
+      ...NO_FOLD,
     });
     expect(shader).toContain('_gpu_pcg3d');
     expect(shader).toContain('uint _gpu_rnd_n');
@@ -730,6 +765,7 @@ describe('compileShader splices the helper preamble (2026-07-25 fix)', () => {
       body: [
         { variable: 'output.color', expression: framed(42, ['Random']) },
       ],
+      ...NO_FOLD,
     });
     expect(shader).toContain('fn _gpu_pcg3d');
     expect(shader).toContain('var<private> _gpu_rnd_n');
@@ -751,6 +787,7 @@ describe('compileShader splices the helper preamble (2026-07-25 fix)', () => {
         { variable: 'fragColor.r', expression: framed(42, ['Random']) },
         { variable: 'fragColor.g', expression: framed(42, ['Random']) },
       ],
+      ...NO_FOLD,
     });
     expect(shader).toContain(', _gpu_rnd_n0)');
     expect(shader).toContain(', _gpu_rnd_n1)');
@@ -766,6 +803,7 @@ describe('compileShader splices the helper preamble (2026-07-25 fix)', () => {
         { variable: 'output.color', expression: framed(42, ['Random']) },
         { variable: 'output.color2', expression: framed(42, ['Random']) },
       ],
+      ...NO_FOLD,
     });
     expect(shader).toContain(', &_gpu_rnd_n0)');
     expect(shader).toContain(', &_gpu_rnd_n1)');

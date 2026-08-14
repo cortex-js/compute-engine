@@ -24,6 +24,7 @@ type CompileExpressionOptions<T extends string = string> = {
   quadrature?: 'adaptive' | 'monte-carlo';
   symbolDeps?: Set<MathJsonSymbol>;
   cse?: boolean;
+  constantFold?: boolean;
 };
 
 /**
@@ -112,6 +113,13 @@ export function compile<T extends string = 'javascript'>(
       // An EXPLICIT `cse: true` is rejected up front (see above the `try`):
       // omitting the option keeps the silent off.
       options.target.cse = { enabled: false, instances: [] };
+      // Stamp the caller's constant-folding choice per call, like the naming
+      // context and CSE state above, so a reused caller target never carries a
+      // previous call's setting. Stamped UNCONDITIONALLY: an omitted option
+      // must reset the field to `undefined` (= enabled, the BaseCompiler
+      // default), or a target reused after a `constantFold: false` call would
+      // silently keep folding disabled.
+      options.target.constantFold = options.constantFold;
       const code = BaseCompiler.compileRoot(rewritten, options.target);
       return BaseCompiler.withReferences(
         {
@@ -158,6 +166,7 @@ export function compile<T extends string = 'javascript'>(
       symbolDeps: options?.symbolDeps,
       varsObjectRefs: options?.varsObjectRefs,
       cse: options?.cse,
+      constantFold: options?.constantFold,
     }) as CompilationResult<T>;
   } catch (e) {
     if (options?.fallback ?? true) {

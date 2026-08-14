@@ -1741,12 +1741,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.takeIter(${emitLazyStream(args[0]!, compile)}, ${compile(args[1])})`;
     }
     const coll = collArg('Take', args[0], compile);
-    return `(${coll}).slice(0, Math.max(0, ${sliceCount(args[1], compile)}))`;
+    return `(${coll}).slice(0, ${clampedSliceCount(args[1], compile)})`;
   },
   Drop: (args, compile) => {
     const coll = collArg('Drop', args[0], compile);
     if (args[1] == null) throw new Error('Drop: missing count');
-    return `(${coll}).slice(Math.max(0, ${sliceCount(args[1], compile)}))`;
+    return `(${coll}).slice(${clampedSliceCount(args[1], compile)})`;
   },
   // Reverse and (ascending, numeric) Sort — copy first so the source array is
   // not mutated. A custom `Sort` comparator is not lowered (fails closed).
@@ -4494,7 +4494,8 @@ const SYS_HELPERS = {
   // The shared `factorial()` helper is integer-only (it returns NaN for a
   // non-integer), so a non-integer argument goes through Γ instead —
   // `(-1/2)! = Γ(1/2) = √π`, not NaN (Tycho item 99). The non-negative
-  // integer fast path is unchanged (including `n ≥ 170 → Infinity`).
+  // integer fast path is unchanged (`n > 170 → Infinity`; `170!` itself is
+  // the largest double-representable factorial and stays finite).
   // A negative *integer* is a pole of Γ(x+1): the interpreter returns
   // ComplexInfinity, which a real target projects to NaN (the same value
   // compiled `~oo` yields), so poles stay NaN.
@@ -5499,7 +5500,24 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // The caller may supply the set to read it back after a declined compile.
     const varsObjectRefs = options.varsObjectRefs ?? new Set<MathJsonSymbol>();
 
+    // Constant folding must never evaluate through an operator the caller
+    // overrode: a custom `functions` entry (and a record-form `operators`
+    // entry) replaces the emission, so a fold through the ENGINE's definition
+    // could disagree with the caller's runtime implementation. A function-form
+    // `operators` is opaque — its covered names cannot be enumerated — so it
+    // disables folding outright.
+    const foldExcludedOps = new Set<MathJsonSymbol>([
+      ...(functions ? Object.keys(functions) : []),
+      ...(operators && typeof operators !== 'function'
+        ? Object.keys(operators)
+        : []),
+    ]);
+    const constantFold =
+      typeof operators === 'function' ? false : options.constantFold;
+
     const target = this.createTarget({
+      constantFold,
+      foldExcludedOps: foldExcludedOps.size > 0 ? foldExcludedOps : undefined,
       operators: operatorLookup,
       varsObjectRefs,
       functions: (id) =>
@@ -5933,6 +5951,24 @@ function sliceCount(
   const n = tryGetConstant(count);
   if (n !== undefined && Number.isInteger(n)) return compile(count);
   return `Math.round(${compile(count)})`;
+}
+
+/**
+ * The `Take`/`Drop` count as a `slice` argument: non-negative and rounded (the
+ * interpreter's `toInteger` count contract — `Take([…], 2.5)` keeps 3
+ * elements). A compile-time-constant count is normalized NOW and emitted as a
+ * bare literal (`Take(xs, 10)` → `.slice(0, 10)`, a negative count → `0`);
+ * only a runtime count pays the emitted `Math.max(0, Math.round(…))` guard. A
+ * non-finite literal (`NaN`, `±∞`) is not a constant to `tryGetConstant` and
+ * stays on the runtime-guard path, preserving its existing semantics.
+ */
+function clampedSliceCount(
+  count: Expression,
+  compile: (expr: Expression) => string
+): string {
+  const n = tryGetConstant(count);
+  if (n !== undefined) return `${Math.max(0, Math.round(n))}`;
+  return `Math.max(0, ${sliceCount(count, compile)})`;
 }
 
 /**

@@ -449,7 +449,12 @@ describe('Route parity with the GLSL lowering (`At` on the GPU)', () => {
   });
 
   test('the JS route still lowers through `_SYS.at` (unchanged)', () => {
-    expect(compile(at(2))!.code).toMatch(/_SYS\.at\(/);
-    expect(compile(at(['List', 1, 3]))!.code).toMatch(/_SYS\.at\(/);
+    // `constantFold: false`: these accesses are variable-free, so compile-time
+    // constant folding would emit their VALUE as a literal and the `_SYS.at`
+    // lowering this test pins would not appear in the code.
+    expect(compile(at(2), { constantFold: false })!.code).toMatch(/_SYS\.at\(/);
+    expect(
+      compile(at(['List', 1, 3]), { constantFold: false })!.code
+    ).toMatch(/_SYS\.at\(/);
   });
 });

@@ -72,7 +72,7 @@ describe('TAGGED policy — the roadmap `ev` AST example', () => {
     const ce = engine(EV);
     const r = compile(
       ce.box(['ev', ['plus', ['lit', 1], ['lit', 2]]] as MathJsonExpression),
-      { fallback: false }
+      { fallback: false, constantFold: false }
     );
     // Construction: `{ _tag, _ops }` object literals.
     expect(r.code).toContain('_tag: "plus"');
@@ -151,6 +151,7 @@ describe('TAGGED policy — the roadmap `ev` AST example', () => {
         ce.box([v === 'canGo' ? v : 'canGo', [v]] as MathJsonExpression),
         {
           fallback: false,
+          constantFold: false,
         }
       );
     expect(go('green').code).toContain('_tag: "green"');
@@ -326,7 +327,7 @@ describe('§B2 — field access on a variant value', () => {
     const ce = engine(AST);
     const r = compile(
       ce.box(['Field', ['lit', 7], { str: 'num' }] as MathJsonExpression),
-      { fallback: false }
+      { fallback: false, constantFold: false }
     );
     expect(r.code).toContain('._ops[0]');
     expect(r.run!({})).toBe(7);
@@ -356,9 +357,9 @@ describe('§B2 — field access on a variant value', () => {
       { str: 'num' },
     ] as MathJsonExpression);
     for (const to of ['python', 'glsl', 'wgsl'] as const)
-      expect(() => compile(e, { to, fallback: false })).toThrow(
-        /cannot compile/
-      );
+      expect(() =>
+        compile(e, { to, fallback: false, constantFold: false })
+      ).toThrow(/cannot compile/);
   });
 });
 

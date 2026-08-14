@@ -353,7 +353,7 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
     expect(() =>
       new GLSLTarget().compile(
         ce.box(['Dot', ['Tuple', 1, 2, 3, 4, 5], ['Tuple', 1, 2, 3, 4, 5]]),
-        { realOnly: true }
+        { realOnly: true, constantFold: false }
       )
     ).toThrow();
   });
@@ -378,7 +378,7 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
   it('python: Dot(Tuple, Tuple) emits np.dot', () => {
     const r = new PythonTarget().compile(
       ce.box(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]]),
-      { realOnly: true }
+      { realOnly: true, constantFold: false }
     );
     expect(r.success).toBe(true);
     expect(r.code).toBe('np.dot((1, 2), (3, 4))');
@@ -470,7 +470,11 @@ describe('GPU point swizzle — the FLAT point spelling (Tycho item 116)', () =>
   // not reach a shader while the tuple spelling compiled — even though it
   // lowers to a genuine `vec2` and the interpreter reads it as ONE point
   // (`PointX([3,4])` is `3`, not `[PointX(3), PointX(4)]`).
-  const glsl = (e: any) => new GLSLTarget().compile(e).code;
+  // These tests pin the EMITTED swizzle (and the fail-closed paths), so the
+  // constant operands must survive to code generation instead of being
+  // evaluated away by compile-time constant folding.
+  const glsl = (e: any) =>
+    new GLSLTarget().compile(e, { constantFold: false }).code;
   const eng = () => new ComputeEngine();
 
   it('a flat 2-list swizzles exactly like the tuple spelling', () => {

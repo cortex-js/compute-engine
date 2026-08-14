@@ -3384,9 +3384,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return infiniteProductClosedForm(ops[0], bounds[0], ce);
           return undefined;
         }
-        if (mode === 'numeric' && numeric && bounds.length === 1) {
-          const accel = acceleratedInfiniteProduct(ops[0], bounds[0], ce);
-          if (accel !== undefined) return accel;
+        if (mode === 'numeric' && numeric) {
+          if (bounds.length === 1) {
+            const accel = acceleratedInfiniteProduct(ops[0], bounds[0], ce);
+            if (accel !== undefined) return accel;
+          }
+          // Acceleration could not establish convergence (divergent,
+          // oscillating, sign-changing, or non-smoothly decaying factors) —
+          // or the infinite domain is multi-index. The historical fallback
+          // truncated at the iteration limit and returned the PARTIAL
+          // product as if it were the value (`Π n, n=1..∞` answered a huge
+          // finite integer). A truncation whose convergence is unestablished
+          // is a silently wrong number, so stay unevaluated instead
+          // (user-ruled 2026-08-14; the compile-time constant folder guards
+          // against the same hazard in `BaseCompiler.containsUnboundedBigOp`).
+          return undefined;
         }
         const result = run(
           reduceBigOp(
@@ -3435,9 +3447,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               return infiniteProductClosedForm(ops[0], bounds[0], ce);
             return undefined;
           }
-          if (mode === 'numeric' && numeric && bounds.length === 1) {
-            const accel = acceleratedInfiniteProduct(ops[0], bounds[0], ce);
-            if (accel !== undefined) return accel;
+          if (mode === 'numeric' && numeric) {
+            if (bounds.length === 1) {
+              const accel = acceleratedInfiniteProduct(ops[0], bounds[0], ce);
+              if (accel !== undefined) return accel;
+            }
+            // Unestablished convergence stays unevaluated — see the matching
+            // comment in the sync `evaluate` handler above.
+            return undefined;
           }
         }
         const result = await runAsync(
@@ -3538,12 +3555,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return infiniteSumClosedForm(first, rest[0], engine);
           return undefined;
         }
-        // Infinite domain under `.N()`: accelerate the (plain-truncation)
-        // tail with Richardson extrapolation for convergent series; fall
-        // through to truncation when it declines.
-        if (mode === 'numeric' && numeric && rest.length === 1) {
-          const accel = acceleratedInfiniteSum(first, rest[0], engine);
-          if (accel !== undefined) return accel;
+        // Infinite domain under `.N()`: accelerate with Richardson
+        // extrapolation, which also serves as the convergence check.
+        if (mode === 'numeric' && numeric) {
+          if (rest.length === 1) {
+            const accel = acceleratedInfiniteSum(first, rest[0], engine);
+            if (accel !== undefined) return accel;
+          }
+          // Acceleration could not establish convergence (divergent,
+          // oscillating, or non-smoothly decaying series) — or the infinite
+          // domain is multi-index. The historical fallback truncated at the
+          // iteration limit and returned the PARTIAL sum as if it were the
+          // value (`Σ i, i=1..∞` answered 50015001, the 10001-term prefix).
+          // A truncation whose convergence is unestablished is a silently
+          // wrong number, so stay unevaluated instead (user-ruled
+          // 2026-08-14; the compile-time constant folder guards against the
+          // same hazard in `BaseCompiler.containsUnboundedBigOp`).
+          return undefined;
         }
         const result = run(
           reduceBigOp(
@@ -3614,9 +3642,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               return infiniteSumClosedForm(first, rest[0], engine);
             return undefined;
           }
-          if (mode === 'numeric' && numeric && rest.length === 1) {
-            const accel = acceleratedInfiniteSum(first, rest[0], engine);
-            if (accel !== undefined) return accel;
+          if (mode === 'numeric' && numeric) {
+            if (rest.length === 1) {
+              const accel = acceleratedInfiniteSum(first, rest[0], engine);
+              if (accel !== undefined) return accel;
+            }
+            // Unestablished convergence stays unevaluated — see the matching
+            // comment in the sync `evaluate` handler above.
+            return undefined;
           }
         }
         const result = await runAsync(

@@ -37,10 +37,19 @@ const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 
+/**
+ * Compile-time constant folding is off throughout this file: most probes are
+ * all-literal (`Median([1,5,3,2,4])`, `Dot([1,2,3],[4,5,6])`), i.e. pure
+ * subtrees with no free variables that the compiler would otherwise evaluate at
+ * compile time and emit as one number. The shape gate under test only runs on
+ * the structural lowering.
+ */
+const NO_FOLD = { constantFold: false } as const;
+
 const g = (expr: any, engine = ce): string =>
-  glsl.compile(engine.box(expr)).code!;
+  glsl.compile(engine.box(expr), NO_FOLD).code!;
 const w = (expr: any, engine = ce): string =>
-  wgsl.compile(engine.box(expr)).code!;
+  wgsl.compile(engine.box(expr), NO_FOLD).code!;
 
 const V3 = ['List', 1, 2, 3];
 const W3 = ['List', 4, 5, 6];

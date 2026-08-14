@@ -27,8 +27,17 @@ const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 
-const g = (expr: any): string => glsl.compile(ce.box(expr)).code!;
-const w = (expr: any): string => wgsl.compile(ce.box(expr)).code!;
+/**
+ * Compile-time constant folding is off throughout this file: the probes are
+ * all-literal (`Dot([1,2,3],[4,5,6])`, `Median([1,5,3,2,4])`), i.e. pure
+ * subtrees with no free variables that the compiler would otherwise evaluate at
+ * compile time and emit as one number. The operand-shape gate under test only
+ * runs on the structural lowering.
+ */
+const NO_FOLD = { constantFold: false } as const;
+
+const g = (expr: any): string => glsl.compile(ce.box(expr), NO_FOLD).code!;
+const w = (expr: any): string => wgsl.compile(ce.box(expr), NO_FOLD).code!;
 
 const V3 = ['List', 1, 2, 3];
 const W3 = ['List', 4, 5, 6];

@@ -281,6 +281,15 @@ export function assertCompilationOptionsContract(
   }
 
   if (
+    options.constantFold !== undefined &&
+    typeof options.constantFold !== 'boolean'
+  ) {
+    throw new Error(
+      'Invalid compilation option "constantFold": expected a boolean'
+    );
+  }
+
+  if (
     options.iterationBudget !== undefined &&
     (typeof options.iterationBudget !== 'number' ||
       !(options.iterationBudget > 0))

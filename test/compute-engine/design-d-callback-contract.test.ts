@@ -393,13 +393,16 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     const e = ce.box(['CountIf', 'cs', ['Function', ['Greater', 'n', 1], 'n']]);
-    const r = compile(e, { fallback: false });
+    // `constantFold: false`: the whole call is constant (a literal list and a
+    // literal predicate), so compile-time constant folding would emit the
+    // value `2` instead of the callback lowering this test pins.
+    const r = compile(e, { fallback: false, constantFold: false });
     expect(r.success).toBe(true);
     expect(r.code).toBe(
       '((_f) => ([1, 2, 3]).filter((_x) => _f(_x)).length)(((n) => 1 < n))'
     );
     expect((r.run as () => unknown)()).toBe(2);
-    expect(new PythonTarget().compile(e)?.code).toBe(
+    expect(new PythonTarget().compile(e, { constantFold: false })?.code).toBe(
       '(lambda _f: sum(1 for _x in [1, 2, 3] if _f(_x)))((lambda n: 1 < n))'
     );
   });

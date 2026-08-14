@@ -295,7 +295,10 @@ describe('PYTHON TARGET', () => {
       const expr = ce.parse(
         '\\frac{1}{\\sqrt{2\\pi}\\sigma} \\exp\\left(-\\frac{(x-\\mu)^2}{2\\sigma^2}\\right)'
       );
-      const code = python.compile(expr).code;
+      // `constantFold: false`: `\sqrt{2\pi}` has no free variable, so
+      // compile-time constant folding replaces it with its value and there is
+      // no `np.sqrt`/`np.pi` left to assert on.
+      const code = python.compile(expr, { constantFold: false }).code;
 
       expect(code).toContain('np.sqrt');
       // \exp is canonicalized to e^
@@ -341,53 +344,60 @@ describe('PYTHON TARGET', () => {
   });
 
   describe('Complex Numbers', () => {
+    // These tests pin the complex LOWERING of each function, and their
+    // operands are literals — with compile-time constant folding on (the
+    // default) a fully constant call is evaluated at compile time and emitted
+    // as its value, so there would be no `cmath.` call left to inspect.
+    const src = (expr: any): string =>
+      python.compile(expr, { constantFold: false }).code;
+
     it('should compile complex literal', () => {
       const expr = ce.expr(['Complex', 3, 2]);
-      expect(python.compile(expr).code).toBe('complex(3, 2)');
+      expect(src(expr)).toBe('complex(3, 2)');
     });
 
     it('should compile pure imaginary literal', () => {
       const expr = ce.expr(['Complex', 0, 1]);
-      expect(python.compile(expr).code).toBe('complex(0, 1)');
+      expect(src(expr)).toBe('complex(0, 1)');
     });
 
     it('should compile ImaginaryUnit', () => {
       // `ImaginaryUnit` canonicalizes to the complex literal (single canonical
       // spelling of `i`), so it compiles through the complex-literal path.
       const expr = ce.expr('ImaginaryUnit');
-      expect(python.compile(expr).code).toBe('complex(0, 1)');
+      expect(src(expr)).toBe('complex(0, 1)');
     });
 
     it('should use cmath.sin for complex sin', () => {
       const expr = ce.expr(['Sin', ['Complex', 0, 1]]);
-      expect(python.compile(expr).code).toBe('cmath.sin(complex(0, 1))');
+      expect(src(expr)).toBe('cmath.sin(complex(0, 1))');
     });
 
     it('should use np.sin for real sin', () => {
       const expr = ce.expr(['Sin', 'x']);
-      expect(python.compile(expr).code).toBe('np.sin(x)');
+      expect(src(expr)).toBe('np.sin(x)');
     });
 
     it('should use cmath.cos for complex cos', () => {
       const expr = ce.expr(['Cos', ['Complex', 1, 2]]);
-      expect(python.compile(expr).code).toBe('cmath.cos(complex(1, 2))');
+      expect(src(expr)).toBe('cmath.cos(complex(1, 2))');
     });
 
     it('should use np.cos for real cos', () => {
       const expr = ce.expr(['Cos', 'x']);
-      expect(python.compile(expr).code).toBe('np.cos(x)');
+      expect(src(expr)).toBe('np.cos(x)');
     });
 
     it('should use cmath.tan for complex tan', () => {
       const expr = ce.expr(['Tan', ['Complex', 1, 1]]);
-      expect(python.compile(expr).code).toBe('cmath.tan(complex(1, 1))');
+      expect(src(expr)).toBe('cmath.tan(complex(1, 1))');
     });
 
     it('should compile complex exp (canonicalized to Power)', () => {
       // Exp is canonicalized to Power(ExponentialE, x), so complex exp
       // goes through the Power path with ** operator
       const expr = ce.expr(['Exp', ['Complex', 0, Math.PI]]);
-      const code = python.compile(expr).code;
+      const code = src(expr);
       expect(code).toContain('np.e');
       expect(code).toContain('**');
       expect(code).toContain(`complex(0, ${Math.PI})`);
@@ -396,29 +406,29 @@ describe('PYTHON TARGET', () => {
     it('should compile real exp (canonicalized to Power)', () => {
       // Exp is canonicalized to Power(ExponentialE, x)
       const expr = ce.expr(['Exp', 'x']);
-      expect(python.compile(expr).code).toBe('np.e ** x');
+      expect(src(expr)).toBe('np.e ** x');
     });
 
     it('should use cmath.log for complex ln', () => {
       const expr = ce.expr(['Ln', ['Complex', 0, 1]]);
-      expect(python.compile(expr).code).toBe('cmath.log(complex(0, 1))');
+      expect(src(expr)).toBe('cmath.log(complex(0, 1))');
     });
 
     it('should use cmath.sqrt for complex sqrt', () => {
       const expr = ce.expr(['Sqrt', ['Complex', 0, 1]]);
-      expect(python.compile(expr).code).toBe('cmath.sqrt(complex(0, 1))');
+      expect(src(expr)).toBe('cmath.sqrt(complex(0, 1))');
     });
 
     it('should use np.sqrt for real sqrt', () => {
       const expr = ce.parse('\\sqrt{x}');
-      expect(python.compile(expr).code).toBe('np.sqrt(x)');
+      expect(src(expr)).toBe('np.sqrt(x)');
     });
 
     it('should use ** for complex power', () => {
       // Use an inexact complex base: since D12-A an exact Gaussian power
       // folds at canonicalization ((1+i)² → 2i), leaving no Power to compile.
       const expr = ce.expr(['Power', ['Complex', 1.5, 1], 2]);
-      const code = python.compile(expr).code;
+      const code = src(expr);
       expect(code).toContain('complex(1.5, 1)');
       expect(code).toContain('**');
     });
@@ -426,17 +436,17 @@ describe('PYTHON TARGET', () => {
     it('should use ** for real power (via operator table)', () => {
       // Real Power goes through the operator table (** with prec 15)
       const expr = ce.expr(['Power', 'x', 3]);
-      expect(python.compile(expr).code).toBe('x ** 3');
+      expect(src(expr)).toBe('x ** 3');
     });
 
     it('should use abs() for complex abs', () => {
       const expr = ce.expr(['Abs', ['Complex', 3, 4]]);
-      expect(python.compile(expr).code).toBe('abs(complex(3, 4))');
+      expect(src(expr)).toBe('abs(complex(3, 4))');
     });
 
     it('should use np.abs for real abs', () => {
       const expr = ce.parse('|x|');
-      expect(python.compile(expr).code).toBe('np.abs(x)');
+      expect(src(expr)).toBe('np.abs(x)');
     });
 
     it('should compile complex addition (native operators)', () => {
@@ -444,7 +454,7 @@ describe('PYTHON TARGET', () => {
       // fold to a single literal at canonicalization, leaving no addition
       // to compile.
       const expr = ce.expr(['Add', ['Complex', 1.5, 2], ['Complex', 3, 4.5]]);
-      const code = python.compile(expr).code;
+      const code = src(expr);
       expect(code).toContain('complex(1.5, 2)');
       expect(code).toContain('+');
       expect(code).toContain('complex(3, 4.5)');
@@ -452,38 +462,38 @@ describe('PYTHON TARGET', () => {
 
     it('should use cmath.asin for complex arcsin', () => {
       const expr = ce.expr(['Arcsin', ['Complex', 1, 1]]);
-      expect(python.compile(expr).code).toBe('cmath.asin(complex(1, 1))');
+      expect(src(expr)).toBe('cmath.asin(complex(1, 1))');
     });
 
     it('should use cmath.acos for complex arccos', () => {
       const expr = ce.expr(['Arccos', ['Complex', 1, 1]]);
-      expect(python.compile(expr).code).toBe('cmath.acos(complex(1, 1))');
+      expect(src(expr)).toBe('cmath.acos(complex(1, 1))');
     });
 
     it('should use cmath.atan for complex arctan', () => {
       const expr = ce.expr(['Arctan', ['Complex', 1, 1]]);
-      expect(python.compile(expr).code).toBe('cmath.atan(complex(1, 1))');
+      expect(src(expr)).toBe('cmath.atan(complex(1, 1))');
     });
 
     it('should use cmath.sinh for complex sinh', () => {
       const expr = ce.expr(['Sinh', ['Complex', 1, 1]]);
-      expect(python.compile(expr).code).toBe('cmath.sinh(complex(1, 1))');
+      expect(src(expr)).toBe('cmath.sinh(complex(1, 1))');
     });
 
     it('should use cmath.cosh for complex cosh', () => {
       const expr = ce.expr(['Cosh', ['Complex', 1, 1]]);
-      expect(python.compile(expr).code).toBe('cmath.cosh(complex(1, 1))');
+      expect(src(expr)).toBe('cmath.cosh(complex(1, 1))');
     });
 
     it('should use cmath.tanh for complex tanh', () => {
       const expr = ce.expr(['Tanh', ['Complex', 1, 1]]);
-      expect(python.compile(expr).code).toBe('cmath.tanh(complex(1, 1))');
+      expect(src(expr)).toBe('cmath.tanh(complex(1, 1))');
     });
 
     it('should include cmath import when imports are enabled', () => {
       const pythonImports = new PythonTarget({ includeImports: true });
       const expr = ce.expr(['Sin', ['Complex', 0, 1]]);
-      const code = pythonImports.compile(expr).code;
+      const code = pythonImports.compile(expr, { constantFold: false }).code;
       expect(code).toContain('import cmath');
       expect(code).toContain('cmath.sin(complex(0, 1))');
     });
@@ -635,9 +645,12 @@ describe('PYTHON TARGET', () => {
   // engine.tolerance (default 1e-10).
   describe('CO-P1-4 tolerance-aware equality', () => {
     it('Equal bakes the engine tolerance', () => {
-      const code = python.compile(
-        ce.box(['Equal', ['Add', 0.1, 0.2], 0.3])
-      ).code;
+      // `constantFold: false`: `0.1 + 0.2` has no free variable, so
+      // compile-time constant folding would emit `0.3` in its place and the
+      // pinned emission would no longer show the operand it compares.
+      const code = python.compile(ce.box(['Equal', ['Add', 0.1, 0.2], 0.3]), {
+        constantFold: false,
+      }).code;
       expect(code).toBe('(abs((0.1 + 0.2) - (0.3)) <= 1e-10)');
     });
 
@@ -793,6 +806,10 @@ describe('PYTHON TARGET', () => {
   // Frobenius norm in the interpreter but the SPECTRAL norm in numpy.
   describe('Norm order guards', () => {
     const M = ['List', ['List', 3, 4], ['List', 5, 12]];
+    // The operands below are literal matrices/vectors, so compile-time
+    // constant folding (on by default) would emit the norm's VALUE instead of
+    // the `np.linalg.norm` call whose order argument is what these tests pin.
+    const noFold = { constantFold: false };
 
     it('a matrix-only string order over a vector fails closed (D6)', () => {
       expect(() =>
@@ -804,7 +821,8 @@ describe('PYTHON TARGET', () => {
 
     it('a string Frobenius order over a matrix still compiles', () => {
       expect(
-        python.compile(ce.box(['Norm', M, { str: 'Frobenius' }] as any)).code
+        python.compile(ce.box(['Norm', M, { str: 'Frobenius' }] as any), noFold)
+          .code
       ).toBe("np.linalg.norm([[3, 4], [5, 12]], 'fro')");
     });
 
@@ -812,11 +830,14 @@ describe('PYTHON TARGET', () => {
       // Interpreter: `Norm(M, 1)` = max column sum, `Norm(M, "Infinity")` =
       // max row sum — exactly numpy's matrix `ord=1` / `ord=inf` (probed
       // 2026-07-31 on [[1,2],[3,4]]: 6 and 7).
-      expect(python.compile(ce.box(['Norm', M, 1] as any)).code).toBe(
+      expect(python.compile(ce.box(['Norm', M, 1] as any), noFold).code).toBe(
         'np.linalg.norm([[3, 4], [5, 12]], 1)'
       );
       expect(
-        python.compile(ce.box(['Norm', M, { num: '+Infinity' }] as any)).code
+        python.compile(
+          ce.box(['Norm', M, { num: '+Infinity' }] as any),
+          noFold
+        ).code
       ).toBe('np.linalg.norm([[3, 4], [5, 12]], np.inf)');
     });
 
@@ -831,7 +852,7 @@ describe('PYTHON TARGET', () => {
       );
       // A vector operand is unaffected: numeric orders are faithful on 1-D.
       expect(
-        python.compile(ce.box(['Norm', ['List', 3, 4], 3] as any)).code
+        python.compile(ce.box(['Norm', ['List', 3, 4], 3] as any), noFold).code
       ).toBe('np.linalg.norm([3, 4], 3)');
     });
 
@@ -908,7 +929,11 @@ describe('PYTHON TARGET', () => {
   describe('Sum / Product → generator expressions', () => {
     it('numeric-bound Sum via compileFunction', () => {
       const expr = ce.parse('\\sum_{k=0}^{3} k^2');
-      const code = python.compileFunction(expr, 'f', []);
+      // This test pins the generator-expression lowering; without the opt-out
+      // the constant Sum folds to `14`.
+      const code = python.compileFunction(expr, 'f', [], undefined, {
+        constantFold: false,
+      });
       expect(code).toBe('def f():\n    return sum(k ** 2 for k in range(0, 4))\n');
     });
 
@@ -928,7 +953,10 @@ describe('PYTHON TARGET', () => {
 
     it('Product compiles to math.prod', () => {
       const expr = ce.parse('\\prod_{k=1}^{4} k');
-      expect(python.compile(expr).code).toBe(
+      // `constantFold: false`: both bounds are numeric, so the whole product
+      // has no free variable and compile-time constant folding would emit
+      // `24` instead of the generator expression under test.
+      expect(python.compile(expr, { constantFold: false }).code).toBe(
         'math.prod(k for k in range(1, 5))'
       );
     });
@@ -942,13 +970,17 @@ describe('PYTHON TARGET', () => {
 
     it('empty/reversed range relies on Python range semantics', () => {
       // range(5, 4) is empty → sum() == 0, math.prod() == 1 (matches the
-      // interpreter's empty-range identities).
-      expect(python.compile(ce.parse('\\sum_{k=5}^{3} k')).code).toBe(
-        'sum(k for k in range(5, 4))'
-      );
-      expect(python.compile(ce.parse('\\prod_{k=5}^{3} k')).code).toBe(
-        'math.prod(k for k in range(5, 4))'
-      );
+      // interpreter's empty-range identities). `constantFold: false`: these
+      // bounds are numeric, so folding would emit those identities as literals
+      // instead of the empty `range(5, 4)` this test is about.
+      expect(
+        python.compile(ce.parse('\\sum_{k=5}^{3} k'), { constantFold: false })
+          .code
+      ).toBe('sum(k for k in range(5, 4))');
+      expect(
+        python.compile(ce.parse('\\prod_{k=5}^{3} k'), { constantFold: false })
+          .code
+      ).toBe('math.prod(k for k in range(5, 4))');
     });
 
     it('multi-index Sum emits nested generator clauses', () => {
@@ -958,7 +990,10 @@ describe('PYTHON TARGET', () => {
         ['Limits', 'i', 1, 3],
         ['Limits', 'j', 1, 3],
       ]);
-      expect(python.compile(expr).code).toBe(
+      // `constantFold: false`: both index ranges are numeric, so the double
+      // sum is constant and folding would emit `36` in place of the nested
+      // generator clauses under test.
+      expect(python.compile(expr, { constantFold: false }).code).toBe(
         'sum(i * j for i in range(1, 4) for j in range(1, 4))'
       );
     });

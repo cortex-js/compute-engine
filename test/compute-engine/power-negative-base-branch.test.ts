@@ -23,8 +23,16 @@ function parts(e: any): { re: number; im: number } {
   return { re: n.re, im: n.im };
 }
 
+/**
+ * Compile with `constantFold: false`. This file exists to exercise the
+ * COMPILER's own negative-base branch decision (`negativeBaseRealPow`), which
+ * runs while lowering a structural `Power`. Whole-expression compile-time
+ * constant folding evaluates a variable-free `Power` through the interpreter
+ * instead and emits its value as a literal, so leaving folding on would make
+ * every assertion here a test of `.N()` rather than of the peephole.
+ */
 function folded(e: any): number | { re: number; im: number } {
-  const r = compile(e, { fallback: false });
+  const r = compile(e, { fallback: false, constantFold: false });
   return (r.run as any)!() as any;
 }
 

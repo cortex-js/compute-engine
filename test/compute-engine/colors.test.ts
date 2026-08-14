@@ -725,7 +725,11 @@ describe('GPU color compilation', () => {
       ['Tuple', 1, 1, 1],
       ['Tuple', 0, 0, 0],
     ]);
-    const compiled = compile(expr, { to: 'wgsl' });
+    // `constantFold: false`: both colors are literals, so the whole contrast
+    // is a constant subtree the compiler would otherwise evaluate at compile
+    // time and emit as a bare number — this test pins the APCA helper and its
+    // preamble, which only the structural lowering emits.
+    const compiled = compile(expr, { to: 'wgsl', constantFold: false });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_apca');
     expect(compiled.preamble).toContain('fn _gpu_srgb_to_linear');

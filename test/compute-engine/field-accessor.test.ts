@@ -185,7 +185,12 @@ describe('Field compile lowering (D16/§4.6)', () => {
       ['Dictionary', ['KeyValuePair', { str: 'a' }, 10]],
       { str: 'a' },
     ]);
-    expect(() => js.compile(d)).toThrow(/At: cannot compile/);
+    // `constantFold: false`: the dictionary literal has no free variables, so
+    // compile-time constant folding would emit `10` and the `At` decline this
+    // test pins would never be reached.
+    expect(() => js.compile(d, { constantFold: false })).toThrow(
+      /At: cannot compile/
+    );
   });
 
   test('JS: a record-bodied nominal operand declines cleanly', () => {

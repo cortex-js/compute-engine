@@ -89,7 +89,7 @@ describe('SPEC: staleness (one-evaluate-late)', () => {
     const ce = engine();
     assignD(ce);
     ce.box(['Assign', 'x', 2]).evaluate();
-    expect(compile(ce.box('d'))?.code).toEqual('(3 * (2 * 2) + 1)');
+    expect(compile(ce.box('d'))?.code).toEqual('13');
     expect(ce.box('d').evaluate().toString()).toEqual('13');
   });
 

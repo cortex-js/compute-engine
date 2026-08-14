@@ -105,7 +105,13 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
         ['\\operatorname{arcosh}(2)', 'Math.acosh(2)'],
         ['\\operatorname{artanh}(0.5)', 'Math.atanh(0.5)'],
       ] as const) {
-        const result = compile(ce.parse(latex), { fallback: false });
+        // `constantFold: false`: the assertion is on the LOWERING chosen for
+        // the head, and these arguments are literals, so compile-time folding
+        // would replace the whole call with its numeric value.
+        const result = compile(ce.parse(latex), {
+          fallback: false,
+          constantFold: false,
+        });
         expect(result.success).toBe(true);
         expect(result.code).toBe(code);
         expect(typeof result.run!()).toBe('number');
@@ -211,7 +217,16 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       const ce = engineWithNegativeAssignment();
       const expr = ce.parse('(-2)^{\\frac{100}{3}}');
       expect(expr.type.toString()).toBe('finite_number');
-      const folded = compile(expr, { fallback: false }).run!() as number;
+      // `constantFold: false`: the subject is the EMITTER's own fold of a
+      // negative base with an odd-denominator exponent (the branch that used
+      // to produce NaN), which is what runs when the whole-expression
+      // compile-time constant folder is out of the way. The folder computes
+      // the same value through the engine's arithmetic and lands one ulp
+      // away from the `Math.pow` double pinned below.
+      const folded = compile(expr, {
+        fallback: false,
+        constantFold: false,
+      }).run!() as number;
       expect(folded).toBe(Math.pow(2, 100 / 3));
       expect(folded).toBeCloseTo(expr.N().re, 0);
       expect(expr.N().im).toBe(0);
@@ -225,11 +240,16 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
     for (const language of ['glsl', 'wgsl'] as const) {
       const v2 = language === 'wgsl' ? 'vec2f' : 'vec2';
 
+      // These cases assert on the EMITTED shader source. Every expression here
+      // is variable-free (`a` is an assigned symbol), so compile-time constant
+      // folding would replace the call with a `vec2(re, im)` literal and no
+      // helper would appear at all. `constantFold: false` keeps the lowering
+      // visible.
       it(`${language}: Sqrt of an assigned negative emits the complex helper`, () => {
         const ce = engineWithNegativeAssignment();
         const code = ce
           .getCompilationTarget(language)!
-          .compile(ce.parse('1 + \\sqrt{a}')).code;
+          .compile(ce.parse('1 + \\sqrt{a}'), { constantFold: false }).code;
         expect(code).toBe(`_gpu_csqrt(${v2}((-2.0), 0.0)) + ${v2}(1.0, 0.0)`);
       });
 
@@ -237,7 +257,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
         const ce = engineWithNegativeAssignment();
         const code = ce
           .getCompilationTarget(language)!
-          .compile(ce.parse('1 + \\ln(a)')).code;
+          .compile(ce.parse('1 + \\ln(a)'), { constantFold: false }).code;
         expect(code).toBe(`_gpu_cln(${v2}((-2.0), 0.0)) + ${v2}(1.0, 0.0)`);
       });
 
@@ -245,7 +265,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
         const ce = engineWithNegativeAssignment();
         const code = ce
           .getCompilationTarget(language)!
-          .compile(ce.parse('1 + \\log(a)')).code;
+          .compile(ce.parse('1 + \\log(a)'), { constantFold: false }).code;
         expect(code).toContain(`_gpu_cln(${v2}((-2.0), 0.0))`);
         expect(code).not.toContain('log((-2.0))');
       });
@@ -254,16 +274,21 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
         const ce = engineWithNegativeAssignment();
         const target = ce.getCompilationTarget(language)!;
         // Direct helper available.
-        expect(target.compile(ce.parse('1 + \\arcsin(2)')).code).toBe(
-          `${v2}(1.0, 0.0) + _gpu_casin(${v2}(2.0, 0.0))`
-        );
         expect(
-          target.compile(ce.parse('1 + \\operatorname{artanh}(2)')).code
+          target.compile(ce.parse('1 + \\arcsin(2)'), { constantFold: false })
+            .code
+        ).toBe(`${v2}(1.0, 0.0) + _gpu_casin(${v2}(2.0, 0.0))`);
+        expect(
+          target.compile(ce.parse('1 + \\operatorname{artanh}(2)'), {
+            constantFold: false,
+          }).code
         ).toBe(`${v2}(1.0, 0.0) + _gpu_catanh(${v2}(2.0, 0.0))`);
         // No direct `_gpu_casec`: the complex lift of the head's own real
         // lowering, `acos(1/x)`.
         expect(
-          target.compile(ce.parse('1 + \\operatorname{arcsec}(0.5)')).code
+          target.compile(ce.parse('1 + \\operatorname{arcsec}(0.5)'), {
+            constantFold: false,
+          }).code
         ).toBe(
           `${v2}(1.0, 0.0) + ` +
             `_gpu_cacos(_gpu_cdiv(${v2}(1.0, 0.0), ${v2}(0.5, 0.0)))`
@@ -277,7 +302,9 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
           '1 + \\operatorname{arsech}(-2)',
           '1 + \\operatorname{arccsc}(0.5)',
         ]) {
-          const code = target.compile(ce.parse(latex)).code!;
+          const code = target.compile(ce.parse(latex), {
+            constantFold: false,
+          }).code!;
           expect([latex, /_gpu_c/.test(code)]).toEqual([latex, true]);
         }
       });
@@ -285,12 +312,15 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       it(`${language}: an IN-domain inverse-trig argument stays scalar`, () => {
         const ce = engineWithNegativeAssignment();
         const target = ce.getCompilationTarget(language)!;
-        expect(target.compile(ce.parse('\\arcsin(0.5)')).code).toBe(
-          'asin(0.5)'
-        );
-        expect(target.compile(ce.parse('\\operatorname{arcosh}(2)')).code).toBe(
-          'acosh(2.0)'
-        );
+        expect(
+          target.compile(ce.parse('\\arcsin(0.5)'), { constantFold: false })
+            .code
+        ).toBe('asin(0.5)');
+        expect(
+          target.compile(ce.parse('\\operatorname{arcosh}(2)'), {
+            constantFold: false,
+          }).code
+        ).toBe('acosh(2.0)');
       });
 
       it(`${language}: a real-typed symbol still emits the scalar lowering`, () => {
@@ -407,7 +437,13 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
     const ce = new ComputeEngine();
     const expr = ce.box(['Exp', ['Ln', -2]]);
     expect(interpreted(expr)).toEqual({ re: -2, im: 0 });
-    expect(compile(expr, { fallback: false }).run!()).toMatchObject({
+    // `constantFold: false`: the dust is produced by the EMITTED complex
+    // `exp`/`log` pair. Folding this variable-free expression at compile time
+    // computes it through the engine instead and emits the exact real `-2`,
+    // leaving nothing for the chop below to act on.
+    expect(
+      compile(expr, { fallback: false, constantFold: false }).run!()
+    ).toMatchObject({
       re: -2,
       im: expect.any(Number),
     });

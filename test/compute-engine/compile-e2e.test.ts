@@ -303,13 +303,22 @@ describe('E2E: Real-world Expressions', () => {
     });
 
     it('integer factorials are unchanged', () => {
+      // `constantFold: false`: these arguments are all variable-free, so
+      // compile-time constant folding would answer from the interpreter
+      // instead of the EMITTED integer fast path whose saturation behaviour is
+      // what this test pins.
       const v = (latex: string) =>
-        compile(ce.parse(latex), { realOnly: true })?.run?.({});
+        compile(ce.parse(latex), { realOnly: true, constantFold: false })?.run?.(
+          {}
+        );
       expect(v('0!')).toBe(1);
       expect(v('1!')).toBe(1);
       expect(v('5!')).toBe(120);
-      // The integer fast path saturates at n ≥ 170 (unchanged by the fix).
-      expect(v('170!')).toBe(Infinity);
+      // `170!` ≈ 7.26e306 is the largest double-representable factorial and
+      // stays finite (the historical `n ≥ 170` cap wrongly saturated it);
+      // the loop's rounding differs from the interpreter's correctly-rounded
+      // 7.257415615307999e306 only in the last ulps. `171!` overflows.
+      expect(v('170!')).toBe(7.257415615307994e306);
       expect(v('171!')).toBe(Infinity);
     });
 

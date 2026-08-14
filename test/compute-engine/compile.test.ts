@@ -12,20 +12,20 @@ describe('COMPILE', () => {
   describe('Expressions', () => {
     it('should compile (and simplify) a simple expression', () => {
       expect(compile(ce.parse('3.45 + \\frac57'))?.code).toMatchInlineSnapshot(
-        `0.7142857142857143 + 3.45`
+        `4.164285714285715`
       );
     });
 
     it('should compile an expression with a constant', () => {
       expect(compile(ce.parse('2\\exponentialE'))?.code).toMatchInlineSnapshot(
-        `2 * Math.E`
+        `5.43656365691809`
       );
     });
 
     it('should compile an expression with trig functions', () => {
       expect(
         compile(ce.parse('2 \\cos(\\frac{\\pi}{5})'))?.code
-      ).toMatchInlineSnapshot(`2 * Math.cos(0.2 * Math.PI)`);
+      ).toMatchInlineSnapshot(`1.618033988749895`);
     });
   });
 
@@ -37,12 +37,7 @@ describe('COMPILE', () => {
 
     it('should compile a block with two statements', () => {
       const expr = ce.expr(['Block', ['Add', 13, 15], ['Multiply', 10, 2]]);
-      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`
-        (() => {
-        28;
-        return 20
-        })()
-      `);
+      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`20`);
     });
 
     it('should compile a block with a declaration', () => {
@@ -902,7 +897,9 @@ describe('COMPILE Tier-2 special functions (elliptic / AGM / hypergeometric / Er
   for (const [op, args] of cases) {
     it(`${op}(${args.join(', ')}) compiles and matches N()`, () => {
       const expr = ce.box([op, ...args]);
-      const result = compile(expr)!;
+      // These cases are all constant, so constant folding would emit a literal
+      // instead of the `_SYS.` runtime call this test is pinning.
+      const result = compile(expr, { constantFold: false })!;
       expect(result.success).toBe(true);
       expect(result.code).toContain('_SYS.');
       const want = expr.N().re;
@@ -1082,7 +1079,9 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
 describe('COMPILE Equal/NotEqual tolerance (CO-P1-4)', () => {
   it('compiled Equal(0.1+0.2, 0.3) is true, matching the interpreter', () => {
     const expr = ce.box(['Equal', ['Add', 0.1, 0.2], 0.3]);
-    const r = compile(expr)!;
+    // The operands are constant, so folding would emit a `true` literal instead
+    // of the tolerance comparison this test is pinning.
+    const r = compile(expr, { constantFold: false })!;
     expect(r.code).toContain('Math.abs');
     expect(r.code).not.toContain('===');
     expect(r.run!({})).toBe(true);
@@ -1468,7 +1467,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(() =>
       js.compile(
         e.box(['Reduce', 'd', ['Function', ['Subtract', 'a', 'b'], 'a', 'b']]),
-        { realOnly: true }
+        // The expression has no free variables, so constant folding would
+        // evaluate it at compile time and never reach the lowering under test.
+        { realOnly: true, constantFold: false }
       )
     ).toThrow(/Fail closed/);
   });
@@ -1575,7 +1576,12 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const js = new JavaScriptTarget();
     const m = e.box(['List', ['List', 1, 2], ['List', 3, 4]]);
     expect(() =>
-      js.compile(e.box(['At', m, 1, 2]), { realOnly: true })
+      // The matrix and indexes are all constant, so constant folding would
+      // evaluate the access at compile time and never reach the lowering.
+      js.compile(e.box(['At', m, 1, 2]), {
+        realOnly: true,
+        constantFold: false,
+      })
     ).toThrow(/Fail closed/);
   });
 
@@ -1624,6 +1630,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       const js = new JavaScriptTarget();
       const r = js.compile(e.box(['At', 'rec', { str: 'a' }]), {
         fallback: true,
+        // `rec` has an assigned value, so constant folding would emit `7`
+        // directly and bypass the fail-closed fallback contract under test.
+        constantFold: false,
       });
       expect(r.success).toBe(false);
       expect(r.run!()).toBe(7);
@@ -1700,7 +1709,14 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   // `d = [10, 20, 30]`. Values checked against the interpreter's materialized
   // result.
   const runJs = (e: ComputeEngine, mathjson: any) => {
-    const r = compile(e.box(mathjson), { fallback: false, realOnly: true })!;
+    // These cases are built from constant collections; the point of each is to
+    // exercise the compiled lowering of the operator, so constant folding —
+    // which would answer from the interpreter at compile time — is disabled.
+    const r = compile(e.box(mathjson), {
+      fallback: false,
+      realOnly: true,
+      constantFold: false,
+    })!;
     expect(r.success).toBe(true);
     return r.run!();
   };
@@ -1986,11 +2002,19 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
     const nested = ['List', ['List', 1], ['List', 1]];
+    // The operands are constant, so constant folding would evaluate these at
+    // compile time and never reach the fail-closed lowering under test.
     expect(() =>
-      js.compile(e.box(['Unique', nested]), { realOnly: true })
+      js.compile(e.box(['Unique', nested]), {
+        realOnly: true,
+        constantFold: false,
+      })
     ).toThrow(/Fail closed/);
     expect(() =>
-      js.compile(e.box(['Contains', nested, ['List', 1]]), { realOnly: true })
+      js.compile(e.box(['Contains', nested, ['List', 1]]), {
+        realOnly: true,
+        constantFold: false,
+      })
     ).toThrow(/Fail closed/);
   });
 
@@ -2231,7 +2255,10 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(Number.isNaN(runJs(e, ['Norm', M, 2]) as number)).toBe(true);
     const js = new JavaScriptTarget();
     expect(() =>
-      js.compile(e.box(['Norm', M, { str: 'Nuclear' }]), { realOnly: true })
+      js.compile(e.box(['Norm', M, { str: 'Nuclear' }]), {
+        realOnly: true,
+        constantFold: false,
+      })
     ).toThrow(/Fail closed/);
   });
 
@@ -2334,7 +2361,12 @@ describe('COMPILE user-defined function calls', () => {
     const e = new ComputeEngine();
     e.parse('f(x) \\coloneq e^{-x^2/2}').evaluate();
     const js = new JavaScriptTarget();
-    const r = js.compile(e.box(['f', 2]), { realOnly: true });
+    // The call has a constant argument, so constant folding would emit the
+    // numeric result instead of the `_fn_f` local this test is pinning.
+    const r = js.compile(e.box(['f', 2]), {
+      realOnly: true,
+      constantFold: false,
+    });
     expect(r.success).toBe(true);
     expect(r.code).toBe('_fn_f(2)');
     expect(r.run(2 as unknown as Record<string, number>)).toBeCloseTo(
@@ -2374,8 +2406,11 @@ describe('COMPILE user-defined function calls', () => {
     const js = new JavaScriptTarget();
     // f appears twice; both call sites reference the same `_fn_f` local (emitted
     // once into the preamble — keyed by name in the userFunctions registry).
+    // Both call sites have constant arguments, so constant folding would emit a
+    // single literal instead of the two `_fn_f` references this test counts.
     const r = js.compile(e.box(['Add', ['f', 1], ['f', 2]]), {
       realOnly: true,
+      constantFold: false,
     });
     expect(r.success).toBe(true);
     expect(r.code.match(/_fn_f\(/g)?.length ?? 0).toBe(2);
@@ -2514,7 +2549,9 @@ describe('COMPILE user-defined function calls', () => {
     it('keeps a scalar argument on the direct-call path', () => {
       const e = setup();
       const expr = e.box(['q', 5]);
-      const r = compile(expr);
+      // The argument is constant, so constant folding would emit `21` instead
+      // of the direct `_fn_q` call this test is pinning.
+      const r = compile(expr, { constantFold: false });
       expect(r.success).toBe(true);
       expect(r.code).toBe('_fn_q(5)');
       expect(r.run!()).toBe(21);
@@ -2907,7 +2944,12 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     const js = new JavaScriptTarget();
     for (const op of ['Negate', 'Not', 'Less', 'Greater', 'And', 'Or']) {
       expect(() =>
-        js.compile(e.box(['Reduce', L, op, 0]), { realOnly: true })
+        // The list and seed are constant, so constant folding would answer from
+        // the interpreter and never reach the combiner check under test.
+        js.compile(e.box(['Reduce', L, op, 0]), {
+          realOnly: true,
+          constantFold: false,
+        })
       ).toThrow(/Fail closed/);
     }
     // Binary arithmetic operator symbols still compile.
@@ -2942,15 +2984,21 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     const js = new JavaScriptTarget();
     // Unary Function literal: the interpreter raises an arity error; the
     // compiled fold must not silently return 3.
+    // The list and seed are constant, so constant folding would answer from the
+    // interpreter and never reach the combiner-arity check under test.
     expect(() =>
       js.compile(e.box(['Reduce', L, ['Function', ['Add', 'x', 1], 'x'], 0]), {
         realOnly: true,
+        constantFold: false,
       })
     ).toThrow(/Fail closed/);
     // Unary user-defined function symbol.
     e.assign('inc', e.box(['Function', ['Add', 'a', 1], 'a']));
     expect(() =>
-      js.compile(e.box(['Reduce', L, 'inc', 0]), { realOnly: true })
+      js.compile(e.box(['Reduce', L, 'inc', 0]), {
+        realOnly: true,
+        constantFold: false,
+      })
     ).toThrow(/Fail closed/);
     // A binary Function literal still compiles.
     expect(
@@ -3054,8 +3102,11 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
 
   it('emits a runtime shape projection, not the scalar arm', () => {
     const e = engineWith('indexed_collection');
+    // `S` and `P` are constant, so constant folding would emit the numeric
+    // extremum instead of the runtime shape projection this test is pinning.
     const code = compile(e.box(['Min', ['Distance', 'S', P]]), {
       fallback: false,
+      constantFold: false,
     })!.code;
     expect(code).toContain('Array.isArray');
     expect(code).not.toMatch(/^Math\.min\(/);
@@ -3082,8 +3133,11 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
     expect(e.box(['Distance', 'S', P]).type.toString()).toBe(
       'list<number> | number'
     );
+    // `S` and `P` are constant, so constant folding would emit the numeric
+    // extremum instead of the runtime shape projection this test is pinning.
     const min = compile(e.box(['Min', ['Distance', 'S', P]]), {
       fallback: false,
+      constantFold: false,
     })!;
     expect(min.success).toBe(true);
     expect(min.code).toContain('Array.isArray');
@@ -3103,7 +3157,9 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
     for (const decl of ['indexed_collection', 'collection']) {
       const e = engineWith(decl);
       const expr = e.box(['Min', ['Distance', 'S', P], 100]);
-      const r = compile(expr, { fallback: false })!;
+      // All operands are constant, so constant folding would emit the numeric
+      // extremum instead of the lowering arms this test is pinning.
+      const r = compile(expr, { fallback: false, constantFold: false })!;
       expect(r.success).toBe(true);
       expect(r.code).toContain('Array.isArray');
       expect(r.run!()).toBeCloseTo(MIN_D, 12);
@@ -3111,12 +3167,16 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
       // The scalar operand still wins when it is the extremum.
       const max = compile(e.box(['Max', ['Distance', 'S', P], 100]), {
         fallback: false,
+        constantFold: false,
       })!;
       expect(max.run!()).toBe(100);
     }
     // The provably-scalar fast path is untouched.
     expect(
-      compile(new ComputeEngine().box(['Min', 3, 5]), { fallback: false })!.code
+      compile(new ComputeEngine().box(['Min', 3, 5]), {
+        fallback: false,
+        constantFold: false,
+      })!.code
     ).toContain('Math.min');
   });
 });
@@ -3195,7 +3255,9 @@ describe('COMPILE built-in operator name as a callback', () => {
   it('compiles and runs `Sum(Map(Sin, xs))`', () => {
     const e = new ComputeEngine();
     const expr = e.box(['Sum', ['Map', 'Sin', XS]]);
-    const r = compile(expr, { fallback: false })!;
+    // The whole expression is constant, so constant folding would emit the sum
+    // as a literal instead of the `_fn_Sin` wrapper this test is pinning.
+    const r = compile(expr, { fallback: false, constantFold: false })!;
 
     expect(r.success).toBe(true);
     expect(r.code).toContain('_fn_Sin');
@@ -3211,7 +3273,9 @@ describe('COMPILE built-in operator name as a callback', () => {
       ['Add', ['Sum', ['Map', 'Sin', XS]], 't'],
       't',
     ]);
-    const r = compile(expr, { fallback: false })!;
+    // The `Sum(Map(Sin, XS))` subtree is constant, so constant folding would
+    // replace it with a literal and emit no wrapper at all.
+    const r = compile(expr, { fallback: false, constantFold: false })!;
 
     expect(r.code).toContain('const _fn_Sin = (_tv1) => Math.sin(_tv1);');
     expect(r.code.split('const _fn_Sin').length - 1).toBe(1);
@@ -3244,7 +3308,9 @@ describe('COMPILE built-in operator name as a callback', () => {
       ['Add', ['Sum', ['Map', 'Sin', XS]], '_tv1'],
       '_tv1',
     ]);
-    const r = compile(expr, { fallback: false })!;
+    // The `Sum(Map(Sin, XS))` subtree is constant, so constant folding would
+    // replace it with a literal and emit no wrapper at all.
+    const r = compile(expr, { fallback: false, constantFold: false })!;
 
     expect(r.code).toContain('const _fn_Sin = (_tv2) => Math.sin(_tv2);');
     expect(r.run!(10) as number).toBeCloseTo(10 + SUM_SIN, 12);
@@ -3270,7 +3336,9 @@ describe('COMPILE built-in operator name as a callback', () => {
     // canonicalize over an untyped parameter, so it still fails closed.)
     const e = new ComputeEngine();
     const expr = e.box(['Sum', ['Map', 'Negate', XS]]);
-    const r = compile(expr, { fallback: false })!;
+    // The whole expression is constant, so constant folding would emit the sum
+    // as a literal instead of the `_fn_Negate` wrapper this test is pinning.
+    const r = compile(expr, { fallback: false, constantFold: false })!;
 
     expect(r.success).toBe(true);
     expect(r.code).toContain('_fn_Negate');
@@ -3310,12 +3378,19 @@ describe('COMPILE built-in operator name as a callback', () => {
     // `IsPrime` eta-expands, but its application has no JavaScript mapping:
     // a compile-time refusal, not an artifact that throws at run time.
     const e = new ComputeEngine();
+    // The expression is constant, so constant folding would answer from the
+    // interpreter and never reach the wrapper lowering under test.
     expect(() =>
-      compile(e.box(['CountIf', XS, 'IsPrime']), { fallback: false })
+      compile(e.box(['CountIf', XS, 'IsPrime']), {
+        fallback: false,
+        constantFold: false,
+      })
     ).toThrow(/Fail closed/);
 
     // With the fallback, the interpreter answers.
-    const r = compile(e.box(['CountIf', XS, 'IsPrime']));
+    const r = compile(e.box(['CountIf', XS, 'IsPrime']), {
+      constantFold: false,
+    });
     expect(r?.success).toBe(false);
     expect(r!.run!({})).toBe(3);
   });

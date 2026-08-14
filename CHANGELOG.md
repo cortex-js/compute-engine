@@ -46,7 +46,46 @@
   collections, so their collection-first spellings remain expressible
   and true.
 
+  Migration is not limited to call sites that _construct_ a `Map`:
+  code that _consumes_ `Map` expressions positionally must be swept
+  too. Anything reading `ops[0]` expecting the source collection (or
+  `ops[1]` expecting the callback) — serializers, tree walks,
+  length/shape predicates keyed on "the first operand" — now reads the
+  wrong operand without any error. Stored old-order expressions stay
+  visible rather than failing silently: the `incompatible-type` error
+  is produced at parse/box (canonicalization) time, so a legacy-order
+  `Map` in captured content is already marked invalid before any
+  evaluation.
+
 ### New Features
+
+- **Compiled code now constant-folds whole subtrees.** A pure
+  subexpression with no free variables is evaluated at compile time and
+  emitted as a literal, on every compilation target:
+  `Sum(Take(Map(_ ↦ _^2, 1..20), 10))` compiles to `385` instead of a
+  map/slice/reduce chain, and the constant part of a live expression
+  folds too (`x + Sum(Map(_ ↦ _^2, 1..5))` → `_.x + 55`). Numbers and
+  booleans fold; list- and string-valued subtrees keep their structural
+  lowering. Folding never touches anything live or effectful: impure
+  operators (`Random(…)`), unknowns, `vars`-mapped inputs, names bound by
+  an enclosing lambda or loop, and operators whose emission the caller
+  overrode with the `functions`/`operators` options all decline it; a
+  `Sum`/`Product` over a non-finite bound never folds (a divergent
+  series would otherwise bake the interpreter's iteration-limit-truncated
+  partial sum as a "constant"); and the evaluation runs under a short
+  time budget and collection-size cap — a constant too expensive to
+  evaluate at compile time compiles structurally as before. Because the folded value is the interpreter's,
+  compiled results now track `evaluate()` where the two previously
+  disagreed in the last ulp (`sin(π/6)` compiles to `0.5`, not
+  `Math.sin(Math.PI/6)` = `0.49999999999999994`). Opt out with
+  `compile(expr, { constantFold: false })` — useful for inspecting the
+  structural lowering of a constant expression. The interval-arithmetic
+  target never folds: a point value would discard the outward-rounded
+  enclosure that target exists to compute. Relatedly, a
+  compile-time-constant `Take`/`Drop` count (and Python
+  `Tabulate`/`Fill` dimension) is now normalized at compile time —
+  `Take(xs, 10)` emits `.slice(0, 10)`, not
+  `.slice(0, Math.max(0, 10))`.
 
 - **A derivative with no tractable symbolic closed form now falls back to
   numeric differentiation — on both the compiled and interpreted routes.**
@@ -70,6 +109,77 @@
   budget, roughly a second per derivative node on the deep shapes).
 
 ### Issues Resolved
+
+- **`expr.unknowns` no longer reports a typed lambda parameter as a free
+  variable.** A `Function` literal's annotated parameter — the
+  `["Typed", "x", type]` spelling canonicalization produces for callback
+  parameters — leaked into `unknowns` (and its alias `freeVariables`), so
+  any expression containing a `Map`-style callback reported a phantom
+  unknown: `Map(_ ↦ _^2, [1,2,3])` reported `_` free. Bare (unannotated)
+  parameters were already excluded; a same-named variable that is
+  genuinely free OUTSIDE the lambda is still reported.
+
+- **`.N()` of a divergent infinite `Sum`/`Product` no longer returns a
+  silently truncated partial.** `Sum(i, i=1..∞).N()` answered `50015001`
+  (the 10001-term iteration-limit prefix), the harmonic series answered
+  `9.7877…`, and `Product(n, n=1..∞)` a huge partial product — finite
+  numbers for series that have no finite value, with nothing marking them
+  as truncations. An infinite-domain sum or product whose convergence the
+  Richardson acceleration cannot establish now stays unevaluated.
+  Convergent series are unaffected (`Σ 1/n² = 1.6449…`,
+  `Σ (−1)^{n+1}/n = ln 2`, `Π (1+1/n²) = sinh(π)/π`), and the bare-index
+  default-domain spelling (`Sum(f, x)` ≡ `x` from 1 to ∞) now computes
+  the true limit of a convergent series instead of a truncation.
+  Doubly-infinite and reflected ranges go through the same certification
+  (`Σ 2^{−|n|}` over ℤ = 3, the oscillating `Σ sinc³(n)` over ℤ = 3π/4,
+  `Σ 2^n` for n = −∞…−1 = 1), with one deliberate tightening: a
+  doubly-infinite sum must converge ABSOLUTELY — `Σ n` over ℤ stays
+  unevaluated rather than answering its Cauchy principal value `0`, since
+  symmetric pairing structurally cancels a divergent series. A convergent
+  series the acceleration cannot certify (e.g. `Σ 1/n^{1.5}`, a
+  non-integer-power tail) also stays unevaluated rather than returning
+  an approximation of unstated error.
+
+- **`170!` no longer saturates to `Infinity` in machine-precision paths.**
+  The shared machine `factorial()` capped at `n ≥ 170`, but
+  `170! ≈ 7.26e306` is the largest double-representable factorial
+  (`Number.MAX_VALUE ≈ 1.8e308`; only `171!` overflows) — an off-by-one
+  dating to 2021 that compiled `170!` (and any machine-float factorial
+  path) to `Infinity` for a representable value.
+
+- **Python-compiled `Take`/`Drop` counts and `Tabulate`/`Fill` dimensions
+  now round like the interpreter.** A fractional runtime count was
+  truncated by `Take`/`Drop` (`int(x)` — `Take(xs, 2.5)` kept 2 elements
+  where the interpreter keeps 3) and rounded half-to-even by
+  `Tabulate`/`Fill` (Python's `round()`, which disagrees with the
+  interpreter's round-half-up at half-integers). Both now emit the
+  interpreter's `toInteger` contract, `floor(x + 0.5)`; the JavaScript
+  target already rounded correctly.
+
+- **Collection facet probes no longer storm (or crash) on symbolic-bound
+  ranges.** Reading `count`/`isFiniteCollection`/`isEmptyCollection` on a
+  collection with a state-dependent bound — `0..(Length(D)-1)` with `D` a
+  lazy comprehension — numerically re-evaluated the bound on EVERY read,
+  with no cache anywhere in the chain. Canonicalizing one Desmos-derived
+  expression against a document-sized state ran 210K such probes (~9.4 s
+  inside a 5 s evaluation span; without a deadline the cascade's
+  allocation churn exhausted a 4 GB heap), because each probe's own
+  evaluation constructed broadcast lambdas whose scope traffic invalidated
+  every generation-keyed cache in the engine — the probes could never
+  memoize themselves. The three facet getters are now backed by a
+  dependency-precise memo (the element memo's invalidation machinery:
+  world-epoch plus per-dependency write-version and name-resolution
+  checks), and the dependency snapshot understands two shapes it wrongly
+  rejected before: forward-referenced function names (`R` calling `R_xz`
+  defined a few cells later) and free symbols auto-declared inside a
+  function body's own scope. The reported document now opens with that
+  span at 31 ms (was 10.4 s) and the crash arm parses in 5 ms. Also fixed
+  along the way: a stale-cache hole where redefining a function name to a
+  scalar (`assign('f', 5)` over a function `f`) advanced no version axis,
+  so element/facet memos kept serving the old function's results — walked
+  function heads are now tracked as dependencies; and `ce.iterationLimit`
+  changes now count as configuration changes so limit-dependent answers
+  refresh. (Tycho item 182 — a document-open refusal in production.)
 
 - **Numeric quadrature now honors the evaluation deadline.** The adaptive
   Gauss–Kronrod kernel never checked the span deadline, so an integral the

@@ -28,8 +28,19 @@ const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 
-const g = (expr: any): string => glsl.compile(ce.box(expr)).code!;
-const w = (expr: any): string => wgsl.compile(ce.box(expr)).code!;
+/**
+ * Compile-time constant folding is off throughout this file. Almost every
+ * probe here is a LITERAL collection (`Max([1,2,3])`), i.e. a pure subtree with
+ * no free variables, which the compiler would otherwise evaluate at compile
+ * time and emit as one number — erasing the pairwise-fold emission, the
+ * empty-collection `_gpu_nan()` emission and the fail-closed throw that are the
+ * whole subject of these tests. The VALUE agreement with the interpreter is
+ * still checked, by running the structural emission through `runShader`.
+ */
+const NO_FOLD = { constantFold: false } as const;
+
+const g = (expr: any): string => glsl.compile(ce.box(expr), NO_FOLD).code!;
+const w = (expr: any): string => wgsl.compile(ce.box(expr), NO_FOLD).code!;
 
 /**
  * Evaluate an emitted shader EXPRESSION over the `max`/`min`/float-literal/
@@ -183,8 +194,10 @@ describe('GPU Max/Min over an EMPTY collection — the target NaN', () => {
 describe('GPU Max/Min over a declared vector operand', () => {
   const cev = new ComputeEngine();
   cev.declare('v', 'vector<3>');
-  const gv = (expr: any): string => glsl.compile(cev.box(expr)).code!;
-  const wv = (expr: any): string => wgsl.compile(cev.box(expr)).code!;
+  const gv = (expr: any): string =>
+    glsl.compile(cev.box(expr), NO_FOLD).code!;
+  const wv = (expr: any): string =>
+    wgsl.compile(cev.box(expr), NO_FOLD).code!;
 
   it('reduces a bare vector symbol over its swizzles', () => {
     expect(gv(['Max', 'v'])).toBe('(max(max(v.x, v.y), v.z))');

@@ -960,10 +960,13 @@ describe('a contradicted scalar declaration declines for a MULTI-CLAUSE function
 
       test('declines the big-op body `Σ a(i)` on JavaScript (wave-1 message)', () => {
         const ce = withClauses('(number) -> number', kind);
-        const r = compile(
-          ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]),
-          { fallback: true }
-        );
+        // `constantFold: false`: the sum has no free variables, so
+        // compile-time constant folding would answer it from the interpreter
+        // and report success, bypassing the static decline under test.
+        const r = compile(ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]), {
+          fallback: true,
+          constantFold: false,
+        });
         expect(r?.success ?? false).toBe(false);
         expect((r as any).error).toMatch(
           /says it returns a scalar .* but its body constructs a collection.*the numeric accumulation would produce a wrong value/s

@@ -504,9 +504,34 @@ export interface CompileTarget<Expr = unknown> {
    * a constant — it stays a live input. Consulted by the `Integrate` handler:
    * the antiderivative-first optimization resolves a definite integral to a
    * closed form via `evaluate()`, which *would* fold such a symbol, so it is
-   * skipped when the integral references any `vars`-mapped symbol.
+   * skipped when the integral references any `vars`-mapped symbol — and by
+   * the compile-time constant folder (`BaseCompiler.tryConstantFold`), which
+   * declines any subtree mentioning a `vars`-mapped symbol for the same
+   * reason.
    */
   varsKeys?: ReadonlySet<string>;
+
+  /**
+   * When `false`, disables compile-time constant folding: a pure subtree with
+   * no free variables is normally evaluated at compile time and emitted as a
+   * number or boolean literal (`Sum(Take(Map(_ ↦ _^2, 1..20), 10))` → `385`).
+   * Defaults to enabled. Turn it off to inspect the structural lowering of a
+   * constant expression (codegen tests do this) or to keep compile time
+   * strictly proportional to expression size.
+   */
+  constantFold?: boolean;
+
+  /**
+   * Operator/function names whose emission the CALLER overrode (the `functions`
+   * and record-form `operators` compilation options). A constant subtree that
+   * mentions such a name — as an application head or as a value-position
+   * symbol — must not be constant-folded: folding evaluates through the
+   * ENGINE's definition, which may disagree with the caller's custom runtime
+   * implementation. A caller-supplied `operators` FUNCTION is opaque (its
+   * covered names cannot be enumerated), so targets disable folding outright
+   * (`constantFold: false`) in that case rather than populate this set.
+   */
+  foldExcludedOps?: ReadonlySet<MathJsonSymbol>;
 
   /**
    * The set of names currently **bound** by an enclosing binding form — lambda
@@ -946,6 +971,25 @@ export interface CompilationOptions<Expr = unknown> {
    *   (~1e-4 typical error, different result each call).
    */
   quadrature?: 'adaptive' | 'monte-carlo';
+
+  /**
+   * Compile-time constant folding (default `true`).
+   *
+   * A **pure** subtree with no free variables — no unknowns, no `vars`-mapped
+   * symbols, no enclosing bound names, no caller-overridden operators — is
+   * evaluated at compile time and emitted as a number or boolean literal:
+   * `Sum(Take(Map(_ ↦ _^2, 1..20), 10))` compiles to `385` instead of a
+   * map/slice/reduce chain. The evaluation runs under a short time budget and
+   * the engine's collection-size cap; a subtree whose evaluation does not
+   * complete, or whose value is not a number or boolean, compiles structurally
+   * as before. The folded value is the interpreter's (`.N()`), so folding can
+   * change the last-ulp rounding of results the structural code computed in a
+   * different operation order — by design, compiled output tracks `evaluate()`.
+   *
+   * `false` disables folding — use it to inspect the structural lowering of a
+   * constant expression (codegen tests do this).
+   */
+  constantFold?: boolean;
 
   /**
    * When provided, the compiler records the id of every symbol whose engine

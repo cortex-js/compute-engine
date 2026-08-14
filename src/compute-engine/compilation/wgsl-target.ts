@@ -194,7 +194,8 @@ export class WGSLTarget extends GPUShaderTarget {
     expr: Expression,
     functionName: string,
     returnType: string,
-    parameters: Array<[name: string, type: string]>
+    parameters: Array<[name: string, type: string]>,
+    options?: { constantFold?: boolean }
   ): string {
     // Both branches below put the body in a position that requires a VALUE:
     // the single-line one wraps it in `return`, the multi-line one relies on
@@ -204,7 +205,7 @@ export class WGSLTarget extends GPUShaderTarget {
     gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
     // Compiled under the caller's declared parameter shapes, so the body
     // analysis agrees with the signature emitted below.
-    const body = this.compileDeclaredFunctionBody(expr, parameters);
+    const body = this.compileDeclaredFunctionBody(expr, parameters, options);
 
     const params = parameters
       .map(([name, type]) => `${name}: ${toWGSLType(type)}`)
@@ -257,6 +258,9 @@ export class WGSLTarget extends GPUShaderTarget {
     }>;
     workgroupSize?: [number, number?, number?];
     body: Array<{ variable: string; expression: Expression }>;
+    /** `false` disables compile-time constant folding of the body statements
+     * (see `CompilationOptions.constantFold`). */
+    constantFold?: boolean;
   }): string {
     const {
       type,
@@ -265,6 +269,7 @@ export class WGSLTarget extends GPUShaderTarget {
       uniforms = [],
       workgroupSize,
       body,
+      constantFold,
     } = options;
 
     let code = '';
@@ -331,14 +336,19 @@ export class WGSLTarget extends GPUShaderTarget {
     // entry point binds as `input`, so it is referenced `input.<name>` — a bare
     // `v` names nothing in a WGSL shader. A uniform is a module-scope global
     // and stays bare.
-    const statements = this.compileShaderBody(body, type, [
-      ...inputs.map((d) => ({
-        name: d.name,
-        type: d.type,
-        ref: `input.${d.name}`,
-      })),
-      ...uniforms,
-    ]);
+    const statements = this.compileShaderBody(
+      body,
+      type,
+      [
+        ...inputs.map((d) => ({
+          name: d.name,
+          type: d.type,
+          ref: `input.${d.name}`,
+        })),
+        ...uniforms,
+      ],
+      constantFold
+    );
     // Over the FULL emission: a helper may be referenced only from inside a
     // hoisted loop (Tycho item 110), and an undeclared helper is a shader that
     // fails to compile on the GPU.

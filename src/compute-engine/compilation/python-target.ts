@@ -60,6 +60,26 @@ const PYTHON_CONSTANTS: Record<string, string> = {
 };
 
 /**
+ * A `Take`/`Drop` slice bound or a `Tabulate`/`Fill` dimension: non-negative
+ * and ROUNDED, the interpreter's `toInteger` count contract
+ * (`Take([…], 2.5)` keeps 3 elements — `Math.round` semantics, i.e.
+ * `floor(x + 0.5)`). The previous emissions diverged from the interpreter on
+ * fractional runtime counts: `Take`/`Drop` truncated (`int(x)`, dropping an
+ * element the interpreter keeps) and `Tabulate`/`Fill` used Python's
+ * `round()`, which rounds half to EVEN. A compile-time-constant count is
+ * normalized now and emitted as a bare literal (`xs[:10]`, `range(3)`); only
+ * a runtime count pays the emitted guard.
+ */
+function pyClampedCount(
+  count: Expression,
+  compile: (expr: Expression) => string
+): string {
+  const n = tryGetConstant(count);
+  if (n !== undefined) return `${Math.max(0, Math.round(n))}`;
+  return `max(0, int(np.floor((${compile(count)}) + 0.5)))`;
+}
+
+/**
  * Fail closed (D6) when a COMPARISON participant is an aggregate whose
  * whole-value comparison none of this target's kernels reproduces — a
  * `dictionary`, a `record`, or a `tuple` at participant level
@@ -2160,12 +2180,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Take: (args, compile) => {
     const coll = pyCollArg('Take', args[0], compile);
     if (args[1] == null) throw new Error('Take: missing count');
-    return `${coll}[:max(0, int(${compile(args[1])}))]`;
+    return `${coll}[:${pyClampedCount(args[1], compile)}]`;
   },
   Drop: (args, compile) => {
     const coll = pyCollArg('Drop', args[0], compile);
     if (args[1] == null) throw new Error('Drop: missing count');
-    return `${coll}[max(0, int(${compile(args[1])})):]`;
+    return `${coll}[${pyClampedCount(args[1], compile)}:]`;
   },
   Reverse: (args, compile) => `${pyCollArg('Reverse', args[0], compile)}[::-1]`,
   Sort: (args, compile) => {
@@ -2440,11 +2460,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         );
     }
     const f = pyFnArg('Tabulate', args[0], compile, ['integer', 'integer']);
-    const n = compile(args[1]);
+    const n = pyClampedCount(args[1]!, compile);
     if (args.length === 2)
-      return `(lambda _f: [_f(_i + 1) for _i in range(max(0, round(${n})))])(${f})`;
-    const m = compile(args[2]);
-    return `(lambda _f: [[_f(_i + 1, _j + 1) for _j in range(max(0, round(${m})))] for _i in range(max(0, round(${n})))])(${f})`;
+      return `(lambda _f: [_f(_i + 1) for _i in range(${n})])(${f})`;
+    const m = pyClampedCount(args[2]!, compile);
+    return `(lambda _f: [[_f(_i + 1, _j + 1) for _j in range(${m})] for _i in range(${n})])(${f})`;
   },
   Fill: (args, compile) => {
     const dims = args[1];
@@ -2456,9 +2476,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           `Fail closed (D6).`
       );
     const f = pyFnArg('Fill', args[0], compile, ['integer', 'integer']);
-    const rows = compile(dims.ops[0]);
-    const cols = compile(dims.ops[1]);
-    return `(lambda _f: [[_f(_i + 1, _j + 1) for _j in range(max(0, round(${cols})))] for _i in range(max(0, round(${rows})))])(${f})`;
+    const rows = pyClampedCount(dims.ops[0], compile);
+    const cols = pyClampedCount(dims.ops[1], compile);
+    return `(lambda _f: [[_f(_i + 1, _j + 1) for _j in range(${cols})] for _i in range(${rows})])(${f})`;
   },
   // --- Core scalar operators -------------------------------------------------
   Boole: (args, compile) => {
@@ -2714,6 +2734,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // reuse (see `NamingContext`).
     const target = this.createTarget({
       var: this.makeVarResolver(vars),
+      // A `vars`-mapped symbol is a live runtime input: the constant folder
+      // must never fold a subtree that mentions one, even when the symbol
+      // has an engine value (`CompileTarget.varsKeys`).
+      varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
+      constantFold: options.constantFold,
       naming: BaseCompiler.newNamingContext(expr, [
         options.preamble,
         ...(vars ? Object.values(vars) : []),
@@ -2771,9 +2796,12 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // string. Checked structurally, before the body is compiled (D6).
     pythonAssertExpressionBody('compileToSource()', expr);
     const vars = options.vars as Record<string, string> | undefined;
-    // Root compilation boundary (see `compile`).
+    // Root compilation boundary (see `compile`). `varsKeys`/`constantFold`:
+    // same constant-folder contract as `compileOrThrow` above.
     const target = this.createTarget({
       var: this.makeVarResolver(vars),
+      varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
+      constantFold: options.constantFold,
       naming: BaseCompiler.newNamingContext(expr, [
         options.preamble,
         ...(vars ? Object.values(vars) : []),
@@ -2810,7 +2838,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     functionName: string,
     parameters: string[],
     docstring?: string,
-    options?: { cse?: boolean }
+    options?: { cse?: boolean; constantFold?: boolean }
   ): string {
     // Both branches below put the body in a position that requires a VALUE: the
     // single-line one wraps it in `return`, the multi-line one relies on the
@@ -2823,6 +2851,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // emitted bare, so they join the collision inventory.
     const target = this.createTarget({
       var: this.makeVarResolver(undefined, parameters),
+      constantFold: options?.constantFold,
       naming: BaseCompiler.newNamingContext(expr, undefined, parameters),
     });
     // CSE is default-enabled; `options.cse` is the opt-out.
@@ -2888,7 +2917,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     functionName: string,
     parameters: string[],
     docstring?: string,
-    options?: { cse?: boolean }
+    options?: { cse?: boolean; constantFold?: boolean }
   ): string {
     const baseFunction = this.compileFunction(
       expr,
@@ -2916,7 +2945,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
   compileLambda(
     expr: Expression,
     parameters: string[],
-    options?: { cse?: boolean }
+    options?: { cse?: boolean; constantFold?: boolean }
   ): string {
     // A lambda body is an EXPRESSION position, so the same two single-line
     // statement shapes `compileToSource()` declines have no emission here
@@ -2925,6 +2954,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // Root compilation boundary (see `compile` and `compileFunction`).
     const target = this.createTarget({
       var: this.makeVarResolver(undefined, parameters),
+      constantFold: options?.constantFold,
       naming: BaseCompiler.newNamingContext(expr, undefined, parameters),
     });
     // Default-enabled, like `compileFunction`; `options.cse` is the opt-out.

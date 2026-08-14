@@ -27,8 +27,19 @@ const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 
-const g = (expr: any): string => glsl.compile(ce.box(expr)).code!;
-const w = (expr: any): string => wgsl.compile(ce.box(expr)).code!;
+/**
+ * Compile-time constant folding is off throughout this file. Every probe here
+ * is a literal constant (`Add(1, NaN)`, `Root(-8, 4)`, `Ln(-2)`), i.e. a pure
+ * subtree with no free variables that the compiler would otherwise evaluate at
+ * compile time and emit as a single literal — which is precisely the lowering
+ * these tests inspect: the bit-pattern `_gpu_nan()`/`_gpu_inf()` mechanism, the
+ * per-node real-vs-complex type agreement, and the complex helper each
+ * no-real-value constant routes through.
+ */
+const NO_FOLD = { constantFold: false } as const;
+
+const g = (expr: any): string => glsl.compile(ce.box(expr), NO_FOLD).code!;
+const w = (expr: any): string => wgsl.compile(ce.box(expr), NO_FOLD).code!;
 
 const NAN = { glsl: '_gpu_nan()', wgsl: 'bitcast<f32>(0x7fc00000u)' };
 const INF = { glsl: '_gpu_inf()', wgsl: 'bitcast<f32>(0x7f800000u)' };
