@@ -415,4 +415,28 @@ export type EvalContext<Expr = unknown, Binding = unknown> = {
    * `Comprehension` element memo survive unrelated scoped evaluations).
    */
   _assumptionsDirty?: boolean;
+  /**
+   * The engine's `_anyVersion`/`_semanticVersion`/`_worldVersion` observed
+   * when this context was pushed. The pop compares them against the current
+   * versions: if NO state event advanced ANY of the three axes while the
+   * context was on the stack (and its assumptions are clean), the pop is a
+   * provable no-op revert — nothing happened inside that a version-keyed
+   * cache could have observed — so it is emitted as
+   * `scope-pop {clean: true}`, which does not advance `any`. All three
+   * axes must be checked, not just `any`: a scoped operator redefinition
+   * emits `redefine`, which advances `semantic`+`world` but NOT `any`, yet
+   * ends the local operator's visibility at the pop — an `any`-keyed cache
+   * filled inside (e.g. the operator-name pool) must not survive it.
+   * Without the clean-pop carve-out, every read-only scoped probe (a
+   * `Comprehension` count/finiteness scan, a lazy-collection walk) retired
+   * every type cache engine-wide, and type derivation over an expression
+   * referencing a comprehension-bound name recomputed the whole subtree
+   * per node (Tycho item 181: one canonical box emitted 872K clean pops
+   * and 1.85M wasted type recomputes).
+   */
+  _anyVersionAtPush?: number;
+  /** See `_anyVersionAtPush` — the `semantic` half of the same stamp. */
+  _semanticVersionAtPush?: number;
+  /** See `_anyVersionAtPush` — the `world` half of the same stamp. */
+  _worldVersionAtPush?: number;
 };

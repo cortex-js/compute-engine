@@ -27,7 +27,19 @@ export type StateEvent =
   | { kind: 'binding-repair' } // variance settle, callable-swap repair, minted-ctor removal
   | { kind: 'redefine'; callableBefore: boolean; callableAfter: boolean }
   | { kind: 'type-write'; callableBefore: boolean; callableAfter: boolean }
-  | { kind: 'scope-pop'; assumptionsDirty: boolean; transient?: boolean }
+  | {
+      kind: 'scope-pop';
+      assumptionsDirty: boolean;
+      transient?: boolean;
+      /** Set by `discardEvalContext` (reached from `popEvalContext` and
+       * from the async pop-by-identity path `removeEvalContext`) when NONE
+       * of the engine's three axis versions advanced while the popped
+       * context was on the stack (and its assumptions are clean): the
+       * bracket performed no writes, declares, redefines, or assumptions,
+       * so the pop reverts nothing a version-keyed cache could have
+       * observed and must not advance `any`. */
+      clean?: boolean;
+    }
   | { kind: 'assumption' } // assume / forget
   | { kind: 'inference'; symbolSignature?: boolean; valueType?: boolean }
   | { kind: 'config' }; // precision, tolerance, angularUnit, jit, reset, type-statement redefinition
@@ -98,9 +110,12 @@ export function callableAxisSelects(e: StateEvent): boolean {
  *   accompanying `value-write`).
  * - `type-write`: direct def retype (§2c) — `any` only (R5-normalized in
  *   step 5: pre-design these bare routes advanced nothing).
- * - `scope-pop`: `any` always for `popEvalContext`, +`semantic`+`world`
- *   when assumptions dirty; the `transient` (`inScope`) variant advances
- *   `any` only when dirty (R5) — a clean transient pop is zero-mask.
+ * - `scope-pop`: `any` for `popEvalContext` unless the pop is `clean`
+ *   (the frame's push-time stamps prove no interior event advanced any of
+ *   the three axes, so there is nothing to retire — the item-181
+ *   amendment), +`semantic`+`world` when assumptions dirty; the
+ *   `transient` (`inScope`) variant advances `any` only when dirty (R5) —
+ *   a clean transient pop is zero-mask.
  * - `inference`: `BoxedFunction.infer` and the matrix freeze/restore — all
  *   three; `symbolSignature` (`BoxedSymbol.infer`, operator branch) — all
  *   three (R5); `valueType` (value branch) — `any` only (R5).
@@ -118,6 +133,16 @@ export function axisMaskOf(e: StateEvent): AxisMask {
     case 'binding-repair':
       return { any: true, semantic: false, world: false };
     case 'redefine':
+      // NOTE: since the clean-bracket pop carve-out (the `scope-pop {clean}`
+      // row below), every zero-`any` branch in this table is a CORRECTNESS
+      // precondition, not just a parity choice: `discardEvalContext` proves
+      // a bracket clean by comparing all three axis versions at push vs
+      // pop, so an event that advances none of them must be genuinely
+      // unobservable to version-keyed caches across a scope boundary — its
+      // effects covered by an atomically accompanying event that does
+      // advance an axis (here: the operator→scalar swap's value-write).
+      // A new emit site reaching a zero-mask branch without such a
+      // companion would let a stale cache survive a clean pop.
       return e.callableAfter
         ? { any: false, semantic: true, world: true }
         : { any: false, semantic: false, world: false };
@@ -132,7 +157,21 @@ export function axisMaskOf(e: StateEvent): AxisMask {
         // its `popEvalContext` twin. A clean transient pop stays zero-mask —
         // `inScope` runs per boxing operation, and its twin's unconditional
         // `any` exists for assumption reverts a clean pop does not perform.
-        any: !e.transient || e.assumptionsDirty,
+        //
+        // A `clean` pop — `discardEvalContext` proved via the frame's
+        // push-time version stamps that no event advanced ANY of the three
+        // axes inside the bracket (all three, because `redefine` advances
+        // `semantic`+`world` without `any` yet ends a local operator's
+        // visibility) — is likewise zero-mask on `any`: the pop-bump exists
+        // to retire answers computed under interior
+        // writes/declares/redefines/assumptions, and a bracket with none
+        // has nothing to retire. Without this, the
+        // push/pop-per-probe reads of lazy collections (`Comprehension`
+        // count/finiteness scans, `Filter` emptiness walks) invalidated the
+        // `_type`/`_sgn` caches the enclosing type derivation was filling —
+        // the Tycho item-181 blowup (872K clean pops, 1.85M wasted type
+        // recomputes in one canonical box).
+        any: (!e.transient && !e.clean) || e.assumptionsDirty,
         semantic: e.assumptionsDirty,
         world: e.assumptionsDirty,
       };

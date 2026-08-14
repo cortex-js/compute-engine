@@ -95,12 +95,20 @@ describe('axisMaskOf: the parity dispatch table, row by row', () => {
       { kind: 'type-write', callableBefore: true, callableAfter: false },
       mask(true, false, false),
     ],
-    // scope-pop: G always for popEvalContext, +M+E when assumptions dirty;
-    // the transient (inScope) variant has no G.
+    // scope-pop: G for popEvalContext unless the pop is `clean` (the
+    // frame's `_anyVersionAtPush` stamp proved no interior event advanced
+    // `any`, so there is nothing to retire — the item-181 amendment); +M+E
+    // when assumptions dirty; the transient (inScope) variant has no G.
     [
-      'scope-pop (clean)',
+      'scope-pop (assumptions clean, no cleanliness proof)',
       { kind: 'scope-pop', assumptionsDirty: false },
       mask(true, false, false),
+    ],
+    [
+      'scope-pop (proven clean bracket)', // item 181: zero-mask, or every
+      // read-only scoped probe retires every `_type`/`_sgn` cache
+      { kind: 'scope-pop', assumptionsDirty: false, clean: true },
+      mask(false, false, false),
     ],
     [
       'scope-pop (dirty)',
@@ -298,5 +306,53 @@ describe('end-to-end advancement (legacy counters, public API)', () => {
     const m = advanced(() => ce.declare('zprobe', 'integer'));
     expect(m.any).toBe(true);
     expect(m.world).toBe(false);
+  });
+});
+
+describe('clean-bracket eval-context pops (Tycho item 181 amendment)', () => {
+  // `discardEvalContext` proves a pop clean by comparing all three axis
+  // versions against their push-time stamps; a clean pop is zero-mask on
+  // `any`. These pins cover both halves: the carve-out itself, and the
+  // all-three-axes requirement (a `redefine` advances `semantic`+`world`
+  // without `any`, yet ends a local operator's visibility at the pop, so
+  // the pop must still retire `any`-keyed caches).
+  let ce: ComputeEngine;
+  beforeEach(() => {
+    ce = new ComputeEngine();
+  });
+
+  const freshScope = () => ({
+    parent: ce.context.lexicalScope,
+    bindings: new Map(),
+  });
+
+  test('an empty push/pop bracket does not advance any axis', () => {
+    const a0 = ce._anyVersion;
+    const s0 = ce._semanticVersion;
+    const w0 = ce._worldVersion;
+    ce._pushEvalContext(freshScope() as any);
+    ce._popEvalContext();
+    expect(ce._anyVersion).toBe(a0);
+    expect(ce._semanticVersion).toBe(s0);
+    expect(ce._worldVersion).toBe(w0);
+  });
+
+  test('a bracket containing a redefine-only event still bumps any at pop', () => {
+    ce._pushEvalContext(freshScope() as any);
+    // Simulate the scoped operator-redefinition path, whose SOLE event is
+    // `redefine` (semantic+world, no `any` — see the assign-operator branch
+    // in engine-declarations.ts).
+    ce._noteStateEvent({
+      kind: 'redefine',
+      callableBefore: false,
+      callableAfter: true,
+    });
+    const a1 = ce._anyVersion;
+    ce._popEvalContext();
+    // The pop must NOT have proven cleanliness from `any` alone: the
+    // semantic/world advance inside the bracket disqualifies it, so the pop
+    // itself advances `any` and retires `any`-keyed caches (the
+    // operator-name pool) that saw the bracket-local operator.
+    expect(ce._anyVersion).toBeGreaterThan(a1);
   });
 });

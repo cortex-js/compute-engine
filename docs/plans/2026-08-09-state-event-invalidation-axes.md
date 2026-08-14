@@ -570,6 +570,38 @@ axis that must see assumption reverts (including `callable`, §5) selects
 `scope-pop{assumptionsDirty: true}` in its predicate. One event, counted
 once, on every axis that cares.
 
+**AMENDMENT 2026-08-14 (Tycho item 181, clean-bracket pops):** the
+"G always for `popEvalContext`" half above is now conditional on a
+cleanliness proof. Each eval context records ALL THREE axis versions at
+push (`_anyVersionAtPush`/`_semanticVersionAtPush`/`_worldVersionAtPush`);
+if at pop none has advanced AND the context's assumptions are clean, the
+pop is emitted as `scope-pop {clean: true}`, whose mask is zero on `any`
+(dirty pops are unaffected — assume/forget advance the axes, so a dirty
+context can never prove cleanliness). Rationale: the G-bump exists to
+retire answers computed under interior writes/declares/redefines/
+assumption changes, and every such interior change advances at least one
+axis itself when it happens — so a bracket that advanced none has nothing
+to retire, exactly the argument that already made clean `transient` pops
+zero-mask under R5. All three axes must be in the proof, not `any` alone:
+`redefine` advances `semantic`+`world` without `any`, yet a scoped
+operator redefinition ends the local operator's visibility at the pop, so
+an `any`-keyed cache filled inside the bracket (the operator-name pool)
+must not survive it (dual-review finding, 2026-08-14). Corollary: every
+zero-mask row in §4's table (`redefine {callableAfter: false}`,
+`inference {valueType}`, clean transient pops) is now a CORRECTNESS
+precondition of the proof — such an event must be genuinely unobservable
+to version-keyed caches across a scope boundary, or atomically paired
+with an axis-advancing companion event. Without this, the push/pop-per-probe
+reads of lazy collections (`Comprehension` count/finiteness scans,
+`Filter` emptiness walks) invalidated the `_type`/`_sgn` caches the
+enclosing type derivation was filling: canonically boxing one row that
+references a comprehension-bound name emitted 872K clean pops and 1.85M
+type recomputes (measured 100% wasted — identical results), ~7–17 s for
+the box and ~60–170 s for the first `.type` read. With the amendment the
+same pipeline is ~50 ms. Pinned by the `scope-pop (proven clean bracket)`
+row in `state-events.test.ts` and the version-advance budget in
+`test/compute-engine/tycho-item-181-comprehension-boxing.test.ts`.
+
 ## 5. Axes
 
 **Existing three: defined by transcription, not by predicate.** Revision 1

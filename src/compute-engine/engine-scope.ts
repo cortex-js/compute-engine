@@ -54,6 +54,12 @@ export function pushEvalContext(
     lexicalScope: scope,
     name,
     assumptions: new ExpressionMap(ce.context?.assumptions ?? []),
+    // Pushing advances no axis, so record all three axis versions for the
+    // pop's clean-bracket check (see `_anyVersionAtPush` in
+    // `types-kernel-evaluation.ts` for why `any` alone is not enough).
+    _anyVersionAtPush: ce._anyVersion,
+    _semanticVersionAtPush: ce._semanticVersion,
+    _worldVersionAtPush: ce._worldVersion,
   });
 }
 
@@ -119,9 +125,33 @@ function discardEvalContext(
   // context's assumptions were modified — a clean pop leaves it untouched so
   // mutation-keyed caches survive unrelated scoped evaluations (Tycho
   // item 38).
+  //
+  // The `clean` payload carries the `any` half of the same argument: when
+  // NOTHING advanced any of the three axes while this context was on the
+  // stack (every install of a local binding or value goes through an event
+  // that advances at least one — `declare` and `value-write` including
+  // ephemeral index writes advance `any`; a scoped operator redefinition
+  // advances `semantic`+`world` but NOT `any`, which is why the check must
+  // cover all three — and pushing itself changes nothing), there is no
+  // silent revert for the pop to cover, and the pop must not advance `any`
+  // either. This is what keeps
+  // a read-only scoped probe — a `Comprehension` count/finiteness scan, a
+  // lazy `Filter` emptiness walk — from retiring every `_type`/`_sgn` cache
+  // engine-wide: those probes bracket with push/pop per read, and with an
+  // unconditional bump each probe invalidated the very caches the enclosing
+  // type derivation was filling, so boxing a row that references a
+  // comprehension-bound name recomputed the whole subtree per node (Tycho
+  // item 181: 872K clean pops and 1.85M wasted type recomputes in ONE
+  // canonical box, ~60–90 s per `.type` read).
+  const clean =
+    context?._assumptionsDirty !== true &&
+    context?._anyVersionAtPush === ce._anyVersion &&
+    context?._semanticVersionAtPush === ce._semanticVersion &&
+    context?._worldVersionAtPush === ce._worldVersion;
   ce._noteStateEvent({
     kind: 'scope-pop',
     assumptionsDirty: context?._assumptionsDirty === true,
+    ...(clean ? { clean: true } : {}),
   });
 }
 
