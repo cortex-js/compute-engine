@@ -88,6 +88,56 @@ describe('STATIC CHECK — engine state rolls back', () => {
     expect(def.value.type.toString()).toBe(typeBefore);
   });
 
+  test('a pinned `:=` signature registration is undone', () => {
+    // The pass registers the signature a `f := ⟨annotated literal⟩` statement
+    // pins so LATER statements check named calls against it
+    // (`registerPinnedSignature`, static-diagnostics.ts). When the name
+    // pre-exists as an outer inferred binding (a previous cell's forward
+    // reference auto-declared it wildcard `function`), the registration
+    // writes onto that OUTER definition — the rollback frame must undo it.
+    const ce = new ComputeEngine();
+    ce.box(['g', 1]).evaluate();
+    const def = ce.lookupDefinition('g')!;
+    if (!isValueDef(def)) throw new Error('expected a value definition');
+    const typeBefore = def.value.type.toString();
+
+    const diagnostics = check(
+      ce,
+      'g := (x: number, y: string) |-> x + 3\ng(y: "ok", x: 1)'
+    );
+    expect(diagnostics).toHaveLength(0);
+    expect(ce.lookupDefinition('g')).toBe(def);
+    expect(def.value.type.toString()).toBe(typeBefore);
+
+    // A name the checked program INTRODUCES registers into the pass's own
+    // scope, which pops with it — nothing to roll back, nothing left behind.
+    const second = check(
+      ce,
+      'f := (x: number, y: string) |-> x + 3\nf(y: "ok", x: 1)'
+    );
+    expect(second).toHaveLength(0);
+    expect(ce.lookupDefinition('f')).toBeUndefined();
+  });
+
+  test('assigning over an engine CONSTANT never re-pins its definition', () => {
+    // `Pi := ⟨annotated literal⟩` resolves the target to the engine-global
+    // constant definition; `registerPinnedSignature`'s `isConstant` guard
+    // must decline before any write, or checking would retype π for the
+    // whole engine (the rollback frame would undo it, but the guard keeps
+    // the invariant unconditional — the type of a constant is never
+    // inferred).
+    const ce = new ComputeEngine();
+    const def = ce.lookupDefinition('Pi')!;
+    if (!isValueDef(def)) throw new Error('expected a value definition');
+    const typeBefore = def.value.type.toString();
+
+    check(ce, 'Pi := (x: number, y: string) |-> x + 3\nPi(y: "ok", x: 1)');
+
+    expect(ce.lookupDefinition('Pi')).toBe(def);
+    expect(def.value.type.toString()).toBe(typeBefore);
+    expect(def.value.isConstant).toBe(true);
+  });
+
   test('route parity after a checked program: box, ce.function and parse agree', () => {
     const ce = new ComputeEngine();
     ce.declare('u', 'unknown');

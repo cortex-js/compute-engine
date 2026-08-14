@@ -988,3 +988,107 @@ describe('EPSIL EXECUTE — diagnostic anchoring inside a NAMED call', () => {
     expect(src.slice(valueRange[0], valueRange[1])).toBe('x: "bad"');
   });
 });
+
+describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)', () => {
+  // Assignment and declaration are evaluation-time effects, so the static
+  // pre-pass — which canonicalizes every statement before any evaluates —
+  // used to see the callee of a named call as an auto-declared symbol with no
+  // parameter names, and drew one false `argument-names-unavailable`
+  // diagnostic per argument for a program that runs fine. The pass now
+  // registers the signature such a statement pins for its LATER statements
+  // (`registerPinnedSignature`, src/epsil/static-diagnostics.ts).
+
+  test('named call to a `:=`-assigned annotated literal is statically clean', () => {
+    const { value, diagnostics } = run(
+      'f := (x: number, y: string) |-> x + 3\nf(y: "ok", x: 1)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
+  });
+
+  test('named call through an annotated declaration is statically clean', () => {
+    const { value, diagnostics } = run(
+      'const g : (x: number, y: string) -> number = (x, y) |-> x + 3\ng(y: "ok", x: 1)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
+  });
+
+  test('an annotation-only declaration pins the names too', () => {
+    // No initializer: at runtime the call permutes against the declared
+    // signature and stays inert, so a static decline would be just as false.
+    const { value, diagnostics } = run(
+      'let g : (x: number, y: string) -> number\ng(y: "ok", x: 1)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.toString()).toBe('g(1, "ok")');
+  });
+
+  test('positional-call control: unchanged, statically clean', () => {
+    const { value, diagnostics } = run(
+      'f := (x: number, y: string) |-> x + 3\nf(1, "ok")'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
+  });
+
+  test('a named call to an UNANNOTATED `:=`-assigned literal still declines', () => {
+    // Type inference drops parameter names (`effects-inference.ts` types a
+    // bare parameter `{ type: 'unknown' }`), so this named call fails at
+    // runtime too — the static diagnostics are TRUE predictions and must
+    // keep firing (ROADMAP "Named-argument calls — v1 residuals").
+    const { value, diagnostics } = run('h := (x, y) |-> x + 3\nh(y: 2, x: 1)');
+    expect(diagnostics.map((d) => d.message[3])).toEqual([
+      'argument-names-unavailable',
+      'argument-names-unavailable',
+    ]);
+    expect(value.errors.length).toBeGreaterThan(0);
+  });
+
+  test('a named call written BEFORE the assignment still declines', () => {
+    // Registration follows statement order, so statement 1's callee has no
+    // names to check — matching the runtime, where `f` is unassigned there:
+    // two static diagnostics plus statement 1's runtime-error, and none for
+    // statement 3, which computes 12.
+    const src =
+      'f(y: "ok", x: 1)\nf := (x: number, y: string) |-> x + 3\nf(y: "no", x: 9)';
+    const { value, diagnostics } = run(src);
+    expect(diagnostics.map((d) => d.message[3])).toEqual([
+      'argument-names-unavailable',
+      'argument-names-unavailable',
+      'argument-names-unavailable',
+    ]);
+    expect(value.re).toBe(12);
+    const firstLineEnd = src.indexOf('\n');
+    for (const d of diagnostics)
+      expect(d.range[1]).toBeLessThanOrEqual(firstLineEnd);
+  });
+
+  test('reassignment: the FIRST pinned signature owns the names', () => {
+    // Mirror of the runtime, where the first assignment pins the binding's
+    // declared type — the place parameter names live — and a later
+    // reassignment never re-pins it: the second literal's names are unknown
+    // at runtime, and the static tier reports the same problem.
+    const src =
+      'f := (x: number, y: number) |-> x + 3\nf := (a: number, b: number) |-> a * b\nf(a: 2, b: 5)';
+    const { value, diagnostics } = run(src);
+    expect(diagnostics.map((d) => [d.message[0], d.message[3]])).toEqual([
+      ['static-type-error', 'argument-name-unknown'],
+    ]);
+    expect(value.errors.length).toBeGreaterThan(0);
+  });
+
+  test('incompatible reassignment: the first names keep working, no false static diagnostics', () => {
+    // The incompatible literal reassignment fails at runtime (surfaced as
+    // statement 2's runtime-error) and leaves the original binding in force,
+    // so the final call computes 4 with the FIRST signature's names — and
+    // draws no static diagnostic.
+    const src =
+      'f := (x: number, y: string) |-> x + 3\nf := (a: number, b: number) |-> a * b\nf(x: 1, y: "ok")';
+    const { value, diagnostics } = run(src);
+    expect(diagnostics.map((d) => [d.message[0], d.message[3]])).toEqual([
+      ['runtime-error', 'incompatible-type'],
+    ]);
+    expect(value.re).toBe(4);
+  });
+});

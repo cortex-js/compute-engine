@@ -6,6 +6,8 @@ import {
   operator,
   stringValue,
 } from '../math-json/utils.js';
+import type { Type } from '../common/type/types.js';
+import { isWildcardFunctionType } from '../common/type/utils.js';
 
 // Type-only import: like `execute-epsil.ts`, this module never statically
 // imports the engine — the engine is injected at call time.
@@ -33,6 +35,7 @@ import {
   calleeSlotNames,
   errorIndexCountsWrittenArguments,
 } from '../compute-engine/boxed-expression/named-arguments.js';
+import { isValueDef } from '../compute-engine/boxed-expression/utils.js';
 import { signatureNotes } from './signature-notes.js';
 
 /**
@@ -152,12 +155,18 @@ function isCanonicalizationError(code: string): boolean {
  * the write is rolled back when the pass ends, so a checked-but-never-run
  * program leaves outer definitions untouched.
  *
- * **Prior declarations are not modeled.** Each statement is canonicalized in
- * source order but *without* applying the bindings the preceding statements
- * declare — `Declare`/`Assign` only take effect when they evaluate, which this
- * pass never does. The pass is therefore incomplete rather than unsound: a
- * mistake that depends on a declared type is missed (`let x: string = "a"`
- * followed by `x + 1` checks clean), and the program reports it when it runs.
+ * **Prior declarations are mostly not modeled.** Each statement is
+ * canonicalized in source order but *without* applying the bindings the
+ * preceding statements declare — `Declare`/`Assign` only take effect when they
+ * evaluate, which this pass never does. The pass is therefore incomplete
+ * rather than unsound: a mistake that depends on a declared type is missed
+ * (`let x: string = "a"` followed by `x + 1` checks clean), and the program
+ * reports it when it runs. One carve-out: a top-level statement that pins a
+ * names-carrying function signature (`f := ⟨annotated literal⟩`,
+ * `let f : ⟨arrow type⟩ …`) registers that signature for the LATER statements
+ * of the same program — see {@link registerPinnedSignature} — because without
+ * it a named call to such a callee drew false `argument-names-unavailable`
+ * diagnostics for a program that runs fine.
  */
 export function staticDiagnostics(
   ce: ComputeEngine,
@@ -242,6 +251,14 @@ function canonicalizationDiagnostics(
   const defSites = definitionSites(ast);
 
   const diagnostics: ParsingDiagnostic[] = [];
+  // The signatures this program's own statements pin (`f := ⟨annotated
+  // literal⟩`, `let f : ⟨arrow type⟩`), registered onto the definitions as
+  // the walk reaches them — see `registerPinnedSignature`. FIRST-wins per
+  // name, and kept here as well as on the definition because boxing a LATER
+  // `Assign` to the same name runs the recursion-knot retype (library/
+  // core.ts), which resets the target to the wildcard `function` type — the
+  // pass re-asserts the pinned signature from this map afterwards.
+  const pinned = new Map<string, Type>();
   for (const statement of statements) {
     // Provenance: the `Error` nodes the statement already carries *before*
     // canonicalization are source-authored values, not static problems.
@@ -257,6 +274,21 @@ function canonicalizationDiagnostics(
       // left to the run phase rather than crashing the check.
       continue;
     }
+
+    // A declaration whose initializer PROVABLY cannot satisfy the annotation
+    // is a static problem too, even though `Declare` only enforces it at
+    // evaluation time (see `declaredTypeMismatch`). Computed BEFORE the
+    // signature registration below: when the mismatch is provable, the
+    // runtime `Declare` refuses to install the binding, so registering its
+    // signature would model a binding the program never gets.
+    const declMismatch = declaredTypeMismatch(ce, boxed);
+
+    // If this statement pins a names-carrying function signature when it
+    // evaluates, make the pinned signature visible to the LATER statements of
+    // this program (never to earlier ones — registration follows the walk's
+    // source order, so a call written before the assignment still has no
+    // names to check, matching the runtime where the callee is unassigned).
+    if (declMismatch === undefined) registerPinnedSignature(ce, boxed, pinned);
 
     const errors: MathJsonExpression[] = [];
     collectErrors(canonical, errors);
@@ -299,10 +331,6 @@ function canonicalizationDiagnostics(
           for (let i = ops.length - 1; i >= 0; i--) stack.push(ops[i]);
       }
     }
-    // A declaration whose initializer PROVABLY cannot satisfy the annotation
-    // is a static problem too, even though `Declare` only enforces it at
-    // evaluation time (see `declaredTypeMismatch`).
-    const declMismatch = declaredTypeMismatch(ce, boxed);
     if (errors.length === 0 && declMismatch === undefined) continue;
 
     const [start, end] = statementRange(statement, source);
@@ -393,6 +421,125 @@ function canonicalizationDiagnostics(
   }
 
   return diagnostics;
+}
+
+/**
+ * Provisionally register the function signature a statement will PIN when it
+ * evaluates, so the later statements of the same program check their calls —
+ * named calls in particular — against it. Two spellings pin one:
+ *
+ * - `f := (x: number, y: string) |-> …` — assignment of a function literal
+ *   whose own (annotated) type is a signature carrying parameter names;
+ * - `let/const f : (x: number, y: string) -> number [= …]` — a declaration
+ *   whose type annotation is such a signature (with or without an
+ *   initializer: the annotation alone pins it).
+ *
+ * Both are evaluation-time effects this pass otherwise cannot see ("prior
+ * declarations are mostly not modeled" above), so before this carve-out a
+ * named call to such a callee drew one false `argument-names-unavailable`
+ * static diagnostic per argument for a program that runs fine. (`function
+ * f(…) {…}` definitions never had the problem: `DefineFunction` installs its
+ * clause at canonicalization.)
+ *
+ * Deliberately narrow, so every diagnostic the pass still emits stays
+ * truthful:
+ *
+ * - Only a signature that CARRIES at least one parameter name registers. An
+ *   UNANNOTATED literal's inferred signature drops its names
+ *   (`effects-inference.ts` types a bare parameter `{ type: 'unknown' }`), so
+ *   a named call to `h := (x, y) |-> …` fails at runtime too and the static
+ *   diagnostic is a true prediction — it must keep firing.
+ * - An `Assign` registers only a function-LITERAL right-hand side. Any other
+ *   expression's static type is an upper bound, not the signature the
+ *   assignment will pin, and permuting a call against a guessed signature
+ *   could silently reorder arguments.
+ * - Registration is FIRST-wins per name (the `pinned` map), mirroring the
+ *   runtime: reassigning a pinned binding to an incompatible signature is a
+ *   runtime error that leaves the original binding in force, and even a
+ *   compatible reassignment leaves the binding's declared TYPE — where the
+ *   parameter names live — unchanged. First-wins also keeps `infer()`'s
+ *   `narrow(old, new)` off the incompatible-signatures path, whose meet is
+ *   `never`. The map is needed on top of the definition's own state because
+ *   boxing a later `Assign` to the same name runs the recursion-knot retype
+ *   (library/core.ts), resetting the target to the wildcard `function` type
+ *   mid-pass — after such a statement the pinned signature is re-asserted
+ *   from the map.
+ * - Beyond first-wins, registration only fills a BLANK: an inferred `unknown`
+ *   or wildcard `function` type (the auto-declaration a forward reference
+ *   creates). A pre-existing concrete type — a user declaration, an earlier
+ *   cell's binding — wins for the same mirror-the-runtime reason.
+ *
+ * The write goes through `infer()` on a bound symbol — the `Assign`/`Declare`
+ * operands hold their target structurally, unbound — inside the pass's
+ * inference rollback frame, so it is journaled and undone when the pass ends:
+ * checking still mutates nothing (`test/epsil/static-check-rollback.test.ts`).
+ * A name that was not yet declared auto-declares into the pass's own scope,
+ * which pops with it.
+ */
+function registerPinnedSignature(
+  ce: ComputeEngine,
+  boxed: ReturnType<ComputeEngine['box']>,
+  pinned: Map<string, Type>
+): void {
+  let name: string | null = null;
+  let type: Type | undefined = undefined;
+  if (isFunction(boxed, 'Assign')) {
+    const target = boxed.ops[0];
+    name = isSymbol(target) ? target.symbol : null;
+    // ANY assignment to an already-pinned name may just have run the
+    // recursion-knot retype and blanked the definition — re-assert the
+    // first-registered signature (see the doc comment) whatever this
+    // statement's right-hand side is.
+    const already = name === null ? undefined : pinned.get(name);
+    if (already !== undefined) {
+      ce.box(name!).infer(already, 'narrow');
+      return;
+    }
+    const rhs = boxed.ops[1];
+    if (rhs !== undefined && rhs.operator === 'Function') type = rhs.type.type;
+  } else if (isFunction(boxed, 'Declare')) {
+    // `["Declare", sym, "'type'", {dict}?]` — the annotation is positional
+    // and optional (same shape `declaredTypeMismatch` reads).
+    const typeOp = boxed.ops[1];
+    if (isString(typeOp)) {
+      const target = boxed.ops[0];
+      name = isSymbol(target) ? target.symbol : null;
+      try {
+        type = ce.type(typeOp.string).type;
+      } catch {
+        // A malformed annotation is already a `type-annotation-error`.
+        return;
+      }
+    }
+  }
+  if (name === null || type === undefined) return;
+  if (!isNamedSignature(type) || pinned.has(name)) return;
+
+  const def = ce.lookupDefinition(name);
+  if (def !== undefined) {
+    // An operator definition (a builtin, or a `function` definition earlier
+    // in this program) is not this statement's to re-pin.
+    if (!isValueDef(def)) return;
+    if (def.value.isConstant) return;
+    // Fill-a-blank gate (see the doc comment above).
+    if (!def.value.inferredType && !def.value.type.isUnknown) return;
+    if (
+      !def.value.type.isUnknown &&
+      !isWildcardFunctionType(def.value.type.type)
+    )
+      return;
+  }
+  if (ce.box(name).infer(type, 'narrow')) pinned.set(name, type);
+}
+
+/** Is `t` a function signature declaring at least one parameter NAME — the
+ * shape a named-argument call can be matched against? A signature without
+ * names (every unannotated literal's inferred type) is positional-only. */
+function isNamedSignature(t: Type): boolean {
+  if (typeof t === 'string' || t.kind !== 'signature') return false;
+  return [...(t.args ?? []), ...(t.optArgs ?? [])].some(
+    (a) => a.name !== undefined
+  );
 }
 
 /**
