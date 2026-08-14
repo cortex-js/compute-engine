@@ -23,6 +23,12 @@ ce.declare('Q', 'tuple<number, number>');
 ce.declare('zc', 'complex');
 
 const VARS = {
+  // Several of the shapes below (a literal boolean-list condition, a literal
+  // list arm) have no free variables, so compile-time constant folding would
+  // evaluate the whole subtree and emit a literal vector instead of exercising
+  // the selection lowering (and instead of reaching the fail-closed gate).
+  // These tests are about the lowering, so folding is off for the whole file.
+  constantFold: false,
   vars: {
     N2: 'u_m',
     N4: 'u_n',

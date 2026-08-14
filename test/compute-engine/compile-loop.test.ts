@@ -268,7 +268,10 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
       ['Element', 'x', ['Range', 1, 3]],
       ['Element', 'y', ['Range', 4, 5]],
     ]);
-    const result = compile(expr);
+    // `constantFold: false`: both ranges are literal, so the comprehension
+    // would otherwise be evaluated at compile time and emitted as the literal
+    // `[1, 1, 2, 2, 3, 3]` — this test pins the for-of lowering, not the fold.
+    const result = compile(expr, { constantFold: false });
     expect(result.success).toBe(true);
     expect(result.code).toContain('for (const x of');
     expect(result.code).toContain('for (const y of');

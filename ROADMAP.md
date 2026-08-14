@@ -110,6 +110,37 @@ than a truncation. Known cost, accepted by the ruling: a convergent
 series the acceleration cannot certify now stays symbolic where it
 previously returned an uncertified truncation — see the entry below.
 
+### A compiled user function declared `-> complex` returns a corrupt value
+
+A user function whose signature declares a `complex` result compiles to a
+call whose emitted body does SCALAR arithmetic on the complex `{re, im}`
+object, so the result's `re` field is a string concatenation. Reproduction
+(no constant folding involved — it reproduces with a run-time argument and
+`constantFold: false`):
+
+```js
+ce.declare('Q', { signature: '(complex) -> complex' });
+ce.assign('Q', ce.box(['Function', ['Block', ['Add', 'z', ['Complex', 0, 1]]], 'z']));
+compile(ce.box(['Q', 'w'])).run({ w: { re: 1, im: -1 } });
+// ➔ { re: '[object Object]0', im: 1 }      the interpreter answers 1
+```
+
+The `'[object Object]0'` is the tell: the emitted definition adds the
+complex literal's real part to the whole parameter OBJECT (`z + 0`) instead
+of routing the addition through the target's complex helper, so the
+user-function body lowering is not applying the complex arithmetic path
+that ordinary `Add` over complex operands uses. The value is silently
+wrong rather than failing closed, which makes it the worst shape of
+compile defect.
+
+Found 2026-08-14 while extending constant folding to collections; it is
+independent of that work (folding a constant call actually produces the
+CORRECT value, which is how the divergence surfaced). Fix in the
+JavaScript target's user-function emission: the body must compile under
+the same complex-operand dispatch a top-level expression gets, or the
+declaration must fail closed. Check the other targets for the same hole
+while there.
+
 ### `.N()` declines convergent series whose tail is not an integer power of 1/N
 
 The Richardson/Neville acceleration behind infinite-series `.N()`
@@ -314,6 +345,47 @@ Fungrim corpus/artifact. Two follow-ups:
   green after: drift 0/0/0, artifact-freshness OK, fungrim suites
   148/148 (count pins updated: byPurpose simplify 1311→1304, expand
   116→123), rule-dispatch oracle byte-identical (172/172 snapshots).
+
+### ~~Same-clause replacement within one program~~ (RULED and IMPLEMENTED 2026-08-14)
+
+**User ruling**: a clause that REPLACES one defined by another statement
+of the same compilation unit now fails with a `function-redefinition`
+diagnostic. Across units — two `ce.parse`/`ce.evaluate` calls, a re-run
+notebook cell — it stays last-wins, and the host routes, which carry no
+origin stamp, are never affected.
+
+The deferral's stated basis was "no evidence either way"; the argument
+that settled it is the notebook one Tycho put forward: cells are
+re-executed and edited in place, so a duplicated parameter list is more
+often stale text than a deliberate hot-fix, and the failure was silent
+AND value-changing.
+
+Only REPLACEMENT is refused. Clause ADDITION at a distinct parameter list
+(`fib(0) = 0; fib(1) = 1; fib(n) = …`) is what multi-clause functions
+exist for and is untouched. "Same clause" is not a new judgement: it is
+`sameParameterDomain` (`multi-clause.ts`), the test dispatch itself uses
+to choose replace-vs-append, so what is refused is exactly what would
+have been silently overwritten.
+
+A latent defect surfaced while implementing it and is fixed in the same
+change: matching origin stamps by anchor OBJECT identity is not sound,
+because one statement is boxed more than once from the same source (the
+static pre-pass, then the evaluation loop) and those boxings produce
+different anchor objects. Stamps now match on the source RANGE when both
+carry one, with object identity as the fallback for hand-built MathJSON
+(`sameStatement`, `declaration-origin.ts`).
+
+Pins: `test/epsil/redefinition-discipline.test.ts` ("the discipline over
+function clauses", 11 tests across addition / within-unit refusal /
+across-unit last-wins / host-route exemption).
+
+**Known gap, deliberate**: this is a RUNTIME-tier check only. `epsil
+check` / `staticDiagnostics` does not yet flag a duplicated clause before
+running, where a duplicated `type`/`protocol` is flagged on both tiers.
+Closing it needs clause signatures computed in the static pass (the
+domain test is type-level, not syntactic — renaming a parameter does not
+make a new clause). Editor feedback is the only thing affected; every
+execution route reports it.
 
 ### `Reverse` of a tuple: static type lies about element order (found 2026-08-14, string-spec review round 2)
 

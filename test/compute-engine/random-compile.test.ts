@@ -581,7 +581,13 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   const gpuDraws = (json: any, lang: 'glsl' | 'wgsl' = 'glsl'): number =>
     (gpuCode(json, lang).match(/_gpu_rnd_draw/g) ?? []).length;
   const jsCode = (json: any): string =>
-    compile(ce.box(json), { fallback: false }).code ?? '';
+    compile(ce.box(json), {
+      fallback: false,
+      // These tests pin emitted JS source byte for byte (and count the draws
+      // in it), so the constant operands and the seeded frames must survive
+      // to code generation instead of being folded to a literal.
+      constantFold: false,
+    }).code ?? '';
   const jsDraws = (json: any): number =>
     (jsCode(json).match(/drawNextRandomNumber/g) ?? []).length;
   /** WGSL has no unframed draw — a seed frame is required there. */

@@ -107,7 +107,12 @@ describe('GPU OPERAND SHAPE GATE — invalid shader source fails closed', () => 
         ['Exp', V3],
         ['Sin', M2],
       ]) {
-        const r = target.compile(ce.box(expr as any), { fallback: true });
+        // `...NO_FOLD`: these probes are all-literal, so constant folding would
+        // emit a folded literal instead of reaching the operand-shape gate.
+        const r = target.compile(ce.box(expr as any), {
+          fallback: true,
+          ...NO_FOLD,
+        });
         expect(r.success).toBe(false);
         expect(r.code ?? '').toBe('');
       }
@@ -319,7 +324,12 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
       [wgsl, ['Mix', 0.5, V3, W3]],
       [wgsl, ['Refract', 0.5, V3, W3]],
     ] as const) {
-      const r = target.compile(ce.box(expr as any), { fallback: true });
+      // `...NO_FOLD`: these probes are all-literal, so constant folding would
+      // emit a folded literal instead of reaching the operand-shape gate.
+      const r = target.compile(ce.box(expr as any), {
+        fallback: true,
+        ...NO_FOLD,
+      });
       expect(r.success).toBe(false);
       expect(r.code ?? '').toBe('');
     }

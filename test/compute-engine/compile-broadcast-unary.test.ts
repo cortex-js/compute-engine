@@ -36,9 +36,18 @@ const wgsl = new WGSLTarget();
 const python = new PythonTarget();
 const intervalJs = new IntervalJavaScriptTarget();
 
-const g = (expr: any): string => glsl.compile(ce.box(expr)).code!;
-const w = (expr: any): string => wgsl.compile(ce.box(expr)).code!;
-const p = (expr: any): string => python.compile(ce.box(expr)).code!;
+// `constantFold: false` throughout: what is under test is the LOWERING of a
+// broadcast unary head over a collection — the emitted source and, for the
+// shapes with no componentwise lowering, the fail-closed diagnostic. Every
+// probe below uses a literal list operand, so compile-time constant folding
+// would evaluate the whole subtree and emit a literal (`vec4(0.841…, …)`)
+// instead, short-circuiting the very code path being pinned.
+const g = (expr: any): string =>
+  glsl.compile(ce.box(expr), { constantFold: false }).code!;
+const w = (expr: any): string =>
+  wgsl.compile(ce.box(expr), { constantFold: false }).code!;
+const p = (expr: any): string =>
+  python.compile(ce.box(expr), { constantFold: false }).code!;
 
 describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
   let warn: jest.SpyInstance;
@@ -200,15 +209,22 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
   });
 
   describe('JavaScript — unchanged `_SYS.bcast`', () => {
+    // `constantFold: false`: the operand is a literal list, so compile-time
+    // folding would answer the whole expression from the interpreter and emit
+    // a literal array instead of the `_SYS.bcast` closure under test.
     it('broadcasts a unary head through the runtime helper', () => {
-      const r = compile(ce.box(['Sin', ['List', 1, 2, 3, 4]]));
+      const r = compile(ce.box(['Sin', ['List', 1, 2, 3, 4]]), {
+        constantFold: false,
+      });
       expect(r.success).toBe(true);
       expect(r.code).toBe('_SYS.bcast((_tv1) => Math.sin(_tv1), [1, 2, 3, 4])');
       expect(r.code).not.toContain('.map(');
     });
 
     it('broadcasts a prefix operator through the runtime helper', () => {
-      const r = compile(ce.box(['Negate', ['List', 1, 2, 3, 4]]));
+      const r = compile(ce.box(['Negate', ['List', 1, 2, 3, 4]]), {
+        constantFold: false,
+      });
       expect(r.success).toBe(true);
       expect(r.run!({})).toEqual([-1, -2, -3, -4]);
     });
@@ -238,8 +254,14 @@ describe('BROADCAST OF A STRING-MAPPED HEAD (JavaScript)', () => {
   });
   afterAll(() => warn.mockRestore());
 
+  // `constantFold: false` on the concrete-list probes below: their operands
+  // are all literal, so compile-time folding would emit the evaluated array
+  // and never exercise the `_SYS.bcast` wrapping of the scalar CALL, which is
+  // the defect these tests pin.
   it('Sign broadcasts over a concrete list', () => {
-    const r = compile(ce.box(['Sign', ['List', 3, -4, 0]]));
+    const r = compile(ce.box(['Sign', ['List', 3, -4, 0]]), {
+      constantFold: false,
+    });
     expect(r.success).toBe(true);
     expect(r.code).toBe('_SYS.bcast((_tv1) => Math.sign(_tv1), [3, -4, 0])');
     expect(r.run!({})).toEqual([1, -1, 0]);
@@ -252,7 +274,9 @@ describe('BROADCAST OF A STRING-MAPPED HEAD (JavaScript)', () => {
   });
 
   it('Arctan2 broadcasts n-ary, zipping the scalar operand', () => {
-    const r = compile(ce.box(['Arctan2', ['List', 1, 2, 3], 1]));
+    const r = compile(ce.box(['Arctan2', ['List', 1, 2, 3], 1]), {
+      constantFold: false,
+    });
     expect(r.success).toBe(true);
     expect(r.code).toBe(
       '_SYS.bcast((_tv1, _tv2) => Math.atan2(_tv1, _tv2), [1, 2, 3], 1)'
@@ -263,7 +287,9 @@ describe('BROADCAST OF A STRING-MAPPED HEAD (JavaScript)', () => {
   });
 
   it('Hypot broadcasts n-ary', () => {
-    const r = compile(ce.box(['Hypot', ['List', 3, 6], 4]));
+    const r = compile(ce.box(['Hypot', ['List', 3, 6], 4]), {
+      constantFold: false,
+    });
     expect(r.success).toBe(true);
     const out = r.run!({}) as unknown as number[];
     expect(out[0]).toBeCloseTo(5, 12);

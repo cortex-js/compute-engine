@@ -425,18 +425,24 @@ describe('Append: the compile targets follow the variadic form', () => {
   // binary-only lowering would silently DROP all but the first.
   const flat: Expression = ['Append', ['Append', ['List', 1, 2], 3], 4];
 
+  // `constantFold: false` on every compile below: these `Append` expressions
+  // are closed (all-literal operands), so compile-time constant folding would
+  // evaluate them and emit the folded list (`[1, 2, 3, 4]`). What is under test
+  // is the spread lowering, which only appears unfolded.
+  const NO_FOLD = { constantFold: false } as const;
+
   test('JavaScript', () =>
-    expect(compile(ce.box(flat))?.code).toBe('[...([1, 2]), 3, 4]'));
+    expect(compile(ce.box(flat), NO_FOLD)?.code).toBe('[...([1, 2]), 3, 4]'));
 
   test('Python', () =>
-    expect(new PythonTarget().compile(ce.box(flat))?.code).toBe(
+    expect(new PythonTarget().compile(ce.box(flat), NO_FOLD)?.code).toBe(
       '[*[1, 2], 3, 4]'
     ));
 
   test('the binary form is unchanged', () => {
     const binary: Expression = ['Append', ['List', 1, 2], 3];
-    expect(compile(ce.box(binary))?.code).toBe('[...([1, 2]), 3]');
-    expect(new PythonTarget().compile(ce.box(binary))?.code).toBe(
+    expect(compile(ce.box(binary), NO_FOLD)?.code).toBe('[...([1, 2]), 3]');
+    expect(new PythonTarget().compile(ce.box(binary), NO_FOLD)?.code).toBe(
       '[*[1, 2], 3]'
     );
   });
@@ -559,7 +565,12 @@ describe('Append: the 1-ary identity form (non-strict)', () => {
 
   test('it compiles to the identity, not an interpreter fallback', () => {
     const e = looseCe.box(['Append', ['List', 1, 2]]);
-    expect(compile(e)?.code).toBe('[...([1, 2])]');
-    expect(new PythonTarget().compile(e)?.code).toBe('[*[1, 2]]');
+    // `constantFold: false`: the operand is a literal list, so compile-time
+    // constant folding would emit `[1, 2]` and the identity lowering under test
+    // would never run.
+    expect(compile(e, { constantFold: false })?.code).toBe('[...([1, 2])]');
+    expect(
+      new PythonTarget().compile(e, { constantFold: false })?.code
+    ).toBe('[*[1, 2]]');
   });
 });

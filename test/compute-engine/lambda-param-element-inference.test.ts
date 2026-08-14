@@ -429,12 +429,15 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
       ['List', 1, 2],
       ['List', 3, 4],
     ]);
-    expect(() => compile(expr, { fallback: false })).toThrow(
+    // `constantFold: false`: both sources are literal lists, so the whole
+    // `Map` would otherwise be evaluated at compile time and emitted as a
+    // literal list, never reaching the multi-collection lowering under test.
+    expect(() => compile(expr, { fallback: false, constantFold: false })).toThrow(
       /multi-collection form is not compiled/
     );
-    expect(() => new PythonTarget().compile(expr)).toThrow(
-      /multi-collection form is not compiled/
-    );
+    expect(() =>
+      new PythonTarget().compile(expr, { constantFold: false })
+    ).toThrow(/multi-collection form is not compiled/);
   });
 
   test('the sharing pin holds for the multi-collection form too', () => {

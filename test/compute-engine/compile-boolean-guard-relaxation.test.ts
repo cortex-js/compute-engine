@@ -92,8 +92,12 @@ describe('orderings over an operand whose shape is only known at run time', () =
     // middle operand cannot be emitted twice (what `bindExpr` protects on the
     // scalar chained path).
     const ce = make();
+    // `constantFold: false`: `L` is an assigned literal list and `q` is pure,
+    // so the whole chain would otherwise be evaluated at compile time and
+    // emitted as a literal — leaving no `_fn_q` call to count.
     const source = compile(ce.box(['Less', 0, ['q', 'L'], 5] as any), {
       fallback: false,
+      constantFold: false,
     })!.code!;
     expect(source.match(/_fn_q/g)?.length).toBe(1);
   });

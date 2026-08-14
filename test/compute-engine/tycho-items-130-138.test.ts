@@ -307,16 +307,24 @@ describe('NORM / ABS of a point list agree on both routes (item 138)', () => {
   // `np.linalg.norm` would have flattened).
   test('the other targets fail closed on a point list', () => {
     const e = new ComputeEngine();
+    // `constantFold: false` throughout: `S_TUPLES` is a literal point list, so
+    // each of these would otherwise be evaluated at compile time and emitted
+    // as a literal vector, bypassing the point-list declines under test.
     for (const lang of ['glsl', 'wgsl', 'python', 'interval-js']) {
       const target = e.getCompilationTarget(lang as any);
       for (const head of ['Norm', 'Abs']) {
         expect(
-          target.compile(e.box([head, S_TUPLES]), { fallback: true }).success
+          target.compile(e.box([head, S_TUPLES]), {
+            fallback: true,
+            constantFold: false,
+          }).success
         ).toBe(false);
       }
       expect(
-        target.compile(e.box(['Distance', S_TUPLES, P]), { fallback: true })
-          .success
+        target.compile(e.box(['Distance', S_TUPLES, P]), {
+          fallback: true,
+          constantFold: false,
+        }).success
       ).toBe(false);
     }
   });

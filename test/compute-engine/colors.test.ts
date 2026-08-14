@@ -741,14 +741,20 @@ describe('GPU color compilation', () => {
     // Canonical color value is OKLCh; converting to oklab routes through
     // _gpu_oklch_to_oklab (no sRGB pinch).
     const expr = ce.expr(['ColorToColorspace', ['Tuple', 0.7, 0.1, 30], "'oklab'"]);
-    const compiled = compile(expr, { to: 'glsl' });
+    // `constantFold: false`: the color is a literal tuple, so the whole
+    // conversion is a constant subtree the compiler would otherwise evaluate
+    // at compile time and emit as a bare vec3 — this test pins the conversion
+    // helper the structural lowering routes through.
+    const compiled = compile(expr, { to: 'glsl', constantFold: false });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_oklch_to_oklab');
   });
 
   test('compile ColorToColorspace to GLSL routes oklch as identity', () => {
     const expr = ce.expr(['ColorToColorspace', ['Tuple', 0.7, 0.1, 30], "'oklch'"]);
-    const compiled = compile(expr, { to: 'glsl' });
+    // `constantFold: false`: a folded literal vec3 would satisfy the two
+    // negative assertions below vacuously, so keep the structural lowering.
+    const compiled = compile(expr, { to: 'glsl', constantFold: false });
     expect(compiled.success).toBe(true);
     // Identity: no conversion call wrapping the input.
     expect(compiled.code).not.toContain('_gpu_oklch_to_oklab');
@@ -757,7 +763,9 @@ describe('GPU color compilation', () => {
 
   test('compile ColorToColorspace to GLSL routes rgb to sRGB', () => {
     const expr = ce.expr(['ColorToColorspace', ['Tuple', 0.7, 0.1, 30], "'rgb'"]);
-    const compiled = compile(expr, { to: 'glsl' });
+    // `constantFold: false`: constant operands would otherwise fold to a
+    // literal vec3, hiding the conversion helper this test pins.
+    const compiled = compile(expr, { to: 'glsl', constantFold: false });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_oklch_to_srgb');
   });
@@ -769,7 +777,9 @@ describe('GPU color compilation', () => {
       ['Tuple', 0.6, 0.2, 0.1],
       "'oklab'",
     ]);
-    const compiled = compile(expr, { to: 'wgsl' });
+    // `constantFold: false`: constant operands would otherwise fold to a
+    // literal vec3f, hiding the conversion helper this test pins.
+    const compiled = compile(expr, { to: 'wgsl', constantFold: false });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_oklab_to_oklch');
   });
@@ -780,7 +790,9 @@ describe('GPU color compilation', () => {
       ['Tuple', 1, 0, 0],
       "'rgb'",
     ]);
-    const compiled = compile(expr, { to: 'glsl' });
+    // `constantFold: false`: constant operands would otherwise fold to a
+    // literal vec3, hiding the conversion helper this test pins.
+    const compiled = compile(expr, { to: 'glsl', constantFold: false });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_srgb_to_oklch');
   });
@@ -801,7 +813,9 @@ describe('GPU compile: HSL space', () => {
       ['Tuple', 0.7, 0.1, 30],
       "'hsl'",
     ]);
-    const compiled = compile(expr, { to: 'glsl' });
+    // `constantFold: false`: constant operands would otherwise fold to a
+    // literal vec3, hiding the sRGB→HSL chain this test pins.
+    const compiled = compile(expr, { to: 'glsl', constantFold: false });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_rgb_to_hsl');
     expect(compiled.code).toContain('_gpu_oklch_to_srgb');
@@ -814,7 +828,9 @@ describe('GPU compile: HSL space', () => {
       ['Tuple', 0, 1, 0.5],
       "'hsl'",
     ]);
-    const compiled = compile(expr, { to: 'wgsl' });
+    // `constantFold: false`: constant operands would otherwise fold to a
+    // literal vec3f, hiding the HSL→sRGB→OKLCh chain this test pins.
+    const compiled = compile(expr, { to: 'wgsl', constantFold: false });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_hsl_to_rgb');
     expect(compiled.code).toContain('_gpu_srgb_to_oklch');
@@ -921,9 +937,12 @@ describe('GPU compile: typed color heads', () => {
   // and then silently dropped by the RGB-only lowering.
   test('ColorFromColorspace with a 4-component tuple fails closed', () => {
     for (const to of ['glsl', 'wgsl'] as const) {
+      // `constantFold: false`: the tuple is all literals, so the compiler
+      // would otherwise evaluate the subtree and emit a `vec4` literal,
+      // never reaching the alpha check this test pins.
       const compiled = compile(
         ce.expr(['ColorFromColorspace', ['Tuple', 1, 0, 0, 0.5], "'rgb'"]),
-        { to }
+        { to, constantFold: false }
       );
       expect(compiled.success).toBe(false);
       expect(compiled.error).toMatch(

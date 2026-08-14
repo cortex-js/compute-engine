@@ -2063,10 +2063,14 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   it('custom Ordering function and an unsupported Random domain fail closed', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
+    // `constantFold: false`: `d` is an assigned literal list, so the whole
+    // `Ordering` is a constant subtree that compile-time folding would
+    // otherwise evaluate and emit as a literal, never reaching the
+    // custom-comparator refusal under test.
     expect(() =>
       js.compile(
         e.box(['Ordering', 'd', ['Function', ['Greater', 'a', 'b'], 'a', 'b']]),
-        { realOnly: true }
+        { realOnly: true, constantFold: false }
       )
     ).toThrow(/Fail closed/);
     // `Interval` and `Range` lower to descriptors and a literal list to the JS
@@ -2313,7 +2317,11 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(() =>
       js.compile(
         e.box(['Sort', 'd', ['Function', ['Subtract', 'b', 'a'], 'a', 'b']]),
-        { realOnly: true }
+        // `constantFold: false`: `d` is an assigned literal list, so the
+        // whole `Sort` is a constant subtree that compile-time folding would
+        // otherwise evaluate and emit as a literal, never reaching the
+        // custom-comparator refusal under test.
+        { realOnly: true, constantFold: false }
       )
     ).toThrow(/Fail closed/);
   });
@@ -2701,7 +2709,11 @@ describe('COMPILE user-defined function calls', () => {
       // argument is coerced, the first is a list and broadcasts.
       const expr = e.box(['P', 'L', ['Complex', 0, 0]]);
       expect(expr.evaluate().toString()).toBe('[1,1,1]');
-      const r = compile(expr, { fallback: false });
+      // `constantFold: false`: `L` and the argument are both literals, so the
+      // call is a constant subtree that compile-time folding would otherwise
+      // evaluate and emit as `[1, 1, 1]` — this test is about the broadcast
+      // lowering and the per-parameter complex coercion inside it.
+      const r = compile(expr, { fallback: false, constantFold: false });
       expect(r.success).toBe(true);
       // The wrap is inside the closure, around the element parameter.
       expect(r.code).toMatch(/_SYS\.bcastFn\(\(\w+, (\w+)\) =>.*re: \1, im: 0/);
@@ -2886,8 +2898,12 @@ describe('COMPILE collection-op findings', () => {
   it('Map/Filter do not leak the native callback index — finding A7', () => {
     // The compiled lambda must be invoked with a single argument; the native
     // `.map((el, index) => …)` index must NOT reach a lambda parameter.
+    // `constantFold: false` throughout: both collections are literals, so
+    // compile-time folding would otherwise evaluate the whole `Map`/`Filter`
+    // and emit the resulting list, with no callback left to inspect.
     const rMap = compile(
-      ce.box(['Map', ['Function', ['Add', 'x', 1], 'x'], ['List', 10, 20, 30]])
+      ce.box(['Map', ['Function', ['Add', 'x', 1], 'x'], ['List', 10, 20, 30]]),
+      { constantFold: false }
     );
     expect(rMap.code).toContain('(_x) => _f(_x)');
     expect(rMap.code).not.toMatch(/\.map\(\(_f\)/); // no bare fn to native map
@@ -2900,7 +2916,8 @@ describe('COMPILE collection-op findings', () => {
         'Filter',
         ['List', 1, 2, 3, 4],
         ['Function', ['Greater', 'x', 2], 'x'],
-      ])
+      ]),
+      { constantFold: false }
     );
     expect(rFilter.code).toContain('(_x) => _f(_x)');
     expect(
@@ -2965,8 +2982,13 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     const e = new ComputeEngine();
     const js = new JavaScriptTarget();
     // A NON-expandable operator symbol (variadic `Less`) still fails closed…
+    // The list is constant, so constant folding would answer from the
+    // interpreter and never reach the callback check under test.
     expect(() =>
-      js.compile(e.box(['Filter', L, 'Less']), { realOnly: true })
+      js.compile(e.box(['Filter', L, 'Less']), {
+        realOnly: true,
+        constantFold: false,
+      })
     ).toThrow(/Fail closed/);
     // …but a UNARY one is eta-expanded into a real callback rather than
     // refused: `Map(Negate, L)` is a valid application at `Negate`'s own

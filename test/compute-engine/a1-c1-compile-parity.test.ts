@@ -120,7 +120,11 @@ describe('A1 — Range GPU compile', () => {
     const ce = new ComputeEngine();
     const glslTarget = new GLSLTarget();
     const expr = ce.parse('\\operatorname{Range}(2, 8, 2)');
-    const result = glslTarget.compile(expr);
+    // `constantFold: false`: the Range is closed, so compile-time constant
+    // folding would emit its value through the plain List lowering
+    // (`vec4(2.0, 4.0, 6.0, 8.0)`); the `float[N]` form under test comes from
+    // the Range lowering.
+    const result = glslTarget.compile(expr, { constantFold: false });
     expect(result.success).toBe(true);
     // [2, 4, 6, 8] → float[4](2.0, 4.0, 6.0, 8.0)
     expect(result.code).toMatch(/float\[4\]/);
@@ -148,7 +152,12 @@ describe('A1 — Range GPU compile', () => {
     const ce = new ComputeEngine();
     const target = new GLSLTarget();
     const expr = ce.parse('\\operatorname{Range}(5, 1)'); // lo > hi, positive step
-    expect(() => target.compile(expr)).toThrow(/empty range/i);
+    // `constantFold: false`: the Range is closed, so compile-time constant
+    // folding would emit a literal array and the emptiness check under test
+    // would never run.
+    expect(() => target.compile(expr, { constantFold: false })).toThrow(
+      /empty range/i
+    );
   });
 });
 
@@ -266,7 +275,10 @@ describe('A1 — Loop / Integrate JS compile', () => {
     const expr = ce.parse(
       '\\operatorname{Comprehension}(i^2, \\operatorname{Element}(i, \\operatorname{Range}(1, 5)))'
     );
-    const result = compile(expr);
+    // `constantFold: false`: the comprehension is closed, so compile-time
+    // constant folding would emit the literal `[1, 4, 9, 16, 25]` and the
+    // comprehension codegen this test pins would not appear in the code.
+    const result = compile(expr, { constantFold: false });
     expect(result?.success).toBe(true);
     // Collects into a result array (comprehension codegen).
     expect(result?.code).toContain('result.push(');

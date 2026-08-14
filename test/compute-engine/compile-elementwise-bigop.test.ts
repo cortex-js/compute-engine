@@ -166,7 +166,11 @@ describe('element-wise Sum/Product: unchanged behavior elsewhere', () => {
   test('the GPU target keeps the fail-closed decline', () => {
     expect(() =>
       new GLSLTarget().compile(
-        ce.box(['Sum', ['Multiply', 2, 'L'], ['Limits', 'k', 1, 3]])
+        ce.box(['Sum', ['Multiply', 2, 'L'], ['Limits', 'k', 1, 3]]),
+        // `constantFold: false`: `L` is an assigned literal list, so the whole
+        // sum would otherwise be evaluated at compile time and emitted as a
+        // shader vector literal, bypassing the decline under test.
+        { constantFold: false }
       )
     ).toThrow(/collection-valued body does not compile/);
   });

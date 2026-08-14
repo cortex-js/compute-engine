@@ -528,15 +528,32 @@ describe('PYTHON TARGET', () => {
     // as a point (`_ce_eqcoll`, indexing) sees the wrong kind. Executed parity
     // for the singleton is pinned in `compile-python-parity.test.ts`
     // (`tuple_singleton_bool` / `tuple_singleton_num`).
+    // `constantFold: false` throughout: a tuple of literals is a pure subtree
+    // with no free variables, so compile-time constant folding evaluates it
+    // and emits the value directly. These tests pin the tuple LOWERING, which
+    // only runs unfolded. (The folded path is held to the same spellings by
+    // `compile-subtree-folding.test.ts`, which asserts a folded tuple emits
+    // exactly what the unfolded lowering does — a folded tuple must never come
+    // back as a Python list, which is a different, mutable, unhashable type.)
     it('emits the trailing comma for a 1-tuple', () => {
-      expect(python.compile(ce.box(['Tuple', 'True'])).code).toBe('(True,)');
-      expect(python.compile(ce.box(['Tuple', 5])).code).toBe('(5,)');
+      expect(
+        python.compile(ce.box(['Tuple', 'True']), { constantFold: false }).code
+      ).toBe('(True,)');
+      expect(
+        python.compile(ce.box(['Tuple', 5]), { constantFold: false }).code
+      ).toBe('(5,)');
     });
 
     it('emits the plain forms for arity 0 and 2+', () => {
-      expect(python.compile(ce.box(['Tuple'])).code).toBe('()');
-      expect(python.compile(ce.box(['Tuple', 1, 2])).code).toBe('(1, 2)');
-      expect(python.compile(ce.box(['Tuple', 1, 2, 3])).code).toBe('(1, 2, 3)');
+      expect(
+        python.compile(ce.box(['Tuple']), { constantFold: false }).code
+      ).toBe('()');
+      expect(
+        python.compile(ce.box(['Tuple', 1, 2]), { constantFold: false }).code
+      ).toBe('(1, 2)');
+      expect(
+        python.compile(ce.box(['Tuple', 1, 2, 3]), { constantFold: false }).code
+      ).toBe('(1, 2, 3)');
     });
   });
 
@@ -1242,9 +1259,13 @@ describe('PYTHON TARGET', () => {
   // the `If` route, which always asserted.
   describe('Collection-valued conditions fail closed', () => {
     it('declines Which with a literal boolean-list condition', () => {
+      // `constantFold: false`: every operand here is a literal, so constant
+      // folding would evaluate the whole `Which` at compile time and emit its
+      // value, and the fail-closed guard under test would never run.
       expect(() =>
         python.compile(
-          ce.box(['Which', ['List', 'True', 'False'], 1, 'True', 0])
+          ce.box(['Which', ['List', 'True', 'False'], 1, 'True', 0]),
+          { constantFold: false }
         )
       ).toThrow(/branch condition is a collection-valued expression/);
     });

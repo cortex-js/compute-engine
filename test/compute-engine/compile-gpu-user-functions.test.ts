@@ -356,13 +356,20 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
 
   it('a collection argument fails closed — no silent scalar apply', () => {
     const ce = engineWithF();
-    expect(() => glsl.compile(ce.expr(['f', ['List', 1, 2, 3, 4, 5]]))).toThrow(
-      /no runtime broadcast dispatch/
-    );
+    // `constantFold: false`: the argument is a literal list and `f` is pure,
+    // so the call would otherwise be evaluated at compile time and emitted as
+    // a literal array, bypassing the broadcast gate under test.
+    expect(() =>
+      glsl.compile(ce.expr(['f', ['List', 1, 2, 3, 4, 5]]), {
+        constantFold: false,
+      })
+    ).toThrow(/no runtime broadcast dispatch/);
     // The JS target answers this with `_SYS.bcastFn`; a shader has no analog.
-    expect(() => wgsl.compile(ce.expr(['f', ['List', 1, 2, 3, 4, 5]]))).toThrow(
-      /no runtime broadcast dispatch/
-    );
+    expect(() =>
+      wgsl.compile(ce.expr(['f', ['List', 1, 2, 3, 4, 5]]), {
+        constantFold: false,
+      })
+    ).toThrow(/no runtime broadcast dispatch/);
   });
 
   it('an argument whose shape disagrees with the parameter fails closed', () => {

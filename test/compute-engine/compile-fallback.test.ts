@@ -131,6 +131,10 @@ describe('Compilation of scalar↔list arithmetic (broadcast + complex fail-clos
     expect(() =>
       compile(ce.box(['Multiply', 2, ['List', ['Complex', 1, 1]]]), {
         fallback: false,
+        // `constantFold: false`: both operands are literals, so the product
+        // would otherwise be folded to a literal list and the complex-valued
+        // decline under test would never fire.
+        constantFold: false,
       })
     ).toThrow(/list-valued operand/);
   });

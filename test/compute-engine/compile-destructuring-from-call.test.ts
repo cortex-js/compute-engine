@@ -46,13 +46,25 @@ function withDefsBlock(defs: string, src: string): any {
   return ce.box(strip(ast));
 }
 
-/** Compile `expr` and assert it agrees with the interpreter. */
+/**
+ * Compile `expr` and assert it agrees with the interpreter.
+ *
+ * Every case here calls a defined function on literal arguments, so the whole
+ * expression is a constant subtree that compile-time constant folding
+ * evaluates and emits as a literal. That folded value is checked too, but the
+ * returned SOURCE comes from a second compile with `constantFold: false`:
+ * the destructuring lowering these tests pin (one temporary, one call, a
+ * positional read per leaf) only appears when folding is off.
+ */
 function agrees(expr: any, expected: number): string {
   const r = compile(expr);
   expect(r?.success).toBe(true);
   expect(r!.run!({})).toBe(expected);
   expect(expr.evaluate().isSame(expected)).toBe(true);
-  return r!.code as string;
+  const unfolded = compile(expr, { constantFold: false });
+  expect(unfolded?.success).toBe(true);
+  expect(unfolded!.run!({})).toBe(expected);
+  return unfolded!.code as string;
 }
 
 const STEP = 'step(i) = (i + 1, i * 2)\n';

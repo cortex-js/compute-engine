@@ -45,8 +45,17 @@ function parity(expr: BoxedExpression, vars?: object): unknown {
   return value;
 }
 
+/**
+ * The emitted source, with compile-time constant folding turned off.
+ *
+ * Most cases here are hand-checked tables of literal conditions and arms, so
+ * the whole `Which` is a constant subtree that the compiler would otherwise
+ * evaluate and emit as a literal list — the assertions below are about the
+ * `_SYS.select` LOWERING, which folding short-circuits. `parity()` keeps
+ * folding on, so the folded value is still checked against the interpreter.
+ */
 function code(expr: BoxedExpression): string {
-  return compile(expr, { fallback: false })!.code ?? '';
+  return compile(expr, { fallback: false, constantFold: false })!.code ?? '';
 }
 
 describe('element-wise selection: the small hand-checked tables', () => {
@@ -423,7 +432,12 @@ describe('element-wise selection: what stays unchanged', () => {
       'True',
       0,
     ] as any);
-    expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
+    // `constantFold: false`: every operand is a literal, so the compiler
+    // would otherwise evaluate the subtree and emit its value, never
+    // reaching the element-wise complex gate this test pins.
+    expect(() =>
+      compile(expr, { fallback: false, constantFold: false })
+    ).toThrow(/Fail closed/);
     // The SCALAR complex conditional is untouched.
     const scalar = ce.box([
       'Which',

@@ -236,7 +236,10 @@ describe('WGSL COMPILATION', () => {
 
     it('should compile vector addition', () => {
       const expr = ce.expr(['Add', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
-      const code = wgsl.compile(expr).code;
+      // `constantFold: false`: both operands are literal vectors, so the sum
+      // would otherwise be folded to the single literal `vec3f(5.0, 7.0, 9.0)`
+      // — this test pins the vector-addition lowering, not the fold.
+      const code = wgsl.compile(expr, { constantFold: false }).code;
       expect(code).toMatchInlineSnapshot(
         `vec3f(1.0, 2.0, 3.0) + vec3f(4.0, 5.0, 6.0)`
       );

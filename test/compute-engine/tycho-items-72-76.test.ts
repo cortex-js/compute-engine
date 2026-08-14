@@ -266,15 +266,20 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     // compile must fail closed (falling back to interpretation) instead.
     const expr = ce.parse('\\left|([1,2],3)\\right|');
     expect(expr.evaluate().operator).toEqual('List');
+    // `constantFold: false` throughout: every component of the point is a
+    // literal, so the whole norm would otherwise be evaluated at compile time
+    // and emitted as a literal list, bypassing the broadcast gate under test.
     const js = ce
       .getCompilationTarget('javascript')
-      .compile(expr, { fallback: true });
+      .compile(expr, { fallback: true, constantFold: false });
     expect(js.success).toBe(false);
-    const iv = ce.getCompilationTarget('interval-js').compile(expr);
+    const iv = ce
+      .getCompilationTarget('interval-js')
+      .compile(expr, { constantFold: false });
     expect(iv.success).toBe(false);
     const glsl = ce
       .getCompilationTarget('glsl')
-      .compile(expr, { fallback: true });
+      .compile(expr, { fallback: true, constantFold: false });
     expect(glsl.success).toBe(false);
   });
 

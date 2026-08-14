@@ -336,11 +336,16 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
     return ce;
   };
 
+  // `constantFold: false` on every probe in this block: the Sum has no free
+  // variables, so compile-time constant folding would answer it from the
+  // interpreter and emit a literal list, bypassing the static decline (and, on
+  // JavaScript, the element-wise `_SYS.bcast` emission) under test.
   test.each(NON_JS)('%s declines `Sum a(h(i))` (direct form)', (to) => {
     const ce = setup();
     const r = compile(ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]), {
       to,
       fallback: true,
+      constantFold: false,
     } as any);
     expect(r?.success ?? false).toBe(false);
     expect((r as any).error).toMatch(/collection-valued body does not compile/);
@@ -348,9 +353,11 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
 
   test.each(NON_JS)('%s declines the `A(t)` wrapper form', (to) => {
     const ce = setup();
+    // `A`'s body ignores `t`, so the Sum subtree is still constant: fold off.
     const r = compile(ce.parse('A(t)', { strict: false }), {
       to,
       fallback: true,
+      constantFold: false,
     } as any);
     expect(r?.success ?? false).toBe(false);
     // The MESSAGE is pinned on the direct form above, not here: Python has no
@@ -367,6 +374,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
     const ce = setup();
     const r = compile(ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]), {
       fallback: true,
+      constantFold: false,
     });
     expect(r?.success).toBe(true);
     expect((r as any).code).toContain('_SYS.bcast');
@@ -458,11 +466,16 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
     return ce;
   };
 
+  // `constantFold: false` on the probes below: every one of these Sums has no
+  // free variables, so compile-time constant folding would answer it from the
+  // interpreter and report success with a literal, short-circuiting both the
+  // decline being pinned and the `_SYS.bcast` emission of the controls.
   test.each(ALL)('%s declines the lying-declaration Sum', (to) => {
     const ce = lying();
     const r = compile(ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]), {
       to,
       fallback: true,
+      constantFold: false,
     } as any);
     expect(r?.success ?? false).toBe(false);
     // The message names both halves and suggests the fix.
@@ -480,7 +493,11 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
       ce.box(['Product', ['a', 'i'], ['Limits', 'i', 0, 2]]),
     ]) {
       for (const opts of [{}, { realOnly: true }]) {
-        const r = compile(expr, { fallback: true, ...opts } as any);
+        const r = compile(expr, {
+          fallback: true,
+          constantFold: false,
+          ...opts,
+        } as any);
         expect(r?.success ?? false).toBe(false);
         expect((r as any).error).toMatch(CONTRADICTED);
       }
@@ -500,7 +517,7 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
       ce.box(['Function', ['Block', ['List', ['Cos', 't'], ['Sin', 't']]], 't'])
     );
     const expr = ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]);
-    const r = compile(expr, { fallback: true });
+    const r = compile(expr, { fallback: true, constantFold: false });
     expect(r?.success).toBe(true);
     expect((r as any).code).toContain('_SYS.bcast');
     const v = (r as any).run({});
@@ -522,7 +539,7 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
       );
       const r = compile(
         ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]),
-        { to, fallback: true } as any
+        { to, fallback: true, constantFold: false } as any
       );
       expect(r?.success ?? false).toBe(false);
       expect((r as any).error).toMatch(/open result type/);
@@ -570,7 +587,7 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
     const ce = truthfulList();
     const expr = ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]);
     expect((expr as any).ops[0].type.toString()).toEqual('list<number>');
-    const r = compile(expr, { fallback: true });
+    const r = compile(expr, { fallback: true, constantFold: false });
     expect(r?.success).toBe(true);
     expect((r as any).code).toContain('_SYS.bcast');
     const v = (r as any).run({});
@@ -584,7 +601,7 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
     (to) => {
       const r = compile(
         truthfulList().box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]),
-        { to, fallback: true } as any
+        { to, fallback: true, constantFold: false } as any
       );
       expect(r?.success ?? false).toBe(false);
       expect((r as any).error).toMatch(/collection-valued body does not compile/);

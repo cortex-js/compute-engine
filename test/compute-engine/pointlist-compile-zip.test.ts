@@ -580,7 +580,10 @@ describe('PointList — GPU projection (D3)', () => {
     expect(() =>
       glsl.compile(
         ce.box(['PointY', ['PointList', -6, ['List', 1, 2, 3, 4, 5]]]),
-        { realOnly: true }
+        // Opt out of constant folding: every operand here is a literal, so the
+        // whole subtree would be evaluated at compile time and emitted as a
+        // `float[5]` literal, short-circuiting the arity check under test.
+        { realOnly: true, constantFold: false }
       )
     ).toThrow(
       /source component 2 has 5 elements, and a shader vector holds 2 to 4/

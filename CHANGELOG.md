@@ -1,3 +1,54 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **Defining the same function clause twice in one program is now an
+  error.** A clause whose parameter list coincides with one an earlier
+  statement of the SAME program already defined silently replaced it,
+  changing what the program computed with nothing to show for it. It is
+  now `function-redefinition`, reported with the first definition's
+  location. `epsil check` reports it too, without running the program.
+
+  Only REPLACEMENT is refused. Clauses at DIFFERENT parameter lists still
+  accumulate, which is what multi-clause functions are for —
+  `fib(0) = 1`, `fib(1) = 1`, `fib(n) = fib(n-1) + fib(n-2)` is
+  unaffected, as is dispatch on distinct literal patterns or on arity.
+  Two clauses count as the same one when their parameter DOMAINS
+  coincide, the same test dispatch uses to pick a clause, so renaming a
+  parameter does not make a new clause.
+
+  Redefinition ACROSS programs is unchanged: re-running an edited
+  definition in a later program (the notebook gesture) still replaces
+  last-wins, and replaces only the matching clause, leaving a function's
+  other clauses in place. Definitions made through the host API rather
+  than an Epsil program are never affected.
+
+
+### New Features
+
+- **Compile-time constant folding now covers constant COLLECTIONS**,
+  extending the subtree folding released in 0.108.0. A constant
+  collection is baked into a literal list, which matters most when the
+  collection is constant but its consumer is not:
+
+  ```
+  At(Map(_ ↦ _^2, 1..6), k)   →   _SYS.at([1, 4, 9, 16, 25, 36], _.k)
+  ```
+
+  The index `k` is a run-time input, so the expression as a whole cannot
+  fold — but its base is now built once at compile time instead of being
+  rebuilt and re-mapped on every call. The literal goes through each
+  target's own list lowering, so the JavaScript and Python targets emit
+  `[1, 4, 9, …]` and the shader targets a `vec3(…)` / `float[5](…)`.
+  A collection folds only when it is finite, **indexed** (a `Set` has no
+  defined element order, so a literal list would invent one), holds at
+  most **50** numeric elements — the threshold the `Range` handler
+  already uses to choose between an inline literal and a generator — and
+  meets every gate the number and boolean folds meet. Anything larger, or
+  holding strings, tuples or nested collections, compiles structurally as
+  before, and `constantFold: false` disables it along with the rest of
+  the folding.
+
 ## 0.108.0 _2026-08-14_
 
 ### Epsil
@@ -37,6 +88,28 @@
   convention (first wins, with a diagnostic). A brace of only spreads
   is a set-spread; lead with the bare `->` marker for a pure dictionary
   merge: `{->, ...d1, ...d2}`.
+
+- **A program that defines a function and then calls it now compiles to
+  JavaScript.** Both definition forms were affected:
+
+  ```
+  const g = (k) |-> Sum(Take(Map(_ |-> _^2, 1..oo), k))
+  g(3)
+  ```
+
+  used to fail the whole compilation with ``Unknown operator `g` ``, and
+  `function g(k) { … }` with ``DefineFunction: … no lowering``. The
+  declaration itself always lowered correctly (`let g = ((k) => …)`); only
+  the CALL had no resolution, because head lookup consulted the engine's
+  definitions and a block-local declaration never enters them. Calls now
+  resolve against the block's own function-valued locals — with recursion,
+  mutual reference between locals, use as a callback value
+  (`Map(sq, 1..oo)`), and the same collection broadcast an engine-level
+  function gets (`h([1,2,3])` → `[2,3,4]`). An arity mismatch and a
+  multi-clause `function` set fail closed rather than compile to something
+  that disagrees with the interpreter, and Python and the GPU targets —
+  which declare a local separately from its assignment and can hold no
+  function-valued local — are unchanged.
 
 ### Breaking Changes
 

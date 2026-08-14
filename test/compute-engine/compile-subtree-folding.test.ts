@@ -84,6 +84,113 @@ describe('COMPILE constant folding - subtree inside a live expression', () => {
   });
 });
 
+describe('COMPILE constant folding - constant collections', () => {
+  const MAP_SQUARES = (n: number) =>
+    ['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, n]] as const;
+
+  it('folds a constant collection under a runtime index', () => {
+    // The whole expression cannot fold (`k` is an unknown), but its BASE is
+    // constant: indexing a baked array beats building the range and mapping
+    // over it on every call.
+    const r = compile(ce.box(['At', MAP_SQUARES(6), 'k'] as any));
+    expect(r.code).toBe('_SYS.at([1, 4, 9, 16, 25, 36], _.k)');
+    expect(r.run?.({ k: 3 })).toBe(9);
+  });
+
+  it('folds a bare constant collection to a literal', () => {
+    const r = compile(ce.box(MAP_SQUARES(6) as any));
+    expect(r.code).toBe('[1, 4, 9, 16, 25, 36]');
+    expect(r.run?.()).toEqual([1, 4, 9, 16, 25, 36]);
+  });
+
+  it('folds on the Python target too', () => {
+    const r = compile(ce.box(MAP_SQUARES(6) as any), { to: 'python' });
+    expect(r.code).toBe('[1, 4, 9, 16, 25, 36]');
+  });
+
+  it('folds a Filter pipeline, agreeing with the interpreter', () => {
+    const e = ce.box([
+      'Filter',
+      ['Range', 1, 10],
+      ['Function', ['Equal', ['Mod', 'y', 2], 0], 'y'],
+    ] as any);
+    const r = compile(e);
+    expect(r.code).toBe('[2, 4, 6, 8, 10]');
+    expect(r.run?.()).toEqual([2, 4, 6, 8, 10]);
+    expect(e.N().toString()).toBe('[2,4,6,8,10]');
+  });
+
+  it('a collection over the inline cap compiles structurally', () => {
+    // 80 elements exceeds CONSTANT_FOLD_MAX_INLINE_ELEMENTS: inlining it
+    // would trade a compact emission for a wall of literals.
+    const r = compile(ce.box(['At', MAP_SQUARES(80), 'k'] as any));
+    expect(r.code).toContain('Array.from');
+    expect(r.run?.({ k: 3 })).toBe(9);
+  });
+
+  it('a non-indexed collection (a Set) never folds — no defined order', () => {
+    const r = compile(ce.box(['SetFrom', ['List', 3, 1, 2]] as any), {
+      fallback: true,
+    });
+    expect(r.code).not.toBe('[3, 1, 2]');
+  });
+
+  it('constantFold: false keeps the structural pipeline', () => {
+    const r = compile(ce.box(['At', MAP_SQUARES(6), 'k'] as any), {
+      constantFold: false,
+    });
+    expect(r.code).toContain('.map(');
+    expect(r.run?.({ k: 3 })).toBe(9);
+  });
+
+  it('a folded Tuple stays a Tuple, not a List', () => {
+    // A Python list is not a Python tuple — it is mutable, unhashable, and
+    // `(1, 2) == [1, 2]` is `False` — so rebuilding a folded tuple through
+    // the List lowering would silently change the value's type. The folded
+    // emission must match the unfolded one.
+    for (const mj of [['Tuple'], ['Tuple', 5], ['Tuple', 1, 2]] as any[]) {
+      const e = ce.box(mj);
+      const folded = compile(e, { to: 'python' }).code;
+      const structural = compile(e, {
+        to: 'python',
+        constantFold: false,
+      }).code;
+      expect(folded).toBe(structural);
+    }
+  });
+
+  it('a complex-ish expression with a real value does not fold', () => {
+    // The structural lowering may return either shape for these — a bare
+    // number, or the target's `{re, im}` convention — and nothing statically
+    // readable says which. Folding either one risks silently changing the
+    // shape a caller reads back, so the fold declines and the structural
+    // path keeps defining it.
+    const e = new ComputeEngine();
+    e.declare('Qc', { signature: '(complex) -> complex' });
+    e.assign(
+      'Qc',
+      e.box(['Function', ['Block', ['Add', 'z', ['Complex', 0, 1]]], 'z'])
+    );
+    const expr = e.box(['Qc', ['Complex', 1, -1]]);
+    expect(expr.N().toString()).toBe('1'); // real-valued despite the type
+    expect(compile(expr).code).toBe('_fn_Qc(({ re: 1, im: -1 }))');
+
+    // The same rule keeps a real-valued `At` with a COMPLEX INDEX structural:
+    // `isComplexValued` answers for the operands, so the index alone makes
+    // the node look complex while the element it selects is a plain number.
+    const at = ce.box(['At', ['List', 10, 20, 30], ['Complex', 1, 2]] as any);
+    expect(at.N().re).toBe(10);
+    expect(compile(at).code).toBe(
+      '_SYS.at([10, 20, 30], ({ re: 1, im: 2 }))'
+    );
+  });
+
+  it('a genuinely complex collection still folds', () => {
+    const r = compile(ce.box(['Multiply', 2, ['List', ['Complex', 1, 1]]]));
+    expect(r.code).toBe('[({ re: 2, im: 2 })]');
+  });
+});
+
 describe('COMPILE constant folding - declines', () => {
   it('constantFold: false preserves the structural lowering', () => {
     const e = ce.parse(
@@ -217,23 +324,34 @@ describe('COMPILE constant folding - unknowns exclude lambda parameters', () => 
 });
 
 describe('COMPILE Take/Drop - literal count peephole', () => {
-  // Distinct from subtree folding: a list-valued result never folds, but a
-  // compile-time-constant COUNT is normalized (clamped to ≥ 0, rounded — the
-  // interpreter's toInteger contract) and emitted as a bare literal.
+  // A compile-time-constant COUNT is normalized (clamped to ≥ 0, rounded —
+  // the interpreter's `toInteger` contract) and emitted as a bare literal.
+  //
+  // The peephole is what these pin, so the constant-collection cases compile
+  // with `constantFold: false`: over a CONSTANT collection the whole slice
+  // now folds to its result (`Take([1,2,3,4], 2)` → `[1, 2]`), which would
+  // leave the peephole itself untested. It still governs every slice of a
+  // RUNTIME collection — the case the last two tests cover without the
+  // opt-out.
+  const NO_FOLD = { constantFold: false } as const;
+
   it('emits a bare literal count', () => {
-    const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 2]));
+    const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 2]), NO_FOLD);
     expect(r.code).toBe('([1, 2, 3, 4]).slice(0, 2)');
     expect(r.run?.()).toEqual([1, 2]);
   });
 
   it('rounds a fractional literal count like the interpreter', () => {
     // Take([1,2,3,4], 5/2) keeps 3 elements (toInteger rounds).
-    const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], ['Divide', 5, 2]]));
+    const r = compile(
+      ce.box(['Take', ['List', 1, 2, 3, 4], ['Divide', 5, 2]]),
+      NO_FOLD
+    );
     expect(r.code).toBe('([1, 2, 3, 4]).slice(0, 3)');
   });
 
   it('clamps a negative literal count to 0', () => {
-    const r = compile(ce.box(['Take', ['List', 1, 2, 3], -2]));
+    const r = compile(ce.box(['Take', ['List', 1, 2, 3], -2]), NO_FOLD);
     expect(r.code).toBe('([1, 2, 3]).slice(0, 0)');
     expect(r.run?.()).toEqual([]);
   });
@@ -247,9 +365,20 @@ describe('COMPILE Take/Drop - literal count peephole', () => {
   });
 
   it('Drop emits a bare literal count', () => {
-    const r = compile(ce.box(['Drop', ['List', 1, 2, 3, 4], 2]));
+    const r = compile(ce.box(['Drop', ['List', 1, 2, 3, 4], 2]), NO_FOLD);
     expect(r.code).toBe('([1, 2, 3, 4]).slice(2)');
     expect(r.run?.()).toEqual([3, 4]);
+  });
+
+  it('a constant slice folds to its result outright', () => {
+    // The peephole's own inputs are constant, so by default the whole
+    // expression folds — the emission the four tests above opt out of.
+    expect(compile(ce.box(['Take', ['List', 1, 2, 3, 4], 2])).code).toBe(
+      '[1, 2]'
+    );
+    expect(compile(ce.box(['Drop', ['List', 1, 2, 3, 4], 2])).code).toBe(
+      '[3, 4]'
+    );
   });
 });
 

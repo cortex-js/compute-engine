@@ -1515,13 +1515,21 @@ describe('a wide index-slot union is not string evidence', () => {
         '    n = 10 * n + IndexOf(digits, cs[j]) - 1\n    j = j + 1\n  }\n' +
         '  (n, j)\n}'
     );
+    // `constantFold: false` on both compiles: the argument is a literal
+    // string, so each call would otherwise be evaluated at compile time and
+    // emitted as a literal pair — the loop lowering and the `IndexOf` decline
+    // this test is about would never be exercised.
     const ok = compile(ce.box(['countDigits', ['Characters', { str: '12a' }], 1]), {
       fallback: false,
+      constantFold: false,
     });
     expect(ok.success).toBe(true);
     expect(ok.run!()).toEqual([2, 3]);
 
-    const closed = compile(ce.box(['parseDigits', ['Characters', { str: '12a' }], 1]));
+    const closed = compile(
+      ce.box(['parseDigits', ['Characters', { str: '12a' }], 1]),
+      { constantFold: false }
+    );
     expect(closed.success).toBe(false);
     expect(closed.error).toMatch(/IndexOf: cannot compile/);
     // …and the interpreter, which `compile()` falls back to, answers.

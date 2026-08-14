@@ -38,7 +38,8 @@ const annotated = (param: string, type: string, body: unknown) => [
 ];
 
 /** Compile on the JavaScript target, never falling back. */
-const js = (expr: any) => compile(expr, { fallback: false });
+const js = (expr: any, options: Record<string, unknown> = {}) =>
+  compile(expr, { fallback: false, ...options });
 
 /** The element-consuming callback consumers, with a body of the right kind. */
 const PREDICATE_OPS = [
@@ -373,13 +374,18 @@ describe('a HAND-annotated union callback over a satisfying source', () => {
     );
 
     // Fail-closed on both targets: the decline comes from the body's `Equal`
-    // over a possibly-string operand, not from the annotation gate.
-    expect(() => js(expr)).toThrow(/string-valued operands are not supported/);
-    expect(() => python.compile(expr)).toThrow(
+    // over a possibly-string operand, not from the annotation gate. Constant
+    // folding is opted out of throughout: the source is a literal list, so the
+    // whole `Filter` would otherwise be evaluated at compile time and emitted
+    // as the literal `[1]`, never reaching the body lowering under test.
+    expect(() => js(expr, { constantFold: false })).toThrow(
+      /string-valued operands are not supported/
+    );
+    expect(() => python.compile(expr, { constantFold: false })).toThrow(
       /string-valued operands are not supported/
     );
     // With the default fallback, that is a reported failure, not a wrong value.
-    expect(compile(expr).success).toBe(false);
+    expect(compile(expr, { constantFold: false }).success).toBe(false);
 
     // ...and the interpreter answers.
     expect(expr.evaluate().toString()).toBe('[1]');

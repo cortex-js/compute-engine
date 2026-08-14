@@ -464,9 +464,12 @@ describe('DECLARED broadcastable<T> — compile fails closed (D6)', () => {
     const ce = new ComputeEngine();
     assignTyped(ce, 'bump', ['Add', 'x', 1], 'broadcastable<number>');
     const js = new JavaScriptTarget();
-    expect(() => js.compile(ce.box(['bump', ['List', 1, 2, 3]]))).toThrow(
-      /declared `broadcastable<T>` parameter/
-    );
+    // `constantFold: false`: the argument is a literal list and `bump` is
+    // pure, so the call would otherwise be evaluated at compile time and
+    // emitted as `[2, 3, 4]`, bypassing the decline under test.
+    expect(() =>
+      js.compile(ce.box(['bump', ['List', 1, 2, 3]]), { constantFold: false })
+    ).toThrow(/declared `broadcastable<T>` parameter/);
     // …and the interpreter still answers.
     expect(
       ce

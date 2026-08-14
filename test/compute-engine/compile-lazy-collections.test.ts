@@ -202,10 +202,14 @@ describe('COMPILE lazy infinite collections', () => {
     });
 
     it('a statically non-finite drop count keeps the pipeline out of the lazy algebra', () => {
+      // `constantFold: false`: the pipeline is closed (no free variables), so
+      // compile-time constant folding would evaluate it to the empty list and
+      // emit `[]` instead of reaching the D6 gate under test.
       const r = compile(
         ce.parse(
           String.raw`\mathrm{Take}(\mathrm{Drop}(1..\infty, \infty), 3)`
-        )
+        ),
+        { constantFold: false }
       );
       expect(r?.success).toBe(false);
     });
@@ -235,8 +239,12 @@ describe('COMPILE lazy infinite collections', () => {
     });
 
     it('a sign-mismatched step (inert in the interpreter) does not compile', () => {
+      // `constantFold: false`: the pipeline is closed (no free variables), so
+      // compile-time constant folding would evaluate it to the empty list and
+      // emit `[]` instead of reaching the D6 gate under test.
       const r = compile(
-        ce.parse(String.raw`\mathrm{Take}(\mathrm{Range}(1, \infty, -2), 4)`)
+        ce.parse(String.raw`\mathrm{Take}(\mathrm{Range}(1, \infty, -2), 4)`),
+        { constantFold: false }
       );
       expect(r?.success).toBe(false);
     });
@@ -251,8 +259,12 @@ describe('COMPILE lazy infinite collections', () => {
     });
 
     it('the Python target fails closed on a non-finite Range bound', () => {
+      // `constantFold: false`: the pipeline is closed (no free variables), so
+      // compile-time constant folding would emit the literal `[1, 2, 3]` and
+      // the Python target's non-finite-bound gate would never run.
       const r = compile(ce.parse(String.raw`\mathrm{Take}(1..\infty, 3)`), {
         to: 'python',
+        constantFold: false,
       });
       expect(r?.success ?? false).toBe(false);
     });
