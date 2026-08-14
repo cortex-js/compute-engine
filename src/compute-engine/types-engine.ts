@@ -404,6 +404,32 @@ export interface IComputeEngine {
    * @internal */
   _protocolRegistryRollbackPoint(): () => void;
 
+  /** A monotone counter that advances on every mutation of the protocol /
+   * conformance registry — a protocol declaration or re-declaration, a
+   * conformance edge, an implementation block, and the static pre-pass's
+   * registry rollback.
+   *
+   * It is the cache key of the DERIVED dispatcher effect unions
+   * (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an
+   * effect"): a protocol function requirement with a BARE specifier imposes
+   * no effect bound, and the dispatcher's effect set is the union of the
+   * inferred effects of the registered conforming implementations. That union
+   * is recomputed lazily, and — per that section's implementation note, "the
+   * effects cache's key must include the conformance registry among its
+   * axes" — a memo of it is valid only while both this counter and
+   * {@link _callableVersion} are unchanged.
+   *
+   * READ-ONLY: advanced only through
+   * {@link _noteConformanceRegistryChange}.
+   * @internal */
+  readonly _conformanceVersion: number;
+
+  /** Advance {@link _conformanceVersion}. Called at every protocol /
+   * conformance registry mutation site, adjacent to the `config` state event
+   * those sites already report.
+   * @internal */
+  _noteConformanceRegistryChange(): void;
+
   /** The stack of open inference **rollback frames**
    * (`inference-rollback.ts`; phase 2b of
    * `docs/plans/2026-08-13-inference-tx-design.md`). While a frame is open,

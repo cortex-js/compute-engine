@@ -79,6 +79,12 @@ export interface InferredLiteralEffects {
    * DISABLES the definition-annotation check: the annotation installs as a
    * trusted contract instead (no dependency tracking, no revalidation). */
   unresolvedHead: boolean;
+  /** True when the walk consulted an effect set that is itself LAZILY DERIVED
+   * from the conformance registry — see `WalkState.consultsRegistry`. A
+   * definition stamped from such a walk installs a deriver of its own
+   * (`_deriveEffects` in `boxed-operator-definition.ts`) instead of freezing
+   * the value it saw. */
+  consultsRegistry: boolean;
 }
 
 /**
@@ -97,10 +103,22 @@ export class EffectContractError extends Error {
   constructor(
     readonly symbol: string,
     readonly declared: EffectSet | undefined,
-    readonly inferred: EffectSet | undefined
+    readonly inferred: EffectSet | undefined,
+    /** Where the violated contract was STATED, when the effects-axis
+     * provenance history recorded it (a post-construction declaration —
+     * `docs/plans/2026-08-13-effects-axis-provenance.md`). `undefined` for
+     * a construction-stated contract, which records no entry. Used for
+     * RENDERING only (the escape rule of the rollback-frame design): the
+     * message and the Epsil diagnostic show its `toString()`, and no
+     * consumer resolves bindings through it. */
+    readonly declaredAt?: Expression
   ) {
     super(
-      `Operator Definition "${symbol}": the body infers the effects \`${describeEffects(inferred)}\`, which the declared effects \`${describeEffects(declared)}\` do not cover`
+      `Operator Definition "${symbol}": the body infers the effects \`${describeEffects(inferred)}\`, which the declared effects \`${describeEffects(declared)}\`` +
+        (declaredAt === undefined
+          ? ''
+          : ` (declared at \`${declaredAt.toString()}\`)`) +
+        ` do not cover`
     );
   }
 }
@@ -126,11 +144,21 @@ export function effectContractErrorValue(
   ce: ComputeEngine,
   e: EffectContractError
 ): Expression {
-  return ce.error([
-    'incompatible-type',
-    `${describeEffects(e.declared)} effects`,
-    `${describeEffects(e.inferred)} effects`,
-  ]);
+  // The declaring site travels as the error's `where` STRING — the legacy
+  // string-context slot of the sited-error shape, rendered by
+  // `describeError` on the Epsil static route. Deliberately a string, not
+  // an expression operand: the effects note only ever renders the site
+  // (never resolves bindings through it), and the public `ce.error` `where`
+  // parameter is string-typed. The diagnostic dedup key is site-less by the
+  // phase-1 design, so deduplication is unchanged.
+  return ce.error(
+    [
+      'incompatible-type',
+      `${describeEffects(e.declared)} effects`,
+      `${describeEffects(e.inferred)} effects`,
+    ],
+    e.declaredAt?.toString()
+  );
 }
 
 /** The effect set spelled for a diagnostic; the empty set has no spelling. */
@@ -560,6 +588,14 @@ interface WalkState {
   readsRandomFrame: boolean;
   draws: boolean;
   unresolvedHead: boolean;
+  /** True when the walk read an effect set that is lazily DERIVED from the
+   * conformance registry — a protocol dispatcher's union over the registered
+   * conforming implementations of a bare requirement, or a callee whose own
+   * stamp is itself derived. A definition stamped by such a walk must
+   * RE-DERIVE rather than freeze: the next conformance can widen the union
+   * under it (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is
+   * an effect"). */
+  consultsRegistry: boolean;
 }
 
 /** Per-branch context: the confinement frontier and the local literal bindings. */
@@ -613,8 +649,9 @@ export function inferFunctionLiteralEffects(
     readsRandomFrame: false,
     draws: false,
     unresolvedHead: false,
+    consultsRegistry: false,
   };
-  walkLiteral(ce, literal, state, options?.selfName, 0);
+  walkLiteral(ce, literal, state, options?.selfName, 0, new Set());
   // Inference produces an UNSTATED set: an empty result is the bare arrow,
   // never the author's `pure`. The walk can accumulate a stated `[]` from an
   // applied `(…) pure -> …` callback, so collapse it here — the one place the
@@ -633,7 +670,16 @@ function walkLiteral(
   literal: Expression,
   state: WalkState,
   selfName: string | undefined,
-  depth: number
+  depth: number,
+  /** Names of the VALUE bindings whose stored literal this walk is currently
+   * inside — the cycle stack of {@link Walker.applyNamed}'s stored-literal
+   * expansion. A head already on it is a recursive call back into a literal
+   * being walked, which is neutral for the same reason a self-call is: the
+   * rest of that body is what classifies it. Without the stack, a
+   * self-recursive value binding (`R := (i) ↦ … R(i-1) …`) would expand into
+   * itself until the depth guard collapsed it to `any`, reporting a pure
+   * recursive body impure. */
+  expanding: Set<string>
 ): void {
   if (depth > MAX_LITERAL_DEPTH) {
     state.effects = 'any';
@@ -667,7 +713,8 @@ function walkLiteral(
     captured,
     localLiterals,
     selfName,
-    depth
+    depth,
+    expanding
   );
   walker.sequence([body], { declared: new Set() });
 }
@@ -702,7 +749,9 @@ class Walker {
     private captured: Set<string>,
     private localLiterals: Map<string, Expression>,
     private selfName: string | undefined,
-    private depth: number
+    private depth: number,
+    /** See the parameter of the same name on {@link walkLiteral}. */
+    private expanding: Set<string>
   ) {}
 
   /** Straight-line dominance: a `Declare(n, …)` statement dominates the
@@ -777,7 +826,8 @@ class Walker {
             callee,
             this.state,
             this.selfName,
-            this.depth + 1
+            this.depth + 1,
+            this.expanding
           );
         else this.applyNamed(sym(callee));
       }
@@ -865,6 +915,7 @@ class Walker {
       readsRandomFrame: false,
       draws: false,
       unresolvedHead: false,
+      consultsRegistry: false,
     };
     this.state = inner;
     try {
@@ -882,6 +933,10 @@ class Walker {
     outer.readsRandomFrame ||= inner.readsRandomFrame;
     outer.draws ||= inner.draws;
     outer.unresolvedHead ||= inner.unresolvedHead;
+    // Registry-dependence is a provenance fact about WHERE the sub-walk read
+    // its numbers, not an effect: a discharge removes labels, never the need
+    // to re-derive.
+    outer.consultsRegistry ||= inner.consultsRegistry;
   }
 
   /**
@@ -942,7 +997,14 @@ class Walker {
 
       // An inline literal in an invoking position: project its latent set.
       if (isFunction(op, 'Function')) {
-        walkLiteral(this.ce, op, this.state, this.selfName, this.depth + 1);
+        walkLiteral(
+          this.ce,
+          op,
+          this.state,
+          this.selfName,
+          this.depth + 1,
+          this.expanding
+        );
         continue;
       }
 
@@ -994,7 +1056,14 @@ class Walker {
     // literal's latent effects.
     const local = this.localLiterals.get(name);
     if (local !== undefined) {
-      walkLiteral(this.ce, local, this.state, this.selfName, this.depth + 1);
+      walkLiteral(
+        this.ce,
+        local,
+        this.state,
+        this.selfName,
+        this.depth + 1,
+        this.expanding
+      );
       return;
     }
 
@@ -1013,9 +1082,58 @@ class Walker {
         this.state.unresolvedHead = true;
         return;
       }
+      // A binding whose declared arrow STATES an effect set (including the
+      // stated-pure empty one) is a trusted contract: union it and stop. When
+      // the arrow is UNSTATED — which is what the `ce.declare(g, '(…) -> …')`
+      // then `ce.assign(g, literal)` idiom leaves behind — the contract says
+      // nothing about what `g` does, and the only account of it is the
+      // `Function` literal the binding currently holds. Walking that literal
+      // into this state propagates its effects, its `draws` /
+      // `readsRandomFrame` bits and — the reason this branch exists — its
+      // `consultsRegistry` bit, so a caller that reaches a protocol dispatcher
+      // through a value-bound hop re-derives when a later conformance widens
+      // the derived union, instead of freezing the (empty) set it first saw.
+      // This mirrors the runtime channel's `valueBindingEffects`
+      // (`effects-of.ts`), which likewise trusts a stated declared arrow and
+      // otherwise consults the stored value; the two channels must not
+      // disagree about the same head. (`docs/TYPE_SYSTEM_ROADMAP.md`,
+      // Appendix B, "Changing a field is an effect".)
+      //
+      // A head already on the expansion stack is a recursive call back into a
+      // literal this walk is inside; it is neutral, exactly as a self-call is,
+      // and falls through to contribute nothing.
+      if (t === undefined && !this.expanding.has(name)) {
+        const stored = storedFunctionLiteral(this.ce, name);
+        if (stored !== undefined) {
+          this.expanding.add(name);
+          try {
+            walkLiteral(
+              this.ce,
+              stored,
+              this.state,
+              this.selfName,
+              this.depth + 1,
+              this.expanding
+            );
+          } finally {
+            this.expanding.delete(name);
+          }
+          return;
+        }
+      }
       this.state.effects = unionEffectSets(this.state.effects, t);
       return;
     }
+
+    // The callee's effect set may be LAZILY DERIVED rather than fixed — a
+    // protocol dispatcher unions the inferred effects of the conformers
+    // registered right now, and a later conformance can widen it. Reading
+    // `def.effects` below goes through the refreshing accessor, so the number
+    // this walk uses is current; recording that the walk depended on it is
+    // what lets the definition being stamped re-derive instead of freezing
+    // (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an
+    // effect").
+    if (def._deriveEffects !== undefined) this.state.consultsRegistry = true;
 
     if (def.readsRandomFrame === true) this.state.readsRandomFrame = true;
     // Read from the callee's DERIVED getter, so an explicit `random`, a
@@ -1164,4 +1282,54 @@ function valueSignatureOf(
   if (!('value' in def)) return undefined;
   const t = def.value.type?.type;
   return signatureEffects(t as Type | undefined);
+}
+
+/**
+ * The `Function` literal a value binding currently HOLDS, when it holds one —
+ * the body behind the `ce.declare(name, { type: '(…) -> …' })` +
+ * `ce.assign(name, literal)` idiom, whose declared arrow states no effects.
+ *
+ * Reading the binding's value is gated on the declared type possibly denoting
+ * something callable ({@link bindingCouldHoldFunction}): the value slot is a
+ * lazy getter that materializes a dynamic value on first read, and an ordinary
+ * `x: number` binding must never be materialized by an effect walk.
+ */
+function storedFunctionLiteral(
+  ce: ComputeEngine,
+  name: string
+): Expression | undefined {
+  const def = ce.lookupDefinition(name);
+  if (def === undefined || !('value' in def)) return undefined;
+  if (!bindingCouldHoldFunction(def.value.type?.type as Type | undefined))
+    return undefined;
+  const value = def.value.value;
+  if (value === undefined || !isFunction(value, 'Function')) return undefined;
+  return value;
+}
+
+/**
+ * Whether a value binding's DECLARED type leaves room for the binding to hold a
+ * function — the gate on reading the (lazy) value slot in
+ * {@link storedFunctionLiteral}.
+ *
+ * Deliberately GENEROUS, and deliberately different from {@link isCallableType}
+ * next door: an absent, `unknown` or `any` declared type counts, because a
+ * binding assigned a literal before any type was declared reads that way. It
+ * mirrors `couldBeCallable` in `effects-of.ts`, which gates the runtime
+ * channel's read of the very same slot — the two gates decide which bindings
+ * are worth consulting, and must not disagree. Being generous here only ever
+ * costs a value read that answers "not a literal"; being narrow would silently
+ * drop a stored literal's effects.
+ */
+function bindingCouldHoldFunction(t: Type | undefined): boolean {
+  if (t === undefined) return true;
+  if (typeof t === 'string')
+    return t === 'unknown' || t === 'any' || t === 'function' || t === 'symbol';
+  return (
+    t.kind === 'signature' ||
+    t.kind === 'callback' ||
+    t.kind === 'intersection' ||
+    t.kind === 'union' ||
+    t.kind === 'reference'
+  );
 }

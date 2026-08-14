@@ -21,8 +21,10 @@ import {
 } from '../common/type/utils.js';
 import {
   effectSetToString,
+  isCoFiniteEffects,
   isEffectSubset,
   isPureEffectSet,
+  subtractEffects,
   unionEffectSets,
 } from '../common/type/effects.js';
 import { isValidPrimitiveType } from '../common/type/primitive.js';
@@ -55,6 +57,7 @@ import {
   sym,
 } from './boxed-expression/type-guards.js';
 import { functionLiteralReturnMarker } from './boxed-expression/function-literal.js';
+import { inferFunctionLiteralEffects } from './boxed-expression/effects-inference.js';
 import {
   isOperatorDef,
   isValueDef,
@@ -227,6 +230,17 @@ export function declareProtocolImpl(
   }
 
   if (existing !== undefined) {
+    // Replacing a protocol can WIDEN a dispatcher's effect set — a
+    // requirement's ceiling loosened from `pure` to `random`, or a bare
+    // requirement whose changed shape now matches an effectful conformer that
+    // used to be stranded — and a function annotated `pure` that calls through
+    // that dispatcher then declares something that is no longer true. As in
+    // `declareConformance`, the declared contracts can only be re-derived
+    // against the LIVE registry, so the replacement is applied and undone
+    // below if it turns out to have falsified one. A FRESH declaration needs
+    // no such guard: it installs dispatchers for a name nothing could already
+    // be calling.
+    const restore = ce._protocolRegistryRollbackPoint();
     // Records mutate IN PLACE (the type-registry contract, same reason:
     // captured references). The conformance edges survive a re-declaration —
     // conformance is monotone (Appendix A "Conformance").
@@ -258,10 +272,29 @@ export function declareProtocolImpl(
     // redefinition: cached decisions taken against the old requirement set
     // must not be left stale (P16).
     ce._noteStateEvent({ kind: 'config' });
+    ce._noteConformanceRegistryChange();
     // The requirement set changed: install the dispatchers of the members it
     // gained, refresh the survivors' signatures, and remove the ones it
     // dropped (P13).
     syncProtocolDispatchers(ce);
+
+    const violations = conformanceWideningViolations(ce);
+    if (violations.length > 0) {
+      // The rollback thunk emits its own `config` state event and bumps the
+      // conformance version when it restores anything, so nothing is emitted
+      // here on top of that — but it only restores the REGISTRY, so the
+      // dispatchers installed against the replaced requirement set are
+      // re-synced explicitly against the restored one.
+      restore();
+      syncProtocolDispatchers(ce);
+      throw Error(
+        `conformance-widens-declared-contract: ${wideningRejectionMessage(
+          violations,
+          'replacing this protocol',
+          'keep the previous declaration'
+        )}`
+      );
+    }
     return;
   }
 
@@ -275,6 +308,7 @@ export function declareProtocolImpl(
   // A FRESH declaration is also a config event: `typesOverlap`/dispatch
   // decisions are keyed on the registry, and phase 3 installs dispatchers here.
   ce._noteStateEvent({ kind: 'config' });
+  ce._noteConformanceRegistryChange();
   // P13 — every FUNCTION member becomes callable by its bare name, unless the
   // name is already taken (see `syncProtocolDispatchers`).
   syncProtocolDispatchers(ce);
@@ -654,6 +688,21 @@ export function declareConformance(
     if (failure !== null) return ce.error([failure.code, failure.message]);
   }
 
+  // Registering a conformance can WIDEN a dispatcher's DERIVED effect set (the
+  // union over the conformers of a bare requirement), and a function annotated
+  // `pure` that calls through that dispatcher then declares something that is
+  // no longer true. Such a statement is BLOCKED, not merely flagged — the same
+  // polarity as an `Assign` that violates a declared type — but the contracts
+  // can only be re-derived against the LIVE registry, so the registration
+  // happens first and is undone if it turns out to have falsified one
+  // (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an
+  // effect").
+  const restore = ce._protocolRegistryRollbackPoint();
+  /** Did the loop below actually change the registry? A re-declared
+   * conformance with no implementation block is a no-op, and re-deriving every
+   * declared contract for it would be pure cost. */
+  let mutated = false;
+
   for (const record of records) {
     const existing = record.conformances.find((c) => c.targetKey === targetKey);
     if (existing !== undefined) {
@@ -661,6 +710,7 @@ export function declareConformance(
       // implementation block fulfils a pending edge, if it COVERS the
       // requirements.
       if (impl !== undefined) {
+        mutated = true;
         existing.impl = impl;
         // The stamp rides with the implementation: an install from outside a
         // batch (the box route, P47) leaves it UNSTAMPED and replaces freely.
@@ -671,6 +721,7 @@ export function declareConformance(
         // target's SUBTYPES, which inherit it.
         refreshInheritedPending(record);
         ce._noteStateEvent({ kind: 'config' });
+        ce._noteConformanceRegistryChange();
       }
       continue;
     }
@@ -687,15 +738,190 @@ export function declareConformance(
         conformance._implOrigin = { batch, block: options?.block };
     }
     record.conformances.push(conformance);
+    mutated = true;
     // The new edge may INHERIT an implementation registered for a supertype,
     // and (with a block of its own) may fulfil impl-less subtype edges.
     refreshInheritedPending(record);
     // P16 — a conformance ADDITION must invalidate cached static-dispatch
     // decisions, so it is a `config` event (all axes), not a `declare`.
     ce._noteStateEvent({ kind: 'config' });
+    ce._noteConformanceRegistryChange();
+  }
+
+  if (mutated) {
+    const violations = conformanceWideningViolations(ce);
+    if (violations.length > 0) {
+      // The rollback thunk emits its own `config` state event and bumps the
+      // conformance version when it restores anything, so the unions derived
+      // while the registration stood are not served to the restored world.
+      // Nothing is emitted here on top of that.
+      restore();
+      return ce.error([
+        'conformance-widens-declared-contract',
+        wideningRejectionMessage(violations),
+      ]);
+    }
   }
 
   return null;
+}
+
+/** A DECLARED effect contract that a conformance registration has falsified —
+ * one entry of the `conformance-widens-declared-contract` diagnostic. */
+interface WideningViolation {
+  /** The name the contract-holder is bound to. */
+  name: string;
+  /** The effect set its own declaration states; `undefined` is the empty set,
+   * spelled `pure` in the diagnostic. */
+  declared: EffectSet | undefined;
+  /** What re-deriving its body now yields. */
+  inferred: EffectSet | undefined;
+  /** The labels of {@link inferred} the ceiling {@link declared} does not
+   * admit. */
+  exceeding: EffectSet;
+}
+
+/**
+ * Every DECLARED effect contract this engine currently holds that the registry
+ * — as it stands right now — has falsified.
+ *
+ * A protocol dispatcher's effect set is DERIVED from the conformers of a bare
+ * requirement, so registering a conformance can widen it, and a function
+ * annotated `pure` that calls through that dispatcher then declares something
+ * untrue. The engine therefore re-derives, after a registration, the effect set
+ * of every definition that carries an EXPLICIT effect specifier. That index is
+ * small by construction: a bare arrow leaves effects on the inferred track, so
+ * an annotation is a deliberate act, and a definition with no body of its own —
+ * a host-implemented library operator — has nothing to re-derive and cannot be
+ * violated by anything in this registry.
+ *
+ * Transitivity needs no dependency graph: re-derivation walks bodies and reads
+ * each callee's effect set through the definition getters, which consult the
+ * dispatcher derivers, so a contract that reaches a dispatcher only through
+ * intermediate functions is caught as well.
+ *
+ * A holder whose re-derivation throws, or whose walk hit an unresolved named
+ * head, is skipped — the walk has nothing to say about it, the same trusted
+ * posture the install-time annotation check takes for an opaque head
+ * (`boxed-operator-definition.ts`).
+ *
+ * (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an effect".)
+ */
+function conformanceWideningViolations(
+  ce: IComputeEngine
+): WideningViolation[] {
+  const violations: WideningViolation[] = [];
+  const seenNames = new Set<string>();
+  const seenDefs = new Set<BoxedDefinition>();
+  let scope: Scope | null = ce.context.lexicalScope;
+  while (scope) {
+    for (const [name, def] of scope.bindings) {
+      // Innermost binding wins: an outer definition of a shadowed name cannot
+      // be called, so its contract cannot be exercised.
+      if (seenNames.has(name)) continue;
+      seenNames.add(name);
+      // One definition record bound under two names is one contract.
+      if (seenDefs.has(def)) continue;
+      seenDefs.add(def);
+      const violation = contractViolation(ce, name, def);
+      if (violation !== null) violations.push(violation);
+    }
+    scope = scope.parent;
+  }
+  return violations;
+}
+
+/** Is `def` a declared-effect contract the current registry has falsified?
+ * See {@link conformanceWideningViolations} for the rule; this is the per-
+ * definition half, which reads the contract off whichever half of the binding
+ * carries it. */
+function contractViolation(
+  ce: IComputeEngine,
+  name: string,
+  def: BoxedDefinition
+): WideningViolation | null {
+  if (isOperatorDef(def)) {
+    const operator = def.operator;
+    // No body, no re-derivation: a host operator's declared set describes host
+    // code, which no conformance can change.
+    if (!operator.effectsDeclared) return null;
+    const literal = operator._lambdaLiteral;
+    if (literal === undefined) return null;
+    // For a CONTRACT definition this getter is the stated set verbatim: a
+    // declared contract never installs a `_deriveEffects` hook (see
+    // `boxed-operator-definition.ts`, "A declared contract never re-derives").
+    return exceededContract(ce, name, literal, operator.effects);
+  }
+  if (isValueDef(def)) {
+    const value = def.value;
+    if (!value.effectsDeclared) return null;
+    const declared = signatureEffects(value.type.type);
+    if (declared === undefined) return null;
+    const literal = value.value;
+    if (literal === undefined || !isFunction(literal, 'Function')) return null;
+    return exceededContract(ce, name, literal, declared);
+  }
+  return null;
+}
+
+/** Re-derive `literal`'s effect set and compare it against the `declared`
+ * contract, `null` when the contract still holds (or when the walk has nothing
+ * to say). `name` rides as the walk's self-name so a recursive body does not
+ * read its own head as an unknown. */
+function exceededContract(
+  ce: IComputeEngine,
+  name: string,
+  literal: Expression,
+  declared: EffectSet | undefined
+): WideningViolation | null {
+  let inferred: ReturnType<typeof inferFunctionLiteralEffects>;
+  try {
+    inferred = inferFunctionLiteralEffects(ce, literal, { selfName: name });
+  } catch {
+    return null;
+  }
+  if (inferred.unresolvedHead) return null;
+  if (isEffectSubset(inferred.effects, declared)) return null;
+  const excess = subtractEffects(
+    inferred.effects,
+    declared === undefined || declared === 'any' ? undefined : declared
+  );
+  return {
+    name,
+    declared,
+    inferred: inferred.effects,
+    // An `'any'` (or co-finite) excess has no enumerable labels: it is the top
+    // of the lattice, "unknown effects".
+    exceeding:
+      excess === undefined || excess === 'any' || isCoFiniteEffects(excess)
+        ? 'any'
+        : excess,
+  };
+}
+
+/** The `conformance-widens-declared-contract` message: EVERY violated
+ * dependent, with the set it declares, the set it would now infer, and the
+ * labels that exceed its ceiling — plus the two remedies Appendix B names
+ * ("widen or remove the dependent's annotation, or don't conform").
+ *
+ * `subject` and `remedy` name the statement being rejected, since the same
+ * diagnostic serves a conformance registration (`declareConformance`) and a
+ * protocol replacement (`declareProtocolImpl`), which widens through the same
+ * derived dispatcher effects. */
+function wideningRejectionMessage(
+  violations: readonly WideningViolation[],
+  subject = 'registering this conformance',
+  remedy = 'do not register this conformance'
+): string {
+  const text = (effects: EffectSet | undefined): string =>
+    effects === undefined ? 'pure' : effectSetToString(effects);
+  const each = violations
+    .map(
+      (v) =>
+        `\`${v.name}\` declares \`${text(v.declared)}\` but would infer \`${text(v.inferred)}\` (exceeding: \`${text(v.exceeding)}\`)`
+    )
+    .join('; ');
+  return `${subject} would make dispatched calls more effectful than declared contracts allow: ${each}. Widen or remove those effect annotations, or ${remedy}`;
 }
 
 /**
@@ -1064,16 +1290,55 @@ function declaredPatternResult(
 }
 
 /**
+ * The tail of an effect-CEILING diagnostic: what the implementation carries
+ * (`lead` names where that set came from — its declaration, or its body), what
+ * the requirement admits, which labels exceed it, and the two ways out.
+ *
+ * `carried` is known NOT to fit `allowed`; the caller tested it. `'any'` is the
+ * top of the effect lattice — "unknown effects", not an enumerable set of
+ * labels — so an `'any'` carrier is reported as unknown, and an excess that is
+ * `'any'` or co-finite (what `subtractEffects` produces from an `'any'`
+ * carrier) is reported as `any` rather than as a list.
+ *
+ * A requirement's effect specifier is a CEILING, not a prediction, and a
+ * rejection must name the exceeded label and point at the ceiling as a possible
+ * fix site (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an
+ * effect").
+ */
+function effectCeilingDetail(
+  lead: string,
+  carried: EffectSet,
+  allowed: EffectSet,
+  site: string
+): string {
+  const carriedText =
+    carried === 'any' ? '`any` (unknown)' : `\`${effectSetToString(carried)}\``;
+  const excess = subtractEffects(
+    carried,
+    allowed === 'any' ? undefined : allowed
+  );
+  const excessText =
+    excess === undefined || excess === 'any' || isCoFiniteEffects(excess)
+      ? 'any'
+      : effectSetToString(excess);
+  return `${lead} ${carriedText}; the requirement's ceiling on \`${site}\` is \`${effectSetToString(allowed)}\` — exceeded by \`${excessText}\`. Make the implementation purer, or widen the ceiling`;
+}
+
+/**
  * Match an implementation signature against a requirement: same arity,
  * parameters CONTRAVARIANT, result COVARIANT, effects equal-or-purer (P17).
  *
  * The comparison is componentwise rather than one whole-signature
  * `isSubtype()` so the diagnostic can name the offending position; the
  * verdicts are the same predicate `isSubtype` applies to a signature pair.
+ *
+ * `site` is the requirement's qualified name (`Comparable.compare`) — the
+ * ceiling's own fix site, which the effects diagnostic points at.
  */
 function signatureMismatch(
   impl: { args: Type[]; result?: Type; effects?: EffectSet },
   requirement: FunctionSignature,
+  site: string,
   options?: { checkResult?: boolean }
 ): string | null {
   const expected = requirement.args ?? [];
@@ -1096,11 +1361,30 @@ function signatureMismatch(
   )
     return `the result is \`${typeToString(impl.result)}\`; expected \`${typeToString(requirement.result)}\` or a subtype`;
 
-  // Effects: equal or PURER. An undeclared effect set is the empty set, which
-  // is below everything, so an unannotated implementation always passes.
+  // Effects: equal or PURER — but only where the requirement actually SPELLS a
+  // specifier. A bare requirement imposes no bound at all: a protocol function
+  // is a dispatcher over an open set of conforming bodies, so making a
+  // requirement anticipate every capability some future conformer might need
+  // was rejected as a design (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B,
+  // "Changing a field is an effect"; the rejected alternative is named there as
+  // "bare-means-pure ceilings on requirements"). The gate therefore tests for
+  // `undefined` — nothing spelled — and never for emptiness: an explicit `pure`
+  // parses to the STATED empty set, which is a real ceiling, and the strongest
+  // one.
+  //
+  // This clause sees only what the implementation DECLARES. A bare-marker
+  // implementation declares nothing, so its BODY is checked separately, by the
+  // inferred-effects clause in `implementationProblem`.
   const allowed = signatureEffects(requirement);
-  if (!isEffectSubset(impl.effects, allowed))
-    return `it declares the effects \`${impl.effects === undefined ? 'pure' : effectSetToString(impl.effects)}\`; the requirement allows \`${allowed === undefined ? 'pure' : effectSetToString(allowed)}\``;
+  if (allowed !== undefined && !isEffectSubset(impl.effects, allowed))
+    return effectCeilingDetail(
+      'it declares the effects',
+      // Not `undefined`: the empty set fits every ceiling, so the test above
+      // could not have failed for it.
+      impl.effects!,
+      allowed,
+      site
+    );
 
   return null;
 }
@@ -1309,7 +1593,7 @@ function implementationProblem(
     const detail =
       declared === null
         ? 'it is not a function literal'
-        : signatureMismatch(declared, expected, {
+        : signatureMismatch(declared, expected, `${record.name}.${member}`, {
             // A CONDITIONAL conformance's result is a covariant position: it is
             // checked against the head PATTERN below, not at the widest
             // instantiation.
@@ -1320,6 +1604,49 @@ function implementationProblem(
         code: 'protocol-signature-mismatch',
         message: `the signature of \`${describeMember(accessor, member)}\` does not match \`${record.name}.${member}\` at \`Self = ${selfName}\` — expected \`${typeToString(expected)}\` (${detail})`,
       };
+
+    // The INFERRED half of the effect ceiling. The clause above compares what
+    // the implementation DECLARES, and a bare-marker implementation declares
+    // nothing — so under a ceiling its BODY is what must be checked, or a
+    // `pure` requirement would accept an implementation that calls `Random()`.
+    // Function members only: the property signatures `requirementOf` builds are
+    // synthesized here and carry no effect specifier, so they impose no
+    // ceiling. (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is
+    // an effect".)
+    //
+    // Like the rest of the loop this runs at `Self = target`; the walk reads
+    // heads by name and needs no resolver.
+    const ceiling = accessor === null ? signatureEffects(expected) : undefined;
+    if (ceiling !== undefined) {
+      let inferred: ReturnType<typeof inferFunctionLiteralEffects> | undefined;
+      try {
+        inferred = inferFunctionLiteralEffects(ce, value);
+      } catch {
+        // A walk that cannot run says nothing about the body; the declared
+        // clause above has already had its say.
+        inferred = undefined;
+      }
+      // An UNRESOLVED named head leaves the walk with `{any}` for a reason it
+      // cannot distinguish from "not defined yet", so the check is skipped —
+      // the same trusted posture the definition-annotation check takes for an
+      // opaque head (`boxed-operator-definition.ts`, the trusted-annotation
+      // escape).
+      if (
+        inferred !== undefined &&
+        !inferred.unresolvedHead &&
+        !isEffectSubset(inferred.effects, ceiling)
+      )
+        return {
+          code: 'protocol-signature-mismatch',
+          message: `the body of \`${describeMember(accessor, member)}\` ${effectCeilingDetail(
+            'infers the effects',
+            // Not `undefined`: the empty set fits every ceiling.
+            inferred.effects!,
+            ceiling,
+            `${record.name}.${member}`
+          )}`,
+        };
+    }
 
     // The COVARIANT positions of a CONDITIONAL conformance, at the head pattern
     // (the clause variables opaque). A result the implementation does not
@@ -1508,6 +1835,13 @@ export function declareProtocolImplementationImpl(
   );
   if (failure !== null) throw Error(`${failure.code}: ${failure.message}`);
 
+  // The declared-contract widening guard, exactly as on the statement route
+  // (see {@link conformanceWideningViolations} and the rollback comment in
+  // `declareConformance`): the contracts can only be re-derived against the
+  // live registry, so the registration happens and is undone if it falsified
+  // one. This route reports by THROWING, its error convention throughout.
+  const restore = ce._protocolRegistryRollbackPoint();
+
   if (existing !== undefined) {
     existing.impl = members;
     existing.pending = false;
@@ -1528,6 +1862,27 @@ export function declareProtocolImplementationImpl(
   // P16 — a conformance addition (and an implementation) invalidates cached
   // static-dispatch decisions: a `config` event, all axes.
   ce._noteStateEvent({ kind: 'config' });
+  ce._noteConformanceRegistryChange();
+
+  // This check cannot currently fire through this route's OWN inputs: a
+  // `ProtocolImplementationInput` carries host callbacks only, and a host
+  // callback contributes the empty set to a bare requirement's derived union
+  // (see {@link derivedDispatcherEffects}), so nothing registered here widens
+  // a dispatcher. It is kept because the guard belongs to the REGISTRATION,
+  // not to the shape of one route's argument: the day
+  // `ProtocolImplementationInput` admits an EXPRESSION implementation — the
+  // only thing separating this route from the statement one, which does widen
+  // — the check would otherwise be silently absent, with nothing failing to
+  // signal it.
+  const violations = conformanceWideningViolations(ce);
+  if (violations.length > 0) {
+    // The rollback thunk emits its own `config` event and bumps the
+    // conformance version, so nothing is emitted here on top of it.
+    restore();
+    throw Error(
+      `conformance-widens-declared-contract: ${wideningRejectionMessage(violations)}`
+    );
+  }
 }
 
 //
@@ -1727,8 +2082,142 @@ function installDispatcher(
   }
 
   const installed = scope.bindings.get(member);
-  if (installed !== undefined && isOperatorDef(installed))
+  if (installed !== undefined && isOperatorDef(installed)) {
     (installed.operator as unknown as DispatcherMarker)[DISPATCHER] = true;
+    // The stored signature carries the DECLARED ceilings, which are fixed at
+    // declaration time; the BARE requirements' contribution is the union over
+    // the conformers registered at the moment the effects are read, so it is
+    // derived lazily rather than baked in here.
+    installed.operator._deriveEffects = makeDispatcherDeriver(ce, member);
+  }
+}
+
+/**
+ * The dispatcher's LIVE effect set for `member`: what
+ * `_BoxedOperatorDefinition._deriveEffects` returns.
+ *
+ * Per protocol declaring `member` as a function requirement:
+ *
+ * - A requirement with a DECLARED effect specifier is a CEILING. Conformers
+ *   may only be purer, and callers are entitled to rely on the bound durably,
+ *   so the declared set — not what the conformers happen to do today — is that
+ *   protocol's contribution.
+ * - A requirement with a BARE specifier imposes no bound, and its
+ *   contribution is the union over the registered conforming implementations
+ *   of what each of them actually does (`docs/TYPE_SYSTEM_ROADMAP.md`,
+ *   Appendix B, "Changing a field is an effect"). A host callback contributes
+ *   the empty set — the same trust extended to a host operator handler, which
+ *   also declares its own effects or none. An Epsil function literal
+ *   contributes its DECLARED marker effects unioned with the effects inferred
+ *   from its body, the honest latent set (the rule `valueBindingEffects`
+ *   applies to ordinary bindings).
+ *
+ * A literal whose `Self`-mentioning annotations fail to parse contributes
+ * `'any'` rather than crashing the deriver: conservative top is always sound.
+ */
+function derivedDispatcherEffects(
+  ce: IComputeEngine,
+  member: string
+): EffectSet | undefined {
+  let union: EffectSet | undefined = undefined;
+  for (const record of protocolsWithMember(ce, member)) {
+    const shape = requirementShape(ce, record, member);
+    if (shape === null) continue;
+
+    const declared = signatureEffects(shape);
+    if (declared !== undefined) {
+      union = unionEffectSets(union, declared);
+      if (union === 'any') return 'any';
+      continue;
+    }
+
+    for (const edge of record.conformances) {
+      // A PENDING edge is not a dispatch candidate — `bestCandidates` skips it,
+      // which is what makes a call through one the
+      // `protocol-implementation-missing` runtime error — so its
+      // implementation is never invoked and must not widen the union. A
+      // protocol RE-DECLARATION strands a formerly-matching implementation
+      // exactly this way (see `declareProtocolImpl`, which re-runs
+      // `implementationProblem` over every conformance).
+      if (edge.pending) continue;
+      const impl = edge.impl?.[member];
+      if (impl === undefined) continue;
+      if (!isExpressionImplementation(impl)) continue;
+      try {
+        union = unionEffectSets(
+          union,
+          inferFunctionLiteralEffects(ce, impl).effects
+        );
+        union = unionEffectSets(
+          union,
+          declaredImplementationSignature(
+            impl,
+            selfAwareResolver(ce._typeResolver)
+          )?.effects
+        );
+      } catch {
+        union = 'any';
+      }
+      if (union === 'any') return 'any';
+    }
+  }
+  return union;
+}
+
+/**
+ * The memoized, re-entrancy-guarded deriver installed on the dispatcher
+ * definition of `member` — see {@link derivedDispatcherEffects} for what it
+ * computes and Appendix B, "Changing a field is an effect", for why the value
+ * is derived rather than fixed at protocol-declaration time.
+ *
+ * The memo is stamped on the two monotone counters that can change the answer:
+ * the conformance-registry version (a new conformer enters the union) and the
+ * `callable` version (a conformer's body calls a global function that was
+ * reassigned). Appendix B's implementation note requires exactly the first of
+ * those — "the effects cache's key must include the conformance registry among
+ * its axes".
+ *
+ * While a computation is in flight the closure returns the set it last
+ * produced. That is sound: a conformer whose body calls back through this very
+ * dispatcher contributes the union under construction, and each of its other,
+ * direct contributions has already been unioned in by the time the cycle
+ * closes.
+ *
+ * While an inference ROLLBACK FRAME is open (`inference-rollback.ts`) the
+ * closure computes but does NOT stamp: a frame's undo restores definitions
+ * through raw slot writes and advances no version counter, so a memo stamped
+ * inside the frame would keep serving a union derived from the discarded
+ * trial world after the rollback. The first read after the frame closes
+ * recomputes against the restored world. (Same rule as
+ * `_BoxedOperatorDefinition._makeLiteralEffectsDeriver`.)
+ */
+function makeDispatcherDeriver(
+  ce: IComputeEngine,
+  member: string
+): () => EffectSet | undefined {
+  let stampedConformance = -1;
+  let stampedCallable = -1;
+  let memo: EffectSet | undefined = undefined;
+  let inFlight = false;
+  return (): EffectSet | undefined => {
+    if (inFlight) return memo;
+    if (
+      stampedConformance === ce._conformanceVersion &&
+      stampedCallable === ce._callableVersion
+    )
+      return memo;
+    inFlight = true;
+    try {
+      memo = derivedDispatcherEffects(ce, member);
+      if (ce._rollbackFrames.length === 0) {
+        stampedConformance = ce._conformanceVersion;
+        stampedCallable = ce._callableVersion;
+      }
+      return memo;
+    } finally {
+      inFlight = false;
+    }
+  };
 }
 
 /**
@@ -1738,11 +2227,22 @@ function installDispatcher(
  * real parameter types depend on `Self`, which is only known per call site, so
  * the checking happens in the `canonical` handler (P1's static half) and the
  * result in the `type` handler. What the signature DOES carry is the
- * requirement's declared EFFECTS — the union across the protocols sharing the
- * name (Appendix A "Effects": implementations may not be more effectful than
- * the requirement, so the requirement's effect is sound for every target) —
- * and the requirement's parameter NAMES, so that a named call can be permuted
- * into declaration order ({@link sharedParameterName}).
+ * requirement's parameter NAMES, so that a named call can be permuted into
+ * declaration order ({@link sharedParameterName}), and its EFFECTS.
+ *
+ * The effects are a two-part rule (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B,
+ * "Changing a field is an effect"):
+ *
+ * - A requirement that DECLARES an effect specifier states a CEILING —
+ *   conformers may be purer, never more effectful — so callers may rely on it
+ *   durably. Those ceilings are static, and their union across the protocols
+ *   sharing the name is what this function stamps here, as the initial value.
+ * - A requirement with a BARE specifier imposes no bound at all. Its
+ *   contribution is the union of the effects of the conforming
+ *   implementations registered right now, which changes as conformances
+ *   register. That part is refreshed on read, through the `_deriveEffects`
+ *   hook {@link installDispatcher} attaches — see
+ *   {@link derivedDispatcherEffects}.
  */
 function dispatcherDefinition(
   ce: IComputeEngine,

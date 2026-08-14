@@ -937,22 +937,94 @@ describe('implementation validation (P17)', () => {
     ).toBe('Nothing');
   });
 
-  test('EFFECTS: an effectful implementation of a pure requirement is rejected', () => {
-    const ce = withComparable();
-    const r = implement(ce, 'string', 'Comparable', {
-      compare: [
-        'Function',
-        [
-          'Typed',
-          { str: 'body' },
-          { str: '(self: Self, other: Self) console -> string' },
-        ],
-        ['Typed', 'self', { str: 'Self' }],
-        ['Typed', 'other', { str: 'Self' }],
-      ],
+  /** A `compare` implementation whose own marker declares `console`. */
+  const consoleCompare: any = [
+    'Function',
+    [
+      'Typed',
+      { str: 'body' },
+      { str: '(self: Self, other: Self) console -> string' },
+    ],
+    ['Typed', 'self', { str: 'Self' }],
+    ['Typed', 'other', { str: 'Self' }],
+  ];
+
+  /** A `compare` implementation with a BARE marker whose BODY draws. */
+  const drawingCompare: any = [
+    'Function',
+    [
+      'Typed',
+      ['Block', ['Random'], { str: '=' }],
+      { str: '(self: Self, other: Self) -> string' },
+    ],
+    ['Typed', 'self', { str: 'Self' }],
+    ['Typed', 'other', { str: 'Self' }],
+  ];
+
+  /** An engine whose `Comparable.compare` requirement spells a `pure`
+   * ceiling, as opposed to `withComparable`'s BARE one. */
+  const withPureComparable = (): ComputeEngine => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Comparable', {
+      functions: { compare: '(self: Self, other: Self) pure -> string' },
     });
-    expect(r.toString()).toContain('protocol-signature-mismatch');
-    expect(r.toString()).toContain('console');
+    return ce;
+  };
+
+  test('EFFECTS: a BARE requirement is no ceiling — an effectful implementation is accepted', () => {
+    // A requirement with a bare specifier imposes no effect bound at all: a
+    // protocol function is a dispatcher over an open set of conforming bodies,
+    // and its effect set is DERIVED from them. Requiring the author to
+    // anticipate every capability a future conformer might need is rejected by
+    // name in `docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is
+    // an effect" ("Rejected: bare-means-pure ceilings on requirements").
+    // `withComparable`'s requirement is bare.
+    const ce = withComparable();
+    expect(
+      implement(ce, 'string', 'Comparable', { compare: consoleCompare }).json
+    ).toBe('Nothing');
+  });
+
+  test('EFFECTS: a bare requirement does not constrain the BODY either', () => {
+    const ce = withComparable();
+    expect(
+      implement(ce, 'string', 'Comparable', { compare: drawingCompare }).json
+    ).toBe('Nothing');
+  });
+
+  test('EFFECTS: an explicit `pure` ceiling rejects a DECLARED effect', () => {
+    // `pure` parses to the STATED empty set, which is distinct from a bare
+    // (absent) specifier and is the strongest ceiling.
+    const ce = withPureComparable();
+    const message = implement(ce, 'string', 'Comparable', {
+      compare: consoleCompare,
+    }).toString();
+    expect(message).toContain('protocol-signature-mismatch');
+    // Appendix B: the diagnostic names the exceeded label and points at the
+    // ceiling as a possible fix site.
+    expect(message).toContain('it declares the effects `console`');
+    expect(message).toContain('exceeded by `console`');
+    expect(message).toContain(
+      "the requirement's ceiling on `Comparable.compare`"
+    );
+    expect(message).toContain('widen the ceiling');
+  });
+
+  test('EFFECTS: an explicit `pure` ceiling rejects a BODY that exceeds it', () => {
+    // The implementation's own marker is bare, so nothing it DECLARES exceeds
+    // the ceiling — only what its body infers does.
+    const ce = withPureComparable();
+    const message = implement(ce, 'string', 'Comparable', {
+      compare: drawingCompare,
+    }).toString();
+    expect(message).toContain('protocol-signature-mismatch');
+    expect(message).toContain(
+      'the body of `compare` infers the effects `random`'
+    );
+    expect(message).toContain('exceeded by `random`');
+    expect(message).toContain(
+      "the requirement's ceiling on `Comparable.compare`"
+    );
   });
 
   test('EFFECTS: a PURER implementation of an effectful requirement is accepted', () => {
@@ -1836,5 +1908,187 @@ describe('P8: a protocol name in TYPE position', () => {
     expect(() => ce.declareProtocol('Comparable', {})).toThrow(
       'already declared'
     );
+  });
+});
+
+//
+// ── The declared-contract widening guard ────────────────────────────────────
+//
+// A protocol dispatcher's effect set is DERIVED from the conformers of a BARE
+// requirement, so registering a conformance can widen it — and a function
+// annotated `pure` that calls through that dispatcher then declares something
+// untrue. Such a statement is BLOCKED, not merely flagged: the engine
+// re-derives every declared-effect contract after the registration and rolls
+// the registration back when one is exceeded
+// (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an
+// effect").
+//
+
+describe('conformance-widens-declared-contract', () => {
+  /** An engine with a BARE `Speaker.speak` requirement and one PURE conformer,
+   * so a dependent's call through the dispatcher typechecks. */
+  const withSpeaker = (): ComputeEngine => {
+    const ce = new ComputeEngine();
+    executeEpsil(
+      ce,
+      'protocol Speaker {\n  function speak(self: Self) -> string\n}'
+    );
+    executeEpsil(
+      ce,
+      'type string is Speaker {\n  function speak(self: Self) -> string { "hi" }\n}'
+    );
+    return ce;
+  };
+
+  /** `type number is Speaker { … Random() … }` — the DRAWING conformer that
+   * widens the derived union to `{random}`. */
+  const DRAWING =
+    'type number is Speaker {\n  function speak(self: Self) -> string { Random() }\n}';
+
+  test('the drawing conformance is REJECTED, naming the dependent and the label', () => {
+    const ce = withSpeaker();
+    expect(
+      executeEpsil(ce, 'function f() pure -> unknown { speak("x") }').value.json
+    ).toBe('Nothing');
+
+    const message = executeEpsil(ce, DRAWING).value.toString();
+    expect(message).toContain('conformance-widens-declared-contract');
+    expect(message).toContain('`f` declares `pure` but would infer `random`');
+    expect(message).toContain('exceeding: `random`');
+  });
+
+  test('the rejected registration is ROLLED BACK', () => {
+    const ce = withSpeaker();
+    executeEpsil(ce, 'function f() pure -> unknown { speak("x") }');
+    executeEpsil(ce, DRAWING);
+
+    // The edge is gone…
+    expect(
+      ce._protocolRegistry.Speaker.conformances.map((c) => c.targetKey)
+    ).toEqual(['string']);
+    // …the dispatcher's derived union is pure again…
+    expect(ce.lookupDefinition('speak')!['operator'].pure).toBe(true);
+    // …the dependent still works…
+    expect(executeEpsil(ce, 'f()').value.toString()).toBe('"hi"');
+    // …and a later PURE conformance still registers.
+    expect(
+      executeEpsil(
+        ce,
+        'type boolean is Speaker {\n  function speak(self: Self) -> string { "b" }\n}'
+      ).value.json
+    ).toBe('Nothing');
+    expect(
+      ce._protocolRegistry.Speaker.conformances.map((c) => c.targetKey)
+    ).toEqual(['string', 'boolean']);
+  });
+
+  test('EVERY violated dependent is named, including a TRANSITIVE one', () => {
+    // `g` reaches the dispatcher only through `mid`, whose own arrow is BARE —
+    // so `mid` re-derives to `{random}` and carries the widening onward. (A
+    // contract-holding intermediate would stop it: its declared set is what
+    // its callers see, and the violation is reported at the intermediate.)
+    const ce = withSpeaker();
+    executeEpsil(ce, 'function f() pure -> unknown { speak("x") }');
+    executeEpsil(ce, 'function mid() { speak("x") }');
+    executeEpsil(ce, 'function g() pure -> unknown { mid() }');
+
+    const message = executeEpsil(ce, DRAWING).value.toString();
+    expect(message).toContain('`f` declares `pure`');
+    expect(message).toContain('`g` declares `pure`');
+  });
+
+  test('a VALUE-half contract — a `let` holding a literal — is covered too', () => {
+    // The index spans both halves of a binding: a `let` with an effect-bearing
+    // arrow type holds its contract on the value definition, not on an
+    // operator definition.
+    const ce = withSpeaker();
+    executeEpsil(ce, 'let cb: () pure -> unknown = () |-> speak("x")');
+    expect(ce.lookupDefinition('cb')!['value']).toBeDefined();
+    expect(ce.lookupDefinition('cb')!['operator']).toBeUndefined();
+
+    const message = executeEpsil(ce, DRAWING).value.toString();
+    expect(message).toContain('conformance-widens-declared-contract');
+    expect(message).toContain('`cb` declares `pure` but would infer `random`');
+  });
+
+  test('REPLACING the protocol is guarded too, and is rolled back', () => {
+    // The dispatcher's effect set also widens when the PROTOCOL changes: a
+    // requirement that gains a `random` ceiling makes every call through the
+    // dispatcher random, whatever the conformers do. The replacement runs the
+    // same re-derivation as a conformance registration and is undone the same
+    // way.
+    const ce = withSpeaker();
+    executeEpsil(ce, 'function f() pure -> unknown { speak("x") }');
+
+    const message = executeEpsil(
+      ce,
+      'protocol Speaker {\n  function speak(self: Self) random -> string\n}'
+    ).value.toString();
+    expect(message).toContain('conformance-widens-declared-contract');
+    expect(message).toContain('replacing this protocol');
+    expect(message).toContain('`f` declares `pure` but would infer `random`');
+
+    // The ORIGINAL requirement is still in force: the bare signature, a pure
+    // dispatcher, and the pure conformer still dispatching.
+    expect(ce._protocolRegistry.Speaker.members.speak).toEqual({
+      kind: 'function',
+      signature: '(self: Self) -> string',
+    });
+    expect(ce.lookupDefinition('speak')!['operator'].pure).toBe(true);
+    expect(executeEpsil(ce, 'speak("y")').value.toString()).toBe('"hi"');
+    expect(executeEpsil(ce, 'f()').value.toString()).toBe('"hi"');
+  });
+
+  test('a conformance that widens NOTHING declared is accepted', () => {
+    // The control: the same drawing conformer, with no declared contract in
+    // reach. The dispatcher's union widens, which is the designed behavior.
+    const ce = withSpeaker();
+    executeEpsil(ce, 'function loose() { speak("x") }');
+    expect(executeEpsil(ce, DRAWING).value.json).toBe('Nothing');
+    expect(ce.lookupDefinition('speak')!['operator'].effects).toEqual([
+      'random',
+    ]);
+  });
+});
+
+//
+// ── A STRANDED implementation is out of the derived union ───────────────────
+//
+
+describe('a PENDING edge does not widen the dispatcher', () => {
+  test('a protocol re-declaration strands the drawing implementation', () => {
+    // The dispatcher's derived effect set is the union over the conformers of
+    // a BARE requirement — but only over the ones dispatch can actually reach.
+    // A re-declaration that retypes a requirement leaves an implementation
+    // that no longer matches PENDING, and a pending edge is not a dispatch
+    // candidate, so its effects must leave the union with it.
+    const ce = new ComputeEngine();
+    executeEpsil(
+      ce,
+      'protocol Speaker {\n  function speak(self: Self) -> string\n}'
+    );
+    executeEpsil(
+      ce,
+      'type number is Speaker {\n  function speak(self: Self) -> string { Random() }\n}'
+    );
+    expect(ce.lookupDefinition('speak')!['operator'].effects).toEqual([
+      'random',
+    ]);
+
+    // The new requirement takes two arguments, so the stored one-argument
+    // implementation no longer matches and its edge goes pending.
+    expect(
+      executeEpsil(
+        ce,
+        'protocol Speaker {\n  function speak(self: Self, other: Self) -> string\n}'
+      ).value.json
+    ).toBe('Nothing');
+    expect(
+      ce._protocolRegistry.Speaker.conformances.map((c) => c.pending)
+    ).toEqual([true]);
+
+    // The empty set is spelled `undefined` by the definition getter.
+    expect(ce.lookupDefinition('speak')!['operator'].effects).toBeUndefined();
+    expect(ce.lookupDefinition('speak')!['operator'].pure).toBe(true);
   });
 });

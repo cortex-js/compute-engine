@@ -72,6 +72,7 @@ import {
   type InferenceRollbackFrame,
 } from './inference-rollback.js';
 import { tombstoneBinding } from './boxed-expression/binding-tombstone.js';
+import { latestDeclaredEffectsSite } from './boxed-expression/effects-provenance.js';
 import {
   isValidOperatorDef,
   isValidValueDef,
@@ -2017,7 +2018,13 @@ export function assignFn(
       // the INFERRED track (the body's effects are simply re-stamped on every
       // assignment), a stated one is a contract.
       const effectsDeclared = def.value.effectsDeclared;
-      assertDeclaredEffects(id, reconciled, declaredType.type, effectsDeclared);
+      assertDeclaredEffects(
+        id,
+        reconciled,
+        declaredType.type,
+        effectsDeclared,
+        latestDeclaredEffectsSite(def.value)
+      );
       if (
         !matchesDeclaredTypeAxes(
           ce,
@@ -2165,7 +2172,8 @@ export function assignFn(
           id,
           reconciled,
           declaredType.type,
-          effectsDeclared
+          effectsDeclared,
+          latestDeclaredEffectsSite(def.operator)
         );
         if (
           !matchesDeclaredTypeAxes(
@@ -2808,13 +2816,19 @@ function assertDeclaredEffects(
   id: MathJsonSymbol,
   literal: Expression,
   declaredType: Type,
-  effectsDeclared: boolean
+  effectsDeclared: boolean,
+  /** Where the contract was STATED, per the effects-axis provenance of the
+   * PRIOR definition half the caller read `effectsDeclared` from —
+   * `latestDeclaredEffectsSite`. Absent for a construction-stated contract
+   * (which records no entry) and on the fresh-Declare path (no prior
+   * half). Rendering only. */
+  declaredAt?: Expression
 ): void {
   const declared = signatureEffects(declaredType);
   if (declared === undefined && !effectsDeclared) return;
   const inferred = signatureEffects(literal.type.type);
   if (!isEffectSubset(inferred, declared))
-    throw new EffectContractError(id, declared, inferred);
+    throw new EffectContractError(id, declared, inferred, declaredAt);
 }
 
 /**

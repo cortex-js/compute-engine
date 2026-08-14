@@ -802,16 +802,67 @@ describe('EPSIL PROTOCOL IMPLEMENTATIONS', () => {
     ).toBe('"Nothing"');
   });
 
-  test('an EFFECTFUL implementation of a pure requirement is rejected', () => {
+  test('an EFFECTFUL implementation of a BARE requirement is accepted', () => {
+    // `COMPARABLE`'s requirement spells no effect specifier, and a bare
+    // requirement is no ceiling: a protocol function is a dispatcher over an
+    // open set of conforming bodies, so its effect set is DERIVED from them.
+    // `docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an
+    // effect", rejects the alternative by name ("bare-means-pure ceilings on
+    // requirements").
     const ce = withComparable();
+    expect(
+      runCodes(
+        ce,
+        impl(
+          'function compare(self: Self, other: Self) console -> string { "=" }'
+        )
+      )
+    ).toEqual([]);
+    expect(ce._protocolRegistry.Comparable.conformances[0].pending).toBe(false);
+  });
+
+  test('an explicit `pure` ceiling in the requirement rejects it', () => {
+    // The Epsil protocol surface CAN spell an effect specifier on a
+    // requirement, and a spelled one IS a ceiling.
+    const ce = new ComputeEngine();
+    executeEpsil(
+      ce,
+      'protocol Comparable {\n  function compare(self: Self, other: Self) pure -> string\n}'
+    );
     const r = executeEpsil(
       ce,
       impl(
         'function compare(self: Self, other: Self) console -> string { "=" }'
       )
     );
-    expect(r.value.toString()).toContain('protocol-signature-mismatch');
-    expect(r.value.toString()).toContain('console');
+    const message = r.value.toString();
+    expect(message).toContain('protocol-signature-mismatch');
+    expect(message).toContain('it declares the effects `console`');
+    expect(message).toContain('exceeded by `console`');
+    expect(message).toContain(
+      "the requirement's ceiling on `Comparable.compare`"
+    );
+    expect(message).toContain('widen the ceiling');
+  });
+
+  test('a ceiling rejects a BODY that exceeds it, with no declared marker', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(
+      ce,
+      'protocol Comparable {\n  function compare(self: Self, other: Self) pure -> string\n}'
+    );
+    const r = executeEpsil(
+      ce,
+      impl(
+        'function compare(self: Self, other: Self) -> string { Random(); "=" }'
+      )
+    );
+    const message = r.value.toString();
+    expect(message).toContain('protocol-signature-mismatch');
+    expect(message).toContain(
+      'the body of `compare` infers the effects `random`'
+    );
+    expect(message).toContain('exceeded by `random`');
   });
 
   test('an EMPTY block on a protocol WITH requirements is a hole', () => {

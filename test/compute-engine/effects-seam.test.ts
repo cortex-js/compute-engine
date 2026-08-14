@@ -77,6 +77,13 @@ describe('The Function-literal construction seam is the only builder', () => {
       // builds one.
       'compute-engine/boxed-expression/boxed-value-definition.ts',
       'compute-engine/engine-declarations.ts',
+      // The protocol dispatcher's DERIVED effect set: a function requirement
+      // with a bare effect specifier imposes no bound, so the dispatcher's
+      // effects are the union of the inferred effects of the registered
+      // conforming implementations (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B,
+      // "Changing a field is an effect"). It RUNS the walk over each
+      // conformer's stored literal; it builds no arrow of its own.
+      'compute-engine/engine-protocols.ts',
       'compute-engine/library/core.ts',
     ].sort();
 

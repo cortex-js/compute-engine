@@ -1,6 +1,10 @@
 import { joinLatex } from '../latex-syntax/tokenizer.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
 import {
+  effectsContractStateOf,
+  recordEffectsTransition,
+} from '../boxed-expression/effects-provenance.js';
+import {
   parse as parseLatex,
   serialize as serializeLatex,
 } from '../latex-syntax/latex-syntax.js';
@@ -2863,9 +2867,26 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 ),
                 callableAfter: containsSignatureArm(parseType(type!)),
               });
+              // Effects-axis provenance (W3 of
+              // `docs/plans/2026-08-13-effects-axis-provenance.md`): the
+              // upgrade can turn the effects annotation into a CONTRACT
+              // (`let f: (n) pure -> n` over an auto-declared `f`); a bare
+              // typed `let` moves nothing (false→false, same spelling) and
+              // records nothing.
+              const effectsBefore = effectsContractStateOf(
+                existingValueDef.value
+              );
               existingValueDef.value.type = ce.type(type!);
               existingValueDef.value.inferredType = false;
               existingValueDef.value.effectsDeclared = effectsDeclared;
+              recordEffectsTransition(
+                ce,
+                existingValueDef.value,
+                effectsBefore,
+                effectsContractStateOf(existingValueDef.value),
+                existingValueDef.value.type,
+                ce._inferenceCause?.expr ?? undefined
+              );
             }
             if (holdUntil) existingValueDef.value.holdUntil = holdUntil;
             if (boundHasValue) ce.assign(symbolName, boundValue!); // assign while mutable

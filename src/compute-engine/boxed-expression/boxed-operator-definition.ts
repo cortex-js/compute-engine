@@ -55,6 +55,7 @@ import { typeToDisplayString } from '../../common/type/display.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { defaultCollectionHandlers } from '../collection-utils.js';
 import { registerProvisionalDependents } from './provisional-application.js';
+import { latestDeclaredEffectsSite } from './effects-provenance.js';
 
 const OPERATOR_DEF_KEYS = new Set([
   // Base
@@ -227,6 +228,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * stated-pure twin `[]`) is the empty set (pure); `'any'` is the top
    * ("unknown effects"). */
   get effects(): EffectSet | undefined {
+    this._refreshDerivedEffects();
     return this._effects;
   }
 
@@ -234,6 +236,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * non-impurity label (e.g. `async`) must not break caching by mere
    * set-nonemptiness. `'any'` reports conservatively (not pure). */
   get pure(): boolean {
+    this._refreshDerivedEffects();
     return isPureEffectSet(this._effects);
   }
 
@@ -252,6 +255,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * is not a weakening of the ruling — `'any'` alone still never satisfies
    * this getter, only an observed draw does. */
   get drawsRandom(): boolean {
+    this._refreshDerivedEffects();
     if (this.frameProtocol === 'seed') return true;
     if (this._inferredDraws) return true;
     return hasDeclaredEffectLabel(this._effects, 'random');
@@ -322,8 +326,67 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     }
   }
 
-  signature: BoxedType;
+  /** Backing store for the {@link signature} accessor pair. Every read that
+   * could run WHILE a derived-effects refresh is in progress must go through
+   * this field, never through the accessor, or the refresh recurses. */
+  private _signature!: BoxedType;
+
+  /** The operator's arrow type, including its effect specifier.
+   *
+   * Reading it first runs {@link _refreshDerivedEffects}, so a definition
+   * whose effect set is LAZILY DERIVED (see {@link _deriveEffects}) reports a
+   * signature that reflects the current world rather than the one in force
+   * when the definition was installed. The fast path — the overwhelmingly
+   * common one — is a single `undefined` test on `_deriveEffects`.
+   *
+   * The accessor pair is installed as an OWN property of each instance (see
+   * the constructor), not on the prototype: the documented
+   * "spread a boxed definition and override a handler" idiom
+   * (`{ ...ce.lookupDefinition('At').operator, evaluate }`, see
+   * `test/compute-engine/declare-spread-override.test.ts`) copies own
+   * enumerable properties only, and it relies on the signature — the carrier
+   * of both the parameter types and the effect specifier — surviving the
+   * spread. */
+  declare signature: BoxedType;
   inferredSignature = true;
+
+  /** A lazily-evaluated override of this definition's effect set, or
+   * `undefined` for the ordinary case where {@link _effects} is simply what
+   * was declared or inferred at install time.
+   *
+   * Installed on exactly two kinds of definitions:
+   *
+   * - A PROTOCOL DISPATCHER. A protocol function requirement with a bare
+   *   effect specifier imposes no bound; the dispatcher's effect set is the
+   *   union of the inferred effects of the registered conforming
+   *   implementations, which changes as conformances register
+   *   (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an
+   *   effect"). `engine-protocols.ts` installs a deriver computing that
+   *   union.
+   * - A LAMBDA-BACKED definition whose body inference consulted such a
+   *   derived union, directly or through a callee. Its install-time effect
+   *   stamp would go stale the moment a later conformance widens the union,
+   *   so it re-runs its own body inference instead of freezing.
+   *
+   * The closure owns its memoization — version-stamped on the engine's
+   * `_conformanceVersion` and `_callableVersion` — and its own re-entrancy
+   * guard; nothing here caches its result beyond the `_effects` it installs.
+   * The getters apply what it returns through {@link _setEffects}, so
+   * `_effects` and the signature's arrow stay in lockstep. */
+  _deriveEffects: (() => EffectSet | undefined) | undefined = undefined;
+
+  /** Re-evaluate {@link _deriveEffects}, if any, and install its result.
+   *
+   * Called at the top of every getter whose answer depends on the effect set
+   * ({@link effects}, {@link pure}, {@link drawsRandom}, {@link signature}).
+   * The no-deriver fast path is one field test. */
+  private _refreshDerivedEffects(): void {
+    const derive = this._deriveEffects;
+    if (derive === undefined) return;
+    const derived = derive();
+    if (!sameEffectSetSpelling(derived, this._effects))
+      this._setEffects(derived);
+  }
 
   // History of writes to this definition's signature — the operator-side
   // analog of `BoxedValueDefinition._typeProvenance` (see
@@ -428,7 +491,27 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   collection?: CollectionHandlers;
 
+  /** The accessor pair installed as each instance's OWN `signature` property.
+   * A single shared descriptor object, so every instance takes the same
+   * hidden-class transition and reads stay monomorphic. */
+  private static readonly _SIGNATURE_DESCRIPTOR: PropertyDescriptor = {
+    enumerable: true,
+    configurable: true,
+    get(this: _BoxedOperatorDefinition): BoxedType {
+      this._refreshDerivedEffects();
+      return this._signature;
+    },
+    set(this: _BoxedOperatorDefinition, value: BoxedType) {
+      this._signature = value;
+    },
+  };
+
   constructor(ce: ComputeEngine, name: string, def: OperatorDefinition) {
+    Object.defineProperty(
+      this,
+      'signature',
+      _BoxedOperatorDefinition._SIGNATURE_DESCRIPTOR
+    );
     this.name = name;
     this.engine = ce;
 
@@ -529,7 +612,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    */
   private _setEffects(effects: EffectSet | undefined): void {
     this._effects = effects;
-    const t = this.signature.type;
+    // Read the BACKING field, not the `signature` accessor: `_setEffects` runs
+    // inside `_refreshDerivedEffects`, and the accessor's getter starts by
+    // calling that refresh — going through it here would recurse.
+    const t = this._signature.type;
     if (typeof t === 'string' || t.kind !== 'signature') return;
     if (sameEffectSetSpelling(t.effects, effects)) return;
     const next: FunctionSignature = { ...t };
@@ -549,6 +635,75 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    */
   _resyncEffects(): void {
     this._setEffects(this._effects);
+  }
+
+  /**
+   * Build the {@link _deriveEffects} closure for a lambda-backed definition
+   * whose body inference consulted a conformance-registry-derived effect set.
+   *
+   * Re-running the walk over `literal` is the whole computation: everything
+   * the body reads (a dispatcher's union, a callee's own derived stamp) is
+   * read live through the refreshing accessors. Two things bound the cost:
+   *
+   * - **Memoization** on the pair of monotone counters that can change the
+   *   answer — the engine's conformance-registry version (a new conformer can
+   *   widen a dispatcher's union) and its `callable` version (reassigning an
+   *   ordinary function re-derives its effects). Unchanged pair ⇒ the last
+   *   result, which is exactly what `_effects` holds.
+   * - **A re-entrancy guard**, returning the current `_effects` uncached: a
+   *   body that reaches its own definition through a dispatcher would
+   *   otherwise recurse, and the partially-built value is the sound answer
+   *   for the cycle (every non-cyclic contribution is unioned on the way).
+   *
+   * `_inferredDraws` — and, when the definition's frame-participation bit is
+   * inference-managed (`restampFrameRead`), `readsRandomFrame` — are updated
+   * in lockstep with the returned set, exactly as the install-time stamp
+   * does: a re-derivation must not leave either frame field describing an
+   * older walk. A caller-declared `readsRandomFrame` is authoritative and is
+   * never overwritten, mirroring the install-time `def.readsRandomFrame ===
+   * undefined` gate.
+   *
+   * The refresh may run inside an inference ROLLBACK FRAME
+   * (`inference-rollback.ts`), whose undo restores definitions through raw
+   * slot writes and advances no version counter. A refresh that stamped its
+   * memo there would keep serving a set inferred from the discarded trial
+   * world after the rollback — the stamps would still match. So while any
+   * frame is open the closure computes and applies, but does NOT stamp: the
+   * first read after the frame closes recomputes against the restored world
+   * and corrects every field it touched.
+   */
+  private _makeLiteralEffectsDeriver(
+    literal: Expression,
+    restampFrameRead: boolean
+  ): () => EffectSet | undefined {
+    let stampedConformance = -1;
+    let stampedCallable = -1;
+    let inFlight = false;
+    return (): EffectSet | undefined => {
+      if (inFlight) return this._effects;
+      const ce = this.engine;
+      if (
+        stampedConformance === ce._conformanceVersion &&
+        stampedCallable === ce._callableVersion
+      )
+        return this._effects;
+      inFlight = true;
+      try {
+        const reInferred = inferFunctionLiteralEffects(ce, literal, {
+          selfName: this.name,
+        });
+        this._inferredDraws = reInferred.draws;
+        if (restampFrameRead)
+          this.readsRandomFrame = reInferred.readsRandomFrame;
+        if (ce._rollbackFrames.length === 0) {
+          stampedConformance = ce._conformanceVersion;
+          stampedCallable = ce._callableVersion;
+        }
+        return reInferred.effects;
+      } finally {
+        inFlight = false;
+      }
+    };
   }
 
   /** Snapshot every field that a provisional re-derivation —
@@ -575,6 +730,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       effectsDeclared: this.effectsDeclared,
       _effects: this._effects,
       _inferredDraws: this._inferredDraws,
+      _deriveEffects: this._deriveEffects,
     };
   }
 
@@ -596,7 +752,14 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       effectsDeclared: boolean;
       _effects: EffectSet | undefined;
       _inferredDraws: boolean;
+      _deriveEffects: (() => EffectSet | undefined) | undefined;
     };
+    // The lazy effect deriver round-trips with the rest: the `update()` being
+    // undone may have installed one (its body inference consulted a
+    // registry-derived union) or cleared one, and leaving that state behind
+    // would keep re-deriving — or stop re-deriving — against the literal the
+    // rollback just discarded.
+    this._deriveEffects = s._deriveEffects;
     this.signature = s.signature;
     this.inferredSignature = s.inferredSignature;
     this._isLambda = s._isLambda;
@@ -939,17 +1102,41 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             throw new EffectContractError(
               this.name,
               declared.effects,
-              inferred.effects
+              inferred.effects,
+              // This definition's OWN effects-axis history: correct for the
+              // one in-place `update()` (the provisional re-derivation
+              // cascade, where `this` is the contract's prior holder), and
+              // automatically `undefined` during construction (fresh
+              // object, empty history) — which is also the right answer for
+              // a construction-stated contract.
+              latestDeclaredEffectsSite(this)
             );
           effects = declared;
           // A declared contract is authoritative on frame participation too,
           // but a draw the walk positively SAW is retained: an `any` contract
           // absorbs `{random}`, and `drawsRandom` requires an explicit label.
           inferredDraws = inferred.draws;
+          // A declared contract never re-derives: the stated set is what
+          // callers may rely on, and noticing that a later conformance has
+          // made it false is the widening guard's job, not this cache's.
+          this._deriveEffects = undefined;
         } else if (!effects.stated) {
           effects = { stated: true, effects: inferred.effects };
           inferredDraws = inferred.draws;
-        }
+          // If the walk consulted an effect set that is itself derived from
+          // the conformance registry — a protocol dispatcher's union over the
+          // conformers of a BARE requirement — freezing what it saw would go
+          // stale the moment the next conformance widens that union. Install a
+          // deriver that re-runs this very inference instead. Otherwise clear
+          // any deriver a previous definition of this name installed: a
+          // redefinition must not keep re-deriving from a discarded body.
+          this._deriveEffects = inferred.consultsRegistry
+            ? this._makeLiteralEffectsDeriver(
+                boxedFn,
+                def.readsRandomFrame === undefined
+              )
+            : undefined;
+        } else this._deriveEffects = undefined;
         if (def.readsRandomFrame === undefined)
           this.readsRandomFrame = inferred.readsRandomFrame;
       }

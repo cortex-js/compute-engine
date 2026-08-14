@@ -45,6 +45,10 @@ import {
   type ProvisionalDependent,
 } from './boxed-expression/provisional-application.js';
 import { activeRollbackFrame } from './inference-rollback.js';
+import {
+  effectsContractStateOf,
+  recordEffectsTransition,
+} from './boxed-expression/effects-provenance.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
 import { isPureComputedEffects } from '../common/type/effects.js';
 import type { FunctionSignature, Type } from '../common/type/types.js';
@@ -737,6 +741,13 @@ function installRebuiltLiteral(
   rebuilt: Expression
 ): void {
   const frame = activeRollbackFrame(ce);
+  // Effects-axis provenance (W2 of
+  // `docs/plans/2026-08-13-effects-axis-provenance.md`): the re-derivation
+  // re-stamps the inferred effect set from the rebuilt body, and a change
+  // records an entry whose cause is the REBUILT literal — deliberately
+  // overriding any ambient canonicalization cause, which would
+  // misattribute the re-derivation to the enclosing expression.
+  const effectsBefore = effectsContractStateOf(def);
   // `update()` re-registers the definition for whatever names the rebuilt body
   // still reads provisionally.
   if ('signature' in def) {
@@ -747,6 +758,14 @@ function installRebuiltLiteral(
       });
     }
     def.update({ evaluate: rebuilt });
+    recordEffectsTransition(
+      ce,
+      def,
+      effectsBefore,
+      effectsContractStateOf(def),
+      def.signature,
+      rebuilt
+    );
   } else {
     if (frame !== undefined) {
       const snapshot = def._typeSlotSnapshot();
@@ -754,6 +773,16 @@ function installRebuiltLiteral(
     }
     def.value = rebuilt;
     registerProvisionalDependents(ce, rebuilt, def);
+    // No effects-provenance recording on this branch — deliberately. The
+    // `value` setter writes the stored expression only; it never touches the
+    // definition's `type` or `effectsDeclared`, which are the two fields the
+    // effects contract state is read from, so the before/after comparison a
+    // recording would make is identical by construction and could never
+    // produce an entry. (W2 of the effects-axis provenance design covers the
+    // OPERATOR branch above, whose `update()` genuinely re-derives and
+    // re-stamps the effect set.) Note the flip side, recorded in ROADMAP.md:
+    // a value-bound literal under a DECLARED effects contract is rebuilt here
+    // with no contract re-verification at all.
   }
 }
 

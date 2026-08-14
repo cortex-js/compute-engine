@@ -369,6 +369,12 @@ export class _BoxedValueDefinition
       _defValue: this._defValue,
       inferredType: this.inferredType,
       _isSelfReferential: this._isSelfReferential,
+      // Effects annotation provenance rides in the tuple: the typed-`let`
+      // upgrade writes it alongside `type`/`inferredType`
+      // (`docs/plans/2026-08-13-effects-axis-provenance.md`, rollback
+      // completeness), so a restore without it would leave the contract
+      // bit stale.
+      effectsDeclared: this.effectsDeclared,
     };
   }
 
@@ -395,12 +401,14 @@ export class _BoxedValueDefinition
         | undefined;
       inferredType: boolean;
       _isSelfReferential: boolean;
+      effectsDeclared: boolean;
     };
     this._type = s._type;
     this._value = s._value;
     this._defValue = s._defValue;
     this.inferredType = s.inferredType;
     this._isSelfReferential = s._isSelfReferential;
+    this.effectsDeclared = s.effectsDeclared;
     this._writeVersion += 1;
   }
 

@@ -128,6 +128,34 @@
   never touched, assignment-derived incumbents stay widen-only, and the D11
   incompatible-guess adoption keeps the value's raw type.
 
+### New Features
+
+- **Protocol dispatcher effects are now derived from the registered
+  conformers; a requirement's effect specifier is an opt-in ceiling.** A
+  protocol function requirement with a **bare** specifier no longer acts as
+  a pure ceiling: implementations may carry any effects, and the
+  dispatcher's effect set is the live union of the inferred effects of the
+  registered conforming implementations — pure while every conformer is
+  pure (calls through it stay cacheable and compile-eligible), widened the
+  moment a mutating or drawing conformance registers, with dependent
+  caches recomputing (a call boxed before the registration reports the new
+  effects, and an already-inferred user function whose body calls the
+  member re-derives). The dispatcher's serialized signature snapshots the
+  union as of serialization. A requirement **with** a specifier (including
+  the explicit `pure`) is a durable ceiling: a conformance whose
+  implementation *declares* or whose body *infers* effects beyond it is
+  rejected (`protocol-signature-mismatch` names the exceeded labels and
+  points at the ceiling as the fix site). Registering a conformance that
+  would widen a bare-requirement union past a standing **declared** effect
+  contract — a function annotated `pure` whose body dispatches through the
+  member — is itself rejected (`conformance-widens-declared-contract`,
+  naming every violated dependent and the exceeding labels) and leaves the
+  registry unchanged. Behavior change: an implementation declaring effects
+  against a bare requirement was previously rejected; it is now accepted,
+  by design (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Changing a field
+  is an effect" — the bare-means-pure ceiling was explicitly rejected
+  there).
+
 ## 0.106.0 _2026-08-13_
 
 ### Breaking Changes

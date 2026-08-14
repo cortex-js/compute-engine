@@ -514,6 +514,19 @@ export class ComputeEngine implements IComputeEngine {
   readonly _protocolRegistry: Record<string, ProtocolRecord> =
     Object.create(null);
 
+  /** Backing store for {@link _conformanceVersion}. */
+  private _conformanceVersionCounter = 0;
+
+  /** See `IComputeEngine._conformanceVersion`. @internal */
+  get _conformanceVersion(): number {
+    return this._conformanceVersionCounter;
+  }
+
+  /** See `IComputeEngine._noteConformanceRegistryChange`. @internal */
+  _noteConformanceRegistryChange(): void {
+    this._conformanceVersionCounter += 1;
+  }
+
   /** See `IComputeEngine._staticTypeCheckDepth`. @internal */
   _staticTypeCheckDepth = 0;
 
@@ -703,7 +716,14 @@ export class ComputeEngine implements IComputeEngine {
           changed = true;
         }
       }
-      if (changed) this._noteStateEvent({ kind: 'config' });
+      if (changed) {
+        this._noteStateEvent({ kind: 'config' });
+        // A rollback is itself a change to the conformance registry: a derived
+        // dispatcher effect union computed while the pre-pass registrations
+        // were in place must not be served to the real evaluation, which sees
+        // the restored world.
+        this._noteConformanceRegistryChange();
+      }
     };
   }
 

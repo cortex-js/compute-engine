@@ -15,6 +15,10 @@ import type {
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { tombstoneBinding } from './binding-tombstone.js';
+import {
+  effectsContractStateOf,
+  recordEffectsTransition,
+} from './effects-provenance.js';
 import { foldSeed } from '../numerics/random.js';
 import { Type } from '../../common/type/types.js';
 import { containsSignatureArm } from '../../common/type/utils.js';
@@ -1213,8 +1217,10 @@ export function updateDef(
   // releasing its resources (a constant's configuration-change
   // subscription) cannot affect anything that outlives the frame — whereas
   // a caller-supplied definition object may pre-exist the frame and be
-  // shared.
-  let constructedValueHalf: BoxedValueDefinition | undefined;
+  // shared. The same constructed-vs-supplied discriminator gates the
+  // provenance-history transfer below, for the same non-ownership reason.
+  let constructedValueHalf: _BoxedValueDefinition | undefined;
+  let constructedOperatorHalf: _BoxedOperatorDefinition | undefined;
 
   // Construct BEFORE swapping the record's halves: the definition
   // constructors validate and can throw (a registration conflict, a violated
@@ -1237,7 +1243,61 @@ export function updateDef(
     const built = new _BoxedOperatorDefinition(ce, name, newDef);
     delete mutableDef.value;
     mutableDef.operator = built;
+    constructedOperatorHalf = built;
   } else return;
+
+  // Provenance-history survival + the redefinition (W1) effects entry
+  // (`docs/plans/2026-08-13-effects-axis-provenance.md`). A definition
+  // object's `_typeProvenance` would otherwise die with it on every
+  // reassignment — this call constructs a FRESH half and discards the old
+  // one — so a declaring site could never be named after a later
+  // redefinition. The installed half ADOPTS the superseded half's history
+  // by copy, and an effects-contract transition appends its entry, ONLY
+  // when this call constructed the installed half: a caller-supplied,
+  // already-boxed half is never written to (it may pre-exist a rollback
+  // frame and be shared — mutating it would clobber history it legitimately
+  // carries and escape the frame, which restores the record's pointer, not
+  // fields on the orphaned instance). Ordered BEFORE the registry calls and
+  // the repair cascade below: the cascade can throw with the swap already
+  // committed, and the history must not be lost in that case.
+  {
+    const supersededHalf = supersededValue ?? supersededOperator;
+    const installedHalf = constructedValueHalf ?? constructedOperatorHalf;
+    if (supersededHalf !== undefined && installedHalf !== undefined) {
+      const inherited = supersededHalf._typeProvenance;
+      if (inherited !== undefined && inherited.length > 0) {
+        // A copy: the superseded object's own array stays untouched, so a
+        // rollback frame's restore-by-identity of that object is exact.
+        // Transferred entries keep their original `epoch`/`cause`, so
+        // nothing inherited can masquerade as "recorded by the pass
+        // running now" (the first-boxing predicate compares those).
+        installedHalf._typeProvenance = [
+          ...inherited,
+          ...(installedHalf._typeProvenance ?? []),
+        ];
+      }
+      recordEffectsTransition(
+        ce,
+        installedHalf,
+        effectsContractStateOf(supersededHalf),
+        effectsContractStateOf(installedHalf),
+        'signature' in installedHalf
+          ? installedHalf.signature
+          : installedHalf.type,
+        // The assigned function literal when the installed half carries
+        // one; else the ambient canonicalization cause, when a write
+        // already materialized it; else absent (the phase-1 "absent cause
+        // is honest" rule).
+        ('signature' in installedHalf
+          ? installedHalf._lambdaLiteral
+          : installedHalf.type.matches('function')
+            ? (installedHalf.value ?? undefined)
+            : undefined) ??
+          ce._inferenceCause?.expr ??
+          undefined
+      );
+    }
+  }
 
   // Rollback journal (family 3, binding-half swaps): re-install the
   // previous half objects on the SAME record, by identity, via the same

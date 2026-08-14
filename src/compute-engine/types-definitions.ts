@@ -1834,6 +1834,17 @@ export interface BoxedOperatorDefinition
    */
   readonly lambda: LambdaDefinition | undefined;
 
+  /** The `Function` literal this definition was created from, verbatim —
+   * `undefined` for a built-in operator, which has no body. Where
+   * {@link lambda} is a canonicalized, structured VIEW for consumers, this is
+   * the literal itself, the input the effects walk
+   * (`inferFunctionLiteralEffects`) takes: re-deriving a definition's effect
+   * set outside this module (the conformance-widening guard in
+   * `engine-protocols.ts`) means re-running that walk over exactly the same
+   * expression the install ran it over.
+   * @internal */
+  _lambdaLiteral?: Expression;
+
   /** If present, this handler can be used to more precisely determine the
    * return type based on the type of the arguments. The arguments themselves
    * should *not* be evaluated, only their types should be used.
@@ -1905,6 +1916,21 @@ export interface BoxedOperatorDefinition
    * truth and must never disagree.
    * @internal */
   _resyncEffects(): void;
+
+  /** A lazily-evaluated override of this definition's effect set, or
+   * `undefined` when the set is simply what was declared or inferred at
+   * install time.
+   *
+   * Installed on protocol DISPATCHERS — whose effect set is the union of the
+   * inferred effects of the registered conforming implementations of a BARE
+   * requirement, and therefore changes as conformances register
+   * (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an
+   * effect") — and on lambda-backed definitions whose body inference
+   * consulted such a union. The closure owns its own memoization and
+   * re-entrancy guard; the `effects` / `pure` / `drawsRandom` / `signature`
+   * accessors consult it before answering.
+   * @internal */
+  _deriveEffects: (() => EffectSet | undefined) | undefined;
 
   /** Opaque snapshot of every field a provisional re-derivation
    * (`installRebuiltLiteral` calling `update({ evaluate })` on a

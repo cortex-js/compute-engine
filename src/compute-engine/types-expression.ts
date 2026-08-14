@@ -302,6 +302,14 @@ interface BoxedOperatorDefinition
   /** Re-attach the definition's effect set to its signature after the
    * signature object was replaced by type inference. @internal */
   _resyncEffects(): void;
+  /** A lazily-evaluated override of this definition's effect set (protocol
+   * dispatchers and the lambdas that consult them) — mirror of the member
+   * documented in `types-definitions.ts`. @internal */
+  _deriveEffects: (() => EffectSet | undefined) | undefined;
+  /** The stored function literal a lambda-backed definition was installed
+   * from — mirror of the member documented in `types-definitions.ts`.
+   * @internal */
+  _lambdaLiteral?: Expression;
   /** Opaque snapshot/restore of the fields a provisional re-derivation can
    * mutate — mirror of the members documented in `types-definitions.ts`.
    * @internal */

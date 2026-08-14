@@ -273,6 +273,49 @@ functions.
 
 ### Protocols residue (protocols + compiled dispatch landed 2026-08-12)
 
+- **A provisional rebuild of a VALUE-bound literal never re-verifies its
+  declared effects contract** (found 2026-08-14, dual review of the
+  effects-provenance + Phase-0a staged set). `installRebuiltLiteral`
+  (`function-utils.ts`) swaps a value definition's stored literal via the
+  bare `value` setter, which touches neither `type` nor `effectsDeclared`
+  — so a binding declared `(…) pure -> …` whose body froze a provisional
+  application can have that body rebuilt into an EFFECTFUL one with no
+  contract check on this route (the operator branch re-validates inside
+  `update()`). Reachable only through the provisional-dependents cascade
+  on declare-then-assign value bindings; the fix is an
+  `assertDeclaredEffects`-style check in the value branch, re-deriving
+  the rebuilt literal's effects against the declared arrow.
+
+- **Box-route conformance implementations are not callable** (found
+  2026-08-14 during the Phase-0a derived-dispatcher-effects round;
+  user-ratified 2026-08-14 as a follow-up — the box route stays
+  registration-only until the `Self`-aware canonicalization below lands).
+  `ce.box(["DeclareConformance", …]).evaluate()` stores the implementation
+  function literal held and UNBOUND (its annotations mention `Self`, which
+  ordinary canonicalization cannot resolve, so the block is deliberately
+  kept raw), and dispatching through such an implementation later throws
+  `Function body must be a scoped Block expression`
+  (`function-utils.ts` `invokeImplementation` → `apply`). The Epsil
+  statement route canonicalizes and works; the CE-route protocol tests
+  never *call* an implementation, so the throw is unpinned. Same family as
+  the "impl literals applied raw per call" follow-up flagged when
+  protocols landed: the fix needs a `Self`-aware canonicalization of the
+  stored block (at registration, with the conformance target bound), not a
+  blanket `op.canonical`.
+
+- **A value-bound function literal's arrow is baked into callers' effect
+  stamps** (recorded 2026-08-14, Phase-0a residual). The derived-effects
+  re-derivation (`consultsRegistry`, `effects-inference.ts`) keeps a
+  definition fresh when its body reaches a protocol dispatcher directly or
+  through OPERATOR-definition callees, but a body that reaches one only
+  through a VALUE-bound literal (`g := (x) |-> speak(x)` stored as a value
+  binding, then `f` calling `g`) freezes `g`'s arrow as read at `f`'s
+  install: the walk cannot see that the value's own arrow is
+  registry-dependent. Consistent with the shipped construction-time
+  snapshot semantics, but it narrows the widening guard's transitive reach
+  on that path. Lifting it needs a registry-dependence bit on the
+  LITERAL's arrow (or type), not just on operator definitions.
+
 - **`InverseFunction(f)` / `Derivative(f, n)` as a lazy operator's
   callback are rejected** (found 2026-08-13; same family as the
   qualified-protocol-member callback fix that landed that day).
