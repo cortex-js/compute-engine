@@ -26,6 +26,7 @@ const CACHE_CLASSES = [
   'effects', // BoxedFunction._effects — generation key, cycle-safe bespoke
   'lazyValue', // the lazy-collection evaluate memo — epoch + generation + scope
   'elementMemo', // collection-element-memo — epoch + per-dependency versions
+  'collectionFacet', // count/isEmpty/isFinite facet memo — epoch + per-dependency versions
 ] as const;
 export type CacheClass = (typeof CACHE_CLASSES)[number];
 

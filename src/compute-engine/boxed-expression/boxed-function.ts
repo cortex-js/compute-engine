@@ -52,7 +52,10 @@ import {
   elementMemoParanoid,
   enterParanoidCheck,
   exitParanoidCheck,
+  snapshotMemoDeps,
+  memoDepsStillValid,
 } from './collection-element-memo.js';
+import type { MemoDeps } from './collection-element-memo.js';
 import {
   isNumber,
   isFunction,
@@ -153,7 +156,10 @@ import { isScalarType } from './function-literal.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
-import { checkDeadline } from '../../common/interruptible.js';
+import {
+  checkDeadline,
+  iterationLimitCancellationCount,
+} from '../../common/interruptible.js';
 import {
   applyPoleOverride,
   isEligibleRealRewrite,
@@ -193,6 +199,19 @@ let _effectsComputeCount = 0;
 /** Read {@link _effectsComputeCount} — for tests. @internal */
 export function effectsComputeCount(): number {
   return _effectsComputeCount;
+}
+
+/** Count of settled collection-facet recomputations (`count`/`isEmpty`/
+ * `isFinite` — see `_memoizedFacet`), engine-wide. A test observable (the
+ * house instance-instrumentation pattern): a memo HIT leaves it unchanged, a
+ * recompute advances it — how the facet-probe regression suite asserts a
+ * probe budget without wall-clock or prototype patching. Monotonic; only
+ * ever compared before/after an operation. @internal */
+let _facetComputeCount = 0;
+
+/** Read {@link _facetComputeCount} — for tests. @internal */
+export function facetComputeCount(): number {
+  return _facetComputeCount;
 }
 
 /** `CE_EFFECTS_PARANOID`: the effects-cache canary of the state-event
@@ -393,6 +412,27 @@ export class BoxedFunction
    * promise to a caller nested inside the very computation it is waiting for
    * would deadlock; no such route exists. */
   private _lazyValuePending: Promise<Expression> | undefined = undefined;
+
+  /** Memo for the nullary collection facets (`count`, `isEmptyCollection`,
+   * `isFiniteCollection`) — see `_memoizedFacet()`. One lazily-allocated slot
+   * so instances that never answer a facet query pay nothing; `undefined`
+   * until the first settled facet computation. The three facets share ONE
+   * dependency snapshot (they are queries over the same tree); each facet's
+   * value is wrapped in `{ value }` so a facet legitimately answering
+   * `undefined` is distinguishable from one not yet computed. All entries
+   * expire together when `ce._worldVersion` moves or any dependency does. */
+  private _facetMemo:
+    | {
+        /** `ce._worldVersion` sampled AFTER the fill, so a bump the
+         * computation itself caused is absorbed (the element-memo stamp
+         * discipline). */
+        worldVersion: number;
+        deps: MemoDeps;
+        count?: { value: number | undefined };
+        isEmpty?: { value: boolean | undefined };
+        isFinite?: { value: boolean | undefined };
+      }
+    | undefined = undefined;
 
   /** The engine generation at which `_type` was last written or confirmed.
    * The cache KEY of `_type` (`undefined` for a pure constant, the generation
@@ -2251,18 +2291,140 @@ export class BoxedFunction
     return this.baseDefinition?.collection?.contains?.(this, rhs);
   }
 
+  /**
+   * Memoized computation of a nullary collection facet (`count`, `isEmpty`,
+   * `isFinite`) — the fix for the canonicalization-time facet-probe storm
+   * (Tycho item 182). These facets are *queries*: the engine already assumes
+   * a repeated read at the same state returns the same answer (callers
+   * double-read them freely), yet the handlers behind them can be arbitrarily
+   * expensive — a `Range(0, Length(D)-1)` count probe numerically evaluates
+   * its bound, which for a comprehension-valued `D` re-scans the
+   * comprehension's clause domains on EVERY probe. One document-open was
+   * measured at 210K such probes (84% of the whole open), and without a
+   * deadline the cascade's allocation churn exhausts a 4 GB heap.
+   *
+   * Invalidation is DEPENDENCY-PRECISE, riding the element memo's machinery
+   * (`snapshotMemoDeps`/`memoDepsStillValid`,
+   * `docs/plans/2026-08-02-dependency-precise-memo-invalidation.md`): an
+   * entry is valid while `ce._worldVersion` is unmoved (assume/forget,
+   * redefinition, configuration) AND every free-symbol dependency still has
+   * the same inner definition, `_writeVersion`, and name resolution. A
+   * `ce._anyVersion` ("generation") key was tried first and REFUTED by
+   * measurement (2026-08-14): the probe cascade itself constructs broadcast
+   * lambdas, and each construction's parameter declare plus its now-dirty
+   * scope pop advance `any` (~104K bumps in one 5 s parse) — a
+   * generation-keyed entry was invalidated by the very computation it
+   * cached, the fourth instance of the self-invalidation class (after
+   * inference{valueType}, the 2^depth shape-query double-read, and item
+   * 181's clean pops). Unrelated declares move NO dependency, so this memo
+   * is immune; a shadowing declare of a name the computation resolves is
+   * caught by the per-dependency resolution re-check.
+   *
+   * No purity gate, deliberately: an impure node's VALUE is nondeterministic
+   * by contract (`Random()` re-draws), but its facets are shape queries, and
+   * the element memo already applies to impure instances by ruling
+   * (`docs/RANDOMNESS-MODEL.md` §6 — repeated reads of one instance are one
+   * draw set). Requiring purity would exclude exactly the instances the
+   * storm hammers (a comprehension whose BODY calls user functions is impure
+   * even when its clause domains are pure).
+   *
+   * Settled-only store, like the lazy-collection value memo: a computation
+   * that consumed a provisional answer — a symbol-binding cycle edge
+   * (`cycleDetectionCount`, which every `BoxedSymbol` facet delegation
+   * routes through), or a re-entrant lazy-collection evaluate
+   * (`_lazyValueProvisionalReads`) — is returned uncached. An instance
+   * `snapshotMemoDeps` deems ineligible (a dependency no version tracks) is
+   * simply never stored — recomputed per read, exactly today's behavior. A
+   * deadline/timeout cancellation THROWS through this helper, so nothing
+   * partial is ever stored.
+   */
+  private _memoizedFacet<T extends number | boolean | undefined>(
+    facet: 'count' | 'isEmpty' | 'isFinite',
+    compute: () => T
+  ): T {
+    const ce = this.engine;
+    const slot = this._facetMemo;
+    if (slot !== undefined && slot.worldVersion === ce._worldVersion) {
+      const entry = slot[facet] as { value: T } | undefined;
+      if (entry !== undefined) {
+        if (memoDepsStillValid(this, slot.deps)) {
+          if (CACHE_STATS) recordCache('collectionFacet', 'hit');
+          return entry.value;
+        }
+        if (CACHE_STATS) recordCache('collectionFacet', 'missDependency');
+      } else if (CACHE_STATS) recordCache('collectionFacet', 'missCold');
+    } else if (CACHE_STATS) {
+      recordCache(
+        'collectionFacet',
+        slot === undefined ? 'missCold' : 'missEpoch'
+      );
+    }
+
+    const cyclesBefore = cycleDetectionCount();
+    const provisionalBefore = _lazyValueProvisionalReads;
+    const iterationBreachesBefore = iterationLimitCancellationCount();
+    _facetComputeCount += 1;
+    const value = compute();
+    if (
+      cycleDetectionCount() !== cyclesBefore ||
+      _lazyValueProvisionalReads !== provisionalBefore ||
+      // A computation that gave up on `engine.iterationLimit` (the
+      // `countOrUndefinedOnIterationLimit`-style handlers convert the
+      // cancellation to an "unknown" answer) is limit-DEGRADED: a raised
+      // limit could produce a definite answer, and `iterationLimit` writes
+      // advance no axis this memo's keys observe. Never frozen — recomputed
+      // per read, which is exactly the pre-memo behavior for such answers.
+      iterationLimitCancellationCount() !== iterationBreachesBefore
+    ) {
+      if (CACHE_STATS) recordCache('collectionFacet', 'declineCycle');
+      return value;
+    }
+
+    // Stamp with the POST-compute world version and, when the existing
+    // snapshot no longer holds (or none exists), a POST-compute dependency
+    // snapshot: a bump or self-write the computation itself performed (a
+    // dependent comprehension count installs its own index values while
+    // enumerating) is absorbed rather than making the entry born-stale —
+    // the element memo's commit discipline.
+    const world = ce._worldVersion;
+    let target = this._facetMemo;
+    if (
+      target === undefined ||
+      target.worldVersion !== world ||
+      !memoDepsStillValid(this, target.deps)
+    ) {
+      const deps = snapshotMemoDeps(this);
+      if (deps === undefined) {
+        // Ineligible (a dependency no version tracks): never stored.
+        if (CACHE_STATS) recordCache('collectionFacet', 'declineStore');
+        return value;
+      }
+      target = { worldVersion: world, deps };
+      this._facetMemo = target;
+    }
+    // The (facet → T) pairing is maintained by the three call sites (`count`
+    // is the only `number`-valued facet), which the keyed slot type cannot
+    // express generically — hence the `unknown` hop.
+    (target as unknown as Record<typeof facet, { value: T }>)[facet] = {
+      value,
+    };
+    return value;
+  }
+
   get count(): number | undefined {
     if (this._optedOutOfCollection) return undefined;
-    // A DECLARED count handler owns the answer, including its `undefined`.
-    const handler = this.operatorDefinition?.collection?.count;
-    if (handler !== undefined) return handler(this);
-    // An EAGER producer with no collection handlers may still know its own
-    // length without evaluating (`Sort` preserves its source's, `Chunk`
-    // answers `k`) — the `count` twin of `canEnumerate`. It owns the answer,
-    // including its `undefined`.
-    const elementCount = this.operatorDefinition?.elementCount;
-    if (elementCount !== undefined) return elementCount(this);
-    return this._broadcastCount();
+    return this._memoizedFacet('count', () => {
+      // A DECLARED count handler owns the answer, including its `undefined`.
+      const handler = this.operatorDefinition?.collection?.count;
+      if (handler !== undefined) return handler(this);
+      // An EAGER producer with no collection handlers may still know its own
+      // length without evaluating (`Sort` preserves its source's, `Chunk`
+      // answers `k`) — the `count` twin of `canEnumerate`. It owns the answer,
+      // including its `undefined`.
+      const elementCount = this.operatorDefinition?.elementCount;
+      if (elementCount !== undefined) return elementCount(this);
+      return this._broadcastCount();
+    });
   }
 
   /**
@@ -2332,12 +2494,16 @@ export class BoxedFunction
 
   get isEmptyCollection(): boolean | undefined {
     if (!this.isCollection) return undefined;
-    return this.operatorDefinition?.collection?.isEmpty?.(this);
+    const handler = this.operatorDefinition?.collection?.isEmpty;
+    if (handler === undefined) return undefined;
+    return this._memoizedFacet('isEmpty', () => handler(this));
   }
 
   get isFiniteCollection(): boolean | undefined {
     if (!this.isCollection) return undefined;
-    return this.operatorDefinition?.collection?.isFinite?.(this);
+    const handler = this.operatorDefinition?.collection?.isFinite;
+    if (handler === undefined) return undefined;
+    return this._memoizedFacet('isFinite', () => handler(this));
   }
 
   get isEnumerableCollection(): boolean | undefined {

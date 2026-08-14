@@ -1,13 +1,14 @@
 import type {
   Expression,
   BoxedDefinition,
+  BoxedOperatorDefinition,
   BoxedValueDefinition,
   IComputeEngine,
   Scope,
 } from '../global-types';
 
 import { isDictionary, isFunction, isSymbol } from './type-guards';
-import { isValueDef } from './utils';
+import { isValueDef, isOperatorDef } from './utils';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats';
 
 /**
@@ -63,10 +64,13 @@ interface ElementMemoDep {
   /** The dependency's name — a symbol's spelling, or the operator name of a
    * value-bound application head. Used for the ambient-resolution axis. */
   name: string;
-  /** The inner value definition at fill time. */
-  valueDef: BoxedValueDefinition;
-  /** `valueDef._writeVersion` at fill time. */
-  version: number;
+  /** The inner value definition at fill time. `undefined` for an
+   * OPERATOR-ONLY dependency (a walked user-lambda head with no value-def
+   * side — see `resolvedOperator`), whose validity rests on the resolution
+   * re-check alone. */
+  valueDef?: BoxedValueDefinition;
+  /** `valueDef._writeVersion` at fill time (absent with `valueDef`). */
+  version?: number;
   /** The binding the instance's RESOLUTION scope chain resolved `name` to
    * at fill time (`undefined` when the chain has no such binding).
    * Non-constant symbol VALUES resolve by name through a scope chain
@@ -80,6 +84,22 @@ interface ElementMemoDep {
    * resolves through the ambient chain at walk time. See
    * `depResolutionScope`. */
   resolved: BoxedDefinition | undefined;
+  /** Set on an OPERATOR dependency — a walked user-lambda head, or a
+   * FORWARD REFERENCE (the occurrence's pinned binding is a valueless
+   * auto-declared value definition because the name was used before it was
+   * defined, and the resolution chain heals it to an operator definition).
+   * This is that operator definition: the INNER object of the resolved
+   * tagged wrapper. Identity is compared at validation instead of the outer
+   * wrapper's: `BoxedDefinition` wrappers are mutated IN PLACE on
+   * redefinition (that is the tagged-literal design's stated purpose), so
+   * an `assign('f', 5)` that swaps the wrapper's operator side for a value
+   * leaves the outer identity intact while this inner identity changes —
+   * and that kind swap advances NO version axis (`redefine
+   * {callableAfter: false}` is zero-mask), so the identity comparison is
+   * the ONLY thing that catches it. A same-kind redefinition is covered by
+   * the `worldVersion` axis (`redefine {callableAfter: true}` advances
+   * `world`). */
+  resolvedOperator?: BoxedOperatorDefinition;
 }
 
 interface ElementMemoCache {
@@ -100,6 +120,16 @@ interface ElementMemoCache {
 /** Keyed on the boxed instance. A `WeakMap` so an unreferenced collection
  * (and its cached elements) is collectable. */
 const elementMemoCaches = new WeakMap<Expression, ElementMemoCache>();
+
+/** `CE_DEBUG_DEPS`: log why `snapshotDeps` declares an instance ineligible
+ * (which gate, which name). A diagnosis aid for "this instance never
+ * memoizes" investigations — the facet-probe storm of Tycho item 182 was
+ * root-caused with it. Env-gated like `CE_DEBUG_BINDINGS`; read once at
+ * module load. */
+const DEBUG_DEPS: boolean =
+  typeof process !== 'undefined' &&
+  process.env?.CE_DEBUG_DEPS !== undefined &&
+  process.env.CE_DEBUG_DEPS !== '0';
 
 /**
  * Debug canary (design §3): under `CE_MEMO_PARANOID=1`, the `each()` seam
@@ -208,10 +238,14 @@ function resolveDepBinding(
 }
 
 /**
- * Snapshot the instance's free-symbol dependencies, one per distinct value
- * definition. Only value-definition bindings are versioned: an operator
- * redefinition or signature inference always bumps `ce._worldVersion`, so
- * operator-bound symbols are covered by the global axis.
+ * Snapshot the instance's dependencies: one entry per distinct value
+ * definition (version-tracked via `_writeVersion`), plus one per walked
+ * user-lambda operator head. Operator entries exist because the world axis
+ * covers only SAME-KIND operator redefinitions — an operator→scalar kind
+ * swap emits the zero-mask `redefine {callableAfter: false}` and advances
+ * no version at all, so it is caught by re-resolving the name and comparing
+ * the inner operator-definition identity instead (see
+ * `ElementMemoDep.resolvedOperator`).
  *
  * Returns `undefined` when the instance is ineligible for memoization: a
  * symbol occurrence with no binding at all resolves dynamically through the
@@ -227,8 +261,63 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
   /** User-defined operator heads whose lambda body was already walked —
    * terminates self- and mutually-recursive function definitions. */
   const seenOperators = new Set<object>();
+  /** NAMES for which an operator dependency entry was already recorded.
+   * Recording is deduplicated per NAME, not per operator object: two names
+   * can be bound to the same operator definition, and rebinding whichever
+   * name happened to be encountered second must still invalidate — the
+   * `seenOperators` dedup above is about traversal cost only. */
+  const seenOperatorNames = new Set<string>();
   const deps: ElementMemoDep[] = [];
   let eligible = true;
+
+  /** Walk a USER-DEFINED operator's lambda body for transitive
+   * dependencies, recording the operator itself as a dependency (shared by
+   * the applied-head branch of `visit` and the forward-reference heal;
+   * `recordDep: false` when the caller records its own entry for this
+   * occurrence). The dep entry is what catches an operator→scalar KIND
+   * SWAP: `redefine {callableAfter: false}` is a zero-mask event — it
+   * advances NEITHER `worldVersion` nor any tracked `_writeVersion` — so
+   * "redefinition always bumps the world axis" holds only for same-kind
+   * redefinitions, and without the entry a memo kept serving a walked
+   * lambda after `assign('f', 5)` replaced it with a scalar. Validation
+   * re-resolves the name and compares the INNER operator identity (see
+   * `ElementMemoDep.resolvedOperator`).
+   * The body's free names are resolved against the INSTANCE's chain, like
+   * every other occurrence: closures re-root at evaluation
+   * (`captureClosures`), so that is the chain the walk actually reads —
+   * see the resolution note on `visitValueDef`. */
+  const visitLambdaBody = (
+    occurrence: Expression,
+    name: string,
+    opDef: NonNullable<Expression['operatorDefinition']>,
+    recordDep: boolean
+  ): void => {
+    const lambda = opDef.lambda;
+    if (lambda === undefined) return;
+    if (recordDep && !seenOperatorNames.has(name)) {
+      seenOperatorNames.add(name);
+      deps.push({
+        occurrence,
+        name,
+        resolved: resolveDepBinding(ce, depScope, name),
+        resolvedOperator: opDef,
+      });
+    }
+    if (seenOperators.has(opDef)) return;
+    seenOperators.add(opDef);
+    // Mirror the stored-value branch: pre-register NESTED literals'
+    // parameter sites anywhere in this body, so a helper that builds its
+    // own lazy collection is not wrongly disqualified by the valueless
+    // gate seeing an inner literal's parameter binding.
+    collectParameterDefs(lambda.body, excluded);
+    // DEFINITION BOUNDARY (see the stored-value branch): the skip set
+    // is built FRESH from this lambda's OWN parameters — never seeded
+    // from the caller's, whose spellings mean something else in this
+    // definition's environment.
+    const bodySkip = new Set<string>();
+    for (const p of lambda.parameters) bodySkip.add(p.name);
+    visit(lambda.body, bodySkip);
+  };
 
   /** Record a value-definition dependency reached through `occurrence`
    * (a symbol operand, or an application whose head is value-bound). */
@@ -237,18 +326,75 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
     valueDef: BoxedValueDefinition
   ): void => {
     const name = isSymbol(occurrence) ? occurrence.symbol : occurrence.operator;
-    // A valueless, non-constant binding is trackable ONLY when it is the
-    // definition the instance's resolution chain resolves its name to (a
-    // declared symbol used symbolically, e.g. under assumptions): a later
-    // `assign` then writes THIS definition (version bump), and a chain
-    // change is caught by the resolution axis. A valueless def the chain
-    // cannot reach (an auto-declared unknown inside a literal's body scope)
-    // is the hazard: `assign` takes the DECLARE path and installs the value
-    // in a DIFFERENT definition, bumping neither the tracked version nor
-    // `_worldVersion` — such an instance is ineligible.
+    // A valueless, non-constant binding needs the resolution chain's
+    // testimony before it is trackable. Resolution here is deliberately the
+    // INSTANCE's chain even for an occurrence deep inside a walked lambda
+    // body: closures re-root at evaluation (`captureClosures`), so a body's
+    // free names resolve through the chain current at WALK time, not
+    // through the canonicalization-time body scope — a dependency recorded
+    // against the body's own chain would keep validating while an ambient
+    // `assign` changed what the walk computes (measured: the Map
+    // auto-compile re-enable test served a stale symbolic drain). Three
+    // cases:
     if (valueDef.value === undefined && !valueDef.isConstant) {
       const resolved = resolveDepBinding(ce, depScope, name);
+      // (1) FORWARD-REFERENCE HEAL: the occurrence pinned a valueless
+      // auto-declared value binding (the name was used before it was
+      // defined — `R := M ↦ R_xz(…)` parsed before `assign('R_xz', …)`),
+      // and the chain now resolves the name to an OPERATOR definition. The
+      // walk reads the name BY CHAIN, so the operator definition is the
+      // real dependency, and it is trackable: a same-kind redefinition
+      // bumps `worldVersion`, a kind swap or rebinding changes the inner
+      // identity recorded in `resolvedOperator`, and the pinned valueless
+      // binding is never written through (writes go by name to the chain
+      // target). Its lambda body carries transitive symbol dependencies
+      // exactly like an applied user-operator head, so walk it.
+      if (isOperatorDef(resolved)) {
+        seen.add(valueDef);
+        // This entry carries the name's resolution, so the per-name
+        // operator-dep dedup in `visitLambdaBody` must not add another.
+        seenOperatorNames.add(name);
+        deps.push({
+          occurrence,
+          name,
+          valueDef,
+          version: valueDef._writeVersion,
+          resolved,
+          resolvedOperator: resolved.operator,
+        });
+        visitLambdaBody(occurrence, name, resolved.operator, false);
+        return;
+      }
+      // (2) The chain resolves the name to NOTHING — an auto-declared free
+      // of a lambda body (`R_xz`'s `c`), or any symbol used before any
+      // reachable declaration. Trackable with `resolved: undefined`: the
+      // walk currently reads the name as unbound, and the one event that
+      // changes that — a binding for the name becoming reachable
+      // (`assign`/`declare` at any level of the chain) — flips the
+      // re-resolution from `undefined` to that binding and invalidates.
+      // (This replaces the blanket ineligibility that made every
+      // lambda-body free permanently uncacheable.)
+      if (resolved === undefined) {
+        seen.add(valueDef);
+        deps.push({
+          occurrence,
+          name,
+          valueDef,
+          version: valueDef._writeVersion,
+          resolved: undefined,
+        });
+        return;
+      }
+      // (3) The chain resolves to a DIFFERENT value binding than the
+      // pinned one: `assign` would write the chain target while the
+      // occurrence keeps reading its pinned def (or vice versa — which one
+      // the walk consults depends on constness and route), so neither
+      // version stream alone is trustworthy. Ineligible, as before.
       if (!isValueDef(resolved) || resolved.value !== valueDef) {
+        if (DEBUG_DEPS)
+          console.log(
+            `[deps] ineligible: valueless '${name}' not chain-resolved`
+          );
         eligible = false;
         return;
       }
@@ -298,14 +444,21 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
       if (valueDef !== undefined) {
         if (excluded.has(valueDef) || seen.has(valueDef)) return;
         visitValueDef(e, valueDef);
-      } else if (e.operatorDefinition === undefined && e.isCanonical === false)
+      } else if (
+        e.operatorDefinition === undefined &&
+        e.isCanonical === false
+      ) {
+        if (DEBUG_DEPS)
+          console.log(`[deps] ineligible: unbound symbol '${e.symbol}'`);
         eligible = false;
+      }
       return;
     }
     // A dictionary's entries are not walked here; a symbol dependency hiding
     // in one would go untracked, so a dictionary operand is conservatively
     // ineligible rather than silently under-keyed.
     if (isDictionary(e)) {
+      if (DEBUG_DEPS) console.log('[deps] ineligible: dictionary operand');
       eligible = false;
       return;
     }
@@ -334,36 +487,76 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
       if (headDef !== undefined && !excluded.has(headDef) && !seen.has(headDef))
         visitValueDef(e, headDef);
       // A USER-DEFINED operator head (`f8(x)` after `ce.assign('f8', x ↦ …)`
-      // creates an operator definition) needs no dep entry — redefinition and
-      // signature inference always bump `_worldVersion` — but its
-      // lambda BODY carries transitive symbol dependencies exactly like a
-      // stored value, so walk it (with its parameter names skipped: their
-      // occurrences bind to valueless body-scope definitions, which are the
-      // walk's own bindings, not dependencies). Built-in operators have no
-      // lambda.
+      // creates an operator definition): its lambda BODY carries transitive
+      // symbol dependencies exactly like a stored value, so walk it (with
+      // its parameter names skipped: their occurrences bind to valueless
+      // body-scope definitions, which are the walk's own bindings, not
+      // dependencies) — and record the operator itself as a dependency,
+      // because a same-kind redefinition bumps `_worldVersion` but an
+      // operator→scalar KIND SWAP does not (see `visitLambdaBody`).
+      // Built-in operators have no lambda: no walk, no entry.
       const opDef = e.operatorDefinition;
-      const lambda = opDef?.lambda;
-      if (lambda !== undefined && !seenOperators.has(opDef!)) {
-        seenOperators.add(opDef!);
-        // Mirror the stored-value branch: pre-register NESTED literals'
-        // parameter sites anywhere in this body, so a helper that builds its
-        // own lazy collection is not wrongly disqualified by the valueless
-        // gate seeing an inner literal's parameter binding.
-        collectParameterDefs(lambda.body, excluded);
-        // DEFINITION BOUNDARY (see the stored-value branch): the skip set
-        // is built FRESH from this lambda's OWN parameters — never seeded
-        // from the caller's, whose spellings mean something else in this
-        // definition's environment.
-        const bodySkip = new Set<string>();
-        for (const p of lambda.parameters) bodySkip.add(p.name);
-        visit(lambda.body, bodySkip);
-      }
+      if (opDef !== undefined) visitLambdaBody(e, e.operator, opDef, true);
       for (const op of e.ops) visit(op, skipNames);
     }
   };
   visit(expr);
 
   return eligible ? deps : undefined;
+}
+
+/**
+ * The dependency snapshot of `expr` for a dependency-precise memo, or
+ * `undefined` when the instance is ineligible (see `snapshotDeps`). The
+ * public seam of this module's dependency machinery, shared by the element
+ * memo and the collection-facet memo (`BoxedFunction._memoizedFacet`) so the
+ * two can never diverge on what counts as a dependency. The returned value
+ * is opaque: hold it and hand it back to `memoDepsStillValid`.
+ */
+export function snapshotMemoDeps(expr: Expression): MemoDeps | undefined {
+  return snapshotDeps(expr);
+}
+
+/** Opaque dependency snapshot — see {@link snapshotMemoDeps}. */
+export type MemoDeps = ElementMemoDep[];
+
+/**
+ * Are all of `deps` (a snapshot taken by {@link snapshotMemoDeps} on this
+ * same `expr`) still current? Checks, per dependency: the occurrence still
+ * resolves to the same inner value definition (an `updateDef` swap is an
+ * identity change), the definition's `_writeVersion` is unmoved (value
+ * writes, INCLUDING ephemeral loop-index writes — this loop is the
+ * ephemeral-write detector, do not "optimize" it away behind a
+ * `_semanticVersion` fast path), and the instance's resolution chain still
+ * resolves the name to the same binding (shadowing declarations bump no
+ * counter and touch no tracked definition, but change what a walk computes —
+ * see `ElementMemoDep.resolved`). Callers must ALSO check their entry's
+ * `worldVersion` stamp against `ce._worldVersion`; that axis is not this
+ * function's job.
+ */
+export function memoDepsStillValid(expr: Expression, deps: MemoDeps): boolean {
+  const ce = expr.engine;
+  const depScope = depResolutionScope(expr);
+  for (const d of deps) {
+    // An OPERATOR-ONLY dependency (no `valueDef`) has no pinned value
+    // binding to compare or version to read; its validity is the resolution
+    // re-check below.
+    if (d.valueDef !== undefined) {
+      if (d.occurrence.valueDefinition !== d.valueDef) return false;
+      if (d.valueDef._writeVersion !== d.version) return false;
+    }
+    const r = resolveDepBinding(ce, depScope, d.name);
+    if (d.resolvedOperator !== undefined) {
+      // An operator dependency (a walked user lambda, or a healed forward
+      // reference) compares the INNER operator-definition identity: the
+      // outer tagged wrapper is mutated in place on redefinition, so its
+      // identity proves nothing — an operator→scalar kind swap keeps the
+      // wrapper and swaps the inner (and bumps no version axis at all).
+      if (!isOperatorDef(r)) return false;
+      if (r.operator !== d.resolvedOperator) return false;
+    } else if (r !== d.resolved) return false;
+  }
+  return true;
 }
 
 /** The still-valid cache for this instance, or `undefined`. Check
@@ -383,29 +576,9 @@ export function validElementMemo(
     if (CACHE_STATS) recordCache('elementMemo', 'missEpoch');
     return undefined;
   }
-  // NO `_semanticVersion` fast path here: an ephemeral loop-index write
-  // bumps the index definition's `_writeVersion` but NOT
-  // `_semanticVersion`, so generation equality does NOT prove the
-  // dependencies are unchanged. The loop below IS the ephemeral-write
-  // detector — it is what makes a memoized instance nested under a `Sum`
-  // refill per iteration. Do not "optimize" it away.
-  const depScope = depResolutionScope(expr);
-  for (const d of entry.deps) {
-    if (d.occurrence.valueDefinition !== d.valueDef) {
-      if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
-      return undefined;
-    }
-    if (d.valueDef._writeVersion !== d.version) {
-      if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
-      return undefined;
-    }
-    // Resolution axis: shadowing declarations bump no counter and touch no
-    // tracked definition, but change what a walk computes (see
-    // `ElementMemoDep.resolved`).
-    if (resolveDepBinding(ce, depScope, d.name) !== d.resolved) {
-      if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
-      return undefined;
-    }
+  if (!memoDepsStillValid(expr, entry.deps)) {
+    if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
+    return undefined;
   }
   if (CACHE_STATS) recordCache('elementMemo', 'hit');
   return entry;
@@ -414,9 +587,12 @@ export function validElementMemo(
 /**
  * Did none of `endDeps` move relative to `startDeps`? Requires a start
  * snapshot, the same dependency count, and — for every end dependency — a
- * start dependency on the SAME `valueDef` object with an equal `version` and
- * an identical resolved binding. (Dependencies are one per distinct value
- * definition, so matching on `valueDef` identity is unambiguous.)
+ * start dependency on the SAME `valueDef`/`resolvedOperator`/`name` triple
+ * with an equal `version` and an identical resolved binding. (Value
+ * dependencies are one per distinct value definition and operator
+ * dependencies one per distinct operator definition, so the triple is
+ * unambiguous — `valueDef` alone no longer is, since operator-only entries
+ * all carry `valueDef: undefined`.)
  */
 function depsUnmoved(
   startDeps: ElementMemoDep[] | undefined,
@@ -425,7 +601,12 @@ function depsUnmoved(
   if (startDeps === undefined) return false;
   if (startDeps.length !== endDeps.length) return false;
   for (const d of endDeps) {
-    const s = startDeps.find((x) => x.valueDef === d.valueDef);
+    const s = startDeps.find(
+      (x) =>
+        x.valueDef === d.valueDef &&
+        x.resolvedOperator === d.resolvedOperator &&
+        x.name === d.name
+    );
     if (s === undefined) return false;
     if (s.version !== d.version) return false;
     if (s.resolved !== d.resolved) return false;

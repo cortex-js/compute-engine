@@ -2,14 +2,21 @@
  * Tycho item 182 BARE repro (no Tycho code): the canonicalization-time
  * collection-facet probe storm, in its undeadlined form — an OOM crash.
  *
+ * FIXED 2026-08-14 by the dependency-precise collection-facet memo
+ * (`BoxedFunction._memoizedFacet` + the forward-reference/region-scope
+ * eligibility repairs in `collection-element-memo.ts`): both arms of this
+ * script now parse the fragment in ~5 ms. The paragraph below records the
+ * PRE-FIX behavior this script reproduced, kept for provenance; regression
+ * pins live in `test/compute-engine/tycho-item-182-facet-probe-storm.test.ts`.
+ *
  * State: fresh source engine + lizeqlnn5e's real `L` (a ~19,000-element
  * literal list) + the document's user functions + `D` assigned the
  * UNEVALUATED lazy comprehension over slices of `L`. Then parsing ONE slot
- * of the C₂ head exhausts a 4 GB heap in ~130 s (measured 2026-08-14);
+ * of the C₂ head exhausted a 4 GB heap in ~130 s (measured 2026-08-14);
  * the full three-slot head ran >180 s before an external kill. Under a
- * 5 s `withTimeLimit` the same state degrades to Tycho's ~9.4 s span
+ * 5 s `withTimeLimit` the same state degraded to Tycho's ~9.4 s span
  * overrun (their document-open refusal). `Length(D)` itself evaluates in
- * 3 ms and stays symbolic — resolving `D` is NOT the cost; the storm is
+ * 3 ms and stays symbolic — resolving `D` was NOT the cost; the storm was
  * the uncached facet probes (see the "Tycho item 182" ROADMAP row for the
  * measured mechanism: 210K Range count probes via `checkNumericArgs` →
  * `isFiniteIndexedCollection` and `addType` → `isFixedShapeCollection`).

@@ -37,6 +37,24 @@ export interface DeadlineFrame {
   spans: string[];
 }
 
+/**
+ * How many `iteration-limit-exceeded` cancellations have been RAISED over the
+ * life of the process. Monotonic; only ever compared before and after a
+ * computation, to answer "did this computation give up because of
+ * `engine.iterationLimit`?". An answer produced under a breached limit is
+ * limit-DEGRADED — a different `iterationLimit` could produce a different
+ * answer — so a memo must not freeze it (the collection-facet memo's
+ * settled-only gate consumes this, exactly like `cycleDetectionCount()`).
+ * Counted at the single raise site (the constructor below) rather than at the
+ * scattered catch sites that convert the error to an "unknown" answer.
+ */
+let _iterationLimitCancellations = 0;
+
+/** See {@link _iterationLimitCancellations}. */
+export function iterationLimitCancellationCount(): number {
+  return _iterationLimitCancellations;
+}
+
 export class CancellationError<T = unknown> extends Error {
   /**
    * Machine-readable reason for the cancellation. Engine cap breaches set one
@@ -75,6 +93,7 @@ export class CancellationError<T = unknown> extends Error {
     if (attribution !== undefined) this.attribution = attribution;
     if (spans !== undefined) this.spans = spans;
     this.name = 'CancellationError';
+    if (cause === 'iteration-limit-exceeded') _iterationLimitCancellations += 1;
   }
 }
 
