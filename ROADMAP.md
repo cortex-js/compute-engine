@@ -95,15 +95,16 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 `(function, collection+)`); the flip swept src, tests, docs, and the
 Fungrim corpus/artifact. Two follow-ups:
 
-- **Fungrim translator still emits the old order.** The corpus
-  (`data/fungrim/`) was flipped in place (61 `["Map", set, fn]` →
-  `["Map", fn, set]`; the artifact's 19 Map rules re-spliced from a
-  fresh compile, 0 dropped/0 added), so the corpus no longer reproduces
-  byte-identically from the fork translator. The fork
-  (github.com/arnog/fungrim, `grim2mathjson` — `_comprehension` in
-  structural.py and any other `Map` emission site) must swap its Map
-  operand order and the corpus be regenerated to restore provenance
-  (MANIFEST commit pin bump).
+- **Fungrim provenance: fork commit + MANIFEST bump pending.** The
+  translator now emits callback-first Map (`_comprehension` in
+  `grim2mathjson/structural.py`, golden `cbce7f.json` updated, 69/69
+  fork tests green — changes sit UNCOMMITTED in ~/dev/fungrim), and the
+  regenerated corpus is byte-identical to the checked-in one (the only
+  regen delta was restoring the translator's `\uXXXX` escape style in
+  two reference strings; `validate --check` green, Stage-1 100%). To
+  close: commit the fork, then set `data/fungrim/MANIFEST.json`
+  `upstream.commit` to the new fork hash and bump `generated`
+  (`pin.sha256` covers only `pygrim/`, which is untouched).
 - **Pre-existing recompile drift, NOT from the flip: 98 rules
   re-orient.** `recompile-drift.ts` reports 0 dropped / 0 added /
   98 changed — all match↔replace orientation (and the paired
