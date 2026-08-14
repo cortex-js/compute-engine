@@ -382,6 +382,63 @@ describe('EPSIL MATCH — reserved-word interaction', () => {
 });
 
 //
+// `otherwise` (2026-08-13): the keyword spelling of the wildcard case
+// pattern `_`. Contextual, not reserved — recognized only when the bare word
+// is the ENTIRE pattern (followed by `=>` or the guard `if`), and lowered to
+// the same `_` node, so it is input sugar with no new pattern kind
+// (serialization keeps `_`, like `is` → `in`).
+//
+
+describe('EPSIL MATCH — `otherwise` (wildcard synonym)', () => {
+  test('lowers to the `_` wildcard', () => {
+    expect(
+      validEpsil('match x {\n  0 => "zero"\n  otherwise => "other"\n}')
+    ).toEqual([
+      'Match',
+      'x',
+      ['MatchCase', 0, { str: 'zero' }],
+      ['MatchCase', '_', { str: 'other' }],
+    ]);
+  });
+
+  test('matches anything and does not bind', () => {
+    expect(
+      run('match 5 {\n  1 => "one"\n  otherwise => "many"\n}').value.toString()
+    ).toBe('"many"');
+    // The body's `otherwise` is NOT the subject — the pattern is `_`, which
+    // binds nothing, so the symbol stays an ordinary (undeclared) symbol.
+    const { value } = run('match 5 {\n  otherwise => otherwise\n}');
+    expect(value.toString()).toBe('"otherwise"');
+  });
+
+  test('takes a guard, like `_`', () => {
+    expect(
+      run(
+        'match 5 {\n  otherwise if 5 > 3 => "big"\n  _ => "small"\n}'
+      ).value.toString()
+    ).toBe('"big"');
+  });
+
+  test('a non-final `otherwise` draws the irrefutable-case diagnostic', () => {
+    expect(
+      diagnostics('match x {\n  otherwise => 1\n  2 => 2\n}')
+    ).toContain('match-irrefutable-case');
+  });
+
+  test('`otherwise` stays an ordinary identifier outside the pattern head', () => {
+    expect(run('let otherwise = 7\notherwise + 1').value.re).toBe(8);
+    // Inside a structured pattern it is a BINDING, not a wildcard.
+    expect(
+      validEpsil('match x {\n  [otherwise, 2] => otherwise\n}')
+    ).toEqual([
+      'Match',
+      'x',
+      ['MatchCase', ['List', '_otherwise', 2], 'otherwise'],
+    ]);
+  });
+});
+
+//
 // Range patterns (§8 of the design, 2026-07-31 addendum): `lo..hi` in pattern
 // position is an inclusive numeric membership test.
 //

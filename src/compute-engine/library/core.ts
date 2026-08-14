@@ -27,6 +27,7 @@ import {
   canonicalFunctionLiteral,
   canonicalFunctionLiteralOperands,
   canonicalWithFreshPlaceholders,
+  WILDCARD_SYMBOLS,
 } from '../function-utils.js';
 
 import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
@@ -47,6 +48,7 @@ import {
   collectionElementType,
   functionResult,
   isValidType,
+  signatureArms,
   stripMissingFromType,
   widen,
   containsSignatureArm,
@@ -163,6 +165,97 @@ function isRefutablePipeTarget(f: Expression): boolean {
   return (
     isNumber(f) || isString(f) || isSymbol(f, 'True') || isSymbol(f, 'False')
   );
+}
+
+/**
+ * Implicit topic argument: a pipe stage written as a CALL that is missing
+ * required arguments receives the piped value as its implicit first
+ * argument — `xs |> Take(10)` means `xs |> Take(_, 10)`. Returns the stage
+ * with a `_` placeholder inserted first (raw, like the held operand it
+ * replaces), or `undefined` when the sugar does not apply.
+ *
+ * Deliberately narrow — the implicit `_` fills a HOLE, it never rewrites a
+ * complete call:
+ * - the stage must be a call `F(…)` on an operator with a known signature;
+ * - it must mention no placeholder of its own (an explicit `_`/`_1`…`_9`
+ *   already says where the topic goes, e.g. `Take(_, 10)`, `Map(_, _^2)`);
+ * - the written argument count must be below EVERY signature arm's required
+ *   count (the call is incomplete however it is read), and the completed
+ *   count must fit some arm's arity.
+ *
+ * A complete call keeps its existing meaning — `5 |> Max(3)` still applies
+ * the value of `Max(3)` — so this sugar only gives meaning to stages that
+ * were previously arity errors. A type mismatch surfaces from the completed
+ * call (`5 |> Take(10)` reports `Take`'s collection parameter), which names
+ * the actual problem better than an `Apply` fallback would.
+ */
+function pipeStageWithImplicitTopic(
+  ce: ComputeEngine,
+  rhs: Expression
+): Expression | undefined {
+  if (!isFunction(rhs)) return undefined;
+  const name = rhs.operator;
+  if (name === 'Function') return undefined;
+  if (rhs.has(WILDCARD_SYMBOLS)) return undefined;
+  const def = ce.lookupDefinition(name);
+  const opDef =
+    def !== undefined && 'operator' in def ? def.operator : undefined;
+  const arms = signatureArms(opDef?.signature.type);
+  if (arms === undefined) return undefined;
+  const n = rhs.nops;
+  // Complete under some arm: the written call already means something.
+  if (arms.some((a) => n >= (a.args?.length ?? 0))) return undefined;
+  const fits = arms.some((a) => {
+    const req = a.args?.length ?? 0;
+    const max =
+      a.variadicArg !== undefined ? Infinity : req + (a.optArgs?.length ?? 0);
+    return n + 1 <= max;
+  });
+  if (!fits) return undefined;
+  return ce._fn(name, [ce.symbol('_', { canonical: false }), ...rhs.ops], {
+    canonical: false,
+  });
+}
+
+/**
+ * Implicit `Map`: a pipe stage that is a UNARY function literal maps over a
+ * collection topic instead of being applied to the collection as a whole —
+ * `xs |> x ↦ x^2` and `xs |> _^2` (the Epsil parser wraps the latter as a
+ * `Function` literal) both mean `Map(xs, x ↦ x^2)`. Returns the `Map`
+ * expression, or `undefined` when the stage is an ordinary application.
+ *
+ * The stage must be a LITERAL lambda: a bare function symbol (`xs |> Sum`) or
+ * a symbol whose value is a lambda still applies to the whole collection, so
+ * whole-collection consumers keep their natural spelling. Two more escapes:
+ * - a STRING topic is enumerable but reads as a scalar in a pipeline
+ *   (`"abc" |> (s ↦ …)` binds the string, not each character);
+ * - an AUTHORED parameter annotation that the topic itself satisfies is a
+ *   contract that the lambda consumes the whole collection
+ *   (`xs |> (l: list<number>) ↦ Length(l)` applies; an element-typed or
+ *   unannotated parameter maps). The annotation is read from the RAW stage,
+ *   the same authored-vs-derived discrimination
+ *   `annotateFunctionLiteralParams` documents.
+ */
+function pipeImplicitMap(
+  ce: ComputeEngine,
+  topic: Expression,
+  f: Expression,
+  rawStage: Expression
+): Expression | undefined {
+  if (!isFunction(f, 'Function')) return undefined;
+  if (f.nops !== 2) return undefined; // body + exactly one parameter
+  if (isString(topic) || topic.type.matches('string')) return undefined;
+  if (!(topic.isCollection || topic.type.matches('collection')))
+    return undefined;
+  const rawParam = isFunction(rawStage, 'Function')
+    ? rawStage.ops[1]
+    : undefined;
+  if (rawParam !== undefined && isFunction(rawParam, 'Typed')) {
+    const t = rawParam.op2;
+    const ts = isString(t) ? t.string : undefined;
+    if (ts !== undefined && topic.type.matches(ts)) return undefined;
+  }
+  return ce._fn('Map', [topic, f]);
 }
 
 /**
@@ -1958,11 +2051,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // canonicalize it with the placeholders freshly bound, so a global
         // `_1` — a valued one in particular — cannot capture them.
         let x = ops[0]?.canonical;
-        const f =
-          ops[1] === undefined
-            ? undefined
-            : canonicalWithFreshPlaceholders(ops[1]);
-        if (x === undefined || f === undefined) return undefined;
+        const rawStage = ops[1];
+        if (x === undefined || rawStage === undefined) return undefined;
 
         // A chained topic (`a |> g |> f` parses to `Pipe(Pipe(a, g), f)`) is
         // plumbing: the inner pipe is `g(a)`, whose VALUE flows on. Evaluate it
@@ -1971,6 +2061,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // topic — a bare function `F`, or `x^2 - 1` — is passed as-is, letting
         // `f` decide whether to evaluate it.
         if (isFunction(x, 'Pipe')) x = x.evaluate({ numericApproximation });
+
+        // Implicit topic argument: `xs |> Take(10)` fills the missing first
+        // argument with `_`, i.e. `xs |> Take(_, 10)` (see
+        // `pipeStageWithImplicitTopic` for the exact gate). The rewritten
+        // stage is raw, exactly like the held operand, so the shorthand
+        // machinery below binds the topic to the placeholder as usual.
+        const f = canonicalWithFreshPlaceholders(
+          pipeStageWithImplicitTopic(ce, rawStage) ?? rawStage
+        );
 
         // The right operand must be applicable. A statically-refutable rhs — a
         // literal number, string, or boolean — can never be a function, so
@@ -1984,6 +2083,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // stays inert (returns `undefined`).
         if (isRefutablePipeTarget(f))
           return ce.typeError('function', f.type, f.toString());
+
+        // Implicit `Map`: a unary LITERAL lambda stage over a collection
+        // topic maps instead of applying — `xs |> x ↦ x^2` and `xs |> _^2`
+        // are `Map(xs, x ↦ x^2)` (see `pipeImplicitMap` for the escapes:
+        // named functions, string topics, whole-collection parameter
+        // annotations).
+        const mapped = pipeImplicitMap(ce, x, f, rawStage);
+        if (mapped !== undefined)
+          return mapped.evaluate({ numericApproximation });
+
         // `Nothing` is ERASED from the call argument list, uniformly on every
         // application route (error-propagation design §4): `Nothing |> f` is
         // `f()`, exactly like `f(Nothing)`. Erasure is a rule on the WRITTEN

@@ -2007,6 +2007,75 @@ describe('EPSIL ABSENCE COALESCING `??`', () => {
       ['Or', 'b', 'c'],
     ]);
   });
+});
+
+/**
+ * Pipe-stage sugar, parser half (2026-08-13; the runtime half — implicit
+ * topic argument and implicit Map — is pinned in `execute.test.ts` and
+ * `test/compute-engine/functions.test.ts`).
+ */
+describe('EPSIL PARSING PIPE-STAGE SUGAR', () => {
+  test('a `|->` after a pipe operand forms the stage lambda', () => {
+    // Globally `|->` (15) is looser than `|>` (20); only in stage position
+    // does the mapsto bind tighter, and its body ends at the next `|>`.
+    expect(validEpsil('a |> x |-> x^2 |> Sum')).toStrictEqual([
+      'Pipe',
+      ['Pipe', 'a', ['Function', ['Power', 'x', 2], 'x']],
+      'Sum',
+    ]);
+  });
+
+  test('a curried stage lambda right-associates', () => {
+    expect(validEpsil('a |> x |-> y |-> x + y')).toStrictEqual([
+      'Pipe',
+      'a',
+      ['Function', ['Function', ['Add', 'x', 'y'], 'y'], 'x'],
+    ]);
+  });
+
+  test('a stage lambda still yields the pipeline result to `??`', () => {
+    expect(validEpsil('xs |> x |-> x + 1 ?? 0')).toStrictEqual([
+      'Coalesce',
+      ['Pipe', 'xs', ['Function', ['Add', 'x', 1], 'x']],
+      0,
+    ]);
+  });
+
+  test('an operator-written placeholder stage becomes a Function literal', () => {
+    expect(validEpsil('a |> _^2')).toStrictEqual([
+      'Pipe',
+      'a',
+      ['Function', ['Power', '_', 2]],
+    ]);
+    expect(validEpsil('a ~> -_')).toStrictEqual([
+      'Pipe',
+      'a',
+      ['Function', ['Negate', '_']],
+    ]);
+  });
+
+  test('a CALL stage with a placeholder is left alone (`_` is the topic)', () => {
+    expect(validEpsil('a |> Take(_, 10)')).toStrictEqual([
+      'Pipe',
+      'a',
+      ['Take', '_', 10],
+    ]);
+    expect(validEpsil('a |> Take(10)')).toStrictEqual([
+      'Pipe',
+      'a',
+      ['Take', 10],
+    ]);
+    // Indexing is call-shaped too: `_[2]` reads the topic's element.
+    expect(validEpsil('a |> _[2]')).toStrictEqual([
+      'Pipe',
+      'a',
+      ['At', '_', 2],
+    ]);
+  });
+
+  test('a bare `_` stage stays the identity shorthand', () => {
+    expect(validEpsil('a |> _')).toStrictEqual(['Pipe', 'a', '_']);
+  });
 
   test('tighter than `=`, so it is the whole initializer', () => {
     expect(validEpsil('let t = c ?? 30')).toStrictEqual([

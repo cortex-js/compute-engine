@@ -280,6 +280,21 @@ symbolic (unbound) `x` as the subject above, `match` selects the `_` case: `x`
 is structurally not `0`, even though it *could* be zero semantically. Use
 `if`/`Which` when you want that kind of semantic case-split instead.
 
+The final catch-all may also be spelled `otherwise`, a synonym for a bare
+`_` pattern (it takes a guard the same way, and binds nothing):
+
+```epsil
+match x {
+  0 => "zero"
+  otherwise => "other"
+}
+```
+
+`otherwise` is contextual, not reserved: it means the wildcard only when it
+is the entire pattern of a case. Anywhere else — including inside a
+structured pattern like `[otherwise, 2]` — it is an ordinary identifier, and
+a bare identifier in a nested pattern position *binds* (next section).
+
 ### Bindings
 
 A bare identifier in pattern position **binds** a new variable to the value
@@ -667,18 +682,24 @@ argument:
 // ➔ [1, 2]
 ```
 
-:::warning[The one trap]
-`xs |> Map(f)` does **not** partially apply `Map`. It pipes `xs` into the
-one-argument call `Map(f)`, which is not a computation Epsil knows how to
-perform — so the result is a symbolic `Map` expression, with no error to
-warn you. Whenever a stage is a call, write the `_`.
+When the piped value would fill the **first** slot, the `_` may be left out:
+a call that is missing required arguments receives the piped value as its
+implicit first argument, so these are the same pipeline:
 
 ```epsil
-[1, 2, 3] |> Map(_, n |-> n^2)      // ✅ [1, 4, 9]
-[1, 2, 3] |> Map(n |-> n^2)         // ❌ stays symbolic
+[1, 2, 3] |> Map(_, n |-> n^2)      // [1, 4, 9]
+[1, 2, 3] |> Map(n |-> n^2)         // [1, 4, 9] — implicit first argument
 ```
 
-:::
+The implicit argument only fills a hole. A call that is already complete is
+never rewritten: `xs |> f(y)` applies the *value* of `f(y)` to `xs`, exactly
+as if the pipe were not there.
+
+A one-parameter **lambda** stage over a collection is applied to each
+element (an implicit `Map`), so the pipeline above can shed its `Map`
+entirely — `[1, 2, 3] |> n |-> n^2` and `[1, 2, 3] |> _^2` also produce
+`[1, 4, 9]`. See [the pipe operator](/epsil/operators/#pipe) for the exact
+rules.
 
 ### Choosing between a pipeline and a nested call
 

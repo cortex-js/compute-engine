@@ -1430,7 +1430,7 @@ function typedBinding(
 /** The shorthand-lambda placeholder symbols: `_` and `_1`…`_9`. An expression
  * containing any of these is a shorthand function body (case 6 of
  * `canonicalFunctionLiteral`). */
-const WILDCARD_SYMBOLS = [
+export const WILDCARD_SYMBOLS = [
   '_',
   '_1',
   '_2',

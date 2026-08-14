@@ -139,8 +139,35 @@ slot the piped value fills:
 // ➔ 165
 ```
 
-The `_` is not optional. `xs |> Map(f)` pipes `xs` into the one-argument call
-`Map(f)` and quietly yields a symbolic expression rather than a list.
+The `_` may be left out when it would fill the **first** slot: a call stage
+that is missing required arguments receives the piped value as its implicit
+first argument, so `xs |> Take(10)` means `xs |> Take(_, 10)`. This only
+fills a hole — a call that is already complete keeps its ordinary meaning,
+and an explicit `_` anywhere in the call says exactly where the piped value
+goes.
+
+A stage may also be a **lambda**, written inline without parentheses — after
+`|>` the arrow binds tighter than the pipe, and the lambda's body ends at the
+next `|>`. When the piped value is a collection, a one-parameter lambda stage
+is applied **to each element** (an implicit `Map`); `_^2` is shorthand for
+such a lambda. The following three pipelines are equivalent:
+
+```epsil-live
+1..oo |> Take(_, 10) |> Map(_, _^2) |> Sum
+// ➔ 385
+```
+
+```epsil
+1..oo |> Take(10) |> x |-> x^2 |> Sum
+1..oo |> Take(10) |> _^2 |> Sum
+```
+
+Note the two readings of `_`: in a **call** stage it is the piped value
+(`Take(_, 10)`); in an **operator-written** stage (`_^2`, `_ + 1`) it is the
+element of the implicit lambda. A **named** function stage always receives
+the whole value — `xs |> Sum` sums the collection, it does not map — as does
+a lambda whose annotated parameter accepts it
+(`xs |> (l: list<number>) |-> Length(l)`).
 
 `|>` and `~>` are aliases for `Pipe` and sit at the **loosest** precedence
 tier, right below `Assign` — looser than arithmetic, relational, and boolean

@@ -778,6 +778,94 @@ describe('EPSIL EXECUTE — error propagation', () => {
   });
 });
 
+/**
+ * Pipe-stage sugar (2026-08-13). Three rules make `|>` pipelines concise:
+ *
+ * 1/ Implicit topic argument: a call stage missing required arguments gets
+ *    the piped value as its first argument — `xs |> Take(10)` means
+ *    `xs |> Take(_, 10)`. A COMPLETE call keeps its old meaning.
+ * 2/ Stage lambda: a `|->` after a pipe operand binds tighter than the pipe
+ *    (only there), so `xs |> x |-> x^2 |> Sum` is `xs |> (x |-> x^2) |> Sum`.
+ * 3/ Implicit `Map`: a unary LITERAL lambda stage over a collection topic
+ *    maps — `xs |> x |-> x^2` and `xs |> _^2` are `Map(xs, x |-> x^2)`.
+ *    Named-function stages (`xs |> Sum`), string topics, and lambdas whose
+ *    authored parameter annotation accepts the whole topic still apply.
+ *
+ * Rules 1 and 3 live in the engine (`library/core.ts`, box-route pins in
+ * `test/compute-engine/functions.test.ts`); rule 2 and the `_^2` lambda
+ * reading are Epsil parser rewrites.
+ */
+describe('EPSIL EXECUTE — pipe-stage sugar', () => {
+  test('the motivating pipelines are equivalent', () => {
+    expect(
+      run('1..oo |> Take(_, 10) |> Map(_, _^2) |> Sum').value.re
+    ).toBe(385);
+    expect(run('1..oo |> Take(10) |> x |-> x^2 |> Sum').value.re).toBe(385);
+    expect(run('1..oo |> Take(10) |> _^2 |> Sum').value.re).toBe(385);
+  });
+
+  test('implicit topic argument fills an incomplete call', () => {
+    expect(run('1..10 |> Take(3)').value.toString()).toBe('[1,2,3]');
+    expect(
+      run('let f = x |-> x * 2\n[1,2,3] |> Map(f)').value.toString()
+    ).toBe('[2,4,6]');
+    expect(run('[1,2,3] |> Filter(x |-> x > 1)').value.toString()).toBe(
+      '[2,3]'
+    );
+  });
+
+  test('a complete call stage keeps its existing meaning', () => {
+    // Max(3) is a valid call: the topic is applied to its value (Apply's
+    // constant-nullary shorthand), exactly as before the sugar.
+    expect(run('5 |> Max(3)').value.re).toBe(3);
+    // An operator-written stage with a free symbol still binds the topic to
+    // the unknown (the shorthand-lambda path), not to Add's first argument.
+    expect(run('5 |> y + 1').value.re).toBe(6);
+  });
+
+  test('a stage lambda ends at the next pipe', () => {
+    expect(
+      run('[1,2,3] |> x |-> x + 1 |> Sum').value.re
+    ).toBe(9);
+  });
+
+  test('a unary lambda stage maps over a collection topic', () => {
+    expect(run('[1,2,3] |> (x |-> x^2)').value.toString()).toBe('[1,4,9]');
+    expect(run('[1,2,3] |> _^2').value.toString()).toBe('[1,4,9]');
+    expect(run('[1,2,3] |> _ + 1').value.toString()).toBe('[2,3,4]');
+    // The stage maps EACH ELEMENT, so a collection-consuming body goes
+    // inert per element…
+    expect(run('[1,2,3] |> (l |-> Length(l))').value.toString()).toBe(
+      '[Length(1),Length(2),Length(3)]'
+    );
+    // …the whole-collection spellings are the named function or an authored
+    // annotation the topic satisfies.
+    expect(run('[1,2,3] |> Length').value.re).toBe(3);
+    expect(
+      run('[1,2,3] |> ((l: list<number>) |-> Length(l))').value.re
+    ).toBe(3);
+  });
+
+  test('a lambda stage over a non-collection topic applies', () => {
+    expect(run('5 |> _^2').value.re).toBe(25);
+    expect(run('5 |> (x |-> x + 1)').value.re).toBe(6);
+    expect(run('5 |> x |-> x + 1').value.re).toBe(6);
+  });
+
+  test('a string topic is a scalar, not a character collection', () => {
+    expect(run('"abc" |> (c |-> c)').value.toString()).toBe('"abc"');
+  });
+
+  test('a placeholder in a CALL stage is still the topic', () => {
+    // `_` as a call argument marks where the piped value goes — no implicit
+    // Map, even over a collection topic.
+    expect(run('1..10 |> Take(_, 3)').value.toString()).toBe('[1,2,3]');
+    expect(run('1..5 |> Map(_, _^2)').value.toString()).toBe(
+      '[1,4,9,16,25]'
+    );
+  });
+});
+
 describe('EPSIL EXECUTE — the bare `_` identity shorthand', () => {
   // A bare `_` in a function slot is the identity function (`x |-> x`). The
   // Epsil parser accepts `_` in argument position (it is an ordinary symbol

@@ -479,6 +479,97 @@ describe('Pipe', () => {
   });
 });
 
+// Pipe-stage sugar (2026-08-13). Two of the three rules live in the ENGINE
+// (`pipeStageWithImplicitTopic` / `pipeImplicitMap`, `library/core.ts`), so
+// they hold on the `ce.box()` route probed here, not just on the Epsil
+// surface (the Epsil-route pins are in `test/epsil/execute.test.ts`). The
+// third — reading an operator-written placeholder expression (`_^2`) as a
+// lambda — is a PARSER rewrite; on the box route `["Power", "_", 2]` keeps
+// its topic-placeholder meaning, and the last test pins that divergence.
+describe('Pipe — stage sugar (box route)', () => {
+  test('implicit topic argument fills an incomplete call', () => {
+    const ce = new ComputeEngine();
+    // Take(10) is missing its collection: the topic becomes the first arg.
+    expect(
+      ce
+        .box(['Pipe', ['Range', 1, 10], ['Take', 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,3]');
+    // Same for a callback slot: Map(f) over the piped collection.
+    ce.assign('f', ce.parse('x \\mapsto 2x'));
+    expect(
+      ce
+        .box(['Pipe', ['List', 1, 2, 3], ['Map', 'f']])
+        .evaluate()
+        .toString()
+    ).toBe('[2,4,6]');
+  });
+
+  test('a complete call keeps its existing (apply) meaning', () => {
+    const ce = new ComputeEngine();
+    // Max(3) is a complete call; the topic is applied to its VALUE under
+    // Apply's constant-nullary shorthand, exactly as before the sugar.
+    expect(ce.box(['Pipe', 5, ['Max', 3]]).evaluate().toString()).toBe('3');
+  });
+
+  test('an explicit placeholder disables the implicit topic argument', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Pipe', ['Range', 1, 10], ['Take', '_', 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,3]');
+  });
+
+  test('a unary lambda stage maps over a collection topic', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'Pipe',
+          ['List', 1, 2, 3],
+          ['Function', ['Power', 'x', 2], 'x'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[1,4,9]');
+    // The wildcard spelling of the same literal maps too.
+    expect(
+      ce
+        .box(['Pipe', ['List', 1, 2, 3], ['Function', ['Power', '_', 2]]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,4,9]');
+  });
+
+  test('a unary lambda stage over a non-collection topic applies', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Pipe', 4, ['Function', ['Power', '_', 2]]])
+        .evaluate()
+        .toString()
+    ).toBe('16');
+  });
+
+  test('a BARE placeholder expression keeps the topic reading (divergence)', () => {
+    const ce = new ComputeEngine();
+    // On the box route there is no call-vs-operator surface distinction, so
+    // `["Power", "_", 2]` stays a shorthand lambda applied to the topic (a
+    // broadcast square of the list), NOT an implicit Map. The Epsil parser
+    // is what rewrites the operator spelling `xs |> _^2` into the `Function`
+    // literal probed above.
+    expect(
+      ce
+        .box(['Pipe', ['List', 1, 2, 3], ['Power', '_', 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,4,9]');
+  });
+});
+
 describe('Argument Evaluation', () => {
   test('Hold expressions are not evaluated', () =>
     expect(evaluate(['Add', ['Hold', ['Add', 2, 5]], 7])).toMatchInlineSnapshot(

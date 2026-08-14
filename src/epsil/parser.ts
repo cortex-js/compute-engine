@@ -37,6 +37,7 @@ import {
   OperatorDef,
   TYPE_TEST_PRECEDENCE,
   infixOperatorForSymbol,
+  operatorDefByName,
   postfixOperatorForSymbol,
   prefixOperatorForSymbol,
 } from './operators.js';
@@ -3082,8 +3083,27 @@ export class Parser {
   } | null {
     const start = this.current.start;
     this.matchTypeGuards = [];
-    const pattern = this.parseCasePattern();
-    if (pattern !== null) this.checkRangePatterns(pattern);
+    // `otherwise => body` — the keyword spelling of the wildcard pattern
+    // `_`. Contextual, not reserved: it is recognized only when the bare
+    // word IS the whole pattern (the next token is the case arrow or the
+    // guard-introducing `if`), so `otherwise` remains an ordinary
+    // identifier everywhere else — including inside structured patterns,
+    // where the `_` spelling is the one that reads correctly. The node
+    // produced is the same `_`, so the irrefutable-non-final-case
+    // diagnostic and the engine's `Match` see no new pattern kind.
+    let pattern: MathJsonExpression | null;
+    if (
+      this.check('SYMBOL') &&
+      this.current.text === 'otherwise' &&
+      ((this.peek().type === 'OPERATOR' && this.peek().text === '=>') ||
+        (this.peek().type === 'SYMBOL' && this.peek().text === 'if'))
+    ) {
+      const tok = this.advance(); // 'otherwise'
+      pattern = this.wrap('_', tok.start, tok.end);
+    } else {
+      pattern = this.parseCasePattern();
+      if (pattern !== null) this.checkRangePatterns(pattern);
+    }
     if (pattern === null) {
       if (!(this.current.diagnostics && this.current.diagnostics.length))
         this.error(
@@ -5399,7 +5419,7 @@ export class Parser {
       // A mapsto's right operand is a LAMBDA BODY, so it is a
       // `break`/`continue` boundary: `for x in xs { f(y |-> break) }` must not
       // let the lambda's `break` bind to the enclosing loop.
-      const right =
+      let right =
         def.symbol === '|->'
           ? this.inLoopContext(0, () => this.parseExpression(rightMin))
           : this.parseExpression(rightMin);
@@ -5411,6 +5431,11 @@ export class Parser {
         );
         break;
       }
+
+      // Pipe-stage sugar: a `|->` after the operand forms an unparenthesized
+      // stage lambda, and an operator-written placeholder expression (`_^2`)
+      // becomes an implicit lambda. See `pipeStage`.
+      if (def.name === 'Pipe') right = this.pipeStage(right, rightMin);
 
       // `a = b = 5` reads as "assign a the boolean (b == 5)" — coherent, but
       // never what someone writing a chained assignment means. Diagnose it;
@@ -5768,6 +5793,90 @@ export class Parser {
 
   /** Combine an infix operator with its operands, flattening a run of the same
    * relational operator into an n-ary node (`a < b < c` → `Less(a,b,c)`). */
+  /**
+   * Pipe-stage sugar on the just-parsed right operand of `|>` (or `~>`).
+   *
+   * 1/ Stage lambda: a `|->` directly after the operand makes the operand the
+   *    lambda's parameter list and the whole mapsto the pipe stage —
+   *    `xs |> x |-> x^2 |> Sum` is `xs |> (x |-> x^2) |> Sum`. Globally `|->`
+   *    (15) binds LOOSER than `|>` (20), which would otherwise make an
+   *    unparenthesized lambda stage unwritable: the mapsto captured the
+   *    pipeline itself as its parameter list and failed with
+   *    `symbol-expected`. Only in this position is the pair inverted. The
+   *    body is parsed at the pipe's right binding power, so the stage ends at
+   *    the next `|>` or anything looser — in particular a trailing `?? d`
+   *    still applies to the PIPELINE result, exactly as the `Coalesce` row in
+   *    `operators.ts` pins for `xs |> f ?? d`. Right-recursion supports a
+   *    curried stage (`xs |> x |-> y |-> x + y`).
+   *
+   * 2/ Implicit lambda: an operand written with ORDINARY OPERATORS that
+   *    mentions a shorthand placeholder — `_^2`, `_ + 1`, `-_` — is wrapped
+   *    as `["Function", operand]`, the engine's canonical spelling of a
+   *    wildcard lambda, so the stage behaves exactly like `x |-> x^2` (in
+   *    particular it triggers the implicit `Map` over a collection topic; see
+   *    the `Pipe` definition in `library/core.ts`). A function CALL is
+   *    deliberately NOT wrapped: there `_` is the pipeline-topic placeholder
+   *    (`Take(_, 10)`, `Map(_, _^2)`), bound to the piped value by the
+   *    existing shorthand machinery. The call-vs-operator split is a SURFACE
+   *    distinction — `Power(_, 2)` and `Take(_, 10)` are structurally alike
+   *    in MathJSON — so it is decided here in the parser; the `ce.box()`
+   *    route keeps the topic reading for both spellings.
+   */
+  private pipeStage(
+    operand: MathJsonExpression,
+    rightMin: number
+  ): MathJsonExpression {
+    return (
+      this.pipeStageLambdaTail(operand, rightMin) ??
+      this.wrapImplicitPipeLambda(operand)
+    );
+  }
+
+  /** Case 1 of `pipeStage`: consume a `|->` (and, recursively, a curried
+   * chain of them) following a pipe's right operand. Returns `null` when no
+   * `|->` follows — the operand is an ordinary stage. */
+  private pipeStageLambdaTail(
+    operand: MathJsonExpression,
+    rightMin: number
+  ): MathJsonExpression | null {
+    const op = this.peekInfix();
+    if (op === null || op.def.symbol !== '|->') return null;
+    if (op.asymmetric) this.emitAsymmetric(this.current, op.def.symbol);
+    for (let i = 0; i < op.tokenCount; i++) this.advance();
+    // A lambda body is a `break`/`continue` boundary, exactly as in the
+    // ordinary mapsto branch of the precedence loop.
+    const body = this.inLoopContext(0, () => this.parseExpression(rightMin));
+    if (body === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return operand;
+    }
+    // The mapsto right-associates: in `xs |> x |-> y |-> body` the inner
+    // lambda is the outer lambda's body.
+    const curried = this.pipeStageLambdaTail(body, rightMin);
+    return this.combineInfix(op.def, operand, curried ?? body);
+  }
+
+  /** Case 2 of `pipeStage`: wrap an operator-written placeholder expression
+   * as a `Function` literal. The operand qualifies when its top-level
+   * operator has a row in the shared operator table (it was written with
+   * operator syntax, or is indistinguishable from it) and it mentions a
+   * shorthand placeholder. */
+  private wrapImplicitPipeLambda(
+    operand: MathJsonExpression
+  ): MathJsonExpression {
+    const op = operator(operand);
+    if (typeof op !== 'string' || op === '') return operand;
+    if (operatorDefByName(op) === undefined) return operand;
+    if (!mentionsWildcard(operand)) return operand;
+    const start = this.localStart(operand) ?? 0;
+    const end = this.localEnd(operand) ?? this.previousEnd();
+    return this.wrap(
+      ['Function', operand] as MathJsonExpression[],
+      start,
+      end
+    );
+  }
+
   private combineInfix(
     def: OperatorDef,
     left: MathJsonExpression,
@@ -7468,6 +7577,25 @@ function scanExponent(t: string, i: number, isP: boolean): number | null {
 //
 // ─── Helpers ────────────────────────────────────────────────────────────────
 //
+
+/** Whether a node mentions a shorthand-lambda placeholder — the bare `_` or a
+ * positional `_1`…`_9` — anywhere in its operands. Heads are not inspected. */
+function mentionsWildcard(node: MathJsonExpression): boolean {
+  const s = symbol(node);
+  if (s !== null)
+    return (
+      s === '_' ||
+      (s.length === 2 && s[0] === '_' && s[1] >= '1' && s[1] <= '9')
+    );
+  let args: MathJsonExpression[] | undefined;
+  if (Array.isArray(node)) args = node as MathJsonExpression[];
+  else if (typeof node === 'object' && node !== null && 'fn' in node)
+    args = node.fn as MathJsonExpression[];
+  if (args === undefined) return false;
+  for (let i = 1; i < args.length; i++)
+    if (mentionsWildcard(args[i])) return true;
+  return false;
+}
 
 /** Render an argument expression as a plain string (for pragma messages).
  * Ported from the old `expressionToString`. */
