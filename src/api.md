@@ -4284,13 +4284,17 @@ Return `undefined` if the membership cannot be determined.
 optional subsetOf?: (collection, other, strict) => boolean | undefined;
 ```
 
-Return `true` if all the elements of `other` are in `collection`.
-Both `collection` and `other` are collections.
+Return `true` if all the elements of `collection` are in `other` — that
+is, `collection` ⊆ `other`. The RECEIVER is the candidate subset, matching
+the public `Expression.subsetOf(other, strict)` method that dispatches
+here. Both `collection` and `other` are collections.
 
-If strict is `true`, the subset must be strict, that is, `collection` must
-have more elements than `other`.
+If strict is `true`, the subset must be strict, that is, `other` must have
+an element that `collection` does not.
 
-Return `undefined` if the subset relation cannot be determined.
+Return `undefined` if the subset relation cannot be determined. A handler
+that cannot see far enough to answer must return `undefined` rather than
+`false`: `false` is read as a proof that the relation does NOT hold.
 
 </MemberCard>
 
@@ -12849,6 +12853,47 @@ When `isCollection` is `true`, the expression:
 - has a `contains(other)` method that returns `true` if the `other`
   expression is in the collection.
 
+### `isCollection` is a CAPABILITY, `type.matches('collection')` is a SHAPE
+
+This is the single most common source of collection-handling bugs in the
+engine, so it is worth stating precisely. The two predicates answer
+different questions and neither implies the other:
+
+- `isCollection` — "can I enumerate this **now**?" It is `false` for a
+  symbol declared `list<number>`/`vector<2>` that has not been assigned
+  yet, and for an application whose head returns a collection (`L(1)`
+  under `L: (number) -> vector<2>`): both are collection-shaped, but
+  there is nothing to walk.
+- `type.matches('collection')` — "is this operand collection-**shaped**?"
+  It is `true` for those valueless cases, and `false` for a materialized
+  collection whose type is top (`unknown`/`any`), which `isCollection`
+  reports `true`.
+
+Pick by the question you are actually asking:
+
+- About to call `each()`, `contains()`, `at()`, or read `count` — that is
+  a capability question. Use `isCollection`.
+- Deciding whether an operand takes the SCALAR path or the
+  collection/broadcast path — that is a shape question. Test
+  `isCollection || type.matches('collection')`, or the operand class
+  alone with `isValuelessCollectionTyped()` (`collection-utils.ts`).
+
+Getting this wrong has a characteristic signature: the operator takes its
+scalar path for an operand that is not a scalar and commits an answer that
+the SAME expression contradicts once the symbol is assigned. A 2026-08-15
+audit of all 95 `isCollection` sites found seven operator families doing
+exactly that — `Sum(L)` answering `L`, `Union(L, Set(1))` collapsing `L`
+into a single element, `SetMinus` INVERTING a membership answer,
+`Mean(L)` committing `NaN`, `Which` throwing on a `list<boolean>`
+condition. Pinned in
+`test/compute-engine/valueless-collection-typed-operand.test.ts`, which is
+the place to add a case if you touch this.
+
+A third predicate covers a distinct case: `isPossiblyCollectionTyped()`
+(`collection-utils.ts`) is for an operand that MIGHT become a collection
+at runtime — a top-typed application, or a `broadcastable<T>` — where the
+honest answer is that the shape is not statically visible at all.
+
 </MemberCard>
 
 <MemberCard>
@@ -12943,7 +12988,11 @@ iterating over the collection.
 subsetOf(other, strict): boolean | undefined
 ```
 
-Check if this collection is a subset of another collection.
+Check if this collection is a subset of another collection, i.e.
+`this` ⊆ `other`.
+
+Returns `undefined` when the relation cannot be determined — including
+when this expression is not (yet) a collection.
 
 ####### other
 

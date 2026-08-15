@@ -385,7 +385,7 @@ ms, so the size of the exposure at document scale is an order of magnitude
 smaller — but the parser still cannot be cancelled, and the argument that
 tightening a budget buys nothing still holds unchanged.
 
-### Boxing a long `1-2-3-…` chain overflows the stack (OPEN, correctness — found in the flat-chain round above)
+### Boxing a long `1-2-3-…` chain overflows the stack (OPEN, correctness — DEFERRED BY RULING 2026-08-15, found in the flat-chain round above)
 
 The LaTeX parser handles a subtraction chain iteratively and returns a
 left-nested `Subtract(Subtract(Subtract(1, 2), 3), …)` (`latexSyntax.parse()`
@@ -405,6 +405,13 @@ recurses once per nesting level, so this stays a threshold, not a fix.
 
 Pre-existing: reproduced on the pre-fix parser, and not addressed by the flat
 chain fix above, which changed the `Add` and multiplicative folds only.
+
+RULING 2026-08-15 (Arno): stays on the roadmap, not fixed in this round.
+The two candidates below are both larger than the round that found it — one
+changes `form: 'raw'` output and its pinned serialization, the other is a
+general boxing change — and neither belongs in a pass cutting a release. The
+threshold is unchanged from what shipped before, so this defers a
+long-standing limit rather than accepting a new one.
 
 Two candidate fixes, needing a ruling because the first changes raw parse
 output: (a) have the `-` infix parser fold a subtraction run into one flat

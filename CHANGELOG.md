@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.111.0 _2026-08-15_
 
 ### New Features
@@ -7,8 +9,8 @@
   `Person(name: "Alan", age: 42)` constructed a value in 0.110.0, but there was
   no way to change one — the assignment failed with a confusing
   `expected \`symbol\`, got \`integer\``, because it fell through to the
-  rebinding-sugar path, which describes a different concept. A field
-  assignment is now a store:
+  rebinding-sugar path, which describes a different concept. A field assignment
+  is now a store:
 
   ```epsil
   type Person = object<name: string, age: integer>
@@ -26,25 +28,25 @@
 
   A store is an effect: a function whose body stores into a field infers the
   `state` label, so annotating such a function `pure` is refused rather than
-  silently accepted. Stores do not disturb the engine's invalidation
-  generations — only results that actually read the changed object's fields
-  are recomputed — so a store-heavy loop does not cold unrelated caches.
+  silently accepted. Stores do not disturb the engine's invalidation generations
+  — only results that actually read the changed object's fields are recomputed —
+  so a store-heavy loop does not cold unrelated caches.
 
-- **Assigning to a field of an immutable value now says so.** A field
-  assignment on a record, dictionary, tuple, or scalar reports
-  `immutable-value-assignment`, naming both ways forward (build an updated
-  copy, or declare the type as `object<…>`), where it previously reported
-  `incompatible-type: expected \`symbol\`` — a message about the old
-  lowering rather than about anything the author wrote.
+- **Assigning to a field of an immutable value now says so.** A field assignment
+  on a record, dictionary, tuple, or scalar reports
+  `immutable-value-assignment`, naming both ways forward (build an updated copy,
+  or declare the type as `object<…>`), where it previously reported
+  `incompatible-type: expected \`symbol\`` — a message about the old lowering
+  rather than about anything the author wrote.
 
 ### Breaking Changes
 
 - **`RecordFrom` has been removed.** It declared `(collection) -> record` but
   returned an inert, untyped `Record(…)` application, because `Record` has no
-  operator definition anywhere in the engine — so its declared result type
-  lied. Use `DictionaryFrom`, which already returns exactly what `RecordFrom`
-  promised: given pairs whose keys are all bare identifiers, its result types
-  as `record<…>`. A record and a dictionary differ only in the type world, and
+  operator definition anywhere in the engine — so its declared result type lied.
+  Use `DictionaryFrom`, which already returns exactly what `RecordFrom`
+  promised: given pairs whose keys are all bare identifiers, its result types as
+  `record<…>`. A record and a dictionary differ only in the type world, and
   record-ness is derived from the value, so the two operators were never
   distinct.
 
@@ -55,43 +57,43 @@
 
 ### Issues Resolved
 
-- **An Epsil program now stops when its time budget expires.** A host that
-  runs `executeEpsil()` inside `ce.withTimeLimit(…)` gave the whole program one
+- **An Epsil program now stops when its time budget expires.** A host that runs
+  `executeEpsil()` inside `ce.withTimeLimit(…)` gave the whole program one
   deadline, but the interpreter turned each statement's timeout into an error
   value and went on to the next statement — and only statements doing enough
-  work to reach one of the engine's internal checks ever noticed. A
-  5 000-statement program ran to completion under a 1 ms budget, reporting
-  `completed`, with a `timeout` diagnostic on roughly one statement in 250.
-  That is a correctness bug, not a latency one: the program that ran was a
-  *different* program — twenty statements skipped from the middle, and every
+  work to reach one of the engine's internal checks ever noticed. A 5
+  000-statement program ran to completion under a 1 ms budget, reporting
+  `completed`, with a `timeout` diagnostic on roughly one statement in 250. That
+  is a correctness bug, not a latency one: the program that ran was a
+  _different_ program — twenty statements skipped from the middle, and every
   later statement executed against the state those should have produced. In an
   imperative language whose errors are values, a skipped assignment does not
-  announce itself; what follows just reads a stale or missing binding and
-  yields a plausible number. The deadline is now checked before every statement (in the static type pass as
-  well as the evaluation loop, which used to swallow it there too), and the
-  first expiry ends the run: `result.value` is the statement's
-  `Error("Timeout exceeded", "timeout")`, `valueRange` points at it, and no
-  later statement runs. Count-based caps (`iterationLimit`, `recursionLimit`)
-  are per-construct and unchanged: the breaching statement is an error value
-  and the program continues. See the Interruptibility section of the Epsil
-  evaluation guide, which now also spells out that a loop cut short by
+  announce itself; what follows just reads a stale or missing binding and yields
+  a plausible number. The deadline is now checked before every statement (in the
+  static type pass as well as the evaluation loop, which used to swallow it
+  there too), and the first expiry ends the run: `result.value` is the
+  statement's `Error("Timeout exceeded", "timeout")`, `valueRange` points at it,
+  and no later statement runs. Count-based caps (`iterationLimit`,
+  `recursionLimit`) are per-construct and unchanged: the breaching statement is
+  an error value and the program continues. See the Interruptibility section of
+  the Epsil evaluation guide, which now also spells out that a loop cut short by
   `iterationLimit` leaves its partial assignments in place.
 
 - **Parsing a long Epsil program was quadratic in its length.** Every bare-`=`
-  statement re-scanned the program's tokens from the first one to find where
-  its left-hand side begins; a 16 000-line program of simple assignments took
-  1.8 s to parse, ~30× longer per line than a 500-line one. That lookup is a
-  binary search now, and the lexer's per-character class tests (`isBreak`,
-  `isSyntax`, …) use `Set`s instead of scanning arrays of thousands of code
-  points. Parse is linear again: ~4 µs per statement at every size measured
-  (500 → 16 000 lines), 29× faster on the 16 000-line program.
+  statement re-scanned the program's tokens from the first one to find where its
+  left-hand side begins; a 16 000-line program of simple assignments took 1.8 s
+  to parse, ~30× longer per line than a 500-line one. That lookup is a binary
+  search now, and the lexer's per-character class tests (`isBreak`, `isSyntax`,
+  …) use `Set`s instead of scanning arrays of thousands of code points. Parse is
+  linear again: ~4 µs per statement at every size measured (500 → 16 000 lines),
+  29× faster on the 16 000-line program.
 
 - **Operators no longer commit an answer for a collection-typed variable that
   has no value yet.** A symbol declared `list<number>` (or `vector<2>`, or a
-  call whose head returns one) is collection-*shaped*, but cannot be
-  enumerated until it is assigned. Six operator families read "cannot
-  enumerate" as "is a scalar" and took their scalar path, producing an answer
-  that the same expression contradicted once the value arrived:
+  call whose head returns one) is collection-_shaped_, but cannot be enumerated
+  until it is assigned. Six operator families read "cannot enumerate" as "is a
+  scalar" and took their scalar path, producing an answer that the same
+  expression contradicted once the value arrived:
 
   With `ce.declare('L', 'list<number>')` and no value assigned yet:
 
@@ -103,18 +105,18 @@
   Missing + L             // was NaN,     now symbolic ([NaN,NaN] once assigned)
   ```
 
-  and with `ce.declare('B', 'list<boolean>')`, `Which(B, 1, True, 2)` threw
-  out of `evaluate()` and is now held.
+  and with `ce.declare('B', 'list<boolean>')`, `Which(B, 1, True, 2)` threw out
+  of `evaluate()` and is now held.
 
-  The `SetMinus` row is the one to note: it *inverted* a membership answer,
-  and a wrong `True` there feeds assumption discharge. `Which` hard-threw out
-  of `evaluate()` where the compiled path already held the same condition, so
-  the interpreter and the compiler disagreed about what a collection-typed
-  condition is; they now agree.
+  The `SetMinus` row is the one to note: it _inverted_ a membership answer, and
+  a wrong `True` there feeds assumption discharge. `Which` hard-threw out of
+  `evaluate()` where the compiled path already held the same condition, so the
+  interpreter and the compiler disagreed about what a collection-typed condition
+  is; they now agree.
 
   Once the symbol is assigned, every one of these gives exactly what it gave
   before — the fix withdraws wrong answers, it does not make the operators
-  inert. The same correction also reaches a valueless *scalar* symbol in the
+  inert. The same correction also reaches a valueless _scalar_ symbol in the
   statistics aggregates: `Mean(y)` stays symbolic instead of folding to `NaN`.
   An absent datum is unaffected: `Mean([1, Missing, 3])` is still `NaN`.
 
@@ -123,15 +125,14 @@
   budget inside it and a single long canonicalization ran to completion no
   matter how small the limit — the overrun scaled with the size of the input
   rather than being bounded by the deadline. A 12 000-term sum parsed under
-  `withTimeLimit({ ms: 1 })` ran 2 799 ms; it now cancels in 6 ms, and a
-  50 ms budget lands at 54 ms. Work outside a `withTimeLimit` span is
-  unaffected and pays no measurable cost.
+  `withTimeLimit({ ms: 1 })` ran 2 799 ms; it now cancels in 6 ms, and a 50 ms
+  budget lands at 54 ms. Work outside a `withTimeLimit` span is unaffected and
+  pays no measurable cost.
 
   One half of `parse()` is still unbounded: the LaTeX parser is a decoupled,
-  injected dependency with no access to the engine's deadline, so giving it
-  one is an interface change and has not been made yet. A span around
-  `ce.parse()` can still overrun by the parser's share of the work, which is
-  roughly half.
+  injected dependency with no access to the engine's deadline, so giving it one
+  is an interface change and has not been made yet. A span around `ce.parse()`
+  can still overrun by the parser's share of the work, which is roughly half.
 
 - **Compiling an indexed read out of a collection with complex elements no
   longer produces a wrong value.** A list is compiled element by element and
@@ -160,10 +161,10 @@
   This also completes the opt-in `complexPromotion` introduced in 0.110.0 for
   collection-valued functions, which was its motivating case: promotion always
   happened inside the body, and only the reading of the result was missing.
-  `w(t) := [√(t−1), √(t−2)]` with `|w(t)[1]/2 − 1|` now matches the
-  interpreter with the option on, for a list body and for a point-list body
-  alike. The promotion rule itself is unchanged, and compilation without the
-  option is unaffected apart from the corrected values above.
+  `w(t) := [√(t−1), √(t−2)]` with `|w(t)[1]/2 − 1|` now matches the interpreter
+  with the option on, for a list body and for a point-list body alike. The
+  promotion rule itself is unchanged, and compilation without the option is
+  unaffected apart from the corrected values above.
 
 - **Comparing a collection-typed operand with a list no longer overflows the
   stack.** `M = [1,2]` with `M` declared `vector<2>` and unassigned — or
@@ -205,26 +206,26 @@
     not yet assigned — left the relation `False`, an answer a later assignment
     contradicts. Such a comparison now stays unevaluated. An operand whose TYPE
     rules out a collection (`Subset(3, Set(1))`) is still `False`.
-  - `Range(2, 4, 2)` (= {2, 4}) counted as a subset of `Range(1, 5, 2)`
-    (= {1, 3, 5}): sharing a step was accepted without checking that the two
-    grids are in phase.
+  - `Range(2, 4, 2)` (= {2, 4}) counted as a subset of `Range(1, 5, 2)` (= {1,
+    3, 5}): sharing a step was accepted without checking that the two grids are
+    in phase.
   - `Range`'s reported element sign was taken from the range's DIRECTION, so
     every ascending range read as `positive` — `Range(-5, 10)` included, which
     is how it passed for a subset of `PositiveIntegers`.
-  - Strictness compared element COUNTS, which is not a stand-in for set
-    equality when a collection's elements repeat: `Subset(List(1, 1),
-    List(1))` was `True` (same elements) and `Subset(List(1, 1), List(1, 2))`
-    was `False` (genuinely a strict subset). It now looks for an element of
-    the superset that the subset lacks.
+  - Strictness compared element COUNTS, which is not a stand-in for set equality
+    when a collection's elements repeat: `Subset(List(1, 1), List(1))` was
+    `True` (same elements) and `Subset(List(1, 1), List(1, 2))` was `False`
+    (genuinely a strict subset). It now looks for an element of the superset
+    that the subset lacks.
   - A `Range` was compared by its declared upper BOUND rather than its last
     element, so `Range(1, 5, 3)` and `Range(1, 4, 3)` — both {1, 4} — were not
     subsets of one another; and two single-element ranges with different steps
     (`Range(1, 1, 1)`, `Range(1, 1, 5)`) failed a step test that has nothing to
     constrain. The grid arithmetic is also confined to integer bounds now: a
     decimal step takes the elementwise walk rather than trusting `%`.
-  - `Interval` had no `subsetOf` handler at all, so `Subset(Interval(1, 2),
-    Interval(0, 5))` was `False`. It has one now, honoring open and closed
-    endpoints and infinite bounds.
+  - `Interval` had no `subsetOf` handler at all, so
+    `Subset(Interval(1, 2), Interval(0, 5))` was `False`. It has one now,
+    honoring open and closed endpoints and infinite bounds.
 
   Sign constraints now compose along their lattice rather than by exact match,
   so `Subset(PositiveIntegers, NonNegativeNumbers)` is `True` where it was
@@ -234,8 +235,8 @@
 
 - **An `Interval`'s emptiness now follows its endpoints.** `Interval(1, 1)`
   reported `isEmptyCollection` as `true` while its own `contains(1)` returned
-  `true` — the closed degenerate interval is the set {1}, not the empty set.
-  In the other direction, a reversed interval with both endpoints open
+  `true` — the closed degenerate interval is the set {1}, not the empty set. In
+  the other direction, a reversed interval with both endpoints open
   (`Interval(Open(2), Open(1))`) reported itself NON-empty, because emptiness
   was decided from the endpoint markers before the bounds were compared.
   Emptiness is now: bounds that cross are empty; bounds that coincide are empty
@@ -249,33 +250,32 @@
   target) already did. Interpreter and compiler now apply the same guard.
 
 - **A declared collection type now answers `count` even with no value.**
-  `ce.declare('M', 'vector<2>')` promises 2 elements, so `M.count` is `2`
-  where it was `undefined`, and `Count(M)` evaluates to `2` instead of staying
+  `ce.declare('M', 'vector<2>')` promises 2 elements, so `M.count` is `2` where
+  it was `undefined`, and `Count(M)` evaluates to `2` instead of staying
   symbolic. A `matrix<3x4>` counts its 3 rows (`count` is the number of
   top-level elements, matching `each()` and `at()`), a `tuple` counts its
-  members, a named type answers as its expansion does, and a union answers
-  when every arm agrees (`vector<2> | tuple<number, number>` is 2). An UNSIZED
-  collection type (`list<T>`, `set<T>`) carries no length and stays
-  `undefined`, as does a non-collection — a `number` is not a collection of
-  unknown size.
+  members, a named type answers as its expansion does, and a union answers when
+  every arm agrees (`vector<2> | tuple<number, number>` is 2). An UNSIZED
+  collection type (`list<T>`, `set<T>`) carries no length and stays `undefined`,
+  as does a non-collection — a `number` is not a collection of unknown size.
 
-  **`isEmptyCollection` and `isFiniteCollection` deliberately do NOT answer
-  from the type**, and neither do the capability facets `isCollection` and
-  `isEnumerableCollection`. A declared size is not permission to walk:
-  roughly twenty library sites treat `isFiniteCollection === true` as their
-  precondition for iterating and then index by `count` — `Sort` builds
-  `0..count-1` and dereferences `at(i)!` — so answering `true` for a symbol
-  whose `each()` yields nothing turns them into definite wrong answers
-  (`Unique` returning `[]`, `Quartiles` returning `(NaN, NaN, NaN)`) or a
-  crash. `count` is safe because it is not itself a walk gate. Making those
-  two answer from the type requires first teaching every such caller to
-  consult `isEnumerableCollection`, which is a separate change.
+  **`isEmptyCollection` and `isFiniteCollection` deliberately do NOT answer from
+  the type**, and neither do the capability facets `isCollection` and
+  `isEnumerableCollection`. A declared size is not permission to walk: roughly
+  twenty library sites treat `isFiniteCollection === true` as their precondition
+  for iterating and then index by `count` — `Sort` builds `0..count-1` and
+  dereferences `at(i)!` — so answering `true` for a symbol whose `each()` yields
+  nothing turns them into definite wrong answers (`Unique` returning `[]`,
+  `Quartiles` returning `(NaN, NaN, NaN)`) or a crash. `count` is safe because
+  it is not itself a walk gate. Making those two answer from the type requires
+  first teaching every such caller to consult `isEnumerableCollection`, which is
+  a separate change.
 
-  An APPLICATION does not take the shortcut either: its collection type can
-  be an artifact of the vacuous lift rather than a promise (`Total([1,2])`
-  with `Total` undeclared types `list<unknown^2>` yet walks nothing), and a
-  bound head with a genuinely sized return is not distinguishable from it at
-  that point, so `count` would outrun the walk — the invariant pinned by
+  An APPLICATION does not take the shortcut either: its collection type can be
+  an artifact of the vacuous lift rather than a promise (`Total([1,2])` with
+  `Total` undeclared types `list<unknown^2>` yet walks nothing), and a bound
+  head with a genuinely sized return is not distinguishable from it at that
+  point, so `count` would outrun the walk — the invariant pinned by
   `test/compute-engine/tycho-item-167-broadcast-count.test.ts`.
 
 ## 0.110.0 _2026-08-15_
@@ -308,132 +308,128 @@
 
 ### Issues Resolved
 
-- **Adding three or more collections no longer nests the result when one of
-  them is a lazy view** (Tycho item 189). `[1,2,3] + [4,5,6] + Range(1,3)`
-  returned `[[6,7,8],[8,9,10],[10,11,12]]` instead of `[6,9,12]`: the
-  element-wise tensor kernel treated an operand that is a collection but not a
-  materialized list — a `Range`, a `Reverse`/`Take` view, or the lazy result of
-  a broadcast over more than 100 elements — as a SCALAR, and added it whole to
-  every cell. Only the diagonal held the intended value and the result was
-  O(n²). Two or fewer operands, and any number of plain lists, were unaffected,
-  which is why the shape surfaced in the field (a 900-element colour grid whose
-  intermediate stayed lazy) rather than in small examples. The kernel now
-  declines such an operand and the sum falls through to the element-wise
-  broadcast that zips it, matching what `Multiply` already did.
+- **Adding three or more collections no longer nests the result when one of them
+  is a lazy view** (Tycho item 189). `[1,2,3] + [4,5,6] + Range(1,3)` returned
+  `[[6,7,8],[8,9,10],[10,11,12]]` instead of `[6,9,12]`: the element-wise tensor
+  kernel treated an operand that is a collection but not a materialized list — a
+  `Range`, a `Reverse`/`Take` view, or the lazy result of a broadcast over more
+  than 100 elements — as a SCALAR, and added it whole to every cell. Only the
+  diagonal held the intended value and the result was O(n²). Two or fewer
+  operands, and any number of plain lists, were unaffected, which is why the
+  shape surfaced in the field (a 900-element colour grid whose intermediate
+  stayed lazy) rather than in small examples. The kernel now declines such an
+  operand and the sum falls through to the element-wise broadcast that zips it,
+  matching what `Multiply` already did.
 
-- **Canonicalizing a broadcast `At` over a comprehension-derived index range
-  no longer takes minutes in a document scope** (Tycho item 186 — the
-  surviving half of item 182's storm class). Parsing
-  `L[1+3(0..(\mathrm{Length}(D)-1))]` with `D` a lazy comprehension whose
-  body reaches a user function carrying an undeclared free symbol burned
-  120–240 s in one `ce.parse`: re-auto-declaring that free symbol during
-  canonicalization replaced its binding wrapper's inner definition in
-  place, which made every collection-facet memo snapshot that had walked
-  the lambda body born-stale, so each `count`/`isEmpty` probe re-scanned
-  the comprehension and rebuilt broadcast lambdas (~460K constructions)
-  until the deadline. Dependency validation now treats a valueless→
-  valueless rebind of a pinned binding as benign — the name still resolves
-  through the scope chain, which is separately re-checked — while a rebind
-  where either side holds a value invalidates as before. The witness parse
-  now canonicalizes in ~15 ms at full production size.
+- **Canonicalizing a broadcast `At` over a comprehension-derived index range no
+  longer takes minutes in a document scope** (Tycho item 186 — the surviving
+  half of item 182's storm class). Parsing `L[1+3(0..(\mathrm{Length}(D)-1))]`
+  with `D` a lazy comprehension whose body reaches a user function carrying an
+  undeclared free symbol burned 120–240 s in one `ce.parse`: re-auto-declaring
+  that free symbol during canonicalization replaced its binding wrapper's inner
+  definition in place, which made every collection-facet memo snapshot that had
+  walked the lambda body born-stale, so each `count`/`isEmpty` probe re-scanned
+  the comprehension and rebuilt broadcast lambdas (~460K constructions) until
+  the deadline. Dependency validation now treats a valueless→ valueless rebind
+  of a pinned binding as benign — the name still resolves through the scope
+  chain, which is separately re-checked — while a rebind where either side holds
+  a value invalidates as before. The witness parse now canonicalizes in ~15 ms
+  at full production size.
 
 - **Arithmetic on a vector-valued call no longer fails when the call's own
-  arguments are not yet defined** (Tycho item 188). With `h` returning a
-  vector and `X`, `Y` declared but not yet assigned,
-  `\frac{H(X(t), Y(t))}{g(t)}` was rejected at parse time with
-  `incompatible-type ('number', 'broadcastable<vector<finite_number^2>>')`,
-  even though the same division evaluates elementwise and the same row parsed
-  fine once `X`, `Y` and `g` had been assigned — so a definition's validity
-  depended on where it sat in a document. Undefined arguments make a call's
-  result type `broadcastable<T>` ("a `T`, or a collection of `T` that
-  broadcasts"), and the numeric-operand check admitted `broadcastable<number>`
-  but not a wrapper around a vector, tuple or list. It now admits the wrapper
-  wherever it admits the bare type, for every numeric operator (`Add`,
-  `Multiply`, `Subtract`, `Divide`, `Negate`); a wrapper around a genuinely
-  non-numeric type is still rejected. The same change makes
-  `broadcastable<T>` agree with `list<T>` for every `T` — previously a mixed
-  union such as `broadcastable<finite_integer | string>` was refused where
+  arguments are not yet defined** (Tycho item 188). With `h` returning a vector
+  and `X`, `Y` declared but not yet assigned, `\frac{H(X(t), Y(t))}{g(t)}` was
+  rejected at parse time with
+  `incompatible-type ('number', 'broadcastable<vector<finite_number^2>>')`, even
+  though the same division evaluates elementwise and the same row parsed fine
+  once `X`, `Y` and `g` had been assigned — so a definition's validity depended
+  on where it sat in a document. Undefined arguments make a call's result type
+  `broadcastable<T>` ("a `T`, or a collection of `T` that broadcasts"), and the
+  numeric-operand check admitted `broadcastable<number>` but not a wrapper
+  around a vector, tuple or list. It now admits the wrapper wherever it admits
+  the bare type, for every numeric operator (`Add`, `Multiply`, `Subtract`,
+  `Divide`, `Negate`); a wrapper around a genuinely non-numeric type is still
+  rejected. The same change makes `broadcastable<T>` agree with `list<T>` for
+  every `T` — previously a mixed union such as
+  `broadcastable<finite_integer | string>` was refused where
   `list<finite_integer | string>` was accepted.
 
 - **Dividing a point or vector no longer claims the components keep the
   numerator's numeric tier.** `Divide` with a tuple-typed numerator (e.g. a
   `PointList` quotient) echoed the numerator's type, so
   `tuple<finite_integer, finite_integer>` divided by an integer-valued call
-  still claimed *integer* components even though `[6, 2]/4` is `[3/2, 1/2]`.
-  The quotient now keeps the tuple/vector structure while widening each
-  component with the same rules as scalar division (integer/integer →
-  `finite_rational`, real/real → `finite_real`, a possibly-`NaN` denominator →
-  `number`). The same widening lets `Divide` preserve the shape of a
-  broadcast-lifted numerator (`broadcastable<vector<n>>`, from the item-188
-  case above) instead of collapsing it: the quotient types
-  `broadcastable<vector<…>>` with honestly-widened components, matching what
-  `Add`, `Multiply`, `Subtract` and `Negate` already did for the shape.
+  still claimed _integer_ components even though `[6, 2]/4` is `[3/2, 1/2]`. The
+  quotient now keeps the tuple/vector structure while widening each component
+  with the same rules as scalar division (integer/integer → `finite_rational`,
+  real/real → `finite_real`, a possibly-`NaN` denominator → `number`). The same
+  widening lets `Divide` preserve the shape of a broadcast-lifted numerator
+  (`broadcastable<vector<n>>`, from the item-188 case above) instead of
+  collapsing it: the quotient types `broadcastable<vector<…>>` with
+  honestly-widened components, matching what `Add`, `Multiply`, `Subtract` and
+  `Negate` already did for the shape.
 
-- **Assigning to a subscripted name now honors a declared joined name, and
-  the ambiguous lambda case is an explicit error instead of a silent
-  no-op.** Two related fixes to `⟨name⟩_⟨subscript⟩ \coloneq …`:
+- **Assigning to a subscripted name now honors a declared joined name, and the
+  ambiguous lambda case is an explicit error instead of a silent no-op.** Two
+  related fixes to `⟨name⟩_⟨subscript⟩ \coloneq …`:
   - **Declared-name precedence now governs the assignment LHS.** With
     `ce.declare('l_P', …)` in effect, `l_{P} \coloneq P^2+1` assigns to the
-    symbol `l_P` — previously it silently defined a *family* on the base
-    letter `l` and left the declared `l_P` unbound (documents routinely use
-    `f` and `f_x` as unrelated names, so the family reading could clobber a
-    sibling definition). This also makes declare-then-assign work with a
-    function-literal right-hand side: `l_{P} \coloneq P \mapsto …` now
-    binds the declared `l_P`.
-  - **With no declaration**, a function-literal right-hand side is
-    genuinely ambiguous (a function *named* `l_P`, or a *family* `l`
-    indexed by `P`?) and previously fell into the sequence-definition
-    machinery, which bound nothing usable and reported nothing. It now
-    returns an `ambiguous-assignment` error naming both working spellings:
-    write `l_P(P) \coloneq ⟨body⟩` to define a function named `l_P`, or
-    assign an expression in `P` (not a function literal) to define a
-    family.
+    symbol `l_P` — previously it silently defined a _family_ on the base letter
+    `l` and left the declared `l_P` unbound (documents routinely use `f` and
+    `f_x` as unrelated names, so the family reading could clobber a sibling
+    definition). This also makes declare-then-assign work with a
+    function-literal right-hand side: `l_{P} \coloneq P \mapsto …` now binds the
+    declared `l_P`.
+  - **With no declaration**, a function-literal right-hand side is genuinely
+    ambiguous (a function _named_ `l_P`, or a _family_ `l` indexed by `P`?) and
+    previously fell into the sequence-definition machinery, which bound nothing
+    usable and reported nothing. It now returns an `ambiguous-assignment` error
+    naming both working spellings: write `l_P(P) \coloneq ⟨body⟩` to define a
+    function named `l_P`, or assign an expression in `P` (not a function
+    literal) to define a family.
 
-  Integer recurrences (`a_1 \coloneq 1`, `a_n \coloneq a_{n-1}+2`,
-  including re-running a base-case row), the undeclared expression-bodied
-  family form `l_P \coloneq P^2+1`, head-application definitions, and
-  assigning function *values* via `ce.assign()` are all unchanged.
+  Integer recurrences (`a_1 \coloneq 1`, `a_n \coloneq a_{n-1}+2`, including
+  re-running a base-case row), the undeclared expression-bodied family form
+  `l_P \coloneq P^2+1`, head-application definitions, and assigning function
+  _values_ via `ce.assign()` are all unchanged.
 
 - **Declaring a function with a placeholder signature no longer breaks the
-  definition that follows.** `ce.declare('f', '(unknown) -> unknown')`
-  followed by `f(P) \coloneq \sqrt{P[1]^2+P[2]^2}` was refused with
-  `incompatible-type` — a placeholder declaration was strictly more
-  restrictive than no declaration — and calls stayed inert. A declared
-  `unknown` parameter or result slot is now a placeholder the definition
-  refines, per-position: the definition installs under the refined concrete
-  signature (so a `[3,4]` argument binds whole instead of broadcasting
-  elementwise), and a concrete slot in the same arrow — `(tuple<number,
-  number>) -> unknown` — is preserved verbatim. `any` is different, by
-  design: `(any) -> any` (the identity function's signature) is a contract
-  to accept every value, and a body that cannot honor it is still refused —
-  now surfaced as an error value on the LaTeX route as well. See "The
-  `unknown` type" in the types guide for the placeholder-vs-contract
-  distinction and the `nothing`/`missing` caveat.
+  definition that follows.** `ce.declare('f', '(unknown) -> unknown')` followed
+  by `f(P) \coloneq \sqrt{P[1]^2+P[2]^2}` was refused with `incompatible-type` —
+  a placeholder declaration was strictly more restrictive than no declaration —
+  and calls stayed inert. A declared `unknown` parameter or result slot is now a
+  placeholder the definition refines, per-position: the definition installs
+  under the refined concrete signature (so a `[3,4]` argument binds whole
+  instead of broadcasting elementwise), and a concrete slot in the same arrow —
+  `(tuple<number, number>) -> unknown` — is preserved verbatim. `any` is
+  different, by design: `(any) -> any` (the identity function's signature) is a
+  contract to accept every value, and a body that cannot honor it is still
+  refused — now surfaced as an error value on the LaTeX route as well. See "The
+  `unknown` type" in the types guide for the placeholder-vs-contract distinction
+  and the `nothing`/`missing` caveat.
 
-- **`Equal`/`NotEqual` between a collection-typed application and a list is
-  a single boolean again.** With `L: (number) -> vector<2>`, the comparison
+- **`Equal`/`NotEqual` between a collection-typed application and a list is a
+  single boolean again.** With `L: (number) -> vector<2>`, the comparison
   `L(1) = [1,2]` broadcast elementwise to `["True","True"]` instead of the
   documented whole-collection verdict `"True"`: the pre-evaluation broadcast
-  gate counted collection literals and possibly-collection (opaque) types
-  but missed operands *definitely typed* as collections. List-vs-scalar
-  comparisons still broadcast elementwise.
+  gate counted collection literals and possibly-collection (opaque) types but
+  missed operands _definitely typed_ as collections. List-vs-scalar comparisons
+  still broadcast elementwise.
 
-- **A compiled `Range` with a computed bound no longer loses every element
-  but the first.** On the `javascript` target, a range whose bound was an
-  expression rather than a literal — `1..(Length(L)/3)` — compiled to the
-  single-element list `[1]` when it appeared inside arithmetic, so a
-  comprehension over it produced one element instead of all of them. The
-  result was wrong rather than refused: the compiled function reported
-  success and returned a short list, disagreeing with interpretation,
-  which was always correct.
+- **A compiled `Range` with a computed bound no longer loses every element but
+  the first.** On the `javascript` target, a range whose bound was an expression
+  rather than a literal — `1..(Length(L)/3)` — compiled to the single-element
+  list `[1]` when it appeared inside arithmetic, so a comprehension over it
+  produced one element instead of all of them. The result was wrong rather than
+  refused: the compiled function reported success and returned a short list,
+  disagreeing with interpretation, which was always correct.
 
-  The constant-folding guard tested the compiled bound with `parseFloat`,
-  which reads a leading numeric prefix and ignores the rest. `Length(L)/3`
-  compiles to `0.3333333333333333 * (_.L).length`, so the guard read the
-  bound as 0.333, computed a descending range of length one, and emitted
-  it as a literal. Only a bound that is entirely numeric is folded now;
-  every computed bound defers its length to run time. A literal bound
-  (ascending or descending) folds exactly as before.
+  The constant-folding guard tested the compiled bound with `parseFloat`, which
+  reads a leading numeric prefix and ignores the rest. `Length(L)/3` compiles to
+  `0.3333333333333333 * (_.L).length`, so the guard read the bound as 0.333,
+  computed a descending range of length one, and emitted it as a literal. Only a
+  bound that is entirely numeric is folded now; every computed bound defers its
+  length to run time. A literal bound (ascending or descending) folds exactly as
+  before.
 
 - **Compiling the same expression twice now always produces the same code.**
   Compile-time constant folding decided whether to fold a subtree using a
@@ -475,41 +471,39 @@
   (`Math.sqrt`) when their operand is a real number whose sign is not known at
   compile time, so a negative operand yields `NaN` where `evaluate()` promotes
   to a complex value: with `z(t) := \sqrt{t-1}`, compiled `|z(t)/2 - 1|`
-  returned `NaN` at `t = 0.3` while the interpreter returned
-  `1.08397416943394`. That default is unchanged — it keeps radical chains on
-  the fast path and is what lets an ordering comparison over a radical compile
-  at all — but a caller whose expressions are genuinely complex-valued (a
-  plotting front-end with a per-document "complex mode" maps that switch onto
-  this option) can now pass `{ complexPromotion: true }` and get the
-  interpreter's value. Real inputs are lifted automatically, so the argument
-  convention is unchanged. Two consequences when enabled: affected chains are
-  about 2.3× slower (an expression with no unknown-sign `Sqrt`/`Ln`/`Log` is
-  emitted exactly as before), and an ordering comparison over such a head fails
-  closed rather than compiling — `Less(Sqrt(x), 2)` has no truth value once
-  `Sqrt(x)` may be complex. Honored by the `javascript` and `python` targets;
-  `glsl`/`wgsl` keep the real kernel. Independent of, and composable with,
-  `realOnly`, which only projects the result at the boundary and can never
-  produce complexness on its own. See the "Complex Promotion" section of the
-  compilation guide.
+  returned `NaN` at `t = 0.3` while the interpreter returned `1.08397416943394`.
+  That default is unchanged — it keeps radical chains on the fast path and is
+  what lets an ordering comparison over a radical compile at all — but a caller
+  whose expressions are genuinely complex-valued (a plotting front-end with a
+  per-document "complex mode" maps that switch onto this option) can now pass
+  `{ complexPromotion: true }` and get the interpreter's value. Real inputs are
+  lifted automatically, so the argument convention is unchanged. Two
+  consequences when enabled: affected chains are about 2.3× slower (an
+  expression with no unknown-sign `Sqrt`/`Ln`/`Log` is emitted exactly as
+  before), and an ordering comparison over such a head fails closed rather than
+  compiling — `Less(Sqrt(x), 2)` has no truth value once `Sqrt(x)` may be
+  complex. Honored by the `javascript` and `python` targets; `glsl`/`wgsl` keep
+  the real kernel. Independent of, and composable with, `realOnly`, which only
+  projects the result at the boundary and can never produce complexness on its
+  own. See the "Complex Promotion" section of the compilation guide.
 
 ### Improvements
 
 - **Long flat operator chains parse in linear time.** Parsing `a+b+c+…` (or
   `a\cdot b\cdot …`) re-walked and re-copied the whole accumulated chain at
   every operator, so the LaTeX parse of a long sum was quadratic in the number
-  of terms: a 12 000-term sum took ~1.7 s to parse (`form: 'raw'`), 20× a
-  3 000-term one. The per-operator work is now constant — the same sum parses
-  in ~90 ms, and doubling the term count doubles the time — for sums,
-  products, subscripted symbols, and parenthesized terms alike. Parse output
-  is unchanged.
+  of terms: a 12 000-term sum took ~1.7 s to parse (`form: 'raw'`), 20× a 3
+  000-term one. The per-operator work is now constant — the same sum parses in
+  ~90 ms, and doubling the term count doubles the time — for sums, products,
+  subscripted symbols, and parenthesized terms alike. Parse output is unchanged.
 - **Deeper expression trees can be boxed before the stack runs out.** Boxing
   recurses once per level of a MathJSON tree, and more than half of the stack
   frames it spent per level were wrappers that do nothing once an enclosing
   construction is active. Those are now bypassed on the nested path: the
   canonical path went from 20 to 9 frames per level, so a `Sin(Sin(…))` nest
   that overflowed at ~225 levels now boxes to ~385, and `1-2-3-…-N` (which
-  parses to a left-nested `Subtract` chain) from ~360 to ~620 terms. The
-  limit is raised, not removed.
+  parses to a left-nested `Subtract` chain) from ~360 to ~620 terms. The limit
+  is raised, not removed.
 - **Writes to a function's own parameters are recognized as call-local.** The
   effects inference previously stamped `scope` on any body assigning to one of
   its parameters; such bodies (e.g. clamping or normalizing an argument in
