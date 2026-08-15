@@ -319,7 +319,117 @@ milliseconds — the wall-clock test doctrine. Verified non-vacuous: disabling
 the check fails exactly the two cancellation cases and leaves the two
 control cases passing.
 
-### The LaTeX parser cannot honor a deadline at all (OPEN, correctness — found while fixing the entry above)
+### The LaTeX parser was quadratic in the length of a flat operator chain (FIXED 2026-08-15)
+
+Found while profiling the raw-parse half of the entry below. A flat chain
+`a+b+c+…` is parsed iteratively — the `+` infix parser is invoked once per
+operator, each time receiving the whole accumulated `Add` as its left operand
+— and two things it did at every invocation were proportional to the chain
+length so far, so the parse of an N-term sum was O(N²):
+
+1. `expandContinuationAdd` (`latex-syntax/dictionary/definitions-arithmetic.ts`)
+   re-walked EVERY accumulated operand looking for an ellipsis
+   (`ContinuationPlaceholder`) so it could rewrite `Subtract` groupings — a
+   `symbol()` call per operand per operator, ~N²/2 in total (501 500 calls at
+   N=1 000, 2 003 000 at N=2 000). This was ~80% of the time at N=12 000.
+2. `foldAssociativeOperator` (`math-json/utils.ts`) built a fresh
+   `[op, ...operands(lhs), rhs]` at every operator: an O(k) copy AND O(k)
+   allocation per operator, so a 12 000-term chain churned ~72 M array slots
+   through the GC. This was most of the remainder — and it applied to every
+   `"any"`/`"both"`-associative infix operator (`\cdot`, `\times`, …), not
+   just `+`.
+
+Neither is a per-token cost, which is why the growth curve LOOKED like a
+linear parser with a quadratic term that only dominates past a few thousand
+terms (0.9× per doubling to 3 000, 1.8× by 12 000), and why source LENGTH did
+not predict time (a 28 900-char comma list parsed 4.6× faster than a
+28 900-char `1+2+3+…`).
+
+Fix: `parser.appendAssociativeOperand` (`parse.ts`) extends a chain array in
+place when it is the parser's *owned chain* — the one array its previous
+append at this `parseExpression` level returned, and which only the infix
+loop's left operand references — so the copy happens once per chain; an array
+from a dictionary constant, a custom `parse` handler or an earlier parse is
+never the owned chain and is still copied. The state is a single slot per
+parser (`_ownedChain`, saved/restored across nested `parseExpression` calls),
+not a global registry. The ellipsis walk needs no memo: an owned `Add` chain
+carries no continuation by construction (a chain that has one is replaced by
+the expanded copy, which is not owned), so `rawHasContinuation` answers O(1)
+for it and only `rhs` is walked. The three fold sites (`Add`,
+`foldMultiplyChain`, the generic associative infix in `definitions.ts`) all
+go through it. Parse output is byte-identical (56 parser suites unchanged).
+
+Raw parse (`form: 'raw'`), medians of 3, fresh engine per run, quiet machine:
+
+    shape (6 000 → 12 000 terms)   BEFORE            AFTER
+    flat sum 1x+2x+…               472 → 1 745 ms     50 →  87 ms
+    numbers 1+2+3+…                177 ms (6 000)     25 →  42 ms
+    \cdot chain                    101 ms (6 000)     26 →  46 ms
+    subscripted symbols x_1+x_2+…  511 ms (6 000)     47 →  88 ms
+    parenthesized (1)+(2)+…        235 ms (6 000)     35 →  67 ms
+    comma list [1,2,3,…]  CONTROL   38 ms (6 000)     36 ms (6 000)
+
+Every shape now scales ~1.7–1.9× per doubling. The comma list is the
+control: it never builds an accumulated infix chain, so the mechanism
+predicts it should not move — and it did not (1.0×), while the shapes with
+both costs improved most (subscripted symbols 11×), the `\cdot` chain with
+only the copy cost least (2.2×). Independently re-measured by the session
+that filed the original numbers, same harness, after the fix. Pinned by
+`test/compute-engine/parse-flat-chain-linear.test.ts`, which asserts the
+`symbol()` and `foldAssociativeOperator` call counts (deterministic, per the
+wall-clock doctrine) — the counter assertions fail on the pre-fix parser.
+
+**Consequence for the deadline entry below:** the numbers in it predate this
+fix. The raw parse of a 12 000-term sum is now ~90 ms rather than ~700–1 700
+ms, so the size of the exposure at document scale is an order of magnitude
+smaller — but the parser still cannot be cancelled, and the argument that
+tightening a budget buys nothing still holds unchanged.
+
+### Boxing a long `1-2-3-…` chain overflows the stack (OPEN, correctness — found in the flat-chain round above)
+
+The LaTeX parser handles a subtraction chain iteratively and returns a
+left-nested `Subtract(Subtract(Subtract(1, 2), 3), …)` (`latexSyntax.parse()`
+succeeds at 1 500 terms), but BOXING that result — raw or canonical —
+recurses once per nesting level and throws `RangeError: Maximum call stack
+size exceeded` from `boxFunctionInternal` (`boxed-expression/box.ts`) at
+about 400 terms canonical / 600 terms raw. So `ce.parse('1-2-3-…-400')`
+throws while `ce.parse('1+2+3+…+12000')` succeeds. Pre-existing (reproduced
+on the pre-fix parser); not touched by the fix above, which changed the `Add`
+and multiplicative folds only.
+
+Two candidate fixes, needing a ruling because the first changes raw parse
+output: (a) have the `-` infix parser fold a subtraction run into one flat
+`Add(a, Negate(b), Negate(c), …)` — the canonical form is that already, but
+`form: 'raw'` output and its serialization would change (`Subtract` groupings
+are pinned by `continuation-placeholder.test.ts` and the ellipsis machinery
+above depends on seeing them); or (b) make deep-tree boxing tolerate the
+depth (an explicit work stack, or a depth-triggered devolve), which is the
+general fix — the same limit hits any ~400-deep tree, e.g. the parser's own
+`(((…)))` overflow at ~2 000 levels noted 2026-08-15. Nothing decided on
+these two; what HAS landed is headroom:
+
+**Frame trimming (DONE 2026-08-15, same day):** the stack per nesting level
+was 20 frames on the canonical path, of which 11 were plumbing that does no
+work once a root repair is active — `withDevolveRepair → withRootRepair →
+closure` entered twice per level (in `box()` and again in `boxFunction()`),
+and each operand boxed through the PUBLIC `ce.expr()` (`expr → inHarvestScope
+→ _inScope → inScope → closure`, re-installing the scope that is already
+current). `box()`/`boxFunction()` now call through directly when the root is
+active, and the operand-boxing sites in `box.ts` call the internal `box()`.
+Canonical boxing: 20 → 9 frames per level; canonicalizing a raw-boxed tree:
+26 → 15. Ceilings on the default Node stack (binary search, bare process):
+
+    shape                              BEFORE            AFTER
+    Sin(Sin(…(x))) canonical / raw     223 / 399         385 / 676 levels
+    ce.parse('1-2-…-N') canonical/raw  358 / 1 131       621 / 2 524 terms
+
+Behaviour unchanged (full suite, 4 306 snapshots). Pinned by
+`test/compute-engine/boxing-depth-headroom.test.ts`, which measures frames per
+level with a probe operator (deterministic; independent of stack size and of
+the runner's own frames). This moves the cliff, it does not remove it —
+`1-2-…-700` still throws.
+
+### The LaTeX parser cannot honor a deadline at all (OPEN, correctness — found while fixing the canonicalization deadline-granularity entry)
 
 The canonicalization fix above bounds the SMALLER and better-behaved half of
 `ce.parse(…)`. The RAW PARSE is the expensive half, it grows superlinearly,

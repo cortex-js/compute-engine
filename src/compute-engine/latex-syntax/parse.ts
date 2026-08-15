@@ -4,6 +4,7 @@ import type {
   MathJsonSymbol,
 } from '../../math-json/types.js';
 import {
+  foldAssociativeOperator,
   getSequence,
   missingIfEmpty,
   operator,
@@ -796,6 +797,51 @@ export class _Parser implements Parser {
     return this._operandStartIndex;
   }
   private _operandStartIndex = 0;
+
+  get ownedChain(): MathJsonExpression | null {
+    return this._ownedChain;
+  }
+  /**
+   * The chain array most recently produced by `appendAssociativeOperand` at
+   * the current `parseExpression` level. `parseExpression` saves and restores
+   * it around its body, so a nested parse (an infix parser's right operand)
+   * cannot make the outer loop forget — or wrongly claim — its own chain.
+   */
+  private _ownedChain: MathJsonExpression | null = null;
+
+  /**
+   * See `Parser.appendAssociativeOperand`. Why the in-place append is safe:
+   * `lhs` is only extended when it is the very array this parser returned from
+   * its previous append at this expression level. That array was handed to
+   * the infix loop as its new `lhs`, and until the loop hands it on — to the
+   * next infix parser (which extends it again) or as an operand of a larger
+   * expression (after which it is never `lhs` again) — the loop holds the
+   * only reference to it. A chain that reached the parser some other way — a
+   * constant array from a dictionary entry, the result of a custom `parse`
+   * handler, an array from an earlier parse — is not the owned chain, so it
+   * is copied exactly as `foldAssociativeOperator` does and never mutated.
+   *
+   * Why: the infix loop parses a flat chain iteratively, handing the
+   * accumulated `Add` back to the `+` parser at every step. Copying it each
+   * time is O(k) work and allocation per operator, O(n²) for the chain — a
+   * 12 000-term sum spent ~40% of its raw-parse time and most of its GC in
+   * that copy.
+   */
+  appendAssociativeOperand(
+    op: string,
+    lhs: MathJsonExpression,
+    rhs: MathJsonExpression
+  ): MathJsonExpression {
+    if (lhs === this._ownedChain && Array.isArray(lhs) && lhs[0] === op) {
+      const chain = lhs as unknown as MathJsonExpression[];
+      if (operator(rhs) === op) chain.push(...operands(rhs));
+      else chain.push(rhs);
+      return lhs;
+    }
+    const result = foldAssociativeOperator(op, lhs, rhs);
+    this._ownedChain = result;
+    return result;
+  }
 
   /**
    * The single symbol oracle (see {@link Parser.resolveSymbol}): parser-local
@@ -3546,6 +3592,12 @@ export class _Parser implements Parser {
     console.assert(until.minPrec !== undefined);
     if (until.minPrec === undefined) until = { ...until, minPrec: 0 };
 
+    // The chain this level's infix loop is growing (see `_ownedChain`) must
+    // survive the nested `parseExpression` calls the infix parsers make for
+    // their right operands: save the caller's chain and restore it on exit.
+    const outerOwnedChain = this._ownedChain;
+    this._ownedChain = null;
+
     //
     // 1. Do we have a prefix operator?
     //
@@ -3644,6 +3696,7 @@ export class _Parser implements Parser {
       }
     }
 
+    this._ownedChain = outerOwnedChain;
     return this.decorate(lhs, start);
   }
 

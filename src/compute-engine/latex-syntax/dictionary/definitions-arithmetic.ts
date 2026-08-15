@@ -1,7 +1,6 @@
 import { MathJsonExpression } from '../../../math-json/types.js';
 import {
   machineValue,
-  foldAssociativeOperator,
   rationalValue,
   operand,
   nops,
@@ -130,13 +129,24 @@ function negateNumberLiteral(
  * groupings the parser emits.
  */
 function rawHasContinuation(
+  parser: Parser,
   expr: MathJsonExpression | null | undefined
 ): boolean {
   if (expr === null || expr === undefined) return false;
   if (symbol(expr) === 'ContinuationPlaceholder') return true;
   const h = operator(expr);
-  if (h === 'Add' || h === 'Subtract' || h === 'Negate')
-    return operands(expr).some((op) => rawHasContinuation(op));
+  if (h === 'Add' || h === 'Subtract' || h === 'Negate') {
+    // The parser's owned `Add` chain never carries a continuation: the `Add`
+    // infix parser below is the only producer of owned `Add` chains, and it
+    // keeps a chain as the owned array only when this very check found no
+    // continuation in it (a chain that has one is replaced by the expanded
+    // copy from `expandContinuationAdd`, which is not owned). Answering from
+    // that fact instead of re-walking the accumulated operands is what keeps a
+    // long flat `a+b+c+…` chain linear: without it the ellipsis check was
+    // O(k) per `+`, ~80% of the raw-parse time of a 12 000-term sum.
+    if (h === 'Add' && expr === parser.ownedChain) return false;
+    return operands(expr).some((op) => rawHasContinuation(parser, op));
+  }
   return false;
 }
 
@@ -166,12 +176,28 @@ function expandAdditiveTerm(expr: MathJsonExpression): MathJsonExpression[] {
  * Returns `result` unchanged when there is no ellipsis (regression-critical:
  * ordinary sums/differences must parse byte-identically).
  */
-function expandContinuationAdd(result: MathJsonExpression): MathJsonExpression {
+function expandContinuationAdd(
+  parser: Parser,
+  result: MathJsonExpression,
+  lhs: MathJsonExpression,
+  rhs: MathJsonExpression
+): MathJsonExpression {
   if (operator(result) !== 'Add') return result;
-  const ops = operands(result);
-  if (!ops.some((op) => rawHasContinuation(op))) return result;
+  // `result` is `lhs` with `rhs` folded in (possibly `lhs`'s own array,
+  // extended in place by `parser.appendAssociativeOperand`), so it carries a
+  // continuation exactly when `lhs` or `rhs` does. Asking about `lhs` and
+  // `rhs` rather than walking `result`'s operands is what keeps a long flat
+  // chain linear: `lhs` is the previous step's `Add` — the parser's owned
+  // chain when it was built here, answered in O(1) by `rawHasContinuation`.
+  // (When `lhs` was extended in place it is `result` itself, and the owned
+  // chain: the O(1) answer describes it as built WITHOUT `rhs`, which is
+  // exactly what the `||` needs.)
+  const has =
+    rawHasContinuation(parser, lhs) || rawHasContinuation(parser, rhs);
+  if (!has) return result;
+  // Not the owned chain: an owned `Add` chain must carry no continuation.
   const terms: MathJsonExpression[] = [];
-  for (const op of ops) terms.push(...expandAdditiveTerm(op));
+  for (const op of operands(result)) terms.push(...expandAdditiveTerm(op));
   return ['Add', ...terms] as MathJsonExpression;
 }
 
@@ -608,7 +634,7 @@ function isFoldBarrierFactor(
 
 /**
  * Fold an explicit multiplication (`\cdot`, `*`) operand into a `Multiply`
- * chain. Like `foldAssociativeOperator`, plus one repair: an UNDELIMITED
+ * chain. Like `parser.appendAssociativeOperand`, plus one repair: an UNDELIMITED
  * juxtaposition (`InvisibleOperator`) operand that carries a direct
  * `ContinuationPlaceholder` — `(px_1+1)\cdots(px_n+1) \cdot p^m` — is spliced
  * into the chain rather than kept as a nested operand. That grouping is a
@@ -620,18 +646,22 @@ function isFoldBarrierFactor(
  * authoritative for that shape.
  */
 function foldMultiplyChain(
+  parser: Parser,
   lhs: MathJsonExpression,
   rhs: MathJsonExpression
 ): MathJsonExpression {
-  const splice = (x: MathJsonExpression): MathJsonExpression[] | null =>
+  // `operands()` already returns a fresh array; no further copy needed.
+  const splice = (
+    x: MathJsonExpression
+  ): ReadonlyArray<MathJsonExpression> | null =>
     operator(x) === 'InvisibleOperator' && hasContinuationFactor(x)
-      ? [...operands(x)]
+      ? operands(x)
       : null;
   const l = splice(lhs);
   const r = splice(rhs);
   if (l !== null || r !== null)
     return ['Multiply', ...(l ?? [lhs]), ...(r ?? [rhs])];
-  return foldAssociativeOperator('Multiply', lhs, rhs);
+  return parser.appendAssociativeOperand('Multiply', lhs, rhs);
 }
 
 function serializeMultiply(
@@ -1653,7 +1683,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // `+` continuation is left for the caller's infix loop instead of being
       // consumed by a nested `parseExpression`. This makes a flat `a+b+c+…`
       // chain iterative (bounded stack) rather than right-recursive;
-      // `expandContinuationAdd`/`foldAssociativeOperator` below still flatten
+      // `expandContinuationAdd`/`appendAssociativeOperand` below still flatten
       // the result, so the parsed expression is unchanged.
       const rhs = parser.parseExpression({
         ...until,
@@ -1670,11 +1700,23 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         const value = operand(rhs, 1);
         if (isNumberExpression(value))
           return expandContinuationAdd(
-            foldAssociativeOperator('Add', lhs, negateNumberLiteral(value))
+            parser,
+            parser.appendAssociativeOperand(
+              'Add',
+              lhs,
+              negateNumberLiteral(value)
+            ),
+            lhs,
+            rhs
           );
       }
 
-      return expandContinuationAdd(foldAssociativeOperator('Add', lhs, rhs));
+      return expandContinuationAdd(
+        parser,
+        parser.appendAssociativeOperand('Add', lhs, rhs),
+        lhs,
+        rhs
+      );
     },
     serialize: serializeAdd,
   },
@@ -2315,7 +2357,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // (for example, it's used as a separator in \int)
       if (rhs === null) return null;
 
-      return foldMultiplyChain(lhs, rhs);
+      return foldMultiplyChain(parser, lhs, rhs);
     },
   },
   // Unicode multiplication-sign spellings (paste/keyboard input), parsed the
@@ -2442,7 +2484,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       });
       if (rhs === null) return ['Multiply', lhs, MISSING];
 
-      return foldMultiplyChain(lhs, rhs);
+      return foldMultiplyChain(parser, lhs, rhs);
     },
   },
   // Infix modulo, as in `26 \bmod 5`

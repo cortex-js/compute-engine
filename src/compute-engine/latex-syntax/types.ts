@@ -1056,6 +1056,33 @@ export interface Parser {
    */
   readonly operandStartIndex: number;
 
+  /**
+   * @internal
+   * Fold `rhs` into an associative operator chain headed by `op` — the same
+   * result as `foldAssociativeOperator(op, lhs, rhs)` — reusing `lhs`'s array
+   * when it is this parser's owned chain (see `ownedChain`), so that a flat
+   * chain `a+b+c+…` grows by appending instead of by copying at every
+   * operator. The array returned becomes the owned chain.
+   */
+  appendAssociativeOperand(
+    op: string,
+    lhs: MathJsonExpression,
+    rhs: MathJsonExpression
+  ): MathJsonExpression;
+
+  /**
+   * @internal
+   * The chain array most recently returned by `appendAssociativeOperand` at
+   * the innermost in-progress `parseExpression` (or `null`). It was
+   * allocated by this parser and, until the infix loop hands it on as an
+   * operand of a larger expression, the loop's left operand is the only
+   * reference to it — which is what licenses extending it in place. Handlers
+   * that give an `Add` chain extra meaning (the ellipsis expansion) may rely
+   * on the owned chain having been built through them: an owned `Add` chain
+   * carries no `ContinuationPlaceholder`.
+   */
+  readonly ownedChain: MathJsonExpression | null;
+
   /** True if currently parsing inside a quantifier body (ForAll, Exists, etc.) */
   readonly inQuantifierScope: boolean;
 

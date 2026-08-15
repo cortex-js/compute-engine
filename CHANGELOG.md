@@ -463,6 +463,22 @@
 
 ### Improvements
 
+- **Long flat operator chains parse in linear time.** Parsing `a+b+c+…` (or
+  `a\cdot b\cdot …`) re-walked and re-copied the whole accumulated chain at
+  every operator, so the LaTeX parse of a long sum was quadratic in the number
+  of terms: a 12 000-term sum took ~1.7 s to parse (`form: 'raw'`), 20× a
+  3 000-term one. The per-operator work is now constant — the same sum parses
+  in ~90 ms, and doubling the term count doubles the time — for sums,
+  products, subscripted symbols, and parenthesized terms alike. Parse output
+  is unchanged.
+- **Deeper expression trees can be boxed before the stack runs out.** Boxing
+  recurses once per level of a MathJSON tree, and more than half of the stack
+  frames it spent per level were wrappers that do nothing once an enclosing
+  construction is active. Those are now bypassed on the nested path: the
+  canonical path went from 20 to 9 frames per level, so a `Sin(Sin(…))` nest
+  that overflowed at ~225 levels now boxes to ~385, and `1-2-3-…-N` (which
+  parses to a left-nested `Subtract` chain) from ~360 to ~620 terms. The
+  limit is raised, not removed.
 - **Writes to a function's own parameters are recognized as call-local.** The
   effects inference previously stamped `scope` on any body assigning to one of
   its parameters; such bodies (e.g. clamping or normalizing an argument in
