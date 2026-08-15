@@ -939,10 +939,12 @@ first 20 nested idx:                                  (empty)
 distinct nested JSON among first 50 nested: 0
 ```
 
-Zero nested members, list length preserved. The probe then throws
-dereferencing `nestedIdx[0]` — it was written when the defect was present
-and assumes at least one nested member exists to dump, so the crash IS
-the pass signal. Tycho's diagonal-residue lane is retirable.
+Zero nested members, list length preserved, and the probe now exits 0
+printing `ACCEPTANCE PASS — CE item 189: all members scalar, zero nested`
+(re-verified 2026-08-15 after Tycho defused it — it previously threw
+dereferencing `nestedIdx[0]`, having been written when the defect was
+present and assuming a nested member existed to dump, so a pass used to
+look like a stack trace). Tycho's diagonal-residue lane is retirable.
 
 **RESOLVED 2026-08-15. The title above is the third one this entry has had,
 and the two earlier ones were both wrong about the layer.** Neither the
