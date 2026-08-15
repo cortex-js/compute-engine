@@ -379,10 +379,10 @@ describe('ANGULAR UNIT — symbolic derivative (by-reference vs inline)', () => 
 // was always correct, since only constant subtrees are folded, which is why
 // the shape of the bug is "constant arguments only".
 //
-// Reported by Tycho against 0.108.0 (their `degree-mode compile parity` test),
-// blocking their adoption. Fix: `tryConstantFold` neutralizes `angularUnit`
-// for the duration of its evaluation, alongside the `maxCollectionSize` clamp
-// it already applied.
+// Reported by Tycho against 0.108.0 as their item 185, caught by their
+// `degree-mode compile parity` test. Fix: `tryConstantFold` neutralizes
+// `angularUnit` for the duration of its evaluation, alongside the
+// `maxCollectionSize` clamp it already applied.
 //
 describe('ANGULAR UNIT — constant folding must not convert twice', () => {
   const CASES: [string, number][] = [
