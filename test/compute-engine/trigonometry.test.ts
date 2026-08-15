@@ -394,13 +394,15 @@ describe('Tycho item 90 — constructible-value lookup skips symbolic arguments'
 
   it('a deeply nested symbolic argument evaluates in bounded time', () => {
     const ce = new ComputeEngine();
-    const e = ce.parse(`\\sin(${nested(ce, 16)})`);
-    const start = Date.now();
+    // Depth 26 is chosen so the guard is a TERMINATION property rather than a
+    // stopwatch reading: the discarded walk this fix removed costs ~2× per
+    // level, so at this depth it would need on the order of 2²⁶ traversals and
+    // never finish, while the gated path stays under a tenth of a second.
+    // Returning `Sin` at all is therefore the assertion, and the jest per-test
+    // timeout below is the backstop for the non-terminating case.
+    const e = ce.parse(`\\sin(${nested(ce, 26)})`);
     expect(e.evaluate().operator).toBe('Sin');
-    // Was ~40 s at this depth; the bound is deliberately loose (this is a
-    // complexity guard, not a timing pin).
-    expect(Date.now() - start).toBeLessThan(5_000);
-  });
+  }, 60_000);
 
   it('the reduction itself is unaffected: bound and constant arguments still fold', () => {
     const ce = new ComputeEngine();
@@ -428,36 +430,48 @@ describe('numericization is skipped for arguments that cannot numericize', () =>
     return body;
   };
 
-  const underBudget = (build: (body: string) => (ce: ComputeEngine) => void) => {
+  // Depth 24 makes each of these a TERMINATION test rather than a stopwatch
+  // reading: the discarded `.N()` walk costs ~2× per level of nesting, so
+  // un-gated it would need on the order of 2²⁴ traversals and never finish,
+  // while every gated path below stays in the low hundreds of milliseconds.
+  // Running to completion is therefore the assertion, and the generous jest
+  // per-test timeouts are the backstop — a millisecond budget in this helper
+  // reported machine load instead, and went red under parallel test runs.
+  const onDeepChain = (
+    build: (body: string) => (ce: ComputeEngine) => void
+  ) => {
     const ce = new ComputeEngine();
-    const body = chain(ce, 14);
-    const run = build(body);
-    const start = Date.now();
-    run(ce);
-    // Each of these was seconds-to-minutes at this depth; the bound is loose
-    // on purpose (a complexity guard, not a timing pin).
-    expect(Date.now() - start).toBeLessThan(2_000);
+    const body = chain(ce, 24);
+    build(body)(ce);
   };
 
-  it('isEqual against a symbolic chain', () =>
-    underBudget((body) => (ce) => {
-      expect(ce.parse(body).isEqual(0)).not.toBe(true);
-    }));
+  it(
+    'isEqual against a symbolic chain',
+    () =>
+      onDeepChain((body) => (ce) => {
+        expect(ce.parse(body).isEqual(0)).not.toBe(true);
+      }),
+    60_000
+  );
 
-  it('Equal / Sort / ApproxEqual / Rationalize over symbolic chains', () => {
-    underBudget((body) => (ce) => {
-      ce.parse(`\\mathrm{Equal}(${body},0)`).evaluate();
-    });
-    underBudget((body) => (ce) => {
-      ce.parse(`\\mathrm{Sort}([${body},${body},${body}])`).evaluate();
-    });
-    underBudget((body) => (ce) => {
-      ce.parse(`\\mathrm{ApproxEqual}(${body},0)`).evaluate();
-    });
-    underBudget((body) => (ce) => {
-      ce.parse(`\\mathrm{Rationalize}(${body})`).evaluate();
-    });
-  });
+  it(
+    'Equal / Sort / ApproxEqual / Rationalize over symbolic chains',
+    () => {
+      onDeepChain((body) => (ce) => {
+        ce.parse(`\\mathrm{Equal}(${body},0)`).evaluate();
+      });
+      onDeepChain((body) => (ce) => {
+        ce.parse(`\\mathrm{Sort}([${body},${body},${body}])`).evaluate();
+      });
+      onDeepChain((body) => (ce) => {
+        ce.parse(`\\mathrm{ApproxEqual}(${body},0)`).evaluate();
+      });
+      onDeepChain((body) => (ce) => {
+        ce.parse(`\\mathrm{Rationalize}(${body})`).evaluate();
+      });
+    },
+    60_000
+  );
 
   it('the gated paths still answer for arguments that DO numericize', () => {
     const ce = new ComputeEngine();

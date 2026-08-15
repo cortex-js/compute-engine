@@ -1,79 +1,88 @@
 ## [Unreleased]
 
-### Issues Resolved
-
-- **Compiling the same expression twice now always produces the same
-  code.** Compile-time constant folding decided whether to fold a
-  subtree using a wall-clock budget, so the decision depended on machine
-  load — and the two outcomes do not agree to the last digit, because a
-  folded value is computed by the interpreter in extended precision
-  while the structural lowering computes in machine floats. Two engines
-  compiling one source could therefore return numbers differing around
-  the 13th significant digit. A seven-term `Sum` over two user functions
-  measured 37–89 ms against the 100 ms budget, which is how it surfaced:
-  a test comparing definitions in different orders passed alone and
-  failed only in loaded parallel runs, with a different subset failing
-  each time.
-
-  Eligibility is now decided by a deterministic estimate of the
-  expression's own cost, so it depends on the input and nothing else.
-  Constructs that multiply work are priced by their counts — a
-  `Sum`/`Product` by its trip count, a `Map`/`Filter` by its source's
-  size — and anything whose count cannot be determined statically is not
-  folded. Two side effects worth knowing: declining is now much cheaper
-  (a constant summing 100 000 mapped elements is turned away in about
-  3 ms, where before it was evaluated for ~100 ms until the clock ran
-  out), and a bound supplied by a *consumer* rather than a source still
-  folds, so `Sum(Take(Map(f, 1..∞), 10))` is still baked to a literal.
-  The previous caveat that the compiled form of a near-budget constant
-  must not be pinned in a test no longer applies.
-
 ### Breaking Changes
 
-- **A function that writes to a variable outside itself must now declare
-  the `scope` effect.** A named definition with no effect annotation now
-  guarantees it does not mutate anything outside its own call: installing
-  a body that provably assigns to an outer variable (or calls a function
-  declared `scope`) is refused with an `incompatible-type` error naming
-  the fix. Opt in with the `scope` specifier — Epsil
+- **A function that writes to a variable outside itself must now declare the
+  `scope` effect.** A named definition with no effect annotation now guarantees
+  it does not mutate anything outside its own call: installing a body that
+  provably assigns to an outer variable (or calls a function declared `scope`)
+  is refused with an `incompatible-type` error naming the fix. This covers every
+  definition route: one-step definitions, multi-clause accumulation, and the
+  declare-then-assign idiom (`ce.declare('f', '(number) -> number')` then
+  `ce.assign('f', body)` — a bare declared arrow still leaves every OTHER effect
+  freely inferred, but an escaping writer now requires the annotation there
+  too). Opt in with the `scope` specifier — Epsil
   `function bump(n) scope { total = total + n }`, or a
-  `"(number) scope -> number"` signature, or the `effects: ['scope']`
-  definition flag.
+  `"(number) scope -> number"` signature, or the `effects: ['scope']` definition
+  flag.
 
-  What does NOT need an annotation: top-level assignments and accumulating
-  loops (`for k in Range(1, 100) { total = total + k }` at the top level
-  is unchanged); writes to a function's own locals and — new in this
-  release — its own **parameters** (`f(x) := (x := x + 1; x)` is
-  call-local, now inferred pure, and works exactly as before); factories
-  returning stateful closures (`makeCounter`), whose `scope` lives on the
-  returned closure's own arrow; and forward references or mutual
-  recursion, which stay optimistic. In exchange, every unannotated
-  function is guaranteed unable to mutate global state mid-evaluation.
+  What does NOT need an annotation: top-level assignments and accumulating loops
+  (`for k in Range(1, 100) { total = total + k }` at the top level is
+  unchanged); writes to a function's own locals and — new in this release — its
+  own **parameters** (`f(x) := (x := x + 1; x)` is call-local, now inferred
+  pure, and works exactly as before); factories returning stateful closures
+  (`makeCounter`), whose `scope` lives on the returned closure's own arrow; and
+  forward references or mutual recursion, which stay optimistic. In exchange,
+  every unannotated function is guaranteed unable to mutate global state
+  mid-evaluation.
 
 ### Issues Resolved
 
-- **A function defined inside another function no longer leaks into the
-  global scope.** `function make() { helper(x) = x + 1; helper }` used to
-  install `helper` as a global — callable at top level after `make()`
-  returned, and silently **overwriting** any existing global function of
-  the same name. Nested definitions are now block-local: they shadow an
-  outer function instead of replacing it, and the name is gone once the
-  enclosing call returns. A returned helper still works as a first-class
-  value, and top-level definitions (the notebook gesture) are unchanged.
+- **Compiling the same expression twice now always produces the same code.**
+  Compile-time constant folding decided whether to fold a subtree using a
+  wall-clock budget, so the decision depended on machine load — and the two
+  outcomes do not agree to the last digit, because a folded value is computed by
+  the interpreter in extended precision while the structural lowering computes
+  in machine floats. Two engines compiling one source could therefore return
+  numbers differing around the 13th significant digit. A seven-term `Sum` over
+  two user functions measured 37–89 ms against the 100 ms budget, which is how
+  it surfaced: a test comparing definitions in different orders passed alone and
+  failed only in loaded parallel runs, with a different subset failing each
+  time.
+
+  Eligibility is now decided by a deterministic estimate of the expression's own
+  cost, so it depends on the input and nothing else. Constructs that multiply
+  work are priced by their counts — a `Sum`/`Product` by its trip count, a
+  `Map`/`Filter` by its source's size — and anything whose count cannot be
+  determined statically is not folded. Two side effects worth knowing: declining
+  is now much cheaper (a constant summing 100 000 mapped elements is turned away
+  in about 3 ms, where before it was evaluated for ~100 ms until the clock ran
+  out), and a bound supplied by a _consumer_ rather than a source still folds,
+  so `Sum(Take(Map(f, 1..∞), 10))` is still baked to a literal. The previous
+  caveat that the compiled form of a near-budget constant must not be pinned in
+  a test no longer applies.
+
+- **A function defined inside another function no longer leaks into the global
+  scope.** `function make() { helper(x) = x + 1; helper }` used to install
+  `helper` as a global — callable at top level after `make()` returned, and
+  silently **overwriting** any existing global function of the same name. Nested
+  definitions are now block-local: they shadow an outer function instead of
+  replacing it, and the name is gone once the enclosing call returns. A returned
+  helper still works as a first-class value, and top-level definitions (the
+  notebook gesture) are unchanged.
 
 ### Improvements
 
-- **Writes to a function's own parameters are recognized as call-local.**
-  The effects inference previously stamped `scope` on any body assigning
-  to one of its parameters; such bodies (e.g. clamping or normalizing an
-  argument in place) now infer pure, making them cacheable and
-  compile-eligible.
-- **Property and element writes are judged on their base variable.** A
-  property rebinding (`q.name = v`) or element write (`L[1] = 5`) on a
-  local `let` binding or parameter now counts as a local write — such
-  bodies infer pure instead of `scope`, and install without an
-  annotation. The same write on an outer variable is still an escaping
-  write.
+- **Writes to a function's own parameters are recognized as call-local.** The
+  effects inference previously stamped `scope` on any body assigning to one of
+  its parameters; such bodies (e.g. clamping or normalizing an argument in
+  place) now infer pure, making them cacheable and compile-eligible.
+- **Property writes are judged on their base variable.** A property rebinding
+  (`q.name = v`) on a local `let` binding or parameter now counts as a local
+  write — such bodies infer pure instead of `scope`, and install without an
+  annotation. The same write on an outer variable is still escaping, and a
+  subscript definition (`L_0 := 1`, which defines a sequence) is always an
+  escaping write.
+- **`Map` auto-compile instrumentation is reachable from an install.** The
+  counters that say whether a lazy `Map` drain compiled, re-validated its
+  dependencies, recompiled or fell back to the interpreter were only a
+  module-level export, which a published install cannot import and which does
+  not survive minification. They are now also available as
+  `ce._mapAutoCompileStats` (`attempts`, `compiledHits`, `revalidations`,
+  `recompiles`, `elementFallbacks`, `nanDoubleChecks`). The counters are
+  process-global and cumulative, so measure one drain by reading them before and
+  after it and taking the difference. Like every other `_`-prefixed member, it
+  is reachable at runtime with no stability promise.
 
 ## 0.109.0 _2026-08-14_
 

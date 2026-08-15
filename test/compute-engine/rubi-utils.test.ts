@@ -2034,11 +2034,13 @@ describe('nested-radical substitution helpers (R31)', () => {
     // exponent would drive a ~100k-term binomial expansion in
     // `conjugateRadicalRationalization` before expand's deadline checkpoint.
     const f = ce.parse('(\\sqrt{x+1}+\\sqrt{1-x})^{-100000}');
-    const t0 = Date.now();
+    // Declining is the assertion, and it is what distinguishes the two
+    // behaviors: a pre-filter that accepted the candidate would go on to build
+    // the ~100k-term expansion, not decline quickly. The jest per-test timeout
+    // is the backstop; timing the decline only added sensitivity to load.
     expect(hasNestedRadicalCandidate(f, 'x')).toBe(false);
     // And the rewrite declines rather than expanding.
     expect(conjugateRadicalRationalization(ce, toTimesPower(ce, f), 'x')).toBeNull();
-    expect(Date.now() - t0).toBeLessThan(1000); // fast decline, no runaway expand
   });
 
   // The substitution identity: g(u(x))·u′(x) ≡ f(x), where u(x) = back and

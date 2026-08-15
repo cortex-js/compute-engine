@@ -79,6 +79,15 @@ export interface InferredLiteralEffects {
    * DISABLES the definition-annotation check: the annotation installs as a
    * trusted contract instead (no dependency tracking, no revalidation). */
   unresolvedHead: boolean;
+  /** True when the walk POSITIVELY proved a world mutation: an unconfined
+   * write or `Assume` in the body, or an application of a resolved callee /
+   * annotated callback parameter whose effect set concretely contains
+   * `scope`. Unlike the `scope` label in {@link effects}, this bit survives
+   * the `any` collapse AND is never set by conservatism (an unresolved head's
+   * `{any}` does not set it) — it is the trigger of the default-`!scope`
+   * ceiling on bare-slot definitions (`docs/EFFECTS-MODEL.md`, "Scope is
+   * opt-in"; ruled 2026-08-15). */
+  escapingWrite: boolean;
   /** True when the walk consulted an effect set that is itself LAZILY DERIVED
    * from the conformance registry — see `WalkState.consultsRegistry`. A
    * definition stamped from such a walk installs a deriver of its own
@@ -111,14 +120,22 @@ export class EffectContractError extends Error {
      * RENDERING only (the escape rule of the rollback-frame design): the
      * message and the Epsil diagnostic show its `toString()`, and no
      * consumer resolves bindings through it. */
-    readonly declaredAt?: Expression
+    readonly declaredAt?: Expression,
+    /** True when the violated bound is the IMPLICIT default rather than an
+     * author-stated contract: a bare-slot definition whose body proved a
+     * world mutation. Escaping writes are opt-in — the `scope` effect must
+     * be declared (`docs/EFFECTS-MODEL.md`, "Scope is opt-in"; ruled
+     * 2026-08-15). Changes only the rendering, not the channel. */
+    readonly scopeDefault?: boolean
   ) {
     super(
-      `Operator Definition "${symbol}": the body infers the effects \`${describeEffects(inferred)}\`, which the declared effects \`${describeEffects(declared)}\`` +
-        (declaredAt === undefined
-          ? ''
-          : ` (declared at \`${declaredAt.toString()}\`)`) +
-        ` do not cover`
+      scopeDefault
+        ? `Operator Definition "${symbol}": the body writes outside the function (an assignment to an outer variable, or an assumption), which requires declaring the \`scope\` effect — e.g. \`function ${symbol}(…) scope { … }\` or a \`(…) scope -> …\` signature. Inferred effects: \`${describeEffects(inferred)}\``
+        : `Operator Definition "${symbol}": the body infers the effects \`${describeEffects(inferred)}\`, which the declared effects \`${describeEffects(declared)}\`` +
+            (declaredAt === undefined
+              ? ''
+              : ` (declared at \`${declaredAt.toString()}\`)`) +
+            ` do not cover`
     );
   }
 }
@@ -154,7 +171,9 @@ export function effectContractErrorValue(
   return ce.error(
     [
       'incompatible-type',
-      `${describeEffects(e.declared)} effects`,
+      e.scopeDefault
+        ? 'non-scope effects (writes outside a function require a declared `scope` effect)'
+        : `${describeEffects(e.declared)} effects`,
       `${describeEffects(e.inferred)} effects`,
     ],
     e.declaredAt?.toString()
@@ -588,6 +607,7 @@ interface WalkState {
   readsRandomFrame: boolean;
   draws: boolean;
   unresolvedHead: boolean;
+  escapingWrite: boolean;
   /** True when the walk read an effect set that is lazily DERIVED from the
    * conformance registry — a protocol dispatcher's union over the registered
    * conforming implementations of a bare requirement, or a callee whose own
@@ -630,6 +650,14 @@ interface WalkContext {
  *   nested `Function` literal (closure capture ⇒ escaping). `Assume` is never
  *   confined. Not provably confined ⇒ `scope`. Inference-only: the runtime
  *   `effectsOf` accounting stays conservative.
+ * - **Parameters are confined at entry.** A write to the literal's own
+ *   parameter is call-local — the binding lives in the call frame and dies
+ *   with the application; the caller's variable never changes (verified
+ *   empirically: `f(x) := (x := x + 1; x)` returns 6 for `f(5)` and leaves
+ *   the caller's `a := 5` untouched). Parameters therefore seed the
+ *   dominance frontier. The closure-capture exclusion still applies: a
+ *   parameter referenced by a nested literal is NOT confined, the same
+ *   conservative rule as any captured binding.
  *
  * `Hold` is NOT skipped: `Hold(Random())` marks the literal as drawing even
  * though nothing draws until `Release`. That is the conservative direction and
@@ -649,6 +677,7 @@ export function inferFunctionLiteralEffects(
     readsRandomFrame: false,
     draws: false,
     unresolvedHead: false,
+    escapingWrite: false,
     consultsRegistry: false,
   };
   walkLiteral(ce, literal, state, options?.selfName, 0, new Set());
@@ -716,7 +745,11 @@ function walkLiteral(
     depth,
     expanding
   );
-  walker.sequence([body], { declared: new Set() });
+  // Parameters seed the confinement frontier: a parameter is bound on every
+  // static path at entry, and a write to it is call-local (see "Parameters
+  // are confined at entry" above). Captured parameters are still excluded by
+  // the `captured` check in `scopeWrite`.
+  walker.sequence([body], { declared: new Set(params.keys()) });
 }
 
 /** All symbol names occurring inside any nested `Function` literal of `expr`. */
@@ -724,21 +757,41 @@ function collectNestedLiteralSymbols(expr: Expression, out: Set<string>): void {
   if (isSymbol(expr)) return;
   if (!isFunction(expr)) return;
   if (expr.operator === 'Function') {
-    collectSymbols(expr, out);
+    collectSymbolsMasked(expr, new Set(), out);
     return;
   }
   for (const op of expr.ops) collectNestedLiteralSymbols(op, out);
 }
 
-function collectSymbols(expr: Expression, out: Set<string>): void {
+/**
+ * Collect symbol spellings, masking each `Function` literal's OWN parameter
+ * names within its subtree: `(x) ↦ x` nested in a body whose enclosing
+ * function also has an `x` parameter SHADOWS that parameter rather than
+ * capturing it, and recording the spelling as captured wrongly un-confines
+ * the enclosing body's writes to its own `x`. Deeper literals extend the
+ * mask with their own parameters, subtree by subtree. Operator names are
+ * still collected — harmless over-approximation for the membership checks
+ * the `captured` set feeds.
+ */
+function collectSymbolsMasked(
+  expr: Expression,
+  mask: ReadonlySet<string>,
+  out: Set<string>
+): void {
   const name = sym(expr);
   if (name !== undefined) {
-    out.add(name);
+    if (!mask.has(name)) out.add(name);
     return;
   }
   if (!isFunction(expr)) return;
   out.add(expr.operator);
-  for (const op of expr.ops) collectSymbols(op, out);
+  if (expr.operator === 'Function') {
+    const extended = new Set(mask);
+    for (const p of functionLiteralParameters(expr)) extended.add(p.name);
+    for (const op of expr.ops) collectSymbolsMasked(op, extended, out);
+    return;
+  }
+  for (const op of expr.ops) collectSymbolsMasked(op, mask, out);
 }
 
 class Walker {
@@ -764,7 +817,7 @@ class Walker {
     const declared = new Set(ctx.declared);
     for (const op of ops) {
       this.visit(op, { declared });
-      if (isFunction(op, 'Declare')) {
+      if (isFunction(op, 'Declare') || isFunction(op, 'DefineFunction')) {
         for (const name of assignTargets(op)) {
           if (name === undefined) continue;
           declared.add(name);
@@ -855,7 +908,32 @@ class Walker {
     if (head === 'Assume') {
       // Never confined: an assumption targets the ambient assumption store.
       this.state.effects = unionEffectSets(this.state.effects, ['scope']);
+      this.state.escapingWrite = true;
       for (const op of expr.ops) this.visit(op, ctx);
+      return;
+    }
+
+    if (head === 'DefineFunction') {
+      // A NESTED `DefineFunction` (Epsil's one-step inner definition,
+      // `helper(x) = x + a` inside a body, lowers here) is BLOCK-LOCAL, so
+      // it never contributes `scope` — categorically, exactly like the
+      // `Declare` above. The definition binds in the block or call frame it
+      // is written in and dies with it: after `function outer(n) { sq(m) =
+      // m * m; sq(n) }` is defined and called, `sq` is still unresolved at
+      // top level, and a same-named outer function is SHADOWED for the
+      // duration of the frame rather than overwritten. The one-step and
+      // two-step (`let sq; sq(m) = m * m`) forms are the same write.
+      //
+      // Not judged by a definition-visibility lookup: the verdict would flip
+      // when the provisional-dependents cascade re-walks the body after a
+      // runtime install has made a name visible. The generic operator path
+      // is wrong too — it would union `DefineFunction`'s own declared
+      // `{scope}`, which describes the TOP-LEVEL defining form.
+      //
+      // The literal operand is deliberately not visited: its body's effects
+      // are latent until the helper is applied, and an application inside
+      // this same body projects them through the `localLiterals` entry
+      // `Walker.sequence` records for the statement.
       return;
     }
 
@@ -915,6 +993,7 @@ class Walker {
       readsRandomFrame: false,
       draws: false,
       unresolvedHead: false,
+      escapingWrite: false,
       consultsRegistry: false,
     };
     this.state = inner;
@@ -933,6 +1012,9 @@ class Walker {
     outer.readsRandomFrame ||= inner.readsRandomFrame;
     outer.draws ||= inner.draws;
     outer.unresolvedHead ||= inner.unresolvedHead;
+    // A proven mutation survives a discharge of OTHER labels; a position that
+    // discharges `scope` itself (none does today) would contain the write.
+    outer.escapingWrite ||= inner.escapingWrite && !discharge.includes('scope');
     // Registry-dependence is a provenance fact about WHERE the sub-walk read
     // its numbers, not an effect: a discharge removes labels, never the need
     // to re-derive.
@@ -1047,8 +1129,7 @@ class Walker {
     if (this.params.has(name)) {
       const declared = this.params.get(name);
       // `null` = unannotated: optimistically pure (ruling (c)).
-      if (declared !== null)
-        this.state.effects = unionEffectSets(this.state.effects, declared);
+      if (declared !== null) this.noteContributorEffects(declared);
       return;
     }
 
@@ -1121,7 +1202,7 @@ class Walker {
           return;
         }
       }
-      this.state.effects = unionEffectSets(this.state.effects, t);
+      this.noteContributorEffects(t);
       return;
     }
 
@@ -1152,7 +1233,7 @@ class Walker {
     // `Comprehension`, which sees the body directly, was pure). The body's own
     // draw is removed by the position's DISCHARGE in `visit`, mirroring
     // `effectsOf`; nothing needs to be added in its place.
-    this.state.effects = unionEffectSets(this.state.effects, def.effects);
+    this.noteContributorEffects(def.effects);
   }
 
   /** An `Assign`: `{scope}` unless provably confined. */
@@ -1164,6 +1245,17 @@ class Walker {
     const targets = assignTargets(expr);
     // Destructuring / compound targets are judged per target symbol; any
     // target the analysis cannot resolve ⇒ `scope`.
+    // NOTE (2026-08-15): an "implicit local declaration" exemption — treating
+    // an `Assign` to a name with no visible outer binding as confined, since
+    // evaluation creates a call-local binding — was tried here and REVERTED.
+    // It is unsound for a literal that is walked standalone: a closure
+    // writing a variable of its ENCLOSING literal (`makeCounter`'s
+    // `count := count + 1`) sees the same "no visible binding" as a genuine
+    // fresh temp, because the enclosing literal's lexical locals are not in
+    // the definition registry — and the closure's arrow then claimed PURE
+    // while every call returned a different value. Not provably confined ⇒
+    // `scope` stays the rule; a fresh-temp body opts out with a `Declare`
+    // (`let`) or a `scope` annotation.
     const confined =
       confinable &&
       targets.length > 0 &&
@@ -1173,8 +1265,23 @@ class Walker {
           ctx.declared.has(name) &&
           !this.captured.has(name)
       );
-    if (!confined)
+    if (!confined) {
       this.state.effects = unionEffectSets(this.state.effects, ['scope']);
+      this.state.escapingWrite = true;
+    }
+  }
+
+  /**
+   * Union a RESOLVED contributor's effect set into the walk, marking the
+   * proven-mutation bit when the set concretely contains `scope`. The `any`
+   * set deliberately does NOT mark it: `any` is conservatism (an unresolved
+   * or collapsed account), and the default-`!scope` ceiling must never fire
+   * on conservatism — only on a positively established world mutation.
+   */
+  private noteContributorEffects(set: EffectSet | undefined): void {
+    this.state.effects = unionEffectSets(this.state.effects, set);
+    if (Array.isArray(set) && set.includes('scope'))
+      this.state.escapingWrite = true;
   }
 }
 
@@ -1254,6 +1361,26 @@ function assignTargets(expr: Expression): (string | undefined)[] {
     isFunction(target, 'Sequence')
   )
     return target.ops.map((op) => sym(op));
+  // A `Field`-target write — `Assign(Field(p, "name"), v)`, the property
+  // rebinding sugar `p.name = v` — is judged on its BASE symbol: the
+  // property SET on a tuple-backed nominal type returns a new value that
+  // REBINDS the base (the setter contract `set name(self, v) -> Person`;
+  // the evaluate route's `property.kind === 'rebind'` ends in
+  // `ce.assign(base, newValue)`), so mutating `q.name` on a `let q` is
+  // exactly as confined as `q := …` itself. ONLY `Field` gets this:
+  // `Assign(Subscript(L, i), v)` is a SEQUENCE DEFINITION (`L_0 := 1`
+  // registers a base case in the engine-wide pending-sequence state — see
+  // the Subscript branch of `Assign`'s evaluate in `library/core.ts`),
+  // never a local rebind, and an `At` target has no assignment semantics
+  // at all today — both stay on the unresolvable-target fallback below.
+  // If a future mutable-object store reuses the `Assign(Field(…))`
+  // spelling with HEAP semantics, it must NOT ride this branch — heap
+  // stores get no confinement exemption in v1 (`docs/EFFECTS-MODEL.md`,
+  // "Confinement does not apply to `state`").
+  if (isFunction(target, 'Field')) {
+    const base = sym(target.ops[0]);
+    if (base !== undefined) return [base];
+  }
   return [undefined];
 }
 

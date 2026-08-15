@@ -1189,15 +1189,29 @@ export class BaseCompiler {
    * for complex-ness.
    */
   private static mentionsCompileBoundName(expr: Expression): boolean {
-    if (isSymbol(expr)) {
-      const s = expr.symbol;
-      if (BaseCompiler._boundVarsCtx?.has(s)) return true;
-      for (let i = BaseCompiler._binderShield.length - 1; i >= 0; i--)
-        if (BaseCompiler._binderShield[i].has(s)) return true;
-      return false;
-    }
-    if (isFunction(expr))
+    if (isSymbol(expr)) return BaseCompiler.isCompileBoundName(expr.symbol);
+    if (isFunction(expr)) {
+      // The application HEAD counts as a mention, exactly as it does in
+      // `mentionsExcludedName` below: a call whose head is a bound name applies
+      // that BINDING, so evaluating the call through the engine here would
+      // apply a same-named engine definition instead and bake ITS result as a
+      // constant. Inside the literal `(g) ↦ g(2)`, with an engine-level
+      // `g = x ↦ x + 1` in scope, `g(2)` folded to 3 and the literal compiled
+      // to `(g) => 3` — ignoring its argument, and disagreeing with the
+      // interpreter, which applies the parameter.
+      if (BaseCompiler.isCompileBoundName(expr.operator)) return true;
       return expr.ops.some((op) => BaseCompiler.mentionsCompileBoundName(op));
+    }
+    return false;
+  }
+
+  /** Whether `name` is bound in the current compilation context — see
+   * {@link mentionsCompileBoundName}, whose two mention sites (a value-position
+   * symbol and an application head) share this test. */
+  private static isCompileBoundName(name: string): boolean {
+    if (BaseCompiler._boundVarsCtx?.has(name)) return true;
+    for (let i = BaseCompiler._binderShield.length - 1; i >= 0; i--)
+      if (BaseCompiler._binderShield[i].has(name)) return true;
     return false;
   }
 
@@ -3429,12 +3443,24 @@ export class BaseCompiler {
       // literal (`f(x) := …`, `x ↦ …`). Emit it as a named local function and
       // compile the call site as `_fn_f(arg)`. Returns undefined for a truly
       // unknown operator (no such definition) or a target that opts out.
-      const userFn = BaseCompiler.tryCompileUserFunction(
-        engine,
-        h,
-        args,
-        target
-      );
+      //
+      // Skipped when `h` names a BOUND variable of the enclosing compilation —
+      // a function literal's parameter, a loop index, a block local. That
+      // binding is what the call applies, and it shadows any same-named engine
+      // definition; resolving the engine definition instead emitted a call to
+      // the WRONG function. With `f` assigned at engine level, the literal
+      // `(f, x) ↦ f(x)` emitted `_fn_f(x)` and so ignored its own `f`
+      // argument, disagreeing with the interpreter. A bound head that is a
+      // block-local FUNCTION was already resolved by
+      // `tryCompileLocalFunctionCall` above and never reaches this line;
+      // anything else falls through to the fail-closed throw below, so the
+      // interpreter — which resolves the parameter correctly — runs the call.
+      // Ruled by the user 2026-08-14: fail closed now; compiling such a call as
+      // a direct call of the bound parameter (true higher-order compilation)
+      // remains a possible future feature, not a bug fix.
+      const userFn = target.boundVars?.has(h)
+        ? undefined
+        : BaseCompiler.tryCompileUserFunction(engine, h, args, target);
       if (userFn !== undefined) return userFn;
       throw new Error(
         BaseCompiler.noLoweringMessage(

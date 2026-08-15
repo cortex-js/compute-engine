@@ -42,6 +42,18 @@ import { CancellationError } from '../../src/common/interruptible';
  * "huge-exponent serialization" describe block below.
  */
 
+// Each case below asserts an OUTCOME — a thrown `CancellationError`, ±∞, an
+// inert symbolic form, or a specific finite value — and every one of those is
+// unreachable from the bug it guards, which was an unbounded loop that never
+// returned. So the outcome is the whole assertion, and the only role left for
+// wall-clock time is to stop a regressed run from blocking the suite forever.
+// That role belongs to the jest timeout, raised here well above the real cost
+// of these cases (tens to hundreds of milliseconds each) so that load on the
+// machine cannot turn a correct run red: elapsed-millisecond assertions in
+// these tests used to fail under a parallel full-suite run and pass in
+// isolation, which made a red suite uninformative.
+jest.setTimeout(60_000);
+
 let ce: ComputeEngine;
 
 beforeEach(() => {
@@ -56,9 +68,7 @@ describe('WP-2.11 / EX-14: Gamma/GammaLn/Zeta bignum kernels', () => {
   // guard fires. Outcome: +Infinity (matches the machine-lane behavior for
   // a huge Gamma argument).
   it('Gamma(1e300).N() overflows to +Infinity instead of hanging', () => {
-    const start = Date.now();
     const r = ce.box(['Gamma', 1e300]).N();
-    expect(Date.now() - start).toBeLessThan(4000);
     expect(r.isInfinity).toBe(true);
     expect(r.isFinite).toBe(false);
   });
@@ -68,9 +78,7 @@ describe('WP-2.11 / EX-14: Gamma/GammaLn/Zeta bignum kernels', () => {
   // genuine (large but representable) finite BigDecimal value. Outcome: a
   // correct finite value (~6.8977552789821374×10³⁰²), not a hang.
   it('GammaLn(1e300).N() returns a correct finite value instead of hanging', () => {
-    const start = Date.now();
     const r = ce.box(['GammaLn', 1e300]).N();
-    expect(Date.now() - start).toBeLessThan(4000);
     expect(r.isFinite).toBe(true);
     // ln(Gamma(1e300)) ≈ (1e300 - 1/2)·ln(1e300) - 1e300 + ln(2π)/2
     expect(r.re).toBeCloseTo(6.897755278982137e302, -288);
@@ -84,9 +92,7 @@ describe('WP-2.11 / EX-14: Gamma/GammaLn/Zeta bignum kernels', () => {
   // magnitude-independent. ζ(s) → 1 as s → +∞. Outcome: a correct finite
   // value (1), not a hang.
   it('Zeta(1e300).N() returns 1 (its asymptotic limit) instead of hanging', () => {
-    const start = Date.now();
     const r = ce.box(['Zeta', 1e300]).N();
-    expect(Date.now() - start).toBeLessThan(4000);
     expect(r.isFinite).toBe(true);
     expect(r.re).toBeCloseTo(1, 10);
   });
@@ -96,9 +102,7 @@ describe('WP-2.11 / EX-14: Gamma/GammaLn/Zeta bignum kernels', () => {
   // rather than going through the functional equation where huge-magnitude
   // sin(πs/2)·Γ(1-s) meets 0·∞ and rounds to NaN. Outcome: exactly 0.
   it('Zeta(-1e300).N() returns the exact trivial zero instead of hanging', () => {
-    const start = Date.now();
     const r = ce.box(['Zeta', -1e300]).N();
-    expect(Date.now() - start).toBeLessThan(4000);
     expect(r.isFinite).toBe(true);
     expect(r.re).toBe(0);
   });
@@ -120,9 +124,7 @@ describe('WP-2.11 / EX-14: Gamma/GammaLn/Zeta bignum kernels', () => {
     it('completes and returns a correct finite value instead of hanging', () => {
       ce.precision = 500;
       try {
-        const start = Date.now();
         const r = ce.box(['Gamma', 1e7]).N();
-        expect(Date.now() - start).toBeLessThan(4000);
         expect(r.isFinite).toBe(true);
         expect(r.isInfinity).toBe(false);
         // The raw BigDecimal formatter is cheap (no huge-exponent
@@ -143,18 +145,14 @@ describe('WP-2.11 / EX-14: combinatorics magnitude guards', () => {
   // MAX_EXACT_COMBINATORICS_DIGITS — the evaluate handler returns
   // `undefined` before the loop starts. Outcome: stays symbolic (inert).
   it('Fibonacci(1e9) stays symbolic instead of hanging', () => {
-    const start = Date.now();
     const r = ce.box(['Fibonacci', 1_000_000_000]).evaluate();
-    expect(Date.now() - start).toBeLessThan(4000);
     expect(r.operator).toBe('Fibonacci');
   });
 
   // Layer 2: Binomial(2e9, 1e9) has ~6×10⁸ digits (estimated via lgamma),
   // far past the threshold. Outcome: stays symbolic (inert).
   it('Binomial(2e9, 1e9) stays symbolic instead of hanging', () => {
-    const start = Date.now();
     const r = ce.box(['Binomial', 2_000_000_000, 1_000_000_000]).evaluate();
-    expect(Date.now() - start).toBeLessThan(4000);
     expect(r.operator).toBe('Binomial');
   });
 
@@ -163,22 +161,18 @@ describe('WP-2.11 / EX-14: combinatorics magnitude guards', () => {
   // actually blows the budget — the `checkDeadline` inside the triangle
   // loop is what catches this one. Outcome: thrown CancellationError.
   it('BellNumber(20000) throws CancellationError instead of hanging', () => {
-    const start = Date.now();
     expect(() =>
       ce.withTimeLimit({ ms: 2000, label: 'test:bellnumber-deadline' }, () =>
         ce.box(['BellNumber', 20_000]).evaluate()
       )
     ).toThrow(CancellationError);
-    expect(Date.now() - start).toBeLessThan(4000);
   });
 
   // Layer 2: !n has the same order of magnitude as n! — Subfactorial(1e6)
   // is estimated (via lgamma) at ~5.6×10⁶ digits, past the threshold.
   // Outcome: stays symbolic (inert).
   it('Subfactorial(1e6) stays symbolic instead of hanging', () => {
-    const start = Date.now();
     const r = ce.box(['Subfactorial', 1_000_000]).evaluate();
-    expect(Date.now() - start).toBeLessThan(4000);
     expect(r.operator).toBe('Subfactorial');
   });
 
@@ -193,9 +187,7 @@ describe('WP-2.18 / P0-19 residual: DigitSum and siblings (library/number-theory
   // O(digits) pass built on the bigint's own (efficient) `toString(base)`.
   // Outcome: a correct finite value, well within the 2s time limit.
   it('DigitSum(2^1000000) completes with the correct value instead of hanging', () => {
-    const start = Date.now();
     const r = ce.box(['DigitSum', ['Power', 2, 1_000_000]]).evaluate();
-    expect(Date.now() - start).toBeLessThan(4000);
     expect(r.operator).toBe('Integer');
     expect(r.re).toBe(1351546);
   });
@@ -206,9 +198,7 @@ describe('WP-2.18 / P0-19 residual: DigitSum and siblings (library/number-theory
   // as the decimal count, so it can cross the threshold well before the
   // decimal case does.
   it('DigitSum(2^10000000, 2) stays symbolic instead of hanging', () => {
-    const start = Date.now();
     const r = ce.box(['DigitSum', ['Power', 2, 10_000_000], 2]).evaluate();
-    expect(Date.now() - start).toBeLessThan(4000);
     expect(r.operator).toBe('DigitSum');
   });
 
@@ -267,11 +257,18 @@ describe('WP-2.18: huge-exponent BigDecimal serialization (src/big-decimal/big-d
         expect(j).toContain('e+65657052');
         expect(j.length).toBeLessThan(1000);
 
-        // Wall-clock is a secondary signal here (the primary one is the
-        // output form above) — kept generous to avoid CI flakiness, but
-        // still tight enough to catch a regression back to the ~9s bug.
-        expect(toStringMs).toBeLessThan(1000);
-        expect(jsonMs).toBeLessThan(1000);
+        // This is the one place in this file where wall-clock time cannot be
+        // replaced by a counter. The defect it guards did not change the
+        // OUTPUT and did not change which functions were CALLED: `toFixed(0)`
+        // was, and still is, invoked speculatively on this value. What changed
+        // is how `toFixed` builds its digits — a bigint exponentiation and
+        // re-stringification of ~6.5×10⁷ digits, versus an O(digits) pass —
+        // so the only observable difference is duration. The bound is
+        // therefore set as a backstop, four orders of magnitude above the
+        // few milliseconds these calls actually take and still far below the
+        // ~9 s the defect produced, so that machine load cannot decide it.
+        expect(toStringMs).toBeLessThan(5000);
+        expect(jsonMs).toBeLessThan(5000);
       } finally {
         ce.precision = savedPrecision.value; // BigDecimal.precision is process-global
       }
@@ -317,13 +314,11 @@ describe('WP-2.18: huge-exponent BigDecimal serialization (src/big-decimal/big-d
 
 describe('WP-2.11 / EX-14: controls (must remain correct/fast, unaffected)', () => {
   it('LucasL(1e9) still cancels via its existing deadline check (~2s)', () => {
-    const start = Date.now();
     expect(() =>
       ce.withTimeLimit({ ms: 2000, label: 'test:lucasl-deadline' }, () =>
         ce.box(['LucasL', 1_000_000_000]).evaluate()
       )
     ).toThrow(CancellationError);
-    expect(Date.now() - start).toBeLessThan(4000);
   });
 
   it('Fibonacci(100) is still exact', () => {

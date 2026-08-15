@@ -606,8 +606,13 @@ describe('EL-4 (revised): Infinite series with Element notation', () => {
   // denominator is the LCM of 10⁴ squares — an intractable bigint that hung
   // the thread (the Element iteration also bypassed the engine deadline, so
   // `run()` never cancelled).
+  // The pass/fail assertion is the RESULT, not elapsed time: returning an
+  // unevaluated `Sum` is only reachable through the capped, numeric
+  // accumulation path, so the exact-bigint hang cannot produce it. The jest
+  // per-test timeout below is a deliberately generous hang backstop (the run
+  // takes well under a second on an idle machine); it is not a performance
+  // budget, so it must never be tightened to the observed duration.
   test('divergent series over PositiveIntegers terminates under N() (does not hang)', () => {
-    const start = Date.now();
     const expr = ce.expr([
       'Sum',
       ['Power', 'n', -1], // harmonic series — diverges
@@ -615,10 +620,9 @@ describe('EL-4 (revised): Infinite series with Element notation', () => {
     ]);
     const result = expr.N();
     // Stays unevaluated (ruled 2026-08-14 — the truncated partial sum it
-    // used to answer was a silently wrong number), quickly, without hanging.
+    // used to answer was a silently wrong number).
     expect(result.operator).toBe('Sum');
-    expect(Date.now() - start).toBeLessThan(5000);
-  }, 10000);
+  }, 30000);
 
   test('infinite series with a symbolic body stays symbolic under both modes', () => {
     // Σ xⁿ has a free variable beyond the index, so a truncated partial value

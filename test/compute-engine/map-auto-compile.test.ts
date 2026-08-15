@@ -268,14 +268,17 @@ describe('Map auto-compile', () => {
   // The fail-closed path that REPLACES the purity gate: eligibility is now the
   // compiler's own D6 question — does a handler exist? `Assume` has none.
   test('an Assume-containing body still falls back to the interpreter', () => {
-    ce.assign(
-      'f7b',
-      ce.box([
+    // `Assume` is an escaping write, so the definition must state the
+    // `scope` contract to install (the default-`!scope` ceiling); the
+    // `effects:` flag states it without pinning a signature.
+    ce.declare('f7b', {
+      effects: ['scope'],
+      evaluate: ce.box([
         'Function',
         ['Block', ['Assume', ['Greater', 'q7', 0]], 'x'],
         'x',
-      ])
-    );
+      ]),
+    });
     const m = broadcast('f7b', 120);
     const els = drainRe(m.N());
     expect(stats.attempts).toBe(1); // one attempt…
@@ -502,14 +505,16 @@ describe('Map auto-compile', () => {
     // engine write); the compiled code would emit a bare JS assignment
     // against a constant-folded read — wrong values AND global pollution.
     ce.assign('kr3', 100);
-    ce.assign(
-      'fr3',
-      ce.box([
+    // The upward write requires the `scope` contract to install (the
+    // default-`!scope` ceiling).
+    ce.declare('fr3', {
+      effects: ['scope'],
+      evaluate: ce.box([
         'Function',
         ['Block', ['Assign', 'kr3', 'x'], ['Multiply', 'kr3', 2]],
         'x',
-      ])
-    );
+      ]),
+    });
     const m = broadcast('fr3', 120);
     const els = drainRe(m.N());
     expect(stats.compiledHits).toBe(0); // ineligible — interpreter serves
@@ -681,5 +686,28 @@ describe('Map auto-compile', () => {
     // 10⁴-sample Monte-Carlo estimator (~0.3% standard error, stochastic):
     // assert the estimate is sane, not tight.
     expect(v.re).toBeCloseTo(1 / 3, 1);
+  });
+
+  // ── Consumer reachability ──────────────────────────────────────────────
+  // The counters are also exposed as the engine member `ce._mapAutoCompileStats`,
+  // because a module-level export of `library/map-auto-compile.ts` is not
+  // reachable from a published install (no subpath export, and the symbol does
+  // not survive minification), while an engine member does survive bundling and
+  // works from a browser.
+  test('counters are reachable as ce._mapAutoCompileStats and move on a drain', () => {
+    // Same object as the module-level export: the counters are process-global,
+    // not per-engine.
+    expect(ce._mapAutoCompileStats).toBe(stats);
+    expect(new ComputeEngine()._mapAutoCompileStats).toBe(stats);
+
+    // A consumer measures one drain by diffing the counters around it.
+    ce.assign('fReach', ce.box(['Function', ['Sin', 'x'], 'x']));
+    const m = broadcast('fReach', 200);
+    const before = { ...ce._mapAutoCompileStats };
+    drainRe(m.N());
+    const after = ce._mapAutoCompileStats;
+
+    expect(after.attempts - before.attempts).toBe(1);
+    expect(after.compiledHits - before.compiledHits).toBe(200);
   });
 });

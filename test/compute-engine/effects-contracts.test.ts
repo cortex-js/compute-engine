@@ -1418,14 +1418,17 @@ describe('9 — confined vs escaping vs conditional-declare', () => {
   it('a write through to an OUTER binding is escaping → `{scope}`, and observably so', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'counter9', 0]).evaluate();
-    ce.box([
-      'Assign',
-      'escaping9',
-      [
+    // The default-`!scope` ceiling refuses a BARE install of an escaping
+    // writer; the stated contract opts in (ruled 2026-08-15). `declare` with
+    // an `evaluate` literal is the one-call route yielding an OPERATOR
+    // definition with declared effects.
+    ce.declare('escaping9', {
+      signature: '() scope -> number',
+      evaluate: ce.box([
         'Function',
         ['Block', ['Assign', 'counter9', ['Add', 'counter9', 1]], 'counter9'],
-      ],
-    ]).evaluate();
+      ]),
+    });
     expect(effectsOfDef(ce, 'escaping9')).toEqual(['scope']);
     // Impure — but owing the random stream nothing: `scope` and `random` are
     // incomparable singletons.
@@ -1442,12 +1445,13 @@ describe('9 — confined vs escaping vs conditional-declare', () => {
 
   it('a CONDITIONAL `Declare` does not dominate → not provably confined', () => {
     // On the `flag`-false path the `Assign` writes through, so the explicit
-    // fallback applies: not provably confined ⇒ `scope`.
+    // fallback applies: not provably confined ⇒ `scope`. Installing such a
+    // body requires the stated `scope` contract (the default-`!scope`
+    // ceiling).
     const ce = new ComputeEngine();
-    ce.box([
-      'Assign',
-      'conditional9',
-      [
+    ce.declare('conditional9', {
+      signature: '() scope -> number',
+      evaluate: ce.box([
         'Function',
         [
           'Block',
@@ -1455,8 +1459,8 @@ describe('9 — confined vs escaping vs conditional-declare', () => {
           ['Assign', 'k2', 5],
           'k2',
         ],
-      ],
-    ]).evaluate();
+      ]),
+    });
     expect(effectsOfDef(ce, 'conditional9')).toEqual(['scope']);
   });
 
@@ -2065,5 +2069,207 @@ describe('effects memo re-entrancy (recursive definition bodies)', () => {
     );
     const body2 = (ce2.box('Q_9').value as Expression).op1;
     expect(body2.isPure).toBe(false);
+  });
+});
+
+/**
+ * # The default-`!scope` ceiling (ruled 2026-08-15)
+ *
+ * A NAMED definition with no effect annotation guarantees it does not mutate
+ * the world: a body with a PROVEN escaping write (unconfined `Assign`,
+ * `Assume`, or an application of a resolved callee whose effect set concretely
+ * contains `scope`) is refused at install unless the definition declares the
+ * `scope` effect. The trigger is the walk's proven-mutation bit, never the
+ * inferred set's `scope` label, so `{any}` conservatism (unresolved
+ * forward-referenced heads) stays optimistic and mutual recursion keeps
+ * working. Anonymous literals are not gated — they have no annotation surface
+ * (the lambda specifier slot is deferred); their arrows carry the inferred
+ * `scope` honestly, which is what the census measured.
+ *
+ * Blast radius measured before the ruling:
+ * `docs/plans/2026-08-14-default-noscope-census.md`.
+ */
+describe('The default-`!scope` ceiling: escaping writes are opt-in', () => {
+  it('a bare install of an escaping writer is refused on the Assign route', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'cl_ctr', 0]).evaluate();
+    const r = ce.box([
+      'Assign',
+      'cl_bump',
+      ['Function', ['Assign', 'cl_ctr', ['Add', 'cl_ctr', 1]]],
+    ]).evaluate();
+    expect(r.operator).toBe('Error');
+    expect(r.toString()).toContain('scope');
+    // Not installed: the definition record stays usable and the counter
+    // never moved.
+    expect(ce.box('cl_ctr').evaluate().re).toBe(0);
+  });
+
+  it('the `ce.assign` API route throws the contract error', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'cl_ctr2', 0]).evaluate();
+    let thrown: unknown;
+    try {
+      ce.assign(
+        'cl_bump2',
+        ce.box(['Function', ['Assign', 'cl_ctr2', ['Add', 'cl_ctr2', 1]]])
+      );
+    } catch (e) {
+      thrown = e;
+    }
+    expect(isEffectContractError(thrown)).toBe(true);
+  });
+
+  it('the stated `scope` contract opts in, and the write works', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'cl_ctr3', 0]).evaluate();
+    ce.declare('cl_bump3', { signature: '() scope -> number' });
+    ce.assign(
+      'cl_bump3',
+      ce.box([
+        'Function',
+        ['Block', ['Assign', 'cl_ctr3', ['Add', 'cl_ctr3', 1]], 'cl_ctr3'],
+      ])
+    );
+    expect(ce.box(['cl_bump3']).evaluate().re).toBe(1);
+    expect(ce.box('cl_ctr3').evaluate().re).toBe(1);
+  });
+
+  it('a write to an OWN PARAMETER is confined: bare install, pure, call-local', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'cl_pinc',
+      ['Function', ['Block', ['Assign', 'x', ['Add', 'x', 1]], 'x'], 'x'],
+    ]).evaluate();
+    const def = ce.lookupDefinition('cl_pinc')!['operator'];
+    expect(def.effects).toBe(undefined);
+    expect(def.pure).toBe(true);
+    // The write is effective inside the body and invisible to the caller.
+    ce.box(['Assign', 'cl_arg', 5]).evaluate();
+    expect(ce.box(['cl_pinc', 'cl_arg']).evaluate().re).toBe(6);
+    expect(ce.box('cl_arg').evaluate().re).toBe(5);
+  });
+
+  it('a factory RETURNING a writing closure installs bare (production is pure)', () => {
+    const ce = new ComputeEngine();
+    // makeCounter() { let c = 0; () ↦ { c := c + 1; c } } — the inner
+    // literal's write goes on the inner ARROW (literals are inference
+    // boundaries); the factory's own body only produces it.
+    const r = ce.box([
+      'Assign',
+      'cl_mk',
+      [
+        'Function',
+        [
+          'Block',
+          ['Declare', 'c', { str: 'number' }, 0],
+          ['Function', ['Block', ['Assign', 'c', ['Add', 'c', 1]], 'c']],
+        ],
+      ],
+    ]).evaluate();
+    expect(r.operator).not.toBe('Error');
+  });
+
+  it('a forward-referenced head stays optimistic: bare install allowed', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box([
+      'Assign',
+      'cl_fwd',
+      ['Function', ['cl_laterDefined', 'n'], 'n'],
+    ]).evaluate();
+    expect(r.operator).not.toBe('Error');
+  });
+
+  it('calling a DECLARED-`scope` function is a proven mutation: the caller needs the contract too', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'cl_ctr4', 0]).evaluate();
+    ce.declare('cl_bump4', { signature: '() scope -> number' });
+    ce.assign(
+      'cl_bump4',
+      ce.box([
+        'Function',
+        ['Block', ['Assign', 'cl_ctr4', ['Add', 'cl_ctr4', 1]], 'cl_ctr4'],
+      ])
+    );
+    // Bare wrapper over a scope callee: refused…
+    const bare = ce.box([
+      'Assign',
+      'cl_wrap',
+      ['Function', ['cl_bump4']],
+    ]).evaluate();
+    expect(bare.operator).toBe('Error');
+    // …and the annotated wrapper installs.
+    ce.declare('cl_wrap2', { signature: '() scope -> number' });
+    ce.assign('cl_wrap2', ce.box(['Function', ['cl_bump4']]));
+    expect(ce.box(['cl_wrap2']).evaluate().re).toBe(1);
+  });
+
+  // A clause SET does not reach the operator definition's own walk-and-gate:
+  // `installClauseList` builds `evaluate` as a JS dispatch function and hands
+  // the definition an already-unioned effect row as an author-STATED one. The
+  // ceiling therefore has a second enforcement point, in `defineFunctionClause`
+  // (`src/compute-engine/multi-clause.ts`), on the clause being admitted.
+  it('a SECOND bare clause with an escaping write is refused', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'cl_ctr5', 0]).evaluate();
+    // Clause 1: pure, installs through the single-clause `ce.assign` shortcut.
+    expect(
+      ce.box([
+        'DefineFunction',
+        'cl_mbump',
+        ['Function', 0, ['Typed', 'z', { str: '0' }]],
+      ]).evaluate().operator
+    ).not.toBe('Error');
+    // Clause 2: converts the symbol to clause storage, and writes outside.
+    const r = ce.box([
+      'DefineFunction',
+      'cl_mbump',
+      [
+        'Function',
+        ['Block', ['Assign', 'cl_ctr5', ['Add', 'cl_ctr5', 1]], 'n'],
+        ['Typed', 'n', { str: 'integer' }],
+      ],
+    ]).evaluate();
+    expect(r.operator).toBe('Error');
+    expect(r.toString()).toContain('scope');
+    // Not installed, and nothing ran: the counter never moved and the symbol
+    // still holds only the first clause.
+    expect(ce.box('cl_ctr5').evaluate().re).toBe(0);
+    expect(ce.box(['cl_mbump', 0]).evaluate().re).toBe(0);
+    expect(ce.box('cl_ctr5').evaluate().re).toBe(0);
+  });
+
+  it('the clause’s stated `scope` row opts in, and the write works', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'cl_ctr6', 0]).evaluate();
+    expect(
+      ce.box([
+        'DefineFunction',
+        'cl_mbump2',
+        ['Function', 0, ['Typed', 'z', { str: '0' }]],
+      ]).evaluate().operator
+    ).not.toBe('Error');
+    // The same escaping clause, with the effect row STATED on the literal's
+    // full-signature return marker.
+    const r = ce.box([
+      'DefineFunction',
+      'cl_mbump2',
+      [
+        'Function',
+        [
+          'Typed',
+          ['Block', ['Assign', 'cl_ctr6', ['Add', 'cl_ctr6', 1]], 'cl_ctr6'],
+          { str: '(n: integer) scope -> integer' },
+        ],
+        'n',
+      ],
+    ]).evaluate();
+    expect(r.operator).not.toBe('Error');
+    // It dispatches, and the write reaches the outer variable.
+    expect(ce.box(['cl_mbump2', 5]).evaluate().re).toBe(1);
+    expect(ce.box('cl_ctr6').evaluate().re).toBe(1);
+    // The pure clause is still there.
+    expect(ce.box(['cl_mbump2', 0]).evaluate().re).toBe(0);
   });
 });

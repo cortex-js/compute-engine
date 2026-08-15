@@ -16,6 +16,7 @@ import { functionLiteralParameterName } from '../boxed-expression/function-liter
 import { lookup } from '../function-utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { _mapAutoCompileStats } from '../map-auto-compile-stats.js';
 import { exactTierShape, MIN_EXACT_COMPILE_COUNT } from './map-exact-proof.js';
 import type { Interval } from './map-exact-proof.js';
 
@@ -143,33 +144,17 @@ interface MapCompileCache {
  */
 const mapCompileCaches = new WeakMap<Expression, MapCompileCache>();
 
-/** Instrumentation for tests: every path bumps a counter, so tests assert
- * counter *deltas* (an all-interpreter implementation cannot pass). */
-export const _mapAutoCompileStats = {
-  /** Compile attempts (initial, re-enabled, and recompiles). */
-  attempts: 0,
-  /** Elements served by a compiled function. */
-  compiledHits: 0,
-  /** Full dependency walks triggered by a cheap-check mismatch. */
-  revalidations: 0,
-  /** Recompiles triggered by a genuine dependency change. */
-  recompiles: 0,
-  /** Elements that fell back to the interpreter (non-numeric input row,
-   * ABI failure). */
-  elementFallbacks: 0,
-  /** Compiled results that were NaN (or complex with a NaN part) and were
-   * re-evaluated through the interpreter (review 14). */
-  nanDoubleChecks: 0,
-};
-
-export function _resetMapAutoCompileStats(): void {
-  _mapAutoCompileStats.attempts = 0;
-  _mapAutoCompileStats.compiledHits = 0;
-  _mapAutoCompileStats.revalidations = 0;
-  _mapAutoCompileStats.recompiles = 0;
-  _mapAutoCompileStats.elementFallbacks = 0;
-  _mapAutoCompileStats.nanDoubleChecks = 0;
-}
+/** Instrumentation: every path below bumps a counter, so a caller (a test, or
+ * a consumer reading `ce._mapAutoCompileStats`) can assert counter *deltas* —
+ * an all-interpreter implementation cannot move them. The counters themselves
+ * live in the dependency-free `../map-auto-compile-stats.js` so that
+ * `types-engine.ts` can type the engine accessor without importing `library/`;
+ * they are re-exported here because this is where they are documented and
+ * bumped. */
+export {
+  _mapAutoCompileStats,
+  _resetMapAutoCompileStats,
+} from '../map-auto-compile-stats.js';
 
 /** The numeric marker: a `Map` whose element lambda's body is the canonical
  * `Block(N(inner))` shape (single-statement `Block` whose statement is an `N`

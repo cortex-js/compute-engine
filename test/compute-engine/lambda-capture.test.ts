@@ -317,7 +317,10 @@ describe('MUTABLE CLOSURE', () => {
   beforeAll(() => {
     ce.pushScope();
     ce.declare('lc_counter', { type: 'integer', value: 0 });
-    ce.declare('lc_increment', 'function');
+    // `scope` declared: the body writes the outer `lc_counter`, which the
+    // default-`!scope` ceiling refuses on a bare declaration
+    // (docs/EFFECTS-MODEL.md, "Scope is opt-in").
+    ce.declare('lc_increment', '() scope -> integer');
     // lc_increment(): increments lc_counter by 1 and returns new value
     ce.assign(
       'lc_increment',

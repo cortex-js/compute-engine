@@ -141,8 +141,18 @@ describe('the gate is why nested applications stay cheap', () => {
     for (let i = 0; i < 14; i++) src = `f(${src})`;
     const expr = engine.parse(src);
 
-    const start = Date.now();
-    expect(numericValueOf(expr)).toBeUndefined();
-    expect(Date.now() - start).toBeLessThan(500);
+    // The saving is pinned by the CALL that must not happen, not by elapsed
+    // milliseconds: `numberLiteralOf` consults `.unknowns` first and returns
+    // before reaching `x.N()`. Spying on `.N()` states that directly and gives
+    // the same verdict on any machine, however loaded; timing the call could
+    // only say "it was fast today". Left ungated, the `.N()` here takes over a
+    // second at this nesting depth.
+    const spy = jest.spyOn(expr, 'N');
+    try {
+      expect(numericValueOf(expr)).toBeUndefined();
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

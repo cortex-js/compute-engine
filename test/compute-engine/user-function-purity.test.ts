@@ -43,11 +43,16 @@ describe('User-function purity is inferred from the body', () => {
     ['Function', ['RandomShuffle', ['List', 1, 2, 3]]],
   ]).evaluate();
   ce.box(['Assign', 'square', ['Function', ['Power', 'x', 2], 'x']]).evaluate();
-  ce.box([
-    'Assign',
-    'bump',
-    ['Function', ['Assign', 'a', ['Add', 'a', 1]]],
-  ]).evaluate();
+  // An escaping write requires the `scope` effect on the definition (the
+  // default-`!scope` ceiling) — the bare install this block used before the
+  // 2026-08-15 ruling is now refused, so the contract is stated up front.
+  // (`declare` with an `evaluate` literal is the one-call route that yields
+  // an OPERATOR definition with declared effects; a prior `declare` plus a
+  // separate `Assign` lands the literal on the value half instead.)
+  ce.declare('bump', {
+    signature: '() scope -> unknown',
+    evaluate: ce.box(['Function', ['Assign', 'a', ['Add', 'a', 1]]]),
+  });
   ce.box(['Assign', 'comp', ['Function', ['Add', ['f'], 1]]]).evaluate();
   ce.box(['Assign', 'apply1', ['Function', ['g'], 'g']]).evaluate();
 
@@ -518,11 +523,16 @@ describe('The inference stamps an effect set on the signature', () => {
 
   it('f() := Assign(a, 1) gets `scope`, and owes the stream nothing', () => {
     const ce = new ComputeEngine();
-    ce.box([
-      'Assign',
-      's9x',
-      ['Function', ['Assign', 'a9x', ['Add', 'a9x', 1]]],
-    ]).evaluate();
+    // The literal's own arrow is inference-stamped with `scope`; INSTALLING
+    // it requires stating the contract (the default-`!scope` ceiling).
+    expect(
+      ce.box(['Function', ['Assign', 'a9x', ['Add', 'a9x', 1]]])
+        .type.toString()
+    ).toContain(' scope -> ');
+    ce.declare('s9x', {
+      signature: '() scope -> unknown',
+      evaluate: ce.box(['Function', ['Assign', 'a9x', ['Add', 'a9x', 1]]]),
+    });
     const def = ce.lookupDefinition('s9x')!['operator'];
     expect(def.effects).toEqual(['scope']);
     expect(def.pure).toBe(false);
@@ -911,18 +921,32 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
     // Declare(counter, 0); g() := Block(Assign(counter, counter + 1), counter)
     const ce = new ComputeEngine();
     ce.box(['Assign', 'counter9x', 0]).evaluate();
-    ce.box([
-      'Assign',
-      'escaping9x',
-      [
+    // The anonymous literal's arrow carries the inferred `scope`…
+    expect(
+      specifier(
+        ce.box([
+          'Function',
+          [
+            'Block',
+            ['Assign', 'counter9x', ['Add', 'counter9x', 1]],
+            'counter9x',
+          ],
+        ])
+      )
+    ).toBe('scope');
+    // …and installing it requires the stated contract (the default-`!scope`
+    // ceiling, ruled 2026-08-15).
+    ce.declare('escaping9x', {
+      signature: '() scope -> number',
+      evaluate: ce.box([
         'Function',
         [
           'Block',
           ['Assign', 'counter9x', ['Add', 'counter9x', 1]],
           'counter9x',
         ],
-      ],
-    ]).evaluate();
+      ]),
+    });
     const def = ce.lookupDefinition('escaping9x')!['operator'];
     expect(def.effects).toEqual(['scope']);
     expect(def.pure).toBe(false);
@@ -969,7 +993,14 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
     expect(specifier(literal)).toBe('scope');
   });
 
-  it('a COMPOUND target the analysis cannot resolve ⇒ `scope`', () => {
+  it('a `Subscript` write is a SEQUENCE definition → `scope`, even on a local base', () => {
+    // `Assign(Subscript(L, i), v)` is NOT rebinding sugar: `L_0 := 1`
+    // registers a base case in the engine-wide pending-sequence state (the
+    // Subscript branch of `Assign`'s evaluate, `library/core.ts`), which
+    // outlives the application regardless of where `L` is declared. Only
+    // `Field` targets get base-symbol confinement (the property setter
+    // contract rebinds the base) — pinned end-to-end in
+    // protocol-properties.test.ts.
     const ce = new ComputeEngine();
     const literal = ce.box([
       'Function',
@@ -978,6 +1009,34 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
         ['Declare', 'L9x', ['List', 1, 2]],
         ['Assign', ['Subscript', 'L9x', 1], 5],
       ],
+    ]);
+    expect(specifier(literal)).toBe('scope');
+  });
+
+  it('a nested lambda’s own SHADOWING parameter does not capture the outer one', () => {
+    // `f(x) { x := x + 1; (x) ↦ x }` — the inner lambda's `x` is its own
+    // parameter, not a capture of the outer `x`, so the outer body's write
+    // to its own parameter stays call-local → confined.
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Assign', 'x', ['Add', 'x', 1]],
+        ['Function', 'x', 'x'],
+      ],
+      'x',
+    ]);
+    expect(specifier(literal)).toBe('');
+  });
+
+  it('a COMPOUND target the analysis cannot resolve ⇒ `scope`', () => {
+    // The base of the accessor is itself an expression, not a symbol —
+    // nothing to judge, so the explicit fallback applies.
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      ['Assign', ['Subscript', ['List', 1, 2], 1], 5],
     ]);
     expect(specifier(literal)).toBe('scope');
   });
@@ -1097,9 +1156,13 @@ describe('The definition-annotation check', () => {
  * The **inferred track** (ruled 2026-08-01, `docs/EFFECTS-MODEL.md`,
  * "Annotation provenance"): a bare specifier slot is the effects-axis analog of
  * an inferred type — flexible, and re-stamped whenever better information
- * arrives. The canonical arc is `fib`: declare bare, assign a counter-writing
- * body (revised to `{scope}`), reassign a pure body (revised back). No errors
- * anywhere.
+ * arrives. The arc is told with `random`: declare bare, assign a drawing body
+ * (revised to `{random}`), reassign a pure body (revised back), no errors.
+ * The original `scope` leg of this arc was SUPERSEDED by the default-`!scope`
+ * ceiling (ruled 2026-08-15, `docs/EFFECTS-MODEL.md`, "Scope is opt-in"):
+ * declare-then-assign now runs the same escaping-write refusal as a one-step
+ * install, so a counter-writing body on a bare declaration is an error, not a
+ * re-stamp — pinned below.
  */
 describe('The inferred effects track (a bare specifier slot)', () => {
   /** The effect specifier on the arrow of the body stored for `name`, as a
@@ -1115,58 +1178,85 @@ describe('The inferred effects track (a bare specifier slot)', () => {
 
   it('the fib arc: declared bare, revised by each body assigned to it', () => {
     const ce = new ComputeEngine();
-    ce.declare('counter9x', { type: 'number', value: 0 });
     ce.declare('fib9x', { type: '(number) -> number' });
 
     // Declared, unassigned: optimistically pure, and NOT a contract.
     const def = ce.lookupDefinition('fib9x')!;
     expect('value' in def && def.value.effectsDeclared).toBe(false);
 
-    // A counter-writing body: accepted, and the effects are revised to
-    // `{scope}` — the very idiom `scope.test.ts` / `lambda-capture.test.ts`
-    // pin (a mutable closure under a bare-arrow declaration).
-    ce.assign(
-      'fib9x',
-      ce.box([
-        'Function',
-        ['Block', ['Assign', 'counter9x', ['Add', 'counter9x', 1]], 'n'],
-        'n',
-      ])
-    );
-    expect(bodyEffects(ce, 'fib9x')).toBe('scope');
-    // ... and the call still works, writing the counter.
-    expect(ce.box(['fib9x', 3]).evaluate().toString()).toBe('3');
-    expect(ce.box('counter9x').evaluate().toString()).toBe('1');
+    // A drawing body: accepted, and the effects are revised to `{random}`.
+    ce.assign('fib9x', ce.box(['Function', ['Add', 'n', ['Random']], 'n']));
+    expect(bodyEffects(ce, 'fib9x')).toBe('random');
 
     // Reassigning a pure body revises the effects BACK: the inferred track is
     // re-stamped, never merely widened.
     ce.assign('fib9x', ce.box(['Function', ['Add', 'n', 1], 'n']));
     expect(bodyEffects(ce, 'fib9x')).toBe('');
     expect(ce.box(['fib9x', 3]).evaluate().toString()).toBe('4');
+
+    // The `scope` leg is GONE (the default-`!scope` ceiling): a
+    // counter-writing body on the bare track is refused at assignment, the
+    // counter never moves, and the prior pure body survives.
+    ce.declare('counter9x', { type: 'number', value: 0 });
+    expect(() =>
+      ce.assign(
+        'fib9x',
+        ce.box([
+          'Function',
+          ['Block', ['Assign', 'counter9x', ['Add', 'counter9x', 1]], 'n'],
+          'n',
+        ])
+      )
+    ).toThrow(/scope/);
+    expect(ce.box('counter9x').evaluate().toString()).toBe('0');
+    expect(ce.box(['fib9x', 3]).evaluate().toString()).toBe('4');
+  });
+
+  it('a declared `scope` signature accepts the counter-writing body', () => {
+    // Opting in through declare-then-assign works on both spellings' shared
+    // reconciliation path; the write is effective.
+    const ce = new ComputeEngine();
+    ce.declare('counter9x2', { type: 'number', value: 0 });
+    ce.declare('fibs9x', { type: '(number) scope -> number' });
+    ce.assign(
+      'fibs9x',
+      ce.box([
+        'Function',
+        ['Block', ['Assign', 'counter9x2', ['Add', 'counter9x2', 1]], 'n'],
+        'n',
+      ])
+    );
+    expect(ce.box(['fibs9x', 3]).evaluate().toString()).toBe('3');
+    expect(ce.box('counter9x2').evaluate().toString()).toBe('1');
   });
 
   it('the same arc through the operator slot (`{ signature: … }`)', () => {
     // The two documented declare spellings must stay equivalent.
     const ce = new ComputeEngine();
-    ce.declare('counter9y', { type: 'number', value: 0 });
     ce.declare('fib9y', { signature: '(number) -> number' });
     expect(ce.lookupDefinition('fib9y')!['operator'].effectsDeclared).toBe(
       false
     );
 
-    ce.assign(
-      'fib9y',
-      ce.box([
-        'Function',
-        ['Block', ['Assign', 'counter9y', ['Add', 'counter9y', 1]], 'n'],
-        'n',
-      ])
-    );
-    expect(bodyEffects(ce, 'fib9y')).toBe('scope');
-    expect(ce.box(['fib9y', 3]).evaluate().toString()).toBe('3');
+    ce.assign('fib9y', ce.box(['Function', ['Add', 'n', ['Random']], 'n']));
+    expect(bodyEffects(ce, 'fib9y')).toBe('random');
 
     ce.assign('fib9y', ce.box(['Function', ['Add', 'n', 1], 'n']));
     expect(bodyEffects(ce, 'fib9y')).toBe('');
+
+    // The ceiling applies identically on this spelling.
+    ce.declare('counter9y', { type: 'number', value: 0 });
+    expect(() =>
+      ce.assign(
+        'fib9y',
+        ce.box([
+          'Function',
+          ['Block', ['Assign', 'counter9y', ['Add', 'counter9y', 1]], 'n'],
+          'n',
+        ])
+      )
+    ).toThrow(/scope/);
+    expect(ce.box('counter9y').evaluate().toString()).toBe('0');
   });
 
   it('an inference-produced definition re-stamps freely too', () => {

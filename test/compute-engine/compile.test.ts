@@ -3445,7 +3445,10 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
   /** An engine with `a` assigned the one-parameter literal `t ↦ <body>`. */
   const engineWithA = (body: MathJsonExpression): ComputeEngine => {
     const e = new ComputeEngine();
-    e.declare('a', { signature: '(number) -> number' });
+    // `scope` declared: the body binds locals by bare assignment, which the
+    // default-`!scope` ceiling otherwise refuses (docs/EFFECTS-MODEL.md,
+    // "Scope is opt-in").
+    e.declare('a', { signature: '(number) scope -> number' });
     e.assign('a', e.box(['Function', body, 't']));
     e.declare('u', 'number');
     return e;
@@ -3556,13 +3559,24 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
       { str: t },
     ];
     e.box(['DefineFunction', 'g', ['Function', 0, p('z', '0')]]).evaluate();
+    // The `scope` row is required, not decoration: a bare `Assign` to a name
+    // the body never declared is not PROVABLY confined — the analysis cannot
+    // tell a fresh temp from a write to an enclosing literal's local — so the
+    // default-`!scope` ceiling refuses such a clause unless the definition
+    // opts in with `scope` (or declares the local with `Declare`, which is the
+    // one shape this suite is deliberately not using). See
+    // `docs/EFFECTS-MODEL.md`, "Scope is opt-in".
     e.box([
       'DefineFunction',
       'g',
       [
         'Function',
-        ['Block', ['Assign', 'w', ['Multiply', 2, 'n']], ['Add', 'w', 1]],
-        p('n', 'integer'),
+        [
+          'Typed',
+          ['Block', ['Assign', 'w', ['Multiply', 2, 'n']], ['Add', 'w', 1]],
+          { str: '(n: integer) scope -> integer' },
+        ],
+        'n',
       ],
     ]).evaluate();
     expect(e.box(['g', 3]).evaluate().re).toBe(7);
@@ -3647,7 +3661,10 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
   /** An engine with `a` assigned the one-parameter literal `t ↦ <body>`. */
   const engineWithA = (body: MathJsonExpression): ComputeEngine => {
     const e = new ComputeEngine();
-    e.declare('a', { signature: '(number) -> number' });
+    // `scope` declared: the body binds locals by bare assignment, which the
+    // default-`!scope` ceiling otherwise refuses (docs/EFFECTS-MODEL.md,
+    // "Scope is opt-in").
+    e.declare('a', { signature: '(number) scope -> number' });
     e.assign('a', e.box(['Function', body, 't']));
     e.declare('u', 'number');
     return e;
@@ -3857,16 +3874,27 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
   const BODY: MathJsonExpression = ['Block', ['Assign', 's', 0], LOOP, 's'];
   const EXPECTED = 3 * Math.sqrt(10);
 
+  // `s`/`z` have no `Declare`, so the inference conservatively judges the
+  // writes escaping and the default-`!scope` ceiling refuses a bare install —
+  // the `effects: ['scope']` flag states the contract without declaring a
+  // signature (this suite's UNDECLARED route needs the signature absent).
   const engineWithA = (declared: boolean): ComputeEngine => {
     const e = new ComputeEngine();
-    if (declared) e.declare('a', { signature: '(number) -> number' });
-    e.assign('a', e.box(['Function', BODY, 't']));
+    if (declared) {
+      // `scope` declared: the body binds locals by bare assignment, which the
+      // default-`!scope` ceiling otherwise refuses (docs/EFFECTS-MODEL.md,
+      // "Scope is opt-in").
+      e.declare('a', { signature: '(number) scope -> number' });
+      e.assign('a', e.box(['Function', BODY, 't']));
+    } else {
+      e.declare('a', { effects: ['scope'], evaluate: e.box(['Function', BODY, 't']) });
+    }
     return e;
   };
 
   it('the interpreter answers 3√10 (the reference)', () => {
     const e = new ComputeEngine();
-    e.assign('a', e.box(['Function', BODY, 't']));
+    e.declare('a', { effects: ['scope'], evaluate: e.box(['Function', BODY, 't']) });
     expect(e.box(['a', 3]).evaluate().N().re).toBeCloseTo(EXPECTED, 12);
   });
 
@@ -3971,7 +3999,10 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
 describe('GPU user-function return type comes from the body VALUE', () => {
   const engineWithA = (body: MathJsonExpression): ComputeEngine => {
     const e = new ComputeEngine();
-    e.declare('a', { signature: '(number) -> number' });
+    // `scope` declared: the body binds locals by bare assignment, which the
+    // default-`!scope` ceiling otherwise refuses (docs/EFFECTS-MODEL.md,
+    // "Scope is opt-in").
+    e.declare('a', { signature: '(number) scope -> number' });
     e.assign('a', e.box(['Function', body, 't']));
     e.declare('u', 'number');
     return e;
@@ -4069,7 +4100,14 @@ describe('GPU user-function return type comes from the body VALUE', () => {
 describe('a GPU user-function body with an early `Return`', () => {
   const engineWithA = (body: MathJsonExpression): ComputeEngine => {
     const e = new ComputeEngine();
-    e.declare('a', { signature: '(number) -> number' });
+    // `any` declared: every body here contains `Return`, which the effects
+    // walk sees as an unresolved head (`Return` has no operator definition —
+    // it is handled structurally by the Block evaluator), so each body
+    // infers effects `any`; and RETURN_COMPLEX_LOCAL additionally binds `z`
+    // by bare assignment, which the default-`!scope` ceiling refuses on a
+    // bare declaration. The `any` contract covers both (`scope` alone would
+    // not: `any ⊄ {scope}`).
+    e.declare('a', { signature: '(number) any -> number' });
     e.assign('a', e.box(['Function', body, 't']));
     e.declare('u', 'number');
     return e;

@@ -229,11 +229,14 @@ describe('compiled RandomSample — framed bit-parity', () => {
   it('never materializes a large domain (sparse Fisher-Yates)', () => {
     const ce = new ComputeEngine();
     const r = compiled(ce, ['RandomSample', ['Range', 1, 1000000], 3]);
+    // The generated source is the whole proof, and it is deterministic: an
+    // `Array.from` over the domain is what a million-element materialization
+    // would look like, and `_SYS.domainRange` is the sparse descriptor that
+    // replaces it. Timing the run added nothing the source inspection does not
+    // already establish, while making the verdict depend on machine load.
     expect(r.code).not.toContain('Array.from');
     expect(r.code).toContain('_SYS.domainRange');
-    const t = Date.now();
     const v = withRandomSeedFrame(ce, 1, () => r.run!() as number[]);
-    expect(Date.now() - t).toBeLessThan(200);
     expect(v).toHaveLength(3);
   });
 

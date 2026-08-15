@@ -621,7 +621,8 @@ export class BoxedFunction
     // built-in `N` operator — defers to an outer applicable definition.
     this._def = lookupApplicable(
       this._operator,
-      this._localScope ?? this.engine.context.lexicalScope
+      this._localScope ?? this.engine.context.lexicalScope,
+      this.engine
     );
   }
 

@@ -6,12 +6,67 @@ import {
   initialPanelsForDimensions,
   quadratureBeatsMonteCarlo,
 } from '../../src/compute-engine/numerics/gauss-kronrod';
+import * as GaussKronrodModule from '../../src/compute-engine/numerics/gauss-kronrod';
+import * as MonteCarloModule from '../../src/compute-engine/numerics/monte-carlo';
 
 /** Compile a parsed LaTeX definite integral to a real-valued runner. */
 function compileReal(latex: string, options?: { quadrature?: 'monte-carlo' }) {
   const r = compile(ce.parse(latex), { realOnly: true, ...options });
   expect(r.success).toBe(true);
   return r;
+}
+
+/**
+ * Run `fn` with the two numeric-integration routines instrumented, and return
+ * how many times each of them evaluated an integrand while it ran.
+ *
+ * This counts the work a COMPILED runner performs, which is the point: a
+ * freestanding call to `adaptiveQuadrature` on a hand-written copy of the
+ * integrand measures the algorithm, not the artifact, and stays green even if
+ * the compiled runner regresses (falls through to Monte Carlo, loses a fast
+ * path, or splits an order of magnitude more panels).
+ *
+ * Generated JavaScript reaches numeric integration through `_SYS.integrate` /
+ * `_SYS.integrateMC`, which live on a private module-level helper object of the
+ * JavaScript target and so cannot be replaced from a test. They can be observed
+ * indirectly: `_SYS.integrate` calls `adaptiveQuadrature` and, on
+ * non-convergence, falls through to `monteCarloEstimate`, and `_SYS.integrateMC`
+ * calls `monteCarloEstimate` directly. Both are ordinary module imports,
+ * resolved at call time, so replacing them on their module here is observed by
+ * the runner — including by an artifact that was compiled before this call. The
+ * originals are restored in a `finally`, so a throwing test cannot leave the
+ * instrumentation in place for later ones.
+ */
+function countIntegrandEvals(fn: () => void): {
+  quadrature: number;
+  samples: number;
+} {
+  const gk = GaussKronrodModule as {
+    adaptiveQuadrature: typeof GaussKronrodModule.adaptiveQuadrature;
+  };
+  const mc = MonteCarloModule as {
+    monteCarloEstimate: typeof MonteCarloModule.monteCarloEstimate;
+  };
+  const originalQuadrature = gk.adaptiveQuadrature;
+  const originalMonteCarlo = mc.monteCarloEstimate;
+  const counts = { quadrature: 0, samples: 0 };
+  gk.adaptiveQuadrature = (f, ...rest) =>
+    originalQuadrature((x) => {
+      counts.quadrature += 1;
+      return f(x);
+    }, ...rest);
+  mc.monteCarloEstimate = (f, ...rest) =>
+    originalMonteCarlo((x) => {
+      counts.samples += 1;
+      return f(x);
+    }, ...rest);
+  try {
+    fn();
+  } finally {
+    gk.adaptiveQuadrature = originalQuadrature;
+    mc.monteCarloEstimate = originalMonteCarlo;
+  }
+  return counts;
 }
 
 describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
@@ -180,9 +235,18 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     // power expansion (`expandPower`) and rule scan (`matchAnyRules`) against
     // the deadline, so compilation degrades to quadrature instead of hanging.
     // (Tycho item 8, 2026-07-15.)
+    // The checkpoint itself is pinned deterministically elsewhere: the
+    // "Symbolic integration (power expansion / rule scan)" block in
+    // `test/compute-engine/timeout.test.ts` asserts that the same integrand
+    // throws `CancellationError` under a span — an outcome unreachable
+    // without the checkpoints, since an unchecked expansion simply runs to
+    // completion. What this test adds is the compile-level OUTCOME. The jest
+    // per-test timeout is a deliberately generous hang backstop (the compile
+    // takes ~1.2 s on an idle machine) and must not be tightened toward the
+    // observed duration: elapsed time under parallel test load measures the
+    // machine, not the engine.
     test('high-power integrand degrades to quadrature at the deadline', () => {
       const engine = new ComputeEngine();
-      const start = Date.now();
       const r = engine.withTimeLimit(
         { ms: 500, label: 'test:high-power-integrand' },
         () =>
@@ -193,15 +257,12 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
             { realOnly: true }
           )
       );
-      const elapsed = Date.now() - start;
       expect(r.success).toBe(true);
       // Fell back to quadrature rather than baking a closed form.
       expect(r.code).toContain('_SYS.integrate(');
-      // Bounded by a small multiple of the 500ms limit, not the ~5s hang.
-      expect(elapsed).toBeLessThan(3000);
       // The compiled quadrature runner still produces a finite value.
       expect(Number.isFinite(r.run() as number)).toBe(true);
-    });
+    }, 30000);
 
     // The item-8 bound above only fires when the CALLER arms a span. Since
     // `ce.timeLimit` was retired, a compile with no enclosing span ran the
@@ -223,37 +284,70 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       test.each([
         ['no enclosing span', undefined],
         ['enclosing 2 s span', 2000],
-      ])('%s', (_label, spanMs) => {
-        const engine = new ComputeEngine();
-        const expr = engine.parse(CHI2_TAIL, { strict: false });
-        const start = Date.now();
-        const run = () => compile(expr, { realOnly: true });
-        const r =
-          spanMs === undefined
-            ? run()
-            : engine.withTimeLimit({ ms: spanMs, label: 'test:item-98' }, run);
-        const elapsed = Date.now() - start;
+      ])(
+        '%s',
+        (_label, spanMs) => {
+          const engine = new ComputeEngine();
+          const expr = engine.parse(CHI2_TAIL, { strict: false });
+          const run = () => compile(expr, { realOnly: true });
+          const r =
+            spanMs === undefined
+              ? run()
+              : engine.withTimeLimit(
+                  { ms: spanMs, label: 'test:item-98' },
+                  run
+                );
 
-        expect(r.success).toBe(true);
-        // Degraded to quadrature rather than baking a closed form.
-        expect(r.code).toContain('_SYS.integrate(');
-        // Bounded by the compile-time attempt budget, not the >2 min hang.
-        expect(elapsed).toBeLessThan(15000);
-        // `k` stays a free symbol, bound at run time alongside `x`.
-        expect(r.run({ x: X_CRIT, k: 2 }) as number).toBeCloseTo(0.05, 8);
-        expect(r.run({ x: 1, k: 2 }) as number).toBeCloseTo(
-          Math.exp(-0.5), // 0.6065306597126334
-          8
-        );
-      });
+          expect(r.success).toBe(true);
+          // Degraded to quadrature rather than baking a closed form. This is
+          // the deterministic evidence that the attempt was abandoned: an
+          // unbounded `tryIntegrationByParts` search never returns at all, so
+          // reaching a quadrature emission means the budget fired. The jest
+          // per-test timeout below is the hang backstop for the "never
+          // returns" case, set far above the observed compile cost so that
+          // load on the machine cannot decide the verdict.
+          expect(r.code).toContain('_SYS.integrate(');
+          // `k` stays a free symbol, bound at run time alongside `x`.
+          expect(r.run({ x: X_CRIT, k: 2 }) as number).toBeCloseTo(0.05, 8);
+          expect(r.run({ x: 1, k: 2 }) as number).toBeCloseTo(
+            Math.exp(-0.5), // 0.6065306597126334
+            8
+          );
+        },
+        60000
+      );
     });
   });
 
-  test('performance smoke — 50 calls under 2 s', () => {
-    const r = compileReal('\\int_0^x 0.1\\sqrt{1+t^2}\\,dt');
-    const start = Date.now();
-    for (let i = 0; i < 50; i++) r.run({ x: 1 + (i % 5) });
-    expect(Date.now() - start).toBeLessThan(2000);
+  // Cost smoke test for the compiled quadrature runner. The work is bounded by
+  // integrand EVALUATIONS rather than by elapsed milliseconds, so the verdict
+  // does not depend on how loaded the machine is, and the evaluations counted
+  // are the ones this artifact's own `run()` performs — see
+  // `countIntegrandEvals`.
+  //
+  // The integrand has to be one the antiderivative-first path declines, or the
+  // artifact is a straight-line closed form that never integrates at run time
+  // and there is no per-call cost left to bound: `e^{-t^4}` has no elementary
+  // antiderivative, and the `_SYS.integrate(` assertion pins that it did in
+  // fact compile to quadrature. Measured 240 evaluations per call at every
+  // bound the loop uses; the bound below leaves room for panel-splitting tweaks
+  // while still catching an order-of-magnitude regression (e.g. a fall-through
+  // to Monte Carlo, which draws 10⁴–10⁷ samples).
+  test('cost smoke — compiled runner stays within its evaluation budget', () => {
+    const r = compileReal('\\int_0^x e^{-t^4}\\,dt');
+    expect(r.code).toContain('_SYS.integrate(');
+    for (let i = 0; i < 50; i++) {
+      const x = 1 + (i % 5);
+      const counts = countIntegrandEvals(() => {
+        expect(Number.isFinite(r.run({ x }) as number)).toBe(true);
+      });
+      const evals = counts.quadrature + counts.samples;
+      // A count of zero would mean the instrumentation missed the path the
+      // runner took, not that the run was free — assert it fired before
+      // trusting the upper bound.
+      expect(evals).toBeGreaterThan(0);
+      expect(evals).toBeLessThan(1000);
+    }
   });
 
   // A multi-limit `Integrate` compiles to NESTED `_SYS.integrate` calls,
@@ -440,15 +534,32 @@ describe('non-finite integrand fails fast (Tycho item 96)', () => {
     // integrand identically NaN. Adaptive quadrature can never converge on it,
     // so it fell through to a 1e7-sample Monte Carlo — ~250-450 ms per call to
     // produce a NaN. The probe in `monteCarloEstimate` decides it immediately.
-    const r = compileReal('\\int_{-10}^{10} (x + q)\\,dx');
-    const t0 = Date.now();
-    const got = r.run({ q: NaN }) as number;
-    const elapsed = Date.now() - t0;
+    //
+    // The integrand has to be one the antiderivative-first path declines
+    // (`sin(x²+q)` has no elementary antiderivative, which the `_SYS.integrate(`
+    // assertion pins): a closed form would produce its NaN by plain arithmetic
+    // and never reach the estimator whose budget is under test.
+    const r = compileReal('\\int_{-10}^{10} \\sin(x^2+q)\\,dx');
+    expect(r.code).toContain('_SYS.integrate(');
 
-    expect(Number.isNaN(got)).toBe(true);
-    // Generous bound: the point is the two-orders-of-magnitude collapse, not a
-    // tight timing pin. Pre-fix this single call took 250-450 ms.
-    expect(elapsed).toBeLessThan(100);
+    // The saving is pinned by SAMPLE COUNT, not by elapsed time, and the
+    // samples counted are the ones this `run()` draws: `countIntegrandEvals`
+    // instruments `monteCarloEstimate` — the routine the compiled runner falls
+    // through to — for the duration of the call. The probe decides after 32
+    // samples; before the fix all 10⁷ that the fall-through requests were drawn
+    // (~250-450 ms per call). The bound leaves room for the probe size to be
+    // retuned while still catching a return to draining the budget.
+    let value: number | undefined = undefined;
+    const counts = countIntegrandEvals(() => {
+      value = r.run({ q: NaN }) as number;
+    });
+    expect(Number.isNaN(value as unknown as number)).toBe(true);
+    expect(counts.samples).toBeLessThan(1000);
+    // The quadrature counter firing is what makes the sample bound meaningful:
+    // it proves the run really went through the instrumented integration path,
+    // so a low sample count is the probe bailing out early rather than the
+    // instrumentation missing the call.
+    expect(counts.quadrature).toBeGreaterThan(0);
   });
 
   test('a genuine endpoint singularity is still integrated', () => {
@@ -864,16 +975,16 @@ describe('divergent integrals are not laundered (Tycho item 136)', () => {
       // Before: the loop bisected toward 0 until the corner panel reached the
       // denormal range (~1075 halvings, ~20 ms). Now it stops ~40 shells in.
       let evals = 0;
-      const t0 = Date.now();
       const r = adaptiveQuadrature((x) => {
         evals++;
         return 1 / x;
       }, 0, 1);
       expect(r.divergent).toBe(true);
-      // Measured ~1700 evaluations / <1 ms; loose bounds, the point is the
-      // order of magnitude (the pre-fix run used ~16 000).
+      // Measured ~1700 evaluations; loose bound, the point is the order of
+      // magnitude (the pre-fix run used ~16 000). The evaluation count is the
+      // whole assertion — an elapsed-time check alongside it added nothing
+      // except sensitivity to load on the machine running the suite.
       expect(evals).toBeLessThan(6000);
-      expect(Date.now() - t0).toBeLessThan(200);
     });
   });
 

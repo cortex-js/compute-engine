@@ -248,9 +248,11 @@ describe('Epsil CLI check: canonicalization-time type errors', () => {
       'x + i',
     ].join('\n');
     const { io } = makeIo();
-    const start = Date.now();
+    // Returning exit code 0 is the assertion: the source contains
+    // `while true { ... }`, so a `check` that EVALUATED instead of only
+    // canonicalizing would never return at all. The jest per-test timeout is
+    // the backstop for that; elapsed milliseconds would measure the machine.
     expect(await main(['check', '-e', source], io)).toBe(0);
-    expect(Date.now() - start).toBeLessThan(5000);
   });
 });
 

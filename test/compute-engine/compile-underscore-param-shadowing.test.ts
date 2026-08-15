@@ -154,3 +154,145 @@ describe('COMPILE: a `_` lambda parameter does not shadow the vars object', () =
     expect(r?.run?.({})).toBe(385);
   });
 });
+
+/**
+ * A call whose HEAD is a bound name — a function literal's parameter, a
+ * definition's parameter — applies that BINDING, never a same-named engine
+ * definition. The compiler had two ways to reach the engine definition anyway,
+ * and both produced a silently wrong compiled artifact:
+ *
+ *  1. `tryCompileUserFunction` resolves a head by NAME through the engine's
+ *     definitions, so `(f, x) ↦ f(x)` with an engine-level `f` emitted
+ *     `_fn_f(x)` and the compiled function ignored its own `f` argument;
+ *  2. the constant-fold gate `mentionsCompileBoundName` tested only
+ *     value-position symbols, not application heads, so the closed-looking
+ *     body of `(g) ↦ g(2)` was evaluated through the engine — applying the
+ *     engine's `g` — and baked as `(g) => 3`.
+ *
+ * Both now refuse: a call of a bound head has no lowering, compilation
+ * declines, and the interpreter — which resolves the parameter correctly as of
+ * 2026-08-14 — evaluates it. Ruled by the user 2026-08-14: fail closed now;
+ * emitting a direct call of the bound parameter (true higher-order
+ * compilation) remains a possible future feature.
+ *
+ * The last two cases check the other direction — that the refusal is not
+ * over-broad. A head bound by a binder the compiler itself lowers (a `Sum`
+ * index) or by a block-local declaration is one the compiler CAN emit, so both
+ * still compile; the block-local one also used to fold to the engine-level
+ * function's answer, so it is a fixed case as well as a canary.
+ */
+describe('COMPILE — a call whose head is a bound parameter', () => {
+  it('never resolves a lambda-parameter head to the engine global', () => {
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.parse('(t)\\mapsto t + 1'));
+    const literal = ce.parse('(f,x)\\mapsto f(x)');
+
+    // The reference answer: applying the ARGUMENT `x ↦ 10x` to 2 is 20. The
+    // engine-level `f` would give 3, which is the wrong-answer signature.
+    const interpreted = ce
+      .box([
+        'Apply',
+        literal.json as never,
+        ['Function', ['Multiply', 'x', 10], 'x'],
+        2,
+      ] as never)
+      .evaluate();
+    expect(interpreted.re).toBe(20);
+
+    const result = compile(literal);
+    // Whatever the compiler does with this shape, it must agree with the
+    // interpreter. Today it declines, so the answer comes from the engine; if
+    // direct higher-order compilation is added later, `success` becomes true
+    // and the emitted `run` must return the same 20.
+    const answer = result.success
+      ? (result.run as (...args: unknown[]) => number)(
+          (v: number) => v * 10,
+          2
+        )
+      : interpreted.re;
+    expect(answer).toBe(20);
+    // In no case may the artifact carry a call to the engine-level `f`.
+    expect(result.code).not.toContain('_fn_f');
+  });
+
+  it('never constant-folds a call whose head is a lambda parameter', () => {
+    const ce = new ComputeEngine();
+    ce.assign('gg', ce.parse('(t)\\mapsto t + 1'));
+    // The body `gg(2)` looks closed — no free symbols — so the fold gate is
+    // what has to refuse it: `gg` is the parameter, and its value is not known
+    // until the literal is applied.
+    const literal = ce.box(['Function', ['gg', 2], 'gg'] as never);
+
+    const interpreted = ce
+      .box([
+        'Apply',
+        literal.json as never,
+        ['Function', ['Multiply', 'x', 10], 'x'],
+      ] as never)
+      .evaluate();
+    expect(interpreted.re).toBe(20);
+
+    const result = compile(literal);
+    // `3` is the engine-level `gg` applied to 2 — the baked constant this
+    // pins against. An empty emission (the decline) trivially satisfies it.
+    expect(result.code).not.toMatch(/=>\s*3\b/);
+    expect(result.code).not.toContain('_fn_gg');
+  });
+
+  it('still folds a closed `Sum` whose INDEX shares a global function name (canary)', () => {
+    // The index `kk` is bound by the `Sum`, which the compiler lowers itself,
+    // and the whole `Sum` is closed at the point the fold is attempted — so
+    // folding it is legitimate and must not be refused. The value is the one
+    // the interpreter computes.
+    const ce = new ComputeEngine();
+    ce.assign('kk', ce.parse('(t)\\mapsto t + 100'));
+    const expr = ce.box(['Sum', ['kk', 2], ['Limits', 'kk', 1, 3]] as never);
+    const interpreted = expr.evaluate();
+
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.code).toBe(String(interpreted.re));
+  });
+
+  it('compiles a call of a BLOCK-LOCAL function to the LOCAL, not the global', () => {
+    // `bb` is declared inside the block, so the call means the local, which
+    // the block itself emits — a bound head the compiler CAN lower, so this
+    // shape must keep compiling rather than being swept into the refusal. It
+    // must also agree with the interpreter: 10 × 2 = 20. Before the fold gate
+    // tested application heads, the body folded through the engine and the
+    // artifact returned the engine-level `bb`'s answer, 3.
+    const ce = new ComputeEngine();
+    ce.assign('bb', ce.parse('(t)\\mapsto t + 1'));
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        [
+          'Declare',
+          'bb',
+          [
+            'Dictionary',
+            [
+              'KeyValuePair',
+              'value',
+              ['Function', ['Multiply', 't', 10], 't'],
+            ],
+          ],
+        ],
+        ['bb', 2],
+      ],
+      'z',
+    ] as never);
+
+    const interpreted = ce
+      .box(['Apply', literal.json as never, 0] as never)
+      .evaluate();
+    expect(interpreted.re).toBe(20);
+
+    const result = compile(literal);
+    expect(result.success).toBe(true);
+    expect(
+      (result.run as (...args: unknown[]) => number)(0)
+    ).toBe(20);
+  });
+});

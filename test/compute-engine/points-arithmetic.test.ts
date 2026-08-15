@@ -857,47 +857,44 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
   // collection at canonicalization time (item 16: `\frac{[1...1e8]}{2}` hung
   // `ce.parse`). A concrete lazy collection with no free variables is now
   // accepted without walking; element validation is deferred to evaluate time.
+  // Every source below is sized at 10⁸ elements deliberately: a walk of that
+  // many elements does not finish, so "canonicalization returned at all" is
+  // the assertion, and the jest per-test timeout is the backstop. That is a
+  // termination property, identical on every machine — unlike the elapsed-
+  // millisecond budgets this replaced, which reported machine load and went
+  // red under a parallel full-suite run.
   test('numeric op over a huge lazy Range canonicalizes without materializing', () => {
     const ce = new ComputeEngine();
-    let start = Date.now();
     const a = ce.box(['Add', ['Range', 1, 1e8], 1]);
     expect(a.operator).toBe('Add');
-    expect(Date.now() - start).toBeLessThan(2000);
 
     // item-16 shape via LaTeX.
-    start = Date.now();
     const f = ce.parse('\\frac{[1...100000000]}{2}');
     expect(f.isValid).toBe(true);
-    expect(Date.now() - start).toBeLessThan(2000);
 
     // A lazy collection with a FREE VARIABLE (`k`) in its mapping function must
-    // still canonicalize fast. Walking it to type-check/infer elements would
-    // materialize all 2e5 — and the walk cost does not depend on free
-    // variables, so the lazy fast path must skip it REGARDLESS of `unknowns`
-    // (previously the `unknowns.length === 0` guard forced a ~5s materializing
-    // walk here). Element type is numeric, so it stays valid.
-    start = Date.now();
+    // still canonicalize without walking. The walk cost does not depend on
+    // free variables, so the lazy fast path must skip it REGARDLESS of
+    // `unknowns` (previously the `unknowns.length === 0` guard forced a
+    // materializing walk here). Element type is numeric, so it stays valid.
     const m = ce.box([
       'Add',
-      ['Map', ['Function', ['Add', 'x', 'k'], 'x'], ['Range', 1, 200000]],
+      ['Map', ['Function', ['Add', 'x', 'k'], 'x'], ['Range', 1, 1e8]],
       1,
     ]);
     expect(m.isValid).toBe(true);
-    expect(Date.now() - start).toBeLessThan(2000);
 
     // A lazy collection whose static element type is genuinely indeterminate
     // (`indexed_collection<unknown>`) — with a free variable in the body — also
     // reaches the fail-open lazy path: element validation is deferred to
     // evaluate time, so canonicalization stays fast and valid.
     ce.declare('col', ce.type('indexed_collection<unknown>'));
-    start = Date.now();
     const u = ce.box([
       'Add',
       ['Map', ['Function', ['Add', 'x', 'k'], 'x'], 'col'],
       1,
     ]);
     expect(u.isValid).toBe(true);
-    expect(Date.now() - start).toBeLessThan(2000);
   });
 
   // Regression (companion to the fast-path test above): a lazy collection whose
@@ -909,16 +906,16 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
   test('a lazy string-typed collection is rejected by a numeric op without walking', () => {
     const ce = new ComputeEngine();
     ce.declare('sfn', ce.type('(integer) -> string'));
-    const start = Date.now();
+    // Sized at 10⁸ elements so that "rejected on the static type alone" is a
+    // termination property rather than a stopwatch reading: a walk of the
+    // elements would not finish, and the jest per-test timeout is the backstop.
     const r = ce.box([
       'Add',
-      ['Map', ['Function', ['sfn', 'x'], 'x'], ['Range', 1, 2000000]],
+      ['Map', ['Function', ['sfn', 'x'], 'x'], ['Range', 1, 1e8]],
       1,
     ]);
     expect(r.isValid).toBe(false);
     expect(errorCode(r.op1) ?? errorCode(r)).toBe('incompatible-type');
-    // Rejected on the static type alone — no 2e6-element walk.
-    expect(Date.now() - start).toBeLessThan(2000);
   });
 
   test('scalar · tuple and tuple · tuple are unchanged', () => {
@@ -960,11 +957,12 @@ describe('ELEMENTWISE BROADCAST — hybrid laziness (huge collections)', () => {
     expect(at101.count).toBe(101);
   });
 
-  test('Add(Range(1,1e8), 1) evaluates promptly to a lazy Map', () => {
+  // Laziness is pinned structurally — the result is a `Map` with
+  // `isLazyCollection`, which an eager evaluation could not produce — and by
+  // the fact that evaluation returns at all over a 10⁸-element source.
+  test('Add(Range(1,1e8), 1) evaluates to a lazy Map without enumerating', () => {
     const ce = new ComputeEngine();
-    const start = Date.now();
     const r = ce.box(['Add', ['Range', 1, 1e8], 1]).evaluate();
-    expect(Date.now() - start).toBeLessThan(2000);
     expect(r.operator).toBe('Map');
     expect(r.isLazyCollection).toBe(true);
     expect(r.count).toBe(1e8);
@@ -988,9 +986,9 @@ describe('ELEMENTWISE BROADCAST — hybrid laziness (huge collections)', () => {
 
   test('a broadcastable unary op over a huge Range is lazy', () => {
     const ce = new ComputeEngine();
-    const start = Date.now();
+    // As above: the lazy `Map` result and the fact that evaluation terminates
+    // over 10⁸ elements are together the whole assertion.
     const r = ce.box(['Sin', ['Range', 1, 1e8]]).evaluate();
-    expect(Date.now() - start).toBeLessThan(2000);
     expect(r.operator).toBe('Map');
     expect(r.isLazyCollection).toBe(true);
     expect(r.count).toBe(1e8);

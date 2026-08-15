@@ -85,6 +85,15 @@ describe('The Function-literal construction seam is the only builder', () => {
       // conformer's stored literal; it builds no arrow of its own.
       'compute-engine/engine-protocols.ts',
       'compute-engine/library/core.ts',
+      // Clause accumulation enforces the default-`!scope` ceiling for the
+      // multi-clause route: a clause set installs an `evaluate` DISPATCH
+      // function with an already-unioned effect row presented as author-stated,
+      // so the operator-definition constructor's walk-and-gate never sees a
+      // clause body and `defineFunctionClause` has to run the walk itself. It
+      // RUNS the walk over the incoming clause literal to read `escapingWrite`;
+      // every arrow it handles comes from that literal's own `.type`, so it
+      // builds none.
+      'compute-engine/multi-clause.ts',
     ].sort();
 
     const importers = sourceFiles()

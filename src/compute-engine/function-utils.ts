@@ -2734,15 +2734,42 @@ function isApplicableDef(def: BoxedDefinition): boolean {
  * skips it (`N(x)` numericizes). If no applicable definition exists anywhere
  * in the chain, the innermost binding is returned unchanged so the ordinary
  * "not a function" diagnostics still apply.
+ *
+ * Pass `engine` from a CANONICALIZATION-time caller. A name introduced by the
+ * construct being canonicalized — a function literal's parameter, a `Block`'s
+ * `Declare`d local — shadows any same-named binding of the enclosing context,
+ * and must do so in operator position as well as in value position. Its
+ * binding may not exist yet when a call to it is canonicalized (the body of
+ * `(g) ↦ g(2)` is canonicalized before its parameters are declared), and
+ * without the engine the walk then escapes to the enclosing binding and caches
+ * it on the node: `const g = (x) ↦ x + 1; const f = (g) ↦ g(2)` applied the
+ * OUTER `g`, so `f(x ↦ 10x)` answered 3 instead of 20. Callers with no
+ * canonicalization in progress (the compiler, `D`) omit it.
  */
 export function lookupApplicable(
   id: MathJsonSymbol,
-  scope: Scope
+  scope: Scope,
+  engine?: ComputeEngine
 ): undefined | BoxedDefinition {
   console.assert(typeof id === 'string' && id.length > 0);
+
+  // A shadowed name resolves to the binding the shadowing construct's own
+  // references already created, if any; otherwise the walk below stops before
+  // the scope enclosing that construct, so a binding from outside it is never
+  // reached. Returning nothing leaves the head undeclared, which is exactly the
+  // state it would be in with no enclosing binding of that name — the caller
+  // then auto-declares it locally, as it already does for `(g) ↦ g(2)` written
+  // where no outer `g` exists.
+  let boundary: Scope | undefined;
+  if (engine?._isShadowedParameter(id)) {
+    const shadowed = engine._shadowedParameterDef(id);
+    if (shadowed !== undefined) return shadowed;
+    boundary = engine._shadowedParameterBoundary(id);
+  }
+
   let innermost: BoxedDefinition | undefined;
   let currentScope: Scope | null = scope;
-  while (currentScope) {
+  while (currentScope && currentScope !== boundary) {
     const def = currentScope.bindings.get(id);
     if (def) {
       if (isApplicableDef(def)) return def;

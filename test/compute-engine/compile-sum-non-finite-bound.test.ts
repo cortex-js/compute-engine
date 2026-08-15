@@ -60,9 +60,7 @@ describe('Sum/Product with a non-finite bound fails closed (D6)', () => {
     // The unroll path runs `for (k = lower; k <= upper; k++)` at COMPILE time:
     // reaching it with an infinite bound would hang the compiler itself.
     // Returning at all is the assertion; the message pins which arm declined.
-    const start = Date.now();
     const result = compile(INFINITE_SUM(), { constantFold: false });
-    expect(Date.now() - start).toBeLessThan(5000);
     expect(result.success).toBe(false);
   });
 

@@ -132,7 +132,17 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
 
       it('a scope-writing body surfaces `{scope}`', () => {
         const ce = new ComputeEngine();
-        ce.declare('bump', declaration);
+        // The `scope` must be DECLARED since the default-`!scope` ceiling
+        // (2026-08-15) extended to declare-then-assign: a writer body on a
+        // bare declaration is refused, not installed. The head-position
+        // surfacing this test pins is unchanged — the declared arrow and the
+        // stored value's arrow are unioned by `valueBindingEffects`.
+        ce.declare(
+          'bump',
+          spelling === 'type'
+            ? { type: '(number) scope -> number' }
+            : { signature: '(number) scope -> number' }
+        );
         ce.assign(
           'bump',
           ce.parse('x \\mapsto \\mathrm{Assign}(\\mathrm{tally}, x)')
@@ -141,6 +151,17 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
           expect(eff(e)).toEqual(['scope']);
           expect(e.isPure).toBe(false);
         }
+      });
+
+      it('a scope-writing body on a BARE declaration is refused (the ceiling)', () => {
+        const ce = new ComputeEngine();
+        ce.declare('bump2', declaration);
+        expect(() =>
+          ce.assign(
+            'bump2',
+            ce.parse('x \\mapsto \\mathrm{Assign}(\\mathrm{tally}, x)')
+          )
+        ).toThrow(/scope/);
       });
 
       it('a drawing body surfaces `{random}` — including against a pure-declared arrow', () => {

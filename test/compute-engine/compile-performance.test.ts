@@ -1,16 +1,33 @@
 import { engine as ce } from '../utils';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 /**
  * Performance benchmarks for the compilation system
  *
  * These tests measure:
- * - Compilation time
+ * - Compilation cost, as a deterministic count of compiler node visits
  * - Execution time (interpreted vs compiled)
  * - Memory usage
  * - Performance with different targets
  * - Impact of operator customization
+ *
+ * COMPILATION COST IS NEVER ASSERTED IN MILLISECONDS. A wall-clock budget for
+ * compilation measures how loaded the machine is: the same assertions passed
+ * in isolation and failed under a parallel full-suite run, which made a red
+ * run uninformative. What a compile-cost test is actually defending against is
+ * an algorithmic blowup — a traversal that revisits nodes, or per-compile state
+ * that accumulates across calls — and that is visible as a node-visit count,
+ * which is identical on every machine. `countCompileVisits` below counts calls
+ * to `BaseCompiler.compile`, the single recursive entry point every target's
+ * emitter routes through.
+ *
+ * The execution-speed comparisons further down (compiled runner vs
+ * interpreter) are still timed, because there is no counter that can stand in
+ * for "the generated code runs faster than the interpreter". They compare two
+ * measurements taken back to back in the same process, so load affects both
+ * sides, and their observed margins are one to two orders of magnitude.
  */
 
 describe('COMPILATION PERFORMANCE', () => {
@@ -33,6 +50,34 @@ describe('COMPILATION PERFORMANCE', () => {
     return end - start;
   }
 
+  /**
+   * Count the compiler node visits performed by `fn`.
+   *
+   * `BaseCompiler.compile` is the recursive entry point: every target emitter
+   * (JavaScript, GLSL, Python, …) descends into operands by calling it on the
+   * `BaseCompiler` class object, so temporarily replacing that static method
+   * observes the whole traversal regardless of target. The count is a pure
+   * function of the expression and the options — no timers involved — so the
+   * bounds asserted against it mean the same thing on every machine and under
+   * any amount of concurrent test load.
+   */
+  function countCompileVisits(fn: () => void): number {
+    const original = BaseCompiler.compile;
+    let visits = 0;
+    (BaseCompiler as { compile: typeof BaseCompiler.compile }).compile =
+      function (this: unknown, ...args: Parameters<typeof original>) {
+        visits += 1;
+        return original.apply(this, args);
+      } as typeof BaseCompiler.compile;
+    try {
+      fn();
+    } finally {
+      (BaseCompiler as { compile: typeof BaseCompiler.compile }).compile =
+        original;
+    }
+    return visits;
+  }
+
   // Helper to measure memory (approximation)
   function measureMemory(fn: () => any): number {
     if (global.gc) {
@@ -45,17 +90,29 @@ describe('COMPILATION PERFORMANCE', () => {
   }
 
   describe('Simple Expressions', () => {
-    it('should compile simple arithmetic quickly', () => {
+    it('should compile simple arithmetic with a bounded, constant amount of work', () => {
       const expr = ce.parse('x + y');
 
-      const compilationTime = benchmark(() => {
+      const once = countCompileVisits(() => {
         compile(expr);
-      }, 1000);
+      });
+      const thousand = countCompileVisits(() => {
+        for (let i = 0; i < 1000; i++) compile(expr);
+      });
 
-      log(
-        `  Simple arithmetic compilation: ${(compilationTime / 1000).toFixed(3)}ms per compilation`
-      );
-      expect(compilationTime).toBeLessThan(1000); // Should be very fast
+      log(`  Simple arithmetic compilation: ${once} node visits`);
+
+      // `x + y` is `Add(x, y)`: the root plus its two operands, so three
+      // visits. The bound is loose enough to survive a target emitter that
+      // wraps an operand in one extra node, and tight enough that any
+      // re-traversal of the tree trips it.
+      expect(once).toBeLessThanOrEqual(8);
+      // Cost per compilation does not grow with the number of compilations
+      // already performed. This is the property the old millisecond budget
+      // was really guarding: per-compile state that accumulates (a cache
+      // keyed so it never hits, a naming inventory that is appended to
+      // instead of reset) shows up here as a superlinear total.
+      expect(thousand).toBe(once * 1000);
     });
 
     it('should execute compiled code faster than evaluation', () => {
@@ -238,46 +295,59 @@ describe('COMPILATION PERFORMANCE', () => {
   });
 
   describe('Different Targets', () => {
-    it('should compile to JavaScript efficiently', () => {
+    it('should compile to JavaScript with a bounded, constant amount of work', () => {
       const expr = ce.parse('x^2 + y^2');
 
-      const time = benchmark(() => {
+      const once = countCompileVisits(() => {
         compile(expr, { to: 'javascript' });
-      }, 1000);
+      });
+      const thousand = countCompileVisits(() => {
+        for (let i = 0; i < 1000; i++) compile(expr, { to: 'javascript' });
+      });
 
-      log(`  JavaScript target: ${(time / 1000).toFixed(3)}ms per compilation`);
-      expect(time).toBeLessThan(1000);
+      log(`  JavaScript target: ${once} node visits per compilation`);
+      // `x^2 + y^2` is `Add(Power(x,2), Power(y,2))`: five nodes, visited once
+      // each. Repeating the compilation costs exactly as much each time.
+      expect(once).toBeLessThanOrEqual(12);
+      expect(thousand).toBe(once * 1000);
     });
 
-    it('should compile to GLSL efficiently', () => {
+    it('should compile to GLSL with a bounded, constant amount of work', () => {
       const expr = ce.parse('x^2 + y^2');
 
-      const time = benchmark(() => {
+      const once = countCompileVisits(() => {
         compile(expr, { to: 'glsl' });
-      }, 1000);
+      });
+      const thousand = countCompileVisits(() => {
+        for (let i = 0; i < 1000; i++) compile(expr, { to: 'glsl' });
+      });
 
-      log(`  GLSL target: ${(time / 1000).toFixed(3)}ms per compilation`);
-      expect(time).toBeLessThan(1000);
+      log(`  GLSL target: ${once} node visits per compilation`);
+      expect(once).toBeLessThanOrEqual(12);
+      expect(thousand).toBe(once * 1000);
     });
 
     it('should handle target switching overhead', () => {
       const expr = ce.parse('\\sin(x) * \\cos(y)');
 
-      const jsTime = benchmark(() => {
+      const jsVisits = countCompileVisits(() => {
         compile(expr, { to: 'javascript' });
-      }, 500);
-
-      const glslTime = benchmark(() => {
+      });
+      const glslVisits = countCompileVisits(() => {
         compile(expr, { to: 'glsl' });
-      }, 500);
+      });
 
-      log(`  JavaScript target: ${(jsTime / 500).toFixed(3)}ms`);
-      log(`  GLSL target: ${(glslTime / 500).toFixed(3)}ms`);
-      log(`  Overhead: ${Math.abs(jsTime - glslTime).toFixed(2)}ms total`);
+      log(`  JavaScript target: ${jsVisits} node visits`);
+      log(`  GLSL target: ${glslVisits} node visits`);
 
-      // Both should be reasonably fast
-      expect(jsTime).toBeLessThan(500);
-      expect(glslTime).toBeLessThan(500);
+      // Switching target must not change the SHAPE of the traversal: both
+      // emitters walk the same expression tree once and differ only in the
+      // source they print. Comparing the two counts catches a target that
+      // starts re-descending (for example to decide a type it could have
+      // asked for once), which a wall-clock comparison of two consecutive
+      // benchmark loops could not distinguish from scheduler noise.
+      expect(jsVisits).toBe(glslVisits);
+      expect(jsVisits).toBeLessThanOrEqual(12);
     });
   });
 
@@ -286,26 +356,28 @@ describe('COMPILATION PERFORMANCE', () => {
       const expr = ce.parse('x + y * z');
 
       // Baseline: no customization
-      const baselineTime = benchmark(() => {
+      const baselineVisits = countCompileVisits(() => {
         compile(expr);
-      }, 1000);
+      });
 
       // With operator customization
-      const customTime = benchmark(() => {
+      const customVisits = countCompileVisits(() => {
         compile(expr, {
           operators: {
             Add: ['add', 11],
             Multiply: ['mul', 12],
           },
         });
-      }, 1000);
+      });
 
-      log(`  Baseline compilation: ${(baselineTime / 1000).toFixed(3)}ms`);
-      log(`  Custom operators: ${(customTime / 1000).toFixed(3)}ms`);
-      log(`  Overhead: ${((customTime - baselineTime) / 1000).toFixed(3)}ms`);
+      log(`  Baseline compilation: ${baselineVisits} node visits`);
+      log(`  Custom operators: ${customVisits} node visits`);
 
-      // Overhead should be minimal
-      expect(customTime - baselineTime).toBeLessThan(100);
+      // Supplying an operator table redirects the source a node prints; it
+      // must not add a traversal step. Equal visit counts state that exactly,
+      // where the previous "the two benchmark loops are within 100 ms of each
+      // other" could be satisfied or broken by scheduling alone.
+      expect(customVisits).toBe(baselineVisits);
     });
 
     it('should measure execution overhead of custom operators', () => {
@@ -493,25 +565,29 @@ describe('COMPILATION PERFORMANCE', () => {
     it('should benefit from repeated compilation of same expression', () => {
       const latex = 'x^2 + y^2';
 
-      // First compilation
-      const firstTime = benchmark(() => {
-        const expr = ce.parse(latex);
-        compile(expr);
-      }, 100);
+      // First batch of parse-and-compile round trips
+      const firstVisits = countCompileVisits(() => {
+        for (let i = 0; i < 100; i++) compile(ce.parse(latex));
+      });
 
-      // Subsequent compilations (same expression)
-      const cachedTime = benchmark(() => {
-        const expr = ce.parse(latex);
-        compile(expr);
-      }, 100);
+      // Second batch, identical work on an engine that has now seen this
+      // expression a hundred times
+      const secondVisits = countCompileVisits(() => {
+        for (let i = 0; i < 100; i++) compile(ce.parse(latex));
+      });
 
-      log(`  First compilation: ${(firstTime / 100).toFixed(3)}ms`);
-      log(`  Cached compilation: ${(cachedTime / 100).toFixed(3)}ms`);
-      log(`  Difference: ${((firstTime - cachedTime) / 100).toFixed(3)}ms`);
+      log(`  First batch: ${firstVisits} node visits`);
+      log(`  Second batch: ${secondVisits} node visits`);
 
-      // Both should be fast
-      expect(firstTime).toBeLessThan(1000);
-      expect(cachedTime).toBeLessThan(1000);
+      // Re-parsing and re-compiling the same LaTeX must cost the same on the
+      // hundredth round trip as on the first — no growth from a memo table
+      // that is consulted linearly, and no growth from an expression cache
+      // whose keys accumulate. Elapsed milliseconds could not express this:
+      // the two batches were each merely required to finish inside a fixed
+      // budget, so a slow but constant compile passed and a load spike
+      // failed.
+      expect(secondVisits).toBe(firstVisits);
+      expect(firstVisits).toBeLessThanOrEqual(100 * 12);
     });
   });
 });

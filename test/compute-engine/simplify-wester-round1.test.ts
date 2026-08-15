@@ -95,9 +95,12 @@ describe('B13 round 1 — rational-function cancellation in simplify()', () => {
 describe('B13 round 1 — recursion / cancellation regressions', () => {
   // Historical hazard: n/π triggered infinite recursion in cancellation.
   test('n/π does not recurse and stays n/π', () => {
-    const start = Date.now();
+    // Returning the unchanged quotient is the assertion. The hazard is
+    // unbounded mutual recursion between the cancellation rule and simplify,
+    // which does not return a value at all — it exhausts the stack or spins —
+    // so the jest per-test timeout is the backstop, and no elapsed-millisecond
+    // check is needed to tell the two apart.
     const r = ce.parse('\\frac{n}{\\pi}').simplify();
-    expect(Date.now() - start).toBeLessThan(2000);
     expect(r.json).toEqual(['Divide', 'n', 'Pi']);
   });
 
@@ -109,9 +112,10 @@ describe('B13 round 1 — recursion / cancellation regressions', () => {
   });
 
   test('(x²−4)/(x−2) cancellation does not hang', () => {
-    const start = Date.now();
+    // Same shape as the case above: producing `x + 2` is only possible if the
+    // cancellation terminated, and the jest per-test timeout covers the case
+    // where it does not.
     const r = ce.parse('\\frac{x^2-4}{x-2}').simplify();
-    expect(Date.now() - start).toBeLessThan(2000);
     expect(r.json).toEqual(['Add', 'x', 2]);
   });
 });

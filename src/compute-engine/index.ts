@@ -92,6 +92,10 @@ import {
   activeRollbackFrame,
 } from './inference-rollback.js';
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
+import {
+  _mapAutoCompileStats,
+  type MapAutoCompileStats,
+} from './map-auto-compile-stats.js';
 
 import { getStandardLibrary } from './library/library.js';
 
@@ -1446,6 +1450,27 @@ export class ComputeEngine implements IComputeEngine {
     return this._runtimeState.timeRemaining;
   }
 
+  /** Instrumentation counters for the auto-compilation of lazy-`Map` element
+   * lambdas on numeric drains — compile attempts, elements served by a
+   * compiled function, dependency re-validations, recompiles, per-element
+   * interpreter fallbacks and NaN double-checks. This is the only surface that
+   * says whether a given `Map` drain compiled, re-validated or fell back, and
+   * it is exposed here because that question is asked from a consumer install,
+   * where a module-level export of `library/map-auto-compile.ts` is not
+   * reachable (no subpath export, and the symbol does not survive
+   * minification).
+   *
+   * The counters are process-global and cumulative, not per-engine — the
+   * compile cache they instrument is a module-level `WeakMap` shared by every
+   * engine in the process — so every engine returns the same object, and a
+   * caller measures a single drain by reading the counters before and after it
+   * and taking the difference.
+   * @internal
+   */
+  get _mapAutoCompileStats(): MapAutoCompileStats {
+    return _mapAutoCompileStats;
+  }
+
   /** Throw `CancellationError` `iteration-limit-exceeded` when the iteration limit
    * in a loop is exceeded. Default: no limits.
    *
@@ -2251,6 +2276,13 @@ export class ComputeEngine implements IComputeEngine {
      * references (including those in nested Block scopes) reuse the SAME
      * binding instead of spawning a stray per-block copy. */
     defs: Map<string, BoxedDefinition>;
+    /** The lexical scope that was current when the frame was pushed — i.e. the
+     * scope ENCLOSING the construct that introduces these names (the scope a
+     * function literal is written in, the scope enclosing a `Block`). A
+     * shadowed name must never resolve to a binding in that scope or above it:
+     * such a binding belongs to the enclosing context, and the parameter (or
+     * block local) shadows it. */
+    boundary: Scope;
   }[] = [];
 
   /** @internal */
@@ -2262,6 +2294,7 @@ export class ComputeEngine implements IComputeEngine {
       names: new Set(names),
       types,
       defs: new Map(),
+      boundary: this.context.lexicalScope,
     });
   }
 
@@ -2283,6 +2316,19 @@ export class ComputeEngine implements IComputeEngine {
     const stack = this._shadowedParameterStack;
     for (let i = stack.length - 1; i >= 0; i--)
       if (stack[i].names.has(name)) return stack[i].types?.get(name);
+    return undefined;
+  }
+
+  /** The scope enclosing the construct that shadows `name` — the scope a
+   * function literal whose parameter is `name` is written in, or the scope
+   * enclosing a `Block` that declares `name`. A resolution of `name` must stop
+   * before reaching this scope: anything found at or above it is the enclosing
+   * context's binding, which the parameter (or block local) shadows.
+   * `undefined` when `name` is not an active shadowed parameter. @internal */
+  _shadowedParameterBoundary(name: string): Scope | undefined {
+    const stack = this._shadowedParameterStack;
+    for (let i = stack.length - 1; i >= 0; i--)
+      if (stack[i].names.has(name)) return stack[i].boundary;
     return undefined;
   }
 

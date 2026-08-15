@@ -1287,16 +1287,17 @@ describe('MATERIALIZATION PRESERVES STRUCTURAL ELEMENTS (enlist regression)', ()
   });
 
   test('materialization keeps an infinite lazy child as an element (no deadline burn)', () => {
-    const start = Date.now();
     const e = engine
       .box(['List', ['Cycle', ['List', 1, 2]]])
       .evaluate({ materialization: true });
     // The Cycle is kept as a single element (materialized to a bounded
-    // placeholder list), not spread into the outer list.
+    // placeholder list), not spread into the outer list. That count of 1 is
+    // itself the proof that the infinite child was not spread — spreading it
+    // does not terminate — so no elapsed-time assertion is needed, and the
+    // jest per-test timeout covers the non-terminating case.
     expect(e.operator).toEqual('List');
     expect(e.count).toEqual(1);
     expect([...e.each()][0].isCollection).toBe(true);
-    expect(Date.now() - start).toBeLessThan(500);
   });
 
   test('DictionaryFrom of a materialized pair-list yields a Dictionary', () => {
@@ -1670,24 +1671,22 @@ describe('ANY / ALL QUANTIFIERS', () => {
   test('Empty collection: All is True (vacuous)', () =>
     expect(evaluate(['All', emptyList, gt(0)])).toMatchInlineSnapshot(`True`));
 
+  // Short-circuiting is pinned by the ANSWER, not by elapsed time: a walk that
+  // did not stop at the deciding element would run through 10⁹ elements and
+  // never return a verdict, so producing `True`/`False` at all is the proof.
+  // The jest per-test timeout is the backstop for that non-terminating case.
   test('Any short-circuits over a huge lazy collection', () => {
-    const t0 = Date.now();
     const result = engine
       .box(['Any', ['Range', 1, 1_000_000_000], gt(5)])
       .evaluate();
-    const elapsed = Date.now() - t0;
     expect(result.symbol).toBe('True');
-    expect(elapsed).toBeLessThan(1000);
   });
 
   test('All short-circuits to False over a huge lazy collection', () => {
-    const t0 = Date.now();
     const result = engine
       .box(['All', ['Range', 1, 1_000_000_000], gt(5)])
       .evaluate();
-    const elapsed = Date.now() - t0;
     expect(result.symbol).toBe('False');
-    expect(elapsed).toBeLessThan(1000);
   });
 
   test('Any stays inert when the outcome is undetermined', () => {
@@ -1735,22 +1734,21 @@ describe('SCAN / DIFFERENCES / TAKEWHILE / DROPWHILE / FLATMAP', () => {
   test('Scan with an initial value seeds the first element', () =>
     expect(str(['Scan', ['List', 1, 2, 3], add, 10])).toEqual('[11,13,16]'));
 
-  test('Scan is lazy: Take over a huge Range is fast', () => {
-    const t0 = Date.now();
+  // Laziness is pinned by the fact that these return AT ALL: an eager Scan
+  // over 10⁹ elements does not terminate within any budget, so obtaining the
+  // first five cumulative sums, or a count, is itself the evidence. The jest
+  // per-test timeout is the backstop for the non-terminating case; an
+  // elapsed-millisecond assertion would only report how loaded the machine is.
+  test('Scan is lazy: Take over a huge Range does not enumerate the source', () => {
     const result = engine
       .box(['Take', ['Scan', ['Range', 1, 1_000_000_000], add], 5])
       .evaluate({ materialization: true });
-    const elapsed = Date.now() - t0;
     expect(result.toString()).toEqual('[1,3,6,10,15]');
-    expect(elapsed).toBeLessThan(1000);
   });
 
   test('Scan reports its count without enumerating', () => {
-    const t0 = Date.now();
     const count = engine.box(['Scan', ['Range', 1, 1_000_000_000], add]).count;
-    const elapsed = Date.now() - t0;
     expect(count).toBe(1_000_000_000);
-    expect(elapsed).toBeLessThan(1000);
   });
 
   test('Scan materializes to a List, not a Set (no generic-collection trap)', () => {
@@ -1774,15 +1772,15 @@ describe('SCAN / DIFFERENCES / TAKEWHILE / DROPWHILE / FLATMAP', () => {
   test('Differences of a single-element list is empty', () =>
     expect(str(['Differences', ['List', 'x']])).toEqual('[]'));
 
+  // As with Scan above: returning a count at all proves the 10⁹-element source
+  // was not walked, since walking it does not terminate. The jest per-test
+  // timeout is the backstop.
   test('Differences reports its count without enumerating', () => {
-    const t0 = Date.now();
     const count = engine.box([
       'Differences',
       ['Range', 1, 1_000_000_000],
     ]).count;
-    const elapsed = Date.now() - t0;
     expect(count).toBe(999_999_999);
-    expect(elapsed).toBeLessThan(1000);
   });
 
   test('Differences materializes to a List, not a Set', () => {
@@ -2302,11 +2300,12 @@ describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
     const ce = new ComputeEngine();
     const neverTrue: Expression = ['Function', ['Less', 'x', 0], 'x'];
     const filter: Expression = ['Filter', ['Range', 1, 'Infinity'], neverTrue];
-    const start = Date.now();
     // The guarded walk trips iteration-limit-exceeded, which isEmpty swallows,
     // so the observable result is `undefined` (unknown) rather than a hang.
+    // Getting an answer back is the assertion: an unguarded walk of an
+    // infinite never-matching Filter never produces one. The jest per-test
+    // timeout below is the hang backstop, deliberately far above the real cost.
     expect(ce.box(filter).isEmptyCollection).toBeUndefined();
-    expect(Date.now() - start).toBeLessThan(5000);
   }, 15_000);
 
   it('bounds First over an infinite never-matching Filter via the iteration limit with NO deadline', () => {
@@ -2325,9 +2324,10 @@ describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
       'First',
       ['Filter', ['Range', 1, 'Infinity'], neverTrue],
     ];
-    const start = Date.now();
+    // Returning the absence marker at all is the assertion: an unguarded walk
+    // of an infinite never-matching Filter never returns. The jest per-test
+    // timeout below is the hang backstop, deliberately far above the real cost.
     expect(ce.box(first).evaluate().isNaN).toBe(true);
-    expect(Date.now() - start).toBeLessThan(5000);
   }, 15_000);
 });
 
@@ -2507,8 +2507,9 @@ describe('SYMBOLIC-BOUND COLLECTIONS STAY INERT', () => {
 
   test('extrema over an unenumerable collection stay inert (no grind, no drop)', () => {
     // Map over a continuous Interval: the dyadic sampler used to grind
-    // until the evaluation deadline (>seconds); now inert immediately.
-    const start = Date.now();
+    // until the evaluation deadline (>seconds); now inert immediately. The
+    // inert `Min` operator below is the deterministic evidence: a sampler that
+    // ground away would have returned a number, not the unevaluated form.
     const r = engine
       .expr([
         'Min',
@@ -2520,7 +2521,6 @@ describe('SYMBOLIC-BOUND COLLECTIONS STAY INERT', () => {
       ])
       .evaluate();
     expect(r.operator).toBe('Min');
-    expect(Date.now() - start).toBeLessThan(2000);
 
     // Map over a Linspace with a symbolic endpoint reports count 3 but
     // declines enumeration: it used to VANISH from the result
@@ -3166,8 +3166,11 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
   // view (count / at / iterator). The predicate form is EXEMPT (no lazy view).
 
   // Large finite: evaluate stays symbolic, facets serve the view cheaply.
+  // Laziness is pinned by the INERT operator and by index-addressed lookups,
+  // not by elapsed time: a materialized Partition would evaluate to a List of
+  // chunks instead of staying a `Partition`, which the first assertion below
+  // catches deterministically on any machine.
   test('Partition(large, n) is inert and served lazily', () => {
-    const t0 = Date.now();
     const p = engine.box(['Partition', ['Range', 1, 1_000_000], 1000]);
     expect(p.evaluate().operator).toBe('Partition');
     expect(engine.box(['Count', p]).evaluate().toString()).toBe('1000');
@@ -3178,7 +3181,6 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
         .evaluate()
         .toString()
     ).toBe('1001');
-    expect(Date.now() - t0).toBeLessThan(1500);
   });
 
   test('SlidingWindow(large, k, step) is inert and served lazily', () => {
@@ -3196,12 +3198,13 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
   });
 
   test('ChunkBy(large) reports its run count without materializing', () => {
-    const t0 = Date.now();
     // 300 singleton runs (every element distinct under the identity key).
+    // Non-materialization is pinned by the operator staying `ChunkBy` after
+    // evaluation, which is a deterministic structural fact; elapsed time added
+    // nothing to it.
     const cb = engine.box(['ChunkBy', ['Range', 1, 300], identity]);
     expect(cb.evaluate().operator).toBe('ChunkBy');
     expect(engine.box(['Count', cb]).evaluate().toString()).toBe('300');
-    expect(Date.now() - t0).toBeLessThan(1000);
   });
 
   // Infinite sources: the lazy view streams windows lazily under Take.
@@ -3361,12 +3364,13 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     // so the default `iterationLimit` (1024) applies.
     const ce = new ComputeEngine();
     const second: Expression = ['Second', ['Dedup', ['Cycle', ['List', 1, 1]]]];
-    const start = Date.now();
     // BREAKING (2026-07-22): out-of-band access yields the position-preserving
     // marker; with an indeterminate/infinite element domain that is `Missing`.
+    // Producing a marker at all is the assertion — an unguarded walk of this
+    // never-emitting source returns nothing, ever. The jest per-test timeout
+    // below is the hang backstop, deliberately far above the real cost.
     const r = ce.box(second).evaluate();
     expect(r.symbol === 'Missing' || r.isNaN === true).toBe(true);
-    expect(Date.now() - start).toBeLessThan(5000);
   }, 15_000);
 
   // --- Insert ------------------------------------------------------------
@@ -3463,10 +3467,13 @@ describe('HYBRID-LAZY INSERT / DELETEAT / REPLACEAT (threshold views)', () => {
     engine.box(expr).evaluate().toString();
 
   // (1) A large finite source stays symbolic and is served lazily by index
-  //     arithmetic — the wall-clock bound pins non-materialization.
+  //     arithmetic. Non-materialization is pinned structurally: each
+  //     `evaluate()` below must leave the operator in place (`Insert`,
+  //     `DeleteAt`, `ReplaceAt`) rather than produce a million-element List,
+  //     and the indexed lookups must answer from arithmetic on the source.
+  //     Those are deterministic facts about the result; the elapsed-time bound
+  //     this replaced measured the machine instead.
   test('large finite Insert/DeleteAt/ReplaceAt stay lazy views', () => {
-    const t0 = Date.now();
-
     expect(engine.box(['Insert', big, 2, 99]).evaluate().operator).toBe(
       'Insert'
     );
@@ -3486,8 +3493,6 @@ describe('HYBRID-LAZY INSERT / DELETEAT / REPLACEAT (threshold views)', () => {
     );
     expect(val(['At', ['ReplaceAt', big, 3, 99], 3])).toBe('99');
     expect(val(['At', ['ReplaceAt', big, 3, 99], 4])).toBe('4');
-
-    expect(Date.now() - t0).toBeLessThan(1500);
   });
 
   // (2) An infinite source is served by pure index arithmetic, plus one

@@ -200,14 +200,15 @@ describe('Parser: for-comprehensions', () => {
     // the work in a labelled span so the shared engine's limit is untouched.
     test('IndexOf on an infinite Range aborts within a time-limited span (C3)', () => {
       const ce2 = new ComputeEngine();
-      const t0 = Date.now();
+      // Throwing IS the assertion: a search over an infinite Range with no
+      // match and no deadline check never returns and never throws. The jest
+      // per-test timeout is the backstop for that case; an elapsed-millisecond
+      // check would only add sensitivity to load on the machine.
       expect(() =>
         ce2.withTimeLimit({ ms: 300, label: 'test:indexof-infinite-range' }, () =>
           ce2.expr(['IndexOf', ['Range', 1, Infinity], 0.5]).evaluate()
         )
       ).toThrow();
-      // Aborts promptly, not after minutes.
-      expect(Date.now() - t0).toBeLessThan(5000);
     });
   });
 });

@@ -56,6 +56,10 @@ import {
   functionLiteralDeclaredEffects,
   functionLiteralParameters,
 } from './boxed-expression/function-literal.js';
+import {
+  EffectContractError,
+  inferFunctionLiteralEffects,
+} from './boxed-expression/effects-inference.js';
 import { apply, lookup } from './function-utils.js';
 import { isMintedConstructor } from './type-constructors.js';
 import { isProtocolDispatcher } from './engine-protocols.js';
@@ -677,6 +681,44 @@ export function defineFunctionClause(
             : `The stated effects are narrower than the effects of an existing clause of "${id}"`
         );
 
+  // ── The default-`!scope` ceiling, for the CLAUSE route ──
+  //
+  // A named definition that states no effect contract promises it does not
+  // mutate the world: an escaping write (an assignment to a variable the body
+  // does not own, or an `Assume`) must be opted into with the `scope` effect —
+  // `function f(…) scope { … }` or a `(…) scope -> …` signature. See
+  // `docs/EFFECTS-MODEL.md`, "Scope is opt-in".
+  //
+  // The single-clause path gets this from the operator definition's
+  // constructor, which walks the body it is handed. Clause storage cannot:
+  // `installClauseList` builds `evaluate` as a JS dispatch function and hands
+  // the definition an already-unioned effect row as an author-STATED one, so
+  // the constructor's walk-and-gate never runs on a clause body. Hence this
+  // gate — only for the clause the caller is admitting right now, since every
+  // clause already in the list was gated when IT was admitted (the first one
+  // by the `ce.assign` shortcut above).
+  //
+  // The trigger is the walk's PROVEN-mutation bit, never the `scope` label of
+  // the inferred set: an unresolved forward-referenced head contributes `{any}`
+  // without proving anything, and gating on that would break mutual recursion.
+  // The gate is skipped entirely when the AUTHOR stated a row — an explicit
+  // clause specifier or a symbol row established by an earlier clause (D5), or
+  // an effect-carrying declared signature. Those are checked against every
+  // clause by the subset test above instead.
+  if (effectRow.explicit === undefined && declared?.effects === undefined) {
+    const inferred = inferFunctionLiteralEffects(ce, incoming.literal, {
+      selfName: id,
+    });
+    if (inferred.escapingWrite)
+      throw new EffectContractError(
+        id,
+        undefined,
+        inferred.effects,
+        undefined,
+        /* scopeDefault */ true
+      );
+  }
+
   installClauseList(ce, id, existing, clauses, effectRow, declared);
 }
 
@@ -728,6 +770,46 @@ function lookupInScope(
   id: string
 ): BoxedDefinition | undefined {
   return lookup(id, ce.context.lexicalScope) ?? undefined;
+}
+
+/**
+ * Give `id` a binding in the CURRENT scope when it only has one further out,
+ * so that the clause `defineFunctionClause` is about to install lands here
+ * instead of being written through to the enclosing definition.
+ *
+ * This is the RUNTIME half of the rule that a one-step function definition
+ * written inside a block or a function body is block-local: it binds where it
+ * is written, SHADOWS a same-named outer function rather than overwriting it,
+ * and dies with the frame. `canonicalBlock` (library/control-structures.ts)
+ * enforces the same rule at canonicalization time by hoisting the name into
+ * the block's own scope; that hoisted binding is not in the chain at
+ * evaluation time (a call frame is built from the parameters alone — see
+ * `makeLambda` step 5 in function-utils.ts), which is why the runtime needs
+ * its own shell. The two-step form `let f; f(x) = …` gets exactly this from
+ * `Declare`'s evaluate handler, which declares its name in the current scope.
+ *
+ * Two names are deliberately left to write through:
+ * - one already bound in the current scope — that is the accumulation target
+ *   (a second clause, or a redefinition in the same scope);
+ * - one owned by a declared nominal type, whose definition is a smart
+ *   CONSTRUCTOR definition: types are engine-global rather than scoped, so
+ *   the definition has to reach the type's constructor.
+ *
+ * A BUILTIN is left alone too: `defineFunctionClause` already recognizes a
+ * system-scope definition and shadows it rather than accumulating onto it.
+ */
+export function declareLocalClauseTarget(
+  ce: IComputeEngine,
+  id: string
+): void {
+  const scope = ce.context.lexicalScope;
+  if (scope.bindings.has(id)) return;
+  if (ce._typeRegistry[id]?.def !== undefined) return;
+  const existing = lookupInScope(ce, id);
+  if (existing === undefined) return;
+  const systemScope = ce.contextStack[0]?.lexicalScope;
+  if (systemScope?.bindings.get(id) === existing) return;
+  ce.declare(id, 'function');
 }
 
 /**

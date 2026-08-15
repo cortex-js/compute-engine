@@ -348,7 +348,6 @@ describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => 
     // s(k) = (3/2)·s(k−1) − s(k−2): 0, 2, 3, 5/2, 3/4, −11/8, … (bounded,
     // oscillating). Anchor 100 is never reached, so the search would grind.
     const fast = new ComputeEngine();
-    const t0 = Date.now();
     let threw: string | null = null;
     try {
       fast.withTimeLimit(
@@ -363,12 +362,13 @@ describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => 
     } catch (e) {
       threw = (e as Error).name;
     }
-    const elapsed = Date.now() - t0;
-    // Either the cooperative deadline cancels it, or a guard rejects the fit —
-    // but it must finish within a small multiple of the 1 s budget, not minutes.
+    // Either the cooperative deadline cancels it, or a guard rejects the fit.
+    // Reaching this line at all is the assertion: the behavior being guarded
+    // against runs for minutes without producing either outcome, so the jest
+    // per-test timeout below is the backstop, and an elapsed-millisecond check
+    // would only make the verdict depend on machine load.
     if (threw !== null) expect(threw).toBe('CancellationError');
-    expect(elapsed).toBeLessThan(8000);
-  });
+  }, 60_000);
 });
 
 describe('Interpret — alternating sequences through natural LaTeX', () => {

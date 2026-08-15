@@ -401,7 +401,10 @@ describe('FUNCTIONS WITH CONFLICTING ARGUMENTS AND LOCAL VARIABLES', () => {
 describe('RECURSIVE FUNCTION WITH OUTER VARIABLE', () => {
   beforeAll(() => {
     ce.pushScope();
-    ce.declare('fib', { type: '(number) -> number' });
+    // `scope` declared: the body writes the outer `counter`, which the
+    // default-`!scope` ceiling refuses on a bare declaration
+    // (docs/EFFECTS-MODEL.md, "Scope is opt-in").
+    ce.declare('fib', { type: '(number) scope -> number' });
     ce.declare('counter', { type: 'number', value: 0 });
     ce.assign(
       'fib',
@@ -665,7 +668,11 @@ describe('BigOp + Function interaction', () => {
     // f(3) should return a function g where g(y) = 6 + y
     ce.pushScope();
     try {
-      ce.declare('clbigop_f', 'function');
+      // `scope` declared: `clbigop_total` is captured by the returned
+      // closure, so its initializing write is not provably confined and the
+      // default-`!scope` ceiling refuses a bare declaration
+      // (docs/EFFECTS-MODEL.md, "Scope is opt-in").
+      ce.declare('clbigop_f', '(number) scope -> function');
       ce.assign(
         'clbigop_f',
         ce.expr([
@@ -916,7 +923,9 @@ describe('MULTIPLE CLOSURES OVER SAME VARIABLE', () => {
     ce.pushScope();
     try {
       ce.declare('mcv_x', { type: 'integer', value: 0 });
-      ce.declare('mcv_inc', 'function');
+      // `scope` declared on the writer (the default-`!scope` ceiling); the
+      // reader stays bare.
+      ce.declare('mcv_inc', '() scope -> integer');
       ce.declare('mcv_get', 'function');
       ce.assign(
         'mcv_inc',

@@ -104,7 +104,7 @@ after a builtin, check the system scope's binding is untouched) and, if
 it reproduces, the same shadowing-declare treatment the dispatcher path
 uses.
 
-### An Epsil function parameter does not shadow a same-named outer `const`
+### ~~An Epsil function parameter does not shadow a same-named outer `const`~~ (FIXED 2026-08-14)
 
 Reported 2026-08-14. The Epsil interpreter resolves a parameter to an
 outer binding of the same name, so a function receives the wrong value —
@@ -132,7 +132,74 @@ shape a defect can take here, since every parity comparison trusts it.
 Unowned as of filing: found while tracing a review finding, and the
 block-local function-compilation session declined it as outside its area.
 
-### Test assertions on wall-clock time make full-suite runs unreliable
+**Fixed 2026-08-14.** The defect was engine-wide canonicalization, not
+Epsil parsing: a function literal's body is deliberately canonicalized
+BEFORE its parameters are declared (declaring first breaks nested-closure
+capture), and while value-position symbol references compensated through
+the engine's shadowed-parameter stack, the OPERATOR-position resolver
+`lookupApplicable()` (`function-utils.ts`) did not — so the head of
+`g(2)` inside `(g) |-> g(2)` walked out to the enclosing scope, found the
+outer `g`, and cached that definition on the node permanently. The raw-
+MathJSON route only looked correct because `ce.box(wholeProgram)`
+canonicalizes every statement before any `Declare` evaluates, so no outer
+`g` existed yet; Epsil executes statement by statement. Fix:
+`lookupApplicable` now consults the shadowed-parameter stack and stops
+the scope walk at the recorded boundary scope (each stack frame records
+the lexical scope enclosing the construct at push time), so a shadowed
+head resolves to the construct's own binding or, when absent, is
+auto-declared locally exactly as in the no-outer-binding case. Regression
+tests: `test/epsil/execute.test.ts`, "a parameter shadows a same-named
+outer binding" (nine shapes, including the default-JIT hot loop). The
+compiled path's own head-position blindness is a SEPARATE surviving
+defect — see the next entry.
+
+### ~~The compiler resolves a head-position parameter to a same-named engine global~~ (RULED + FIXED 2026-08-14)
+
+Found 2026-08-14 while fixing the interpreter-side shadowing entry above,
+and independent of it: with `f` assigned in the engine,
+`compile(ce.parse('(f,x) |-> f(x)'))` emits code that inlines the GLOBAL
+`f` and ignores the function argument entirely — `run(v => v*10, 2)`
+returns 3 (global `t+1` applied), where the interpreter now correctly
+returns 20. Two mechanisms in `base-compiler.ts`, both verified
+load-bearing by toggling each off: `mentionsCompileBoundName` tests only
+value-position symbols and not the application head (unlike its sibling
+`mentionsExcludedName`), so `tryConstantFold` evaluates the call through
+the engine and bakes the constant; and `tryCompileUserFunction` resolves
+the head by name against engine definitions without checking
+`target.boundVars`. The same head blindness affects loop indices and
+block locals used in head position.
+
+Both one-line guards were implemented and verified (compiler fails
+closed, interpreter fallback answers correctly), then REVERTED, because
+two tests pin the current emission and explicitly forbid changing it
+there (`compile-cse.test.ts`, the two "calls the GLOBAL `f`" notes). That
+pin's stated justification — that head-position shadowing resolving to
+the global is "shared by the interpreter and the compiler" — is void now
+that the interpreter half is fixed, so the compiler is the only side
+answering wrongly. Needs a ruling: (a) fail closed (re-apply the two
+guards, rewrite the two CSE pins to assert fail-closed instead of
+`_fn_f(`), (b) keep as-is (compiled higher-order calls keep ignoring
+their function argument and disagreeing with the interpreter), or
+(c) compile the parameter call directly (genuine higher-order compile
+support, a feature, unattempted). With the guards in, the `compile*`
+suites were 2472 passed / 2 failed — the failures being exactly the two
+CSE pins; with them reverted, 2474 / 0.
+
+**Ruled 2026-08-14, option (a): fail closed.** Both guards are applied in
+`base-compiler.ts` (`isCompileBoundName` head check in the fold gate;
+`target.boundVars` check before `tryCompileUserFunction`), the two
+`compile-cse.test.ts` pins now assert the decline (`cannot compile`, no
+`_fn_f` in emitted code), and four behavioral tests landed in
+`compile-underscore-param-shadowing.test.ts` — including a case the fix
+round discovered was ALSO silently wrong: a call of a BLOCK-LOCAL
+function was fold-resolved to a same-named engine global (returned 3,
+now compiles to the local and returns 20). A closed `Sum` whose index
+shares a global function name still folds (over-refusal canary, 306
+both regimes). Direct higher-order compilation — emitting a real JS
+call of the parameter instead of declining — remains a possible future
+feature, recorded here, not a bug.
+
+### ~~Test assertions on wall-clock time make full-suite runs unreliable~~ (FIXED 2026-08-14)
 
 Several suites assert elapsed milliseconds, so they fail under parallel
 load and pass in isolation — the signal is machine state, not
@@ -153,24 +220,61 @@ rather than on the work itself — and the same remedy applies: assert a
 deterministic bound (iteration or step count), keeping a generous
 wall-clock limit only as a hang backstop rather than as the assertion.
 
-### The value-half two-step bypasses the default-`!scope` ceiling
+**Fixed 2026-08-14.** The sweep found ~90 elapsed-ms assertions across 28
+test files, not just the three named; all were converted. Hang guards
+now assert the termination outcome (the result an infinite path can
+never produce) under a generous jest timeout; regression guards assert a
+deterministic count — compile node-visits (a test-local spy on
+`BaseCompiler.compile`, the single recursive entry point), quadrature
+evaluation counts, Monte Carlo sample counts, memoization spy
+call-counts. Two tests needed their input magnitudes raised
+(`points-arithmetic` to 1e8, `trigonometry` chain depth to 24/26)
+because their non-timing assertions passed in both regimes — without
+that, dropping the stopwatch would have left them asserting nothing.
+Remaining wall-clock checks are deliberate and documented in place:
+`deadline-regressions.test.ts` `toFixed` timings (the fix changed only
+algorithmic complexity, not outputs or call shape — eliminating it needs
+an instrumented `BigDecimal.toFixed`), `assumptions.test.ts:365` and
+`fungrim-loader.test.ts:96` (~100× and ~66× headroom, no counter
+available without `src/` instrumentation), the relative
+compiled-vs-interpreter comparisons in `compile-performance.test.ts`,
+and `quadrature-deadline.test.ts`'s 30× end-to-end backstop.
 
-Since the 2026-08-15 ruling, a named function definition with no effect
-annotation is refused when its body provably writes to an outer variable
-(`docs/EFFECTS-MODEL.md`, "Scope is opt-in"). The gate sits at the
-operator-definition construction seam, so one route bypasses it:
-`ce.declare('f', '(number) -> number')` followed by
-`ce.assign('f', literal)` stores the literal on a **value** definition
-and installs a proven writer bare (its arrow still carries the inferred
-`scope`, so arrow-reading consumers are not lied to — only the install
-gate is missed). Closing it needs a discriminator between global installs
-and block-local `let` bindings inside the value-definition constructor: a
-closure writing its enclosing literal's local is confined from outside
-and must stay installable, so the constructor cannot refuse every
-scope-arrowed literal it stores. The mutable-closure pins in
-`test/compute-engine/user-function-purity.test.ts` (the "fib arc" block)
-currently pin this residual route's permissive behavior and flip when
-this closes.
+A second erosion class surfaced while converting `compile-integrate`:
+the antiderivative-first fold had turned both cost-guard integrands into
+closed forms, so `r.run()` performed no numeric integration at all and
+the tests pinned a path the runner never took (the item-96 NaN test's
+`NaN` came from `20*NaN`, not from the Monte Carlo fast path it
+claims). Both tests now use integrands the fold declines and assert
+`r.code` contains `_SYS.integrate(` so a future smarter fold cannot
+silently re-vacate them. Open question for a later pass: apply that
+same emitted-code guard to the other quadrature-dependent tests in
+`compile-integrate.test.ts`, since any of their repros could be
+intercepted by the same fold as it improves.
+
+### ~~The value-half two-step bypasses the default-`!scope` ceiling~~ (CLOSED 2026-08-15, same day, by ruling)
+
+`ce.declare('f', '(number) -> number')` — or the object spelling
+`ce.declare('f', { signature: … })` — followed by
+`ce.assign('f', writerLiteral)` used to install a proven escaping writer
+bare, because that route stores the literal on a value definition and
+misses the operator-definition construction gate. The staged-diff review
+(Codex, HIGH) flagged it; the user ruled the ceiling supersedes the
+2026-08-01 bare-specifier arc on this route too, and the gate now lives
+in `assertDeclaredEffects` (`engine-declarations.ts`), enabled on the
+two declare-then-assign reconciliation callers. The former "fib arc"
+pins were retold with `random` (the inferred track's re-stamp freedom
+survives for every label except `scope`) plus explicit refusal pins.
+
+**Narrowed residual, still open:** the declare-WITH-value route —
+`ce.declare('f', { type: '(…) -> …', value: writerLiteral })`, the
+third `assertDeclaredEffects` caller — stays ungated, because the same
+code path serves block-local `let` bindings whose writer closures (a
+closure mutating its enclosing literal's local) must remain
+installable, and no global-vs-local discriminator is available at that
+seam (the Epsil static pass also evaluates top-level declares under
+pushed scopes, so context depth does not separate the two). Its arrow
+still carries the inferred `scope` honestly.
 
 ### ~~`.N()` of a divergent infinite `Sum`/`Product` silently returns a truncated partial~~ (FIXED 2026-08-14, same day)
 
@@ -298,7 +402,83 @@ Regression pins: `test/compute-engine/tycho-item-184-gather-count.test.ts`
 (14 tests, including the mask/scalar-index/chained-access shapes that must
 keep declining to claim a count).
 
-### ~~Tycho item 182 — canonicalization-time collection-facet probe storm on a range-broadcast `At` head~~ (FIXED 2026-08-14)
+### Tycho item 186 — the item-182 class SURVIVES in document context (OPEN, filed 2026-08-14)
+
+Tycho's item-182 witness re-check FAILED after adopting 0.109.0: their
+`lizeqlnn5e` C₂ range-broadcast-`At` color head still burns ≥120–240 s in
+ONE canonical `ce.parse`, A/B-identical on 0.108.0 and 0.109.0 — so it is
+neither cured by 182's facet memo nor caused by a 0.109.0 rider. Filed as
+a NEW item rather than reopening 182 (their hygiene rule: the shipped fix
+was adopted, the surviving symptom gets fresh attribution).
+
+Their CPU profile (10 ms sampling, 154 s run): 133 s inclusive under
+`ce.parse` → `withRootRepair`/`_withRepairFrame` → deep type-lattice
+helpers, self-time dominated by small type helpers plus 16.5 s GC. A
+TYPE-computation storm inside recursive canonicalization repair — the
+182 family through a path the facet memo does not cover.
+
+**Context-bound, as 182 was**: bare-engine repros run in 2–6 ms across
+five registration recipes; the storm needs their `DocumentCEManager`
+context (document engine profile, `resolveSymbol` handler, pass-1
+declares, scopes). Their `At` override was disabled in the probes.
+
+**Divisibility hypothesis: REFUTED.** I proposed that the cliff was really
+"3 ∤ length(L)" (which makes the comprehension bound `length(L)/3` an
+exact rational instead of an integer) rather than a magnitude threshold.
+Tycho ran the discriminator: N=306 and N=309 are both divisible by 3 and
+both at-ceiling (30.2 s), with the 303/304 boundary re-confirmed in the
+same run set. Their original sweep also already contained counterexamples
+I had not accounted for — N=450 (divisible) was slow, N=301/302
+(non-divisible) were fast. The shape is a pure MAGNITUDE threshold at
+L-length 304, indifferent to divisibility, and the pad-to-a-multiple-of-3
+workaround is dead.
+
+**Leading candidate — the TYPE-STRING CACHE thrashes by design.**
+`TYPE_CACHE` (`common/type/parse.ts`) is capped at 2048 entries and
+evicts by CLEARING THE ENTIRE MAP, on the stated assumption that "the
+working set of distinct type strings is small". That assumption fails for
+types carrying LENGTHS: every distinct vector size is its own type string
+(`vector<finite_integer^303>`, `^304`, …), so a program indexing or
+slicing many differently-sized collections builds a large working set.
+
+Measured directly (re-parsing a working set of W distinct length-typed
+strings in a loop): W ≤ 2048 costs 0.04–0.11 µs/parse; **W = 2100 costs
+4.25 µs/parse — a 40–100× cliff — and stays flat above it** (4.08 at
+2500, 3.76 at 4000). Clearing drops 100% of entries per overflow, so the
+hit rate collapses rather than degrading, and the time goes to re-parsing
+and re-`deepFreeze`ing plus the garbage that creates.
+
+That reproduces every signature in Tycho's profile: a sharp cliff at a
+size threshold, a flat ceiling above it, self-time in small type helpers,
+heavy GC, and context-boundness (a bare repro's working set never reaches
+the cap, which is why their five bare recipes run in 2–6 ms). It also
+explains why 304 looks arbitrary: what crosses the cap is the WHOLE
+program's working set, so the boundary is a property of the document, not
+of the expression that tipped it over.
+
+**Testable prediction, handed to Tycho:** the boundary should MOVE if
+unrelated parts of the document change how many distinct type strings it
+generates. Their offered subterm-separation probe can test this directly.
+
+**Eviction policy is NOT the fix** — measured. Replacing the clear with
+FIFO eviction of the oldest entry made it slightly worse (5.8 vs
+4.3 µs/parse over-cap): a working set larger than the cache, re-parsed in
+a repeating order, is the worst case for any eviction policy. The lever
+is either reducing the number of distinct type strings (cache a
+length-parameterized type by structure, with the length as a parameter)
+or sizing the cache to the working set.
+
+**Honesty note on 182's verification.** The "span#2 10.4 s → 31 ms"
+figure recorded in 182's section came from their
+`d21-lizeq-head-extract.mts` harness on CE source. Their re-check says
+the class survives against the real document, so that figure measured a
+narrower thing than 182's section claims for it — read it as "the
+extracted head got fast", not "the document head got fast".
+
+Their 5 s registry-head guard stays load-bearing, so there is no
+production hang; the cost is one permanently-refused color row.
+
+### ~~Tycho item 182 — canonicalization-time collection-facet probe storm on a range-broadcast `At` head~~ (FIXED 2026-08-14; but see item 186 above — the class SURVIVES in document context)
 
 Original filing: parsing `255(0.5 + L[1+3(0..Length(D)-1)]/60)/255` inside
 a live Tycho document scope burned ~9.4 s in one 5 s span (and, without a
@@ -459,7 +639,7 @@ the ablation shows the terms interact, so measure both. Any change here
 needs the snapshot blast radius measured first; product expansion is
 long-standing behavior with wide pin coverage.
 
-### Auto-compile instrumentation is unreachable from a consumer install (OPEN, observability gap)
+### ~~Auto-compile instrumentation is unreachable from a consumer install~~ (FIXED 2026-08-14)
 
 `_mapAutoCompileStats` (`library/map-auto-compile.ts`) counts
 `attempts`/`compiledHits`/`revalidations`/`recompiles`/
@@ -505,6 +685,24 @@ Scope note for whoever implements it: a new engine member must land on
 `IComputeEngine` as well, and that applies to `_`-prefixed members —
 60 of them are already declared there, including every one named above.
 So this is an implementation + interface change, not a one-file edit.
+
+**Fixed 2026-08-14** as specified: `ce._mapAutoCompileStats` is a getter
+on the engine class and declared on `IComputeEngine` (`types-engine.ts`),
+backed by a new dependency-free leaf module
+`src/compute-engine/map-auto-compile-stats.ts` — the counters had to
+move out of `library/map-auto-compile.ts` because the ESLint layering
+zone forbids `types-*.ts` from importing under `library/`, and the old
+path re-exports both symbols so existing test imports are untouched. The
+counters are process-global and cumulative by design (the compile cache
+they instrument is a module-level `WeakMap` shared by every engine in
+the process); a caller measures a single drain by diffing before/after.
+No reset was added to the engine surface — a reset on a process-global
+object called from one engine would perturb another. Marked `@internal`,
+so `src/api.md` is unaffected. The generalization the entry raised —
+that `CE_CACHE_STATS`, `CE_DEBUG_DEPS`, and `CE_MEMO_PARANOID` are all
+eliminated from the published bundle and thus unreachable for every
+consumer — remains true and undecided as policy; this fix made exactly
+one surface consumer-reachable.
 
 ### Degree-mode folding flips `angularUnit` per fold attempt, purging caches (OPEN, perf — small)
 

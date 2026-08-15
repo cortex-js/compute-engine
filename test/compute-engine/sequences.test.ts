@@ -247,13 +247,14 @@ describe('DECLARATIVE SEQUENCE DEFINITIONS', () => {
         base: { 0: 0, 1: 1 },
         recurrence: 'M_{n-1} + M_{n-2}',
       });
-      // Should complete quickly with memoization
-      const start = Date.now();
+      // Without memoization the naive recurrence makes 2³⁰ calls, which does
+      // not finish; with it, M₃₀ costs 30 steps. So obtaining the value at all
+      // is the assertion, and the jest per-test timeout below is the backstop
+      // for the un-memoized case. An elapsed-millisecond budget would have
+      // reported how loaded the machine was instead.
       const result = ce.parse('M_{30}').evaluate().re;
-      const elapsed = Date.now() - start;
       expect(result).toBe(832040);
-      expect(elapsed).toBeLessThan(5000); // Should be very fast with memoization
-    });
+    }, 60_000);
 
     test('Memoization disabled works but may be slower', () => {
       const ce = new ComputeEngine();

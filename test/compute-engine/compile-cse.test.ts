@@ -1561,30 +1561,48 @@ describe('COMPILE CSE — repeated pure calls at the ROOT (item 120 follow-up)',
  * Every such name is refused, fail closed: the harvester collects the binder
  * names of the tree it walks, and the compiler threads in the parameter names
  * of the definition whose body a NESTED harvest covers (§5.4).
+ *
+ * Two of the cases below never reach CSE any more. Since the user's 2026-08-14
+ * ruling, a CALL whose head is a bound parameter has no lowering at all — the
+ * compiler declines and the interpreter evaluates it — so for those shapes the
+ * decline supersedes the merge question, and each test pins the decline. The
+ * shapes where the shadowed name is an OPERAND rather than a head still
+ * compile, and still pin that CSE leaves them unmerged.
  */
 describe('COMPILE CSE — shadowed names are never admitted', () => {
   it('refuses a call whose HEAD is a lambda parameter', () => {
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
-    const result = compile(engine.parse('(f,x)\\mapsto f(x)+f(x)+f(x)'), {
-      fallback: false,
-    });
+    const source = '(f,x)\\mapsto f(x)+f(x)+f(x)';
 
-    // NOTE: the emitted code calls the GLOBAL `f` (`_fn_f`), not the
-    // parameter. Head-position shadowing resolving to the global is
-    // pre-existing, engine-wide behavior shared by the interpreter and the
-    // compiler — it is NOT what this test pins and must not be "fixed" here.
-    // What is pinned is that CSE refuses to merge the three calls: the
-    // harvest cannot know which `f` a call site means, so it declines.
-    expect(result.code).not.toMatch(/_cse\d/);
-    expect(occurrences(result.code, '_fn_f(')).toBe(3);
-    // …which is exactly the `cse: false` emission.
-    expect(result.code).toBe(
-      compile(engine.parse('(f,x)\\mapsto f(x)+f(x)+f(x)'), {
-        fallback: false,
-        cse: false,
-      }).code
+    // CONTRACT: a head-position parameter must never resolve to a same-named
+    // engine global. `f` here is the literal's own first parameter, so
+    // `f(x)` applies whatever function the caller passes — the engine-level
+    // `f` is a different function and is not what the three calls mean. The
+    // compiler has no lowering for a call of a bound parameter, so it declines
+    // and the interpreter (which resolves the parameter correctly as of
+    // 2026-08-14) evaluates the expression instead.
+    //
+    // Ruled by the user 2026-08-14: fail closed now. Emitting a direct call of
+    // the bound parameter — true higher-order compilation — remains a possible
+    // future feature; until then, declining is the only answer that cannot be
+    // wrong. Before the ruling the three calls emitted `_fn_f(…)` against the
+    // GLOBAL `f`, so the compiled function silently ignored its own `f`
+    // argument.
+    //
+    // CSE is not reached at all for this shape now (there is nothing to
+    // merge), so the merge behavior this test used to pin no longer has a
+    // subject; the decline supersedes it.
+    expect(() => compile(engine.parse(source), { fallback: false })).toThrow(
+      /^f: cannot compile/
     );
+
+    // With the fallback allowed the result reports the decline rather than
+    // carrying wrong code: nothing is emitted, and in particular nothing that
+    // calls the global.
+    const fallbackResult = compile(engine.parse(source));
+    expect(fallbackResult.success).toBe(false);
+    expect(fallbackResult.code).not.toContain('_fn_f');
   });
 
   it('refuses a named-callback OPERAND that is a lambda parameter', () => {
@@ -1612,9 +1630,20 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
   });
 
   it('refuses a callee that is a PARAMETER of the definition being emitted', () => {
-    // The nested harvest sees only `q_2`'s BODY, in which `g_2` is a free
-    // symbol — its binder is `q_2`'s parameter list, outside the tree. The
-    // compiler threads those parameter names in as `shadowedNames`.
+    // `q_2` takes its callee as its FIRST parameter: `q_2 = (g_2, t) ↦
+    // g_2(t) + g_2(t)²`. Inside that body `g_2` is the parameter, even though
+    // an engine-level `g_2` of the same name exists — the same head-position
+    // shadowing rule as above, one level down, where the shadowed name is a
+    // parameter of the definition being EMITTED rather than of the expression
+    // being compiled.
+    //
+    // The contract is therefore the same: the compiler has no lowering for a
+    // call of a bound parameter, so emitting `_fn_q_2` fails closed and the
+    // whole compilation declines; the interpreter evaluates it. Ruled by the
+    // user 2026-08-14 (fail closed now; direct higher-order compilation is a
+    // possible future feature). Before the ruling the two calls in the emitted
+    // `_fn_q_2` body ran against the GLOBAL `_fn_g_2`, so the compiled
+    // definition ignored its own first argument.
     const engine = new ComputeEngine();
     engine.assign('g_2', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
     engine.assign(
@@ -1626,15 +1655,15 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
         't',
       ])
     );
-    const result = compile(engine.parse('(h,v)\\mapsto q_2(h,v)'), {
-      fallback: false,
-    });
+    const source = '(h,v)\\mapsto q_2(h,v)';
 
-    const def = result.code.split('\n').find((l) => l.includes('_fn_q_2 ='))!;
-    // Same pre-existing head semantics as above: the two calls emit against
-    // the GLOBAL `_fn_g_2`. The pin is that they are NOT merged.
-    expect(def).not.toMatch(/_cse\d/);
-    expect(occurrences(def, '_fn_g_2(')).toBe(2);
+    expect(() => compile(engine.parse(source), { fallback: false })).toThrow(
+      /^g_2: cannot compile/
+    );
+
+    const fallbackResult = compile(engine.parse(source));
+    expect(fallbackResult.success).toBe(false);
+    expect(fallbackResult.code).not.toContain('_fn_g_2');
   });
 
   it('still merges an UNSHADOWED named callback (canary)', () => {

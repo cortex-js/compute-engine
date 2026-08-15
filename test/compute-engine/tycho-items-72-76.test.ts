@@ -301,21 +301,33 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
 describe('Item 75 — isValid is memoized', () => {
   test('repeat isValid queries on a large tree are O(1)', () => {
     // Build a ~12k-node tree; the first query walks it, later queries must
-    // answer from the cached flag. Wall-clock bounds are inherently
-    // load-sensitive, so the margins are wide on both sides: 10 000
-    // un-memoized walks of this tree take several SECONDS (≈0.3 ms each),
-    // while memoized queries finish in single-digit milliseconds — a
-    // 1000 ms bound distinguishes the two regimes with ~10× headroom each
-    // way even on a loaded CI machine.
+    // answer from the cached flag. The memoization is asserted by COUNTING
+    // DESCENTS rather than by timing the loop: reading `isValid` on the root
+    // is the only thing that can read `isValid` on an operand, so a spy on one
+    // operand's getter counts exactly how many times the root re-walked. An
+    // un-memoized root would descend on all 10 000 reads (several seconds of
+    // work); a memoized one descends zero times. The count is identical on
+    // every machine, whereas the millisecond budget it replaces was decided by
+    // how busy the machine was.
     const build = (depth: number): any =>
       depth === 0
         ? 'x'
         : ['Add', ['Multiply', build(depth - 1), 2], build(depth - 1), 1];
     const expr = ce.box(build(11), { canonical: false });
-    expect(expr.isValid).toBe(true);
-    const t0 = performance.now();
-    for (let i = 0; i < 10_000; i++) void expr.isValid;
-    expect(performance.now() - t0).toBeLessThan(1000);
+    const operand = expr.ops![0];
+
+    const descents = jest.spyOn(operand, 'isValid', 'get');
+    try {
+      // The first query is the one walk that is allowed.
+      expect(expr.isValid).toBe(true);
+      expect(descents).toHaveBeenCalledTimes(1);
+
+      descents.mockClear();
+      for (let i = 0; i < 10_000; i++) void expr.isValid;
+      expect(descents).not.toHaveBeenCalled();
+    } finally {
+      descents.mockRestore();
+    }
   });
 
   test('memoized isValid stays correct for invalid trees', () => {
@@ -406,12 +418,12 @@ describe('Item 64b — large finite big-operator bounds stream and stay interrup
   test('Σ over a 1e8 finite range honors the deadline (no eager materialization)', () => {
     const engine = new ComputeEngine();
     const expr = engine.parse('\\sum_{i=1}^{100000000} \\sin(i)');
-    const t0 = Date.now();
+    // Throwing IS the assertion: an eager materialization of 10⁸ terms never
+    // reaches the deadline check at all (it OOMs or stalls), so a clean
+    // cancellation can only come from the streamed, interruptible path. The
+    // jest per-test timeout is the backstop for the stall case; an elapsed-ms
+    // assertion here only ever added sensitivity to machine load.
     expect(() => engine.withTimeLimit(500, () => expr.evaluate())).toThrow();
-    // An eager materialization would OOM/stall far past the deadline; the
-    // streamed path cancels promptly. Generous bound (20× the 500 ms
-    // deadline) so a loaded CI machine cannot flake it.
-    expect(Date.now() - t0).toBeLessThan(10_000);
   });
 
   test('Π over a 1e8 finite range honors the deadline', () => {

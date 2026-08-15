@@ -1115,7 +1115,11 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
    */
   const withDeclaration = (signature: string) => {
     const ce = new ComputeEngine();
-    ce.declare('a', { signature });
+    // `scope` spliced into the declared signature: the body binds `w` by
+    // bare assignment, which the default-`!scope` ceiling otherwise refuses
+    // on a bare declaration (docs/EFFECTS-MODEL.md, "Scope is opt-in"). The
+    // scalar-vs-collection contradiction under test is unaffected.
+    ce.declare('a', { signature: signature.replace('->', 'scope ->') });
     ce.assign(
       'a',
       ce.box([
@@ -1233,7 +1237,9 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
     '%s still compiles a TRUTHFUL multi-statement scalar body',
     (to) => {
       const ce = new ComputeEngine();
-      ce.declare('a', { signature: '(number) -> number' });
+      // `scope` declared: `w` is bound by bare assignment (see
+      // `withDeclaration` above).
+      ce.declare('a', { signature: '(number) scope -> number' });
       ce.assign(
         'a',
         ce.box([

@@ -238,9 +238,19 @@ confined iff **every static path from the literal's entry to the
 **and** the symbol is not referenced by any nested `Function` literal
 (closure capture ⇒ escaping — the closure may outlive the declaring
 application). `Assume` is **never** confined. Destructuring and compound
-targets are judged per target symbol; any target the analysis cannot
-resolve ⇒ `scope`. The explicit fallback, stated normatively: **not
-provably confined ⇒ `scope`.** Consequences:
+targets are judged per target symbol; a `Field` target
+(`Assign(Field(p, "name"), v)` — the property rebinding sugar
+`p.name = v`) is judged on its **base symbol** *(amendment 2026-08-15:
+the property SET on a tuple-backed nominal type returns a new value
+that rebinds the base, so a dominated local base is as confined as
+assigning the base itself; `Field` ONLY — a `Subscript` target is a
+sequence definition, `L_0 := 1` registering a base case in engine-wide
+pending-sequence state that outlives any application, an `At` target
+has no assignment semantics at all today, and a future heap-semantics
+object store must NOT ride this clause, per "Confinement does not apply
+to `state`" below)*; any target the analysis cannot resolve ⇒ `scope`.
+The explicit fallback, stated normatively: **not provably confined ⇒
+`scope`.** Consequences:
 
 - An opaque declaration cannot prove confinement, so it declares `scope`
   conservatively — consistent with annotation-gets-the-contract.
@@ -250,6 +260,41 @@ provably confined ⇒ `scope`.** Consequences:
   dominance requirement on the `Declare`, not mere lexical containment:
   `Block(If(flag, Declare(n, 0)), Assign(n, 5))` is **not** confined
   (on the `flag`-false path the `Assign` writes through).
+- **Parameters seed the dominance frontier** *(amendment, 2026-08-15)*: a
+  parameter is bound on every static path at the literal's entry, and a
+  write to it is call-local — the binding lives in the call frame and dies
+  with the application; the caller's variable never changes (verified
+  empirically: with `f(x) := (x := x + 1; x)` and `a := 5`, `f(a)` is `6`
+  and `a` stays `5`). So `f(x) := (x := x + 1; x)` infers **pure**. The
+  closure-capture exclusion still applies: a parameter referenced by a
+  nested literal is not confined, the same conservative rule as any
+  captured binding.
+- **No implicit-local exemption for `Assign`** *(tried and reverted,
+  2026-08-15)*: treating an `Assign` to a name with no visible outer
+  binding as confined (evaluation does create a call-local binding —
+  probed) is unsound for a literal walked standalone: a closure writing a
+  variable of its ENCLOSING literal (`makeCounter`'s
+  `count := count + 1`) presents the same "no visible binding" as a
+  genuine fresh temp, because an enclosing literal's lexical locals are
+  not in the definition registry — and the closure's arrow then claimed
+  pure while every call returned a different value. "Not provably
+  confined ⇒ `scope`" stands; a fresh-temp body opts out with a `Declare`
+  (`let`) or a `scope` annotation.
+- **A nested `DefineFunction` is confined only through a local
+  declaration** *(amendment, 2026-08-15)*: Epsil's one-step inner
+  definition (`helper(x) = x + a` inside a body) lowers to
+  `DefineFunction`. With a `let`-declared local name
+  (`let sq; sq(m) = m * m`) it assigns that local, which dies with the
+  call — confined, and the defining write is the initialization, so
+  capture by the helper's own recursive body does not un-confine it.
+  WITHOUT a local declaration it installs into the **global registry**
+  (probed: the helper is callable at top level after the enclosing call
+  returns, and overwrites an outer function of the same name) — an
+  escaping write, so an enclosing bare definition using the bare
+  one-step form is refused by the ceiling. (Judging it by a visibility
+  lookup instead would also make the verdict flip when the
+  provisional-dependents cascade re-walks the body after the runtime
+  install has made the name globally visible.)
 
 **Confinement does not apply to `state` — v1.** The confinement
 analysis above is written entirely in terms of *bindings* (a `Declare`
@@ -275,6 +320,56 @@ signature, and every application of that function projects through the
 pure arrow — so nothing downstream of a definition is pessimized. The
 divergence is visible only on un-abstracted expressions, where
 conservatism costs a cache, not correctness.
+
+**Scope is opt-in — the default-`!scope` ceiling (ruled 2026-08-15).**
+A **named definition with no effect annotation guarantees it does not
+mutate the world**: installing a body with a *proven* escaping write is
+refused unless the definition declares the `scope` effect (a `scope`
+specifier, an `effects:` flag, or an `any` contract). This partially
+reverses the bare-specifier fork ruling of 2026-08-01 for this one label —
+every other label stays on the freely re-stamping inferred track;
+escaping writes alone are a contract that must be chosen, because a write
+to an outer binding is always a deliberate design decision by the author.
+The measured blast radius that supported the ruling is
+`docs/plans/2026-08-14-default-noscope-census.md` (49 escaping writes in
+18 of 493 test suites, zero in the real-program corpus). Mechanics:
+
+- **The trigger is the walk's proven-mutation bit** (`escapingWrite` on
+  `InferredLiteralEffects`), set by an unconfined `Assign`, by `Assume`,
+  and by applying a resolved callee or annotated callback parameter whose
+  effect set *concretely* contains `scope`. It is **never** set by `{any}`
+  conservatism: an unresolved forward-referenced head stays optimistic
+  (the v5 dependency-order ruling), so forward references and mutual
+  recursion install bare exactly as before. The bit also survives the
+  `any` collapse, so a body that both writes and calls an unresolved head
+  is still refused.
+- **The gate sits at the operator-definition construction seam** (the
+  single point where `inferFunctionLiteralEffects` stamps a definition).
+  The violation is an `EffectContractError` with a dedicated rendering
+  that names the fix; the `Assign`/`Declare` operator routes convert it to
+  the `incompatible-type` error value, like every other contract
+  violation.
+- **Anonymous literals are not gated.** They have no annotation surface
+  (the lambda specifier slot is deferred), and they are never installed
+  through the seam; their arrows carry the inferred `scope` honestly, so
+  every consumer that reads arrows still sees the truth. Consequence: a
+  factory returning a writing closure (`makeCounter() { let c = 0;
+  () ↦ { c := c + 1; c } }`) installs bare — producing a literal is pure;
+  the `scope` lives on the *inner* arrow.
+- **Declare-then-assign is gated too** *(closed by ruling, 2026-08-15,
+  same day)*: `ce.declare(f, '(number) -> number')` — either spelling —
+  followed by `ce.assign(f, writerLiteral)` runs the same refusal, via
+  the `scopeDefault` branch of `assertDeclaredEffects`
+  (`engine-declarations.ts`) on the two assignment-reconciliation
+  callers. This supersedes the 2026-08-01 bare-specifier arc for the
+  `scope` label on this route: a bare declared arrow still re-stamps
+  freely for every other label (the arc's tests are retold with
+  `random`), but an escaping writer is refused. **Known residual**: the
+  declare-WITH-value route (`ce.declare(f, { type, value: literal })`)
+  stays ungated — it shares its code path with block-local `let`
+  bindings, whose writer closures must remain installable, and no
+  global-vs-local discriminator exists at that seam. Tracked in
+  `ROADMAP.md`.
 
 **Reads of non-local scope are not an effect.** Every expression with a
 free symbol reads the ambient scope; a label would infect essentially

@@ -143,13 +143,19 @@ describe('`scope`: zero writes at partial application, exactly one at saturation
 
   it('the parse route — `f(1)` on a two-parameter `f`', () => {
     const ce = counting();
-    ce.assign('f', ce.box(WRITING_LAMBDA));
+    // Installing a writer as a NAMED definition requires the `scope`
+    // contract (the default-`!scope` ceiling); the anonymous box /
+    // `ce.function` routes above need none. The contract is stated via the
+    // `effects:` flag rather than a `signature:` — a DECLARED signature pins
+    // the arity and `f(1)` would fail validation with `missing` instead of
+    // currying, and the currying behavior is exactly what this test pins.
+    ce.declare('f', { effects: ['scope'], evaluate: ce.box(WRITING_LAMBDA) });
 
     const partial = ce.parse('f(1)').evaluate();
     expect(partial.operator).toBe('Function');
     expect(n(ce)).toBe(0);
 
-    ce.assign('g', partial);
+    ce.declare('g', { effects: ['scope'], evaluate: partial });
     expect(ce.parse('g(2)').evaluate().re).toBe(3);
     expect(n(ce)).toBe(1);
   });

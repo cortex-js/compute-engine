@@ -271,8 +271,13 @@ describe('HARD GRUNTZ LIMITS RESPECT THE DEADLINE (CORRECTNESS_FINDINGS #28)', (
     ['Gruntz #1 (→1/3)', gruntz1],
     ['Gruntz #2 (→1/e)', gruntz2],
   ] as const) {
+    // The span is what bounds these; the assertions are the OUTCOME (no throw
+    // reaching the caller, and no spuriously confident finite value). The
+    // regression they guard against runs unboundedly rather than returning a
+    // wrong answer quickly, so the jest per-test timeout is the backstop and
+    // no elapsed-millisecond assertion is needed — one would only make the
+    // verdict depend on how loaded the machine running the suite is.
     test(`${name}: N() returns within the time budget, no throw`, () => {
-      const start = Date.now();
       let result: any;
       // Must not throw a CancellationError (or anything) at the caller.
       expect(() => {
@@ -281,8 +286,6 @@ describe('HARD GRUNTZ LIMITS RESPECT THE DEADLINE (CORRECTNESS_FINDINGS #28)', (
           () => limT(body).N()
         );
       }).not.toThrow();
-      // Bounded by ~2× the time limit (generous wall-clock allowance).
-      expect(Date.now() - start).toBeLessThan(10000);
       // Whatever it returns, it must not be a spuriously "confident" wrong
       // finite value: an inert Limit, undefined-ish, or NaN is acceptable.
       const isInert = result?.operator === 'Limit';
@@ -291,7 +294,6 @@ describe('HARD GRUNTZ LIMITS RESPECT THE DEADLINE (CORRECTNESS_FINDINGS #28)', (
     });
 
     test(`${name}: evaluate() stays symbolic within the time budget`, () => {
-      const start = Date.now();
       let result: any;
       expect(() => {
         result = timedEngine.withTimeLimit(
@@ -299,7 +301,6 @@ describe('HARD GRUNTZ LIMITS RESPECT THE DEADLINE (CORRECTNESS_FINDINGS #28)', (
           () => limT(body).evaluate()
         );
       }).not.toThrow();
-      expect(Date.now() - start).toBeLessThan(10000);
       // Symbolic path returns the inert Limit (no wrong closed form).
       expect(result?.operator).toBe('Limit');
     });

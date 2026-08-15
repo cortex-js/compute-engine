@@ -556,9 +556,11 @@ describe('BoxedObject — .json (the full B5 form)', () => {
     let node = obj(ce, 'Box', { n: ce.number(0) });
     for (let i = 1; i <= 26; i++) node = obj(ce, 'Box', { a: node, b: node });
 
-    const started = Date.now();
+    // Completing at all is the assertion (see the paragraph above): the
+    // un-memoized walk does 2²⁶ ≈ 67 million records of work and never
+    // returns, so the jest per-test timeout is the backstop and an
+    // elapsed-millisecond check would only measure the machine.
     const json = node.json as unknown[];
-    expect(Date.now() - started).toBeLessThan(2000);
 
     // The shape is unchanged: every level still holds two full `Object`
     // records, never a marker or a back-reference, all the way down.

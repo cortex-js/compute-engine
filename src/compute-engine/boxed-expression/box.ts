@@ -1451,7 +1451,7 @@ function makeCanonicalFunctionCore(
   // the operator path (with its canonical handler) runs. `bind()` performs
   // the same resolution, keeping construction and binding consistent.
   //
-  const def = lookupApplicable(name, scope ?? ce.context.lexicalScope);
+  const def = lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
   if (!def) {
     // No def. This is for example `["f", 2]` where "f" is not declared.
     // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,

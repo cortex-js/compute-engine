@@ -156,6 +156,42 @@ describe('EPSIL — named inner function escapes its defining scope', () => {
       run('function make() { let s = 10; x |-> s + x }\nlet f = make()\nf(5)')
     ).toBe('15');
   });
+
+  test('a returned named helper needs no `scope` annotation', () => {
+    // A block-local definition writes nothing outside the frame, so the
+    // default no-`scope` ceiling on a bare definition must not refuse it.
+    expect(
+      run('function make(a) { helper(x) = x + a; helper }\nlet h = make(10)\nh(5)')
+    ).toBe('15');
+  });
+});
+
+describe('EPSIL — a nested function definition is block-local', () => {
+  test('the helper is not visible at top level, before or after the call', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'function outer(n) { sq(m) = m * m; sq(n) }');
+    // Defining `outer` must not install `sq` anywhere reachable from here…
+    expect(ce.box(['sq', 5]).evaluate().toString()).toBe('sq(5)');
+    expect(ce.box(['outer', 3]).evaluate().toString()).toBe('9');
+    // …and neither must calling it: the definition dies with the frame.
+    expect(ce.box(['sq', 5]).evaluate().toString()).toBe('sq(5)');
+  });
+
+  test('a same-named outer function is shadowed, not overwritten', () => {
+    const ce = new ComputeEngine();
+    const { value, diagnostics } = executeEpsil(
+      ce,
+      'function sq2(m) { m + 1000 }\n' +
+        'function outer(n) { sq2(m) = m * m; sq2(n) }\n' +
+        'let a = outer(3)\n' +
+        'let b = sq2(3)\n' +
+        '[a, b]'
+    );
+    expect(diagnostics).toEqual([]);
+    // `a` uses the block-local squaring helper; `b` still uses the top-level
+    // `sq2`, which the nested definition only shadowed for the frame.
+    expect(value.toString()).toBe('[9,1003]');
+  });
 });
 
 //

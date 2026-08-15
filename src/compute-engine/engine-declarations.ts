@@ -42,6 +42,7 @@ import { BoxedType } from '../common/type/boxed-type.js';
 import {
   assertSingleArmPolytype,
   EffectContractError,
+  inferFunctionLiteralEffects,
   matchesDeclaredTypeAxes,
   signatureEffects,
   stripArrowEffects,
@@ -2166,7 +2167,8 @@ export function assignFn(
         reconciled,
         declaredType.type,
         effectsDeclared,
-        latestDeclaredEffectsSite(def.value)
+        latestDeclaredEffectsSite(def.value),
+        { ce }
       );
       if (
         !matchesDeclaredTypeAxes(
@@ -2316,7 +2318,8 @@ export function assignFn(
           reconciled,
           declaredType.type,
           effectsDeclared,
-          latestDeclaredEffectsSite(def.operator)
+          latestDeclaredEffectsSite(def.operator),
+          { ce }
         );
         if (
           !matchesDeclaredTypeAxes(
@@ -2965,10 +2968,36 @@ function assertDeclaredEffects(
    * `latestDeclaredEffectsSite`. Absent for a construction-stated contract
    * (which records no entry) and on the fresh-Declare path (no prior
    * half). Rendering only. */
-  declaredAt?: Expression
+  declaredAt?: Expression,
+  /** Enforce the default-`!scope` ceiling on the BARE track (`docs/
+   * EFFECTS-MODEL.md`, "Scope is opt-in"): with no stated contract, a body
+   * the walk PROVES to write outside itself is refused instead of being
+   * accepted-and-restamped. Passed by the declare-then-assign routes —
+   * which install a GLOBAL named definition, so the ruling applies — and
+   * left off by the declare-WITH-value route, which also serves
+   * block-local `let` bindings whose writer closures (a closure mutating
+   * its enclosing literal's local) must stay installable. The trigger is
+   * the walk's proven-mutation bit, never the arrow's `scope` label, so
+   * `{any}` conservatism from unresolved forward references stays
+   * optimistic. Requires `ce`. */
+  scopeDefault?: { ce: IComputeEngine }
 ): void {
   const declared = signatureEffects(declaredType);
-  if (declared === undefined && !effectsDeclared) return;
+  if (declared === undefined && !effectsDeclared) {
+    if (scopeDefault === undefined) return;
+    const inferred = inferFunctionLiteralEffects(scopeDefault.ce, literal, {
+      selfName: id,
+    });
+    if (inferred.escapingWrite)
+      throw new EffectContractError(
+        id,
+        undefined,
+        inferred.effects,
+        undefined,
+        /* scopeDefault */ true
+      );
+    return;
+  }
   const inferred = signatureEffects(literal.type.type);
   if (!isEffectSubset(inferred, declared))
     throw new EffectContractError(id, declared, inferred, declaredAt);

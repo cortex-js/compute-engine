@@ -200,9 +200,11 @@ describe('Playground regressions', () => {
       ];
       const body = ['Divide', numer, denom];
       const slow = ce.box(['Limit', ['Function', body, 'x'], 'PositiveInfinity']);
-      // Bounded: returns (inert) or throws CancellationError — nothing else,
-      // and within a small multiple of the time limit (was an ~18 min hang).
-      const start = Date.now();
+      // Bounded: returns (inert) or throws CancellationError — nothing else.
+      // Reaching the end of the loop is the assertion; the defect this guards
+      // (an ~18 min hang) does neither, so the jest per-test timeout below is
+      // what turns it into a failure. A millisecond budget here would instead
+      // have measured how loaded the machine running the suite was.
       for (const run of [() => slow.evaluate(), () => slow.N()]) {
         try {
           ce.withTimeLimit({ ms: 50, label: 'test:gruntz-tower' }, run);
@@ -210,8 +212,7 @@ describe('Playground regressions', () => {
           expect((e as Error).constructor.name).toBe('CancellationError');
         }
       }
-      expect(Date.now() - start).toBeLessThan(10_000);
-    });
+    }, 60_000);
   });
 
   describe('Ellipsis in a numeric context must not throw (MathNet corpus)', () => {
@@ -276,13 +277,14 @@ describe('Playground regressions', () => {
 
     test('repeated `]` groups parse in polynomial time', () => {
       const ce = new ComputeEngine();
-      const start = Date.now();
       // 200 repeats of a symbol-indexing group — every group ends in `]`.
-      // Before the fix this was tens of seconds even at ~14 groups.
+      // The exponential backtracking this guards against took tens of seconds
+      // at ~14 groups, so at 200 groups it does not finish at all: parsing
+      // returning a valid expression IS the assertion, and the jest per-test
+      // timeout below is the backstop for the case where it does not return.
       const expr = ce.parse('a[b=c]'.repeat(200), { canonical: false });
       expect(expr.isValid).toBe(true);
-      expect(Date.now() - start).toBeLessThan(5_000);
-    });
+    }, 60_000);
   });
 
   // A self-referential binding (`a := a + 1` over an unbound `a`) forms a

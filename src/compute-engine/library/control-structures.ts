@@ -1153,6 +1153,39 @@ function canonicalBlock(
       if (scope.bindings.has(name) || ce.lookupDefinition(name)) continue;
       ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
     }
+    // A one-step function definition written inside a block —
+    // `DefineFunction(name, Function(…))`, the surface form `name(x) = …` —
+    // is BLOCK-LOCAL, on the same rule as `Declare`: it binds in the block it
+    // is written in, SHADOWS a same-named outer function instead of
+    // overwriting it, and dies with the frame.
+    //
+    // Hoisting the name here is what makes that true. `defineFunctionClause`
+    // (multi-clause.ts) installs onto the binding it finds by walking the
+    // scope chain, so with no block-scope binding to find it reaches up: a
+    // nested `sq(m) = m * m` left `sq` callable at top level once the
+    // enclosing function was defined, and a nested definition of an existing
+    // outer function replaced it permanently. The explicit two-step form
+    // (`let sq; sq(m) = m * m`) already behaved correctly precisely because
+    // the `Declare` hoist above gave it a block-scope binding to install on.
+    //
+    // Unconditional, unlike the `Assign` hoist: a visible outer binding is
+    // exactly the case that must be shadowed rather than written through.
+    // The exception is a name owned by a declared nominal type, whose
+    // definition is a smart-CONSTRUCTOR definition: types are engine-global,
+    // not scoped, so that definition must reach the type's constructor.
+    //
+    // The name is declared `function`-typed (not `unknown`) so that a call to
+    // it later in the block resolves to this binding as an applicable
+    // operator instead of deferring past it to the outer definition
+    // (`lookupApplicable`, boxed-expression/lookup.ts).
+    for (const op of ops) {
+      if (!isFunction(op, 'DefineFunction')) continue;
+      const name = sym(op.ops[0]);
+      if (!name || name === 'Nothing') continue;
+      if (scope.bindings.has(name)) continue;
+      if (ce._typeRegistry[name]?.def !== undefined) continue;
+      ce._declareSymbolValue(name, { type: 'function', inferred: true }, scope);
+    }
   }
 
   ce._pushShadowedParameters(declaredNames);

@@ -1298,3 +1298,137 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     expect(value.re).toBe(4);
   });
 });
+
+describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () => {
+  // A function literal's parameter is a fresh local: inside the body, its name
+  // denotes the argument, never a same-named binding of the enclosing scope.
+  // That was already true in value position but not in OPERATOR position — the
+  // call `bump(2)` in a body whose parameter is `bump` resolved to the outer
+  // `bump` at canonicalization time, so the literal applied the wrong function
+  // and returned a silently wrong number.
+  //
+  // The parameter names here are deliberately not engine builtins: a builtin
+  // name would answer these calls on its own and the probe would prove nothing.
+
+  test('a parameter shadows an outer `const` holding a function', () => {
+    const { value, diagnostics } = run(
+      [
+        'const bump = (x) |-> x + 1',
+        'const applyTwo = (bump) |-> bump(2)',
+        'applyTwo((x) |-> x * 10)',
+      ].join('\n')
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(20);
+  });
+
+  test('a parameter shadows an outer named function definition', () => {
+    const { value, diagnostics } = run(
+      [
+        'bump(x) = x + 1',
+        'const applyTwo = (bump) |-> bump(2)',
+        'applyTwo((x) |-> x * 10)',
+      ].join('\n')
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(20);
+  });
+
+  test('a parameter of a named function definition shadows too', () => {
+    const { value, diagnostics } = run(
+      [
+        'const bump = (x) |-> x + 1',
+        'applyTwo(bump) = bump(2)',
+        'applyTwo((x) |-> x * 10)',
+      ].join('\n')
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(20);
+  });
+
+  test('an ANNOTATED function-typed parameter shadows too', () => {
+    const { value, diagnostics } = run(
+      [
+        'const bump = (x) |-> x + 1',
+        'const applyTwo = (bump: (number) -> number) |-> bump(2)',
+        'applyTwo((x) |-> x * 10)',
+      ].join('\n')
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(20);
+  });
+
+  test('the shadowed outer binding is intact after the call', () => {
+    // Shadowing is confined to the body: the outer `bump` is neither
+    // overwritten nor consumed by the call that shadowed it.
+    const { value, diagnostics } = run(
+      [
+        'const bump = (x) |-> x + 1',
+        'const applyTwo = (bump) |-> bump(2)',
+        'let inner = applyTwo((x) |-> x * 10)',
+        'let outer = bump(5)',
+        '[inner, outer]',
+      ].join('\n')
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.toString()).toBe('[20,6]');
+  });
+
+  test('a parameter shadows an outer `let` holding a function', () => {
+    const { value, diagnostics } = run(
+      [
+        'let bump = (x) |-> x + 1',
+        'const applyTwo = (bump) |-> bump(2)',
+        'applyTwo((x) |-> x * 10)',
+      ].join('\n')
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(20);
+  });
+
+  test('a parameter shadows an outer non-function `const`', () => {
+    const { value, diagnostics } = run(
+      ['const offset = 5', 'const wrap = (offset) |-> offset + 1', 'wrap(10)'].join(
+        '\n'
+      )
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(11);
+  });
+
+  test('an inner parameter shadows an outer parameter of the same name', () => {
+    // The inner literal re-binds `bump`, so its `bump(2)` is the inner
+    // argument (×100), and the outer `bump` is still the outer argument (×10)
+    // where the outer body applies it: 200 + 20.
+    const { value, diagnostics } = run(
+      [
+        'const applyTwo = (bump) |-> ((bump) |-> bump(2))((y) |-> y * 100) + bump(2)',
+        'applyTwo((x) |-> x * 10)',
+      ].join('\n')
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(220);
+  });
+
+  test('the compiled path agrees with the interpreter', () => {
+    // Same program under `jit: 'auto'`, called enough times to make
+    // auto-compilation worthwhile: a compiled call must not answer differently
+    // from an interpreted one. (The compiler fails such a call closed and the
+    // interpreter runs it; what is asserted here is the ANSWER, not which tier
+    // produced it.)
+    const ce = new ComputeEngine();
+    ce.jit = 'auto';
+    const { value, diagnostics } = executeEpsil(
+      ce,
+      [
+        'const bump = (x) |-> x + 1',
+        'const applyTwo = (bump) |-> bump(2)',
+        'let acc = 0',
+        'for k in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] { acc = acc + applyTwo((x) |-> x * 10) }',
+        'acc',
+      ].join('\n')
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(200);
+  });
+});

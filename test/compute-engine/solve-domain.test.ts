@@ -176,9 +176,12 @@ describe('SOLVE OVER A DOMAIN — budget and interruption', () => {
       ['Equal', ['Add', ['Power', 2, 'x'], 'x'], 999999999999],
       ['Element', 'x', ['Range', 1, 100000000]],
     ]);
-    const start = Date.now();
+    // Returning at all is the assertion: sweeping the enumeration this test
+    // rejects does not finish, so an over-budget spec that was NOT declined
+    // would hang here rather than answer slowly. The jest per-test timeout is
+    // the backstop for that; an elapsed-millisecond check would only add
+    // sensitivity to load on the machine running the suite.
     expect(isUnevaluated(expr)).toBe(true);
-    expect(Date.now() - start).toBeLessThan(2000);
   });
 
   test('deadline interruption propagates a CancellationError', () => {
@@ -297,9 +300,12 @@ describe('SOLVE OVER A DOMAIN — multi-variable enumeration', () => {
       ['Element', 'x', ['Range', 1, 10000]],
       ['Element', 'y', ['Range', 1, 10000]],
     ]);
-    const start = Date.now();
+    // Returning at all is the assertion: sweeping the enumeration this test
+    // rejects does not finish, so an over-budget spec that was NOT declined
+    // would hang here rather than answer slowly. The jest per-test timeout is
+    // the backstop for that; an elapsed-millisecond check would only add
+    // sensitivity to load on the machine running the suite.
     expect(isUnevaluated(expr)).toBe(true);
-    expect(Date.now() - start).toBeLessThan(2000);
   });
 
   test('a bare-symbol spec mixed with domain specs stays inert', () => {
@@ -450,10 +456,11 @@ describe('SOLVE OVER A DOMAIN — periodic root-family expansion', () => {
       ['Equal', ['Sin', 'x'], 0],
       ['Element', 'x', ['Interval', 0, 1000000000]],
     ]);
-    const start = Date.now();
-    // Principal roots 0 and π both lie in the domain.
+    // Principal roots 0 and π both lie in the domain. Getting exactly those
+    // two is the assertion: expanding ~1.6·10⁸ periods would neither finish
+    // nor produce a two-element answer. The jest per-test timeout is the
+    // backstop for the non-terminating case.
     expect(solutions(expr)).toEqual([0, Math.PI]);
-    expect(Date.now() - start).toBeLessThan(2000);
   });
 
   test('non-periodic quadratic over a range is unaffected (exact roots)', () => {

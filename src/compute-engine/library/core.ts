@@ -106,6 +106,7 @@ import {
   ClauseDefinitionError,
   clauseListing,
   declaredSignatureOf,
+  declareLocalClauseTarget,
   defineFunctionClause,
   canonInstallSkipped,
   isGenericClauseLiteral,
@@ -2630,6 +2631,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             op1 ?? ce.Nothing,
           ]);
         try {
+          // A definition evaluated inside a call frame or a block binds
+          // THERE: it shadows a same-named outer function instead of
+          // overwriting it, and dies with the frame. The clause installation
+          // below writes through the scope chain, so the local binding it
+          // installs onto has to exist first.
+          declareLocalClauseTarget(ce, name);
           // Same anchor and same route discipline as the canonical handler
           // above — `op1` is the raw name operand it threaded through.
           withStatementRoute(ce, (route) =>

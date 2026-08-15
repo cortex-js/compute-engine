@@ -1125,6 +1125,24 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           // made it false is the widening guard's job, not this cache's.
           this._deriveEffects = undefined;
         } else if (!effects.stated) {
+          // The default-`!scope` ceiling (ruled 2026-08-15): a definition
+          // with NO effect annotation guarantees it does not mutate the
+          // world — escaping writes are opt-in via the `scope` label. The
+          // trigger is the walk's PROVEN-mutation bit, never the `scope`
+          // label of the inferred set: `{any}` from an unresolved
+          // forward-referenced head must stay optimistic (the v5
+          // dependency-order ruling), or mutual recursion breaks. Anonymous
+          // literals are not gated — they have no annotation surface (the
+          // lambda specifier slot is deferred) and are never installed here;
+          // their arrows still carry the inferred `scope` honestly.
+          if (inferred.escapingWrite)
+            throw new EffectContractError(
+              this.name,
+              undefined,
+              inferred.effects,
+              undefined,
+              /* scopeDefault */ true
+            );
           effects = { stated: true, effects: inferred.effects };
           inferredDraws = inferred.draws;
           // If the walk consulted an effect set that is itself derived from

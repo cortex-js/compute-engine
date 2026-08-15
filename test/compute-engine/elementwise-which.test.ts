@@ -891,16 +891,23 @@ describe('perf smoke', () => {
       elapsed = Math.min(elapsed, performance.now() - t);
       expect(v.count).toBe(N);
     }
+    // Express the cost in units of the canary rather than in milliseconds.
+    // Both numbers are measured in the same process moments apart, so a host
+    // that is slow — or merely busy running the rest of the suite in parallel
+    // — inflates them together and the ratio stays put, whereas an absolute
+    // millisecond bound turns machine load into a test failure. Measured
+    // ~1150 canary units (22 ms against a 0.019 ms/iter canary); the
+    // per-position lazy regime this guards against is an order of magnitude
+    // worse, so the bound below sits comfortably between the two.
+    const canaryUnits = elapsed / canary;
     // eslint-disable-next-line no-console
     console.log(
       `[elementwise-which] witness 3×900: ${elapsed.toFixed(
         2
-      )} ms (box canary ${canary.toFixed(4)} ms/iter)`
+      )} ms = ${canaryUnits.toFixed(0)} canary units (box canary ${canary.toFixed(
+        4
+      )} ms/iter)`
     );
-    // The LOGGED number is the signal; this bound is only a
-    // catastrophic-regression tripwire (the per-position lazy regime would be
-    // an order of magnitude worse), set high enough that a loaded CI host
-    // cannot flake it.
-    expect(elapsed).toBeLessThan(150);
+    expect(canaryUnits).toBeLessThan(5000);
   });
 });

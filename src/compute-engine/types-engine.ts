@@ -14,6 +14,8 @@ import type { BoxedType } from '../common/type/boxed-type.js';
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
 import type { StateEvent } from './engine-configuration-lifecycle.js';
 import type { DeadlineFrame } from '../common/interruptible.js';
+import type { MapAutoCompileStats } from './map-auto-compile-stats.js';
+export type { MapAutoCompileStats } from './map-auto-compile-stats.js';
 import type {
   ParseLatexOptions,
   SerializeLatexOptions,
@@ -580,6 +582,24 @@ export interface IComputeEngine {
    */
   _timeRemaining: number;
 
+  /** Instrumentation counters for the auto-compilation of lazy-`Map` element
+   * lambdas on numeric drains: how many compile attempts were made, how many
+   * elements a compiled function served, how many dependency re-validations,
+   * recompiles, per-element interpreter fallbacks and NaN double-checks
+   * occurred. This is the only surface that says whether a given `Map` drain
+   * compiled, re-validated or fell back.
+   *
+   * The counters are process-global and cumulative, not per-engine — the
+   * compile cache they instrument is shared by every engine in the process —
+   * so every engine returns the same object, and a caller measures one drain by
+   * reading the counters before and after it and taking the difference.
+   *
+   * Reachable at runtime with no stability promise, like the other
+   * `_`-prefixed members: the shape and the counter set may change.
+   * @internal
+   */
+  readonly _mapAutoCompileStats: MapAutoCompileStats;
+
   /** Names defined by a library that was NOT one of the engine's standard
    * libraries, i.e. a `LibraryDefinition` object supplied by the caller to the
    * constructor's `libraries` option. Caller-supplied libraries are installed
@@ -1127,6 +1147,13 @@ export interface IComputeEngine {
   _isShadowedParameter(name: string): boolean;
   /** The declared type of an active shadowed parameter, if any. @internal */
   _shadowedParameterType(name: string): Type | undefined;
+  /** The scope enclosing the construct that shadows `name` — the scope a
+   * function literal whose parameter is `name` is written in, or the scope
+   * enclosing a `Block` that declares `name`. A resolution of `name` must stop
+   * before reaching this scope: anything found at or above it belongs to the
+   * enclosing context, which the parameter (or block local) shadows.
+   * `undefined` when `name` is not an active shadowed parameter. @internal */
+  _shadowedParameterBoundary(name: string): Scope | undefined;
   /** The binding already auto-declared for an active shadowed parameter during
    * the current body's canonicalization, if any. @internal */
   _shadowedParameterDef(name: string): BoxedDefinition | undefined;
