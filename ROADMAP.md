@@ -620,6 +620,99 @@ Pins: `test/epsil/multi-clause.test.ts` — the bare recursive `fact`, the
 no-weakening check on the declared domain, and the annotated-parameter
 arm check that must still fail.
 
+### `definition-order.test.ts` is intermittently red in FULL runs only (found 2026-08-14)
+
+The "three-definition Sum matrix" tests compare the COMPILED result of the
+same program built in different definition orders. In a full suite run they
+disagree in the last few digits:
+
+```
+- -0.5248276195478552   (control order)
++ -0.5248276195481336   (order A,h,a)
+```
+
+Established so far:
+
+- The file passes **32/32 in isolation**, both parallel and `--runInBand`.
+- The failing SUBSET changes between full runs — 4 tests in one, 2 in the
+  next, all within the same describe block — so it is not a deterministic
+  logic error.
+- The assertion compares two engines constructed inside ONE test, so
+  whatever differs is process-global state that earlier suites in the same
+  worker have already perturbed, not a stored baseline drifting.
+- Pairwise runs against the obvious numeric neighbours do NOT reproduce it:
+  `numbers`, `compile-subtree-folding`, `canonical-folding`,
+  `compile-lazy-collections`, `deadline-regressions`,
+  `lazy-collection-regimes` each pass when run immediately before it.
+
+**Both obvious candidates are REFUTED — do not re-derive them.**
+
+- *A cross-engine cache.* The engine cache is per-engine: `EngineCacheStore`
+  keeps `_entries` as an INSTANCE field and the only instantiation is the
+  engine's own `_cacheStore`, so no module-level store exists and two engines
+  in one test cannot see each other's entries.
+- *Leaked `BigDecimal.precision`.* It is process-global, and eleven test files
+  under `test/compute-engine/` do set it with no `afterAll`/`afterEach`
+  restore (`bug-fixes`, `comparisons`, `deadline-regressions`,
+  `lazy-collection-regimes`, `numbers`, `performance`,
+  `pointlist-lazy-broadcast`, `random-compile`, `serialization`, `timeout`,
+  `statistics`) — but it is NOT this mechanism. Probed directly: the control
+  order and every failing order produce byte-identical compiled output, both
+  at the default precision and after deliberately leaking precision 100 into
+  the process. Restoring precision in those eleven files is still worth doing
+  as hygiene; it will not fix this.
+
+A full `--runInBand` run — all 511 suites in ONE process — PASSES. The failure
+appears only under PARALLEL execution.
+
+**Do not read that as refuting process-global state; it does not.** In-band
+runs every suite sequentially in one process, while a parallel run splits them
+across worker processes each holding a DIFFERENT subset. So a polluting suite
+and this one can land in the same worker with nothing in between, where the
+in-band ordering happens to put other work between them. In-band passing shows
+only that the full sequential ordering does not trigger it. (Recorded because
+the stronger claim was made and withdrawn in the same session — the
+distinction is easy to get wrong.)
+
+**Isolation passing (32/32) is weak evidence for the same reason**, and this
+generalizes beyond this entry. Running a suite alone shows only that it needs
+no help from a neighbour; it says nothing about whether a real defect is being
+TRIGGERED by a neighbour it legitimately shares a worker with in ordinary
+runs. "Passes in isolation" is evidence for *not self-contained*, never for
+*not a real defect* — the inference that felt safe to three separate sessions
+today and is wrong in the same way both times. What the conclusion here rests
+on instead is the other three legs: the 13th-digit magnitude, three
+independent sessions hitting it across unrelated diffs, and the object work
+eliminated by a clean full run.
+
+Two live hypotheses remain:
+
+- **Something else in the process-global numeric family.** `BigDecimal.precision`
+  is specifically eliminated, but it is not the only shared numeric setting.
+  The magnitude fits: the mismatch is in the 13th significant digit
+  (`-0.5248276195478552` vs `-0.5248276195481336`), a precision artifact
+  rather than a logic error.
+- **Load sensitivity.** An iteration or time budget on this path yielding a
+  slightly different result when the CPU is contended would explain passes
+  alone, passes in-band, fails only in parallel, and a failing subset that
+  varies with which workers get starved. If this is it, it is a real defect —
+  a compiled result that changes with machine load — and not a flaky test.
+
+Eliminated, do not re-derive: the per-engine cache (`EngineCacheStore` keeps
+`_entries` as an instance field, so two engines cannot share entries), leaked
+`BigDecimal.precision` (probed directly: control and every ordering agree
+byte-for-byte at default precision and after deliberately leaking precision
+100), and the Appendix B object work (a full run with all of Phase 1 applied
+shows these same failures and nothing else).
+
+Reference points for whoever picks this up: a FRESH process computes
+`-0.5248276195481336` for both the control and every ordering — the value the
+failing runs report as *received* — so it is the collection-phase `reference`
+that ends up holding `-0.5248276195478552`. The failing PERMUTATIONS also vary
+between runs on identical tree state (3 failures — `h,A,a`/`A,h,a`/`A,a,h` —
+then 2 — `a,A,h`/`A,a,h`), so neither which orders fail nor how many is
+stable; isolation is 32/32 every time.
+
 ### `Reverse` of a tuple: static type lies about element order (found 2026-08-14, string-spec review round 2)
 
 `Reverse`'s signature is `(T) -> T where T: indexed_collection`, and
@@ -631,6 +724,45 @@ order. The fix is entangled with the Phase 0 tuple decision in
 `docs/STRING_ROADMAP.md` ("Signature refinement" — whether arity-typed
 tuples are excluded from the `(T) -> T` bounds or get their own result
 typing); resolve them together.
+
+### ~~`typeCouldBeCollection` omits `dictionary`/`record`, so spreading a valueless dictionary-typed symbol errors~~ (found and FIXED 2026-08-14, record-spread status check)
+
+`dictionary<...>` and `record<...>` are subtypes of `collection`, but
+`typeCouldBeCollection` (`src/compute-engine/collection-utils.ts`) returned
+`false` for them, so `ListFrom`'s valueless-collection inertness gate
+(USER-RULED 2026-08-11: a collection-TYPED operand with no value yet must
+stay unresolved, not be wrapped as a scalar datum) misfired for
+dictionary/record-typed symbols: `let d1: dictionary<integer>` then the
+Epsil merge `{->, ...d1, "k" -> 3}` errored with "Expected a collection of
+pairs, got dictionary<integer>" instead of staying symbolic. Values were
+unaffected — only the declared-but-unassigned case.
+
+Fixed (USER-RULED 2026-08-14) by SPLITTING the predicate, since it served
+two different questions:
+
+- `typeCouldBeCollection` now answers "could be a collection of ANY kind"
+  (gains `dictionary`/`record`, both primitives and kinds) and is used by
+  the materializer inertness gates (`ListFrom`/`SetFrom`/`TupleFrom`,
+  `canEnumerateCollectionOperands`) and the enumerability/draw-free probes
+  (`enumerableFromAllSources`, `isDrawFreeBroadcast`).
+- `typeCouldBeUnkeyedCollection` (new) answers "could be an UNKEYED
+  collection" — one whose members are elements (`list`/`set`/`tuple`/bare
+  `collection`), not key–value pairs — and feeds broadcast/threadable
+  admission via `couldBeUnkeyedCollectionOperand` (the renamed
+  `couldBeCollectionOperand`; policy field `couldBeUnkeyedCollection`).
+  Only the KEYED collections (`dictionary`/`record`) are excluded, so
+  `Sin(dict)`/`dict + 1` keep their loud `incompatible-type` errors.
+
+The admission boundary is keyed vs unkeyed, NOT indexed vs non-indexed:
+an "indexed" split (excluding `set`) was tried first and REFUTED by three
+test pins — `Conjugate(Set(1, 2))` under `(T) -> T where T: number` must
+be lift-admitted and bind WHOLE, typing `set<finite_integer>` (§5.3 D10,
+pinned in `generic-function-literals.test.ts` and
+`type-variables-linalg.test.ts`), and the coset idiom
+`|H \cap xH| \geq 2p - n` must parse clean
+(`set-label-tolerance.test.ts`). Set operands in scalar positions staying
+typed-symbolic is deliberate (image-of-a-set semantics stays open); do
+not re-attempt dropping `set` from admission.
 
 ### Ground-type invariant leak in `parameterized-nominal-constructor.test.ts` (dev-assert noise)
 

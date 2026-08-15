@@ -2,6 +2,21 @@
 
 ### Issues Resolved
 
+- **Spreading a declared-but-unassigned dictionary or record symbol no
+  longer errors.** With `let d: dictionary<integer>` and no value yet,
+  the Epsil merge `{->, ...d, "k" -> 3}` errored with `Expected a
+  collection of pairs, got dictionary<integer>` instead of staying
+  symbolic until `d` receives a value (as the same spread over a
+  `list`-typed symbol already did). Cause: the could-be-a-collection type
+  test used by the eager materializers (`ListFrom`, `SetFrom`,
+  `TupleFrom`) did not know the `dictionary` and `record` types, so the
+  unresolved symbol was wrapped as if it were a scalar datum. The test now
+  covers them, and the threadable/broadcast admission check has been split
+  into its own predicate that admits only unkeyed collections (lists,
+  sets, tuples) — so `Sin(dict)` and `dict + 1` still report
+  `incompatible-type` loudly, while set operands keep their existing
+  behavior (admitted whole, staying symbolic).
+
 - **Degree mode no longer produces wrong compiled results for angular
   functions with a constant argument** (regression in 0.108.0). With
   `angularUnit` set to `"deg"`, compiled `sin(90)` returned 0.0274
