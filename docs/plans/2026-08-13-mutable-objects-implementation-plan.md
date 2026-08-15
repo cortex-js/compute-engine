@@ -170,31 +170,28 @@ The center of gravity. Sub-steps in dependency order.
 > > `object-store` event at a ZERO mask by user ruling, and the
 > > acceptance matrix in `test/compute-engine/object-store.test.ts`).
 > >
-> > The rebinding-sugar RETIREMENT is BLOCKED and its prerequisite —
-> > Appendix B's B1 mutability gate — was implemented, measured and
-> > reverted the same day: it fails 32 protocol tests, and the failures
-> > are structural rather than fixture-level (a builtin can never be an
-> > object type, so B1 deletes the shipped host-API ability to register
-> > protocol setters; the migratable cases depend on Phase 2's
-> > field-backed-satisfaction ruling). Three options are written up
-> > under "Appendix B's mutability gate (B1) would remove settable
-> > properties from host types" in `ROADMAP.md`, needing a product
-> > ruling. Until then the sugar ships alongside the store: the store
-> > claims a name in the object's own layout, the sugar serves the rest.
+> > The rebinding-sugar RETIREMENT does not land in Phase 1. Its
+> > prerequisite, Appendix B's B1 mutability gate, was implemented,
+> > measured and reverted on 2026-08-15, then **RULED that same day: B1
+> > stands as written** — a writable property is meaningful only on a
+> > mutable object. The rebinding sugar was a workaround for the absence
+> > of mutable values, and retires with the problem it solved; the
+> > rationale is recorded at the gate's spec section
+> > (`docs/TYPE_SYSTEM_ROADMAP.md`, "Which types can conform") and the
+> > accepted costs in the B1 entry of `ROADMAP.md`.
 > >
-> > **This document schedules B1 twice, and that is the root of the
-> > problem.** Step 5 below puts `protocol-requires-object` in Phase 1 as
-> > part of the sugar retirement, while "Phase 2 — Protocol integration"
-> > lists "The mutability gate (B1)" as one of its own bullets. Phase 2 is
-> > the coherent home: B1's two companions there — field-backed
-> > satisfaction (a stored field satisfies a `readwrite` requirement with
-> > no accessor written) and `object-property-conflict` — are exactly what
-> > a conformance must be re-pointed AT once records stop being legal
-> > conformers, and without them a migrated fixture has no defined meaning
-> > for an explicit `set` accessor on an object. The sugar retirement
-> > therefore depends on Phase 2 and cannot complete inside Phase 1;
-> > whether it MOVES to Phase 2 or Phase 2 moves ahead of it is the
-> > sequencing half of the ruling that ROADMAP.md asks for.
+> > **It is scheduled for Phase 2, not here.** This document had
+> > scheduled B1 twice — step 5 below names `protocol-requires-object`
+> > as part of 1D, while "Phase 2 — Protocol integration" lists the
+> > mutability gate as one of its own bullets. Phase 2 is the coherent
+> > home: field-backed satisfaction and `object-property-conflict` are
+> > what a migrated conformance must be re-pointed at, and the measured
+> > migration is 32 protocol tests. Step 5's sugar-retirement clause is
+> > therefore superseded by the Phase 2 bullet.
+> >
+> > Until then the sugar ships alongside the store: the store claims a
+> > name in the object's own layout, the sugar serves the rest, and the
+> > dispatch guard in `library/core.ts` keeps them from fighting.
 > **1E** — evaluation-order audit (B8) and the appendix's own examples
 > as verbatim tests. Independent of B1 — nothing in it touches
 > conformance — so it is Phase 1's remaining work whichever way the

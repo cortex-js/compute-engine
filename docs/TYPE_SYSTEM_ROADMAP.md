@@ -1559,6 +1559,26 @@ decline (ruling B8).
 
 ### Which types can conform (the mutability gate)
 
+**Why this rule exists** (user-ruled 2026-08-15, recorded because the
+outcome does not explain itself). Appendix A designed protocol
+properties when the language had no mutable values at all. A
+`readwrite` property was therefore a conundrum: there was nothing a
+write could *modify*, so `p.name = v` was given the only meaning
+available — call the setter, which builds a NEW value, and rebind `p`
+to it. That rebinding sugar was a workaround for a missing feature, and
+recognizing it as one is what motivated mutable objects and the
+`object` type in the first place.
+
+With objects in the language the workaround is superfluous, and the
+rule can be stated cleanly: **a writable property is meaningful only on
+a mutable object**. The gate below is that statement. Its consequence —
+that a value type may no longer present a settable property that
+quietly rebuilds and rebinds — is the intent, not collateral damage:
+one syntax with two meanings selected by the receiver's type is what
+produced a silent aliasing defect during Phase 1D, where a store into
+an object was lowered to a rebinding and every other reference to that
+object kept the old contents.
+
 A protocol that can *modify* object state — because it has at least one
 `readwrite` property, or a function member whose declared effects
 include the `state` label — can only be conformed to by object types. A

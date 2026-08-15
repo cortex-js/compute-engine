@@ -445,6 +445,41 @@ level with a probe operator (deterministic; independent of stack size and of
 the runner's own frames). This moves the cliff, it does not remove it —
 `1-2-…-700` still throws.
 
+**Second trim (DONE 2026-08-15, later the same day):** of the 9 remaining
+frames per canonical level, four only dispatched: `Array.prototype.map` and
+its callback, `box()` (whose two brackets — the inference transaction and the
+root repair — are no-ops once a root pass is open) and `boxFunction()`.
+Operands are now boxed by a `for` loop calling `boxInternal()` directly
+(`boxOperands()` in `box.ts`, inlined at the two hottest sites),
+`boxInternal()` calls `boxFunctionInternal()` directly when the root is
+active, and `canonicalForm()` with no scope goes straight to the `.canonical`
+getter instead of through `_inScope → inScope → callback`. Canonical boxing:
+9 → 5 frames per level (`boxInternal → boxFunctionInternal →
+makeCanonicalFunction → makeCanonicalFunctionCore → applyOperatorDefinition`);
+canonicalizing a raw-boxed tree: 15 → 8. The remaining `makeCanonicalFunction`
+frame is real work (it brackets `_inferenceCause`) and stays.
+
+Bytes of stack per level, measured as Δ`--stack-size` / Δceiling in a fresh
+process (the ceilings themselves are JIT-state dependent — Ignition and
+TurboFan frames differ in size, so a warm process can sit 30% either side of
+a cold one; frames and bytes per level are the numbers to compare):
+
+    path                          BEFORE (9 fr)   AFTER (5 fr)   trivial fn
+    canonical boxing              2 080 B/level   1 570 B/level   89 B/frame
+    raw boxing                    1 220 B/level     630 B/level
+
+So the four removed frames were the small ones (~125 B each); the five that
+remain average ~315 B. An Ignition frame is the function's whole register
+file — every local and temporary in the function, whichever path runs — and
+`makeCanonicalFunctionCore` (468 lines, 32 locals), `applyOperatorDefinition`
+(292, 14) and `boxFunctionInternal` (227, 18) stay live across the recursion.
+The next step down is therefore structural, not dispatch: split those three
+so the recursive call is reached through small dispatchers and the
+non-recursing arms (`List`/`Dictionary` fast paths, spread handling, error
+construction, the number/symbol/string arms of `boxInternal`) live in helpers
+that are called and returned from before the recursion. Expected gain another
+~1.5–2×; still a cliff. Removing the cliff needs the (a)/(b) ruling above.
+
 ### The LaTeX parser cannot honor a deadline at all (OPEN, correctness — found while fixing the canonicalization deadline-granularity entry)
 
 The canonicalization fix above bounds the SMALLER and better-behaved half of
@@ -1394,68 +1429,61 @@ plain `Typed` usage rather than a record mechanism.
 Phase 1's serialization walk had already been switched to emit the
 `Dictionary` operator form for this reason.
 
-### Appendix B's mutability gate (B1) would remove settable properties from host types (found 2026-08-15, OPEN — needs a product ruling; BLOCKS the rest of Phase 1D)
+### Appendix B's mutability gate (B1) — RULED 2026-08-15, scheduled for Phase 2
 
-Appendix B ruling B1 says a protocol with a `readwrite` property (or a
-member declaring `state`) may only be conformed to by an **object type**, and
-its "Changes to shipped documents" item 5 calls the migration of existing
-record-backed conformances **mechanical**. Implemented and measured on
-2026-08-15, it is not, and the gate was reverted pending a decision. What the
-implementation showed:
+**Ruling: B1 stands as written.** A writable property is meaningful only on a
+mutable object, so a protocol with a `readwrite` property (or a member
+declaring `state`) admits object conformers only.
 
-- **32 protocol tests fail**, across `protocols.test.ts`,
-  `protocol-properties.test.ts` and `protocol-dispatch-compile.test.ts`. All
-  of them for the same reason: their fixture conforms a `readwrite` protocol
-  to a non-object type.
-- **Some of those cannot be migrated at all.** A builtin (`string`,
-  `number`) can never be an object type, so `type string is Nameable` with a
-  `readwrite name` becomes permanently illegal. That is not a test-fixture
-  problem — it removes a **shipped host-API capability**:
-  `ce.declareProtocolImplementation(target, protocol, { setters: … })` on any
-  host-declared nominal, exercised today by "P18: HOST-declared getters and
-  setters". The P17 setter-validation surface (contravariant second
-  parameter, `set` without `get`, `set` on a `readonly` property) is likewise
-  reachable only through targets the gate forbids.
-- **The migratable cases land in Phase 2 semantics that do not exist yet.**
-  Retargeting a fixture to `object<…>` makes the question "what does an
-  explicit `set` accessor on an object type mean" — mutate in place, or
-  rebuild-and-rebind? That is field-backed satisfaction, a Phase 2 ruling.
-  Migrating now bakes in a guess.
+The rationale, which the rule alone does not convey, is now recorded at the
+gate's spec section (`docs/TYPE_SYSTEM_ROADMAP.md`, "Which types can conform"):
+Appendix A designed protocol properties before the language had any mutable
+value, so `p.name = v` on a value type was given the only meaning then
+available — rebuild and rebind. That rebinding sugar was a workaround for a
+missing feature, and recognizing it as one is what motivated mutable objects
+and the `object` type. With objects in the language it is superfluous.
 
-The property STORE itself is unaffected and shipped: `p.age = 43` works on
-object types, and the store wins over the protocol route for a name in the
-object's layout. What is blocked is the *retirement* of Appendix A's
-rebinding sugar, since the sugar is what currently serves record-backed
-`readwrite` conformances.
+**What the ruling accepts.** These three stop working, and that is the intent
+rather than collateral damage (all verified working on 0.111.0 before the
+ruling):
 
-**The implementation plan schedules B1 twice**, which is where the
-confusion originates: step 5 of Phase 1 names `protocol-requires-object`
-as part of 1D's sugar retirement, while "Phase 2 — Protocol integration"
-lists the mutability gate as one of its own bullets. Phase 2 is the
-coherent home — B1's companions there (field-backed satisfaction,
-`object-property-conflict`) are what a migrated conformance must be
-re-pointed at — so the ruling below has a sequencing half as well as a
-policy half: does the sugar retirement move to Phase 2, or does Phase 2
-move ahead of it?
+- `type Person = tuple<…> is Nameable` with `get`/`set` accessors — the Epsil
+  rebinding sugar.
+- `ce.declareProtocolImplementation(target, protocol, { setters: … })` on a
+  host-declared value type. This is not an independent capability: it is the
+  same rebinding sugar reached from the host API, so it retires with it.
+- `type string is Tagged` with a `readwrite tag` — a builtin can never be an
+  object type, so settable properties on builtins go away permanently. The
+  P17 setter-validation surface (contravariant second parameter, `set`
+  without `get`, `set` on a `readonly` property) must be re-pointed at object
+  targets, since it is reachable only through targets the gate forbids.
 
-Three ways out, needing a product ruling:
+The decisive argument was route ambiguity, not tidiness: one syntax with two
+meanings selected by the receiver's type is what produced the Phase 1D
+aliasing defect, where a store into an object was lowered to a rebinding and
+every other reference to that object kept the old contents.
 
-1. **Narrow B1 to Epsil-declared conformances**, leaving the host API able to
-   register setters on any nominal. Keeps the shipped capability; the gate
-   then constrains the surface language rather than the engine.
-2. **Keep B1 as written** and accept that settable protocol properties are
-   object-only everywhere. Then P18's host getter/setter tests and the P17
-   setter-validation tests are rewritten against object targets, and Phase 2's
-   field-backed-satisfaction ruling has to land first.
-3. **Drop B1**, letting any type conform to a `readwrite` protocol and
-   relying on `immutable-value-assignment` at the store to refuse the write.
-   Simplest, but a conformance that can never be satisfied then registers
-   silently.
+**Scheduling: Phase 2, with its companions.** The implementation plan
+scheduled B1 twice — Phase 1 step 5 named `protocol-requires-object` as part
+of 1D's sugar retirement, and Phase 2 lists the mutability gate as its own
+bullet. Phase 2 wins: field-backed satisfaction (a stored field satisfies a
+`readwrite` requirement with no accessor written) and `object-property-conflict`
+are what a migrated conformance is re-pointed AT, and without them "what does
+an explicit `set` accessor on an object mean" has no implemented answer.
 
-If nothing is decided, Appendix A's rebinding sugar stays shipped alongside
-the property store. That is coherent (the store claims a name in the object's
-layout; the sugar serves everything else) but leaves two mechanisms for one
-surface syntax.
+**Migration cost, measured 2026-08-15** (the implementation was landed,
+measured and reverted pending this ruling): **32 protocol tests** across
+`protocols.test.ts`, `protocol-properties.test.ts` and
+`protocol-dispatch-compile.test.ts`, every one because its fixture conforms a
+`readwrite` protocol to a non-object type. Appendix B item 5 calls the
+migration "mechanical"; it is not, and that wording should be amended when
+Phase 2 lands.
+
+Until Phase 2, the rebinding sugar ships alongside the property store. That is
+stable rather than broken — the store claims a name the object's own layout
+declares, the sugar serves everything else, and the dispatch guard in
+`library/core.ts` keeps them from fighting — but it is two mechanisms for one
+syntax, and Phase 1D does not formally close until the sugar is gone.
 
 ### A field store's EXPRESSION-level effect is still `scope`, not `state` (found 2026-08-15 in review; the inference half FIXED same day, OPEN — narrow residual)
 
