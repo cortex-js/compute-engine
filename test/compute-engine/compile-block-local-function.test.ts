@@ -2,7 +2,7 @@
  * Compiling a program that DEFINES a function and then CALLS it — the ordinary
  * shape of an Epsil file, and of any `Block` whose local holds a lambda:
  *
- *     const g = (k) |-> Sum(Take(Map(_ |-> _^2, 1..oo), k))
+ *     const g = (k) => Sum(Take(Map(_ => _^2, 1..oo), k))
  *     g(3)
  *
  * The declaration always lowered to a value binding (`let g = ((k) => …)`),
@@ -62,7 +62,7 @@ function both(
 describe('COMPILE a block-local function definition', () => {
   it('compiles the call of a `const`-bound lambda (the reported program)', () => {
     const { compiled, interpreted, code } = both(
-      'const g = (k) |-> Sum(Take(Map( _ |-> _^2, 1..oo), k))\ng(3)'
+      'const g = (k) => Sum(Take(Map( _ => _^2, 1..oo), k))\ng(3)'
     );
     expect(compiled).toBe(14); // 1 + 4 + 9
     expect(interpreted).toBe('14');
@@ -74,7 +74,7 @@ describe('COMPILE a block-local function definition', () => {
 
   it('emits the CALL when the argument is not constant', () => {
     const { compiled, code } = both(
-      'const g = (k) |-> Sum(Take(Map( _ |-> _^2, 1..oo), k))\ng(n)',
+      'const g = (k) => Sum(Take(Map( _ => _^2, 1..oo), k))\ng(n)',
       { vars: { n: 3 } }
     );
     expect(code).toContain('g(');
@@ -83,14 +83,14 @@ describe('COMPILE a block-local function definition', () => {
   });
 
   it('compiles a `let`-bound lambda the same way', () => {
-    const { compiled, interpreted } = both('let h = (k) |-> k + 1\nh(3)');
+    const { compiled, interpreted } = both('let h = (k) => k + 1\nh(3)');
     expect(compiled).toBe(4);
     expect(interpreted).toBe('4');
   });
 
   it('resolves a call from a LOOP BODY inside the same block', () => {
     const { compiled, interpreted } = both(
-      'const h = (k) |-> k + 1\nlet s = 0\nfor k in 1..4 { s := s + h(k) }\ns'
+      'const h = (k) => k + 1\nlet s = 0\nfor k in 1..4 { s := s + h(k) }\ns'
     );
     expect(compiled).toBe(14); // 2 + 3 + 4 + 5
     expect(interpreted).toBe('14');
@@ -98,7 +98,7 @@ describe('COMPILE a block-local function definition', () => {
 
   it('resolves a call of one local from another local', () => {
     const { compiled, interpreted } = both(
-      'const h = (k) |-> k + 1\nconst j = (k) |-> h(k) * 2\nj(3)'
+      'const h = (k) => k + 1\nconst j = (k) => h(k) * 2\nj(3)'
     );
     expect(compiled).toBe(8);
     expect(interpreted).toBe('8');
@@ -106,7 +106,7 @@ describe('COMPILE a block-local function definition', () => {
 
   it('recurses through its own binding', () => {
     const { compiled, interpreted } = both(
-      'const fact = (n) |-> if n <= 1 { 1 } else { n * fact(n - 1) }\nfact(5)'
+      'const fact = (n) => if n <= 1 { 1 } else { n * fact(n - 1) }\nfact(5)'
     );
     expect(compiled).toBe(120);
     expect(interpreted).toBe('120');
@@ -117,13 +117,13 @@ describe('COMPILE a block-local function definition', () => {
     // the same dispatch an engine-level user function gets. The argument is a
     // run-time input, so this exercises the emitted dispatch rather than the
     // constant fold (which would answer `[2, 3, 4]` without it).
-    const { compiled, code } = both('const h = (k) |-> k + 1\nh(xs)', {
+    const { compiled, code } = both('const h = (k) => k + 1\nh(xs)', {
       vars: { xs: [1, 2, 3] },
     });
     expect(code).toContain('_SYS.bcastFn');
     expect(compiled).toEqual([2, 3, 4]);
     // …and the same call with a LITERAL list folds to the same answer.
-    expect(both('const h = (k) |-> k + 1\nh([1, 2, 3])')).toMatchObject({
+    expect(both('const h = (k) => k + 1\nh([1, 2, 3])')).toMatchObject({
       compiled: [2, 3, 4],
       interpreted: '[2,3,4]',
     });
@@ -133,7 +133,7 @@ describe('COMPILE a block-local function definition', () => {
     // JavaScript would bind the missing parameter to `undefined` and compute
     // NaN; the interpreter reports an error, so the compilation must not
     // silently disagree.
-    expect(() => both('const h = (a, b) |-> a + b\nh(1)')).toThrow(
+    expect(() => both('const h = (a, b) => a + b\nh(1)')).toThrow(
       /declared with 2 parameters but called with 1/
     );
   });
@@ -143,7 +143,7 @@ describe('COMPILE a block-local function definition', () => {
     // `compileBlock`: without the same rewrite and scope there, a definition
     // made inside the body was still `Unknown operator`.
     const { compiled, interpreted } = both(
-      'let s = 0\nfor k in 1..3 { const h = (j) |-> j + 1\n s := s + h(k) }\ns'
+      'let s = 0\nfor k in 1..3 { const h = (j) => j + 1\n s := s + h(k) }\ns'
     );
     expect(compiled).toBe(9); // 2 + 3 + 4
     expect(interpreted).toBe('9');
@@ -155,7 +155,7 @@ describe('COMPILE a block-local function definition', () => {
     // the whole statement list, not the part emitted so far. Compiling it
     // against the progressive scope rejected this ordinary program.
     const { compiled, interpreted } = both(
-      'const f = (n) |-> g(n)\nconst g = (n) |-> n + 1\nf(2)'
+      'const f = (n) => g(n)\nconst g = (n) => n + 1\nf(2)'
     );
     expect(compiled).toBe(3);
     expect(interpreted).toBe('3');
@@ -167,7 +167,7 @@ describe('COMPILE a block-local function definition', () => {
     // compile time. Resolving it would emit `let a = g(3); let g = …`, whose
     // `g(3)` reads a JavaScript temporal dead zone: a runtime `ReferenceError`
     // behind `success: true`.
-    expect(() => both('let a = g(3)\nconst g = (k) |-> k + 1\na')).toThrow(
+    expect(() => both('let a = g(3)\nconst g = (k) => k + 1\na')).toThrow(
       /Unknown operator/
     );
   });
@@ -184,7 +184,7 @@ describe('COMPILE a block-local function definition', () => {
     // more exempt from the contract than a definition is.
     expect(() =>
       both(
-        'const pair = (x: broadcastable<value>) |-> (x, x)\npair([1, 2, 3])',
+        'const pair = (x: broadcastable<value>) => (x, x)\npair([1, 2, 3])',
         {
           constantFold: false,
         }
@@ -192,7 +192,7 @@ describe('COMPILE a block-local function definition', () => {
     ).toThrow(/declared `broadcastable<T>` parameter/);
     expect(
       program(
-        'const pair = (x: broadcastable<value>) |-> (x, x)\npair([1, 2, 3])'
+        'const pair = (x: broadcastable<value>) => (x, x)\npair([1, 2, 3])'
       )
         .evaluate()
         .toString()
@@ -202,7 +202,7 @@ describe('COMPILE a block-local function definition', () => {
   it('a NON-function local shadows an outer function-valued one', () => {
     // The inner `g` is a number, so `g(2)` is not a call of the outer lambda.
     expect(() =>
-      both('const g = (k) |-> k + 1\n{ const g = 5\n g(2) }')
+      both('const g = (k) => k + 1\n{ const g = 5\n g(2) }')
     ).toThrow();
   });
 });
@@ -288,9 +288,9 @@ describe('COMPILE a `function` definition', () => {
     // the engine as it canonicalizes, so `g(3)` reached the folder with a
     // known head and folded to `14`, while the `const` binding declares
     // nothing and left an unfolded `g(3)` behind.
-    const body = 'Sum(Take(Map( _ |-> _^2, 1..oo), k))';
+    const body = 'Sum(Take(Map( _ => _^2, 1..oo), k))';
     expect(both(`function g(k) { ${body} }\ng(3)`).code).toBe(
-      both(`const g = (k) |-> ${body}\ng(3)`).code
+      both(`const g = (k) => ${body}\ng(3)`).code
     );
   });
 
@@ -329,7 +329,7 @@ describe('COMPILE a block-local function — other targets are unchanged', () =>
 
   it('Python still fails closed on a call of a lambda-bound local', () => {
     expect(() =>
-      both('const h = (k) |-> k + 1\nh(3)', { to: 'python' })
+      both('const h = (k) => k + 1\nh(3)', { to: 'python' })
     ).toThrow(/Unknown operator `h`/);
   });
 });

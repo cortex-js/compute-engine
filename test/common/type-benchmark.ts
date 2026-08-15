@@ -28,7 +28,7 @@ const TYPE_STRINGS = [
   'integer | rational | real',
   'collection<number>',
   'set<finite_complex>',
-  'record<x: integer, y: string>',
+  'record{x: integer, y: string}',
   'number & real',
   'integer<0..10>',
   'vector<3>',
@@ -47,7 +47,7 @@ const SUBTYPE_PAIRS: [Type | string, Type | string][] = [
   ['(integer) -> integer', '(number) -> number'],
   ['integer | rational', 'real'],
   ['set<integer>', 'set<number>'],
-  ['record<x: integer>', 'record<x: number>'],
+  ['record{x: integer}', 'record{x: number}'],
   ['matrix<integer^(2x3)>', 'matrix'],
   ['string', 'number'],
 ];

@@ -459,8 +459,14 @@ export const FANCY_UNICODE = new Map<number, string>([
   [0x2192, '->'], // RIGHTWARDS ARROW
   [0x2194, '<->'],
   // [     0x21A4,  '<-|'],
-  [0x21a6, '|->'], // RIGHTWARDS ARROW FROM BAR
-  [0x21d2, '=>'], // ⇒ RIGHTWARDS DOUBLE ARROW (match-case arrow)
+  // Both arrows spell the one `=>` operator, which is the mapsto (lambda)
+  // arrow AND the `match` case arrow. `⇒` is the `MapsTo` row's `fancySymbol`,
+  // so it is the one the serializer emits under `fancySymbols` — and it reads
+  // back through its entry here. `↦` is an accepted INPUT spelling only: it is
+  // the traditional mathematical mapsto glyph, so a program may be written
+  // with it, but it is never produced.
+  [0x21a6, '=>'], // ↦ RIGHTWARDS ARROW FROM BAR
+  [0x21d2, '=>'], // ⇒ RIGHTWARDS DOUBLE ARROW
   [0x21d4, '<=>'],
 
   [0x2205, 'EmptySet'], // ∅ EMPTY SET

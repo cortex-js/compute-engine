@@ -258,7 +258,7 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
   // compared. This one is 1-ary against a 1-ary (record-bodied) raw arm.
   test('a 1-ary generic user arm reaches the overlap check without leaking `U`', () => {
     const ce = new ComputeEngine();
-    ce.declareType('pack', 'record<v: T>', { typeParams: ['T'] });
+    ce.declareType('pack', 'record{v: T}', { typeParams: ['T'] });
     const n = countAssertFailures(() => {
       try {
         ce.assign(
@@ -280,7 +280,7 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
     // Grounded, `U` reads `any` at the parameter — undecidable, which D14a
     // rejects loudly rather than letting the user arm shadow the raw one.
     const ce = new ComputeEngine();
-    ce.declareType('pack', 'record<v: T>', { typeParams: ['T'] });
+    ce.declareType('pack', 'record{v: T}', { typeParams: ['T'] });
     expect(() =>
       ce.assign(
         'pack',
@@ -324,13 +324,13 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
 });
 
 describe('§5 — a record body is inhabited by a generic constructor function', () => {
-  /** `type tree<T> = record<…>` mints nothing (D4b); the constructor function
+  /** `type tree<T> = record{…}` mints nothing (D4b); the constructor function
    * supplies it, with a clause of its OWN — the variable is named `U` here
    * precisely because the type's `T` is not in scope inside the function and
    * the names are alpha-irrelevant. */
   function recordTreeEngine(): ComputeEngine {
     const ce = new ComputeEngine();
-    ce.declareType('tree', 'record<value: T, children: list<tree<T>>>', {
+    ce.declareType('tree', 'record{value: T, children: list<tree<T>>}', {
       typeParams: ['T'],
     });
     ce.assign(
@@ -350,7 +350,7 @@ describe('§5 — a record body is inhabited by a generic constructor function',
 
   test('a record body auto-mints nothing', () => {
     const ce = new ComputeEngine();
-    ce.declareType('tree', 'record<value: T, children: list<tree<T>>>', {
+    ce.declareType('tree', 'record{value: T, children: list<tree<T>>}', {
       typeParams: ['T'],
     });
     expect(signatureOf(ce, 'tree')).toBe('NONE');
@@ -360,7 +360,7 @@ describe('§5 — a record body is inhabited by a generic constructor function',
     const ce = recordTreeEngine();
     expect(signatureOf(ce, 'tree')).toBe(
       '((v: U, cs: list<tree<U>>) -> tree<U> where U) & ' +
-        '((record<value: T, children: list<tree<T>>>) -> tree<T> where T)'
+        '((record{value: T, children: list<tree<T>>}) -> tree<T> where T)'
     );
   });
 
@@ -385,7 +385,7 @@ describe('§5 — a record body is inhabited by a generic constructor function',
 
   test('a wrong-arity result-type application does not produce a constructor', () => {
     const ce = new ComputeEngine();
-    ce.declareType('tree', 'record<value: T, children: list<tree<T>>>', {
+    ce.declareType('tree', 'record{value: T, children: list<tree<T>>}', {
       typeParams: ['T'],
     });
     const literal = ce.box([
@@ -405,7 +405,7 @@ describe('§5 — a record body is inhabited by a generic constructor function',
     // type's clause is not in scope in the function (§5), so a literal with no
     // declared result gets `tree<any>` rather than an open `tree<T>`.
     const ce = new ComputeEngine();
-    ce.declareType('tree', 'record<value: T, children: list<tree<T>>>', {
+    ce.declareType('tree', 'record{value: T, children: list<tree<T>>}', {
       typeParams: ['T'],
     });
     ce.assign(

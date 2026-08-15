@@ -217,7 +217,7 @@ function objectJsonWith(
  * The head is `Dictionary`, not `Record`: a record value in this engine IS a
  * dictionary whose keys are identifiers, and `Dictionary` is the operator that
  * builds one — re-boxing this form yields a `BoxedDictionary` whose type is
- * derived from its keys (`record<name: string, age: finite_integer>`), which is
+ * derived from its keys (`record{name: string, age: finite_integer}`), which is
  * what makes the `Object` provenance head's contract ("its static type is the
  * wrapped record's type") say something. There is no `Record` operator
  * definition anywhere in the engine, so a `["Record", …]` body re-boxed as an

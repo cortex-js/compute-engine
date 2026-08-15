@@ -347,7 +347,7 @@ describe('G5 — partial application of a generic literal is rejected', () => {
     // Instead the residual literal was built by re-attaching the FULL 2-ary
     // marker onto the 1-ary curried literal, whose §2.3 arity check then
     // rejected it — the result was
-    // `(_1) |-> Error("A function-literal signature marker must be …")`, an
+    // `(_1) => Error("A function-literal signature marker must be …")`, an
     // error buried in the residual body rather than a diagnostic on the call.
     const ce = fresh();
     const g = e1(
@@ -1128,7 +1128,7 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
 });
 
 describe('§5.7 — G10, the variable-correlated return is a TRUSTED ascription', () => {
-  test('`x |-> 0` installs at `(T) -> T where T`; `f("a")` types `string`', () => {
+  test('`x => 0` installs at `(T) -> T where T`; `f("a")` types `string`', () => {
     // RULED (G10, 2026-08-04): under erasure nothing verifies that the body
     // returns its argument's type, and the typed-function-literals precedent
     // (ruled 2026-07-12) makes return ascriptions TRUSTED, TypeScript-style —
@@ -1714,7 +1714,7 @@ describe('R1 — a declared polytype is ascribed onto the stored literal', () =>
   test('declare-then-assign: the value carries the clause', () => {
     const ce = declareAssign('(x: T) -> T where T', ['Function', 'x', 'x']);
     const value = ce.box('f').evaluate();
-    expect(value.toString()).toBe('(x) |-> x');
+    expect(value.toString()).toBe('(x) => x');
     expect(value.type.toString()).toBe('(x: T) -> T where T');
     // The definition's own type is unchanged, and so is every call.
     expect(ce.box('f').type.toString()).toBe('(x: T) -> T where T');

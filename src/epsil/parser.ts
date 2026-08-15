@@ -52,6 +52,10 @@ const PREFIX_PRECEDENCE = prefixOperatorForSymbol('!')!.precedence;
  * from the shared table so it stays in sync. */
 const MULTIPLY_PRECEDENCE = infixOperatorForSymbol('*')!.precedence;
 
+/** The legacy spelling of the mapsto arrow, replaced by `=>`. Still lexed and
+ * parsed as the arrow, but reported (`mapsto-arrow-legacy`) with a fixit. */
+const LEGACY_MAPSTO_ARROW = '|->';
+
 /** The two rows a bare `=` resolves to. Reading them from the shared table
  * keeps the positional `=` identical to the explicit spellings — same head,
  * same precedence, same associativity, same relational chaining. */
@@ -409,6 +413,26 @@ export class Parser {
    * `=>` then diagnosed. Depth-gated so parenthesized subexpressions inside
    * the body keep the ordinary continuation behavior. */
   private matchBodyStops: number[] = [];
+
+  /** Bracket depths at which a `=>` belongs to a `match` case rather than to
+   * an expression — that is, the depths at which a case's PATTERN and its
+   * optional `if` GUARD are being parsed.
+   *
+   * The mapsto (lambda) arrow and the case arrow are the same glyph `=>`, so
+   * everything a case parses before its arrow must refuse to consume one:
+   * without this, `n if valid => n` reads `valid => n` as a lambda guard and
+   * leaves the arm bodiless, and `xs |> f => n` in the same position is
+   * swallowed whole by the pipe-stage lambda sugar. Every site that can
+   * consume the arrow consults `atMapstoStop()`: the infix loop, the pattern
+   * infix loop, and `pipeStageLambdaTail`.
+   *
+   * Depth-gated exactly like `matchBodyStops`, so a lambda genuinely wanted in
+   * a guard still works when parenthesized (`n if (f => f)(n) => …`): inside
+   * the parentheses `this.brackets` is deeper than the recorded depth, and the
+   * arrow is an ordinary mapsto again. The stop is popped before the arm BODY
+   * is parsed, so `0 => x => x + 1` reads as a case whose body is a lambda.
+   */
+  private mapstoStops: number[] = [];
 
   /** Type names this program may refer to in an annotation: the host-supplied
    * names (`typeNames`, seeded from the engine's type resolver) plus every name
@@ -887,7 +911,7 @@ export class Parser {
   /** `do { … }`: a statement block in expression position. The `do` keyword
    * turns the brace-delimited block (otherwise the `{…}` collection grammar)
    * into a `Block`, so it can appear anywhere an expression can (a lambda body
-   * `x |-> do { … }`, an assignment RHS, an argument). A `do` not followed by
+   * `x => do { … }`, an assignment RHS, an argument). A `do` not followed by
    * `{` is a diagnostic (with a fix-it suggesting `{`). */
   private parseDoBlock(): MathJsonExpression | null {
     const kw = this.advance(); // 'do'
@@ -1152,7 +1176,7 @@ export class Parser {
    * the initializer is not itself a function literal, the names bind: the
    * initializer becomes the body of a lambda whose parameters come from the
    * annotation, so `const f : (x: number) -> number = x^2 + 1` means
-   * `= (x) |-> x^2 + 1`. The lifted `Declare` is the exact shape the
+   * `= (x) => x^2 + 1`. The lifted `Declare` is the exact shape the
    * explicit-lambda spelling produces; the engine's declared-type
    * reconciliation does the rest.
    *
@@ -1161,7 +1185,7 @@ export class Parser {
    * diagnostic. Exception: under a NESTED-arrow annotation
    * (`(x: number) -> (y: number) -> number`) a lambda whose names don't
    * match the outermost level is read as the outer lift's BODY
-   * (`= (y) |-> x + y` binds `x` around the inner lambda) — only the
+   * (`= (y) => x + y` binds `x` around the inner lambda) — only the
    * outermost level ever lifts.
    *
    * Deliberately inert (the initializer must then be an explicit lambda):
@@ -1263,7 +1287,7 @@ export class Parser {
     );
   }
 
-  /** `const f : (y: number) -> number = (x) |-> …` — the annotation and the
+  /** `const f : (y: number) -> number = (x) => …` — the annotation and the
    * lambda name the same positional parameter differently. The fixit renames
    * the ANNOTATION to the lambda's names: the lambda's names are the binders
    * the body actually uses, so that direction is the semantics-preserving
@@ -1645,7 +1669,7 @@ export class Parser {
     }
 
     // A `type` body IS the whole type, so it may carry a trailing clause — and
-    // a NOMINAL `type` body is the ONE position where an `object<…>` layout is
+    // a NOMINAL `type` body is the ONE position where an `object{…}` layout is
     // legal (every other route refuses the form with `object-type-not-inline`).
     // A `type alias` body is not one of them: an object type is nominal, and a
     // structural alias to a layout would make two aliases of the same shape
@@ -2286,7 +2310,10 @@ export class Parser {
     let returnType: MathJsonExpression | null = null;
     if (this.check('OPERATOR') && this.current.text === '->') {
       this.advance();
-      returnType = this.parseHeldType();
+      // A member's body block is required right after the return type, which
+      // is what disambiguates a bare `record`/`object` return type from a
+      // field list (see {@link parseHeldType}).
+      returnType = this.parseHeldType({ blockFollows: true });
     }
     if (!this.check('OPEN_BRACE')) {
       this.error(
@@ -3094,6 +3121,79 @@ export class Parser {
   } | null {
     const start = this.current.start;
     this.matchTypeGuards = [];
+    // Everything up to the case arrow — the pattern and the optional `if`
+    // guard — is parsed with `=>` reserved for this case (see `mapstoStops`).
+    // Popped before the BODY is parsed, where `=>` is an ordinary lambda
+    // arrow again.
+    this.mapstoStops.push(this.brackets.length);
+    let head: {
+      pattern: MathJsonExpression;
+      typeGuards: MathJsonExpression[];
+      explicitGuard: MathJsonExpression | null;
+    } | null;
+    try {
+      head = this.parseMatchCaseHead();
+    } finally {
+      this.mapstoStops.pop();
+    }
+    if (head === null) return null;
+    const { pattern, typeGuards, explicitGuard } = head;
+
+    // The arrow `=>`, in any of its spellings.
+    if (!this.atCaseArrow()) {
+      this.error(
+        ['match-case-arrow-expected'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    // The retired `|->` folds onto `=>` everywhere, so it reaches here too;
+    // report it in this position as well rather than accepting it in silence.
+    this.checkLegacyMapstoArrow();
+    this.advance(); // '=>'
+
+    this.matchBodyStops.push(this.brackets.length);
+    let body: MathJsonExpression | null;
+    try {
+      body = this.parseExpression(0);
+    } finally {
+      this.matchBodyStops.pop();
+    }
+    if (body === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+    const end = this.localEnd(body) ?? this.previousEnd();
+
+    // Conjoin the implicit type guards with the explicit guard (implicit
+    // first), building a single guard operand.
+    const guard = this.combineGuards(typeGuards, explicitGuard, start, end);
+
+    const ops: MathJsonExpression[] = ['MatchCase', pattern];
+    if (guard !== null) ops.push(guard);
+    ops.push(body);
+
+    const irrefutable = guard === null && isIrrefutablePattern(pattern);
+    return {
+      node: this.wrap(ops, start, end),
+      irrefutable,
+      name: bindingName(pattern),
+      start,
+      end,
+    };
+  }
+
+  /** The part of a `match` case BEFORE its `=>` arrow: the pattern, the
+   * implicit type guards collected while patternizing it, and the optional
+   * explicit `if` guard. Returns `null` on an unrecoverable case. Called with
+   * the case's `mapstoStops` entry pushed, so no `=>` here is read as a lambda
+   * arrow. */
+  private parseMatchCaseHead(): {
+    pattern: MathJsonExpression;
+    typeGuards: MathJsonExpression[];
+    explicitGuard: MathJsonExpression | null;
+  } | null {
     // `otherwise => body` — the keyword spelling of the wildcard pattern
     // `_`. Contextual, not reserved: it is recognized only when the bare
     // word IS the whole pattern (the next token is the case arrow or the
@@ -3106,7 +3206,7 @@ export class Parser {
     if (
       this.check('SYMBOL') &&
       this.current.text === 'otherwise' &&
-      ((this.peek().type === 'OPERATOR' && this.peek().text === '=>') ||
+      (this.operatorText(this.peek()) === '=>' ||
         (this.peek().type === 'SYMBOL' && this.peek().text === 'if'))
     ) {
       const tok = this.advance(); // 'otherwise'
@@ -3145,46 +3245,18 @@ export class Parser {
       this.checkConditionAssign(explicitGuard);
     }
 
-    // The arrow `=>` (an OPERATOR token; not an expression operator).
-    if (!(this.check('OPERATOR') && this.current.text === '=>')) {
-      this.error(
-        ['match-case-arrow-expected'],
-        this.current.start,
-        this.current.end
-      );
-      return null;
-    }
-    this.advance(); // '=>'
+    return { pattern, typeGuards, explicitGuard };
+  }
 
-    this.matchBodyStops.push(this.brackets.length);
-    let body: MathJsonExpression | null;
-    try {
-      body = this.parseExpression(0);
-    } finally {
-      this.matchBodyStops.pop();
-    }
-    if (body === null) {
-      this.error(['expression-expected'], this.current.start, this.current.end);
-      return null;
-    }
-    const end = this.localEnd(body) ?? this.previousEnd();
-
-    // Conjoin the implicit type guards with the explicit guard (implicit
-    // first), building a single guard operand.
-    const guard = this.combineGuards(typeGuards, explicitGuard, start, end);
-
-    const ops: MathJsonExpression[] = ['MatchCase', pattern];
-    if (guard !== null) ops.push(guard);
-    ops.push(body);
-
-    const irrefutable = guard === null && isIrrefutablePattern(pattern);
-    return {
-      node: this.wrap(ops, start, end),
-      irrefutable,
-      name: bindingName(pattern),
-      start,
-      end,
-    };
+  /** Whether a `=>` at the current position belongs to an enclosing `match`
+   * case rather than being a mapsto (lambda) arrow — true while a case's
+   * pattern or guard is being parsed at the very bracket depth the case
+   * started at. See `mapstoStops`. */
+  private atMapstoStop(): boolean {
+    return (
+      this.mapstoStops.length > 0 &&
+      this.mapstoStops[this.mapstoStops.length - 1] === this.brackets.length
+    );
   }
 
   /** Conjoin the implicit type guards with an optional explicit guard into a
@@ -3252,13 +3324,17 @@ export class Parser {
   /** Whether the current token is a bare `|` (an or-alternative separator),
    * including a maximal-munched pipe such as the `|-` of `1 |-2` (only the
    * leading `|` is the separator). The real pipe operators (`||`, `|>`,
-   * `|->`, `||>`) are NOT separators — they parse as infix operators. */
+   * `||>`) are NOT separators — they parse as infix operators, and neither is
+   * the retired mapsto spelling `|->`, which still parses as the arrow so it
+   * can be diagnosed. */
   private isAlternativeSeparator(): boolean {
     const t = this.current;
     if (t.type !== 'OPERATOR' || t.text[0] !== '|') return false;
     // A token that is itself a defined infix operator (`||`, `|>`, `|->`) is
-    // consumed by the expression grammar, not the case parser.
-    return infixOperatorForSymbol(t.text) === undefined;
+    // consumed by the expression grammar, not the case parser. `operatorText`
+    // is what folds the legacy `|->` onto the `=>` row, so the token's
+    // spelling is read through it rather than compared raw.
+    return infixOperatorForSymbol(this.operatorText(t) ?? t.text) === undefined;
   }
 
   /** Consume the leading `|` of an or-alternative. When maximal munch glued the
@@ -3394,6 +3470,9 @@ export class Parser {
       const op = this.peekInfix();
       if (op === null) break;
       if (op.def.precedence < minPrecedence) break;
+      // The `=>` that follows a case pattern is the CASE arrow — it ends the
+      // pattern instead of building a lambda out of it. See `mapstoStops`.
+      if (op.def.name === 'MapsTo' && this.atMapstoStop()) break;
 
       if (op.asymmetric) this.emitAsymmetric(this.current, op.def.symbol);
       for (let i = 0; i < op.tokenCount; i++) this.advance();
@@ -3802,7 +3881,11 @@ export class Parser {
     let returnType: MathJsonExpression | null = null;
     if (this.check('OPERATOR') && this.current.text === '->') {
       this.advance(); // '->'
-      returnType = this.parseHeldType();
+      // A `function` declaration's body block is required after the return
+      // type (with at most a `where` clause in between), which is what
+      // disambiguates a bare `record`/`object` return type from a field list
+      // (see {@link parseHeldType}).
+      returnType = this.parseHeldType({ blockFollows: true });
     }
 
     // Phase 3 — the clause itself, always LAST (after the effects slot and
@@ -4216,6 +4299,20 @@ export class Parser {
         if (depth < 0) return null;
         continue;
       }
+      // A depth-0 `{` normally IS the head terminator — the body block. But a
+      // `record{…}` / `object{…}` return type is written with braces too, and
+      // it sits before the clause (`-> record{a: T} where T { … }`), so a
+      // braced group whose depth-matched `}` is followed by `where` is part of
+      // the head and is skipped whole. Without this the scan would stop at the
+      // field list and the clause's names would never be seeded, so the
+      // annotations mentioning them would fail with `Unknown type "T"`.
+      if (depth === 0 && ch === '{') {
+        const past = this.skipBracesBeforeWhereClause(pos);
+        if (past !== null) {
+          pos = past;
+          continue;
+        }
+      }
       if (depth === 0 && (ch === '{' || ch === '=' || ch === ';')) return null;
       const m =
         /[A-Za-z_]/.test(ch) && !/[A-Za-z0-9_]/.test(src[pos - 1] ?? '')
@@ -4233,6 +4330,58 @@ export class Parser {
       pos += 1;
     }
     return null;
+  }
+
+  /**
+   * The `{` at `pos` opens a braced group that belongs to the definition HEAD
+   * rather than starting its body: the offset just past the group's
+   * depth-matched `}` when a `where` word follows it, `null` otherwise (the
+   * caller then treats the `{` as the head terminator it normally is).
+   *
+   * The only head construct written with braces is a `record{…}` / `object{…}`
+   * type in return-type position; a body block is never followed by `where`,
+   * so "a `where` follows the matching brace" identifies the case exactly.
+   * Strings and comments are skipped whole, as in {@link scanWhereClause}.
+   */
+  private skipBracesBeforeWhereClause(pos: number): number | null {
+    const src = this.source;
+    let depth = 0;
+    while (pos < src.length) {
+      const ch = src[pos];
+      if (ch === '"' || ch === "'" || ch === '`') {
+        pos = skipStringLiteral(src, pos);
+        continue;
+      }
+      if (ch === '/') {
+        const past = skipComment(src, pos);
+        if (past !== pos) {
+          pos = past;
+          continue;
+        }
+      }
+      if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          pos += 1;
+          break;
+        }
+      }
+      pos += 1;
+    }
+    if (depth !== 0) return null; // no matching `}`
+
+    // Skip the whitespace (and comments) between the group and what follows.
+    for (;;) {
+      if (pos < src.length && /\s/.test(src[pos])) {
+        pos += 1;
+        continue;
+      }
+      const past = skipComment(src, pos);
+      if (past === pos) break;
+      pos = past;
+    }
+    return /^where\b/.test(src.slice(pos)) ? pos : null;
   }
 
   /** The variable NAMES of the clause whose body starts at `pos` (just past
@@ -4967,13 +5116,24 @@ export class Parser {
    *
    * `allowWhere` stays false (the default): a trailing clause quantifies the
    * whole assembled signature, not the return type, so it is left for the
-   * definition parser to consume (see {@link consumeWhereClause}). */
-  private parseHeldType(): MathJsonExpression | null {
+   * definition parser to consume (see {@link consumeWhereClause}).
+   *
+   * `options.blockFollows` says the caller REQUIRES a `{ … }` body after the
+   * type (with at most a `where` clause in between) — true of a `function`
+   * declaration, false of the math form `f(x) -> T = expr`. It is what tells
+   * the type parser that the `{` after a bare `record`/`object` return type
+   * opens the body rather than a field list, so `function f() -> record { … }`
+   * keeps its body (see `startsFieldList` in `src/common/type/parser.ts`). */
+  private parseHeldType(options?: {
+    blockFollows?: boolean;
+  }): MathJsonExpression | null {
     const start = this.current.start;
     try {
       const { end } = parseTypePrefix(
         this.source.slice(start),
-        this.typeResolver
+        this.typeResolver,
+        undefined,
+        { blockFollows: options?.blockFollows ?? false }
       );
       const typeString = this.source.slice(start, start + end).trim();
       this.advanceToOffset(start + end);
@@ -5115,7 +5275,7 @@ export class Parser {
         );
         return null;
       }
-      // An `object<…>` layout outside a named type's definition: the type
+      // An `object{…}` layout outside a named type's definition: the type
       // parser codes the refusal, so the author gets the rule by name rather
       // than a generic type-annotation failure.
       if ((e as { code?: string }).code === 'object-type-not-inline') {
@@ -5224,15 +5384,25 @@ export class Parser {
    * statementRecovered}) so the statement loop does not recover a SECOND time
    * — which would skip the statement that follows. Unlike {@link
    * recoverAtTopLevel} the current token is not consumed unconditionally (the
-   * cursor may already be past the error), and a `}` stops the skip so a
-   * statement inside a block never eats the block's closing brace. */
+   * cursor may already be past the error), and an UNMATCHED `}` stops the skip
+   * so a statement inside a block never eats the block's closing brace.
+   *
+   * "Unmatched" is what makes the skip work over a brace-delimited region the
+   * statement itself opened — a `record{…}` / `object{…}` type annotation or a
+   * `{…}` literal. Without the depth count the skip would stop at that
+   * region's own closing brace and the statement loop would report it a second
+   * time (`let x: object{id: string} = 1`, whose real diagnostic is
+   * `object-type-not-inline`, would also report an unexpected `}`). */
   private recoverAtStatementBoundary(): void {
+    let braceDepth = 0;
     while (
       this.current.type !== 'EOF' &&
       this.current.type !== 'SEMICOLON' &&
-      this.current.type !== 'CLOSE_BRACE' &&
+      !(this.current.type === 'CLOSE_BRACE' && braceDepth === 0) &&
       !this.current.precededByLinebreak
     ) {
+      if (this.current.type === 'OPEN_BRACE') braceDepth += 1;
+      else if (this.current.type === 'CLOSE_BRACE') braceDepth -= 1;
       this.advance();
     }
     if (this.current.type === 'SEMICOLON') this.advance();
@@ -5427,7 +5597,13 @@ export class Parser {
 
       if (def.precedence < minPrecedence) break;
 
+      // A `=>` that belongs to an enclosing `match` case ends the expression:
+      // it is the case arrow, not a lambda arrow. See `mapstoStops`.
+      if (def.name === 'MapsTo' && this.atMapstoStop()) break;
+
       if (op.asymmetric) this.emitAsymmetric(this.current, op.def.symbol);
+
+      if (def.name === 'MapsTo') this.checkLegacyMapstoArrow();
 
       // Consume the operator token(s).
       for (let i = 0; i < op.tokenCount; i++) this.advance();
@@ -5435,10 +5611,10 @@ export class Parser {
       const rightMin =
         def.assoc === 'right' ? def.precedence : def.precedence + 1;
       // A mapsto's right operand is a LAMBDA BODY, so it is a
-      // `break`/`continue` boundary: `for x in xs { f(y |-> break) }` must not
+      // `break`/`continue` boundary: `for x in xs { f(y => break) }` must not
       // let the lambda's `break` bind to the enclosing loop.
       let right =
-        def.symbol === '|->'
+        def.name === 'MapsTo'
           ? this.inLoopContext(0, () => this.parseExpression(rightMin))
           : this.parseExpression(rightMin);
       if (right === null) {
@@ -5450,7 +5626,7 @@ export class Parser {
         break;
       }
 
-      // Pipe-stage sugar: a `|->` after the operand forms an unparenthesized
+      // Pipe-stage sugar: a `=>` after the operand forms an unparenthesized
       // stage lambda, and an operator-written placeholder expression (`_^2`)
       // becomes an implicit lambda. See `pipeStage`.
       if (def.name === 'Pipe') right = this.pipeStage(right, rightMin);
@@ -5777,10 +5953,54 @@ export class Parser {
     return postfixOperatorForSymbol(token.text) ?? null;
   }
 
+  /**
+   * Whether the current token is an arrow that makes the parenthesized group
+   * just parsed a LAMBDA PARAMETER LIST — the mapsto arrow `=>` (in any of its
+   * spellings: `=>`, the Unicode `⇒`/`↦`, and the retired `|->`), or the `->`
+   * that people write for it by mistake.
+   *
+   * `->` is included so `parseParenthesizedBody` lets a typed or empty
+   * parameter list through to `combineInfix`, which reports the ONE real
+   * problem (`mapsto-arrow-expected`, with a fixit) and recovers as the lambda
+   * that was meant, rather than adding a spurious complaint about the `:` or
+   * the empty `()`.
+   *
+   * Reading the spelling through `operatorText` — rather than comparing
+   * `this.current.text` — is what makes the Unicode arrows work here: `↦` and
+   * `⇒` lex as single-glyph non-OPERATOR tokens whose text is the glyph, so a
+   * literal comparison missed them and `(x: integer) ↦ x` used to report a
+   * spurious `unexpected-symbol ":"`.
+   */
+  private atLambdaArrow(): boolean {
+    const text = this.operatorText(this.current);
+    return text === '=>' || text === '->';
+  }
+
+  /**
+   * Whether the current token is the `match` case arrow `=>` — in any of its
+   * spellings, including the Unicode `⇒`/`↦` and the retired `|->`, all of
+   * which `operatorText` folds onto `=>`.
+   *
+   * Each is a single token, so the caller advances past it exactly once.
+   * Reading the arrow this way rather than comparing `this.current.text` is
+   * what lets a case be written with a Unicode arrow: `⇒` and `↦` lex as
+   * single-glyph non-OPERATOR tokens whose text is the glyph itself.
+   */
+  private atCaseArrow(): boolean {
+    return this.operatorText(this.current) === '=>';
+  }
+
   /** The operator spelling a token would contribute in infix position (fancy
-   * Unicode translated), or `null` if the token cannot be an operator. */
+   * Unicode translated, legacy spellings folded onto their replacement), or
+   * `null` if the token cannot be an operator. */
   private operatorText(token: Token): string | null {
-    if (token.type === 'OPERATOR') return token.text;
+    if (token.type === 'OPERATOR') {
+      // The retired mapsto spelling still parses AS the mapsto arrow, so the
+      // rest of the program parses without cascaded errors; the arrow's
+      // consumption sites report `mapsto-arrow-legacy` with a fixit to `=>`.
+      if (token.text === LEGACY_MAPSTO_ARROW) return '=>';
+      return token.text;
+    }
     if (token.type === 'SYMBOL') return this.fancyOperator(token) ?? token.text;
     if (token.type === 'ERROR') return this.fancyOperator(token);
     return null;
@@ -5814,9 +6034,9 @@ export class Parser {
   /**
    * Pipe-stage sugar on the just-parsed right operand of `|>` (or `~>`).
    *
-   * 1/ Stage lambda: a `|->` directly after the operand makes the operand the
+   * 1/ Stage lambda: a `=>` directly after the operand makes the operand the
    *    lambda's parameter list and the whole mapsto the pipe stage —
-   *    `xs |> x |-> x^2 |> Sum` is `xs |> (x |-> x^2) |> Sum`. Globally `|->`
+   *    `xs |> x => x^2 |> Sum` is `xs |> (x => x^2) |> Sum`. Globally `=>`
    *    (15) binds LOOSER than `|>` (20), which would otherwise make an
    *    unparenthesized lambda stage unwritable: the mapsto captured the
    *    pipeline itself as its parameter list and failed with
@@ -5825,12 +6045,12 @@ export class Parser {
    *    the next `|>` or anything looser — in particular a trailing `?? d`
    *    still applies to the PIPELINE result, exactly as the `Coalesce` row in
    *    `operators.ts` pins for `xs |> f ?? d`. Right-recursion supports a
-   *    curried stage (`xs |> x |-> y |-> x + y`).
+   *    curried stage (`xs |> x => y => x + y`).
    *
    * 2/ Implicit lambda: an operand written with ORDINARY OPERATORS that
    *    mentions a shorthand placeholder — `_^2`, `_ + 1`, `-_` — is wrapped
    *    as `["Function", operand]`, the engine's canonical spelling of a
-   *    wildcard lambda, so the stage behaves exactly like `x |-> x^2` (in
+   *    wildcard lambda, so the stage behaves exactly like `x => x^2` (in
    *    particular it triggers the implicit `Map` over a collection topic; see
    *    the `Pipe` definition in `library/core.ts`). A function CALL is
    *    deliberately NOT wrapped: there `_` is the pipeline-topic placeholder
@@ -5850,16 +6070,22 @@ export class Parser {
     );
   }
 
-  /** Case 1 of `pipeStage`: consume a `|->` (and, recursively, a curried
+  /** Case 1 of `pipeStage`: consume a `=>` (and, recursively, a curried
    * chain of them) following a pipe's right operand. Returns `null` when no
-   * `|->` follows — the operand is an ordinary stage. */
+   * `=>` follows — the operand is an ordinary stage. */
   private pipeStageLambdaTail(
     operand: MathJsonExpression,
     rightMin: number
   ): MathJsonExpression | null {
     const op = this.peekInfix();
-    if (op === null || op.def.symbol !== '|->') return null;
+    if (op === null || op.def.name !== 'MapsTo') return null;
+    // Inside a `match` case's pattern or guard the arrow is the CASE arrow, so
+    // the stage-lambda sugar must not claim it: `n if xs |> f => n` is a guard
+    // `xs |> f` and a body `n`, not a guard ending in a stage lambda. See
+    // `mapstoStops`.
+    if (this.atMapstoStop()) return null;
     if (op.asymmetric) this.emitAsymmetric(this.current, op.def.symbol);
+    this.checkLegacyMapstoArrow();
     for (let i = 0; i < op.tokenCount; i++) this.advance();
     // A lambda body is a `break`/`continue` boundary, exactly as in the
     // ordinary mapsto branch of the precedence loop.
@@ -5868,7 +6094,7 @@ export class Parser {
       this.error(['expression-expected'], this.current.start, this.current.end);
       return operand;
     }
-    // The mapsto right-associates: in `xs |> x |-> y |-> body` the inner
+    // The mapsto right-associates: in `xs |> x => y => body` the inner
     // lambda is the outer lambda's body.
     const curried = this.pipeStageLambdaTail(body, rightMin);
     return this.combineInfix(op.def, operand, curried ?? body);
@@ -5899,10 +6125,10 @@ export class Parser {
     const start = this.localStart(left) ?? 0;
     const end = this.localEnd(right) ?? this.previousEnd();
 
-    // The mapsto arrow `params |-> body`: `left` is a parameter list (a bare
+    // The mapsto arrow `params => body`: `left` is a parameter list (a bare
     // symbol, or a parenthesized/tuple list of symbols), `right` is the body.
     // Rewrite into the engine `Function` shape `["Function", body, …params]`.
-    if (def.symbol === '|->')
+    if (def.name === 'MapsTo')
       return this.wrap(
         ['Function', right, ...this.mapstoParams(left)] as MathJsonExpression[],
         start,
@@ -5911,10 +6137,10 @@ export class Parser {
 
     // `(x: number) -> x^2`, `(x, y) -> x + y`, `= x -> x + 1`: a
     // `KeyValuePair` whose left side is shaped like a parameter list is a
-    // function written with the wrong arrow (`->` for `|->`). None of these
+    // function written with the wrong arrow (`->` for `=>`). None of these
     // shapes is a valid dictionary key (keys are strings), so diagnose — with
     // a fixit on the arrow — and RECOVER as the intended function. (The right
-    // operand was parsed at `->`'s precedence, which is tighter than `|->`'s,
+    // operand was parsed at `->`'s precedence, which is tighter than `=>`'s,
     // so a `??`/`|>` tail still lands outside the recovered lambda: the
     // fixit, not the recovery, is the real repair.)
     if (def.name === 'KeyValuePair' && this.lambdaMistypedAsPair(left)) {
@@ -6060,8 +6286,8 @@ export class Parser {
   }
 
   /** Extract the parameters from a mapsto LHS: a bare symbol (one parameter),
-   * or a `Tuple` of parameters (`(x, y) |-> …`). Each parameter is either a
-   * bare symbol or a typed `["Typed", sym, type]` node (`(x: integer) |-> …`).
+   * or a `Tuple` of parameters (`(x, y) => …`). Each parameter is either a
+   * bare symbol or a typed `["Typed", sym, type]` node (`(x: integer) => …`).
    * A parenthesized single parameter arrives here already unwrapped. A
    * non-parameter LHS element is a diagnostic and is dropped. */
   private mapstoParams(left: MathJsonExpression): MathJsonExpression[] {
@@ -6101,7 +6327,7 @@ export class Parser {
    * `Typed` parameter (`(x: number) -> …`), a tuple of parameters
    * (`(x, y) -> …`), or a bare symbol right after a `(` or `=`
    * (`(x) -> …`, `f = x -> …`)? None of these is a valid dictionary key, so
-   * the `->` was almost certainly meant to be `|->`. A bare symbol in any
+   * the `->` was almost certainly meant to be `=>`. A bare symbol in any
    * other position (`{one -> 1}`, a list element) is left alone: inside a
    * brace literal an unquoted name is a legitimate string key. */
   private lambdaMistypedAsPair(left: MathJsonExpression): boolean {
@@ -6132,7 +6358,27 @@ export class Parser {
     return false;
   }
 
-  /** Report a `->` that was meant to be `|->`, with a fixit replacing the
+  /** Report the retired `|->` spelling of the mapsto arrow, with a fixit
+   * replacing it by `=>`. Called at each site that CONSUMES the arrow (the
+   * infix loop and the pipe-stage tail), before the token is advanced past, so
+   * exactly one diagnostic is emitted per written arrow — `peekInfix` is
+   * speculative and may see the same token many times. Parsing then continues
+   * as if `=>` had been written, so a program using the old spelling still
+   * yields its real shape instead of a cascade of parse errors. */
+  private checkLegacyMapstoArrow(): void {
+    const token = this.current;
+    if (token.type !== 'OPERATOR' || token.text !== LEGACY_MAPSTO_ARROW) return;
+    this.diagnostics.push({
+      severity: 'error',
+      message: ['mapsto-arrow-legacy'],
+      range: [this.baseOffset + token.start, this.baseOffset + token.end],
+      fixits: [
+        [this.baseOffset + token.start, this.baseOffset + token.end, '=>'],
+      ],
+    });
+  }
+
+  /** Report a `->` that was meant to be `=>`, with a fixit replacing the
    * arrow (found in the source gap between the two operands — the operator
    * token has already been consumed by the infix loop). */
   private reportMapstoArrowExpected(
@@ -6166,7 +6412,7 @@ export class Parser {
     };
     if (span !== null)
       diagnostic.fixits = [
-        [this.baseOffset + span[0], this.baseOffset + span[1], '|->'],
+        [this.baseOffset + span[0], this.baseOffset + span[1], '=>'],
       ];
     this.diagnostics.push(diagnostic);
   }
@@ -6232,7 +6478,7 @@ export class Parser {
   private parseCall(callee: MathJsonExpression): MathJsonExpression {
     const start = this.localStart(callee) ?? this.current.start;
     // The explicit `Function(body, …params)` literal is a function boundary
-    // for `break`/`continue`, exactly as `|->` is. Without this, a call
+    // for `break`/`continue`, exactly as `=>` is. Without this, a call
     // argument is parsed in the ENCLOSING loop context, so
     // `for x in xs { let f = Function(break) }` would be accepted and the
     // lambda could later emit `Break()` into an unrelated running loop — the
@@ -6638,7 +6884,7 @@ export class Parser {
   private parseParenthesizedBody(): MathJsonExpression | null {
     const diagBefore = this.diagnostics.length;
     // Allow `bare-symbol : Type` elements so a typed mapsto parameter list
-    // `(x: integer) |-> …` parses (a `:` has no infix parselet, so it would
+    // `(x: integer) => …` parses (a `:` has no infix parselet, so it would
     // otherwise die with `closing-bracket-expected`).
     const { values, open, end, typed } = this.parseBracketedList(
       'CLOSE_PAREN',
@@ -6648,32 +6894,23 @@ export class Parser {
 
     if (values.length === 0) {
       // An empty `()` immediately before a mapsto arrow is a zero-parameter
-      // lambda parameter list: `() |-> expr` → `["Function", body]`. Emit an
+      // lambda parameter list: `() => expr` → `["Function", body]`. Emit an
       // empty `Tuple` so `mapstoParams` yields no parameters. Anywhere else,
       // an empty parenthesis is a diagnostic (no empty tuple in v0). A `->`
       // here is the wrong-arrow spelling of the same lambda — let it through
       // so `combineInfix` diagnoses (`mapsto-arrow-expected`) and recovers.
-      if (
-        this.check('OPERATOR') &&
-        (this.current.text === '|->' || this.current.text === '->')
-      )
+      if (this.atLambdaArrow())
         return this.wrap(['Tuple'] as MathJsonExpression[], open.start, end);
       if (this.diagnostics.length === diagBefore)
         this.error(['expression-expected'], open.start, end);
       return null;
     }
     // A type annotation is only meaningful in a mapsto parameter list. If the
-    // annotated group is not the LHS of a `|->`, it is a type annotation in an
+    // annotated group is not the LHS of a `=>`, it is a type annotation in an
     // invalid position. A following `->` is exempt: that is the wrong-arrow
     // spelling of a lambda, and `combineInfix` reports the ONE real problem
     // (`mapsto-arrow-expected`) instead of a spurious `:` complaint.
-    if (
-      typed &&
-      !(
-        this.check('OPERATOR') &&
-        (this.current.text === '|->' || this.current.text === '->')
-      )
-    ) {
+    if (typed && !this.atLambdaArrow()) {
       const o = nodeOffsets(values[values.length - 1]);
       this.error(
         ['unexpected-symbol', ':'],
@@ -6981,11 +7218,11 @@ export class Parser {
           break;
         }
         // A `bare-symbol : Type` element is a typed lambda parameter
-        // `["Typed", sym, {str: type}]` (only valid in a `( … ) |->` mapsto
-        // parameter list; the caller checks the `|->` follows).
+        // `["Typed", sym, {str: type}]` (only valid in a `( … ) =>` mapsto
+        // parameter list; the caller checks the `=>` follows).
         // Comma-delimited, so `allowWhere` stays false (the default); an
         // anonymous literal's polytype is spelled on the DECLARATION
-        // (`let f: (T) -> T where T = x |-> x`), which does admit a clause.
+        // (`let f: (T) -> T where T = x => x`), which does admit a clause.
         let element = expr;
         if (
           allowTypedParams &&
@@ -7068,7 +7305,7 @@ export class Parser {
         else angle = Math.max(0, angle - text.length);
       } else if (stopAtElementBoundary && depth === 0 && angle === 0) {
         if (t === 'COMMA') return;
-        if (t === 'OPERATOR' && this.current.text === '=>') return;
+        if (this.atCaseArrow()) return;
       }
       this.advance();
     }

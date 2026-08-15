@@ -59,7 +59,7 @@ describe('a bare-arrow parameter is a pure-callback bound', () => {
     const e = ce.box(['integ', RANDOM_CALLBACK, 0, 1]);
     expect(e.isValid).toBe(false);
     expect(rejectedOperand(e)).toMatchInlineSnapshot(
-      `"Error(ErrorCode("incompatible-type", "(any) -> number", "(unknown) random -> number"), (x) |-> Random())"`
+      `"Error(ErrorCode("incompatible-type", "(any) -> number", "(unknown) random -> number"), (x) => Random())"`
     );
   });
 

@@ -122,12 +122,12 @@ describe('WHERE CLAUSE — non-signature targets are rejected', () => {
 describe('WHERE CLAUSE — nested clauses', () => {
   test('parenthesized nested clause is rejected loudly (W1)', () => {
     expect(
-      parseError('record<map: ((A) -> B where A, B), other: number>')
+      parseError('record{map: ((A) -> B where A, B), other: number}')
     ).toMatch(/not a nested one/);
   });
 
   test('unparenthesized nested clause is an error, never a reinterpretation', () => {
-    expect(parseError('record<map: (A) -> B where A, B>')).not.toBe(
+    expect(parseError('record{map: (A) -> B where A, B}')).not.toBe(
       '<no error>'
     );
   });

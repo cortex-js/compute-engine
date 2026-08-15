@@ -412,7 +412,7 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
     // kernels were producing.
     test.each([
       ['dictionary<integer>', 'dictionary'],
-      ['record<a: integer, b: integer>', 'record'],
+      ['record{a: integer, b: integer}', 'record'],
     ] as const)('%s declines for Equal/NotEqual/Less', (type, kind) => {
       for (const head of ['Equal', 'NotEqual', 'Less'] as const) {
         ce = new ComputeEngine();
@@ -499,7 +499,7 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
       // `false` for two equal values.
       for (const type of [
         'list<dictionary<integer>>',
-        'list<record<a: integer>>',
+        'list<record{a: integer}>',
         'set<dictionary<integer>>',
       ] as const) {
         ce = new ComputeEngine();

@@ -43,7 +43,7 @@ Collections carry the type of what is in them, and how many:
 
 ```epsil-live
 (Type([1, 2, 3]), Type({1, 2}), Type((1, "a")), Type({x -> 1}))
-// ➔ ("vector<finite_integer^3>", "set<finite_integer>", "tuple<finite_integer, string>", "record<x: finite_integer>")
+// ➔ ("vector<finite_integer^3>", "set<finite_integer>", "tuple<finite_integer, string>", "record{x: finite_integer}")
 ```
 
 Numeric types form a tower — `integer ⊂ rational ⊂ real ⊂ complex ⊂ number` —
@@ -164,12 +164,12 @@ spellings:
 ```epsil
 f(x: real, n: integer) -> real = x^n
 function g(x: integer) -> integer { x + 1 }
-(x: integer) |-> x + 1
+(x: integer) => x + 1
 ```
 
 A declaration whose annotation is a function type **written out with named
 parameters** binds those names too — the initializer is then the function's
-body, no `|->` needed:
+body, no `=>` needed:
 
 ```epsil
 const f : (x: real) -> real = x^2 + 2x + 1
@@ -401,7 +401,7 @@ type). The engine checks the payload and tags it; the result is a value of
 the type. This is how a `record`-bodied type gets its constructor:
 
 ```epsil-live
-type circle = record<x: number, y: number, r: number>
+type circle = record{x: number, y: number, r: number}
 function circle(x, y, r) { {x -> x, y -> y, r -> r} }
 Type(circle(1, 2, 3))
 // ➔ "circle"
@@ -413,7 +413,7 @@ constructor* idiom — the single place a value of the type can come into
 existence, so validation or normalization written there cannot be bypassed:
 
 ```epsil-live
-type frac = record<n: integer, d: integer>
+type frac = record{n: integer, d: integer}
 function frac(n: integer, d: integer) {
   {n -> n / GCD(n, d), d -> d / GCD(n, d)}
 }
@@ -733,10 +733,10 @@ A declaration has **one binding site**: it may carry a `<…>` clause or a
 error, not a bounded `<T: number>`.
 
 A full-type annotation has no binder slot, so it always uses the `where`
-clause — `let f: (T) -> T where T = x |-> x`.
+clause — `let f: (T) -> T where T = x => x`.
 
 Note that a function is generic only when it is **declared** generic. Nothing
-is silently generalized: `x |-> x` is a function on some inferred type, not an
+is silently generalized: `x => x` is a function on some inferred type, not an
 implicit "for all `T`".
 
 ## Absence values

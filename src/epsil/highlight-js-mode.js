@@ -98,7 +98,7 @@ const DOMAINS_LIST = [
 //
 // The merely-RESERVED words (`set`, `with`, `label`, …) are
 // deliberately NOT here. They are ordinary identifiers — they can name a
-// binding, be assigned to, be a `|->` parameter, and be called — so painting
+// binding, be assigned to, be a `=>` parameter, and be called — so painting
 // them as keywords would tell the author a name is unavailable when it is
 // available. They are a documentation concern, not a coloring one.
 //
@@ -326,7 +326,7 @@ const SYMBOLS = [
 
 // Operators. The ASCII variant maximal-munches a run of the lexer's operator
 // characters (`src/epsil/lexer.ts` OPERATOR_CHARS) so multi-character
-// operators — `|>`, `~>`, `->`, `|->`, `**`, `!=`, `%`, postfix `!` and the
+// operators — `|>`, `~>`, `->`, `=>`, `**`, `!=`, `%`, postfix `!` and the
 // range `..` — are one token.
 //
 // The fancy variant covers the Unicode operator glyphs the serializer emits and

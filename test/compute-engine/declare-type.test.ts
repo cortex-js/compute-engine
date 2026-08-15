@@ -700,7 +700,7 @@ describe('DeclareType statement replacement: dependent ARITY', () => {
 
   test('an OBJECT dependent is covered: its field types are mentions too', () => {
     // The structural walk behind this re-check must descend into an
-    // `object<…>` layout exactly as it does into a `record<…>` body. An
+    // `object{…}` layout exactly as it does into a `record{…}` body. An
     // object layout is legal ONLY as the body of a named type declaration —
     // which is precisely what this walk reads — so a missed arm here means a
     // dependent object type silently keeps an application that now matches
@@ -711,7 +711,7 @@ describe('DeclareType statement replacement: dependent ARITY', () => {
       typeParams: ['inout T'],
       fromStatement: true,
     });
-    ce.declareType('h1', 'object<b: h2<T>>', {
+    ce.declareType('h1', 'object{b: h2<T>}', {
       typeParams: ['inout T'],
       fromStatement: true,
     });
@@ -733,7 +733,7 @@ describe('DeclareType statement replacement: dependent ARITY', () => {
       typeParams: ['inout T'],
       fromStatement: true,
     });
-    ce.declareType('k1', 'object<b: k2<string>>', { fromStatement: true });
+    ce.declareType('k1', 'object{b: k2<string>}', { fromStatement: true });
     expect(() =>
       ce.declareType('k2', 'tuple<v: T>', {
         typeParams: ['inout T: integer'],

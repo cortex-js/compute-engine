@@ -575,7 +575,7 @@ export function serializeEpsil(
     //
     // An annotated `Function` literal — one carrying `["Typed", …]` parameters
     // and/or a `["Typed", body, type]` return ascription — is serialized as an
-    // anonymous mapsto `(x: integer) |-> body`. An UNANNOTATED literal is left
+    // anonymous mapsto `(x: integer) => body`. An UNANNOTATED literal is left
     // to the generic `Function(body, …params)` form (unchanged round-trip).
     // (Named typed defs go through the `Assign` handler, which reconstructs the
     // `f(x: integer) -> real = …` / `function … { … }` syntax.)
@@ -604,7 +604,7 @@ export function serializeEpsil(
       // NARROWER than the body's inferred type, which the dropped-ascription
       // path would have silently widened.
       if (decomposed) return serializeGenericFunction(expr);
-      const arrow = options?.fancySymbols ? '↦' : '|->';
+      const arrow = options?.fancySymbols ? '⇒' : '=>';
       return fmt.line(
         serializeParamList(params),
         ` ${arrow} `,
@@ -1057,7 +1057,12 @@ export function serializeEpsil(
     const parts: (string | FormattingBlock)[] = [pattern];
     if (guard !== null && guard !== undefined)
       parts.push(' if ', serializeExpression(guard));
-    parts.push(' => ', serializeExpression(body ?? 'Nothing'));
+    // The case arrow is the mapsto arrow, so it takes the same fancy
+    // spelling: a fancy-printed program uses `⇒` for both roles.
+    parts.push(
+      options?.fancySymbols ? ' ⇒ ' : ' => ',
+      serializeExpression(body ?? 'Nothing')
+    );
     return fmt.line(...parts);
   }
 

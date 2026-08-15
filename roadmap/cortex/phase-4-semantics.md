@@ -40,7 +40,7 @@ parallel._
   params `f(x: real) = expr` via the type subparser; a return-type annotation
   uses `->` only in the unambiguous post-parameter-list signature position
   (matches the type language's own `(real) -> real`).
-- **Anonymous functions: mapsto `x |-> expr`** → `["Function", expr, "x"]`
+- **Anonymous functions: mapsto `x => expr`** → `["Function", expr, "x"]`
   (ASCII for the engine's `↦`; collision-free — a plain `->` is `KeyValuePair`).
 - **Control flow: `if cond { } else { }` (expression) + `while cond { }` +
   `for x in xs { }`**, plus library `map`/`filter`/`reduce`. In `for x in xs`,

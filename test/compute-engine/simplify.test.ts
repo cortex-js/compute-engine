@@ -2036,7 +2036,7 @@ describe('simplify() is value-blind across a binder', () => {
     // `x` here is the lambda parameter, not the global 5.
     expect(
       ce.box(['Function', ['Add', 'x', 1], 'x']).simplify().toString()
-    ).toBe('(x) |-> x + 1');
+    ).toBe('(x) => x + 1');
   });
 
   test('.evaluate() on the same lambda is unchanged (still value-blind)', () => {
@@ -2044,7 +2044,7 @@ describe('simplify() is value-blind across a binder', () => {
     ce.assign('x', 5);
     expect(
       ce.box(['Function', ['Add', 'x', 1], 'x']).evaluate().toString()
-    ).toBe('(x) |-> x + 1');
+    ).toBe('(x) => x + 1');
   });
 
   test('a compound bound-variable subexpression in a lambda body is preserved', () => {
@@ -2053,7 +2053,7 @@ describe('simplify() is value-blind across a binder', () => {
     // `x^2` would fold to 25 if the bound `x` were resolved to the global.
     expect(
       ce.box(['Function', ['Add', ['Power', 'x', 2], 1], 'x']).simplify().toString()
-    ).toBe('(x) |-> x^2 + 1');
+    ).toBe('(x) => x^2 + 1');
   });
 
   test('a Sum over a bound index that shadows a global stays correct', () => {

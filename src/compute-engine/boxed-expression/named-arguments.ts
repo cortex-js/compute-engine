@@ -280,7 +280,7 @@ export function protocolMemberParts(
 
 /**
  * A signature carrying the parameter names of a raw INLINE `Function` literal
- * callee — what lets `((x: number) |-> x + 1)(x: 5)` (which canonicalizes
+ * callee — what lets `((x: number) => x + 1)(x: 5)` (which canonicalizes
  * through `Apply`) take named arguments.
  *
  * The names are read SYNTACTICALLY from the literal's parameter operands (a

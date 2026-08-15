@@ -1002,9 +1002,9 @@ export function declareType(
             // as a type variable rather than as an unknown type name.
             parseType(type, ce._typeResolver, params, {
               // A NOMINAL declaration is the one route that may spell an
-              // `object<…>` layout. Every other parse refuses the form with
+              // `object{…}` layout. Every other parse refuses the form with
               // `object-type-not-inline`, and this parse still refuses one
-              // NESTED inside the body (`type T = list<object<…>>`), which is
+              // NESTED inside the body (`type T = list<object{…}>`), which is
               // inline by the same rule. A structural ALIAS is excluded too:
               // an object type is nominal, and two aliases of one layout
               // would be interchangeable — the subtyping between object types
@@ -1019,7 +1019,7 @@ export function declareType(
     // `allowObjectType` gate just above never sees them. `mintTypeConstructor`
     // applies the same rule at the mint site, but `mint: false` skips minting
     // altogether; without this call a declaration made that way installs an
-    // aliased or nested `object<…>` layout unchecked.
+    // aliased or nested `object{…}` layout unchecked.
     if (typeof type !== 'string')
       assertObjectLayoutIsNominalBody(alias === true, def);
   } catch (e) {
@@ -1547,10 +1547,10 @@ function mentionsOf(
       case 'tuple':
         t.elements.forEach((el) => visit(el.type));
         return;
-      // An `object<…>` layout is legal exactly where this walk runs — as the
+      // An `object{…}` layout is legal exactly where this walk runs — as the
       // body of a named type declaration — so its field types are a prime
       // place for a mention to hide. Without this arm `type Person =
-      // object<b: Box<integer>>` reports zero mentions of `Box`, and a later
+      // object{b: Box<integer>}` reports zero mentions of `Box`, and a later
       // change to `Box`'s arity or parameter bounds skips the re-check that
       // would have caught `Person`'s now-invalid application.
       case 'object':
@@ -2005,7 +2005,7 @@ export function assignFn(
   // dies when that half is swapped. The single-clause side-channels hang off
   // the OUTER record, which `updateDef()` mutates in place and which therefore
   // survives the assignment — so without this they outlive the clause they
-  // describe. `f(n) = 1` then `f = x |-> 42` then `f(m) = 2` refused the third
+  // describe. `f(n) = 1` then `f = x => 42` then `f(m) = 2` refused the third
   // statement as a redefinition of a clause the assignment had already thrown
   // away, and answered 42 instead of installing it.
   //
@@ -3279,7 +3279,7 @@ export function ascribeDeclaredParameterTypes(
  * R1 — ascribe a DECLARED POLYTYPE onto a marker-less function literal, so the
  * stored value describes itself.
  *
- * `let f: (x: T) -> T where T = x |-> x` installed a literal whose own type
+ * `let f: (x: T) -> T where T = x => x` installed a literal whose own type
  * was the erased `(unknown) -> unknown`: the declaration's clause lived only on
  * the definition, so `f`'s VALUE (what `evaluate()` and serialization hand back)
  * had lost it. Rebuilding through the Phase-1 authoring form — the full
@@ -3313,7 +3313,7 @@ export function ascribeDeclaredParameterTypes(
  * `where` clause, never tighten a parameter.
  *
  * Ground declarations are deliberately out of scope: their parameter types are
- * dropped from the stored literal's arrow too (`(x) |-> x` under
+ * dropped from the stored literal's arrow too (`(x) => x` under
  * `(x: integer) -> integer` types `(unknown) -> integer`), but that asymmetry
  * predates this milestone and has a far larger surface.
  */

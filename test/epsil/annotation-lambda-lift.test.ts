@@ -58,7 +58,7 @@ describe('EPSIL ANNOTATION LAMBDA LIFT — lifting', () => {
     // The lambda's name matches the INNER level, so it is the outer lift's
     // body: `x` binds around it.
     const { value, diagnostics } = run(
-      'const f : (x: number) -> (y: number) -> number = (y) |-> x + y\nf(2)(3)'
+      'const f : (x: number) -> (y: number) -> number = (y) => x + y\nf(2)(3)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(5);
@@ -66,7 +66,7 @@ describe('EPSIL ANNOTATION LAMBDA LIFT — lifting', () => {
 
   test('a fully explicit nested lambda is the function value', () => {
     const { value, diagnostics } = run(
-      'const f : (x: number) -> (y: number) -> number = (x) |-> ((y) |-> x + y)\nf(2)(3)'
+      'const f : (x: number) -> (y: number) -> number = (x) => ((y) => x + y)\nf(2)(3)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(5);
@@ -76,7 +76,7 @@ describe('EPSIL ANNOTATION LAMBDA LIFT — lifting', () => {
 describe('EPSIL ANNOTATION LAMBDA LIFT — both sides named', () => {
   test('matching names on both sides are legal', () => {
     const { value, diagnostics } = run(
-      'const f : (x: number) -> number = (x) |-> x^2 + 2x + 1\nf(3)'
+      'const f : (x: number) -> number = (x) => x^2 + 2x + 1\nf(3)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(16);
@@ -84,14 +84,14 @@ describe('EPSIL ANNOTATION LAMBDA LIFT — both sides named', () => {
 
   test('a bare-symbol lambda participates in the name check', () => {
     const { value, diagnostics } = run(
-      'const f : (x: number) -> number = x |-> x + 1\nf(3)'
+      'const f : (x: number) -> number = x => x + 1\nf(3)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);
   });
 
   test('a name mismatch is a diagnostic with a rename-the-annotation fixit', () => {
-    const src = 'const f : (y: number) -> number = (x) |-> x + 1';
+    const src = 'const f : (y: number) -> number = (x) => x + 1';
     const { diagnostics } = run(src);
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].message).toEqual([
@@ -103,13 +103,13 @@ describe('EPSIL ANNOTATION LAMBDA LIFT — both sides named', () => {
     // names are the binders the body actually uses).
     const [start, end, replacement] = diagnostics[0].fixits![0];
     expect(src.slice(0, start) + replacement + src.slice(end)).toBe(
-      'const f : (x: number) -> number = (x) |-> x + 1'
+      'const f : (x: number) -> number = (x) => x + 1'
     );
   });
 
   test('an arity disagreement is the type check’s job, not a name mismatch', () => {
     const { value, diagnostics } = run(
-      'const f : (x: number) -> number = (a, b) |-> a + b'
+      'const f : (x: number) -> number = (a, b) => a + b'
     );
     expect(
       diagnostics.some((d) => d.message[0] === 'parameter-name-mismatch')
@@ -122,7 +122,7 @@ describe('EPSIL ANNOTATION LAMBDA LIFT — both sides named', () => {
 describe('EPSIL ANNOTATION LAMBDA LIFT — deliberately inert', () => {
   test('an unnamed annotation with a lambda initializer is unchanged', () => {
     const { value, diagnostics } = run(
-      'const f : (number) -> number = (x) |-> x + 1\nf(3)'
+      'const f : (number) -> number = (x) => x + 1\nf(3)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);
@@ -139,7 +139,7 @@ describe('EPSIL ANNOTATION LAMBDA LIFT — deliberately inert', () => {
     expect(message).toContain('parameters bind only when they are named');
     expect(message).toContain('an expression in the unknown \\"x\\"');
     expect(message).toContain('(x: number) -> number');
-    expect(message).toContain('(x) |-> x^2 + 1');
+    expect(message).toContain('(x) => x^2 + 1');
   });
 
   test('the host `ce.declare` route throws the same explanation', () => {
@@ -154,7 +154,7 @@ describe('EPSIL ANNOTATION LAMBDA LIFT — deliberately inert', () => {
 
   test('a function-valued initializer under an unnamed annotation is untouched', () => {
     const { value, diagnostics } = run(
-      'const k = (x) |-> x + 1\nconst m : (number) -> number = k\nm(3)'
+      'const k = (x) => x + 1\nconst m : (number) -> number = k\nm(3)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);

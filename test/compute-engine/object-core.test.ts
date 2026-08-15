@@ -10,7 +10,7 @@
  *
  * Objects are constructed here through `ce._object()`, the engine-internal
  * factory: the user-facing named-argument constructor and the `type P =
- * object<…>` declaration are later work packages, and the kind must be real
+ * object{…}` declaration are later work packages, and the kind must be real
  * and testable before they exist.
  */
 import { ComputeEngine } from '../../src/compute-engine';
@@ -81,7 +81,7 @@ describe('BoxedObject — kind basics', () => {
     // not-an-object. The fail-closed answer is the same one an unknown name
     // gets: an unresolved nominal reference to the name, which still prints
     // and diagnoses as that name but resolves to no definition.
-    ce.declareType('Tally', 'record<a: integer>', { alias: true });
+    ce.declareType('Tally', 'record{a: integer}', { alias: true });
     expect(ce.type('Tally').matches('record')).toBe(true);
 
     const t = obj(ce, 'Tally', { a: ce.number(1) });
@@ -280,15 +280,15 @@ describe('BoxedObject — .json (the full B5 form)', () => {
     const p = obj(ce, 'Person', { name: ce.string('Alan'), age: ce.number(42) });
     const reboxed = ce.box(p.json);
     expect(reboxed.type.toString()).toBe(
-      'record<name: string, age: finite_integer>'
+      'record{name: string, age: finite_integer}'
     );
     expect(reboxed.evaluate().type.toString()).toBe(
-      'record<name: string, age: finite_integer>'
+      'record{name: string, age: finite_integer}'
     );
     // Nested objects are records all the way down.
     const outer = obj(ce, 'Box', { inner: p });
     expect(ce.box(outer.json).type.toString()).toBe(
-      'record<inner: record<name: string, age: finite_integer>>'
+      'record{inner: record{name: string, age: finite_integer}}'
     );
   });
 
@@ -848,7 +848,7 @@ describe('The `Object` provenance head', () => {
     // a genuine record type, because the body is a real `Dictionary`.
     expect(reboxed.type.toString()).toBe(reboxed.op1.type.toString());
     expect(reboxed.type.toString()).toBe(
-      'record<name: string, age: finite_integer>'
+      'record{name: string, age: finite_integer}'
     );
   });
 });

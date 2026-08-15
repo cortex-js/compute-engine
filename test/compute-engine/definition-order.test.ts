@@ -188,7 +188,7 @@ describe('definition order does not change semantics', () => {
       ce.parse('g(t)\\coloneq 2a(t)').evaluate();
       ce.declare('a', { signature: '(number) -> number' });
       const def: any = ce.lookupDefinition('g');
-      expect(def.operator._lambdaLiteral.toString()).toEqual('(t) |-> 2a(t)');
+      expect(def.operator._lambdaLiteral.toString()).toEqual('(t) => 2a(t)');
       ce.assign('a', ce.parse('t \\mapsto t+1'));
       expect(ce.parse('g(3)').evaluate().toString()).toEqual('8');
     });
@@ -251,7 +251,7 @@ describe('definition order does not change semantics', () => {
       ce.parse('g(t)\\coloneq 2x(t+1)').evaluate();
       const def: any = ce.lookupDefinition('g');
       expect(def.operator._lambdaLiteral.toString()).toEqual(
-        '(t) |-> 2x * (t + 1)'
+        '(t) => 2x * (t + 1)'
       );
     });
 

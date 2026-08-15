@@ -47,7 +47,7 @@ let x = 5                 // mutable declaration
 const tau = 6.28          // immutable; reassigning yields an Error value
 x = x + 3                 // assignment: a bare `=` assigns only as a STATEMENT
 f(x) = x^2                // function definition, math style
-square = x |-> x^2        // anonymous function ("|->" is the lambda arrow)
+square = x => x^2        // anonymous function ("=>" is the lambda arrow)
 cube : (x: number) -> number = x^3   // a named function-type annotation binds x
 function g(n) {           // function definition, block style
   let t = n + 1           // blocks are lexically scoped
@@ -90,7 +90,7 @@ g(x) + f(2)
 - **LaTeX islands**: `$\frac{1}{2}$` splices parsed LaTeX into the expression
   (available in the CLI and any host that injects a LaTeX parser).
 
-**Operator precedence**, loosest → tightest: `:=` · `|->` · `??` (coalesce) ·
+**Operator precedence**, loosest → tightest: `:=` · `=>` · `??` (coalesce) ·
 `|>` (pipe) · `->` (key-value) · `a if c else b` (conditional) · `||` · `&&` ·
 comparisons
 `== != < <= > >= === in !in is` (chainable: `1 < 2 < 3`) · `..` (range) ·
@@ -111,7 +111,7 @@ actually happens → write instead:**
 | `range(1, 5)` excludes end | Inert call + did-you-mean; `Range(1, 5)` **includes** 5: `[1,2,3,4,5]` | `Range(1, n)` or `1..n` for 1…n inclusive |
 | `x = 5` at top level | Assigns — `=` assigns only as a whole statement with a name on the left | `x == 5` for the equation |
 | `# comment` | Diagnostic (`#` introduces pragmas) | `// comment` or `/* … */` |
-| `def f(x):` / `(x) => …` / `lambda x: …` | Parse diagnostics; `(x) -> …` is recovered with a did-you-mean-`\|->` fixit | `f(x) = expr`, `x \|-> expr`, or `function f(x) { … }` |
+| `def f(x):` / `(x) => …` / `lambda x: …` | Parse diagnostics; `(x) -> …` is recovered with a did-you-mean-`=>` fixit | `f(x) = expr`, `x => expr`, or `function f(x) { … }` |
 | `cond ? a : b` | Parse diagnostic | `a if cond else b`, or `if cond { a } else { b }` — both are expressions |
 | `elif` | Parse diagnostic | `else if` |
 | `return` | Reserved word, **not implemented** | A block's value is its last expression |
@@ -150,7 +150,7 @@ any number of recursive calls — `fib(n-1) + fib(n-2)` is fine), and closures:
 
 ```epsil
 fact(n) = 1 if n <= 1 else n * fact(n - 1)
-makeAdder(k) = x |-> x + k     // closures capture lexically
+makeAdder(k) = x => x + k     // closures capture lexically
 let add10 = makeAdder(10)
 add10(fact(5))
 // ➔ 130
@@ -160,12 +160,12 @@ Collections pipeline — `Map`/`Filter`/`Reduce` for value-producing iteration,
 `|>` to chain; `1..n` is an inclusive range:
 
 ```epsil
-1..10 |> Filter(_, k |-> k % 2 == 0) |> Map(k |-> k^2, _)
+1..10 |> Filter(_, k => k % 2 == 0) |> Map(k => k^2, _)
 // ➔ [4, 16, 36, 64, 100]
 ```
 
 ```epsil
-Reduce([1, 2, 3, 4], (acc, x) |-> acc + x, 0) + Sum(1..100)
+Reduce([1, 2, 3, 4], (acc, x) => acc + x, 0) + Sum(1..100)
 // ➔ 5060
 ```
 
@@ -264,7 +264,7 @@ Caution: `Head` and `Tail` exist but are **structural** operators
 for elements use `First`/`Rest`.
 
 ```epsil
-Sort([3, 1, 4, 1, 5], (a, b) |-> a > b)
+Sort([3, 1, 4, 1, 5], (a, b) => a > b)
 // ➔ [5,4,3,1,1]
 ```
 

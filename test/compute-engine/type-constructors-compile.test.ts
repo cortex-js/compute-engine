@@ -268,7 +268,7 @@ describe('TUPLE-BODY CONSTRUCTOR — follows `Tuple` (D11 step B)', () => {
 describe('DECLINES CLEANLY — never throws', () => {
   test('a record body has no constructor at all (D4b)', () => {
     const ce = new ComputeEngine();
-    ce.declareType('rec', 'record<x: number, y: number>');
+    ce.declareType('rec', 'record{x: number, y: number}');
     expect(ce.lookupDefinition('rec')).toBeUndefined();
     // Nothing minted, so `rec(…)` is an unknown operator: it declines with no
     // code, and does not throw out of `compile()`.

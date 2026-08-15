@@ -59,7 +59,7 @@ function objectAt(name: string, engine = ce) {
   return o;
 }
 
-const PERSON = `type Person = object<name: string, age: integer>`;
+const PERSON = `type Person = object{name: string, age: integer}`;
 
 describe('THE STORE — a field of an object can be assigned', () => {
   test('`p.age = 43` writes the field and the read sees it', () => {
@@ -151,7 +151,7 @@ p.age`)
 describe('REFERENCES, NOT COPIES — a store is visible through every alias', () => {
   test('two names for one object see each other‘s stores', () => {
     expect(
-      value(`type MutableData = object<id: string, value: string>
+      value(`type MutableData = object{id: string, value: string}
 let d = MutableData(id: "1234", value: "foo")
 let e = d
 d.id = "0000"
@@ -161,7 +161,7 @@ e.id`)
 
   test('a function receives the object itself and can modify it', () => {
     expect(
-      value(`type MutableData = object<id: string, value: string>
+      value(`type MutableData = object{id: string, value: string}
 let d = MutableData(id: "1234", value: "foo")
 function rename(x: MutableData) { x.id = "XXXX" }
 rename(d)
@@ -175,7 +175,7 @@ d.id`)
     // rebinding sugar could not express at all (`property-assignment-target-
     // invalid`), because there was no binding to rebind.
     expect(
-      value(`type P = object<name: string>
+      value(`type P = object{name: string}
 let a = P(name: "x")
 let xs = [a, P(name: "y")]
 xs[1].name = "z"
@@ -185,8 +185,8 @@ a.name`)
 
   test('a store through a CHAIN of references reaches the inner object', () => {
     expect(
-      value(`type Inner = object<n: integer>
-type Outer = object<inner: Inner>
+      value(`type Inner = object{n: integer}
+type Outer = object{inner: Inner}
 let inner = Inner(n: 1)
 let outer = Outer(inner: inner)
 outer.inner.n = 9
@@ -225,7 +225,7 @@ describe("PRECEDENCE — the object's own layout beats a protocol property", () 
   // Appendix B calls computed, and the one that stays legal under the
   // conflict check).
   const OVERLAP = `protocol Nameable { readwrite name: string }
-type P = object<name: string>
+type P = object{name: string}
 type P is Nameable {
   get name(self: Self) -> string { self.name }
   set name(self: Self, v: string) -> P { P(name: v) }
@@ -278,7 +278,7 @@ let q = p`;
     expect(assign.toString()).toBe('Assign(Field(p, "label"), "Steve")');
     value(
       `protocol Labelled { readwrite label: string }
-type P = object<n: string>
+type P = object{n: string}
 type P is Labelled {
   get label(self: Self) -> string { self.n }
   set label(self: Self, v: string) -> P { P(n: v) }
@@ -302,7 +302,7 @@ let p = P(n: "Bob")`,
       1,
     ] as never);
     value(
-      `type P = object<n: string>
+      `type P = object{n: string}
 let p = P(n: "Bob")`,
       engine
     );
@@ -367,7 +367,7 @@ describe('THE RECEIVER IS EVALUATED EXACTLY ONCE', () => {
 describe('A STORE WRITES THE EVALUATED VALUE', () => {
   test('the RHS is evaluated before it is stored', () => {
     expect(
-      value(`type P = object<n: integer>
+      value(`type P = object{n: integer}
 let p = P(n: 0)
 p.n = 2 + 3
 p.n`)
@@ -387,7 +387,7 @@ p.age`)
     // `evaluate()`, not `.N()`: the exactness contract applies to a store
     // exactly as it does to an ordinary assignment.
     expect(
-      value(`type P = object<v: number>
+      value(`type P = object{v: number}
 let p = P(v: 0)
 p.v = Sqrt(2)
 p.v`)
@@ -401,7 +401,7 @@ p.v`)
     const engine = new ComputeEngine();
     expect(
       value(
-        `type P = object<n: integer>
+        `type P = object{n: integer}
 let p = P(n: 0)
 let calls = 0
 function bump() scope -> integer { calls = calls + 1
@@ -421,7 +421,7 @@ calls`,
     // node and hands the very same node back, so nothing is written.
     const engine = new ComputeEngine();
     value(
-      `type P = object<n: integer>
+      `type P = object{n: integer}
 let p = P(n: 1)`,
       engine
     );
@@ -449,7 +449,7 @@ let p = P(n: 1)`,
     // a product decision (recorded in `ROADMAP.md`).
     const engine = new ComputeEngine();
     value(
-      `type P = object<n: integer>
+      `type P = object{n: integer}
 let p = P(n: 1)`,
       engine
     );
@@ -473,7 +473,7 @@ describe('CHANGING A FIELD IS AN EFFECT', () => {
     // in, so it escapes however local the parameter looks.
     const engine = new ComputeEngine();
     value(
-      `type M = object<id: string>
+      `type M = object{id: string}
 function rename(x: M) { x.id = "XXXX" }`,
       engine
     );
@@ -488,7 +488,7 @@ function rename(x: M) { x.id = "XXXX" }`,
     // promise on a body that mutates its argument is a false contract, and
     // purity is what licenses caching and constant folding downstream.
     const engine = new ComputeEngine();
-    value('type M = object<id: string>', engine);
+    value('type M = object{id: string}', engine);
     expect(
       errorCode(result('function k(x: M) pure -> nothing { x.id = "Z" }', engine))
     ).toBe('incompatible-type');
@@ -526,7 +526,7 @@ describe('EVALUATION ORDER — the receiver, then the value (B8)', () => {
     const engine = new ComputeEngine();
     expect(
       value(
-        `type P = object<n: integer>
+        `type P = object{n: integer}
 let log = 0
 function receiver() scope state -> P { log = log * 10 + 1
   P(n: 0) }
@@ -549,7 +549,7 @@ q.x = 2`);
     // The message names both ways out, because which one is right depends on
     // what the author meant.
     expect(r).toContain('not an object type');
-    expect(r).toContain('object<…>');
+    expect(r).toContain('object{…}');
   });
 
   test('a DICTIONARY target is refused the same way', () => {
@@ -634,7 +634,7 @@ describe('THE STATE EVENT — a store reports, and advances nothing', () => {
       return original(e as never);
     };
     value(
-      `type P = object<n: integer>
+      `type P = object{n: integer}
 let p = P(n: 1)`,
       engine
     );
@@ -656,7 +656,7 @@ let p = P(n: 1)`,
       return original(e as never);
     };
     value(
-      `type P = object<n: integer>
+      `type P = object{n: integer}
 let p = P(n: 1)`,
       engine
     );
@@ -674,7 +674,7 @@ let p = P(n: 1)`,
     // stores must be invisible to the axes.
     const engine = new ComputeEngine();
     value(
-      `type Acc = object<total: integer>
+      `type Acc = object{total: integer}
 let a = Acc(total: 0)`,
       engine
     );
@@ -715,11 +715,11 @@ describe('LAYOUT PINNING — a store type-checks against the instance', () => {
     // way a type evolves, and it is exactly the case pinning exists for.
     const engine = new ComputeEngine();
     expect(
-      executeEpsil(engine, 'type P = object<v: integer>\nlet a = P(v: 1)')
+      executeEpsil(engine, 'type P = object{v: integer}\nlet a = P(v: 1)')
         .diagnostics
     ).toEqual([]);
     expect(
-      executeEpsil(engine, 'type P = object<v: string>\nlet b = P(v: "s")')
+      executeEpsil(engine, 'type P = object{v: string}\nlet b = P(v: "s")')
         .diagnostics
     ).toEqual([]);
 
@@ -735,7 +735,7 @@ describe('LAYOUT PINNING — a store type-checks against the instance', () => {
 
   test('`_fieldType` is `undefined` for a name the layout does not carry', () => {
     const engine = new ComputeEngine();
-    engine.declareType('P', 'object<v: integer>');
+    engine.declareType('P', 'object{v: integer}');
     const p = engine._object('P', { v: engine.number(1) });
     if (!isObject(p)) throw new Error('expected an object');
     expect(p._fieldType('nope')).toBeUndefined();
@@ -746,7 +746,7 @@ describe('LAYOUT PINNING — a store type-checks against the instance', () => {
     // entry that asked what type `v` is has not thereby become sensitive to
     // what `v` holds.
     const engine = new ComputeEngine();
-    engine.declareType('P', 'object<v: integer>');
+    engine.declareType('P', 'object{v: integer}');
     const p = engine._object('P', { v: engine.number(1) });
     if (!isObject(p)) throw new Error('expected an object');
     const before = objectReadCount();
@@ -781,9 +781,9 @@ describe_()`,
     const engine = new ComputeEngine();
     expect(
       value(
-        `type P = object<n: integer>
+        `type P = object{n: integer}
 let p = P(n: 2)
-function xs() -> list<integer> { Map((i) |-> i * p.n, 1..3) }
+function xs() -> list<integer> { Map((i) => i * p.n, 1..3) }
 Last(xs())`,
         engine
       )

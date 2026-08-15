@@ -637,7 +637,7 @@ describe('WHERE-CLAUSE BINDER — the five declaration spellings', () => {
   });
 
   test('anonymous type — the clause has nowhere else to go', () => {
-    expect(run('let f: (T) -> T where T = x |-> x\nf(5)')).toMatchObject({
+    expect(run('let f: (T) -> T where T = x => x\nf(5)')).toMatchObject({
       diagnostics: [],
       value: '5',
       type: 'finite_integer',

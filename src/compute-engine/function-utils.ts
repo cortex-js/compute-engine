@@ -2098,7 +2098,7 @@ function makeLambda(
 
     // (b) The body IS a scoped Block: it may declare mutable locals (`let`)
     //     captured by an escaping closure — e.g. a counter factory
-    //     `() |-> do { let count = 0; () |-> do { count = count + 1; count } }`.
+    //     `() => do { let count = 0; () => do { count = count + 1; count } }`.
     //     Those locals must live in a fresh per-call scope so separate
     //     invocations don't share state. Evaluate the block's statements in a
     //     fresh scope (parent = the defining scope) and run `captureClosures`,
@@ -2177,7 +2177,7 @@ function makeLambda(
   // slot is only whatever inference left there (`unknown` by default), which is
   // not a contract its author wrote. Validating against it rejects values that
   // are legitimately unconstrained: `nothing` is deliberately not a subtype of
-  // `unknown`, so `Reduce(xs, (acc, n: integer) |-> acc + n)` errored with
+  // `unknown`, so `Reduce(xs, (acc, n: integer) => acc + n)` errored with
   // `incompatible-type unknown nothing` on the sentinel a seedless fold used to
   // start from. So for VALIDATION ONLY, a bare parameter's slot is relaxed to
   // `any`; annotated parameters keep their exact enforcement, and the literal's
@@ -2265,7 +2265,7 @@ function makeLambda(
       // validation below never runs for one. (Measured before the guard: the
       // residual was built by re-attaching the FULL n-ary marker onto the
       // (n-k)-ary curried literal, whose §2.3 arity check then rejected it —
-      // `(_1) |-> Error("A function-literal signature marker must be …")`,
+      // `(_1) => Error("A function-literal signature marker must be …")`,
       // an error buried in the body rather than a diagnostic on the call.)
       // Partial INSTANTIATION is the principled lift; recorded as future work.
       if (isGenericLiteral)

@@ -11,11 +11,11 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // value serializes as the raw-injection spelling so round-trips close.
 //
 
-/** The canonical record-body example: `type circle = record<…>` +
+/** The canonical record-body example: `type circle = record{…}` +
  * `function circle(x, y, r) { {x -> x, y -> y, r -> r} }`. */
 function circleEngine(): ComputeEngine {
   const ce = new ComputeEngine();
-  ce.declareType('circle', 'record<x: number, y: number, r: number>');
+  ce.declareType('circle', 'record{x: number, y: number, r: number}');
   ce.assign(
     'circle',
     ce.box([
@@ -144,7 +144,7 @@ describe('D9 equality over constructed values', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      `type frac = record<n: integer, d: integer>
+      `type frac = record{n: integer, d: integer}
 function frac(n: integer, d: integer) { {n -> n / GCD(n, d), d -> d / GCD(n, d)} }
 frac(2, 4) == frac(1, 2)`
     );
@@ -214,7 +214,7 @@ describe('runtime arm dispatch — refutations produce clean errors', () => {
     // parameter DEFINITELY refutes the record — the result is a clean error
     // value, not a silent body run or an inert Apply wrapper.
     const ce = new ComputeEngine();
-    ce.declareType('t', 'record<x: number>');
+    ce.declareType('t', 'record{x: number}');
     ce.assign(
       't',
       ce.box([
@@ -245,7 +245,7 @@ describe('runtime arm dispatch — refutations produce clean errors', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      `type nat = record<v: integer>
+      `type nat = record{v: integer}
 function nat(x: integer) { if (x < 0) { nat(-x) } else { {v -> x} } }
 (nat(3), nat(-5))`
     );
@@ -357,7 +357,7 @@ describe('Epsil route (statement flow)', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      `type circle = record<x: number, y: number, r: number>
+      `type circle = record{x: number, y: number, r: number}
 function circle(x, y, r) { {x -> x, y -> y, r -> r} }
 circle(1, 2, 3)`
     );
@@ -397,7 +397,7 @@ match p { pt(a, b) => a + b }`
     const r = executeEpsil(
       ce,
       `function circle(x, y, r) { {x -> x, y -> y, r -> r} }
-type circle = record<x: number, y: number, r: number>
+type circle = record{x: number, y: number, r: number}
 circle(1, 2, 3)`
     );
     expect(

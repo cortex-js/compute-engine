@@ -479,7 +479,7 @@ describe('TAKE', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "record<x: finite_integer, y: finite_integer, z: finite_integer>"
+            "record{x: finite_integer, y: finite_integer, z: finite_integer}"
           ],
           {dict: {x: 1; y: 2; z: 3}}
         ],
@@ -496,7 +496,7 @@ describe('TAKE', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "record<x: finite_integer, y: finite_integer, z: finite_integer>"
+            "record{x: finite_integer, y: finite_integer, z: finite_integer}"
           ],
           {dict: {x: 1; y: 2; z: 3}}
         ],
@@ -623,7 +623,7 @@ describe('DROP 2', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "record<x: finite_integer, y: finite_integer, z: finite_integer>"
+            "record{x: finite_integer, y: finite_integer, z: finite_integer}"
           ],
           {dict: {x: 1; y: 2; z: 3}}
         ],
@@ -765,7 +765,7 @@ describe('SLICE (2,3)', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "record<x: finite_integer, y: finite_integer, z: finite_integer>"
+            "record{x: finite_integer, y: finite_integer, z: finite_integer}"
           ],
           {dict: {x: 1; y: 2; z: 3}}
         ],
@@ -866,7 +866,7 @@ describe('SLICE -1,1', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "record<x: finite_integer, y: finite_integer, z: finite_integer>"
+            "record{x: finite_integer, y: finite_integer, z: finite_integer}"
           ],
           {dict: {x: 1; y: 2; z: 3}}
         ],
@@ -990,7 +990,7 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // that `collectionElementType` reports for iteration. Otherwise `d["a"] + 10`
     // fails with `incompatible-type`.
     const at = engine.box(['At', dict, { str: 'x' }]);
-    // §3.C: the literal `dict` synthesizes `record<x: …, y: …, z: …>`, so a
+    // §3.C: the literal `dict` synthesizes `record{x: …, y: …, z: …}`, so a
     // LITERAL key that names an existing field is statically present — the
     // "present literal → exact" arm applies and the result carries no absence
     // marker. (A key-blind `dictionary<T>` base instead gives `T | marker(T)`,
@@ -1242,7 +1242,7 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
   // with type `unknown`, because `Record` has no operator definition anywhere
   // in the engine — so its declared result type lied. `DictionaryFrom` on the
   // same input already returns exactly what `RecordFrom` promised: a
-  // dictionary value whose type derives as `record<…>` when every key is a
+  // dictionary value whose type derives as `record{…}` when every key is a
   // bare identifier. Record-ness is derived from the value, not carried by a
   // separate representation, which made the operator redundant rather than
   // merely broken. See the `RecordFrom` entry in `ROADMAP.md`.
@@ -1260,7 +1260,7 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
         ['List', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]],
       ])
       .evaluate();
-    expect(d.type.toString()).toBe('record<a: finite_integer, b: finite_integer>');
+    expect(d.type.toString()).toBe('record{a: finite_integer, b: finite_integer}');
   });
 });
 
@@ -1526,7 +1526,7 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
   });
 
   test('Map element type reflects the lambda result, not the source', () => {
-    // Regression: `Map(k |-> k + i, Range(1,3))` must NOT be typed with the
+    // Regression: `Map(k => k + i, Range(1,3))` must NOT be typed with the
     // source element type (integer). Its element type is the lambda's result
     // type, which keeps it out of the real-only compiled fast path.
     //
@@ -2653,7 +2653,7 @@ describe('DICTIONARY LITERAL VALUE EVALUATION', () => {
 
 //
 // A dictionary literal always knows its keys, so it synthesizes the narrower
-// `record<k: T, …>` rather than the key-blind `dictionary<T>`. This is what
+// `record{k: T, …}` rather than the key-blind `dictionary<T>`. This is what
 // makes a `record`-bodied type inhabitable from a literal; `record <:
 // dictionary` keeps every `dictionary<T>` consumer matching.
 //
@@ -2661,7 +2661,7 @@ describe('DICTIONARY LITERAL TYPE SYNTHESIS', () => {
   test('synthesizes a record type naming the keys', () => {
     const ce = new ComputeEngine();
     expect(ce.box({ dict: { x: 1, y: 2 } }).type.toString()).toBe(
-      'record<x: finite_integer, y: finite_integer>'
+      'record{x: finite_integer, y: finite_integer}'
     );
   });
 
@@ -2673,7 +2673,7 @@ describe('DICTIONARY LITERAL TYPE SYNTHESIS', () => {
       ['KeyValuePair', { str: 'y' }, 2],
     ]);
     expect(d.type.toString()).toBe(
-      'record<x: finite_integer, y: finite_integer>'
+      'record{x: finite_integer, y: finite_integer}'
     );
   });
 
@@ -2684,7 +2684,7 @@ describe('DICTIONARY LITERAL TYPE SYNTHESIS', () => {
     expect(t.matches('dictionary')).toBe(true);
     expect(t.matches('collection')).toBe(true);
     // ...and now also the record shape it structurally matches.
-    expect(t.matches('record<x: number, y: number>')).toBe(true);
+    expect(t.matches('record{x: number, y: number}')).toBe(true);
   });
 
   test('a non-identifier key falls back to `dictionary<T>`', () => {
@@ -4422,7 +4422,7 @@ describe('Indeterminate collection facets stay coherent (review round)', () => {
   });
 
   test('Partition stays symbolic for an UNDECIDED boolean predicate', () => {
-    // `x |-> x > n` with `n` free resolves and is typed `boolean`, but is
+    // `x => x > n` with `n` free resolves and is typed `boolean`, but is
     // neither True nor False — undecided, not wrong. Only a predicate that
     // resolves to a non-boolean earns the throw.
     const ce = fresh();
@@ -4798,7 +4798,7 @@ describe('FIRST/SECOND/THIRD/LAST REQUIRE AN INDEXED COLLECTION (regression)', (
 });
 
 describe('BARE `_` IS THE IDENTITY FUNCTION SHORTHAND (regression)', () => {
-  // `_` alone in a function slot means `x |-> x`. Only the BARE `_` qualifies:
+  // `_` alone in a function slot means `x => x`. Only the BARE `_` qualifies:
   // `_1`/`_2`/… are positional parameters of an enclosing shorthand and a
   // named symbol may name a function, so both stay pass-through.
   const xs: Expression = ['List', 3, 1, 2];
@@ -5052,7 +5052,7 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
     // symbolic residue. (Same verdict as before the split — this guards
     // the WIDE predicate from ever leaking into admission.)
     const ce2 = new ComputeEngine();
-    ce2.declare('r', 'record<x: integer>');
+    ce2.declare('r', 'record{x: integer}');
     const e = ce2.box(['Sin', 'r']);
     expect(e.isValid).toBe(false);
     expect(e.toString()).toContain('incompatible-type');

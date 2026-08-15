@@ -630,7 +630,7 @@ describe('Map auto-compile', () => {
     // (`docs/RANDOMNESS-MODEL.md` §5: a fixed number of indices per operation,
     // whichever implementation serves it.)
 
-    /** Build a fresh `Map(x |-> body, Range(1,n))`, drain it inside a frame,
+    /** Build a fresh `Map(x => body, Range(1,n))`, drain it inside a frame,
      * and report the frame's trailing draw index alongside the values. */
     function framedDrain(body: any, n: number, jit: 'auto' | 'off') {
       const engine = new ComputeEngine();

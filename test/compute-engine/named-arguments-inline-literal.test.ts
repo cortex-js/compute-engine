@@ -3,7 +3,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 /**
  * Named arguments on an INLINE function-literal callee:
- * `((x: number) |-> x + 1)(x: 5)`.
+ * `((x: number) => x + 1)(x: 5)`.
  *
  * The call canonicalizes through `Apply`, which the named-argument seam
  * excludes (sub-ruling R4: `Apply`'s own first parameter IS the callee, so a
@@ -66,54 +66,54 @@ function epsil(src: string): { value: string; codes: string[] } {
 
 describe('inline-literal named arguments — Epsil route', () => {
   test('annotated literal, named call', () => {
-    const r = epsil('((x: number) |-> x + 1)(x: 5)');
+    const r = epsil('((x: number) => x + 1)(x: 5)');
     expect(r.codes).toEqual([]);
     expect(r.value).toBe('6');
   });
 
   test('named arguments are permuted into declaration order', () => {
-    const r = epsil('((x: number, y: number) |-> x - y)(y: 2, x: 10)');
+    const r = epsil('((x: number, y: number) => x - y)(y: 2, x: 10)');
     expect(r.codes).toEqual([]);
     expect(r.value).toBe('8');
   });
 
   test('UNANNOTATED literal: names read from the syntax, not the type', () => {
-    const r = epsil('((x, y) |-> x - y)(y: 2, x: 10)');
+    const r = epsil('((x, y) => x - y)(y: 2, x: 10)');
     expect(r.codes).toEqual([]);
     expect(r.value).toBe('8');
   });
 
   test('mixed positional-then-named call', () => {
-    const r = epsil('((x: number, y: number) |-> x - y)(10, y: 2)');
+    const r = epsil('((x: number, y: number) => x - y)(10, y: 2)');
     expect(r.codes).toEqual([]);
     expect(r.value).toBe('8');
   });
 
   test('positional call is untouched by the carve-out', () => {
-    const r = epsil('((x: number) |-> x + 1)(5)');
+    const r = epsil('((x: number) => x + 1)(5)');
     expect(r.codes).toEqual([]);
     expect(r.value).toBe('6');
   });
 
   test('an unknown name reports argument-name-unknown with the declared names', () => {
-    const r = epsil('((x: number) |-> x + 1)(y: 5)');
+    const r = epsil('((x: number) => x + 1)(y: 5)');
     expect(r.value).toContain('argument-name-unknown');
     expect(r.value).toContain('`x`');
   });
 
   test('a zero-parameter literal names no parameters', () => {
-    const r = epsil('(() |-> 42)(x: 1)');
+    const r = epsil('(() => 42)(x: 1)');
     expect(r.value).toContain('argument-name-unknown');
     expect(r.value).toContain('declares no parameter names');
   });
 
   test('a positional argument may not follow a named one', () => {
-    const r = epsil('((x: number, y: number) |-> x - y)(x: 1, 2)');
+    const r = epsil('((x: number, y: number) => x - y)(x: 1, 2)');
     expect(r.value).toContain('argument-order-invalid');
   });
 
   test('writing the same name twice is a duplicate', () => {
-    const r = epsil('((x: number) |-> x + 1)(x: 1, x: 2)');
+    const r = epsil('((x: number) => x + 1)(x: 1, x: 2)');
     expect(r.value).toContain('argument-name-duplicate');
   });
 });

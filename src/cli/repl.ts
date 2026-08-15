@@ -184,7 +184,7 @@ export function isRecoverable(
   )
     return true;
 
-  return /(?:\+|-|\*|\/|\^|==|!=|<=|>=|<|>|&&|\|\||=|->|=>)\s*$/.test(source);
+  return /(?:\+|-|\*|\/|\^|==|!=|<=|>=|<|>|&&|\|\||==>|=>)\s*$/.test(source);
 }
 
 function diagnosticCode(diagnostic: ParsingDiagnostic): string {

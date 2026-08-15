@@ -103,19 +103,19 @@ describe('EPSIL `where` ANNOTATIONS (D13: full-literal positions)', () => {
   // (`docs/plans/2026-08-04-generic-function-literals-design.md` §2.4). The
   // annotation still parses through the shared type DSL, as it always did.
   test('a function-literal body INSTALLS, and instantiates per call', () => {
-    expect(parseDiagnostics('let f: (T) -> T where T = x |-> x')).toEqual([]);
+    expect(parseDiagnostics('let f: (T) -> T where T = x => x')).toEqual([]);
 
-    const r = run('let f: (T) -> T where T = x |-> x');
+    const r = run('let f: (T) -> T where T = x => x');
     expect(r.diagnostics).toEqual([]);
-    expect(r.value).toBe('(x) |-> x');
+    expect(r.value).toBe('(x) => x');
 
     // Both instantiations, on ONE engine — no cross-call pollution.
-    expect(run('let f: (T) -> T where T = x |-> x\nf(5)')).toMatchObject({
+    expect(run('let f: (T) -> T where T = x => x\nf(5)')).toMatchObject({
       diagnostics: [],
       value: '5',
       type: 'finite_integer',
     });
-    expect(run('let f: (T) -> T where T = x |-> x\nf("a")')).toMatchObject({
+    expect(run('let f: (T) -> T where T = x => x\nf("a")')).toMatchObject({
       diagnostics: [],
       value: '"a"',
       type: 'string',
@@ -126,29 +126,29 @@ describe('EPSIL `where` ANNOTATIONS (D13: full-literal positions)', () => {
   // ascribed onto it as a full-signature marker, so the value's OWN type is the
   // polytype rather than the `(unknown) -> unknown` its bare parameters infer.
   test('…and the installed VALUE carries the declared polytype', () => {
-    const r = run('let f: (x: T) -> T where T = x |-> x\nf');
+    const r = run('let f: (x: T) -> T where T = x => x\nf');
     expect(r.diagnostics).toEqual([]);
-    expect(r.value).toBe('(x) |-> x');
+    expect(r.value).toBe('(x) => x');
     expect(r.type).toBe('(x: T) -> T where T');
 
     // The unnamed-argument spelling too (marker argument names are cosmetic).
-    expect(run('let f: (T) -> T where T = x |-> x\nf').type).toBe(
+    expect(run('let f: (T) -> T where T = x => x\nf').type).toBe(
       '(T) -> T where T'
     );
   });
 
   test('…and the value serializes with the marker', () => {
-    // The known Declare-value-bag gap keeps this off the `x |-> x` sugar; what
+    // The known Declare-value-bag gap keeps this off the `x => x` sugar; what
     // R1 pins is that the round trip no longer DROPS the clause.
     const ce = new ComputeEngine();
-    const r = executeEpsil(ce, 'let f: (x: T) -> T where T = x |-> x\nf');
+    const r = executeEpsil(ce, 'let f: (x: T) -> T where T = x => x\nf');
     expect(serializeEpsil(r.value!.json)).toBe(
       'Function(do {Typed(x, "(x: T) -> T where T")}, x)'
     );
   });
 
   test('…and on the §9.1 `(x: T) scope -> T` shape', () => {
-    const source = 'let f: (x: T) scope -> T where T = x |-> x + 1\nf(5)';
+    const source = 'let f: (x: T) scope -> T where T = x => x + 1\nf(5)';
     expect(parseDiagnostics(source)).toEqual([]);
     expect(run(source)).toMatchObject({
       diagnostics: [],
@@ -158,7 +158,7 @@ describe('EPSIL `where` ANNOTATIONS (D13: full-literal positions)', () => {
   });
 
   test('a declared BOUND is enforced at the call, not at the declaration', () => {
-    const source = 'let f: (x: T) -> T where T: number = x |-> x\nf("a")';
+    const source = 'let f: (x: T) -> T where T: number = x => x\nf("a")';
     expect(parseDiagnostics(source)).toEqual([]);
     expect(run(source).value).toBe(
       'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
@@ -465,7 +465,7 @@ describe('EPSIL `where` SERIALIZATION (D13: never decompose)', () => {
   test('an initializer serializes in call form — pre-existing, and generic/ground identical', () => {
     // BUG (pre-existing, NOT generics-specific): a `Function` literal in a
     // `Declare` attribute bag serializes as `Function(x, x)` rather than the
-    // `x |-> x` mapsto spelling, so `let f: … = x |-> x` does not round-trip.
+    // `x => x` mapsto spelling, so `let f: … = x => x` does not round-trip.
     // Pinned here only to show the polytype path behaves EXACTLY like the
     // ground path — the clause itself is not implicated.
     const withValue = (type: string) =>

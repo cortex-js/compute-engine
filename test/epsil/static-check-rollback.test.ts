@@ -82,7 +82,7 @@ describe('STATIC CHECK — engine state rolls back', () => {
     expect(def.value.inferredType).toBe(true);
 
     check(ce, 'function f(x) { x + 1 }\nf(2)');
-    check(ce, 'f = x |-> x + 1\nf(2)');
+    check(ce, 'f = x => x + 1\nf(2)');
 
     expect(ce.lookupDefinition('f')).toBe(def);
     expect(def.value.type.toString()).toBe(typeBefore);
@@ -103,7 +103,7 @@ describe('STATIC CHECK — engine state rolls back', () => {
 
     const diagnostics = check(
       ce,
-      'g := (x: number, y: string) |-> x + 3\ng(y: "ok", x: 1)'
+      'g := (x: number, y: string) => x + 3\ng(y: "ok", x: 1)'
     );
     expect(diagnostics).toHaveLength(0);
     expect(ce.lookupDefinition('g')).toBe(def);
@@ -113,7 +113,7 @@ describe('STATIC CHECK — engine state rolls back', () => {
     // scope, which pops with it — nothing to roll back, nothing left behind.
     const second = check(
       ce,
-      'f := (x: number, y: string) |-> x + 3\nf(y: "ok", x: 1)'
+      'f := (x: number, y: string) => x + 3\nf(y: "ok", x: 1)'
     );
     expect(second).toHaveLength(0);
     expect(ce.lookupDefinition('f')).toBeUndefined();
@@ -131,7 +131,7 @@ describe('STATIC CHECK — engine state rolls back', () => {
     if (!isValueDef(def)) throw new Error('expected a value definition');
     const typeBefore = def.value.type.toString();
 
-    check(ce, 'Pi := (x: number, y: string) |-> x + 3\nPi(y: "ok", x: 1)');
+    check(ce, 'Pi := (x: number, y: string) => x + 3\nPi(y: "ok", x: 1)');
 
     expect(ce.lookupDefinition('Pi')).toBe(def);
     expect(def.value.type.toString()).toBe(typeBefore);

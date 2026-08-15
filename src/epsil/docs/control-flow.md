@@ -51,8 +51,8 @@ body:
 - **Block style** (`function f(x) { … }`) once the body needs more than an
   expression — a local `let`, a `match`, a loop. It is also the only form that
   carries a name *and* a multi-statement body.
-- **Anonymous** (`x |-> …`) when the function is an argument to another
-  function and a name would add nothing: `Map(x |-> x^2, xs)`.
+- **Anonymous** (`x => …`) when the function is an argument to another
+  function and a name would add nothing: `Map(x => x^2, xs)`.
 
 An anonymous function can have a multi-statement body too, by making that body
 a [`do` block](#do-block-expressions) — but at that point a named `function` is
@@ -121,7 +121,7 @@ fib(10)
 
 Redefining a clause with the *same* parameter list replaces just that
 clause — so re-running an edited definition behaves as expected. A plain
-assignment (`f = x |-> …`) still replaces the whole binding, clauses and
+assignment (`f = x => …`) still replaces the whole binding, clauses and
 all.
 
 A literal parameter behaves as an anonymous parameter constrained to that exact
@@ -144,33 +144,37 @@ domain.
 
 ### Anonymous functions
 
-An anonymous function uses the ASCII mapsto arrow `|->` (the engine's `↦`);
-`->` itself is taken by `KeyValuePair`, so this is a collision-free choice:
+An anonymous function uses the ASCII mapsto arrow `=>` (`⇒` in fancy-symbol
+output, and `↦` is accepted as input too);
+`->` itself is taken by `KeyValuePair` and by function types in annotations,
+so the two arrows never collide. The same `=>` separates a `match` case from
+its body — one arrow, meaning "yields", in both places (see
+[Guards](#guards)):
 
 ```epsil
-x |-> x + 1
+x => x + 1
 ```
 
 ```epsil
-(x, y) |-> x + y
+(x, y) => x + y
 ```
 
 A mapsto binds loosely enough to sit on the right-hand side of an
 assignment:
 
 ```epsil
-f = x |-> x + 1
+f = x => x + 1
 ```
 
 A lambda can take **no** parameters — an empty parameter list `()` before the
 arrow:
 
 ```epsil
-() |-> 42
+() => 42
 ```
 
 Writing `->` where a function was meant — `(x, y) -> x + y`,
-`(n: integer) -> n^2` — is a diagnosed typo: the parser suggests `|->` with a
+`(n: integer) -> n^2` — is a diagnosed typo: the parser suggests `=>` with a
 fixit and recovers as the intended function, so the program still runs. And
 when a declaration's annotation is a function type with named parameters, the
 lambda can be omitted entirely — `const f : (x: number) -> number = x^2 + 1`
@@ -223,13 +227,13 @@ would leave the false case with no value to name. `1 if c` is an error; use the
 block form (`if c { 1 }`) when there is nothing to return.
 
 **It binds looser than every operator that computes, but tighter than the four
-that bind or pair — `=`, `|->`, `|>` and `->`.** So the whole conditional is the
+that bind or pair — `=`, `=>`, `|>` and `->`.** So the whole conditional is the
 right-hand side of an assignment, the body of a function, or the value of a
 dictionary entry, and no parentheses are needed around a comparison:
 
 ```epsil
 let scale = 2
-let tag = n |-> "big" if n * scale > 10 else "small"
+let tag = n => "big" if n * scale > 10 else "small"
 tag(6)
 // ➔ "big"
 ```
@@ -469,6 +473,14 @@ If the guard is undecidable for a symbolic subject, the case falls through to
 the next one — consistent with `match`'s totality, a guard never leaves the
 whole expression inert.
 
+The case arrow `=>` is the same arrow that builds an anonymous function, so a
+guard ends at the first `=>` written at the case's own level: in
+`n if valid => n` the guard is `valid` and the body is `n`, never the lambda
+`valid => n`. A lambda genuinely wanted in a pattern or a guard is
+parenthesized — `n if (f => f)(n) => n` — which costs nothing, since a bare
+lambda as a guard is a function value and therefore always true. A case BODY
+has no such restriction: `0 => x => x + 1` is a case whose result is a lambda.
+
 ### Destructuring
 
 List, tuple, and dictionary patterns decompose the subject and bind their
@@ -635,7 +647,7 @@ Nested calls:
 
 ```epsil-live
 let scores = [88, 42, 95, 61, 73]
-Mean(Map(s |-> s + 5, Filter(scores, s |-> s >= 60)))
+Mean(Map(s => s + 5, Filter(scores, s => s >= 60)))
 // ➔ 337/4
 ```
 
@@ -643,8 +655,8 @@ Named intermediates:
 
 ```epsil-live
 let scores = [88, 42, 95, 61, 73]
-let passing = Filter(scores, s |-> s >= 60)
-let curved = Map(s |-> s + 5, passing)
+let passing = Filter(scores, s => s >= 60)
+let curved = Map(s => s + 5, passing)
 Mean(curved)
 // ➔ 337/4
 ```
@@ -652,8 +664,7 @@ Mean(curved)
 A pipeline:
 
 ```epsil-live
-let scores = [88, 42, 95, 61, 73]
-scores |> Filter(_, s |-> s >= 60) |> Map(s |-> s + 5, _) |> Mean
+[88, 42, 95, 61, 73] |> Filter(s => s >= 60) |> s => s + 5 |> Mean
 // ➔ 337/4
 ```
 
@@ -688,8 +699,8 @@ collection piped into `Take(3)`, second for one piped into the
 callback-first `Map(f)` — so these are the same pipeline:
 
 ```epsil
-[1, 2, 3] |> Map(n |-> n^2, _)      // [1, 4, 9]
-[1, 2, 3] |> Map(n |-> n^2)         // [1, 4, 9] — implicit argument
+[1, 2, 3] |> Map(n => n^2, _)      // [1, 4, 9]
+[1, 2, 3] |> Map(n => n^2)         // [1, 4, 9] — implicit argument
 ```
 
 The implicit argument only fills a hole. A call that is already complete is
@@ -698,7 +709,7 @@ as if the pipe were not there.
 
 A one-parameter **lambda** stage over a collection is applied to each
 element (an implicit `Map`), so the pipeline above can shed its `Map`
-entirely — `[1, 2, 3] |> n |-> n^2` and `[1, 2, 3] |> _^2` also produce
+entirely — `[1, 2, 3] |> n => n^2` and `[1, 2, 3] |> _^2` also produce
 `[1, 4, 9]`. See [the pipe operator](/epsil/operators/#pipe) for the exact
 rules.
 
@@ -778,12 +789,12 @@ block:
 let y = do { let t = 3; t + 1 }
 ```
 
-Because a lambda body is an ordinary expression, `x |-> do { … }` gives a
+Because a lambda body is an ordinary expression, `x => do { … }` gives a
 lambda the same multi-statement body a named `function` has — so a closure
 whose body runs several statements is written with `do`:
 
 ```epsil
-counter |-> do { counter = counter + 1; counter }
+counter => do { counter = counter + 1; counter }
 ```
 
 A `do` **not** followed by `{` is an `opening-bracket-expected` diagnostic.

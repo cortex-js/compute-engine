@@ -343,7 +343,7 @@ describe('Annotated function literal — serialization drops annotations (§8)',
   test('ASCII-math drops the parameter annotation', () => {
     const ce = new ComputeEngine();
     const f = ce.box(['Function', ['Add', 'x', 1], ['Typed', 'x', "'integer'"]]);
-    expect(f.toString()).toBe('(x) |-> x + 1');
+    expect(f.toString()).toBe('(x) => x + 1');
   });
 });
 

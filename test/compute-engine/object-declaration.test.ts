@@ -1,7 +1,7 @@
 /**
- * The `object<…>` TYPE DECLARATION and its named-argument CONSTRUCTOR.
+ * The `object{…}` TYPE DECLARATION and its named-argument CONSTRUCTOR.
  *
- * `type Person = object<firstName: string, …>` declares a NOMINAL type whose
+ * `type Person = object{firstName: string, …}` declares a NOMINAL type whose
  * stored fields are fixed at declaration, and mints one constructor:
  * `Person(firstName: "Alan", …)`. Spec: `docs/TYPE_SYSTEM_ROADMAP.md`
  * Appendix B — "Declaring an object type" (the field list, ruling B7's
@@ -73,11 +73,11 @@ function epsilCodes(source: string, engine = ce): string[] {
   return codes;
 }
 
-describe('OBJECT TYPE — the `object<…>` type form', () => {
+describe('OBJECT TYPE — the `object{…}` type form', () => {
   test('parses and round-trips through serialization', () => {
     ce.declareType(
       'Person',
-      'object<firstName: string, lastName: string, age: integer>'
+      'object{firstName: string, lastName: string, age: integer}'
     );
     const def = ce.type('Person').type;
     expect(typeof def === 'object' && def.kind === 'reference').toBe(true);
@@ -94,16 +94,16 @@ describe('OBJECT TYPE — the `object<…>` type form', () => {
       'age',
     ]);
     expect(ce.type(body as never).toString()).toBe(
-      'object<firstName: string, lastName: string, age: integer>'
+      'object{firstName: string, lastName: string, age: integer}'
     );
   });
 
   test('a re-parse of the serialized form yields the same type', () => {
-    ce.declareType('A', 'object<x: integer, y: list<string>>');
+    ce.declareType('A', 'object{x: integer, y: list<string>}');
     const text = ce
       .type(((ce.type('A').type as { def: unknown }).def as never) ?? 'never')
       .toString();
-    expect(text).toBe('object<x: integer, y: list<string>>');
+    expect(text).toBe('object{x: integer, y: list<string>}');
     ce.declareType('B', text);
     expect(
       ((ce.type('B').type as { def: unknown }).def as { kind: string }).kind
@@ -112,16 +112,16 @@ describe('OBJECT TYPE — the `object<…>` type form', () => {
 
   test('bare `object` is a usable type meaning "any object"', () => {
     expect(ce.type('object').toString()).toBe('object');
-    // `object<>` with no fields is the bare primitive, not an empty layout.
-    ce.declareType('Anything', 'object<>');
+    // `object{}` with no fields is the bare primitive, not an empty layout.
+    ce.declareType('Anything', 'object{}');
     expect(ce.type('Anything').toString()).toBe('Anything');
   });
 
   test('`object` and `record` are DISJOINT — in both directions (B6)', () => {
     expect(ce.type('object').matches('record')).toBe(false);
     expect(ce.type('record').matches('object')).toBe(false);
-    ce.declareType('Data', 'record<id: string>');
-    ce.declareType('MutableData', 'object<id: string>');
+    ce.declareType('Data', 'record{id: string}');
+    ce.declareType('MutableData', 'object{id: string}');
     expect(ce.type('Data').matches('object')).toBe(false);
     expect(ce.type('MutableData').matches('record')).toBe(false);
   });
@@ -129,7 +129,7 @@ describe('OBJECT TYPE — the `object<…>` type form', () => {
   test('a value of a declared object type inhabits bare `object`', () => {
     const { diagnostics, value } = executeEpsil(
       new ComputeEngine(),
-      'type P = object<a: integer>\nlet x: object = P(a: 1)\nx'
+      'type P = object{a: integer}\nlet x: object = P(a: 1)\nx'
     );
     expect(diagnostics).toEqual([]);
     expect(value!.type.toString()).toBe('P');
@@ -138,7 +138,7 @@ describe('OBJECT TYPE — the `object<…>` type form', () => {
   test('a RECORD value does not inhabit bare `object`', () => {
     expect(
       epsilCodes(
-        'type D = record<a: integer>\nlet x: object = D(a: 1)\nx',
+        'type D = record{a: integer}\nlet x: object = D(a: 1)\nx',
         new ComputeEngine()
       )
     ).toContain('incompatible-type');
@@ -147,15 +147,15 @@ describe('OBJECT TYPE — the `object<…>` type form', () => {
   test('`object` is not a collection', () => {
     expect(ce.type('object').matches('collection')).toBe(false);
     expect(ce.type('object').matches('dictionary')).toBe(false);
-    ce.declareType('MutableData', 'object<id: string>');
+    ce.declareType('MutableData', 'object{id: string}');
     expect(ce.type('MutableData').matches('collection')).toBe(false);
   });
 
-  test('an inline `object<…>` annotation is rejected (box route)', () => {
+  test('an inline `object{…}` annotation is rejected (box route)', () => {
     let code: string | undefined;
     let message = '';
     try {
-      ce.declare('x', { type: 'object<id: string>' });
+      ce.declare('x', { type: 'object{id: string}' });
     } catch (e) {
       code = (e as { code?: string }).code;
       message = (e as Error).message;
@@ -164,52 +164,52 @@ describe('OBJECT TYPE — the `object<…>` type form', () => {
     expect(message).toContain('may only be the definition of a named type');
   });
 
-  test('an inline `object<…>` annotation is rejected (Epsil route)', () => {
-    expect(epsilCodes('let x: object<id: string> = 1')).toEqual([
+  test('an inline `object{…}` annotation is rejected (Epsil route)', () => {
+    expect(epsilCodes('let x: object{id: string} = 1')).toEqual([
       'object-type-not-inline',
     ]);
   });
 
-  test('an `object<…>` NESTED in a declaration body is inline too', () => {
-    expect(() => ce.declareType('T', 'list<object<a: integer>>')).toThrow(
+  test('an `object{…}` NESTED in a declaration body is inline too', () => {
+    expect(() => ce.declareType('T', 'list<object{a: integer}>')).toThrow(
       /may only be the definition of a named type/
     );
-    expect(epsilCodes('type T = list<object<a: integer>>')).toEqual([
+    expect(epsilCodes('type T = list<object{a: integer}>')).toEqual([
       'object-type-not-inline',
     ]);
-    expect(epsilCodes('type T = object<a: integer> | integer')).toEqual([
+    expect(epsilCodes('type T = object{a: integer} | integer')).toEqual([
       'object-type-not-inline',
     ]);
   });
 
-  test('a `type alias` body may not be an `object<…>` layout', () => {
+  test('a `type alias` body may not be an `object{…}` layout', () => {
     // Object types are nominal. A structural alias to a layout would make two
     // aliases of one shape interchangeable — exactly the subtyping between
     // object types the appendix rules out.
     expect(() =>
-      ce.declareType('P', 'object<a: integer>', { alias: true })
+      ce.declareType('P', 'object{a: integer}', { alias: true })
     ).toThrow(/may only be the definition of a named type/);
-    expect(epsilCodes('type alias P = object<a: integer>\n1')).toEqual([
+    expect(epsilCodes('type alias P = object{a: integer}\n1')).toEqual([
       'object-type-not-inline',
     ]);
   });
 
-  test('a FIELD may not spell another `object<…>` layout', () => {
+  test('a FIELD may not spell another `object{…}` layout', () => {
     // It would name a second, unnamed object type. Declare it and refer to it
     // by name instead.
-    expect(() => ce.declareType('P', 'object<a: object<b: integer>>')).toThrow(
+    expect(() => ce.declareType('P', 'object{a: object{b: integer}}')).toThrow(
       /may only be the definition of a named type/
     );
-    ce.declareType('Inner', 'object<b: integer>');
-    expect(() => ce.declareType('Q', 'object<a: Inner>')).not.toThrow();
+    ce.declareType('Inner', 'object{b: integer}');
+    expect(() => ce.declareType('Q', 'object{a: Inner}')).not.toThrow();
   });
 });
 
 describe('OBJECT TYPE — subtyping', () => {
   beforeEach(() => {
-    ce.declareType('Counter', 'object<count: integer>');
-    ce.declareType('Gauge', 'object<count: integer>');
-    ce.declareType('Widened', 'object<count: number>');
+    ce.declareType('Counter', 'object{count: integer}');
+    ce.declareType('Gauge', 'object{count: integer}');
+    ce.declareType('Widened', 'object{count: number}');
   });
 
   test('two object types with IDENTICAL shapes are unrelated', () => {
@@ -236,7 +236,7 @@ describe('OBJECT TYPE — subtyping', () => {
   });
 
   test('a nominal RECORD type is not a subtype of `object`', () => {
-    ce.declareType('Badge', 'record<id: string>');
+    ce.declareType('Badge', 'record{id: string}');
     expect(ce.type('Badge').matches('object')).toBe(false);
   });
 
@@ -285,7 +285,7 @@ describe('OBJECT TYPE — a property read on a bare `object`', () => {
     const { value } = executeEpsil(
       ce,
       [
-        'type Person = object<name: string>',
+        'type Person = object{name: string}',
         'let p: object = Person(name: "Alan")',
         'p.name',
       ].join('\n')
@@ -297,32 +297,32 @@ describe('OBJECT TYPE — a property read on a bare `object`', () => {
 describe('OBJECT TYPE — generic declarations (B13)', () => {
   test('a stored-field type variable verifies as `inout`', () => {
     expect(() =>
-      ce.declareType('Cell', 'object<value: T>', { typeParams: 'inout T' })
+      ce.declareType('Cell', 'object{value: T}', { typeParams: 'inout T' })
     ).not.toThrow();
   });
 
   test('`out` on a stored-field variable is rejected', () => {
     expect(() =>
-      ce.declareType('Cell', 'object<value: T>', { typeParams: 'out T' })
+      ce.declareType('Cell', 'object{value: T}', { typeParams: 'out T' })
     ).toThrow(/variance-violation/);
   });
 
   test('`in` on a stored-field variable is rejected', () => {
     expect(() =>
-      ce.declareType('Cell', 'object<value: T>', { typeParams: 'in T' })
+      ce.declareType('Cell', 'object{value: T}', { typeParams: 'in T' })
     ).toThrow(/variance-violation/);
   });
 
   test('the DEFAULT (no marker, i.e. `out`) is rejected too', () => {
     expect(() =>
-      ce.declareType('Cell', 'object<value: T>', { typeParams: 'T' })
+      ce.declareType('Cell', 'object{value: T}', { typeParams: 'T' })
     ).toThrow(/variance-violation/);
   });
 
   test('the violation message names the read/write position and the fix', () => {
     let message = '';
     try {
-      ce.declareType('Cell', 'object<value: T>', { typeParams: 'out T' });
+      ce.declareType('Cell', 'object{value: T}', { typeParams: 'out T' });
     } catch (e) {
       message = (e as Error).message;
     }
@@ -335,7 +335,7 @@ describe('OBJECT TYPE — generic declarations (B13)', () => {
     const engine = new ComputeEngine();
     const { diagnostics, value } = executeEpsil(
       engine,
-      'type Ref<inout T> = object<value: T>\nRef(value: 1)'
+      'type Ref<inout T> = object{value: T}\nRef(value: 1)'
     );
     expect(diagnostics).toEqual([]);
     expect(isObject(value!)).toBe(true);
@@ -349,7 +349,7 @@ describe('OBJECT TYPE — generic declarations (B13)', () => {
     // declaration that ends the program contributes its error VALUE as the
     // program's result instead (pre-existing behavior, shared with every
     // other type declaration).
-    expect(epsilCodes('type Cell<out T> = object<value: T>\n1')).toContain(
+    expect(epsilCodes('type Cell<out T> = object{value: T}\n1')).toContain(
       'invalid-type-declaration'
     );
   });
@@ -357,7 +357,7 @@ describe('OBJECT TYPE — generic declarations (B13)', () => {
 
 describe('OBJECT TYPE — the declaration statement', () => {
   test('declares on the box route and mints a constructor', () => {
-    ce.declareType('MutableData', 'object<id: string, value: string>');
+    ce.declareType('MutableData', 'object{id: string, value: string}');
     const def = ce.lookupDefinition('MutableData');
     expect(def).toBeDefined();
     expect((def as any).operator.signature.toString()).toBe(
@@ -369,7 +369,7 @@ describe('OBJECT TYPE — the declaration statement', () => {
     const engine = new ComputeEngine();
     const { diagnostics } = executeEpsil(
       engine,
-      'type MutableData = object<id: string, value: string>'
+      'type MutableData = object{id: string, value: string}'
     );
     expect(diagnostics).toEqual([]);
     expect(
@@ -398,14 +398,14 @@ describe('OBJECT TYPE — the declaration statement', () => {
     // The shipped redefinition discipline covers the object form with no work
     // of its own: `type` is `type`, whatever its body.
     expect(
-      epsilCodes('type P = object<a: integer>\ntype P = object<b: integer>\n1')
+      epsilCodes('type P = object{a: integer}\ntype P = object{b: integer}\n1')
     ).toContain('type-redefinition');
   });
 
   test('a re-declaration in a LATER program replaces, as for any type', () => {
     const engine = new ComputeEngine();
-    expect(epsilCodes('type P = object<a: integer>', engine)).toEqual([]);
-    expect(epsilCodes('type P = object<b: string>', engine)).toEqual([]);
+    expect(epsilCodes('type P = object{a: integer}', engine)).toEqual([]);
+    expect(epsilCodes('type P = object{b: string}', engine)).toEqual([]);
     expect(
       (engine.lookupDefinition('P') as any).operator.signature.toString()
     ).toBe('(b: string) state -> P');
@@ -421,14 +421,14 @@ describe('OBJECT TYPE — the declaration statement', () => {
     const engine = new ComputeEngine();
     const first = executeEpsil(
       engine,
-      'type P = object<a: integer>\nlet p = P(a: 1)\np'
+      'type P = object{a: integer}\nlet p = P(a: 1)\np'
     );
     expect(first.diagnostics).toEqual([]);
     const p = first.value!;
     expect(isObject(p)).toBe(true);
     expect([...(p as any)._slots.keys()]).toEqual(['a']);
 
-    expect(epsilCodes('type P = object<b: string>', engine)).toEqual([]);
+    expect(epsilCodes('type P = object{b: string}', engine)).toEqual([]);
 
     // The instance keeps its slots, its printed type name, AND the layout its
     // pinned type resolves to.
@@ -452,7 +452,7 @@ describe('OBJECT TYPE — the declaration statement', () => {
     // same-named applications whose records differ, so a fully copied record
     // would make the pinned type match no other spelling of itself.
     const engine = new ComputeEngine();
-    engine.declareType('Cell', 'object<value: T>', { typeParams: 'inout T' });
+    engine.declareType('Cell', 'object{value: T}', { typeParams: 'inout T' });
     const { diagnostics, value } = executeEpsil(
       engine,
       'let c = Cell(value: 3)\nc'
@@ -565,7 +565,7 @@ describe('OBJECT CONSTRUCTOR — argument names are required (B11)', () => {
   beforeEach(() => {
     ce.declareType(
       'Person',
-      'object<firstName: string, lastName: string, age: integer>'
+      'object{firstName: string, lastName: string, age: integer}'
     );
   });
 
@@ -611,7 +611,7 @@ describe('OBJECT CONSTRUCTOR — argument names are required (B11)', () => {
 
   test('a positional call is rejected on the Epsil route', () => {
     expect(
-      epsilCodes('type P = object<a: string, b: string>\nP("x", "y")')
+      epsilCodes('type P = object{a: string, b: string}\nP("x", "y")')
     ).toContain('argument-names-required');
   });
 });
@@ -620,7 +620,7 @@ describe('OBJECT CONSTRUCTOR — every field is required (B7)', () => {
   beforeEach(() => {
     ce.declareType(
       'Person',
-      'object<firstName: string, lastName: string, age: integer>'
+      'object{firstName: string, lastName: string, age: integer}'
     );
   });
 
@@ -663,7 +663,7 @@ describe('OBJECT CONSTRUCTOR — every field is required (B7)', () => {
 
   test('a superfluous field name is rejected on the Epsil route', () => {
     expect(
-      epsilCodes('type P = object<a: string>\nP(a: "x", b: "y")')
+      epsilCodes('type P = object{a: string}\nP(a: "x", b: "y")')
     ).toContain('argument-name-unknown');
   });
 
@@ -693,7 +693,7 @@ describe('OBJECT CONSTRUCTOR — every field is required (B7)', () => {
 
 describe('OBJECT CONSTRUCTOR — every construction makes a new object', () => {
   beforeEach(() => {
-    ce.declareType('MutableData', 'object<id: string, value: string>');
+    ce.declareType('MutableData', 'object{id: string, value: string}');
   });
 
   /** `MutableData(id: "1", value: "x")`, boxed. */
@@ -768,7 +768,7 @@ describe('OBJECT CONSTRUCTOR — every construction makes a new object', () => {
     const { diagnostics, value } = executeEpsil(
       engine,
       [
-        'type MutableData = object<id: string, value: string>',
+        'type MutableData = object{id: string, value: string}',
         'let a = MutableData(id: "1", value: "x")',
         'let b = MutableData(id: "1", value: "x")',
         'a == b',
@@ -783,7 +783,7 @@ describe('OBJECT CONSTRUCTOR — every construction makes a new object', () => {
     const { diagnostics, value } = executeEpsil(
       engine,
       [
-        'type MutableData = object<id: string, value: string>',
+        'type MutableData = object{id: string, value: string}',
         'let a = MutableData(id: "1", value: "x")',
         'let c = a',
         'a == c',
@@ -796,7 +796,7 @@ describe('OBJECT CONSTRUCTOR — every construction makes a new object', () => {
 
 describe('OBJECT CONSTRUCTOR — the stored values', () => {
   test('a slot holds the EVALUATED argument', () => {
-    ce.declareType('W', 'object<v: number, s: string>');
+    ce.declareType('W', 'object{v: number, s: string}');
     const w = ce
       .box(['W', named('v', ['Add', 2, 3]), named('s', { str: 'x' })] as never)
       .evaluate();
@@ -806,13 +806,13 @@ describe('OBJECT CONSTRUCTOR — the stored values', () => {
   });
 
   test('an exact argument stays exact — evaluated is not numericized', () => {
-    ce.declareType('W', 'object<v: number>');
+    ce.declareType('W', 'object{v: number}');
     const w = ce.box(['W', named('v', ['Sqrt', 2])] as never).evaluate();
     expect((w as any)._slots.get('v').toString()).toBe('sqrt(2)');
   });
 
   test('the fields are stored in DECLARED order', () => {
-    ce.declareType('P', 'object<a: integer, b: integer, c: integer>');
+    ce.declareType('P', 'object{a: integer, b: integer, c: integer}');
     const p = ce
       .box(['P', named('c', 3), named('a', 1), named('b', 2)] as never)
       .evaluate();
@@ -824,8 +824,8 @@ describe('OBJECT CONSTRUCTOR — the stored values', () => {
     const { diagnostics, value } = executeEpsil(
       engine,
       [
-        'type Inner = object<n: integer>',
-        'type Outer = object<inner: Inner>',
+        'type Inner = object{n: integer}',
+        'type Outer = object{inner: Inner}',
         'let seed = Inner(n: 1)',
         'let o = Outer(inner: seed)',
         'o',
@@ -844,12 +844,12 @@ describe("APPENDIX B's OWN EXAMPLES (construction only — no field access yet)"
     const { diagnostics, value } = executeEpsil(
       engine,
       [
-        'type Person = object<',
+        'type Person = object{',
         '  firstName: string,',
         '  lastName: string,',
         '  age: integer,',
         '  role: string',
-        '>',
+        '}',
         'const p = Person(firstName: "Alan", lastName: "Turing",',
         '                 age: 42, role: "scientist")',
         'p',
@@ -868,7 +868,7 @@ describe("APPENDIX B's OWN EXAMPLES (construction only — no field access yet)"
     const { diagnostics, value } = executeEpsil(
       engine,
       [
-        'type MutableData = object<id: string, value: string>',
+        'type MutableData = object{id: string, value: string}',
         'let d = MutableData(id: "1234", value: "foo")',
         'd',
       ].join('\n')
@@ -879,12 +879,12 @@ describe("APPENDIX B's OWN EXAMPLES (construction only — no field access yet)"
   });
 
   test('a record type is NOT constructible this way — records mint nothing', () => {
-    // The appendix's `Data` example is a record: `type Data = record<…>` mints
+    // The appendix's `Data` example is a record: `type Data = record{…}` mints
     // no constructor (a shipped rule, D4b), so the call is flagged rather than
     // silently building something.
     expect(
       epsilCodes(
-        'type Data = record<id: string, value: string>\nData(id: "1234", value: "foo")'
+        'type Data = record{id: string, value: string}\nData(id: "1234", value: "foo")'
       )
     ).toContain('type-not-callable');
   });

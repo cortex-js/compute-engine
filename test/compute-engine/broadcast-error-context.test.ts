@@ -60,7 +60,7 @@ describe('BROADCAST ERROR CONTEXT — box route', () => {
         .evaluate()
         .toString()
     ).toBe(
-      `[2,Apply((n) |-> n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
+      `[2,Apply((n) => n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
     );
   });
 
@@ -124,7 +124,7 @@ describe('BROADCAST ERROR CONTEXT — value-definition route', () => {
       { operator: 'bump', index: 2, length: 3 },
     ]);
     expect(result.toString()).toBe(
-      `[2,Apply((n) |-> n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
+      `[2,Apply((n) => n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
     );
   });
 
@@ -175,7 +175,7 @@ describe('BROADCAST ERROR CONTEXT — Epsil route', () => {
       `function bump(n: integer) { n + 1 }\nbump([1, "b", 3])`
     );
     expect(value.toString()).toBe(
-      `[2,Apply((n) |-> n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
+      `[2,Apply((n) => n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
     );
   });
 

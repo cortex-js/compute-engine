@@ -89,7 +89,7 @@ describe('Field on nominal types (the sanctioned accessor window)', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      `type circle = record<x: number, y: number, r: number>
+      `type circle = record{x: number, y: number, r: number}
 function circle(x, y, r) { {x -> x, y -> y, r -> r} }
 const c = circle(1, 2, 3)
 (c.x, c.y, c.r)`
@@ -195,7 +195,7 @@ describe('Field compile lowering (D16/§4.6)', () => {
 
   test('JS: a record-bodied nominal operand declines cleanly', () => {
     const ce = new ComputeEngine();
-    ce.declareType('circle', 'record<x: number, y: number, r: number>');
+    ce.declareType('circle', 'record{x: number, y: number, r: number}');
     ce.declare('c', 'circle');
     const js = new JavaScriptTarget();
     expect(() => js.compile(ce.box(['Field', 'c', { str: 'x' }]))).toThrow(
@@ -372,7 +372,7 @@ describe('Field at an instantiated parameterized nominal body (§6)', () => {
 
   test('a record-bodied parameterized nominal instantiates as well', () => {
     const ce = new ComputeEngine();
-    ce.declareType('bag', 'record<one: T, many: list<T>>', {
+    ce.declareType('bag', 'record{one: T, many: list<T>}', {
       typeParams: ['T'],
     });
     ce.declare('b', 'bag<string>');

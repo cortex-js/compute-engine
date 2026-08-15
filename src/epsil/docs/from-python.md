@@ -37,8 +37,8 @@ There is no `print`. A program's value is the value of its **last statement**.
 | `x: int = 4` | `let n: integer = 4` |
 | `def f(x): return x**2` | `f(x) = x^2` |
 | `def f(x):` with a body | `function f(x) { … }` — value is the last expression |
-| `lambda x: x*2` | `x \|-> 2x` |
-| `lambda: 42` | `() \|-> 42` |
+| `lambda x: x*2` | `x => 2x` |
+| `lambda: 42` | `() => 42` |
 | `def f(x: float) -> float:` | `f(x: real) -> real = x^2` |
 | `return` | *(no `return`)* — the last expression is the value |
 | `math.floor(x)`, `np.mean(xs)` | `Floor(x)`, `Mean(xs)` — no modules, no imports |
@@ -50,7 +50,7 @@ symbolic, with a did-you-mean warning when a close library name exists
 
 ```epsil
 fact(n) = 1 if n <= 1 else n * fact(n - 1)
-let double = x |-> 2x
+let double = x => 2x
 (fact(5), double(21))
 // ➔ (120, 42)
 ```
@@ -69,7 +69,7 @@ let double = x |-> 2x
 | `xs[1:3]` | `xs[2..3]` — 1-based, **inclusive** on both ends |
 | `range(1, 6)` | `1..5` or `Range(1, 5)` — **inclusive** of the end |
 | `len(xs)` | `Length(xs)` |
-| `sorted(xs)` / `sorted(xs, reverse=True)` | `Sort(xs)` / `Sort(xs, (a, b) \|-> a > b)` |
+| `sorted(xs)` / `sorted(xs, reverse=True)` | `Sort(xs)` / `Sort(xs, (a, b) => a > b)` |
 | `sum`, `min`, `max`, `any`, `all` | `Sum`, `Min`, `Max`, `Any`, `All` |
 | `reversed(xs)` | `Reverse(xs)` |
 | `zip(a, b)` | `Zip(a, b)` |
@@ -109,7 +109,7 @@ sum(n**2 for n in range(1, 11) if n % 2 == 1)
 ```
 
 ```epsil
-1..10 |> Filter(_, n |-> n % 2 == 1) |> Map(n |-> n^2, _) |> Sum
+1..10 |> Filter(_, n => n % 2 == 1) |> Map(n => n^2, _) |> Sum
 // ➔ 165
 ```
 
@@ -120,7 +120,7 @@ time, so the same "late binding in a closure" surprise applies:
 
 ```epsil
 let n = 1
-let m = Map(k |-> k * n, 1..3)
+let m = Map(k => k * n, 1..3)
 n = 10
 Sum(m)
 // ➔ 60
@@ -223,7 +223,7 @@ is the one numeric answer that differs on values you are likely to type:
 Arithmetic broadcasts over a list elementwise, without anything like NumPy:
 
 ```epsil
-([1, 2, 3] + 1, [1, 2, 3] * [4, 5, 6], Sum(Map(k |-> k^2, 1..4)))
+([1, 2, 3] + 1, [1, 2, 3] * [4, 5, 6], Sum(Map(k => k^2, 1..4)))
 // ➔ ([2,3,4], [4,10,18], 30)
 ```
 
@@ -260,7 +260,7 @@ There are no exceptions. A runtime problem becomes an ordinary
 not abort the rest of the work:
 
 ```epsil
-Map(x |-> Sqrt(x), [16, -4, "banana", 81])
+Map(x => Sqrt(x), [16, -4, "banana", 81])
 // ➔ [4, 2i, NaN, 9]
 ```
 

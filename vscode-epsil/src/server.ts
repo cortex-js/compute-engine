@@ -492,7 +492,8 @@ connection.onCodeAction((params) => {
 function fixTitle(entry: PublishedEntry): string {
   switch (entry.diagnostic.code) {
     case 'mapsto-arrow-expected':
-      return 'Use the function arrow "|->"';
+    case 'mapsto-arrow-legacy':
+      return 'Use the function arrow "=>"';
     case 'parameter-name-mismatch':
       return "Rename the annotation's parameters to match the lambda";
     default: {

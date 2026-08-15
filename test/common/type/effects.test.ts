@@ -489,7 +489,7 @@ describe('subtyping: the effect set is covariant, by subset inclusion', () => {
     expect(
       sub('(real) console fs_write network scope -> real', 'function')
     ).toBe(true);
-    // ...and via an argument bound, so `Map(x |-> Random(), xs)` keeps working
+    // ...and via an argument bound, so `Map(x => Random(), xs)` keeps working
     expect(
       sub('(collection, function) -> list', '(collection, function) -> list')
     ).toBe(true);

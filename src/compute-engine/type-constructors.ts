@@ -167,15 +167,15 @@ function removeMintedTypeConstructor(
 }
 
 /**
- * An `object<…>` LAYOUT is legal in exactly one position: as the WHOLE
+ * An `object{…}` LAYOUT is legal in exactly one position: as the WHOLE
  * definition body of a NOMINAL named type. Two positions are rejected here:
  *
  * - the body of a structural ALIAS. Object types are nominal, and two aliases
  *   of one layout would be interchangeable — the subtyping between object
  *   types `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B ("No subtyping between
  *   object types") rules out.
- * - a layout NESTED anywhere else — inside the body (`list<object<a:
- *   integer>>`, `object<…> | integer`) or as a FIELD type of a layout body.
+ * - a layout NESTED anywhere else — inside the body (`list<object{a:
+ *   integer}>`, `object{…} | integer`) or as a FIELD type of a layout body.
  *   That names a second, unnamed object type: no constructor is minted for it
  *   and no value can inhabit it.
  *
@@ -214,11 +214,11 @@ export function assertObjectLayoutIsNominalBody(
   }
 
   const err = new Error(
-    'object-type-not-inline: an `object<…>` type may only be the definition of a named type. Object types are nominal: declare one with `type Person = object<…>` (not `type alias`), then refer to `Person` here'
+    'object-type-not-inline: an `object{…}` type may only be the definition of a named type. Object types are nominal: declare one with `type Person = object{…}` (not `type alias`), then refer to `Person` here'
   ) as Error & { code?: string; rawMessage?: string };
   err.code = 'object-type-not-inline';
   err.rawMessage =
-    'An `object<…>` type may only be the definition of a named type';
+    'An `object{…}` type may only be the definition of a named type';
   throw err;
 }
 
@@ -348,7 +348,7 @@ export function mintTypeConstructor(
   ref: TypeReference,
   body: Type
 ): void {
-  // First, and before any mutation: an `object<…>` layout may only be the
+  // First, and before any mutation: an `object{…}` layout may only be the
   // whole body of a nominal type. The text route already refused every other
   // position while parsing; this catches the structural one.
   assertObjectLayoutIsNominalBody(ref.alias === true, body);

@@ -335,10 +335,10 @@ describe('BROADCAST ELIGIBILITY: function-typed parameters', () => {
   });
 
   test('a function-typed parameter no longer vetoes', () => {
-    expect(runEpsil(prog('c: (any) -> any', '(x) |-> x'))).toBe(
+    expect(runEpsil(prog('c: (any) -> any', '(x) => x'))).toBe(
       '[box(10),box(20)]'
     );
-    expect(runEpsil(prog('c: function', '(x) |-> x'))).toBe(
+    expect(runEpsil(prog('c: function', '(x) => x'))).toBe(
       '[box(10),box(20)]'
     );
   });
@@ -374,7 +374,7 @@ describe('BROADCAST ELIGIBILITY: function-typed parameters', () => {
               tree,
               `function map${sig} { tree(f(t.value), map(f, t.children)) }`,
               sample,
-              'map((x) |-> x * 10, t)',
+              'map((x) => x * 10, t)',
             ].join('\n')
           )
         ).toBe(expected);

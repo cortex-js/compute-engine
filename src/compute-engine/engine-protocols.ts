@@ -2921,7 +2921,7 @@ export function protocolMemberValue(
 
 /** Parameter names for the wrapper literal: the requirement's own names when
  * they are all present and distinct (so `Comparable.compare` reads as
- * `(self, other) |-> …`), else positional placeholders. The body mentions
+ * `(self, other) => …`), else positional placeholders. The body mentions
  * nothing else, so no capture is possible either way. */
 function parameterNames(shape: FunctionSignature, arity: number): string[] {
   const declared = (shape.args ?? []).map((a) => a.name);

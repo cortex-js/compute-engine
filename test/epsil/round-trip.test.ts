@@ -223,7 +223,7 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
 
   // Typed function literals (Phase 4): typed params + return ascriptions
   // reconstruct their Epsil syntax (`f(x: integer) -> real = …`,
-  // `(x: integer) |-> …`).
+  // `(x: integer) => …`).
   [
     'typed math-style def',
     ['DefineFunction', 'f', ['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'integer' }]]],

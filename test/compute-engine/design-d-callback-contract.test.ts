@@ -381,7 +381,7 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
   it('a NAMED callback is never rebuilt (the sharing pin)', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-    executeEpsil(ce, 'let pred = n |-> n > 1');
+    executeEpsil(ce, 'let pred = n => n > 1');
     expect(ce.box(['CountIf', 'cs', 'pred']).toMathJson()).toEqual([
       'CountIf',
       'cs',
@@ -453,7 +453,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
     ]);
     expect(
       canonicalJson((ce) =>
-        ce.box(parseEpsil('Filter(points, p |-> p == (0, 0))')[0])
+        ce.box(parseEpsil('Filter(points, p => p == (0, 0))')[0])
       )
     ).toBe(viaBox);
     expect(
@@ -510,7 +510,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
     // per-element values, which is the published Epsil behavior.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let mixed: list<integer|string> = [1,"a",2]');
-    executeEpsil(ce, 'let isbig = (n: integer) |-> n > 1');
+    executeEpsil(ce, 'let isbig = (n: integer) => n > 1');
     const e = ce.box(['Filter', 'mixed', 'isbig']);
     expect(e.isValid).toBe(true);
     expect(e.toMathJson()).toEqual(['Filter', 'mixed', 'isbig']);
@@ -806,7 +806,7 @@ describe('phase 1: `FlatMap` — R-D2′ result inference', () => {
     // `T`, so the call is admitted and the type error is a per-element VALUE.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-    executeEpsil(ce, 'let wrap = (s: string) |-> [s]');
+    executeEpsil(ce, 'let wrap = (s: string) => [s]');
     const e = ce.box(['FlatMap', 'cs', 'wrap']);
     expect(e.isValid).toBe(true);
     expect(e.toMathJson()).toEqual(['FlatMap', 'cs', 'wrap']);
@@ -843,7 +843,7 @@ describe('phase 1: route parity (box / Epsil / LaTeX)', () => {
     ]);
     expect(
       parityJson((ce) =>
-        ce.box(parseEpsil('TakeWhile(points, p |-> p == (0, 0))')[0])
+        ce.box(parseEpsil('TakeWhile(points, p => p == (0, 0))')[0])
       )
     ).toBe(viaBox);
     expect(
@@ -874,7 +874,7 @@ describe('phase 1: route parity (box / Epsil / LaTeX)', () => {
     ]);
     expect(
       parityJson((ce) =>
-        ce.box(parseEpsil('IndexWhere(points, p |-> p == (0, 0))')[0])
+        ce.box(parseEpsil('IndexWhere(points, p => p == (0, 0))')[0])
       )
     ).toBe(viaBox);
     expect(
@@ -1370,11 +1370,11 @@ describe('phase 3: `Map` — the callback-first signature', () => {
         .evaluate()
         .toString()
     ).toBe(
-      'Too many arguments for function "(a) |-> a + 1": expected 1, got 2'
+      'Too many arguments for function "(a) => a + 1": expected 1, got 2'
     );
 
     // A named callback is shared, never rebuilt — on both clauses.
-    executeEpsil(ce, 'let pair = (n, s) |-> (n, s)');
+    executeEpsil(ce, 'let pair = (n, s) => (n, s)');
     expect(ce.box(['Map', 'pair', 'cs', 'ss']).toMathJson()).toEqual([
       'Map',
       'pair',
@@ -1597,7 +1597,7 @@ describe('phase 2: route parity (box / Epsil / LaTeX)', () => {
       ['Function', ['Less', 'n', 3], ['Typed', 'n', "'integer'"]],
     ]);
     expect(
-      parityJson((ce) => ce.box(parseEpsil('Partition(cs, n |-> n < 3)')[0]))
+      parityJson((ce) => ce.box(parseEpsil('Partition(cs, n => n < 3)')[0]))
     ).toBe(viaBox);
     expect(
       parityJson((ce) =>
@@ -1616,7 +1616,7 @@ describe('phase 2: route parity (box / Epsil / LaTeX)', () => {
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
     ]);
     expect(
-      parityJson((ce) => ce.box(parseEpsil('Reduce(cs, (a, x) |-> a + x)')[0]))
+      parityJson((ce) => ce.box(parseEpsil('Reduce(cs, (a, x) => a + x)')[0]))
     ).toBe(viaBox);
     expect(
       parityJson((ce) =>
@@ -2004,7 +2004,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     ]);
     expect(
       canonicalJson((ce) =>
-        ce.box(parseEpsil('CountIf(points, p |-> p == (0, 0))')[0])
+        ce.box(parseEpsil('CountIf(points, p => p == (0, 0))')[0])
       )
     ).toBe(viaBox);
     expect(
@@ -2225,7 +2225,7 @@ describe('phase 2/3: route parity for the remaining shapes', () => {
     ]);
     expect(
       parityJson((ce) =>
-        ce.box(parseEpsil('Fold((a, x) |-> a + x, 10, cs)')[0])
+        ce.box(parseEpsil('Fold((a, x) => a + x, 10, cs)')[0])
       )
     ).toBe(viaBox);
     expect(
@@ -2247,7 +2247,7 @@ describe('phase 2/3: route parity for the remaining shapes', () => {
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
     ]);
     expect(
-      parityJson((ce) => ce.box(parseEpsil('Scan(cs, (a, x) |-> a + x)')[0]))
+      parityJson((ce) => ce.box(parseEpsil('Scan(cs, (a, x) => a + x)')[0]))
     ).toBe(viaBox);
     expect(
       parityJson((ce) =>
@@ -2266,7 +2266,7 @@ describe('phase 2/3: route parity for the remaining shapes', () => {
       ['Function', ['Less', 1, 'n'], ['Typed', 'n', "'integer'"]],
     ]);
     expect(
-      parityJson((ce) => ce.box(parseEpsil('Any(cs, n |-> n > 1)')[0]))
+      parityJson((ce) => ce.box(parseEpsil('Any(cs, n => n > 1)')[0]))
     ).toBe(viaBox);
     expect(
       parityJson((ce) =>

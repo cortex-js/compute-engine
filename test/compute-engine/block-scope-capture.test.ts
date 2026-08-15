@@ -359,10 +359,10 @@ describe('annotated parameter read from a nested Block', () => {
 // Invisible for an arithmetic body, whose symbols live directly in the body
 // Block that IS rebuilt; visible the moment a held operand introduces a scope.
 // `If`'s branches are the common case, and Epsil compiles every `if` branch
-// to a Block, so `(x) |-> if x > 1 { k } else { 0 }` lost `k`.
+// to a Block, so `(x) => if x > 1 { k } else { 0 }` lost `k`.
 //
 describe('nested scoped Block in an escaping closure', () => {
-  /** `s = k |-> (x |-> body)`; returns `s(100)(2)`. */
+  /** `s = k => (x => body)`; returns `s(100)(2)`. */
   const nested = (body: any): string => {
     const ce = new ComputeEngine();
     ce.assign(

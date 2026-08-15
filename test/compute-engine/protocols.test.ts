@@ -2002,7 +2002,7 @@ describe('conformance-widens-declared-contract', () => {
     // arrow type holds its contract on the value definition, not on an
     // operator definition.
     const ce = withSpeaker();
-    executeEpsil(ce, 'let cb: () pure -> unknown = () |-> speak("x")');
+    executeEpsil(ce, 'let cb: () pure -> unknown = () => speak("x")');
     expect(ce.lookupDefinition('cb')!['value']).toBeDefined();
     expect(ce.lookupDefinition('cb')!['operator']).toBeUndefined();
 

@@ -234,7 +234,7 @@ type integer is Summable { function total(self) -> number { self } }
 
 type list<T> is Summable where T is Summable {
   function total(self: list<T>) -> number {
-    Reduce(self, (acc, x) |-> acc + total(x), 0)
+    Reduce(self, (acc, x) => acc + total(x), 0)
   }
 }
 

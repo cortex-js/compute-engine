@@ -86,7 +86,7 @@ describe('MERELY RESERVED WORDS are ordinary identifiers', () => {
 
   test.each([
     ['a bare assignment target', 'with = 5'],
-    ['a mapsto parameter', 'set |-> set'],
+    ['a mapsto parameter', 'set => set'],
     ["a call's callee", 'label(6)'],
     ['a definition target (already worked)', 'label(6) = 1'],
     ['a binding name', 'let where = 5'],

@@ -151,7 +151,7 @@ function forEachApplication(t: Type, cb: (ref: TypeReference) => void): void {
     case 'record':
     // An object type's stored fields hold ordinary types, so an applied
     // reference nested in one must be found here too — otherwise a body such
-    // as `object<t: tree<T>>` would look application-free and the deferral
+    // as `object{t: tree<T>}` would look application-free and the deferral
     // analysis would judge the declaration settled while `tree` is still an
     // unfulfilled forward reference.
     case 'object':

@@ -826,7 +826,7 @@ function clauseRedefinitionDiagnostic(
  * evaluates, so the later statements of the same program check their calls —
  * named calls in particular — against it. Two spellings pin one:
  *
- * - `f := (x: number, y: string) |-> …` — assignment of a function literal
+ * - `f := (x: number, y: string) => …` — assignment of a function literal
  *   whose own (annotated) type is a signature carrying parameter names;
  * - `let/const f : (x: number, y: string) -> number [= …]` — a declaration
  *   whose type annotation is such a signature (with or without an
@@ -845,7 +845,7 @@ function clauseRedefinitionDiagnostic(
  * - Only a signature that CARRIES at least one parameter name registers. An
  *   UNANNOTATED literal's inferred signature drops its names
  *   (`effects-inference.ts` types a bare parameter `{ type: 'unknown' }`), so
- *   a named call to `h := (x, y) |-> …` fails at runtime too and the static
+ *   a named call to `h := (x, y) => …` fails at runtime too and the static
  *   diagnostic is a true prediction — it must keep firing.
  * - An `Assign` registers only a function-LITERAL right-hand side. Any other
  *   expression's static type is an upper bound, not the signature the
@@ -1063,7 +1063,7 @@ function collectErrors(
   // which `operands()` does not traverse. Descend into the dictionary values,
   // or every canonicalization error inside an initializer stays invisible
   // (`let g = "a" + 1`, or a `KeyValuePair` with a non-string key — the
-  // common `->`/`|->` typo shapes are recovered by the parser as lambdas
+  // common `->`/`=>` typo shapes are recovered by the parser as lambdas
   // with a `mapsto-arrow-expected` diagnostic, but a bare-symbol key in an
   // unclaimed position, e.g. `let f = [n -> n + 1]`, still lands here).
   if (isDictionaryObject(expr)) {

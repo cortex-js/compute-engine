@@ -157,16 +157,16 @@ describe('EPSIL FUNCTION DEFINITIONS', () => {
     ]);
   });
 
-  test('anonymous mapsto with a typed parameter `(x: integer) |-> …`', () => {
-    expect(validEpsil('(x: integer) |-> x + 1')).toStrictEqual([
+  test('anonymous mapsto with a typed parameter `(x: integer) => …`', () => {
+    expect(validEpsil('(x: integer) => x + 1')).toStrictEqual([
       'Function',
       ['Add', 'x', 1],
       ['Typed', 'x', { str: 'integer' }],
     ]);
   });
 
-  test('anonymous mapsto with typed parameters `(x: integer, y: real) |-> …`', () => {
-    expect(validEpsil('(x: integer, y: real) |-> x + y')).toStrictEqual([
+  test('anonymous mapsto with typed parameters `(x: integer, y: real) => …`', () => {
+    expect(validEpsil('(x: integer, y: real) => x + y')).toStrictEqual([
       'Function',
       ['Add', 'x', 'y'],
       ['Typed', 'x', { str: 'integer' }],
@@ -174,21 +174,21 @@ describe('EPSIL FUNCTION DEFINITIONS', () => {
     ]);
   });
 
-  test('a typed parenthesized group not followed by `|->` is a diagnostic', () => {
+  test('a typed parenthesized group not followed by `=>` is a diagnostic', () => {
     const [, diags] = parseEpsil('(x: integer)');
     expect(diags.length).toBeGreaterThan(0);
   });
 
-  test('anonymous mapsto `x |-> expr`', () => {
-    expect(validEpsil('x |-> x + 1')).toStrictEqual([
+  test('anonymous mapsto `x => expr`', () => {
+    expect(validEpsil('x => x + 1')).toStrictEqual([
       'Function',
       ['Add', 'x', 1],
       'x',
     ]);
   });
 
-  test('anonymous mapsto with a parameter list `(x, y) |-> expr`', () => {
-    expect(validEpsil('(x, y) |-> x + y')).toStrictEqual([
+  test('anonymous mapsto with a parameter list `(x, y) => expr`', () => {
+    expect(validEpsil('(x, y) => x + y')).toStrictEqual([
       'Function',
       ['Add', 'x', 'y'],
       'x',
@@ -197,7 +197,7 @@ describe('EPSIL FUNCTION DEFINITIONS', () => {
   });
 
   test('a mapsto binds loosely enough to be a Let/Assign RHS', () => {
-    expect(validEpsil('f = x |-> x + 1')).toStrictEqual([
+    expect(validEpsil('f = x => x + 1')).toStrictEqual([
       'Assign',
       'f',
       ['Function', ['Add', 'x', 1], 'x'],
@@ -205,7 +205,7 @@ describe('EPSIL FUNCTION DEFINITIONS', () => {
   });
 
   test('a non-symbol mapsto parameter is a diagnostic', () => {
-    const [, diags] = parseEpsil('1 |-> x');
+    const [, diags] = parseEpsil('1 => x');
     expect(diags.length).toBeGreaterThan(0);
     expect(diags[0].message[0]).toBe('symbol-expected');
   });
@@ -301,7 +301,7 @@ describe('EPSIL CONTROL FLOW', () => {
 //
 // The conditional expression `a if c else b` — the same `If` the block form
 // builds, but with plain expression branches (no `Block`, so no scope). It
-// binds looser than every ordinary operator and tighter than `=` and `|->`.
+// binds looser than every ordinary operator and tighter than `=` and `=>`.
 //
 describe('EPSIL CONDITIONAL EXPRESSION', () => {
   test('lowers to If(cond, consequent, alternative) — no Block branches', () => {
@@ -331,8 +331,8 @@ describe('EPSIL CONDITIONAL EXPRESSION', () => {
     ]);
   });
 
-  test('binds tighter than `|->`: the whole conditional is the body', () => {
-    expect(validEpsil('x |-> x + 1 if c else 2')).toStrictEqual([
+  test('binds tighter than `=>`: the whole conditional is the body', () => {
+    expect(validEpsil('x => x + 1 if c else 2')).toStrictEqual([
       'Function',
       ['If', 'c', ['Add', 'x', 1], 2],
       'x',
@@ -672,8 +672,8 @@ describe('EPSIL `break` AND `continue`', () => {
     ['in a bare `match`', 'match x { 1 => break }'],
     // The loop context resets at every function/lambda boundary: a `break`
     // there must not escape to the enclosing loop.
-    ['in a lambda inside a loop', 'for x in xs { g(y |-> break) }'],
-    ['in a `do` lambda inside a loop', 'for x in xs { g(y |-> do { break }) }'],
+    ['in a lambda inside a loop', 'for x in xs { g(y => break) }'],
+    ['in a `do` lambda inside a loop', 'for x in xs { g(y => do { break }) }'],
     ['in a function inside a loop', 'for x in xs { function h() { break } }'],
     ['in a definition RHS inside a loop', 'for x in xs { f(x) = break }'],
     // The explicit `Function(…)` literal is a boundary too. A call argument

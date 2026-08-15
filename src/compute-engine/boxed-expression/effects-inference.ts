@@ -800,7 +800,7 @@ function walkLiteral(
   // The parameters' DECLARED types, kept separately from their arrow effects
   // above so that a write through a parameter can be classified by what the
   // parameter is declared to be. A store into a mutable object's own field
-  // (`x.id = …` where `x: M` and `M` is an `object<…>` layout declaring `id`)
+  // (`x.id = …` where `x: M` and `M` is an `object{…}` layout declaring `id`)
   // is a heap mutation and must carry `state`; the declaration is the only
   // place that says so, since canonicalizing the receiver inside a literal
   // reports a parameter's type as `unknown`. Unannotated parameters get no
@@ -1348,7 +1348,7 @@ class Walker {
   /**
    * Whether this `Assign` is a store into a mutable object's own layout field
    * — `Assign(Field(base, "name"), v)` where `base` is a bare symbol naming a
-   * parameter whose DECLARED type resolves to an `object<…>` layout that
+   * parameter whose DECLARED type resolves to an `object{…}` layout that
    * declares `"name"`.
    *
    * The declared type is the only usable evidence here: inside a `Function`

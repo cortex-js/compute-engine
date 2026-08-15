@@ -63,7 +63,7 @@ describe('PARSE / SERIALIZE ROUND TRIP', () => {
     '(list<T>, (T) any -> U) -> list<U> where T: number, U',
     '(list<Elem>) -> Elem where Elem',
     '(broadcastable<T>) -> T where T',
-    '(set<T>, dictionary<T>, record<x: T>) -> T where T',
+    '(set<T>, dictionary<T>, record{x: T}) -> T where T',
     '(collection<T>, indexed_collection<T>) -> T where T',
     // A bound may itself be a signature: the dot terminates the clause.
     '(g: T) -> boolean where T: (real) -> real',
@@ -859,13 +859,13 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     ).toBe('tuple<string, number>');
     expect(
       typeToString(
-        collectionElementType(parseType('record<a: integer, b: string>'))!
+        collectionElementType(parseType('record{a: integer, b: string}'))!
       )
     ).toBe('tuple<string, integer | string>');
     expect(
       solvedVar(
         '(collection<T>) -> T where T',
-        ['record<a: integer, b: string>'],
+        ['record{a: integer, b: string}'],
         'T'
       )
     ).toBe('tuple<string, integer | string>');
@@ -1546,7 +1546,7 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
     const ce = fresh();
     // The clause is parenthesized: in an annotation position a bare trailing
     // `where` would run into the `=` of the declaration.
-    const { value } = executeEpsil(ce, 'let f: ((T) -> T where T) = x |-> x');
+    const { value } = executeEpsil(ce, 'let f: ((T) -> T where T) = x => x');
     expect(value.toString()).not.toContain('incompatible-type');
     expect(ce.box(['f', 5]).evaluate().toString()).toBe('5');
   });

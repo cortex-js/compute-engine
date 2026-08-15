@@ -102,7 +102,7 @@ describe('EPSIL PHASE 4 — notebook integration', () => {
     const forms = [
       'function outer(n) { sq(m) = m * m; sq(n) }\nouter(3)',
       'function outer(n) { let sq; sq(m) = m * m; sq(n) }\nouter(3)',
-      'function outer(n) { let sq = m |-> m * m; sq(n) }\nouter(3)',
+      'function outer(n) { let sq = m => m * m; sq(n) }\nouter(3)',
       'sq(m) = m * m\nsq(3)',
     ];
     for (const program of forms) {
@@ -129,7 +129,7 @@ describe('EPSIL — named inner function escapes its defining scope', () => {
   // enclosing function returns the bare `helper` symbol, the block's final
   // value must resolve to the underlying function literal so it can escape the
   // (soon-popped) call frame as a first-class value — matching how a returned
-  // lambda (`x |-> …`) already escapes.
+  // lambda (`x => …`) already escapes.
   const run = (src: string) =>
     executeEpsil(new ComputeEngine(), src).value.toString();
 
@@ -153,7 +153,7 @@ describe('EPSIL — named inner function escapes its defining scope', () => {
 
   test('a returned lambda still escapes (unchanged)', () => {
     expect(
-      run('function make() { let s = 10; x |-> s + x }\nlet f = make()\nf(5)')
+      run('function make() { let s = 10; x => s + x }\nlet f = make()\nf(5)')
     ).toBe('15');
   });
 

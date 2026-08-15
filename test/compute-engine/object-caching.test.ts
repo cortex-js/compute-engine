@@ -70,8 +70,8 @@ function person(age = 42): Expression & ObjectInterface {
 
 beforeEach(() => {
   ce = new ComputeEngine();
-  ce.declareType('Person', 'object<name: string, age: integer>');
-  ce.declareType('Node', 'object<label: string, next: any>');
+  ce.declareType('Person', 'object{name: string, age: integer}');
+  ce.declareType('Node', 'object{label: string, next: any}');
 });
 
 afterEach(() => {

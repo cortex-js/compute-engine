@@ -331,7 +331,7 @@ describe('WithRandomSeed — partial evaluation keeps the frame (Tycho item 104)
   });
 
   it('a lazy view escaping the frame is a COMPLETED value, not a pending draw (§6 ruling)', () => {
-    // `Map(x |-> Random(), xs)` evaluates to a lazy view; its lambda draws at
+    // `Map(x => Random(), xs)` evaluates to a lazy view; its lambda draws at
     // materialization, from whatever frame is active THEN. The frame is
     // stripped — the ruled live-draw escape — not preserved.
     const result = parsed(
@@ -768,7 +768,7 @@ describe('WithRandomSeed — pending-draw detection (review round, 2026-07-28)',
 
 describe('WithRandomSeed — a binder LAZY view is a completed value (Tycho item 106)', () => {
   // `Comprehension(body, Element(k, xs))` — what `[… for k = …]` parses to —
-  // is `Map(k |-> body, xs)` spelled without a syntactic `Function` node. The
+  // is `Map(k => body, xs)` spelled without a syntactic `Function` node. The
   // pending-draw walk used to read its unevaluated `Random()` body as work the
   // frame still owed, so the whole expression evaluated to ITSELF and, unlike
   // the unbound-symbol case, nothing would ever complete it: the row drew

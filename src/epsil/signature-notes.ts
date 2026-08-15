@@ -263,7 +263,7 @@ function innermostFrame(error: MathJsonExpression): ErrorFrameRef | undefined {
 }
 
 /** The callable type of `name`: an operator definition's signature, or the
- * type of a value definition holding a function literal (`let f = (x) |-> …`).
+ * type of a value definition holding a function literal (`let f = (x) => …`).
  */
 function calleeType(ce: ComputeEngine, name: string): Type | undefined {
   let def: ReturnType<ComputeEngine['lookupDefinition']>;

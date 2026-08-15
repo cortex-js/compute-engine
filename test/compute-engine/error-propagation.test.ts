@@ -99,7 +99,7 @@ describe('ERROR PROPAGATION — rung 2: bubbling at application', () => {
     expect(calls()).toBe(0);
   });
 
-  test('the motivating case: ("a" + 1) |> (x |-> 99) is the embedded error', () => {
+  test('the motivating case: ("a" + 1) |> (x => 99) is the embedded error', () => {
     const ce = new ComputeEngine();
     // Not `99` (the body must not run) and not a frozen `Apply`.
     expect(
@@ -143,10 +143,10 @@ describe('ERROR PROPAGATION — rung 2: bubbling at application', () => {
       'Error("oops")'
     );
     expect(ce.box(['f', ERR]).evaluate().toString()).toBe('Error("oops")');
-    expect(epsil('let f = x |-> x + 1; f("a" + 1)')).toBe(
+    expect(epsil('let f = x => x + 1; f("a" + 1)')).toBe(
       'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
-    expect(epsil('let f = x |-> x + 1; ("a" + 1) |> f')).toBe(
+    expect(epsil('let f = x => x + 1; ("a" + 1) |> f')).toBe(
       'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
     );
   });
@@ -439,8 +439,8 @@ describe('ERROR PROPAGATION — Nothing: argument-list erasure, route parity', (
     expect(ce.box(['Pipe', 'Nothing', lit]).evaluate().toString()).toBe(
       nullary
     );
-    expect(epsil('(x |-> x + 1)(Nothing)')).toBe(nullary);
-    expect(epsil('Nothing |> (x |-> x + 1)')).toBe(nullary);
+    expect(epsil('(x => x + 1)(Nothing)')).toBe(nullary);
+    expect(epsil('Nothing |> (x => x + 1)')).toBe(nullary);
   });
 });
 
@@ -659,7 +659,7 @@ describe('ERROR PROPAGATION — Nothing: erasure is a rule on the WRITTEN argume
    */
   const NOTHING_FN: MathJsonExpression = ['Function', ['Type', 'x'], 'x'];
 
-  /** A fresh engine with `g() = Nothing` and `f = x |-> Type(x)`; the body
+  /** A fresh engine with `g() = Nothing` and `f = x => Type(x)`; the body
    * reports whether the argument was BOUND (`"nothing"`) or ERASED (the
    * nullary contract curries, giving the literal back). */
   function nothingSetup(): ComputeEngine {
@@ -704,14 +704,14 @@ describe('ERROR PROPAGATION — Nothing: erasure is a rule on the WRITTEN argume
     expect(ce.box(['Pipe', ['g'], NOTHING_FN]).evaluate().toString()).toBe(
       '"nothing"'
     );
-    expect(epsil('let g = () |-> Nothing; (x |-> Type(x))(g())')).toBe(
+    expect(epsil('let g = () => Nothing; (x => Type(x))(g())')).toBe(
       '"nothing"'
     );
   });
 
   test('a middle-position `Nothing` erases, shifting later arguments left', () => {
     const ce = new ComputeEngine();
-    // `Apply(x, y |-> x + y, Nothing, 5)`: the `Nothing` is erased, so `5`
+    // `Apply(x, y => x + y, Nothing, 5)`: the `Nothing` is erased, so `5`
     // binds the FIRST parameter and the second stays unapplied (curried).
     const lit: MathJsonExpression = ['Function', ['Add', 'x', 'y'], 'x', 'y'];
     expect(ce.box(['Apply', lit, 'Nothing', 5]).evaluate().toString()).toBe(

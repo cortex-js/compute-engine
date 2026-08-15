@@ -47,8 +47,8 @@ function deepFreeze<T>(obj: T): T {
 /**
  * Options accepted by the type-string entry points.
  *
- * `allowObjectType` admits the `object<name: T, …>` layout form, which is
- * legal ONLY as the definition of a named type (`type Person = object<…>`).
+ * `allowObjectType` admits the `object{name: T, …}` layout form, which is
+ * legal ONLY as the definition of a named type (`type Person = object{…}`).
  * The routes that declare a type set it; every other route leaves it off and
  * the parse refuses the form with an `object-type-not-inline` error. The bare
  * `object` primitive is unaffected either way. See
@@ -89,7 +89,7 @@ export function parseType(
   // Parse the type string
   if (typeof s !== 'string') return undefined;
 
-  // A parse that admits the `object<…>` layout is a DECLARATION body, never a
+  // A parse that admits the `object{…}` layout is a DECLARATION body, never a
   // hot path, and it reads the same text differently from every other route —
   // so it neither consults nor fills the string-keyed cache, and it skips the
   // resolver-less first attempt (which would refuse the form and throw).
@@ -267,18 +267,30 @@ function parseTypeUncached(
  * enclosing construct (or its `,`-separated list would swallow the next list
  * element), so the parse stops before the `where` and the caller's grammar
  * reports it. A PARENTHESIZED clause is always admitted.
+ *
+ * `options.blockFollows` (default `false`) tells the parse that the caller
+ * will parse a `{ … }` block immediately after the type (with at most a
+ * `where` clause in between), which is what an Epsil `function` declaration's
+ * return type is followed by. It disambiguates the `{` after a bare
+ * `record`/`object` return type from the function body's brace — see
+ * `startsFieldList` in `parser.ts`. Pass it only where the caller's grammar
+ * REQUIRES the block.
  */
 export function parseTypePrefix(
   source: string,
   typeResolver?: TypeResolver,
   typeVars?: readonly TypeParameter[],
-  options?: { allowWhere?: boolean } & ParseTypeOptions
+  options?: {
+    allowWhere?: boolean;
+    blockFollows?: boolean;
+  } & ParseTypeOptions
 ): { type: Type; end: number } {
   const parser = new Parser(source, {
     typeResolver,
     allowTrailing: true,
     allowWhere: options?.allowWhere ?? false,
     allowObjectType: options?.allowObjectType,
+    blockFollows: options?.blockFollows ?? false,
     typeVars,
   });
   const ast = parser.parseTypePrefix();
@@ -292,10 +304,10 @@ export function parseTypePrefix(
  * The second half of the "an object type is legal only as the definition of a
  * named type" rule, for the routes that admit the layout form at all.
  *
- * The parser refuses `object<…>` outright everywhere else; here the form is
+ * The parser refuses `object{…}` outright everywhere else; here the form is
  * admitted, so what is left to check is its POSITION: only a body that IS the
  * layout declares an object type. A body that merely CONTAINS one
- * (`type T = list<object<a: integer>>`, `type T = object<…> | integer`) names
+ * (`type T = list<object{a: integer}>`, `type T = object{…} | integer`) names
  * a layout no constructor is ever minted for and no value can inhabit, which
  * is inline by the same rule.
  *
@@ -305,7 +317,7 @@ export function parseTypePrefix(
  */
 export function assertObjectTypeNotInline(type: Type): Type {
   // The body IS a layout: legal, provided no FIELD spells another one. A
-  // field holding `object<…>` names a second, unnamed object type — inline by
+  // field holding `object{…}` names a second, unnamed object type — inline by
   // the same rule; it must be declared and referred to by name.
   const inline =
     typeof type === 'object' && type.kind === 'object'
@@ -314,15 +326,15 @@ export function assertObjectTypeNotInline(type: Type): Type {
   if (!inline) return type;
 
   const err = new Error(
-    'object-type-not-inline: an `object<…>` type may only be the definition of a named type. Object types are nominal: declare one with `type Person = object<…>` (not `type alias`), then refer to `Person` here'
+    'object-type-not-inline: an `object{…}` type may only be the definition of a named type. Object types are nominal: declare one with `type Person = object{…}` (not `type alias`), then refer to `Person` here'
   ) as Error & { code?: string; rawMessage?: string };
   err.code = 'object-type-not-inline';
   err.rawMessage =
-    'An `object<…>` type may only be the definition of a named type';
+    'An `object{…}` type may only be the definition of a named type';
   throw err;
 }
 
-/** Does `t` contain an `object<…>` layout anywhere (not following type
+/** Does `t` contain an `object{…}` layout anywhere (not following type
  * references)? See {@link assertObjectTypeNotInline}. */
 function containsObjectLayout(t: Type): boolean {
   if (typeof t === 'string') return false;
@@ -562,17 +574,17 @@ export function parseTypeParameterClause(
 /**
  * Scan from `pos` to the next `,` at bracket depth 0, or to the end of
  * `text`, WITHOUT parsing: the raw extent of one clause entry's bound.
- * Brackets (`()`, `<>`, `[]`) nest; `->` is skipped atomically so its `>`
- * does not close a bracket; string literals (`"…"`, `'…'`, `` `…` ``) are
- * skipped with their escapes.
+ * Brackets (`()`, `<>`, `[]`, and the `{}` of a record/object field list)
+ * nest; `->` is skipped atomically so its `>` does not close a bracket; string
+ * literals (`"…"`, `'…'`, `` `…` ``) are skipped with their escapes.
  */
 function scanToClauseComma(text: string, pos: number): number {
   let depth = 0;
   while (pos < text.length) {
     const ch = text[pos];
     if (ch === ',' && depth === 0) return pos;
-    if (ch === '(' || ch === '<' || ch === '[') depth += 1;
-    else if (ch === ')' || ch === '>' || ch === ']') depth -= 1;
+    if (ch === '(' || ch === '<' || ch === '[' || ch === '{') depth += 1;
+    else if (ch === ')' || ch === '>' || ch === ']' || ch === '}') depth -= 1;
     else if (ch === '-' && text[pos + 1] === '>') pos += 1;
     else if (ch === '"' || ch === "'" || ch === '`') {
       const quote = ch;

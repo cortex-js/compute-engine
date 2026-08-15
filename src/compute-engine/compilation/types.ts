@@ -583,7 +583,7 @@ export interface CompileTarget<Expr = unknown> {
 
   /**
    * Block locals whose declared value is a function literal, keyed by the
-   * local's name: `const g = (k) |-> …` inside a compiled `Block`. The
+   * local's name: `const g = (k) => …` inside a compiled `Block`. The
    * declaration lowers to a value binding (`let g = ((k) => …)`), so a later
    * `g(3)` in the same block is an ordinary call of that binding — but head
    * resolution otherwise looks a user-defined function up in the ENGINE's
@@ -630,10 +630,10 @@ export interface CompileTarget<Expr = unknown> {
    * the shader languages) leave this undefined.
    *
    * Declared so a function literal can avoid SHADOWING it. `_` is also the
-   * spelling of an implicit lambda parameter, and `_ |-> _ + k` therefore
+   * spelling of an implicit lambda parameter, and `_ => _ + k` therefore
    * emitted `((_) => _ + _.k)`: inside the arrow, `_` is the parameter, so
    * `_.k` read a property off a number and the whole call answered
-   * `NaN`/`false` behind `success: true` — `Map(_ |-> _ + k, [1,2,3])` with
+   * `NaN`/`false` behind `success: true` — `Map(_ => _ + k, [1,2,3])` with
    * `k = 10` gave `[null, null, null]` instead of `[11, 12, 13]`. A parameter
    * that collides with this name is renamed at emission
    * (`BaseCompiler.lambdaParamBinding`).

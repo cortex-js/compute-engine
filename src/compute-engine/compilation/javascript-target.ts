@@ -332,7 +332,7 @@ function isStringCollectionEquality(args: ReadonlyArray<Expression>): boolean {
  * kernels see its JavaScript representation as something to look inside:
  *
  *  - `_SYS.eq`/`_SYS.neq` reduce to the numeric tolerance test, which for two
- *    EQUAL `dictionary<integer>` / `record<…>` values is `Math.abs(obj - obj)`
+ *    EQUAL `dictionary<integer>` / `record{…}` values is `Math.abs(obj - obj)`
  *    → `NaN <= tol` → `false`, where the interpreter answers `True`;
  *  - a `tuple` lowers to a JS array, so `Equal(Tuple(1, 2), 1)` ran ELEMENT-WISE
  *    to `[true, false]` and `Equal(Tuple(1, 2), List(1, 2))` to `true`, where

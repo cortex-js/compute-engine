@@ -480,7 +480,7 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
   enhanced engine `Declare` (`let`/`const`, const = `constant: True` binding
   attribute enforced by the engine, type inferred; a type annotation implies a
   declaration; bare `x = 5` = `Assign`). **Functions**: `f(x)=expr`,
-  `function f(x){…}`, mapsto lambda `x |-> expr` → `Function`. **Control flow**:
+  `function f(x){…}`, mapsto lambda `x => expr` → `Function`. **Control flow**:
   `if` is a true **expression** (`If`, usable as RHS/operand); `while` →
   `Loop(Block(If(Not(cond),Break), body))`; `for x in xs` → `Loop(…, Element)` —
   all real engine primitives (compile via `base-compiler`). Surfaced + fixed an

@@ -467,7 +467,7 @@ For genuine Functor/Monad abstraction, in dependency order:
    (`-> indexed_collection`) — HKT and protocols pay off together.
 2. **Rank-2 quantification**, if protocols become first-class
    dictionaries: a `mappable` witness is
-   `record<map: ((A) -> B where A, B), …>` and any function taking one is
+   `record{map: ((A) -> B where A, B), …}` and any function taking one is
    rank-2. (Rank = how deeply a quantifier nests left of arrows = who
    instantiates; orthogonal to kind. Also enables
    scope-enforcement types à la `runST`/`withFile`, where the nested
@@ -477,7 +477,7 @@ For genuine Functor/Monad abstraction, in dependency order:
 
 **Syntax ruling reserved for rank-2** (where-clause design, W1): a `where`
 clause in any **nested** position must be **parenthesized** —
-`record<map: ((A) -> B where A, B), other: number>`. Unparenthesized, the
+`record{map: ((A) -> B where A, B), other: number}`. Unparenthesized, the
 clause's `,` separator collides with the record field separator
 (`other: number` is simultaneously a well-formed `<var_decl>` and a
 well-formed field), so unparenthesized nested `where` is a **syntax error**,
@@ -1427,16 +1427,16 @@ JavaScript's `const`.
 
 ### Declaring an object type
 
-An object type is declared like other nominal types, with `object<…>`
+An object type is declared like other nominal types, with `object{…}`
 listing its stored fields:
 
 ```epsil
-type Person = object<
+type Person = object{
   firstName: string,
   lastName: string,
   age: integer,
   role: string
->
+}
 ```
 
 The constructor takes one value per stored field, passed by name:
@@ -1458,9 +1458,9 @@ half-initialized state, and no rule is needed for "reading a field that
 was never set". (A create-empty-then-fill-in style would need one;
 ruling B7 defers it.)
 
-In v1, `object<…>` may appear only as the definition of a named type,
+In v1, `object{…}` may appear only as the definition of a named type,
 as above — inline in an annotation it is rejected with
-`object-type-not-inline` (`let x: object<id: string>`). Objects are
+`object-type-not-inline` (`let x: object{id: string}`). Objects are
 nominal.
 
 ### Objects and protocols
@@ -1494,12 +1494,12 @@ these rules are laid out.
 A conforming object type:
 
 ```epsil
-type Person = object<
+type Person = object{
   firstName: string,
   lastName: string,
   age: integer,
   role: string
-> is Identifiable {
+} is Identifiable {
   // fullName is not a stored field: it is computed on demand.
   get fullName(self: Person) -> string {
     "\(self.firstName\) \(self.lastName\)"
@@ -1603,7 +1603,7 @@ with a pure implementation even while object conformers of the same
 protocol mutate.
 
 ```epsil
-type Badge = record<id: string> is Identifiable
+type Badge = record{id: string} is Identifiable
 // -> protocol-requires-object: the `Identifiable` protocol has settable
 //    properties. `Badge` is a record, and records are immutable; declare
 //    `Badge` as an object type to conform.
@@ -1616,7 +1616,7 @@ objects. On a record — or any other immutable value — it is an error
 that names the two ways out:
 
 ```epsil
-type Data = record<id: string, value: string>
+type Data = record{id: string, value: string}
 let d = Data(id: "1234", value: "foo")
 d.id = "456"
 // -> immutable-value-assignment: `d` is a record, and records cannot be
@@ -1625,7 +1625,7 @@ d.id = "456"
 ```
 
 ```epsil
-type MutableData = object<id: string, value: string>
+type MutableData = object{id: string, value: string}
 let d = MutableData(id: "1234", value: "foo")
 d.id = "456"   // ok — the object now has id "456"
 ```
@@ -1840,7 +1840,7 @@ Because objects are references, they can end up referring to each other
 in a loop:
 
 ```epsil
-type Buddy = object<name: string, friend: type Buddy | missing>
+type Buddy = object{name: string, friend: type Buddy | missing}
 let alice = Buddy(name: "Alice", friend: Missing)
 let bob = Buddy(name: "Bob", friend: alice)
 alice.friend = bob
@@ -1922,7 +1922,7 @@ that operator was deleted. It declared `(collection) -> record` but
 returned an inert `Record(…)` application with type `unknown`, because
 `Record` has no operator definition anywhere in the engine, so its
 declared result type lied. `DictionaryFrom` already returns exactly
-what it promised: a dictionary value whose type derives as `record<…>`
+what it promised: a dictionary value whose type derives as `record{…}`
 when every key is a bare identifier — record-ness is derived from the
 value rather than carried by a separate representation, which is what
 made `RecordFrom` redundant rather than merely broken. See the
@@ -1988,7 +1988,7 @@ by the result being an immutable record.) Its semantics:
   cross-edge, not a back-edge) has a perfectly good tree representation
   and is simply duplicated — two references to one object come back as
   two unrelated records. Nominal identity: records are structural, so
-  `DictionaryFrom` returns a plain `record<firstName: string, …>` — the
+  `DictionaryFrom` returns a plain `record{firstName: string, …}` — the
   `Person`-ness is gone from the *value*. In `DictionaryFrom`'s own result
   the type name survives only in `CircularReference` markers; the
   serializer route below does better.
@@ -2008,7 +2008,7 @@ wrote the body as `["Record", ["Tuple", …], …]`. There is no `Record`
 operator in the engine: such a payload boxes to an inert application
 whose type is `unknown`, which would make this wrapper's own contract —
 "its static type is the wrapped record's type" — vacuous. `Dictionary`
-is a real operator whose boxed value **derives** a `record<…>` type
+is a real operator whose boxed value **derives** a `record{…}` type
 from its identifier keys, so the reloaded snapshot is a genuine
 record-typed value. This is the same fact that made
 `RecordFrom` redundant, and it was deleted for it on 2026-08-15; see
@@ -2220,8 +2220,8 @@ compatible. To see why the flexibility records enjoy would be unsound
 here, suppose it were allowed:
 
 ```epsil
-type Counter = object<count: integer>
-type Gauge   = object<count: number>
+type Counter = object{count: integer}
+type Gauge   = object{count: number}
 
 let c: Counter = Counter(count: 1)
 let g: Gauge = c        // suppose this were allowed…
@@ -2245,7 +2245,7 @@ declaring it `out` or `in` is rejected. The unsoundness this blocks is
 the parameterized twin of the Counter/Gauge example:
 
 ```epsil
-type Cell<inout T> = object<value: T>
+type Cell<inout T> = object{value: T}
 
 // If `out T` were accepted, Cell<integer> <: Cell<number> would hold:
 let a: Cell<integer> = Cell(value: 1)
@@ -2265,7 +2265,7 @@ exactly a one-field object, expressible in this appendix's machinery
 as:
 
 ```epsil
-type Ref<inout T> = object<value: T>
+type Ref<inout T> = object{value: T}
 ```
 
 — the identical shape to the `Cell<inout T>` example under "Generic
@@ -2280,7 +2280,7 @@ whole record, so no field-granular writes and no field-backed property
 satisfaction) or record-of-refs (every field read is a deref, and the
 "stored field satisfies a `readwrite` property" rule collapses). Once
 B13 lands, the library may ship `Ref<T>` as a convenience type; until
-then, `type Counter = object<count: integer>` is the idiom for a
+then, `type Counter = object{count: integer}` is the idiom for a
 mutable scalar.
 
 **`list` stays immutable forever; `array<T>` is the designated
@@ -2318,7 +2318,7 @@ corollary: every array slot is a readwrite position, so `array<T>` is
 **invariant** in `T` and array types have no subtyping among
 themselves — B13's stored-field rule applied to slots. An
 implementation may even represent an array internally as
-`object<items: list<T>>` with indexing sugar, composing with
+`object{items: list<T>}` with indexing sugar, composing with
 copy-elision-when-unique so the persistent interior updates in place
 when unshared.
 
@@ -2413,7 +2413,7 @@ own short ruling list —
 Until then, the interim idiom is a list inside an object:
 
 ```epsil
-type MutList<inout T> = object<items: list<T>>
+type MutList<inout T> = object{items: list<T>}
 
 let ml = MutList(items: [1, 2, 3])
 let other = ml                    // same object
@@ -2596,7 +2596,7 @@ To Appendix A:
    conformance to a protocol with `readwrite` properties (Appendix A's
    original `Person`/`Nameable` example was one) becomes illegal —
    revalidation emits `protocol-requires-object`. Migration is
-   mechanical: redeclare the type as `object<…>` with the same fields.
+   mechanical: redeclare the type as `object{…}` with the same fields.
    Deliberate, not collateral: the rebinding lowering those
    conformances relied on only ever worked for variable-rooted access.
 
@@ -2747,16 +2747,16 @@ this appendix originally anticipated (both deliberate, v1):
   library signatures carry any name), and an **unannotated** function
   literal reached through a BINDING is not name-addressable —
   signature inference drops the names of bare parameters
-  (`(a, b) |-> a + b` types as `(unknown, unknown) -> …`), so a name
+  (`(a, b) => a + b` types as `(unknown, unknown) -> …`), so a name
   can only address it where the literal itself is visible (the inline
   case below). Carrying inferred names through the type is a measured
   follow-up (ROADMAP, v1 residuals).
 - **Inline-literal callees permute against their own parameter list**
   (fixed 2026-08-13 — they declined in the original v1):
-  `((x: number) |-> x + 1)(x: 5)` evaluates to 6. The `Apply` path
+  `((x: number) => x + 1)(x: 5)` evaluates to 6. The `Apply` path
   reads the names SYNTACTICALLY from the literal expression
   (`inlineLiteralSignature`, `boxed-expression/named-arguments.ts`),
-  so an unannotated inline literal (`((x, y) |-> x - y)(y: 2, x: 10)`)
+  so an unannotated inline literal (`((x, y) => x - y)(y: 2, x: 10)`)
   works too, its inferred name-less type notwithstanding. The other
   `Apply`-routed carve-out is the qualified protocol spelling
   `Comparable.compare(self: x, …)`, whose names are supplied by the
@@ -2912,5 +2912,5 @@ proposed by Appendix B and are not implemented.
 | `argument-optional-skipped` | a named optional supplied while an optional declared before it is not — the no-optional-holes rule (Appendix C) |
 | `object-property-conflict` † | both a stored field and an explicit accessor declared for the same property name (Appendix B) |
 | `conformance-widens-declared-contract` † | a conformance whose implementation effects widen a dispatcher union past a dependent's declared effect contract; names every violated dependent and the exceeding labels (Appendix B, "Changing a field is an effect") |
-| `object-type-not-inline` | `object<…>` used anywhere other than as the definition of a named type — inline in an annotation, or nested inside a declaration body (Appendix B) |
+| `object-type-not-inline` | `object{…}` used anywhere other than as the definition of a named type — inline in an annotation, or nested inside a declaration body (Appendix B) |
 | `argument-names-required` | a call to an operator whose arguments must each be written with their parameter's name (an object-type constructor, ruling B11) passed one positionally |

@@ -219,7 +219,7 @@ describe('curated did-you-mean synonyms — Wolfram Language names', () => {
     expect(execDiagnostics('Total([1, 2, 3])')).toEqual([
       ['unknown-function', 'Total', 'Sum'],
     ]);
-    expect(execDiagnostics('Select([1, 2, 3], x |-> x > 1)')).toEqual([
+    expect(execDiagnostics('Select([1, 2, 3], x => x > 1)')).toEqual([
       ['unknown-function', 'Select', 'Filter'],
     ]);
     expect(execDiagnostics('MemberQ([1, 2], 1)')).toEqual([
@@ -243,7 +243,7 @@ describe('parameter-shadows-constant lint', () => {
       ['parameter-shadows-constant', 'GoldenRatio'],
     ]);
     // Anonymous mapsto literals have the same shadowing convention.
-    expect(execDiagnostics('Pi |-> Pi + 1')).toEqual([
+    expect(execDiagnostics('Pi => Pi + 1')).toEqual([
       ['parameter-shadows-constant', 'Pi'],
     ]);
   });

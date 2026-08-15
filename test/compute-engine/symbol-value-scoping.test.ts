@@ -257,8 +257,8 @@ describe('SPEC: name capture through call frames', () => {
   test('lambda frames do not capture either', () => {
     // A lambda's call frame is the same mechanism as a named function's, so it
     // must answer the same way on all three routes.
-    expect(epsil('let a = x + 1\nlet h = x |-> a\nh(5)')).toEqual('x + 1');
-    expect(epsil('let a = x + 1\nlet h = x |-> a\nN(h(5))')).toEqual('x + 1');
+    expect(epsil('let a = x + 1\nlet h = x => a\nh(5)')).toEqual('x + 1');
+    expect(epsil('let a = x + 1\nlet h = x => a\nN(h(5))')).toEqual('x + 1');
     // Box route: same shape, no Epsil parsing involved.
     const ce = engine();
     ce.box(['Assign', 'a', ['Add', 'x', 1]]).evaluate();

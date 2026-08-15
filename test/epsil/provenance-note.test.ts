@@ -46,7 +46,7 @@ describe('EPSIL PROVENANCE NOTE — two-site incompatible-type diagnostics', () 
     const diagnostics = staticDiagnosticsOf(
       [
         'let b = p && q',
-        'let f = p |-> do { let c = p && r; p + 1 }',
+        'let f = p => do { let c = p && r; p + 1 }',
         'f',
       ].join('\n')
     );
@@ -63,7 +63,7 @@ describe('EPSIL PROVENANCE NOTE — two-site incompatible-type diagnostics', () 
 
   test('parameter with no same-named global: the note is minted from the (scope-dead) parameter binding', () => {
     const diagnostics = staticDiagnosticsOf(
-      ['let g = m |-> do { let c = m && r; m + 1 }', 'g'].join('\n')
+      ['let g = m => do { let c = m && r; m + 1 }', 'g'].join('\n')
     );
     const notes = diagnostics.flatMap((d) =>
       (d.notes ?? []).map((n) => n.message)

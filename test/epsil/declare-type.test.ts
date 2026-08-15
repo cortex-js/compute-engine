@@ -980,7 +980,7 @@ describe('EPSIL TYPE NAME IN CALL POSITION', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      'type rec = record<x: number, y: number>\nconst p = rec(1, 2)\np'
+      'type rec = record{x: number, y: number}\nconst p = rec(1, 2)\np'
     );
     expect(r.diagnostics.map((d) => d.message)).toEqual([
       ['type-not-callable', 'rec'],
@@ -992,7 +992,7 @@ describe('EPSIL TYPE NAME IN CALL POSITION', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      'type alias reca = record<x: number, y: number>\nreca(1, 2)'
+      'type alias reca = record{x: number, y: number}\nreca(1, 2)'
     );
     expect(r.diagnostics.map((d) => d.message)).toEqual([
       ['type-not-callable', 'reca'],
@@ -1001,7 +1001,7 @@ describe('EPSIL TYPE NAME IN CALL POSITION', () => {
 
   test('a host-declared record type name warns as well', () => {
     const ce = new ComputeEngine();
-    ce.declareType('hostrec', 'record<x: number, y: number>', { alias: true });
+    ce.declareType('hostrec', 'record{x: number, y: number}', { alias: true });
     const r = executeEpsil(ce, 'hostrec(1, 2)');
     expect(r.diagnostics.map((d) => d.message)).toEqual([
       ['type-not-callable', 'hostrec'],
@@ -1042,7 +1042,7 @@ describe('EPSIL TYPE NAME IN CALL POSITION', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      'type rp = record<x: number>\nlet a = rp(1)\nlet b = rp(3)\nb'
+      'type rp = record{x: number}\nlet a = rp(1)\nlet b = rp(3)\nb'
     );
     expect(r.diagnostics.map((d) => d.message)).toEqual([
       ['type-not-callable', 'rp'],
@@ -1243,7 +1243,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     ).toEqual([]);
     const r = executeEpsil(
       ce,
-      'type po = record<x: number, y: number>\npo(1, 2, 3)'
+      'type po = record{x: number, y: number}\npo(1, 2, 3)'
     );
     // Identical to declaring the record type on a FRESH engine: the
     // `type-not-callable` lint (record bodies mint no constructor), not a
@@ -1279,7 +1279,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     expect(r.value.type.toString()).toBe('point');
   });
 
-  // A dictionary literal synthesizes `record<x: …, y: …>` (its keys are
+  // A dictionary literal synthesizes `record{x: …, y: …}` (its keys are
   // statically known), so a `record`-bodied ALIAS is inhabitable from a
   // literal. Before record-aware synthesis the literal typed as
   // `dictionary<finite_integer>` and this annotation failed `incompatible-type`
@@ -1288,11 +1288,11 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      'type alias pt = record<x: number, y: number>\nconst p: pt = {x -> 1, y -> 2}\np'
+      'type alias pt = record{x: number, y: number}\nconst p: pt = {x -> 1, y -> 2}\np'
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.value.type.toString()).toBe(
-      'record<x: finite_integer, y: finite_integer>'
+      'record{x: finite_integer, y: finite_integer}'
     );
   });
 
@@ -1300,7 +1300,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      'type alias pt = record<x: number, y: number>\nconst p: pt = {x -> 1, z -> 2}\np'
+      'type alias pt = record{x: number, y: number}\nconst p: pt = {x -> 1, z -> 2}\np'
     );
     const messages = r.diagnostics.map((d) => d.message);
     expect(messages).toHaveLength(1);
@@ -1375,7 +1375,7 @@ describe('EPSIL RECURSIVE TYPES', () => {
       // Every arm of the rejection path used to overflow the stack: the type
       // is only consulted recursively when NO arm matches.
       for (const [label, value] of [
-        ['a function', '(x) |-> x + 1'],
+        ['a function', '(x) => x + 1'],
         ['a complex number', '2 + 3i'],
         ['NaN', 'NaN'],
       ] as const) {
@@ -1518,7 +1518,7 @@ describe('EPSIL RECURSIVE TYPE FIELD ACCESS', () => {
         'type tree = tuple<value: any, children: list<tree>>',
         'function map(f, t) { tree(f(t.value), map(f, t.children)) }',
         'let t = tree(1, [tree(2, [tree(4, [])]), tree(3, [])])',
-        'map((x) |-> x * 10, t)',
+        'map((x) => x * 10, t)',
       ].join('\n')
     );
     expect(r.diagnostics).toEqual([]);

@@ -326,7 +326,7 @@ describe('EPSIL EFFECTS — anonymous contract literals (option B, ruled 2026-08
     // none of it — not even the `-> ‹result›`. Dropping it was LOSSY whenever
     // the marker's result is NARROWER than the body's inferred type: `x + 1`
     // over a bare parameter infers `number` (finite-numeric widening), so
-    // `(x) |-> x + 1` would have silently widened this literal's `integer`
+    // `(x) => x + 1` would have silently widened this literal's `integer`
     // return to `number`.
     const lit = [
       'Function',
@@ -359,7 +359,7 @@ describe('EPSIL EFFECTS — anonymous contract literals (option B, ruled 2026-08
         ['Typed', ['Add', 'x', 1], { str: '((integer) -> integer)' }],
         'x',
       ] as MathJsonExpression)
-    ).toBe('(x) |-> x + 1');
+    ).toBe('(x) => x + 1');
   });
 
   test('an effect-free ascription stays transparent', () => {

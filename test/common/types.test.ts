@@ -320,8 +320,8 @@ describe('Collection Type Parser', () => {
     `);
   });
 
-  it('should parse a record<> expression', () => {
-    expect(parseType('record<red: integer, green: integer, blue: integer>'))
+  it('should parse a record{} expression', () => {
+    expect(parseType('record{red: integer, green: integer, blue: integer}'))
       .toMatchInlineSnapshot(`
       {
         "elements": {
@@ -334,33 +334,75 @@ describe('Collection Type Parser', () => {
     `);
   });
 
+  // A record's field list is written with BRACES — the delimiter of the value
+  // literal it describes, and the mark of an unordered, keyed field set. Angle
+  // brackets stay reserved for type arguments and ordered element lists, so
+  // `tuple<…>` and every generic application are unaffected.
+  describe('the record/object brace syntax', () => {
+    it('round-trips through the serializer', () => {
+      for (const s of [
+        'record',
+        'record{x: integer}',
+        'record{a: list<integer>, b: record{c: string}}',
+        'record{p: tuple<x: integer, y: integer>}',
+        'record{f: (integer) -> integer}',
+        'record{a: integer | string}',
+        'list<record{a: integer}>',
+      ])
+        expect(typeToString(parseType(s))).toEqual(s);
+    });
+
+    it('accepts a space before the field list', () => {
+      expect(typeToString(parseType('record {x: integer}'))).toEqual(
+        'record{x: integer}'
+      );
+    });
+
+    it('reads an EMPTY field list as the bare record type', () => {
+      expect(typeToString(parseType('record{}'))).toEqual('record');
+    });
+
+    it('rejects the former angle-bracket spelling, naming the brace form', () => {
+      expect(() => parseType('record<x: integer>')).toThrow(
+        /A record type is written with braces: `record\{key: type, …\}`/
+      );
+      // The `object` layout is refused for its own reason unless the parse
+      // declares a named type, so check the angle-bracket message there.
+      expect(() =>
+        parseType('object<id: string>', undefined, undefined, {
+          allowObjectType: true,
+        })
+      ).toThrow(/An object type is written with braces/);
+    });
+  });
+
   // A `record` is a `dictionary` whose keys are statically known — the type
   // tree in `doc/08-guide-types.md` nests `record` under `dictionary`, and the
   // guide's "Compatibility" examples pin both the parameterized and the bare
   // direction. Load-bearing for dictionary literals, which synthesize a
-  // `record<…>` and must still satisfy a `dictionary<T>` annotation.
+  // `record{…}` and must still satisfy a `dictionary<T>` annotation.
   it('makes a record a subtype of a dictionary', () => {
     expect(
       isSubtype(
-        parseType('record<red: integer, green: integer, blue: integer>'),
+        parseType('record{red: integer, green: integer, blue: integer}'),
         parseType('dictionary<integer>')
       )
     ).toBe(true);
     // ...but only when every field type fits the dictionary's value type.
     expect(
       isSubtype(
-        parseType('record<user: string, age: integer>'),
+        parseType('record{user: string, age: integer}'),
         parseType('dictionary<integer>')
       )
     ).toBe(false);
     // The bare primitives, per the same tree.
     expect(
-      isSubtype(parseType('record<red: integer>'), parseType('dictionary'))
+      isSubtype(parseType('record{red: integer}'), parseType('dictionary'))
     ).toBe(true);
     // The converse does NOT hold: a dictionary states no keys, so it cannot
     // stand in for a record that requires them.
     expect(
-      isSubtype(parseType('dictionary<integer>'), parseType('record<x: integer>'))
+      isSubtype(parseType('dictionary<integer>'), parseType('record{x: integer}'))
     ).toBe(false);
     expect(
       isSubtype(parseType('dictionary'), parseType('record'))
@@ -369,7 +411,7 @@ describe('Collection Type Parser', () => {
 
   it('should parse a record with exotic keys', () => {
     expect(
-      parseType('record<`直径`: string, `نصف القطر`: integer, `durée`: number>')
+      parseType('record{`直径`: string, `نصف القطر`: integer, `durée`: number}')
     ).toMatchInlineSnapshot(`
       {
         "elements": {
@@ -380,6 +422,68 @@ describe('Collection Type Parser', () => {
         "kind": "record",
       }
     `);
+  });
+
+  it('serializes an exotic key back in backticks', () => {
+    // The type lexer reads only `[a-zA-Z_][a-zA-Z0-9_]*` as a bare key, so a
+    // key (or a tuple/argument label) outside that set has to be quoted for
+    // the serialization to parse back. It used to be emitted bare, which broke
+    // the round trip.
+    for (const s of [
+      'record{`直径`: string, x: integer}',
+      'object{`my field`: integer}',
+      'tuple<`my x`: integer>',
+    ]) {
+      const once = typeToString(
+        parseType(s, undefined, undefined, { allowObjectType: true })
+      );
+      expect(once).toEqual(s);
+      expect(
+        typeToString(
+          parseType(once, undefined, undefined, { allowObjectType: true })
+        )
+      ).toEqual(s);
+    }
+  });
+
+  it('escapes a backtick or a backslash inside a backticked key', () => {
+    // Inside a verbatim (backticked) name, the type lexer unescapes `\\` to a
+    // backslash and `` \` `` to a backtick. A name containing either character
+    // has to be emitted with those escapes, otherwise the serialization
+    // re-lexes as a different (or unterminated) verbatim string.
+    for (const s of [
+      'record{`a\\`b`: string}',
+      'record{`a\\\\b`: string}',
+      'record{`a\\`b\\\\c`: string}',
+      'tuple<`my\\`x`: integer>',
+    ]) {
+      const once = typeToString(
+        parseType(s, undefined, undefined, { allowObjectType: true })
+      );
+      expect(once).toEqual(s);
+      expect(
+        parseType(once, undefined, undefined, { allowObjectType: true })
+      ).toEqual(parseType(s, undefined, undefined, { allowObjectType: true }));
+    }
+  });
+
+  it('escapes a quote or a backslash inside a string-literal type', () => {
+    // A string-literal (value) type is double-quoted on the way out, and the
+    // lexer unescapes `\\` and `\"` inside it, so a value containing either
+    // character has to be emitted escaped: `"a"b"` would not re-lex, and an
+    // unescaped backslash would be lost on the round trip.
+    for (const [s, value] of [
+      ['"a\\"b"', 'a"b'],
+      ['"a\\\\b"', 'a\\b'],
+      ['"a\\\\\\\\b"', 'a\\\\b'],
+      ['"it\'s"', "it's"],
+    ] as const) {
+      const t = parseType(s);
+      expect(t).toEqual({ kind: 'value', value });
+      const once = typeToString(t);
+      expect(once).toEqual(s);
+      expect(parseType(once)).toEqual(t);
+    }
   });
 
   it('should parse a collection expression', () => {
@@ -1361,7 +1465,7 @@ describe('Type References', () => {
 
     expect(
       parseType(
-        'record<parent:node | nothing, left: node | nothing, right: node | nothing>',
+        'record{parent:node | nothing, left: node | nothing, right: node | nothing}',
         recursiveTypeResolver
       )
     ).toMatchInlineSnapshot(`

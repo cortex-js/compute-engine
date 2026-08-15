@@ -3885,7 +3885,7 @@ export class BaseCompiler {
       }
 
       // `h` may name a function-valued BLOCK LOCAL of an enclosing statement
-      // list (`const g = (k) |-> …`, then `g(3)`). That binding is emitted by
+      // list (`const g = (k) => …`, then `g(3)`). That binding is emitted by
       // the block itself, so the call is an ordinary call of it — and it must
       // be resolved BEFORE the engine lookup below, which a same-named engine
       // symbol would otherwise win.
@@ -5254,7 +5254,7 @@ export class BaseCompiler {
    * declaration `Declare(name, "unknown", literal)`.
    *
    * A `function` definition inside a block is block-scoped (it does not leak
-   * to the enclosing scope), so it binds exactly what `const name = (…) |-> …`
+   * to the enclosing scope), so it binds exactly what `const name = (…) => …`
    * binds; rewriting to that shape routes it through the machinery the bound
    * literal already has — the `let name = ((…) => …)` emission, the bare-name
    * reads, and the call-site resolution of `CompileTarget.localFunctions`,
@@ -6364,7 +6364,7 @@ export class BaseCompiler {
    * differ when a parameter would SHADOW the target's vars object
    * (`CompileTarget.varsObjectName`): the JavaScript family binds free
    * symbols through `_`, and `_` is also how an implicit lambda parameter is
-   * spelled, so `_ |-> _ + k` emitted `((_) => _ + _.k)` — inside the arrow
+   * spelled, so `_ => _ + k` emitted `((_) => _ + _.k)` — inside the arrow
    * `_` is the parameter, so `_.k` read a property off a number and the call
    * answered `NaN` behind `success: true`. Such a parameter is renamed to a
    * generated name that the literal's other parameters and the compilation's
@@ -8963,7 +8963,7 @@ export class BaseCompiler {
 
   /**
    * If head `h` names a FUNCTION-VALUED BLOCK LOCAL of an enclosing statement
-   * list (`target.localFunctions` — `const g = (k) |-> …` earlier in the same
+   * list (`target.localFunctions` — `const g = (k) => …` earlier in the same
    * block), compile the call site as an ordinary call of that binding.
    *
    * The declaration itself already lowers to a value binding (`let g = ((k) =>
@@ -9011,7 +9011,7 @@ export class BaseCompiler {
     // function does. Without this the two Epsil spellings of one definition
     // compiled differently: `function g(k) { … }` DECLARES `g` in the engine
     // as it canonicalizes, so `["g", 3]` reached the folder with no unknown
-    // head and folded, while the `const g = (k) |-> …` binding declares
+    // head and folded, while the `const g = (k) => …` binding declares
     // nothing and left the call unfolded.
     //
     // The fold runs on `Apply(literal, …args)` — the call written in a form
@@ -9055,7 +9055,7 @@ export class BaseCompiler {
     // DECLARED `broadcastable<T>`. An elementwise contract that maps exactly
     // one rank down, which neither emitted call form expresses — see
     // `checkDeclaredBroadcast` for the full rule. Without this,
-    // `const pair = (x: broadcastable<value>) |-> (x, x)` applied to a list
+    // `const pair = (x: broadcastable<value>) => (x, x)` applied to a list
     // emitted a direct call and answered `[[1,2,3],[1,2,3]]` where the
     // interpreter answers `[(1,1),(2,2),(3,3)]`.
     BaseCompiler.checkDeclaredBroadcastAgainst(
@@ -9351,7 +9351,7 @@ export class BaseCompiler {
    * implementation of the gate. They differ only in where the callee's
    * declared shape comes from — a definition versus the declared literal's own
    * signature — and a second copy of the rule is exactly how the local route
-   * came to emit a direct call for `const pair = (x: broadcastable<value>) |->
+   * came to emit a direct call for `const pair = (x: broadcastable<value>) =>
    * (x, x)`, answering a tuple of arrays where the interpreter answers an
    * elementwise list of pairs.
    */

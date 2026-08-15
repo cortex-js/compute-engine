@@ -76,7 +76,7 @@ export function enclosingFrame(
 /**
  * Narrow an error's source anchor from the whole statement down to the
  * innermost frame that still maps onto the parsed source — the difference
- * between underlining all of `s |> Map(_ |-> Length(Characters(s)), _)` and
+ * between underlining all of `s |> Map(_ => Length(Characters(s)), _)` and
  * underlining the `s` inside `Characters(s)`, or between underlining a
  * 40-line function definition and underlining the one extra argument inside
  * it.

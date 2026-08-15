@@ -514,7 +514,7 @@ export function makeObject(
  * What is copied, and what is deliberately not:
  *
  * - The reference node's own properties, including the resolved `def` — the
- *   LAYOUT, the thing a re-declaration replaces. The `object<…>` body is
+ *   LAYOUT, the thing a re-declaration replaces. The `object{…}` body is
  *   copied one level (a fresh `elements` map) so that even an in-place edit of
  *   the layout cannot reach the pin.
  * - The printed NAME is unchanged, so `P` still prints and diagnoses as `P`;
@@ -563,7 +563,7 @@ function detachNominalType(t: BoxedType): BoxedType {
 }
 
 /** The definition body of a pinned nominal reference, copied far enough that a
- * later edit of the registry's own body cannot reach it. Only an `object<…>`
+ * later edit of the registry's own body cannot reach it. Only an `object{…}`
  * layout needs the copy — it is the one body kind a re-declaration of an
  * object type installs — and one level is enough: the field TYPES are shared
  * on purpose (see {@link detachNominalType}). */

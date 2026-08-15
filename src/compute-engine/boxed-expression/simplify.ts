@@ -616,7 +616,7 @@ function hasBodyAtOperand0(expr: Expression): boolean {
  *
  * A body arrives in one of two shapes: `Sum`/`Product`/`D` hold the raw
  * expression (`n + n`), while `Integrate` holds a function literal
- * (`(x) |-> x + x`). A literal cannot just be handed to `simplify()` — the
+ * (`(x) => x + x`). A literal cannot just be handed to `simplify()` — the
  * `Function` head is lazy and holds its own body in turn — so rebuild it around
  * the simplified inner body, reusing the SAME parameter operands and carrying
  * the original `localScope` across so the binding survives.

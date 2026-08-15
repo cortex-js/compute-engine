@@ -460,7 +460,7 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
     case 'type-redefinition':
       return `The type "${args[0]}" is declared twice in this program; a name may only be declared once per program (re-running an edited declaration in a later program still replaces it)`;
     case 'object-type-not-inline':
-      return `An "object<…>" type may only be the definition of a named type: object types are nominal, so declare one with "type Person = object<…>" (not "type alias"), then use "Person" here`;
+      return `An "object{…}" type may only be the definition of a named type: object types are nominal, so declare one with "type Person = object{…}" (not "type alias"), then use "Person" here`;
     case 'protocol-redefinition':
       return `The protocol "${args[0]}" is declared twice in this program; a name may only be declared once per program (re-running an edited declaration in a later program still replaces it)`;
     case 'function-redefinition':
@@ -534,7 +534,9 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
     case 'conditional-if-line-start':
       return `An "if" at the start of a line begins a new if-statement; for a conditional expression ("a if c else b"), keep "if" on the same line as the value before it`;
     case 'mapsto-arrow-expected':
-      return `"->" pairs a key with a value (and the key must be a string); to write a function, use the mapsto arrow "|->"`;
+      return `"->" pairs a key with a value (and the key must be a string); to write a function, use the mapsto arrow "=>"`;
+    case 'mapsto-arrow-legacy':
+      return `"|->" is the old spelling of the mapsto arrow; write "=>"`;
     case 'parameter-name-mismatch':
       return `The parameter is named "${args[0]}" in the lambda but "${args[1]}" in the type annotation; a parameter name binds wherever it is written, so the two must agree — rename one side, or leave the annotation's parameters unnamed`;
     case 'unexpected-symbol':

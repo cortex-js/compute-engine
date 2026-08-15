@@ -1,2 +1,2 @@
-let sq = (n) |-> n * n
+let sq = (n) => n * n
 sq(4)

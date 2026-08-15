@@ -354,7 +354,7 @@ fact(5)`);
     const { text, diagnostics } = run(`
 f(0) = 1
 f(n: integer) = n + 1
-f = x |-> 42
+f = x => 42
 f(0)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('42');

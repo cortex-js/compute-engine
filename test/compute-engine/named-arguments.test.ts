@@ -677,7 +677,7 @@ describe('overloads (§4) — per-arm permutation', () => {
     ]);
     const call = ce.box(['sel', N('x', { str: 'q' }), N('y', 7)] as any);
     expect(errorCodes(call)).toEqual([]);
-    expect(call.toString()).toBe('Apply((y, x) |-> y + 100, 7, "q")');
+    expect(call.toString()).toBe('Apply((y, x) => y + 100, 7, "q")');
     expect(call.evaluate().toString()).toBe('107');
 
     // The unambiguous direction needs no pinning — the positional call it
@@ -757,7 +757,7 @@ describe('overloads (§4) — per-arm permutation', () => {
     // which is what the changed printed form records.
     const named = ce.box(['f', N('n', 0)] as any);
     expect(errorCodes(named)).toEqual([]);
-    expect(named.toString()).toBe('Apply((n) |-> "many", 0)');
+    expect(named.toString()).toBe('Apply((n) => "many", 0)');
     expect(named.evaluate().toString()).toBe('"many"');
     // Naming the clause the value would have chosen anyway needs no pinning,
     // so those calls keep the ordinary printed form.
@@ -797,7 +797,7 @@ describe('overloads (§4) — per-arm permutation', () => {
     // Naming `b` leaves a clause the value dispatch would NOT have chosen (the
     // `a: 0` clause is more specific), so that call is pinned.
     const b = ce.box(['f', N('b', 0)] as any);
-    expect(b.toString()).toBe('Apply((b) |-> "bnum", 0)');
+    expect(b.toString()).toBe('Apply((b) => "bnum", 0)');
     expect(b.evaluate().toString()).toBe('"bnum"');
   });
 

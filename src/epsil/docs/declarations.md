@@ -143,14 +143,14 @@ f(3)
 // ➔ 16
 ```
 
-This is the same function as `= (x) |-> x^2 + 2x + 1`, and the same as the
+This is the same function as `= (x) => x^2 + 2x + 1`, and the same as the
 definition form `f(x: number) -> number = x^2 + 2x + 1`. The initializer may
 instead be an explicit lambda; the annotation's names must then agree with the
 lambda's (a disagreement is a diagnostic, with a fixit) — or leave the
 annotation's parameters unnamed, and let the lambda name them:
 
 ```epsil
-const g : (number) -> number = (x) |-> x + 1
+const g : (number) -> number = (x) => x + 1
 ```
 
 So a name appears in **one** place (or in both, agreeing) — never with two
@@ -164,7 +164,7 @@ The names bind only where they are **written**: an annotation through a
 `type alias` never binds (its names are documentation), a zero-parameter
 signature has nothing to bind (`const t : () -> number = makeCounter()` keeps
 meaning what it says), and for a curried signature only the **outermost**
-arrow binds — `const add : (x: number) -> (y: number) -> number = (y) |-> x + y`
+arrow binds — `const add : (x: number) -> (y: number) -> number = (y) => x + y`
 binds `x` around an explicit inner lambda. Generic (a `where` clause), effectful,
 optional/variadic, and partially named signatures do not bind either; give
 those an explicit lambda.

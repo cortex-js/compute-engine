@@ -88,7 +88,7 @@ describe('EPSIL STATIC DECLARED-TYPE CHECK — unproven stays silent', () => {
     // program runs fine.
     const { value, diagnostics } = executeEpsil(
       new ComputeEngine(),
-      'const k = (x) |-> x + 1\nconst m : (number) -> number = k\nm(3)'
+      'const k = (x) => x + 1\nconst m : (number) -> number = k\nm(3)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);

@@ -1,4 +1,4 @@
-Sum(Take(Map(1..oo, _ |-> _^2), 10))
+Sum(Take(Map(1..oo, _ => _^2), 10))
 
 // JS: the infinite array is an issue. We should materialize the Take on an infinite collection.
 // ((((_f) => (Array.from({length: Infinity}, (_e, i) => 1 + i)).map((_x) => _f(_x)))(((_) => (_ * _)))).slice(0, Math.max(0, 10))).reduce((_a, _b) => _a + _b, 0)
@@ -11,7 +11,7 @@ Sum(Take(Map(1..oo, _ |-> _^2), 10))
 
 
 // The following should be equivalent:
-// 1..oo |> Take(10) |> x |-> x^2 |> Sum
+// 1..oo |> Take(10) |> x => x^2 |> Sum
 // 1..oo |> Take(10) |> _^2 |> Sum
 
 // Note: 1/ The `Take` operator has an implicit `_` as its first argument, when compatible, 2/ when the rhs of `|>` is a lambda with a shape compatible with `Map(_, ...)` the `Map` is implicit. 3/ In that case the `_` is a marker for an implicit lambda argument (that might be ambiguous...)

@@ -667,7 +667,7 @@ describe('Partial derivatives of unknown multivariate functions', () => {
       1,
       1,
     ]);
-    expect(expr.evaluate().toString()).toMatchInlineSnapshot(`(x, y) |-> 2x`);
+    expect(expr.evaluate().toString()).toMatchInlineSnapshot(`(x, y) => 2x`);
   });
 });
 

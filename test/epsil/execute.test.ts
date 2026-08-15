@@ -131,13 +131,13 @@ describe('EPSIL EXECUTE — programs', () => {
   });
 
   test('a typed mapsto rejects a bad-typed call', () => {
-    const { value } = run('((x: integer) |-> x + 1)(2.5)');
+    const { value } = run('((x: integer) => x + 1)(2.5)');
     expect(value.re).not.toBe(3.5);
     expect(value.toString()).toContain('incompatible-type');
   });
 
   test('a typed mapsto accepts a good-typed call', () => {
-    const { value, diagnostics } = run('((x: integer) |-> x + 1)(3)');
+    const { value, diagnostics } = run('((x: integer) => x + 1)(3)');
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);
   });
@@ -156,7 +156,7 @@ describe('EPSIL EXECUTE — programs', () => {
 
   test('a conditional expression as a lambda body', () => {
     const { value, diagnostics } = run(
-      'let sign = x |-> 1 if x > 0 else -1\nsign(-4)'
+      'let sign = x => 1 if x > 0 else -1\nsign(-4)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(-1);
@@ -268,7 +268,7 @@ describe('EPSIL EXECUTE — do-block expressions', () => {
 
   test('a do-block lambda body', () => {
     const { value, diagnostics } = run(
-      'let f = x |-> do { let t = x * x; t + 1 }\nf(3)'
+      'let f = x => do { let t = x * x; t + 1 }\nf(3)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(10);
@@ -277,7 +277,7 @@ describe('EPSIL EXECUTE — do-block expressions', () => {
 
 describe('EPSIL EXECUTE — zero-parameter lambdas', () => {
   test('a zero-parameter lambda applies with no arguments', () => {
-    const { value, diagnostics } = run('let f = () |-> 42\nf()');
+    const { value, diagnostics } = run('let f = () => 42\nf()');
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(42);
   });
@@ -460,7 +460,7 @@ describe('EPSIL EXECUTE — static (canonicalization-time) type errors', () => {
     expect(diagnostics.map((x) => x.message[0])).toContain('static-type-error');
   });
 
-  test('the `->` / `|->` typo is caught at parse time and recovered', () => {
+  test('the `->` / `=>` typo is caught at parse time and recovered', () => {
     // `(n) -> n^2 + 1` used to surface only as a static-type-error (a
     // `KeyValuePair` whose key must be a string, found by the initializer
     // descent above). The parser now diagnoses the wrong arrow directly —
@@ -759,7 +759,7 @@ describe('EPSIL EXECUTE — did-you-mean for unknown functions', () => {
 
   test('a lambda parameter used as a function is not flagged', () => {
     const { value, diagnostics } = run(
-      'apply(g, x) = g(x)\napply(y |-> y * 2, 5)'
+      'apply(g, x) = g(x)\napply(y => y * 2, 5)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(10);
@@ -828,10 +828,10 @@ describe('EPSIL EXECUTE — Count(xs, v) and Count(xs, p)', () => {
   });
 
   test('the predicate form counts satisfying elements', () => {
-    expect(run('Count([1, 2, 3], x |-> x > 1)').value.re).toBe(2);
+    expect(run('Count([1, 2, 3], x => x > 1)').value.re).toBe(2);
     // A symbol bound to a function literal is a predicate too — the forms
     // dispatch on the operand's TYPE, not on its syntax.
-    expect(run('let p = x |-> x > 1\nCount([1, 2, 3], p)').value.re).toBe(2);
+    expect(run('let p = x => x > 1\nCount([1, 2, 3], p)').value.re).toBe(2);
   });
 
   test('the 1-argument cardinality form is unchanged', () => {
@@ -850,16 +850,16 @@ describe('EPSIL EXECUTE — error propagation', () => {
   test('an error argument bubbles out of a call and out of a pipe', () => {
     const expected =
       'Error(ErrorCode("incompatible-type", "number", "string"), "a")';
-    expect(run('let f = x |-> x + 1\nf("a" + 1)').value.toString()).toBe(
+    expect(run('let f = x => x + 1\nf("a" + 1)').value.toString()).toBe(
       expected
     );
-    expect(run('let f = x |-> x + 1\n("a" + 1) |> f').value.toString()).toBe(
+    expect(run('let f = x => x + 1\n("a" + 1) |> f').value.toString()).toBe(
       expected
     );
     // A chain short-circuits at the first stage.
     expect(
       run(
-        'let f = x |-> x + 1\nlet g = y |-> y * 2\n("a" + 1) |> f |> g'
+        'let f = x => x + 1\nlet g = y => y * 2\n("a" + 1) |> f |> g'
       ).value.toString()
     ).toBe(expected);
   });
@@ -897,19 +897,19 @@ describe('EPSIL EXECUTE — error propagation', () => {
 
   test('NaN does not short-circuit a pipe', () => {
     expect(run('NaN |> IsMissing').value.symbol).toBe('True');
-    const { value } = run('let f = x |-> 99\nNaN |> f');
+    const { value } = run('let f = x => 99\nNaN |> f');
     expect(value.re).toBe(99);
   });
 
   test('`Nothing` is erased from the argument list on every route', () => {
-    const nullary = run('let f = x |-> x + 1\nf()').value.toString();
-    expect(run('let f = x |-> x + 1\nf(Nothing)').value.toString()).toBe(
+    const nullary = run('let f = x => x + 1\nf()').value.toString();
+    expect(run('let f = x => x + 1\nf(Nothing)').value.toString()).toBe(
       nullary
     );
-    expect(run('let f = x |-> x + 1\nNothing |> f').value.toString()).toBe(
+    expect(run('let f = x => x + 1\nNothing |> f').value.toString()).toBe(
       nullary
     );
-    expect(run('let f = x |-> x + 1\nApply(f, Nothing)').value.toString()).toBe(
+    expect(run('let f = x => x + 1\nApply(f, Nothing)').value.toString()).toBe(
       nullary
     );
   });
@@ -921,10 +921,10 @@ describe('EPSIL EXECUTE — error propagation', () => {
  * 1/ Implicit topic argument: a call stage missing required arguments gets
  *    the piped value as its first argument — `xs |> Take(10)` means
  *    `xs |> Take(_, 10)`. A COMPLETE call keeps its old meaning.
- * 2/ Stage lambda: a `|->` after a pipe operand binds tighter than the pipe
- *    (only there), so `xs |> x |-> x^2 |> Sum` is `xs |> (x |-> x^2) |> Sum`.
+ * 2/ Stage lambda: a `=>` after a pipe operand binds tighter than the pipe
+ *    (only there), so `xs |> x => x^2 |> Sum` is `xs |> (x => x^2) |> Sum`.
  * 3/ Implicit `Map`: a unary LITERAL lambda stage over a collection topic
- *    maps — `xs |> x |-> x^2` and `xs |> _^2` are `Map(x |-> x^2, xs)`.
+ *    maps — `xs |> x => x^2` and `xs |> _^2` are `Map(x => x^2, xs)`.
  *    Named-function stages (`xs |> Sum`), string topics, and lambdas whose
  *    authored parameter annotation accepts the whole topic still apply.
  *
@@ -937,16 +937,16 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
     expect(
       run('1..oo |> Take(_, 10) |> Map(_^2, _) |> Sum').value.re
     ).toBe(385);
-    expect(run('1..oo |> Take(10) |> x |-> x^2 |> Sum').value.re).toBe(385);
+    expect(run('1..oo |> Take(10) |> x => x^2 |> Sum').value.re).toBe(385);
     expect(run('1..oo |> Take(10) |> _^2 |> Sum').value.re).toBe(385);
   });
 
   test('implicit topic argument fills an incomplete call', () => {
     expect(run('1..10 |> Take(3)').value.toString()).toBe('[1,2,3]');
     expect(
-      run('let f = x |-> x * 2\n[1,2,3] |> Map(f)').value.toString()
+      run('let f = x => x * 2\n[1,2,3] |> Map(f)').value.toString()
     ).toBe('[2,4,6]');
-    expect(run('[1,2,3] |> Filter(x |-> x > 1)').value.toString()).toBe(
+    expect(run('[1,2,3] |> Filter(x => x > 1)').value.toString()).toBe(
       '[2,3]'
     );
   });
@@ -962,35 +962,35 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
 
   test('a stage lambda ends at the next pipe', () => {
     expect(
-      run('[1,2,3] |> x |-> x + 1 |> Sum').value.re
+      run('[1,2,3] |> x => x + 1 |> Sum').value.re
     ).toBe(9);
   });
 
   test('a unary lambda stage maps over a collection topic', () => {
-    expect(run('[1,2,3] |> (x |-> x^2)').value.toString()).toBe('[1,4,9]');
+    expect(run('[1,2,3] |> (x => x^2)').value.toString()).toBe('[1,4,9]');
     expect(run('[1,2,3] |> _^2').value.toString()).toBe('[1,4,9]');
     expect(run('[1,2,3] |> _ + 1').value.toString()).toBe('[2,3,4]');
     // The stage maps EACH ELEMENT, so a collection-consuming body goes
     // inert per element…
-    expect(run('[1,2,3] |> (l |-> Length(l))').value.toString()).toBe(
+    expect(run('[1,2,3] |> (l => Length(l))').value.toString()).toBe(
       '[Length(1),Length(2),Length(3)]'
     );
     // …the whole-collection spellings are the named function or an authored
     // annotation the topic satisfies.
     expect(run('[1,2,3] |> Length').value.re).toBe(3);
     expect(
-      run('[1,2,3] |> ((l: list<number>) |-> Length(l))').value.re
+      run('[1,2,3] |> ((l: list<number>) => Length(l))').value.re
     ).toBe(3);
   });
 
   test('a lambda stage over a non-collection topic applies', () => {
     expect(run('5 |> _^2').value.re).toBe(25);
-    expect(run('5 |> (x |-> x + 1)').value.re).toBe(6);
-    expect(run('5 |> x |-> x + 1').value.re).toBe(6);
+    expect(run('5 |> (x => x + 1)').value.re).toBe(6);
+    expect(run('5 |> x => x + 1').value.re).toBe(6);
   });
 
   test('a string topic is a scalar, not a character collection', () => {
-    expect(run('"abc" |> (c |-> c)').value.toString()).toBe('"abc"');
+    expect(run('"abc" |> (c => c)').value.toString()).toBe('"abc"');
   });
 
   test('a placeholder in a CALL stage is still the topic', () => {
@@ -1122,7 +1122,7 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
 });
 
 describe('EPSIL EXECUTE — the bare `_` identity shorthand', () => {
-  // A bare `_` in a function slot is the identity function (`x |-> x`). The
+  // A bare `_` in a function slot is the identity function (`x => x`). The
   // Epsil parser accepts `_` in argument position (it is an ordinary symbol
   // token there), so the shorthand has to work on this route too.
   test('Map(_, [1,2,3]) yields the elements unchanged', () => {
@@ -1167,7 +1167,7 @@ describe('EPSIL EXECUTE — `??` and `is`', () => {
   });
 
   test('`??` inside a lambda body', () => {
-    expect(value('let f = (x) |-> x ?? 0\nf(NaN)')).toBe('0');
+    expect(value('let f = (x) => x ?? 0\nf(NaN)')).toBe('0');
   });
 
   test('`is` is a runtime type test', () => {
@@ -1343,7 +1343,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
 
   test('named call to a `:=`-assigned annotated literal is statically clean', () => {
     const { value, diagnostics } = run(
-      'f := (x: number, y: string) |-> x + 3\nf(y: "ok", x: 1)'
+      'f := (x: number, y: string) => x + 3\nf(y: "ok", x: 1)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);
@@ -1351,7 +1351,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
 
   test('named call through an annotated declaration is statically clean', () => {
     const { value, diagnostics } = run(
-      'const g : (x: number, y: string) -> number = (x, y) |-> x + 3\ng(y: "ok", x: 1)'
+      'const g : (x: number, y: string) -> number = (x, y) => x + 3\ng(y: "ok", x: 1)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);
@@ -1369,7 +1369,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
 
   test('positional-call control: unchanged, statically clean', () => {
     const { value, diagnostics } = run(
-      'f := (x: number, y: string) |-> x + 3\nf(1, "ok")'
+      'f := (x: number, y: string) => x + 3\nf(1, "ok")'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);
@@ -1380,7 +1380,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // bare parameter `{ type: 'unknown' }`), so this named call fails at
     // runtime too — the static diagnostics are TRUE predictions and must
     // keep firing (ROADMAP "Named-argument calls — v1 residuals").
-    const { value, diagnostics } = run('h := (x, y) |-> x + 3\nh(y: 2, x: 1)');
+    const { value, diagnostics } = run('h := (x, y) => x + 3\nh(y: 2, x: 1)');
     expect(diagnostics.map((d) => d.message[3])).toEqual([
       'argument-names-unavailable',
       'argument-names-unavailable',
@@ -1394,7 +1394,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // two static diagnostics plus statement 1's runtime-error, and none for
     // statement 3, which computes 12.
     const src =
-      'f(y: "ok", x: 1)\nf := (x: number, y: string) |-> x + 3\nf(y: "no", x: 9)';
+      'f(y: "ok", x: 1)\nf := (x: number, y: string) => x + 3\nf(y: "no", x: 9)';
     const { value, diagnostics } = run(src);
     expect(diagnostics.map((d) => d.message[3])).toEqual([
       'argument-names-unavailable',
@@ -1413,7 +1413,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // reassignment never re-pins it: the second literal's names are unknown
     // at runtime, and the static tier reports the same problem.
     const src =
-      'f := (x: number, y: number) |-> x + 3\nf := (a: number, b: number) |-> a * b\nf(a: 2, b: 5)';
+      'f := (x: number, y: number) => x + 3\nf := (a: number, b: number) => a * b\nf(a: 2, b: 5)';
     const { value, diagnostics } = run(src);
     expect(diagnostics.map((d) => [d.message[0], d.message[3]])).toEqual([
       ['static-type-error', 'argument-name-unknown'],
@@ -1427,7 +1427,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // so the final call computes 4 with the FIRST signature's names — and
     // draws no static diagnostic.
     const src =
-      'f := (x: number, y: string) |-> x + 3\nf := (a: number, b: number) |-> a * b\nf(x: 1, y: "ok")';
+      'f := (x: number, y: string) => x + 3\nf := (a: number, b: number) => a * b\nf(x: 1, y: "ok")';
     const { value, diagnostics } = run(src);
     expect(diagnostics.map((d) => [d.message[0], d.message[3]])).toEqual([
       ['runtime-error', 'incompatible-type'],
@@ -1450,9 +1450,9 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
   test('a parameter shadows an outer `const` holding a function', () => {
     const { value, diagnostics } = run(
       [
-        'const bump = (x) |-> x + 1',
-        'const applyTwo = (bump) |-> bump(2)',
-        'applyTwo((x) |-> x * 10)',
+        'const bump = (x) => x + 1',
+        'const applyTwo = (bump) => bump(2)',
+        'applyTwo((x) => x * 10)',
       ].join('\n')
     );
     expect(diagnostics).toEqual([]);
@@ -1463,8 +1463,8 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
     const { value, diagnostics } = run(
       [
         'bump(x) = x + 1',
-        'const applyTwo = (bump) |-> bump(2)',
-        'applyTwo((x) |-> x * 10)',
+        'const applyTwo = (bump) => bump(2)',
+        'applyTwo((x) => x * 10)',
       ].join('\n')
     );
     expect(diagnostics).toEqual([]);
@@ -1474,9 +1474,9 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
   test('a parameter of a named function definition shadows too', () => {
     const { value, diagnostics } = run(
       [
-        'const bump = (x) |-> x + 1',
+        'const bump = (x) => x + 1',
         'applyTwo(bump) = bump(2)',
-        'applyTwo((x) |-> x * 10)',
+        'applyTwo((x) => x * 10)',
       ].join('\n')
     );
     expect(diagnostics).toEqual([]);
@@ -1486,9 +1486,9 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
   test('an ANNOTATED function-typed parameter shadows too', () => {
     const { value, diagnostics } = run(
       [
-        'const bump = (x) |-> x + 1',
-        'const applyTwo = (bump: (number) -> number) |-> bump(2)',
-        'applyTwo((x) |-> x * 10)',
+        'const bump = (x) => x + 1',
+        'const applyTwo = (bump: (number) -> number) => bump(2)',
+        'applyTwo((x) => x * 10)',
       ].join('\n')
     );
     expect(diagnostics).toEqual([]);
@@ -1500,9 +1500,9 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
     // overwritten nor consumed by the call that shadowed it.
     const { value, diagnostics } = run(
       [
-        'const bump = (x) |-> x + 1',
-        'const applyTwo = (bump) |-> bump(2)',
-        'let inner = applyTwo((x) |-> x * 10)',
+        'const bump = (x) => x + 1',
+        'const applyTwo = (bump) => bump(2)',
+        'let inner = applyTwo((x) => x * 10)',
         'let outer = bump(5)',
         '[inner, outer]',
       ].join('\n')
@@ -1514,9 +1514,9 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
   test('a parameter shadows an outer `let` holding a function', () => {
     const { value, diagnostics } = run(
       [
-        'let bump = (x) |-> x + 1',
-        'const applyTwo = (bump) |-> bump(2)',
-        'applyTwo((x) |-> x * 10)',
+        'let bump = (x) => x + 1',
+        'const applyTwo = (bump) => bump(2)',
+        'applyTwo((x) => x * 10)',
       ].join('\n')
     );
     expect(diagnostics).toEqual([]);
@@ -1525,7 +1525,7 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
 
   test('a parameter shadows an outer non-function `const`', () => {
     const { value, diagnostics } = run(
-      ['const offset = 5', 'const wrap = (offset) |-> offset + 1', 'wrap(10)'].join(
+      ['const offset = 5', 'const wrap = (offset) => offset + 1', 'wrap(10)'].join(
         '\n'
       )
     );
@@ -1539,8 +1539,8 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
     // where the outer body applies it: 200 + 20.
     const { value, diagnostics } = run(
       [
-        'const applyTwo = (bump) |-> ((bump) |-> bump(2))((y) |-> y * 100) + bump(2)',
-        'applyTwo((x) |-> x * 10)',
+        'const applyTwo = (bump) => ((bump) => bump(2))((y) => y * 100) + bump(2)',
+        'applyTwo((x) => x * 10)',
       ].join('\n')
     );
     expect(diagnostics).toEqual([]);
@@ -1558,10 +1558,10 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
     const { value, diagnostics } = executeEpsil(
       ce,
       [
-        'const bump = (x) |-> x + 1',
-        'const applyTwo = (bump) |-> bump(2)',
+        'const bump = (x) => x + 1',
+        'const applyTwo = (bump) => bump(2)',
         'let acc = 0',
-        'for k in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] { acc = acc + applyTwo((x) |-> x * 10) }',
+        'for k in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] { acc = acc + applyTwo((x) => x * 10) }',
         'acc',
       ].join('\n')
     );

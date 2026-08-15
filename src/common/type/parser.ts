@@ -96,6 +96,7 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
                  | <list_type>
                  | <tuple_type>
                  | <record_type>
+                 | <object_type>
                  | <dictionary_type>
                  | <set_type>
                  | <broadcastable_type>
@@ -160,8 +161,17 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 
 <tuple_type> ::= "tuple<" ( <named_element> ( "," <named_element> )* )? ">"
 
+(* A record's (and an object's) field list is written with BRACES — the same
+   delimiter as the `{…}` value literal it describes — because it is an
+   UNORDERED, KEYED set of fields. Angle brackets are reserved for type
+   arguments and ordered element lists (`list<…>`, `tuple<…>`, `Pair<…>`).
+   The former angle-bracket spelling (`record<…>`, `object<…>`) is a parse
+   error carrying a migration hint. *)
 <record_type> ::= "record"
-                | "record<" <record_element> ( "," <record_element> )* ">"
+                | "record" "{" ( <record_element> ( "," <record_element> )* )? "}"
+
+<object_type> ::= "object"
+                | "object" "{" ( <record_element> ( "," <record_element> )* )? "}"
 
 <record_element> ::= <key> ":" <type>
 
@@ -288,7 +298,7 @@ export class Parser {
   private allowWhere: boolean;
 
   /**
-   * Whether the `object<name: T, …>` layout form may be parsed at all.
+   * Whether the `object{name: T, …}` layout form may be parsed at all.
    *
    * `false` everywhere except the routes that declare a NAMED type, which is
    * what enforces "an object type is legal only as the definition of a named
@@ -296,6 +306,14 @@ export class Parser {
    * {@link parseObjectType}. The bare `object` primitive is unaffected.
    */
   private allowObjectType: boolean;
+
+  /**
+   * Whether the CALLER will parse a `{ … }` block immediately after this type
+   * (with at most a `where` clause in between): the return type of an Epsil
+   * `function` declaration, and nothing else. It makes the `{` of a bare
+   * `record`/`object` return type unambiguous — see {@link startsFieldList}.
+   */
+  private blockFollows: boolean;
 
   /** True once a `where` clause has been seen (pre-scanned or parsed). The
    * declaration-time validation (`validateDeclaredType`) is gated on it, so a
@@ -317,12 +335,14 @@ export class Parser {
       allowTrailing?: boolean;
       allowWhere?: boolean;
       allowObjectType?: boolean;
+      blockFollows?: boolean;
       typeVars?: readonly TypeParameter[];
     }
   ) {
     this.allowTrailing = options?.allowTrailing ?? false;
     this.allowWhere = options?.allowWhere ?? true;
     this.allowObjectType = options?.allowObjectType ?? false;
+    this.blockFollows = options?.blockFollows ?? false;
     // A PRE-SEEDED parse (the body of a generic type alias): the alias's own
     // parameters are in scope from the first token, exactly as if an enclosing
     // `where` clause had quantified them, so `tuple<T, T>` reads `T` as a VARIABLE
@@ -719,11 +739,16 @@ export class Parser {
    *
    * The scan runs on a fresh, TOLERANT lexer over the remaining input: the
    * first character that cannot begin a type token ends the scan (the same
-   * rule that ends a prefix parse), so `= 5`, `{ … }` and other trailing
-   * (non-type) source bound the search for free. The scan additionally stops
-   * at a depth-0 `,` (inside a single type, commas only occur bracketed — a
-   * depth-0 comma means the type already ended) and when the bracket depth
-   * goes negative (the closing delimiter of the surrounding construct).
+   * rule that ends a prefix parse), so `= 5` and other trailing (non-type)
+   * source bound the search for free. The scan additionally stops at a depth-0
+   * `,` (inside a single type, commas only occur bracketed — a depth-0 comma
+   * means the type already ended) and when the bracket depth goes negative
+   * (the closing delimiter of the surrounding construct).
+   *
+   * Braces nest like the other brackets, so a `where` clause after a record
+   * field list (`record{a: T} where T`) is still found, while a `where`
+   * INSIDE braces is not at depth 0 and is ignored — which is what an Epsil
+   * block body following a bare `record` return type would be.
    *
    * Returns the clause names, or `null` when no clause is in range.
    */
@@ -741,11 +766,13 @@ export class Parser {
         case '(':
         case '<':
         case '[':
+        case '{':
           depth += 1;
           break;
         case ')':
         case '>':
         case ']':
+        case '}':
           depth -= 1;
           if (depth < 0) return null;
           break;
@@ -770,13 +797,15 @@ export class Parser {
                 if (
                   token.type === '(' ||
                   token.type === '<' ||
-                  token.type === '['
+                  token.type === '[' ||
+                  token.type === '{'
                 )
                   entryDepth += 1;
                 else if (
                   token.type === ')' ||
                   token.type === '>' ||
-                  token.type === ']'
+                  token.type === ']' ||
+                  token.type === '}'
                 ) {
                   entryDepth -= 1;
                   if (entryDepth < 0) return names;
@@ -1563,25 +1592,164 @@ export class Parser {
     return undefined;
   }
 
+  /**
+   * Is the current `{` the start of a field list (`record{…}` / `object{…}`),
+   * rather than a brace that belongs to the SURROUNDING grammar?
+   *
+   * The question exists because a type is often parsed as a PREFIX of a larger
+   * source text whose next character is a brace: Epsil writes a return-type
+   * annotation immediately before the function's block body, so
+   * `function f() -> record { let r = …; r }` has a `{` right after a bare
+   * `record` type. The rule: the `{` opens a field list only when, after
+   * whitespace, it is followed by `}` (the empty field list `record{}`) or by
+   * a key — an identifier or a backticked verbatim string — and then a `:`,
+   * the head of a field entry. Otherwise the `{` is left unconsumed,
+   * `record`/`object` is the bare primitive type, and the brace ends the
+   * prefix parse.
+   *
+   * That head test is enough everywhere the type is NOT followed by a block:
+   * an Epsil block body opens with a STATEMENT, and the one statement that can
+   * begin with `name :` is a bare type annotation (`x: integer`, see
+   * `Parser.tryParseAnnotation` in `src/epsil/parser.ts`) — Epsil's dictionary
+   * literal is `{key -> value}`, not `{key: value}`, so nothing else in the
+   * brace grammar begins that way. Two shapes would still be misread as field
+   * lists though: an EMPTY body (`-> record { }`) and a body whose first
+   * statement is a bare annotation (`-> record { x: integer }`).
+   *
+   * So in the one position where a block MUST follow the type — the return
+   * type of a `function` declaration — the caller sets `blockFollows` and a
+   * SECOND test applies: the `{` opens a field list only if its depth-matched
+   * closing `}` is followed (after whitespace) by the body — another `{`, or a
+   * `where` clause and then the body. A field list in that position is always
+   * followed by the block, and a block body is not, which decides every case:
+   *
+   * ```
+   * -> record { }                    bare record, empty body
+   * -> record { x: integer }         bare record, body = a bare annotation
+   * -> record{a: integer} { {a -> 1} }   field list, then the body
+   * -> record{a: T} where T { … }        field list, clause, then the body
+   * ```
+   *
+   * The second test is a textual depth-matched brace scan over the lexer
+   * input (braces nest; `"…"` and `` `…` `` spans are opaque, so a brace
+   * inside a string is not counted).
+   *
+   * Nothing is consumed: the lexer state, the current token and the
+   * prefix-parse end offset are all restored before returning (the end offset
+   * matters — on a `false` answer no further token is consumed, so a
+   * lookahead that moved it would report the brace as part of the type).
+   */
+  private startsFieldList(): boolean {
+    if (this.current.type !== '{') return false;
+
+    const braceOffset = this.current.position;
+    const savedState = this.lexer.saveState();
+    const savedCurrent = this.current;
+    const savedEnd = this._end;
+    let headMatches: boolean;
+    try {
+      this.advance(); // consume '{'
+      const head = this.current as Token;
+      if (head.type === '}') headMatches = true;
+      else if (head.type !== 'IDENTIFIER' && head.type !== 'VERBATIM_STRING')
+        headMatches = false;
+      else {
+        this.advance(); // consume the candidate key
+        headMatches = (this.current as Token).type === ':';
+      }
+    } finally {
+      this.lexer.restoreState(savedState);
+      this.current = savedCurrent;
+      this._end = savedEnd;
+    }
+
+    if (!headMatches) return false;
+    return !this.blockFollows || this.blockFollowsFieldList(braceOffset);
+  }
+
+  /**
+   * The `blockFollows` half of {@link startsFieldList}: starting at the `{` at
+   * `braceOffset`, is the depth-matched closing `}` followed by the block the
+   * caller is about to parse — either the block's `{`, or a `where` clause
+   * (which sits between a return type and the body) and then the block?
+   *
+   * A `"…"` or `` `…` `` span is skipped whole, so a brace written inside a
+   * string literal does not throw the depth count off. An unterminated span,
+   * or a `{` with no match, answers `false` — the brace then reads as the
+   * caller's, which is the recoverable reading (the caller reports the
+   * malformed body).
+   */
+  private blockFollowsFieldList(braceOffset: number): boolean {
+    const src = this.lexer.input;
+    let depth = 0;
+    let i = braceOffset;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (c === '"' || c === '`') {
+        i += 1;
+        while (i < src.length && src[i] !== c) i += src[i] === '\\' ? 2 : 1;
+        if (i >= src.length) return false; // unterminated string
+        continue;
+      }
+      if (c === '{') depth += 1;
+      else if (c === '}') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    if (i >= src.length) return false; // no matching '}'
+
+    let j = i + 1;
+    while (j < src.length && /\s/.test(src[j])) j += 1;
+    if (j >= src.length) return false;
+    return src[j] === '{' || /^where\b/.test(src.slice(j));
+  }
+
+  /**
+   * Parse the `{ key: type, … }` field list shared by `record` and `object`.
+   * The cursor is on the `{`, which {@link startsFieldList} has already
+   * confirmed opens a field list.
+   */
+  private parseFieldList(what: 'record' | 'object'): RecordEntryNode[] {
+    const entries: RecordEntryNode[] = [];
+    this.expect('{');
+    if ((this.current as Token).type !== '}') {
+      do {
+        const entry = this.parseRecordEntry();
+        if (!entry) this.error(`Expected ${what} field`);
+        entries.push(entry);
+      } while (this.match(','));
+    }
+    this.expect('}');
+    return entries;
+  }
+
+  /**
+   * `record` — bare, meaning "any record" — and `record{key: T, …}`, a record
+   * with a known field set.
+   *
+   * The field list is written with BRACES, matching the `{…}` value literal a
+   * record is built from: braces mean an unordered, keyed field set. Angle
+   * brackets, which every other constructor uses (`list<…>`, `tuple<…>`,
+   * `Pair<…>`), mean type arguments or an ordered element list. The former
+   * angle-bracket spelling (`record<x: integer>`) is therefore refused with a
+   * migration hint rather than silently accepted.
+   */
   private parseRecordType(): RecordTypeNode | undefined {
     if (this.current.type === 'IDENTIFIER' && this.current.value === 'record') {
+      const recordToken = this.current;
       this.advance(); // consume 'record'
 
-      const entries: RecordEntryNode[] = [];
+      let entries: RecordEntryNode[] = [];
 
-      if (this.match('<')) {
-        if ((this.current as Token).type !== '>') {
-          do {
-            const entry = this.parseRecordEntry();
-            if (!entry) {
-              this.error('Expected record entry');
-            }
-            entries.push(entry);
-          } while (this.match(','));
-        }
-
-        this.expect('>');
-      }
+      if (this.startsFieldList()) entries = this.parseFieldList('record');
+      else if ((this.current as Token).type === '<')
+        this.errorAtToken(
+          recordToken,
+          'A record type is written with braces: `record{key: type, …}`',
+          'For example `record{x: integer, y: integer}`',
+          'record-type-angle-brackets'
+        );
 
       return this.createNode<RecordTypeNode>('record', { entries });
     }
@@ -1590,22 +1758,27 @@ export class Parser {
   }
 
   /**
-   * `object` — bare, meaning "any object" — and `object<name: T, …>`, the
+   * `object` — bare, meaning "any object" — and `object{name: T, …}`, the
    * stored-field layout of an object type.
    *
    * The layout form is admitted only when the parse was started with
    * `allowObjectType`, which the routes that declare a NOMINAL type set and
-   * nothing else does. `object<…>` is legal only as the definition of a named
-   * type (`type Person = object<…>`): objects are nominal, so an inline
-   * occurrence in an annotation (`let x: object<id: string>`) would name a
+   * nothing else does. `object{…}` is legal only as the definition of a named
+   * type (`type Person = object{…}`): objects are nominal, so an inline
+   * occurrence in an annotation (`let x: object{id: string}`) would name a
    * type nothing can ever construct or conform to, and a structural ALIAS to
    * a layout would make two aliases of one shape interchangeable — the
    * subtyping between object types the appendix rules out. Refusing the form
    * here makes every other route fail closed. (The declaring route then
    * additionally rejects an occurrence NESTED inside the body, such as
-   * `type T = list<object<…>>`, which is inline by the same rule.)
+   * `type T = list<object{…}>`, which is inline by the same rule.) The EMPTY
+   * list `object{}` is exempt: it names no layout and builds the bare
+   * primitive, so it is admitted on every route.
    *
-   * The BARE spelling is unrestricted: it is an ordinary primitive type.
+   * The BARE spelling is unrestricted: it is an ordinary primitive type. The
+   * field list uses braces for the same reason a record's does — see
+   * {@link parseRecordType} — and the brace/body ambiguity is resolved by
+   * {@link startsFieldList}.
    *
    * Spec: `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Declaring an object
    * type" (the `object-type-not-inline` paragraph).
@@ -1617,27 +1790,30 @@ export class Parser {
     const objectToken = this.current;
     this.advance(); // consume 'object'
 
-    const entries: RecordEntryNode[] = [];
+    let entries: RecordEntryNode[] = [];
 
-    if (this.match('<')) {
-      if (!this.allowObjectType)
+    if (this.startsFieldList()) {
+      entries = this.parseFieldList('object');
+
+      // The inline restriction is about a nominal LAYOUT, so it applies only
+      // once there is at least one field. An empty list declares no layout —
+      // the type builder collapses zero entries to the bare `object` primitive
+      // (`visitObjectType` in `type-builder.ts`) — so `object{}` is admitted
+      // everywhere the bare spelling is.
+      if (entries.length > 0 && !this.allowObjectType)
         this.errorAtToken(
           objectToken,
-          'An `object<…>` type may only be the definition of a named type',
-          'Object types are nominal: declare one with `type Person = object<…>` (not `type alias`), then refer to `Person` here',
+          'An `object{…}` type may only be the definition of a named type',
+          'Object types are nominal: declare one with `type Person = object{…}` (not `type alias`), then refer to `Person` here',
           'object-type-not-inline'
         );
-
-      if ((this.current as Token).type !== '>') {
-        do {
-          const entry = this.parseRecordEntry();
-          if (!entry) this.error('Expected object field');
-          entries.push(entry);
-        } while (this.match(','));
-      }
-
-      this.expect('>');
-    }
+    } else if ((this.current as Token).type === '<')
+      this.errorAtToken(
+        objectToken,
+        'An object type is written with braces: `object{field: type, …}`',
+        'For example `type Person = object{name: string, age: integer}`',
+        'object-type-angle-brackets'
+      );
 
     return this.createNode<ObjectTypeNode>('object', { entries });
   }

@@ -385,7 +385,7 @@ is free to *not* evaluate what it can prove it does not need, and in every such
 case the counter does not advance:
 
 - a branch not taken — `If(c, Random(), 0)` when `c` is false;
-- a lazy view never materialized — `Map(x |-> Random(), xs)` that nobody
+- a lazy view never materialized — `Map(x => Random(), xs)` that nobody
   consumes (§6);
 - a wrapper erased at **canonicalization** — `Count(RandomShuffle(xs))`
   canonicalizes to `Count(xs)`, because a count-preserving wrapper cannot change
@@ -411,11 +411,11 @@ is dynamic scoping applied consistently, not a defect.
 A caller who wants framed values therefore **materializes inside the frame**:
 
 ```
-WithRandomSeed(1, ListFrom(Map(x |-> Random(), Range(1, 3))))   // replays
-WithRandomSeed(1, At(Map(x |-> Random(), Range(1, 3)), 1))      // replays
-WithRandomSeed(1, Sum(Map(x |-> Random(), Range(1, 3))))        // replays
+WithRandomSeed(1, ListFrom(Map(x => Random(), Range(1, 3))))   // replays
+WithRandomSeed(1, At(Map(x => Random(), Range(1, 3)), 1))      // replays
+WithRandomSeed(1, Sum(Map(x => Random(), Range(1, 3))))        // replays
 
-ListFrom(WithRandomSeed(1, Map(x |-> Random(), Range(1, 3))))   // LIVE draws:
+ListFrom(WithRandomSeed(1, Map(x => Random(), Range(1, 3))))   // LIVE draws:
                                                     // the view escaped the frame
 ```
 

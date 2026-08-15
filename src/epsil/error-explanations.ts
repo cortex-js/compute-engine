@@ -62,9 +62,13 @@ Arguments are matched to declared positions, and there is no way to leave a hole
 
 The last element is "xs[-1]" — negative indices count from the end, which is usually what a 0-index habit is reaching for.`,
 
-  'mapsto-arrow-expected': `"->" and "|->" are different operators: "->" pairs a key with a value (the key must be a string, as in a dictionary entry) and also writes function TYPES in annotations ("(number) -> number"), while "|->" is the mapsto arrow that builds a function value.
+  'mapsto-arrow-expected': `"->" and "=>" are different operators: "->" pairs a key with a value (the key must be a string, as in a dictionary entry) and also writes function TYPES in annotations ("(number) -> number"), while "=>" is the mapsto arrow that builds a function value.
 
-So "(x) -> x^2" reads as a key-value pair with a malformed key, not a lambda. Write "(x) |-> x^2" for the function; the fixit in the diagnostic applies exactly that rewrite.`,
+So "(x) -> x^2" reads as a key-value pair with a malformed key, not a lambda. Write "(x) => x^2" for the function; the fixit in the diagnostic applies exactly that rewrite.`,
+
+  'mapsto-arrow-legacy': `"|->" was the mapsto arrow in earlier versions of the language. It is now spelled "=>", the same arrow a "match" case uses for its body — one glyph, meaning "yields", in both places.
+
+Write "x => x + 1"; the fixit in the diagnostic replaces the arrow for you. The expression was parsed as the function it was meant to be, so any other diagnostic reported here is a separate problem. (Function TYPES and dictionary entries are unaffected: they keep "->", as in "(number) -> number" and "{k -> v}".)`,
 
   'chained-assignment': `"a = b = 5" does not chain: "=" only assigns as a whole statement, so the OUTER "=" assigns and the inner one compares — "a" receives the boolean of "b = 5".
 

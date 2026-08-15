@@ -567,7 +567,7 @@ type string is Comparable {
       .box(['Field', 'Comparable', { str: 'compare' }] as any)
       .evaluate();
     expect(v.toString()).toBe(
-      '("self", "other") |-> ProtocolMember("Comparable", "compare", "self", "other")'
+      '("self", "other") => ProtocolMember("Comparable", "compare", "self", "other")'
     );
   });
 
@@ -741,7 +741,7 @@ const r = Map(Negatable.negated, [1, 2])`
         .evaluate()
         .toString()
     ).toBe(
-      '("self", "other") |-> ProtocolMember("Comparable", "compare", "self", "other")'
+      '("self", "other") => ProtocolMember("Comparable", "compare", "self", "other")'
     );
   });
 

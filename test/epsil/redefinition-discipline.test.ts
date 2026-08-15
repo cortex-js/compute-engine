@@ -855,14 +855,14 @@ describe('the discipline over function clauses', () => {
       const ce = new ComputeEngine();
       const { value, diagnostics } = executeEpsil(
         ce,
-        'f(n) = 1\nf = (x |-> 42)\nf(m) = 2\nf(0)'
+        'f(n) = 1\nf = (x => 42)\nf(m) = 2\nf(0)'
       );
       expect(diagnostics).toEqual([]);
       expect(value.toString()).toBe('2');
       // Both tiers agree: `epsil check` must not report it either.
       expect(
         codes(
-          checkSource('f(n) = 1\nf = (x |-> 42)\nf(m) = 2\nf(0)').diagnostics
+          checkSource('f(n) = 1\nf = (x => 42)\nf(m) = 2\nf(0)').diagnostics
         )
       ).toEqual([]);
     });
@@ -871,7 +871,7 @@ describe('the discipline over function clauses', () => {
       const ce = new ComputeEngine();
       const { value, diagnostics } = executeEpsil(
         ce,
-        'g(n) = 1\ng = x |-> 2\ng(n) = 3\ng(9)'
+        'g(n) = 1\ng = x => 2\ng(n) = 3\ng(9)'
       );
       expect(diagnostics).toEqual([]);
       expect(value.toString()).toBe('3');

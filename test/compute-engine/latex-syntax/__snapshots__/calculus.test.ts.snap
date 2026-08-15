@@ -74,13 +74,13 @@ D
 
 exports[`EULER DERIVATIVE NOTATION D^2_x f - second derivative 1`] = `
 \\frac{\\mathrm{d}^{2}}{\\mathrm{d}x^{2}}f
-D(D((x) |-> f, x), x)
+D(D((x) => f, x), x)
 ["D", ["D", ["Function", "f", "x"], "x"], "x"]
 `;
 
 exports[`EULER DERIVATIVE NOTATION D_t x - different variable 1`] = `
 \\frac{\\mathrm{d}}{\\mathrm{d}t}x
-D((t) |-> x, t)
+D((t) => x, t)
 ["D", ["Function", "x", "t"], "t"]
 `;
 
@@ -92,7 +92,7 @@ D(x^2 + 1, x)
 
 exports[`EULER DERIVATIVE NOTATION D_x f - first derivative 1`] = `
 \\frac{\\mathrm{d}}{\\mathrm{d}x}f
-D((x) |-> f, x)
+D((x) => f, x)
 ["D", ["Function", "f", "x"], "x"]
 `;
 
@@ -555,7 +555,7 @@ int_(1)^(2)(int_(0)^(1)(int_(3)^(4)(x^2 + y^2 + z^2 dx) dy) dz)
 
 exports[`NEWTON DOT NOTATION Dot notation with expression 1`] = `
 \\frac{\\mathrm{d}^{2}}{\\mathrm{d}t^{2}}x+\\frac{\\mathrm{d}}{\\mathrm{d}t}x
-D(D((t) |-> x, t), t) + D((t) |-> x, t)
+D(D((t) => x, t), t) + D((t) => x, t)
 [
   "Add",
   ["D", ["D", ["Function", "x", "t"], "t"], "t"],
@@ -565,25 +565,25 @@ D(D((t) |-> x, t), t) + D((t) |-> x, t)
 
 exports[`NEWTON DOT NOTATION First derivative \\dot{x} 1`] = `
 \\frac{\\mathrm{d}}{\\mathrm{d}t}x
-D((t) |-> x, t)
+D((t) => x, t)
 ["D", ["Function", "x", "t"], "t"]
 `;
 
 exports[`NEWTON DOT NOTATION Fourth derivative \\ddddot{z} 1`] = `
 \\frac{\\mathrm{d}^{4}}{\\mathrm{d}t^{4}}z
-D(D(D(D((t) |-> z, t), t), t), t)
+D(D(D(D((t) => z, t), t), t), t)
 ["D", ["D", ["D", ["D", ["Function", "z", "t"], "t"], "t"], "t"], "t"]
 `;
 
 exports[`NEWTON DOT NOTATION Second derivative \\ddot{x} 1`] = `
 \\frac{\\mathrm{d}^{2}}{\\mathrm{d}t^{2}}x
-D(D((t) |-> x, t), t)
+D(D((t) => x, t), t)
 ["D", ["D", ["Function", "x", "t"], "t"], "t"]
 `;
 
 exports[`NEWTON DOT NOTATION Third derivative \\dddot{y} 1`] = `
 \\frac{\\mathrm{d}^{3}}{\\mathrm{d}t^{3}}y
-D(D(D((t) |-> y, t), t), t)
+D(D(D((t) => y, t), t), t)
 ["D", ["D", ["D", ["Function", "y", "t"], "t"], "t"], "t"]
 `;
 

@@ -209,7 +209,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) |-> e === v)`."
+      "description": "Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) => e === v)`."
     },
     {
       "name": "Apart",
@@ -1294,7 +1294,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return True if the collection contains the given element (structural identity, like `===`), False otherwise.\n\nEquivalent to `Any(xs, (e) |-> e === v)`; use `Any` to test an arbitrary predicate instead of a specific value."
+      "description": "Return True if the collection contains the given element (structural identity, like `===`), False otherwise.\n\nEquivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value."
     },
     {
       "name": "Continue",

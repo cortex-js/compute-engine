@@ -17,7 +17,7 @@ import { MathJsonSymbol } from '../math-json/types.js';
 //
 //   Assign :=         10   (infix, right, relational spacing)
 //   (bare `=` is positional — it resolves to `:=` or `==`; see its row)
-//   MapsTo |->        15   (infix, right)
+//   MapsTo =>         15   (infix, right; also the `match` case arrow)
 //   Coalesce ??       18   (infix, right)
 //   Pipe  |>  ~>      20   (infix, left)
 //   KeyValuePair ->   30   (infix)
@@ -68,7 +68,7 @@ import { MathJsonSymbol } from '../math-json/types.js';
  * consequent alone and leave a shape nobody can mean:
  *
  *     x = a if c else b     →  x = (a if c else b)      not (x = a) if …
- *     x |-> a if c else b   →  x |-> (a if c else b)    not (x |-> a) if …
+ *     x => a if c else b    →  x => (a if c else b)     not (x => a) if …
  *     xs |> f if c else g   →  xs |> (f if c else g)    not (xs |> f) if …
  *     k -> v if c else w    →  k -> (v if c else w)     not (k -> v) if …
  *
@@ -158,17 +158,35 @@ export const OPERATORS: OperatorDef[] = [
     assoc: 'right',
     relational: true,
   },
-  // Anonymous-function (mapsto) arrow `x |-> expr`. Maximal-munches as one
-  // OPERATOR token, distinct from `|>` (Pipe) and `->` (KeyValuePair). It binds
-  // very loosely (just above `Assign`, so `f = x |-> x + 1` captures the whole
-  // mapsto as the RHS) and right-associates for currying (`x |-> y |-> …`). Its
-  // MathJSON `name` is a parser-internal marker: the parser rewrites the node in
-  // `combineInfix` into the engine `Function` shape (`["Function", body,
-  // …params]`), so a raw `MapsTo` head never reaches the serializer.
+  // Anonymous-function (mapsto) arrow `x => expr`. Maximal-munches as one
+  // OPERATOR token, distinct from `->` (KeyValuePair, which also writes
+  // function TYPES) and `>=`. It binds very loosely (just above `Assign`, so
+  // `f = x => x + 1` captures the whole mapsto as the RHS) and right-associates
+  // for currying (`x => y => …`). Its MathJSON `name` is a parser-internal
+  // marker: the parser rewrites the node in `combineInfix` into the engine
+  // `Function` shape (`["Function", body, …params]`), so a raw `MapsTo` head
+  // never reaches the serializer.
+  //
+  // `=>` is deliberately SHARED with the `match` case arrow
+  // (`pattern [if guard] => body`) — one glyph meaning "yields", as in Scala.
+  // The grammar keeps the two apart by POSITION, not by spelling: while a
+  // case's pattern and guard are being parsed, the arrow is reserved for that
+  // case, and every site that could consume it as a mapsto declines (the
+  // parser's `mapstoStops` bracket-depth stack). So `n if valid => n` is a
+  // guard `valid` and a body `n`, never a lambda guard `valid => n`. The
+  // reservation is depth-gated, so a lambda genuinely wanted there is
+  // spellable in parentheses (`n if (f => f)(n) => …`); and it is popped
+  // before the arm BODY, so `0 => x => x + 1` is a case whose body is a
+  // lambda.
+  //
+  // The reservation is positional rather than a precedence floor because this
+  // row is not the loosest: `Assign` `:=` (10) is looser still, and a floor
+  // above `MapsTo` would also have ended a guard at a `:=`, losing the
+  // `assign-in-condition` diagnostic that `n if flag := true => 1` earns.
   {
     name: 'MapsTo',
-    symbol: '|->',
-    fancySymbol: '↦',
+    symbol: '=>',
+    fancySymbol: '⇒',
     precedence: 15,
     kind: 'infix',
     assoc: 'right',
@@ -180,7 +198,7 @@ export const OPERATORS: OperatorDef[] = [
   //
   //   - LOOSER than `Pipe` (20), so `xs |> f ?? 0` is `(xs |> f) ?? 0` — the
   //     default is for the pipeline's result, never for the stage function.
-  //   - TIGHTER than `MapsTo` (15), so `x |-> x.a ?? 0` puts the default
+  //   - TIGHTER than `MapsTo` (15), so `x => x.a ?? 0` puts the default
   //     inside the body rather than coalescing the whole lambda.
   //
   // That also places it below `Or` (40), below `KeyValuePair` (30) — exactly

@@ -17,7 +17,7 @@ import { widen } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import { isFunction, isString, isSymbol, isNumber } from './type-guards.js';
 
-/** Keys a `record<…>` type can carry unescaped: what the type lexer reads back
+/** Keys a `record{…}` type can carry unescaped: what the type lexer reads back
  * as an `IDENTIFIER` (`lexer.ts`), minus the words it lexes as keywords. */
 const TYPE_KEYWORD_KEYS = new Set(['true', 'false', 'nan', 'infinity', 'oo']);
 function isRecordKey(key: string): boolean {
@@ -187,7 +187,7 @@ export class BoxedDictionary
     if (this._type) return this._type;
     const keys = Object.keys(this._keyValues);
     // A dictionary literal always knows its keys, so synthesize the narrower
-    // `record<k: T, …>` — the shape a `record`-bodied type can accept. It is a
+    // `record{k: T, …}` — the shape a `record`-bodied type can accept. It is a
     // subtype of the `dictionary<T>` this used to report, so any consumer
     // expecting `dictionary<T>` still matches. Fall back to `dictionary<T>`
     // when a key is not a bare identifier: `typeToString` does not backtick-

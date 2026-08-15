@@ -389,7 +389,7 @@ describe('Epsil CLI runtime error reporting', () => {
   test('renders a fixit as a help line', async () => {
     const { io, stderr } = makeIo();
     expect(await main(['-e', '(x) -> x^2'], io)).toBe(1);
-    expect(stderr()).toContain('= help: did you mean `(x) |-> x^2`?');
+    expect(stderr()).toContain('= help: did you mean `(x) => x^2`?');
   });
 
   test('advertises extended docs with a note footer', async () => {
@@ -429,14 +429,14 @@ describe('Epsil CLI runtime error reporting', () => {
     // data-only: the caret says it more clearly, so it is not rendered.
     expect(
       await main(
-        ['-e', 'let s = ["a", "b"]\ns |> Map(_ |-> Length(Characters(s)), _)'],
+        ['-e', 'let s = ["a", "b"]\ns |> Map(_ => Length(Characters(s)), _)'],
         io
       )
     ).toBe(1);
     expect(stderr()).not.toContain('in Characters argument');
-    expect(stderr()).toContain('--> 2:34');
+    expect(stderr()).toContain('--> 2:33');
     // A single-character span: one caret, not a statement-wide underline.
-    expect(stderr()).toMatch(/\n\s*\| {34}\^\n/);
+    expect(stderr()).toMatch(/\n\s*\| {33}\^\n/);
   });
 });
 

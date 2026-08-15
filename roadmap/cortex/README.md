@@ -140,7 +140,7 @@ accepts a single collection of strings, including a lazy `Map` result, so
 
 - **Typed function params: CLOSED (native typed function literals, committed
   652a20fc 2026-07-12).** Typed defs (`f(x: integer) -> real = …`,
-  `function f(x) -> real { … }`), anonymous `(x: integer) |-> …`, enforcement,
+  `function f(x) -> real { … }`), anonymous `(x: integer) => …`, enforcement,
   return types, and faithful serialize round-trip all ship natively via
   `["Typed", …]` annotations on the `Function` literal — see
   [`docs/plans/2026-07-12-typed-function-literals-design.md`](../../docs/plans/2026-07-12-typed-function-literals-design.md).
@@ -227,11 +227,11 @@ bug — decide when Tycho demand appears:
   `{…}` in expression position stays a set literal; the block-in-expression
   form is an explicit `do { … }` (the keyword is already reserved): a
   statement block in any expression position whose value is its final
-  statement. Rejected: JS-style "block after `|->`" (silently changes the
-  meaning of set-valued lambdas like `x |-> {x, -x}`). Ladder status
+  statement. Rejected: JS-style "block after `=>`" (silently changes the
+  meaning of set-valued lambdas like `x => {x, -x}`). Ladder status
   (2026-07-11): rungs 1, 2 and 4 **landed** — `do { … }` parses in any
   expression position (serializer emits `do {…}` for expression-position
-  Blocks only), zero-param lambdas `() |-> …` parse and apply, and a named
+  Blocks only), zero-param lambdas `() => …` parse and apply, and a named
   inner function escapes its defining scope as a first-class value (the
   operator-def's captured `_lambdaLiteral` is resolved at the two
   value-position return points; the broader resolve-in-`BoxedSymbol.evaluate`
@@ -295,7 +295,7 @@ CI-executed doc examples and the agents card + MCP server. Worth taking:
   `if let` item below; compound/negation-type resolution in typed
   patterns is its concrete prerequisite (an unsupported annotation now
   at least diagnoses `type-pattern-unsupported` instead of silently
-  never matching — adversarial-review fix). The `->` vs `|->` typo is
+  never matching — adversarial-review fix). The `->` vs `=>` typo is
   now CAUGHT by `check` (the review found the error was minted but
   hidden inside a dictionary literal the walk didn't descend into; the
   general fix also surfaces `let g = "a" + 1`-class initializer errors).

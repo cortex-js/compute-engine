@@ -28,7 +28,7 @@ export type DiagnosticCode =
   | 'generic-clause-unsupported' // %0 = function name — a generic (`function f<T>(…)`) definition cannot take part in a multi-clause set
   | 'type-declaration-not-top-level' // %0 = type name — a `type` statement inside a block or function body; types are engine-global, so declarations are legal only at the top level of a program
   | 'type-redefinition' // %0 = type name — a second `type` statement declaring the same name in ONE program (a sum's variant names count as its statement's own). Within one compilation unit a redeclaration is a mistake; across units (a re-run cell) it is the notebook redefinition gesture and stays legal. See `docs/plans/2026-08-14-redefinition-discipline.md`
-  | 'object-type-not-inline' // an `object<…>` layout written anywhere other than as the definition of a NOMINAL named type (`let x: object<id: string>`, nested inside a declaration body, or as a `type alias` body). Object types are nominal: only a named declaration mints the constructor and carries the conformances, so an inline layout would name a type nothing can construct. See `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Declaring an object type"
+  | 'object-type-not-inline' // an `object{…}` layout written anywhere other than as the definition of a NOMINAL named type (`let x: object{id: string}`, nested inside a declaration body, or as a `type alias` body). Object types are nominal: only a named declaration mints the constructor and carries the conformances, so an inline layout would name a type nothing can construct. See `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Declaring an object type"
   | 'protocol-redefinition' // %0 = protocol name — the protocol counterpart of `type-redefinition`; same rule, same boundary
   | 'function-redefinition' // %0 = function name — two clauses in ONE program share a parameter list, so the second silently replaces the first (user ruling 2026-08-14). Only REPLACEMENT is refused: clauses at distinct parameter lists still accumulate, which is what multi-clause functions are for. Same unit boundary as the two above — a re-run cell still replaces last-wins. Reported by BOTH tiers, like the two above: the static pass collects each clause's parameter domain from the canonicalized literal (`epsil check` reports it before anything runs), the statement route by the batch stamp. See `docs/plans/2026-08-14-redefinition-discipline.md`
   | 'protocol-declaration-not-top-level' // %0 = protocol name — a `protocol` statement inside a block or function body; protocols are engine-global, so declarations are legal only at the top level of a program
@@ -74,7 +74,8 @@ export type DiagnosticCode =
   | 'primary-expected'
   | 'string-literal-opening-delimiter-expected'
   | 'string-literal-closing-delimiter-expected' // %0 = delimiter
-  | 'mapsto-arrow-expected' // `->` (KeyValuePair) whose left side is shaped like a parameter list — `(x: number) -> x^2`, `(x, y) -> x + y`, `= x -> x + 1` — a function written with the wrong arrow; recovered as the intended `|->`
+  | 'mapsto-arrow-expected' // `->` (KeyValuePair) whose left side is shaped like a parameter list — `(x: number) -> x^2`, `(x, y) -> x + y`, `= x -> x + 1` — a function written with the wrong arrow; recovered as the intended `=>`
+  | 'mapsto-arrow-legacy' // the retired `|->` spelling of the mapsto arrow — `x |-> x + 1`; carries a fixit replacing it by `=>` and is recovered AS the arrow, so the rest of the program parses normally
   | 'parameter-name-mismatch' // %0 = lambda parameter name, %1 = name in the type annotation — a typed declaration's annotation and its lambda initializer name the same positional parameter differently
   | 'symbol-expected'
   | 'unbalanced-verbatim-symbol' // %0 = symbol name

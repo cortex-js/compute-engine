@@ -356,21 +356,21 @@ The names checked are the ones the callee's **declaration** carries — a
 `function` definition's parameters, a
 [named function-type annotation](/epsil/declarations/#function-type-annotations-bind-their-parameter-names),
 an annotated lambda (including one assigned to a name,
-`f := (x: number, y: string) |-> x + 3` then `f(y: "ok", x: 1)`), or a
+`f := (x: number, y: string) => x + 3` then `f(y: "ok", x: 1)`), or a
 protocol member's requirement (both the bare call
 `compare(other: y, self: x)` and the qualified
 `Comparable.compare(other: y, self: x)`, which dispatch on `self`
 wherever it is written). An inline lambda applied directly reads its
-names from the expression itself — `((x: number) |-> x + 1)(x: 5)` is
+names from the expression itself — `((x: number) => x + 1)(x: 5)` is
 `6`, and unannotated parameters work there too,
-`((x, y) |-> x - y)(y: 2, x: 10)` is `8`.
+`((x, y) => x - y)(y: 2, x: 10)` is `8`.
 
 A parameter without a declared name is positional-only, and a callee
 whose parameter names the engine cannot read cannot take named
 arguments at all: a forward reference (a call *before* the statement
 that pins the callee's signature), a value typed only as `function`,
 or an **unannotated** lambda reached through a binding —
-`h := (x, y) |-> …` then `h(x: 1, y: 2)` declines, because type
+`h := (x, y) => …` then `h(x: 1, y: 2)` declines, because type
 inference drops the parameter names; annotate the parameters to call
 it by name. A misspelled name gets a "did you mean" pointing at the
 closest declared one.
@@ -434,7 +434,7 @@ call/index/field — the same whitespace-sensitivity that governs operators.
 - **Tuple**: `(a, b)`. A single parenthesized element, `(a)`, is just the
   parenthesized expression `a`, not a one-element tuple; `()` is a diagnostic
   (`expression-expected`) — there is no empty tuple — **except** immediately
-  before a mapsto arrow, where `() |-> expr` is a zero-parameter lambda.
+  before a mapsto arrow, where `() => expr` is a zero-parameter lambda.
 - **Dictionary**: `{k -> v}`; an unquoted key becomes a string key. The empty
   dictionary is spelled `{->}`, not `{}` (which is the empty set).
 

@@ -166,7 +166,7 @@ await scenario('fixit diagnostic', undefined, async (c) => {
   );
   check(
     'and carries the explanation as its message',
-    diagnostics[0]?.message.includes('use the mapsto arrow "|->"') === true,
+    diagnostics[0]?.message.includes('use the mapsto arrow "=>"') === true,
     JSON.stringify(diagnostics[0]?.message)
   );
 });

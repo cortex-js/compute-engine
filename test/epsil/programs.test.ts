@@ -45,7 +45,7 @@ total`);
 
   test('FizzBuzz as a value (Map over a Range)', () => {
     const { value, diagnostics } = run(`
-Map(k |->
+Map(k =>
   if k % 15 == 0 { "FizzBuzz" }
   else if k % 3 == 0 { "Fizz" }
   else if k % 5 == 0 { "Buzz" }
@@ -148,7 +148,7 @@ fact(10)`);
     // that captures it is created.
     const { text, diagnostics } = run(`
 let fact
-fact = n |-> if n <= 1 { 1 } else { n * fact(n - 1) }
+fact = n => if n <= 1 { 1 } else { n * fact(n - 1) }
 fact(10)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('3628800');
@@ -226,7 +226,7 @@ D(f(t), t)`);
   test('solve a quadratic, then verify the roots by substitution', () => {
     const { text, diagnostics } = run(`
 let roots = Solve(x^2 - 5x + 6 == 0, x)
-Map(r |-> r^2 - 5r + 6, roots)`);
+Map(r => r^2 - 5r + 6, roots)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('[0,0]');
   });
@@ -291,8 +291,8 @@ let x = 2^11 - 1
     // control characters; each body row splices computed numbers with `\(…)`.
     const { value, diagnostics } = run(`
 let header = "n\\tn^2\\tn^3\\n"
-let lines = Map(n |-> "\\(n)\\t\\(n^2)\\t\\(n^3)\\n", Range(1, 5))
-StringJoin(header, Fold((acc, line) |-> StringJoin(acc, line), "", lines))`);
+let lines = Map(n => "\\(n)\\t\\(n^2)\\t\\(n^3)\\n", Range(1, 5))
+StringJoin(header, Fold((acc, line) => StringJoin(acc, line), "", lines))`);
     expect(diagnostics).toEqual([]);
     expect(value.string).toBe(
       'n\tn^2\tn^3\n1\t1\t1\n2\t4\t8\n3\t9\t27\n4\t16\t64\n5\t25\t125\n'
@@ -338,7 +338,7 @@ function shift(s, k) {
     // (`UnicodeScalars`) must still iterate — the source is materialized when
     // iterated rather than yielding nothing. Here the identity Map round-trips.
     const { text, diagnostics } = run(
-      `StringFrom(Map(c |-> c + 1, UnicodeScalars("abc")), "unicode-scalars")`
+      `StringFrom(Map(c => c + 1, UnicodeScalars("abc")), "unicode-scalars")`
     );
     expect(diagnostics).toEqual([]);
     expect(text).toBe('"bcd"');
@@ -395,8 +395,8 @@ let xs = [4, 8, 15, 16, 23, 42]
 
   test('filter and reduce with anonymous functions', () => {
     const { text, diagnostics } = run(`
-let evens = Filter(Range(1, 10), n |-> n % 2 == 0)
-Reduce(evens, (acc, n) |-> acc + n)`);
+let evens = Filter(Range(1, 10), n => n % 2 == 0)
+Reduce(evens, (acc, n) => acc + n)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('30');
   });
@@ -418,7 +418,7 @@ let m = [[1, 2], [3, 4]]
 
   test('fold with an explicit initial value', () => {
     const { text, diagnostics } = run(`
-Fold((acc, n) |-> acc + n^2, 0, Range(1, 5))`);
+Fold((acc, n) => acc + n^2, 0, Range(1, 5))`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('55');
   });
@@ -448,7 +448,7 @@ let sol = Solve([x + y == 3, x - y == 1], [x, y])
     // the valid inputs still compute — the Map never throws.
     const { text, diagnostics } = run(`
 let inputs = [16, -4, "banana", 81]
-Map(x |-> Sqrt(x), inputs)`);
+Map(x => Sqrt(x), inputs)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('[4,2i,NaN,9]');
   });
@@ -480,7 +480,7 @@ describe('EPSIL PROGRAMS — higher-order functions', () => {
   test('a numeric-derivative factory (a lambda closing over f and h)', () => {
     // Central difference of x^3 at 2 with h = 1/1000 is exact: 3·2² + h².
     const { text, diagnostics } = run(`
-deriv(f, h) = x |-> (f(x + h) - f(x - h)) / (2h)
+deriv(f, h) = x => (f(x + h) - f(x - h)) / (2h)
 g(x) = x^3
 let dg = deriv(g, 1/1000)
 dg(2)`);
@@ -490,7 +490,7 @@ dg(2)`);
 
   test('N numericizes a user-function/closure call in one step', () => {
     const { text, diagnostics } = run(`
-deriv(f, h) = x |-> (f(x + h) - f(x - h)) / (2h)
+deriv(f, h) = x => (f(x + h) - f(x - h)) / (2h)
 g(x) = x^3
 let dg = deriv(g, 1/1000)
 N(dg(2))`);
@@ -500,7 +500,7 @@ N(dg(2))`);
 
   test('function composition captures the right bindings', () => {
     const { text, diagnostics } = run(`
-compose(f, g) = x |-> f(g(x))
+compose(f, g) = x => f(g(x))
 inc(x) = x + 1
 sq(x) = x^2
 let h = compose(sq, inc)
@@ -516,7 +516,7 @@ let h = compose(sq, inc)
     const { text, diagnostics } = run(`
 function makeCounter() {
   let count = 0
-  () |-> do { count = count + 1; count }
+  () => do { count = count + 1; count }
 }
 let c = makeCounter()
 c()
@@ -533,7 +533,7 @@ c()`);
     const { text, diagnostics } = run(`
 function makeCounter() {
   let count = 0
-  () |-> do { count = count + 1; count }
+  () => do { count = count + 1; count }
 }
 let a = makeCounter()
 let b = makeCounter()
@@ -689,7 +689,7 @@ let y = 5
 
   test('a truth table for logical AND, as a Map over pairs', () => {
     const { text, diagnostics } = run(`
-Map(p |-> p[1] && p[2],
+Map(p => p[1] && p[2],
     [(True, True), (True, False), (False, True), (False, False)])`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('["True","False","False","False"]');
@@ -715,7 +715,7 @@ describe('EPSIL PROGRAMS — integers and number theory', () => {
     // The accumulator is a two-element list literal [a, b]; big integers
     // survive it exactly (F(200) is far past Float64's 2^53 range).
     const { text, diagnostics } = run(`
-Fold((p, _) |-> [p[2], p[1] + p[2]], [0, 1], Range(1, 200))[1]`);
+Fold((p, _) => [p[2], p[1] + p[2]], [0, 1], Range(1, 200))[1]`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('280571172992510140037611932413038677189525');
   });
@@ -740,7 +740,7 @@ describe('EPSIL PROGRAMS — complex numbers', () => {
   test('a product of complex numbers over a mapped Range', () => {
     // (1+i)(2+i)(3+i) = 10i — the imaginary parts survive the reduction.
     const { text, diagnostics } = run(`
-Product(Map(k |-> k + i, Range(1, 3)))`);
+Product(Map(k => k + i, Range(1, 3)))`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('10i');
   });
@@ -768,7 +768,7 @@ describe('EPSIL PROGRAMS — exact sums and special values', () => {
   test('an exact rational Fold: the 10th harmonic number', () => {
     // Folding 1/k over a Range keeps the accumulator an exact rational.
     const { text, diagnostics } = run(`
-Fold((a, k) |-> a + 1/k, 0, Range(1, 10))`);
+Fold((a, k) => a + 1/k, 0, Range(1, 10))`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('7381/2520');
   });

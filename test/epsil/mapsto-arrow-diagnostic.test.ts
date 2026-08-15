@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
-// The `->` / `|->` typo diagnostic — see the companion-diagnostics section of
+// The `->` / `=>` typo diagnostic — see the companion-diagnostics section of
 // `docs/plans/2026-08-08-annotation-lambda-lift.md`.
 //
 // A `KeyValuePair` whose left side is shaped like a parameter list — a typed
@@ -30,7 +30,7 @@ describe('EPSIL MAPSTO-ARROW DIAGNOSTIC — wrong-arrow lambdas', () => {
     // The fixit replaces the arrow itself.
     const [start, end, replacement] = diagnostics[0].fixits![0];
     expect(src.slice(0, start) + replacement + src.slice(end)).toBe(
-      'const f = (x:number) |-> x^2 + 2x + 1'
+      'const f = (x:number) => x^2 + 2x + 1'
     );
   });
 

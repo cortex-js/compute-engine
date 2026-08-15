@@ -221,7 +221,7 @@ describe('Map fusion — route parity', () => {
 describe('Map fusion — shape-gate negatives fall back correctly', () => {
   const ce = new ComputeEngine();
 
-  test('deep parameter position (`x |-> x^2 + 1`) still evaluates', () => {
+  test('deep parameter position (`x => x^2 + 1`) still evaluates', () => {
     // Body is `Add(Power(_1, 2), 1)`: the parameter is not a direct operand
     // of the body application, so the level is NOT lowerable.
     const m = ce.box([
@@ -431,7 +431,7 @@ describe('Map fusion — the row is EVALUATED before a level applies', () => {
 describe('Map fusion — the identity level under the `N` marker', () => {
   const ce = new ComputeEngine();
 
-  test('`Map(x |-> x, Range).N()` lowers as an `N` level and keeps its values', () => {
+  test('`Map(x => x, Range).N()` lowers as an `N` level and keeps its values', () => {
     const m = ce.box(['Map', ['Function', '_1', '_1'], ['Range', 1, 150]]);
     // The bare identity level is a pass-through…
     const plain = lowerMapSpine(m)!;

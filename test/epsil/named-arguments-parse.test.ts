@@ -103,7 +103,7 @@ describe('what the named-argument production does NOT claim', () => {
   });
 
   test('a mapsto parameter list still reads `x: T` as an annotation', () => {
-    expect(ast('(x: integer) |-> x')).toEqual({
+    expect(ast('(x: integer) => x')).toEqual({
       fn: [
         'Function',
         { sym: 'x' },

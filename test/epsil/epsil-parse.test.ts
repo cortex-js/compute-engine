@@ -1863,7 +1863,7 @@ describe('EPSIL PARSING `do { … }` BLOCK EXPRESSIONS', () => {
   });
 
   test('a do-block as a lambda body', () => {
-    expect(validEpsil('x |-> do { let t = x * x; t + 1 }')).toStrictEqual([
+    expect(validEpsil('x => do { let t = x * x; t + 1 }')).toStrictEqual([
       'Function',
       [
         'Block',
@@ -1887,7 +1887,7 @@ describe('EPSIL PARSING `do { … }` BLOCK EXPRESSIONS', () => {
   });
 
   test('a bare `{…}` lambda body stays a Set (no regression)', () => {
-    expect(validEpsil('x |-> {1, 2}')).toStrictEqual([
+    expect(validEpsil('x => {1, 2}')).toStrictEqual([
       'Function',
       ['Set', 1, 2],
       'x',
@@ -1917,15 +1917,15 @@ describe('EPSIL PARSING `do { … }` BLOCK EXPRESSIONS', () => {
 });
 
 describe('EPSIL PARSING ZERO-PARAMETER LAMBDAS', () => {
-  test('`() |-> expr` is a zero-parameter Function', () => {
-    expect(validEpsil('() |-> 42')).toStrictEqual(['Function', 42]);
+  test('`() => expr` is a zero-parameter Function', () => {
+    expect(validEpsil('() => 42')).toStrictEqual(['Function', 42]);
   });
 
   test('a zero-argument call `c()` parses', () => {
     expect(validEpsil('c()')).toStrictEqual(['c']);
   });
 
-  test('a bare `()` (not before `|->`) is still a diagnostic', () => {
+  test('a bare `()` (not before `=>`) is still a diagnostic', () => {
     const [, diags] = parseEpsil('()');
     expect(diags.length).toBeGreaterThan(0);
     expect(diags[0].message).toStrictEqual(['expression-expected']);
@@ -1991,8 +1991,8 @@ describe('EPSIL ABSENCE COALESCING `??`', () => {
     ]);
   });
 
-  test('TIGHTER than `|->`: the default is inside the lambda body', () => {
-    expect(validEpsil('x |-> x.a ?? 0')).toStrictEqual([
+  test('TIGHTER than `=>`: the default is inside the lambda body', () => {
+    expect(validEpsil('x => x.a ?? 0')).toStrictEqual([
       'Function',
       ['Coalesce', ['Field', 'x', { str: 'a' }], 0],
       'x',
@@ -2014,10 +2014,10 @@ describe('EPSIL ABSENCE COALESCING `??`', () => {
  * `test/compute-engine/functions.test.ts`).
  */
 describe('EPSIL PARSING PIPE-STAGE SUGAR', () => {
-  test('a `|->` after a pipe operand forms the stage lambda', () => {
-    // Globally `|->` (15) is looser than `|>` (20); only in stage position
+  test('a `=>` after a pipe operand forms the stage lambda', () => {
+    // Globally `=>` (15) is looser than `|>` (20); only in stage position
     // does the mapsto bind tighter, and its body ends at the next `|>`.
-    expect(validEpsil('a |> x |-> x^2 |> Sum')).toStrictEqual([
+    expect(validEpsil('a |> x => x^2 |> Sum')).toStrictEqual([
       'Pipe',
       ['Pipe', 'a', ['Function', ['Power', 'x', 2], 'x']],
       'Sum',
@@ -2025,7 +2025,7 @@ describe('EPSIL PARSING PIPE-STAGE SUGAR', () => {
   });
 
   test('a curried stage lambda right-associates', () => {
-    expect(validEpsil('a |> x |-> y |-> x + y')).toStrictEqual([
+    expect(validEpsil('a |> x => y => x + y')).toStrictEqual([
       'Pipe',
       'a',
       ['Function', ['Function', ['Add', 'x', 'y'], 'y'], 'x'],
@@ -2033,7 +2033,7 @@ describe('EPSIL PARSING PIPE-STAGE SUGAR', () => {
   });
 
   test('a stage lambda still yields the pipeline result to `??`', () => {
-    expect(validEpsil('xs |> x |-> x + 1 ?? 0')).toStrictEqual([
+    expect(validEpsil('xs |> x => x + 1 ?? 0')).toStrictEqual([
       'Coalesce',
       ['Pipe', 'xs', ['Function', ['Add', 'x', 1], 'x']],
       0,

@@ -2872,7 +2872,7 @@ function gpuAtBaseShape(base: Expression | null): GPUAtBase {
   if (
     isFunction(base, 'Dictionary') ||
     (typeof t !== 'string' &&
-      // A dictionary literal synthesizes the narrower `record<…>` (its keys
+      // A dictionary literal synthesizes the narrower `record{…}` (its keys
       // are statically known), so both kinds land here.
       (t.kind === 'dictionary' || t.kind === 'record'))
   )

@@ -60,8 +60,13 @@ export function typeToString(type: Type, precedence = 0): string {
 
   switch (type.kind) {
     case 'value':
-      // Serialize value types
-      if (typeof type.value === 'string') result = `"${type.value}"`;
+      // Serialize value types. A string literal is double-quoted, and a
+      // backslash or a double quote inside it is escaped, mirroring the two
+      // escape sequences the lexer recognizes inside a string literal
+      // (`readStringLiteral()` in `lexer.ts`): `\\` reads back as a backslash
+      // and `\"` as a quote; every other character is read verbatim.
+      if (typeof type.value === 'string')
+        result = `"${type.value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
       else if (typeof type.value === 'boolean')
         result = type.value ? 'true' : 'false';
       else result = type.value.toString();
@@ -207,19 +212,22 @@ export function typeToString(type: Type, precedence = 0): string {
       break;
 
     case 'record':
-      // Serialize record types
+      // Serialize record types. A key that is not a plain identifier is
+      // wrapped in backticks by `symbolName()`: the type lexer reads only
+      // `[a-zA-Z_][a-zA-Z0-9_]*` bare, so an unquoted exotic key would not
+      // parse back.
       const elements = Object.entries(type.elements)
-        .map(([key, value]) => `${key}: ${typeToString(value)}`)
+        .map(([key, value]) => `${symbolName(key)}: ${typeToString(value)}`)
         .join(', ');
-      result = `record<${elements}>`;
+      result = `record{${elements}}`;
       break;
 
     case 'object':
       // The stored-field layout of an object type: the same surface form as a
       // record, with the `object` head naming the mutable/nominal category.
-      result = `object<${Object.entries(type.elements)
-        .map(([key, value]) => `${key}: ${typeToString(value)}`)
-        .join(', ')}>`;
+      result = `object{${Object.entries(type.elements)
+        .map(([key, value]) => `${symbolName(key)}: ${typeToString(value)}`)
+        .join(', ')}}`;
       break;
 
     case 'dictionary':
@@ -328,7 +336,11 @@ export function typeToString(type: Type, precedence = 0): string {
 }
 
 function namedElement(el: NamedElement): string {
-  if (el.name) return `${el.name}: ${typeToString(el.type)}`;
+  // The label of a tuple element or a function argument. Backticked when it is
+  // not a plain identifier, for the same reason a record key is: the type
+  // lexer reads only `[a-zA-Z_][a-zA-Z0-9_]*` bare, so `tuple<my x: integer>`
+  // would not parse back.
+  if (el.name) return `${symbolName(el.name)}: ${typeToString(el.type)}`;
   return typeToString(el.type);
 }
 
@@ -336,8 +348,13 @@ function symbolName(name: string): string {
   // If the name is a basic identifier, return it as is
   if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) return name;
 
-  // Otherwise, return the name in backticks
-  return `\`${name}\``;
+  // Otherwise, return the name in backticks. A backslash or a backtick inside
+  // the name has to be escaped, mirroring the two escape sequences the lexer
+  // recognizes inside a verbatim string (`readVerbatimString()` in
+  // `lexer.ts`): `\\` reads back as a backslash and `` \` `` as a backtick.
+  // Any other character (including a `\` followed by something else) is read
+  // verbatim, so escaping every backslash is what makes the round trip exact.
+  return `\`${name.replace(/\\/g, '\\\\').replace(/`/g, '\\`')}\``;
 }
 
 function getPrecedence(kind: string): number {
@@ -351,7 +368,7 @@ function getPrecedence(kind: string): number {
     case 'list':
       return LIST_PRECEDENCE;
     case 'record':
-    // Bracketed exactly like `record<…>`, so it never needs parentheses.
+    // Delimited exactly like `record{…}`, so it never needs parentheses.
     case 'object':
       return RECORD_PRECEDENCE;
     case 'dictionary':

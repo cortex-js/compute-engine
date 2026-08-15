@@ -1173,7 +1173,7 @@ function annotateFromDeclaredParams(
     // stamp pairs the literal's parameters with the declared ones
     // POSITIONALLY, so a literal of the wrong arity would take a PARTIAL stamp
     // — a declared `(integer) -> boolean` slot annotating the `a` of
-    // `(a, b) |-> a > b` and leaving `b` bare. The whole stamp declines
+    // `(a, b) => a > b` and leaving `b` bare. The whole stamp declines
     // instead. Evaluation is unchanged either way (the arity error dominates);
     // what this buys is that a declined application carries no half-written
     // contract.
@@ -1302,7 +1302,7 @@ function annotateCallbacksFromContextualSolve(
     if (s.variadicArg !== undefined) continue;
     // ARITY GUARD: the stamp pairs the literal's parameters with `S`'s
     // POSITIONALLY, so a literal of the wrong arity would take a PARTIAL stamp
-    // — `Filter(cs, (a, b) |-> a > b)` annotating `a` alone. The whole stamp
+    // — `Filter(cs, (a, b) => a > b)` annotating `a` alone. The whole stamp
     // declines instead. Evaluation is unchanged either way (the arity error
     // dominates); what this buys is that a declined application carries no
     // half-written contract. The admissible range is `S`'s consumption arity:
@@ -1697,7 +1697,7 @@ function makeCanonicalFunctionCore(
     }
   } else if (named && name === 'Apply') {
     // Second carve-out: an INLINE function-literal callee,
-    // `((x: number) |-> x + 1)(x: 5)`. Its parameter names sit in the very
+    // `((x: number) => x + 1)(x: 5)`. Its parameter names sit in the very
     // expression being applied — read syntactically by
     // `inlineLiteralSignature`, so an UNANNOTATED literal's names work too,
     // even though its inferred signature type drops them (that drop is why a

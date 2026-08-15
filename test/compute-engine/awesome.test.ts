@@ -232,7 +232,7 @@ describe('Nth PRIME NUMBER', () =>
           "n"
         ]
       ]
-      eval-auto = (n) |-> sum_(v_1=2)^(floor(1.5 * n * ln(n)))(floor(1 / (0^(n - sum_(v_2=2)^("v_1")(prod_(v_3=2)^(floor(sqrt("v_2")))(1 - 0^(|-"v_2" / "v_3" + floor("v_2" / "v_3")|)))) + 1))) + 2
+      eval-auto = (n) => sum_(v_1=2)^(floor(1.5 * n * ln(n)))(floor(1 / (0^(n - sum_(v_2=2)^("v_1")(prod_(v_3=2)^(floor(sqrt("v_2")))(1 - 0^(|-"v_2" / "v_3" + floor("v_2" / "v_3")|)))) + 1))) + 2
     `);
   }));
 

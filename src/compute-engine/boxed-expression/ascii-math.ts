@@ -632,19 +632,19 @@ const FUNCTIONS: Record<
       args.map((x) => serialize(unwrap(x))).join(', ');
 
     if (isFunction(expr.op1, 'Block')) {
-      if (expr.op1.nops === 0) return `(${serializedArgs()}) |-> {}`;
+      if (expr.op1.nops === 0) return `(${serializedArgs()}) => {}`;
       if (expr.op1.nops === 1) {
         if (args.length === 1 && isSymbol(args[0], '_1')) {
           // If there is a single argument and it's _1, we can use _ instead
-          return `(_) |-> ${serialize(unwrap(expr.op1.op1).subs({ _1: '_' }))}`;
+          return `(_) => ${serialize(unwrap(expr.op1.op1).subs({ _1: '_' }))}`;
         }
-        return `(${serializedArgs()}) |-> ${serialize(unwrap(expr.op1.op1))}`;
+        return `(${serializedArgs()}) => ${serialize(unwrap(expr.op1.op1))}`;
       }
-      return `(${serializedArgs()}) |-> {\n    ${expr.op1.ops
+      return `(${serializedArgs()}) => {\n    ${expr.op1.ops
         .map((x) => serialize(unwrap(x)))
         .join(';\n     ')}\n}`;
     }
-    return `(${serializedArgs()}) |-> ${serialize(unwrap(expr.op1))}`;
+    return `(${serializedArgs()}) => ${serialize(unwrap(expr.op1))}`;
   },
 
   Domain: (expr: Expression) => JSON.stringify(expr.json),

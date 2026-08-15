@@ -683,7 +683,7 @@ function collectBreakpointableLines(ast: MathJsonExpression): number[] {
 
 /** Record the source span of every `Function` literal, named from the
  * enclosing definition where there is one: `function f(…) {…}` and the
- * `f(x) = …` sugar (both `DefineFunction`), and `let g = (x) |-> …`
+ * `f(x) = …` sugar (both `DefineFunction`), and `let g = (x) => …`
  * (a `Declare`/`Assign` whose value is a lambda — the name threads through
  * the value's `Dictionary`/`KeyValuePair` wrappers). Frames are named by
  * span containment — the engine has no user-facing name for a lambda at

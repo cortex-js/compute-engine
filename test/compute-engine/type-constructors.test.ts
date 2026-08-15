@@ -10,7 +10,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 //   type point = tuple<x: number, y: number>   →  point: (x: number, y: number) -> point
 //   type meters = number                       →  meters: (number) -> meters
 //   type alias pt = tuple<number, number>      →  pt: (number, number) -> tuple<number, number>
-//   type rec = record<x: number>               →  nothing (D4b)
+//   type rec = record{x: number}               →  nothing (D4b)
 //
 // A NOMINAL constructor is inert: `point(1, 2)` canonicalizes to, and stays,
 // the tagged application `["point", 1, 2]` whose `.type` is `point`. An ALIAS
@@ -61,7 +61,7 @@ describe('MINTING — signature derivation (D4)', () => {
 
   test('a RECORD body mints NOTHING (D4b)', () => {
     const ce = new ComputeEngine();
-    ce.declareType('rec', 'record<x: number, y: number>');
+    ce.declareType('rec', 'record{x: number, y: number}');
     expect(ce.operatorInfo('rec')).toBeUndefined();
     // …and the type itself is registered as usual.
     expect(ce.type('rec').toString()).toBe('rec');
@@ -69,7 +69,7 @@ describe('MINTING — signature derivation (D4)', () => {
 
   test('a record ALIAS mints nothing either (D4b)', () => {
     const ce = new ComputeEngine();
-    ce.declareType('reca', 'record<x: number>', { alias: true });
+    ce.declareType('reca', 'record{x: number}', { alias: true });
     expect(ce.operatorInfo('reca')).toBeUndefined();
   });
 
@@ -465,7 +465,7 @@ describe('NAMESPACE rules (D5)', () => {
     const ce = new ComputeEngine();
     ce.declareType('po', 'tuple<number, number>', { fromStatement: true });
     expect(ce.operatorInfo('po')).toBeDefined();
-    ce.declareType('po', 'record<x: number>', { fromStatement: true });
+    ce.declareType('po', 'record{x: number}', { fromStatement: true });
     expect(ce.operatorInfo('po')).toBeUndefined();
   });
 

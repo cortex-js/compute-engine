@@ -116,11 +116,11 @@ export function unboundSignatureHint(
     unknowns.length === args.length
   ) {
     const named = `(${args.map((a, i) => `${unknowns[i]}: ${typeToString(a.type)}`).join(', ')}) -> ${typeToString(declared.result)}`;
-    return `${lead}. Name the parameters — "${named}" — to bind them and make the initializer the function's body, or provide a function literal: "(${unknowns.join(', ')}) |-> ${short}"`;
+    return `${lead}. Name the parameters — "${named}" — to bind them and make the initializer the function's body, or provide a function literal: "(${unknowns.join(', ')}) => ${short}"`;
   }
   if (allUnnamed)
-    return `${lead}. Name the signature's parameters to bind them and make the initializer the function's body, or provide a function literal ("(x) |-> …")`;
-  return `${lead}. Provide a function literal ("(x) |-> …") or a function-valued expression`;
+    return `${lead}. Name the signature's parameters to bind them and make the initializer the function's body, or provide a function literal ("(x) => …")`;
+  return `${lead}. Provide a function literal ("(x) => …") or a function-valued expression`;
 }
 
 /**

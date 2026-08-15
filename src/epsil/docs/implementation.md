@@ -127,7 +127,7 @@ parsed node carries.
 | `x = 5`, `(a, b) := t` | `Assign` |
 | `type p = …`, `type alias q = …` | `DeclareType` |
 | `f(x) = …`, `function f(x) { … }` | `DefineFunction` + `Function` |
-| `x \|-> …` | `Function` |
+| `x => …` | `Function` |
 | `x: real` (annotation on a parameter or body) | `Typed` |
 | `if c { … } else { … }`, `a if c else b` | `If` |
 | `match s { p => b }` | `Match` + `MatchCase` |
@@ -152,7 +152,7 @@ parsed node carries.
 | `"a\(b)c"` | `String` |
 | `Sequence(1, 2, 3)` | `Sequence` |
 
-Note that `MapsTo` — the name the operator table uses for `|->` — is internal
+Note that `MapsTo` — the name the operator table uses for `=>` — is internal
 to parsing. The resulting expression uses `Function`, not a `MapsTo` head.
 Likewise, `is` and `in` produce the same `Element` expression, which is why a
 serialized program spells both of them `in`.
@@ -222,7 +222,7 @@ parameters** (the "lambda lift" — see
 [Declarations](/epsil/declarations/#function-type-annotations-bind-their-parameter-names)):
 before lowering, the parser wraps a non-lambda initializer in a `Function`
 whose parameters come from the annotation, so the declared value is exactly
-what the explicit `|->` spelling produces:
+what the explicit `=>` spelling produces:
 
 ```epsil
 const f : (x: number) -> number = x + 1
@@ -455,7 +455,7 @@ fib(0) = 0
 ### Anonymous functions
 
 ```epsil
-x |-> x + 1
+x => x + 1
 ```
 
 ```json
@@ -463,7 +463,7 @@ x |-> x + 1
 ```
 
 ```epsil
-(x, y) |-> x + y
+(x, y) => x + y
 ```
 
 ```json
@@ -471,11 +471,11 @@ x |-> x + 1
 ```
 
 Because a mapsto binds loosely enough to sit on the right-hand side of an
-assignment, `f = x |-> x + 1` is an `Assign` of a `Function`, not a
+assignment, `f = x => x + 1` is an `Assign` of a `Function`, not a
 `DefineFunction`:
 
 ```epsil
-f = x |-> x + 1
+f = x => x + 1
 ```
 
 ```json
@@ -485,7 +485,7 @@ f = x |-> x + 1
 A zero-parameter lambda is a `Function` with only a body:
 
 ```epsil
-() |-> 42
+() => 42
 ```
 
 ```json

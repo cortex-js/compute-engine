@@ -183,7 +183,7 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
       ce.box(filterPoints(['Tuple', 0, 0]) as any)
     );
     const viaEpsil = canonicalJson((ce) => {
-      const [ast] = parseEpsil('Filter(points, p |-> p == (0, 0))');
+      const [ast] = parseEpsil('Filter(points, p => p == (0, 0))');
       return ce.box(ast);
     });
     const viaParse = canonicalJson((ce) =>
@@ -262,7 +262,7 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
     (op) => {
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-      executeEpsil(ce, 'let pred = n |-> n > 1');
+      executeEpsil(ce, 'let pred = n => n > 1');
       expect(ce.box([op, 'cs', 'pred'] as any).toMathJson()).toEqual([
         op,
         'cs',
@@ -415,7 +415,7 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
       ['List', 3, 4],
     ]);
     expect(expr.evaluate().toString()).toBe(
-      'Too many arguments for function "(a) |-> a + 1": expected 1, got 2'
+      'Too many arguments for function "(a) => a + 1": expected 1, got 2'
     );
   });
 
@@ -444,7 +444,7 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     executeEpsil(ce, 'let ss: list<string> = ["a","bb","ccc"]');
-    executeEpsil(ce, 'let pair = (n, s) |-> (n, s)');
+    executeEpsil(ce, 'let pair = (n, s) => (n, s)');
     expect(ce.box(['Map', 'pair', 'cs', 'ss']).toMathJson()).toEqual([
       'Map',
       'pair',
@@ -667,7 +667,7 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
     (op) => {
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-      executeEpsil(ce, 'let pred = n |-> n > 1');
+      executeEpsil(ce, 'let pred = n => n > 1');
       expect(ce.box([op, 'cs', 'pred'] as any).toMathJson()).toEqual([
         op,
         'cs',
@@ -758,7 +758,7 @@ describe('§6.4: a BARE parameter imposes no constraint (ruled 2026-08-09)', () 
 describe('the sharing pin: a symbol-valued callback is never rebuilt', () => {
   test('one literal used over two differently-typed collections', () => {
     const ce = new ComputeEngine();
-    executeEpsil(ce, 'let f = p |-> p == (0,0)');
+    executeEpsil(ce, 'let f = p => p == (0,0)');
     const before = ce.lookupDefinition('f')!;
     const literalBefore = JSON.stringify(
       (before as any).value.value.toMathJson()
@@ -874,7 +874,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     const ce = new ComputeEngine();
     const { value, diagnostics } = executeEpsil(
       ce,
-      'let inputs = [16, -4, "banana", 81]\nMap(x |-> Sqrt(x), inputs)'
+      'let inputs = [16, -4, "banana", 81]\nMap(x => Sqrt(x), inputs)'
     );
     expect(diagnostics).toEqual([]);
     expect(value?.toString()).toBe('[4,2i,NaN,9]');
@@ -887,7 +887,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     const ce = new ComputeEngine();
     const { value, diagnostics } = executeEpsil(
       ce,
-      'let vs: list<scalar> = [1, 2, 3]\nMap(x |-> x + 1, vs)'
+      'let vs: list<scalar> = [1, 2, 3]\nMap(x => x + 1, vs)'
     );
     expect(diagnostics).toEqual([]);
     expect(value?.toString()).toBe('[2,3,4]');
@@ -993,7 +993,7 @@ describe('signature-driven trigger: a user-defined callee', () => {
   test('Epsil route: a declared arrow parameter annotates the literal', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'function apply2(f: (number) -> number, x) { f(x) }');
-    expect(executeEpsil(ce, 'apply2(n |-> n + 1, 3)').value?.toString()).toBe(
+    expect(executeEpsil(ce, 'apply2(n => n + 1, 3)').value?.toString()).toBe(
       '4'
     );
     // Observed directly: a callee that RETURNS its callback hands back the
@@ -1001,7 +1001,7 @@ describe('signature-driven trigger: a user-defined callee', () => {
     expect(
       executeEpsil(
         ce,
-        'function keep(f: (number) -> number) { f }\nkeep(n |-> n + 1)'
+        'function keep(f: (number) -> number) { f }\nkeep(n => n + 1)'
       ).value?.type.toString()
     ).toBe('(n: number) -> number');
   });

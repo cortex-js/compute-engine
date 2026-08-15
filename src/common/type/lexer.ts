@@ -24,6 +24,8 @@ export type TokenType =
   | '>'
   | '['
   | ']'
+  | '{'
+  | '}'
   | ','
   | ':'
   | '?'
@@ -350,6 +352,19 @@ export class Lexer {
       case ']':
         this.advance();
         return this.createToken(']', ']');
+      case '{':
+        // Braces delimit the field list of a `record{…}` / `object{…}` type.
+        // They are ordinary tokens, so in TOLERANT (prefix) mode a brace no
+        // longer ends the scan by itself; the parser is what decides whether a
+        // `{` continues the type. It only ever consumes one directly after
+        // `record`/`object` and only when the text after it looks like a field
+        // list, so an Epsil block body (`… -> string { … }`) is left
+        // unconsumed and still ends the prefix parse.
+        this.advance();
+        return this.createToken('{', '{');
+      case '}':
+        this.advance();
+        return this.createToken('}', '}');
       case ',':
         this.advance();
         return this.createToken(',', ',');

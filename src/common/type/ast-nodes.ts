@@ -117,7 +117,7 @@ export interface RecordEntryNode extends ASTNode {
   valueType: TypeNode;
 }
 
-/** The parse of `object<name: T, …>` — the stored-field layout of an object
+/** The parse of `object{name: T, …}` — the stored-field layout of an object
  * type. Its entries reuse {@link RecordEntryNode}: the two forms have the same
  * surface grammar, and only their semantics differ (an object type is nominal
  * and its fields are invariant read/write positions). */

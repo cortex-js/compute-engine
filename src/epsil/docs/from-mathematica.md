@@ -40,8 +40,8 @@ operators all keep their names; `{k, 1, n}` iterator triples work in `Sum`,
 | `f[x]`, `Sin[x]` | `f(x)`, `Sin(x)` |
 | `x = 5` | `let x = 5` |
 | `f[x_] := x^2` | `f(x) = x^2` |
-| `f = Function[x, x^2]` | `f = x \|-> x^2` |
-| `#^2 &` | `x \|-> x^2` — no slot/`&` syntax |
+| `f = Function[x, x^2]` | `f = x => x^2` |
+| `#^2 &` | `x => x^2` — no slot/`&` syntax |
 | `expr /. x -> 3` | `ReplaceAll(expr, Rule(x, 3))` |
 | `a == b`, `SameQ[a, b]` | `a == b`, `a === b` — see below |
 | `expr // N` | `expr \|> N` (or `~>`) |
@@ -113,7 +113,7 @@ match, and a predicate:
 
 ```epsil
 let xs = [3, 1, 4, 1, 5, 1]
-(Count(xs), Count(xs, 1), Count(xs, k |-> k > 2))
+(Count(xs), Count(xs, 1), Count(xs, k => k > 2))
 // ➔ (6, 3, 3)
 ```
 
@@ -165,7 +165,7 @@ Sum(Table(k^2, (k, 1, 5)))
 you want an ordinary list, index it, aggregate it, or build it with `Map`:
 
 ```epsil
-let g = x |-> x^2 + 1
+let g = x => x^2 + 1
 (g(3), Sum(Map(g, 1..4)))
 // ➔ (10, 34)
 ```

@@ -260,8 +260,8 @@ describe('Python: EQUALITY fails closed on an unfaithful aggregate', () => {
   });
 
   test('Equal over record-typed symbols declines', () => {
-    ce.declare('r1', 'record<a: integer>');
-    ce.declare('r2', 'record<a: integer>');
+    ce.declare('r1', 'record{a: integer}');
+    ce.declare('r2', 'record{a: integer}');
     expect(() =>
       python.compileFunction(ce.box(['Equal', 'r1', 'r2']), 'f', ['r1', 'r2'])
     ).toThrow(/Equal.*a record participant/s);

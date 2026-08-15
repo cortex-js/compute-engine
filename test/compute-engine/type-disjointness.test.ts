@@ -104,7 +104,7 @@ describe('BoxedType.isDisjointFrom', () => {
     // examples and contradicted both the type-hierarchy doc and the runtime,
     // which handles record in every dictionary-kind branch.
     expect(
-      ce.type('record<red: integer>').isDisjointFrom('dictionary<integer>')
+      ce.type('record{red: integer}').isDisjointFrom('dictionary<integer>')
     ).toBe(false);
     // The unit types are distinct from each other and from everything else.
     expect(ce.type('nothing').isDisjointFrom('missing')).toBe(true);

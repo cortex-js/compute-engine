@@ -15,7 +15,7 @@ identifiers denote user-defined variables and functions.
 ```epsil
 Sin(x)
 Simplify(2 + 3x^3)
-Map(x |-> x^2, [1, 2, 3])
+Map(x => x^2, [1, 2, 3])
 ```
 
 `Sin`, `Simplify`, and `Map` are library operators; `x` is an ordinary user
