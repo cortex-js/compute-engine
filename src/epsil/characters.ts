@@ -460,7 +460,7 @@ export const FANCY_UNICODE = new Map<number, string>([
   [0x2194, '<->'],
   // [     0x21A4,  '<-|'],
   [0x21a6, '|->'], // RIGHTWARDS ARROW FROM BAR
-  [0x21d0, '=>'],
+  [0x21d2, '=>'], // ⇒ RIGHTWARDS DOUBLE ARROW (match-case arrow)
   [0x21d4, '<=>'],
 
   [0x2205, 'EmptySet'], // ∅ EMPTY SET
