@@ -28,6 +28,19 @@
 
 ### Issues Resolved
 
+- **Adding three or more collections no longer nests the result when one of
+  them is a lazy view** (Tycho item 189). `[1,2,3] + [4,5,6] + Range(1,3)`
+  returned `[[6,7,8],[8,9,10],[10,11,12]]` instead of `[6,9,12]`: the
+  element-wise tensor kernel treated an operand that is a collection but not a
+  materialized list — a `Range`, a `Reverse`/`Take` view, or the lazy result of
+  a broadcast over more than 100 elements — as a SCALAR, and added it whole to
+  every cell. Only the diagonal held the intended value and the result was
+  O(n²). Two or fewer operands, and any number of plain lists, were unaffected,
+  which is why the shape surfaced in the field (a 900-element colour grid whose
+  intermediate stayed lazy) rather than in small examples. The kernel now
+  declines such an operand and the sum falls through to the element-wise
+  broadcast that zips it, matching what `Multiply` already did.
+
 - **Canonicalizing a broadcast `At` over a comprehension-derived index range
   no longer takes minutes in a document scope** (Tycho item 186 — the
   surviving half of item 182's storm class). Parsing
@@ -174,6 +187,30 @@
   replacing it, and the name is gone once the enclosing call returns. A returned
   helper still works as a first-class value, and top-level definitions (the
   notebook gesture) are unchanged.
+
+### New Features
+
+- **`complexPromotion` compile option — opt in to complex results from
+  `Sqrt`/`Ln`/`Log`** (Tycho item 190). These heads compile to the real kernel
+  (`Math.sqrt`) when their operand is a real number whose sign is not known at
+  compile time, so a negative operand yields `NaN` where `evaluate()` promotes
+  to a complex value: with `z(t) := \sqrt{t-1}`, compiled `|z(t)/2 - 1|`
+  returned `NaN` at `t = 0.3` while the interpreter returned
+  `1.08397416943394`. That default is unchanged — it keeps radical chains on
+  the fast path and is what lets an ordering comparison over a radical compile
+  at all — but a caller whose expressions are genuinely complex-valued (a
+  plotting front-end with a per-document "complex mode" maps that switch onto
+  this option) can now pass `{ complexPromotion: true }` and get the
+  interpreter's value. Real inputs are lifted automatically, so the argument
+  convention is unchanged. Two consequences when enabled: affected chains are
+  about 2.3× slower (an expression with no unknown-sign `Sqrt`/`Ln`/`Log` is
+  emitted exactly as before), and an ordering comparison over such a head fails
+  closed rather than compiling — `Less(Sqrt(x), 2)` has no truth value once
+  `Sqrt(x)` may be complex. Honored by the `javascript` and `python` targets;
+  `glsl`/`wgsl` keep the real kernel. Independent of, and composable with,
+  `realOnly`, which only projects the result at the boundary and can never
+  produce complexness on its own. See the "Complex Promotion" section of the
+  compilation guide.
 
 ### Improvements
 

@@ -10,14 +10,13 @@ date: Last Modified
 # Epsil
 
 <Intro>
-Epsil is a programming language for scientific computing, built on the
-Compute Engine.
+A programming language for scientific computing
 </Intro>
 
 :::warning[Experimental]
-Epsil is available as an **experimental** entry point. Its syntax and
-semantics may change between releases while the language is being exercised in
-notebooks and other applications.
+Epsil is still being developed. Its syntax and semantics may change between 
+releases while the language is being exercised by early adopters. Your feedback
+can help shape its direction.
 :::
 
 Epsil is embedded from JavaScript through the
@@ -162,18 +161,12 @@ lowers to. Not needed to write Epsil.
 
 ## Collections
 
-Epsil has literal syntax for lists, sets and dictionaries.
+Epsil has literal syntax for lists and dictionaries.
 
 **Lists** are ordered and 1-indexed with `xs[i]`:
 
 ```epsil-live
 [3, 5, 7, 11]
-```
-
-**Sets** are unordered collections of unique elements:
-
-```epsil-live
-{3, 5, 7, 11}
 ```
 
 **Dictionaries** are sets of key/value pairs. The empty dictionary is `{->}`:

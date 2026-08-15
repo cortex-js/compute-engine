@@ -693,6 +693,23 @@ fills. The primes below 100, counted:
 // ➔ 25
 ```
 
+If the slot can be inferred based on the type of the previous argument, it can be left out:
+
+```epsil
+1..100 |> Filter(IsPrime) |> Length
+// ➔ 25
+```
+
+And a lambda is automatically converted to a map:
+
+```epsil
+1..100 |> x |-> x^2
+
+// Shorthand for:
+1..100 |> Map(x |-> x^2, _)
+```
+
+
 **Spread arguments.** In a call argument list, `...t` splices the elements of
 the tuple `t` in as positional arguments; several spreads splice in order:
 
