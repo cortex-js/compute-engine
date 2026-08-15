@@ -44,19 +44,30 @@
   where either side holds a value invalidates as before. The witness parse
   now canonicalizes in ~15 ms at full production size.
 
-- **Assigning a function literal to a subscripted name is now an explicit
-  error instead of a silent no-op.** `l_P \coloneq P \mapsto
-  \sqrt{P[1]^2+P[2]^2}` fell into the sequence-definition machinery
-  (`a_n := a_{n-1} + 2`), which bound nothing usable and reported nothing —
-  the definition silently vanished, and in some shapes the BASE letter `l`
-  was overwritten. The notation is genuinely ambiguous (a function *named*
-  `l_P`, or a *family* `l` indexed by `P`?), so it now returns an
-  `ambiguous-assignment` error naming both working spellings: write
-  `l_P(P) \coloneq ⟨body⟩` to define a function named `l_P`, or assign an
-  expression in `P` (not a function literal) to define a family. Integer
-  recurrences, the expression-bodied family form `l_P \coloneq P^2+1`,
-  head-application definitions, and assigning function *values* via
-  `ce.assign()` are all unchanged.
+- **Assigning to a subscripted name now honors a declared joined name, and
+  the ambiguous lambda case is an explicit error instead of a silent
+  no-op.** Two related fixes to `⟨name⟩_⟨subscript⟩ \coloneq …`:
+  - **Declared-name precedence now governs the assignment LHS.** With
+    `ce.declare('l_P', …)` in effect, `l_{P} \coloneq P^2+1` assigns to the
+    symbol `l_P` — previously it silently defined a *family* on the base
+    letter `l` and left the declared `l_P` unbound (documents routinely use
+    `f` and `f_x` as unrelated names, so the family reading could clobber a
+    sibling definition). This also makes declare-then-assign work with a
+    function-literal right-hand side: `l_{P} \coloneq P \mapsto …` now
+    binds the declared `l_P`.
+  - **With no declaration**, a function-literal right-hand side is
+    genuinely ambiguous (a function *named* `l_P`, or a *family* `l`
+    indexed by `P`?) and previously fell into the sequence-definition
+    machinery, which bound nothing usable and reported nothing. It now
+    returns an `ambiguous-assignment` error naming both working spellings:
+    write `l_P(P) \coloneq ⟨body⟩` to define a function named `l_P`, or
+    assign an expression in `P` (not a function literal) to define a
+    family.
+
+  Integer recurrences (`a_1 \coloneq 1`, `a_n \coloneq a_{n-1}+2`,
+  including re-running a base-case row), the undeclared expression-bodied
+  family form `l_P \coloneq P^2+1`, head-application definitions, and
+  assigning function *values* via `ce.assign()` are all unchanged.
 
 - **Declaring a function with a placeholder signature no longer breaks the
   definition that follows.** `ce.declare('f', '(unknown) -> unknown')`
