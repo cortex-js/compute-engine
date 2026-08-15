@@ -585,8 +585,7 @@ export function typeCouldBeUnkeyedCollection(type: Type): boolean {
  */
 export function couldBeUnkeyedCollectionOperand(op: Expression): boolean {
   return (
-    isFiniteIndexedCollection(op) ||
-    typeCouldBeUnkeyedCollection(op.type.type)
+    isFiniteIndexedCollection(op) || typeCouldBeUnkeyedCollection(op.type.type)
   );
 }
 

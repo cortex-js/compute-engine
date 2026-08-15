@@ -100,8 +100,6 @@ import {
   isNumber,
   isFunction,
   isSymbol,
-  isDictionary,
-  isObject,
   adoptsForeignEngineObject,
 } from './type-guards.js';
 import { symbolAtSite, replaceAtSite } from './binding-sites.js';

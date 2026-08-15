@@ -163,7 +163,6 @@ export function cachedValue<T>(
   v.inFlight = (v.inFlight ?? 0) + 1;
   beginObjectDeps();
   let result: T;
-  let deps: ObjectDeps | undefined;
   try {
     result = fn();
   } catch (e) {
@@ -175,7 +174,7 @@ export function cachedValue<T>(
     v.generation = prevGeneration;
     throw e;
   }
-  deps = endObjectDeps();
+  const deps = endObjectDeps();
   v.inFlight -= 1;
 
   // The settled-only gate. A computation that consumed a provisional answer —

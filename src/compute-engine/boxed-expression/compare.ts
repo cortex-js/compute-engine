@@ -278,7 +278,8 @@ export function same(
   // `true` for two distinct objects with equal slots. Having already failed
   // the `a === b` fast path, the answer here is always `false`; it is written
   // as the identity comparison because that is the rule, not the outcome.
-  if (isObject(a) || isObject(b)) return (a as Expression) === (b as Expression);
+  if (isObject(a) || isObject(b))
+    return (a as Expression) === (b as Expression);
 
   // A symbol is compared as a symbol, never as its value: exactly one operand
   // being a symbol falls through to the type-mismatch branches below and is
@@ -483,7 +484,8 @@ function eqImpl(
   // deferred `Equatable` protocol — would carve into this branch and the
   // pre-pass above, and nowhere else.)
   //
-  if (isObject(a) || isObject(b)) return (a as Expression) === (b as Expression);
+  if (isObject(a) || isObject(b))
+    return (a as Expression) === (b as Expression);
 
   //
   // Do we have at least one function expression?
