@@ -2738,9 +2738,16 @@ export interface ObjectInterface {
    * @internal */
   _field(name: string): Expression | undefined;
 
+  /** The DECLARED type of a stored field, from the layout pinned on this
+   * instance (never re-resolved from the type registry by name), or
+   * `undefined` for a name the layout does not carry. Consults the layout and
+   * not the slots, so it is not a field read and records no dependency.
+   * @internal */
+  _fieldType(name: string): Type | undefined;
+
   /** The sole slot writer. Storing the identical node is a total no-op (no
-   * version bump); any other store writes the slot and increments
-   * `_version`.
+   * version bump, no state event); any other store writes the slot,
+   * increments `_version` and reports an `object-store` state event.
    * @internal */
   _store(name: string, value: Expression): void;
 }

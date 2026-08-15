@@ -136,6 +136,12 @@ describe('FIELD READ — a pure load of the stored value', () => {
 });
 
 describe('THE PREMISE — a store moves no engine invalidation axis', () => {
+  // A store DOES report an `object-store` state event (every state write in
+  // the engine goes through that one choke point), and the event's row in
+  // `axisMaskOf` advances nothing — ruled 2026-08-15, and pinned row-by-row
+  // in `state-events.test.ts`. This is what everything below depends on: if
+  // the row ever widened, every test in this file would still pass while
+  // proving nothing, because the coarse bump would be doing the invalidating.
   test('no engine axis moves on a store', () => {
     const p = person();
     const e = ce as unknown as {

@@ -7,7 +7,7 @@ import type {
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { signatureArms, signatureEffects } from '../../common/type/utils.js';
 import { isCallbackType } from '../../common/type/callback.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, objectLayoutOfType } from '../../common/type/subtype.js';
 import {
   effectSetToString,
   isCoFiniteEffects,
@@ -19,10 +19,11 @@ import {
 import type {
   BoxedOperatorDefinition,
   Expression,
+  FunctionInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 
-import { isFunction, isSymbol, sym } from './type-guards.js';
+import { isFunction, isString, isSymbol, sym } from './type-guards.js';
 import { effectiveDischarge } from './effects-of.js';
 import { typeAcceptsValue } from './value-membership.js';
 import {
@@ -796,10 +797,21 @@ function walkLiteral(
   // A parameter shadows any same-named operator for the whole body, so
   // `f(Random) := Random` must not be read as a draw.
   const params = new Map<string, EffectSet | undefined | null>();
-  for (const p of functionLiteralParameters(literal))
+  // The parameters' DECLARED types, kept separately from their arrow effects
+  // above so that a write through a parameter can be classified by what the
+  // parameter is declared to be. A store into a mutable object's own field
+  // (`x.id = …` where `x: M` and `M` is an `object<…>` layout declaring `id`)
+  // is a heap mutation and must carry `state`; the declaration is the only
+  // place that says so, since canonicalizing the receiver inside a literal
+  // reports a parameter's type as `unknown`. Unannotated parameters get no
+  // entry, which keeps them on the conservative `scope` path.
+  const paramTypes = new Map<string, Type>();
+  for (const p of functionLiteralParameters(literal)) {
     // `null` marks an UNANNOTATED parameter: optimistically pure, no
     // contribution. An annotated one contributes its declared arrow effects.
     params.set(p.name, p.type === undefined ? null : signatureEffects(p.type));
+    if (p.type !== undefined) paramTypes.set(p.name, p.type);
+  }
 
   const body = functionLiteralBody(literal);
   if (body === undefined) return;
@@ -817,6 +829,7 @@ function walkLiteral(
     ce,
     state,
     params,
+    paramTypes,
     captured,
     localLiterals,
     selfName,
@@ -877,6 +890,9 @@ class Walker {
     private ce: ComputeEngine,
     private state: WalkState,
     private params: Map<string, EffectSet | undefined | null>,
+    /** The declared type of each ANNOTATED parameter; see the field-store
+     * classification in {@link Walker.isFieldStore}. */
+    private paramTypes: Map<string, Type>,
     private captured: Set<string>,
     private localLiterals: Map<string, Expression>,
     private selfName: string | undefined,
@@ -970,7 +986,22 @@ class Walker {
     }
 
     if (head === 'Assign') {
-      this.scopeWrite(expr, ctx, /* confinable */ true);
+      // `Assign(Field(base, "name"), v)` spells two different operations. When
+      // `base` is a parameter declared to be a mutable object whose layout has
+      // a `"name"` field, it is a HEAP STORE: it overwrites a field of the
+      // record the caller handed in, so the mutation is observable to the
+      // caller and the function is not pure ("Changing a field is an effect",
+      // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B). It gets no confinement
+      // exemption — the confinement analysis proves that a write cannot
+      // outlive the call, which is never true of a store into someone else's
+      // record ("Confinement does not apply to `state`",
+      // `docs/EFFECTS-MODEL.md`). Everything else — including the property
+      // REBINDING sugar `p.name = v` on a value type, which rebinds the local
+      // `p` rather than mutating a heap cell — stays on the `scope` path,
+      // where `assignTargets` judges the write on the base symbol.
+      if (this.isFieldStore(expr))
+        this.state.effects = unionEffectSets(this.state.effects, ['state']);
+      else this.scopeWrite(expr, ctx, /* confinable */ true);
       for (const op of expr.ops.slice(1)) this.visit(op, ctx);
       return;
     }
@@ -1314,6 +1345,33 @@ class Walker {
     this.noteContributorEffects(def.effects);
   }
 
+  /**
+   * Whether this `Assign` is a store into a mutable object's own layout field
+   * — `Assign(Field(base, "name"), v)` where `base` is a bare symbol naming a
+   * parameter whose DECLARED type resolves to an `object<…>` layout that
+   * declares `"name"`.
+   *
+   * The declared type is the only usable evidence here: inside a `Function`
+   * literal the body is not yet in a frame that binds the parameters, so
+   * canonicalizing the receiver and reading its type reports `unknown` and
+   * decides nothing. Everything the declaration does not positively establish
+   * — a receiver that is not a bare symbol, a parameter with no annotation, a
+   * type that is not an object layout, a field the layout does not declare —
+   * answers `false` and takes the conservative `scope` path, which is also
+   * what the property rebinding sugar on a value type needs.
+   */
+  private isFieldStore(expr: Expression & FunctionInterface): boolean {
+    const target = expr.ops[0];
+    if (!isFunction(target, 'Field')) return false;
+    const base = sym(target.ops[0]);
+    if (base === undefined) return false;
+    const declared = this.paramTypes.get(base);
+    if (declared === undefined) return false;
+    const field = target.ops[1];
+    if (!isString(field)) return false;
+    return objectLayoutOfType(declared)?.elements[field.string] !== undefined;
+  }
+
   /** An `Assign`: `{scope}` unless provably confined. */
   private scopeWrite(
     expr: Expression,
@@ -1451,10 +1509,14 @@ function assignTargets(expr: Expression): (string | undefined)[] {
   // the Subscript branch of `Assign`'s evaluate in `library/core.ts`),
   // never a local rebind, and an `At` target has no assignment semantics
   // at all today — both stay on the unresolvable-target fallback below.
-  // If a future mutable-object store reuses the `Assign(Field(…))`
-  // spelling with HEAP semantics, it must NOT ride this branch — heap
-  // stores get no confinement exemption in v1 (`docs/EFFECTS-MODEL.md`,
-  // "Confinement does not apply to `state`").
+  // A mutable-object STORE reuses the `Assign(Field(…))` spelling with heap
+  // semantics, and it does not reach this branch: `Walker.isFieldStore`
+  // recognizes it from the receiver's declared parameter type and contributes
+  // `state` without consulting the confinement frontier at all, because heap
+  // stores get no confinement exemption (`docs/EFFECTS-MODEL.md`,
+  // "Confinement does not apply to `state`"). Any OTHER caller of
+  // `assignTargets` on a `Field` target inherits the rebinding reading above,
+  // so a new one must make the same distinction.
   if (isFunction(target, 'Field')) {
     const base = sym(target.ops[0]);
     if (base !== undefined) return [base];

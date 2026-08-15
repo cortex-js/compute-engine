@@ -1,5 +1,57 @@
 ## [Unreleased]
 
+### New Features
+
+- **Mutable objects can now be modified: `p.age = 43` stores into a field.**
+  `type Person = object<name: string, age: integer>` declared a type and
+  `Person(name: "Alan", age: 42)` constructed a value in 0.110.0, but there was
+  no way to change one — the assignment failed with a confusing
+  `expected \`symbol\`, got \`integer\``, because it fell through to the
+  rebinding-sugar path, which describes a different concept. A field
+  assignment is now a store:
+
+  ```epsil
+  type Person = object<name: string, age: integer>
+  let p = Person(name: "Alan", age: 42)
+  p.age = p.age + 1
+  p.age                     // ➔ 43
+  ```
+
+  The target no longer has to be a variable — any expression that evaluates to
+  an object can be stored into, so `xs[i].name = v` and `p.friend.name = v`
+  work. The right-hand side is evaluated once, at the store, at the exact tier
+  (`Sqrt(2)` is stored symbolically, never as a float), and the object is
+  mutated in place: every name referring to it sees the change, including a
+  `const` binding, since the store writes the object and never the binding.
+
+  A store carries the `state` effect, so a function that performs one must
+  declare it. Stores do not disturb the engine's invalidation generations —
+  only results that actually read the changed object's fields are recomputed —
+  so a store-heavy loop does not cold unrelated caches.
+
+- **Assigning to a field of an immutable value now says so.** A field
+  assignment on a record, dictionary, tuple, or scalar reports
+  `immutable-value-assignment`, naming both ways forward (build an updated
+  copy, or declare the type as `object<…>`), where it previously reported
+  `incompatible-type: expected \`symbol\`` — a message about the old
+  lowering rather than about anything the author wrote.
+
+### Breaking Changes
+
+- **`RecordFrom` has been removed.** It declared `(collection) -> record` but
+  returned an inert, untyped `Record(…)` application, because `Record` has no
+  operator definition anywhere in the engine — so its declared result type
+  lied. Use `DictionaryFrom`, which already returns exactly what `RecordFrom`
+  promised: given pairs whose keys are all bare identifiers, its result types
+  as `record<…>`. A record and a dictionary differ only in the type world, and
+  record-ness is derived from the value, so the two operators were never
+  distinct.
+
+  ```epsil
+  DictionaryFrom([("a", 1), ("b", 2)])
+  // ➔ {"a" -> 1, "b" -> 2}, typed record<a: finite_integer, b: finite_integer>
+  ```
+
 ### Issues Resolved
 
 - **Comparing a collection-typed operand with a list no longer overflows the

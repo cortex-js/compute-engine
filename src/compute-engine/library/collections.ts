@@ -12,6 +12,7 @@ import {
   broadcastOverIndexedCollections,
   canEnumerateFiniteSource,
   canEnumerateOperand,
+  collectionSubset,
   elementCountOfFiniteSource,
   enumerableFromAllSources,
   enumerableFromSource,
@@ -32,8 +33,14 @@ import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // (collections → compile-expression → base-compiler → library/utils → collections)
 import { kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
+import { typeToString } from '../../common/type/serialize.js';
 import { reduceType } from '../../common/type/reduce.js';
-import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import {
+  isSubtype,
+  objectLayoutOfType,
+  provablyDisjoint,
+  resolveTypeReference,
+} from '../../common/type/subtype.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
   DictionaryType,
@@ -42,10 +49,7 @@ import {
   RecordType,
   TupleType,
   Type,
-  TypeReference,
 } from '../../common/type/types.js';
-import { declarationOf } from '../../common/type/reference.js';
-import { substituteTypeVariables } from '../../common/type/instantiate.js';
 import {
   collectionElementType,
   functionResult,
@@ -76,6 +80,7 @@ import type {
 import { BoxedType } from '../types.js';
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils.js';
+import { isValueDef } from '../boxed-expression/utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { shapedListType } from '../boxed-expression/shaped-list-type.js';
 import {
@@ -766,25 +771,14 @@ const POINT_LIST_COMPILE_LANGUAGES: ReadonlySet<string> = new Set([
 function fieldBearingType(
   t: Type
 ): RecordType | ObjectType | TupleType | DictionaryType | 'none' | undefined {
-  // Keyed on the DECLARATION record, not on `t`: instantiating an applied
-  // reference below mints a fresh body object each step, so an identity guard
-  // on `t` itself would go blind on a cycle. The record is identity-stable.
-  const seen = new Set<TypeReference>();
-  while (typeof t === 'object' && t.kind === 'reference') {
-    const decl = declarationOf(t);
-    if (t.def === undefined || seen.has(decl)) return undefined;
-    seen.add(decl);
-    // An APPLIED reference reads its body instantiated at the arguments
-    // (parameterized-nominal design §6). One substitution, one level deep: a
-    // nested `tree<T>` stays an unexpanded reference, so the loop terminates.
-    const params = decl.typeParams;
-    if (t.args !== undefined && params !== undefined) {
-      const bindings: Record<string, Type> = Object.create(null);
-      const n = Math.min(params.length, t.args.length);
-      for (let i = 0; i < n; i++) bindings[params[i].name] = t.args[i];
-      t = substituteTypeVariables(t.def, bindings);
-    } else t = t.def;
-  }
+  // An APPLIED reference reads its body instantiated at the arguments
+  // (parameterized-nominal design §6); an unfulfilled or self-cycling one
+  // answers `undefined`. Shared with `BoxedObject._fieldType`, which asks the
+  // same question of a PINNED type — hence the walk lives in `common/type`,
+  // which both the expression layer and this library layer may import.
+  const resolved = resolveTypeReference(t);
+  if (resolved === undefined) return undefined;
+  t = resolved;
   if (typeof t === 'string') {
     if (
       t === 'unknown' ||
@@ -817,6 +811,266 @@ function fieldBearingType(
   if (t.kind === 'union' || t.kind === 'intersection' || t.kind === 'negation')
     return undefined;
   return 'none';
+}
+
+//
+// ── Property stores: `p.age = 43` ────────────────────────────────────────────
+//
+// Assignment through a `Field` target is a **store into a mutable object**,
+// and it is legal on nothing else. Spec: `docs/TYPE_SYSTEM_ROADMAP.md`
+// Appendix B, "Assigning to a property" and "A store writes the evaluated
+// value". The two functions below are the canonical-time and evaluate-time
+// halves of one decision, and `Assign` (`library/core.ts`) is their only
+// caller.
+//
+
+/**
+ * Does the receiver's own object layout declare this field?
+ *
+ * This is the question that has to be asked BEFORE the protocol-property
+ * route, and it is asked of the STATIC type because the canonical handler has
+ * no value in hand. An object's stored fields belong to the object: when a
+ * `readwrite` protocol happens to declare a property of the same name, the
+ * store still wins.
+ *
+ * Getting the precedence wrong is not a cosmetic ordering preference — it
+ * silently breaks aliasing. The protocol route lowers `p.name = v` to
+ * `p = «set name»(p, v)`, and a setter returns a NEW value which is then
+ * rebound; every other reference to the original object keeps seeing the old
+ * contents, which is exactly what Appendix B's "References, not copies"
+ * forbids. Worse, the divergence is route-dependent: the protocol lowering
+ * only fires when the receiver's type is settled at canonicalization, so the
+ * same program behaved differently in one Epsil batch than across two.
+ *
+ * Answers `false` whenever the layout cannot be read — an unsettled receiver,
+ * a bare `object` annotation (which promises fields without naming them), a
+ * union. Those defer to the runtime route, where `objectFieldStore` puts the
+ * instance's own layout back in charge.
+ */
+export function objectLayoutOwnsField(
+  ce: ComputeEngine,
+  lhs: Expression
+): boolean {
+  if (!isFunction(lhs, 'Field')) return false;
+  if (!isString(lhs.ops[1])) return false;
+  const name = lhs.ops[1].string;
+  const base = lhs.ops[0];
+  if (base === undefined) return false;
+
+  // A bare-symbol receiver is read off its DEFINITION, never by canonicalizing
+  // it. Two reasons, both load-bearing: canonicalizing a single-letter target
+  // folds it into the constant of that name (`i` becomes `ImaginaryUnit`),
+  // which is why `Assign` keeps its left operand raw at all; and
+  // canonicalization INFERS types as it walks, so doing it here — ahead of
+  // `protocolPropertyAssignment`, which documents that it needs the raw
+  // operand — changed what that route then saw and made a `readonly` property
+  // SET compile instead of failing closed.
+  const rootName = sym(base);
+  if (rootName !== undefined) {
+    const def = ce.lookupDefinition(rootName);
+    const t = def !== undefined && isValueDef(def)
+      ? def.value.type.type
+      : undefined;
+    return (
+      t !== undefined && objectLayoutOfType(t)?.elements[name] !== undefined
+    );
+  }
+
+  // A computed receiver (`xs[i].name`, `p.inner.name`) has no binding to read,
+  // so its type comes from canonicalizing it — the same thing
+  // `protocolPropertyAssignment` does on its own non-variable branch.
+  try {
+    const canonical = base.canonical;
+    if (!canonical.isValid) return false;
+    return objectLayoutOfType(canonical.type.type)?.elements[name] !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What should `Assign`'s CANONICAL handler do with a `Field` left operand?
+ *
+ * - `undefined` — this is not a field target at all; the caller keeps whatever
+ *   it does otherwise.
+ * - `'defer'` — it may be a store, but the receiver's type does not settle it
+ *   here. The caller keeps the `Field` target RAW and asks
+ *   {@link objectFieldStore} again from `evaluate`, where a real value is in
+ *   hand. This is the common case and not an edge one: the Epsil static
+ *   pre-pass canonicalizes a whole program before any of it runs, so `p` is
+ *   routinely still untyped at `p.age = 43`.
+ * - an `Expression` — a static error to return in place of the assignment.
+ *
+ * The only static refusal made here is the one that CANNOT change at runtime:
+ * a receiver whose type is settled and is not an object type can never become
+ * one, because object types have no subtypes and no value of another type is
+ * ever an object. That refusal is worth making early — it is the diagnostic a
+ * reader of `d.id = "456"` on a record needs, and making it at evaluation
+ * would report it only on the paths that run.
+ */
+export function fieldAssignmentVerdict(
+  ce: ComputeEngine,
+  lhs: Expression
+): 'defer' | Expression | undefined {
+  if (!isFunction(lhs, 'Field')) return undefined;
+  if (!isString(lhs.ops[1])) return undefined;
+  const name = lhs.ops[1].string;
+  const base = lhs.ops[0];
+  if (base === undefined) return undefined;
+
+  // Canonicalizing the receiver can itself throw on a malformed target; a
+  // target whose type cannot even be asked for is deferred, never refused,
+  // so the runtime route reports whatever is actually wrong with it.
+  let t: Type;
+  try {
+    const canonical = base.canonical;
+    // A receiver that is ALREADY broken (an undeclared constructor, a call
+    // that did not type-check) has a real diagnostic of its own, and typing
+    // `error` as "not an object type" would bury it under a second, wrong
+    // one. Defer: the runtime route propagates the receiver's own error.
+    if (!canonical.isValid) return 'defer';
+    t = canonical.type.type;
+    // Likewise for a receiver whose TYPE is `error` — a binding whose
+    // initializer failed. The binding itself is a valid symbol, so the check
+    // above does not catch it, and calling `error` "not an object type" would
+    // report a second, wrong defect on top of the real one.
+    if (t === 'error') return 'defer';
+  } catch {
+    return 'defer';
+  }
+
+  // `fieldBearingType` answers `undefined` for everything indeterminate — an
+  // unresolved reference, bare `object`, and (the case that matters for
+  // `xs[i].name = v`) a union, since an absence marker joins `missing` onto
+  // the element type. All of those defer.
+  const rt = fieldBearingType(t);
+  if (rt === undefined) return 'defer';
+  if (rt !== 'none' && rt.kind === 'object') return 'defer';
+
+  return immutableTargetError(ce, name, t);
+}
+
+/**
+ * `immutable-value-assignment` — a store into something that cannot hold one.
+ *
+ * The message names both ways out that Appendix B names, because the fix
+ * depends on what the author meant: a record is a value (build an updated
+ * copy), and an object is the shape that supports stores (declare the type as
+ * one).
+ */
+function immutableTargetError(
+  ce: ComputeEngine,
+  name: string,
+  t: Type
+): Expression {
+  return ce.error([
+    'immutable-value-assignment',
+    `\`${typeToString(t)}\` is not an object type, and only an object's fields can be assigned. Build an updated copy with the new \`${name}\`, or declare the type as \`object<…>\``,
+  ]);
+}
+
+/**
+ * The LAST refusal for a `Field` assignment: every route has now declined —
+ * the receiver did not evaluate to an object ({@link objectFieldStore}) and no
+ * protocol claims the name either — so the target simply cannot be stored
+ * into. Called from `Assign`'s evaluate handler, which owns that ordering.
+ *
+ * Separate from the refusals inside {@link objectFieldStore} because it can
+ * only be made once the protocol route has had its turn: a value whose type
+ * this function would call immutable may still have a `readwrite` property,
+ * and that is a store the protocol machinery performs.
+ *
+ * `base` is the receiver ALREADY EVALUATED by the caller, never re-derived
+ * from `lhs` here. A receiver is an arbitrary expression and may carry effects
+ * (`nextItem().field = v`), so evaluating it a second time to format an error
+ * would fire them twice — which is what this function used to do.
+ */
+export function fieldStoreRefusal(
+  ce: ComputeEngine,
+  lhs: Expression,
+  base: Expression | undefined
+): Expression {
+  if (!isFunction(lhs, 'Field')) return immutableTargetError(ce, '', 'unknown');
+  const name = isString(lhs.ops[1]) ? lhs.ops[1].string : '';
+  if (base !== undefined && !base.isValid) return base;
+  // An OBJECT receiver is mutable — the target is fine, the NAME is not. Saying
+  // "not an object type" here would be flatly false and would send the reader
+  // looking for the wrong problem, so this reports the same `unknown-field`
+  // (naming what IS stored) that reading the same name reports.
+  if (base !== undefined && isObject(base))
+    return ce.error(
+      ['unknown-field', name, [...base._slots.keys()].join(', ')],
+      base.typeName
+    );
+  return immutableTargetError(ce, name, base?.type.type ?? 'unknown');
+}
+
+/**
+ * Perform `Assign(Field(base, name), value)` as a store, from `Assign`'s
+ * EVALUATE handler — the route where a real receiver is in hand.
+ *
+ * `undefined` means the receiver did not evaluate to an object and this is not
+ * a store; every other outcome is the expression the assignment evaluates to
+ * (the stored value on success, an error value otherwise).
+ *
+ * `base` is the receiver ALREADY EVALUATED by the caller — evaluated rather
+ * than canonicalized-and-read, because the target of a store is a *reference*
+ * and only an actual `BoxedObject` can be stored into, so a chain such as
+ * `xs[i].name` resolves through ordinary evaluation like any other expression.
+ * The caller owns that single evaluation and hands the same value to every
+ * route it tries, so a receiver carrying effects fires them exactly once
+ * however the assignment is ultimately resolved.
+ *
+ * The RHS is evaluated here, and only once this function is committed to
+ * storing — that is both ruling B8's left-to-right order (receiver, then
+ * value) and the guarantee that a declined route costs the RHS nothing. It is
+ * evaluated at the exact tier (never `.N()`) and
+ * the EVALUATED result is what lands in the slot — the rule that makes a field
+ * read a pure load and the object's version counter a sufficient cache
+ * dependency (Appendix B, "A store writes the evaluated value").
+ */
+export function objectFieldStore(
+  ce: ComputeEngine,
+  lhs: Expression,
+  rhs: Expression,
+  base: Expression | undefined
+): Expression | undefined {
+  if (!isFunction(lhs, 'Field')) return undefined;
+  if (!isString(lhs.ops[1])) return undefined;
+  const name = lhs.ops[1].string;
+  if (base === undefined) return undefined;
+  // Anything that is not an object DECLINES rather than refuses. This route
+  // runs first, before the protocol one, and a non-object receiver may still
+  // have a `readwrite` protocol property whose setter performs the write; the
+  // refusal for a target no route can serve is `fieldStoreRefusal`, which
+  // `Assign` reaches only after both have declined.
+  if (!isObject(base)) return undefined;
+
+  // The LAYOUT is the authority on what this object has, and it is read off
+  // the INSTANCE (pinned at construction), never off the type registry by
+  // name: a `type` re-declaration replaces the registry record in place, and
+  // an instance built before it keeps its own fields.
+  //
+  // A name the layout does NOT carry declines, and does not error here: an
+  // object may conform to a protocol with a COMPUTED property — accessors and
+  // no stored field — and `p.label = v` must reach that `set` accessor. This
+  // mirrors the `Field` READ handler's object arm, which tries the protocol
+  // route before reporting `unknown-field` for exactly the same reason. The
+  // error, when no route answers at all, is `fieldStoreRefusal`'s to make.
+  const declared = base._fieldType(name);
+  if (declared === undefined) return undefined;
+
+  const value = rhs.evaluate();
+  if (!value.isValid) return value;
+
+  // The declared field type is a contract the store must keep: a slot holds
+  // values of its declared type for the object's whole lifetime, which is what
+  // lets `p.age`'s static type be read off the layout at every use site.
+  if (!value.type.matches(declared))
+    return ce.typeError(declared, value.type, value);
+
+  base._store(name, value);
+  return value;
 }
 
 /**
@@ -2151,7 +2405,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       indexWhere: undefined,
 
-      subsetOf: (expr, target) => {
+      // Per the handler contract (`types-definitions.ts`) the receiver is the
+      // candidate SUBSET: this answers `expr` ⊆ `target`.
+      subsetOf: (expr, target, strict) => {
         // Note: Linspace is not considered a subset of Range
         if (target.operator === 'Range') {
           // Symbolic bounds on either side: indeterminate
@@ -2159,27 +2415,58 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             return undefined;
           const [al, au, as] = range(expr);
           const [bl, bu, bs] = range(target);
-          return al >= bl && au <= bu && as % bs === 0;
+          // Ascending ranges only. A descending or empty range (`as`/`bs`
+          // negative or zero) does not enumerate as `al, al+as, …, au`, so the
+          // arithmetic below would not describe its elements; those fall
+          // through to the elementwise walk.
+          if (as <= 0 || bs <= 0 || al > au || bl > bu) return undefined;
+          // Every element of `expr` is `al + k·as`; it lies in `target` when it
+          // is within `target`'s bounds AND on its grid. Sharing the step
+          // (`as % bs === 0`) is not enough — the two grids must also be in
+          // PHASE, which is what `(al - bl) % bs === 0` checks: without it
+          // `Range(2, 4, 2)` = {2, 4} would count as a subset of
+          // `Range(1, 5, 2)` = {1, 3, 5}.
+          if (!(al >= bl && au <= bu && as % bs === 0 && (al - bl) % bs === 0))
+            return false;
+          if (!strict) return true;
+          // Proper unless the two ranges enumerate the same elements.
+          return !(
+            al === bl &&
+            as === bs &&
+            Math.floor((au - al) / as) === Math.floor((bu - bl) / bs)
+          );
         }
 
-        if (!target.isCollection) return false;
-
-        let i = 1;
-        for (const x of target.each()) {
-          if (!expr.contains(x)) return false;
-          if (!expr.at(i)?.isSame(x)) return false;
-          i++;
-        }
-        return true;
+        // Any other target: the generic elementwise/type-based test.
+        return collectionSubset(expr, target, strict);
       },
 
       eltsgn: (expr) => {
         // Symbolic bounds: the elements' common sign is indeterminate
         if (hasSymbolicRangeBounds(expr)) return undefined;
-        const [lower, upper, step] = range(expr);
-        if (step === 0) return 'zero';
-        if (step > 0) return lower <= upper ? 'positive' : 'negative';
-        return lower >= upper ? 'positive' : 'negative';
+        const r = range(expr);
+        const [lower, upper, step] = r;
+        // A zero step does not enumerate, and a range whose bounds run
+        // against its step is empty: neither has elements to take a sign
+        // from.
+        if (step === 0) return undefined;
+        if (step > 0 ? lower > upper : lower < upper) return undefined;
+        // The sign comes from the extreme ELEMENTS, not the bounds: the last
+        // element is the last grid point at or before `upper` (`Range(1, 6, 2)`
+        // ends at 5), and a descending range runs from `lower` DOWN. Reading
+        // the direction alone reported `Range(-5, 10)` as `positive`, which a
+        // subset test against `PositiveIntegers` then believed.
+        const last = rangeLast(r);
+        const min = Math.min(lower, last);
+        const max = Math.max(lower, last);
+        if (min > 0) return 'positive';
+        if (max < 0) return 'negative';
+        if (min === 0 && max === 0) return 'zero';
+        if (min === 0) return 'non-negative';
+        if (max === 0) return 'non-positive';
+        // Straddles zero: no common sign (the range may or may not step ON
+        // zero, so not even `not-zero` is safe).
+        return undefined;
       },
 
       elttype: (expr) => {
@@ -2294,6 +2581,45 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return int.start >= int.end;
       },
       isFinite: (_expr) => false,
+      // Per the handler contract (`types-definitions.ts`) the receiver is the
+      // candidate SUBSET: this answers `expr` ⊆ `other`.
+      subsetOf: (expr, other, strict) => {
+        const a = interval(expr);
+        // Symbolic endpoints: indeterminate
+        if (a === undefined) return undefined;
+        const b = interval(other);
+        // `other` is not an interval: fall back to the generic test, which
+        // still decides an interval against a set that contains every value
+        // of its element type (`Interval(1, 2)` ⊆ `RealNumbers`).
+        if (b === undefined) return collectionSubset(expr, other, strict);
+
+        if (expr.isEmptyCollection === true) {
+          // The empty set is a subset of everything, strictly so unless
+          // `other` is empty too.
+          if (!strict) return true;
+          if (other.isEmptyCollection === undefined) return undefined;
+          return !other.isEmptyCollection;
+        }
+
+        // An endpoint of `other` admits the corresponding endpoint of `expr`
+        // when it lies strictly outside it, or coincides with it and is no
+        // more exclusive (a closed bound admits an open one, not the
+        // reverse). Endpoints may be ±Infinity, which compares correctly.
+        const lowerFits =
+          b.start < a.start ||
+          (b.start === a.start && (!b.openStart || a.openStart));
+        const upperFits =
+          b.end > a.end || (b.end === a.end && (!b.openEnd || a.openEnd));
+        if (!lowerFits || !upperFits) return false;
+        if (!strict) return true;
+        // Proper unless the two intervals are the same set of reals.
+        return !(
+          a.start === b.start &&
+          a.end === b.end &&
+          a.openStart === b.openStart &&
+          a.openEnd === b.openEnd
+        );
+      },
       // Three-valued membership: `true` only when both bound checks are
       // entailed, `false` when a bound check (or the type of the target)
       // refutes membership, `undefined` otherwise (e.g. symbolic target
@@ -7636,49 +7962,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
-  RecordFrom: {
-    description:
-      'Create a record from the elements of a collection of (key, value) pairs.',
-    complexity: 8200,
-    signature: '(collection) -> record',
-    // Provable declines only — see `DictionaryFrom`.
-    canEnumerate: canEnumerateFiniteSource,
-    evaluate: ([xs], { engine: ce }) => {
-      if (!xs.isCollection) return undefined;
-
-      // If the collection is a Dictionary, use its ops directly
-      if (isFunction(xs, 'Dictionary'))
-        return ce.function('Record', [...xs.ops]);
-
-      // Stay inert on non-finite or unknown-length input: building the
-      // record requires walking every entry.
-      if (!xs.isFiniteCollection) return undefined;
-
-      const entries: Expression[] = [];
-      for (const keyValue of xs.each()) {
-        // Boxed error, not a raw `throw` — see `DictionaryFrom`.
-        if (!isFunction(keyValue) || keyValue.nops !== 2)
-          return ce.error(
-            [
-              'incompatible-type',
-              'tuple<string, unknown>',
-              keyValue.type.toString(),
-            ],
-            keyValue.toString()
-          );
-        const key = keyValue.op1;
-        const value = keyValue.op2;
-        if (!isString(key))
-          return ce.error(
-            ['incompatible-type', 'string', key.type.toString()],
-            key.toString()
-          );
-        // POSITIONAL pair: `_fn`, not `tuple()` — see `BoxedDictionary.each()`.
-        entries.push(ce._fn('Tuple', [key, value]));
-      }
-      return ce.function('Record', entries);
-    },
-  },
 };
 
 //

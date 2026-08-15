@@ -146,6 +146,17 @@ describe('axisMaskOf: the parity dispatch table, row by row', () => {
     ],
     // config: G+M+E (tolerance, jit, reset, type-statement rollback).
     ['config', { kind: 'config' }, mask(true, true, true)],
+    // object-store: a mutable object's field write moves NOTHING (ruled
+    // 2026-08-15). Objects exist for store-heavy loops, and an axis bump per
+    // store would cold every generation-keyed cache in the engine on every
+    // iteration — the slider-tick pathology. Invalidation for stores is the
+    // per-object version channel in
+    // `src/compute-engine/boxed-expression/object-deps.ts` instead, which
+    // stamps `(object, version)` on each cache entry that read a field.
+    // Widening this row would not even be a safe fallback: an object is
+    // `isConstant`, so a field-reading node takes a generation-INDEPENDENT
+    // cache key that an `any` bump does not reach.
+    ['object-store', { kind: 'object-store' }, mask(false, false, false)],
   ];
 
   for (const [name, event, expected] of ROWS)

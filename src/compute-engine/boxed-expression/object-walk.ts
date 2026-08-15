@@ -5,7 +5,7 @@
  * Two consumers share it, which is why it lives in its own module: the
  * `.json` serialization of a `BoxedObject` (which wraps the record this walk
  * produces in an `["Object", …, "'TypeName'"]` provenance head), and — once
- * they land — the `RecordFrom(object)` operator arm and the serializer's
+ * they land — the `DictionaryFrom(object)` operator arm and the serializer's
  * `objects:` option, which must produce a byte-identical record.
  *
  * Three properties are contractual (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B,
@@ -61,7 +61,7 @@
  * with no depth cap. And a subgraph that carries a cycle is re-walked at every
  * occurrence rather than memoized, because reuse there would not be faithful
  * (`WalkState.markers` explains why); only the acyclic parts of such a graph
- * get the memo. A future `RecordFrom(object)` arm and the serializer's
+ * get the memo. A future `DictionaryFrom(object)` arm and the serializer's
  * `objects:` option inherit all three, since they must produce a
  * byte-identical record.
  */
@@ -212,7 +212,7 @@ function objectJsonWith(
 
 /**
  * The `["Dictionary", ["KeyValuePair", { str: "field" }, value], …]` body of
- * the walk — the exact shape `RecordFrom(object)` returns.
+ * the walk — the exact shape `DictionaryFrom(object)` returns.
  *
  * The head is `Dictionary`, not `Record`: a record value in this engine IS a
  * dictionary whose keys are identifiers, and `Dictionary` is the operator that

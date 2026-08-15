@@ -76,7 +76,7 @@ unconditionally, at every tier.
     an unspecified interim form would leak). Consequence for
     sequencing: the structural walk is a Phase 1 deliverable (steps
     4/8 territory); Phase 3 adds only the serializer OPTION
-    (`objects:`) and the `RecordFrom` operator arm on top of the same
+    (`objects:`) and the `DictionaryFrom` object arm on top of the same
     walk. The result is **computed fresh on every access and never
     memoized** — the value is mutable — and the one-way re-boxing
     guarantee (parses back as a record under the provenance head,
@@ -138,7 +138,7 @@ unconditionally, at every tier.
   once, at the store").
 - **Collection protocol**: `isCollection: false` throughout — objects
   are deliberately not collections (Appendix B plumbing note under
-  "Serialization": `RecordFrom`'s `isCollection` guard must not admit
+  "Serialization": `DictionaryFrom`'s `isCollection` guard must not admit
   them by accident; P46 dictionary-key precedence is likewise not
   implicated).
 - **Value plumbing**: `value` getter returns `undefined` (dictionary
@@ -158,10 +158,25 @@ unconditionally, at every tier.
   (`value === current ⇒ return`, suppression total — no bump, no
   event; object identity only, mirroring
   `boxed-value-definition.ts:305`), else writes the slot, increments
-  `_version`, and emits the new **`object-store` state event** (next
+  `_version`, and emits the **`object-store` state event** (next
   section). Field READS go through `_field(name)` and are pure loads;
   the property-access operators (Phase 1 steps 4–5) consume these two
   methods and add nothing beside them.
+  - **The guard's reach is narrower than Appendix B assumes**
+    (measured 2026-08-15, pinned in `object-store.test.ts`). The
+    appendix licenses the elision by observing that "the evaluated
+    result can be an interned node (equal small-integer literals share
+    one boxed value engine-wide)". That holds for host-built literals —
+    `ce.number(1) === ce.number(1)` — but NOT for a literal that came
+    through the parser, which carries its own source offsets and is a
+    distinct instance. So `p.n = 1` over a stored `1` bumps the version
+    and invalidates every entry that read the field, although no reader
+    can observe a difference; in practice only `p.n = p.n` is elided.
+    The guard is sound either way (it is an optimization, never a
+    semantic requirement); widening it to `isSame` would close the gap
+    and is also sound, but it contradicts the identity-only rule above
+    and costs a structural walk per store, so it is an open product
+    question rather than a silent change. Recorded in `ROADMAP.md`.
 - `_version` starts at 0 and only increments. It is PER-OBJECT cache
   currency, not an engine axis: cached results that read fields record
   `(object, versionAtRead)` dependencies per entry (below). Overflow
@@ -178,55 +193,69 @@ unconditionally, at every tier.
 ## The `object-store` state event
 
 `StateEvent` (engine-configuration-lifecycle.ts) gains
-`{ kind: 'object-store' }`. Mask decision (REVISED by the 2026-08-14
-review — the original semantic+callable blanket was the slider-tick
-pathology reborn): `any: true, semantic: false, world: false`, and the
-callable axis is **not** selected — the `declare`/`binding-repair`
-precedent. The rationale is the measured-waste discipline of the
-state-event design: Appendix B's forcing function for objects is
-store-heavy loops (sorts, sieves, shuffles, the `MutList` idiom), and a
-per-store bump of `_semanticVersion`/`_callableVersion` would cold
-engine-wide memos on every iteration — the exact incident class the
-invalidation-axes work and the item-181 fix exist to prevent. The
-PRECISE channel for field-derived staleness is the per-object version
-dependency (next section), and it is therefore a **prerequisite**:
-property stores do not ship before the dependency channel does (Phase 1
-orders step 7's recording machinery with step 5, not after it). A
-store-in-a-loop microbenchmark (N stores; assert unrelated memo
-recompute counts stay flat) is an explicit step-7 acceptance criterion.
-The `any` bump remains: `_type`/`_sgn`/value memos on expressions that
-read fields are `any`-keyed today and get their precision from the
-object-dependency channel, not from mask width.
+`{ kind: 'object-store' }`, and its mask is **zero on every axis** —
+`any: false, semantic: false, world: false`, callable not selected
+(USER-RULED 2026-08-15; the fork this settles is recorded below). The
+event exists so that a field write is reported at the same choke point
+as every other state write in the engine, and so the field-store canary
+has somewhere to hang; the invalidation it carries is the per-object
+version bump, not an axis.
 
-### OPEN RULING for 1D — this note and the shipped code disagree
+The rationale is the measured-waste discipline of the state-event
+design. Appendix B's forcing function for objects is store-heavy loops
+(sorts, sieves, shuffles, the `MutList` idiom), and a per-store bump of
+ANY engine axis would cold engine-wide memos on every iteration — the
+exact incident class the invalidation-axes work and the item-181 fix
+exist to prevent. The PRECISE channel for field-derived staleness is
+the per-object version dependency (next section), and it is therefore a
+**prerequisite**: property stores do not ship before the dependency
+channel does (Phase 1 orders step 7's recording machinery with step 5,
+not after it). A store-in-a-loop test (N stores; assert the engine axes
+do not move) is an acceptance criterion and is pinned in
+`test/compute-engine/object-store.test.ts`.
 
-**Do not wire the `object-store` event without resolving this.** The
-mask paragraph above specifies `any: true`. The shipped 1C inventory
-reasons from the opposite premise: `object-deps.ts` states that "a
-field store advances no engine axis — not `any`, not `semantic`, not
-`world`", and the per-object dependency channel was built on that
-basis. Both are currently true only because **no event exists yet** —
-`_store` emits nothing, so the shipped comment describes reality and
-the mask paragraph describes an intention. They cannot both survive 1D.
+### The mask fork, and how it was settled (2026-08-15)
 
-The fork:
+Recorded because the reasoning is not recoverable from the outcome.
+Revision 1 of this note specified `any: true` while the shipped 1C
+inventory reasoned from the opposite premise — `object-deps.ts` stated
+that "a field store advances no engine axis" — and both read true only
+because no event existed yet. The alternatives were:
 
-- **Keep `any: true`** (recommended for v1) — fail-safe: any cache not
-  yet wired to the per-object channel still invalidates. Cost: every
-  store colds all generation-keyed caches, which is coarse in exactly
-  the store-heavy loops objects exist for. The store-loop microbenchmark
-  named in the acceptance criteria is what decides whether that cost is
-  tolerable.
-- **Zero-mask** — the per-object channel becomes the sole invalidator,
-  which is precise and cheap, but every cache family must be *proven*
-  wired or excluded, because anything missed goes stale silently. The
-  B3 inventory claims that completeness; it has not been tested against
-  an actual emitter.
+- **`any: true`**, fail-safe: a cache family not yet wired to the
+  per-object channel would still invalidate. Cost: every store colds
+  all generation-keyed caches.
+- **Zero-mask**, precise and cheap, but every cache family must be
+  *proven* wired or excluded, because anything missed goes stale
+  silently.
 
-Whichever is chosen, `object-deps.ts`'s comment must be updated in the
-same change — leaving it asserting "no engine axis" while the event
-bumps `any` would be a false statement in the file a future reader
-consults first.
+Two facts found while implementing 1D decided it, and both cut against
+the fail-safe reading:
+
+1. **`any: true` is not actually a safety net for the caches in
+   question.** An object answers `isConstant` true, so a field-reading
+   node such as `Field(p, 'age')` takes a
+   *generation-independent* cache key (`_lazyCollectionMemoKey`,
+   `_type`, `_eagerSource` in `boxed-function.ts` all select on
+   `ops.every(x => x.isConstant)`). An `any` bump does not reach those
+   entries at all. The per-object channel is load-bearing under either
+   mask; the coarse bump would only have covered families that are not
+   the ones at risk.
+2. **`any: true` would make the B3 acceptance matrix vacuous.** With
+   every store colding all generation-keyed caches, the
+   evaluate → store → re-evaluate tests pass whether or not the
+   per-object channel works, so the one empirical proof that the
+   inventory is complete would stop proving anything.
+
+The residual risk — a missed cache family going stale silently — is
+answered by a diagnostic instead of by mask width:
+**`CE_OBJECT_STORE_BUMPS_ANY`** makes every store advance `any`
+(env-gated, the `CE_EFFECTS_PARANOID`/`CE_CACHE_STATS` posture). A
+staleness bug that disappears under the flag is a missing cache family,
+and the flag names the file to read.
+
+`object-deps.ts`'s inventory comment was rewritten in the same change,
+since it is the file a future reader consults first.
 
 ## Per-entry object-version dependencies (shape only; step 7 builds it)
 
@@ -318,7 +347,7 @@ serialization):
   guard's query set to object-slot traversal, keyed on the
   `BoxedObject` instance — a boolean "already in progress" answer is
   all these need.
-- **The serialization walk** (`.json` and, in Phase 3, `RecordFrom`)
+- **The serialization walk** (`.json` and, in Phase 3, `DictionaryFrom`)
   needs MORE than detection: Appendix B's `["CircularReference", n,
   Type?]` marker carries the ancestor DEPTH `n`, and the shared guard
   is a flag-only bitmask with no path tracking. The walk therefore
@@ -386,7 +415,7 @@ arm AND the early `eqImpl()` object branch (see "Equality"); `order.ts`
 classifier arm (rank beside dictionary); `ascii-math.ts toAsciiMath`
 arm; `match-dispatch.ts` literal handling; element-memo eligibility;
 the cross-engine ingress checks (see that section);
-`library/collections.ts` — `RecordFrom`'s signature widened to
+`library/collections.ts` — `DictionaryFrom`'s signature widened to
 `collection | object` with the object branch dispatched ahead of its
 `isCollection` guard (Appendix B names this edit; the operator arm
 itself is Phase 3, listed here so the checklist is the one complete

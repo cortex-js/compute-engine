@@ -17,7 +17,10 @@ import type {
 import type { Type, TypeReference } from '../../common/type/types.js';
 
 import { BoxedType } from '../../common/type/boxed-type.js';
-import { isObjectType } from '../../common/type/subtype.js';
+import {
+  isObjectType,
+  objectLayoutOfType,
+} from '../../common/type/subtype.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { noteObjectConstructed, recordObjectRead } from './object-deps.js';
 import { objectJson } from './object-walk.js';
@@ -298,6 +301,27 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
   }
 
   /**
+   * The DECLARED type of one stored field, or `undefined` for a name this
+   * object's layout does not carry.
+   *
+   * Read off the type PINNED on this instance, never resolved from the type
+   * registry by name — that is the whole point of pinning. An Epsil `type`
+   * statement re-run replaces the registry record in place, so a by-name
+   * lookup would answer with the NEW layout for an instance whose slots hold
+   * the OLD one, and a store type-checked against it could write a value the
+   * field cannot hold.
+   *
+   * This is not a field READ and deliberately does not report one to the
+   * dependency collectors: it consults the layout, which is fixed at
+   * construction, and never the slots, whose contents a store changes. A
+   * cache entry that asked what type `age` is has not thereby become
+   * sensitive to what `age` holds.
+   */
+  _fieldType(name: string): Type | undefined {
+    return objectLayoutOfType(this._type.type)?.elements[name];
+  }
+
+  /**
    * An object expression denotes a **fixed reference**, and a reference never
    * changes — only the contents it points at do. `isConstant` is a question
    * about the VALUE, so the answer is `true`, and it stays true across every
@@ -349,13 +373,20 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
    * Storing the identical node is observably nothing — everything storable is
    * immutable except objects, which alias by design, so an identical node
    * cannot differ in contents — and the suppression is TOTAL: no version
-   * bump, and (once stores emit one) no state event. This is the identity-only
-   * no-op rule the binding machinery already applies to `Assign`
-   * (`boxed-value-definition.ts`'s value setter).
+   * bump, no state event. This is the identity-only no-op rule the binding
+   * machinery already applies to `Assign` (`boxed-value-definition.ts`'s
+   * value setter).
    *
-   * Any other store writes the slot and increments `_version`, the per-object
+   * Any other store writes the slot, increments `_version` — the per-object
    * cache currency that lets a cached field-derived result tell whether the
-   * object it read has changed.
+   * object it read has changed — and reports an `object-store` state event.
+   * That event advances no invalidation axis by ruling (2026-08-15); it exists
+   * so that the write has a single reported site alongside every other state
+   * write in the engine, and so the field-store canary
+   * (`CE_OBJECT_STORE_BUMPS_ANY`) has somewhere to hang. The invalidation
+   * itself is the version bump on the line above, consumed through
+   * `object-deps.ts`. See the `object-store` row of `axisMaskOf`
+   * (`engine-configuration-lifecycle.ts`) for why the axes stay still.
    */
   _store(name: string, value: Expression): void {
     if (isForeignEngineObject(value, this.engine)) {
@@ -372,6 +403,7 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
     }
     this._slots.set(name, value);
     this._version += 1;
+    this.engine._noteStateEvent({ kind: 'object-store' });
   }
 
   /**

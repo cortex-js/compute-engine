@@ -227,18 +227,25 @@ let xs = ["a", "b"]`);
     );
   });
 
-  test('a NON-protocol field assignment keeps its existing error', () => {
+  test('a NON-protocol field assignment is `immutable-value-assignment`', () => {
     // `Field`/`At` assignment is otherwise rejected (the immutable value
-    // model); only the protocol-property case is claimed.
+    // model); only the protocol-property case is claimed here.
+    //
+    // The CODE changed with the property store (`docs/TYPE_SYSTEM_ROADMAP.md`
+    // Appendix B, "Assigning to a property" and its "Changes to Appendix A"
+    // item 1): a field assignment is now a store, so the refusal names what is
+    // actually wrong — the target is immutable — instead of reporting that a
+    // `Field` is not a `symbol`, which described the old rebinding lowering
+    // rather than anything the author wrote.
     const ce = new ComputeEngine();
     expect(errorCode(value(ce, 'let d = {"a" -> 1}\nd.a = 2'))).toBe(
-      'incompatible-type'
+      'immutable-value-assignment'
     );
     expect(
       errorCode(
         value(ce, 'type Pt = tuple<x: integer>\nlet q = Pt(1)\nq.x = 2')
       )
-    ).toBe('incompatible-type');
+    ).toBe('immutable-value-assignment');
   });
 
   test('the box route rewrites the same way', () => {
@@ -559,10 +566,16 @@ function f() -> integer {
 });
 
 describe('P38: a DEFERRED target that is not a protocol property after all', () => {
-  test('it produces the ordinary field-assignment error, not silence', () => {
+  test('it produces the field-assignment refusal, not silence', () => {
     // `d` is undeclared when the assignment canonicalizes, so the `Field` LHS
     // survives (the deferral) — by the time it evaluates, `d` is an ordinary
     // record that conforms to nothing.
+    //
+    // What matters here is that the refusal is REPORTED rather than swallowed
+    // by evaluating the `Field` and returning nothing. Its code became
+    // `immutable-value-assignment` with the property store: every route has
+    // declined, so the target is an immutable value being stored into
+    // (Appendix B, "Assigning to a property").
     const ce = engineFor(`protocol Tagged { readwrite tag: string }
 type string is Tagged {
   get tag(self: Self) -> string { "s" }
@@ -574,6 +587,6 @@ type string is Tagged {
     expect(run(ce, 'let d = {"tag" -> 1}')).toEqual([]);
     const result = assign.evaluate();
     expect(result.operator).toBe('Error');
-    expect(errorCode(result.toString())).toBe('incompatible-type');
+    expect(errorCode(result.toString())).toBe('immutable-value-assignment');
   });
 });

@@ -17,6 +17,7 @@ import type {
   FunctionSignature,
   ListType,
   NumericPrimitiveType,
+  ObjectType,
   PrimitiveType,
   SetType,
   Type,
@@ -1657,6 +1658,64 @@ function isScalar(type: Type): boolean {
  * (`type A = B` where `B` resolves back to `A`), which the resolver admits
  * while a forward reference is unfulfilled.
  */
+/**
+ * Follow a chain of nominal/alias type REFERENCES down to the type they
+ * define, instantiating a parameterized reference at its arguments on the way.
+ * A type that is not a reference is returned unchanged.
+ *
+ * `undefined` for a chain that cannot be followed: an unfulfilled forward
+ * reference (no `def` yet), or one that cycles back on itself (`type A = B`
+ * where `B` resolves to `A`), which the resolver admits while a forward
+ * reference is outstanding.
+ *
+ * The body is read from the REFERENCE's own `def`, never from the type
+ * registry's current record for the name. That is what lets a *pinned* type —
+ * a detached copy captured when a mutable object was constructed — answer with
+ * the layout that object actually has, rather than with whatever a later
+ * redeclaration made of the name. Type PARAMETERS still come from the
+ * declaration record, whose back-pointer a parameterized pin deliberately
+ * keeps live: they are the parameter list, which a redeclaration cannot change
+ * without minting a different type.
+ *
+ * One substitution, one level deep: a nested `tree<T>` inside the body stays an
+ * unexpanded reference, so the walk terminates.
+ */
+export function resolveTypeReference(t: Type): Type | undefined {
+  // Keyed on the DECLARATION record, not on `t`: instantiating an applied
+  // reference mints a fresh body object each step, so an identity guard on `t`
+  // itself would go blind on a cycle. The record is identity-stable.
+  const seen = new Set<TypeReference>();
+  while (typeof t === 'object' && t.kind === 'reference') {
+    const decl = declarationOf(t);
+    if (t.def === undefined || seen.has(decl)) return undefined;
+    seen.add(decl);
+    const params = decl.typeParams;
+    if (t.args !== undefined && params !== undefined) {
+      const bindings: Record<string, Type> = Object.create(null);
+      const n = Math.min(params.length, t.args.length);
+      for (let i = 0; i < n; i++) bindings[params[i].name] = t.args[i];
+      t = substituteTypeVariables(t.def, bindings);
+    } else t = t.def;
+  }
+  return t;
+}
+
+/**
+ * The stored-field LAYOUT a type denotes: the `object<…>` body reached through
+ * any chain of nominal references, or `undefined` for anything else.
+ *
+ * `undefined` covers the bare `object` primitive too, which promises that
+ * fields exist without naming them — a caller that needs to know whether a
+ * particular field is present must therefore treat `undefined` as "cannot
+ * tell", not as "no such field".
+ */
+export function objectLayoutOfType(t: Type): ObjectType | undefined {
+  const resolved = resolveTypeReference(t);
+  if (typeof resolved === 'object' && resolved.kind === 'object')
+    return resolved;
+  return undefined;
+}
+
 export function isObjectType(type: Type, seen?: Set<TypeReference>): boolean {
   if (type === 'object') return true;
   if (typeof type === 'string') return false;

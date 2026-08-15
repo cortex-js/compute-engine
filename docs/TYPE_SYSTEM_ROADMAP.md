@@ -1888,19 +1888,33 @@ object's data irrecoverably: by the time someone notices the error
 node in a stored artifact, the live object may be gone. Between two
 equally silent defaults, the one that keeps the data wins.
 
-**The conversion is `RecordFrom`.** The engine already ships a
+**The conversion is `DictionaryFrom`.** The engine already ships a
 conversion family — `ListFrom`, `SetFrom`, `TupleFrom`,
-`DictionaryFrom`, `RecordFrom(collection of pairs) -> record`
-(`library/collections.ts`) — and the in-engine conversion is a new arm
-on that family, not a new operator: `RecordFrom(object)` returns an
-immutable record of the object's current contents. It is both the
-operation a program calls directly and the single mechanism the
-serializer default (below) rides on. (Plumbing note: the shipped
-handler's signature is `(collection) -> record` and its evaluate
-begins with an `isCollection` guard — and objects are deliberately
-not collections — so the arm needs the signature widened to
-`collection | object` with the object branch dispatched ahead of that
-guard.) (`Snapshot` was
+`DictionaryFrom(collection of pairs)` (`library/collections.ts`) — and
+the in-engine conversion is a new arm on that family, not a new
+operator: `DictionaryFrom(object)` returns an immutable record of the
+object's current contents. It is both the operation a program calls
+directly and the single mechanism the serializer default (below) rides
+on.
+
+(**Amended 2026-08-15**: every sentence above said `RecordFrom` until
+that operator was deleted. It declared `(collection) -> record` but
+returned an inert `Record(…)` application with type `unknown`, because
+`Record` has no operator definition anywhere in the engine, so its
+declared result type lied. `DictionaryFrom` already returns exactly
+what it promised: a dictionary value whose type derives as `record<…>`
+when every key is a bare identifier — record-ness is derived from the
+value rather than carried by a separate representation, which is what
+made `RecordFrom` redundant rather than merely broken. See the
+`RecordFrom` entry in `ROADMAP.md`. The plumbing note stands with the
+new name: the shipped handler's signature is `(collection) -> …` and
+its evaluate begins with an `isCollection` guard — and objects are
+deliberately not collections — so the arm needs the signature widened
+to `collection | object` with the object branch dispatched ahead of
+that guard. Phase 1's serialization walk already emits the `Dictionary`
+operator form for the same reason.)
+
+(`Snapshot` was
 considered as a name and rejected: the family already covers the
 meaning, and the point-in-time detachment it would advertise is implied
 by the result being an immutable record.) Its semantics:
@@ -1928,12 +1942,12 @@ by the result being an immutable record.) Its semantics:
   user code, is atomic — nothing can mutate mid-walk — and terminates
   on finite expression trees, which all values are. Two deliberate
   exclusions: computed properties (their accessors are user code —
-  `RecordFrom` captures the stored layout), and, in v1, a
+  `DictionaryFrom` captures the stored layout), and, in v1, a
   function-literal value whose *captured environment* cannot be
   structurally verified object-free — that position declines with an
   error marker rather than guessing (captured scopes are not ordinary
   operands).
-- **A read, not an action.** `RecordFrom(p)` carries no `state` label —
+- **A read, not an action.** `DictionaryFrom(p)` carries no `state` label —
   it observes. It records version-counter dependencies on every object
   it reads, so a cached result containing a snapshot invalidates
   correctly when any snapshotted object is later stored to.
@@ -1949,20 +1963,20 @@ by the result being an immutable record.) Its semantics:
   reconstruct the loop. The walker emits the type operand (it knows the
   type at the back-edge for free); the shape remains valid without it.
   The back-edge guard is exactly the value-walk cycle guard the
-  "Cycles" section mandates — `RecordFrom` is its first named consumer.
+  "Cycles" section mandates — `DictionaryFrom` is its first named consumer.
 - **Two documented losses.** Sharing: a shared but acyclic reference (a
   cross-edge, not a back-edge) has a perfectly good tree representation
   and is simply duplicated — two references to one object come back as
   two unrelated records. Nominal identity: records are structural, so
-  `RecordFrom` returns a plain `record<firstName: string, …>` — the
-  `Person`-ness is gone from the *value*. In `RecordFrom`'s own result
+  `DictionaryFrom` returns a plain `record<firstName: string, …>` — the
+  `Person`-ness is gone from the *value*. In `DictionaryFrom`'s own result
   the type name survives only in `CircularReference` markers; the
   serializer route below does better.
 
 **`toMathJSON()` converts by default.** The serializer gains an option
 (spelling open, e.g. `objects: 'record' | 'reject'`, default
 `'record'`). Under the default, each object position serializes as the
-record `RecordFrom` would produce, **wrapped in a dedicated `Object`
+record `DictionaryFrom` would produce, **wrapped in a dedicated `Object`
 head carrying the object's nominal type name**:
 
 ```json
@@ -1976,10 +1990,10 @@ whose type is `unknown`, which would make this wrapper's own contract —
 "its static type is the wrapped record's type" — vacuous. `Dictionary`
 is a real operator whose boxed value **derives** a `record<…>` type
 from its identifier keys, so the reloaded snapshot is a genuine
-record-typed value. This is the same fact that makes `RecordFrom`
-redundant and currently broken; see the `RecordFrom` entry in
-`ROADMAP.md`, which also records the consequence for Phase 3 —
-the `…From` arm named below belongs on `DictionaryFrom`.)*
+record-typed value. This is the same fact that made
+`RecordFrom` redundant, and it was deleted for it on 2026-08-15; see
+the `RecordFrom` entry in `ROADMAP.md`. The `…From` arm named below is
+therefore `DictionaryFrom`'s.)*
 
 An earlier revision used a `Typed` ascription wrapper here, and the
 spec review killed it: `Typed` is *asserted* ascription — its type
@@ -2000,7 +2014,7 @@ every converted position, that an object of that nominal type stood
 here — a consumer that must not accept snapshots can detect them and
 refuse at import. Constraints pinned now: **one walk, one mechanism**
 — the record inside the wrapper is byte-identical to explicit
-`RecordFrom` output, the serializer only adds the `Object` wrapper —
+`DictionaryFrom` output, the serializer only adds the `Object` wrapper —
 and it is a **one-way door**: the output parses back as records
 (wrapped in provenance), never objects; identity, sharing, and
 conformances do not survive.
@@ -2370,7 +2384,7 @@ own short ruling list —
   *is* an immutable list, so the snapshot is handing it out, and the
   array's next store pays the one copy. Only an element type that can
   contain objects or arrays forces `ListFrom` onto the deep walk
-  (`RecordFrom`'s detachment rule), and that is statically knowable
+  (`DictionaryFrom`'s detachment rule), and that is statically knowable
   from `T` — the fast path is a type check, not a scan.
 - **Compilation.** JS/Python arrays have native reference semantics;
   the GPU target and the engine⇄compiled result boundary follow the

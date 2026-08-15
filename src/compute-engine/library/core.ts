@@ -38,7 +38,14 @@ import { randomCount } from './random-utils.js';
 import { isRingConstant } from './ring-constructions.js';
 import { quotientRingType } from './type-handlers.js';
 import { interval } from '../numerics/interval.js';
-import { range, rangeLast } from './collections.js';
+import {
+  fieldAssignmentVerdict,
+  fieldStoreRefusal,
+  objectLayoutOwnsField,
+  objectFieldStore,
+  range,
+  rangeLast,
+} from './collections.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { typeToDisplayString } from '../../common/type/display.js';
 
@@ -135,6 +142,7 @@ import {
   isProtocolDispatcher,
   protocolMemberResultType,
   protocolPropertyAssignment,
+  protocolsWithProperty,
   protocolPropertyResultType,
 } from '../engine-protocols.js';
 import { errorValue } from '../boxed-expression/error-value.js';
@@ -2694,6 +2702,23 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return ce._fn('Assign', [lhs, args[1]]);
         }
 
+        // A PROPERTY STORE — `p.age = 43`. Assignment through a `Field` target
+        // is a store into a mutable object and is legal on nothing else
+        // (Appendix B, "Assigning to a property"), so a `Field` LHS never
+        // reaches the `checkType(lhs, 'symbol')` refusal below: it either
+        // defers to `evaluate`, where a real receiver settles it, or carries
+        // the one refusal that cannot change at runtime.
+        //
+        // The one question asked BEFORE the protocol route: does the receiver's
+        // own object layout declare this field? If so it is a store, even when
+        // a `readwrite` protocol declares a property of the same name. Letting
+        // the protocol lowering win there does not merely pick a different
+        // mechanism — it rebinds the receiver to a NEW value built by the
+        // setter, so every other reference to the object keeps the old contents
+        // and Appendix B's "References, not copies" breaks silently. Handing it
+        // to `evaluate` lets the instance's own pinned layout decide.
+        const layoutOwned = objectLayoutOwnsField(ce, lhs);
+
         // P2 — protocol-property assignment is REBINDING SUGAR: `p.name = v`
         // canonicalizes to `p = «set name»(p, v)`. Runs BEFORE the symbol
         // check below, which would otherwise reject the `Field` target as
@@ -2701,13 +2726,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // left to that existing path; one whose target is not yet TYPED (the
         // Epsil pre-pass canonicalizes the batch before anything runs) keeps
         // its raw `Field` LHS and is resolved again from `evaluate`.
-        const property = protocolPropertyAssignment(ce, lhs, args[1]);
+        const property = layoutOwned
+          ? undefined
+          : protocolPropertyAssignment(ce, lhs, args[1]);
         if (property?.kind === 'error') return property.error;
         if (property?.kind === 'rebind')
           return ce._fn('Assign', [
             ce.symbol(property.symbol),
             property.setter,
           ]);
+
+        // The static refusal is only reached once the protocol route has
+        // DECLINED outright. A `defer` from that route means the name is some
+        // protocol's property and the receiver's type is not settled here — a
+        // protocol setter may well perform this write — and refusing it as
+        // immutable would report a defect where there is none.
+        const store =
+          property === undefined && !layoutOwned
+            ? fieldAssignmentVerdict(ce, lhs)
+            : ('defer' as const);
+        if (store !== undefined && store !== 'defer') return store;
+        const deferStore = layoutOwned || store === 'defer';
 
         // Note: we can't use checkType() because it canonicalized/bind the argument.
         // As in `Declare`, a `Tuple` first operand is a destructuring pattern
@@ -2717,6 +2756,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         let symbol = lhs;
         if (
           property === undefined &&
+          !deferStore &&
           !isSymbol(symbol) &&
           !isFunction(symbol, 'Tuple')
         ) {
@@ -3075,12 +3115,45 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
 
         //
-        // P2 — the DEFERRED protocol-property assignment: canonicalization
-        // could not read the target's type yet (the Epsil pre-pass runs before
-        // anything is evaluated), so the `Field` LHS survived. The type is
-        // settled now, so the rebinding is resolved and performed here.
+        // A `Field` LHS that reached evaluation: a PROPERTY STORE, a deferred
+        // protocol-property rebinding, or a refusal.
         //
         if (isFunction(op1, 'Field')) {
+          // The RECEIVER is evaluated exactly once, here, and the same value is
+          // handed to every route tried below. A receiver is an arbitrary
+          // expression and may carry effects (`nextItem().field = v`), so each
+          // route deriving it from `op1` for itself would fire them once per
+          // route — including on the refusal path, which merely needs its type
+          // to phrase the error. Evaluating it BEFORE the value is also ruling
+          // B8's left-to-right order.
+          const receiver = op1.ops[0]?.evaluate();
+
+          // The property STORE comes first: an object's own stored fields are
+          // its layout's, and a name in the layout is a store even if some
+          // protocol also declares a property by that name. `objectFieldStore`
+          // evaluates the value only once it is committed to storing, so a
+          // decline (`undefined`) costs the RHS nothing and leaves the protocol
+          // route below to evaluate it exactly once itself.
+          const stored = objectFieldStore(ce, op1, op2, receiver);
+          if (stored !== undefined) return stored;
+
+          // REFUSE BEFORE EVALUATING THE VALUE where the refusal is already
+          // certain. The store route has declined, so the only remaining
+          // candidate is a protocol property — and if no protocol declares
+          // this name at all, none ever will. Asking that cheap question here
+          // keeps the promise the store route makes one line above: a target
+          // no route can serve costs the right-hand side nothing, so
+          // `n.x = bump()` on a number does not fire `bump()` before reporting
+          // that `n` cannot be stored into. (The full resolution below cannot
+          // stand in for this check: it needs the CONCRETE value, so asking it
+          // first would be the very evaluation being avoided.)
+          const fieldName = isString(op1.ops[1]) ? op1.ops[1].string : undefined;
+          if (
+            fieldName !== undefined &&
+            protocolsWithProperty(ce, fieldName).length === 0
+          )
+            return fieldStoreRefusal(ce, op1, receiver);
+
           // Evaluate the VALUE first: this is the runtime route, so the
           // value-fit check inside `protocolPropertyAssignment` must see the
           // CONCRETE value. The static type of a raw RHS is often wider than
@@ -3095,14 +3168,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const property = protocolPropertyAssignment(ce, op1, rhs);
           if (property?.kind === 'error') return property.error;
           if (property === undefined) {
-            // The deferred target is NOT a protocol property after all (the
-            // root settled to an ordinary record/dictionary, or to a type that
-            // does not conform). That is the plain `Field`-assignment refusal
-            // the canonical route makes with `checkType(lhs, 'symbol')` — emit
-            // it here, since falling through would evaluate the `Field` and
-            // return `undefined`, swallowing the error entirely.
-            const target = checkType(ce, op1, 'symbol');
-            if (!target.isValid) return target;
+            // Every route has declined: the receiver did not evaluate to an
+            // object, and no protocol claims the name either. The target
+            // cannot be stored into, and that is the value of the statement —
+            // falling through would evaluate the `Field` and return
+            // `undefined`, swallowing the refusal entirely.
+            return fieldStoreRefusal(ce, op1, receiver);
           }
           if (property?.kind === 'rebind') {
             const val = property.setter.evaluate();

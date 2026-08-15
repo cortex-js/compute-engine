@@ -136,7 +136,7 @@ The center of gravity. Sub-steps in dependency order.
 >   `["Object", <record>, "'TypeName'"]` wrapper over the shared
 >   structural walk, with `CircularReference` depth+type markers. No
 >   provisional shape ever ships. Phase 3 then adds only the serializer
->   OPTION and the `RecordFrom` operator arm over the same walk. The
+>   OPTION and the `DictionaryFrom` object arm over the same walk. The
 >   walk keeps its OWN ancestor stack (the shared cycle guard is
 >   flag-only and cannot produce the marker's depth).
 > - **The nominal type is PINNED at construction** (never re-resolved
@@ -163,8 +163,42 @@ The center of gravity. Sub-steps in dependency order.
 > and the B3 adversarial acceptance matrix; the Appendix A
 > rebinding-sugar replacement (the phase's one breaking change —
 > measure snapshot blast radius before landing).
+>
+> > **1D STATUS 2026-08-15 — SPLIT.** The store half is DONE and the
+> > feature is usable (`p.age = 43`, `xs[i].name = v`, evaluated-value
+> > semantics, B8 order, the `immutable-value-assignment` refusals, the
+> > `object-store` event at a ZERO mask by user ruling, and the
+> > acceptance matrix in `test/compute-engine/object-store.test.ts`).
+> >
+> > The rebinding-sugar RETIREMENT is BLOCKED and its prerequisite —
+> > Appendix B's B1 mutability gate — was implemented, measured and
+> > reverted the same day: it fails 32 protocol tests, and the failures
+> > are structural rather than fixture-level (a builtin can never be an
+> > object type, so B1 deletes the shipped host-API ability to register
+> > protocol setters; the migratable cases depend on Phase 2's
+> > field-backed-satisfaction ruling). Three options are written up
+> > under "Appendix B's mutability gate (B1) would remove settable
+> > properties from host types" in `ROADMAP.md`, needing a product
+> > ruling. Until then the sugar ships alongside the store: the store
+> > claims a name in the object's own layout, the sugar serves the rest.
+> >
+> > **This document schedules B1 twice, and that is the root of the
+> > problem.** Step 5 below puts `protocol-requires-object` in Phase 1 as
+> > part of the sugar retirement, while "Phase 2 — Protocol integration"
+> > lists "The mutability gate (B1)" as one of its own bullets. Phase 2 is
+> > the coherent home: B1's two companions there — field-backed
+> > satisfaction (a stored field satisfies a `readwrite` requirement with
+> > no accessor written) and `object-property-conflict` — are exactly what
+> > a conformance must be re-pointed AT once records stop being legal
+> > conformers, and without them a migrated fixture has no defined meaning
+> > for an explicit `set` accessor on an object. The sugar retirement
+> > therefore depends on Phase 2 and cannot complete inside Phase 1;
+> > whether it MOVES to Phase 2 or Phase 2 moves ahead of it is the
+> > sequencing half of the ruling that ROADMAP.md asks for.
 > **1E** — evaluation-order audit (B8) and the appendix's own examples
-> as verbatim tests.
+> as verbatim tests. Independent of B1 — nothing in it touches
+> conformance — so it is Phase 1's remaining work whichever way the
+> sequencing goes.
 
 1. **Representation decision (first design task, before code).** An
    object value = identity + mutable slot table + per-object version
@@ -259,7 +293,8 @@ record / object); replacement re-validation. Effort: L.
 
 Spec: "Serialization" + "Cycles".
 
-- `RecordFrom(object)` arm: widen the shipped signature
+- `DictionaryFrom(object)` arm (was `RecordFrom`, deleted 2026-08-15 —
+  see the `RecordFrom` entry in `ROADMAP.md`): widen the shipped signature
   (`collection | object`), dispatch the object branch ahead of the
   `isCollection` guard. Deep **structural** walk (never enumerative):
   stored fields only; lazy/non-finite collection values pass through
@@ -274,7 +309,7 @@ Spec: "Serialization" + "Cycles".
 - `toMathJSON()` option (spelling to bikeshed at implementation:
   lean `objects: 'record' | 'reject'`), default `'record'`, wrapping
   each object position; byte-identical record to explicit
-  `RecordFrom`; `'reject'` emits subexpression-local
+  `DictionaryFrom`; `'reject'` emits subexpression-local
   `object-serialization-unsupported`.
 - Display serializers (`toString`, LaTeX, Epsil views) show contents
   with cycle guards; no option needed.
@@ -283,7 +318,7 @@ Acceptance: round-trip tests proving the one-way door (reload is a
 record; object-only calls/stores rejected — the spec review's
 required test); cycle snapshot fidelity (`Buddy` graph → markers with
 depth+type); byte-identity between option output and explicit
-`RecordFrom`; the O(1)/deep fast-path split by element type. Effort: L.
+`DictionaryFrom`; the O(1)/deep fast-path split by element type. Effort: L.
 
 ## Phase 4 — Compilation boundary
 

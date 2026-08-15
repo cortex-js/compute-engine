@@ -54,12 +54,26 @@
  *
  * The acceptance criterion for objects is an invariant over EVERY cache, not
  * over the ones that happened to come to mind: *no cache serves a value
- * derived from an object field without validating that object's version.* A
- * field store advances no engine axis — not `any`, not `semantic`, not
- * `world`, not `callable` — so a cache that only checks a generation is blind
- * to mutation by construction, and "we forgot one" is indistinguishable from
- * "the engine returns stale answers". The disposition of each family is
- * recorded at its own site; this is the index.
+ * derived from an object field without validating that object's version.*
+ *
+ * A field store reports an `object-store` state event, and that event advances
+ * no engine axis — not `any`, not `semantic`, not `world`, not `callable`
+ * (ruled 2026-08-15; the `object-store` row of `axisMaskOf` in
+ * `engine-configuration-lifecycle.ts` carries the argument, and
+ * `docs/plans/2026-08-14-object-representation-decision.md` the fork it
+ * settles). So a cache that only checks a generation is blind to mutation by
+ * construction, and "we forgot one" is indistinguishable from "the engine
+ * returns stale answers". Widening the mask would not have rescued a forgotten
+ * family either: an object is `isConstant`, so a field-reading node takes a
+ * generation-INDEPENDENT cache key that no axis bump reaches. This channel is
+ * load-bearing, not a refinement.
+ *
+ * The disposition of each family is recorded at its own site; this is the
+ * index. Each wired family carries an adversarial evaluate → store →
+ * re-evaluate test (`test/compute-engine/object-caching.test.ts`), which is the
+ * inventory's only empirical proof; `CE_OBJECT_STORE_BUMPS_ANY` makes every
+ * store advance `any` so that a suspected staleness bug in the field can be
+ * bisected to a missing family in one run.
  *
  * RECORDING DEPENDENCIES (they can be object-derived, and they validate):
  * - `cachedValue()` (`cache.ts`) and therefore every slot that goes through

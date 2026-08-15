@@ -1237,26 +1237,30 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
     expect(e.operator).toEqual('DictionaryFrom');
   });
 
-  test('RecordFrom of a finite collection of pairs', () => {
+  // `RecordFrom` was DELETED (user-ruled 2026-08-15). It declared
+  // `(collection) -> record` but returned an inert `Record(…)` application
+  // with type `unknown`, because `Record` has no operator definition anywhere
+  // in the engine — so its declared result type lied. `DictionaryFrom` on the
+  // same input already returns exactly what `RecordFrom` promised: a
+  // dictionary value whose type derives as `record<…>` when every key is a
+  // bare identifier. Record-ness is derived from the value, not carried by a
+  // separate representation, which made the operator redundant rather than
+  // merely broken. See the `RecordFrom` entry in `ROADMAP.md`.
+  test('RecordFrom is gone; DictionaryFrom is the conversion', () => {
     const e = engine
       .box([
         'RecordFrom',
         ['List', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]],
       ])
       .evaluate();
-    expect(e.operator).toEqual('Record');
-    expect(e.json).toEqual([
-      'Record',
-      ['Tuple', "'a'", 1],
-      ['Tuple', "'b'", 2],
-    ]);
-  });
-
-  test('RecordFrom of an infinite collection stays inert', () => {
-    const e = engine
-      .box(['RecordFrom', ['Cycle', ['List', ['Tuple', { str: 'a' }, 1]]]])
+    expect(e.operatorDefinition).toBeUndefined();
+    const d = engine
+      .box([
+        'DictionaryFrom',
+        ['List', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]],
+      ])
       .evaluate();
-    expect(e.operator).toEqual('RecordFrom');
+    expect(d.type.toString()).toBe('record<a: finite_integer, b: finite_integer>');
   });
 });
 

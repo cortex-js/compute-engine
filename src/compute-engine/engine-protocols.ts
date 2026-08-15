@@ -3010,8 +3010,14 @@ type PropertyResolution =
   | { status: 'none' };
 
 /** Every protocol declaring `name` as a PROPERTY requirement. `only`
- * restricts the search to one protocol — the qualified form `p.(P.name)`. */
-function protocolsWithProperty(
+ * restricts the search to one protocol — the qualified form `p.(P.name)`.
+ *
+ * Exported so a caller can ask the CHEAP half of the question — "could any
+ * protocol claim this name at all?" — without paying for the full resolution
+ * in {@link protocolPropertyAssignment}, which canonicalizes the value it is
+ * given in order to type-check it. `Assign` uses it to refuse a hopeless field
+ * target before evaluating the right-hand side. */
+export function protocolsWithProperty(
   ce: IComputeEngine,
   name: string,
   only?: ProtocolRecord

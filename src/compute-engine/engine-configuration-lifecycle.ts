@@ -42,7 +42,10 @@ export type StateEvent =
     }
   | { kind: 'assumption' } // assume / forget
   | { kind: 'inference'; symbolSignature?: boolean; valueType?: boolean }
-  | { kind: 'config' }; // precision, tolerance, angularUnit, jit, reset, type-statement redefinition
+  | { kind: 'config' } // precision, tolerance, angularUnit, jit, reset, type-statement redefinition
+  /** A field of a mutable object was written (`BoxedObject._store`). Advances
+   * NO axis — see the `object-store` row of {@link axisMaskOf}. */
+  | { kind: 'object-store' };
 
 /** Which axes an event advances. */
 export type AxisMask = {
@@ -86,8 +89,42 @@ export function callableAxisSelects(e: StateEvent): boolean {
       return e.callable;
     case 'declare':
       return e.callable || e.shadowsCallable;
+    case 'object-store':
+      // A store changes no declaration, no binding and no signature, so no
+      // expression's EFFECTS can differ because of it — the axis that keys
+      // `BoxedFunction._effects` is not selected. See the `object-store` row
+      // of `axisMaskOf` for the whole invalidation story.
+      return false;
   }
 }
+
+/**
+ * `CE_OBJECT_STORE_BUMPS_ANY`: the field-store canary.
+ *
+ * A field store advances no invalidation axis (the `object-store` row of
+ * {@link axisMaskOf}); everything it invalidates travels the precise
+ * per-object version channel in `boxed-expression/object-deps.ts` instead.
+ * That is correct only while every cache that can hold a field-derived value
+ * is wired to that channel or excluded from it, and a family that is neither
+ * goes stale SILENTLY — there is no error, just an out-of-date answer.
+ *
+ * Setting this environment variable makes every store additionally advance the
+ * engine-wide `any` version, which colds every generation-keyed cache. If a
+ * suspected staleness bug disappears under the flag, the defect is a cache
+ * family missing from the object-dependency channel rather than a store
+ * defect, and the flag names the file to go read. It is a diagnostic for smoke
+ * and soak runs, not a semantic mode — the same posture and env-gating as
+ * `CE_EFFECTS_PARANOID` (`boxed-expression/boxed-function.ts`) and
+ * `CE_CACHE_STATS`.
+ *
+ * Ruled 2026-08-15 (the `object-store` mask fork of
+ * `docs/plans/2026-08-14-object-representation-decision.md`).
+ */
+const OBJECT_STORE_BUMPS_ANY: boolean = (() => {
+  if (typeof process === 'undefined') return false;
+  const flag = process.env?.CE_OBJECT_STORE_BUMPS_ANY;
+  return flag !== undefined && flag !== '0';
+})();
 
 /**
  * The dispatch table: a row-by-row TRANSCRIPTION of the legacy counter
@@ -120,6 +157,9 @@ export function callableAxisSelects(e: StateEvent): boolean {
  *   three; `symbolSignature` (`BoxedSymbol.infer`, operator branch) — all
  *   three (R5); `valueType` (value branch) — `any` only (R5).
  * - `assumption`, `config`: all three.
+ * - `object-store`: a mutable object's field write — NONE of the three (and
+ *   not the callable axis either). Invalidation for stores is the per-object
+ *   version channel, not an axis; see the row's own note.
  *
  * The R5 rows are the step-5 normalization (ruled 2026-08-09): the
  * pre-cutover masks they replace are recorded in the design's §2/§9.
@@ -193,6 +233,42 @@ export function axisMaskOf(e: StateEvent): AxisMask {
       return { any: true, semantic: true, world: true };
     case 'config':
       return { any: true, semantic: true, world: true };
+    case 'object-store':
+      // A field store of a mutable object advances NOTHING (ruled 2026-08-15;
+      // the fork is recorded in
+      // `docs/plans/2026-08-14-object-representation-decision.md`). The engine
+      // axes are the COARSE channel — an `any` bump colds every
+      // generation-keyed cache in the engine — and objects exist for exactly
+      // the workload that cannot afford it: store-heavy loops (sorts, sieves,
+      // accumulating a running total). A per-store engine-wide bump is the
+      // slider-tick pathology the invalidation-axes work was built to end
+      // (item 181: 872K events, 1.85M wasted type recomputes in one box).
+      //
+      // What a store DOES invalidate travels the precise per-object channel in
+      // `boxed-expression/object-deps.ts`: every cache entry built from a
+      // field read carries `(object, version at read)` stamps that are
+      // re-validated at every use, so a store to `p` drops exactly the entries
+      // that read `p` and nothing else. The coarse channel could not
+      // substitute for it in any case: an object answers `isConstant` true, so
+      // a field-reading node takes a generation-INDEPENDENT cache key that an
+      // `any` bump does not reach (see `BoxedObject.isConstant`). Soundness
+      // therefore rests on the cache inventory being complete — every family
+      // wired to the channel or excluded with a reason — which is what
+      // `object-deps.ts`'s inventory records and what the adversarial
+      // store-then-re-evaluate matrix in `test/compute-engine/object-caching.test.ts`
+      // tests family by family. `CE_OBJECT_STORE_BUMPS_ANY` is the diagnostic
+      // for the failure mode that inventory is guarding against.
+      //
+      // On the zero-mask correctness precondition stated in the `redefine`
+      // note above: a store inside a scope bracket leaves that bracket
+      // provably `clean`, and that is sound here rather than accidental,
+      // because no version-keyed cache entry can be stale on account of a
+      // store. An entry that read a field carries object-version stamps and
+      // revalidates against them independently of any scope boundary; an entry
+      // that read no field is unaffected by a store in the first place.
+      return OBJECT_STORE_BUMPS_ANY
+        ? { any: true, semantic: false, world: false }
+        : { any: false, semantic: false, world: false };
   }
 }
 

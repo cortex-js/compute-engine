@@ -1531,13 +1531,13 @@
       "name": "DeclareConformance",
       "category": "Core",
       "arity": "optional",
-      "signature": "(target: string|symbol, protocols: any, implementation: dictionary?) scope -> nothing",
+      "signature": "(target: string|symbol, protocols: any, whereClauseOrImplementation: any?, implementation: dictionary?) scope -> nothing",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare that a type CONFORMS to one or more protocols — the lowering of the Epsil `type string is Hashable & Comparable` statement. The target rides as a type-expression string and must be named and ground (not a union, an anonymous structural type or a `type alias` name); the protocols ride as a `List` of names. An optional trailing dictionary carries the implementation block, member name -> function literal (property handlers under the mangled keys `__get__x` / `__set__x`); it may only accompany a SINGLE protocol. Conformance is monotone — it can be added but never removed — and a re-declaration is a no-op. Evaluates to `Nothing`."
+      "description": "Declare that a type CONFORMS to one or more protocols — the lowering of the Epsil `type string is Hashable & Comparable` statement. The target rides as a type-expression string and must be named and ground (not a union, an anonymous structural type or a `type alias` name); the protocols ride as a `List` of names. An optional trailing dictionary carries the implementation block, member name -> function literal (property handlers under the mangled keys `__get__x` / `__set__x`); it may only accompany a SINGLE protocol. A CONDITIONAL conformance carries, ahead of that block, the source text of its trailing `where` clause as a string: the target is then a head pattern naming the variables the clause binds (`list<T>` with `\"where T is Comparable\"`). Conformance is monotone — it can be added but never removed — and a re-declaration is a no-op. Evaluates to `Nothing`."
     },
     {
       "name": "DeclareProtocol",
@@ -4000,13 +4000,13 @@
       "name": "Map",
       "category": "Collections",
       "arity": "variadic",
-      "signature": "(collection<T>, mapping: callback<(T) -> U>, collection*) -> indexed_collection where T, U",
+      "signature": "(mapping: callback<(T) -> U>, collection<T>+) -> indexed_collection where T, U",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the collection where each element has been transformed by the mapping function.\n\nWith a single collection, equivalent to `[f(x) for x in xs]`. With\n\nmultiple collections, combines them element-wise (like `zipWith`): \n\n`Map(xs, ys, f) = [f(x1, y1), f(x2, y2), …]`, with the length of the\n\nshortest input. The mapping function is always the LAST argument."
+      "description": "Return the collection where each element has been transformed by the mapping function.\n\nWith a single collection, equivalent to `[f(x) for x in xs]`. With\n\nmultiple collections, combines them element-wise (like `zipWith`): \n\n`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the\n\nshortest input. The mapping function is always the FIRST argument."
     },
     {
       "name": "Match",
@@ -4310,6 +4310,18 @@
       "lazy": true,
       "broadcastable": false,
       "description": "N(expr): numerically evaluate an expression\n\nN(expr, precision): evaluate to `precision` significant digits"
+    },
+    {
+      "name": "NamedArgument",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(string, any) -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "NamedArgument(name, value): one named argument of a call (Epsil\n\nsurface syntax: `f(rate: 0.05)`).\n\nA parse-level carrier, like `Spread`, but one that never survives:\n\nthe enclosing call consumes it at canonicalization, permuting the\n\nwritten arguments into the order its callee declares.\n\nReaching this definition therefore means the carrier was NOT\n\nconsumed — the callee supplied no parameter names to match — which\n\nis the `argument-names-unavailable` error."
     },
     {
       "name": "Nand",
@@ -4766,6 +4778,18 @@
       "lazy": true,
       "broadcastable": true,
       "description": "Sequence of Numerator and Denominator of an expression"
+    },
+    {
+      "name": "Object",
+      "category": "Core",
+      "arity": "optional",
+      "signature": "(any, string?) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Provenance head for the snapshot of a mutable object: `[\"Object\", <record>, \"'TypeName'\"]`. The record holds the object's stored fields at the moment it was serialized; the second operand names the nominal type the object had. Not a constructor and not an ascription — it wraps data, it does not make an object."
     },
     {
       "name": "Oklab",
@@ -5464,7 +5488,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Read (or write) a protocol PROPERTY through a NAMED protocol \u2014 the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). The first two operands name the protocol and the property; the third is the receiver. A fourth operand makes it a SET invocation \u2014 the rebinding sugar `p.name = v` lowers to `p = ProtocolProperty(P, \"name\", p, v)` (P2) \u2014 which has no surface spelling of its own: qualified property ASSIGNMENT is not supported. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the receiver is invoked."
+      "description": "Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). The first two operands name the protocol and the property; the third is the receiver. A fourth operand makes it a SET invocation — the rebinding sugar `p.name = v` lowers to `p = ProtocolProperty(P, \"name\", p, v)` (P2) — which has no surface spelling of its own: qualified property ASSIGNMENT is not supported. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the receiver is invoked."
     },
     {
       "name": "PseudoInverse",
@@ -5731,18 +5755,6 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Real part of a complex number."
-    },
-    {
-      "name": "RecordFrom",
-      "category": "Collections",
-      "arity": "1",
-      "signature": "(collection) -> record",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": false,
-      "broadcastable": false,
-      "description": "Create a record from the elements of a collection of (key, value) pairs."
     },
     {
       "name": "Reduce",
@@ -6471,7 +6483,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "StringSplit(s): split a string on runs of whitespace (the Unicode White_Space code points), dropping empty parts.\n\nStringSplit(s, sep): split a string on the separator string `sep` (empty parts are kept). A non-string argument leaves the expression unevaluated."
+      "description": "StringSplit(s): split a string on runs of whitespace (the Unicode White_Space code points), dropping empty parts.\n\nStringSplit(s, sep): split a string on the separator string `sep` (empty parts are kept). An empty separator splits into user-perceived characters (grapheme clusters), like Characters. A non-string argument leaves the expression unevaluated."
     },
     {
       "name": "Subfactorial",
