@@ -151,7 +151,7 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
     // payload can contain one, and the containment walk they run at every
     // commit point short-circuits to a single boolean check
     // (`object-deps.ts`, `anyObjectExists`).
-    noteObjectConstructed();
+    noteObjectConstructed(ce);
   }
 
   /** The inert head-word, for display only: objects are values, not

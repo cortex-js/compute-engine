@@ -453,9 +453,15 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
       generation: 1,
     };
     expect(() =>
-      cachedValue(slot, 2, () => {
-        throw new Error('nope');
-      })
+      cachedValue(
+        slot,
+        2,
+        () => {
+          throw new Error('nope');
+        },
+        undefined,
+        ce
+      )
     ).toThrow('nope');
     // The entry is exactly as it was: the failed attempt did not stamp
     // generation 2 onto generation 1's value.
@@ -469,12 +475,12 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
       value: null,
       generation: undefined,
     };
-    const out = cachedValue(slot, 1, () => p as Expression);
+    const out = cachedValue(slot, 1, () => p as Expression, undefined, ce);
     expect(out).toBe(p);
     expect(slot.value).toBeNull();
     // …and nested one level down, inside a container.
     const wrapped = ce.function('List', [p]);
-    const out2 = cachedValue(slot, 1, () => wrapped);
+    const out2 = cachedValue(slot, 1, () => wrapped, undefined, ce);
     expect(out2).toBe(wrapped);
     expect(slot.value).toBeNull();
   });
@@ -502,22 +508,22 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
     };
     const computeOuter = (): number => {
       outerRuns += 1;
-      return cachedValue(inner, 1, readInner) * 10;
+      return cachedValue(inner, 1, readInner, undefined, ce) * 10;
     };
 
     // 1. Fill the INNER entry on its own.
-    expect(cachedValue(inner, 1, readInner)).toBe(1);
+    expect(cachedValue(inner, 1, readInner, undefined, ce)).toBe(1);
     // 2. Now run the outer one: its inner call is a pure hit.
-    expect(cachedValue(outer, 1, computeOuter)).toBe(10);
+    expect(cachedValue(outer, 1, computeOuter, undefined, ce)).toBe(10);
     expect(innerRuns).toBe(1);
     expect(outerRuns).toBe(1);
     // 3. A repeat is served from the outer entry.
-    expect(cachedValue(outer, 1, computeOuter)).toBe(10);
+    expect(cachedValue(outer, 1, computeOuter, undefined, ce)).toBe(10);
     expect(outerRuns).toBe(1);
     // 4. A store to the object only the INNER computation ever read must
     //    invalidate the OUTER entry too.
     p._store('age', ce.number(43));
-    expect(cachedValue(outer, 1, computeOuter)).toBe(20);
+    expect(cachedValue(outer, 1, computeOuter, undefined, ce)).toBe(20);
     expect(outerRuns).toBe(2);
     expect(innerRuns).toBe(2);
   });
@@ -540,16 +546,16 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
       return runs;
     };
 
-    expect(cachedValue(slot, 1, readAge)).toBe(1);
+    expect(cachedValue(slot, 1, readAge, undefined, ce)).toBe(1);
 
     // A new generation, with nothing about `p` changed: the entry is stale by
     // KEY only, which is what makes it servable to a re-entrant read.
     let seen: number | undefined;
     const outerPass = (): number => {
-      seen = cachedValue(slot, 2, readAge); // re-entrant read of this very slot
+      seen = cachedValue(slot, 2, readAge, undefined, ce); // re-entrant read of this very slot
       return readAge();
     };
-    expect(cachedValue(slot, 2, outerPass)).toBe(2);
+    expect(cachedValue(slot, 2, outerPass, undefined, ce)).toBe(2);
     expect(seen).toBe(1); // the previous value, served provisionally
 
     // …and nothing was frozen: the entry is back at its own key, holding its
@@ -561,7 +567,7 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
     // The dependency channel still governs that surviving entry: a store to
     // the object it read invalidates it.
     p._store('age', ce.number(43));
-    expect(cachedValue(slot, 1, readAge)).toBe(3);
+    expect(cachedValue(slot, 1, readAge, undefined, ce)).toBe(3);
   });
 
   test('a computation that consumed a provisional answer commits nothing — not even an OUTER one', () => {
@@ -589,12 +595,13 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
     let pass = 0;
     const computeInner = (): number => {
       pass += 1;
-      if (pass === 1) return cachedValue(inner, 2, computeInner);
+      if (pass === 1) return cachedValue(inner, 2, computeInner, undefined, ce);
       return ageOf();
     };
-    const computeOuter = (): number => cachedValue(inner, 2, computeInner);
+    const computeOuter = (): number =>
+      cachedValue(inner, 2, computeInner, undefined, ce);
 
-    expect(cachedValue(outer, 2, computeOuter)).toBe(0); // provisional
+    expect(cachedValue(outer, 2, computeOuter, undefined, ce)).toBe(0); // provisional
     expect(outer.value).toBeNull(); // …and not frozen
     // Nor did the entry that was re-entered move: still the primed value, at
     // its own key, so the new key it was asked for was never stamped over it.
@@ -604,7 +611,7 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
     // The proof that the dependency-free 0 never became an entry: a store the
     // outer computation could not have recorded still changes what it returns.
     p._store('age', ce.number(43));
-    expect(cachedValue(outer, 2, computeOuter)).toBe(43);
+    expect(cachedValue(outer, 2, computeOuter, undefined, ce)).toBe(43);
   });
 
   test('a hit is refused once a recorded object version has moved', () => {
@@ -619,10 +626,10 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
       p._field('age');
       return computes;
     };
-    expect(cachedValue(slot, 1, read)).toBe(1);
-    expect(cachedValue(slot, 1, read)).toBe(1); // hit
+    expect(cachedValue(slot, 1, read, undefined, ce)).toBe(1);
+    expect(cachedValue(slot, 1, read, undefined, ce)).toBe(1); // hit
     p._store('age', ce.number(43));
-    expect(cachedValue(slot, 1, read)).toBe(2); // invalidated by the store
+    expect(cachedValue(slot, 1, read, undefined, ce)).toBe(2); // invalidated by the store
   });
 });
 

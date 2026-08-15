@@ -142,14 +142,40 @@ export function objectReadCount(): number {
  */
 let _objectsExist = false;
 
+/** The engines that have constructed at least one object. Per-ENGINE, unlike
+ * {@link _objectsExist}, and the two are not interchangeable:
+ *
+ * - {@link anyObjectExists} gates pure OPTIMIZATIONS (skipping a containment
+ *   walk, skipping a foreign-engine scan). Being process-wide only makes
+ *   those conservative once any object exists anywhere — never wrong.
+ * - {@link engineHasObjects} gates a BEHAVIOUR: `cachedValue`'s refusal to
+ *   commit a computation that consumed a provisional re-entrant answer.
+ *   Process-wide leakage there is a real defect, not conservatism: one
+ *   object built in one engine permanently stopped re-entrant nodes from
+ *   caching in EVERY engine in the process, including engines that never
+ *   see an object. Found 2026-08-14 by bisecting an intermittent numeric
+ *   disagreement in `definition-order.test.ts` down to "shares a jest
+ *   worker with a suite that constructs an object"; the same leak degrades
+ *   a real session permanently after its first object.
+ *
+ * A `WeakSet` so an engine is not retained by this module (ruling B12). */
+const _enginesWithObjects = new WeakSet<object>();
+
 /** Called once per constructed object, from `BoxedObject`'s constructor. */
-export function noteObjectConstructed(): void {
+export function noteObjectConstructed(engine: object): void {
   _objectsExist = true;
+  _enginesWithObjects.add(engine);
 }
 
-/** See {@link _objectsExist}. */
+/** See {@link _objectsExist} — process-wide, for optimization gates only. */
 export function anyObjectExists(): boolean {
   return _objectsExist;
+}
+
+/** Has THIS engine ever constructed an object? The gate for anything whose
+ * behaviour (not merely its cost) depends on objects being in play. */
+export function engineHasObjects(engine: object): boolean {
+  return _enginesWithObjects.has(engine);
 }
 
 /** Open a collector for the computation that is about to run. Every caller

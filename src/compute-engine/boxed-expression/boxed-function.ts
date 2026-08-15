@@ -1198,7 +1198,8 @@ export class BoxedFunction
       this._sgn,
       gen,
       compute,
-      CACHE_STATS ? { cls: 'sgn', same: (a, b) => a === b } : undefined
+      CACHE_STATS ? { cls: 'sgn', same: (a, b) => a === b } : undefined,
+      this.engine
     );
   }
 
@@ -1780,7 +1781,8 @@ export class BoxedFunction
               // form.
               same: (a, b) => a?.toString() === b?.toString(),
             }
-          : undefined
+          : undefined,
+        this.engine
       ) ?? BoxedType.unknown;
     // Record the generation OBSERVED ON ENTRY: a computation that bumped the
     // generation (signature inference does) must leave the fast path closed.
@@ -2878,8 +2880,12 @@ export class BoxedFunction
       this._ops.every((x) => x.isConstant) && this.isPure
         ? undefined
         : this.engine._anyVersion;
-    const evaluated = cachedValue(this._eagerSource, gen, () =>
-      this.evaluate()
+    const evaluated = cachedValue(
+      this._eagerSource,
+      gen,
+      () => this.evaluate(),
+      undefined,
+      this.engine
     );
     // Drift tripwire (dev only): a `canEnumerate` handler that vouched `true`
     // must be backed by an evaluation that actually produced the collection.

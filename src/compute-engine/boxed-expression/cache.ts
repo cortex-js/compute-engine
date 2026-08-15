@@ -5,9 +5,9 @@ import {
   type CacheEvent,
 } from '../../common/cache-stats.js';
 import {
-  anyObjectExists,
   beginObjectDeps,
   endObjectDeps,
+  engineHasObjects,
   mergeObjectDeps,
   objectDepsValid,
   type ObjectDeps,
@@ -109,7 +109,14 @@ export function cachedValue<T>(
   v: CachedValue<T>,
   generation: number | undefined,
   fn: () => T,
-  stats?: CachedValueStats<T>
+  stats?: CachedValueStats<T>,
+  /** The engine this entry belongs to. Supplied so the provisional-read gate
+   * below can ask whether THIS engine has objects rather than whether the
+   * PROCESS does — see `engineHasObjects` in `object-deps.ts` for why the
+   * difference is a correctness matter and not a tuning one. Optional so a
+   * caller with no engine in hand (there are none today) degrades to never
+   * counting, i.e. to the pre-object behaviour. */
+  engine?: object
 ): T {
   if (
     v.generation === generation &&
@@ -134,9 +141,12 @@ export function cachedValue<T>(
       // freezing what they built from it (`scope-advanced.test.ts` MUTUAL
       // RECURSION; `definition-order.test.ts`, which pins that a compiled
       // result does not depend on which definition was read first, both fail
-      // when these nodes stop caching). `anyObjectExists()` is one-way, so a
-      // session that later builds an object gets the gate from that point on.
-      if (anyObjectExists()) _provisionalReads += 1;
+      // when these nodes stop caching). The gate is PER-ENGINE: a process-wide
+      // one leaked across engines, so a single object anywhere stopped these
+      // nodes caching everywhere, which is what made those two suites fail
+      // merely for sharing a jest worker with an object-constructing suite.
+      if (engine !== undefined && engineHasObjects(engine))
+        _provisionalReads += 1;
       if (stats && CACHE_STATS) recordCache(stats.cls, 'declineCycle');
     } else if (stats && CACHE_STATS)
       recordCache(stats.cls, generation === undefined ? 'hitConstant' : 'hit');
