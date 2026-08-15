@@ -142,12 +142,13 @@ export function parseType(
 
 /** Memoize a resolver-independent parse in {@link TYPE_CACHE}. */
 function cacheResult(s: TypeString, type: Type): Type {
-  // Bound the cache by evicting the OLDEST entry, not by clearing the map.
+  // Bounded by CLEARING the map on overflow — a policy with a known sharp
+  // edge, kept deliberately because the alternatives measured no better.
   //
-  // The original policy cleared everything on overflow, on the assumption
-  // that "the working set of distinct type strings is small". That holds for
-  // a hand-written program, but not for one whose types carry LENGTHS: every
-  // distinct vector size is its own type string (`vector<finite_integer^303>`,
+  // The cap rests on the assumption that "the working set of distinct type
+  // strings is small". That holds for a hand-written program, but not for one
+  // whose types carry LENGTHS: every distinct vector size is its own type
+  // string (`vector<finite_integer^303>`,
   // `^304`, …), so a document indexing or slicing many differently-sized
   // collections generates a working set that can exceed the cap. Past that
   // point, clearing dropped 100% of the entries on every overflow, so the hit

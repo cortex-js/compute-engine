@@ -3825,14 +3825,21 @@ describe('At: lenient over-narrowed base (Tycho 19.3)', () => {
     ce.declare('h', '(unknown, unknown) -> unknown');
     const inert = ce.box(['At', ce.parse('2h(x,y)-1'), 1]);
     expect(inert.isValid).toBe(true);
-    // `h` now returns a scalar: the base evaluates to a number and `At` errors.
+    // `h` now returns a scalar. Since placeholder-signature refinement
+    // (2026-08-15), the assignment refines the declared `unknown` result to
+    // `number`, so the scalar-ness of the base is STATICALLY visible and `At`
+    // rejects at canonicalization — a top-level `incompatible-type` error
+    // rather than the pre-refinement shape (an inert `At` whose base erred at
+    // evaluation, the nested form `errorCode` reads).
     ce.assign('h', ce.parse('(u, v) \\mapsto u+v'));
+    expect(ce.box('h').type.toString()).toBe('(unknown, unknown) -> number');
     const r = ce
       .parse('a[1]')
       .subs({ a: ce.parse('2h(3,4)-1') })
       .evaluate();
     expect(r.isValid).toBe(false);
-    expect(errorCode(r)).toBe('incompatible-type');
+    expect(r.operator).toBe('Error');
+    expect(JSON.stringify(r.json)).toContain('incompatible-type');
   });
 
   test('bare unknown-return call base is unchanged', () => {

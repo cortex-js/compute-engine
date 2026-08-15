@@ -538,8 +538,10 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     // a `Tuple` argument binds ATOMICALLY — never mapped over its components —
     // so `x + 1` would be the documented `scalar + tuple` rejection.)
     ce.parse('f(x) \\coloneq 2x').evaluate();
-    // The declared signature is authoritative and preserved.
-    expect(ce.box('f').type.toString()).toBe('(tuple<number, number>) -> unknown');
+    // The declared PARAMETER is authoritative and preserved; the `unknown`
+    // RESULT is a placeholder the body's inference refines (2026-08-15
+    // placeholder-signature ruling).
+    expect(ce.box('f').type.toString()).toBe('(tuple<number, number>) -> number');
     // A scalar call still type-errors (tuple required)…
     expect(ce.box(['f', 3]).json).toEqual([
       'f',
@@ -646,9 +648,10 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     const ce = new ComputeEngine();
     ce.declare('f', { signature: '(tuple<number, number>) -> unknown' });
     ce.parse('f(x) \\coloneq 2x').evaluate();
-    // Declared signature preserved (authoritative), not replaced by inference.
+    // Declared PARAMETER preserved (authoritative); the placeholder result
+    // refines to the body's inference (2026-08-15 ruling).
     expect(ce.box('f').type.toString()).toBe(
-      '(tuple<number, number>) -> unknown'
+      '(tuple<number, number>) -> number'
     );
     // Scalar call still type-errors (tuple required)…
     expect(ce.box(['f', 3]).json).toEqual([
@@ -672,8 +675,9 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     const ce = new ComputeEngine();
     ce.declare('f', { signature: '(tuple<number, number>) -> unknown' });
     ce.assign('f', ce.box(['Function', ['Multiply', 2, 'x'], 'x']));
+    // Parameter preserved; placeholder result refined (2026-08-15 ruling).
     expect(ce.box('f').type.toString()).toBe(
-      '(tuple<number, number>) -> unknown'
+      '(tuple<number, number>) -> number'
     );
     expect(ce.box(['f', 3]).json).toEqual([
       'f',
@@ -720,9 +724,9 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     const ce = new ComputeEngine();
     ce.declare('f', { signature: '(number) -> unknown' });
     ce.parse('f(x) \\coloneq x + 1').evaluate();
-    // The declared signature is preserved verbatim (as in the value-slot path);
-    // the `unknown` return accepts the literal's concrete inferred body.
-    expect(ce.box('f').type.toString()).toBe('(number) -> unknown');
+    // The declared `unknown` return is a placeholder: it accepts the literal's
+    // concrete inferred body AND refines to it (2026-08-15 ruling).
+    expect(ce.box('f').type.toString()).toBe('(number) -> number');
     expect(ce.box(['f', 3]).evaluate().json).toBe(4);
   });
 

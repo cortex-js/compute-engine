@@ -47,9 +47,19 @@ describe('Equal/NotEqual over an opaque operand and a list', () => {
 
   test('a resolved operand still decides, both ways', () => {
     ce.assign('q', ce.parse('x \\mapsto [1,2]'));
-    expect(ce.box(['Equal', ['q', 2], ['List', 1, 2]]).evaluate().toString()).toBe(
-      '["True","True"]'
-    );
+    // A single boolean, not `["True","True"]`: `q(2)` is statically typed as
+    // a collection (`vector<2>`), and a collection-typed application follows
+    // the same documented rule as a literal list — whole-collection equality
+    // against another collection. The elementwise result this test originally
+    // pinned was the step-2 gate missing definitely-collection-TYPED operands
+    // (it counted only collection nodes and possibly-collection types), fixed
+    // 2026-08-15 when placeholder-signature refinement made such types common.
+    expect(
+      ce.box(['Equal', ['q', 2], ['List', 1, 2]]).evaluate().symbol
+    ).toBe('True');
+    expect(
+      ce.box(['NotEqual', ['q', 2], ['List', 1, 2]]).evaluate().symbol
+    ).toBe('False');
   });
 
   test('whole-collection equality is unchanged', () => {

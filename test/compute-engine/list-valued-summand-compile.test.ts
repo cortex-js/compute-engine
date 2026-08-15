@@ -216,9 +216,13 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
     ['mod(sin)', ['Mod', ['Multiply', 10000, ['Sin', ['Multiply', 10000, 'i']]], 1]],
   ])('`Sum a(h(i))` with h = %s agrees with the interpreter', (_label, hBody) => {
     const ce = setup(hBody);
-    // The body is the lift-wrapped shape that used to slip the gate.
+    // The body is the lift-wrapped shape that used to slip the gate. Since
+    // placeholder-signature refinement (2026-08-15) the declared `unknown`
+    // results refine to the bodies' inferred types, so the shape is now
+    // CONCRETELY vector-valued rather than `broadcastable<unknown>` — the
+    // element-wise agreement below is what this test pins either way.
     const sumBody = (ce.box('A').value as any).ops[0].ops[0].ops[0];
-    expect(sumBody.type.toString()).toEqual('broadcastable<unknown>');
+    expect(sumBody.type.toString()).toMatch(/vector<finite_number\^2>/);
 
     const [x, y] = [...ce.parse('A(0.3)').N().each()].map((e) => e.re);
     // Both option shapes — `realOnly` is irrelevant to the emission.
@@ -527,7 +531,7 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
   });
 
   test.each(['glsl', 'wgsl', 'python', 'interval-js'] as const)(
-    '%s declines the `-> unknown` shape on its OWN message, not the new one',
+    '%s declines the (formerly open) collection shape on its OWN message, not the contradicted one',
     (to) => {
       const ce = new ComputeEngine();
       for (const id of ['h', 'a'])
@@ -542,7 +546,15 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
         { to, fallback: true, constantFold: false } as any
       );
       expect(r?.success ?? false).toBe(false);
-      expect((r as any).error).toMatch(/open result type/);
+      // Since placeholder-signature refinement (2026-08-15) this shape is no
+      // longer open: `a`'s declared `unknown` result refines to the body's
+      // `vector<…>`, so the STATIC collection-body decline fires (a sharper
+      // message than the old "open result type" one, which needs a result
+      // that STAYS open — a shape refinement makes rare by design). What must
+      // not regress is the untangling: the decline is never the
+      // contradicted-declaration message, which blames the author for a lie
+      // they did not write.
+      expect((r as any).error).toMatch(/collection-valued body does not compile/);
       expect((r as any).error).not.toMatch(CONTRADICTED);
     }
   );

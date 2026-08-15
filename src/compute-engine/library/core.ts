@@ -2828,6 +2828,36 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const seqName = sym(op1.op1)!;
           const subscript = op1.op2;
 
+          // A FUNCTION LITERAL on the right of a subscripted-name assignment
+          // is refused outright (user ruling 2026-08-15, option (d) of the
+          // subscripted-lambda entry in ROADMAP.md). The notation is
+          // genuinely ambiguous — `l_P := P ↦ body` reads either as defining
+          // a function NAMED `l_P` (Desmos treats the subscript as pure
+          // spelling, and documents routinely use `f` and `f_x` as unrelated
+          // names) or as defining a FAMILY `l` whose P-th member is the
+          // lambda (`T_n := x ↦ cos(n·arccos x)`) — and before this check
+          // every reading fell into the sequence-definition machinery below,
+          // which defined nothing usable and reported nothing: the
+          // assignment silently vanished. Field-verified corpus-safe: the
+          // Desmos importer only ever emits head-application assignments
+          // (`l_P(P) := …`), never this spelling. The error names both
+          // working spellings so the author can say which they meant.
+          if (isFunction(op2, 'Function')) {
+            return ce.error(
+              [
+                'ambiguous-assignment',
+                `Assigning a function literal to the subscripted name ` +
+                  `"${seqName}_${subscript.toString()}" is ambiguous. To ` +
+                  `define a function named "${seqName}_${subscript.toString()}", ` +
+                  `write "${seqName}_${subscript.toString()}(…) := ⟨body⟩". To ` +
+                  `define a family of functions indexed by ` +
+                  `"${subscript.toString()}", assign an expression in ` +
+                  `"${subscript.toString()}" instead of a function literal.`,
+              ],
+              op2.toString()
+            );
+          }
+
           //
           // Check for multi-index subscript: P_{n,k}
           // Parser produces: Subscript(P, Sequence(n, k))

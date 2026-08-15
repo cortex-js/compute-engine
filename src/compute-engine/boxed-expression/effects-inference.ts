@@ -30,6 +30,7 @@ import {
   genericOverloadLiteralError,
 } from './type-compatibility-error.js';
 import { substituteDeclaredBounds } from './generic-instantiation.js';
+import { isPolymorphicType } from '../../common/type/instantiate.js';
 import {
   functionLiteralBody,
   functionLiteralDeclaredEffects,
@@ -254,6 +255,75 @@ export function withArrowEffects(t: Type, effects: EffectSet): Type {
  * Only the TOP-LEVEL specifier is inferred; a nested arrow (an annotated
  * parameter's `(real) random -> real`) is the author's and is never stripped.
  */
+/**
+ * Refine `unknown` placeholder slots in a DECLARED ground signature with the
+ * corresponding slots of the value's inferred signature, before the two are
+ * compared.
+ *
+ * A declared `unknown` is a PLACEHOLDER, not a contract (ruled 2026-08-15):
+ * per "The `unknown` type" in `doc/08-guide-types.md` it "can be replaced or
+ * refined as more information becomes available" — and the definition that
+ * follows the declaration IS that information. Without this, a placeholder
+ * declaration was strictly MORE restrictive than no declaration: checking the
+ * body-inferred lambda against `(unknown) -> unknown` requires, by parameter
+ * contravariance, `unknown <: ⟨inferred param⟩`, which is false in the
+ * lattice — so `declare('f', '(unknown) -> unknown')` followed by
+ * `f(P) := √(P[1]²+P[2]²)` was refused while declaring nothing at all
+ * worked.
+ *
+ * `any` slots are deliberately NOT refined: `any` is a CONTRACT — the
+ * identity function is `(any) -> any`, a promise to accept every value — so a
+ * body that cannot honor it is correctly refused (same ruling).
+ *
+ * Only top-level parameter and result slots of a plain fixed-arity ground
+ * signature are refined; polymorphic declarations, optional/variadic
+ * signatures, and non-signature types pass through untouched.
+ *
+ * Exported for the install routes in `engine-declarations.ts`, which refine
+ * BEFORE their reconciliation pipeline (so parameter ascription, the
+ * compatibility check, and the `paramsAreScalar` broadcast decision all see
+ * the concrete signature) and persist the refined type onto the definition —
+ * a check-time-only refinement here would accept the definition but leave the
+ * stored `(unknown) -> …` signature driving call-site broadcasting, so
+ * `l_P([3,4])` broadcast elementwise instead of passing the list whole.
+ */
+export function refineDeclaredPlaceholders(declared: Type, value: Type): Type {
+  if (typeof declared !== 'object' || declared.kind !== 'signature')
+    return declared;
+  // A polymorphic declaration's slots are quantified variables with their own
+  // machinery (§2.4 generic literals) — never placeholder-refined.
+  if (isPolymorphicType(declared)) return declared;
+  if (typeof value !== 'object' || value.kind !== 'signature') return declared;
+  if ((declared.optArgs?.length ?? 0) > 0) return declared;
+  if (declared.variadicArg !== undefined) return declared;
+  const dArgs = declared.args ?? [];
+  const vArgs = value.args ?? [];
+  if (dArgs.length !== vArgs.length) return declared;
+
+  let argsChanged = false;
+  const args = dArgs.map((a, i) => {
+    if (a.type !== 'unknown') return a;
+    const v = vArgs[i]?.type;
+    if (v === undefined || v === 'unknown') return a;
+    argsChanged = true;
+    return { ...a, type: v };
+  });
+  let resultChanged = false;
+  let result = declared.result;
+  if (result === 'unknown' && value.result !== 'unknown') {
+    resultChanged = true;
+    result = value.result;
+  }
+  if (!argsChanged && !resultChanged) return declared;
+  // Replace only the slots that moved: a zero-arg signature spells its
+  // parameter list as ABSENT (`args: undefined`), and fabricating an explicit
+  // empty array changes the object shape the rest of the type machinery
+  // canonicalized on.
+  const refined = { ...declared, result };
+  if (argsChanged) refined.args = args;
+  return refined;
+}
+
 export function matchesDeclaredTypeAxes(
   ce: ComputeEngine,
   value: BoxedType,
@@ -263,6 +333,14 @@ export function matchesDeclaredTypeAxes(
   /** The symbol being declared/assigned, for the D7 diagnostic. */
   symbol?: string
 ): boolean {
+  // A declared `unknown` slot is a placeholder the value refines, never a
+  // constraint (see `refineDeclaredPlaceholders` above). Skipped for a
+  // polymorphic declaration, whose slots are quantified variables with their
+  // own machinery.
+  if (!declared.isPolymorphic) {
+    const refined = refineDeclaredPlaceholders(declared.type, value.type);
+    if (refined !== declared.type) declared = ce.type(refined);
+  }
   // Declaration compatibility uses SUBTYPE semantics. `BoxedType.matches` on
   // a polymorphic pattern is the D12 existential QUERY ("does SOME
   // instantiation fit?"), which would accept an instance-shaped ground value

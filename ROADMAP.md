@@ -402,7 +402,33 @@ Regression pins: `test/compute-engine/tycho-item-184-gather-count.test.ts`
 (14 tests, including the mask/scalar-index/chained-access shapes that must
 keep declining to claim a count).
 
-### A declared `(unknown) -> unknown` breaks the definition that follows (OPEN — needs a ruling)
+### A declared `(unknown) -> unknown` breaks the definition that follows (RULED 2026-08-15 — IMPLEMENTED; resolution at the end of this entry)
+
+**FOLLOW-UP WORK THIS RULING DOES NOT YET COVER, with a ready-made
+acceptance pair.** The per-position placeholder semantics fixes declared
+`unknown` in the DECLARATION direction. It does not yet refine an
+`unknown` PARAMETER from the call site, and there are now two consumer
+cases that need exactly that, failing today for the same reason from
+different directions:
+
+- **The D-240 indexed-access class** — an `unknown` parameter should
+  refine so that `f(t)[k]` compiles instead of failing closed.
+- **Tycho item 190** (see its entry below) — `z(t) := sqrt(t-1)` with an
+  `unknown` parameter widens `sqrt(unknown)` to `finite_number`, and
+  `complex <: finite_number` is FALSE, so complex admission is dropped
+  and the JS target correctly emits a real `Math.sqrt`. Compiled
+  `|z(t)/2-1|` at t=0.3 returns NaN where interpreted returns
+  1.08397416943394. Measured: the ruling AS STAGED does not fix it.
+
+Take both as regression fixtures if this work is picked up. The pair is
+worth more than either alone: 190 would catch a refinement that restores
+indexed access while still dropping NUMERIC-DOMAIN information, which the
+D-240 case cannot detect. Tycho's repros are bare and in their scratch
+directory, against the installed engine.
+
+Ownership note: the session that ruled and implemented this
+(`compute-engine-53`) has ended, and no successor has claimed the
+follow-up.
 
 Declaring a head with a PLACEHOLDER signature makes a later definition
 fail, where declaring nothing at all — or declaring a CONCRETE signature —
@@ -458,7 +484,486 @@ exactly how their bug stayed invisible.
 Incidental, from their trace and not chased here: their manager declares
 the head twice with the same signature before assigning. Benign today.
 
-### Tycho item 186 — the item-182 class SURVIVES in document context (OPEN, filed 2026-08-14)
+Verification addendum (2026-08-15, second investigation — all four rows
+re-reproduced on the working tree):
+
+- The two spellings share ONE root check — `matchesDeclaredTypeAxes`
+  against the declared signature, reached from the assign path in
+  `engine-declarations.ts`: `ce.assign('l_P', P ↦ …)` throws the same
+  `incompatible-type` as the head-call spelling. (CORRECTION of this
+  entry's earlier "swallowed throw" claim: the parse route's lambda-row
+  silence is NOT a suppressed error. `l_{P} := ⟨lambda⟩` canonicalizes
+  its LHS as `Subscript(l, P)` and takes the SEQUENCE-definition path —
+  the `a_n := a_{n-1}+1` machinery — never targeting `l_P` at all; it is
+  equally inert with NO declaration. Filed separately below. The `Assign`
+  evaluate handler does surface type-compatibility throws as error
+  VALUES; there is no swallow.)
+- `(any) -> any` fails IDENTICALLY (contravariant parameter:
+  `any <: dictionary | indexed_collection` is false), so the ruling
+  covers `any` in parameter position too, not just `unknown`.
+- Result-position `unknown` already does not constrain on this route:
+  `(indexed_collection) -> unknown` assigns and calls fine (result is
+  covariant, `broadcastable<number> <: unknown` is true). A bare
+  `function` declaration also works — it is today's workaround.
+- The published type documentation (`doc/08-guide-types.md`, "The
+  `unknown` type") states `unknown` "is compatible with all types, and
+  all types are compatible with it… a wildcard in type matching [that]
+  can be replaced or refined as more information becomes available."
+  The declaration check contradicts this documented contract; the
+  subtype lattice (`unknown` as top, one-directional) implements a
+  different meaning than the docs promise.
+- The doc/lattice divergence is INDEPENDENT of the declaration check
+  and the ruling should say which side moves. The doc's claim is
+  bidirectional ("compatible with all types, AND all types are
+  compatible with it"), but no predicate implements that:
+  `BoxedType.matches()` delegates to subtyping (its own docstring says
+  it answers "is this a subtype of `other`"), so
+  `type('unknown').matches('number')` is `false` while
+  `type('number').matches('unknown')` is `true` — verified. Either
+  `unknown` becomes bidirectionally compatible in the subtype/matching
+  layer (matches the doc; the declaration check falls out for free; but
+  it makes `unknown` a wildcard EVERYWHERE — large, unmeasured blast
+  radius across inference, dedup keys, and overload resolution), or the
+  declaration check alone treats declared `unknown`/`any` as
+  non-constraining and the doc is corrected to describe the top-type
+  lattice it actually has (small, local change). These are
+  different-sized changes; the doc currently promises the larger one.
+- The codebase itself implements BOTH readings of `unknown` in
+  different corners, which is further evidence the ruling should pick
+  one meaning and document it. `isSubtype` treats `unknown` as a
+  near-top (`everything <: unknown` except `nothing`/`missing`), but
+  `superType`/`widen` treat it as an IDENTITY element — `widen(unknown,
+  T)` returns `T`, the placeholder reading ("no information; the other
+  operand wins"). Under a genuine top-type reading the join would be
+  `unknown`. Verified: `widen('unknown','missing')` = `missing`.
+  (`superType` gives `nothing` the same identity treatment — the
+  erasure semantics leaking into the join.)
+- A third doc mismatch, same family: the type-guide table
+  (`doc/08-guide-types.md`, `unknown` row) says "Every other type
+  matches `unknown`", but `nothing.matches('unknown')` and
+  `missing.matches('unknown')` are `false` — the unit types are
+  subtypes only of `any` and themselves. No rationale is recorded for
+  that exclusion (the `nothing` rule dates to the original type-system
+  bring-up, "wip: types"; `missing` copied it by stated symmetry —
+  "behaves like `nothing`"), but it is defensible as absence-is-opt-in:
+  a slot whose type is undetermined should not silently accept an
+  absence marker; absence must be admitted explicitly (`A | missing`)
+  or via `any`. Whichever way the ruling goes, the doc sentence needs
+  the same reconciliation as the bidirectionality claim.
+- Precedent inside the engine for the NO answer: the multi-clause route
+  already accepts a bare parameter when the declared type is
+  `unknown`/`any` ("a bare param narrows nothing" —
+  `assertClauseFitsDeclared`, fixed 2026-08-14), and
+  `ascribeDeclaredParameterTypes` deliberately skips stamping
+  `unknown`/`any` parameters.
+
+**RESOLUTION (ruled and implemented 2026-08-15).** The user ruled:
+`unknown` is a PLACEHOLDER (aligning with `doc/08-guide-types.md`), `any`
+is a CONTRACT (the identity function is `(any) -> any`), and the doc
+gains the `nothing`/`missing` caveat.
+
+Implementation notes, in the order the evidence forced them:
+
+- The literal lattice flip (`unknown <: T` = true in `isSubtype`) was
+  TRIED AND REVERTED within the hour: canonicalization DISPATCH gates
+  need positive type evidence, and a wildcard `unknown` poisons them —
+  measured immediately, `P[1]^2` canonicalized as `MatrixPower` (the
+  element access types `unknown`, which then "matched" `matrix`), and
+  even the NO-declaration row of the repro matrix went inert. Do not
+  re-attempt: the placeholder semantics cannot live in the raw subtype
+  relation while `matches()` doubles as the dispatch predicate.
+- The ruling is implemented at the DECLARATION boundary instead:
+  `refineDeclaredPlaceholders` (`boxed-expression/effects-inference.ts`)
+  replaces `unknown` parameter/result slots of a declared ground
+  signature with the definition's inferred slots — PER-POSITION, so a
+  concrete declared parameter is kept while an `unknown` result of the
+  same arrow refines (Tycho's addendum: their derived `-> unknown`
+  results erased every call's type; a per-declaration rule would have
+  missed that half). It runs inside `matchesDeclaredTypeAxes` and, more
+  importantly, at the head of all three install routes in
+  `engine-declarations.ts` (value-def assign, operator-def assign,
+  declare-with-value), which then PERSIST the refined type — a
+  check-time-only refinement accepted the definition but left the stored
+  `(unknown) -> …` signature driving call-site broadcasting, so
+  `l_P([3,4])` broadcast elementwise instead of passing the list whole.
+- `any` slots are NOT refined: `(any) -> any` + a collection-only body
+  still refuses with `incompatible-type`, on both routes (the parse
+  route surfaces it as an error value). A Tycho row that declared
+  `-> any` and lost its compiled indexed access is therefore INTENDED
+  behavior post-ruling: `-> any` states a contract; a consumer that
+  means "not known yet" writes `-> unknown` (now refinable) or declares
+  bare `function`.
+- Doc updated (`doc/08-guide-types.md`): the `unknown` section now
+  states the refinement behavior, the `nothing`/`missing` (and
+  `error`/`never`) exclusions — absence is opt-in — and the
+  placeholder-vs-contract split against `any`; the `unknown` table row
+  carries the same caveat.
+- Pins: `test/compute-engine/placeholder-signature-refinement.test.ts` —
+  route parity for the repro matrix, per-position refinement, the `any`
+  contract refusal on both routes, and the lattice invariants (raw
+  `unknown` stays one-directional; `nothing`/`missing` excluded).
+- COMPILATION posture (user-confirmed 2026-08-15, same ruling round):
+  OPTIMISTIC over `unknown` — assume a match and let it fail at runtime.
+  This is already the JS target's implemented policy (the item-80 rule:
+  runtime projection over static provably-X gates; `_SYS.at`/`_SYS.bcast`
+  carry the runtime dispatch — verified: `f(t)[2]` on a bare-`function`
+  head and `x[2]+1` on an `unknown` symbol both compile and run). Two
+  boundaries survive it: (1) EVIDENCE beats optimism — the D6 declines
+  that remain fire only on proof (a statically-collection body under a
+  numeric accumulation, a contradicted declaration), where "assume a
+  match" would knowingly emit wrong code, and in JS wrongness is SILENT
+  coercion, not a runtime failure (`Σ "ab"` compiled to `"ababab"`
+  behind `success: true` is the incident that created the D6 posture);
+  (2) shader targets (glsl/wgsl) have no runtime-failure channel, so a
+  genuinely-open shape there declines and takes the `fallback` path
+  rather than rendering garbage.
+
+### Assigning a lambda to a SUBSCRIPTED name is silently inert (RULED option (d) + IMPLEMENTED 2026-08-15; resolution at the end of this entry)
+
+`l_{P} \coloneq P \mapsto …` (parse route) canonicalizes its LHS as
+`Subscript(l, P)` and is captured by the SEQUENCE-definition machinery
+(the `a_n := a_{n-1}+1` feature): the `Assign` evaluate's Subscript
+branch treats `l` as a sequence name and `P` as a symbolic index, defines
+no usable binding, and returns without a diagnostic — `l_P([3,4])` stays
+inert. Declaration-independent (reproduces with no prior `declare`) and
+long-standing; it was row 4 of the placeholder-signature matrix and was
+initially mis-diagnosed there as a swallowed type error.
+
+The head-call spelling (`l_{P}(P) \coloneq …`) is immune — application
+position collapses `l_{P}` to the symbol `l_P` — and so is any
+non-subscripted name. Needs a ruling rather than a patch: `a_n := ⟨expr
+in n⟩` is legitimate sequence syntax, so the question is whether a
+FUNCTION-LITERAL RHS (whose parameter, not the subscript, binds the
+body) should divert to symbol assignment, or whether a subscripted-name
+lambda assignment should be an explicit error instead of a silent no-op.
+The silent no-op is the only clearly wrong outcome.
+
+**RESOLUTION (ruled 2026-08-15, option (d): explicit error).** Four
+options were weighed: (a) eta-collapse (`l_P := P ↦ body` ≡ `l(P) :=
+body`, binding the base letter), (b) strict sequence semantics (the
+family's members are function values, uniform with `l_P := P²+1`), (c)
+a name-sensitive rule (collapse when the lambda's parameter equals the
+subscript, family otherwise), and (d) an explicit error naming the
+working spellings. The user chose (d), sympathetic to (c) but bound by
+corpus safety. Field evidence from the Desmos importer (687-state
+corpus) decided it: their pipeline only ever emits head-application
+assignments, so (d) is unreachable from imported content; 10 live
+states use the subscript-equals-parameter coincidence on the
+HEAD-APPLICATION form, killing any name-keyed rule as a refactor-away
+regression; and 111 states use a bare head and subscripted heads on the
+same letter (`f` alongside `f_x`) as UNRELATED names, making any
+base-letter-binding semantics — (a) and (b) — a clobber hazard. The
+importer independently measured that clobber through its public
+`definitions` seam (their probe
+`docs/scratch/subscript-assign-family-probe.mts`: a zero-parameter
+subscripted entry overwrote a sibling base-letter definition behind a
+"skipped" report) and is guarding that seam on their side.
+
+Implemented in the `Assign` evaluate's Subscript branch
+(`library/core.ts`): a syntactic `Function`-literal RHS returns an
+`ambiguous-assignment` error value naming both disambiguating
+spellings, BEFORE any sequence bookkeeping runs — so neither the base
+letter nor the joined name is touched. Covers symbolic, numeric, and
+multi-index subscripts, declared or not. Pins:
+`test/compute-engine/subscript-lambda-assign.test.ts` (the error rows
+plus the four spellings that must keep working: integer recurrences,
+the non-lambda family form, head-application, and the
+`ce.assign(name, ⟨Function value⟩)` API route, which is deliberately
+untouched — the ruling is notation-level).
+
+Noted, verified, and left OPEN (out of this ruling's scope): the
+declared-name-precedence convention does NOT govern the Assign LHS. A
+declared `l_P` does not stop `l_{P} \coloneq P²+1` from binding the
+base `l` and leaving the declared `l_P` unbound (verified on 0.109.0 by
+the importer and on the working tree here; the precedence pins in
+`subscript-declared-name-precedence.test.ts` cover expression
+positions, not the sequence-definition branch). Whether the presence of
+a declared joined name should divert the whole subscripted-assignment
+family to symbol assignment is a follow-on ruling if a consumer ever
+needs it; nothing known depends on it today.
+
+### Tycho item 190 — compiled real-domain emission for a complex-promoting chain over an `unknown`-typed parameter (OPEN)
+
+Another member of 187's blocking class: a wrong VALUE behind
+`success: true`. Reproduced bare on the working tree, `z(t) := sqrt(t-1)`:
+
+```
+|z(0.3)/2 - 1|   CONSTANT arg  -> compiled 1.08397416943394   = interpreted   OK
+|z(t)/2 - 1|     SYMBOLIC arg  -> compiled ok:true, run(t=0.3) -> NaN         WRONG
+```
+
+The constant case is right only because it FOLDED — its emitted code is
+the literal `1.08397416943394`, i.e. the interpreter's answer baked in.
+The symbolic case emits real-domain code:
+`Math.abs(0.5 * _SYS.bcastFn((_tv1) => _fn_z(_tv1), _.t) + -1)`.
+
+**Their framing does not fit, and this is the load-bearing correction.**
+The ask was "promote when the chain's TYPE says complex is reachable".
+Measured, the type says the opposite: `complex <: finite_number` is
+FALSE, `z` types `(unknown) -> finite_number`, and `z(t)` types
+`finite_number` — a type that EXCLUDES complex. So no type-driven
+promotion can fire; given that type, `Math.sqrt` is the correct emission.
+The defect is upstream of the emission.
+
+**Where the type degrades.** The type system is honest when the argument
+type is known: `sqrt(u-1)` with `u: real` types `finite_complex`, and
+`sqrt(-0.7)` types `finite_complex`. It is the `unknown` PARAMETER that
+loses it — `z`'s parameter infers `unknown`, `sqrt(unknown)` widens to
+`finite_number`, and the complex admission is dropped before the compiler
+ever sees the chain. Interpretation promotes at runtime regardless, which
+is why interpreted is correct and compiled is not.
+
+**So this is the same family as the `unknown` per-position ruling**, and
+that ruling as currently staged does NOT fix it (measured: still NaN on
+the working tree). Whoever finishes that work should check this case: an
+`unknown` parameter that refines from the call site would let the body
+type against the real argument, restoring `finite_complex` and with it a
+correct emission. That is the most promising fix direction and it is
+cheaper than teaching the target a runtime real/complex promotion.
+
+`realOnly` is NOT the lever — `true`, `false` and default all emit the
+same code (measured).
+
+**190 IS UNMITIGABLE FROM THE CONSUMER SIDE — the sharpest argument for
+prioritising it over 188/189.** Tycho evaluated a 187-style interim
+compile-decline and shipped NOTHING, for a reason that is really about
+this defect's shape: **no sound decline predicate exists on their side,
+because detecting "complex-promoting symbolic chain" requires exactly the
+type information whose ABSENCE is the defect.** Our type system is the
+blind oracle here, so any consumer-side gate would have to be a
+`sqrt`/`log` operator heuristic that rots as our typing evolves — a class
+their standing rules forbid, rightly.
+
+That distinguishes 190 from its queue-mates: 188 and 189 both have
+shipped, pinned interims, so waiting costs those rows only the workaround.
+**190 has no workaround available to anyone, and cannot have one until we
+fix it.**
+
+Tempering that, and recorded so nobody over-reads the above: their
+exposure is ZERO-DELTA. The only measured witness draws nothing either
+way — the compiled NaN already routes their sampler to per-point
+interpreted evaluation, which IS the recorded ≥240 s starvation, so a
+decline would change neither pixels nor cost. Their watch needs no
+predicate: the D-73 parity sweep catches the class corpus-wide and both
+190 probes re-run at the adopting release. So: no mitigation is possible,
+but also no additional harm accrues while it waits. Fix it properly rather
+than fast — and know that nobody can paper over it meanwhile.
+
+Adoption consequence: 190 has NO interim to retire, which makes its
+adoption cheaper than 188's or 189's.
+
+**Ride the pending release?** My read: NO for the fix. The mechanism above
+is measured, but the FIX is a judgement about where to intervene
+(call-site refinement of `unknown` parameters vs runtime promotion in the
+target), it interacts with a ruling still under review, and a wrong choice
+here re-lands as another silent-wrong-value. It queues with 188/189.
+
+Production stakes (theirs): this is D-234's actual root — `skz0syspxp`'s
+radical chain samples 0/201 finite on BOTH compiled routes while
+interpreted is finite — and it is behind a ≥240 s SPA-open starvation,
+since a 0-finite compile sends their sampler to per-point CE evaluation.
+Their previously recorded "expanded route gives 186/201" asymmetry does
+NOT reproduce and is retired, along with the by-ref framing of the old
+D-234 offer.
+
+### Tycho item 189 — an elementwise-selected list-valued ARM is lifted WHOLE instead of indexed (OPEN)
+
+**This is a bug against RATIFIED semantics, not an open design question.**
+`docs/plans/2026-07-27-elementwise-which-design.md` is marked
+"**Status: RATIFIED 2026-07-27 — R1–R4 as recommended, user-confirmed**",
+and R1 says exactly what Tycho is asking for:
+
+> Per position j, the selected clause is the first whose condition is
+> `True` at j… The output cell is the selected arm's value at j: a scalar
+> arm lifts; **a list-valued arm is indexed at j**. This is `np.select`.
+
+Reported by Tycho (item 189, witness `wsne0l2tcv`): a piecewise over
+900-element collections returns a 900-element list in which the 193
+`otherwise` positions hold scalars (correct, scalar arm lifts) while each
+of the 707 GUARDED positions holds the arm's ENTIRE 900-element broadcast,
+un-indexed. Element k's k-th entry is the correct value — i.e. only the
+diagonal is meaningful, which is precisely R1's "indexed at j" recovered
+by hand. Cost is O(N²) where O(N) was intended: 900 → 636,300 nested
+elements, and every element-reading consumer sees collections where
+scalars belong. Off-diagonal entries frequently go complex through
+`sqrt(1-l²)` with `l > 1`, independent evidence that only the diagonal
+was ever meaningful.
+
+**FIRST DIAGNOSIS REFUTED BY MEASUREMENT (2026-08-15).** I proposed that
+`evaluateElementwiseSelection` (`library/control-structures.ts`) misgates
+the arm: it decides list-valued-ness with `isBroadcastableCollection`
+(`isIndexedCollection === true && !isTuple`), so an arm answering `false`
+would be stored whole and lifted into every selected position. Wrong.
+
+Instrumented the gate and ran Tycho's own in-document discriminator probe
+against CE SOURCE through the item-182 src-redirect hook. The selection
+path ran ONCE, with two arms, and classified BOTH CORRECTLY:
+
+```
+arm0  isIdx=true   passes=true   type=list<number>     <- indexed, correct
+arm1  isIdx=false  passes=false  type=finite_real      <- scalar 0.8, lifted, correct
+```
+
+So the elementwise-selection path is INNOCENT: it saw a numeric piecewise
+and handled it per R1. Tycho's independent reading agrees from the other
+side — the stored nested members answer `isIndexedCollection = TRUE`, not
+the `false` my diagnosis needed.
+
+**Where that leaves it, and it is a real narrowing.** The arms at the gate
+are `list<number>` and `finite_real`; the 707 nested members are
+`indexed_collection<color>`, each a lazy `Map(Hsv(0,0,_1), Map(Multiply(…),
+Map(Add(…), …)))` chain. Different types, different layer. **The nesting is
+produced AFTER the selection, at the colour/`Hsv` layer** — something
+broadcasts the colour construction over the 900 positions in a way that
+leaves each position holding the whole 900-element colour collection rather
+than its own element. The next question is what applies `Hsv` over the
+selection result, not anything inside `Which`.
+
+That also explains why bare shapes at N=4 broadcast correctly: they
+exercise the selection path, which works.
+
+**MECHANISM ESTABLISHED (Tycho measurement, 2026-08-15) — there are TWO
+`Which`es, and I instrumented the wrong one.** Their registry body hands us
+ONE colour application over the whole piecewise:
+`["Hsv", 0, 0, ["Which", cond, <arm>, 0.8]]` (json-head verified). OUR
+canonicalization then DISTRIBUTES the colour constructor into the arms:
+`["Which", cond, ["Hsv", 0, 0, <arm>], …]`. The inner NUMERIC `Which` I
+measured — arms `list<number>` / `finite_real` — selects correctly, which
+is why the gate looked innocent. The broken layer is the DISTRIBUTED
+COLOUR `Which`, whose guarded arm is a colour-typed expression over the
+collections, and whose per-position value is that arm's whole 900-element
+colour broadcast — the `indexed_collection<color>` `Map`-chains the census
+found.
+
+**RULING — fix at the DISTRIBUTION (do not distribute into the arms of an
+elementwise selection), not at the selection.** Reasoning, which does not
+depend on reading the implementation:
+
+1. The pre-distribution form is one `Hsv` applied to the SELECTED value.
+   That is the author's meaning and it is well defined per position.
+2. `f(Which(c, a, b))` → `Which(c, f(a), f(b))` is sound for SCALAR
+   selection. Across an ELEMENTWISE selection it converts each arm from
+   "this position's value" into "the whole collection", manufacturing an
+   indexing obligation that the original shape did not have. The rewrite
+   is being applied through a boundary where it does not hold.
+3. It also duplicates work: the colour construction is built once per ARM
+   instead of once per selection, against the spirit of R2 ("arm
+   evaluation at most once, whole, only if selected somewhere").
+4. Repairing it at the selection instead (index the distributed arm at j)
+   leaves the O(N²) structure being built and then indexed back down —
+   correct but wasteful, and it treats the symptom.
+
+Indexing a list-valued arm at `j` should ALSO hold as an invariant — it
+already does for arms that reach the gate — but it is the safety net, not
+the fix.
+
+**Verification obligation for whoever implements**: I could NOT reproduce
+the distribution bare (a lowercase unknown `hsv` head stays undistributed;
+it needs the real `Hsv` operator and the document context), so this ruling
+is made on semantics, not on a reproduction. Verify against Tycho's
+witness: after the fix their anatomy probe must report all members scalar.
+
+**Their interim** (shipped, tagged retire-at-fix): a diagonal-residue lane
+in the colour seam taking a same-length nested member's k-th element —
+which is R1 implemented by the consumer. At the fixing release they re-run
+the anatomy probe (members should all be scalars) and delete the lane.
+Answer to their "or state the intended semantics" ask: **it is not
+intended, R1 already rules it, keep the lane as a workaround and retire
+it.**
+
+### Tycho item 188 — `Divide` rejects a `broadcastable<vector<…>>` numerator that it then broadcasts (OPEN)
+
+`Divide`'s operand check accepts a plain vector numerator and REFUSES the
+`broadcastable` wrapper around the same thing, even though `broadcastable<T>`
+is precisely the marker for "this broadcasts elementwise". Reproduced bare
+on 0.109.0 and the working tree:
+
+```
+h(a,b) := [cos(a+b), sin(a-b)]        // h(1,2) : vector<finite_number^2>
+h(1,2) / 2                            // OK, evaluates elementwise
+H(a,b) := h(2a,3b)                    // with X, Y declared-but-unassigned:
+H(X(t),Y(t)) / g(t)                   // numerator : broadcastable<vector<finite_number^2>>
+  -> Error(incompatible-type, "number", "broadcastable<vector<finite_number^2>>")
+```
+
+The evaluator disagrees with its own checker: `[1,2]/2` evaluates to
+`[1/2,1]`, and `h(1,2)/2` evaluates elementwise — the checker rejects a
+shape evaluation handles. The error is baked in at canonicalization, so
+the row does not merely warn, it fails.
+
+**The consumer-visible half is worse than the type error.** Because the
+numerator's type depends on whether its callees are ASSIGNED yet, a row's
+PARSE VALIDITY depends on document position: the same definition parses
+invalid before its callees assign and valid afterwards. Tycho's document
+cells register in order, so their `G` cell was silently dropped from
+registration. Position-dependent validity is not something a consumer can
+reason about or work around cleanly; their interim is a second-chance
+registration queue that re-processes position-invalid rows after the whole
+document has assigned.
+
+Their ask, either half sufficient: type vector-operand arithmetic the way
+evaluation actually treats it, or make the operand check NON-FATAL while an
+operand's type may still refine. The second is the smaller change and
+matches the "don't fail closed on a type that is still moving" posture.
+
+Trigger note worth keeping: this surfaced the day they STOPPED declaring
+evidence-free placeholder arrows. Better call types exposed an over-strict
+check that all-`unknown` types used to sail past — so improving type
+information upstream made a downstream check start failing, which is the
+kind of coupling to expect more of as inference sharpens.
+
+### ~~Tycho item 186 — the item-182 class SURVIVES in document context~~ (FIXED 2026-08-15; filed 2026-08-14)
+
+**RESOLVED 2026-08-15.** The "architectural" conclusion below was wrong in
+one load-bearing detail: the storm's 66K facet probes hit ONE STABLE
+comprehension instance (D), not fresh ones — instrumented
+`scanIndependentClauses` counted 66,297 of 66,301 calls on the same object.
+The ~462K fresh `Map`/`Function`/`Block` builds are the OUTPUT of those
+rescans, not the driver. The memo on that one instance never served because
+of one dependency-validation rule: `memoDepsStillValid` failed whenever a
+dep's occurrence no longer pinned the identical inner value definition —
+and bare-symbol canonicalization (`ce.symbol(name)` →
+`_declareSymbolValue`/`updateDef`, observed live under
+`BoxedSymbol.get canonical` inside `inScope`) re-auto-declares a
+lambda-body free like `R_xz`'s `c`, replacing the shared binding wrapper's
+inner definition in place while bumping no version axis. Only ~8 such swaps
+occur per parse, but each one makes every snapshot pinning the previous
+definition object born-stale, the recompute re-triggers the swap, and the
+`count`/`isEmpty` store ping-pong (a fresh slot wipes the sibling facet's
+entry) doubles the burn: measured 26,523 `occurrence-valuedef-swap`
+validation failures on the symbol `c` in one 4 s window, 28,824 slot
+replacements, 56 hits.
+
+**The fix** (`memoDepsStillValid`, `collection-element-memo.ts`): a swap
+from one VALUELESS pinned definition to another VALUELESS one is a
+re-auto-declare, not a semantic change — a definition holding no value
+never supplies what a walk reads; the name resolves through the scope
+chain, which the re-resolution check still validates. Identity (and
+`_writeVersion` continuity) stays load-bearing when either side holds a
+value. Measured on Tycho's own probe (`MODE=strip`, CE source): C₂ span at
+NL=304 ceiling-burn → **67 ms**; the "every literal value storms" arm
+(`DBOUND=101` at NL=303) ceiling → 79 ms; production-scale NL=3708 → 206 ms
+strip / **14 ms** in the full 17-cell document (whole document evaluates in
+1.3 s). Scan volume at NL=3708: 8 `scanIndependentClauses` calls, 11
+broadcast-lambda constructions (was ~47K `lazyBroadcastMap` calls inside
+one 4 s window). The 303→304 "magnitude threshold" was never a size effect
+— it was whichever arm's canonicalization happened to re-trigger the swap
+between probes, which is why literal bounds stormed at every size while the
+symbolic bound flipped at an arbitrary-looking length.
+
+Regression pins: `test/compute-engine/tycho-item-186-valueless-rebind.test.ts`
+(3 tests: benign swap serves, value-holding swap still invalidates,
+name-becomes-reachable still invalidates; non-vacuity verified — the first
+test fails under the pre-fix rule). Suites green: item-182 pins,
+collections, lazy-collection regimes/compile/broadcast, map-auto-compile,
+collection-element-memo (717 tests), plus typecheck.
+
+Still open from this investigation (recorded below, unchanged): the
+`toNumericValue` `console.assert` violations at `boxed-function.ts` reached
+via `canonicalDivide` → `factor()`, and the `TYPE_CACHE` clear-all
+eviction cliff (real, measured, refuted as 186's cause).
+
+--- original investigation record follows ---
 
 Tycho's item-182 witness re-check FAILED after adopting 0.109.0: their
 `lizeqlnn5e` C₂ range-broadcast-`At` color head still burns ≥120–240 s in

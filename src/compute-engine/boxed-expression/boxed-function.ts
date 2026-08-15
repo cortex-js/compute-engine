@@ -4173,10 +4173,23 @@ function skipBroadcastForVectorOps(
   // `broadcastComparison`, whole-collection equality for two collections) —
   // so a possibly-collection operand that turns out scalar still broadcasts
   // element-wise, unchanged.
+  //
+  // An operand DEFINITELY typed as a collection counts as well: an
+  // application such as `L(1)` under `L: (number) -> vector<2>` is a
+  // collection VALUE the moment it evaluates, but it is not a collection NODE
+  // (`isCollection` is false on an application) and its concrete type is
+  // neither top nor `broadcastable`, so both predicates above miss it and the
+  // pre-evaluation broadcast fanned `L(1) = [1,2]` elementwise. Surfaced when
+  // placeholder-signature refinement (2026-08-15) started giving such
+  // applications their concrete collection types.
   if (
     (operator === 'Equal' || operator === 'NotEqual') &&
-    ops.filter((x) => x.isCollection || isPossiblyCollectionTyped(x)).length >=
-      2
+    ops.filter(
+      (x) =>
+        x.isCollection ||
+        isPossiblyCollectionTyped(x) ||
+        x.type.matches('collection')
+    ).length >= 2
   )
     return true;
   return false;

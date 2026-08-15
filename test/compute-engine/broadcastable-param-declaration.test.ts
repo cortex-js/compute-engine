@@ -84,8 +84,20 @@ describe('DECLARED broadcastable<T> — application-site typing (Tycho 157(1))',
     ce.declare('L', 'list<number>');
     // Guards against silently drifting onto the operator-definition route.
     expect(ce.lookupDefinition('vf')).toHaveProperty('value');
-    expect(ce.box(['vf', 'L']).type.toString()).toBe('list<unknown>');
-    expect(ce.box(['vf', 7]).type.toString()).toBe('unknown');
+    // Since placeholder-signature refinement (2026-08-15) the assignment
+    // refines the declared `unknown` result to the body's `tuple<…>`; the
+    // LIFT under test is unchanged — a list argument still types `list<R>`,
+    // a scalar the bare `R`. The tuple's ELEMENTS stay `unknown` because a
+    // `broadcastable<T>` parameter is deliberately never stamped onto the
+    // body (it is a declaration-level contract, not a parameter type), so a
+    // pass-through body offers no element evidence to refine from.
+    expect(ce.box('vf').type.toString()).toBe(
+      '(broadcastable<number>) -> tuple<unknown, unknown>'
+    );
+    expect(ce.box(['vf', 'L']).type.toString()).toBe(
+      'list<tuple<unknown, unknown>>'
+    );
+    expect(ce.box(['vf', 7]).type.toString()).toBe('tuple<unknown, unknown>');
   });
 });
 

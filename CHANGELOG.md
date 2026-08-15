@@ -28,6 +28,30 @@
 
 ### Issues Resolved
 
+- **Declaring a function with a placeholder signature no longer breaks the
+  definition that follows.** `ce.declare('f', '(unknown) -> unknown')`
+  followed by `f(P) \coloneq \sqrt{P[1]^2+P[2]^2}` was refused with
+  `incompatible-type` — a placeholder declaration was strictly more
+  restrictive than no declaration — and calls stayed inert. A declared
+  `unknown` parameter or result slot is now a placeholder the definition
+  refines, per-position: the definition installs under the refined concrete
+  signature (so a `[3,4]` argument binds whole instead of broadcasting
+  elementwise), and a concrete slot in the same arrow — `(tuple<number,
+  number>) -> unknown` — is preserved verbatim. `any` is different, by
+  design: `(any) -> any` (the identity function's signature) is a contract
+  to accept every value, and a body that cannot honor it is still refused —
+  now surfaced as an error value on the LaTeX route as well. See "The
+  `unknown` type" in the types guide for the placeholder-vs-contract
+  distinction and the `nothing`/`missing` caveat.
+
+- **`Equal`/`NotEqual` between a collection-typed application and a list is
+  a single boolean again.** With `L: (number) -> vector<2>`, the comparison
+  `L(1) = [1,2]` broadcast elementwise to `["True","True"]` instead of the
+  documented whole-collection verdict `"True"`: the pre-evaluation broadcast
+  gate counted collection literals and possibly-collection (opaque) types
+  but missed operands *definitely typed* as collections. List-vs-scalar
+  comparisons still broadcast elementwise.
+
 - **A compiled `Range` with a computed bound no longer loses every element
   but the first.** On the `javascript` target, a range whose bound was an
   expression rather than a literal — `1..(Length(L)/3)` — compiled to the

@@ -44,6 +44,7 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
   matchesDeclaredTypeAxes,
+  refineDeclaredPlaceholders,
   signatureEffects,
   stripArrowEffects,
   withArrowEffects,
@@ -1883,8 +1884,23 @@ export function declareFn(
       def.type !== undefined &&
       isFunction(def.value as Expression | undefined, 'Function')
     ) {
-      const declaredType =
-        def.type instanceof BoxedType ? def.type.type : parseType(def.type);
+      // The resolver makes engine-local type names (`(meters) -> unknown`
+      // with a `type meters = number` alias) parse here, exactly as the
+      // value-definition constructor's own parse does — omitting it threw
+      // before that constructor was reached.
+      const declaredType0 =
+        def.type instanceof BoxedType
+          ? def.type.type
+          : parseType(def.type, ce._typeResolver);
+      // Placeholder refinement, as on the assign routes (two passes — the
+      // second, below, adopts the post-ascription result a pass-through body
+      // only shows after reconciliation): declared `unknown` slots adopt the
+      // literal's inferred slots, and the refined type is what the definition
+      // installs under.
+      let declaredType = refineDeclaredPlaceholders(
+        declaredType0,
+        (def.value as Expression).type.type
+      );
       if (hasFunctionSignature(declaredType)) {
         // G11 (§2.4) — see the assign path. Checked FIRST, ahead of the
         // arity/effects assertions: an overload set with a generic arm is not
@@ -1917,8 +1933,15 @@ export function declareFn(
           declaredType
         );
         assertDeclaredEffects(id, reconciled, declaredType, effectsDeclared);
+        // Second refinement pass — adopt the post-ascription result.
+        declaredType = refineDeclaredPlaceholders(
+          declaredType,
+          reconciled.type.type
+        );
         valueDef = { ...valueDef, value: reconciled };
       }
+      if (declaredType !== declaredType0)
+        valueDef = { ...valueDef, type: ce.type(declaredType) };
     }
     ce._declareSymbolValue(id, valueDef, scope);
     return ce;
@@ -2125,7 +2148,18 @@ export function assignFn(
   ) {
     const literal = canonicalFunctionLiteral(ce.expr(arg2));
     if (literal !== undefined) {
-      const declaredType = def.value.type;
+      // A declared `unknown` slot is a placeholder the definition refines,
+      // never a contract (ruled 2026-08-15; `refineDeclaredPlaceholders`).
+      // Refined BEFORE the reconciliation pipeline so ascription, the
+      // compatibility check, and call-site broadcasting all see the concrete
+      // signature; persisted onto the definition after the checks pass.
+      // TWO passes are required: the literal's own type is read before
+      // parameter ascription, so a pass-through body (`P ↦ P` under
+      // `(tuple<…>) -> unknown`) still shows an `unknown` result here — only
+      // the post-ascription `reconciled` carries the sharpened result, so a
+      // second pass runs below once `reconciled` exists.
+      const declaredType0 = def.value.type;
+      let declaredType = refineDeclaredType(ce, declaredType0, literal.type);
 
       // A generic declaration DOES take a function-literal body (the
       // generic-literals milestone, §2.4): the literal installs under the
@@ -2158,6 +2192,9 @@ export function assignFn(
         ascribeDeclaredParameterTypes(ce, literal, declaredType.type),
         declaredType.type
       );
+      // Second refinement pass (see the comment above): adopt the
+      // post-ascription result for any slot still `unknown`.
+      declaredType = refineDeclaredType(ce, declaredType, reconciled.type);
       // The effects axis is judged by its own provenance: a bare specifier is
       // the INFERRED track (the body's effects are simply re-stamped on every
       // assignment), a stated one is a contract.
@@ -2181,6 +2218,7 @@ export function assignFn(
         )
       )
         throw declaredTypeError(id, reconciled, declaredType);
+      if (declaredType !== declaredType0) def.value.type = declaredType;
       ce._setSymbolValue(id, reconciled);
       return ce;
     }
@@ -2283,7 +2321,14 @@ export function assignFn(
         literal !== undefined &&
         !functionLiteralHasAnnotation(literal);
       if (literal !== undefined && !replacesDerived) {
-        const declaredType = def.operator.signature;
+        // Placeholder refinement, as on the value-slot route above: declared
+        // `unknown` slots adopt the literal's inferred slots before the
+        // pipeline, so the installed signature and the `paramsAreScalar`
+        // broadcast flag below are computed from the concrete type. Two
+        // passes, for the same reason as there: only the post-ascription
+        // `reconciled` carries a pass-through body's sharpened result.
+        const declaredType0 = def.operator.signature;
+        let declaredType = refineDeclaredType(ce, declaredType0, literal.type);
 
         // G11 — see the value-slot route above. The literal then installs as a
         // VALUE carrying the DECLARED polytype (the same representation this
@@ -2308,6 +2353,8 @@ export function assignFn(
           ascribeDeclaredParameterTypes(ce, literal, declaredType.type),
           declaredType.type
         );
+        // Second refinement pass — adopt the post-ascription result.
+        declaredType = refineDeclaredType(ce, declaredType, reconciled.type);
         // The effects axis is judged by its own provenance. The operator
         // definition carries the bit (`effectsDeclared`), and it has to travel
         // with the value definition this route installs: the declared type
@@ -3014,6 +3061,30 @@ function assertDeclaredEffects(
  * Returns the (possibly rebuilt) literal. Genuine parameter/return conflicts
  * are left for the caller's compatibility check to reject.
  */
+/**
+ * BoxedType-level wrapper for {@link refineDeclaredPlaceholders}, shared by
+ * the install routes: refine the DECLARED type's `unknown` placeholder slots
+ * from the value's type, reboxing only when something actually moved so an
+ * unchanged declaration keeps its object identity (callers compare against
+ * the original to decide whether to persist).
+ *
+ * Called TWICE per route: once from the literal's own (pre-ascription) type
+ * so parameter ascription and the arity/effects checks see the concrete
+ * parameter slots, and once from the reconciled (post-ascription) type,
+ * because a pass-through body (`P ↦ P` under `(tuple<…>) -> unknown`) only
+ * shows its concrete RESULT after ascription re-canonicalized it — a
+ * single early pass persisted `-> unknown` and re-created the very
+ * placeholder-stuck call sites the refinement exists to remove.
+ */
+function refineDeclaredType(
+  ce: IComputeEngine,
+  declared: BoxedType,
+  valueType: BoxedType
+): BoxedType {
+  const refined = refineDeclaredPlaceholders(declared.type, valueType.type);
+  return refined === declared.type ? declared : ce.type(refined);
+}
+
 export function reconcileFunctionLiteralReturn(
   ce: IComputeEngine,
   literal: Expression,

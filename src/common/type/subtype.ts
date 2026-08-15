@@ -893,6 +893,24 @@ export function isSubtype(
   if (rhs === 'unknown') return true;
   // 'unknown' is only a subtype of `any` (handled above); gate on a primitive
   // rhs so `unknown <: unknown | integer` falls through to the union handler.
+  //
+  // ⚠️ Do NOT make this bidirectional. TRIED AND REVERTED (2026-08-15). The
+  // structural reason comes first because no downstream patch can route
+  // around it: if `unknown <: T` and `T <: unknown` both held for every `T`,
+  // antisymmetry is gone — `unknown` becomes lattice-EQUIVALENT to every
+  // type, and union subsumption and `meet2`'s subtype-based tie-breaks stop
+  // being order-independent. That is not a bug to fix in the callers; it is
+  // the partial order ceasing to be one. The empirical witness, for scale:
+  // `matches()` doubles as the engine's dispatch predicate, and within one
+  // probe of the flip an element access typed `unknown` "matched" `matrix`,
+  // so `P[1]^2` canonicalized as `MatrixPower`, broadcast decisions flipped,
+  // and even undeclared-function definitions went inert. A bidirectional
+  // "compatible with everything" reading of `unknown` therefore cannot live
+  // in this relation at all. The placeholder semantics users actually need
+  // lives at the DECLARATION boundary instead: `refineDeclaredPlaceholders`
+  // (compute-engine/boxed-expression/effects-inference.ts) replaces declared
+  // `unknown` slots with the definition's inferred slots. Full record: the
+  // placeholder-signature entry in ROADMAP.md (ruled 2026-08-15).
   if (lhs === 'unknown' && typeof rhs === 'string') return false;
 
   //
