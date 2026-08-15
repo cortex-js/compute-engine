@@ -1,6 +1,7 @@
 import {
-  couldBeCollectionOperand,
+  couldBeUnkeyedCollectionOperand,
   isFiniteIndexedCollection,
+  typeCouldBeCollection,
   typeCouldBeNumericCollection,
   typeCouldBeNumericTuple,
   typeIsProvablyNonNumericCollection,
@@ -80,11 +81,26 @@ const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
 // an operand admitted by validation but missed by the type handlers
 // collapsed to `number` and baked `incompatible-type` (Tycho item 30).
 
-// `couldBeCollectionOperand` moved to `collection-utils.ts` alongside the
-// sibling COULD-semantics predicates, so validation, overload resolution and
-// result typing share ONE definition — a private copy here would let the
+// `couldBeUnkeyedCollectionOperand` moved to `collection-utils.ts` alongside
+// the sibling COULD-semantics predicates, so validation, overload resolution
+// and result typing share ONE definition — a private copy here would let the
 // resolution used for validation admit different arms from the one used for
 // result typing.
+
+/**
+ * Exclusion gate for scalar numeric INFERENCE — deliberately WIDER than
+ * broadcast admission (`couldBeUnkeyedCollectionOperand`). The hazard the
+ * gate prevents is keyedness-independent: `x.infer('real')` on an operand
+ * whose inferred result signature is collection-shaped WIDENS the shared
+ * definition (Tycho item 121), and a `dictionary<…>`-shaped signature is
+ * corrupted by that write exactly as a `vector<2>` one is. So ANY operand
+ * that is, or could be, a collection of any kind is excluded from the
+ * scalar inference — even though only the unkeyed ones are ever consumed
+ * by broadcast.
+ */
+function excludedFromScalarInference(op: Expression): boolean {
+  return op.isCollection || typeCouldBeCollection(op.type.type);
+}
 
 /**
  * Check that the number of arguments is as expected.
@@ -287,9 +303,11 @@ export function checkNumericArgs(
     // signature is already `vector<2>` WIDENS the shared definition to
     // `real | vector<2>`, and every later use of that function then types as
     // `number` (Tycho item 121: the compiled Sum then emits scalar `+` over
-    // arrays). Mirrors the `couldBeCollectionOperand` guard on the
+    // arrays). The exclusion is wider than admission — see
+    // `excludedFromScalarInference` — and mirrors the guard on the
     // signature-validation route (`validateSignature`).
-    for (const x of xs) if (!couldBeCollectionOperand(x)) x.infer(inferredType);
+    for (const x of xs)
+      if (!excludedFromScalarInference(x)) x.infer(inferredType);
     return xs;
   }
 
@@ -472,12 +490,13 @@ export function checkNumericArgs(
         // inferred function call still needs the walk.
         if (x.isLazyCollection) continue;
         for (const y of x.each()) y.infer(inferredType);
-      } else if (!couldBeCollectionOperand(x)) x.infer(inferredType);
+      } else if (!excludedFromScalarInference(x)) x.infer(inferredType);
     // A possibly-collection operand (a `vector<n>`-returning application,
-    // `number | list`, a tuple) is consumed by broadcast: inferring the
-    // scalar numeric context onto it would WIDEN a shared inferred result
-    // signature to `real | vector<…>` (Tycho item 121) — same guard as the
-    // signature-validation route above.
+    // `number | list`, a tuple, a `dictionary<…>`-shaped signature) is not a
+    // scalar: inferring the scalar numeric context onto it would WIDEN a
+    // shared inferred result signature to `real | vector<…>` (Tycho item
+    // 121) — same guard as the signature-validation route above, and wider
+    // than broadcast admission (see `excludedFromScalarInference`).
   }
 
   return xs;
@@ -699,7 +718,7 @@ export function validateArguments(
     const policies = {
       lazy,
       threadable,
-      couldBeCollection: couldBeCollectionOperand,
+      couldBeUnkeyedCollection: couldBeUnkeyedCollectionOperand,
       stripMissing,
       freshMatrixRepair: (op: Expression, param: Type) =>
         couldRepairFreshMatrixInference(ce, op, param, freshlyInferred),
@@ -977,7 +996,10 @@ export function validateArguments(
       result.push(op);
       continue;
     }
-    if (isThreadableAt(threadable, idx) && couldBeCollectionOperand(op)) {
+    if (
+      isThreadableAt(threadable, idx) &&
+      couldBeUnkeyedCollectionOperand(op)
+    ) {
       result.push(op);
       continue;
     }
@@ -1136,7 +1158,7 @@ export function validateArguments(
       i += 1;
       continue;
     }
-    if (isThreadableAt(threadable, i) && couldBeCollectionOperand(op)) {
+    if (isThreadableAt(threadable, i) && couldBeUnkeyedCollectionOperand(op)) {
       result.push(op);
       i += 1;
       continue;
@@ -1234,7 +1256,10 @@ export function validateArguments(
         continue;
       }
       // The operand index is `i - 1` (already incremented at the loop top).
-      if (isThreadableAt(threadable, i - 1) && couldBeCollectionOperand(op)) {
+      if (
+        isThreadableAt(threadable, i - 1) &&
+        couldBeUnkeyedCollectionOperand(op)
+      ) {
         result.push(op);
         continue;
       }
@@ -1387,7 +1412,7 @@ export function validateArguments(
     if (t !== undefined && !lazy && !deferredIdx.has(i))
       if (
         !isThreadableAt(threadable, i) ||
-        !couldBeCollectionOperand(finalOps[i])
+        !couldBeUnkeyedCollectionOperand(finalOps[i])
       )
         finalOps[i].infer(t);
     i += 1;
@@ -1398,7 +1423,7 @@ export function validateArguments(
     if (t !== undefined && !lazy && !deferredIdx.has(i))
       if (
         !isThreadableAt(threadable, i) ||
-        !couldBeCollectionOperand(finalOps[i])
+        !couldBeUnkeyedCollectionOperand(finalOps[i])
       )
         finalOps[i].infer(t);
     i += 1;
@@ -1407,7 +1432,10 @@ export function validateArguments(
     for (const op of finalOps.slice(i)) {
       const t = inferenceTypeAt(i, varParam);
       if (t !== undefined && !lazy && !deferredIdx.has(i))
-        if (!isThreadableAt(threadable, i) || !couldBeCollectionOperand(op))
+        if (
+          !isThreadableAt(threadable, i) ||
+          !couldBeUnkeyedCollectionOperand(op)
+        )
           op.infer(t);
       i += 1;
     }

@@ -5001,6 +5001,60 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
     expect(e.evaluate().toString()).toBe('[1,2,2]');
     expect(e.type.matches('list')).toBe(true);
   });
+
+  test('a spread of a VALUELESS dictionary-typed symbol stays symbolic', () => {
+    // A collection-TYPED operand with no value yet is UNRESOLVED, not a
+    // scalar datum (USER-RULED 2026-08-11) — and `dictionary`/`record` are
+    // collection types too. `ListFrom` on such a symbol used to wrap it as
+    // a one-element list (`["d"]`), so the dictionary merge lowering
+    // errored with "Expected a collection of pairs" instead of waiting for
+    // the value; `typeCouldBeCollection` now covers the keyed collections.
+    const ce2 = new ComputeEngine();
+    ce2.declare('d', 'dictionary<integer>');
+    // ListFrom stays inert on the valueless symbol...
+    expect(ce2.box(['ListFrom', 'd']).evaluate().json).toEqual([
+      'ListFrom',
+      'd',
+    ]);
+    // ...so the dictionary-merge lowering survives symbolically...
+    const merge = ce2.box([
+      'DictionaryFrom',
+      ['Join', ['ListFrom', 'd'], ['List', ['Tuple', { str: 'z' }, 3]]],
+    ]);
+    expect(merge.evaluate().isValid).toBe(true);
+    // ...and resolves once the symbol receives its value.
+    ce2
+      .box(['Assign', 'd', ['Dictionary', ['Tuple', { str: 'a' }, 1]]])
+      .evaluate();
+    expect(merge.evaluate().json).toEqual({ dict: { a: 1, z: 3 } });
+  });
+
+  test('a record-typed symbol in a scalar position still errors loudly', () => {
+    // The admission split must not leak: keyed collections (dictionary,
+    // record) stay OUT of threadable/broadcast admission, so a numeric
+    // function over one reports incompatible-type instead of parking as
+    // symbolic residue. (Same verdict as before the split — this guards
+    // the WIDE predicate from ever leaking into admission.)
+    const ce2 = new ComputeEngine();
+    ce2.declare('r', 'record<x: integer>');
+    const e = ce2.box(['Sin', 'r']);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain('incompatible-type');
+  });
+
+  test('a SET operand in a scalar position stays admitted (opposite polarity)', () => {
+    // Guards the other edge of the keyed/unkeyed admission boundary: a set
+    // is UNKEYED, so lift admission binds it WHOLE and the call stays typed
+    // symbolic — it must NOT become an incompatible-type error. (An
+    // "indexed" admission predicate was tried and refuted by exactly this:
+    // the primary pins are the D10 §5.3 tests in
+    // generic-function-literals.test.ts and type-variables-linalg.test.ts;
+    // this twin keeps the polarity visible next to the keyed-side pin.)
+    const ce2 = new ComputeEngine();
+    const e = ce2.box(['Conjugate', ['Set', 1, 2]]);
+    expect(e.type.toString()).toBe('set<finite_integer>');
+    expect(e.evaluate().toString()).toBe('Conjugate(Set(1, 2))');
+  });
 });
 
 describe("Drop's count facet agrees with its own walk", () => {

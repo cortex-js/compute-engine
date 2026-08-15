@@ -466,27 +466,80 @@ function couldBeNumericElement(el: Type): boolean {
 }
 
 /**
- * Return true if a type could be a numeric collection at runtime — a `list`,
- * `set`, `collection`, or `indexed_collection` whose elements could be
- * numeric, or a `broadcastable<S>` with a numeric-ish element. COULD-
- * semantics: bare kinds (`list`, `collection`, …) and `any`/`unknown`
- * elements qualify; a statically non-numeric element type (`list<string>`)
- * does not.
+ * Return true if a type could be a collection — of ANY kind — at runtime.
+ * `dictionary` and `record` qualify: both are subtypes of `collection` (a
+ * dictionary is a collection of key–value pairs), even though neither is
+ * indexed.
  *
- * SINGLE SOURCE OF TRUTH shared by `checkNumericArgs` (`validate.ts`, the
- * operand-admission gate) and — via `couldBeNumericTuple` — the
- * `Add`/`Multiply` type handlers and the invisible-operator gate. The two
- * layers must never diverge: an operand admitted by validation but missed by
- * the type handlers collapses to `number` through the `isFinite === false`
- * path and lets the `Add` scalar-plus-tuple guard bake `incompatible-type`
- * (Tycho item 30).
- */
-/**
- * Return true if a type could be a collection type at runtime.
- * Used for threadable/broadcastable functions to accept arguments whose type
- * includes a collection possibility (e.g. `number | list`).
+ * This is the predicate for consumers that must not mistake an unresolved
+ * collection-typed operand for a scalar datum: the eager materializers'
+ * inertness gates (`ListFrom`/`SetFrom`/`TupleFrom` stay inert on a
+ * collection-TYPED operand with no value yet, USER-RULED 2026-08-11) and the
+ * enumerability probes over multi-source operators
+ * (`enumerableFromAllSources`, `canEnumerateCollectionOperands`).
+ *
+ * For threadable/broadcast admission use `typeCouldBeUnkeyedCollection`
+ * instead: the keyed collections (`dictionary`, `record`) hold key–value
+ * pairs, not elements, so in a scalar position they get a loud
+ * `incompatible-type` error rather than admission.
  */
 export function typeCouldBeCollection(type: Type): boolean {
+  if (typeof type === 'string') {
+    return (
+      type === 'collection' ||
+      type === 'indexed_collection' ||
+      type === 'list' ||
+      type === 'set' ||
+      type === 'tuple' ||
+      type === 'dictionary' ||
+      type === 'record' ||
+      type === 'any'
+    );
+  }
+  if (
+    type.kind === 'collection' ||
+    type.kind === 'indexed_collection' ||
+    type.kind === 'list' ||
+    type.kind === 'set' ||
+    type.kind === 'tuple' ||
+    type.kind === 'dictionary' ||
+    type.kind === 'record' ||
+    // A `broadcastable<T>` operand COULD be an indexed collection at runtime.
+    type.kind === 'broadcastable'
+  )
+    return true;
+  if (type.kind === 'union')
+    return type.types.some((t) => typeCouldBeCollection(t));
+  return false;
+}
+
+/**
+ * Return true if a type could be an UNKEYED collection at runtime — a
+ * collection whose members are elements (`list`, `set`, `tuple`, a bare
+ * `collection`), as opposed to the KEYED collections (`dictionary`,
+ * `record`) whose members are key–value pairs. This is the admission
+ * question for threadable/broadcastable functions accepting an argument in
+ * a scalar position (e.g. `number | list`).
+ *
+ * The keyed/unkeyed line is the admission boundary, not indexability: a
+ * `set` cannot be indexed, yet a set operand is deliberately admitted — it
+ * binds WHOLE under generic lift admission and the call stays typed
+ * symbolic (`Conjugate(Set(1, 2))` types as `set<finite_integer>`; §5.3
+ * D10, pinned in `generic-function-literals.test.ts` and
+ * `type-variables-linalg.test.ts`), keeping image-of-a-set semantics
+ * available. A keyed collection in a scalar position is instead a loud
+ * `incompatible-type` error: its members are pairs, so element-wise or
+ * image semantics do not apply.
+ *
+ * Unions qualify per-arm: `number | list` is admitted because its `list`
+ * arm could broadcast. A union with NO unkeyed-collection arm
+ * (`number | dictionary`) is not admitted here even though its scalar arm
+ * is viable at runtime — such an operand's fate rests entirely with
+ * ordinary argument validation. (Unchanged from before the keyed/unkeyed
+ * split; recorded so the asymmetry is a documented choice, not an
+ * accident.)
+ */
+export function typeCouldBeUnkeyedCollection(type: Type): boolean {
   if (typeof type === 'string') {
     return (
       type === 'collection' ||
@@ -508,17 +561,20 @@ export function typeCouldBeCollection(type: Type): boolean {
   )
     return true;
   if (type.kind === 'union')
-    return type.types.some((t) => typeCouldBeCollection(t));
+    return type.types.some((t) => typeCouldBeUnkeyedCollection(t));
   return false;
 }
 
 /**
- * A threadable operand that broadcasting may consume as a collection: either
- * the *value* is an actual finite indexed collection (regardless of how
- * precise its static type is), or the static *type* admits a collection at
- * runtime (`list`, `number | list`, `broadcastable<T>`, …) even though no
- * value is materialized. Neither check subsumes the other. Such an operand is
- * admitted as-is and excluded from scalar parameter-type inference.
+ * A threadable operand that broadcasting or lift admission may consume as a
+ * collection: either the *value* is an actual finite indexed collection
+ * (regardless of how precise its static type is), or the static *type*
+ * admits an UNKEYED collection at runtime (`list`, `number | list`, `set`,
+ * `broadcastable<T>`, …) even though no value is materialized. Neither
+ * check subsumes the other. Such an operand is admitted as-is and excluded
+ * from scalar parameter-type inference. The KEYED collections
+ * (`dictionary`, `record`) are deliberately NOT admitted — see
+ * `typeCouldBeUnkeyedCollection` for the keyed/unkeyed rationale.
  *
  * Lives here, beside the sibling COULD-semantics predicates, so that argument
  * validation (`boxed-expression/validate.ts`), overload resolution
@@ -527,10 +583,29 @@ export function typeCouldBeCollection(type: Type): boolean {
  * copy in `validate.ts` would let the resolution used for validation and the
  * resolution used for result typing admit different arms.
  */
-export function couldBeCollectionOperand(op: Expression): boolean {
-  return isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type);
+export function couldBeUnkeyedCollectionOperand(op: Expression): boolean {
+  return (
+    isFiniteIndexedCollection(op) ||
+    typeCouldBeUnkeyedCollection(op.type.type)
+  );
 }
 
+/**
+ * Return true if a type could be a numeric collection at runtime — a `list`,
+ * `set`, `collection`, or `indexed_collection` whose elements could be
+ * numeric, or a `broadcastable<S>` with a numeric-ish element. COULD-
+ * semantics: bare kinds (`list`, `collection`, …) and `any`/`unknown`
+ * elements qualify; a statically non-numeric element type (`list<string>`)
+ * does not.
+ *
+ * SINGLE SOURCE OF TRUTH shared by `checkNumericArgs` (`validate.ts`, the
+ * operand-admission gate) and — via `couldBeNumericTuple` — the
+ * `Add`/`Multiply` type handlers and the invisible-operator gate. The two
+ * layers must never diverge: an operand admitted by validation but missed by
+ * the type handlers collapses to `number` through the `isFinite === false`
+ * path and lets the `Add` scalar-plus-tuple guard bake `incompatible-type`
+ * (Tycho item 30).
+ */
 export function typeCouldBeNumericCollection(type: Type): boolean {
   if (typeof type === 'string') {
     return (

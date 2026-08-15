@@ -294,7 +294,7 @@ export interface AdmissionPolicies {
   /** Per-position for a declared `broadcastable<T>` signature — see
    * {@link Threadable}. */
   threadable?: Threadable;
-  couldBeCollection?: (op: Expression) => boolean;
+  couldBeUnkeyedCollection?: (op: Expression) => boolean;
   /** Strip-before-validate eligibility, per operand index (§3.B). */
   stripMissing?: (index: number) => boolean;
   /** Write-free precondition of the fresh-matrix-inference repair. */
@@ -354,7 +354,7 @@ function prefilterAdmits(
 
   if (
     isThreadableAt(policies?.threadable, index) &&
-    policies?.couldBeCollection?.(op)
+    policies?.couldBeUnkeyedCollection?.(op)
   )
     return true;
   if (op.type.matches(param)) return true;

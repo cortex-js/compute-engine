@@ -18,7 +18,7 @@ import type {
   TypeResolver,
 } from '../../common/type/types.js';
 
-import { couldBeCollectionOperand } from '../collection-utils.js';
+import { couldBeUnkeyedCollectionOperand } from '../collection-utils.js';
 import type { Expression } from '../global-types.js';
 
 /**
@@ -190,7 +190,7 @@ export function solveArm(
         return (
           isThreadableAt(ctx?.threadable, i) &&
           !!op &&
-          couldBeCollectionOperand(op)
+          couldBeUnkeyedCollectionOperand(op)
         );
       },
     }

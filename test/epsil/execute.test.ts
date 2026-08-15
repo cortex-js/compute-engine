@@ -961,6 +961,27 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
     expect(value.toString()).toBe('[1,2,2]');
     expect(value.type.matches('list')).toBe(true);
   });
+
+  test('a spread of a VALUELESS dictionary-typed symbol stays symbolic', () => {
+    // The bug as filed (2026-08-14): with `d` declared `dictionary<integer>`
+    // but not yet assigned, the merge errored with "Expected a collection of
+    // pairs, got dictionary<integer>" instead of staying symbolic until the
+    // value arrives. This pins the Epsil surface; the box-route twin lives
+    // in `collections.test.ts` ("a spread of a VALUELESS dictionary-typed
+    // symbol stays symbolic").
+    const { value, diagnostics } = run(
+      'let d: dictionary<integer>\n{->, ...d, "z" -> 3}'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.isValid).toBe(true);
+    expect(value.operator).toBe('DictionaryFrom');
+    // Same program with the value present resolves to the merged dictionary.
+    expect(
+      run(
+        'let d: dictionary<integer>\nd = {"a" -> 1}\n{->, ...d, "z" -> 3}'
+      ).value.toString()
+    ).toBe('{"dict":{"a":1,"z":3}}');
+  });
 });
 
 describe('EPSIL EXECUTE — the bare `_` identity shorthand', () => {

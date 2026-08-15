@@ -35,11 +35,12 @@ import {
   isKnownFinitenessBroadcast,
   isLinearAlgebraCollection,
   isNumericTuple,
-  couldBeCollectionOperand,
+  couldBeUnkeyedCollectionOperand,
   isPossiblyCollectionTyped,
   isTuple,
   isUnknownLengthBroadcast,
   typeCouldBeCollection,
+  typeCouldBeUnkeyedCollection,
   lazyBroadcastMapIfNeeded,
   lazyMapNumericApproximation,
   zip,
@@ -2557,8 +2558,10 @@ export class BoxedFunction
    */
   private _broadcastCount(): number | undefined {
     // Only a collection-SHAPED result can have an element count. `Add(1, 2)`
-    // types `finite_integer` and must keep answering `undefined`.
-    if (!typeCouldBeCollection(this.type.type)) return undefined;
+    // types `finite_integer` and must keep answering `undefined`. UNKEYED:
+    // broadcast lifts over element collections only, so a keyed-typed result
+    // (never produced by an admitted broadcast) stays `undefined`.
+    if (!typeCouldBeUnkeyedCollection(this.type.type)) return undefined;
     // An UNBOUND head does not broadcast (Tycho item 169). An undeclared call
     // binds vacuously (item 152) and its result type lifts over a collection
     // argument, so `Total([1, 2])` types `list<unknown^2>` and looks countable
@@ -2577,8 +2580,9 @@ export class BoxedFunction
     if (ops === undefined) return undefined;
     let count: number | undefined;
     for (const op of ops) {
-      // A scalar operand is a LIFT, not a participant.
-      if (!typeCouldBeCollection(op.type.type)) continue;
+      // A scalar operand is a LIFT, not a participant. Broadcast participants
+      // are UNKEYED collections only — keyed operands are never admitted.
+      if (!typeCouldBeUnkeyedCollection(op.type.type)) continue;
       const c = op.count;
       if (c === undefined) return undefined;
       if (count === undefined) count = c;
@@ -2647,12 +2651,13 @@ export class BoxedFunction
     //   (`[1, 2] + RandomInteger(1, 10)`) do not demote the answer.
     if (
       this.operatorDefinition.broadcastable === true &&
-      typeCouldBeCollection(this.type.type)
+      typeCouldBeUnkeyedCollection(this.type.type)
     ) {
       let result: boolean | undefined = true;
       for (const op of this.ops) {
-        // A scalar operand is a LIFT, not a participant.
-        if (!typeCouldBeCollection(op.type.type)) continue;
+        // A scalar operand is a LIFT, not a participant (UNKEYED, as in
+        // `_broadcastCount`: keyed operands are never admitted to broadcast).
+        if (!typeCouldBeUnkeyedCollection(op.type.type)) continue;
         const e = op.isEnumerableCollection;
         if (e === false) return false;
         if (e === undefined) result = undefined;
@@ -2664,7 +2669,12 @@ export class BoxedFunction
 
     // Unadopted: a collection-typed application is undecidable here rather
     // than false (`each()`/`at()` walk it through the materialize fallbacks).
-    // Anything that cannot be a collection at all cannot be walked.
+    // Anything that cannot be a collection at all cannot be walked. WIDE
+    // deliberately (2026-08-14): a dictionary/record-typed application IS
+    // walkable through the fallbacks — evaluation yields the keyed value,
+    // whose own `each()` walks its pairs — so answering a definite `false`
+    // for it was wrong; it now answers `undefined` like every other
+    // collection-typed unadopted application.
     return typeCouldBeCollection(this.type.type) ? undefined : false;
   }
 
@@ -2843,7 +2853,12 @@ export class BoxedFunction
    */
   private _materializedAt(index: number): Expression | undefined {
     if (!this.isValid) return undefined;
-    if (!typeCouldBeCollection(this.type.type)) return undefined;
+    // UNKEYED: `at()` here is POSITIONAL, and a keyed-typed application can
+    // never answer it — `BoxedDictionary` has no `at` handler at all — so
+    // paying an evaluation for a `dictionary`/`record`-typed application
+    // would buy a guaranteed `undefined`, violating the "a non-indexable
+    // application must not pay an evaluation" gate above.
+    if (!typeCouldBeUnkeyedCollection(this.type.type)) return undefined;
     // Draw-free rather than pure (item-169 ruling, 2026-08-12): a BROADCAST
     // whose impurity is confined to scalar (lifted) operands evaluates to a
     // structural distribute with the impure calls left unevaluated —
@@ -5014,7 +5029,7 @@ function resolvedArm(
   const policies = {
     lazy: def?.lazy,
     threadable: def?.broadcastable,
-    couldBeCollection: couldBeCollectionOperand,
+    couldBeUnkeyedCollection: couldBeUnkeyedCollectionOperand,
   };
   const { selected, selectedInstance } =
     expr._resolvedOverload ??

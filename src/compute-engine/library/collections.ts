@@ -7610,16 +7610,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       const entries: Expression[] = [];
       for (const keyValue of xs.each()) {
-        if (!isFunction(keyValue) || keyValue.nops !== 2) {
-          throw new Error(
-            `Expected a collection of pairs, got ${keyValue.type}`
+        // A malformed element is a boxed error, not a raw `throw`: a throw
+        // here escapes `evaluate()` as an uncaught JS exception (the engine
+        // does not catch handler throws on the plain evaluate route).
+        if (!isFunction(keyValue) || keyValue.nops !== 2)
+          return ce.error(
+            [
+              'incompatible-type',
+              'tuple<string, unknown>',
+              keyValue.type.toString(),
+            ],
+            keyValue.toString()
           );
-        }
         const key = keyValue.op1;
         const value = keyValue.op2;
-        if (!isString(key)) {
-          throw new Error(`Expected a string key, got ${key.type}`);
-        }
+        if (!isString(key))
+          return ce.error(
+            ['incompatible-type', 'string', key.type.toString()],
+            key.toString()
+          );
         // POSITIONAL pair: `_fn`, not `tuple()` — see `BoxedDictionary.each()`.
         entries.push(ce._fn('Tuple', [key, value]));
       }
@@ -7647,16 +7656,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       const entries: Expression[] = [];
       for (const keyValue of xs.each()) {
-        if (!isFunction(keyValue) || keyValue.nops !== 2) {
-          throw new Error(
-            `Expected a collection of pairs, got ${keyValue.type}`
+        // Boxed error, not a raw `throw` — see `DictionaryFrom`.
+        if (!isFunction(keyValue) || keyValue.nops !== 2)
+          return ce.error(
+            [
+              'incompatible-type',
+              'tuple<string, unknown>',
+              keyValue.type.toString(),
+            ],
+            keyValue.toString()
           );
-        }
         const key = keyValue.op1;
         const value = keyValue.op2;
-        if (!isString(key)) {
-          throw new Error(`Expected a string key, got ${key.type}`);
-        }
+        if (!isString(key))
+          return ce.error(
+            ['incompatible-type', 'string', key.type.toString()],
+            key.toString()
+          );
         // POSITIONAL pair: `_fn`, not `tuple()` — see `BoxedDictionary.each()`.
         entries.push(ce._fn('Tuple', [key, value]));
       }

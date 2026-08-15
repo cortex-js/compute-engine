@@ -12,7 +12,7 @@ import {
   signatureArms,
   signatureEffects,
 } from '../../common/type/utils.js';
-import { couldBeCollectionOperand } from '../collection-utils.js';
+import { couldBeUnkeyedCollectionOperand } from '../collection-utils.js';
 import { overloadArms, resolveOverload } from './overload.js';
 
 import type {
@@ -414,7 +414,7 @@ function ownEffects(
   const { selected } = resolveOverload(ce, ops, arms, {
     lazy: def.lazy,
     threadable: def.broadcastable,
-    couldBeCollection: couldBeCollectionOperand,
+    couldBeUnkeyedCollection: couldBeUnkeyedCollectionOperand,
     stripMissing: (i) => def.stripsMissingAt(i),
   });
   return selected === undefined ? def.effects : selected.effects;

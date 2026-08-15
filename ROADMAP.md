@@ -764,6 +764,34 @@ pinned in `generic-function-literals.test.ts` and
 typed-symbolic is deliberate (image-of-a-set semantics stays open); do
 not re-attempt dropping `set` from admission.
 
+Dual-review round applied same day (Codex 0 findings, Opus 10): the
+unkeyed predicate is the OLD predicate renamed (byte-identical
+membership), so broadcast admission is exactly unchanged from before the
+split — the behavioral change is entirely the widening of
+`typeCouldBeCollection`. Applied from the findings: the scalar-numeric
+INFERENCE exclusion in `checkNumericArgs` (`excludedFromScalarInference`,
+validate.ts) is now WIDER than admission — the Tycho-121 signature-
+widening hazard is keyedness-independent, so a `dictionary<…>`-shaped
+operand is no longer `infer('real')`ed in non-strict mode; the widened
+predicate's six `boxed-function.ts` consumers were audited — the
+broadcast-participant sites and the positional `_materializedAt` gate use
+the unkeyed predicate (a keyed-typed application can never answer
+positional `at()` — `BoxedDictionary` has no `at` handler — so paying an
+evaluation there bought a guaranteed `undefined`), while the unadopted
+`isEnumerableCollection` fallback deliberately keeps the wide one (a
+dictionary-typed application IS walkable through the materialize
+fallbacks, so `undefined` beats the old wrong `false`); and
+`DictionaryFrom`/`RecordFrom` now return boxed `incompatible-type` errors
+for malformed elements instead of throwing uncaught JS exceptions out of
+`evaluate()` (verified escaping before the fix).
+
+Residual, recorded not fixed: `boxed-dictionary.ts` `_initFromExpression`
+still has raw construction-time `throw new Error` calls (non-string key,
+`Nothing` key, wrong pair arity). Those are constructor invariants behind
+canonical-handler validation, a different reachability class from the
+evaluate-handler throws fixed above; converting them needs its own
+analysis of which callers rely on fail-fast construction.
+
 ### Ground-type invariant leak in `parameterized-nominal-constructor.test.ts` (dev-assert noise)
 
 Every full-suite run emits one `console.assert` failure: `probe() received
