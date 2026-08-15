@@ -172,6 +172,51 @@ import {
  */
 const RAW_OPERAND = { canonical: false, structural: false } as const;
 
+/**
+ * Box the operands of a construction: the same result as
+ * `ops.map((x) => box(ce, x, options))` (for the dense arrays MathJSON
+ * operands are — a hole in a sparse array would be boxed as a missing
+ * operand rather than kept as a hole), spelled to spend as few stack frames
+ * per nesting level as possible. Boxing recurses once per level of the
+ * MathJSON tree, and the frames per level bound how deep a tree can be boxed
+ * before `RangeError: Maximum call stack size exceeded` (see `box()`).
+ *
+ * Two savings. (1) When this construction is already inside a root boxing
+ * pass — the inference transaction is open (`_inferenceTxDepth > 0`) AND a
+ * root repair is active — both brackets that `box()` puts around
+ * `boxInternal()` are no-ops (a nested `beginInferenceTransaction` neither
+ * bumps the epoch nor, on end, clears `_freshlyInferred`; `withDevolveRepair`
+ * with the root active just calls its builder), so `boxInternal()` is called
+ * directly. When either bracket is not open — a construction that started at
+ * `ce.function()` boxes its first operand with no transaction open — the
+ * operand goes through `box()` exactly as before, so the transaction's epoch
+ * and clearing semantics are unchanged. (2) A `for` loop replaces
+ * `Array.prototype.map` and its callback, two frames per level — which is why
+ * this is not written as `ops.map(...)`. The choice between `boxInternal` and
+ * `box` is made once, before the loop.
+ *
+ * The two hottest sites (`boxFunctionInternal`'s non-canonical tail and
+ * `applyOperatorDefinition`'s canonical operands) inline this loop rather than
+ * call it, saving this helper's own frame as well.
+ */
+function boxOperands(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<ExpressionInput>,
+  options?: {
+    canonical?: CanonicalOptions;
+    structural?: boolean;
+    scope?: Scope;
+  }
+): Expression[] {
+  const boxOne =
+    ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
+      ? boxInternal
+      : box;
+  const result: Expression[] = [];
+  for (const x of ops) result.push(boxOne(ce, x, options));
+  return result;
+}
+
 export function formToInternal(form?: FormOption): {
   canonical: CanonicalOptions;
   structural: boolean;
@@ -353,12 +398,10 @@ function boxFunctionInternal(
   // Error
   //
   if (name === 'Error' || name === 'ErrorCode') {
-    return new BoxedFunction(
-      ce,
-      name,
-      ops.map((x) => box(ce, x, RAW_OPERAND)),
-      { metadata: options?.metadata, canonical: true }
-    );
+    return new BoxedFunction(ce, name, boxOperands(ce, ops, RAW_OPERAND), {
+      metadata: options?.metadata,
+      canonical: true,
+    });
   }
 
   //
@@ -498,24 +541,27 @@ function boxFunctionInternal(
       options.scope
     );
 
+  // Inlined `boxOperands()` (see there for why): this is the recursive path
+  // of every non-canonical operand, and even the helper's own call frame is
+  // stack space a deep tree cannot afford.
+  const operandOptions = {
+    canonical: options.canonical,
+    structural,
+    scope: options.scope,
+  };
+  const boxOne =
+    ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
+      ? boxInternal
+      : box;
+  const boxedOps: Expression[] = [];
+  for (const x of ops) boxedOps.push(boxOne(ce, x, operandOptions));
   return canonicalForm(
-    new BoxedFunction(
-      ce,
-      name,
-      ops.map((x) =>
-        box(ce, x, {
-          canonical: options.canonical,
-          structural,
-          scope: options.scope,
-        })
-      ),
-      {
-        metadata: options.metadata,
-        canonical: false,
-        structural,
-        scope: options.scope,
-      }
-    ),
+    new BoxedFunction(ce, name, boxedOps, {
+      metadata: options.metadata,
+      canonical: false,
+      structural,
+      scope: options.scope,
+    }),
     options.canonical ?? false,
     options.scope
   );
@@ -738,11 +784,13 @@ function boxInternal(
     const rebound = ce._boxingState.isRebuilding
       ? rebindDevolvedSymbol(ce, expr, options?.scope)
       : null;
-    return canonicalForm(
-      rebound ?? expr,
-      options?.canonical ?? true,
-      options?.scope
-    );
+    // The common case — full canonical form, no scope — is exactly the
+    // `.canonical` getter; `canonicalForm()` would only add a frame on the
+    // recursive path of canonicalizing an already-boxed tree.
+    const forms = options?.canonical ?? true;
+    if (forms === true && options?.scope === undefined)
+      return (rebound ?? expr).canonical;
+    return canonicalForm(rebound ?? expr, forms, options?.scope);
   }
 
   options = options ? { ...options } : {};
@@ -774,12 +822,16 @@ function boxInternal(
       return ce.error('unexpected-mathjson', stringifyForError(expr));
     }
 
+    // `boxFunction()` is only a root-repair dispatcher; with the root
+    // already active it would call `boxFunctionInternal()` straight back, so
+    // skip its frame (boxing recurses once per level, see `box()`).
     return canonicalForm(
-      boxFunction(ce, expr[0], expr.slice(1) as ExpressionInput[], {
-        canonical,
-        structural,
-        scope: options?.scope,
-      }),
+      (ce._boxingState.isRootActive ? boxFunctionInternal : boxFunction)(
+        ce,
+        expr[0],
+        expr.slice(1) as ExpressionInput[],
+        { canonical, structural, scope: options?.scope }
+      ),
       options?.canonical ?? true,
       options?.scope
     );
@@ -858,7 +910,12 @@ function boxInternal(
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;
       return canonicalForm(
-        boxFunction(ce, fnName, ops, { canonical, structural, metadata }),
+        (ce._boxingState.isRootActive ? boxFunctionInternal : boxFunction)(
+          ce,
+          fnName,
+          ops,
+          { canonical, structural, metadata }
+        ),
         options.canonical!,
         options.scope
       );
@@ -1479,7 +1536,7 @@ function makeCanonicalFunctionCore(
   // bypass.
   //
   if (name === 'List' && !named && !ops.some(isSpreadOperand)) {
-    const boxedOps = ops.map((x) => box(ce, x, RAW_OPERAND));
+    const boxedOps = boxOperands(ce, ops, RAW_OPERAND);
     // `Nothing` is an ERASURE marker (an empty-sequence splice): it is elided
     // from a collection literal, so `[12, Nothing, 34]` is a 2-element list.
     // Use `Missing` for an absent-but-positioned value.
@@ -1497,7 +1554,7 @@ function makeCanonicalFunctionCore(
   // merge lowering (library/collections.ts), which this structural
   // construction would bypass.
   if (name === 'Dictionary' && !named && !ops.some(isSpreadOperand)) {
-    const boxedOps = ops.map((x) => box(ce, x, RAW_OPERAND));
+    const boxedOps = boxOperands(ce, ops, RAW_OPERAND);
     return new BoxedDictionary(ce, ce._fn('Dictionary', boxedOps), {
       canonical: true,
     });
@@ -2103,7 +2160,7 @@ function applyOperatorDefinition(
 
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
-    const xs = rawOps ?? ops.map((x) => box(ce, x, RAW_OPERAND));
+    const xs = rawOps ?? boxOperands(ce, ops, RAW_OPERAND);
     if (opDef.canonical) {
       try {
         result = opDef.canonical(xs, { engine: ce, scope });
@@ -2164,10 +2221,17 @@ function applyOperatorDefinition(
   // operands. Signature validation may use this to retract only fresh,
   // provisional guesses; inferences from earlier expressions are never
   // eligible for repair.
-  // Box through the internal `box()` rather than `ce.expr()`: the public
-  // entry point re-establishes the (already current) scope through five
-  // extra frames per operand, and this site is on the recursive path.
-  const xs = ops.map((x) => box(ce, x));
+  // Inlined `boxOperands()` (see there for why): this is the recursive path
+  // of every canonical operand — the innermost boxing frames of a deep tree
+  // are here — so it neither goes through the public `ce.expr()` (five
+  // frames of scope re-installation) nor through `Array.prototype.map` and
+  // a callback, nor through the helper itself.
+  const boxOne =
+    ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
+      ? boxInternal
+      : box;
+  const xs: Expression[] = [];
+  for (const x of ops) xs.push(boxOne(ce, x));
 
   // A symbolic `Spread` operand (`f(...p)` where `p` is not a literal tuple
   // — a literal one already spliced to a `Sequence` when the operand
@@ -2408,7 +2472,7 @@ function canonicalizeBinder(
   // The selector reads the operands, so they must be boxed before the handler
   // runs. Raw (unbound) boxing is what a lazy operator does anyway, and the
   // result is handed on so it is done once.
-  const xs = ops.map((x) => box(ce, x, RAW_OPERAND));
+  const xs = boxOperands(ce, ops, RAW_OPERAND);
 
   const preSites = sites(xs, 'pre');
 

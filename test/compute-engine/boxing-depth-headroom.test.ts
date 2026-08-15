@@ -14,6 +14,19 @@ import { ComputeEngine } from '../../src/compute-engine';
  * (Node 22, 2026-08-15) — the ceiling on the default stack went from ~225 to
  * ~385 canonical levels and from ~400 to ~675 raw.
  *
+ * A second trim the same day removed the frames that only dispatched: the
+ * operands are boxed by a `for` loop calling `boxInternal()` directly (not
+ * `Array.prototype.map` + callback + `box()`, whose two brackets are no-ops
+ * inside a root pass — see `boxOperands()` in `box.ts`), `boxInternal()`
+ * calls `boxFunctionInternal()` directly when the root is active, and
+ * `canonicalForm()` with no scope is just the `.canonical` getter. Canonical
+ * boxing: 9 → 5 frames per level (`boxInternal → boxFunctionInternal →
+ * makeCanonicalFunction → makeCanonicalFunctionCore →
+ * applyOperatorDefinition`); canonicalizing a raw-boxed tree: 15 → 8. Bytes of
+ * stack per level (Δ`--stack-size` / Δceiling): canonical 2 080 → 1 570, raw
+ * boxing 1 220 → 630 — the remaining frames are the large ones, whose Ignition
+ * register files are the next thing to shrink.
+ *
  * The frames-per-level count is measured, not the ceiling: a probe operator's
  * canonical handler records the JS stack depth when it runs, and the
  * difference between two nest sizes divided by the size difference is exactly
@@ -67,16 +80,53 @@ describe('boxing stack frames per nesting level', () => {
     return (b - a) / 40;
   }
 
-  test('canonical boxing spends fewer than 14 frames per level (was 20)', () => {
+  // Measured 5 and 8 on Node 22 (2026-08-15). The bounds leave ~4 frames of
+  // room: a Node/V8 upgrade can change how `Error.prototype.stack` reports
+  // frames for inlined or optimized code, and a failure here after a runtime
+  // bump should first be read as that, not as a boxing regression.
+  test('canonical boxing spends fewer than 9 frames per level (was 20, then 9, now 5)', () => {
     const f = framesPerLevel('canonical');
     expect(f).toBeGreaterThan(0);
-    expect(f).toBeLessThan(14);
+    expect(f).toBeLessThan(9);
   });
 
-  test('canonicalizing a raw-boxed tree spends fewer than 20 frames per level (was 26)', () => {
+  test('canonicalizing a raw-boxed tree spends fewer than 13 frames per level (was 26, then 15, now 8)', () => {
     const f = framesPerLevel('raw');
     expect(f).toBeGreaterThan(0);
-    expect(f).toBeLessThan(20);
+    expect(f).toBeLessThan(13);
+  });
+
+  // The frame trim boxes nested operands through `boxInternal()` directly,
+  // skipping `box()`'s inference-transaction bracket. That is only a no-op
+  // when a transaction is already open: `ce.box()` opens one at the root, but
+  // `ce.function()` roots a construction WITHOUT opening one, so each of its
+  // top-level operands must still get its own bracket (one boxing epoch per
+  // operand — provenance entries stamp the epoch so a consumer can ask
+  // "recorded by the pass running now?"). Both are pinned by counting epoch
+  // bumps; a guard that only checked `isRootActive` would make the
+  // `ce.function()` counts 0.
+  test('a ce.box() root opens exactly one boxing epoch for the whole tree', () => {
+    const ce = new ComputeEngine();
+    let d: any = 'x';
+    for (let i = 0; i < 30; i++) d = ['Sin', d];
+    const before = ce._boxingEpoch;
+    ce.box(d);
+    expect(ce._boxingEpoch - before).toBe(1);
+  });
+
+  test('a ce.function() root still opens one boxing epoch per top-level operand', () => {
+    const ce = new ComputeEngine();
+    const deep = () => {
+      let d: any = 'x';
+      for (let i = 0; i < 30; i++) d = ['Sin', d];
+      return d;
+    };
+    let before = ce._boxingEpoch;
+    ce.function('Sin', [deep()]);
+    expect(ce._boxingEpoch - before).toBe(1);
+    before = ce._boxingEpoch;
+    ce.function('Tuple', [deep(), deep(), deep()]);
+    expect(ce._boxingEpoch - before).toBe(3);
   });
 
   test('a 300-deep Sin nest boxes canonically', () => {

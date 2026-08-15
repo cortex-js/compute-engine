@@ -24,8 +24,14 @@ export function canonicalForm(
   // No canonical form?
   if (forms === false) return expr;
 
-  // Full canonical form?
-  if (forms === true) return expr.engine._inScope(scope, () => expr.canonical);
+  // Full canonical form? Without a scope, `_inScope()` would just call its
+  // callback: go straight to the getter. This is on the recursive path of
+  // canonicalizing an already-boxed tree (each operand's `.canonical` comes
+  // back through here), where every frame per level costs depth.
+  if (forms === true)
+    return scope === undefined
+      ? expr.canonical
+      : expr.engine._inScope(scope, () => expr.canonical);
 
   if (typeof forms === 'string') forms = [forms];
 
