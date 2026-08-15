@@ -15,6 +15,7 @@ import {
   isReservedTypeName,
   validateDeclaredType,
 } from './instantiate.js';
+import { CACHE_STATS, recordCache } from '../cache-stats.js';
 
 // Note: the authoritative BNF grammar for the type syntax lives with the
 // parser implementation in `./parser.ts`.
@@ -107,7 +108,10 @@ export function parseType(
   // whose resolver-less parse is resolver-INDEPENDENT (see below), so a hit
   // is the answer any resolver would give.
   const cached = TYPE_CACHE.get(s);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    if (CACHE_STATS) recordCache('typeParse', 'hit');
+    return cached;
+  }
 
   // Two-step resolution: try the RESOLVER-LESS parse first even when a
   // resolver is supplied. A user type name can never shadow built-in type
@@ -168,7 +172,22 @@ function cacheResult(s: TypeString, type: Type): Type {
   // type strings (a length-parameterized type could cache by structure with
   // the length as a parameter) or sizing the cache to the working set; it is
   // not a matter of choosing a better victim.
-  if (TYPE_CACHE.size >= TYPE_CACHE_MAX_SIZE) TYPE_CACHE.clear();
+  //
+  // ALSO MEASURED (2026-08-15): no known real workload engages the cliff.
+  // The document that motivated the investigation (Tycho's lizeqlnn5e
+  // witness at full production size, after the item-186 memo fix) mints 329
+  // distinct type strings total, exactly one of them length-carrying, with
+  // ZERO overflow clears — the length-heavy pressure existed only in a
+  // synthetic probe that added hundreds of distinct-size collections. So the
+  // structural levers above stay unbuilt until a workload shows otherwise;
+  // the `typeParse` class under `CE_CACHE_STATS` reports hits, stores, and
+  // overflow clears, so "is a program thrashing this cache?" is answerable
+  // from a run flag (`evictClear` > 0 is the re-open trigger).
+  if (TYPE_CACHE.size >= TYPE_CACHE_MAX_SIZE) {
+    if (CACHE_STATS) recordCache('typeParse', 'evictClear');
+    TYPE_CACHE.clear();
+  }
+  if (CACHE_STATS) recordCache('typeParse', 'missCold');
   TYPE_CACHE.set(s, deepFreeze(type));
   return type;
 }

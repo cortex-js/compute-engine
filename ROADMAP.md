@@ -1152,6 +1152,21 @@ is either reducing the number of distinct type strings (cache a
 length-parameterized type by structure, with the length as a parameter)
 or sizing the cache to the working set.
 
+**DISPOSITION (2026-08-15): dormant — no real workload engages the cliff;
+observability landed instead of a speculative fix.** The cliff reproduces
+on demand (0.02 µs/parse cached → ~3 µs the moment a cycling working set
+crosses the 2048 cap, ~150×, flat above — re-measured on current source),
+but the full lizeqlnn5e document at production size, post-item-186 fix,
+mints only 329 distinct type strings — ONE of them length-carrying — with
+zero overflow clears and a 97.1% hit rate over 11,245 reads. The
+hundreds-of-distinct-sizes pressure existed only in the synthetic
+boundary-mobility probe. The structural levers above stay unbuilt until a
+workload shows clears; what landed is the re-open trigger: `TYPE_CACHE` now
+reports under `CE_CACHE_STATS` as the `typeParse` class (hits, cold
+stores, and `evictClear` — the count of whole-cache overflow drops), so a
+thrashing program is diagnosable from a run flag. `evictClear > 0` on a
+real workload re-opens this item.
+
 **Honesty note on 182's verification.** The "span#2 10.4 s → 31 ms"
 figure recorded in 182's section came from their
 `d21-lizeq-head-extract.mts` harness on CE source. Their re-check says

@@ -27,6 +27,7 @@ const CACHE_CLASSES = [
   'lazyValue', // the lazy-collection evaluate memo — epoch + generation + scope
   'elementMemo', // collection-element-memo — epoch + per-dependency versions
   'collectionFacet', // count/isEmpty/isFinite facet memo — epoch + per-dependency versions
+  'typeParse', // common/type/parse TYPE_CACHE — bounded, clear-all on overflow
 ] as const;
 export type CacheClass = (typeof CACHE_CLASSES)[number];
 
@@ -43,6 +44,7 @@ const CACHE_EVENTS = [
   'missDependency', // a tracked dependency moved (elementMemo only)
   'declineCycle', // re-entrant/provisional read served uncached
   'declineStore', // settled-only or purity gate suppressed the write
+  'evictClear', // bounded cache overflowed and dropped ALL entries (typeParse only)
 ] as const;
 export type CacheEvent = (typeof CACHE_EVENTS)[number];
 
@@ -156,6 +158,8 @@ export function formatCacheStats(): string {
       lines.push(
         `  declines: cycle ${c.declineCycle}, store ${c.declineStore}`
       );
+    if (c.evictClear)
+      lines.push(`  overflow clears: ${c.evictClear} (whole cache dropped)`);
   }
 
   lines.push(
