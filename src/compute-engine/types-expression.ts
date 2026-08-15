@@ -2457,7 +2457,11 @@ export interface Expression {
   contains(rhs: Expression): boolean | undefined;
 
   /**
-   * Check if this collection is a subset of another collection.
+   * Check if this collection is a subset of another collection, i.e.
+   * `this` ⊆ `other`.
+   *
+   * Returns `undefined` when the relation cannot be determined — including
+   * when this expression is not (yet) a collection.
    *
    * @param other The other collection to check against.
    * @param strict If true, the subset relation is strict (i.e., proper subset).

@@ -17,10 +17,7 @@ import type {
 import type { Type, TypeReference } from '../../common/type/types.js';
 
 import { BoxedType } from '../../common/type/boxed-type.js';
-import {
-  isObjectType,
-  objectLayoutOfType,
-} from '../../common/type/subtype.js';
+import { isObjectType, objectLayoutOfType } from '../../common/type/subtype.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { noteObjectConstructed, recordObjectRead } from './object-deps.js';
 import { objectJson } from './object-walk.js';

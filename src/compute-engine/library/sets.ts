@@ -3,9 +3,8 @@
 
 import { Complex } from 'complex-esm';
 import { kleeneAnd, kleeneNot, kleeneOr } from '../../common/kleene.js';
-import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
-import { reduceType } from '../../common/type/reduce.js';
+import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import { collectionElementType } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import { flatten } from '../boxed-expression/flatten.js';
@@ -25,12 +24,15 @@ import {
 import { domainToType } from '../boxed-expression/utils.js';
 import { adjoinType, quotientRingType } from './type-handlers.js';
 import {
+  declareTypeSaturatedSet,
   enumerableFromAllSources,
   enumerableFromSource,
+  typeSaturatedSubsetOf,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
 import type {
   Expression,
+  Sign,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
@@ -43,6 +45,35 @@ import {
 
 function typeIntersection(a: Type, b: Type): Type {
   return reduceType({ kind: 'intersection', types: [a, b] });
+}
+
+/**
+ * Build the `subsetOf` handler of a number set that contains EVERY value of
+ * `elementType` whose sign satisfies `sign` — `Integers` is every value of
+ * type `finite_integer` with no sign constraint, `PositiveNumbers` every
+ * `real` whose sign is `positive`, and so on.
+ *
+ * Two such sets are compared by their descriptions alone, with no
+ * enumeration. Recording the description with `declareTypeSaturatedSet()` also
+ * lets any OTHER collection — a `Range`, a `Set` literal, an `Interval` —
+ * decide its own inclusion in this set from its element type and sign, again
+ * without enumerating: see `collectionSubset()` in `collection-utils.ts`.
+ *
+ * `elementType` and `sign` must agree with the set's own `elttype`/`eltsgn`
+ * handlers, which report the same two facts to the rest of the engine.
+ */
+function numberSetSubsetOf(
+  name: string,
+  elementType: Type,
+  sign?: Sign
+): (
+  collection: Expression,
+  other: Expression,
+  strict: boolean
+) => boolean | undefined {
+  return typeSaturatedSubsetOf(
+    declareTypeSaturatedSet(name, { elementType, sign })
+  );
 }
 
 /**
@@ -127,10 +158,15 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => true,
       isFinite: () => true,
       contains: () => false,
-      // `other` ⊆ EmptySet iff `other` is itself empty. A strict subset is
-      // impossible (EmptySet has no elements to spare).
-      subsetOf: (_, other, strict) =>
-        !strict && other.isEmptyCollection === true,
+      // The empty set is a subset of every collection; it is a STRICT subset
+      // of every collection that has an element to spare. (Per the handler
+      // contract the receiver is the candidate subset — see
+      // `types-definitions.ts`.)
+      subsetOf: (_, other, strict) => {
+        if (!strict) return true;
+        if (other.isEmptyCollection === undefined) return undefined;
+        return !other.isEmptyCollection;
+      },
       eltsgn: () => undefined,
       elttype: () => 'never',
     },
@@ -147,14 +183,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isFinite: () => false,
 
       contains: (_, x) => typeMembership(x, 'number'),
-      subsetOf: (_, other, strict) => {
-        if (other.operator === 'Range' || other.operator === 'Linspace')
-          return true;
-        return (
-          other.type.matches(BoxedType.setNumber) &&
-          (!strict || sym(other) !== 'Numbers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('Numbers', 'number'),
       // Elements include the reals, so no sign claim ('unsigned' would
       // assert a definite imaginary part or NaN).
       eltsgn: () => undefined,
@@ -172,14 +201,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       contains: (_, x) => typeMembership(x, 'finite_complex'),
-      subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' || rhs.operator === 'Linspace')
-          return true;
-        return (
-          rhs.type.matches(BoxedType.setComplex) &&
-          (!strict || sym(rhs) !== 'ComplexNumbers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('ComplexNumbers', 'finite_complex'),
       // real ⊂ complex: elements include the reals, so no sign claim.
       eltsgn: () => undefined,
       elttype: () => 'finite_complex',
@@ -196,14 +218,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       contains: (_, x) => typeMembership(x, 'complex'),
-      subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' || rhs.operator === 'Linspace')
-          return true;
-        return (
-          rhs.type.matches(BoxedType.setComplex) &&
-          (!strict || sym(rhs) !== 'ExtendedComplexNumbers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('ExtendedComplexNumbers', 'complex'),
       // real ⊂ complex: elements include the reals, so no sign claim.
       eltsgn: () => undefined,
       elttype: () => 'complex',
@@ -220,9 +235,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       contains: (_, x) => typeMembership(x, 'imaginary'),
-      subsetOf: (_, rhs, strict) =>
-        rhs.type.matches(BoxedType.setImaginary) &&
-        (!strict || sym(rhs) !== 'ImaginaryNumbers'),
+      subsetOf: numberSetSubsetOf('ImaginaryNumbers', 'imaginary', 'unsigned'),
       eltsgn: () => 'unsigned',
       elttype: () => 'imaginary',
     },
@@ -238,9 +251,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) =>
-        rhs.type.matches(BoxedType.setReal) &&
-        (!strict || sym(rhs) !== 'RealNumbers'),
+      subsetOf: numberSetSubsetOf('RealNumbers', 'finite_real'),
       eltsgn: () => undefined,
       elttype: () => 'finite_real',
     },
@@ -256,9 +267,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) =>
-        rhs.type.matches(BoxedType.setReal) &&
-        (!strict || sym(rhs) !== 'ExtendedRealNumbers'),
+      subsetOf: numberSetSubsetOf('ExtendedRealNumbers', 'real'),
       eltsgn: () => undefined,
       elttype: () => 'real',
     },
@@ -274,13 +283,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range') return true;
-        return (
-          rhs.type.matches(BoxedType.setFiniteInteger) &&
-          (!strict || sym(rhs) !== 'Integers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('Integers', 'finite_integer'),
       eltsgn: () => undefined,
       elttype: () => 'finite_integer',
     },
@@ -296,13 +299,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range') return true;
-        return (
-          rhs.type.matches(BoxedType.setInteger) &&
-          (!strict || sym(rhs) !== 'ExtendedIntegers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('ExtendedIntegers', 'integer'),
       eltsgn: () => undefined,
       elttype: () => 'integer',
     },
@@ -318,9 +315,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       contains: (_, x) => typeMembership(x, 'finite_rational'),
-      subsetOf: (_, rhs, strict) =>
-        rhs.type.matches(BoxedType.setRational) &&
-        (!strict || sym(rhs) !== 'RationalNumbers'),
+      subsetOf: numberSetSubsetOf('RationalNumbers', 'finite_rational'),
       eltsgn: () => undefined,
       elttype: () => 'finite_rational',
     },
@@ -336,9 +331,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) =>
-        rhs.type.matches(BoxedType.setRational) &&
-        (!strict || sym(rhs) !== 'ExtendedRationalNumbers'),
+      subsetOf: numberSetSubsetOf('ExtendedRationalNumbers', 'rational'),
       eltsgn: () => undefined,
       elttype: () => 'rational',
     },
@@ -354,21 +347,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         rationalIterator(self, { sign: '-', includeZero: false }),
       count: () => Infinity,
       contains: (_, x) => signedMembership(x, 'real', x.isNegative),
-      subsetOf: (_, rhs, strict) => {
-        if (
-          (rhs.operator === 'Range' || rhs.operator === 'Linspace') &&
-          isFunction(rhs)
-        ) {
-          const low = rhs.ops[0].re;
-          const high = rhs.ops[1].re;
-          return low < 0 && high < 0;
-        }
-        return (
-          rhs.type.matches(BoxedType.setReal) &&
-          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'negative' &&
-          (!strict || sym(rhs) !== 'NegativeNumbers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('NegativeNumbers', 'real', 'negative'),
 
       eltsgn: () => 'negative',
       elttype: () => 'real',
@@ -387,22 +366,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) => {
-        if (
-          (rhs.operator === 'Range' || rhs.operator === 'Linspace') &&
-          isFunction(rhs)
-        ) {
-          const low = rhs.ops[0].re;
-          const high = rhs.ops[1].re;
-          return low >= 0 && high >= 0;
-        }
-
-        return (
-          rhs.type.matches(BoxedType.setReal) &&
-          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-positive' &&
-          (!strict || sym(rhs) !== 'NonPositiveNumbers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('NonPositiveNumbers', 'real', 'non-positive'),
       eltsgn: () => 'non-positive',
       elttype: () => 'real',
     },
@@ -420,21 +384,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) => {
-        if (
-          (rhs.operator === 'Range' || rhs.operator === 'Linspace') &&
-          isFunction(rhs)
-        ) {
-          const low = rhs.ops[0].re;
-          const high = rhs.ops[1].re;
-          return low <= 0 && high <= 0;
-        }
-        return (
-          rhs.type.matches(BoxedType.setReal) &&
-          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
-          (!strict || sym(rhs) !== 'NonNegativeNumbers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('NonNegativeNumbers', 'real', 'non-negative'),
       eltsgn: () => 'non-negative',
       elttype: () => 'real',
     },
@@ -450,21 +400,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         rationalIterator(self, { sign: '+', includeZero: false }),
       contains: (_, x) => signedMembership(x, 'real', x.isPositive),
       count: () => Infinity,
-      subsetOf: (_, rhs, strict) => {
-        if (
-          (rhs.operator === 'Range' || rhs.operator === 'Linspace') &&
-          isFunction(rhs)
-        ) {
-          const low = rhs.ops[0].re;
-          const high = rhs.ops[1].re;
-          return low > 0 && high > 0;
-        }
-        return (
-          rhs.type.matches(BoxedType.setReal) &&
-          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
-          (!strict || sym(rhs) !== 'PositiveNumbers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('PositiveNumbers', 'real', 'positive'),
       eltsgn: () => 'positive',
       elttype: () => 'real',
     },
@@ -481,19 +417,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) => {
-        if (isFunction(rhs, 'Range')) {
-          const low = rhs.ops[0].re;
-          const high = rhs.ops[1].re;
-          return low < 0 && high < 0;
-        }
-
-        return (
-          rhs.type.matches(BoxedType.setInteger) &&
-          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'negative' &&
-          (!strict || sym(rhs) !== 'NegativeIntegers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('NegativeIntegers', 'integer', 'negative'),
       eltsgn: () => 'negative',
       elttype: () => 'integer',
     },
@@ -510,18 +434,11 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) => {
-        if (isFunction(rhs, 'Range')) {
-          const low = rhs.ops[0].re;
-          const high = rhs.ops[1].re;
-          return low <= 0 && high <= 0;
-        }
-        return (
-          rhs.type.matches(BoxedType.setInteger) &&
-          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-positive' &&
-          (!strict || sym(rhs) !== 'NonPositiveIntegers')
-        );
-      },
+      subsetOf: numberSetSubsetOf(
+        'NonPositiveIntegers',
+        'integer',
+        'non-positive'
+      ),
       eltsgn: () => 'non-positive',
       elttype: () => 'integer',
     },
@@ -538,18 +455,11 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) => {
-        if (isFunction(rhs, 'Range')) {
-          const low = rhs.ops[0].re;
-          const high = rhs.ops[1].re;
-          return low > 0 && high > 0;
-        }
-        return (
-          rhs.type.matches(BoxedType.setInteger) &&
-          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'non-negative' &&
-          (!strict || sym(rhs) !== 'NonNegativeIntegers')
-        );
-      },
+      subsetOf: numberSetSubsetOf(
+        'NonNegativeIntegers',
+        'integer',
+        'non-negative'
+      ),
       eltsgn: () => 'non-negative',
       elttype: () => 'integer',
     },
@@ -566,18 +476,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: (_, rhs, strict) => {
-        if (isFunction(rhs, 'Range')) {
-          const low = rhs.ops[0].re;
-          const high = rhs.ops[1].re;
-          return low > 0 && high > 0;
-        }
-        return (
-          rhs.type.matches(BoxedType.setInteger) &&
-          rhs.baseDefinition?.collection?.eltsgn?.(rhs) === 'positive' &&
-          (!strict || sym(rhs) !== 'PositiveIntegers')
-        );
-      },
+      subsetOf: numberSetSubsetOf('PositiveIntegers', 'integer', 'positive'),
       eltsgn: () => 'positive',
       elttype: () => 'integer',
     },
@@ -832,7 +731,8 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       return ce._fn('SupersetEqual', [args[0].canonical, args[1].canonical]);
     },
     evaluate: ([lhs, rhs], { engine: ce }) => {
-      const result = subset(rhs, lhs, true); // reversed
+      // Not strict: "superset, possibly equal" is the mirror of `SubsetEqual`.
+      const result = subset(rhs, lhs, false); // reversed
       if (result === true) return ce.True;
       if (result === false) return ce.False;
       return undefined;
@@ -858,7 +758,8 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description:
       'Test whether the first collection is not a superset (possibly equal) of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
-      const result = subset(rhs, lhs, true); // reversed
+      // Not strict: the negation of "superset, possibly equal".
+      const result = subset(rhs, lhs, false); // reversed
       if (result === true) return ce.False;
       if (result === false) return ce.True;
       return undefined;
@@ -1124,19 +1025,29 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 };
 
-function subset(lhs: Expression, rhs: Expression, strict = true): boolean {
-  if (!lhs.isCollection || !rhs.isCollection) return false;
-  // The empty set is a subset of every set (strictly so unless `rhs` is also
-  // empty). Handle it here since its generic `set` type defeats the
-  // type-based per-set handlers below.
-  if (lhs.isEmptyCollection === true)
-    return !strict || rhs.isEmptyCollection !== true;
-  // The `subsetOf(collection, other, strict)` handler tests whether every
-  // element of `other` is in `collection` (i.e. `other` ⊆ `collection`).
-  // To test `lhs` ⊆ `rhs`, dispatch on the candidate *superset* `rhs`,
-  // passing `lhs` as the candidate subset.
-  if (rhs.baseDefinition?.collection?.subsetOf?.(rhs, lhs, strict)) return true;
-  return false;
+/**
+ * Is `lhs` ⊆ `rhs` (strictly, if `strict`)? `undefined` when undecided.
+ *
+ * `subsetOf()` answers `receiver ⊆ argument`, so the dispatch is on `lhs`, the
+ * candidate SUBSET. That is the direction the public method documents
+ * (`Expression.subsetOf`, `types-expression.ts`) and the one the handlers
+ * implement.
+ */
+function subset(
+  lhs: Expression,
+  rhs: Expression,
+  strict = true
+): boolean | undefined {
+  for (const op of [lhs, rhs]) {
+    if (op.isCollection) continue;
+    // `isCollection` is also `false` for a symbol DECLARED with a collection
+    // type and not yet assigned, and for an inert set-valued shell. Answering
+    // `False` for those would be a claim that a later assignment contradicts,
+    // so only an operand whose TYPE rules out a collection is a definitive
+    // `false`.
+    return typesOverlap(op.type.type, 'collection') ? undefined : false;
+  }
+  return lhs.subsetOf(rhs, strict);
 }
 
 function union(

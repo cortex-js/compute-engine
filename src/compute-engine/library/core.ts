@@ -607,15 +607,24 @@ function analyzeRandomDomain(
   domain: Expression
 ): RandomDomainPlan {
   // 1. `Interval` — a closed form, short-circuited before any collection
-  //    machinery. Endpoints must be finite reals; emptiness is decided by
-  //    `isEmptyCollection`, never by `count`.
+  //    machinery. Endpoints must be finite reals spanning a non-zero width;
+  //    neither `count` nor `isEmptyCollection` decides that (see below).
   if (isFunction(domain, 'Interval')) {
     const int = interval(domain);
     // Symbolic endpoints: stay symbolic rather than claim an error.
     if (!int) return { kind: 'symbolic' };
     if (!Number.isFinite(int.start) || !Number.isFinite(int.end))
       return randomDomainError(ce, 'a bounded Interval', domain);
-    if (domain.isEmptyCollection !== false)
+    // A continuous draw needs positive WIDTH, which is a different question
+    // from set-emptiness: `Interval(1, 1)` is the non-empty set {1}, and its
+    // `contains(1)` says so, but draws come from the half-open span
+    // `[start, end)`, which is empty when the endpoints coincide — no uniform
+    // distribution exists on it. Reading `isEmptyCollection` here worked only
+    // while that handler wrongly called `[1, 1]` empty. This is the same test
+    // the compiled path applies (`domainInterval` in
+    // `compilation/javascript-target.ts` checks `!(hi > lo)`), so interpreter
+    // and compiler agree.
+    if (!(int.start < int.end))
       return randomDomainError(ce, 'a non-empty Interval', domain);
     return { kind: 'continuous', lo: int.start, hi: int.end };
   }
@@ -3147,7 +3156,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // that `n` cannot be stored into. (The full resolution below cannot
           // stand in for this check: it needs the CONCRETE value, so asking it
           // first would be the very evaluation being avoided.)
-          const fieldName = isString(op1.ops[1]) ? op1.ops[1].string : undefined;
+          const fieldName = isString(op1.ops[1])
+            ? op1.ops[1].string
+            : undefined;
           if (
             fieldName !== undefined &&
             protocolsWithProperty(ce, fieldName).length === 0

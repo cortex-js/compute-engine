@@ -1192,10 +1192,28 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
+  // Base contract: nothing to walk and no declared size to fall back on.
+  // Subclasses that CAN answer from a declaration override this — see
+  // `BoxedSymbol.count`. The default deliberately stays `undefined` rather
+  // than consulting `this.type`: `BoxedFunction` must NOT answer from its
+  // type, because an application's collection type can be an artifact of the
+  // vacuous lift rather than a promise, and a base class that answered would
+  // make that an easily-missed opt-OUT instead of an explicit opt-in.
   get count(): number | undefined {
     return undefined;
   }
 
+  // These stay gated on `isCollection`, deliberately: a DECLARED size does not
+  // make a valueless collection answer them. Much of the library uses
+  // `isFiniteCollection === true` as its sole precondition for "I may walk
+  // this now" (`Sort`, `Unique`, `Tally`, `Chunk`, `Partition`,
+  // `RandomShuffle`, the statistics helpers via `flattenArguments`), so
+  // answering `true` for a symbol whose `each()` yields nothing turns those
+  // into definite wrong values — an empty walk baked into `[]`, a
+  // `(NaN, NaN, NaN)` quartile tuple, or a crash when `at(i)` returns
+  // `undefined`. `count` may answer from the type (it is not a walk gate);
+  // these two may not until every such caller also consults
+  // `isEnumerableCollection`.
   get isEmptyCollection(): boolean | undefined {
     if (!this.isCollection) return undefined;
     const count = this.count;

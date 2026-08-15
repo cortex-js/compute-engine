@@ -1,3 +1,10 @@
+> **STATUS 2026-08-15: all 14 findings applied to the spec.** Finding 2
+> was resolved by a user ruling (introduce a real `range` type = index
+> span); findings 1, 3–14 were applied directly. Finding 3's tuple
+> defect was also filed as a live bug in `ROADMAP.md`. Applying the
+> `range` ruling forced a correction to the Phase 0 mechanism — see
+> "Signature refinement" in the spec.
+
 # Spec review round 2: docs/STRING_ROADMAP.md (2026-08-14)
 
 Dual-reviewer pass (Claude + Codex, high reasoning) on the revised spec —

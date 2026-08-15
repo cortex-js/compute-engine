@@ -62,10 +62,15 @@ import { isFunction, sym } from './type-guards.js';
  *
  * The computation is **write-free**: definitions are resolved by name (the
  * `isImpureHead` pattern of `library/map-broadcast-shape.ts`), nothing is bound
- * or canonicalized. Results are memoized on `BoxedFunction` behind a
- * `ce._anyVersion` guard, which is what keeps "resolve through the current
- * binding" honest: reassigning a symbol bumps the generation and invalidates
- * the cached answer.
+ * or canonicalized. Results are memoized on `BoxedFunction` (`_effects`)
+ * behind the `ce._callableVersion` axis PLUS an `_effectsScope` identity
+ * stamp — the pair is what keeps "resolve through the current binding"
+ * honest: an event that can change what a name resolves to as a CALLABLE
+ * advances the axis, while the scope stamp catches a re-resolution under a
+ * different ambient chain (a clean scope pop then costs nothing). The
+ * original spelling of this guard was the coarse `ce._anyVersion`; it moved
+ * to the callable axis when `_effects` was re-keyed
+ * (`docs/plans/2026-08-09-state-event-invalidation-axes.md` §6).
  */
 
 /**

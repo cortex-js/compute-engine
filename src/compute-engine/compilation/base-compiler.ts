@@ -1340,6 +1340,275 @@ export class BaseCompiler {
   private static _userCallVisited: Set<string> = new Set();
 
   /**
+   * A user function's body reduced to the literal collection CONSTRUCTOR it
+   * builds, so that operand k of the result is component k of the value the
+   * call produces. Returns `undefined` when the body is anything else, and the
+   * caller then declines to answer for an individual element.
+   *
+   * Used by {@link withCollectionElements}, whose whole premise is that the
+   * emitter lowers component k from operand k — so only constructors with that
+   * one-to-one correspondence may be returned here.
+   */
+  private static collectionConstructorBody(
+    body: Expression | undefined
+  ): (Expression & { ops: ReadonlyArray<Expression> }) | undefined {
+    // A function body is stored as a `Block`, and a declared result type wraps
+    // the value in a `Typed` ascription. Unwrap both, but only a SINGLE-
+    // statement block: a multi-statement body binds locals whose complex-ness
+    // `isBlockValueComplexValued` infers with a frame this element analysis
+    // does not build, so guessing here could disagree with the emitter.
+    let e = body;
+    while (
+      e !== undefined &&
+      ((isFunction(e, 'Block') && e.ops.length === 1) ||
+        (isFunction(e, 'Typed') && e.ops.length >= 1))
+    )
+      e = e.ops[0];
+    if (e === undefined) return undefined;
+    if (isFunction(e, 'List') || isFunction(e, 'Tuple')) return e;
+    // An ALL-SCALAR `PointList` is a single point whose component k is operand
+    // k — the same equivalence the JavaScript target already relies on, where
+    // the `PointList` definition handler lowers that shape itself "byte-
+    // identically to `Tuple`" and only the other shapes reach
+    // `compileJSPointList`. Requiring every operand to be provably numeric is
+    // what excludes those other shapes: a component that is (or may be) an
+    // indexed collection is a SOURCE, zipped across points, so operand k is
+    // then not component k and the identification would be wrong.
+    if (
+      isFunction(e, 'PointList') &&
+      e.ops.length > 0 &&
+      e.ops.every((op) => op.type.matches('number'))
+    )
+      return e;
+    return undefined;
+  }
+
+  /**
+   * Resolve `collection` to the element expressions the emitter will lower one
+   * by one, and run `fn` over them in the context those elements are analyzed
+   * in. Returns `undefined` — and the caller then keeps its previous answer —
+   * when the elements cannot be identified.
+   *
+   * Two routes: the collection is itself a literal constructor, or it is a call
+   * to a user function whose body is one. The second route runs `fn` with the
+   * function's PARAMETERS shielded, exactly as {@link isComplexValuedUserCall}
+   * shields them for a scalar body — the elements mention those parameters, and
+   * reading a same-named engine symbol's value through one would analyze the
+   * wrong definition. It also declines a head already being looked through, so
+   * a self- or mutually-recursive definition terminates instead of looping.
+   */
+  private static withCollectionElements<T>(
+    collection: Expression,
+    fn: (elements: ReadonlyArray<Expression>) => T | undefined
+  ): T | undefined {
+    if (isFunction(collection, 'List') || isFunction(collection, 'Tuple'))
+      return fn(collection.ops);
+    if (!isFunction(collection)) return undefined;
+    const op = collection.operator;
+    if (typeof op !== 'string' || BaseCompiler._userCallVisited.has(op))
+      return undefined;
+    const literal = BaseCompiler.userFunctionLiteral(collection.engine, op);
+    if (literal === undefined) return undefined;
+    const body = BaseCompiler.collectionConstructorBody(literal.ops[0]);
+    if (body === undefined) return undefined;
+    const params = literal.ops
+      .slice(1)
+      .map((p) => (isSymbol(p) ? p.symbol : undefined))
+      .filter((p): p is string => p !== undefined);
+    const nextVisited = new Set(BaseCompiler._userCallVisited);
+    nextVisited.add(op);
+    const prevVisited = BaseCompiler._userCallVisited;
+    BaseCompiler._userCallVisited = nextVisited;
+    try {
+      return BaseCompiler.withBinderMask({ real: [], shielded: params }, () =>
+        fn(body.ops)
+      );
+    } finally {
+      BaseCompiler._userCallVisited = prevVisited;
+    }
+  }
+
+  /**
+   * Whether ELEMENT `index` (1-based) of the indexed collection `collection` is
+   * complex-valued, when that element can be identified statically. Returns
+   * `undefined` when it cannot be — a collection whose elements
+   * {@link withCollectionElements} cannot see, or an index past their end — and
+   * the caller then keeps its previous, whole-collection answer.
+   *
+   * Needed because a list is emitted ELEMENT BY ELEMENT and each element picks
+   * its own real-vs-complex lowering, so the run-time array is heterogeneous:
+   * `[i·t, 1]` lowers to `[{re, im}, 1]`. The whole-list verdict
+   * (`ops.some(isComplexValued)`, the generic recursion the caller falls back
+   * to) therefore describes NO single element, and reading one through it is
+   * wrong in both directions. Measured at `t = 0.3` before this, on the DEFAULT
+   * path with no compile option set:
+   *
+   * | shape                | compiled              | interpreter |
+   * | -------------------- | --------------------- | ----------- |
+   * | `[i·t, 1][2] + 1`    | `{re: NaN}`           | `2`         |
+   * | `h(t)[1] + 1`        | the STRING `"…1"`     | `1 + 0.3i`  |
+   *
+   * — the first over-claims (the whole list is complex, so the plain number `1`
+   * pulled out of it is read as `{re, im}` and `.re` is `undefined`), the second
+   * under-claims (a call to `h(t) := [i·t, 1]` is classified real, so the
+   * `{re, im}` pulled out of it is added to a number and JavaScript
+   * concatenates the object instead). Both are silently wrong values behind
+   * `success: true`.
+   *
+   * Reading the element the emitter will actually produce answers both.
+   */
+  private static isComplexValuedElementAt(
+    collection: Expression,
+    index: number
+  ): boolean | undefined {
+    return BaseCompiler.withCollectionElements(collection, (elements) => {
+      // A NEGATIVE index counts back from the end — `At([10, 20, 30], -1)`
+      // compiles to `30`, so `-1` is the last element, not an invalid one.
+      // Treating it as invalid left it on the whole-collection verdict and
+      // reintroduced the exact over-claim this method exists to remove:
+      // `[i·t, 1][-1] + 1` ran to `{re: NaN}` where the interpreter answers `2`,
+      // because `-1` selects the REAL element.
+      const i = index < 0 ? elements.length + index : index - 1;
+      // Any index that selects nothing — zero, fractional, or past either end —
+      // lowers to the plain number `NaN` (measured: `_SYS.at([10, 20, 30], 1.5)`
+      // and `…, 0)` both yield `NaN`, not a complex object). That is a REAL
+      // value, so answer `false` rather than declining: declining would hand the
+      // node back to the whole-collection verdict, which reports complex for any
+      // collection holding one complex element and would read that `NaN` as
+      // `{re, im}`.
+      if (!Number.isInteger(index) || i < 0 || i >= elements.length)
+        return false;
+      return BaseCompiler.isComplexValued(elements[i]);
+    });
+  }
+
+  /**
+   * The complex-ness every element of `collection` shares, or `undefined` when
+   * they do not all share one (or cannot be identified).
+   *
+   * This is the answer for an indexed read whose index is only known at RUN
+   * TIME: no single element can be named, but when they all agree the verdict
+   * holds whichever one the index selects. Measured before this, on the DEFAULT
+   * path with `u(t) := [i·t, i]` — a body whose elements DO agree — the read
+   * `u(t)[k] + 1` compiled to the string `"[object Object]1"` where the
+   * interpreter answers `1 + 0.3i`.
+   *
+   * When the elements DISAGREE, no static answer exists and this declines. The
+   * read is then refused outright rather than lowered on a guess — see
+   * {@link assertNoAmbiguousComplexElementRead}.
+   */
+  private static uniformElementComplexness(
+    collection: Expression
+  ): boolean | undefined {
+    return BaseCompiler.withCollectionElements(collection, (elements) => {
+      if (elements.length === 0) return undefined;
+      const first = BaseCompiler.isComplexValued(elements[0]);
+      for (let i = 1; i < elements.length; i++)
+        if (BaseCompiler.isComplexValued(elements[i]) !== first)
+          return undefined;
+      return first;
+    });
+  }
+
+  /**
+   * Whether ANY identifiable element of `collection` is complex-valued.
+   * `false` when none is, and also when the elements cannot be seen at all —
+   * callers pair it with a type-based test that covers the collections this
+   * one declines.
+   */
+  /**
+   * Whether an `At` index selects a SUB-COLLECTION rather than a single scalar
+   * — a gather (`At(L, [1, 3])`) or a boolean mask, both of which the
+   * JavaScript `At` lowering supports. Such a read produces a list, not an
+   * element, so neither the per-element answer nor the mixed-element decline
+   * applies to it; the enclosing analysis keeps whatever it did before.
+   *
+   * Covers an index that is only POSSIBLY a collection as well as a definite
+   * one, because the distinction it guards is about which LOWERING runs, and a
+   * `broadcastable`/top-typed index could take either at run time.
+   */
+  private static isGatherIndex(index: Expression): boolean {
+    return (
+      index.type.matches('collection') ||
+      index.isCollection === true ||
+      isPossiblyCollectionTyped(index)
+    );
+  }
+
+  private static hasAnyComplexElement(collection: Expression): boolean {
+    return (
+      BaseCompiler.withCollectionElements(collection, (elements) =>
+        elements.some((e) => BaseCompiler.isComplexValued(e))
+      ) ?? false
+    );
+  }
+
+  /**
+   * Whether the elements of `collection` are identifiable AND disagree about
+   * being complex-valued — the case {@link uniformElementComplexness} declines
+   * for a reason other than not being able to see the elements at all.
+   */
+  private static hasMixedElementComplexness(collection: Expression): boolean {
+    return (
+      BaseCompiler.withCollectionElements(collection, (elements) => {
+        if (elements.length < 2) return false;
+        const first = BaseCompiler.isComplexValued(elements[0]);
+        return elements.some((e) => BaseCompiler.isComplexValued(e) !== first);
+      }) ?? false
+    );
+  }
+
+  /**
+   * Fail closed (D6, user-ruled 2026-08-15) on an indexed read whose element
+   * SHAPE cannot be decided: the collection MIXES complex- and real-valued
+   * elements, and the index is known only at run time.
+   *
+   * A list is emitted element by element and each element picks its own
+   * real-vs-complex lowering, so `[i·t, 1]` lowers to the heterogeneous
+   * `[{re, im}, 1]`. When the index is a literal, the element it selects is
+   * known and {@link isComplexValuedElementAt} answers for that one. When every
+   * element agrees, the shared verdict holds whichever the index selects
+   * ({@link uniformElementComplexness}). Neither applies here, and there is no
+   * third source of truth: the read is `{re, im}` for some indices and a plain
+   * number for others, decided at run time.
+   *
+   * Emitting anything is therefore a coin flip that lands on a silently wrong
+   * value. Measured before this guard, on the DEFAULT path with no compile
+   * option set: `[i·t, 1][k] + 1` at `k = 2` ran to `{re: NaN}` where the
+   * interpreter answers `2` — the whole-collection verdict read the plain
+   * number `1` as a complex object. Declining hands the expression to the
+   * interpreter, which indexes the value it actually built.
+   *
+   * The narrowness is the point: an all-complex or all-real collection is
+   * unaffected, a literal index is unaffected, and a collection whose elements
+   * this analysis cannot see keeps whatever it did before.
+   */
+  private static assertNoAmbiguousComplexElementRead(
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): void {
+    if (h !== 'At' || args.length !== 2) return;
+    const index = args[1];
+    // A literal index names its element. A COMPLEX index names none, but that
+    // is a different defect from this one — leave it to whatever handles it.
+    if (isNumber(index) || BaseCompiler.isComplexValued(index)) return;
+    // A GATHER selects a sub-collection rather than one scalar, so the
+    // ambiguity this guard is about does not arise — its result is a list whose
+    // own elements the enclosing analysis handles. `At([10, 20, 30], [2])`
+    // compiles to `[20]` today, and declining it would be a pure regression.
+    if (BaseCompiler.isGatherIndex(index)) return;
+    if (!BaseCompiler.hasMixedElementComplexness(args[0])) return;
+    throw new Error(
+      `At: cannot compile an indexed read with a run-time index into a ` +
+        `collection that mixes complex-valued and real-valued elements — the ` +
+        `element is a complex object for some indices and a plain number for ` +
+        `others, so no single lowering is correct. Fail closed (D6) — the ` +
+        `interpreter evaluates it. Use a literal index, or make every element ` +
+        `complex-valued.`
+    );
+  }
+
+  /**
    * Whether `expr` mentions any name that is BOUND in the current compilation
    * context — a user function's parameter, an enclosing binder's index, a
    * broadcast element (`_boundVarsCtx`, synced from `target.boundVars` by
@@ -2551,6 +2820,14 @@ export class BaseCompiler {
     // the contradiction makes wrong. See
     // `assertNoContradictedScalarOperand`.
     BaseCompiler.assertNoContradictedScalarOperand(engine, h, args);
+
+    // An indexed read into a collection that mixes complex- and real-valued
+    // elements, with an index known only at run time: the element is a complex
+    // object for some indices and a plain number for others, so no single
+    // lowering is correct. Refuse rather than guess (D6), for the same reason
+    // and in the same place as the contradicted declaration above. See
+    // `assertNoAmbiguousComplexElementRead`.
+    BaseCompiler.assertNoAmbiguousComplexElementRead(h, args);
 
     // A broadcastable head with a list/collection-typed operand that
     // `tryCompileBroadcast` did NOT handle would otherwise fall through to the
@@ -4042,6 +4319,15 @@ export class BaseCompiler {
     // `_SYS.mul` runtime helper cannot carry complex elements, so a complex
     // operand there must defer to the fail-closed path.
     const hasComplexElement = (a: Expression): boolean => {
+      // The ELEMENTS the emitter will actually lower, when they can be seen.
+      // The type test below cannot stand alone: a list mixing a complex and a
+      // real element unifies to a WIDE element type (`[i·t, 1]` is
+      // `vector<finite_number^2>`, which is neither complex nor real), so it
+      // answered `false` and the real-only element closure below was emitted
+      // over an array whose first element is a `{re, im}` object. Measured on
+      // the DEFAULT path with `h(t) := [i·t, 1]`: `2·h(t)` ran to `[NaN, 2]`
+      // where the interpreter answers `[0.6i, 2]`.
+      if (BaseCompiler.hasAnyComplexElement(a)) return true;
       const elt = collectionElementType(compilationType(a));
       if (elt === undefined) return false;
       return isNonRealNumber(elt);
@@ -6743,6 +7029,34 @@ export class BaseCompiler {
     // `Real(±∞)` can type `non_finite_number` (so the `isNonRealNumber`
     // branch would too) — yet every target emits a real scalar for both.
     if (BaseCompiler.REAL_BY_DEFINITION_HEADS.has(expr.operator)) return false;
+    // An indexed read answers for the ELEMENT it selects, not for the whole
+    // collection: a list is emitted element by element, so its run-time array is
+    // heterogeneous and the generic `ops.some(…)` recursion at the bottom of
+    // this function describes none of its elements. See
+    // `isComplexValuedElementAt`, which answers `undefined` — and so leaves the
+    // previous behavior in place — whenever the selected element cannot be
+    // identified statically (a computed index, a non-literal collection).
+    if (expr.operator === 'At' && expr.ops.length === 2) {
+      const index = expr.ops[1];
+      // A COMPLEX index selects no element — it is not a position at all — so
+      // this arm has nothing to say about such a node and must leave it to the
+      // generic operand recursion below, which reports it complex from the
+      // index. Answering from the elements instead reported a list of real
+      // elements as real, and `At(List(10, 20, 30), Complex(1, 2))` then folded
+      // to `10` instead of staying `_SYS.at([10, 20, 30], {re: 1, im: 2})`
+      // (pinned in `compile-subtree-folding.test.ts`).
+      if (
+        !BaseCompiler.isComplexValued(index) &&
+        !BaseCompiler.isGatherIndex(index)
+      ) {
+        // A literal index names one element; a run-time index names none, but
+        // when every element agrees the answer is the same either way.
+        const viaElement = isNumber(index)
+          ? BaseCompiler.isComplexValuedElementAt(expr.ops[0], index.re)
+          : BaseCompiler.uniformElementComplexness(expr.ops[0]);
+        if (viaElement !== undefined) return viaElement;
+      }
+    }
     // The `complexPromotion` opt-in is answered BEFORE the type branches
     // below, because the types it has to override are the WIDE ones: an
     // unknown-sign `√(t−1)` types `finite_number`, which is neither non-real

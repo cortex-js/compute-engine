@@ -8,12 +8,13 @@ import { isSubtype } from '../common/type/subtype.js';
 import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
-import { Expression, CollectionHandlers } from './global-types.js';
+import { Expression, CollectionHandlers, Sign } from './global-types.js';
 import type { MathJsonExpression } from '../math-json/types.js';
 import {
   isFunction,
   isNumber,
   isSymbol,
+  sym,
 } from './boxed-expression/type-guards.js';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
@@ -1596,25 +1597,200 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
   };
 }
 
-function collectionSubset(
+/**
+ * Describes a collection that contains EVERY value of an element type that
+ * satisfies a sign constraint. The mathematical number sets are all of this
+ * shape: `Integers` is every value of type `finite_integer` with no sign
+ * constraint, `PositiveNumbers` every value of type `real` whose sign is
+ * `positive`, and so on.
+ *
+ * Saturation is what makes the shape usable for inclusion: because such a set
+ * omits no value of its description, any collection whose own element type and
+ * sign fit inside the description is a subset of it — no enumeration, and the
+ * answer holds for an infinite or oversized candidate subset too. A collection
+ * that merely HAPPENS to have those elements (`Set(1, 2)`, whose element type
+ * is also `finite_integer`) carries no such guarantee, which is why membership
+ * in this table is declared, not inferred from `elttype`/`eltsgn`.
+ */
+export interface TypeSaturatedSet {
+  /** The type every value of the set has, and every value of which is in it */
+  elementType: Type;
+  /** The sign every element has, or `undefined` for no sign constraint */
+  sign: Sign | undefined;
+}
+
+/**
+ * The type-saturated sets, keyed by the symbol that names them. Populated by
+ * `declareTypeSaturatedSet()` as the number-set definitions are built
+ * (`library/sets.ts`), so the table cannot drift from the definitions it
+ * describes.
+ */
+const TYPE_SATURATED_SETS = new Map<string, TypeSaturatedSet>();
+
+/**
+ * Record that the set named `name` contains every value matching `shape`, and
+ * return the shape so a definition can keep using it. See
+ * {@linkcode TypeSaturatedSet}.
+ */
+export function declareTypeSaturatedSet(
+  name: string,
+  shape: TypeSaturatedSet
+): TypeSaturatedSet {
+  TYPE_SATURATED_SETS.set(name, shape);
+  return shape;
+}
+
+/** The shape of `expr` if it is a declared type-saturated set, else `undefined` */
+export function typeSaturatedShape(
+  expr: Expression
+): TypeSaturatedSet | undefined {
+  const name = sym(expr);
+  if (name === undefined) return undefined;
+  return TYPE_SATURATED_SETS.get(name);
+}
+
+/**
+ * Does the sign constraint `a` IMPLY the sign constraint `b` — i.e. is every
+ * value whose sign is `a` also of sign `b`?
+ *
+ * `undefined` means "no constraint" on the `b` side (everything implies it)
+ * and "constraint unknown" on the `a` side (it implies nothing but the absence
+ * of a constraint). Both readings coincide with the lattice order, so one
+ * function serves both.
+ */
+function signImplies(a: Sign | undefined, b: Sign | undefined): boolean {
+  if (b === undefined) return true;
+  if (a === undefined) return false;
+  if (a === b) return true;
+  if (a === 'zero') return b === 'non-negative' || b === 'non-positive';
+  if (a === 'positive') return b === 'non-negative' || b === 'not-zero';
+  if (a === 'negative') return b === 'non-positive' || b === 'not-zero';
+  // `unsigned` is NOT the top of this lattice: it is the specific claim that a
+  // value has an imaginary part or is NaN (`Sign` in `types-definitions.ts`),
+  // so no real-signed constraint implies it. "No constraint" is spelled
+  // `undefined`, handled above.
+  return false;
+}
+
+/**
+ * Is every value described by `a` also described by `b`? Both describe a set
+ * of values as an element type plus a sign constraint — see
+ * {@linkcode TypeSaturatedSet}.
+ */
+function shapeIncludedIn(a: TypeSaturatedSet, b: TypeSaturatedSet): boolean {
+  return isSubtype(a.elementType, b.elementType) && signImplies(a.sign, b.sign);
+}
+
+/**
+ * The `subsetOf` handler shared by every type-saturated set: decides
+ * `self ⊆ other` by comparing descriptions, with no enumeration.
+ *
+ * Answering `false` (rather than "undecided") when the descriptions do not fit
+ * is sound because these sets are non-empty: if `self`'s element type is not a
+ * subtype of `other`'s, or its sign constraint is looser, then `self` holds a
+ * value `other` does not.
+ */
+export function typeSaturatedSubsetOf(
+  self: TypeSaturatedSet
+): (
+  collection: Expression,
+  other: Expression,
+  strict: boolean
+) => boolean | undefined {
+  return (_collection, other, strict) => {
+    const target = typeSaturatedShape(other);
+    if (target === undefined) {
+      // `other` is described some other way. A type-saturated set is infinite
+      // — every element type these sets are built on has infinitely many
+      // values — so a FINITE `other` demonstrably cannot contain it. For an
+      // infinite `other` the descriptions cannot be compared and the relation
+      // is left undecided: a collection with an element type wide enough may
+      // still omit values (the even integers omit the odd ones), so a `false`
+      // here would be a claim this handler cannot support.
+      return other.isFiniteCollection === true ? false : undefined;
+    }
+    if (!shapeIncludedIn(self, target)) return false;
+    // A strict subset must not be the same set. Two descriptions denote the
+    // same set exactly when each includes the other.
+    if (strict && shapeIncludedIn(target, self)) return false;
+    return true;
+  };
+}
+
+/**
+ * Default `subsetOf` handler: decide `a ⊆ b` by testing every element of `a`
+ * for membership in `b`.
+ *
+ * Per the handler contract (`types-definitions.ts`), the receiver is the
+ * candidate SUBSET.
+ */
+export function collectionSubset(
   a: Expression,
   b: Expression,
   strict: boolean
 ): boolean | undefined {
-  if (a.isFiniteCollection !== true || b.isFiniteCollection !== true)
+  // Fast path: when `b` contains every value of an element type and sign, `a`
+  // is a subset of it as soon as `a`'s own element type and sign fit that
+  // description — no walk, so it also answers for an infinite or oversized
+  // `a` (`Range(1, 10^9) ⊆ Integers`).
+  const bShape = typeSaturatedShape(b);
+  if (bShape) {
+    const handlers = a.baseDefinition?.collection;
+    // The `elttype` handler is preferred over the type: it is the narrower of
+    // the two (a `Range` types `indexed_collection<integer>`, admitting the
+    // infinities, but its handler reports `finite_integer`). The type is the
+    // fallback for a collection with no such handler, and is an upper bound on
+    // the elements either way.
+    const elementType =
+      handlers?.elttype?.(a) ?? collectionElementType(a.type.type);
+    if (
+      elementType !== undefined &&
+      elementType !== 'unknown' &&
+      shapeIncludedIn({ elementType, sign: handlers?.eltsgn?.(a) }, bShape)
+    ) {
+      // `b` is infinite (see `typeSaturatedSubsetOf`), so a finite `a` is a
+      // proper subset. An infinite `a` may still equal `b`, so leave `strict`
+      // to the walk below.
+      if (!strict || a.isFiniteCollection === true) return true;
+    }
+    // A miss proves nothing: `elttype`/`eltsgn` are widenings of what `a`
+    // actually holds. Fall through to the elementwise walk.
+  }
+
+  if (a.isFiniteCollection !== true) return undefined;
+  // Walking an enormous `a` (`Range(1, 10^9)`) would cost more than the answer
+  // is worth; leave it undecided rather than spend unbounded time.
+  const aSize = a.count;
+  if (aSize === undefined || aSize > MAX_SIZE_EAGER_COLLECTION)
     return undefined;
 
   // All elements of a must be in b
-  for (const x of a.each()) if (b.contains(x) !== true) return false;
+  for (const x of a.each()) {
+    const inB = b.contains(x);
+    if (inB === undefined) return undefined;
+    if (inB === false) return false;
+  }
 
-  // A strict subset (a ⊂ b) must have at least one element that is not in b
+  // A strict subset (a ⊂ b) must have at least one element of `b` that is not
+  // in `a`.
   if (strict) {
-    // a must not be equal to b, therefore their size must be different
-    const aSize = a.count;
-    if (aSize === undefined) return false;
+    // An infinite `b` cannot be exhausted by a finite `a`.
+    if (b.isFiniteCollection === false) return true;
     const bSize = b.count;
-    if (bSize === undefined) return false;
-    if (aSize === bSize) return false;
+    if (bSize === undefined || bSize > MAX_SIZE_EAGER_COLLECTION)
+      return undefined;
+    // Look for that element rather than comparing SIZES. A collection's
+    // elements may repeat — `List` admits duplicates where `Set` does not — so
+    // size is not a stand-in for extensional equality in either direction:
+    // `List(1, 1)` and `List(1)` have different sizes and the same elements,
+    // while `List(1, 1)` and `List(1, 2)` have the same size and different
+    // ones.
+    for (const y of b.each()) {
+      const inA = a.contains(y);
+      if (inA === undefined) return undefined;
+      if (inA === false) return true;
+    }
+    return false;
   }
   return true;
 }

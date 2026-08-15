@@ -190,9 +190,16 @@ part of the Phase 1 contract.
 10. **Cross-target compilation contract (decided; Phase 1 acceptance
     criterion).** The Phase 1 deliverable includes a target matrix — for
     each of {`Length`, `At`/indexing, iteration-derived operators, list-out
-    operators, string-preserving operators} × {JavaScript, Python,
-    GLSL/WGSL}, each cell is either implemented grapheme-correctly or fails
-    closed with a diagnostic. Per target:
+    operators, string-preserving operators, **and the `character` scalar
+    itself**} × {JavaScript, Python, GLSL/WGSL}, each cell is either
+    implemented grapheme-correctly or fails closed with a diagnostic. The
+    `character` row is not implied by the string rows and must be decided
+    per target on its own: `CharacterFrom`, narrowed character literals,
+    `String(c)`, character equality/ordering/hashing, and
+    `list<character>` values. (JavaScript's natural lowering is a
+    one-cluster JS string, making the distinction compile-time-only;
+    Python's string-collection type-gate does NOT by itself answer
+    whether `CharacterFrom("a")` compiles.) Per target:
     - **JavaScript**: `isIndexedCollectionOperand`
       (`compilation/javascript-target.ts`) currently excludes strings ONLY
       because `string` does not match `indexed_collection` — the lattice
@@ -245,24 +252,19 @@ part of the Phase 1 contract.
 The rule is derivable from the operator's declared signature, not an ad-hoc
 list:
 
-- **Kind-preserving signatures — string-preserving in PHASE 1.** An operator
-  whose signature returns the bound type variable itself, e.g. `Reverse:
-  `(T) -> T where T: indexed_collection`` (`library/collections.ts`),
-  STATICALLY promises `string`-out the moment the lattice changes — a
-  list-out runtime would contradict constraint 8's static/runtime
-  agreement. These operators must be string-preserving from Phase 1. After
-  the Phase 0 tightening (see "Signature refinement" below) this category
-  contains not just `Reverse` but every operator that passed the honesty
-  test: `Rest`, `Most`, `Take`, `Drop`, `Slice`, unary `Sort`, `Unique` —
-  all of which therefore ship their string runtimes IN Phase 1.
-- **Element-preserving operators that fail the honesty test — overload
-  sets in PHASE 2.** Operators whose operation cannot preserve every
-  indexed kind (`RotateLeft`/`RotateRight`, `Filter`, `Sort` with a
-  comparator — see the classification in "Signature refinement") stay
-  list-out in Phase 1 and gain `(string, …) -> string` overloads in
-  Phase 2. `Join` becomes THE variadic string concatenation (see "`Join`
-  vs. `StringJoin`" in the Operations Review). Each string-preserving
-  result documents the re-segmentation caveat (constraint 3).
+- **Element-preserving operators (subset / reordering of the input's own
+  characters) — string-preserving in PHASE 1.** `Reverse`, `Rest`,
+  `Most`, `Take`, `Drop`, `Slice`, `Unique`, `Sort`,
+  `RotateLeft`/`RotateRight`, `Filter`. Phase 0 gives each a per-kind
+  result rule (see "Signature refinement" below); Phase 1 adds the
+  `string -> string` arm. Doing this in Phase 1 rather than later is
+  forced, not chosen: once Phase 0's rule says `string -> string` and
+  Phase 1 flips the lattice, a list-out runtime would contradict
+  constraint 8's static/runtime agreement. Each documents the
+  re-segmentation caveat (constraint 3). `Join` is the one member that
+  waits for Phase 2, because it is not just an arm but a role change —
+  it becomes THE variadic string concatenation (see "`Join` vs.
+  `StringJoin`" in the Operations Review).
 - **Element-TRANSFORMING higher-order operators — permanently list-out.**
   `Map`, `FlatMap`, `Scan`, `Zip` return `list` for string input, always —
   even for a character→character callback. There is no type-level rule for
@@ -273,74 +275,81 @@ list:
   `Σ → ς` depends on position in the word), so a per-character map is the
   wrong primitive anyway.
 
-#### Signature refinement: prefer accurate bounds over overloads (decided 2026-08-14)
+#### Signature refinement: honest per-kind results (decided 2026-08-14, corrected 2026-08-15)
 
 Several collection signatures are looser than the operations they
 describe (e.g. `RotateLeft: (indexed_collection, integer?) ->
 indexed_collection` — rotation never changes the collection's element
-type or length, but the signature says nothing of the kind). The string
-work forces a per-operator signature audit anyway, so Phase 2 tightens
-them. The mechanism is chosen by an honesty test:
+type or length, but the signature says nothing of the kind), and one is
+already actively WRONG (see the `Reverse` defect below). The string work
+forces a per-operator signature audit anyway, so Phase 0 fixes them.
 
-**The test: is the operation kind-preserving for EVERY indexed kind?** A
-bounded signature `(T, …) -> T where T: indexed_collection` is a promise
-about every kind the bound admits — string, list, range, linspace — and
-the runtime must deliver each one. Where the promise holds, the bound is
-the right spelling: ONE signature, and string preservation falls out with
-no string-specific overload (per the preservation rule, a `(T) -> T`
-signature must then be string-out as soon as it ships). Where it does not
-hold, forcing the bound would lie for some kind; use an overload set
-instead: `(string, …) -> string`, plus the generic
-`(indexed_collection<T>, …) -> list<T>` fallback.
+**The honesty test: is the operation closed over the kind?** A bounded
+signature `(T, …) -> T where T: indexed_collection` is a promise about
+EVERY kind the bound admits, and the runtime must deliver each one. The
+first draft of this section assumed the promise held for most operators;
+it does not. The lattice's indexed kinds are `list`, `tuple`, `range`
+(new — see "The `range` type"), and `string` (after Phase 1); there is no
+`linspace` type (a `Linspace` value types as `indexed_collection<number>`).
+Checking each kind against each operation:
 
-Classification (each verified against what the operation can actually
-represent in each kind):
+- **`tuple` breaks every one of them.** A tuple's type carries its arity
+  and per-position element types, so `Reverse((1, "a"))` must be
+  `tuple<string, finite_integer>`, and `Rest`/`Most`/`Take`/`Drop`/
+  `Slice` change arity. This is not hypothetical: shipped `Reverse` is
+  `(T) -> T where T: indexed_collection` and `tuple` matches that bound,
+  so `Reverse((1, "a"))` STATICALLY claims `tuple<finite_integer,
+  string>` for the value `("a", 1)` — a live defect, filed in
+  `ROADMAP.md`, that this phase fixes.
+- **`range` breaks them too, in two ways** (both verified): the type has
+  no EMPTY inhabitant, but `Take(1..5, 0)`, `Drop(1..5, 10)`,
+  `Rest(1..1)`, and `Most(1..1)` all evaluate to an empty collection;
+  and `Reverse(1..5)` is `[5, 4, 3, 2, 1]`, descending, which the `range`
+  type deliberately excludes.
+- **`list` and `string` are closed** under all of them.
 
-- **Bound-tightenable — `(T, …) -> T where T: indexed_collection`**:
-  `Reverse` (already spelled this way; a reversed range is a
-  negative-step range), `Rest`, `Most` (dropping an end of a range or
-  linspace yields a range/linspace), `Take`, `Drop`, `Slice` (contiguous
-  subranges preserve every kind), `Sort` in its UNARY form (a sorted
-  range/linspace is itself, possibly step-flipped; a sorted string is a
-  string), `Unique` (an already-unique kind is unchanged; a list
-  dedupes to a list; a string to a string).
-- **Overload set — string/list preserved, generic falls back to `list`**:
-  `RotateLeft`/`RotateRight` (a rotated range is NOT a range — the
-  monotone step breaks at the seam), `Filter` (an arbitrary subsequence
-  of a range is not a range), `Sort` WITH a comparator (an arbitrary
-  permutation of a range is not a range — though the string overload
-  still holds: sorted characters rejoin to a string).
+So the honest mechanism is NOT a universal bound but a **per-kind result
+rule**: `string -> string`, `list -> list`, and every other indexed kind
+falls back to `list<T>`. Spell it as an overload set, or — if the type
+system admits a union bound — as `(T, …) -> T where T: list | string`
+plus the generic arm; the two spellings express the same contract, and
+the choice is an implementation detail recorded in the Phase 0 audit.
+The operators: `Reverse`, `Rest`, `Most`, `Take`, `Drop`, `Slice`,
+`Unique`, `Sort` (unary), `RotateLeft`/`RotateRight`, `Filter`, `Sort`
+(with a comparator). One operator needs extra care: **`Sort` today is a
+single signature with an OPTIONAL `order`** (`(indexed_collection<T>,
+order: function?) -> list<T>`), so giving its unary form a
+kind-preserving result requires splitting it into two arms by arity —
+with `order` becoming REQUIRED in the comparator arm — and deliberately
+superseding the pin in its `evaluate` handler (whose comment explains
+that results rebuild as `List`, "never the source's head", because a
+`Range`/`Linspace` head would reinterpret sorted elements as lo/hi/step).
+The unary arm must reconstruct a proper `Range` call, not swap the head.
 
-**Sequencing (decided 2026-08-14): the tightening happens UPFRONT, as
-Phase 0, before any string work.** The tightening is independent of
-strings — today the bound only admits `list`/`range`/`linspace` — and
-front-loading it pays three ways:
+**Static promises and runtime kinds are decoupled.** Dropping the
+over-strong static promise does NOT drop the laziness win: `Take(1..10^6,
+3)` should still RETURN a `Range` value (a lazy kind-preserving view)
+rather than materializing a million-element list — it simply types as
+`indexed_collection<integer>`, which that value satisfies. Runtime
+kind-preservation is a performance property; the static signature is a
+promise, and the two are tightened independently.
 
-- **Smaller blast radius now than later.** Landing `(T) -> T` before the
-  lattice change means the promise covers three kinds, not four; the
-  string case arrives later as an extension of already-working machinery
-  instead of shipping inside the big-bang.
-- **The hard part gets battle-tested early.** The real work is making
-  each tightened runtime actually produce the promised kind — `Take` on a
-  range must return a range (lazy kind-preserving views or literal
-  reconstruction), not a materialized list wearing a `range` type. That
-  machinery is exercised against ranges/linspaces with today's test
-  suite, before the string work depends on it. (It is also a standalone
-  win: `Take(1..10^6, 3)` staying a range is a laziness/perf improvement
-  with no string involvement.)
-- **Phase 2 shrinks.** Once the signatures are tight, string preservation
-  for those operators is not a "promotion" at all — the moment Phase 1
-  flips the lattice, the `T` promise extends to strings automatically,
-  and Phase 1 ships their string runtimes (a small delta: segment →
-  operate → join, on machinery that already preserves kinds). Phase 2
-  keeps only the overload-set operators and the new operations.
+**Sequencing (decided 2026-08-14): this happens UPFRONT, as Phase 0,
+before any string work.** It is independent of strings — the kinds
+involved are `list`/`tuple`/`range` — and front-loading pays three ways:
+the fix lands while the promise covers three kinds rather than four; the
+lazy kind-preserving runtime machinery is exercised against ranges with
+today's test suite before the string work depends on it; and Phase 1's
+string arms become a small, uniform delta (add the `string -> string` arm
+to an operator that already dispatches per kind) instead of a redesign.
+The live `Reverse`-on-tuple defect is fixed here, not deferred.
 
 The costs, accepted: two breaking rounds instead of one (Phase 0 changes
-static result types — `Take(1..10, 3)` types as `range`, and downstream
-code annotated `list` breaks — AND runtime value kinds, so code
-pattern-matching a `List` operator on a `Take`-of-range result breaks
-behaviorally; each round gets its own CHANGELOG migration note), and
-Phase 1 must include the string runtimes for every tightened operator
+static result types — `Reverse((1, "a"))` newly types as
+`tuple<string, finite_integer>`, and operators that silently promised
+`(T) -> T` for exotic kinds now say `list<T>` — plus runtime value kinds
+where laziness is added; each round gets its own CHANGELOG migration
+note), and Phase 1 must add the string arm for every operator in the set
 (mandatory, not optional, per the preservation rule).
 
 ### Impact on existing user code
@@ -381,6 +390,122 @@ the negation spelling the type system offers).
   constraint 2 (segmentation is not concatenation-stable, so the same
   value would have two different lengths).
 
+## The `range` type (new in Phase 0)
+
+**Ratified 2026-08-14.** Add a `range` type to the lattice denoting an
+INDEX SPAN — a contiguous, ascending run of 1-based collection indices.
+It is not a mathematical range: continuous intervals are `Interval`, and
+the statistical "range of a data set" (the extent of its values) remains
+`Min`/`Max`. Its purpose is to give index spans a name so that
+`Slice(xs, r)` and `RangeOf`'s result are typed rather than
+runtime-checked.
+
+### Definition
+
+A value has type `range` iff it is a `Range` whose bounds are provably:
+
+- **integers** — no floats (`Range(0.5, 2.5)` is not a `range`);
+- **≥ 1** — a valid 1-based index, so `Range(0, 5)` and negative bounds
+  are excluded (NOTE: the ruling was phrased "integer > 1"; it is
+  implemented as "≥ 1", since indices are 1-based and `Range(1, n)`
+  must qualify — flag if ≥ 2 was actually intended);
+- **ascending** — `lower ≤ upper`, so `Range(5, 2)` is excluded;
+- **step 1** — contiguous, so `Range(1, 10, 2)` is excluded. (The
+  ruling named integer/ascending; contiguity is the completion that
+  makes the type mean "span". A stepped range is a GATHER, and gathering
+  already has an operator: `At(xs, r)`.)
+- **finite** — `Range(1, oo)` is excluded, following the ruling's
+  "integer" literally. Consequence, accepted: `Slice(xs, 1..oo)` is a
+  type error and the positional form `Slice(xs, 1, oo)` is used instead.
+  Revisit if the infinite tail proves common.
+
+Anything else stays `indexed_collection<integer>` /
+`indexed_collection<number>`, exactly as today — so this is a NARROWING
+of `Range`'s result type in the qualifying cases, never a widening
+elsewhere.
+
+### Lattice placement
+
+`range <: indexed_collection<integer>`, added to `INDEXED_COLLECTION_TYPES`
+(`src/common/type/primitive.ts`) and to the `indexed_collection` entry of
+the subtype map (`src/common/type/subtype.ts`). It is NOT parameterized:
+the elements of an index span are always positive integers, so `range`
+carries no element-type argument. Every existing signature that accepts
+`indexed_collection` therefore accepts a `range` unchanged.
+
+### Typing rule for `Range`
+
+`Range`'s existing `type` handler (`library/collections.ts`) gains the
+qualification check. Provability is literal-based in v1: all present
+operands must be integer LITERALS meeting the constraints above.
+Symbolic or assumption-bound operands (`Range(a, b)` with `a`, `b`
+declared integers and `a ≤ b` assumed) do NOT yield `range` — narrowing
+through assumptions is a possible later refinement, deliberately out of
+scope, and its absence is never unsound (the result merely types wider).
+
+### What the type buys
+
+- `Slice(xs, r: range)` — the overload becomes STATICALLY safe: a
+  descending or stepped range is now a TYPE error at the call site
+  rather than a runtime error value, and the "which ranges are valid
+  spans" rule lives in the type instead of in each operator's handler.
+- `RangeOf(xs, needle, from?) -> range | nothing` — the signature is now
+  literal and parseable, and the type itself certifies that the result
+  is a usable index span.
+- Any future span-consuming operator (`ReplaceAt`-style splicing, a
+  collation-aware search returning a match span) inherits the same
+  guarantee for free.
+
+### What it does NOT do (and why)
+
+`range` is deliberately absent from the kind-preserving result rule (see
+"Signature refinement"): it has **no empty inhabitant** — `Take(1..5, 0)`
+and `Rest(1..1)` both evaluate to an empty collection, which is not an
+ascending non-empty span — and no descending inhabitant, so
+`Reverse(1..5)` is not one either. Operations that can empty or reverse a
+range therefore report `list<T>` (their runtime may still return a lazy
+`Range` value; see the static/runtime decoupling note).
+
+### The empty-range question (re-examined and re-confirmed 2026-08-15)
+
+Whether `range` should have an empty inhabitant was reopened, on the
+argument that a non-empty type forces `range | nothing` on any operator
+that might produce an empty span. Re-confirmed NON-EMPTY, for four
+reasons:
+
+- **It would not remove a single union.** `RangeOf`'s `| nothing`
+  encodes ABSENCE, not emptiness — "not found" and "found a zero-width
+  span at position p" are different claims, and the second needs a
+  position. Since an empty needle is rejected, zero-width matches never
+  arise, so `| nothing` is required either way. No other specified
+  operator returns a range-typed result at all.
+- **Potentially-empty results widen instead of unionizing.** The escape
+  hatch is `indexed_collection<integer>`, which admits both a `Range`
+  value and an empty list — no union, no new inhabitant. This is
+  already what the per-kind result rule does for `Take`/`Slice`/`Rest`
+  on a range.
+- **There is no spelling.** `Range(6, 5)` is the DESCENDING pair
+  `[6, 5]` (verified), so the "bounds crossed" encoding is occupied. An
+  empty range would need a new sentinel value or a breaking
+  reinterpretation of descending ranges. (Swift's `Range` gets empty for
+  free because it is half-open — `5..<5` — but the engine's `Range` is
+  inclusive and shipped.)
+- **It would trade a producer-side union for consumer-side
+  partiality.** With an empty inhabitant, `First(r)`/`Last(r)` become
+  partial and the clean `Slice(xs, r) ≡ Slice(xs, First(r), Last(r))`
+  definition needs a special case — pushing "handle the empty case" onto
+  every consumer, which is the larger population.
+
+Accepted cost, documented so it is not rediscovered as a bug: the
+"span after a match" idiom `Range(Last(r) + 1, Length(xs))` produces a
+DESCENDING range when the match ends at the last element, which is not a
+`range` and so is rejected by `Slice(xs, r: range)`. Use the positional
+form `Slice(xs, Last(r) + 1, Length(xs))` (where `start > end` yields
+the empty collection) or `Drop(xs, Last(r))`. Neither reversibility
+direction is free — adding an empty inhabitant later would break
+consumers that rely on `First`/`Last` totality, and removing one later
+would break producers — so this is decided on merits, not deferred.
+
 ## Operations Review (2026-08-13)
 
 ### Current surface
@@ -418,7 +543,15 @@ Observations:
 ### Free once strings are collections (Phase 1)
 
 With `string <: indexed_collection<character>`, the generic collection
-operators apply to strings with no string-specific code: `Length`,
+operators become TYPE-APPLICABLE to strings — the lattice change alone
+makes the calls well-typed. (It does not make them all free of
+string-specific code: the element-preserving members below need the
+Phase-1 `string -> string` arm, since a generic list-producing runtime
+would contradict their signature. Free-as-in-no-new-code are the ones
+whose result is not a collection of the source's kind — `Length`,
+`IsEmpty`, `Contains`, `Count`, `Any`/`All`, `IndexOf`, `At`, `First`,
+`Last`, `Position`, `Find`, and the permanently list-out higher-order
+operators.) The full list that becomes applicable: `Length`,
 `IsEmpty`, `Contains`/`Count`/`Tally` (character membership / frequency),
 `Any`/`All`, `Map`/`Filter`/`Reduce`/`Fold`, `At`/`First`/`Last`/`Rest`/
 `Most`/`Take`/`Drop`/`Slice`, `Reverse`, `IndexOf` (character; returns 0
@@ -442,6 +575,16 @@ CHANGELOG entry with the migration (`Join(a, b)`, or `"\(a)\(b)"`).
 `StringJoin` itself is NOT removed — it is sharpened to the one job `Join`
 structurally cannot do, and gains the feature that job has always wanted:
 
+The string-preserving overload's trigger is EVERY operand being a
+`string`; that is what returns a string. A mixed call such as
+`Join("ab", ["c", "d"])` — a string and a `list<character>`, siblings
+under `indexed_collection<character>` by constraint 2 — falls back to
+the generic arm and yields `list<character>`; rejoin explicitly with
+`String(…)` if a string is wanted. Requiring homogeneity keeps the rule
+predictable (the result kind is readable from the operand kinds, with no
+"majority wins" subtlety) and leaves the more permissive rule available
+later, since widening a trigger is not a breaking change.
+
 - **`Join` cannot take a separator.** Its signature is
   `(collection*) -> collection`, and once strings are collections a
   trailing separator is indistinguishable from one more operand:
@@ -461,14 +604,19 @@ Precedents: Python's `sep.join(xs)`, Mathematica's `StringRiffle`. It is
 the inverse of `StringSplit`: `StringJoin(StringSplit(s, sep), sep) == s`
 whenever `sep` occurs in `s` only as a separator. Strictness is unchanged:
 a non-string, non-character element leaves the expression unevaluated.
-The separator parameter lands in Phase 2.
+An EMPTY collection joins to `""` (with any separator — no separator is
+emitted before the first element, and there is none); a one-element
+collection yields that element unchanged. A non-finite collection leaves
+the expression unevaluated, as today. The separator parameter lands in
+Phase 2.
 
 ### Missing operations (proposed)
 
 **Sequence-search operations** (Phase 2; decided 2026-08-14). Substring
 search generalizes to CONTIGUOUS-SUBSEQUENCE search over any indexed
-collection, following the `StartsWith`/`EndsWith` precedent — one generic
-operator, strings just benefit. Two design points make this sound:
+collection — one generic operator, strings just benefit, and the whole
+family (`RangeOf`, `ContainsSequence`, `StartsWith`, `EndsWith`) is
+introduced together in this phase. Two design points make this sound:
 
 **Not an `IndexOf` overload.** `IndexOf(xs, v)` is ELEMENT search
 (shipped). Overloading it for collection-valued needles would recreate the
@@ -496,8 +644,9 @@ that lock the behavior in:
 - `RangeOf("👨‍👩‍👧", "👩")` → `Nothing` (no match): the woman emoji's
   code units occur inside the ZWJ family cluster, but the subject has ONE
   character, and it is not `👩`.
-- `RangeOf("e" ++ combining-acute ++ "e", "e")` → `2..2`, the span of the
-  FINAL `e` (the leading `e` is inside the `é` cluster).
+- `RangeOf("ée", "e")` → `2..2`, the span of the FINAL `e` (the
+  leading `e` is inside the `é` cluster formed with the following
+  combining acute; the subject's characters are `[é, e]`).
 
 The operators:
 
@@ -506,16 +655,34 @@ The operators:
   index `from` or later, as a 1-based inclusive index range
   (`RangeOf([9,7,5,3], [7,5])` → `2..3`), or `Nothing` when absent.
   Signature `(indexed_collection<T>, indexed_collection<T>, integer?) ->
-  range | nothing where T` — so on strings the needle is a string (or a
-  `list<character>`) and the span is in character indices. Returning the
-  span rather than a start index (Swift's `range(of:)`) is deliberate:
-  it feeds slicing and replacement directly, and it stays honest if a
-  future matching mode has spans that differ from the needle's length
-  (case-insensitive `"ß"`/`"SS"`, collation-aware search). The defining
-  law: `Slice(xs, RangeOf(xs, needle)) == needle` whenever the needle is
-  found — which requires the `Slice(xs, range)` overload, batched into
-  Phase 0 (where `Slice` is already being reworked for the tightening;
-  the overload has no string dependency).
+  range | nothing where T` — a literal, parseable signature now that
+  `range` is a real type (see "The `range` type"). On strings the needle
+  is a string (or a `list<character>`) and the span is in character
+  indices. Returning the span rather than a start index (Swift's
+  `range(of:)`) is deliberate: it feeds slicing and replacement
+  directly, and it stays honest if a future matching mode has spans that
+  differ from the needle's length (case-insensitive `"ß"`/`"SS"`,
+  collation-aware search).
+
+  The defining law, stated ELEMENT-WISE: when the needle is found,
+  `Slice(xs, RangeOf(xs, needle))` has the same element sequence as the
+  needle. It is deliberately not spelled `== needle`: the needle may be
+  a sibling kind of the subject (searching a string with a
+  `list<character>` needle is well-typed), and `Slice` is
+  kind-preserving, so the two sides can be a `string` and a
+  `list<character>` — equal element-wise, never `==` (constraint 2 makes
+  those kinds disjoint). When needle and subject are the same kind, the
+  stronger `==` does hold. This consumes the `Slice(xs, r: range)`
+  overload, batched into Phase 0 (no string dependency).
+
+  Finiteness: the subject must be a finite collection. On an infinite or
+  unknown-length subject the expression stays SYMBOLIC (the house
+  pattern — `Sort` and `StringJoin` already decline this way) rather
+  than searching forever or guessing; an absent needle in `1..oo` would
+  otherwise not terminate. The needle must be finite too. The same rule
+  applies to `ContainsSequence`, `StartsWith`, and `EndsWith` —
+  `EndsWith` additionally requires a known length, since it must inspect
+  the tail.
 
   The `from` parameter (default 1) is what makes iteration expressible
   without re-slicing: the returned span is always in the ORIGINAL
@@ -554,7 +721,11 @@ The operators:
 - `StartsWith(xs, prefix)` / `EndsWith(xs, suffix)` — the same generic
   family: prefix/suffix as contiguous subsequences anchored at an end.
   For strings, a prefix that ends mid-cluster does not match (same
-  structural guarantee as above).
+  structural guarantee as above). An EMPTY prefix/suffix matches
+  everything (`True`), following `ContainsSequence`'s rule rather than
+  `RangeOf`'s: like `ContainsSequence` these return a boolean, so the
+  no-representable-empty-span problem that forces `RangeOf` to reject an
+  empty needle does not arise.
 
 **String-specific operations** (Phase 2). `StringReplace` deliberately
 stays string-only: replacement is where strings genuinely diverge from
@@ -563,15 +734,21 @@ sequence-replace has weak demand against the existing rules/`ReplaceAll`
 machinery, and — because it shares the subjects-first shape — it can be
 generalized later without breaking anything if demand appears.
 
-- `StringReplace(s, target, replacement, count?)` — replaces occurrences
-  found by character-wise matching (the same semantics as
-  `RangeOf`), non-overlapping, scanning left to right,
-  with the scan resuming AFTER each replacement (a replacement's content
-  is never re-matched). All occurrences by default; `count` limits from
-  the left and must be a positive integer (0, negative, or non-integer
-  `count` is an error value). An EMPTY `target` is an error value — the
-  host `replaceAll("", x)` insert-at-every-boundary behavior is a
-  well-known surprise and is deliberately rejected, not inherited.
+- `StringReplace(s, target, replacement, count?)` — signature
+  `(string, string, string, integer?) -> string`; a non-string operand
+  leaves the expression unevaluated, as elsewhere. Occurrences are found
+  by character-wise matching (the same semantics as `RangeOf`),
+  non-overlapping, scanning left to right. The scan walks the ORIGINAL
+  subject's character sequence and skips past each match's span, so a
+  replacement's content is never re-matched (`StringReplace("aa", "a",
+  "aa")` is `"aaaa"`, not an infinite expansion) — and re-segmentation
+  happens ONCE, when the pieces are joined to build the result, per
+  constraint 3. All occurrences by default; `count` limits from the left
+  and must be a positive integer (0, negative, or non-integer `count` is
+  an error value). An EMPTY `target` is an error value — the host
+  `replaceAll("", x)` insert-at-every-boundary behavior is a well-known
+  surprise and is deliberately rejected, not inherited. An empty
+  `replacement` is legal and means DELETION.
 - `Trim(s, chars?)` / `TrimStart` / `TrimEnd` — default trim set is the
   same Unicode White_Space set `StringSplit` uses (`UNICODE_WHITESPACE`).
   The optional `chars` argument is a SET of characters to strip — typed
@@ -585,8 +762,12 @@ generalized later without breaking anything if demand appears.
   if the string already has ≥ `n` characters it is returned unchanged. A
   multi-character `pad` repeats, and the final copy is truncated ON A
   CHARACTER BOUNDARY to fit exactly (JS `padStart` semantics, lifted from
-  code units to characters). Aligning to terminal/display width is an
-  explicit non-goal.
+  code units to characters). `pad` defaults to a single space `" "`; an
+  EMPTY `pad` is an error value (there is no way to reach length `n` with
+  it, and silently returning `s` unchanged would hide the caller's bug);
+  a non-string `pad` leaves the expression unevaluated, like every other
+  operand here. `n` must be a non-negative integer. Aligning to
+  terminal/display width is an explicit non-goal.
 
 **Case operations** (Phase 2):
 
@@ -602,8 +783,22 @@ generalized later without breaking anything if demand appears.
 
 **Conversions**:
 
-- `NumberFrom(string) -> number` — entirely missing today (`DigitsFrom` is
-  integer-only); follows the `From` convention.
+- `NumberFrom(s, base?) -> number | error` — entirely missing today
+  (`DigitsFrom` is integer-only); follows the `From` convention. Parse
+  contract, so implementations cannot drift: the accepted grammar is
+  optional leading/trailing Unicode White_Space, an optional sign, then
+  either a decimal numeral (digits with an optional `.` fraction and an
+  optional `e`/`E` exponent) or one of the exact spellings `oo`/`+oo`/
+  `-oo`/`NaN`. ASCII digits only in v1 (other Unicode decimal digits are
+  rejected — silently accepting them invites homoglyph confusion). Any
+  other input, including the empty string, is an ERROR value, never
+  `NaN`: `NaN` is a legitimate parse RESULT for the literal `"NaN"`, so
+  it cannot double as the failure signal. Exactness follows the engine's
+  evaluate/N contract: a numeral with no fraction or exponent parses to
+  an exact integer, `"1/3"` is NOT accepted (use `DigitsFrom` or
+  arithmetic), and a fractional/exponent numeral parses to an exact
+  decimal, numericized only by `.N()`. The optional `base` mirrors
+  `DigitsFrom`'s (2–36, integer numerals only).
 - `CharacterFrom(string) -> character` — see "The `character` value model"
   (Phase 1, since literal narrowing and serialization depend on it).
 - Number FORMATTING (fixed decimals, scientific notation, grouping
@@ -696,7 +891,7 @@ operators, already anticipated in their Phase 2 description.
 | `ToUpperCase`/`ToLowerCase` | optional trailing locale | add optional param |
 | `CaseFold` + `==` | unchanged — the fast, deterministic caseless path | none (subsumed but not replaced) |
 | `==`, `in`, `Contains`, `Unique`, `Tally` | never collation-aware (invariant above) | none, by promise |
-| `ContainsSequence`/`RangeOf`/`StartsWith` | stay codepoint-literal; collation-aware search (accent-insensitive matching) would be a NEW operator or a named option, not a redefinition | none |
+| `ContainsSequence`/`RangeOf`/`StartsWith` | stay character-literal; collation-aware search (accent-insensitive matching) would be a NEW operator or a named option, not a redefinition | none |
 
 One addition this analysis feeds back into Phase 2: **`StringCompare(a, b)
 -> -1 | 0 | 1`**, three-valued comparison under the default scalar-sequence
@@ -741,32 +936,47 @@ operator to land on.
 
 ## Phases
 
-0. **Signature tightening (upfront — no string involvement).** Tighten
-   the bound-tightenable operators to `(T, …) -> T where T:
-   indexed_collection` (`Rest`, `Most`, `Take`, `Drop`, `Slice`, unary
-   `Sort`, `Unique` — per the honesty test in "Signature refinement"),
-   and make each runtime actually kind-preserving for
-   `list`/`range`/`linspace` (lazy views or literal reconstruction —
-   `Take(1..10^6, 3)` stays a range, a standalone laziness/perf win).
-   Breaking: static result types change (`Take(1..10, 3)` types as
-   `range`) and runtime value kinds change — CHANGELOG migration note.
+0. **The `range` type + honest per-kind signatures (upfront — no string
+   involvement).** Three pieces, all independent of strings:
 
-   Also in this phase (same `Slice` touch, no string dependency): the
-   **`Slice(xs, range)` overload** the `RangeOf` law consumes. `Slice`
-   today takes only positional bounds (`(xs, start, end)`, 1-based
-   inclusive, clamping out-of-bounds, negatives counting from the end,
-   `start > end` → empty) — a range argument is a type error.
-   `Slice(xs, r)` for a step-1 ASCENDING integer range is defined as
-   `Slice(xs, First(r), Last(r))`, inheriting the clamping and
-   negative-index semantics. Any other range — descending or stepped —
-   is an ERROR value, deliberately: `Slice(xs, 3, 2)` is empty, but the
-   RANGE `3..2` is the descending two-element collection `[3, 2]`, so
-   unpacking its bounds would contradict the range's own meaning.
-   Gather-by-indices (any order, any step) already exists as
-   `At(xs, r)` — the error message points there. Division of labor:
-   `Slice` = contiguous span, kind-preserving (string → string after
-   Phase 1), clamping; `At` = gather, list-out, element-exact.
-   Ships before, and independently of, everything below.
+   a. **The `range` type** — add it to the lattice as
+      `range <: indexed_collection<integer>` and gate `Range`'s type
+      handler on the qualification check (integer, ≥ 1, ascending,
+      step 1, finite). See "The `range` type".
+
+   b. **Per-kind result rule** for `Reverse`, `Rest`, `Most`, `Take`,
+      `Drop`, `Slice`, `Unique`, `Sort` (unary and comparator arms —
+      note the arity split and the superseded List-rebuild pin),
+      `RotateLeft`/`RotateRight`, `Filter`: `string -> string` (Phase 1),
+      `list -> list`, every other indexed kind → `list<T>`. This FIXES
+      the live `Reverse`-on-tuple defect (filed in `ROADMAP.md`), where
+      the current `(T) -> T` signature claims `tuple<finite_integer,
+      string>` for the value `("a", 1)`. Separately, keep/extend runtime
+      laziness so `Take(1..10^6, 3)` still returns a `Range` VALUE — a
+      perf property, independent of the static type (see the decoupling
+      note in "Signature refinement").
+
+   c. **The `Slice(xs, r: range)` overload** the `RangeOf` law consumes.
+      `Slice` today takes only positional bounds (`(xs, start, end)`,
+      1-based inclusive, clamping out-of-bounds, negatives counting from
+      the end, `start > end` → empty) — a range argument is a type error.
+      `Slice(xs, r)` is defined as `Slice(xs, First(r), Last(r))`,
+      inheriting the clamping semantics. Because the parameter is typed
+      `range`, a descending or stepped argument is rejected STATICALLY
+      (no runtime error branch needed): `Slice(xs, 3, 2)` is empty, but
+      the collection `3..2` is the descending pair `[3, 2]`, so unpacking
+      its bounds would contradict its own meaning. Gather-by-indices (any
+      order, any step) is `At(xs, r)`, which accepts the wider
+      `indexed_collection<integer>` — the diagnostic points there.
+      Division of labor: `Slice` = contiguous span, clamping,
+      kind-preserving for list/string; `At` = gather, list-out,
+      element-exact.
+
+   Breaking: static result types change (`Reverse((1, "a"))` newly types
+   as `tuple<string, finite_integer>`; operators that silently promised
+   `(T) -> T` for exotic kinds now say `list<T>`; qualifying `Range`
+   calls newly type as `range`) — CHANGELOG migration note. Ships
+   before, and independently of, everything below.
 1. **`character` type + collection facets.** The `character` scalar type in
    the lattice with its full value model (representation, `CharacterFrom`,
    equality/ordering/hashing, serialization); `string <:
@@ -774,9 +984,10 @@ operator to land on.
    `at`); broadcast and `Flatten` atomicity; the `String`
    single-collection join carve-out (constraint 3); literal narrowing;
    well-formedness at ingress (constraint 12); `Characters` migration;
-   string runtimes for every Phase-0-tightened operator plus `Reverse`
-   (mandatory: their `(T) -> T` signatures extend the promise to strings
-   the moment the lattice flips — the delta is segment → operate → join
+   the `string -> string` arm for every operator given a per-kind result
+   rule in Phase 0 (mandatory, per the preservation rule: their
+   signatures promise string-out the moment the lattice flips — the
+   delta is segment → operate → join
    on machinery Phase 0 already made kind-preserving); library signature
    audit under the String preservation rule; the compile-target matrix
    (constraint 10: JS explicit exclusion + grapheme lowerings, Python
@@ -785,10 +996,11 @@ operator to land on.
    `doc/97-reference-strings.md` (it currently states "Strings are not
    handled as collections" and documents `Characters` as `list<string>` —
    both false after this phase). Ships as one unit (constraint 8).
-2. **Overload-set promotions + substring/case operations.** String
-   overloads for the operators that failed the honesty test
-   (`RotateLeft`/`RotateRight`, `Filter`, `Sort` with a comparator) and
-   the `Join` string-preserving overload, each documenting the
+2. **`Join`/`StringJoin` roles + substring/case operations.** (The
+   `string -> string` arms for the element-preserving operators all
+   land in Phase 1; what remains here is the one role change and the new
+   operations.) The `Join` string-preserving overload — all-string
+   operands, see "`Join` vs. `StringJoin`" — documenting the
    re-segmentation caveat (constraint 3). `StringJoin` is narrowed to
    `(collection, separator?) -> string` and its variadic form removed
    (see "`Join` vs. `StringJoin`"; breaking, CHANGELOG + migration

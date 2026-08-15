@@ -1052,13 +1052,17 @@ export interface BaseCollectionHandlers {
   ) => boolean | undefined;
 
   /**
-   * Return `true` if all the elements of `other` are in `collection`.
-   * Both `collection` and `other` are collections.
+   * Return `true` if all the elements of `collection` are in `other` — that
+   * is, `collection` ⊆ `other`. The RECEIVER is the candidate subset, matching
+   * the public `Expression.subsetOf(other, strict)` method that dispatches
+   * here. Both `collection` and `other` are collections.
    *
-   * If strict is `true`, the subset must be strict, that is, `collection` must
-   * have more elements than `other`.
+   * If strict is `true`, the subset must be strict, that is, `other` must have
+   * an element that `collection` does not.
    *
-   * Return `undefined` if the subset relation cannot be determined.
+   * Return `undefined` if the subset relation cannot be determined. A handler
+   * that cannot see far enough to answer must return `undefined` rather than
+   * `false`: `false` is read as a proof that the relation does NOT hold.
    */
   subsetOf?: (
     collection: Expression,

@@ -24,10 +24,11 @@
   mutated in place: every name referring to it sees the change, including a
   `const` binding, since the store writes the object and never the binding.
 
-  A store carries the `state` effect, so a function that performs one must
-  declare it. Stores do not disturb the engine's invalidation generations —
-  only results that actually read the changed object's fields are recomputed —
-  so a store-heavy loop does not cold unrelated caches.
+  A store is an effect: a function whose body stores into a field infers the
+  `state` label, so annotating such a function `pure` is refused rather than
+  silently accepted. Stores do not disturb the engine's invalidation
+  generations — only results that actually read the changed object's fields
+  are recomputed — so a store-heavy loop does not cold unrelated caches.
 
 - **Assigning to a field of an immutable value now says so.** A field
   assignment on a record, dictionary, tuple, or scalar reports
@@ -54,6 +55,38 @@
 
 ### Issues Resolved
 
+- **Compiling an indexed read out of a collection with complex elements no
+  longer produces a wrong value.** A list is compiled element by element and
+  each element picks its own real-or-complex lowering, so the emitted array is
+  mixed: `[i·t, 1]` becomes `[{re, im}, 1]`. An indexed read was nonetheless
+  classified from the whole collection, which describes no individual element —
+  so it was wrong in both directions, and silently, behind `success: true`. At
+  `t = 0.3`, with no compile options set:
+
+  ```epsil
+  [i t, 1][2] + 1                      // was {re: NaN}, now 2
+  h(t) := [i t, 1]  ;  h(t)[1] + 1     // was the string "[object Object]1",
+                                       // now 1 + 0.3i
+  2 * h(t)                             // was [NaN, 2]; now declines to the
+                                       // interpreter, which gives [0.6i, 2]
+  ```
+
+  The read is now classified from the element it actually selects. A literal
+  index names one element; a run-time index is answered when every element
+  agrees. A run-time index into a collection whose elements DISAGREE has no
+  static answer — the read is a complex object for some indices and a plain
+  number for others — so it now declines to compile and the interpreter
+  evaluates it, rather than emitting one of the two lowerings and being wrong
+  for the other.
+
+  This also completes the opt-in `complexPromotion` introduced in 0.110.0 for
+  collection-valued functions, which was its motivating case: promotion always
+  happened inside the body, and only the reading of the result was missing.
+  `w(t) := [√(t−1), √(t−2)]` with `|w(t)[1]/2 − 1|` now matches the
+  interpreter with the option on, for a list body and for a point-list body
+  alike. The promotion rule itself is unchanged, and compilation without the
+  option is unaffected apart from the corrected values above.
+
 - **Comparing a collection-typed operand with a list no longer overflows the
   stack.** `M = [1,2]` with `M` declared `vector<2>` and unassigned — or
   `L(1) = [1,2]` under `L: (number) -> vector<2>`, in either operand order, and
@@ -72,6 +105,100 @@
   collection rule leaves them undecided); list-vs-scalar broadcast, named-list
   broadcast, whole-list equality, and comparisons on a DEFINED vector-valued
   function are all unchanged.
+
+- **`Subset` over set literals no longer answers backwards.**
+  `Subset(Set(1), Set(1, 2))` and `SubsetEqual(Set(1), Set(1, 2))` evaluated to
+  `False`, while `Subset(Set(1, 2), Set(1))` evaluated to `True`, on a bare
+  engine with two literal, finite, fully known sets. The `subsetOf` collection
+  handler had two contradictory readings of its operand order in the codebase at
+  once: `receiver ⊆ other` — the public `Expression.subsetOf(other, strict)`
+  contract, which `Set` implemented — and `other ⊆ receiver`, which the named
+  number sets implemented and which the dispatcher assumed. Against a `Set`
+  literal the dispatcher therefore computed the question backwards. The whole
+  family (`Subset`, `SubsetEqual`, `Superset`, `SupersetEqual` and the three
+  `Not…` forms) inherited it.
+
+  Every handler now answers `receiver ⊆ other`, and the dispatcher asks the
+  candidate SUBSET. Fixed in the same pass:
+
+  - `SupersetEqual` and `NotSupersetEqual` asked for a STRICT superset, so
+    `SupersetEqual(Set(1), Set(1))` was `False`.
+  - An operand the engine cannot resolve — a symbol declared `set<number>` and
+    not yet assigned — left the relation `False`, an answer a later assignment
+    contradicts. Such a comparison now stays unevaluated. An operand whose TYPE
+    rules out a collection (`Subset(3, Set(1))`) is still `False`.
+  - `Range(2, 4, 2)` (= {2, 4}) counted as a subset of `Range(1, 5, 2)`
+    (= {1, 3, 5}): sharing a step was accepted without checking that the two
+    grids are in phase.
+  - `Range`'s reported element sign was taken from the range's DIRECTION, so
+    every ascending range read as `positive` — `Range(-5, 10)` included, which
+    is how it passed for a subset of `PositiveIntegers`.
+  - Strictness compared element COUNTS, which is not a stand-in for set
+    equality when a collection's elements repeat: `Subset(List(1, 1),
+    List(1))` was `True` (same elements) and `Subset(List(1, 1), List(1, 2))`
+    was `False` (genuinely a strict subset). It now looks for an element of
+    the superset that the subset lacks.
+  - A `Range` was compared by its declared upper BOUND rather than its last
+    element, so `Range(1, 5, 3)` and `Range(1, 4, 3)` — both {1, 4} — were not
+    subsets of one another; and two single-element ranges with different steps
+    (`Range(1, 1, 1)`, `Range(1, 1, 5)`) failed a step test that has nothing to
+    constrain. The grid arithmetic is also confined to integer bounds now: a
+    decimal step takes the elementwise walk rather than trusting `%`.
+  - `Interval` had no `subsetOf` handler at all, so `Subset(Interval(1, 2),
+    Interval(0, 5))` was `False`. It has one now, honoring open and closed
+    endpoints and infinite bounds.
+
+  Sign constraints now compose along their lattice rather than by exact match,
+  so `Subset(PositiveIntegers, NonNegativeNumbers)` is `True` where it was
+  `False`, and a finite collection is decided against an infinite number set
+  from its element type alone — `SubsetEqual(Range(1, 1000000), Integers)` is
+  `True` without walking a million elements.
+
+- **An `Interval`'s emptiness now follows its endpoints.** `Interval(1, 1)`
+  reported `isEmptyCollection` as `true` while its own `contains(1)` returned
+  `true` — the closed degenerate interval is the set {1}, not the empty set.
+  In the other direction, a reversed interval with both endpoints open
+  (`Interval(Open(2), Open(1))`) reported itself NON-empty, because emptiness
+  was decided from the endpoint markers before the bounds were compared.
+  Emptiness is now: bounds that cross are empty; bounds that coincide are empty
+  unless BOTH endpoints are closed.
+
+  `Random` over a degenerate interval still errors, but for the right reason. It
+  had been reading `isEmptyCollection` to reject `Random(Interval(1, 1))`, which
+  only worked while that handler was wrong. A continuous draw needs positive
+  WIDTH — a different question from set-emptiness — so it now tests the width
+  directly, which is what the compiled path (`domainInterval` in the JavaScript
+  target) already did. Interpreter and compiler now apply the same guard.
+
+- **A declared collection type now answers `count` even with no value.**
+  `ce.declare('M', 'vector<2>')` promises 2 elements, so `M.count` is `2`
+  where it was `undefined`, and `Count(M)` evaluates to `2` instead of staying
+  symbolic. A `matrix<3x4>` counts its 3 rows (`count` is the number of
+  top-level elements, matching `each()` and `at()`), a `tuple` counts its
+  members, a named type answers as its expansion does, and a union answers
+  when every arm agrees (`vector<2> | tuple<number, number>` is 2). An UNSIZED
+  collection type (`list<T>`, `set<T>`) carries no length and stays
+  `undefined`, as does a non-collection — a `number` is not a collection of
+  unknown size.
+
+  **`isEmptyCollection` and `isFiniteCollection` deliberately do NOT answer
+  from the type**, and neither do the capability facets `isCollection` and
+  `isEnumerableCollection`. A declared size is not permission to walk:
+  roughly twenty library sites treat `isFiniteCollection === true` as their
+  precondition for iterating and then index by `count` — `Sort` builds
+  `0..count-1` and dereferences `at(i)!` — so answering `true` for a symbol
+  whose `each()` yields nothing turns them into definite wrong answers
+  (`Unique` returning `[]`, `Quartiles` returning `(NaN, NaN, NaN)`) or a
+  crash. `count` is safe because it is not itself a walk gate. Making those
+  two answer from the type requires first teaching every such caller to
+  consult `isEnumerableCollection`, which is a separate change.
+
+  An APPLICATION does not take the shortcut either: its collection type can
+  be an artifact of the vacuous lift rather than a promise (`Total([1,2])`
+  with `Total` undeclared types `list<unknown^2>` yet walks nothing), and a
+  bound head with a genuinely sized return is not distinguishable from it at
+  that point, so `count` would outrun the walk — the invariant pinned by
+  `test/compute-engine/tycho-item-167-broadcast-count.test.ts`.
 
 ## 0.110.0 _2026-08-15_
 

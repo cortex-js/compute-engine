@@ -868,9 +868,8 @@ export function objectLayoutOwnsField(
   const rootName = sym(base);
   if (rootName !== undefined) {
     const def = ce.lookupDefinition(rootName);
-    const t = def !== undefined && isValueDef(def)
-      ? def.value.type.type
-      : undefined;
+    const t =
+      def !== undefined && isValueDef(def) ? def.value.type.type : undefined;
     return (
       t !== undefined && objectLayoutOfType(t)?.elements[name] !== undefined
     );
@@ -882,7 +881,9 @@ export function objectLayoutOwnsField(
   try {
     const canonical = base.canonical;
     if (!canonical.isValid) return false;
-    return objectLayoutOfType(canonical.type.type)?.elements[name] !== undefined;
+    return (
+      objectLayoutOfType(canonical.type.type)?.elements[name] !== undefined
+    );
   } catch {
     return false;
   }
@@ -2413,28 +2414,52 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // Symbolic bounds on either side: indeterminate
           if (hasSymbolicRangeBounds(expr) || hasSymbolicRangeBounds(target))
             return undefined;
-          const [al, au, as] = range(expr);
-          const [bl, bu, bs] = range(target);
-          // Ascending ranges only. A descending or empty range (`as`/`bs`
-          // negative or zero) does not enumerate as `al, al+as, …, au`, so the
-          // arithmetic below would not describe its elements; those fall
-          // through to the elementwise walk.
-          if (as <= 0 || bs <= 0 || al > au || bl > bu) return undefined;
-          // Every element of `expr` is `al + k·as`; it lies in `target` when it
-          // is within `target`'s bounds AND on its grid. Sharing the step
-          // (`as % bs === 0`) is not enough — the two grids must also be in
-          // PHASE, which is what `(al - bl) % bs === 0` checks: without it
-          // `Range(2, 4, 2)` = {2, 4} would count as a subset of
-          // `Range(1, 5, 2)` = {1, 3, 5}.
-          if (!(al >= bl && au <= bu && as % bs === 0 && (al - bl) % bs === 0))
-            return false;
+          const a = range(expr);
+          const b = range(target);
+          const [al, , as] = a;
+          const [bl, , bs] = b;
+          // Ascending integer grids only. The `%` arithmetic below is exact
+          // only on integers (over floats it accumulates representation error,
+          // and `Range.contains` compares decimal steps with a tolerance this
+          // would contradict), and a descending range does not enumerate as
+          // `al, al + as, …`. Everything else takes the elementwise walk.
+          const aLast = rangeLast(a);
+          const bLast = rangeLast(b);
+          if (
+            as <= 0 ||
+            bs <= 0 ||
+            ![al, as, aLast, bl, bs, bLast].every(Number.isInteger)
+          )
+            return collectionSubset(expr, target, strict);
+
+          // Work from the ELEMENT COUNT, not the declared upper bound: a
+          // range stops at the last grid point at or before `upper`, so
+          // `Range(1, 5, 3)` and `Range(1, 4, 3)` both enumerate {1, 4} and
+          // comparing `upper` would call the first no subset of the second.
+          const aCount = Math.floor((aLast - al) / as) + 1;
+          const bCount = Math.floor((bLast - bl) / bs) + 1;
+          // An empty range is a subset of every range, strictly so unless the
+          // other is empty too.
+          if (aCount <= 0) return strict ? bCount > 0 : true;
+          if (bCount <= 0) return false;
+
+          // Every element of `expr` is `al + k·as`, and lies in `target` when
+          // it is within `target`'s span AND on its grid. Being on the grid
+          // takes two conditions, not one: the same PHASE
+          // (`(al - bl) % bs === 0`) and a step that is a multiple of
+          // `target`'s. Without the phase check `Range(2, 4, 2)` = {2, 4}
+          // would count as a subset of `Range(1, 5, 2)` = {1, 3, 5}. The step
+          // condition is vacuous for a single element, which has no second
+          // point for the step to place — `Range(1, 1, 1)` and
+          // `Range(1, 1, 5)` are both {1}.
+          const inSpan = al >= bl && aLast <= bLast;
+          const inPhase = (al - bl) % bs === 0;
+          const onGrid = aCount === 1 || as % bs === 0;
+          if (!(inSpan && inPhase && onGrid)) return false;
           if (!strict) return true;
-          // Proper unless the two ranges enumerate the same elements.
-          return !(
-            al === bl &&
-            as === bs &&
-            Math.floor((au - al) / as) === Math.floor((bu - bl) / bs)
-          );
+          // `expr ⊆ target` with the same number of elements means the same
+          // elements.
+          return aCount !== bCount;
         }
 
         // Any other target: the generic elementwise/type-based test.
@@ -2457,6 +2482,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // the direction alone reported `Range(-5, 10)` as `positive`, which a
         // subset test against `PositiveIntegers` then believed.
         const last = rangeLast(r);
+        // `rangeLast` special-cases an infinite UPPER bound but not an
+        // infinite LOWER one, where `upper - ((upper - lower) % step)`
+        // evaluates to NaN (`Range(-oo, -1)`). Decline explicitly: NaN makes
+        // every comparison below false, so the sign would come out `undefined`
+        // by accident rather than by decision. An infinite UPPER bound is
+        // fine and stays supported — `Range(1, oo)` is `positive`.
+        if (Number.isNaN(last)) return undefined;
         const min = Math.min(lower, last);
         const max = Math.max(lower, last);
         if (min > 0) return 'positive';
@@ -2570,15 +2602,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         };
       },
       isEmpty: (_expr) => {
-        // An interval is empty if the start is greater or equal to the end
         const int = interval(_expr);
         // Symbolic endpoints: emptiness is indeterminate
         if (!int) return undefined;
-        // Should account for open intervals???
-        if (int.openStart && int.start === int.end) return true;
-        if (int.openEnd && int.start === int.end) return true;
-        if (int.openStart && int.openEnd) return false;
-        return int.start >= int.end;
+        // Bounds that cross contain nothing, whatever the endpoint markers
+        // say: `(2, 1)` and `[2, 1]` are both empty. The previous form
+        // answered this case from the marker pair alone and reported a
+        // doubly-open reversed interval NON-empty.
+        if (int.start > int.end) return true;
+        // Bounds that coincide contain their single point only when BOTH
+        // endpoints are closed: `[1, 1]` is {1} — and `contains(1)` says so —
+        // while `(1, 1)`, `[1, 1)` and `(1, 1]` all exclude the only
+        // candidate. The previous form reported `[1, 1]` empty, contradicting
+        // its own `contains` handler.
+        if (int.start === int.end) return int.openStart || int.openEnd;
+        return false;
       },
       isFinite: (_expr) => false,
       // Per the handler contract (`types-definitions.ts`) the receiver is the
@@ -2587,19 +2625,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const a = interval(expr);
         // Symbolic endpoints: indeterminate
         if (a === undefined) return undefined;
+
+        // An empty interval is a subset of every collection, strictly so
+        // unless `other` is empty too. This is decided BEFORE the
+        // interval-vs-interval comparison below, because otherwise an empty
+        // interval whose `other` is a `Set`, a `Range` or a number set would
+        // take the generic path — and that path cannot decide it: it declines
+        // anything whose `isFiniteCollection` is not `true`, and an
+        // `Interval`'s is unconditionally `false` even when the interval holds
+        // nothing.
+        if (expr.isEmptyCollection === true) {
+          if (!strict) return true;
+          if (other.isEmptyCollection === undefined) return undefined;
+          return !other.isEmptyCollection;
+        }
+
         const b = interval(other);
         // `other` is not an interval: fall back to the generic test, which
         // still decides an interval against a set that contains every value
         // of its element type (`Interval(1, 2)` ⊆ `RealNumbers`).
         if (b === undefined) return collectionSubset(expr, other, strict);
-
-        if (expr.isEmptyCollection === true) {
-          // The empty set is a subset of everything, strictly so unless
-          // `other` is empty too.
-          if (!strict) return true;
-          if (other.isEmptyCollection === undefined) return undefined;
-          return !other.isEmptyCollection;
-        }
 
         // An endpoint of `other` admits the corresponding endpoint of `expr`
         // when it lies strictly outside it, or coincides with it and is no
@@ -7961,7 +8006,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return ce.function('Dictionary', entries);
     },
   },
-
 };
 
 //

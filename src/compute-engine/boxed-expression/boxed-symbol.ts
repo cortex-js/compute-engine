@@ -11,6 +11,7 @@ import {
   widen,
   narrow,
   containsSignatureArm,
+  typeElementCount,
 } from '../../common/type/utils.js';
 import { reduceType } from '../../common/type/reduce.js';
 import type { OneOf } from '../../common/one-of.js';
@@ -1418,13 +1419,21 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   // For a non-collection symbol these return `undefined` (the abstract-class
   // contract), not 0 / true — a plain symbol is not an empty collection.
   get count(): number | undefined {
+    // A declared collection type pins the size even with no value to walk
+    // (`vector<2>` has 2 elements by declaration), so it is the fallback when
+    // neither the collection handlers nor a value can answer. It is only a
+    // FALLBACK: a value that disagrees with its declared size is a type error
+    // reported elsewhere, and the value is the more specific answer regardless.
+    const fromType = typeElementCount(this.type.type);
     const def = this._def;
-    if (def === undefined) return undefined;
+    if (def === undefined) return fromType;
     const guard = enterCycleQuery(def, CycleQuery.Count);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
       return (
-        this._asCollection?.count(this._value ?? this) ?? this._value?.count
+        this._asCollection?.count(this._value ?? this) ??
+        this._value?.count ??
+        fromType
       );
     } finally {
       exitCycleQuery(def, guard);
@@ -1437,6 +1446,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const guard = enterCycleQuery(def, CycleQuery.IsEmptyCollection);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
+      // Deliberately NO type-derived fallback here, unlike `count` above: see
+      // the note on `_BoxedExpression.isEmptyCollection`. Library operators
+      // treat a decided `isFiniteCollection`/`isEmptyCollection` as licence to
+      // walk, and a valueless symbol's `each()` yields nothing, so answering
+      // from the declared size turns an unresolved operand into a definite
+      // empty result.
       return (
         this._asCollection?.isEmpty?.(this._value ?? this) ??
         this._value?.isEmptyCollection
@@ -1597,16 +1612,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
   }
 
-  subsetOf(rhs: Expression, strict: boolean): boolean {
+  subsetOf(rhs: Expression, strict: boolean): boolean | undefined {
+    // No definition, or a self-referential query: undecided rather than `no`
+    // — an undeclared symbol may still be assigned a collection later.
     const def = this._def;
-    if (def === undefined) return false;
+    if (def === undefined) return undefined;
     const guard = enterCycleQuery(def, CycleQuery.SubsetOf);
-    if (guard === CYCLE_DETECTED) return false;
+    if (guard === CYCLE_DETECTED) return undefined;
     try {
       return (
         this._asCollection?.subsetOf?.(this._value ?? this, rhs, strict) ??
-        this._value?.subsetOf?.(rhs, strict) ??
-        false
+        this._value?.subsetOf?.(rhs, strict)
       );
     } finally {
       exitCycleQuery(def, guard);

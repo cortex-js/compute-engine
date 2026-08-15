@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine as ce } from '../utils';
 
 describe('ELEMENT', () => {
@@ -247,6 +248,241 @@ describe('SUBSET', () => {
     ).toMatchInlineSnapshot(`True`);
     expect(
       ce.expr(['Subset', 'EmptySet', 'EmptySet']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+  });
+
+  // The `subsetOf` collection handler had TWO contradictory readings of its
+  // operand order: the `Set` handler answered `receiver ⊆ other` (the public
+  // `Expression.subsetOf()` contract) while the named number sets answered
+  // `other ⊆ receiver`, and the dispatcher assumed the second. Against a `Set`
+  // literal that computed the question backwards, so both directions were
+  // wrong at once.
+  test('set literals answer in the right direction', () => {
+    expect(
+      ce.expr(['Subset', ['Set', 1], ['Set', 1, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Subset', ['Set', 1, 2], ['Set', 1]]).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['SubsetEqual', ['Set', 1], ['Set', 1, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['SubsetEqual', ['Set', 1, 2], ['Set', 1]]).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['Superset', ['Set', 1, 2], ['Set', 1]]).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    // A set is a subset (possibly equal) of itself, but not a strict one.
+    expect(
+      ce.expr(['SubsetEqual', ['Set', 1], ['Set', 1]]).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Subset', ['Set', 1], ['Set', 1]]).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+  });
+
+  // `SupersetEqual`/`NotSupersetEqual` passed `strict = true`, so the
+  // "possibly equal" reading denied that a set is a superset of itself.
+  test('SupersetEqual allows equality', () => {
+    expect(
+      ce.expr(['SupersetEqual', ['Set', 1], ['Set', 1]]).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['SupersetEqual', 'Integers', 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['NotSupersetEqual', ['Set', 1], ['Set', 1]]).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['NotSupersetEqual', ['Set', 1], ['Set', 1, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+  });
+
+  test('a finite collection is a subset of the number set it fits in', () => {
+    expect(
+      ce.expr(['SubsetEqual', ['Set', 1, 2], 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['SubsetEqual', 'Integers', ['Set', 1, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['SubsetEqual', ['Range', 1, 10], 'PositiveIntegers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    // A `Range` that straddles zero is not a subset of the positive integers
+    // (`Range`'s `eltsgn` used to report any ASCENDING range as `positive`).
+    expect(
+      ce.expr(['SubsetEqual', ['Range', -5, 10], 'PositiveIntegers']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['SubsetEqual', ['Range', -5, 10], 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    // Decided from the element type alone, so the size of the range is
+    // irrelevant — no walk happens.
+    expect(
+      ce.expr(['SubsetEqual', ['Range', 1, 1000000], 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+  });
+
+  test('sign constraints compose along the lattice', () => {
+    expect(
+      ce.expr(['Subset', 'PositiveIntegers', 'NonNegativeNumbers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Subset', 'NonNegativeIntegers', 'PositiveIntegers']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['Subset', 'ImaginaryNumbers', 'ComplexNumbers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+  });
+
+  // The signed INTEGER sets are declared over `integer`, which admits the
+  // infinities, while `Integers` is declared over `finite_integer`, which does
+  // not — and their `contains` handlers agree: `NegativeIntegers` contains
+  // -oo, `Integers` does not contain +oo. So the negative integers are NOT a
+  // subset of `Integers`; `ExtendedIntegers` is the one that contains them.
+  // The answer looks wrong at a glance, which is why it is pinned here.
+  test('the signed integer sets admit the infinities', () => {
+    expect(
+      ce.expr(['Subset', 'NegativeIntegers', 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['Subset', 'NegativeIntegers', 'ExtendedIntegers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    // The `contains` handlers this rests on:
+    expect(
+      ce.box('NegativeIntegers').contains(ce.box({ num: '-Infinity' }))
+    ).toBe(true);
+    expect(ce.box('Integers').contains(ce.box({ num: '+Infinity' }))).toBe(
+      false
+    );
+  });
+
+  // An empty interval is a subset of every collection, including one that is
+  // not an interval — the generic path cannot decide that case, because it
+  // declines anything not known finite and an `Interval` never reports finite.
+  test('an empty Interval is a subset of a non-Interval collection', () => {
+    expect(
+      ce.expr(['Subset', ['Interval', 5, 3], ['Set', 1, 2, 3]]).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce
+        .expr(['Subset', ['Interval', ['Open', 5], ['Open', 5]], 'Integers'])
+        .evaluate()
+    ).toMatchInlineSnapshot(`True`);
+  });
+
+  // Two ranges can share a step and still be disjoint if their grids are out
+  // of phase: {2, 4} is not a subset of {1, 3, 5}.
+  test('Range subset requires matching bounds AND phase', () => {
+    expect(
+      ce.expr(['Subset', ['Range', 2, 4, 2], ['Range', 1, 5, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['Subset', ['Range', 2, 4, 2], ['Range', 2, 6, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce
+        .expr(['SubsetEqual', ['Range', 2, 6, 2], ['Range', 2, 6, 2]])
+        .evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Subset', ['Range', 2, 6, 2], ['Range', 2, 6, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+  });
+
+  // A range stops at the last grid point at or before its upper BOUND, so two
+  // ranges with different bounds — or different steps — can be the same set.
+  test('Range subset compares elements, not declared bounds', () => {
+    // Both enumerate {1, 4}.
+    expect(
+      ce
+        .expr(['SubsetEqual', ['Range', 1, 5, 3], ['Range', 1, 4, 3]])
+        .evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Subset', ['Range', 1, 5, 3], ['Range', 1, 4, 3]]).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    // Both are {1}: with a single element there is no second point for the
+    // step to place, so the steps need not divide one another.
+    expect(
+      ce
+        .expr(['SubsetEqual', ['Range', 1, 1, 1], ['Range', 1, 1, 5]])
+        .evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    // A descending range takes the elementwise walk; {10, 7, 4, 1} ⊆ {1..10}.
+    expect(
+      ce
+        .expr(['SubsetEqual', ['Range', 10, 1, -3], ['Range', 1, 10]])
+        .evaluate()
+    ).toMatchInlineSnapshot(`True`);
+  });
+
+  // Strictness asks whether the SUPERSET has an element the subset lacks.
+  // Comparing sizes instead is wrong in both directions for a collection whose
+  // elements repeat, and `List` admits duplicates where `Set` does not.
+  test('strictness over a collection with duplicate elements', () => {
+    // Same elements, different sizes — not a strict subset.
+    expect(
+      ce.expr(['Subset', ['List', 1, 1], ['List', 1]]).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['SubsetEqual', ['List', 1, 1], ['List', 1]]).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    // Same size, different elements — a strict subset.
+    expect(
+      ce.expr(['Subset', ['List', 1, 1], ['List', 1, 2]]).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+  });
+
+  // `Interval`'s emptiness is decided by its endpoints, not by its endpoint
+  // MARKERS: a doubly-open reversed interval used to report itself non-empty,
+  // and the degenerate closed `[1, 1]` used to report itself empty while its
+  // own `contains(1)` answered `True`.
+  test('Interval emptiness follows the endpoints', () => {
+    expect(
+      ce.expr(['Interval', ['Open', 2], ['Open', 1]]).isEmptyCollection
+    ).toBe(true);
+    expect(ce.expr(['Interval', 2, 1]).isEmptyCollection).toBe(true);
+    expect(ce.expr(['Interval', 1, 1]).isEmptyCollection).toBe(false);
+    expect(ce.expr(['Interval', 1, 1]).contains(ce.box(1))).toBe(true);
+    expect(
+      ce.expr(['Interval', ['Open', 1], ['Open', 1]]).isEmptyCollection
+    ).toBe(true);
+    expect(ce.expr(['Interval', 1, 2]).isEmptyCollection).toBe(false);
+    // An empty interval is a subset of every interval.
+    expect(
+      ce
+        .expr([
+          'SubsetEqual',
+          ['Interval', ['Open', 2], ['Open', 1]],
+          ['Interval', ['Open', 0], ['Open', 0.5]],
+        ])
+        .evaluate()
+    ).toMatchInlineSnapshot(`True`);
+  });
+
+  // A symbol DECLARED with a set type but not yet assigned is not a decided
+  // `False`: answering one would flip to `True` on assignment.
+  test('an unresolved operand leaves the relation unevaluated', () => {
+    const engine = new ComputeEngine();
+    engine.declare('unassignedSet', 'set<number>');
+    expect(
+      engine.expr(['SubsetEqual', 'EmptySet', 'unassignedSet']).evaluate().json
+    ).toEqual(['SubsetEqual', 'EmptySet', 'unassignedSet']);
+    expect(
+      engine.expr(['SubsetEqual', ['Set', 1], 'unassignedSet']).evaluate().json
+    ).toEqual(['SubsetEqual', ['Set', 1], 'unassignedSet']);
+    // Same for a collection-typed APPLICATION, whose collection type may be a
+    // vacuous-lift artifact rather than a promise: it never claims a size, so
+    // the strictness test must not read "not known finite" as "infinite".
+    engine.declare('vectorValued', '(number) -> vector<2>');
+    expect(
+      engine.expr(['Subset', ['Set', 1], ['vectorValued', 1]]).evaluate().json
+    ).toEqual(['Subset', ['Set', 1], ['vectorValued', 1]]);
+    // A value whose type rules out a collection is still a decided `False`.
+    expect(
+      engine.expr(['Subset', 3, ['Set', 1]]).evaluate()
     ).toMatchInlineSnapshot(`False`);
   });
 });

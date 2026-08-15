@@ -335,6 +335,282 @@ that applies to `_`-prefixed members too, 60 of which are already declared
 there — so each conversion is an implementation + interface change, not a
 one-file edit.
 
+### A collection-TYPED but valueless operand is mishandled by seven operator families, six still open (OPEN, correctness — one audit, all MEASURED)
+
+Audited 2026-08-15 across all 95 `.isCollection` predicate sites in
+`src/compute-engine` (71 are genuine capability checks and are correct as
+they stand). `.isCollection` asks "can I enumerate this NOW", and is false for
+a symbol declared `list<number>`/`vector<2>` with no value yet, or an
+application whose head returns one. Sites that use it to ask the different
+question "is this operand collection-SHAPED" therefore take a scalar path for
+an operand that is not a scalar. Every line below was reproduced on a bare
+engine; each pairs the wrong answer with the answer the same expression gives
+once the symbol is assigned, which is what makes them wrong rather than merely
+undecided.
+
+    Sum(L), Product(L)   L: list<number>   → L        (→ 6 once L := [1,2,3])
+    Element(1, SetMinus(Set(1,2), L))      → True     (→ False once L := [1])
+    Union(L, Set(1))                       → Set(L,1) (→ Set(5,1) once L := [5])
+    Add(Missing, L)                        → NaN      (→ [NaN,NaN] once assigned)
+    Mean(L), Median(L)                     → NaN      (→ 2 once L := [1,2,3])
+    Which(B,1,True,2)  B: list<boolean>    → THROWS out of evaluate()
+
+DISCHARGED 2026-08-15 by the `subsetOf` convention sweep (the entry below):
+the `Subset(EmptySet, S)` row is fixed. `subset()` no longer gates on
+`.isCollection` alone — an operand that is not a collection NOW is a decided
+`False` only when its TYPE rules a collection out
+(`typesOverlap(op.type.type, 'collection')`), and everything else is
+undecided, with `subset()` and the two `subsetOf` method implementations
+(`boxed-function.ts`, `boxed-symbol.ts`) widened to `boolean | undefined` so
+the operators stay symbolic. Verified here: with `S` declared `set<number>`
+and unassigned, `SubsetEqual(EmptySet, S)` and `SubsetEqual(Set(1), S)` both
+stay unevaluated, while `Subset(3, Set(1))` is still a decided `False`. Do
+NOT re-fix this row; the six others below are untouched.
+
+Ranked by severity: `Sum`/`Product` and the statistics helpers commit a
+plausible-looking value that a later assignment contradicts, and `SetMinus`
+INVERTS a membership answer (`True` before assignment, `False` after) in a
+subsystem where a wrong `True` feeds assumption discharge. `Which`/`If`
+hard-throw where they should stay symbolic — and the compiled path already
+gets this right (`interval-javascript-target.ts` tests
+`c.isCollection || c.type.matches('collection')`), so interpreter and compiler
+currently disagree about what a collection-typed condition is.
+
+Two of these are guard FAMILIES where a partial fix reopens the hole on
+another route: `Sum`/`Product` is four guards (`library/arithmetic.ts` at the
+canonical and evaluate sites, `library/utils.ts` in `canonicalBigop` and
+`bigopGenerator`), and `SetMinus` is three copies of one rule
+(`library/sets.ts`, the eager, Kleene and query-decomposition forms).
+
+For `Sum`/`Product` the fix is NOT to widen the capability tests: that would
+send a valueless body into the reducer, which walks zero elements and answers
+`Sum(L) → 0` — a worse wrong answer than `L`. The fall-through in
+`bigopGenerator` should DECLINE instead, which is what the 2026-08-11 ruling
+already made `ListFrom`/`SetFrom`/`TupleFrom` do for the same operand class.
+
+Fixed in this pass, recorded here because they came from the same audit: the
+`Equal`/`NotEqual` broadcast crash (see the CHANGELOG entry) and its latent
+twin `undecidedCollectionComparison`, which was the un-widened half of the
+same guard pair and was resting on `eq()` happening to decline.
+
+Also fixed since (2026-08-15, with the `subsetOf` operand-convention sweep —
+see the CHANGELOG): `Subset(EmptySet, S)` with `S` a declared, unassigned
+`set<number>` answered `False` and flipped to `True` on assignment. The
+`Subset` family now leaves the relation unevaluated when an operand's type
+still permits a collection, and answers `False` only when the type rules one
+out.
+
+### `_mapAutoCompileStats` is a process-global singleton with three undocumented gates (OPEN, observability — small)
+
+The accessor shipped in 0.110.0 so a consuming process could see whether a
+lazy `Map` drain compiled. It works. But it has six ways of handing a careful
+person numbers that look right and are not, none of which throws or warns —
+so the resolution below should lead with a WORKED WRONG MEASUREMENT, not a
+list of rules. Every one of these was found by a competent person doing
+something reasonable.
+
+Start with the one that fires on the most reflexive debugging action there
+is, printing the value:
+
+    const stats0 = { ...ce._mapAutoCompileStats };
+    const r = ce.parse(MAP).N();
+    console.log(r.evaluate().toString());          // ← "just looking at it"
+    const d = delta(stats0, ce._mapAutoCompileStats);   // attempts 1, hits 10
+
+That reads as "`evaluate()` compiles 10 elements". It does not: `evaluate()`
+compiles NOTHING, and `toString()` is the consumer. Serializing a lazy result
+materializes a fixed 10-element preview regardless of n, so stringifying
+inside a measured region both does work and RELOCATES the attribution onto
+whatever call preceded it. The reader ends up with a coherent, wrong causal
+picture in which nothing looks off. This is how the row was first
+mis-measured here, across five construction paths and the published bundle,
+all agreeing — because they were one measurement repeated. **Read the
+counters BEFORE stringifying anything.**
+
+Two structural properties make it easy to conclude the accessor is broken,
+and the first consumer to try it did:
+
+- The counters are a MODULE-LEVEL object shared by every engine in the
+  process. `new ComputeEngine()` does not reset them, so absolute reads are
+  meaningless and a multi-engine process aggregates. There is no reset on the
+  public surface.
+- They move only when THREE independent gates are met, none of them mentioned
+  where the accessor is documented, and each failing the same silent way —
+  zeros that read as an absence of activity rather than an inert instrument:
+  1. `ce.precision = 'machine'`. At the default bignum-preferred precision the
+     float tier never attempts (at bignum the interpreter produces digits
+     float64 cannot match, so the gate itself is correct).
+  2. A numeric route — `.N()`, or `.evaluate()` on an `N(…)`-marked body. A
+     bare `.evaluate()` reports zero at any drain size.
+  3. The lazy result must actually be CONSUMED. `.N()` on a `Map` returns a
+     lazy collection; if nothing iterates it, nothing compiles and every
+     counter stays 0 with the first two gates satisfied. Measured: n=200
+     consumed gives `attempts` 1 / `compiledHits` 200, unconsumed gives 0/0.
+
+  "Consumed" is narrower than "touched", which is worth stating explicitly:
+  measured by stepping one expression and reading the counters between each
+  call (n=2000, machine precision, `Range`-sourced):
+
+      .N()          0 / 0      builds the lazy collection, compiles nothing
+      .evaluate()   0 / 0      compiles NOTHING
+      .toString()   1 / 10     serializing materializes a 10-element preview
+      [...each()]   1 / 2000   the whole drain
+      .at(1500)     1 / 1      exactly one element
+      .count        0 / 0      answers structurally
+      .json         0 / 0      answers structurally
+
+  The `toString()` row is the one warned about at the top of this entry. The
+  other rows matter mostly to probe authors; that one fires on ordinary use.
+
+Measured 2026-08-15: at machine precision on the `.N()` route a 20-element
+drain gives `attempts` 1 / `compiledHits` 20, while the same expression at
+default precision, or drained through a bare `.evaluate()`, gives zeros at
+2 000 elements. Drain size and body shape do not gate it at all — n=20 counts
+exactly like n=2000, and `sin(x)`, `x^2+1` and `sin(x)+x^2` behave alike.
+
+`iterationLimit` never gates the COUNTERS, but it does bound the DRAIN for a
+comprehension-sourced collection, and only for that. Holding the boxing, the
+assigned symbol and the `Map` constant and varying only the source:
+
+    Map over Range (parsed or boxed)        drained 2000, clean
+    Map over an assigned COMPREHENSION      drained 1024, then cancelled
+    Map over an assigned Range (control)    drained 2000, clean
+    same three with the limit raised        all drain 2000, clean
+
+The limit is spent materializing `[i for i = 1..2000]` before the `Map` ever
+drains, hence the stop at exactly the 1024 default; `Range` is lazy and costs
+no iterations. So an instrument sourced from a comprehension must raise
+`iterationLimit` above the element count, while a `Range`-sourced one need
+not. This is a source-shape property, not a defect. It stayed hidden through
+several rounds on two independent harnesses because both only ever tested
+`Range`-sourced collections — n=5000 and limit=50 runs were rigorous on the
+axis that was not the gate.
+
+The compile CACHE and the COUNTERS have DIFFERENT SCOPES, which is worth
+stating side by side because the natural assumption is that they match: the
+cache keys on the SHAPE (re-parsing does not defeat it) and is PER-ENGINE,
+while the counters are MODULE-WIDE. So a second measurement of the same `Map`
+shape in the same engine reads 0/0. Anyone comparing routes by running them
+in sequence — the natural way to build the table above — gets a real number
+for the first route and zeros for the rest, which reads as "only `each()`
+compiles". Measure each route in a FRESH engine, and still take deltas,
+because the singleton is orthogonal to the caching.
+
+THE SIX SILENT-ZERO PATHS, for the note to cover. None throws, none warns,
+and each returns numbers a careful person would believe:
+
+1. `toString()` consuming and relocating the attribution (above) — the only
+   one that fires on ordinary use rather than on a probe design.
+2. Carried-over totals read as absolutes, because the counters are a
+   module-level singleton with no reset.
+3. An unconsumed lazy result: gates 1 and 2 met, nothing iterates, all zeros.
+4. A structural `count`/`json` read — the confirmation step a careful person
+   reaches for BECAUSE they are being careful — compiling nothing.
+5. A cached second measurement of the same shape in one engine.
+6. An unverified correction from a trusted source. Recorded because it
+   happened twice in this investigation, in both directions: a first-party
+   measured claim was retracted on a peer's report without re-measuring, and
+   separately five agreeing measurements were treated as five confirmations
+   when they were one measurement repeated. Consistency across an axis that
+   is not varied reads exactly like corroboration.
+
+Worth either a documented note naming both gates and the singleton scoping,
+or a per-engine snapshot with a reset — the counters exist for consumers who
+cannot otherwise see this path, so "reports zero unless you already know two
+undocumented preconditions" undercuts the feature.
+
+### An indexed read out of a collection with complex elements was classified from the WHOLE collection (FIXED 2026-08-15; this also closed the `complexPromotion` collection-body item)
+
+The filed item was "`complexPromotion` does not look through a
+COLLECTION-valued user function, which is the shape its motivating witness
+has". Investigating it found a larger defect underneath, on the DEFAULT compile
+path with no option set, and fixing that one closed the filed item as a side
+effect.
+
+A list is emitted ELEMENT BY ELEMENT and each element picks its own
+real-vs-complex lowering, so the run-time array is heterogeneous: `[i·t, 1]`
+lowers to `[{re, im}, 1]`. An indexed read was nonetheless classified from the
+whole collection — `ops.some(isComplexValued)` for a literal list, and a flat
+decline for a call to a user function with a collection body — and that verdict
+describes no individual element. It was wrong in both directions, and both ran
+to a silently wrong value behind `success: true`. Measured 2026-08-15 at
+`t = 0.3`, no compile option set:
+
+    [i·t, 1][2] + 1                      → {re: NaN}            (interpreter 2)
+    h(t) := [i·t, 1] ;  h(t)[1] + 1      → the STRING "…1"      (interpreter 1 + 0.3i)
+    2·h(t)                               → [NaN, 2]             (interpreter [0.6i, 2])
+
+The first OVER-claims (the list holds a complex element, so the plain `1` pulled
+out of it is read as `{re, im}` and `.re` is `undefined`); the second
+UNDER-claims (the call is classified real, so the `{re, im}` pulled out of it is
+added to a number and JavaScript concatenates the object); the third is the same
+under-claim reaching the broadcast closure, whose complex-element test was
+TYPE-based and answered `false` because a mixed list unifies to a wide element
+type (`vector<finite_number^2>`, neither complex nor real).
+
+Fixed by reading the element the emitter will actually produce
+(`isComplexValuedElementAt`, `uniformElementComplexness`,
+`hasAnyComplexElement` in `compilation/base-compiler.ts`): a literal index names
+one element, and a run-time index is answered when every element agrees. A
+run-time index into a collection whose elements DISAGREE has no static answer
+and fails closed (D6, user-ruled 2026-08-15) rather than emitting a coin flip.
+Pinned in `test/compute-engine/compile-complex-element-access.test.ts`.
+
+**Why this closed the `complexPromotion` item.** The opt-in always promoted
+INSIDE a collection-valued body — `_fn_w` returned `[{re, im}, {re, im}]` — and
+what was missing was the call site reading those elements as complex. The filed
+witness now matches the interpreter, for a `List` body and for the `PointList`
+body the consumer's chain actually uses:
+
+    z(t) := √(t−1)           ;  |z(t)/2 − 1|      OFF NaN  ON 1.08397416943394
+    w(t) := [√(t−1), √(t−2)] ;  |w(t)[1]/2 − 1|   OFF NaN  ON 1.08397416943394
+    p(t) := PointList(√(t−1), √(t−2)) ; |p(t)[1]/2 − 1|    OFF NaN  ON 1.08397416943394
+
+The promotion rule itself is unchanged, and the default path is unchanged except
+for the wrong values above. The two discriminators recorded with the original
+item both still promote (a nested scalar call — nesting in the BODY — and a
+two-argument call with a radical inside divided by another call), so all four
+shapes promote together.
+
+The ordering-comparison consequence recorded with the original item does reach
+indexed reads now: with promotion ON, `Less(w(t)[1], 2)` fails closed. What it
+replaces is not a working comparison — measured before the fix, that expression
+compiled to a CONSTANT `false` (`{re, im} < 2` is never true), wrong at `t = 2`
+where the interpreter answers `True`. Ruled 2026-08-15: land it.
+
+### `complexPromotion` loses a complex value passed as an ARGUMENT to a scalar-bodied user function (OPEN, correctness — promotion-only)
+
+Found while fixing the entry above, and distinct from it: the user-call
+look-through analyzes a body with the function's PARAMETERS shielded, i.e.
+treated as real, so a complex value arriving through an argument is not seen.
+The emitted `_fn_b` is also emitted once, in the real lane, and cannot serve a
+complex call site. Measured 2026-08-15 at `t = 0.3`, `realOnly: true`,
+`complexPromotion: true`:
+
+    a(t) := √(t−1) ;  b(x) := 2x ;  |b(a(t))/2 − 1|   ON NaN  (interpreter 1.3038404810405297)
+
+Nesting in the BODY is unaffected and promotes correctly (`m(t) := n(t) + 1`
+with `n(t) := √(t−1)`); it is specifically ARGUMENT position that is lost.
+
+Fix shape when picked up: the call site's complexness has to consider the
+ARGUMENTS as well as the body, and the emitted user function then needs a
+complex-lane specialization for the call sites that pass one — a per-call-site
+monomorphization the emitter does not do today.
+
+PRIORITY CAVEAT, and the reason not to inherit "nothing is waiting on this":
+the deferral above was written when the flag's one prospective consumer had
+declined to enable it. That decision was REOPENED the same day, once the
+collection-body item closed. Two of its three stated grounds no longer hold —
+"zero measured benefit" ends when the fix above ships, since both witnesses
+including the `PointList` form then promote; and the regression risk was
+partly a misreading, because the ordering comparisons that decline under
+promotion were previously compiling to a CONSTANT `false` (wrong at t = 2
+against the interpreter), so a withdrawn wrong answer had been priced as a
+lost capability. Only the measured ~1.6× cost on affected chains survives
+unchanged. So re-check whether the flag is actually being enabled before
+treating this as unwatched; a "declined, settled" line is exactly what a later
+session inherits without re-deriving.
+
 ### The constant fold's own 2000 ms stall guard can still swap a folded value for a lowered one (OPEN, correctness — narrow residual; the AMBIENT-deadline path is already correct)
 
 `foldCostEstimate` made the fold ELIGIBILITY decision a property of the
@@ -685,6 +961,104 @@ plain `Typed` usage rather than a record mechanism.
 
 Phase 1's serialization walk had already been switched to emit the
 `Dictionary` operator form for this reason.
+
+### Appendix B's mutability gate (B1) would remove settable properties from host types (found 2026-08-15, OPEN — needs a product ruling; BLOCKS the rest of Phase 1D)
+
+Appendix B ruling B1 says a protocol with a `readwrite` property (or a
+member declaring `state`) may only be conformed to by an **object type**, and
+its "Changes to shipped documents" item 5 calls the migration of existing
+record-backed conformances **mechanical**. Implemented and measured on
+2026-08-15, it is not, and the gate was reverted pending a decision. What the
+implementation showed:
+
+- **32 protocol tests fail**, across `protocols.test.ts`,
+  `protocol-properties.test.ts` and `protocol-dispatch-compile.test.ts`. All
+  of them for the same reason: their fixture conforms a `readwrite` protocol
+  to a non-object type.
+- **Some of those cannot be migrated at all.** A builtin (`string`,
+  `number`) can never be an object type, so `type string is Nameable` with a
+  `readwrite name` becomes permanently illegal. That is not a test-fixture
+  problem — it removes a **shipped host-API capability**:
+  `ce.declareProtocolImplementation(target, protocol, { setters: … })` on any
+  host-declared nominal, exercised today by "P18: HOST-declared getters and
+  setters". The P17 setter-validation surface (contravariant second
+  parameter, `set` without `get`, `set` on a `readonly` property) is likewise
+  reachable only through targets the gate forbids.
+- **The migratable cases land in Phase 2 semantics that do not exist yet.**
+  Retargeting a fixture to `object<…>` makes the question "what does an
+  explicit `set` accessor on an object type mean" — mutate in place, or
+  rebuild-and-rebind? That is field-backed satisfaction, a Phase 2 ruling.
+  Migrating now bakes in a guess.
+
+The property STORE itself is unaffected and shipped: `p.age = 43` works on
+object types, and the store wins over the protocol route for a name in the
+object's layout. What is blocked is the *retirement* of Appendix A's
+rebinding sugar, since the sugar is what currently serves record-backed
+`readwrite` conformances.
+
+**The implementation plan schedules B1 twice**, which is where the
+confusion originates: step 5 of Phase 1 names `protocol-requires-object`
+as part of 1D's sugar retirement, while "Phase 2 — Protocol integration"
+lists the mutability gate as one of its own bullets. Phase 2 is the
+coherent home — B1's companions there (field-backed satisfaction,
+`object-property-conflict`) are what a migrated conformance must be
+re-pointed at — so the ruling below has a sequencing half as well as a
+policy half: does the sugar retirement move to Phase 2, or does Phase 2
+move ahead of it?
+
+Three ways out, needing a product ruling:
+
+1. **Narrow B1 to Epsil-declared conformances**, leaving the host API able to
+   register setters on any nominal. Keeps the shipped capability; the gate
+   then constrains the surface language rather than the engine.
+2. **Keep B1 as written** and accept that settable protocol properties are
+   object-only everywhere. Then P18's host getter/setter tests and the P17
+   setter-validation tests are rewritten against object targets, and Phase 2's
+   field-backed-satisfaction ruling has to land first.
+3. **Drop B1**, letting any type conform to a `readwrite` protocol and
+   relying on `immutable-value-assignment` at the store to refuse the write.
+   Simplest, but a conformance that can never be satisfied then registers
+   silently.
+
+If nothing is decided, Appendix A's rebinding sugar stays shipped alongside
+the property store. That is coherent (the store claims a name in the object's
+layout; the sugar serves everything else) but leaves two mechanisms for one
+surface syntax.
+
+### A field store's EXPRESSION-level effect is still `scope`, not `state` (found 2026-08-15 in review; the inference half FIXED same day, OPEN — narrow residual)
+
+Appendix B rules that changing a field carries the `state` effect. Half of that
+now holds and half does not.
+
+**Fixed (2026-08-15).** A function whose body stores into a field infers
+`state`: `function rename(x: M) { x.id = "XXXX" }` reports `["state"]` where it
+previously inferred nothing at all. The walker already received declared
+parameter types from `functionLiteralParameters` and discarded them; it now
+keeps them, so a `Field` target whose receiver is a parameter of an object type
+declaring that field is recognised as a HEAP STORE and contributes `state` with
+no confinement exemption. A `Field` target that is anything else — most
+importantly the property rebinding sugar on a value type — still takes
+`scopeWrite` unchanged, which is why this landed with zero churn to the six
+`protocol-dispatch-compile` tests that the earlier blunt attempt broke.
+
+**Still open.** At the EXPRESSION level a store reports `scope`, read straight
+off `Assign`'s declared signature (`(symbol | expression, any) scope -> any`).
+`Assign` spells two different operations — a binding write and a heap store —
+and one declared arrow cannot say both, while `effects-of.ts` has no
+per-operator hook that could decide per call site. Impact is a wrong label, not
+a wrong answer: the expression is impure either way, so nothing is folded or
+cached, and mutations are not lost.
+
+The clean resolution is the one the sugar retirement brings: once
+`Assign(Field(…))` means only "store" (see the B1 entry above), the arrow can
+simply say `state`. Doing it before then requires either a per-operator effects
+hook or a special case in `effects-of.ts`, for a label nobody currently
+consumes differently from `scope`.
+
+Effect CONTRACTS are enforced correctly on the fixed half: annotating a
+storing function `pure` is now refused with
+`incompatible-type: expected \`pure effects\`, got \`state effects\``, the same
+shape a `scope` write or a `Random()` draw already produced.
 
 ### A field store's no-op guard almost never fires (found 2026-08-15, OPEN — needs a product ruling)
 

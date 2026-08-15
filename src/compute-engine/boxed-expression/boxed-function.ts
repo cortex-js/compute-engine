@@ -2522,6 +2522,19 @@ export class BoxedFunction
       // including its `undefined`.
       const elementCount = this.operatorDefinition?.elementCount;
       if (elementCount !== undefined) return elementCount(this);
+      // Deliberately NOT falling back to the declared type here, the way a
+      // SYMBOL's `count` does. An application's collection type can be an
+      // artifact of the vacuous lift rather than a promise: `Total([1, 2])`
+      // with `Total` undeclared types `list<unknown^2>` on a bare engine, yet
+      // `each()` provably walks nothing, and a bound head with a genuinely
+      // sized return (`L(1)` under `L: (number) -> vector<2>`) is not
+      // distinguishable from it at this point — both have no operator
+      // definition and both auto-declare their head. Reporting 2 for the
+      // first is `count` outrunning the walk — promising elements that `at()`
+      // cannot deliver — which is settled as `undefined`; the invariant is
+      // pinned by `test/compute-engine/tycho-item-167-broadcast-count.test.ts`
+      // ("count does not outrun the walk"). A declared SYMBOL has no such
+      // ambiguity: its type is the user's own declaration.
       return this._broadcastCount();
     });
   }
@@ -2931,12 +2944,13 @@ export class BoxedFunction
     return undefined;
   }
 
-  subsetOf(rhs: Expression, strict: boolean): boolean {
+  subsetOf(rhs: Expression, strict: boolean): boolean | undefined {
+    // Not a collection: it has no elements to be contained in `rhs`.
     if (this._optedOutOfCollection) return false;
-    return (
-      this.operatorDefinition?.collection?.subsetOf?.(this, rhs, strict) ??
-      false
-    );
+    // A missing handler means "cannot say", not "no" — a hard `false` here
+    // would be a claim, and callers (`Subset`, `SubsetEqual`, …) rely on
+    // `undefined` to stay unevaluated instead of answering wrongly.
+    return this.operatorDefinition?.collection?.subsetOf?.(this, rhs, strict);
   }
 
   /** Splice `Spread` operands (`f(...p)`) into the operand list.

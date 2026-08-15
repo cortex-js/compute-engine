@@ -1124,14 +1124,30 @@ function broadcastableComparisonOperands(
  * `q(2)`, or a `broadcastable<T>` node) may still BE that collection, so
  * answering `False` would claim a mismatch the engine cannot see. Stay inert
  * instead — the same rule the handlers already apply to `x^2 = 4`.
+ *
+ * "Unresolved" includes an operand that is DEFINITELY collection-typed but
+ * carries no value — a symbol declared `vector<2>`, or an application whose
+ * head returns one. Such an operand is exactly as unresolved as an opaque one,
+ * and for the same reason: it may still be equal to the other side. This
+ * predicate is the last line of defense before the structural comparison, so
+ * omitting them here would rest on `eq()` happening to decline for a free
+ * variable — true today, but a coincidence rather than a guarantee, and it
+ * would become an unsound `False` the moment `eq()` grew stronger. It also
+ * keeps this in step with `broadcastableComparisonOperands` above, whose twin
+ * `skipBroadcastForVectorOps` (`boxed-expression/boxed-function.ts`) applies
+ * the same test. When those two disagreed, the pre-evaluation guard skipped,
+ * this handler broadcast and rebuilt the identical node, and evaluating it
+ * re-entered the pre-evaluation guard — `M = [1,2]` with `M` declared
+ * `vector<2>` overflowed the stack out of `evaluate()` on a bare engine.
+ * Pinned by `test/compute-engine/relational-broadcast-recursion.test.ts`.
  */
 function undecidedCollectionComparison(
   ops: ReadonlyArray<Expression>
 ): boolean {
-  return (
-    ops.some((op) => isPossiblyCollectionTyped(op)) &&
-    ops.some((op) => op.isCollection)
-  );
+  const unresolved = (op: Expression): boolean =>
+    isPossiblyCollectionTyped(op) ||
+    (!op.isCollection && op.type.matches('collection'));
+  return ops.some(unresolved) && ops.some((op) => op.isCollection);
 }
 
 /**

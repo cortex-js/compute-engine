@@ -363,6 +363,95 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   return undefined;
 }
 
+/**
+ * The number of TOP-LEVEL elements a value of this type must have, when the
+ * type alone pins it; `undefined` when it does not.
+ *
+ * "Top-level" matches the `count` contract on an expression: a `matrix<3x4>`
+ * counts its 3 rows, not its 12 scalar entries, the same way `each()` and
+ * `at()` walk rows. A `tuple` counts its declared members. A `list<T>` or
+ * `set<T>` carries no length, so it stays `undefined`.
+ *
+ * Purely a question about the TYPE: it says nothing about whether a value
+ * exists or whether its elements can be produced. Deciding what to do with
+ * that is the caller's; see `BoxedSymbol.count`, which uses it as the
+ * fallback for a declared-but-unassigned symbol.
+ */
+export function typeElementCount(type: Readonly<Type>): number | undefined {
+  return typeElementCountGuarded(type, undefined);
+}
+
+/**
+ * {@link typeElementCount}, carrying the cycle guard the union arm needs.
+ *
+ * `resolveTypeForCompilation` guards its own reference CHAIN, but that guard is
+ * local to one call and its loop never descends into a union's members — safe
+ * for it, not for us. Recursing into union arms re-enters it with a fresh
+ * guard, so a self-referential alias whose recursive occurrence is a bare arm
+ * (`type selfu = selfu | integer`) unfolds back to the same union forever and
+ * overflows the stack. The set below is threaded THROUGH the arm recursion so
+ * re-entering a declaration already being unfolded answers `undefined` instead.
+ *
+ * Entries are removed on the way back out (a depth-first mark, not a permanent
+ * one) so that a legitimate DIAMOND still answers: both arms of
+ * `pair | pair` resolve independently and agree, rather than the second arm
+ * being refused because the first visited the same declaration.
+ */
+function typeElementCountGuarded(
+  type: Readonly<Type>,
+  seen: Set<unknown> | undefined
+): number | undefined {
+  let decl: unknown;
+  if (
+    typeof type === 'object' &&
+    type.kind === 'reference' &&
+    type.def !== undefined
+  ) {
+    decl = declarationOf(type as TypeReference);
+    if (seen?.has(decl)) return undefined;
+  }
+
+  const t = resolveTypeForCompilation(type);
+  if (typeof t === 'string') return undefined;
+
+  // A declared-dimension list: `vector<2>` is `dimensions: [2]`, and
+  // `matrix<3x4>` is `dimensions: [3, 4]` whose top-level elements are its
+  // rows, so the FIRST dimension is the count in both cases. A `list<T>`
+  // parses without `dimensions` and keeps an unknown length, and an unsized
+  // dimension is the sentinel `-1` (`matrix` is `[-1, -1]`), never a length.
+  if (t.kind === 'list') {
+    const dims = t.dimensions;
+    if (dims && dims.length > 0 && Number.isInteger(dims[0]) && dims[0] >= 0)
+      return dims[0];
+    return undefined;
+  }
+
+  if (t.kind === 'tuple') return t.elements.length;
+
+  // A union still pins the size when every arm does and they agree: every
+  // value of `vector<2> | tuple<number, number>` has two top-level elements,
+  // whichever arm it came from. One arm that is unsized, or any disagreement,
+  // makes the whole union unknown.
+  if (t.kind === 'union') {
+    const guard = seen ?? new Set<unknown>();
+    if (decl !== undefined) guard.add(decl);
+    try {
+      let count: number | undefined = undefined;
+      for (const arm of t.types) {
+        const n = typeElementCountGuarded(arm, guard);
+        if (n === undefined) return undefined;
+        if (count === undefined) count = n;
+        else if (count !== n) return undefined;
+      }
+      return count;
+    } finally {
+      if (decl !== undefined) guard.delete(decl);
+    }
+  }
+
+  return undefined;
+}
+
 export function isValidTypeName(name: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
 }
