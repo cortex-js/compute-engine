@@ -1,12 +1,12 @@
-const s1 = "Sightglass Coffee Shop"
-const s2 = "Le café des Deux Magots"
-const s3 = "singer 👨🏻‍🎤"
-const s4 = "Mühlenstraße"
-const s5 = "Mühlenstrasse"
+// const s1 = "Sightglass Coffee Shop"
+// const s2 = "Le café des Deux Magots"
+// const s3 = "singer 👨🏻‍🎤"
+// const s4 = "Mühlenstraße"
+// const s5 = "Mühlenstrasse"
 
-function foo(s: string) { s }
+// function foo(s: string) { s }
 
-Length(s1)
+// Length(s1)
 
 // const s = [s1, s2, s3, s4, s5]
 // s |> Map(_, Length(s))
@@ -16,7 +16,7 @@ Length(s1)
 // ----
 
 // let digits = Characters("0123456789")
-// "a" in Characters("0123456789")
+// "0" in Characters("0123456789")
 
 // This program cannot be compiled to JavaScript:
 // Element: cannot compile — the interpreter compares elements structurally, but only real/boolean/string elements compare by value on the JavaScript target. Fail closed (D6).
@@ -24,9 +24,8 @@ Length(s1)
 // ----
 
 
-// Sum(Take(Map(1..oo, _ |-> _^2), 10))
-
-// (_SYS.takeIter(_SYS.mapIter(_SYS.rangeIter(1, 1), ((_) => (_ * _))), 10)).reduce((_a, _b) => _a + _b, 0)
+const g = (k) |-> Sum(Take(Map( _ |-> _^2, 1..oo,), k))
+g(3)
 
 // ----
 
