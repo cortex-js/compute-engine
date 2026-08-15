@@ -119,6 +119,7 @@ import {
   widen,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import type { Type } from '../../common/type/types.js';
 import {
   numericTypeHandler,
   elementaryFunctionType,
@@ -309,6 +310,119 @@ function negativeBaseIsComplexBranch(exp: Expression): boolean {
   // finite value — `Ln(2)`, a free symbol — still hedges.
   if (terms === undefined) return Number.isFinite(exp.re);
   return terms[1] % 2 === 0;
+}
+
+/**
+ * The component tier of a shaped quotient: the type of `el / den`, where `el`
+ * is one component TYPE of a tuple- or collection-shaped `Divide` numerator
+ * and `den` is the denominator expression.
+ *
+ * Mirrors the scalar branches of the `Divide` type handler exactly, including
+ * their ratified possibly-zero-denominator convention (an unproven-nonzero
+ * denominator still claims a finite tier; only a literal 0 yields the top
+ * type — see the "Possibly-zero *denominators*" note in the handler), so a
+ * component of a shaped numerator and a standalone scalar of the same tier
+ * always type their quotients identically. The divergence shaped numerators
+ * used to have — echoing the component type verbatim, so
+ * `tuple<finite_integer, finite_integer> / finite_integer` claimed INTEGER
+ * components where `[6,2]/4 = [3/2,1/2]` is rational — is exactly what this
+ * widening removes.
+ */
+function quotientComponentType(el: Type, den: Expression): Type {
+  // The handler checks `isNaN`/`isSame(0)` before its shape branches only for
+  // the NUMERATOR side of those guards; re-check the denominator here so the
+  // helper's per-component parity with the scalar path does not depend on
+  // call order.
+  if (den.isNaN || den.isSame(0)) return 'number';
+  if (den.isFinite === false) {
+    // The scalar path's symmetric claim: a provably finite real component
+    // over a provably non-finite REAL denominator is exactly 0.
+    if (isSubtype(el, 'finite_real') && den.isReal === true)
+      return 'finite_integer';
+    return 'number';
+  }
+  if (den.isInteger && isSubtype(el, 'integer')) return 'finite_rational';
+  if (den.isReal && isSubtype(el, 'real')) return 'finite_real';
+  if (den.type.matches('finite_complex') && isSubtype(el, 'finite_complex'))
+    return 'finite_complex';
+  return 'finite_number';
+}
+
+/**
+ * Map a shaped `Divide`-numerator TYPE — a tuple, a (possibly dimensioned)
+ * list/collection, or a union of shapes — to the quotient's type: the same
+ * structure with every numeric component widened through
+ * `quotientComponentType`. A scalar (a non-shape union arm such as the
+ * `number` in `tuple | number`) widens as a single component; a bare kind
+ * string (`'tuple'`, `'list'`) carries no component types to widen and passes
+ * through unchanged.
+ */
+function quotientShapeType(t: Type, den: Expression): Type {
+  if (typeof t === 'string') {
+    if (
+      t === 'tuple' ||
+      t === 'list' ||
+      t === 'collection' ||
+      t === 'indexed_collection'
+    )
+      return t;
+    return quotientComponentType(t, den);
+  }
+  if (t.kind === 'union')
+    return {
+      kind: 'union',
+      types: t.types.map((a) => quotientShapeType(a, den)),
+    };
+  if (t.kind === 'tuple')
+    return {
+      kind: 'tuple',
+      elements: t.elements.map((e) => ({
+        ...e,
+        type: quotientComponentType(e.type, den),
+      })),
+    };
+  if (
+    t.kind === 'list' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection'
+  )
+    // Recurse (not `quotientComponentType`): a matrix is a list of lists, and
+    // its inner rows must widen structurally too. Dimensions are preserved by
+    // the spread.
+    return { ...t, elements: quotientShapeType(t.elements, den) };
+  return quotientComponentType(t, den);
+}
+
+/**
+ * True when a type statically carries a SHAPE a quotient must preserve: a
+ * tuple, a list/collection kind, or a broadcast lift of one.
+ * `broadcastable<number>` is NOT shaped — its runtime value may be a plain
+ * scalar, which is precisely why the lift exists.
+ *
+ * Used by the `Divide` type handler on both sides: a shaped (or
+ * broadcast-lifted shaped) NUMERATOR keeps its structure with widened
+ * components, while a shaped or possibly-shaped DENOMINATOR disqualifies that
+ * claim (`tuple / tuple` has no defined quotient — `canonicalDivide` rejects
+ * it — so the handler falls through to the scalar widening instead).
+ */
+function isShapedNumericType(t: Type): boolean {
+  if (typeof t === 'string')
+    return (
+      t === 'tuple' ||
+      t === 'list' ||
+      t === 'collection' ||
+      t === 'indexed_collection' ||
+      t === 'set'
+    );
+  if (t.kind === 'union') return t.types.some((a) => isShapedNumericType(a));
+  if (t.kind === 'broadcastable') return isShapedNumericType(t.elements);
+  return (
+    t.kind === 'tuple' ||
+    t.kind === 'list' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection' ||
+    t.kind === 'set'
+  );
 }
 
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
@@ -555,9 +669,41 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `false`, which would otherwise collapse it to `number`.
         // COULD-semantics on the numerator, and the denominator must not itself
         // be tuple-shaped — `tuple / tuple` has no defined quotient and
-        // `canonicalDivide` already rejects it.
+        // `canonicalDivide` already rejects it. The STRUCTURE is preserved but
+        // the components are NOT echoed: each is widened through
+        // `quotientComponentType`, which applies the same tier rules as the
+        // scalar branches below — echoing claimed integer components for
+        // `tuple<finite_integer, …> / finite_integer` where the quotient is
+        // rational (`[6,2]/4 = [3/2,1/2]`).
         if (couldBeNumericTuple(num) && !couldBeNumericTuple(den))
-          return num.type;
+          return quotientShapeType(num.type.type, den);
+        // The broadcast-lifted counterpart, one wrapper out (Tycho item 188):
+        // a numerator typed `broadcastable<vector<n>>` — a vector-valued call
+        // whose arguments' collection-ness is not statically knowable, e.g. a
+        // document row above its callees' definitions — reports
+        // `isFinite === false` like the tuple above, so without this branch it
+        // fell into the non-finite widening and the quotient dropped its shape
+        // (`broadcastable<number>`) while `Add`/`Multiply`/`Subtract`/`Negate`
+        // on the same operand keep it. Preserve the base's structure with the
+        // same component widening as the tuple branch. The denominator may be
+        // a scalar or a broadcast-lifted scalar (`broadcastable<number>` — a
+        // scalar, or an indexed collection of scalars that divides
+        // elementwise; the numerator's shape survives either way), but a
+        // shaped or possibly-shaped denominator disqualifies the claim and
+        // falls through to the scalar widening below.
+        {
+          const nt = num.type.type;
+          if (
+            typeof nt !== 'string' &&
+            nt.kind === 'broadcastable' &&
+            isShapedNumericType(nt.elements) &&
+            !isShapedNumericType(den.type.type)
+          )
+            return {
+              kind: 'broadcastable',
+              elements: quotientShapeType(nt.elements, den),
+            };
+        }
         if (den.isNaN || num.isNaN) return 'number';
         // Division by zero: k/0 = ~oo, 0/0 = NaN — indeterminate.
         if (den.isSame(0)) return 'number';

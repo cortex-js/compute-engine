@@ -44,6 +44,38 @@
   where either side holds a value invalidates as before. The witness parse
   now canonicalizes in ~15 ms at full production size.
 
+- **Arithmetic on a vector-valued call no longer fails when the call's own
+  arguments are not yet defined** (Tycho item 188). With `h` returning a
+  vector and `X`, `Y` declared but not yet assigned,
+  `\frac{H(X(t), Y(t))}{g(t)}` was rejected at parse time with
+  `incompatible-type ('number', 'broadcastable<vector<finite_number^2>>')`,
+  even though the same division evaluates elementwise and the same row parsed
+  fine once `X`, `Y` and `g` had been assigned — so a definition's validity
+  depended on where it sat in a document. Undefined arguments make a call's
+  result type `broadcastable<T>` ("a `T`, or a collection of `T` that
+  broadcasts"), and the numeric-operand check admitted `broadcastable<number>`
+  but not a wrapper around a vector, tuple or list. It now admits the wrapper
+  wherever it admits the bare type, for every numeric operator (`Add`,
+  `Multiply`, `Subtract`, `Divide`, `Negate`); a wrapper around a genuinely
+  non-numeric type is still rejected. The same change makes
+  `broadcastable<T>` agree with `list<T>` for every `T` — previously a mixed
+  union such as `broadcastable<finite_integer | string>` was refused where
+  `list<finite_integer | string>` was accepted.
+
+- **Dividing a point or vector no longer claims the components keep the
+  numerator's numeric tier.** `Divide` with a tuple-typed numerator (e.g. a
+  `PointList` quotient) echoed the numerator's type, so
+  `tuple<finite_integer, finite_integer>` divided by an integer-valued call
+  still claimed *integer* components even though `[6, 2]/4` is `[3/2, 1/2]`.
+  The quotient now keeps the tuple/vector structure while widening each
+  component with the same rules as scalar division (integer/integer →
+  `finite_rational`, real/real → `finite_real`, a possibly-`NaN` denominator →
+  `number`). The same widening lets `Divide` preserve the shape of a
+  broadcast-lifted numerator (`broadcastable<vector<n>>`, from the item-188
+  case above) instead of collapsing it: the quotient types
+  `broadcastable<vector<…>>` with honestly-widened components, matching what
+  `Add`, `Multiply`, `Subtract` and `Negate` already did for the shape.
+
 - **Assigning to a subscripted name now honors a declared joined name, and
   the ambiguous lambda case is an explicit error instead of a silent
   no-op.** Two related fixes to `⟨name⟩_⟨subscript⟩ \coloneq …`:

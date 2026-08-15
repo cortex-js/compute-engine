@@ -884,7 +884,134 @@ Answer to their "or state the intended semantics" ask: **it is not
 intended, R1 already rules it, keep the lane as a workaround and retire
 it.**
 
-### Tycho item 188 — `Divide` rejects a `broadcastable<vector<…>>` numerator that it then broadcasts (OPEN)
+### ~~Tycho item 188 — `Divide` rejects a `broadcastable<vector<…>>` numerator that it then broadcasts~~ (FIXED 2026-08-15; filed 2026-08-15)
+
+**RESOLVED 2026-08-15**, taking their FIRST ask (type the operand the way
+evaluation treats it) rather than the second (soften the check to non-fatal).
+The first turned out to be the smaller change after all, and it keeps the
+checker failing closed on operands that are genuinely non-numeric.
+
+Two layers, both measured:
+
+1. **Admission** (`typeCouldBeNumericCollection`, `collection-utils.ts`). Its
+   `broadcastable<S>` arm asked only whether `S` was numeric-SCALAR-ish
+   (`isSubtype(S, number) || isSubtype(number, S)`), so a collection or tuple
+   BASE — `broadcastable<vector<n>>`, `broadcastable<list<number>>`,
+   `broadcastable<tuple<number,number>>` — answered `false` and fell through
+   `checkNumericArgs` to its final `else`, which bakes
+   `Error(incompatible-type, number, …)` at canonicalization. It now recurses
+   into the base, so the invariant is "admit the lift exactly where the base is
+   admitted". The companion `typeIsProvablyNonNumericCollection` — which
+   REJECTS, and had the mirrored hole — is now written as the literal negation
+   of the admit predicate so the two halves cannot drift apart again. Because
+   every numeric operator validates through `checkNumericArgs`, the same
+   operand is now accepted by `Add`, `Multiply`, `Subtract` and `Negate` too;
+   `Divide` was only where Tycho happened to hit it.
+
+The same delegation closed a second, unrelated hole in that arm: a mixed union
+base (`broadcastable<finite_integer | string>`) was refused while the identical
+`list<finite_integer | string>` was admitted, because the hand-rolled test
+asked `isSubtype(S, number) || isSubtype(number, S)` — neither of which holds
+for a union with one non-numeric member — where `couldBeNumericElement`
+distributes over the union arms.
+
+The **shape-preservation layer** took two landings. The first echoed
+`num.type` verbatim and was withdrawn under dual review: echoing asserts the
+numerator's ELEMENT TIER survives division, and it does not —
+`Divide(broadcastable<vector<finite_integer^2>>, <integer-valued call>)` typed
+integer components while `[6,2]/4 = [3/2,1/2]` is rational. The second landing
+(same day, user-ruled to proceed together with the tuple-branch fix below) is
+the correct form: `Divide` keeps a shaped numerator's STRUCTURE — a tuple, or
+a `broadcastable<…>` lift of a vector/tuple/list base — but derives every
+component through `quotientComponentType` (`arithmetic.ts`), which applies
+byte-for-byte the same tier rules as the handler's scalar branches, ratified
+possibly-zero-denominator convention included. So:
+
+- `broadcastable<vector<finite_integer^2>> / <integer call>` →
+  `broadcastable<vector<finite_rational^2>>` (tier moved, shape kept);
+- over an unknown-typed application (`g(t)` before `g` assigns, which reports
+  `isFinite === false` since it could be NaN) the components widen to `number`
+  — printed `broadcastable<vector<2>>` — exactly as scalar `x / g(t)` widens;
+- a shaped or possibly-shaped DENOMINATOR still makes no claim
+  (`tuple / tuple` is rejected by `canonicalDivide`), and a broadcast-lifted
+  SCALAR denominator (`broadcastable<number>`) preserves the numerator's
+  shape, since a scalar or an elementwise collection divide both do.
+
+Consumer-visible result: the row is valid in BOTH document positions, and its
+value is identical in both (`G(0.7) = [-0.329034…, 0.584950…]`, matching the
+source formula). The declared types still differ by position —
+`(unknown) -> broadcastable<vector<…>>` above the callees' definitions,
+`(unknown) -> vector<2>` below them — and that difference is honest rather
+than a residue: above the definitions CE genuinely cannot prove the arguments
+are not collections.
+
+Regression pins:
+`test/compute-engine/tycho-item-188-broadcastable-vector-divide.test.ts`
+(18 tests: the lift really is `broadcastable<vector<…>>`; the row is valid with
+callees unassigned; validity and value are position-independent; the quotient
+keeps the shape with per-denominator element tiers mirroring the scalar path;
+a lifted integer vector's quotient claims rational — not integer — components,
+so the withdrawn echo cannot return; tuple component tiers widen the same way;
+`broadcastable<S>` and `list<S>` are admitted alike for four bases including a
+mixed union; the four sibling operators admit the same operand; a provably
+non-numeric lift is still rejected). Non-vacuity verified — 8 of the first 10
+fail under the pre-fix predicate. Full suite: **zero** snapshot changes
+(4,269 snapshots, all unchanged); the only failures in the measuring run were
+2 tests of a concurrent session's in-flight, untracked item-190 test file,
+attributed by discriminator runs (they pass both with and without this change
+once that session's own edit landed).
+
+Their second-chance registration queue is theirs to keep or retire — it buys
+order-robustness independent of this defect, and nothing here obliges them to
+remove it.
+
+Trigger note worth keeping: this surfaced the day they STOPPED declaring
+evidence-free placeholder arrows. Better call types exposed an over-strict
+check that all-`unknown` types used to sail past — so improving type
+information upstream made a downstream check start failing, which is the kind
+of coupling to expect more of as inference sharpens.
+
+### ~~`Divide`'s tuple branch over-claims the element tier~~ (FIXED 2026-08-15; discovered same day reviewing the item-188 fix)
+
+**RESOLVED 2026-08-15** (user-ruled to fix immediately rather than defer). The
+hoisted tuple branch (item 165) returned the numerator's type verbatim, so
+`Divide(tuple<finite_integer, finite_integer>, <integer-valued call>)` claimed
+INTEGER components where the quotient is rational (`[6,2]/4 = [3/2,1/2]`) —
+while the bare list path widened correctly, so the two disagreed on the same
+arithmetic.
+
+The fix keeps the tuple STRUCTURE (item 165's actual point — a `PointList`
+quotient must not collapse to `number`) and derives each component through
+`quotientComponentType` (`arithmetic.ts`), which mirrors the handler's scalar
+branches byte for byte: `finite_rational` for integer/integer, `finite_real`
+for real/real, `number` over a possibly-NaN denominator (an unknown-typed
+application reports `isFinite === false`), and the scalar path's ratified
+possibly-zero-denominator convention (an unproven-nonzero denominator still
+claims a finite tier; only a literal 0 — folded away by `canonicalDivide`
+anyway — yields the top type). The finiteness half of the original filing was
+therefore NOT a defect: claiming `finite_real` over a possibly-zero
+denominator is the handler's own documented scalar convention, and the
+component widening now follows it identically — consistency-by-construction,
+with the convention question belonging to the scalar rules alone.
+
+The same helper drives the restored item-188 broadcast-shape branch above
+(`quotientShapeType` recurses structurally, so `matrix` bases widen row-wise
+too). Item 165's pins (`tycho-item-165-pointlist-divide-type.test.ts`,
+`points-arithmetic.test.ts`) pass unchanged — they pin the tuple STRUCTURE,
+not the component tiers — and the measured snapshot blast radius is ZERO
+(4,269 snapshots, unchanged). New pins live in the item-188 test file
+(tuple component widening per denominator; the tuple/tuple rejection).
+
+One asymmetry noted, deliberately untouched: the bare dimensioned-list path
+(`vector<finite_integer^2> / <integer call>`) routes through the
+boxed-function broadcast arm and types `vector<finite_number^2>` — sound but
+one tier wider than the tuple/lift paths' `finite_rational`. Tightening it
+means changing the shared broadcast-arm element computation, a different
+blast radius from this fix.
+
+---
+
+Original report, kept for the record:
 
 `Divide`'s operand check accepts a plain vector numerator and REFUSES the
 `broadcastable` wrapper around the same thing, even though `broadcastable<T>`
@@ -918,12 +1045,6 @@ Their ask, either half sufficient: type vector-operand arithmetic the way
 evaluation actually treats it, or make the operand check NON-FATAL while an
 operand's type may still refine. The second is the smaller change and
 matches the "don't fail closed on a type that is still moving" posture.
-
-Trigger note worth keeping: this surfaced the day they STOPPED declaring
-evidence-free placeholder arrows. Better call types exposed an over-strict
-check that all-`unknown` types used to sail past — so improving type
-information upstream made a downstream check start failing, which is the
-kind of coupling to expect more of as inference sharpens.
 
 ### ~~Tycho item 186 — the item-182 class SURVIVES in document context~~ (FIXED 2026-08-15; filed 2026-08-14)
 

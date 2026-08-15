@@ -624,15 +624,24 @@ export function typeCouldBeNumericCollection(type: Type): boolean {
   // A `broadcastable<S>` operand COULD be a numeric indexed collection at
   // runtime. `broadcastable<any>`/`broadcastable<unknown>` qualify too; a
   // plainly non-numeric element (e.g. `broadcastable<string>`) does not.
-  if (type.kind === 'broadcastable') {
-    const el = type.elements;
-    return (
-      el === 'any' ||
-      el === 'unknown' ||
-      isSubtype(el, 'number') ||
-      isSubtype('number', el)
-    );
-  }
+  //
+  // Decided by the SAME element predicate the collection kinds above use, for
+  // the same reason: the base `S` is whatever the un-lifted expression typed,
+  // and `broadcastable<S>` means "an `S`, or an indexed collection of `S`", so
+  // such an operand broadcasts elementwise exactly as a collection of `S`
+  // does. This arm used to hand-roll a weaker copy of `couldBeNumericElement`
+  // that tested only for a numeric SCALAR base, which had two consequences: a
+  // collection or tuple base (`broadcastable<vector<n>>` — what applying a
+  // vector-valued function to a declared-but-not-yet-assigned callee produces)
+  // was refused, so a `Divide` numerator's parse validity depended on whether
+  // its callees had been assigned yet (Tycho item 188, pinned in
+  // `test/compute-engine/tycho-item-188-broadcastable-vector-divide.test.ts`);
+  // and a mixed union base (`finite_integer | string`) was refused here while
+  // the identical `list<finite_integer | string>` was admitted. Delegating
+  // keeps this kind in lockstep with every other collection kind by
+  // construction.
+  if (type.kind === 'broadcastable')
+    return couldBeNumericElement(type.elements);
   if (type.kind === 'union')
     return type.types.some((t) => typeCouldBeNumericCollection(t));
   return false;
@@ -665,11 +674,10 @@ export function typeIsProvablyNonNumericCollection(type: Type): boolean {
     if (el === 'any' || el === 'unknown') return false;
     return !couldBeNumericElement(el);
   }
-  if (type.kind === 'broadcastable') {
-    const el = type.elements;
-    if (el === 'any' || el === 'unknown') return false;
-    return !(isSubtype(el, 'number') || isSubtype('number', el));
-  }
+  // Expressed as the exact negation of the companion so the two cannot drift:
+  // the companion's broadcastable arm already returns `true` for
+  // `any`/`unknown` elements and for a collection- or tuple-typed base.
+  if (type.kind === 'broadcastable') return !typeCouldBeNumericCollection(type);
   // A union is provably non-numeric only if EVERY member is (any could-be-
   // numeric member keeps the whole union admissible).
   if (type.kind === 'union')
