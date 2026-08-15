@@ -1787,7 +1787,11 @@ export class BaseCompiler {
     depth = 0,
     ctx?: FoldCostContext
   ): number {
-    const c = ctx ?? { inProgress: new Set<string>(), cache: new Map(), visits: 0 };
+    const c = ctx ?? {
+      inProgress: new Set<string>(),
+      cache: new Map(),
+      visits: 0,
+    };
     // The estimator's OWN work is bounded, not just the tree's depth. Depth
     // alone does not bound a wide call graph: composed helpers that each call
     // the one below a few times branch as fan-out^depth, and a 12-level,
@@ -1889,7 +1893,11 @@ export class BaseCompiler {
     // the path is recursive and has no static bound.
     const literal = BaseCompiler.userFunctionLiteral(expr.engine, op);
     let calleeCost = 0;
-    if (literal !== undefined && isFunction(literal) && literal.ops.length > 0) {
+    if (
+      literal !== undefined &&
+      isFunction(literal) &&
+      literal.ops.length > 0
+    ) {
       const cached = c.cache.get(op);
       if (cached !== undefined) {
         // A genuine CACHE, not merely a cycle guard. Without it the name was
@@ -1902,7 +1910,11 @@ export class BaseCompiler {
       } else {
         if (c.inProgress.has(op)) return Infinity; // recursive: no static bound
         c.inProgress.add(op);
-        calleeCost = BaseCompiler.foldCostEstimate(literal.ops[0], depth + 1, c);
+        calleeCost = BaseCompiler.foldCostEstimate(
+          literal.ops[0],
+          depth + 1,
+          c
+        );
         c.inProgress.delete(op);
         // Only a settled answer is cached. An `Infinity` reached because the
         // VISIT BUDGET ran out is a property of this walk, not of the
@@ -1957,7 +1969,8 @@ export class BaseCompiler {
       // anti-hang deadline this estimate exists to keep out of the decision.
       const lo = ops.length > 1 ? BaseCompiler.realBoundOf(ops[0]) : 1;
       const hi = BaseCompiler.realBoundOf(ops.length > 1 ? ops[1] : ops[0]);
-      const step = ops.length > 2 ? BaseCompiler.realBoundOf(ops[2]) : undefined;
+      const step =
+        ops.length > 2 ? BaseCompiler.realBoundOf(ops[2]) : undefined;
       if (lo === undefined || hi === undefined) return undefined;
       const s = step ?? (hi >= lo ? 1 : -1);
       if (s === 0 || !Number.isFinite(s)) return undefined;

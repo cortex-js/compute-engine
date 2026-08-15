@@ -798,10 +798,7 @@ function lookupInScope(
  * A BUILTIN is left alone too: `defineFunctionClause` already recognizes a
  * system-scope definition and shadows it rather than accumulating onto it.
  */
-export function declareLocalClauseTarget(
-  ce: IComputeEngine,
-  id: string
-): void {
+export function declareLocalClauseTarget(ce: IComputeEngine, id: string): void {
   const scope = ce.context.lexicalScope;
   if (scope.bindings.has(id)) return;
   if (ce._typeRegistry[id]?.def !== undefined) return;
