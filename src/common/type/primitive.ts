@@ -20,7 +20,35 @@ export const INDEXED_COLLECTION_TYPES: PrimitiveType[] = [
   'indexed_collection',
   'list',
   'tuple',
+  // An index span (see the `range` entry in `types.ts`). A sibling of `list`,
+  // not a subtype of it: a `Range` value is not a `List`, and neither kind is
+  // a subtype of the other.
+  'range',
 ];
+
+/**
+ * The structural reading of the unparameterized `range` type: an index span
+ * is an indexed collection of integers.
+ *
+ * `range` is the only primitive that carries a hidden element type, so every
+ * site that destructures a parameterized collection (subtype checks against
+ * `indexed_collection<T>`, type-variable binding, element-type readers) has
+ * to expand it — hence ONE shared constant rather than a literal repeated at
+ * each site. The element type is `integer`, matching exactly what a
+ * qualifying `Range` reported before `range` existed
+ * (`indexed_collection<integer>`), so the new type NARROWS the collection
+ * kind without perturbing element-type inference downstream.
+ */
+// Frozen because it is shared BY REFERENCE across every `range` subtype and
+// pattern-match call in the process (`isSubtype`, `walkPattern`): in-place
+// mutation by any future consumer would silently corrupt every subsequent
+// `range` check for the lifetime of the process, with no error at the
+// mutation site. Same rule as the cached types in `parse.ts`, which are
+// deep-frozen for exactly this reason.
+export const RANGE_STRUCTURAL_TYPE: Type = Object.freeze({
+  kind: 'indexed_collection',
+  elements: 'integer',
+}) as Type;
 
 export const COLLECTION_TYPES: PrimitiveType[] = [
   ...INDEXED_COLLECTION_TYPES,

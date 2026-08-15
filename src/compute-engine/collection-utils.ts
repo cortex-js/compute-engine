@@ -490,6 +490,8 @@ export function typeCouldBeCollection(type: Type): boolean {
       type === 'collection' ||
       type === 'indexed_collection' ||
       type === 'list' ||
+      // An index span is an indexed collection of integers.
+      type === 'range' ||
       type === 'set' ||
       type === 'tuple' ||
       type === 'dictionary' ||
@@ -546,6 +548,8 @@ export function typeCouldBeUnkeyedCollection(type: Type): boolean {
       type === 'collection' ||
       type === 'indexed_collection' ||
       type === 'list' ||
+      // An index span is unkeyed and indexed — it broadcasts like a list.
+      type === 'range' ||
       type === 'set' ||
       type === 'tuple' ||
       type === 'any'
@@ -612,7 +616,15 @@ export function typeCouldBeNumericCollection(type: Type): boolean {
       type === 'list' ||
       type === 'set' ||
       type === 'collection' ||
-      type === 'indexed_collection'
+      type === 'indexed_collection' ||
+      // An index span is a collection of integers, so it is admissible
+      // wherever a numeric collection is. Omitting it made a symbol DECLARED
+      // `range` fail `checkNumericArgs` with `incompatible-type` in a numeric
+      // broadcast (`Multiply(r, 2)` for `r: range`), while the equivalent
+      // `indexed_collection<integer>` declaration passed — a literal `Range`
+      // call was rescued by the later finite-collection branch, so only the
+      // declared-symbol route showed it.
+      type === 'range'
     );
   }
   if (
@@ -717,7 +729,15 @@ export function typeCouldBeNumericTuple(type: Type): boolean {
  */
 export function isLinearAlgebraCollection(expr: Expression): boolean {
   const t = expr.type.type;
-  if (t === 'list' || t === 'collection' || t === 'indexed_collection')
+  if (
+    t === 'list' ||
+    t === 'collection' ||
+    t === 'indexed_collection' ||
+    // An index span is a sequence of numbers, so it participates in linear
+    // algebra exactly as it did before the `range` type existed (when a
+    // qualifying `Range` typed as `indexed_collection<integer>`).
+    t === 'range'
+  )
     return true;
   return (
     typeof t !== 'string' &&
@@ -786,6 +806,9 @@ export function broadcastCollectionElementType(
 
 function dimensionlessIndexedElement(t: Type): Type | undefined {
   if (t === 'list' || t === 'indexed_collection') return 'any';
+  // An index span is dimensionless and its elements are finite positive
+  // integers — a known element type, unlike the bare types above.
+  if (t === 'range') return 'integer';
   if (typeof t === 'string') return undefined;
   if (t.kind === 'indexed_collection') return t.elements;
   // A `list` broadcasts only when it is unbounded/dimensionless (a plain

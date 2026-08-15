@@ -7,6 +7,7 @@ import {
   INDEXED_COLLECTION_TYPES,
   PRIMITIVE_TYPES,
   PRIMITIVE_TYPES_SET,
+  RANGE_STRUCTURAL_TYPE,
   SCALAR_TYPES,
   SCALAR_TYPES_SET,
   VALUE_TYPES,
@@ -100,6 +101,13 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   collection: COLLECTION_TYPES,
   indexed_collection: INDEXED_COLLECTION_TYPES,
   list: [],
+  // An index span has no primitive subtypes. It is a subtype of
+  // `indexed_collection` (and thence `collection`) through the
+  // `indexed_collection` entry above, which lists it. Against a
+  // PARAMETERIZED rhs (`indexed_collection<integer>`, `collection<number>`)
+  // it is expanded structurally to `RANGE_STRUCTURAL_TYPE`
+  // (`indexed_collection<integer>`, defined in `primitive.ts`) in `isSubtype`.
+  range: [],
   set: [],
   tuple: [],
   record: [],
@@ -1169,6 +1177,21 @@ export function isSubtype(
     }
   }
 
+  // `range` is the only primitive with a structural reading: an index span is
+  // an indexed collection of finite positive integers, so it must satisfy a
+  // PARAMETERIZED collection rhs (`range <: indexed_collection<integer>`,
+  // `range <: collection<number>`) that the primitive-vs-primitive table
+  // above cannot express. Expanding here, just before the fall-through,
+  // keeps every other primitive on the fast path. The element type is
+  // `integer` (see `RANGE_STRUCTURAL_TYPE`), matching what a qualifying
+  // `Range` reported before this type existed, so the narrowing perturbs no
+  // downstream element-type inference.
+  // Note this does NOT make a range a `list` — `indexed_collection<T>` is not
+  // a subtype of `list<T>`, so `range <: list<integer>` stays false, which is
+  // the intent (they are sibling kinds).
+  if (lhs === 'range')
+    return isSubtype(RANGE_STRUCTURAL_TYPE, rhs);
+
   // A primitive type is not a subtype of a composite type (except a union)
   if (typeof lhs === 'string') return false;
 
@@ -1357,7 +1380,7 @@ export function isSubtype(
   // declared type forbids (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "No
   // subtyping between object types", the Counter/Gauge example).
   //
-  // This is a backstop, not the rule authors meet: an `object<…>` layout is
+  // This is a backstop, not the rule authors meet: an `object{…}` layout is
   // only ever the definition of a NOMINAL reference, and nominal references
   // never unfold to their definitions, so two declared object types are
   // unrelated even when their layouts are identical.
@@ -1701,7 +1724,7 @@ export function resolveTypeReference(t: Type): Type | undefined {
 }
 
 /**
- * The stored-field LAYOUT a type denotes: the `object<…>` body reached through
+ * The stored-field LAYOUT a type denotes: the `object{…}` body reached through
  * any chain of nominal references, or `undefined` for anything else.
  *
  * `undefined` covers the bare `object` primitive too, which promises that
@@ -1754,6 +1777,9 @@ function isIndexedCollection(type: Type): boolean {
 function broadcastableCollectionElementType(type: Type): Type | undefined {
   if (typeof type === 'string') {
     if (type === 'indexed_collection' || type === 'list') return 'any';
+    // An index span carries a known element type (finite positive integers),
+    // so it broadcasts as `finite_integer`, not as an opaque `any`.
+    if (type === 'range') return 'integer';
     return undefined;
   }
   if (type.kind === 'indexed_collection') return type.elements;

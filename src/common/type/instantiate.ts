@@ -8,6 +8,7 @@ import type {
   TypeResolver,
 } from './types.js';
 import { typeToString } from './serialize.js';
+import { RANGE_STRUCTURAL_TYPE } from './primitive.js';
 import { declarationOf, withTypeArguments } from './reference.js';
 import { subtypingVarianceOf } from './variance.js';
 
@@ -1561,6 +1562,12 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
  */
 function elementTypeOf(type: Type): Type | undefined {
   if (typeof type === 'string') {
+    // An index span's element type is KNOWN (finite positive integers), so it
+    // does not belong with the unparameterized types below, which report the
+    // opaque `any`. This mirrors `collectionElementType`
+    // (`common/type/utils.ts`), which this function's contract promises to
+    // match exactly.
+    if (type === 'range') return 'integer';
     if (
       type === 'collection' ||
       type === 'indexed_collection' ||
@@ -1655,6 +1662,9 @@ function liftedElementTypeOf(actual: Type): Type {
   // it to `any` still gets the RANK right (the wrapper re-adds one level),
   // where contributing it whole would nest (`list<list>`).
   if (actual === 'list' || actual === 'indexed_collection') return 'any';
+  // An index span peels to its KNOWN element type rather than to `any`: its
+  // members are finite positive integers.
+  if (actual === 'range') return 'integer';
 
   if (typeof actual !== 'object' || !MAPPED_KINDS.has(actual.kind))
     return actual;
@@ -1675,7 +1685,7 @@ function liftedElementTypeOf(actual: Type): Type {
  * `list`/`indexed_collection` spellings carry no element type but ARE mapped
  * (they peel to `any`). */
 function isMappedActual(t: Type): boolean {
-  if (t === 'list' || t === 'indexed_collection') return true;
+  if (t === 'list' || t === 'indexed_collection' || t === 'range') return true;
   return typeof t === 'object' && MAPPED_KINDS.has(t.kind);
 }
 
@@ -1746,6 +1756,14 @@ function walkPattern(
   }
 
   if (typeof pattern === 'string') return true; // unreachable: no free vars
+
+  // `range` is the one primitive with a hidden element type, and the pattern
+  // here is composite (it has free variables), so a bare `range` actual would
+  // fall through every structural case below and leave the variable unbound —
+  // `Sort(Range(1, 5))`, whose parameter is `indexed_collection<T>`, would
+  // infer `T = any` and report `list<any>` instead of `list<integer>`.
+  // Expanding to the structural reading binds `T` from the span's elements.
+  if (actual === 'range') actual = RANGE_STRUCTURAL_TYPE;
 
   switch (pattern.kind) {
     case 'signature': {

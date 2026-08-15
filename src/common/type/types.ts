@@ -25,7 +25,7 @@
  *    - `collection`
  *       - `set`: a collection of unique expressions, e.g. `set<string>`.
  *       - `record`: a collection of specific key-value pairs,
- *          e.g. `record<x: number, y: boolean>`.
+ *          e.g. `record{x: number, y: boolean}`.
  *       - `dictionary`: a collection of arbitrary key-value pairs
  *          e.g. `dictionary<string, number>`.
  *       - `indexed_collection`: collections whose elements can be accessed
@@ -45,6 +45,18 @@ export type PrimitiveType =
   | 'collection'
   | 'indexed_collection'
   | 'list'
+  // An INDEX SPAN: a contiguous, ascending, step-1 run of 1-based collection
+  // indices, i.e. a `Range` whose bounds are provably finite integers with
+  // `1 <= lower <= upper`. Not a mathematical range (that is `Interval`) and
+  // not the statistical range of a data set (that is `Min`/`Max`). It exists
+  // so span-consuming operators such as `Slice(xs, r)` can reject a
+  // descending or stepped range at the type level instead of at runtime; see
+  // `docs/STRING_ROADMAP.md` ("The `range` type"). Structurally it behaves as
+  // `indexed_collection<integer>` (`RANGE_STRUCTURAL_TYPE` in `primitive.ts`,
+  // which every site that destructures a parameterized collection expands it
+  // to); it has no EMPTY inhabitant, which is why operations that can empty a
+  // range report `list` instead.
+  | 'range'
   | 'set'
   | 'dictionary'
   | 'record'
@@ -304,10 +316,10 @@ export type RecordType = {
  * opposite ways, and the difference is deliberate:
  *
  * - An object type is **nominal**. This shape is only ever the definition
- *   (`def`) of a declared {@link TypeReference}: `type Person = object<…>`.
+ *   (`def`) of a declared {@link TypeReference}: `type Person = object{…}`.
  *   Two object types with identical layouts are unrelated, because a store
  *   through one view would break the other's declared field types (write
- *   `1.5` into an `object<count: integer>` viewed as `object<count: number>`).
+ *   `1.5` into an `object{count: integer}` viewed as `object{count: number}`).
  *   The nominal reference is what supplies that opacity; this shape only
  *   carries the layout.
  * - Every field is a read/write position, so a field type is **invariant**:

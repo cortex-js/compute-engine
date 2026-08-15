@@ -321,6 +321,11 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   if (type === 'collection') return 'any';
   if (type === 'indexed_collection') return 'any';
   if (type === 'list') return 'any';
+  // Unlike the unparameterized collection types above, an index span's
+  // element type is KNOWN: its members are finite positive integers. (`any`
+  // would be sound but would lose the precision `Range` had before the
+  // `range` type existed, when it typed as `indexed_collection<integer>`.)
+  if (type === 'range') return 'integer';
   if (type === 'set') return 'any';
   if (type === 'tuple') return 'any';
   if (type === 'dictionary') return 'any';
@@ -905,7 +910,11 @@ export function overlapsForDeferredValidation(
   // collection alternative is in play).
   const isCollectionLike =
     (typeof t === 'string' &&
-      (t === 'list' || t === 'collection' || t === 'indexed_collection')) ||
+      (t === 'list' ||
+        t === 'collection' ||
+        t === 'indexed_collection' ||
+        // An index span is collection-like for deferral purposes.
+        t === 'range')) ||
     (typeof t !== 'string' &&
       (t.kind === 'list' ||
         t.kind === 'collection' ||

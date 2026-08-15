@@ -693,7 +693,7 @@ function componentResultType(
 // Build the result type of `Map`: a collection with the same shape and
 // indexed-ness as the `source` collection, but whose elements are the
 // mapping lambda's result type (`elementType`) — not the source element
-// type. `Map(k |-> k + i, Range(1,3))` is thus `indexed_collection<complex>`,
+// type. `Map(k => k + i, Range(1,3))` is thus `indexed_collection<complex>`,
 // not `indexed_collection<integer>`.
 function mapResultType(
   source: Readonly<Type>,
@@ -705,6 +705,13 @@ function mapResultType(
     if (source === 'set') return { kind: 'set', elements: elementType as Type };
     if (source === 'indexed_collection' || source === 'collection')
       return { kind: source, elements: elementType as Type };
+    // An index span maps to an ORDERED result, and `range` cannot carry the
+    // lambda's element type (it is unparameterized, and its elements are
+    // indices by definition), so the result widens to `indexed_collection`.
+    // Without this case a mapped span fell through to the unordered
+    // `collection` below and rebuilt with a `Set` head.
+    if (source === 'range')
+      return { kind: 'indexed_collection', elements: elementType as Type };
     // dictionary/record/tuple/etc.: yield a plain collection of the results.
     return { kind: 'collection', elements: elementType as Type };
   }
@@ -799,7 +806,7 @@ function fieldBearingType(
       return undefined;
     return 'none';
   }
-  // An `object<…>` layout is field-bearing in exactly the way a record body
+  // An `object{…}` layout is field-bearing in exactly the way a record body
   // is — the same ordered map from field name to field type — and reaching it
   // through the pinned nominal reference is how `p.age` learns its static
   // type. The difference the layout carries is that its fields are read/write
@@ -966,7 +973,7 @@ function immutableTargetError(
 ): Expression {
   return ce.error([
     'immutable-value-assignment',
-    `\`${typeToString(t)}\` is not an object type, and only an object's fields can be assigned. Build an updated copy with the new \`${name}\`, or declare the type as \`object<…>\``,
+    `\`${typeToString(t)}\` is not an object type, and only an object's fields can be assigned. Build an updated copy with the new \`${name}\`, or declare the type as \`object{…}\``,
   ]);
 }
 
@@ -2251,6 +2258,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     type: (ops) => {
       // ops: [lower, upper?, step?]
+      // An INDEX SPAN — the `range` type — when the operands prove the value
+      // is a contiguous ascending run of valid 1-based indices; see
+      // `isIndexSpan` and `docs/STRING_ROADMAP.md` ("The `range` type").
+      // This is a NARROWING of the two results below, never a widening:
+      // `range <: indexed_collection<integer>`.
+      if (isIndexSpan(ops)) return 'range';
       // The element type is integer iff every present operand is integer-
       // valued. Range(0.5, 2.5) iterates 0.5, 1.5, 2.5 — number, not integer.
       const allInt = ops.every((op) => op.isInteger);
@@ -2863,7 +2876,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Contains: {
     description:
-      'Return True if the collection contains the given element (structural identity, like `===`), False otherwise.\n\nEquivalent to `Any(xs, (e) |-> e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.',
+      'Return True if the collection contains the given element (structural identity, like `===`), False otherwise.\n\nEquivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.',
     complexity: 8200,
     signature: '(collection, element: any) -> boolean',
     // Peek through membership-preserving wrappers (incl. `Unique`) so an eager
@@ -3018,7 +3031,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // like Julia's `any(itr)`.
   Any: {
     description:
-      'Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) |-> e === v)`.',
+      'Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) => e === v)`.',
     complexity: 8200,
     lazy: true,
     // Design D phase 1: the element-of link lives in the SIGNATURE (see
@@ -3692,7 +3705,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the ELEMENT parameter only — §7 rule 2: `S` describes the STAMP, not the
     // operator's tolerance. The accumulator is deliberately `unknown`, which
     // the stamp gate declines, because a fold's accumulator may CHANGE TYPE
-    // mid-fold and an annotation would forbid it: `Reduce([1,2,3], (a, x) |->
+    // mid-fold and an annotation would forbid it: `Reduce([1,2,3], (a, x) =>
     // a / x, 1)` folds 1 → 1/2 → 1/6, which a `finite_integer` accumulator
     // annotation (solved from the initial value) rejects at apply time. That
     // holds for the SEEDED form as much as the seedless one, so neither stamps
@@ -3793,7 +3806,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // the convention of `Scan` and of the compiled fast path above (ruled
         // 2026-08-09). The previous encoding folded from the `Nothing`
         // sentinel, which only looked right for a reducer that splices it
-        // away (`Add`): `Reduce([1, 2, 3], (a, b) |-> a - b)` answered -6
+        // away (`Add`): `Reduce([1, 2, 3], (a, b) => a - b)` answered -6
         // (`((nothing - 1) - 2) - 3`) where `Scan`'s last element is -4, and a
         // reducer that does not splice leaked `Nothing` into the result
         // (`Reduce([2, 3, 2], Power)` → `Nothing^12`). It also made the
@@ -4296,7 +4309,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // A finite source is NECESSARY but not SUFFICIENT: the flattened stream
       // is finite only if each of the finitely many inner results is finite
       // too, and a callback returning an INFINITE inner collection
-      // (`FlatMap([1, 2], n |-> Range(1, Infinity))`) makes the result
+      // (`FlatMap([1, 2], n => Range(1, Infinity))`) makes the result
       // infinite from a finite source. Since every finite-guarded consumer
       // (`Reduce`, `Sum`, …) enumerates on the strength of this facet, `true`
       // is claimed only when BOTH halves are provable, from the callback's
@@ -5804,6 +5817,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'Reverse the order of the elements of an indexed collection.',
     complexity: 8200,
     signature: '(T) -> T where T: indexed_collection',
+    // Reversing an INDEX SPAN leaves the `range` type: the result is
+    // descending (`Reverse(1..10)` is `[10, 9, …, 1]`) and `range` admits
+    // only ascending spans, so the declared `(T) -> T` would bind `T = range`
+    // and claim a type the value does not have. Widen to the honest
+    // supertype instead. (Reversal is one of the operations that motivates
+    // the per-kind result rule in `docs/STRING_ROADMAP.md`, "Signature
+    // refinement"; this handler is that rule's `range` case.) Every other
+    // operand type declines by returning `undefined`, keeping the signature.
+    type: ([xs]) =>
+      xs?.type.type === 'range'
+        ? parseType('indexed_collection<integer>')
+        : undefined,
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -7165,12 +7190,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // An UNDECIDED predicate, in either of its two shapes: unresolved —
             // a symbol declared `function` with no value applies to a symbolic
             // `g(x)` typed `unknown` — or resolved but not decidable yet, an
-            // unevaluated relation already typed `boolean` (`x |-> x > n` with
+            // unevaluated relation already typed `boolean` (`x => x > n` with
             // `n` free, which is neither `True` nor `False`). Both are undecided,
             // not wrong: stay unevaluated, mirroring `If`, which reserves its
             // throw for a condition that is not boolean at all. The throw below
             // keeps the case the spell-check hint was written for: a predicate
-            // that resolves to a concrete non-boolean (`x |-> x + 1`).
+            // that resolves to a concrete non-boolean (`x => x + 1`).
             return undefined;
           throw predicateResultError('Partition', arg);
         }
@@ -9370,4 +9395,53 @@ function isEmptySource(x: Expression): boolean | undefined {
   // `Infinity` correctly answers `false` here — an unbounded source is not
   // empty. Only a genuinely unknown count leaves the verdict open.
   return typeof n === 'number' ? n === 0 : undefined;
+}
+
+/**
+ * Do these `Range` operands PROVE the value is an index span — the `range`
+ * type: a contiguous, ascending, step-1 run of valid 1-based collection
+ * indices?
+ *
+ * Operands are `[lower, upper?, step?]`, with the one-operand form meaning
+ * `Range(n) = 1..n`. The qualification, per `docs/STRING_ROADMAP.md`
+ * ("The `range` type"):
+ *
+ * - every present operand is an integer LITERAL with a readable value. Note
+ *   `toInteger` alone is NOT that test: it ROUNDS (`Math.round`), so it maps
+ *   the `Range(0.5, 2.5)` bounds — a sequence of halves, not indices — onto
+ *   `1..3`. Hence the `isInteger` type check first, which is false for a
+ *   non-integer literal. A symbolic `Range(a, b)` never qualifies either:
+ *   `isInteger` may hold for a declared-integer symbol, but `toInteger`
+ *   returns `null` for it. Assumption-based narrowing is deliberately out of
+ *   scope; its absence is never unsound, since the result merely types wider;
+ * - the step, if present, is exactly 1 (a stepped range is a GATHER, and
+ *   gathering is `At(xs, r)`, not a span);
+ * - `lower >= 1` — index 1 is the first element, so 0 and negatives are not
+ *   index spans;
+ * - `lower <= upper` — ascending. A descending `Range(6, 5)` is the pair
+ *   `[6, 5]`, a real value with a real meaning, and not a span.
+ *
+ * Finiteness falls out: `toInteger` rejects a non-finite operand, so
+ * `Range(1, oo)` does not qualify.
+ *
+ * There is deliberately no EMPTY index span: `Range(1, 0)` already means the
+ * descending pair `[1, 0]`, so an empty span has no spelling, and operations
+ * that can empty a range report `list` instead of `range`.
+ */
+function isIndexSpan(ops: ReadonlyArray<Expression>): boolean {
+  if (ops.length === 0 || ops.length > 3) return false;
+
+  // An exact, finite integer LITERAL, or `null`. See the note above on why
+  // `toInteger` is guarded by `isInteger` rather than used bare.
+  const literal = (op: Expression | undefined): number | null =>
+    op?.isInteger === true ? toInteger(op) : null;
+
+  if (ops.length === 3 && literal(ops[2]) !== 1) return false;
+
+  // `Range(n)` is `1..n`; `Range(lo, hi)` and `Range(lo, hi, 1)` are explicit.
+  const lower = ops.length === 1 ? 1 : literal(ops[0]);
+  const upper = ops.length === 1 ? literal(ops[0]) : literal(ops[1]);
+  if (lower === null || upper === null) return false;
+
+  return lower >= 1 && lower <= upper;
 }

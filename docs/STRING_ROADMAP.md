@@ -436,8 +436,12 @@ carries no element-type argument. Every existing signature that accepts
 ### Typing rule for `Range`
 
 `Range`'s existing `type` handler (`library/collections.ts`) gains the
-qualification check. Provability is literal-based in v1: all present
-operands must be integer LITERALS meeting the constraints above.
+qualification check (`isIndexSpan`). Provability is literal-based in v1: all
+present operands must be integer LITERALS meeting the constraints above. The
+one-operand form `Range(n)` means `1..n`, so it qualifies whenever `n` is an
+integer literal `>= 1`. Note the literal test cannot be `toInteger` alone —
+that helper ROUNDS, so it maps the `Range(0.5, 2.5)` bounds (a sequence of
+halves) onto `1..3`; the check is guarded by `isInteger` first.
 Symbolic or assumption-bound operands (`Range(a, b)` with `a`, `b`
 declared integers and `a ≤ b` assumed) do NOT yield `range` — narrowing
 through assumptions is a possible later refinement, deliberately out of
@@ -875,7 +879,7 @@ they will never change.
   with the KEY-function family — `MaxBy`/`MinBy`/`Ordering`/`GroupBy` and
   friends all take a key or comparator already, so collation-aware
   grouping ("group names ignoring accents") needs zero new variants of
-  those operators: `GroupBy(names, n |-> CollationKey(n, c))`.
+  those operators: `GroupBy(names, n => CollationKey(n, c))`.
 
 Locale-sensitive CASING (`ToUpperCase(s, locale)` — the Turkish dotless-i)
 is a separate, smaller feature: an optional trailing argument on the case
@@ -943,6 +947,17 @@ operator to land on.
       `range <: indexed_collection<integer>` and gate `Range`'s type
       handler on the qualification check (integer, ≥ 1, ascending,
       step 1, finite). See "The `range` type".
+
+      Note (learned while implementing, 2026-08-15): step (a) cannot ship
+      WITHOUT `Reverse`'s per-kind case from step (b). The moment
+      qualifying ranges type as `range`, `Reverse`'s declared
+      `(T) -> T where T: indexed_collection` binds `T = range` and claims
+      `range` for `Reverse(1..10)` = `[10, 9, …, 1]` — a descending
+      sequence the type excludes. Introducing the type therefore CREATES
+      a false static type unless `Reverse` widens a span operand to
+      `indexed_collection<integer>` in the same change. Any other
+      operator given a kind-preserving signature has the same coupling:
+      the type and its per-kind cases are one unit.
 
    b. **Per-kind result rule** for `Reverse`, `Rest`, `Most`, `Take`,
       `Drop`, `Slice`, `Unique`, `Sort` (unary and comparator arms —
