@@ -620,7 +620,7 @@ Pins: `test/epsil/multi-clause.test.ts` — the bare recursive `fact`, the
 no-weakening check on the declared domain, and the annotated-parameter
 arm check that must still fail.
 
-### `definition-order.test.ts` is intermittently red in FULL runs only (found 2026-08-14)
+### Compile-time constant folding is NON-DETERMINISTIC under machine load — design revisit needed (root cause found 2026-08-14)
 
 The "three-definition Sum matrix" tests compare the COMPILED result of the
 same program built in different definition orders. In a full suite run they
@@ -685,33 +685,72 @@ on instead is the other three legs: the 13th-digit magnitude, three
 independent sessions hitting it across unrelated diffs, and the object work
 eliminated by a clean full run.
 
-Two live hypotheses remain:
+**ROOT CAUSE — the load-sensitivity hypothesis is CONFIRMED, and it is a
+design defect, not a flaky test.** Compile-time constant folding evaluates a
+constant subtree under a WALL-CLOCK budget: `CONSTANT_FOLD_BUDGET_MS = 100`
+in `src/compute-engine/compilation/base-compiler.ts`, armed around
+`tryConstantFold` via `withTimeLimit`. `tryConstantFold`'s own doc records
+the consequence as accepted: *"a deadline-degradable numeric operator
+(adaptive quadrature is best-effort under a deadline) folds to the estimate
+the budget allows."* Under CPU contention that operator completes fewer
+iterations inside the same 100 ms, so it folds to a DIFFERENT estimate —
+and the compiled program therefore contains a different constant. The
+13th-digit disagreement between definition orders is that estimate moving,
+not the orders differing.
 
-- **Something else in the process-global numeric family.** `BigDecimal.precision`
-  is specifically eliminated, but it is not the only shared numeric setting.
-  The magnitude fits: the mismatch is in the 13th significant digit
-  (`-0.5248276195478552` vs `-0.5248276195481336`), a precision artifact
-  rather than a logic error.
-- **Load sensitivity.** An iteration or time budget on this path yielding a
-  slightly different result when the CPU is contended would explain passes
-  alone, passes in-band, fails only in parallel, and a failing subset that
-  varies with which workers get starved. If this is it, it is a real defect —
-  a compiled result that changes with machine load — and not a flaky test.
+**What was accepted was the magnitude of the folded value; what was not
+noticed is that COMPILED OUTPUT BECOMES A FUNCTION OF MACHINE LOAD.**
+Consequences worth weighing in the revisit:
 
-Eliminated, do not re-derive: the per-engine cache (`EngineCacheStore` keeps
-`_entries` as an instance field, so two engines cannot share entries), leaked
-`BigDecimal.precision` (probed directly: control and every ordering agree
-byte-for-byte at default precision and after deliberately leaking precision
-100), and the Appendix B object work (a full run with all of Phase 1 applied
-shows these same failures and nothing else).
+- The same source compiled twice on the same machine can differ. Compiled
+  artifacts are not reproducible, and anything that caches or fingerprints
+  one is caching a load-dependent value.
+- No test can pin a compiled numeric result exactly — which is what
+  `definition-order.test.ts` was trying to do, and why it looked flaky.
+- The failure is silent and small. A 13th-digit drift will not be noticed
+  until something downstream amplifies it.
 
-Reference points for whoever picks this up: a FRESH process computes
-`-0.5248276195481336` for both the control and every ordering — the value the
-failing runs report as *received* — so it is the collection-phase `reference`
-that ends up holding `-0.5248276195478552`. The failing PERMUTATIONS also vary
-between runs on identical tree state (3 failures — `h,A,a`/`A,h,a`/`A,a,h` —
-then 2 — `a,A,h`/`A,a,h`), so neither which orders fail nor how many is
-stable; isolation is 32/32 every time.
+**Reproducer** (much smaller than "a full suite"; deterministic):
+
+```
+npx jest --config ./config/jest.config.cjs -- \
+  test/compute-engine/definition-order.test.ts \
+  test/compute-engine/arithmetic.test.ts \
+  test/compute-engine/trigonometry.test.ts \
+  test/compute-engine/number-theory.test.ts
+      -> 5 failed, three runs out of three
+
+same four files with --maxWorkers=1   -> 163 passed
+same four files with --runInBand      -> 163 passed
+```
+
+Any three sizeable suites reproduce it; the neighbours' CONTENT is
+irrelevant (an earlier bisect that appeared to implicate the mutable-object
+suites was measuring added load, not those files). One worker never
+reproduces it.
+
+**Direction for the revisit — a fold should be all-or-nothing.** The budget
+exists so a pathological constant degrades to structural compilation instead
+of stalling the compile, and the doc notes typical folds complete in
+MICROSECONDS. So discarding a fold whose evaluation exhausted its budget —
+rather than keeping the partial estimate — costs almost nothing in the
+common case and removes this entire class: either the value was computed to
+completion (deterministic) or the subtree is compiled structurally and
+evaluated at run time (also deterministic). The open implementation question
+is whether the deadline mechanism can report "degraded" distinctly from
+"completed"; if `withTimeLimit` cannot, that signal has to be added, and any
+operator that is *best-effort by design* (adaptive quadrature) must be
+excluded from folding regardless, since it can return an approximation
+without ever hitting the deadline.
+
+A deterministic budget (an iteration or step count rather than wall-clock)
+is the other candidate. It removes load-dependence but not
+approximation-dependence, so it is strictly weaker than the all-or-nothing
+rule unless combined with it.
+
+Until this is resolved, `definition-order.test.ts`'s Sum-matrix assertions
+are expected to fail under parallel load and are NOT evidence of a
+regression in whatever is being changed.
 
 ### `Reverse` of a tuple: static type lies about element order (found 2026-08-14, string-spec review round 2)
 
