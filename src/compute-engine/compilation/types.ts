@@ -522,6 +522,22 @@ export interface CompileTarget<Expr = unknown> {
   constantFold?: boolean;
 
   /**
+   * When true, `Sqrt`/`Ln`/`Log` over a real operand of UNKNOWN sign lower
+   * through the complex helpers instead of the real kernel, so the compiled
+   * value matches the interpreter's complex promotion. Defaults to disabled.
+   * The caller-facing option of the same name documents the trade (about 2.3×
+   * on affected chains, and an ordering comparison over such a head fails
+   * closed); this field is how a target carries the choice into
+   * `BaseCompiler.isComplexValued`.
+   *
+   * Read ONCE, from the outermost compilation, and held for its whole
+   * duration: the analysis and every target emitter must agree on a node's
+   * value SHAPE, so a nested target must never be able to flip the lane
+   * mid-compile.
+   */
+  complexPromotion?: boolean;
+
+  /**
    * The most elements a constant COLLECTION may inline to when it is
    * constant-folded — an INCLUSIVE maximum, so a collection of exactly this
    * size still inlines. Defaults to 49, matching the JavaScript `Range`
@@ -1043,8 +1059,48 @@ export interface CompilationOptions<Expr = unknown> {
    *
    * This avoids object allocations for callers that only need real-valued
    * results (e.g., plotting).
+   *
+   * This projects the compiled unit's RESULT and nothing else: it never
+   * influences which lowering an operator picks, so it can only discard
+   * complexness, never produce it. To make a square root of a possibly
+   * negative operand yield a complex value at all, see `complexPromotion`
+   * below — the two are independent and compose (promote internally, project
+   * at the boundary).
    */
   realOnly?: boolean;
+
+  /**
+   * Opt in to COMPLEX PROMOTION for `Sqrt`/`Ln`/`Log` applied to a real
+   * operand whose sign is not known at compile time (default `false`).
+   *
+   * By default such a head keeps the real kernel — `Math.sqrt(t - 1)` — even
+   * though its type admits complex, so a negative operand yields `NaN` where
+   * the interpreter promotes and returns a complex value. That default is
+   * deliberate: it keeps `√(⌈x⌉²+⌈y⌉²)` on the fast path, and it is what lets
+   * an ordering comparison over a radical compile at all (see below).
+   *
+   * With this option, such a head lowers through the complex helpers instead
+   * (`_SYS.csqrt`/`_SYS.clog`, lifting a real operand to `{re, im: 0}`), so
+   * the compiled value matches `evaluate()`/`.N()`. Intended for a caller that
+   * knows its documents are complex-valued — a plotting front-end with a
+   * per-document "complex mode" switch maps that switch onto this option.
+   *
+   * Two consequences to expect when enabling it:
+   *
+   * - Affected chains get slower: about 2.3× measured on a 200k-point sweep of
+   *   `|√(u+1)/2 − 1|` (9 ms → 21 ms). Chains with no unknown-sign
+   *   `Sqrt`/`Ln`/`Log` are emitted exactly as before and cost nothing.
+   * - An ordering comparison over such a head now FAILS CLOSED (D6) rather
+   *   than compiling: `Less(Sqrt(x), 2)` has no truth value once `Sqrt(x)` may
+   *   be complex, which is why the default keeps the real kernel there.
+   *
+   * Honored by the `javascript` and `python` targets. The shader targets
+   * (`glsl`/`wgsl`) do not accept it and keep the real kernel unconditionally:
+   * they have no runtime-failure channel, and their real-kernel behavior for
+   * an unknown-sign radicand is pinned by the Desmos-corpus render states of
+   * Tycho item 144 (`test/compute-engine/compile-glsl.test.ts`).
+   */
+  complexPromotion?: boolean;
 
   /**
    * Cap the trip count of emitted `Sum`/`Product` loops: a loop whose

@@ -1572,13 +1572,38 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Ln: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `cmath.log(${compile(args[0])})`;
+    // The caller's `complexPromotion` opt-in: an operand of unknown sign takes
+    // the complex lane so the compiled value matches the interpreter's
+    // promotion. Uses the SAME predicate `BaseCompiler.isComplexValued`
+    // reports to the enclosing node, or the parent reads a real where a
+    // complex is returned.
+    //
+    // `np.emath.log`, not `cmath.log`: the operand here is a REAL of unknown
+    // sign, so zero is in range, and `cmath.log(0)` raises `ValueError` where
+    // the interpreter answers `-∞` (and the unpromoted `np.log(0)` yields
+    // `-inf`). `np.emath` is numpy's domain-relaxed variant — complex for a
+    // negative input, `-inf` at zero — which is exactly this option's
+    // semantics, and it accepts arrays as the rest of this target does.
+    if (BaseCompiler.promotesRadicalToComplex('Ln', args))
+      return `np.emath.log(${compile(args[0])})`;
     return `np.log(${compile(args[0])})`;
   },
   Log: (args, compile) => {
-    // Log with base: log(x, base)
-    if (args.length === 1) return `np.log10(${compile(args[0])})`;
-    if (args.length === 2)
-      return `(np.log(${compile(args[0])}) / np.log(${compile(args[1])}))`;
+    // Log with base: log(x, base). Under the caller's `complexPromotion`
+    // opt-in an operand of unknown sign — value OR base, since a negative base
+    // makes the quotient complex too — routes through `np.emath`, numpy's
+    // domain-relaxed variant (complex for a negative input, `-inf` at zero).
+    // See `Ln` above for why `cmath` is the wrong helper for a REAL operand:
+    // `cmath.log(0)` raises where the interpreter answers `-∞`.
+    const promoted = BaseCompiler.promotesRadicalToComplex('Log', args);
+    if (args.length === 1)
+      return promoted
+        ? `np.emath.log10(${compile(args[0])})`
+        : `np.log10(${compile(args[0])})`;
+    if (args.length === 2) {
+      const fn = promoted ? 'np.emath.log' : 'np.log';
+      return `(${fn}(${compile(args[0])}) / ${fn}(${compile(args[1])}))`;
+    }
     return 'np.log10';
   },
   Log10: 'np.log10',
@@ -1598,6 +1623,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Sqrt: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `cmath.sqrt(${compile(args[0])})`;
+    // The `complexPromotion` opt-in — see `Ln` above. `np.emath.sqrt` rather
+    // than `cmath.sqrt` for the same two reasons that matter across all three
+    // promoted heads: the operand is a REAL of unknown sign (so the whole real
+    // line, zero included, is in range) and `cmath` accepts only Python
+    // scalars, raising `TypeError` on the numpy arrays this target otherwise
+    // supports throughout.
+    if (BaseCompiler.promotesRadicalToComplex('Sqrt', args))
+      return `np.emath.sqrt(${compile(args[0])})`;
     return `np.sqrt(${compile(args[0])})`;
   },
   Root: (args, compile) => {
@@ -2739,6 +2772,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // has an engine value (`CompileTarget.varsKeys`).
       varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
       constantFold: options.constantFold,
+      complexPromotion: options.complexPromotion,
       naming: BaseCompiler.newNamingContext(expr, [
         options.preamble,
         ...(vars ? Object.values(vars) : []),
@@ -2802,6 +2836,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       var: this.makeVarResolver(vars),
       varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
       constantFold: options.constantFold,
+      complexPromotion: options.complexPromotion,
       naming: BaseCompiler.newNamingContext(expr, [
         options.preamble,
         ...(vars ? Object.values(vars) : []),

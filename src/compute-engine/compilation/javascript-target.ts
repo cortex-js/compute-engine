@@ -1560,12 +1560,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Ln: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.cln(${compile(args[0])})`;
-    // PROVABLY negative real operand, complex result (`Ln(-2)`, or `a := -2`
-    // → `Ln(a)` is `finite_complex`): the parent emits `{re, im}` arithmetic,
-    // so `Math.log` — a `NaN` number — must not be the lowering. An operand
-    // of merely UNKNOWN sign keeps the real kernel (pinned; see the
+    // Real-emitted operand with a complex result — a PROVABLY negative operand
+    // (`Ln(-2)`, or `a := -2` → `Ln(a)` is `finite_complex`), or an
+    // unknown-sign one under the caller's `complexPromotion` opt-in. The
+    // parent emits `{re, im}` arithmetic, so `Math.log` — a `NaN` number —
+    // must not be the lowering. Without the opt-in an unknown-sign operand
+    // keeps the real kernel (pinned; `promotesToComplexLane` mirrors the
     // `isComplexValued` Sqrt/Ln/Log carve-out, which makes the parent agree).
-    if (args[0]?.isNegative === true && resultIsComplexValued('Ln', args))
+    if (promotesToComplexLane('Ln', args))
       return `_SYS.cln(${complexOperandCode(args[0], compile)})`;
     return `Math.log(${compile(args[0])})`;
   },
@@ -2460,17 +2462,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `Log(x)` is base 10; `Log(x, b)` is base `b`. `Log2`/`Log10`/`Lb`
   // canonicalize into this head, so this is the only place they are lowered.
   Log: (args, compile, target) => {
-    // Complex either because an operand is, or because the RESULT is complex
+    // Complex either because an operand is, or because the RESULT is complex —
     // from a PROVABLY negative argument (`Log(-2)`, or `a := -2` making
-    // `Log(a)` `finite_complex`). Either way the enclosing expression reads
-    // `{re, im}`, so `Math.log10` — a `NaN` number — must not be the
-    // lowering. An operand of merely UNKNOWN sign keeps the real kernel
-    // (pinned; the `isComplexValued` Sqrt/Ln/Log carve-out makes the parent
-    // agree on the real shape).
+    // `Log(a)` `finite_complex`), or from an unknown-sign argument under the
+    // caller's `complexPromotion` opt-in. Either way the enclosing expression
+    // reads `{re, im}`, so `Math.log10` — a `NaN` number — must not be the
+    // lowering. Without the opt-in an unknown-sign operand keeps the real
+    // kernel (pinned; `promotesToComplexLane` mirrors the `isComplexValued`
+    // Sqrt/Ln/Log carve-out, which makes the parent agree on the shape).
     if (
       args.some((a) => BaseCompiler.isComplexValued(a)) ||
-      (args.some((a) => a.isNegative === true) &&
-        resultIsComplexValued('Log', args))
+      promotesToComplexLane('Log', args)
     ) {
       const n = BaseCompiler.tempVar(target);
       const num = `const ${n} = _SYS.cln(${complexOperandCode(args[0], compile)});`;
@@ -2956,13 +2958,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (Number.isNaN(r)) return complexSqrtLiteral(c);
       return String(r);
     }
-    // The operand is real-emitted but PROVABLY negative, so the result is
-    // complex (`a := -2` → `Sqrt(a)` is `finite_complex`). The enclosing
-    // expression reads `{re, im}` off this node, so `Math.sqrt` — which
-    // yields a `NaN` *number* there — would NaN-poison it. An operand of
-    // merely UNKNOWN sign keeps `Math.sqrt` (pinned; the `isComplexValued`
-    // Sqrt/Ln/Log carve-out makes the parent agree on the real shape).
-    if (args[0]?.isNegative === true && resultIsComplexValued('Sqrt', args))
+    // The operand is real-emitted but the result is complex — because the
+    // operand is PROVABLY negative (`a := -2` → `Sqrt(a)` is `finite_complex`),
+    // or because the caller opted in to promoting an unknown-sign operand
+    // (`complexPromotion`). The enclosing expression reads `{re, im}` off this
+    // node, so `Math.sqrt` — which yields a `NaN` *number* there — would
+    // NaN-poison it. Without the opt-in an unknown-sign operand keeps
+    // `Math.sqrt` (pinned; `promotesToComplexLane` mirrors the
+    // `isComplexValued` Sqrt/Ln/Log carve-out so the parent agrees).
+    if (promotesToComplexLane('Sqrt', args))
       return `_SYS.csqrt(${complexOperandCode(args[0], compile)})`;
     return `Math.sqrt(${compile(args[0])})`;
   },
@@ -3526,6 +3530,33 @@ function resultIsComplexValued(
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether a `Sqrt`/`Ln`/`Log` application takes the COMPLEX lane on account of
+ * its result rather than its operands (an operand that is itself complex is
+ * handled before this, by `isComplexValued`).
+ *
+ * Mirrors the `Sqrt`/`Ln`/`Log` branch of `BaseCompiler.isComplexValued`
+ * exactly, and must keep doing so: that branch is what the ENCLOSING
+ * expression consults to decide whether to read `{re, im}` off this node, and
+ * a parent reading `{re, im}` around a child that emitted a bare number is
+ * `NaN` everywhere. So both sides apply the same two conditions — a PROVABLY
+ * negative operand always promotes, and an operand of merely UNKNOWN sign
+ * promotes only when the caller opted in with `complexPromotion`.
+ */
+function promotesToComplexLane(
+  head: MathJsonSymbol,
+  args: ReadonlyArray<Expression>
+): boolean {
+  // The caller's opt-in, decided by the same predicate `isComplexValued` uses
+  // — never by the node's type, which is the wide `finite_number` for exactly
+  // the unknown-sign operands the option targets.
+  if (BaseCompiler.promotesRadicalToComplex(head, args)) return true;
+  // The default: only a PROVABLY negative operand promotes, and only when the
+  // result type confirms it.
+  if (!args.some((a) => a?.isNegative === true)) return false;
+  return resultIsComplexValued(head, args);
 }
 
 /**
@@ -5578,6 +5609,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
 
     const target = this.createTarget({
       constantFold,
+      complexPromotion: options.complexPromotion,
       foldExcludedOps: foldExcludedOps.size > 0 ? foldExcludedOps : undefined,
       operators: operatorLookup,
       varsObjectRefs,

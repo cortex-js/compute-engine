@@ -20,6 +20,7 @@ type CompileExpressionOptions<T extends string = string> = {
   preamble?: string;
   fallback?: boolean;
   realOnly?: boolean;
+  complexPromotion?: boolean;
   iterationBudget?: number;
   quadrature?: 'adaptive' | 'monte-carlo';
   symbolDeps?: Set<MathJsonSymbol>;
@@ -120,6 +121,10 @@ export function compile<T extends string = 'javascript'>(
       // default), or a target reused after a `constantFold: false` call would
       // silently keep folding disabled.
       options.target.constantFold = options.constantFold;
+      // Stamped unconditionally for the same reason as `constantFold` above: an
+      // omitted option must reset the field, or a target reused after a
+      // `complexPromotion: true` call would silently keep promoting.
+      options.target.complexPromotion = options.complexPromotion;
       const code = BaseCompiler.compileRoot(rewritten, options.target);
       return BaseCompiler.withReferences(
         {
@@ -161,6 +166,7 @@ export function compile<T extends string = 'javascript'>(
       imports: options?.imports,
       preamble: options?.preamble,
       realOnly: options?.realOnly,
+      complexPromotion: options?.complexPromotion,
       iterationBudget: options?.iterationBudget,
       quadrature: options?.quadrature,
       symbolDeps: options?.symbolDeps,

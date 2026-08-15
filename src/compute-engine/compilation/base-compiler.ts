@@ -3,6 +3,7 @@ import type {
   FunctionInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
+import type { MathJsonSymbol } from '../../math-json/types.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import {
   broadcastableParamSlots,
@@ -1144,6 +1145,31 @@ export class BaseCompiler {
     // are stable within one compilation but not across compilations, and a
     // boxed expression can outlive the compile that cached its answer.
     if (BaseCompiler._compileDepth === 0) BaseCompiler._invalidateComplexMemo();
+    // The complex-promotion opt-in is latched from the OUTERMOST compilation
+    // only (`complexPromotion`). The analysis here and every target emitter
+    // must agree on each node's value SHAPE — a parent that read `{re, im}`
+    // around a child that emitted a bare number is NaN everywhere — so the
+    // lane must be one answer for a whole compilation. Nested targets (a user
+    // function's body, a broadcast element) are constructed internally and do
+    // not carry the caller's option, so reading it at depth > 0 would flip the
+    // lane back mid-compile.
+    // Only the languages whose emitters implement the promotion may latch it.
+    // The option reaches a target two ways — the registered route, and the
+    // direct `compile(expr, { target })` route, which stamps the caller's
+    // choice onto whatever target object it was handed — and neither knows the
+    // language. A shader target's `Sqrt`/`Ln`/`Log` emitters never consult
+    // `promotesRadicalToComplex`, so letting the flag through there would make
+    // the ANALYSIS report complex over emitters still producing a scalar:
+    // measured, `compile(Mod(1e5·√(x−1), 1), { target: glslRaw,
+    // complexPromotion: true })` turned a working
+    // `mod(100000.0 * sqrt(x + -1.0), 1.0)` into a D6 decline. Restricting the
+    // latch here — the one choke-point every target funnels through — enforces
+    // the option's documented scope on every entry path at once.
+    const prevPromotion = BaseCompiler._complexPromotion;
+    if (BaseCompiler._compileDepth === 0)
+      BaseCompiler._complexPromotion =
+        target.complexPromotion === true &&
+        BaseCompiler.COMPLEX_PROMOTION_LANGUAGES.has(target.language ?? '');
     BaseCompiler._compileDepth += 1;
     // Only a genuine CHANGE of the bound-variable context invalidates: the
     // inner targets of a recursion carry the SAME `boundVars` set object
@@ -1166,6 +1192,7 @@ export class BaseCompiler {
       return BaseCompiler.compileWithCse(expr, target, prec);
     } finally {
       BaseCompiler._compileDepth -= 1;
+      BaseCompiler._complexPromotion = prevPromotion;
       if (nextBoundCtx !== prevBoundCtx) {
         BaseCompiler._boundVarsCtx = prevBoundCtx;
         BaseCompiler._invalidateComplexMemo();
@@ -1175,6 +1202,142 @@ export class BaseCompiler {
 
   /** The innermost compile target's `boundVars`, synced by `compile()`. */
   private static _boundVarsCtx: ReadonlySet<string> | undefined;
+
+  /**
+   * Whether the OUTERMOST compilation opted in to complex promotion for
+   * `Sqrt`/`Ln`/`Log` over an operand of unknown sign (`complexPromotion`).
+   * Latched by `compile()` at depth 0 and restored on the way out.
+   */
+  private static _complexPromotion = false;
+
+  /**
+   * Whether the compilation in progress promotes an unknown-sign
+   * `Sqrt`/`Ln`/`Log` to the complex lane. Target emitters read this so their
+   * lowering agrees with `isComplexValued`'s report to the enclosing node —
+   * the shape invariant compiled correctness rests on.
+   */
+  static get complexPromotion(): boolean {
+    return BaseCompiler._complexPromotion;
+  }
+
+  /**
+   * The target languages whose `Sqrt`/`Ln`/`Log` emitters consult
+   * `promotesRadicalToComplex`, and so may honor the `complexPromotion`
+   * option. Any other language — the shader targets, the interval target, a
+   * caller's custom target — keeps the real kernel unconditionally, because
+   * its emitters would otherwise disagree with the analysis about a node's
+   * value shape.
+   */
+  private static readonly COMPLEX_PROMOTION_LANGUAGES = new Set([
+    'javascript',
+    'python',
+  ]);
+
+  /** The heads whose real kernel can silently swallow a complex result. */
+  private static readonly PROMOTABLE_RADICAL_HEADS = new Set([
+    'Sqrt',
+    'Ln',
+    'Log',
+  ]);
+
+  /**
+   * Whether applying `head` to `args` takes the COMPLEX lane purely because
+   * the caller opted in to complex promotion (`complexPromotion`).
+   *
+   * The rule is deliberately NOT "the node's type admits complex". That test
+   * is too weak in both directions and misses the case the option exists for:
+   * `√(t−1)` types the wide `finite_number` — not a non-real type — whenever
+   * `t` is an undeclared symbol or an `unknown` parameter, which is exactly
+   * the shape a user function's body has. Keying off the type there would
+   * leave the option inert on its own witness.
+   *
+   * So the rule is the mathematical one: the real kernel is safe only when the
+   * operand is PROVABLY non-negative, and anything else may promote at run
+   * time, which is what the interpreter does. `isNonNegative` is three-valued
+   * and answers `undefined` for most symbolic operands; only an explicit
+   * `true` keeps the real kernel.
+   *
+   * Both `isComplexValued` and every target emitter for these heads route
+   * through this one predicate, so parent and child always agree on the value
+   * SHAPE — the invariant compiled correctness rests on.
+   */
+  static promotesRadicalToComplex(
+    head: MathJsonSymbol,
+    args: ReadonlyArray<Expression>
+  ): boolean {
+    if (!BaseCompiler._complexPromotion) return false;
+    if (!BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(head)) return false;
+    // `Log(x, b)`: a negative BASE makes the quotient complex too, so every
+    // operand has to clear the bar. An omitted operand cannot be cleared.
+    return args.some((a) => a?.isNonNegative !== true);
+  }
+
+  /**
+   * Under `complexPromotion`, whether a call to a USER-defined function
+   * produces a complex value — decided by looking through to its body.
+   *
+   * Needed because the promotion happens INSIDE the emitted `_fn_…`: with
+   * `z(t) := √(t−1)`, the body promotes and `_fn_z` returns `{re, im}`, while
+   * the call site `z(t)` types the wide `finite_number` and would otherwise be
+   * read as a plain number — `Math.abs(0.5 * {re,im} + -1)`, i.e. `NaN`
+   * everywhere, which is item 190's exact witness.
+   *
+   * Not consulted without the opt-in: the default carve-out keeps such a body
+   * on the real kernel, so the ordinary operand recursion already agrees, and
+   * gating here keeps the default emission byte-identical.
+   *
+   * The parameters are shielded during the body analysis, exactly as for a
+   * `Function` literal operand (`binderParts`), and `visited` declines self-
+   * and mutual recursion rather than looping.
+   */
+  private static isComplexValuedUserCall(
+    expr: Expression & { ops: ReadonlyArray<Expression> },
+    visited: Set<string>
+  ): boolean | undefined {
+    const op = expr.operator;
+    if (typeof op !== 'string' || visited.has(op)) return undefined;
+    const literal = BaseCompiler.userFunctionLiteral(expr.engine, op);
+    if (literal === undefined) return undefined;
+    const body = literal.ops[0];
+    if (body === undefined) return undefined;
+    // A body that may build a COLLECTION is not classifiable this way and must
+    // decline. `isComplexValued` answers for a list from `ops.some(…)`, so a
+    // single complex ELEMENT would report the whole call complex — and the
+    // scalar extracted from it inherits that verdict, because `At` has an
+    // `unknown` result type. Measured before this guard, with
+    // `g(t) := [√(t−1), 1]` under the opt-in: `g(t)[2] + 1` emitted
+    // `{re: _tv.re + 1, im: _tv.im}` around the plain number `1` and returned
+    // `{re: null}` instead of `2`. Declining here falls through to the
+    // ordinary analysis, which is what classified such calls before the
+    // look-through existed. Element-level complexness has its own separate
+    // handling (the list emitters' own element test).
+    //
+    // Both predicates are needed and neither subsumes the other:
+    // `type.matches('collection')` catches a body whose type is DEFINITELY a
+    // collection (`[√(t−1), 1]` types `vector<finite_number^2>`), while
+    // `isPossiblyCollectionTyped` catches the merely POSSIBLE ones — a
+    // `broadcastable<T>` or top-typed body, for which the former is false.
+    if (body.type.matches('collection') || isPossiblyCollectionTyped(body))
+      return undefined;
+    const params = literal.ops
+      .slice(1)
+      .map((p) => (isSymbol(p) ? p.symbol : undefined))
+      .filter((p): p is string => p !== undefined);
+    const nextVisited = new Set(visited);
+    nextVisited.add(op);
+    const prevVisited = BaseCompiler._userCallVisited;
+    BaseCompiler._userCallVisited = nextVisited;
+    try {
+      return BaseCompiler.withBinderMask({ real: [], shielded: params }, () =>
+        BaseCompiler.isComplexValued(body)
+      );
+    } finally {
+      BaseCompiler._userCallVisited = prevVisited;
+    }
+  }
+
+  /** Heads already being looked through by `isComplexValuedUserCall`. */
+  private static _userCallVisited: Set<string> = new Set();
 
   /**
    * Whether `expr` mentions any name that is BOUND in the current compilation
@@ -6567,6 +6730,23 @@ export class BaseCompiler {
     // `Real(±∞)` can type `non_finite_number` (so the `isNonRealNumber`
     // branch would too) — yet every target emits a real scalar for both.
     if (BaseCompiler.REAL_BY_DEFINITION_HEADS.has(expr.operator)) return false;
+    // The `complexPromotion` opt-in is answered BEFORE the type branches
+    // below, because the types it has to override are the WIDE ones: an
+    // unknown-sign `√(t−1)` types `finite_number`, which is neither non-real
+    // (so the `isNonRealNumber` arm never fires) nor `real`. See
+    // `promotesRadicalToComplex`.
+    if (BaseCompiler._complexPromotion) {
+      if (BaseCompiler.promotesRadicalToComplex(expr.operator, expr.ops))
+        return true;
+      // …and a call to a user function follows its BODY, which is where the
+      // promotion above actually happens (item 190's witness puts the radical
+      // inside `z(t) := √(t−1)`).
+      const viaBody = BaseCompiler.isComplexValuedUserCall(
+        expr,
+        BaseCompiler._userCallVisited
+      );
+      if (viaBody !== undefined) return viaBody;
+    }
     // Check the function's return type from its operator definition
     const t = expr.type;
     if (isNonRealNumber(t.type)) {
@@ -6584,10 +6764,19 @@ export class BaseCompiler {
         expr.operator === 'Sqrt' ||
         expr.operator === 'Ln' ||
         expr.operator === 'Log'
-      )
+      ) {
+        // The `complexPromotion` opt-in is NOT re-checked here: the gate at
+        // the top of this function already answered `true` for every promoted
+        // case, so reaching this line under the opt-in means
+        // `promotesRadicalToComplex` declined — every operand is provably
+        // non-negative — and the emitters' `promotesToComplexLane` will
+        // decline identically. Returning `true` here would therefore report
+        // complex over an emitter still producing `Math.sqrt`, which is the
+        // shape disagreement this whole predicate exists to prevent.
         return expr.ops.some(
           (a) => a.isNegative === true || BaseCompiler.isComplexValued(a)
         );
+      }
       // …and the carve-out has to survive the arithmetic ABOVE those heads
       // (Tycho item 144): `Multiply(1e5, Sqrt(u))` is itself typed
       // `finite_complex`, so answering from the type here would report
