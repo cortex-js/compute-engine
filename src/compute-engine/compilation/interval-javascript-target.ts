@@ -782,6 +782,14 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
   ): CompileTarget<Expression> {
     return {
       language: 'interval-javascript',
+      // See `CompileTarget.varsObjectName`: free symbols read as `_.<id>`
+      // (below), so a lambda parameter spelled `_` must not shadow the vars
+      // object.
+      varsObjectName: '_',
+      // `_IA` is baked as a literal token by every interval lowering; `_SYS`
+      // by the helpers it shares with the JavaScript target. See
+      // `CompileTarget.reservedEmittedNames`.
+      reservedEmittedNames: new Set(['_IA', '_SYS']),
       // Don't use operators - all arithmetic goes through functions
       // because interval arithmetic returns IntervalResult, not numbers
       operators: () => undefined,

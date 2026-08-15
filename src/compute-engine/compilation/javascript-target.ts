@@ -161,6 +161,15 @@ import type {
 /**
  * JavaScript operator mappings
  */
+/**
+ * Identifiers this target bakes into emitted source as literal tokens, which a
+ * function parameter must therefore not be emitted under. `_SYS` is the
+ * runtime helper namespace every `_SYS.…` lowering names; see
+ * `CompileTarget.reservedEmittedNames`. (The vars object `_` is handled
+ * separately — `varsObjectName` — because it needs a narrower rename rule.)
+ */
+const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set(['_SYS']);
+
 const JAVASCRIPT_OPERATORS: CompiledOperators = {
   Add: ['+', 11],
   Negate: ['-', 14], // Unary operator
@@ -5202,14 +5211,52 @@ function makeLazyStreamHelpers(ce: ComputeEngine): LazyStreamSysHelpers {
     new Error(
       `Iteration limit of ${ce.iterationLimit} exceeded while evaluating ${op}()`
     );
+  // Which helpers get the iteration cap, and what it counts.
+  //
+  // The cap exists to turn a walk that can NEVER FINISH into the interpreter's
+  // iteration-limit error instead of a hang. That danger is a property of the
+  // helper, not of the source being infinite, and it comes in two shapes:
+  //
+  //  - A helper that can spin WITHOUT EMITTING. `filterIter` advances its
+  //    source until the predicate matches, so an infinite source with a
+  //    predicate that never matches loops inside `filterIter` forever. Capped
+  //    — but on pulls SINCE THE LAST YIELD, not on pulls in total: a filter
+  //    that keeps yielding has proved it is not stuck, and is bounded by
+  //    whatever consumes it. Counting productive pulls made
+  //    `Take(Filter(1..∞, _ > 0), 1025)` throw at the default limit of 1024
+  //    for a walk that rejects nothing.
+  //  - A helper that MATERIALIZES an unbounded result. `takeWhileIter` builds
+  //    an array and stops only when the predicate turns false, so a predicate
+  //    that never does yields forever into memory. Nothing else bounds it —
+  //    unlike `takeIter` it has no count — so it is capped on TOTAL pulls, and
+  //    that total is what limits the size of the result it returns.
+  //  - `takeIter` pulls at most `k` elements, and `dropIter` skips exactly `k`
+  //    before yielding. `k` is a resolved SAFE INTEGER (`intCount` above has
+  //    already rejected non-finite and out-of-range counts, which return the
+  //    empty walk), so both loops provably terminate. NOT capped: `k` is the
+  //    caller's explicit, finite request, and the interpreter honours it in
+  //    full — `Sum(Take(Map(_ ↦ _², 1..∞), 100000))` answers 333338333350000
+  //    there, where a capped `takeIter` threw at the default limit of 1024,
+  //    and `Take(Drop(1..∞, 2000), 3)` answers [2001, 2002, 2003] where a
+  //    capped `dropIter` threw. An unbounded stage UPSTREAM of either still
+  //    fails as it should, because that stage carries its own cap.
   return {
     // Predicate TRUTHINESS, matching the eager `Filter` lowering
     // (`.filter((_x) => _f(_x))`).
     filterIter: function* (it, p) {
-      let pulls = 0;
+      // Counted since the last element was YIELDED, not in total — see the
+      // note above `intCount`. Only an unbroken run of rejections is a walk
+      // that can never finish; a filter that keeps yielding is bounded by its
+      // consumer, and counting its productive pulls made
+      // `Take(Filter(1..∞, _ > 0), 1025)` throw at the default limit of 1024
+      // for a walk that rejects nothing. Mirrors the interpreter's `Filter`
+      // iterator (`library/collections.ts`).
+      let sinceYield = 0;
       for (const x of it) {
-        if (++pulls > ce.iterationLimit) throw exceeded('Filter');
-        if (p(x)) yield x;
+        if (p(x)) {
+          sinceYield = 0;
+          yield x;
+        } else if (++sinceYield > ce.iterationLimit) throw exceeded('Filter');
       }
     },
     // A negative count drops nothing (`Drop(xs, -2)` is `xs`, matching the
@@ -5218,9 +5265,7 @@ function makeLazyStreamHelpers(ce: ComputeEngine): LazyStreamSysHelpers {
       const k = intCount(n);
       if (k === null) return;
       let dropped = 0;
-      let pulls = 0;
       for (const x of it) {
-        if (++pulls > ce.iterationLimit) throw exceeded('Drop');
         if (dropped < k) {
           dropped++;
           continue;
@@ -5235,9 +5280,7 @@ function makeLazyStreamHelpers(ce: ComputeEngine): LazyStreamSysHelpers {
       const k = intCount(n);
       if (k === null || k <= 0) return [];
       const out: unknown[] = [];
-      let pulls = 0;
       for (const x of it) {
-        if (++pulls > ce.iterationLimit) throw exceeded('Take');
         out.push(x);
         if (out.length >= k) break;
       }
@@ -5339,6 +5382,14 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       language: 'javascript',
       operators: (op) => JAVASCRIPT_OPERATORS[op],
       functions: (id) => JAVASCRIPT_FUNCTIONS[id],
+      // Free symbols read through the vars object bound to `_` (see the
+      // `_.<id>` emissions below), so a lambda parameter spelled `_` must not
+      // shadow it — see `CompileTarget.varsObjectName`.
+      varsObjectName: '_',
+      // Baked as a literal token by every helper lowering; a parameter
+      // spelled this way shadows it for its whole body — see
+      // `CompileTarget.reservedEmittedNames`.
+      reservedEmittedNames: JS_RESERVED_EMITTED_NAMES,
       var: (id) => {
         const result = {
           Pi: 'Math.PI',
@@ -5520,6 +5571,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       foldExcludedOps: foldExcludedOps.size > 0 ? foldExcludedOps : undefined,
       operators: operatorLookup,
       varsObjectRefs,
+      // See `CompileTarget.varsObjectName`: free symbols read as `_.<id>`, so
+      // a lambda parameter spelled `_` must not shadow the vars object.
+      varsObjectName: '_',
+      // See `CompileTarget.reservedEmittedNames`.
+      reservedEmittedNames: JS_RESERVED_EMITTED_NAMES,
       functions: (id) =>
         namedFunctions?.[id] ? namedFunctions[id] : JAVASCRIPT_FUNCTIONS[id],
       var: (id) => {

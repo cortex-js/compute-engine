@@ -522,6 +522,24 @@ export interface CompileTarget<Expr = unknown> {
   constantFold?: boolean;
 
   /**
+   * The most elements a constant COLLECTION may inline to when it is
+   * constant-folded — an INCLUSIVE maximum, so a collection of exactly this
+   * size still inlines. Defaults to 49, matching the JavaScript `Range`
+   * handler's `len < 50`: a source-SIZE trade-off, appropriate where both
+   * emissions exist.
+   *
+   * A target sets this when that trade-off does not describe it. On the
+   * shader targets a dynamic collection has no lowering at all, so for a
+   * constant one the inline literal is the only emission that can compile:
+   * the number is a capability limit rather than a compactness choice, and
+   * they set it to the same 256 their own `Range` handler already inlines to,
+   * keeping one limit per target instead of two that can disagree. Stating
+   * the field as an inclusive maximum is what lets each target reuse its own
+   * number directly rather than translating it by one.
+   */
+  maxInlineElements?: number;
+
+  /**
    * Operator/function names whose emission the CALLER overrode (the `functions`
    * and record-form `operators` compilation options). A constant subtree that
    * mentions such a name — as an application head or as a value-position
@@ -546,6 +564,83 @@ export interface CompileTarget<Expr = unknown> {
    * `Match` case. See `BaseCompiler.withBoundNames` and finding A2.
    */
   boundVars?: ReadonlySet<string>;
+
+  /**
+   * Block locals whose declared value is a function literal, keyed by the
+   * local's name: `const g = (k) |-> …` inside a compiled `Block`. The
+   * declaration lowers to a value binding (`let g = ((k) => …)`), so a later
+   * `g(3)` in the same block is an ordinary call of that binding — but head
+   * resolution otherwise looks a user-defined function up in the ENGINE's
+   * definitions only (`BaseCompiler.userFunctionLiteral`), which a block-local
+   * declaration never reaches, and the call fell through to the fail-closed
+   * throw as ``Unknown operator `g` ``. Populated by `BaseCompiler.compileBlock`
+   * on the target it compiles its statements under; an inner block's entry
+   * shadows an outer one's, and a local whose value is NOT a function literal
+   * REMOVES the entry it shadows.
+   *
+   * Only set for targets that lower a `Declare` as a value binding — i.e.
+   * those with no `declare` hook (the JavaScript family). Python and the GPU
+   * targets declare a local separately from its assignment and have no
+   * function-valued local at all, so they keep failing closed.
+   */
+  localFunctions?: ReadonlyMap<string, Expr>;
+
+  /**
+   * The same block locals as {@link localFunctions}, but the WHOLE enclosing
+   * statement list rather than the part of it already emitted — the scope for
+   * compiling a function-literal BODY.
+   *
+   * The two differ because a reference resolves at a different moment in each
+   * position. A statement-position expression runs where it is written, so a
+   * name declared later is genuinely not bound yet (`let a = g(3)` before
+   * `const g = …` must fail closed, not read a JavaScript temporal dead
+   * zone) — that is `localFunctions`, filled progressively. A function
+   * literal's body does not run until the function is CALLED, by which point
+   * every lexical declaration of the block has initialized, so it may name
+   * any of them: mutually recursive definitions (`isEven`/`isOdd`) and a
+   * lambda whose body calls a later sibling are ordinary programs the
+   * interpreter resolves, and compiling a body against the progressive map
+   * rejected both. Whether a given CALL is early enough remains JavaScript's
+   * own temporal-dead-zone question, and the emitted `let` bindings answer it
+   * exactly as the interpreter does.
+   */
+  lexicalFunctions?: ReadonlyMap<string, Expr>;
+
+  /**
+   * The identifier this target binds its VARS OBJECT to, when it reads free
+   * symbols through one. The JavaScript family compiles a free `k` to the
+   * member access `_.k` and binds the caller's `vars` argument to `_`, so it
+   * sets `'_'`; targets that spell a free symbol as a bare identifier (Python,
+   * the shader languages) leave this undefined.
+   *
+   * Declared so a function literal can avoid SHADOWING it. `_` is also the
+   * spelling of an implicit lambda parameter, and `_ |-> _ + k` therefore
+   * emitted `((_) => _ + _.k)`: inside the arrow, `_` is the parameter, so
+   * `_.k` read a property off a number and the whole call answered
+   * `NaN`/`false` behind `success: true` — `Map(_ |-> _ + k, [1,2,3])` with
+   * `k = 10` gave `[null, null, null]` instead of `[11, 12, 13]`. A parameter
+   * that collides with this name is renamed at emission
+   * (`BaseCompiler.lambdaParamBinding`).
+   */
+  varsObjectName?: string;
+
+  /**
+   * Identifiers this target bakes into emitted code as LITERAL tokens — the
+   * runtime helper namespaces (`_SYS` on JavaScript, `_IA` on the interval
+   * target). A function parameter spelled like one shadows it for that
+   * function's whole body: a parameter named `_SYS` turned every `_SYS.…`
+   * lowering inside the body into `TypeError: _SYS.rangeIter is not a
+   * function` at run time, for a program the interpreter evaluates fine.
+   *
+   * Distinct from {@link varsObjectName}, which is renamed only when the body
+   * actually reads the vars object — `_` is the ordinary spelling of an
+   * implicit parameter, so renaming it unconditionally would rewrite every
+   * `_ ↦ …` literal in every artifact. These names are renamed
+   * unconditionally instead: no source spells a parameter this way, so the
+   * rename costs nothing and does not have to predict which helpers the body
+   * will emit.
+   */
+  reservedEmittedNames?: ReadonlySet<string>;
 
   /**
    * Target-supplied absence capability (§3.F of the missing-value typing

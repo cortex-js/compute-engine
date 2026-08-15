@@ -56,6 +56,29 @@ export const INVERSE_TRIG_OPERATORS = new Set([
 const DERIVATIVE_HEADS = new Set(['D', 'Derivative', 'ND']);
 
 /**
+ * Does `expr` contain a derivative head anywhere — i.e. a subtree that
+ * {@link rewriteAngularUnit} deliberately left in the ENGINE's angular
+ * convention while rewriting everything around it into radians?
+ *
+ * A caller that wants to evaluate a rewritten tree has to know this: after
+ * the rewrite, a tree with no derivative head is uniformly radian-convention
+ * and must be evaluated as such, while one that HAS a derivative head carries
+ * two conventions at once and can be evaluated correctly under neither single
+ * setting. The compile-time constant folder uses this to neutralize the
+ * angular unit in the first case and to decline outright in the second
+ * (`tryConstantFold`, `compilation/base-compiler.ts`).
+ *
+ * Kept next to {@link DERIVATIVE_HEADS} on purpose: a head added to the
+ * rewrite's skip list must also become a decline for anyone evaluating the
+ * rewritten tree, and separating the two would let them drift silently.
+ */
+export function containsDerivativeHead(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (DERIVATIVE_HEADS.has(expr.operator)) return true;
+  return expr.ops.some(containsDerivativeHead);
+}
+
+/**
  * The chain factor dθ/da converting the engine's angular unit to radians, as
  * an EXACT expression (`π/180` in degree mode, `1` in radian mode) — matching
  * `angleToRadians` in `boxed-expression/utils.ts`.

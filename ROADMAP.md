@@ -324,6 +324,168 @@ canonicalization walk (the pattern `common/interruptible.ts` documents),
 plus a regression bounding parse time against a small multiple of the
 requested limit.
 
+### `evaluate()` eagerly expands symbolic `Product`s, then distributes — superlinear blowup on the plotting shape (OPEN, perf/design)
+
+Measured 2026-08-14, bare, machine precision, free symbols, on Tycho's
+`ioclpgtwi1` row
+`1 - Map(Z ↦ Σ_{i=1..Z} (1/i!)((1-x)/n)^i ∏_{k=1..i-1}(kn-1), 1..N)`:
+
+| N | median | | binding | median |
+|---|---|---|---|---|
+| 2 | 26 ms | | free `x`,`n` | 2062 ms |
+| 4 | 145 ms | | bound (`n=5`, `x=0.5`) | 39 ms |
+| 6 | 409 ms |
+| 8 | 1085 ms |
+| 10 | 3629 ms |
+| 12 | 4923 ms |
+
+~140× for a 5× increase in N (roughly cubic-to-quartic), and ~53×
+free-vs-bound on the identical row.
+
+**Mechanism, confirmed by ablation and by direct probe.** Two behaviors
+compose. (1) A symbolic `Product` EXPANDS to a polynomial under
+`evaluate()`: `∏_{k=1..8}(kn-1)` returns the 9-term
+`40320n^8 - 109584n^7 + …`, not the compact product. (2) Multiplying an
+expanded polynomial by anything then DISTRIBUTES — `(n-1)(1-x)^2`
+evaluates to `n(1-x)^2 - (1-x)^2` — which is the documented `mul()`
+behavior (see `mul-distributes-over-sums`), harmless in isolation and
+quadratic here. Together: the product contributes ~i terms, distribution
+multiplies them across the `(1-x)^i` factor, the Σ sums that over
+i=1..Z, and the `Map` repeats it for Z=1..N.
+
+Ablation at N=8 (median of 3, full row = 1311 ms) shows the cost is
+SUPERADDITIVE, so no single sub-term owns it: removing the product →
+158 ms, removing the factorial → 423 ms, removing the symbolic power →
+1081 ms; but each sub-term ALONE is cheap (product only 184 ms, power
+only 109 ms, factorial only 16 ms — 309 ms summed against 1311 ms
+combined).
+
+**Why this is worth changing rather than accepting.** `evaluate()`'s
+contract is the most EXACT form, not the most expanded one — an
+unexpanded `∏(kn-1)` is equally exact and dramatically smaller, and
+expansion is `expand()`'s job. The cost also lands precisely on the
+structural plotting case: a plot axis variable CANNOT be bound, so a
+consumer plotting this function always pays the free-symbol path. Tycho
+hit it as a 4–9 s evaluation behind a 500 ms probe budget.
+
+Fix shape when picked up: stop expanding a symbolic `Product` whose
+bound is symbolic during `evaluate()` (leave it as a `Product` and let
+`expand()` open it), and/or avoid `mul()`'s distribution when either
+operand is a many-term sum. Note the second lever alone is not enough —
+the ablation shows the terms interact, so measure both. Any change here
+needs the snapshot blast radius measured first; product expansion is
+long-standing behavior with wide pin coverage.
+
+### Auto-compile instrumentation is unreachable from a consumer install (OPEN, observability gap)
+
+`_mapAutoCompileStats` (`library/map-auto-compile.ts`) counts
+`attempts`/`compiledHits`/`revalidations`/`recompiles`/
+`elementFallbacks`/`nanDoubleChecks`, and is the only surface that says
+whether a `Map` drain compiled, re-validated or fell back. It is
+reachable from the repo and NOT from the published package: the bundle
+has no `./library/map-auto-compile` subpath export and the symbol does
+not appear in `dist/esm-min` at all (Tycho grepped it: 0 hits). Its own
+doc comment scopes it to tests.
+
+So when a consumer asks "did this drain compile, and did that decision
+change between runs?" — the question a wandering evaluation cost makes
+them ask — we can answer it in-repo and they cannot answer it at all.
+Tycho hit exactly this while investigating a `Map`-of-`Sum` row
+(2026-08-14) and said they would use the surface immediately if it
+existed.
+
+`CE_DEBUG_DEPS` does not cover it (it is referenced only in
+`collection-element-memo.ts`, for element/facet snapshot eligibility),
+which is why their first attempt produced no output.
+
+**The env-gated idiom is NOT the fix, and the reason generalizes.**
+Measured against the shipped bundle (`dist/esm-min/compute-engine.js`):
+`CE_CACHE_STATS` occurs 0 times, `process.env` occurs 0 times, and
+`mapAutoCompileStats` occurs 0 times. So every `process.env`-gated
+diagnostic in this repo — `CE_CACHE_STATS`, `CE_DEBUG_DEPS`,
+`CE_MEMO_PARANOID` — is eliminated from the published artifact, not
+merely defaulted off in it. Those flags serve CE's own Node-side
+debugging and CI, and they are unreachable for EVERY consumer of the
+package, browser or Node alike. Adding one more of them would reproduce
+the same dead end this entry is about.
+
+Fix shape when picked up: expose the counters as an `_`-prefixed ENGINE
+MEMBER (`ce._mapAutoCompileStats`). That is this repo's established
+shape for "reachable at runtime, no stability promise" — `_deadline`,
+`_random()`, `_compile()`, `_getSymbolValue()`, `_epsilBatchId` all live
+there. It survives bundling, needs no subpath export, and works from a
+browser, which is where the consumer asking the question runs. Keep an
+env-gated dump alongside it for Node/CI if wanted; it costs nothing, it
+just cannot be the consumer-facing half.
+
+Scope note for whoever implements it: a new engine member must land on
+`IComputeEngine` as well, and that applies to `_`-prefixed members —
+60 of them are already declared there, including every one named above.
+So this is an implementation + interface change, not a one-file edit.
+
+### Degree-mode folding flips `angularUnit` per fold attempt, purging caches (OPEN, perf — small)
+
+The 0.108.0 degree-mode fold fix neutralizes `engine.angularUnit` around
+each constant-fold evaluation (necessary — see the CHANGELOG entry). The
+setter is not a cheap flag: `set angularUnit` calls `_reset()`, which
+runs `purgeValues()` on the cache store. So a degree-mode compile pays
+two cache purges per fold ATTEMPT.
+
+Measured (60 constant subtrees, median of 5, javascript target):
+angular constants 4.2 ms in radian mode vs 9.4 ms in degree (2.2×);
+NON-angular constants 0.3 ms in both. So the cost is not the flag itself
+— it tracks how warm the purged caches are, and only an angular-heavy
+degree-mode compile is warm enough to notice.
+
+Note what that rules out: narrowing the gate to "subtree contains an
+angular operator" would save nothing, because the penalty falls exactly
+on the subtrees that genuinely need the neutralization. The fix that
+would work is hoisting the neutralization to the compilation boundary so
+it happens once — but that is not free either, because
+`compileDerivative` (`library/calculus.ts`) calls `rewriteAngularUnit`
+DURING compilation and that function reads `ce.angularUnit` from the
+engine. Hoisting therefore has to make the derivative lowering's unit
+explicit rather than ambient, or degree-mode derivatives silently stop
+being rewritten. Raised by the compilation session, who own the folder.
+
+### The constant-fold budget is WALL-CLOCK, so folded output is not reproducible (OPEN, design question — EXPLICIT compile path only)
+
+`CONSTANT_FOLD_BUDGET_MS = 100` (`compilation/base-compiler.ts`) is a
+wall-clock budget per constant subtree. Inside it the subtree folds to a
+literal; over it, it degrades to structural compilation. Correctness is
+not at stake — the gates are written so a clamped evaluation yields a
+correct value or a non-literal, never a wrong fold — but whether a
+borderline-expensive constant folds can differ between two runs of the
+same compile on the same input.
+
+The strongest argument for changing it is testability, not performance:
+a deterministic proxy (node/term count, or an element-count cap like the
+one the collection arm already uses) would make compiled OUTPUT
+reproducible for a given input, and therefore pinnable in a test. As it
+stands, the folded code of a near-budget constant must not be pinned —
+`doc/13-guide-compile.md` documents the caveat for users.
+
+**Scope: the EXPLICIT `compile()` path only.** Constant folding does not
+run on the implicit `Map`-drain path at all: `tryConstantFold` declines
+outright when `target.symbolDeps !== undefined`, which is its first gate,
+before any budget is armed — and `map-auto-compile.ts` always passes
+`symbolDeps`. The gate is deliberate (folding consults engine state
+transitively with no per-read hook, so it would under-report the capture
+set the implicit-compile cache is keyed on and serve a baked constant
+after a dependency changed) and is pinned by "a capture-set request
+(symbolDeps) declines all folding" in `compile-subtree-folding.test.ts`.
+
+Recorded because this entry previously claimed the opposite. Tycho
+measured ~3× non-monotonic wander (1849–5442 ms) on a `Map`-of-`Sum` row
+while adopting 0.108.0, and the fold budget was written up here as the
+explanation. It is NOT: their own A/B found `constantFold: true`/`false`
+moved that row's compile time by nothing (28/3/3 ms vs 3/2/5 ms) against
+an evaluation wandering by seconds, and the `symbolDeps` gate above means
+the implicit path never consults the budget either. **The cause of that
+wander is unidentified and is somewhere in the DRAIN, not in the
+compile.** Anyone picking this up should not "fix" the fold budget
+expecting the wander to move.
+
 `Map` now takes the mapping function first (`Map(f, xs…)`, signature
 `(function, collection+)`); the flip swept src, tests, docs, and the
 Fungrim corpus/artifact. Two follow-ups:
@@ -376,16 +538,87 @@ carry one, with object identity as the fallback for hand-built MathJSON
 (`sameStatement`, `declaration-origin.ts`).
 
 Pins: `test/epsil/redefinition-discipline.test.ts` ("the discipline over
-function clauses", 11 tests across addition / within-unit refusal /
-across-unit last-wins / host-route exemption).
+function clauses", 20 tests across addition / within-unit refusal /
+across-unit last-wins / host-route exemption / the static tier).
 
-**Known gap, deliberate**: this is a RUNTIME-tier check only. `epsil
-check` / `staticDiagnostics` does not yet flag a duplicated clause before
-running, where a duplicated `type`/`protocol` is flagged on both tiers.
-Closing it needs clause signatures computed in the static pass (the
-domain test is type-level, not syntactic — renaming a parameter does not
-make a new clause). Editor feedback is the only thing affected; every
-execution route reports it.
+**The static tier landed 2026-08-14**, closing the gap the first
+implementation left: `epsil check` and the `executeEpsil` pre-pass now
+report a duplicated clause BEFORE anything runs, so all four constructs
+of the discipline are reported on both tiers. The clause collector is
+pass-local like the declaration one, but keyed by parameter DOMAIN rather
+than by name, and it reads the domain off the CANONICALIZED literal
+because the test is type-level: an unannotated parameter has no type in
+the source, and renaming a parameter does not make a new clause. The
+shared predicate `sameParameterDomain` moved into the engine-free leaf
+`src/compute-engine/clause-identity.ts`, so both tiers decide clause
+identity with one piece of code. A statement is recorded as a first
+definition only when canonicalization actually installed its clause
+(`canonInstallSkipped`), the counterpart of the declaration half's
+`DECLARATION_BLOCKING_CODES` gate.
+
+Two corner cases still read differently on the two tiers, because the
+static pass canonicalizes but never EVALUATES: with `x := 5` (or a `let f
+: …` declaration the clause does not fit) followed by two same-domain
+clauses, the run refuses both clauses on their own terms while the static
+pass — which cannot see the assigned value — reports the duplication.
+Both tiers report an error on the same statements, so no program passes
+`epsil check` and then fails; only the wording differs.
+
+### ~~Declare-then-define rejects an UNANNOTATED clause parameter~~ (found and FIXED 2026-08-14)
+
+```
+let fact: (integer) -> integer
+fact(0) = 1
+fact(n) = n * fact(n - 1)   // was: the clause "(unknown) -> integer" is not an
+fact(5)                     //   arm of the declared type "(integer) -> integer"
+```
+
+§4.3a calls the declared signature authoritative, and the clause route
+already ascribed the declared RESULT onto an unannotated body
+(`reconcileFunctionLiteralReturn`) — but not the declared PARAMETER
+types. A bare parameter therefore inferred `unknown`, everything computed
+from it widened (`n - 1` became `number`), and the recursive self-call
+failed against the very declaration written to make it check. The shape
+§4.3a calls the prescribed form for a recursive definition only worked
+when every parameter was annotated a second time. The same shape had
+always been accepted on the single-function route (`ce.declare` then
+`ce.assign`), so this was a route inconsistency rather than a rule.
+
+Three parts, because the first two were each insufficient alone — the
+sequence is worth keeping, since the second and third were only found by
+probing the first:
+
+1. `ascribeDeclaredParameterTypes` (`engine-declarations.ts`) grew an
+   `includeScalar` option and is now called on the clause route. Its
+   existing skips do the load-bearing work: an ANNOTATED parameter is
+   never stamped, so every clause that actually narrows is still checked
+   positionally by `assertClauseFitsDeclared` and that check does not
+   become vacuous — the concern that had kept this function off the
+   clause route entirely.
+2. The ascription had to move AHEAD of `args[1].canonical` in
+   `DefineFunction`'s canonical handler (`library/core.ts`), before the
+   recursion knot retypes the target and loses the declaration. Ascribing
+   at clause-install time is too late: the body has already canonicalized
+   against `unknown` and the `incompatible-type` error is baked into it,
+   so re-boxing that body preserves the error.
+3. A `SINGLE_CLAUSE_DECLARED` side-channel (`multi-clause.ts`) remembers
+   the declaration for a lone clause, which keeps the §4.2 plain
+   representation and so has no clause state to hold it. Without it the
+   declaration went invisible the moment clause 1 installed, and a second
+   bare clause was neither ascribed nor arm-checked: `f(n) = 1` then
+   `f(m) = 2` built `((n: integer) -> integer) & ((unknown) -> number)`
+   instead of reporting the redefinition. Same problem, and the same
+   shape of fix, as the neighbouring `SINGLE_CLAUSE_ORIGIN`.
+
+`assertClauseFitsDeclared` additionally accepts a parameter still typed
+`unknown` after all that — a declaration whose type at that position
+mentions a quantified variable, or is `unknown`/`any`, is deliberately
+not stamped — because a bare parameter narrows nothing, so its arm is the
+declared parameter itself.
+
+Pins: `test/epsil/multi-clause.test.ts` — the bare recursive `fact`, the
+no-weakening check on the declared domain, and the annotated-parameter
+arm check that must still fail.
 
 ### `Reverse` of a tuple: static type lies about element order (found 2026-08-14, string-spec review round 2)
 

@@ -56,7 +56,7 @@ import {
 import { planProtocolDispatch } from './protocol-dispatch.js';
 import type { ReceiverGuard } from './protocol-dispatch.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
-import { rewriteAngularUnit } from './angular-unit.js';
+import { containsDerivativeHead, rewriteAngularUnit } from './angular-unit.js';
 import {
   isWildcard,
   wildcardName,
@@ -129,6 +129,30 @@ const MONTE_CARLO_FOLD_EXCLUSIONS: ReadonlySet<string> = new Set([
   'Integrate',
   'NIntegrate',
 ]);
+
+/**
+ * Cap on the element count of a constant COLLECTION folded to a literal list
+ * (`tryConstantFold`). A larger constant collection compiles structurally,
+ * exactly as before.
+ *
+ * This is an INCLUSIVE maximum: a collection of exactly this many elements
+ * still inlines. Stating it that way lets each target use the same number its
+ * own lowering already uses, instead of an off-by-one translation. The
+ * JavaScript `Range` handler inlines when `len < 50` — i.e. up to 49 — so the
+ * default is 49, and a 49-element collection inlines while a 50-element one
+ * does not, exactly matching it. The trade-off is source SIZE: inlining
+ * removes the run-time construction but pays for it in emitted text.
+ *
+ * This is the DEFAULT only. It is a source-SIZE trade-off, which describes
+ * the JavaScript and Python targets, where both emissions exist and both
+ * compile. On the shader targets a dynamic collection has no lowering at
+ * all, so for a constant one the inline literal is the only emission that can
+ * compile and the number is a capability limit instead — they raise it via
+ * `CompileTarget.maxInlineElements` to the same 256 their own `Range` handler
+ * already inlines to, so one limit governs both paths rather than a fold cap
+ * refusing what the `Range` handler would have accepted.
+ */
+const CONSTANT_FOLD_MAX_INLINE_ELEMENTS = 49;
 
 /** Accumulate every symbol name of `expr` into `names`. One walk by node
  * object (a shared subtree is visited once — the set is a union either way). */
@@ -1249,6 +1273,9 @@ export class BaseCompiler {
     prec: number
   ): TargetSource | undefined {
     if (target.constantFold === false) return undefined;
+    // Re-entry from the emission of a value this fold already computed (see
+    // `emitFoldedValue`) — there is nothing left to fold inside it.
+    if (BaseCompiler._emittingFoldedValue) return undefined;
 
     // A caller recording the capture set (`CompileTarget.symbolDeps` — the
     // implicit-compilation cache key) gets NO subtree folding: the fold
@@ -1271,7 +1298,27 @@ export class BaseCompiler {
       t !== 'any' &&
       t !== 'value' &&
       !isSubtype(t, 'number') &&
-      !isSubtype(t, 'boolean')
+      !isSubtype(t, 'boolean') &&
+      !isSubtype(t, 'indexed_collection')
+    )
+      return undefined;
+
+    // `indexed_collection` above is UNPARAMETRIZED, so it also admits
+    // `list<string>`, `list<boolean>` and nested lists — none of which can
+    // fold, since only number literals are inlined. Without this check the
+    // decision would be deferred to `foldableCollectionElements`, i.e. until
+    // AFTER a full `.N()` has materialized the collection (up to the
+    // evaluation budget and the collection-size clamp), and it would be paid
+    // again at every node the top-down walk reaches it from. When the element
+    // type is statically known and is not numeric, decline here instead —
+    // keeping this gate sequence's cheap-before-expensive ordering.
+    const elementType = collectionElementType(t);
+    if (
+      elementType !== undefined &&
+      elementType !== 'unknown' &&
+      elementType !== 'any' &&
+      elementType !== 'value' &&
+      !isSubtype(elementType, 'number')
     )
       return undefined;
 
@@ -1313,6 +1360,10 @@ export class BaseCompiler {
 
     const engine = expr.engine;
     let value: Expression | undefined;
+    // The materialized elements when the value is a foldable constant
+    // COLLECTION (assigned inside the budget below, since walking a lazy
+    // collection is real work).
+    let elements: Expression[] | undefined;
     // Evaluation may re-enter compilation (large `Map` callbacks are
     // auto-compiled during evaluate); that inner compilation must not inherit
     // THIS compilation's bound-name context, or its analysis would treat the
@@ -1320,6 +1371,32 @@ export class BaseCompiler {
     const savedBoundCtx = BaseCompiler._boundVarsCtx;
     const savedShield = BaseCompiler._binderShield;
     const savedMaxCollectionSize = engine.maxCollectionSize;
+    // ANGULAR UNIT — a CORRECTNESS requirement, not a tuning knob.
+    //
+    // `rewriteAngularUnit` runs at the compile entry and puts the tree into
+    // the RADIAN convention, so under `angularUnit: 'deg'` the subtree
+    // reaching this point is `sin(90 * 0.01745…)`, not `sin(90)` (visible in
+    // the emitted code of an unfolded compile). Evaluating that through
+    // `.N()` on an engine still set to degrees applied the conversion a
+    // SECOND time: `sin(90)` folded to 0.0274 — the sine of 90° re-read as
+    // degrees — instead of 1, and `arctan(1)` to 2578.31 (45 × 180/π) on the
+    // way out. Silently wrong compiled output, disagreeing with
+    // interpretation, for every angular function with a CONSTANT argument on
+    // a user-facing engine setting. (A free-variable argument was unaffected,
+    // since only constant subtrees fold — which is why the bug's shape was
+    // "constants only".) So the fold evaluates with the unit neutralized.
+    //
+    // EXCEPT under a derivative head. `rewriteAngularUnit` deliberately does
+    // NOT rewrite the operands of `D`/`Derivative`/`ND` — differentiation is
+    // unit-aware and must run in the engine's own convention, its closed form
+    // being rewritten later where it is produced. A subtree containing one
+    // therefore carries BOTH conventions at once and is correct under neither
+    // single setting, so it is declined rather than folded: structural
+    // compilation of that shape is already correct, and declining costs only
+    // the fold.
+    const savedAngularUnit = engine.angularUnit;
+    const neutralizeAngle = savedAngularUnit !== 'rad';
+    if (neutralizeAngle && containsDerivativeHead(expr)) return undefined;
     BaseCompiler._boundVarsCtx = undefined;
     BaseCompiler._binderShield = [];
     try {
@@ -1327,9 +1404,17 @@ export class BaseCompiler {
         savedMaxCollectionSize,
         CONSTANT_FOLD_MAX_COLLECTION_SIZE
       );
+      if (neutralizeAngle) engine.angularUnit = 'rad';
       value = engine.withTimeLimit(
         { ms: CONSTANT_FOLD_BUDGET_MS, label: 'compile:constant-fold' },
-        () => expr.N()
+        () => {
+          const v = expr.N();
+          elements = BaseCompiler.foldableCollectionElements(
+            v,
+            target.maxInlineElements ?? CONSTANT_FOLD_MAX_INLINE_ELEMENTS
+          );
+          return v;
+        }
       );
     } catch (e) {
       // The fold's own expired budget is a quiet decline — but a cancellation
@@ -1341,8 +1426,47 @@ export class BaseCompiler {
       BaseCompiler._boundVarsCtx = savedBoundCtx;
       BaseCompiler._binderShield = savedShield;
       engine.maxCollectionSize = savedMaxCollectionSize;
+      engine.angularUnit = savedAngularUnit;
     }
     if (value === undefined) return undefined;
+
+    // A constant COLLECTION folds to a literal of its elements, emitted
+    // through the target's own lowering — `[1, 4, 9]` on JavaScript and
+    // Python, `vec3(1.0, 4.0, 9.0)` / `float[5](…)` on the shader targets. So
+    // `At(Map(_ ↦ _², 1..20), k)` with a run-time `k` indexes a baked array
+    // instead of building the range and mapping over it on every call. (On the
+    // shader targets that shape had no lowering at all and failed closed; a
+    // folded literal base is one it can index.)
+    //
+    // The literal is rebuilt with the value's OWN aggregate head: a `Tuple`
+    // must not come back as a `List`, because the two are different types
+    // wherever the target spells them differently — a Python list is mutable
+    // and unhashable, and `(1, 2) == [1, 2]` is `False` there, so folding a
+    // tuple through the list lowering silently changed the value's type.
+    if (elements !== undefined) {
+      // A complex-ish collection does not fold AT ALL. The structural
+      // lowering picks its element convention from a conservative static
+      // analysis, and the evaluated values need not agree with it in either
+      // direction: `Map(_ ↦ √_, [-4, -9, -16])` compiles structurally to the
+      // real kernel `Math.sqrt`, so it yields `[NaN, NaN, NaN]`, while `.N()`
+      // answers `[2i, 3i, 4i]` — and a mixed list like `[-4, 4]` would fold
+      // to one complex element beside one bare number, a shape no consumer
+      // can read uniformly. Whether an expression folds also depends on the
+      // element cap and the evaluation budget, so admitting these would make
+      // the emitted VALUES depend on those thresholds, not just the emitted
+      // code. Decline the whole class and let the structural path define
+      // both value and shape, as it did before folding existed.
+      //
+      // This costs the common case nothing: every real collection reports
+      // `isComplexValued === false` (measured over Map/Range/Filter/list
+      // literals), so only genuinely complex-ish aggregates are turned away.
+      if (BaseCompiler.isComplexValued(expr)) return undefined;
+      return BaseCompiler.emitFoldedValue(
+        engine.function(isTuple(value) ? 'Tuple' : 'List', elements),
+        target,
+        prec
+      );
+    }
 
     const foldable =
       isNumber(value) || isSymbol(value, 'True') || isSymbol(value, 'False');
@@ -1353,16 +1477,106 @@ export class BaseCompiler {
     // (Python, the shader targets) keeps its structural lowering.
     if (isSymbol(value, 'True') || isSymbol(value, 'False'))
       return target.var?.(value.symbol);
+
+    // A complex-ish expression whose value comes back with NO imaginary part
+    // does not fold at all. The structural lowering may return either shape
+    // here — a bare number (`_SYS.at` over a real list, even when the INDEX
+    // is complex) or the target's `{re, im}` complex convention (a call to a
+    // function declared `-> complex`) — and which one it picks is a property
+    // of the emitted code, not of any type this can read: the result type is
+    // `number` in both directions, and `isComplexValued` answers for the
+    // OPERANDS, so it is true for a real-valued `At` with a complex index.
+    // Emitting the wrong one silently changes the shape a caller reads back
+    // (`.re` working or not, depending only on whether the inputs happened to
+    // be constant), so decline and let the structural path define the shape,
+    // exactly as it did before folding existed. A value with a NONZERO
+    // imaginary part is unambiguous and still folds, through the complex
+    // literal path below.
+    if (isNumber(value) && value.im === 0 && BaseCompiler.isComplexValued(expr))
+      return undefined;
+
     // Emit through the ordinary number-literal path so the target's own
     // spelling applies (float formatting, complex support, negative-literal
-    // parenthesization). A value the target cannot represent throws — decline
-    // and let the structural lowering produce its own (equivalent) failure.
+    // parenthesization).
+    return BaseCompiler.emitFoldedValue(value, target, prec);
+  }
+
+  /**
+   * The elements of a constant collection VALUE as number literals, ready to
+   * inline — or `undefined` when it is not a foldable collection, which is the
+   * common case and leaves the caller's number/boolean handling to run.
+   *
+   * Requirements, each with a reason:
+   * - **finite** and **indexed**: an infinite collection cannot be inlined at
+   *   all, and a non-indexed one (a `Set`) has no defined element ORDER, so a
+   *   literal list would fix an order the source never promised;
+   * - **within the inline cap** (`maxInlineElements`, the target's own limit
+   *   — see `CONSTANT_FOLD_MAX_INLINE_ELEMENTS` for the default), checked
+   *   against the `count` facet BEFORE walking so an oversized collection
+   *   costs nothing, and again during the walk because `count` is a facet
+   *   while the walk is the truth;
+   * - **every element a number literal**: strings, nested collections, tuples
+   *   (a point list) and symbolic elements decline. Each element is emitted
+   *   through the target's ordinary number path, so this keeps the folded
+   *   list to values that path already vets.
+   */
+  private static foldableCollectionElements(
+    value: Expression,
+    maxElements: number
+  ): Expression[] | undefined {
+    if (value.isFiniteCollection !== true) return undefined;
+    if (value.isIndexedCollection !== true) return undefined;
+    const count = value.count;
+    if (count === undefined || count > maxElements) return undefined;
+    const elements: Expression[] = [];
+    for (const element of value.each()) {
+      if (!isNumber(element)) return undefined;
+      if (elements.length > maxElements) return undefined;
+      elements.push(element);
+    }
+    return elements;
+  }
+
+  /**
+   * Emit an already-computed folded VALUE through the target's ordinary
+   * lowering, so each target's own spelling applies. A value the target cannot
+   * represent throws — decline, and let the structural lowering produce its
+   * own (equivalent) failure.
+   *
+   * `_emittingFoldedValue` makes this re-entry safe. The emission compiles a
+   * value that is itself a candidate — a folded `List` is a pure, constant,
+   * collection-typed function node, so `tryConstantFold` would evaluate it,
+   * materialize the same elements, and compile another `List`, forever. The
+   * flag turns folding off for the duration; the value being emitted is
+   * already fully evaluated, so there is nothing left to fold inside it.
+   */
+  private static emitFoldedValue(
+    value: Expression,
+    target: CompileTarget<Expression>,
+    prec: number
+  ): TargetSource | undefined {
+    const saved = BaseCompiler._emittingFoldedValue;
+    BaseCompiler._emittingFoldedValue = true;
     try {
       return BaseCompiler.compile(value, target, prec);
-    } catch {
+    } catch (e) {
+      // Same discrimination the evaluation's own catch applies: a failure
+      // here normally means "this target cannot represent that literal", a
+      // quiet decline. But a cancellation raised because the AMBIENT (outer)
+      // deadline expired must keep cancelling the whole compilation rather
+      // than being absorbed as a fold miss. That matters more for a folded
+      // COLLECTION than it did for a single number: emission recurses through
+      // `compile()` for every element, so there is real work — and real
+      // surface for an unrelated codegen defect — running under this catch.
+      if (!value.engine._shouldContinueExecution()) throw e;
       return undefined;
+    } finally {
+      BaseCompiler._emittingFoldedValue = saved;
     }
   }
+
+  /** See `emitFoldedValue`: folding is off while a folded value is emitted. */
+  private static _emittingFoldedValue = false;
 
   /**
    * The compile-time integer value of a `Sum`/`Product` bound, or `undefined`
@@ -2288,14 +2502,24 @@ export class BaseCompiler {
       const params = args
         .slice(1)
         .map((x) => functionLiteralParameterName(x) || '_');
+      // A parameter that would shadow the vars object is emitted under a
+      // generated name (see `lambdaParamBinding`); `boundVars` keeps the
+      // literal's OWN parameter names, which are what the expression binds.
+      const binding = BaseCompiler.lambdaParamBinding(params, args[0], target);
       const lambdaTarget: CompileTarget<Expression> = {
         ...target,
-        var: (id) => (params.includes(id) ? id : target.var(id)),
+        var: binding.varOf,
         boundVars: BaseCompiler.withBoundNames(target, params),
+        // The body runs at CALL time, not here, so it resolves a block-local
+        // function against the WHOLE enclosing statement list rather than the
+        // part emitted so far — that is what lets `isEven`/`isOdd` reference
+        // each other, and a lambda call a sibling declared after it. See
+        // `CompileTarget.lexicalFunctions`.
+        localFunctions: target.lexicalFunctions ?? target.localFunctions,
       };
       // The body is a bindable region of its own (§5.1(a)); pushed under the
       // lambda's target, so its temporaries land inside the arrow function.
-      return `((${params.join(', ')}) => ${BaseCompiler.compileOp(
+      return `((${binding.emitted.join(', ')}) => ${BaseCompiler.compileOp(
         node,
         0,
         lambdaTarget,
@@ -2847,6 +3071,14 @@ export class BaseCompiler {
         );
         if (code !== undefined) return code;
       }
+
+      // `h` may name a function-valued BLOCK LOCAL of an enclosing statement
+      // list (`const g = (k) |-> …`, then `g(3)`). That binding is emitted by
+      // the block itself, so the call is an ordinary call of it — and it must
+      // be resolved BEFORE the engine lookup below, which a same-named engine
+      // symbol would otherwise win.
+      const localFn = BaseCompiler.tryCompileLocalFunctionCall(h, args, target);
+      if (localFn !== undefined) return localFn;
 
       // `h` may be a symbol whose engine definition is a user-defined function
       // literal (`f(x) := …`, `x ↦ …`). Emit it as a named local function and
@@ -4184,6 +4416,97 @@ export class BaseCompiler {
   }
 
   /**
+   * Rewrite each `function` definition in a statement list — `DefineFunction(
+   * name, ["Function", body, …params])` — into the equivalent value
+   * declaration `Declare(name, "unknown", literal)`.
+   *
+   * A `function` definition inside a block is block-scoped (it does not leak
+   * to the enclosing scope), so it binds exactly what `const name = (…) |-> …`
+   * binds; rewriting to that shape routes it through the machinery the bound
+   * literal already has — the `let name = ((…) => …)` emission, the bare-name
+   * reads, and the call-site resolution of `CompileTarget.localFunctions`,
+   * which gives the definition true recursion (the arrow reads its own binding
+   * at call time, after initialization). Before this, `DefineFunction` reached
+   * `compileExpr` with no lowering on any target and the whole program failed
+   * closed, so a program that defines a function and calls it — the ordinary
+   * shape of an Epsil file — could not be compiled at all.
+   *
+   * Two shapes are deliberately LEFT ALONE, and keep failing closed:
+   *
+   *  - A MULTI-CLAUSE set (two or more definitions of the same name in one
+   *    list). `DefineFunction` ACCUMULATES clauses and the call dispatches on
+   *    the argument types; a single value binding would silently keep only the
+   *    last clause, answering the wrong branch rather than failing.
+   *  - The last statement of a VALUE-CARRYING block, whose value is the
+   *    block's: a declaration has no value there, and the rewrite would emit
+   *    `return let name = …`.
+   *
+   * Returns `stmts` unchanged when the list defines no function.
+   */
+  private static withDefineFunctionDeclares(
+    stmts: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    valueUsed: boolean
+  ): ReadonlyArray<Expression> {
+    // Same target restriction as `CompileTarget.localFunctions`: only a target
+    // that lowers a `Declare` as a value binding (no `declare` hook — the
+    // JavaScript family) can bind a function-valued local at all. Python and
+    // the GPU targets declare a local with a scalar type, separately from its
+    // assignment, so the rewrite would emit `float g;` against an arrow-
+    // function assignment — source no compiler accepts. They keep failing
+    // closed on `DefineFunction` itself.
+    if (target.declare !== undefined) return stmts;
+    if (!stmts.some((s) => isFunction(s, 'DefineFunction'))) return stmts;
+
+    // Names defined more than once in this list are a multi-clause set.
+    const definitionCount = new Map<string, number>();
+    for (const s of stmts) {
+      if (!isFunction(s, 'DefineFunction') || !isSymbol(s.ops[0])) continue;
+      const name = s.ops[0].symbol;
+      definitionCount.set(name, (definitionCount.get(name) ?? 0) + 1);
+    }
+
+    const last = stmts.length - 1;
+    const rewritable = (s: Expression, i: number): boolean => {
+      if (!isFunction(s, 'DefineFunction') || !isSymbol(s.ops[0])) return false;
+      if (valueUsed && i === last) return false;
+      if ((definitionCount.get(s.ops[0].symbol) ?? 0) > 1) return false;
+      return isFunction(s.ops[1], 'Function');
+    };
+    const asDeclare = (s: Expression & FunctionInterface): Expression =>
+      s.engine._fn('Declare', [s.ops[0], s.engine.string('unknown'), s.ops[1]]);
+
+    // HOISTED to the front, in their original relative order, rather than
+    // rewritten in place. A `function` definition is visible to the WHOLE
+    // statement list — `DefineFunction`'s canonical handler declares the name
+    // as the program canonicalizes, which is what lets `let a = g(3)` precede
+    // `function g(k) { … }` and still answer 4 in the interpreter. Emitted in
+    // place, the same program compiles to `let a = g(3); let g = …`, and `g`
+    // is then read inside its own temporal dead zone: a runtime
+    // `ReferenceError: Cannot access 'g' before initialization`, for a program
+    // that interprets fine.
+    //
+    // Hoisting is safe because what moves is a `Declare` of a pure `Function`
+    // LITERAL: it has no side effects to reorder, and its body reads whatever
+    // it references at CALL time, not at binding time — so a hoisted
+    // definition may still reference locals bound after it.
+    //
+    // A `const`/`let` binding of a lambda is NOT hoisted, because the
+    // interpreter does not hoist it either: it declares nothing until its own
+    // statement runs, so a call before it is invalid there too. Those resolve
+    // through the statement-ordered map in `compileBlock`, and a forward call
+    // fails closed at compile time rather than reaching a dead zone.
+    const hoisted: Expression[] = [];
+    const rest: Expression[] = [];
+    stmts.forEach((s, i) => {
+      if (rewritable(s, i))
+        hoisted.push(asDeclare(s as Expression & FunctionInterface));
+      else rest.push(s);
+    });
+    return [...hoisted, ...rest];
+  }
+
+  /**
    * Prepend the `Declare` statements a statement list is MISSING: one per
    * block-local that the block introduces by bare ASSIGNMENT.
    *
@@ -4384,6 +4707,10 @@ export class BaseCompiler {
       );
     }
 
+    // …then `function` definitions, which are block-scoped exactly like a
+    // `const` binding of the same literal and lower to the same value binding.
+    args = BaseCompiler.withDefineFunctionDeclares(args, target, valueUsed);
+
     // …then the block-locals introduced by bare ASSIGNMENT, which carry no
     // `Declare` statement of their own. Synthesize the missing declaration so
     // everything below treats them exactly like a declared local.
@@ -4563,6 +4890,20 @@ export class BaseCompiler {
         target.declaredVarTypes
       );
 
+      // The function-valued locals of this list, so a call of one resolves to
+      // its own binding (see `CompileTarget.localFunctions`). Filled IN
+      // STATEMENT ORDER as the emission below walks the list, not up front:
+      // a binding is in scope for its own statement (so a recursive lambda's
+      // self-call resolves) and for every later one, but not for an earlier
+      // one — where the emitted `let` has not run yet, so resolving there
+      // would compile a read of a JavaScript temporal dead zone. `function`
+      // definitions are already hoisted to the front of `args`, which is what
+      // makes their forward references resolve.
+      const localFunctions = BaseCompiler.newLocalFunctionScope(target);
+      // …and the whole-list scope a function-literal BODY resolves against,
+      // which is what makes mutually recursive definitions compile.
+      const lexicalFunctions = BaseCompiler.lexicalFunctionScope(args, target);
+
       const localTarget: CompileTarget<Expression> = {
         ...target,
         var: (id) => {
@@ -4571,6 +4912,8 @@ export class BaseCompiler {
         },
         boundVars: BaseCompiler.withBoundNames(target, locals),
         declaredVarTypes,
+        localFunctions,
+        lexicalFunctions,
       };
 
       // The statement LIST is one INERT region — no binding is placed at the
@@ -4581,6 +4924,9 @@ export class BaseCompiler {
       const result = BaseCompiler.withCseScope(node, -1, localTarget, () =>
         stmts
           .flatMap((arg, i) => {
+            // Bring this statement's own function-valued binding into scope
+            // before compiling it (see `localFunctions` above).
+            BaseCompiler.noteLocalFunction(arg, localFunctions);
             // An ELSE-LESS `If` in STATEMENT position. `if c { … }` with no
             // else has no value — the interpreter answers `Nothing`, which is
             // the erasure marker and deliberately has no lowering — so
@@ -5078,12 +5424,26 @@ export class BaseCompiler {
       const stmts = expr.ops.flatMap(
         (s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]
       );
+      // …and so does the `function`-definition rewrite, so a definition made
+      // INSIDE a loop body lowers and is callable there, exactly as one made
+      // in an ordinary block is. A loop body carries no value, hence
+      // `valueUsed: false`: every statement of it, the last included, is in
+      // statement position.
       const withDecls = BaseCompiler.withImplicitLocalDeclares(
-        stmts,
+        BaseCompiler.withDefineFunctionDeclares(stmts, target, false),
         target,
         expr
       );
-      const bodyTarget = BaseCompiler.loopBodyTempTarget(withDecls, target);
+      // A body-scoped `localFunctions`, filled in statement order below. Held
+      // as its own binding because the field on `CompileTarget` is a
+      // `ReadonlyMap`: the target exposes it for READS during compilation, and
+      // only this routine writes it.
+      const bodyLocalFunctions = BaseCompiler.newLocalFunctionScope(target);
+      const bodyTarget: CompileTarget<Expression> = {
+        ...BaseCompiler.loopBodyTempTarget(withDecls, target),
+        localFunctions: bodyLocalFunctions,
+        lexicalFunctions: BaseCompiler.lexicalFunctionScope(withDecls, target),
+      };
       const complexFrame = new Map<string, boolean>();
       for (const s of withDecls)
         if (isFunction(s, 'Declare') && isSymbol(s.ops[0]))
@@ -5094,7 +5454,12 @@ export class BaseCompiler {
           BaseCompiler.noteLocalComplex(s, complexFrame);
         return BaseCompiler.withCseScope(expr, -1, bodyTarget, () =>
           withDecls
-            .map((s) => BaseCompiler.compileLoopBody(s, bodyTarget))
+            .map((s) => {
+              // Statement-ordered, as in `compileBlock` — see the
+              // `localFunctions` comment there.
+              BaseCompiler.noteLocalFunction(s, bodyLocalFunctions);
+              return BaseCompiler.compileLoopBody(s, bodyTarget);
+            })
             .join('; ')
         );
       } finally {
@@ -5142,6 +5507,146 @@ export class BaseCompiler {
         target.declaredVarTypes
       ),
     };
+  }
+
+  /**
+   * A fresh `localFunctions` scope for a statement list: a MUTABLE copy of the
+   * enclosing map, which `noteLocalFunction` fills in statement order as the
+   * list is emitted. See `CompileTarget.localFunctions` for what the map is
+   * for, and `compileBlock` for why it is filled progressively rather than up
+   * front (a binding must not be resolvable before its own `let` has run).
+   *
+   * Returns `undefined` for a target that lowers a `Declare` through a
+   * `declare` hook (Python, the GPU targets): there the declaration and its
+   * assignment are separate statements with a declared scalar type, so a
+   * function-valued local has no binding a call could reach — those targets
+   * must keep failing closed rather than emit a call to a name they never
+   * bound.
+   */
+  /**
+   * The parameter names a function literal EMITS, and the `var` hook that
+   * resolves its parameters to them.
+   *
+   * Normally the two coincide — a parameter compiles to its own name. They
+   * differ when a parameter would SHADOW the target's vars object
+   * (`CompileTarget.varsObjectName`): the JavaScript family binds free
+   * symbols through `_`, and `_` is also how an implicit lambda parameter is
+   * spelled, so `_ |-> _ + k` emitted `((_) => _ + _.k)` — inside the arrow
+   * `_` is the parameter, so `_.k` read a property off a number and the call
+   * answered `NaN` behind `success: true`. Such a parameter is renamed to a
+   * generated name that the literal's other parameters and the compilation's
+   * used-name set do not claim; the body's reads follow through the returned
+   * hook, so the rename is invisible to everything else.
+   *
+   * The rename is deliberately confined to the collision: every other literal
+   * emits byte-identical source to before.
+   */
+  private static lambdaParamBinding(
+    params: ReadonlyArray<string>,
+    body: Expression | undefined,
+    target: CompileTarget<Expression>
+  ): { emitted: string[]; varOf: (id: string) => TargetSource | undefined } {
+    const keep = {
+      emitted: [...params],
+      varOf: (id: string) => (params.includes(id) ? id : target.var(id)),
+    };
+
+    // Which of this literal's parameters shadow something the target bakes
+    // into the emitted source. Two sources, with DIFFERENT rename conditions:
+    const shadowing = new Set<string>();
+
+    // (1) A runtime helper namespace (`_SYS`, `_IA` —
+    //     `CompileTarget.reservedEmittedNames`). Renamed UNCONDITIONALLY: no
+    //     source spells a parameter this way, so the rename costs nothing and
+    //     does not have to predict which helpers the body will emit. Left
+    //     alone, a parameter named `_SYS` turned every `_SYS.…` lowering
+    //     inside its body into `TypeError: _SYS.rangeIter is not a function`.
+    for (const p of params)
+      if (target.reservedEmittedNames?.has(p)) shadowing.add(p);
+
+    // (2) The vars object (`_`). Renamed only when the body actually READS it:
+    //     `_` is the ordinary spelling of an implicit parameter, so renaming
+    //     it unconditionally would rewrite every `_ ↦ …` literal in every
+    //     artifact — `((_) => (_ * _))` and its like — for no behavioural
+    //     gain. `unknowns` is the same set the JavaScript target's `var` hook
+    //     keys its `_.<id>` emission on, so it decides the collision
+    //     precisely; the body's own parameters appear there (nothing binds
+    //     them in the body expression alone) and are filtered out.
+    const varsObject = target.varsObjectName;
+    if (varsObject !== undefined && params.includes(varsObject)) {
+      const prefix = `${varsObject}.`;
+      const readsVarsObject = (body?.unknowns ?? []).some(
+        (s) => !params.includes(s) && target.var(s)?.startsWith(prefix) === true
+      );
+      if (readsVarsObject) shadowing.add(varsObject);
+    }
+
+    if (shadowing.size === 0) return keep;
+
+    const taken = (name: string): boolean =>
+      params.includes(name) || target.naming?.usedNames.has(name) === true;
+    const renamed = new Map<string, string>();
+    const allocated = new Set<string>();
+    let n = 0;
+    for (const p of shadowing) {
+      let fresh = '_p';
+      while (taken(fresh) || allocated.has(fresh)) fresh = `_p${++n}`;
+      allocated.add(fresh);
+      target.naming?.usedNames.add(fresh);
+      renamed.set(p, fresh);
+    }
+
+    return {
+      emitted: params.map((p) => renamed.get(p) ?? p),
+      varOf: (id) =>
+        params.includes(id) ? (renamed.get(id) ?? id) : target.var(id),
+    };
+  }
+
+  private static newLocalFunctionScope(
+    target: CompileTarget<Expression>
+  ): Map<string, Expression> | undefined {
+    if (target.declare !== undefined) return undefined;
+    return new Map(target.localFunctions ?? []);
+  }
+
+  /**
+   * The `lexicalFunctions` scope for a statement list: every function-valued
+   * local the list declares, merged over the enclosing lexical scope. Unlike
+   * {@link newLocalFunctionScope} this is complete before any statement is
+   * emitted — see `CompileTarget.lexicalFunctions` for why a function-literal
+   * body resolves against the whole list and a statement against only the
+   * part before it.
+   */
+  private static lexicalFunctionScope(
+    stmts: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): ReadonlyMap<string, Expression> | undefined {
+    if (target.declare !== undefined) return undefined;
+    const scope = new Map(
+      target.lexicalFunctions ?? target.localFunctions ?? []
+    );
+    for (const stmt of stmts) BaseCompiler.noteLocalFunction(stmt, scope);
+    return scope;
+  }
+
+  /**
+   * Record statement `stmt`'s function-valued local in `scope`, if it declares
+   * one. A local whose value is NOT a function literal REMOVES the entry it
+   * shadows (`let g = 5` over an outer function-valued `g` must not keep
+   * calling the outer one).
+   */
+  private static noteLocalFunction(
+    stmt: Expression,
+    scope: Map<string, Expression> | undefined
+  ): void {
+    if (scope === undefined) return;
+    if (!isFunction(stmt, 'Declare') || !isSymbol(stmt.ops[0])) return;
+    const name = stmt.ops[0].symbol;
+    const value = BaseCompiler.declareValueOperand(stmt.ops);
+    if (value !== undefined && isFunction(value, 'Function'))
+      scope.set(name, value);
+    else scope.delete(name);
   }
 
   /**
@@ -7518,20 +8023,15 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): TargetSource | undefined {
-    // Every argument PROVABLY not a collection (`number`/`boolean`/`string`-
-    // typed — a plain numeric call such as `f(2)`) can never broadcast at run
-    // time. Note the direction: this decides only where the answer is certain,
-    // so a type merely WIDER than the runtime value is treated as possibly a
-    // collection.
-    const provablyScalarArg = (a: Expression): boolean =>
-      a.type.matches('number') ||
-      a.type.matches('boolean') ||
-      a.type.matches('string');
-
     // Fail closed (D6) BEFORE emission: whether the callee can be emitted at
     // all is irrelevant to whether an emitted call would be sound, and the
     // caller's generic "no lowering" message hides the real reason.
-    BaseCompiler.checkDeclaredBroadcast(engine, h, args, provablyScalarArg);
+    BaseCompiler.checkDeclaredBroadcast(
+      engine,
+      h,
+      args,
+      BaseCompiler.provablyScalarArg
+    );
 
     const name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
     if (name === undefined) return undefined;
@@ -7565,6 +8065,164 @@ export class BaseCompiler {
       // clause set instead.
       return BaseCompiler.multiClauseParamIsComplex(engine, h, i);
     });
+    return BaseCompiler.emitUserFunctionCall(
+      name,
+      args,
+      target,
+      coerceToComplex,
+      BaseCompiler.userFunctionParamsAreScalar(engine, h)
+    );
+  }
+
+  /**
+   * If head `h` names a FUNCTION-VALUED BLOCK LOCAL of an enclosing statement
+   * list (`target.localFunctions` — `const g = (k) |-> …` earlier in the same
+   * block), compile the call site as an ordinary call of that binding.
+   *
+   * The declaration itself already lowers to a value binding (`let g = ((k) =>
+   * …)`) — only the CALL had no resolution: head lookup consults the engine's
+   * definitions (`userFunctionLiteral`), which a block-local declaration never
+   * enters (compiling must not mutate the engine), so `g(3)` reported
+   * ``Unknown operator `g` `` even though the block bound `g` two lines above.
+   *
+   * The callee's signature is read from the declared LITERAL rather than from
+   * an engine definition; everything downstream of that — complex `{re, im}`
+   * coercion, the `_SYS.bcastFn` runtime broadcast — is the shared
+   * `emitUserFunctionCall`, so a local and an engine-level function of the
+   * same shape compile to the same call.
+   *
+   * Returns `undefined` when `h` is not such a local, leaving the caller's
+   * fail-closed throw in place. An ARITY mismatch fails closed here instead:
+   * JavaScript would silently pass `undefined` for a missing argument (the
+   * body then computing `NaN`), where the interpreter reports an error.
+   */
+  private static tryCompileLocalFunctionCall(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    const literal = target.localFunctions?.get(h);
+    // Re-narrowed rather than typed on the map: `CompileTarget` is generic in
+    // its expression type, so the map's value type carries no operand access.
+    if (literal === undefined || !isFunction(literal, 'Function'))
+      return undefined;
+
+    // `["Function", body, ...params]` — one operand per declared parameter
+    // after the body.
+    const arity = literal.ops.length - 1;
+    if (args.length !== arity)
+      throw new Error(
+        `${h}: cannot compile — the block-local function is declared with ` +
+          `${arity} parameter${arity === 1 ? '' : 's'} but called with ` +
+          `${args.length}. JavaScript would bind the missing parameters to ` +
+          `\`undefined\` and compute NaN, where the interpreter reports an ` +
+          `error. Fail closed (D6).`
+      );
+
+    // A call of a CLOSED local with constant arguments is itself constant, so
+    // it folds — `g(3)` to `14` — exactly as the same call of an engine-level
+    // function does. Without this the two Epsil spellings of one definition
+    // compiled differently: `function g(k) { … }` DECLARES `g` in the engine
+    // as it canonicalizes, so `["g", 3]` reached the folder with no unknown
+    // head and folded, while the `const g = (k) |-> …` binding declares
+    // nothing and left the call unfolded.
+    //
+    // The fold runs on `Apply(literal, …args)` — the call written in a form
+    // that carries its own callee — and is decided by the ordinary
+    // `tryConstantFold` gates, not by a second copy of them: a non-constant
+    // argument, an impure body, an unbounded big-op, a caller-overridden name
+    // and a `constantFold: false` all decline there. In particular a body that
+    // references ANOTHER compile-bound name — a sibling local, or the local's
+    // own name in a recursive definition — declines on
+    // `mentionsCompileBoundName`, since those names have no engine value the
+    // fold could evaluate through.
+    const folded = BaseCompiler.tryConstantFold(
+      literal.engine.function('Apply', [literal, ...args]),
+      target,
+      BaseCompiler.FOLD_OPERAND_PREC
+    );
+    if (folded !== undefined) return folded;
+
+    const signature = literal.type?.type;
+
+    // The two fail-closed gates the ENGINE-defined route enforces, applied to
+    // the declared LITERAL's signature. Both are about what the emitted call
+    // would COMPUTE, not about whether the callee can be emitted, so a local
+    // is no more exempt from them than a definition is.
+    //
+    // GENERIC. A polymorphic signature's parameter is a type VARIABLE, which
+    // the compiler can neither coerce nor decide a broadcast against; the
+    // engine route declines such a callee outright in
+    // `ensureUserFunctionEmitted` (rule G3, generic-function-literals design
+    // §2.7). Emitting the call anyway would run the scalar body on whatever
+    // the argument happens to be.
+    if (signature !== undefined && isPolymorphicType(signature))
+      throw new Error(
+        `${h}: cannot compile — the block-local function has a GENERIC ` +
+          `signature, whose parameters are type variables the compiler cannot ` +
+          `resolve at the call site (rule G3). Fail closed (D6). Evaluate ` +
+          `this expression with evaluate() instead, or annotate the ` +
+          `parameters with ground types.`
+      );
+
+    // DECLARED `broadcastable<T>`. An elementwise contract that maps exactly
+    // one rank down, which neither emitted call form expresses — see
+    // `checkDeclaredBroadcast` for the full rule. Without this,
+    // `const pair = (x: broadcastable<value>) |-> (x, x)` applied to a list
+    // emitted a direct call and answered `[[1,2,3],[1,2,3]]` where the
+    // interpreter answers `[(1,1),(2,2),(3,3)]`.
+    BaseCompiler.checkDeclaredBroadcastAgainst(
+      h,
+      args,
+      BaseCompiler.provablyScalarArg,
+      broadcastableParamSlots(signature),
+      () => declaresBroadcastableParam(signature)
+    );
+
+    const paramTypes =
+      typeof signature === 'object' && signature.kind === 'signature'
+        ? signature.args
+        : undefined;
+    const coerceToComplex = args.map((a, i) => {
+      if (
+        target.language !== 'javascript' ||
+        !BaseCompiler.isProvablyRealValued(a)
+      )
+        return false;
+      const pt = paramTypes?.[i]?.type;
+      return pt !== undefined && isNonRealNumber(pt);
+    });
+
+    return BaseCompiler.emitUserFunctionCall(
+      target.var(h) ?? h,
+      args,
+      target,
+      coerceToComplex,
+      signature === undefined ? true : paramsAreScalar(signature)
+    );
+  }
+
+  /**
+   * The call site of an already-emitted user function `name`: either a direct
+   * scalar call or the runtime broadcast dispatch, per the rules below.
+   *
+   * Shared by the ENGINE-defined route (`tryCompileUserFunction`) and the
+   * BLOCK-LOCAL route (`tryCompileLocalFunctionCall`), which differ only in
+   * where they read the callee's signature from — the engine's definition
+   * versus the declared literal's own type — never in how the call is spelled.
+   *
+   * `coerceToComplex[i]` marks an argument to wrap in the `{ re, im }`
+   * convention; `paramsAreScalar` says no parameter binds a collection whole.
+   */
+  private static emitUserFunctionCall(
+    name: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    coerceToComplex: ReadonlyArray<boolean>,
+    paramsAreScalar: boolean
+  ): TargetSource {
+    const provablyScalarArg = BaseCompiler.provablyScalarArg;
+
     const compiledArgs = args.map((a) =>
       BaseCompiler.compileValueOperand(a, target)
     );
@@ -7614,7 +8272,7 @@ export class BaseCompiler {
       !args.every(provablyScalarArg) &&
       !args.some((a) => isTuple(a)) &&
       !args.some((a) => BaseCompiler.isNominalAtomicArg(a)) &&
-      BaseCompiler.userFunctionParamsAreScalar(engine, h)
+      paramsAreScalar
     ) {
       // A complex-typed parameter is coerced INSIDE the closure, on the
       // element the broadcast selected: wrapping the whole argument would
@@ -7771,14 +8429,53 @@ export class BaseCompiler {
    * ruling). One the element type refutes is NOT exempt: the interpreter
    * answers `incompatible-type` there, and no emitted form says that.
    */
+  /**
+   * Is `a` PROVABLY not a collection (`number`/`boolean`/`string`-typed — a
+   * plain numeric call such as `f(2)`), and so incapable of broadcasting at
+   * run time? Note the direction: this decides only where the answer is
+   * certain, so a type merely WIDER than the runtime value is treated as
+   * possibly a collection.
+   */
+  private static readonly provablyScalarArg = (a: Expression): boolean =>
+    a.type.matches('number') ||
+    a.type.matches('boolean') ||
+    a.type.matches('string');
+
   private static checkDeclaredBroadcast(
     engine: ComputeEngine,
     h: string,
     args: ReadonlyArray<Expression>,
     provablyScalarArg: (a: Expression) => boolean
   ): void {
+    BaseCompiler.checkDeclaredBroadcastAgainst(
+      h,
+      args,
+      provablyScalarArg,
+      BaseCompiler.userFunctionBroadcastPlan(engine, h),
+      () => BaseCompiler.userFunctionHasBroadcastableParam(engine, h)
+    );
+  }
+
+  /**
+   * The body of {@link checkDeclaredBroadcast}, over a broadcast plan the
+   * caller supplies rather than one read from an engine definition.
+   *
+   * Shared so the ENGINE-defined and BLOCK-LOCAL call routes enforce ONE
+   * implementation of the gate. They differ only in where the callee's
+   * declared shape comes from — a definition versus the declared literal's own
+   * signature — and a second copy of the rule is exactly how the local route
+   * came to emit a direct call for `const pair = (x: broadcastable<value>) |->
+   * (x, x)`, answering a tuple of arrays where the interpreter answers an
+   * elementwise list of pairs.
+   */
+  private static checkDeclaredBroadcastAgainst(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    provablyScalarArg: (a: Expression) => boolean,
+    plan: BroadcastSlotPlan | undefined,
+    hasBroadcastableParam: () => boolean
+  ): void {
     if (args.length === 0) return;
-    const plan = BaseCompiler.userFunctionBroadcastPlan(engine, h);
     const risky =
       plan !== undefined
         ? args.some((a, i) => {
@@ -7798,8 +8495,7 @@ export class BaseCompiler {
           })
         : // An OVERLOAD set has no single plan — which arm binds is a runtime
           // question — so answer conservatively over the whole argument list.
-          BaseCompiler.userFunctionHasBroadcastableParam(engine, h) &&
-          !args.every(provablyScalarArg);
+          hasBroadcastableParam() && !args.every(provablyScalarArg);
     if (!risky) return;
     throw new Error(
       `${h}: cannot compile an application of a function with a declared \`broadcastable<T>\` parameter over a possibly-collection argument — the declaration maps ONE rank down and the compile targets map to the leaves. Fail closed (D6). Evaluate this expression with evaluate() instead, or declare the parameter as its element type.`
@@ -8173,15 +8869,27 @@ export class BaseCompiler {
     bodyExpr: Expression;
     bodyTarget: CompileTarget<Expression>;
   } {
-    const params = literal.ops
+    const declared = literal.ops
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');
     const bodyExpr = rewriteAngularUnit(literal.ops[0].canonical);
     const root = registry.root ?? target;
+    // The SAME parameter-shadowing rule as the inline lambda lowering, through
+    // the same helper. This site builds the identical `(params) => body` shape
+    // for the emitted-definition route (`f(x) := …`, and each clause of a
+    // multi-clause set), so without it an engine-defined function with a `_`
+    // parameter stayed silently wrong — `f := _ ↦ _ + k` called with `k = 10`
+    // computed NaN — while the inline route had been fixed. Note the fallback
+    // name above is `_` itself, so a parameter that yields no name defaults
+    // INTO the colliding spelling rather than merely being allowed to use it.
+    const binding = BaseCompiler.lambdaParamBinding(declared, bodyExpr, root);
+    const params = binding.emitted;
     const bodyTarget: CompileTarget<Expression> = {
       ...root,
-      var: (id) => (params.includes(id) ? id : root.var(id)),
-      boundVars: BaseCompiler.withBoundNames(root, params),
+      var: binding.varOf,
+      // The literal's OWN parameter names — what the body expression binds,
+      // whatever they are emitted as.
+      boundVars: BaseCompiler.withBoundNames(root, declared),
       // The parameters' DECLARED types, for the lowerings that read a raw
       // (never-bound) symbol — the protocol-property SET rebinding, whose
       // `Assign` LHS root types `unknown` in the canonical body. Fresh per

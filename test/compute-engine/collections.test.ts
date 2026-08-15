@@ -4876,7 +4876,10 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
     const ce2 = new ComputeEngine();
     expect(ce2.box(['List', ['Spread', 'xs']]).json).toEqual(['Join', 'xs']);
     expect(
-      ce2.box(['List', ['Spread', ['Range', 1, 4]]]).evaluate().toString()
+      ce2
+        .box(['List', ['Spread', ['Range', 1, 4]]])
+        .evaluate()
+        .toString()
     ).toBe('[1,2,3,4]');
     // A scalar spread is Join's loud incompatible-type error.
     expect(ce2.box(['List', ['Spread', 5]]).evaluate().isValid).toBe(false);
@@ -4903,9 +4906,9 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
     ce2.box(['Assign', 'xs', ['List', 2, 2, 3]]).evaluate();
     expect(e.evaluate().toString()).toBe('Set(1, 2, 3)');
     // A literal set splices eagerly (and the plain dedup path runs).
-    expect(
-      ce2.box(['Set', 1, ['Spread', ['Set', 1, 2]]]).toString()
-    ).toBe('Set(1, 2)');
+    expect(ce2.box(['Set', 1, ['Spread', ['Set', 1, 2]]]).toString()).toBe(
+      'Set(1, 2)'
+    );
   });
 
   test('dictionary spread merges LAST-wins via DictionaryFrom(Join(…))', () => {
@@ -4997,5 +5000,79 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
     const e = ce2.box(['List', ['Spread', ['Set', 1, 2]], 2]);
     expect(e.evaluate().toString()).toBe('[1,2,2]');
     expect(e.type.matches('list')).toBe(true);
+  });
+});
+
+describe("Drop's count facet agrees with its own walk", () => {
+  // A NEGATIVE count drops nothing, which is what the walk does — but the
+  // count clamped its RESULT rather than the drop count, so `count - (-5)`
+  // came out LARGER than the source: `Drop(1..10, -5)` reported 15 elements
+  // for a walk that yields 10. The facet is what indexing bounds, emptiness
+  // and the materialization gates read, so a disagreement is not confined to
+  // a wrong `Length`.
+  test.each([-5, -1, 0, 2, 20])('Drop(1..10, %p)', (n) => {
+    const ce2 = new ComputeEngine();
+    const dropped = ce2.box(['Drop', ['Range', 1, 10], n]).evaluate();
+    expect(dropped.count).toBe([...dropped.each()].length);
+  });
+
+  test('a negative count drops nothing', () => {
+    const ce2 = new ComputeEngine();
+    expect(
+      ce2
+        .box(['Length', ['Drop', ['Range', 1, 10], -5]])
+        .evaluate()
+        .toString()
+    ).toBe('10');
+  });
+});
+
+describe('the iteration cap counts UNPRODUCTIVE pulls, not total pulls', () => {
+  // The cap turns a walk that can never finish into `iteration-limit-exceeded`
+  // instead of a hang. Only an unbroken run of non-emissions is that walk: a
+  // filter (or dedup) that keeps emitting is bounded by whatever consumes it.
+  // Counting productive pulls too capped `Take(Filter(1..oo, _ > 0), 1025)` at
+  // the default limit of 1024 — silently truncating a walk that rejects
+  // nothing.
+  const INFINITY = { num: '+Infinity' };
+
+  test('a productive Filter runs to its consumer’s bound', () => {
+    const ce2 = new ComputeEngine();
+    const taken = ce2
+      .box([
+        'Take',
+        [
+          'Filter',
+          ['Range', 1, INFINITY],
+          ['Function', ['Greater', '_', 0], '_'],
+        ],
+        1025,
+      ])
+      .evaluate();
+    expect([...taken.each()].length).toBe(1025);
+  });
+
+  test('a dedup over an all-distinct source is not capped', () => {
+    const ce2 = new ComputeEngine();
+    expect(
+      ce2
+        .box(['Length', ['Unique', ['Range', 1, 3000]]])
+        .evaluate()
+        .toString()
+    ).toBe('3000');
+  });
+
+  test('a filter that never matches still hits the cap', () => {
+    // Unchanged: every pull is a rejection, so the run is unbroken. `Take`
+    // swallows `iteration-limit-exceeded` to an empty result, as before.
+    const ce2 = new ComputeEngine();
+    const taken = ce2
+      .box([
+        'Take',
+        ['Filter', ['Range', 1, INFINITY], ['Function', ['Less', '_', 0], '_']],
+        1,
+      ])
+      .evaluate();
+    expect([...taken.each()].length).toBe(0);
   });
 });

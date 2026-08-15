@@ -159,14 +159,51 @@ describe('COMPILE lazy infinite collections', () => {
       );
       expect(() => filter?.run?.({})).toThrow(/Iteration limit of 500/);
       const takeWhile = compile(
-        ce.parse(
-          String.raw`\mathrm{TakeWhile}(1..\infty, \_ \mapsto \_ > 0)`
-        )
+        ce.parse(String.raw`\mathrm{TakeWhile}(1..\infty, \_ \mapsto \_ > 0)`)
       );
       expect(() => takeWhile?.run?.({})).toThrow(/Iteration limit of 500/);
     } finally {
       ce.iterationLimit = prev;
     }
+  });
+
+  it('a PRODUCTIVE Filter is not capped — the cap counts rejections, not pulls', () => {
+    // The cap is for a filter that can never finish: a predicate that never
+    // matches over an infinite source. A filter that keeps emitting is bounded
+    // by whatever consumes it — here a `Take` — so counting its productive
+    // pulls capped a walk that rejects nothing, at the default limit of 1024.
+    // The interpreter answers 1025 elements for this; so does the compiled
+    // form now. (The never-matching case above still throws.)
+    const r = compile(
+      ce.parse(
+        String.raw`\mathrm{Take}(\mathrm{Filter}(1..\infty, \_ \mapsto \_ > 0), 1025)`
+      ),
+      { constantFold: false }
+    );
+    expect((r?.run?.({}) as number[]).length).toBe(1025);
+  });
+
+  it('a COUNTED Take/Drop is not capped — the count is the caller’s explicit request', () => {
+    // The cap belongs to the two scans whose walk can never finish (above).
+    // `Take(…, k)` pulls at most `k` and `Drop(…, k)` skips exactly `k`, with
+    // `k` a resolved safe integer, so both provably terminate — capping them
+    // turned a legitimate count larger than `ce.iterationLimit` (1024 by
+    // default) into an error the interpreter never raises.
+    const sum = compile(
+      ce.parse(
+        String.raw`\mathrm{Sum}(\mathrm{Take}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty), 2000))`
+      ),
+      // Otherwise the closed pipeline folds to the literal at compile time and
+      // the `_SYS` stream under test never runs.
+      { constantFold: false }
+    );
+    expect(sum?.run?.({})).toBe(2668667000); // the interpreter's own result
+
+    const drop = compile(
+      ce.parse(String.raw`\mathrm{Take}(\mathrm{Drop}(1..\infty, 2000), 3)`),
+      { constantFold: false }
+    );
+    expect(drop?.run?.({})).toEqual([2001, 2002, 2003]);
   });
 
   it('an invalid runtime count is an indeterminate (empty) walk, per the interpreter contract', () => {
@@ -176,15 +213,11 @@ describe('COMPILE lazy infinite collections', () => {
     // substitutes a default.
     ce.pushScope();
     ce.declare('m_0', 'real');
-    const take = compile(
-      ce.parse(String.raw`\mathrm{Take}(1..\infty, m_0)`)
-    );
+    const take = compile(ce.parse(String.raw`\mathrm{Take}(1..\infty, m_0)`));
     expect(take?.run?.({ m_0: NaN })).toEqual([]);
     expect(take?.run?.({ m_0: 1e100 })).toEqual([]);
     const drop = compile(
-      ce.parse(
-        String.raw`\mathrm{Take}(\mathrm{Drop}(1..\infty, m_0), 3)`
-      )
+      ce.parse(String.raw`\mathrm{Take}(\mathrm{Drop}(1..\infty, m_0), 3)`)
     );
     ce.popScope();
     // An invalid drop count contributes NO elements (empty walk) — not
@@ -195,9 +228,7 @@ describe('COMPILE lazy infinite collections', () => {
 
   describe('fail closed (D6) when the pipeline is never bounded', () => {
     it('a statically non-finite take count does not compile', () => {
-      const r = compile(
-        ce.parse(String.raw`\mathrm{Take}(1..\infty, \infty)`)
-      );
+      const r = compile(ce.parse(String.raw`\mathrm{Take}(1..\infty, \infty)`));
       expect(r?.success).toBe(false);
     });
 
@@ -216,7 +247,9 @@ describe('COMPILE lazy infinite collections', () => {
 
     it('Sum over an unbounded infinite Map does not compile', () => {
       const r = compile(
-        ce.parse(String.raw`\mathrm{Sum}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty))`)
+        ce.parse(
+          String.raw`\mathrm{Sum}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty))`
+        )
       );
       expect(r?.success).toBe(false);
     });
@@ -224,7 +257,9 @@ describe('COMPILE lazy infinite collections', () => {
     it('an array-materializing consumer (Reverse) does not compile', () => {
       expect(() =>
         compile(
-          ce.parse(String.raw`\mathrm{Reverse}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty))`),
+          ce.parse(
+            String.raw`\mathrm{Reverse}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty))`
+          ),
           { fallback: false }
         )
       ).toThrow(/infinite collection/);

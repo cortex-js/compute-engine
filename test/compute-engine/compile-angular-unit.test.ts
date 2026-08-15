@@ -361,3 +361,92 @@ describe('ANGULAR UNIT — symbolic derivative (by-reference vs inline)', () => 
     expect(js.compile(nd).run!({}) as number).toBeCloseTo(Math.PI / 180, 10);
   });
 });
+
+//
+// CONSTANT FOLDING × ANGULAR UNIT — regression, 0.108.0.
+//
+// Whole-subtree constant folding shipped in 0.108.0 and applied the angular
+// conversion TWICE in degree mode. The subtree reaching `tryConstantFold` has
+// already had the conversion lowered into it — under `deg` the tree is
+// `sin(90 * 0.01745…)`, not `sin(90)` — so evaluating it through `.N()` on an
+// engine still set to degrees converted a second time: `sin(90)` folded to
+// 0.0274 (the sine of 90° re-read as degrees) instead of 1, and `arctan(1)` to
+// 2578.31 (45 × 180/π) on the way out.
+//
+// The failure was silent — no decline, no error, just wrong numbers that
+// disagreed with interpretation — and it hit every angular function with a
+// CONSTANT argument on a user-facing engine setting. A free-variable argument
+// was always correct, since only constant subtrees are folded, which is why
+// the shape of the bug is "constant arguments only".
+//
+// Reported by Tycho against 0.108.0 (their `degree-mode compile parity` test),
+// blocking their adoption. Fix: `tryConstantFold` neutralizes `angularUnit`
+// for the duration of its evaluation, alongside the `maxCollectionSize` clamp
+// it already applied.
+//
+describe('ANGULAR UNIT — constant folding must not convert twice', () => {
+  const CASES: [string, number][] = [
+    ['\\sin(90)', 1],
+    ['\\sin(30)', 0.5],
+    ['\\sin(1)', 0.017452406437283512],
+    ['\\cos(0)', 1],
+    ['\\cos(60)', 0.5],
+    ['\\tan(45)', 1],
+    ['\\arcsin(1)', 90],
+    ['\\arctan(1)', 45],
+    ['\\arccos(0)', 90],
+  ];
+
+  test.each(CASES)(
+    'deg: %s compiles to the interpreted value with folding ON',
+    (latex, expected) => {
+      const ce = degEngine();
+      const js = ce.getCompilationTarget('javascript')!;
+      const compiled = js.compile(ce.parse(latex)).run!({}) as number;
+      expect(compiled).toBeCloseTo(expected, 9);
+      // …and agrees with interpretation, which was always correct.
+      expect(compiled).toBeCloseTo(ce.parse(latex).N().re as number, 9);
+    }
+  );
+
+  test('folding ON and OFF agree in degree mode', () => {
+    for (const [latex] of CASES) {
+      const ce = degEngine();
+      const js = ce.getCompilationTarget('javascript')!;
+      const on = js.compile(ce.parse(latex), {
+        constantFold: true,
+      } as never).run!({}) as number;
+      const off = js.compile(ce.parse(latex), {
+        constantFold: false,
+      } as never).run!({}) as number;
+      expect(on).toBeCloseTo(off, 9);
+    }
+  });
+
+  test('a FREE argument was never affected, and still is not', () => {
+    const ce = degEngine();
+    const js = ce.getCompilationTarget('javascript')!;
+    const f = js.compile(ce.parse('\\sin(x)')).run!({ x: 90 }) as number;
+    expect(f).toBeCloseTo(1, 9);
+  });
+
+  test('the engine is left in its original angular unit after a fold', () => {
+    // The neutralization is restored in a `finally`, so a fold — including one
+    // that declines — must not leak radians into the caller's engine.
+    const ce = degEngine();
+    const js = ce.getCompilationTarget('javascript')!;
+    js.compile(ce.parse('\\sin(90)'));
+    expect(ce.angularUnit).toBe('deg');
+    expect(ce.parse('\\sin(90)').N().re).toBeCloseTo(1, 9);
+  });
+
+  test('radian mode is unchanged', () => {
+    const ce = new ComputeEngine();
+    ce.angularUnit = 'rad';
+    const js = ce.getCompilationTarget('javascript')!;
+    for (const latex of ['\\sin(1)', '\\arctan(1)', '\\cos(0)']) {
+      const compiled = js.compile(ce.parse(latex)).run!({}) as number;
+      expect(compiled).toBeCloseTo(ce.parse(latex).N().re as number, 9);
+    }
+  });
+});

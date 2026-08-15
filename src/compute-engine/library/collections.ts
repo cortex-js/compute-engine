@@ -38,6 +38,7 @@ import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
   DictionaryType,
   ListType,
+  ObjectType,
   RecordType,
   TupleType,
   Type,
@@ -749,7 +750,8 @@ const POINT_LIST_COMPILE_LANGUAGES: ReadonlySet<string> = new Set([
 
 /**
  * The field-bearing shape behind a `Field` operand's static type: a `record`,
- * a `dictionary`, or a tuple with NAMED elements — reached through type
+ * an `object` layout, a `dictionary`, or a tuple with NAMED elements —
+ * reached through type
  * REFERENCES, both alias and nominal. Unfolding a nominal reference here is
  * deliberate and is the whole point of `Field`: it is the nominal-types
  * design's sanctioned accessor window (D6/§4.5b D16), dispatching off the
@@ -762,7 +764,7 @@ const POINT_LIST_COMPILE_LANGUAGES: ReadonlySet<string> = new Set([
  * (`unknown`, an unresolved reference, an algebraic type) — stay symbolic. */
 function fieldBearingType(
   t: Type
-): RecordType | TupleType | DictionaryType | 'none' | undefined {
+): RecordType | ObjectType | TupleType | DictionaryType | 'none' | undefined {
   // Keyed on the DECLARATION record, not on `t`: instantiating an applied
   // reference below mints a fresh body object each step, so an identity guard
   // on `t` itself would go blind on a cycle. The record is identity-stable.
@@ -796,7 +798,13 @@ function fieldBearingType(
       return undefined;
     return 'none';
   }
-  if (t.kind === 'record' || t.kind === 'dictionary') return t;
+  // An `object<…>` layout is field-bearing in exactly the way a record body
+  // is — the same ordered map from field name to field type — and reaching it
+  // through the pinned nominal reference is how `p.age` learns its static
+  // type. The difference the layout carries is that its fields are read/write
+  // positions, which matters to variance and to stores, not to this lookup.
+  if (t.kind === 'record' || t.kind === 'object' || t.kind === 'dictionary')
+    return t;
   if (t.kind === 'tuple')
     return t.elements.some((x) => x.name !== undefined) ? t : 'none';
   if (t.kind === 'union' || t.kind === 'intersection' || t.kind === 'negation')
@@ -3119,13 +3127,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
         if (!isEnumerableSource(expr.op1)) return undefined;
-        // The exact walk enforces `ce.iterationLimit` on SOURCE elements; if
-        // that limit trips, report the count as unknown rather than letting
-        // the cancellation escape (mirrors `comprehensionEnumeratedCount`).
-        // Any other cancellation (deadline/timeout) must propagate.
+        // A FACET query stays cheap: past `ce.iterationLimit` matching
+        // elements the count is reported as UNKNOWN rather than walked to the
+        // end. This bound is the count's OWN, deliberately separate from the
+        // iterator's: the iterator caps an unbroken run of REJECTIONS, which
+        // is the walk that can never finish, and a productive filter must run
+        // as far as its consumer asks (`Take(Filter(1..∞, _ > 0), 1025)`).
+        // Answering a facet is the other concern — bounded work for a
+        // question nobody asked to be exact — and the two shared one mechanism
+        // until the iterator's guard was narrowed.
+        //
+        // The `catch` still stands: the iterator's own cap can trip inside the
+        // walk (a long run of non-matching elements), and that cancellation is
+        // reported as an unknown count rather than escaping. Any other
+        // cancellation (deadline/timeout) must propagate.
+        const limit = expr.engine.iterationLimit;
         try {
           let n = 0;
-          for (const _ of expr.each()) n++;
+          for (const _ of expr.each()) if (++n > limit) return undefined;
           return n;
         } catch (e) {
           if (
@@ -3174,19 +3193,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!f) return { next: () => ({ value: undefined, done: true }) };
 
         const source = expr.op1.each();
-        let count = 0;
+        // Pulls since the last element was EMITTED, not pulls in total. The
+        // cap exists to turn a walk that can never finish into an error
+        // instead of a hang — a predicate that never matches over an infinite
+        // source — and only an unbroken run of REJECTIONS is that walk. A
+        // filter that keeps emitting has proved it is not stuck, and is
+        // bounded by whatever consumes it: counting its productive pulls too
+        // made `Take(Filter(1..∞, _ > 0), 1025)` fail at the default limit of
+        // 1024 for a walk that rejects nothing.
+        let sinceEmit = 0;
         const limit = expr.engine.iterationLimit;
+        const emit = (value: Expression): IteratorYieldResult<Expression> => {
+          sinceEmit = 0;
+          return { value, done: false };
+        };
         return {
           next: () => {
             while (true) {
               const { value, done } = source.next();
-              count += 1;
-              if (count > limit) {
-                throw new CancellationError({
-                  cause: 'iteration-limit-exceeded',
-                  message: `Iteration limit of ${limit} exceeded while evaluating Filter()`,
-                });
-              }
               if (done) return { value: undefined, done: true };
               const pred = f([value]);
               if (!pred) {
@@ -3194,16 +3218,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                   `Invalid filter predicate. ${spellCheckMessage(expr.op2)}`
                 );
               }
-              if (sym(pred) === 'True') return { value, done: false };
+              if (sym(pred) === 'True') return emit(value);
               if (sym(pred) !== 'False') {
                 // The predicate failed on this ELEMENT (e.g. its `Typed`
                 // parameter annotation rejected it): emit that `Error` value
                 // in the element's place, as `Map` does, instead of throwing
                 // a message about the predicate.
                 const err = predicateErrorValue(pred);
-                if (err) return { value: err, done: false };
+                // An error VALUE takes the element's place, so this pull is
+                // productive too and resets the counter.
+                if (err) return emit(err);
                 throw predicateResultError('Filter', expr.op2);
               }
+              // REJECTED — the only pull that counts toward the cap.
+              if (++sinceEmit > limit)
+                throw new CancellationError({
+                  cause: 'iteration-limit-exceeded',
+                  message: `Iteration limit of ${limit} exceeded while evaluating Filter()`,
+                });
             }
           },
         };
@@ -4232,7 +4264,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // (P18) before the static defect is reported.
       const ordinary = ((): Type | undefined => {
         if (rt === 'none') return undefined;
-        if (rt.kind === 'record') {
+        // An OBJECT layout is read exactly like a record body: the field list
+        // is fixed at declaration, so a name it does not carry is a static
+        // defect and gets NO absence marker. (Stores are what make the two
+        // shapes differ, and a read is not a store.)
+        if (rt.kind === 'record' || rt.kind === 'object') {
           // A record's key set is fixed: a known-absent field is a static
           // defect, not an out-of-band access.
           if (name !== undefined) return rt.elements[name];
@@ -4956,9 +4992,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (xs.isEmptyCollection) return 0;
         const dropped = integerParam(n);
         if (dropped === null) return undefined; // symbolic bound
-        const nValue = dropped ?? 0;
+        // A NEGATIVE count drops nothing — which is what the walk does — so it
+        // is clamped here as well. `Math.max(0, …)` on the RESULT does not do
+        // that: `count - (-5)` is larger than `count`, so `Drop(1..10, -5)`
+        // reported 15 elements for a walk that yields 10. A count that
+        // disagrees with its own walk is not merely a wrong `Length`: the
+        // facet is what indexing bounds, emptiness and the materialization
+        // gates all read.
+        const nValue = Math.max(0, dropped ?? 0);
         if (nValue >= count) return 0;
-        return Math.max(0, count - nValue);
+        return count - nValue;
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -6500,13 +6543,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
         if (!isEnumerableSource(expr.op1)) return undefined;
-        // The guarded iterator caps the walk at `ce.iterationLimit`; if that
-        // trips, report the count as unknown rather than letting the
-        // cancellation escape (mirrors Filter's `count`). Any other
-        // cancellation (deadline/timeout) must propagate.
+        // Bounded on DISTINCT elements, the count's own limit — separate from
+        // the iterator's guard against an unbroken run of duplicates, exactly
+        // as in Filter's `count` (see the note there). Past the limit the
+        // count is unknown rather than walked to the end; the `catch` still
+        // reports the iterator's own cancellation the same way, and any other
+        // cancellation (deadline/timeout) propagates.
+        const limit = expr.engine.iterationLimit;
         try {
           let n = 0;
-          for (const _ of expr.each()) n++;
+          for (const _ of expr.each()) if (++n > limit) return undefined;
           return n;
         } catch (e) {
           if (
@@ -6536,26 +6582,34 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Cap the SOURCE walk at `ce.iterationLimit`: the loop advances only on
         // DISTINCT elements, so a source that repeats one value forever (e.g.
         // `Cycle([1,1])`) would spin here without ever emitting. Mirror the
-        // Filter/TakeWhile guard — throw `iteration-limit-exceeded`, which the
-        // terminal consumers (`count`, `at`) swallow to `undefined`; any other
+        // Filter guard — throw `iteration-limit-exceeded`, which the terminal
+        // consumers (`count`, `at`) swallow to `undefined`; any other
         // cancellation (deadline/timeout) propagates.
-        let count = 0;
+        //
+        // Counted since the last EMISSION, not in total, for the same reason
+        // as Filter: only an unbroken run of duplicates is the walk that
+        // cannot finish. A dedup that keeps emitting is bounded by whatever
+        // consumes it, and counting its productive pulls capped long
+        // all-distinct sources that were never at risk.
+        let sinceEmit = 0;
         const limit = expr.engine.iterationLimit;
         return {
           next: () => {
             while (true) {
               const { value, done } = source.next();
-              count += 1;
-              if (count > limit) {
-                throw new CancellationError({
-                  cause: 'iteration-limit-exceeded',
-                  message: `Iteration limit of ${limit} exceeded while evaluating Dedup()`,
-                });
-              }
               if (done) return { value: undefined, done: true };
-              if (hasPrev && prev!.isSame(value as Expression)) continue;
+              if (hasPrev && prev!.isSame(value as Expression)) {
+                // A DUPLICATE — the only pull that counts toward the cap.
+                if (++sinceEmit > limit)
+                  throw new CancellationError({
+                    cause: 'iteration-limit-exceeded',
+                    message: `Iteration limit of ${limit} exceeded while evaluating Dedup()`,
+                  });
+                continue;
+              }
               prev = value as Expression;
               hasPrev = true;
+              sinceEmit = 0;
               return { value, done: false };
             }
           },

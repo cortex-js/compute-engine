@@ -7,4 +7,7 @@
  * targets are its primary consumer — each applies it at its public
  * `compile()` entry.
  */
-export { rewriteAngularUnit } from '../symbolic/angular-unit.js';
+export {
+  containsDerivativeHead,
+  rewriteAngularUnit,
+} from '../symbolic/angular-unit.js';

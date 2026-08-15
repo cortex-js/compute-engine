@@ -74,6 +74,22 @@ export const GPU_OPERATORS: CompiledOperators = {
  * keywords, control-flow keywords, and common built-in function names that a
  * bare reference would shadow/collide with (`texture`, `sample`, …).
  */
+/**
+ * The most elements a shader target inlines into a fixed-size array
+ * constructor (`float[n](…)` / `array<f32, n>(…)`).
+ *
+ * Shared by the `Range` handler, which materializes a constant range as such
+ * a literal, and by `CompileTarget.maxInlineElements`, which bounds
+ * constant-collection FOLDING. The two must agree: a fold cap below this
+ * would refuse a constant collection that the `Range` handler compiles
+ * happily, and one above it would emit an array the handler considers too
+ * large. Unlike the JavaScript default, this is a capability limit rather
+ * than a source-size preference — a dynamic collection has no shader
+ * lowering at all, so for a constant one the literal is the only emission
+ * that can compile.
+ */
+const GPU_MAX_INLINE_ELEMENTS = 256;
+
 const GLSL_RESERVED: ReadonlySet<string> = new Set([
   // storage/parameter qualifiers
   'attribute',
@@ -5034,9 +5050,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         'Range: empty range (lo > hi for positive step, or lo < hi for negative step)'
       );
     }
-    if (count > 256) {
+    if (count > GPU_MAX_INLINE_ELEMENTS) {
       throw new Error(
-        `Range: GPU compile inlines ranges up to 256 elements (got ${count})`
+        `Range: GPU compile inlines ranges up to ${GPU_MAX_INLINE_ELEMENTS} elements (got ${count})`
       );
     }
     const values: number[] = [];
@@ -8071,6 +8087,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const rules = this.getShapeRules();
     const target: GPURandomTarget & GPUShapeRulesTarget = {
       language: this.languageId,
+      // Constant-collection folding inlines up to the SAME limit this
+      // target's `Range` handler already inlines to. On a shader target a
+      // dynamic collection has no lowering at all, so for a constant one the
+      // inline literal is the only emission that can compile — the number is
+      // a capability limit, not the source-size trade-off the default 50
+      // describes. One limit governs both paths, so the fold cannot refuse a
+      // collection the `Range` handler would have accepted.
+      maxInlineElements: GPU_MAX_INLINE_ELEMENTS,
       // Carried on the target so a LOWERING can validate the calls it
       // generates against the same table the generic gate uses — the variadic
       // `min`/`max` fold, whose nested calls no longer line up with the CE

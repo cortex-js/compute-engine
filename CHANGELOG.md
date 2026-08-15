@@ -1,5 +1,133 @@
 ## [Unreleased]
 
+### Issues Resolved
+
+- **Degree mode no longer produces wrong compiled results for angular
+  functions with a constant argument** (regression in 0.108.0). With
+  `angularUnit` set to `"deg"`, compiled `sin(90)` returned 0.0274
+  instead of 1 and compiled `arctan(1)` returned 2578.31 instead of 45,
+  disagreeing with interpretation, which was always correct. The failure
+  was silent — no decline, no error, just wrong numbers — and applied to
+  every angular function whose argument was a constant. An argument
+  containing a variable was never affected.
+
+  Cause: whole-subtree constant folding, added in 0.108.0, evaluated a
+  subtree in which the angular conversion had already been applied,
+  using an engine still set to degrees — so the conversion happened
+  twice. Folding now evaluates with the angular unit neutralized, and
+  declines outright for a subtree containing a `D`, `Derivative` or `ND`
+  head, since differentiation is deliberately left in the engine's own
+  angular convention and such a subtree carries two conventions at once.
+  Radian mode was never affected.
+
+- **A program that defines a function and then calls it now compiles to
+  JavaScript.** Both definition forms were affected:
+
+  ```
+  const g = (k) |-> Sum(Take(Map(_ |-> _^2, 1..oo), k))
+  g(3)
+  ```
+
+  used to fail the whole compilation with ``Unknown operator `g` ``, and
+  `function g(k) { … }` with ``DefineFunction: … no lowering``. The
+  declaration itself always lowered correctly (`let g = ((k) => …)`); only
+  the CALL had no resolution, because head lookup consulted the engine's
+  definitions and a block-local declaration never enters them. Calls now
+  resolve against the block's own function-valued locals — with recursion,
+  mutual reference between locals, use as a callback value
+  (`Map(sq, 1..oo)`), definitions made inside a loop body, and the same
+  collection broadcast an engine-level function gets (`h([1,2,3])` →
+  `[2,3,4]`). A `function` definition is HOISTED, so a call may precede it
+  (`let a = g(3)` before `function g(k) { … }` answers 4, as it does when
+  interpreted); a `const`/`let` lambda is not, matching the interpreter,
+  and a call before one fails closed.
+
+  Everything that cannot be compiled to something the interpreter agrees
+  with fails closed instead: an arity mismatch, a multi-clause `function`
+  set, a generic signature, and a declared `broadcastable<T>` parameter
+  applied to a possibly-collection argument (`(x: broadcastable<value>)
+  |-> (x, x)` over a list, which the interpreter maps one rank down). The
+  last two are the same gates the engine-defined route enforces, now
+  shared by both rather than duplicated. Python and the GPU targets —
+  which declare a local separately from its assignment and can hold no
+  function-valued local — are unchanged.
+
+  The two spellings also now compile to the SAME code. A call with constant
+  arguments folds for both (`g(3)` → `14`); previously only the `function`
+  form did, because `DefineFunction` declares its name in the engine as it
+  canonicalizes while a `const` binding declares nothing, so only the former
+  reached the folder with a known head.
+
+- **A `_` lambda parameter no longer shadows the compiled vars object.**
+  The JavaScript targets bind the caller's `vars` argument to `_` and
+  compile a free symbol `k` to `_.k`. `_` is also how an implicit lambda
+  parameter is spelled, so `_ ↦ _ + k` emitted `((_) => _ + _.k)` — inside
+  the arrow `_` is the parameter, a number, so `_.k` read `undefined` off
+  it. Every such call was silently wrong behind `success: true`:
+  `Map(_ ↦ _ + k, [1,2,3])` with `k = 10` answered `[NaN, NaN, NaN]`
+  instead of `[11,12,13]`, and `Filter([1,2,3,4], _ ↦ _ < k)` answered
+  `[]`. A colliding parameter is now renamed at emission, on both routes
+  that emit a function — the inline lambda and the named definition
+  (`f(x) := …`, and each clause of a multi-clause set). The rename applies
+  only where the body actually reads the vars object, so a literal with no
+  free symbol — `_ ↦ _²`, the common case — emits exactly as before.
+
+  A parameter named after a runtime HELPER namespace (`_SYS` on
+  JavaScript, `_IA` on the interval target) is renamed too. Those are baked
+  into emitted code as literal tokens, so such a parameter shadowed them
+  for its whole body — `TypeError: _SYS.rangeIter is not a function` at run
+  time, for a program the interpreter evaluates fine. No source spells a
+  parameter that way, so unlike `_` these are renamed unconditionally.
+
+- **`Drop`'s element count no longer disagrees with its own walk for a
+  negative count.** `Drop(1..10, -5)` reported 15 elements — more than the
+  source has — for a walk that yields 10: the count clamped its result
+  rather than the drop count, so `count - (-5)` grew instead of dropping
+  nothing. `Length` was the visible symptom, but the count facet is also
+  what indexing bounds, emptiness and the materialization gates read.
+
+- **The iteration cap on `Filter` and `Unique` now counts UNPRODUCTIVE
+  pulls, not total pulls.** The cap exists to turn a walk that can never
+  finish into `iteration-limit-exceeded` instead of a hang — a predicate
+  that never matches, a source that repeats one value forever. Only an
+  unbroken run of non-emissions is that walk: a filter that keeps emitting
+  is bounded by whatever consumes it. Counting its productive pulls too
+  meant `Take(Filter(1..∞, _ ↦ _ > 0), 1025)` stopped at the default limit
+  of 1024 — silently truncated when interpreted, an error when compiled —
+  for a walk that rejects nothing. Both now answer 1025 elements. A
+  predicate that never matches still hits the cap, unchanged.
+
+  The `count` FACET keeps its own bound, now stated separately: past
+  `ce.iterationLimit` matching elements a filtered count is reported as
+  unknown rather than walked to the end, so answering a facet stays cheap
+  work for a question nobody asked to be exact. The two concerns had
+  shared one mechanism.
+
+- **A compiled `Take`/`Drop` count larger than `ce.iterationLimit` no
+  longer throws.** `Sum(Take(Map(_ ↦ _², 1..∞), 100000))` compiled to a
+  lazy stream that raised `Iteration limit of 1024 exceeded` at run time,
+  where interpreting it answers 333338333350000; `Take(Drop(1..∞, 2000), 3)`
+  failed the same way. The iteration cap exists to turn a walk that can
+  never finish into that error instead of a hang — a `Filter` whose
+  predicate never matches, a `TakeWhile` whose predicate never turns false
+  — and those two keep it. A counted `Take`/`Drop` pulls a resolved,
+  finite number of elements and provably terminates, so it is now honoured
+  in full, as the interpreter honours it. An unbounded stage upstream of
+  one still raises the error, from its own cap.
+
+- **A declared function's clauses may now leave their parameters
+  unannotated.** Under `let fact: (integer) -> integer`, the clause
+  `fact(n) = n * fact(n - 1)` was refused outright: the bare `n` inferred
+  `unknown`, so `n - 1` widened to `number` and the recursive call failed
+  against the very declaration written to make it check. Annotating every
+  parameter a second time (`fact(n: integer)`) was the only way through,
+  even though the same shape had always been accepted when the function
+  was assigned rather than defined by clauses. The declaration is
+  authoritative for parameters now, as it already was for the result, so
+  a bare parameter takes the declared type at its position. A parameter
+  the author DID annotate is untouched and still checked as an arm of the
+  declaration, so a clause outside the declared domain remains an error.
+
 ### Breaking Changes
 
 - **Defining the same function clause twice in one program is now an
@@ -88,28 +216,6 @@
   convention (first wins, with a diagnostic). A brace of only spreads
   is a set-spread; lead with the bare `->` marker for a pure dictionary
   merge: `{->, ...d1, ...d2}`.
-
-- **A program that defines a function and then calls it now compiles to
-  JavaScript.** Both definition forms were affected:
-
-  ```
-  const g = (k) |-> Sum(Take(Map(_ |-> _^2, 1..oo), k))
-  g(3)
-  ```
-
-  used to fail the whole compilation with ``Unknown operator `g` ``, and
-  `function g(k) { … }` with ``DefineFunction: … no lowering``. The
-  declaration itself always lowered correctly (`let g = ((k) => …)`); only
-  the CALL had no resolution, because head lookup consulted the engine's
-  definitions and a block-local declaration never enters them. Calls now
-  resolve against the block's own function-valued locals — with recursion,
-  mutual reference between locals, use as a callback value
-  (`Map(sq, 1..oo)`), and the same collection broadcast an engine-level
-  function gets (`h([1,2,3])` → `[2,3,4]`). An arity mismatch and a
-  multi-clause `function` set fail closed rather than compile to something
-  that disagrees with the interpreter, and Python and the GPU targets —
-  which declare a local separately from its assignment and can hold no
-  function-valued local — are unchanged.
 
 ### Breaking Changes
 

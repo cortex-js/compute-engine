@@ -128,6 +128,44 @@ describe('COMPILE constant folding - constant collections', () => {
     expect(r.run?.({ k: 3 })).toBe(9);
   });
 
+  it('the inline cap is per-target, not one borrowed number', () => {
+    // On JavaScript the cap is a source-SIZE trade-off (both emissions
+    // compile), so it stays at 50. On a shader target a dynamic collection
+    // has no lowering at all, so for a constant one the inline literal is the
+    // only emission that can compile — there the number is a capability
+    // limit, and it matches the 256 that target's own `Range` handler already
+    // inlines to. Before this was per-target, a 60-element constant
+    // collection was refused on GLSL purely by a JavaScript source-size
+    // number, even though `float[60](…)` is an ordinary array constructor.
+    const many = (n: number) =>
+      ce.box(['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, n]] as any);
+
+    expect(compile(many(60)).code).toContain('Array.from'); // JS: structural
+    expect(compile(many(60), { to: 'glsl' }).code).toContain('float[60](');
+    expect(compile(many(200), { to: 'glsl' }).code).toContain('float[200](');
+    // The cap is an INCLUSIVE maximum, so each target folds exactly up to its
+    // own limit — 256 here, the same count its `Range` handler inlines. An
+    // exclusive comparison would have refused this one while `Range` accepted
+    // it, which is the off-by-one the two-number arrangement invited.
+    expect(compile(many(256), { to: 'glsl' }).code).toContain('float[256](');
+    // Past that limit it declines, as its Range does.
+    expect(() =>
+      compile(many(257), { to: 'glsl', fallback: false })
+    ).toThrow();
+  });
+
+  it('the cap boundary matches the Range handler exactly', () => {
+    // The fold declines at `count >= 50` and the JavaScript `Range` handler
+    // inlines at `len < 50`, so the two agree at the boundary instead of
+    // straddling it: 49 elements inline, 50 do not.
+    expect(compile(ce.box(['At', MAP_SQUARES(49), 'k'] as any)).code).toContain(
+      '_SYS.at(['
+    );
+    expect(
+      compile(ce.box(['At', MAP_SQUARES(50), 'k'] as any)).code
+    ).toContain('Array.from');
+  });
+
   it('a non-indexed collection (a Set) never folds — no defined order', () => {
     const r = compile(ce.box(['SetFrom', ['List', 3, 1, 2]] as any), {
       fallback: true,
@@ -185,9 +223,30 @@ describe('COMPILE constant folding - constant collections', () => {
     );
   });
 
-  it('a genuinely complex collection still folds', () => {
-    const r = compile(ce.box(['Multiply', 2, ['List', ['Complex', 1, 1]]]));
-    expect(r.code).toBe('[({ re: 2, im: 2 })]');
+  it('a complex-ish COLLECTION never folds, in either direction', () => {
+    // The structural lowering picks its element convention from a
+    // conservative static analysis that the evaluated values need not match:
+    // `√` of negatives compiles to the real kernel (`[NaN, NaN, NaN]`) while
+    // `.N()` answers `[2i, 3i, 4i]`, and a mixed list would fold to one
+    // complex element beside one bare number. Since whether a fold happens
+    // also depends on the element cap and the evaluation budget, admitting
+    // these would make emitted VALUES depend on those thresholds. The whole
+    // class declines and the structural path defines value and shape.
+    const negRoots = ce.box([
+      'Map',
+      ['Function', ['Sqrt', 'y'], 'y'],
+      ['List', -4, -9, -16],
+    ] as any);
+    expect(negRoots.N().toString()).toBe('[2i,3i,4i]');
+    expect(compile(negRoots).code).toContain('Math.sqrt');
+    expect(compile(negRoots).code).not.toContain('im');
+
+    // And a complex collection whose structural lowering fails closed keeps
+    // failing closed, rather than the fold quietly answering for it.
+    const cplx = compile(ce.box(['Multiply', 2, ['List', ['Complex', 1, 1]]]), {
+      fallback: true,
+    });
+    expect(cplx.success).toBe(false);
   });
 });
 
