@@ -5102,12 +5102,8 @@ export class Parser {
       // Offset-shift the type error to the absolute Epsil position. Use the
       // token at that offset (if any) for the diagnostic's end.
       let errEnd = errStart + 1;
-      for (const tok of this.tokens) {
-        if (tok.start >= errStart) {
-          errEnd = Math.max(tok.end, errStart + 1);
-          break;
-        }
-      }
+      const errTok = this.firstTokenAtOrAfter(errStart);
+      if (errTok !== undefined) errEnd = Math.max(errTok.end, errStart + 1);
       // A PROTOCOL name in type position gets its own diagnostic, pointing at
       // the constrained-variable spelling rather than reporting an unknown type.
       const protocol = protocolInTypePosition(e);
@@ -6017,11 +6013,32 @@ export class Parser {
   private startsWithSymbolToken(target: MathJsonExpression): boolean {
     const start = this.localStart(target);
     if (start === undefined || start === null) return false;
-    for (const tok of this.tokens) {
-      if (tok.start < start) continue;
-      return tok.type === 'SYMBOL' || tok.type === 'VERBATIM_SYMBOL';
+    const tok = this.firstTokenAtOrAfter(start);
+    if (tok === undefined) return false;
+    return tok.type === 'SYMBOL' || tok.type === 'VERBATIM_SYMBOL';
+  }
+
+  /**
+   * The first token whose `start` is at or after `offset` (a local offset),
+   * or `undefined` when every token begins before it.
+   *
+   * Binary search: `this.tokens` is the lexer's output in source order, so
+   * `start` is non-decreasing along the array. This is called once per bare
+   * `=` statement (see {@link startsWithSymbolToken}); a linear scan from the
+   * first token made parsing a program of N assignments O(N²) — the scan
+   * dominated the parse of a few-thousand-line program (measured 2026-08-15:
+   * 69% of parse time on a 16 000-statement program).
+   */
+  private firstTokenAtOrAfter(offset: number): Token | undefined {
+    const tokens = this.tokens;
+    let lo = 0;
+    let hi = tokens.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (tokens[mid].start < offset) lo = mid + 1;
+      else hi = mid;
     }
-    return false;
+    return tokens[lo];
   }
 
   /**

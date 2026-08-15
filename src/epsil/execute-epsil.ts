@@ -8,7 +8,11 @@ import {
   machineValue,
 } from '../math-json/utils.js';
 import { isLiteralParamName } from '../math-json/symbols.js';
-import type { CancellationCause } from '../common/interruptible.js';
+import {
+  checkDeadline,
+  isTimeoutCancellation,
+  type CancellationCause,
+} from '../common/interruptible.js';
 
 // Type-only imports: `src/epsil` never statically imports the engine, so this
 // adds no runtime dependency (and no `compute-engine` cycle — the engine never
@@ -194,8 +198,27 @@ function executeEpsilBatch(
   // only after the previous ones have *evaluated*, so its canonical form can
   // depend on declarations this pass cannot see. Programs are small and
   // canonicalization is cheap next to evaluation.
-  if (!diagnostics.some((x) => x.severity === 'error'))
-    diagnostics.push(...staticDiagnostics(ce, ast, source));
+  // Set when the host's time budget expired DURING the static pass. The
+  // evaluation loop's first act is the same deadline check, so it records the
+  // cancellation as the program's value; the flag only spares the advisory
+  // pre-evaluation scans, which walk the whole program and have no business
+  // running once the budget is gone.
+  let budgetExpired = false;
+  if (!diagnostics.some((x) => x.severity === 'error')) {
+    try {
+      // The pass writes into `diagnostics` as it goes (rather than returning
+      // an array) so that everything it established BEFORE a deadline breach
+      // is kept — see the parameter note on `staticDiagnostics`.
+      staticDiagnostics(ce, ast, source, diagnostics);
+    } catch (e) {
+      // The pass boxes every statement, so it can outlive the host's time
+      // budget on its own. `staticDiagnostics` lets an expired budget through
+      // (its per-statement catch keeps only ordinary boxing failures) — and
+      // the pass is a report, so there is nothing to convert it into here.
+      if (!isTimeoutCancellation(e)) throw e;
+      budgetExpired = true;
+    }
+  }
 
   // Parameters that shadow an engine constant — `f(Pi) = Pi + 1` declares a
   // parameter NAMED `Pi` (the uniform binding convention, shared with match
@@ -203,7 +226,7 @@ function executeEpsilBatch(
   // diagnostic per name per program run. Skipped on parse errors for the
   // same reason as the static pass above: the AST of an unparseable program
   // is a guess.
-  if (!diagnostics.some((x) => x.severity === 'error')) {
+  if (!budgetExpired && !diagnostics.some((x) => x.severity === 'error')) {
     const reportedShadows = new Set<string>();
     for (const stmt of statements)
       scanConstantShadowingParams(
@@ -248,6 +271,13 @@ function executeEpsilBatch(
     const enclosingRoute = ce._epsilDeclarationRoute;
     ce._epsilDeclarationRoute = isDeclarationStatement(stmt);
     try {
+      // The host's time budget is one deadline for the whole program (an
+      // enclosing `withTimeLimit` span). The engine only checks it inside
+      // long-running work — every few hundred evaluations, inside collection
+      // walks — so a program of many cheap statements would otherwise run to
+      // completion no matter how far past its deadline it is: the check
+      // between statements bounds the overrun to one statement.
+      checkDeadline(ce._deadlineFrame);
       value = ce.box(stmt).evaluate();
       // An error value narrows the anchor to its breadcrumb's innermost
       // source-mapped frame, so a host that reports the error points at the
@@ -315,6 +345,19 @@ function executeEpsilBatch(
         diagnostics.push(diagnostic);
       }
     }
+
+    // An expired TIME budget ends the program: the deadline belongs to the
+    // enclosing span, not to this statement, so it stays expired — every later
+    // statement would fail the same check and none of them can run. Stopping
+    // here makes the cancellation the program's result: `value` is the
+    // `["Error", "Timeout exceeded", "timeout"]` of the statement that hit
+    // it and `valueRange` points at that statement (plus the
+    // `evaluation-canceled` diagnostic above when it was not the last one).
+    // The count-based caps (`iterationLimit`, `recursionLimit`) are
+    // per-construct configuration, not a shared budget: the next statement
+    // gets a fresh allowance, so a breach there is an ordinary error value
+    // and the program continues (see `docs/TIMEOUT-MODEL.md` §9).
+    if (cancellation === 'timeout') break;
 
     // "Did you mean?" — calling an unknown function stays *silently* symbolic
     // (an inert `["Quartile", …]` value), so the user never learns it did not

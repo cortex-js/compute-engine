@@ -569,6 +569,143 @@ describe('EPSIL EXECUTE — structured cancellation cause', () => {
   });
 });
 
+describe('EPSIL EXECUTE — an expired time budget ends the program', () => {
+  // The host's `withTimeLimit` span is one deadline for the whole program.
+  // Before the fix (2026-08-15) `executeEpsil` converted each statement's
+  // timeout `CancellationError` into an error value and moved on to the NEXT
+  // statement — so a program of many cheap statements ran to completion
+  // however far past its deadline it was, and a budget was decorative. Now
+  // the deadline is checked before every statement (in the static pass and
+  // in the evaluation loop) and the first expiry stops the program.
+  //
+  // Wall-clock doctrine: no elapsed-time assertions. A `ms: 0` span is
+  // expired the moment it is armed, so every outcome below is deterministic.
+
+  test('no statement runs once the budget has expired', () => {
+    const ce = new ComputeEngine();
+    const { value, diagnostics, valueRange } = ce.withTimeLimit(
+      { ms: 0, label: 'test:epsil-expired' },
+      () => executeEpsil(ce, 'x = 1\ny = 2\nz = 3')
+    );
+    // The program's value is the cancellation, anchored on the statement it
+    // stopped at — the first one.
+    expect(value.operator).toBe('Error');
+    expect(value.op2?.string).toBe('timeout');
+    expect(valueRange).toEqual([0, 5]);
+    // Non-final, so mirrored as a diagnostic — exactly one, not one per
+    // statement: the loop stopped.
+    expect(diagnostics.map((d) => d.message.slice(0, 2))).toEqual([
+      ['evaluation-canceled', 'timeout'],
+    ]);
+    // Nothing after the cancellation ran: no statement bound its name.
+    expect(ce.box('x').value).toBeUndefined();
+    expect(ce.box('y').value).toBeUndefined();
+    expect(ce.box('z').value).toBeUndefined();
+  });
+
+  test('statements before the expiry keep their effects', () => {
+    // The budget expires MID-program: statement 1 runs, statement 2 spends
+    // the rest of the budget, statement 3 must not run. Deterministic —
+    // rather than a real span the program can outrun during parsing, a host
+    // function moves the armed deadline into the past when it evaluates
+    // (`withTimeLimit` restores the frame it saved when the call returns).
+    const ce = new ComputeEngine();
+    let spends = 0;
+    ce.declare('SpendBudget', {
+      signature: '() -> integer',
+      evaluate: () => {
+        spends += 1;
+        ce._deadlineFrame = { at: Date.now() - 1, spans: ['test:spend'] };
+        return ce.One;
+      },
+    });
+    const { value, diagnostics, valueRange } = ce.withTimeLimit(
+      { ms: 60_000, label: 'test:epsil-spend' },
+      () => executeEpsil(ce, 'a = 1\nSpendBudget()\nb = 2\nb')
+    );
+    // The handler ran exactly once, at evaluation time (had canonicalization
+    // folded the call, the static pass would have tripped and the program
+    // would have stopped at statement 1 instead).
+    expect(spends).toBe(1);
+    expect(value.operator).toBe('Error');
+    expect(value.op2?.string).toBe('timeout');
+    // Anchored on `b = 2`, the statement the check stopped.
+    expect(valueRange).toEqual([20, 25]);
+    expect(diagnostics.map((d) => d.message.slice(0, 2))).toEqual([
+      ['evaluation-canceled', 'timeout'],
+    ]);
+    // `a = 1` ran before the budget was spent; `b = 2` after it did not.
+    expect(ce.box('a').evaluate().re).toBe(1);
+    expect(ce.box('b').value).toBeUndefined();
+  });
+
+  test('a count-based cap does not end the program (per-construct config)', () => {
+    // Contrast: `iterationLimit` is per-construct, so the next statement gets
+    // a fresh allowance and the program continues — the breach is an error
+    // value plus a diagnostic, exactly as before. (`docs/TIMEOUT-MODEL.md` §9.)
+    const ce = new ComputeEngine();
+    ce.iterationLimit = 100;
+    const { value, diagnostics } = executeEpsil(
+      ce,
+      'let c = 0\nwhile c >= 0 { c = c + 1 }\nb = 2\nb'
+    );
+    expect(diagnostics.map((d) => d.message.slice(0, 2))).toEqual([
+      ['evaluation-canceled', 'iteration-limit-exceeded'],
+    ]);
+    expect(value.re).toBe(2);
+  });
+
+  test('a budget spent DURING the static pass keeps the diagnostics found so far', () => {
+    // The pass writes into the caller's diagnostics array as it goes, so a
+    // static type error established in statement 1 survives a deadline breach
+    // at statement 2 (a `canonical` handler expires the frame at BOXING time,
+    // which is when the pass runs — deterministic, no real span to outrun).
+    // The program's result is then the cancellation at statement 1, and no
+    // statement's evaluation ran.
+    const ce = new ComputeEngine();
+    let spends = 0;
+    ce.declare('SpendAtBoxing', {
+      signature: '() -> integer',
+      canonical: (ops, { engine }) => {
+        spends += 1;
+        engine._deadlineFrame = { at: Date.now() - 1, spans: ['test:spend'] };
+        return engine._fn('SpendAtBoxing', ops);
+      },
+    });
+    const { value, diagnostics, valueRange } = ce.withTimeLimit(
+      { ms: 60_000, label: 'test:epsil-static-spend' },
+      () => executeEpsil(ce, '"a" + 1\nSpendAtBoxing()\nz = 3\nz')
+    );
+    // Boxed once, by the pass; the pass then threw at the next statement's
+    // check, so the evaluation loop's own boxing never reached it.
+    expect(spends).toBe(1);
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'static-type-error',
+      'evaluation-canceled',
+    ]);
+    expect(value.operator).toBe('Error');
+    expect(value.op2?.string).toBe('timeout');
+    expect(valueRange).toEqual([0, 7]);
+    expect(ce.box('z').value).toBeUndefined();
+  });
+
+  test('the static pass lets an expired budget through instead of eating it', () => {
+    // `staticDiagnostics` boxes every statement under a per-statement catch
+    // that used to swallow EVERY throw, an expired budget included. A direct
+    // caller (`epsil check`) armed with a span must see the cancellation.
+    const ce = new ComputeEngine();
+    const [ast] = parseEpsil('x = 1\ny = 2');
+    expect(() =>
+      ce.withTimeLimit({ ms: 0, label: 'test:epsil-static' }, () =>
+        staticDiagnostics(ce, ast!, 'x = 1\ny = 2')
+      )
+    ).toThrow(/Timeout exceeded/);
+    // …and it left the engine clean (scope popped, depth restored): a
+    // following unbudgeted pass over the same engine still works.
+    expect(staticDiagnostics(ce, ast!, 'x = 1\ny = 2')).toEqual([]);
+  });
+});
+
 describe('EPSIL EXECUTE — did-you-mean for unknown functions', () => {
   // Calling an unknown function stays *silently* symbolic (an inert
   // `["Quartile", …]` value). When the unknown name is close to a known

@@ -231,6 +231,35 @@ an error value (or an `evaluation-canceled` diagnostic when it happens in a
 non-final statement) — see
 [Execution](/epsil/implementation/#execution) for how a host sets one.
 
+The two kinds of limit end differently:
+
+- An expired **time budget ends the program**. The budget is one deadline for
+  the whole run, so once it has passed no later statement could run either:
+  the statement that hit it becomes the last one executed, the program's
+  value is its `Error("Timeout exceeded", "timeout")`, and the statements
+  after it are not evaluated. Statements that completed before the expiry keep
+  their effects. The deadline is checked before every statement (and before
+  every statement of the static pass), so a program of many cheap statements
+  is bounded too, not only one whose single statement runs long.
+- A breached **count-based cap** (`iterationLimit`, `recursionLimit`) is
+  per-construct: the next statement gets a fresh allowance, so the program
+  continues past it. The statement that breached evaluates to the error value,
+  and — because a loop is imperative — whatever it assigned before the breach
+  stays assigned. A program that reads such a variable afterwards therefore
+  sees a *partial* result alongside the `evaluation-canceled` diagnostic:
+
+  <!-- epsil-test: expect-diagnostics -->
+
+  ```epsil
+  total = 0
+  for i in 1..5000 { total = total + i * 2 }   // stops at iterationLimit (1024)
+  total                                        // ➔ 1051650, not 25005000
+  ```
+
+  A host that displays `value` must also surface `diagnostics` (the loop's
+  breach is an `error`-severity `evaluation-canceled` there), or raise
+  `ce.iterationLimit` for programs expected to loop longer.
+
 These limits are cooperative. A browser that evaluates untrusted or potentially
 unbounded programs should run Epsil in a Web Worker it can terminate from the
 outside. See

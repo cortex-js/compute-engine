@@ -1,5 +1,9 @@
 import type { MathJsonExpression } from '../math-json/types.js';
 import {
+  checkDeadline,
+  isTimeoutCancellation,
+} from '../common/interruptible.js';
+import {
   isDictionaryObject,
   operand,
   operands,
@@ -179,11 +183,19 @@ function isCanonicalizationError(code: string): boolean {
  * of the same program — see {@link registerPinnedSignature} — because without
  * it a named call to such a callee drew false `argument-names-unavailable`
  * diagnostics for a program that runs fine.
+ *
+ * `into`, when given, receives each diagnostic as it is found and is also the
+ * returned array. It exists for the time-budget path: the pass checks the
+ * host's deadline before every statement and lets an expired budget propagate
+ * as a throw, and a caller that passed `into` keeps everything the pass had
+ * established before the deadline (a static type error in statement 1 is a
+ * fact about the program whether or not statement 400 reached the budget).
  */
 export function staticDiagnostics(
   ce: ComputeEngine,
   ast: MathJsonExpression,
-  source: string
+  source: string,
+  into: ParsingDiagnostic[] = []
 ): ParsingDiagnostic[] {
   // The frame NAME is load-bearing: the engine's `DeclareType` handler treats
   // 'epsil:static-check' as a top-level surrogate (types are engine-global,
@@ -238,7 +250,7 @@ export function staticDiagnostics(
     // `ce.box()` windows then nest inside it.
     return ce._withBoxingPassWindow(() =>
       ce._withRolledBackInference(() =>
-        canonicalizationDiagnostics(ce, ast, source)
+        canonicalizationDiagnostics(ce, ast, source, into)
       )
     );
   } finally {
@@ -252,7 +264,8 @@ export function staticDiagnostics(
 function canonicalizationDiagnostics(
   ce: ComputeEngine,
   ast: MathJsonExpression,
-  source: string
+  source: string,
+  diagnostics: ParsingDiagnostic[]
 ): ParsingDiagnostic[] {
   // The parser wraps a multi-statement program in `Block` (see
   // `executeEpsil()`); a single statement is not wrapped.
@@ -262,7 +275,6 @@ function canonicalizationDiagnostics(
   // signature error carries (see `signatureNotes()`).
   const defSites = definitionSites(ast);
 
-  const diagnostics: ParsingDiagnostic[] = [];
   // The signatures this program's own statements pin (`f := ⟨annotated
   // literal⟩`, `let f : ⟨arrow type⟩`), registered onto the definitions as
   // the walk reaches them — see `registerPinnedSignature`. FIRST-wins per
@@ -312,11 +324,21 @@ function canonicalizationDiagnostics(
     const enclosingRoute = ce._epsilDeclarationRoute;
     ce._epsilDeclarationRoute = isDeclarationStatement(statement);
     try {
+      // The pass runs under the host's time budget (`executeEpsil` under a
+      // `withTimeLimit` span). Boxing rarely checks the deadline on its own,
+      // so check it once per statement here; an expired budget propagates
+      // out of the pass — see the catch below.
+      checkDeadline(ce._deadlineFrame);
       boxed = ce.box(statement);
       canonical = boxed.json;
-    } catch {
-      // Canonicalization is best-effort: a statement the engine cannot box is
-      // left to the run phase rather than crashing the check.
+    } catch (e) {
+      // An expired time budget is the host's cancellation, not a statement
+      // that failed to box: swallowing it here would let the pass — and then
+      // the program — run on past its deadline. It propagates to the caller
+      // (`executeEpsil` turns it into the program's cancelled value).
+      if (isTimeoutCancellation(e)) throw e;
+      // Otherwise canonicalization is best-effort: a statement the engine
+      // cannot box is left to the run phase rather than crashing the check.
       continue;
     } finally {
       ce._epsilDeclarationRoute = enclosingRoute;

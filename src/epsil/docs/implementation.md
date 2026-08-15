@@ -93,6 +93,9 @@ const result = ce.withTimeLimit(
 );
 ```
 
+When the budget expires the program stops: `result.value` is the
+`Error("Timeout exceeded", "timeout")` of the statement that hit the deadline,
+`result.valueRange` points at that statement, and no later statement runs.
 See [Evaluation](/epsil/evaluation/#interruptibility) for the rest of the
 cancellation model.
 

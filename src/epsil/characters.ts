@@ -571,8 +571,24 @@ function expand(source: (number | [start: number, end: number])[]): number[] {
   return result;
 }
 
+// Set views of the code-point tables above, for the predicates below. The
+// tables stay arrays (they compose by spread and are read top-to-bottom as
+// documentation); the predicates run once per source character in the lexer,
+// and `Array.prototype.includes` on `PATTERN_SYNTAX` — thousands of expanded
+// code points — was a measurable share of parse time (`isBreak` alone ~6% of
+// a large-program parse, 2026-08-15).
+const LINEBREAK_CHARACTER_SET = new Set(LINEBREAK_CHARACTER);
+const PATTERN_WHITE_SPACE_SET = new Set(PATTERN_WHITE_SPACE);
+const WHITE_SPACE_SET = new Set(WHITE_SPACE);
+const PATTERN_SYNTAX_SET = new Set(PATTERN_SYNTAX);
+const IDENTIFIER_CONTINUE_PROHIBITED_SET = new Set(
+  IDENTIFIER_CONTINUE_PROHIBITED
+);
+const IDENTIFIER_START_PROHIBITED_SET = new Set(IDENTIFIER_START_PROHIBITED);
+const INVISIBLE_CHARS_SET = new Set(INVISIBLE_CHARS);
+
 export function isLinebreak(c: number): boolean {
-  return LINEBREAK_CHARACTER.includes(c);
+  return LINEBREAK_CHARACTER_SET.has(c);
 }
 
 /** Most restrictive whitespace only TAB or SPACE */
@@ -581,36 +597,36 @@ export function isInlineSpace(c: number): boolean {
 }
 
 export function isPatternWhitespace(c: number): boolean {
-  return PATTERN_WHITE_SPACE.includes(c);
+  return PATTERN_WHITE_SPACE_SET.has(c);
 }
 
 /** Everything in pattern white space, plus some other
  * characters considered whitespace */
 export function isWhitespace(c: number): boolean {
-  return WHITE_SPACE.includes(c);
+  return WHITE_SPACE_SET.has(c);
 }
 
 export function isSyntax(c: number): boolean {
-  return PATTERN_SYNTAX.includes(c);
+  return PATTERN_SYNTAX_SET.has(c);
 }
 
 /** A 'break' character is an whitespace, operator, punctuation, bracket, etc..
  * It indicates the end of an identifier (or number).
  */
 export function isBreak(c: number): boolean {
-  return WHITE_SPACE.includes(c) || PATTERN_SYNTAX.includes(c);
+  return WHITE_SPACE_SET.has(c) || PATTERN_SYNTAX_SET.has(c);
 }
 
 export function isIdentifierContinueProhibited(c: number): boolean {
-  return IDENTIFIER_CONTINUE_PROHIBITED.includes(c);
+  return IDENTIFIER_CONTINUE_PROHIBITED_SET.has(c);
 }
 
 export function isIdentifierStartProhibited(c: number): boolean {
-  return IDENTIFIER_START_PROHIBITED.includes(c);
+  return IDENTIFIER_START_PROHIBITED_SET.has(c);
 }
 
 export function isInvisible(c: number): boolean {
-  return INVISIBLE_CHARS.includes(c);
+  return INVISIBLE_CHARS_SET.has(c);
 }
 
 export function codePointLength(code: number): number {

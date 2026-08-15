@@ -55,6 +55,37 @@
 
 ### Issues Resolved
 
+- **An Epsil program now stops when its time budget expires.** A host that
+  runs `executeEpsil()` inside `ce.withTimeLimit(…)` gave the whole program one
+  deadline, but the interpreter turned each statement's timeout into an error
+  value and went on to the next statement — and only statements doing enough
+  work to reach one of the engine's internal checks ever noticed. A
+  5 000-statement program ran to completion under a 1 ms budget, reporting
+  `completed`, with a `timeout` diagnostic on roughly one statement in 250.
+  That is a correctness bug, not a latency one: the program that ran was a
+  *different* program — twenty statements skipped from the middle, and every
+  later statement executed against the state those should have produced. In an
+  imperative language whose errors are values, a skipped assignment does not
+  announce itself; what follows just reads a stale or missing binding and
+  yields a plausible number. The deadline is now checked before every statement (in the static type pass as
+  well as the evaluation loop, which used to swallow it there too), and the
+  first expiry ends the run: `result.value` is the statement's
+  `Error("Timeout exceeded", "timeout")`, `valueRange` points at it, and no
+  later statement runs. Count-based caps (`iterationLimit`, `recursionLimit`)
+  are per-construct and unchanged: the breaching statement is an error value
+  and the program continues. See the Interruptibility section of the Epsil
+  evaluation guide, which now also spells out that a loop cut short by
+  `iterationLimit` leaves its partial assignments in place.
+
+- **Parsing a long Epsil program was quadratic in its length.** Every bare-`=`
+  statement re-scanned the program's tokens from the first one to find where
+  its left-hand side begins; a 16 000-line program of simple assignments took
+  1.8 s to parse, ~30× longer per line than a 500-line one. That lookup is a
+  binary search now, and the lexer's per-character class tests (`isBreak`,
+  `isSyntax`, …) use `Set`s instead of scanning arrays of thousands of code
+  points. Parse is linear again: ~4 µs per statement at every size measured
+  (500 → 16 000 lines), 29× faster on the 16 000-line program.
+
 - **Operators no longer commit an answer for a collection-typed variable that
   has no value yet.** A symbol declared `list<number>` (or `vector<2>`, or a
   call whose head returns one) is collection-*shaped*, but cannot be
