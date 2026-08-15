@@ -335,6 +335,45 @@ that applies to `_`-prefixed members too, 60 of which are already declared
 there — so each conversion is an implementation + interface change, not a
 one-file edit.
 
+### The constant fold's own 2000 ms stall guard can still swap a folded value for a lowered one (OPEN, correctness — narrow residual; the AMBIENT-deadline path is already correct)
+
+`foldCostEstimate` made the fold ELIGIBILITY decision a property of the
+expression alone, so the same input always makes the same fold/decline
+choice. The fold BODY is still wrapped in a stall guard —
+`engine.withTimeLimit({ ms: CONSTANT_FOLD_BUDGET_MS })` in
+`compilation/base-compiler.ts` (`CONSTANT_FOLD_BUDGET_MS = 2000`) — and
+crossing THAT budget is a quiet decline: the catch sets
+`value = undefined` and compilation continues down the structural
+lowering with no diagnostic.
+
+Why a quiet decline is a correctness matter and not a lost optimization:
+the comment on `CONSTANT_FOLD_MAX_COST` records that the folded value
+comes from `.N()` in bignum while the structural lowering computes in
+doubles, so the two branches differ in the last digits. A budget crossing
+therefore changes the compiled VALUE, and because 2000 ms of wall clock
+is machine-load dependent, two runs on the same input can disagree —
+exactly the property the cost gate was introduced to remove.
+
+**The ambient-deadline path is NOT part of this defect, and a fix must
+not disturb it.** `withTimeLimit` nests as `min()`, so a caller's tighter
+deadline does reach the fold — but an expiry attributable to the AMBIENT
+deadline is rethrown (`if (!engine._shouldContinueExecution()) throw e`)
+and cancels the whole compilation rather than being swallowed as a fold
+miss. Measured 2026-08-15 on a 7-term `Sum` of user-function calls: an
+ambient span of 1 ms and 5 ms threw `Timeout exceeded`, while 50 ms and
+500 ms returned code byte-identical to the unbudgeted compile. There is
+no silent branch swap via a consumer's span budget; a consumer that
+budgets its compiles gets a loud failure or the same answer.
+
+So the exposure is only the fold's own 2000 ms ceiling, which no caller
+can tighten — hard to reach, but reachable on a slow machine under load
+for an expression the cost estimator admits. Fix shape when picked up:
+make the fold's own decline deterministic or observable rather than a
+silent branch change; keep the ambient rethrow exactly as it is. A
+regression should compile one folding expression under a tight and a
+loose ambient deadline and assert the emitted code is identical whenever
+neither run throws.
+
 ### Degree-mode folding flips `angularUnit` per fold attempt, purging caches (OPEN, perf — small)
 
 Measured before `foldCostEstimate` replaced the wall-clock budget. That
@@ -597,9 +636,19 @@ to *builtins* only, and the "`foo` is defined here" related-information
 pointer had nothing that could trigger it; both now work for the file's own
 functions.
 
-### `RecordFrom` is broken, and probably redundant (found 2026-08-14)
+### `RecordFrom` was broken and redundant — DELETED (found 2026-08-14, user-ruled and removed 2026-08-15)
 
-`RecordFrom` declares `(collection) -> record` but returns an inert,
+**Resolution: deleted.** `DictionaryFrom` is the conversion, for records as
+much as for dictionaries, since record-ness is derived from the value. The
+operator definition is gone from `library/collections.ts`, its reference
+entry from `doc/82-reference-collections.md`, and
+`test/compute-engine/collections.test.ts` now pins that the head is inert
+while `DictionaryFrom` on the same input types `record<…>`. Appendix B
+Phase 3's object-serialization arm therefore belongs on `DictionaryFrom`;
+the appendix still says `RecordFrom` and must be amended before Phase 3 is
+implemented. The diagnosis that led to the ruling is kept below.
+
+`RecordFrom` declared `(collection) -> record` but returned an inert,
 untyped application:
 
 ```
@@ -623,21 +672,55 @@ representation. That makes `RecordFrom` redundant with
 `DictionaryFrom`, not merely buggy: the latter already returns exactly
 what the former promises.
 
-Three ways out, needing a product ruling: delete `RecordFrom`
-(public-surface deprecation), alias it to `DictionaryFrom`, or give
-`Record` a real operator definition. A `Typed(Dictionary(…),
+Three ways out were considered, and the user ruled on 2026-08-15 for the
+first: **delete** `RecordFrom`; alias it to `DictionaryFrom` (rejected — two
+names for one operation forever, and the declared result type still
+over-promises when a key is not an identifier); or give `Record` a real
+operator definition (rejected — it contradicts the derived-record-ness model
+and adds a second value representation to maintain). A `Typed(Dictionary(…),
 "record<…>")` spelling was also considered and is NOT needed — the
 derivation already happens, and ascription would only be meaningful for
 ordinary widening (`record<a: number>` over a literal `1`), which is
 plain `Typed` usage rather than a record mechanism.
 
-**Blocks Appendix B Phase 3**, which currently names `RecordFrom(object)`
-as the object-serialization conversion — "not a new operator, a new arm
-on that family" — including the plumbing note about widening its
-signature to `collection | object`. If `RecordFrom` goes away that arm
-belongs on `DictionaryFrom`, and the appendix must be amended before
-Phase 3 is implemented. (Phase 1's serialization walk was switched to
-emit the `Dictionary` operator form for this reason.)
+Phase 1's serialization walk had already been switched to emit the
+`Dictionary` operator form for this reason.
+
+### A field store's no-op guard almost never fires (found 2026-08-15, OPEN — needs a product ruling)
+
+`BoxedObject._store` suppresses a store whose new value is the **identical
+node** as the current one (no version bump, no state event). Appendix B
+licenses that elision by observing that "the evaluated result can be an
+interned node (equal small-integer literals share one boxed value
+engine-wide)".
+
+Measured: that holds for host-built literals (`ce.number(1) ===
+ce.number(1)` is `true`) but NOT for a literal that came through the parser,
+which carries its own source offsets and is a distinct instance. So over a
+stored `1`:
+
+```
+p.n = p.n     suppressed  (the very same node)
+p.n = 1       BUMPS       (a fresh parsed literal)
+p.n = 1 + 0   BUMPS
+p.n = 4 + 1   BUMPS       (over a stored 5 computed as 2 + 3)
+```
+
+Consequence: a loop that writes back an unchanged value invalidates every
+cache entry that read the field, once per iteration, although no reader can
+observe a difference. Correctness is unaffected — the guard is an
+optimization, never a semantic requirement.
+
+The fix would be to widen the guard from `===` to `.isSame()`, which is
+sound (`isSame` is an unconditional equivalence relation and is reference
+identity for objects, so a suppressed store is still observably nothing).
+It is NOT applied unilaterally because it contradicts a standing ruling —
+the decision note specifies "object identity only, mirroring
+`boxed-value-definition.ts`'s value setter" — and costs a structural walk on
+every store, which is a real per-store price in exactly the store-heavy
+loops objects exist for. Pinned as-is by
+`test/compute-engine/object-store.test.ts` ("an EQUAL-but-not-identical
+store still bumps") so the gap stays visible.
 
 ### A literal argument to an `inout`-parameterized constructor over-narrows (found 2026-08-14)
 

@@ -1092,8 +1092,26 @@ function broadcastableComparisonOperands(
   ops: ReadonlyArray<Expression>
 ): boolean {
   return (
-    ops.filter((op) => op.isCollection || isPossiblyCollectionTyped(op))
-      .length < 2
+    ops.filter(
+      (op) =>
+        op.isCollection ||
+        isPossiblyCollectionTyped(op) ||
+        // A DEFINITELY collection-typed operand that is not a collection NODE:
+        // a symbol declared `vector<2>` with no value, or an application
+        // `L(1)` under `L: (number) -> vector<2>`. `isCollection` is false
+        // (nothing to enumerate) and the concrete type is neither top nor
+        // `broadcastable`, so the two predicates above both miss it. This
+        // disjunct must stay in lockstep with `skipBroadcastForVectorOps`
+        // (`boxed-expression/boxed-function.ts`), which gained the same test
+        // on 2026-08-15 when placeholder-signature refinement started giving
+        // such operands their concrete collection types: while only step 2
+        // counted them, step 2 skipped and this handler broadcast, so
+        // `broadcastComparison` rebuilt the identical node and evaluating it
+        // re-entered step 2 — `M = [1,2]` with `M: vector<2>` overflowed the
+        // stack out of `evaluate()` on a bare engine, in the same way the
+        // top-typed case described above once did.
+        op.type.matches('collection')
+    ).length < 2
   );
 }
 

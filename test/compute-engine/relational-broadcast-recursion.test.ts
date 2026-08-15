@@ -89,3 +89,68 @@ describe('Equal/NotEqual over an opaque operand and a list', () => {
     );
   });
 });
+
+// The same disagreement, reintroduced from the other side in 0.110.0.
+//
+// Step 2 gained a third disjunct (`x.type.matches('collection')`) when
+// placeholder-signature refinement started giving applications their concrete
+// collection types, so an operand that is collection-TYPED but not a collection
+// NODE — a symbol declared `vector<2>` with no value, or `L(1)` under
+// `L: (number) -> vector<2>` — began counting there. The evaluate handler's
+// twin predicate did not gain it, so the two rules disagreed again and the
+// identical loop returned: step 2 skipped, the handler broadcast, the rebuilt
+// node re-entered step 2. `M = [1,2]` overflowed the stack on a bare engine.
+//
+// These operands are undecidable rather than false: nothing has resolved, so
+// the comparison stays inert, which is what the whole-collection rule says.
+describe('Equal/NotEqual over a collection-TYPED operand and a list', () => {
+  let ce: ComputeEngine;
+  beforeEach(() => {
+    ce = new ComputeEngine();
+  });
+
+  test('a declared, unassigned collection-typed symbol does not recurse', () => {
+    ce.declare('M', 'vector<2>');
+    expect(ce.box(['Equal', 'M', ['List', 1, 2]]).evaluate().toString()).toBe(
+      'M == [1,2]'
+    );
+  });
+
+  test('a collection-typed application does not recurse, in either order', () => {
+    ce.declare('L', '(number) -> vector<2>');
+    expect(
+      ce.box(['Equal', ['L', 1], ['List', 1, 2]]).evaluate().toString()
+    ).toBe('L(1) == [1,2]');
+    expect(
+      ce.box(['Equal', ['List', 1, 2], ['L', 1]]).evaluate().toString()
+    ).toBe('[1,2] == L(1)');
+  });
+
+  test('NotEqual and a list<number> return type behave the same', () => {
+    ce.declare('L', '(number) -> vector<2>');
+    expect(
+      ce.box(['NotEqual', ['L', 1], ['List', 1, 2]]).evaluate().toString()
+    ).toBe('L(1) != [1,2]');
+    const ce2 = new ComputeEngine();
+    ce2.declare('K', '(number) -> list<number>');
+    expect(
+      ce2.box(['Equal', ['K', 1], ['List', 1, 2]]).evaluate().toString()
+    ).toBe('K(1) == [1,2]');
+  });
+
+  test('a SCALAR-typed application still broadcasts element-wise', () => {
+    // The new disjunct must not swallow the list-vs-scalar case: `L(1)` is a
+    // number here, so fanning the list out is still correct.
+    ce.declare('L', '(number) -> number');
+    expect(
+      ce.box(['Equal', ['L', 1], ['List', 1, 2]]).evaluate().toString()
+    ).toBe('[L(1) == 1,L(1) == 2]');
+  });
+
+  test('a DEFINED vector-valued function still decides whole-collection', () => {
+    ce.box(['Assign', 'L', ['Function', ['List', 1, 2], 'k']]).evaluate();
+    expect(
+      ce.box(['Equal', ['L', 1], ['List', 1, 2]]).evaluate().symbol
+    ).toBe('True');
+  });
+});

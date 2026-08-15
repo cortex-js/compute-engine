@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+### Issues Resolved
+
+- **Comparing a collection-typed operand with a list no longer overflows the
+  stack.** `M = [1,2]` with `M` declared `vector<2>` and unassigned — or
+  `L(1) = [1,2]` under `L: (number) -> vector<2>`, in either operand order, and
+  `NotEqual` likewise — crashed `evaluate()` with a `RangeError` on a bare
+  engine. The list-vs-scalar broadcast rule for `Equal`/`NotEqual` is applied
+  twice, once before evaluation (`skipBroadcastForVectorOps`) and once inside
+  the evaluate handler. 0.110.0 taught the first to count an operand that is
+  collection-TYPED but not a collection NODE, because placeholder-signature
+  refinement had started giving such operands their concrete collection types;
+  the handler's twin predicate was not taught the same test. The two rules then
+  disagreed — the first skipped, the handler broadcast and rebuilt the identical
+  node, and evaluating it re-entered the first — which is the same loop the
+  handler's docstring already recorded for top-typed operands such as `A(t)`.
+  Both predicates now apply the test, and the comment at each site names the
+  other. Such comparisons stay inert (nothing has resolved, so the whole-
+  collection rule leaves them undecided); list-vs-scalar broadcast, named-list
+  broadcast, whole-list equality, and comparisons on a DEFINED vector-valued
+  function are all unchanged.
+
 ## 0.110.0 _2026-08-15_
 
 ### Breaking Changes
