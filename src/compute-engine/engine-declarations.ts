@@ -19,6 +19,7 @@ import {
   containsSignatureArm,
 } from '../common/type/utils.js';
 import { parseType, parseTypeParameterClause } from '../common/type/parse.js';
+import { clearClauseProvenance } from './clause-identity.js';
 import { isSubtype } from '../common/type/subtype.js';
 import { isEffectSubset } from '../common/type/effects.js';
 import {
@@ -99,6 +100,7 @@ import {
 } from './type-constructors.js';
 import {
   isFunction,
+  isForeignEngineObject,
   isNumber,
   isString,
   isSymbol,
@@ -586,6 +588,16 @@ export function setSymbolValue(
   if (typeof value === 'number') value = ce.number(value);
   else if (typeof value === 'boolean') value = value ? ce.True : ce.False;
 
+  // An object belongs to the engine that constructed it, so a binding in THIS
+  // engine cannot hold one from another (`ce.assign` and every path that
+  // installs a value reach this setter). A host API throws rather than
+  // returning an error value, matching this function's other refusals below.
+  if (isForeignEngineObject(value as Expression, ce)) {
+    throw new Error(
+      `object-foreign-engine: cannot assign an object that belongs to a different engine to "${id}"`
+    );
+  }
+
   const def = lookup(id, ce.context.lexicalScope);
   if (!def) throw new Error(`Unknown symbol "${id}"`);
 
@@ -980,7 +992,18 @@ export function declareType(
         : typeof type === 'string'
           ? // A2 — the clause is PRE-SEEDED into the body parse, so `T` reads
             // as a type variable rather than as an unknown type name.
-            parseType(type, ce._typeResolver, params)
+            parseType(type, ce._typeResolver, params, {
+              // A NOMINAL declaration is the one route that may spell an
+              // `object<…>` layout. Every other parse refuses the form with
+              // `object-type-not-inline`, and this parse still refuses one
+              // NESTED inside the body (`type T = list<object<…>>`), which is
+              // inline by the same rule. A structural ALIAS is excluded too:
+              // an object type is nominal, and two aliases of one layout
+              // would be interchangeable — the subtyping between object types
+              // Appendix B rules out. See `docs/TYPE_SYSTEM_ROADMAP.md`
+              // Appendix B, "Declaring an object type".
+              allowObjectType: alias !== true,
+            })
           : type;
   } catch (e) {
     rollbackTypeHalf();
@@ -1929,6 +1952,32 @@ export function assignFn(
   }
 
   const id = arg1;
+
+  // D6 — assignment FULL-REPLACES, so everything `clause-identity.ts` remembers
+  // about the binding's current definition record stops being true here. The
+  // clause LIST needs no such call: it hangs off the inner operator object and
+  // dies when that half is swapped. The single-clause side-channels hang off
+  // the OUTER record, which `updateDef()` mutates in place and which therefore
+  // survives the assignment — so without this they outlive the clause they
+  // describe. `f(n) = 1` then `f = x |-> 42` then `f(m) = 2` refused the third
+  // statement as a redefinition of a clause the assignment had already thrown
+  // away, and answered 42 instead of installing it.
+  //
+  // Deliberately NOT hooked into `updateDef()` itself, which looks like the
+  // tidier choke point: `DefineFunction`'s own recursion-knot machinery
+  // retypes the target through that path while a clause is being installed, so
+  // clearing there wiped the stamp mid-definition and let a genuine duplicate
+  // clause through. Only ASSIGNMENT means full replacement.
+  clearClauseProvenance(ce.lookupDefinition(id));
+
+  // An object belongs to the engine that constructed it. Checked here as well
+  // as in `setSymbolValue` because a first assignment to an undeclared name
+  // installs its value through the declaration path instead of the setter.
+  if (isForeignEngineObject(arg2 as Expression, ce)) {
+    throw new Error(
+      `object-foreign-engine: cannot assign an object that belongs to a different engine to "${id}"`
+    );
+  }
 
   // Cannot set the value of 'Nothing'
   // @todo: could have a 'locked' attribute on the definition
@@ -2993,22 +3042,41 @@ export function reconcileFunctionLiteralReturn(
  * way. Ascribing the parameters makes the literal self-describing, and both
  * halves then read the same type (Tycho item 116).
  *
- * Deliberately NOT applied on the multi-clause route: a clause is checked as an
- * ARM of the declared signature (`assertClauseFitsDeclared`), and stamping the
- * general signature's parameter types onto a clause would make that check
- * vacuous. Clause parameters are narrowed by construction.
+ * The multi-clause route calls this too, with `includeScalar` — see that option
+ * below. The concern that once kept this function off that route entirely (that
+ * stamping the general signature's parameter types onto a clause would make
+ * `assertClauseFitsDeclared` vacuous) is answered by the skips: an ANNOTATED
+ * parameter is never stamped, so every clause that actually narrows is still
+ * checked positionally. Only a BARE parameter is stamped, and a bare parameter
+ * narrows nothing — its arm is the declared parameter, so there was nothing for
+ * the check to verify in the first place.
  *
  * Skips, each leaving the literal untouched: an author-annotated parameter (the
  * author's ascription always wins, as it does for the return type), a
- * non-symbol parameter operand (nothing to annotate), a parameter whose
- * declared type mentions a quantified variable (§2.4/G4 — nothing ground to
- * ascribe), and `unknown`/`any`, which state nothing and would merely flip the
- * literal to "annotated".
+ * non-symbol parameter operand (nothing to annotate — a literal clause pattern
+ * such as `f(0)` lands here), a parameter whose declared type mentions a
+ * quantified variable (§2.4/G4 — nothing ground to ascribe), and
+ * `unknown`/`any`, which state nothing and would merely flip the literal to
+ * "annotated".
+ *
+ * `includeScalar` stamps SCALAR declared types as well. Off by default because
+ * the disagreement this function was written for (Tycho item 116) is
+ * `paramsAreScalar`-shaped — only a parameter that binds a collection WHOLE can
+ * be handed a value the scalar-compiled body cannot read — and because stamping
+ * a scalar is not inert: it re-canonicalizes the body against a narrower
+ * parameter, which changed how a tuple argument broadcasts through `x ↦ 2x`.
+ * The clause route turns it ON because there the body TYPE is the point: under
+ * `let fact: (integer) -> integer`, `fact(n) = n * fact(n - 1)` types `n` as
+ * `unknown` without it, so `n - 1` widens to `number` and the recursive
+ * self-call violates the very declaration that was written to make it check.
+ * That is the declare-then-define shape §4.3a calls the prescribed form for a
+ * recursive definition, so it has to work with bare parameters.
  */
 export function ascribeDeclaredParameterTypes(
   ce: IComputeEngine,
   literal: Expression,
-  declaredType: Type
+  declaredType: Type,
+  options?: { includeScalar?: boolean }
 ): Expression {
   if (!isFunction(literal, 'Function')) return literal;
   if (typeof declaredType !== 'object' || declaredType.kind !== 'signature')
@@ -3034,14 +3102,17 @@ export function ascribeDeclaredParameterTypes(
     const t = args[i].type;
     if (t === 'unknown' || t === 'any') return p.json;
     if (mentionsQuantifiedVariable(t, declaredType)) return p.json;
-    // Only a NON-SCALAR parameter is ascribed. The disagreement this repairs
-    // is `paramsAreScalar`-shaped: the call site consults the DECLARED type to
-    // decide whether to pass a collection argument whole, so only a parameter
-    // that binds whole can be handed a value the scalar-compiled body cannot
-    // read. Stamping a scalar type buys nothing and is not inert — it
-    // re-canonicalizes the body against a narrower parameter, which changed
-    // how a tuple argument broadcasts through `x ↦ 2x`.
-    if (isScalarType(t)) return p.json;
+    // Only a NON-SCALAR parameter is ascribed, unless the caller asks for
+    // scalars too. The disagreement this repairs is `paramsAreScalar`-shaped:
+    // the call site consults the DECLARED type to decide whether to pass a
+    // collection argument whole, so only a parameter that binds whole can be
+    // handed a value the scalar-compiled body cannot read. Stamping a scalar
+    // type buys nothing there and is not inert — it re-canonicalizes the body
+    // against a narrower parameter, which changed how a tuple argument
+    // broadcasts through `x ↦ 2x`. The clause route needs it anyway, because
+    // there the body's TYPE is what a recursive self-call is checked against
+    // (see `includeScalar` in this function's contract above).
+    if (isScalarType(t) && options?.includeScalar !== true) return p.json;
     // `broadcastable<T>` is not a parameter type to stamp: it is a
     // DECLARATION-level contract with its own assignment enforcement (ratified
     // 2026-08-08, item 157), and ascribing it onto the literal made a

@@ -70,12 +70,7 @@ describe('EPSIL MULTI-CLAUSE — literal parameter lowering (§4.5)', () => {
     expect(lowered('h("yes", x) = x')).toEqual([
       'DefineFunction',
       'h',
-      [
-        'Function',
-        'x',
-        ['Typed', 'literalParam_1', { str: '"yes"' }],
-        'x',
-      ],
+      ['Function', 'x', ['Typed', 'literalParam_1', { str: '"yes"' }], 'x'],
     ]);
   });
 
@@ -251,14 +246,36 @@ mode("slow")`);
     expect(text).toBe('2');
   });
 
-  test('a same-signature redefinition replaces the clause (notebook re-run)', () => {
-    const { text, diagnostics } = run(`
+  test('a same-signature redefinition within ONE program is refused', () => {
+    // REDEFINITION DISCIPLINE (user ruling 2026-08-14). This test previously
+    // asserted the opposite and called itself "notebook re-run", but a re-run
+    // is a SEPARATE program — a third statement of the same program is not one
+    // (see the next test for the real gesture). Within one program, a second
+    // clause at an identical parameter list silently discarded the first, and
+    // that is exactly the value-changing overwrite the ruling refuses.
+    const { diagnostics } = run(`
 g(0) = 100
 g(x: integer) = x + 1
 g(0) = 999
 g(0)`);
-    expect(diagnostics).toEqual([]);
-    expect(text).toBe('999');
+    expect(
+      diagnostics.some((d) =>
+        JSON.stringify(d.message).includes('function-redefinition')
+      )
+    ).toBe(true);
+  });
+
+  test('the same redefinition ACROSS programs replaces the clause (notebook re-run)', () => {
+    // The real notebook gesture: re-running an edited cell is its own
+    // compilation unit, so it replaces last-wins with no diagnostic.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'g(0) = 100');
+    executeEpsil(ce, 'g(x: integer) = x + 1');
+    const edited = executeEpsil(ce, 'g(0) = 999');
+    expect(edited.diagnostics).toEqual([]);
+    expect(executeEpsil(ce, 'g(0)').value.toString()).toBe('999');
+    // ...and the OTHER clause is untouched by the replacement.
+    expect(executeEpsil(ce, 'g(5)').value.toString()).toBe('6');
   });
 
   test('clauses accumulate onto a DECLARED signature (declare-then-define)', () => {
@@ -271,6 +288,66 @@ fact(n: integer) = n * fact(n - 1)
 fact(5)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('120');
+  });
+
+  test('a clause parameter may be left BARE under a declaration', () => {
+    // The declaration is authoritative for parameters, not only for the
+    // result: a bare parameter takes the declared type at its position. Before
+    // that held, this program failed outright — `n` inferred `unknown`, so
+    // `n - 1` widened to `number` and the recursive self-call was rejected
+    // against the very declaration written to make it check ("the clause
+    // "(unknown) -> integer" is not an arm of the declared type"). Annotating
+    // the parameter a second time was the only way through.
+    const { text, diagnostics } = run(`
+let fact: (integer) -> integer
+fact(0) = 1
+fact(n) = n * fact(n - 1)
+fact(5)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('120');
+  });
+
+  test('a bare parameter does not weaken the declared domain', () => {
+    // Ascribing the declared type onto a BARE parameter must not make the
+    // symbol's own type wider than the declaration: a second bare clause is the
+    // SAME clause, so it is refused as a redefinition rather than appended as
+    // an `(unknown) -> …` arm. The shape to watch for is the nonsense
+    // intersection `((n: integer) -> integer) & ((unknown) -> number)`.
+    const ce = new ComputeEngine();
+    const { diagnostics } = executeEpsil(
+      ce,
+      'let f: (integer) -> integer\nf(n) = 1\nf(m) = 2'
+    );
+    expect(JSON.stringify(diagnostics)).toContain('function-redefinition');
+    expect(ce.box('f').type.toString()).toBe('(integer) -> integer');
+    expect(executeEpsil(ce, 'f(1)').value.toString()).toBe('1');
+  });
+
+  test('an explicit `x: unknown` annotation is still checked, unlike a bare parameter', () => {
+    // The bypass for an un-narrowed parameter keys on what the author WROTE,
+    // not on the resulting type. Keying on the type would wave through an
+    // author-written `unknown` annotation, which is a stated arm and is not a
+    // subtype of the declared domain — the same hole the adjacent test closes
+    // for `string`.
+    const ce = new ComputeEngine();
+    const { diagnostics } = executeEpsil(
+      ce,
+      'let f: (integer) -> integer\nf(x: unknown) = 1\nf(1)'
+    );
+    expect(JSON.stringify(diagnostics)).toContain('invalid clause definition');
+  });
+
+  test('an ANNOTATED clause parameter is still checked against the declaration', () => {
+    // The relaxation is only for a parameter that narrows NOTHING. A parameter
+    // the author annotated states an arm, and an arm outside the declared
+    // domain is still the loud `invalid-clause-definition` — otherwise the
+    // check the declaration exists to perform would have become vacuous.
+    const ce = new ComputeEngine();
+    const { diagnostics } = executeEpsil(
+      ce,
+      'let k: (integer) -> integer\nk(n) = 1\nk(s: string) = 2\nk(1)'
+    );
+    expect(JSON.stringify(diagnostics)).toContain('invalid clause definition');
   });
 
   test('a plain assignment full-replaces the whole clause set (D6)', () => {

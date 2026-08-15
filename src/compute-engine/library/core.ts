@@ -105,6 +105,7 @@ import {
 import {
   ClauseDefinitionError,
   clauseListing,
+  declaredSignatureOf,
   defineFunctionClause,
   canonInstallSkipped,
   isGenericClauseLiteral,
@@ -113,6 +114,7 @@ import {
   loosenForClauseDefinition,
 } from '../multi-clause.js';
 import {
+  ascribeDeclaredParameterTypes,
   assertAssignable,
   assignValueAsOperatorDef,
   declareSumType,
@@ -2332,6 +2334,30 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const isAliasTarget =
           ctorType?.def !== undefined && ctorType.alias === true;
 
+        // §4.3a, PARAMETER half — capture the author-DECLARED signature while
+        // it is still readable, so a BARE clause parameter can be ascribed
+        // before the body canonicalizes below.
+        //
+        // The capture has to happen HERE, ahead of everything that follows:
+        // the recursion knot immediately retypes the target to the wildcard
+        // `function`, and `loosenForClauseDefinition` loosens it further, so by
+        // the time the body canonicalizes the declaration is no longer on the
+        // binding to read.
+        //
+        // Why the body and not just the stored signature: a bare parameter
+        // infers `unknown`, and everything computed from it widens. Under
+        // `let fact: (integer) -> integer`, the body of `fact(n) = n * fact(n-1)`
+        // canonicalized `n - 1` as `number`, so the recursive self-call failed
+        // against the very declaration that was written to make it check, and
+        // the clause was left holding an `incompatible-type` error. Ascribing
+        // at clause-install time is too late — the error is already baked into
+        // the canonical body — which is why this sits before `args[1].canonical`
+        // rather than in `defineFunctionClause`.
+        const declaredForParams =
+          symbolName === undefined
+            ? undefined
+            : declaredSignatureOf(ce.lookupDefinition(symbolName));
+
         // Tie the recursion knot (same as `Assign`): pre-declare the target
         // as function-typed so a self-reference in the body binds here.
         // A visible SYSTEM-SCOPE builtin is pre-shadowed with a
@@ -2391,7 +2417,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
         let canonFn: Expression;
         try {
-          canonFn = args[1].canonical;
+          // The parameter ascription canonicalizes the rebuilt literal itself,
+          // so it must run INSIDE the loosened window like the plain
+          // canonicalization it replaces — a recursive self-call in the body
+          // still has to bind to the loosened target. It returns the literal
+          // UNCHANGED (and uncanonicalized) when there is nothing to ascribe,
+          // which is the ordinary path.
+          const ascribed =
+            declaredForParams === undefined
+              ? args[1]
+              : ascribeDeclaredParameterTypes(ce, args[1], declaredForParams, {
+                  includeScalar: true,
+                });
+          canonFn = ascribed === args[1] ? args[1].canonical : ascribed;
         } finally {
           restoreClause?.();
         }
@@ -2505,15 +2543,43 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             noteCanonInstallSkipped(target);
           } else {
             try {
-              defineFunctionClause(ce, symbolName, canonFn);
-            } catch {
+              // REDEFINITION DISCIPLINE — anchored on the RAW name operand,
+              // the same token the evaluate route below reads, so this
+              // statement's up-to-three installs (static pre-pass
+              // canonicalize, eval-loop canonicalize, evaluate) all carry ONE
+              // identity and cannot collide with themselves. The install runs
+              // INSIDE `withStatementRoute` so that anything the clause body
+              // declares re-entrantly through the box route stays unstamped.
+              withStatementRoute(ce, (route) =>
+                defineFunctionClause(
+                  ce,
+                  symbolName,
+                  canonFn,
+                  statementOrigin(ce, args[0], route)
+                )
+              );
+            } catch (e) {
               // A malformed or conflicting clause is diagnosed on the
               // evaluate route, which runs the same installation and turns
               // the failure into an error VALUE with the full message;
               // canonicalization stays silent, exactly as the constructor
               // branch does. The target keeps whatever it had, so nothing
               // downstream validates against a half-built signature.
-              noteCanonInstallSkipped(target);
+              //
+              // A REDEFINITION refusal is the exception, and must NOT mark the
+              // target. The marker is sticky for the life of the definition
+              // record — it exists to keep canonicalization from building a
+              // picture of a definition the program will not actually have —
+              // but a refused duplicate leaves the EARLIER clause installed and
+              // entirely valid, so there is no divergence to protect against.
+              // Marking here made the refusal poison every later compilation
+              // unit: once one cell wrote a duplicate clause, the static
+              // collector stopped recording that name's clauses for good, and a
+              // later clean cell silently lost the `function-redefinition`
+              // diagnostic it was promised (`src/epsil/static-diagnostics.ts`,
+              // `clauseRedefinitionDiagnostic`).
+              if (!(e instanceof RedefinitionError))
+                noteCanonInstallSkipped(target);
             }
           }
         }
@@ -2527,8 +2593,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             op1 ?? ce.Nothing,
           ]);
         try {
-          defineFunctionClause(ce, name, op2);
+          // Same anchor and same route discipline as the canonical handler
+          // above — `op1` is the raw name operand it threaded through.
+          withStatementRoute(ce, (route) =>
+            defineFunctionClause(ce, name, op2, statementOrigin(ce, op1, route))
+          );
         } catch (e) {
+          if (e instanceof RedefinitionError)
+            return ce._fn('Error', [ce.string(e.code), ce.string(e.message)]);
           if (e instanceof ClauseDefinitionError)
             return ce._fn('Error', [ce.string(e.code), ce.string(e.message)]);
           // The single-clause and constructor paths delegate to the host

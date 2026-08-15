@@ -19,7 +19,10 @@ import type { DeclarationOrigin } from '../common/type/types.js';
 /** The diagnostic codes the discipline mints — the SAME codes on both tiers
  * (the static pass emits them as `ParsingDiagnostic`s, the statement route as
  * error VALUES), so one problem reads the same wherever it is reported. */
-export type RedefinitionCode = 'type-redefinition' | 'protocol-redefinition';
+export type RedefinitionCode =
+  | 'type-redefinition'
+  | 'protocol-redefinition'
+  | 'function-redefinition';
 
 /**
  * A declaration refused because the name was already declared by a DIFFERENT
@@ -68,6 +71,65 @@ export function checkSameUnitRedefinition(
     kind === 'type' ? 'type-redefinition' : 'protocol-redefinition',
     name,
     `The ${kind} "${name}" is already declared${firstSite(existing)} in this program. A second declaration of a name in one program is a mistake; to redefine it interactively, re-run it as a separate program.`
+  );
+}
+
+/**
+ * Refuse a function CLAUSE that replaces a clause defined by a DIFFERENT
+ * statement of the same compilation unit (user ruling 2026-08-14, closing the
+ * borderline the discipline's v1 deliberately left silent).
+ *
+ * This is the clause-level twin of {@link checkSameUnitRedefinition}, and the
+ * distinction it draws is the one that keeps multi-clause functions working:
+ * only a clause with the SAME PARAMETER DOMAIN — the test dispatch itself uses,
+ * so what is refused is exactly what would have been silently overwritten — is
+ * a redefinition. Clause ADDITION at a distinct parameter list
+ * (`fib(0) = 0; fib(1) = 1; fib(n) = …`) is the idiom multi-clause functions
+ * exist for and is never affected.
+ *
+ * ACROSS units it stays last-wins, like every other construct: re-running an
+ * edited clause in a later program is the notebook gesture, and the host routes
+ * (`ce.parse`/`ce.evaluate`/`ce.declare`) are unstamped, so this never applies
+ * to them.
+ */
+export function checkSameUnitClauseRedefinition(
+  name: string,
+  existing: DeclarationOrigin | undefined,
+  incoming: DeclarationOrigin | undefined
+): void {
+  if (existing === undefined || incoming === undefined) return;
+  if (existing.batch !== incoming.batch) return;
+  if (sameStatement(existing, incoming)) return;
+  throw new RedefinitionError(
+    'function-redefinition',
+    name,
+    `A clause of "${name}" with this parameter list is already defined${firstSite(existing)} in this program, and this one would silently replace it. Give the clauses different parameter lists to dispatch between them, or edit the existing clause in place; to redefine it interactively, re-run it as a separate program.`
+  );
+}
+
+/**
+ * Are two origin stamps of the same batch the SAME defining statement?
+ *
+ * Object identity of the anchor is the primary test, but it is NOT sufficient
+ * on its own for clauses, because one statement is boxed more than once from
+ * the SAME source: the static pre-pass canonicalizes it, and the evaluation
+ * loop canonicalizes it again from the original MathJSON. Those two boxings
+ * produce DIFFERENT operand objects for the same written statement, so an
+ * identity-only test reports a statement as a redefinition of itself — which
+ * showed up as an across-program re-run silently failing to install, the
+ * second boxing throwing where the first had just replaced the clause.
+ *
+ * The source RANGE settles it: within one compilation unit two distinct
+ * statements always occupy distinct offsets, and every boxing of one statement
+ * reports the same ones. Identity remains the fallback for a hand-built
+ * MathJSON operand, which carries no offsets at all.
+ */
+function sameStatement(a: DeclarationOrigin, b: DeclarationOrigin): boolean {
+  if (a.statementId === b.statementId) return true;
+  const ra = a.firstRange;
+  const rb = b.firstRange;
+  return (
+    ra !== undefined && rb !== undefined && ra[0] === rb[0] && ra[1] === rb[1]
   );
 }
 

@@ -18,7 +18,13 @@ import { typeToString } from '../../src/common/type/serialize';
 // checker also runs with no batch at all (`epsil check` calls
 // `staticDiagnostics` directly): a pass-local collector on the static tier, the
 // batch stamp on the runtime tier. Both mint the SAME codes —
-// `type-redefinition` / `protocol-redefinition`.
+// `type-redefinition` / `protocol-redefinition` / `function-redefinition`.
+//
+// Function CLAUSES join the discipline under the user ruling of 2026-08-14
+// (only a clause REPLACING one of the same unit; addition at a distinct
+// parameter list is untouched). Their static collector is keyed by parameter
+// DOMAIN rather than by name, since one name legitimately carries many clauses
+// — see "the discipline over function clauses" at the end of this file.
 //
 
 /** The diagnostic CODES of a diagnostic list, in order. */
@@ -611,5 +617,297 @@ describe('REDEFINITION — nested runs are separate units', () => {
     );
     // The inner unit's rejected duplicate left the first inner declaration.
     expect(typeToString(ce._typeRegistry['Nested'].def!)).toBe('integer');
+  });
+});
+
+//
+// FUNCTION CLAUSES — the borderline the discipline's v1 left silent, closed by
+// user ruling 2026-08-14.
+//
+// Only a REPLACEMENT is refused: a clause whose parameter domain coincides with
+// one already defined in this program, which would silently discard it. Clause
+// ADDITION at a distinct parameter list is the whole point of multi-clause
+// functions and is never affected. Across units it stays last-wins, and the
+// host routes (`ce.parse`/`ce.evaluate`/`ce.declare`) are unstamped, so the
+// rule never reaches them.
+//
+describe('the discipline over function clauses', () => {
+  /** The error codes an Epsil run reports, from either tier. */
+  function runCodes(ce: ComputeEngine, source: string): string[] {
+    const { diagnostics } = executeEpsil(ce, source);
+    return diagnostics
+      .filter((d) => d.severity === 'error')
+      .map((d) => JSON.stringify(d.message));
+  }
+
+  describe('clause ADDITION is untouched', () => {
+    test('the fibonacci idiom accumulates across three statements', () => {
+      const ce = new ComputeEngine();
+      const { diagnostics, value } = executeEpsil(
+        ce,
+        'f(0)=1\nf(1)=1\nf(n)=f(n-1)+f(n-2)\nf(10)'
+      );
+      expect(diagnostics).toEqual([]);
+      expect(value.toString()).toBe('89');
+    });
+
+    test('clauses of different ARITY are different clauses', () => {
+      const ce = new ComputeEngine();
+      const { diagnostics, value } = executeEpsil(
+        ce,
+        'h(0)=1\nh(n)=n\nh(a,b)=a+b\nh(3,4)'
+      );
+      expect(diagnostics).toEqual([]);
+      expect(value.toString()).toBe('7');
+    });
+
+    test('distinct literal patterns dispatch, and the catch-all still lands', () => {
+      const ce = new ComputeEngine();
+      const { diagnostics, value } = executeEpsil(
+        ce,
+        'mode("fast")=1\nmode("slow")=2\nmode(s: string)=0\nmode("slow")'
+      );
+      expect(diagnostics).toEqual([]);
+      expect(value.toString()).toBe('2');
+    });
+  });
+
+  describe('clause REPLACEMENT within one program is refused', () => {
+    test('the same parameter list twice', () => {
+      const ce = new ComputeEngine();
+      expect(runCodes(ce, 'g(n)=1\ng(n)=2\ng(5)').join()).toContain(
+        'function-redefinition'
+      );
+    });
+
+    test('renaming the parameter does not make it a different clause', () => {
+      // Dispatch keys on the parameter DOMAIN, not on parameter names, so
+      // `g(m)` would overwrite `g(n)` just as silently.
+      const ce = new ComputeEngine();
+      expect(runCodes(ce, 'g(n)=1\ng(m)=2\ng(5)').join()).toContain(
+        'function-redefinition'
+      );
+    });
+
+    test('a duplicated LITERAL clause', () => {
+      const ce = new ComputeEngine();
+      expect(runCodes(ce, 'k(0)=1\nk(0)=2\nk(0)').join()).toContain(
+        'function-redefinition'
+      );
+    });
+
+    test('the refusal names the function and points at the first definition', () => {
+      const ce = new ComputeEngine();
+      const { diagnostics } = executeEpsil(ce, 'g(n)=1\ng(n)=2\ng(5)');
+      // The human-readable half of the runtime-tier error value.
+      const message = diagnostics
+        .flatMap((d) => (Array.isArray(d.message) ? d.message : [d.message]))
+        .map(String)
+        .join(' ');
+      expect(message).toContain('A clause of "g"');
+      expect(message).toContain('already defined');
+      // The first definition's site, so the report points at both ends.
+      expect(message).toMatch(/at characters \d+-\d+/);
+    });
+  });
+
+  describe('ACROSS units it stays last-wins (the notebook gesture)', () => {
+    test('a re-run clause replaces, with no diagnostic', () => {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, 'q(n)=1');
+      const edited = executeEpsil(ce, 'q(n)=n+100');
+      expect(edited.diagnostics).toEqual([]);
+      expect(executeEpsil(ce, 'q(5)').value.toString()).toBe('105');
+    });
+
+    test('a re-run replaces only its OWN clause, leaving the others', () => {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, 'w(0)=1\nw(n)=n+1');
+      const edited = executeEpsil(ce, 'w(0)=999');
+      expect(edited.diagnostics).toEqual([]);
+      expect(executeEpsil(ce, 'w(0)').value.toString()).toBe('999');
+      expect(executeEpsil(ce, 'w(5)').value.toString()).toBe('6');
+    });
+
+    test('a clause ADDED by a later program still appends', () => {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, 'p(0)=1');
+      const added = executeEpsil(ce, 'p(n)=n+100');
+      expect(added.diagnostics).toEqual([]);
+      expect(executeEpsil(ce, 'p(0)').value.toString()).toBe('1');
+      expect(executeEpsil(ce, 'p(5)').value.toString()).toBe('105');
+    });
+  });
+
+  describe('the STATIC tier reports it before anything runs', () => {
+    // `epsil check` never evaluates, so the runtime tier's batch stamp cannot
+    // reach it (`checkSource` runs with no batch at all). The static tier is a
+    // pass-local collector of the clauses the unit defines, keyed by parameter
+    // DOMAIN — computed from the canonicalized literal, because an unannotated
+    // parameter has no type in the source to read.
+    test('`epsil check` flags a duplicated clause', () => {
+      const source = 'g(n) = 1\ng(n) = 2\ng(5)';
+      const { diagnostics } = checkSource(source);
+      expect(codes(diagnostics)).toEqual(['function-redefinition']);
+
+      const [d] = diagnostics;
+      expect(d.message).toEqual(['function-redefinition', 'g']);
+      // The PRIMARY range is the second definition…
+      expect(source.slice(d.range[0], d.range[1])).toBe('g(n) = 2');
+      // …and the note points at the first.
+      expect(d.notes).toHaveLength(1);
+      expect(d.notes![0].message).toContain('first defined here');
+      expect(source.slice(d.notes![0].range![0], d.notes![0].range![1])).toBe(
+        'g(n) = 1'
+      );
+    });
+
+    test('renaming the parameter is still the same clause statically', () => {
+      // The domain test is TYPE-level, not syntactic — which is why this tier
+      // needs the canonicalized literal rather than the raw AST.
+      expect(
+        codes(checkSource('g(n) = 1\ng(m) = 2\ng(5)').diagnostics)
+      ).toEqual(['function-redefinition']);
+    });
+
+    test('an annotated duplicate, and a distinct annotation that is not one', () => {
+      expect(
+        codes(checkSource('p(n: integer)=1\np(m: integer)=2\np(1)').diagnostics)
+      ).toEqual(['function-redefinition']);
+      expect(
+        codes(checkSource('p(n: integer)=1\np(s: string)=2\np(1)').diagnostics)
+      ).toEqual([]);
+    });
+
+    test('clause ADDITION passes the static tier clean', () => {
+      expect(
+        codes(
+          checkSource('f(0)=1\nf(1)=1\nf(n)=f(n-1)+f(n-2)\nf(10)').diagnostics
+        )
+      ).toEqual([]);
+      expect(
+        codes(checkSource('h(0)=1\nh(n)=n\nh(a,b)=a+b\nh(3,4)').diagnostics)
+      ).toEqual([]);
+      expect(
+        codes(
+          checkSource(
+            'mode("fast")=1\nmode("slow")=2\nmode(s: string)=0\nmode("slow")'
+          ).diagnostics
+        )
+      ).toEqual([]);
+    });
+
+    test('the collector is pass-local: two separate programs are not a redefinition', () => {
+      expect(codes(checkSource('q(n) = 1').diagnostics)).toEqual([]);
+      expect(codes(checkSource('q(n) = 2').diagnostics)).toEqual([]);
+    });
+
+    test('three definitions of one clause report twice, both against the first', () => {
+      const source = 'g(n)=1\ng(n)=2\ng(n)=3\ng(5)';
+      const { diagnostics } = checkSource(source);
+      expect(codes(diagnostics)).toEqual([
+        'function-redefinition',
+        'function-redefinition',
+      ]);
+      // A refused clause never becomes a "first definition", so both reports
+      // point at the one statement that did define the clause.
+      for (const d of diagnostics)
+        expect(source.slice(d.notes![0].range![0], d.notes![0].range![1])).toBe(
+          'g(n)=1'
+        );
+    });
+
+    test('a GENERIC function is left to the single-clause rule', () => {
+      // Rule G2 refuses a second clause on a generic definition as
+      // `generic-clause-unsupported`; the static tier must not pre-empt it with
+      // a redefinition report naming a different problem.
+      const source =
+        'function id<T>(x: T) -> T { x }\nfunction id<T>(y: T) -> T { y }\nid(1)';
+      expect(codes(checkSource(source).diagnostics)).toEqual([]);
+    });
+
+    test('the SAME diagnostic arrives through the `executeEpsil` pre-pass', () => {
+      const ce = new ComputeEngine();
+      const { diagnostics } = executeEpsil(ce, 'g(n)=1\ng(n)=2\ng(5)');
+      expect(
+        diagnostics.filter((d) => codes([d])[0] === 'function-redefinition')
+      ).toHaveLength(1);
+    });
+
+    test('the static pass leaves no residue: a second check reports the same', () => {
+      const ce = new ComputeEngine();
+      const source = 'g(n)=1\ng(n)=2\ng(5)';
+      expect(codes(staticCheck(ce, source))).toEqual(['function-redefinition']);
+      expect(codes(staticCheck(ce, source))).toEqual(['function-redefinition']);
+    });
+  });
+
+  describe('provenance does not outlive the clause it describes', () => {
+    // All three regressions below were found by the dual code review of this
+    // change. Their common cause: the side-channels that describe a LONE clause
+    // are keyed on the definition RECORD, which is mutated in place and so
+    // survives events that discard the clause itself.
+    test('an ASSIGNMENT between two clauses is not a redefinition', () => {
+      // Assignment full-replaces (D6), so the clause defined afterwards is the
+      // first clause of a fresh binding. Reporting it as a redefinition of the
+      // pre-assignment clause both cited a statement whose clause was gone AND
+      // refused to install the new one — the program answered 42.
+      const ce = new ComputeEngine();
+      const { value, diagnostics } = executeEpsil(
+        ce,
+        'f(n) = 1\nf = (x |-> 42)\nf(m) = 2\nf(0)'
+      );
+      expect(diagnostics).toEqual([]);
+      expect(value.toString()).toBe('2');
+      // Both tiers agree: `epsil check` must not report it either.
+      expect(
+        codes(
+          checkSource('f(n) = 1\nf = (x |-> 42)\nf(m) = 2\nf(0)').diagnostics
+        )
+      ).toEqual([]);
+    });
+
+    test('a clause defined after an assignment still installs', () => {
+      const ce = new ComputeEngine();
+      const { value, diagnostics } = executeEpsil(
+        ce,
+        'g(n) = 1\ng = x |-> 2\ng(n) = 3\ng(9)'
+      );
+      expect(diagnostics).toEqual([]);
+      expect(value.toString()).toBe('3');
+    });
+
+    test('a refused duplicate does not disable the static tier for later units', () => {
+      // The canonicalization-time "install skipped" marker is sticky for the
+      // life of the definition record, and the static collector consults it. A
+      // redefinition refusal must NOT set it: the earlier clause is still
+      // installed and valid, so there is no divergence to protect against.
+      // Marking made one duplicate poison the name forever — the next cell
+      // silently lost the diagnostic it was promised.
+      const ce = new ComputeEngine();
+      executeEpsil(ce, 'g(n)=1\ng(m)=2');
+      const later = executeEpsil(ce, 'g(a)=10\ng(b)=20\ng(1)');
+      expect(codes(later.diagnostics)).toContain('function-redefinition');
+    });
+  });
+
+  describe('the host route is exempt', () => {
+    test('a box-route definition replaces freely, with no batch to collide in', () => {
+      const ce = new ComputeEngine();
+      const clause = (body: unknown, param: unknown) =>
+        ['Function', body, param] as never;
+      ce.box(['DefineFunction', 'z', clause(1, 'n')] as never).evaluate();
+      ce.box([
+        'DefineFunction',
+        'z',
+        clause(['Add', 'n', 100], 'n'),
+      ] as never).evaluate();
+      expect(
+        ce
+          .box(['z', 5] as never)
+          .evaluate()
+          .toString()
+      ).toBe('105');
+    });
   });
 });

@@ -1,8 +1,27 @@
 import type {
+  DeclarationOrigin,
   EffectSet,
   FunctionSignature,
   Type,
 } from '../common/type/types.js';
+import { checkSameUnitClauseRedefinition } from './declaration-origin.js';
+import {
+  clauseSignatureOf as clauseSignatureOfType,
+  noteSingleClauseDeclared,
+  noteSingleClauseOrigin,
+  sameParameterDomain,
+  singleClauseDeclared,
+  singleClauseOrigin,
+} from './clause-identity.js';
+// The canonicalization-time install marker lives in the same leaf, because the
+// Epsil static checker reads it too — a clause the canonical route did not
+// install is not this program's first definition of anything, and must not be
+// reported as one (`src/epsil/static-diagnostics.ts`). Re-exported so the
+// engine's own callers keep importing it from here.
+export {
+  canonInstallSkipped,
+  noteCanonInstallSkipped,
+} from './clause-identity.js';
 import {
   isEffectSubset,
   isPureEffectSet,
@@ -41,6 +60,7 @@ import { apply, lookup } from './function-utils.js';
 import { isMintedConstructor } from './type-constructors.js';
 import { isProtocolDispatcher } from './engine-protocols.js';
 import {
+  ascribeDeclaredParameterTypes,
   assignValueAsOperatorDef,
   reconcileFunctionLiteralReturn,
 } from './engine-declarations.js';
@@ -70,6 +90,14 @@ export interface FunctionClause {
   signature: FunctionSignature;
   /** The canonical `Function` literal (with its captured scope). */
   literal: Expression;
+  /** REDEFINITION DISCIPLINE — which compilation unit and which defining
+   * STATEMENT installed this clause, when it came in on the Epsil statement
+   * route (`docs/plans/2026-08-14-redefinition-discipline.md`). Present only
+   * for a clause defined by an Epsil statement while a batch was live; a box-
+   * route or host-API definition leaves it absent, which is what keeps those
+   * routes freely replaceable. Consulted only when a later clause would
+   * REPLACE this one — see `checkSameUnitClauseRedefinition`. */
+  origin?: DeclarationOrigin;
 }
 
 /** Symbol-level effect-row state (D5): `explicit` is the author-established
@@ -128,21 +156,10 @@ export class ClauseDefinitionError extends Error {
 //
 
 /** The clause signature of a canonical `Function` literal: its arrow with
- * the effects specifier removed (D5 — effects are symbol-level). */
+ * the effects specifier removed (D5 — effects are symbol-level). The rule
+ * itself lives in `clause-identity.ts`, shared with the Epsil static checker. */
 function clauseSignatureOf(literal: Expression): FunctionSignature {
-  const arrow = literal.type.type;
-  if (typeof arrow === 'object' && arrow.kind === 'signature') {
-    const sig = { ...arrow };
-    delete sig.effects;
-    return sig;
-  }
-  // A literal always types as a signature; degrade conservatively if not.
-  return {
-    kind: 'signature',
-    variadicArg: { type: 'any' },
-    variadicMin: 0,
-    result: 'unknown',
-  };
+  return clauseSignatureOfType(literal.type.type);
 }
 
 /** The literal's inferred effect row (its arrow's specifier), for the D5
@@ -152,38 +169,6 @@ function inferredEffectsOf(literal: Expression): EffectSet | undefined {
   if (typeof arrow === 'object' && arrow.kind === 'signature')
     return arrow.effects;
   return undefined;
-}
-
-//
-// ─── Clause identity (§4.3) ───────────────────────────────────────────────
-//
-
-/** Two clauses are the SAME clause iff their parameter domains coincide:
- * identical arity structure and mutually-subtyped parameter types.
- * Result type and effects are deliberately excluded — a body edit that
- * changes the inferred result must REPLACE its clause, not append. */
-function sameParameterDomain(
-  a: FunctionSignature,
-  b: FunctionSignature
-): boolean {
-  const aReq = a.args?.length ?? 0;
-  const bReq = b.args?.length ?? 0;
-  const aOpt = a.optArgs?.length ?? 0;
-  const bOpt = b.optArgs?.length ?? 0;
-  if (aReq !== bReq || aOpt !== bOpt) return false;
-  if ((a.variadicArg === undefined) !== (b.variadicArg === undefined))
-    return false;
-  if (a.variadicArg && (a.variadicMin ?? 0) !== (b.variadicMin ?? 0))
-    return false;
-
-  const mutual = (x: Type, y: Type) => isSubtype(x, y) && isSubtype(y, x);
-  for (let i = 0; i < aReq; i++)
-    if (!mutual(a.args![i].type, b.args![i].type)) return false;
-  for (let i = 0; i < aOpt; i++)
-    if (!mutual(a.optArgs![i].type, b.optArgs![i].type)) return false;
-  if (a.variadicArg && !mutual(a.variadicArg.type, b.variadicArg!.type))
-    return false;
-  return true;
 }
 
 //
@@ -209,12 +194,22 @@ function sameParameterDomain(
  * encoding or an overload declaration, neither of which is an arm contract
  * in v1.
  */
-function declaredSignatureOf(
+export function declaredSignatureOf(
   def: BoxedDefinition | undefined
 ): FunctionSignature | undefined {
   if (def === undefined) return undefined;
   const state = multiClauseState(def);
   if (state !== undefined) return state.declared;
+  // A LONE clause installed under a declaration keeps the plain single-function
+  // representation (§4.2), so there is no clause state to carry `declared` —
+  // the side-channel below remembers it. Without this the declaration became
+  // invisible the moment clause 1 installed: clause 2 was neither ascribed nor
+  // arm-checked, and `let f: (integer) -> integer` / `f(n) = 1` / `f(m) = 2`
+  // built the nonsense intersection
+  // `((n: integer) -> integer) & ((unknown) -> number)` instead of reporting
+  // the redefinition. Same problem, and the same fix, as SINGLE_CLAUSE_ORIGIN.
+  const remembered = singleClauseDeclared(def);
+  if (remembered !== undefined) return remembered;
   let t: Type | undefined;
   if (isValueDef(def)) {
     if (def.value.inferredType || def.value.value !== undefined)
@@ -255,37 +250,21 @@ function hasLiteralPatternParam(literal: Expression): boolean {
 }
 
 /**
- * True when `def` already HOLDS a generic function definition — a stored
- * generic literal, not a bare generic declaration (which is the ordinary
- * declare-then-define shape and delegates to `ce.assign`).
- */
-/**
- * Definition records whose canonicalization-time clause install was SKIPPED.
+ * REDEFINITION DISCIPLINE — the origin stamp of a SINGLE-clause definition,
+ * which does not live in clause storage.
  *
- * Skipping one clause of a name obliges the canonical route to skip every
- * later clause of that name too, or its picture of the definition diverges
- * from what the program will actually build. Concretely: a generic first
- * clause is skipped (see {@link isGenericTarget}); if a plain second clause
- * were then installed, canonicalization would believe the target is that
- * plain clause, while the run rejects the second clause under G2 and keeps
- * the generic one — and every later call would be checked against a signature
- * the program never has. Skipping both leaves the target at the top
- * `function` type, which checks nothing and so cannot be wrong.
+ * §4.2 keeps a lone clause in the ordinary single-function representation
+ * (`ce.assign`), so its stamp has nowhere to ride: `FunctionClause.origin`
+ * only exists once a clause LIST does. Without this side-channel the very
+ * shape the ruling targets — one function defined twice in one program,
+ * `g(n) = 1` then `g(n) = 2` — would be invisible, because the second
+ * definition reconstructs the first through {@link convertToClauseState},
+ * which rebuilds the clause from the installed literal and would hand back a
+ * clause with no origin to compare against.
  *
- * Weakly keyed on the definition RECORD, which is mutated in place across
- * installs and dies with its scope.
+ * Weakly keyed on the definition RECORD, like {@link CANON_INSTALL_SKIPPED}:
+ * it is mutated in place across installs and dies with its scope.
  */
-const CANON_INSTALL_SKIPPED = new WeakSet<object>();
-
-export function noteCanonInstallSkipped(
-  def: BoxedDefinition | undefined
-): void {
-  if (def !== undefined) CANON_INSTALL_SKIPPED.add(def);
-}
-
-export function canonInstallSkipped(def: BoxedDefinition | undefined): boolean {
-  return def !== undefined && CANON_INSTALL_SKIPPED.has(def);
-}
 
 /**
  * True when installing a clause onto `def` would produce a GENERIC target —
@@ -359,11 +338,31 @@ function declaredParamAt(sig: FunctionSignature, i: number): Type | undefined {
  * pass — the clause SET, not any single clause, implements the declaration.
  * So: each parameter type must be a subtype of the declared type at that
  * position, and the result a subtype of the declared result.
+ *
+ * An UNANNOTATED parameter is the exception. It infers `unknown` — the top
+ * type, a subtype of nothing — so the positional test would reject every clause
+ * that leaves a parameter bare, and `let f: (integer) -> integer` followed by
+ * `f(n) = 1` failed as "parameter 1 of type "unknown" is outside the declared
+ * "integer"". A bare parameter states no narrowing at all, so the arm it
+ * describes is the DECLARED parameter itself: it is accepted here and the
+ * declaration governs the call, exactly as it already did on the single-function
+ * route (`ce.declare('h', '(integer) -> integer')` followed by
+ * `ce.assign('h', n ↦ 1)` has always been accepted, so refusing the same shape
+ * on the clause route was a route inconsistency rather than a rule).
+ *
+ * This does NOT stamp the declared type onto the clause — the reason
+ * `ascribeDeclaredParameterTypes` (`engine-declarations.ts`) documents for
+ * staying off this route. Stamping would re-canonicalize the body against a
+ * narrower parameter and, applied generally, would make this very check
+ * vacuous. Only the check is relaxed, and only where the author narrowed
+ * nothing: an ANNOTATED parameter, including one annotated `0` or `string`, is
+ * still checked positionally, so every narrowing clause is verified as before.
  */
 function assertClauseFitsDeclared(
   id: string,
   clause: FunctionSignature,
-  declared: FunctionSignature
+  declared: FunctionSignature,
+  bareParams: readonly boolean[]
 ): void {
   const reject = (why: string): never => {
     throw new ClauseDefinitionError(
@@ -384,6 +383,14 @@ function assertClauseFitsDeclared(
     const d = declaredParamAt(declared, i);
     if (d === undefined)
       reject(`the declaration takes no parameter at position ${i + 1}`);
+    // A BARE parameter narrows nothing, so its arm IS the declared parameter.
+    // Keyed on what the author WROTE, not on the resulting type: the ascription
+    // stamps most bare parameters to the declared type, but not all of them (a
+    // declared type mentioning a quantified variable, or `unknown`/`any`, is
+    // deliberately left alone), so those still arrive as `unknown` and must
+    // pass. Testing the TYPE instead would also wave through an author-written
+    // `x: unknown`, which is a stated arm and has to be checked like any other.
+    else if (bareParams[i] === true) continue;
     else if (!isSubtype(params[i].type, d))
       reject(
         `parameter ${i + 1} of type "${typeToString(params[i].type)}" is outside the declared "${typeToString(d)}"`
@@ -413,7 +420,8 @@ function assertClauseFitsDeclared(
 export function defineFunctionClause(
   ce: IComputeEngine,
   id: string,
-  literal: Expression
+  literal: Expression,
+  origin?: DeclarationOrigin
 ): void {
   if (!isFunction(literal, 'Function') || !literal.isCanonical)
     throw new ClauseDefinitionError(
@@ -520,15 +528,41 @@ export function defineFunctionClause(
   // same reconciliation `ce.assign` performs for a plain definition), then
   // check the clause as an ARM of it.
   const declared = declaredSignatureOf(existing);
-  if (declared !== undefined)
+  // Which parameter positions the author left BARE, captured BEFORE the
+  // ascription below stamps them — afterwards a stamped parameter is
+  // indistinguishable from one the author annotated. `assertClauseFitsDeclared`
+  // needs the distinction: a bare parameter narrows nothing and its arm is the
+  // declared parameter, but an author-written `x: unknown` is a stated arm and
+  // must still be checked against the declared domain like any other.
+  const bareParams = isFunction(literal, 'Function')
+    ? literal.ops.slice(1).map((p) => !isFunction(p, 'Typed'))
+    : [];
+  if (declared !== undefined) {
+    // PARAMETERS first, then the result. A bare parameter otherwise types as
+    // `unknown` inside the body, and everything computed from it widens: under
+    // `let fact: (integer) -> integer`, `fact(n) = n * fact(n - 1)` read `n - 1`
+    // as `number` and the self-call then violated the declaration it was
+    // written against. Only BARE parameters are stamped — an annotated one is
+    // the author's narrowing and is left alone, so `assertClauseFitsDeclared`
+    // below still checks every clause that narrows.
+    //
+    // Ordering is load-bearing: the result reconciliation reads the body's
+    // INFERRED result, so the body has to have been canonicalized against the
+    // declared parameter types before it runs, or it reconciles against a
+    // result derived from `unknown` parameters.
+    literal = ascribeDeclaredParameterTypes(ce, literal, declared, {
+      includeScalar: true,
+    });
     literal = reconcileFunctionLiteralReturn(ce, literal, declared);
+  }
 
   const incoming: FunctionClause = {
     signature: clauseSignatureOf(literal),
     literal,
+    ...(origin !== undefined ? { origin } : {}),
   };
   if (declared !== undefined)
-    assertClauseFitsDeclared(id, incoming.signature, declared);
+    assertClauseFitsDeclared(id, incoming.signature, declared, bareParams);
 
   const incomingExplicit = functionLiteralDeclaredEffects(literal);
 
@@ -565,11 +599,25 @@ export function defineFunctionClause(
   const effectRow: EffectRowState = { explicit: state?.effectRow.explicit };
 
   // Replace (same parameter domain, position preserved) or append.
+  //
+  // REDEFINITION DISCIPLINE (user ruling 2026-08-14): a REPLACEMENT is refused
+  // when the clause it would overwrite was defined by a different statement of
+  // the SAME compilation unit. That is precisely the silent, value-changing
+  // overwrite the ruling targets; an APPEND — a clause at a distinct parameter
+  // list — is the multi-clause idiom and passes untouched. Across units the
+  // replacement stands (the notebook re-run gesture), and both routes with no
+  // origin stamp (box route, host API) are exempt.
+  //
+  // Checked BEFORE the prospective state is mutated, so a refused clause
+  // leaves the installed definition byte-identical — the same discipline the
+  // effect-row checks below observe.
   const at = clauses.findIndex((c) =>
     sameParameterDomain(c.signature, incoming.signature)
   );
-  if (at >= 0) clauses[at] = incoming;
-  else clauses.push(incoming);
+  if (at >= 0) {
+    checkSameUnitClauseRedefinition(id, clauses[at].origin, origin);
+    clauses[at] = incoming;
+  } else clauses.push(incoming);
 
   // §4.2: a SINGLE clause keeps today's single-function representation —
   // no behavior change until a second clause exists. Assignment installs
@@ -592,6 +640,15 @@ export function defineFunctionClause(
   ) {
     if (shadowsDispatcher) declareShadowingFunction(ce, id, literal);
     else ce.assign(id, literal);
+    // Stamp the installed record so a SECOND definition of this same lone
+    // clause, later in the same program, can see whose it was — the shape the
+    // redefinition ruling targets. Read back by `convertToClauseState`.
+    const installed = lookupInScope(ce, id);
+    noteSingleClauseOrigin(installed, origin);
+    // …and remember the DECLARATION the same way, so a later clause of this
+    // same name is still ascribed and arm-checked against it (§4.3a). The
+    // plain representation has nowhere else to keep it.
+    noteSingleClauseDeclared(installed, declared);
     return;
   }
 
@@ -648,8 +705,18 @@ function convertToClauseState(
   const canonical = literal.isCanonical ? literal : literal.canonical;
   if (!isFunction(canonical, 'Function')) return undefined;
 
+  // The reconstructed clause carries the origin the single-clause install
+  // recorded on the side (`noteSingleClauseOrigin`), so a second definition of
+  // the same lone clause within one program is seen as the redefinition it is.
+  const origin = singleClauseOrigin(def);
   return {
-    clauses: [{ signature: clauseSignatureOf(canonical), literal: canonical }],
+    clauses: [
+      {
+        signature: clauseSignatureOf(canonical),
+        literal: canonical,
+        ...(origin !== undefined ? { origin } : {}),
+      },
+    ],
     effectRow: { explicit: functionLiteralDeclaredEffects(canonical) },
     declared: declaredSignatureOf(def),
   };

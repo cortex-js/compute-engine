@@ -7,8 +7,9 @@ import {
   stringValue,
   symbol,
 } from '../math-json/utils.js';
-import type { Type } from '../common/type/types.js';
+import type { FunctionSignature, Type } from '../common/type/types.js';
 import { isWildcardFunctionType } from '../common/type/utils.js';
+import { isPolymorphicType } from '../common/type/instantiate.js';
 
 // Type-only import: like `execute-epsil.ts`, this module never statically
 // imports the engine — the engine is injected at call time.
@@ -37,6 +38,15 @@ import {
   errorIndexCountsWrittenArguments,
 } from '../compute-engine/boxed-expression/named-arguments.js';
 import { isValueDef } from '../compute-engine/boxed-expression/utils.js';
+// `clause-identity.ts` is an engine-free leaf too (its only runtime dependency
+// is `common/type/subtype.js`), so the redefinition discipline's two tiers can
+// share ONE definition of clause identity without this module importing the
+// engine — the same arrangement as `unboundSignatureHint` above.
+import {
+  canonInstallSkipped,
+  clauseSignatureOf,
+  sameParameterDomain,
+} from '../compute-engine/clause-identity.js';
 import { signatureNotes } from './signature-notes.js';
 
 /**
@@ -101,6 +111,7 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   'argument-name-duplicate',
   'argument-names-unavailable',
   'argument-optional-skipped',
+  'argument-names-required',
   'incompatible-type',
   'incompatible-dimensions',
   'invalid-axis',
@@ -269,6 +280,15 @@ function canonicalizationDiagnostics(
   // for. See `docs/plans/2026-08-14-redefinition-discipline.md`.
   const declaredInThisUnit = new Map<string, [number, number]>();
 
+  // REDEFINITION DISCIPLINE, static tier — the function CLAUSES this unit
+  // defines: name → one entry per clause, holding its parameter domain and the
+  // range of the statement that defined it. Pass-local for the same reason as
+  // `declaredInThisUnit` above, and separate from it because a clause is
+  // identified by its parameter domain rather than by a name: a name may carry
+  // any number of clauses, and only a second clause at the SAME domain is a
+  // redefinition.
+  const clausesInThisUnit = new Map<string, ClauseSite[]>();
+
   for (const statement of statements) {
     const redefinition = redefinitionDiagnostic(
       statement,
@@ -312,6 +332,30 @@ function canonicalizationDiagnostics(
     // real cause for both. The two tiers must report the same problem.
     if (redefinition === undefined)
       recordDeclaredNames(statement, canonical, source, declaredInThisUnit);
+
+    // REDEFINITION DISCIPLINE, static tier — the clause half. Unlike the
+    // declaration half it can only run AFTER the statement is canonicalized:
+    // clause identity is a TYPE-level test on the parameter domain (renaming a
+    // parameter does not make a new clause, and an unannotated parameter's type
+    // is inferred), so the raw AST cannot answer it. Records as well as
+    // reports; see `clauseRedefinitionDiagnostic`.
+    // …and an ASSIGNMENT to a name discards every clause this unit recorded for
+    // it, because assignment FULL-REPLACES (design rule D6). Without this the
+    // collector kept citing a clause the program had already thrown away:
+    // `f(n) = 1` then `f = x ↦ 42` then `f(m) = 2` reported the third statement
+    // as redefining the first, whose binding no longer existed. Runs BEFORE the
+    // clause check below so a statement that both replaces and defines is read
+    // in that order.
+    forgetReplacedClauses(statement, clausesInThisUnit);
+
+    const clauseRedefinition = clauseRedefinitionDiagnostic(
+      ce,
+      statement,
+      boxed,
+      source,
+      clausesInThisUnit
+    );
+    if (clauseRedefinition !== undefined) diagnostics.push(clauseRedefinition);
 
     // A declaration whose initializer PROVABLY cannot satisfy the annotation
     // is a static problem too, even though `Declare` only enforces it at
@@ -520,11 +564,19 @@ function declarationName(op: MathJsonExpression | null): string | undefined {
 }
 
 /**
- * Does `statement`'s AST head declare a type or a protocol? The
- * REDEFINITION DISCIPLINE's statement-route marker
- * (`IComputeEngine._epsilDeclarationRoute`) is raised only around such a
- * statement, so that a statement like `let x = f()` — whose callee might
- * declare something through the box route — never raises it.
+ * Does `statement`'s AST head declare a name the REDEFINITION DISCIPLINE
+ * governs — a type, a protocol, or a function CLAUSE? The discipline's
+ * statement-route marker (`IComputeEngine._epsilDeclarationRoute`) is raised
+ * only around such a statement, so that a statement like `let x = f()` —
+ * whose callee might declare something through the box route — never raises
+ * it.
+ *
+ * `DefineFunction` joins the three declaration heads under the user ruling of
+ * 2026-08-14: a clause that REPLACES one defined by another statement of the
+ * same program is refused, the same within-unit rule the other three follow.
+ * Only the replace case is affected; a clause at a distinct parameter list
+ * still accumulates (`fib(0) = 0; fib(1) = 1; fib(n) = …`), so raising the
+ * marker here costs an ordinary multi-clause program nothing.
  *
  * Exported for `execute-epsil.ts`, whose evaluation loop raises the same
  * marker around the statement it boxes and evaluates.
@@ -534,7 +586,8 @@ export function isDeclarationStatement(statement: MathJsonExpression): boolean {
   return (
     head === 'DeclareType' ||
     head === 'DeclareSumType' ||
-    head === 'DeclareProtocol'
+    head === 'DeclareProtocol' ||
+    head === 'DefineFunction'
   );
 }
 
@@ -622,6 +675,128 @@ function redefinitionDiagnostic(
   }
 
   return undefined;
+}
+
+/** REDEFINITION DISCIPLINE, static tier: one clause this unit defined — its
+ * parameter domain, and the range of the `DefineFunction` statement that
+ * defined it (the "first defined here" site of a later collision). */
+interface ClauseSite {
+  signature: FunctionSignature;
+  range: [number, number];
+}
+
+/**
+ * REDEFINITION DISCIPLINE, static tier: drop every clause site this unit
+ * recorded for a name that `statement` ASSIGNS to.
+ *
+ * Assignment full-replaces a clause set (design rule D6 — `Assign` drops the
+ * clause list wholesale, which is why `f(0) = 1; f(n) = n + 1; f = x ↦ 42`
+ * answers 42). A clause defined AFTER such an assignment is therefore the first
+ * clause of a fresh binding, never a redefinition of one the assignment already
+ * discarded; reporting it as one both cites a statement whose clause is gone and
+ * contradicts the runtime tier, which clears its own provenance on this route
+ * (`clearClauseProvenance`, `clause-identity.ts`).
+ *
+ * `Declare` counts only when it carries an initializer — `let f: (integer) ->
+ * integer` states a contract and defines no clause, so it must not wipe one.
+ */
+function forgetReplacedClauses(
+  statement: MathJsonExpression,
+  clauses: Map<string, ClauseSite[]>
+): void {
+  const head = operator(statement);
+  if (head !== 'Assign' && head !== 'Declare') return;
+  // `Declare` with nothing in the value slot is a bare declaration.
+  if (head === 'Declare' && operand(statement, 2) === null) return;
+  const name = declarationName(operand(statement, 1));
+  if (name !== undefined) clauses.delete(name);
+}
+
+/**
+ * REDEFINITION DISCIPLINE, static tier: is `statement` a second definition of a
+ * clause this unit already defined — one whose parameter domain coincides with
+ * an earlier clause's, so that it would silently discard it? Records the
+ * statement's own clause in `clauses` when it is not, so the collector is
+ * filled and consulted in one place (the declaration half splits the two
+ * because its recording is gated on the canonical form).
+ *
+ * Clause identity is `sameParameterDomain` — the very test
+ * `defineFunctionClause` (`src/compute-engine/multi-clause.ts`) uses to choose
+ * between replacing a clause and appending one, so what this reports is exactly
+ * what would be overwritten. Clause ADDITION at a distinct parameter list
+ * (`fib(0) = 0; fib(1) = 1; fib(n) = …`) is the idiom multi-clause functions
+ * exist for and is never flagged.
+ *
+ * `boxed` is the CANONICAL statement, `DefineFunction(name, literal)`: the
+ * literal's arrow type is where the parameter domain becomes readable, since an
+ * unannotated parameter has no type in the source at all.
+ *
+ * Two shapes are deliberately passed over, so that this tier never reports a
+ * problem the run reports differently:
+ * - a GENERIC clause, or one landing on a generic definition. Rule G2 makes
+ *   generic functions single-clause, so a second one is refused as
+ *   `generic-clause-unsupported`, which names the real constraint.
+ * - anything whose canonical form is not the expected `DefineFunction(name,
+ *   Function(…))` — a malformed definition the run diagnoses on its own terms.
+ *
+ * A statement is RECORDED as a first definition only when canonicalization
+ * actually installed its clause — `canonInstallSkipped` is the canonical
+ * route's own marker for an install it refused, the counterpart of the
+ * declaration half's `DECLARATION_BLOCKING_CODES` gate (read as a marker rather
+ * than as an error node because `DefineFunction`'s canonical handler swallows
+ * its failures; they are minted on the evaluate route). Without it, a
+ * definition refused for an INDEPENDENT reason — `x := 5` followed by
+ * `x(n) = …` — would become the "first definition" a later clause is reported
+ * as replacing, while the run reported the real cause for both. The gate is on
+ * the recording only, never on the report: a clause the discipline itself
+ * refuses is marked skipped too, and that one is exactly what must be reported.
+ *
+ * See `docs/plans/2026-08-14-redefinition-discipline.md`.
+ */
+function clauseRedefinitionDiagnostic(
+  ce: ComputeEngine,
+  statement: MathJsonExpression,
+  boxed: ReturnType<ComputeEngine['box']> | undefined,
+  source: string,
+  clauses: Map<string, ClauseSite[]>
+): ParsingDiagnostic | undefined {
+  if (operator(statement) !== 'DefineFunction') return undefined;
+  // The NAME and the RANGE come from the raw statement (the canonical tree
+  // carries no source offsets); the parameter domain from the canonical one.
+  const name = declarationName(operand(statement, 1));
+  if (name === undefined || !isFunction(boxed, 'DefineFunction'))
+    return undefined;
+  const literal = boxed.ops[1];
+  if (!isFunction(literal, 'Function')) return undefined;
+  const literalType = literal.type.type;
+  if (isPolymorphicType(literalType)) return undefined;
+
+  const signature = clauseSignatureOf(literalType);
+  const range = statementRange(statement, source);
+  const defined = clauses.get(name) ?? [];
+  const first = defined.find((c) =>
+    sameParameterDomain(c.signature, signature)
+  );
+
+  if (first === undefined) {
+    if (!canonInstallSkipped(ce.lookupDefinition(name))) {
+      defined.push({ signature, range });
+      clauses.set(name, defined);
+    }
+    return undefined;
+  }
+
+  return {
+    severity: 'error',
+    message: ['function-redefinition', name],
+    range: [range[0], range[1], range[0]],
+    notes: [
+      {
+        message: `this clause of \`${name}\` is first defined here`,
+        range: first.range,
+      },
+    ],
+  };
 }
 
 /**

@@ -112,10 +112,55 @@ Deliberately NOT in it:
 - **`DeclareConformance` implementation blocks**: already governed by
   P47; this document generalizes it, not re-legislates it.
 
-Recorded borderline, deferred: redefining the SAME clause (identical
-parameter list) within one unit — plausibly a copy-paste bug, but
-replace-that-clause is also how an author hot-fixes a clause
-mid-program; no evidence either way yet, so v1 stays silent there.
+Recorded borderline, ~~deferred~~ **RULED 2026-08-14 (user) — IN the
+discipline**: redefining the SAME clause (identical parameter list)
+within one unit is now `function-redefinition`. The deferral's stated
+basis was "no evidence either way"; the ruling settled it on the
+notebook argument — cells are re-executed and edited in place, so a
+duplicated parameter list is more often stale text than a deliberate
+hot-fix, and the failure it caused was silent AND value-changing.
+
+Only the REPLACE case is in. Clause ADDITION at a distinct parameter
+list — the bullet above — is untouched, and across units a re-run clause
+still replaces last-wins. What "same clause" means is not a new
+judgement: it is `sameParameterDomain` (`multi-clause.ts`), the very
+test dispatch uses to decide replace-vs-append, so what is refused is
+exactly what would otherwise have been silently overwritten.
+
+Implementation note — the identity test needed widening for this to
+work. One statement is boxed more than once from the same source (the
+static pre-pass canonicalizes it, then the evaluation loop canonicalizes
+it again from the original MathJSON), and those boxings produce
+DIFFERENT anchor objects. Comparing anchors by object identity alone
+therefore reported a statement as a redefinition of itself, which showed
+up as an across-program re-run silently failing to install. The stamp is
+now matched on the source RANGE when both origins carry one, with object
+identity as the fallback for hand-built MathJSON that has no offsets —
+see `sameStatement` in `declaration-origin.ts`.
+
+The clause ruling first shipped on the RUNTIME tier only. Its STATIC
+tier followed on 2026-08-14, so `epsil check` reports a duplicated
+clause before anything runs, like the other three constructs. It could
+not reuse the declaration collector, because a clause is identified by
+its parameter DOMAIN rather than by a name — one name legitimately
+carries many clauses — and that domain is type-level, not syntactic:
+renaming a parameter does not make a new clause, and an unannotated
+parameter has no type in the source at all. The collector therefore
+records the domain read off the CANONICALIZED literal
+(`DefineFunction(name, Function(…))`, whose arrow is the clause
+signature), one entry per clause, and reports a statement whose domain
+coincides with an earlier entry's. `sameParameterDomain` and
+`clauseSignatureOf` moved into `src/compute-engine/clause-identity.ts`,
+an engine-free leaf, so the two tiers share one definition of clause
+identity — the static checker may only import leaves at runtime, since
+its engine is injected. Recording is gated on `canonInstallSkipped`,
+the canonical route's own marker for a clause it refused to install:
+that is the clause-side counterpart of the declaration tier's
+`DECLARATION_BLOCKING_CODES` gate, read as a marker because
+`DefineFunction`'s canonical handler swallows its failures (they are
+minted on the evaluate route). Since a clause the discipline itself
+refuses is also marked skipped, the gate applies to the RECORDING only,
+never to the report.
 
 ## Mechanics — two tiers, two mechanisms
 
@@ -221,7 +266,7 @@ above:
 | Sum declaration | Replaces wholesale (all N+1 names under the new statement); dropped variants stay ordinary nominal types | sum-sugar semantics + the generated-name rule above |
 | `protocol P { … }` | Protocol replaced; conformances re-validated against the new requirements; dispatchers re-synced | Appendix A "Scope and lifecycle", as amended above |
 | Conformance impl block | Replaces the stored block (P47) | protocols design P47 |
-| Function clause, same parameter list | Replaces that clause | multi-clause semantics |
+| Function clause, same parameter list | ACROSS units: replaces that clause. WITHIN one unit: `function-redefinition` (user ruling 2026-08-14) | multi-clause semantics; "Scope" above |
 | Function clause, new parameter list | Adds a clause | multi-clause semantics |
 | Plain assignment | Rebinds | core semantics |
 
