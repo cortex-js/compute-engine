@@ -433,7 +433,66 @@ I had not accounted for — N=450 (divisible) was slow, N=301/302
 L-length 304, indifferent to divisibility, and the pad-to-a-multiple-of-3
 workaround is dead.
 
-**Leading candidate — the TYPE-STRING CACHE thrashes by design.**
+**REPRODUCED IN THIS REPO, against CE SOURCE, with a profile.** Tycho's
+probe runs on our working tree through the item-182 src-redirect hook:
+
+```
+cd ~/dev/tycho && MODE=strip NL=304 CEIL=8000 \
+  node --cpu-prof \
+    --import ~/.nvm/versions/node/v22.13.1/lib/node_modules/tsx/dist/loader.mjs \
+    --import ~/dev/compute-engine/docs/scratch/2026-08-14-item182-ce-src-redirect.mjs \
+    docs/scratch/d21-lizeq-boundary.mts
+```
+
+`NL=303` → C₂ span 56 ms. `NL=304` → the span consumes whatever ceiling
+it is given (8 s, 12 s, 20 s all fully spent), and the engine emits
+`error canonicalizing At: Timeout exceeded`. `MODE=strip` is a 7-cell
+dependency closure, so nothing else in the document is involved.
+
+**Attributed profile (source names, 9.8 s sample):** 79.4% INCLUSIVE in a
+single `ce.parse` → `box` → `withRootRepair` → `_withRepairFrame` →
+`makeCanonicalFunction`. One canonicalization consumes the whole budget.
+Self time is spread across small helpers, led by the element-memo
+dependency machinery (`collection-element-memo.ts` 8.1%,
+`collectParameterDefs` 3.3%) and the type lattice (`isSubtype` 4.4%,
+`type` 2.8%, `matches` 1.4%), plus 5.2% GC. So this is the item-182
+disease family reaching the ELEMENT memo's dependency closure and the
+type lattice, through canonicalization repair — a path the facet memo
+(which fixed 182) does not cover.
+
+**The pathological object, per Tycho's isolation** — an `At`-broadcast
+whose range EXTENT is a SYMBOLIC expression over a sized literal
+collection: `At(L, 1+3·(0..(Length(D)-1)))`. Three findings pin it:
+- Literalizing C₂'s OWN extent (`0..1234` for `0..(Length(D)-1)`) makes
+  it 2 ms **at the full 3708-element L** — so magnitude is not the driver.
+- FORM, not magnitude, of D's bound: rewriting `(1..(Length(L)/3))-1` to
+  the numerically IDENTICAL literal `(1..101)-1` at L=303 flips the FAST
+  side to the ceiling. Every literal value storms.
+- The 303→304 boundary is immobile to unrelated document content (both
+  directions tested), so it is intrinsic to this dep closure.
+
+**No consumer-side lever exists.** Tycho cannot emit literal bounds as an
+interim workaround: `L` is ACTION-written in that document (a ticker
+rewrites it), so D's length is genuinely runtime-variable and
+literalizing is semantically wrong. Bounding this is ours.
+
+**Separate real defect found while profiling**: 9 failing
+`console.assert`s per run at `boxed-function.ts:889` (`toNumericValue`
+asserting `isCanonical || isStructural`), reached via
+`canonicalDivide` → `toNumericValue` → `factor()` → `toNumericValue`. Not
+the hot loop, but an invariant violated repeatedly on this shape and
+worth its own look.
+
+**Refuted, do not retry — the TYPE-STRING CACHE thrash.** The mechanism
+below is REAL and measurable, but Tycho's boundary-mobility test (which I
+designed as the discriminator) refuted it as the cause of 186: stripping
+all 10 unrelated rows left L=304 still storming (predicted fast), and
+adding 300 distinct-size `Range` rows plus 30 distinct-length literal
+lists (~12.4k numbers) left L=303 at 150–188 ms (predicted slow). The
+boundary is immobile to unrelated content, so a document-wide working-set
+overflow is not it. Kept here because the cliff itself is real and worth
+fixing on its own merits.
+
 `TYPE_CACHE` (`common/type/parse.ts`) is capped at 2048 entries and
 evicts by CLEARING THE ENTIRE MAP, on the stated assumption that "the
 working set of distinct type strings is small". That assumption fails for

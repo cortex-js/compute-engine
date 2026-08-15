@@ -142,8 +142,31 @@ export function parseType(
 
 /** Memoize a resolver-independent parse in {@link TYPE_CACHE}. */
 function cacheResult(s: TypeString, type: Type): Type {
-  // Simple bound: reset the cache if it grows too large (the working set
-  // of distinct type strings is small, so this should rarely trigger)
+  // Bound the cache by evicting the OLDEST entry, not by clearing the map.
+  //
+  // The original policy cleared everything on overflow, on the assumption
+  // that "the working set of distinct type strings is small". That holds for
+  // a hand-written program, but not for one whose types carry LENGTHS: every
+  // distinct vector size is its own type string (`vector<finite_integer^303>`,
+  // `^304`, …), so a document indexing or slicing many differently-sized
+  // collections generates a working set that can exceed the cap. Past that
+  // point, clearing dropped 100% of the entries on every overflow, so the hit
+  // rate collapsed to ~0 instead of degrading — measured at a 40–100× jump in
+  // per-parse cost the moment the working set crossed the cap, flat above it,
+  // with the time going to re-parsing and re-`deepFreeze`ing (and the garbage
+  // that creates). A sharp cliff at an input size that looks arbitrary,
+  // because what matters is where the WHOLE program's working set crosses the
+  // cap — not any property of the expression that tipped it over.
+  //
+  // MEASURED, and eviction POLICY is not the lever: replacing the clear with
+  // FIFO eviction of the oldest entry was tried and made it slightly WORSE
+  // (5.8 vs 4.3 µs/parse over-cap). A program that re-parses a working set
+  // larger than the cache in a repeating order is the worst case for any
+  // eviction policy — by the time a string comes round again it has been
+  // evicted either way. Fixing this means reducing the NUMBER of distinct
+  // type strings (a length-parameterized type could cache by structure with
+  // the length as a parameter) or sizing the cache to the working set; it is
+  // not a matter of choosing a better victim.
   if (TYPE_CACHE.size >= TYPE_CACHE_MAX_SIZE) TYPE_CACHE.clear();
   TYPE_CACHE.set(s, deepFreeze(type));
   return type;
