@@ -89,6 +89,70 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### `defineFunctionClause` may write through to a builtin instead of shadowing it
+
+Flagged during the nested-`DefineFunction` block-local fix (2026-08-15):
+in `src/compute-engine/multi-clause.ts`, when the existing binding is a
+system-scope builtin the clause path clears `existing` so the builtin is
+shadowed — but the single-clause branch then delegates to
+`ce.assign(id, literal)`, which resolves the name up the whole scope
+chain and could mutate the builtin's binding rather than create a
+current-scope shadow (contrast the protocol-dispatcher path, which
+routes to `declareShadowingFunction`). No test exercises the
+builtin-name single-clause case; needs a probe (define one clause named
+after a builtin, check the system scope's binding is untouched) and, if
+it reproduces, the same shadowing-declare treatment the dispatcher path
+uses.
+
+### An Epsil function parameter does not shadow a same-named outer `const`
+
+Reported 2026-08-14. The Epsil interpreter resolves a parameter to an
+outer binding of the same name, so a function receives the wrong value —
+silently, with no error:
+
+```
+const g = (x) |-> x + 1
+const f = (g) |-> g(2)
+f((x) |-> x * 10)
+```
+
+`f`'s parameter is named `g`, so `g(2)` must apply the lambda passed in
+and give **20**. Epsil answers **3** — the outer `g` (2 + 1). Confirmed
+interpreter-side, not a compile artifact: it reproduces with
+`ce.jit = 'off'`, and the same program built as MathJSON and evaluated
+answers 20 correctly. Removing the outer `g` also gives 20, which
+isolates it to the shadowing rather than to the call.
+
+The COMPILED path is not affected in the same way — it fails closed with
+`Unknown operator g` rather than answering wrongly — which narrows the
+fault to Epsil scope construction rather than to anything in compilation.
+A silently wrong answer in the reference implementation is the worst
+shape a defect can take here, since every parity comparison trusts it.
+
+Unowned as of filing: found while tracing a review finding, and the
+block-local function-compilation session declined it as outside its area.
+
+### Test assertions on wall-clock time make full-suite runs unreliable
+
+Several suites assert elapsed milliseconds, so they fail under parallel
+load and pass in isolation — the signal is machine state, not
+correctness. Observed 2026-08-14:
+
+| Test | Measured | Asserted |
+| :--- | :--- | :--- |
+| `latex-syntax/arithmetic` — divergent series terminates | 5133 ms | < 5000 ms |
+| `compile-performance` — simple arithmetic compiles quickly | (varies) | fixed budget |
+| `compile-integrate` — high-power integrand degrades at the deadline | (varies) | deadline-shaped |
+
+The cost is not the individual flake, it is that a red full run stops
+meaning anything: three separate sessions in one day spent time
+attributing failures that were only load, and a genuinely broken tree
+would have looked identical. This is the same defect class that was just
+removed from the constant folder — a decision keyed on elapsed time
+rather than on the work itself — and the same remedy applies: assert a
+deterministic bound (iteration or step count), keeping a generous
+wall-clock limit only as a hang backstop rather than as the assertion.
+
 ### The value-half two-step bypasses the default-`!scope` ceiling
 
 Since the 2026-08-15 ruling, a named function definition with no effect

@@ -50,6 +50,17 @@
   recursion, which stay optimistic. In exchange, every unannotated
   function is guaranteed unable to mutate global state mid-evaluation.
 
+### Issues Resolved
+
+- **A function defined inside another function no longer leaks into the
+  global scope.** `function make() { helper(x) = x + 1; helper }` used to
+  install `helper` as a global — callable at top level after `make()`
+  returned, and silently **overwriting** any existing global function of
+  the same name. Nested definitions are now block-local: they shadow an
+  outer function instead of replacing it, and the name is gone once the
+  enclosing call returns. A returned helper still works as a first-class
+  value, and top-level definitions (the notebook gesture) are unchanged.
+
 ### Improvements
 
 - **Writes to a function's own parameters are recognized as call-local.**
@@ -57,6 +68,12 @@
   to one of its parameters; such bodies (e.g. clamping or normalizing an
   argument in place) now infer pure, making them cacheable and
   compile-eligible.
+- **Property and element writes are judged on their base variable.** A
+  property rebinding (`q.name = v`) or element write (`L[1] = 5`) on a
+  local `let` binding or parameter now counts as a local write — such
+  bodies infer pure instead of `scope`, and install without an
+  annotation. The same write on an outer variable is still an escaping
+  write.
 
 ## 0.109.0 _2026-08-14_
 
