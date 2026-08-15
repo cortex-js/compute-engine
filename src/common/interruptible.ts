@@ -35,6 +35,23 @@ export interface DeadlineFrame {
   at: number;
   owner?: string;
   spans: string[];
+  /**
+   * Scratch counter for a strided deadline check, owned by whichever walk is
+   * amortizing its `Date.now()` calls (today: the canonicalization walk in
+   * `boxed-expression/box.ts`).
+   *
+   * It lives on the FRAME rather than in a module-level variable so the stride
+   * counts the nodes of the span that armed it, and only those. A module-level
+   * counter is shared by every engine in the process, so a nested
+   * canonicalization on a DIFFERENT engine — reachable because a canonical
+   * handler runs arbitrary caller code — consumes stride boundaries while the
+   * engine being checked at that moment has no frame armed. The check is then
+   * a no-op and the engine that DOES have a budget waits up to another full
+   * stride, so the residual overrun is not the one stride the walk claims.
+   * A frame is created per `withTimeLimit` span, so per-frame ticking makes
+   * that bound exact, at the cost of one property access.
+   */
+  tick?: number;
 }
 
 /**

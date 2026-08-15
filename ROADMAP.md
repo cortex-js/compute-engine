@@ -242,24 +242,158 @@ probe. So the structural levers stay unbuilt and observability landed instead:
 cold stores, and `evictClear` — the count of whole-cache overflow drops).
 **`evictClear > 0` on a real workload re-opens this item.**
 
-### Deadline granularity in the canonicalization walk (OPEN; second observation of Tycho item 182)
+### Deadline granularity in the canonicalization walk (FIXED 2026-08-15; second observation of Tycho item 182)
 
-The canonicalization walk honors a span deadline only BETWEEN stretches,
-so a single long stretch can overrun a `withTimeLimit` budget — a ~2×
+The canonicalization walk honored a span deadline only BETWEEN stretches,
+so a single long stretch could overrun a `withTimeLimit` budget — a ~2×
 overrun was measured while the stretches were inflated by the item-182
 probe storm. The storm fix shrank the stretches that made the overrun
 visible; it did NOT change the granularity. A deadline is a correctness
 boundary, and any future long-stretch workload (a huge literal, a
 pathological rule set) reproduces it.
 
-This is load-bearing for a consumer today: Tycho's span-budget math
+This was load-bearing for a consumer: Tycho's span-budget math
 assumes a long canonicalization stretch can overrun its deadline by ~2×,
-and stays conservative until this closes (confirmed by them 2026-08-14).
+and stayed conservative until this closed (confirmed by them 2026-08-14).
 
-Fix shape when picked up: a strided `checkDeadline` inside the
-canonicalization walk (the pattern `common/interruptible.ts` documents),
-plus a regression bounding parse time against a small multiple of the
-requested limit.
+**The filed ~2× UNDERSTATED it by orders of magnitude.** Re-measured
+2026-08-15 before the fix: the walk honored the deadline not at all, and the
+overrun scaled with the INPUT rather than being bounded by the limit. A sum of
+`n` distinct non-trivial terms, parsed inside `ce.withTimeLimit({ ms })`, ran
+to completion every time:
+
+| n | 1 ms budget | 5 ms budget | 50 ms budget |
+|---|---|---|---|
+| 200 | 54 ms (54×) | 45 ms (9×) | 35 ms (0.7×) |
+| 1 000 | 134 ms (134×) | 127 ms (25×) | 118 ms (2.4×) |
+| 4 000 | 577 ms (577×) | 579 ms (116×) | 588 ms (12×) |
+| 12 000 | 2 799 ms (**2 799×**) | 2 782 ms (556×) | 2 778 ms (56×) |
+
+The ~2× in the original filing is what that curve happens to look like when
+the budget is close to the whole cost of the walk; it is not a bound.
+
+**FIXED** by the prescribed shape: a strided `checkDeadline` (stride 1024, the
+idiom `common/interruptible.ts` documents) in `boxFunctionInternal`
+(`boxed-expression/box.ts`), the per-node chokepoint of the canonicalization
+walk. After it, the overrun is bounded by ONE stride and no longer grows with
+the input: at n = 12 000 the same three budgets give 12 ms, 13 ms and 50 ms
+(1.0× at the 50 ms budget). Cost on the un-armed path is one `undefined`
+comparison — a 9-run A/B on a 2 000-term parse gives a 246–248 ms median with
+the check enabled and disabled, i.e. inside the noise — because a deadline
+frame is armed only by an enclosing `withTimeLimit` span.
+
+Two corrections came out of the dual review of this change, both applied:
+
+- **The stride counter lives on the FRAME, not in a module-level variable.**
+  A shared counter is consumed by every engine in the process, and a canonical
+  handler runs arbitrary caller code, so a nested canonicalization on a
+  DIFFERENT engine can eat stride boundaries at moments when the engine being
+  checked has no frame armed. The check is then a no-op and the engine that
+  DOES have a budget waits up to another full stride — so the one-stride bound
+  would not have held. A frame is created per span, so ticking it makes the
+  bound exact (`DeadlineFrame.tick`, `common/interruptible.ts`).
+- **A `canonical` handler must not swallow the cancellation.** Both
+  `try`/`catch` blocks around `opDef.canonical(...)` in
+  `applyOperatorDefinition` logged the error and fell back to a NON-canonical
+  `BoxedFunction`. That is right for a handler that failed on its operands and
+  wrong for a cancellation, and the strided check made it far more reachable —
+  it now fires from inside any node a handler CONSTRUCTS. Measured before the
+  fix with a node-building handler: `ce.withTimeLimit({ ms: 1 })` returned
+  NORMALLY holding an `isCanonical === false` expression, with the breach
+  visible only as a console line. That is worse than the overrun this entry
+  fixes, because it looks like success. Both catches now re-throw a
+  cancellation, matching every other catch site in the engine
+  (`abstract-boxed-expression.ts`, `rules.ts`, `stochastic-equal.ts`,
+  `boxed-function.ts`), identified by NAME rather than `instanceof` for the
+  cross-bundle reason `canonicalErrorDetail` already documents.
+
+  The wide-sum fixture could not have caught this: its operands are
+  canonicalized BEFORE the handler runs, so its trip point is the
+  operand-boxing loop, which sits outside the `try`. The regression uses a
+  handler that builds nodes.
+
+Pinned by `test/compute-engine/canonicalization-deadline-granularity.test.ts`.
+Its assertions are on OUTCOMES (an unbounded walk COMPLETES, a bounded one
+CANCELS, and the error carries the owning span's label), never on elapsed
+milliseconds — the wall-clock test doctrine. Verified non-vacuous: disabling
+the check fails exactly the two cancellation cases and leaves the two
+control cases passing.
+
+### The LaTeX parser cannot honor a deadline at all (OPEN, correctness — found while fixing the entry above)
+
+The canonicalization fix above bounds the SMALLER and better-behaved half of
+`ce.parse(…)`. The RAW PARSE is the expensive half, it grows superlinearly,
+and it is the unbounded one — so the share of `ce.parse()` that ignores a
+deadline gets worse as inputs grow. Medians of 3, fresh engine per run,
+`form: 'raw'` isolating the parser from canonicalization:
+
+    N        raw parse   canonicalization   raw : canon
+    3 000     71 ms          45 ms            1.6 : 1
+    6 000    209 ms          49 ms            4.3 : 1
+    12 000   719 ms         111 ms            6.5 : 1
+
+Canonicalization is close to linear; the parser is not (roughly 3x per
+doubling). An earlier note on this entry recorded the two halves as "about the
+same" from a single 6 000-term measurement of 608 ms and 657 ms — that pairing
+does not reproduce, and taking one size as the ratio hid the fact that the
+ratio itself moves.
+
+`form: 'raw'` does NOT avoid the problem, which is worth stating because it is
+the obvious workaround: skipping canonicalization skips the half that is
+already bounded and keeps the half that is not. A raw parse under a 1 ms
+budget and under a 50 ms budget both ran ~560 ms.
+
+**The consumer-facing danger is not the size of the overrun, it is that
+TIGHTENING THE BUDGET BUYS NOTHING.** Elapsed time is essentially independent
+of the budget, because the parse runs to completion and only then notices it
+was cancelled. Measured 2026-08-15 on a 12 000-term sum, against the now-fixed
+canonicalization half for contrast:
+
+    CANONICALIZE   budget  1 ms → elapsed  17 ms   (17x)
+    CANONICALIZE   budget 50 ms → elapsed  51 ms   (1.02x)
+    PARSE          budget  1 ms → elapsed 832 ms   (832x)
+    PARSE          budget 50 ms → elapsed 795 ms   (16x)
+
+So an operator tuning a span DOWNWARD to bound a risk does nothing at all
+while believing the risk is bounded — no error, a plausible configuration, and
+no effect. That is worse than a large constant overrun, which at least
+responds to the knob. A consumer whose spans wrap parse AND canonicalization
+has, after the fix above, bounded the half that was already the more
+responsive one.
+
+**FIELD EVIDENCE (consumer audit, 2026-08-15): on the paths where this
+matters most, the canonicalization fix buys nothing at all — not half.** The
+consumer already passes `form: 'raw'` at its three hottest parse sites: the
+Desmos import session (their largest workload, with no deadline armed at any
+level), the action-firing path (a 50 ms budget, one parse per step), and
+formula classification (a 5 000 ms budget). Because `form: 'raw'` skips
+canonicalization entirely, 100% of the cost at those sites is in the unbounded
+parser. Their audit had recorded the exposure as "half fixed, half remaining",
+which was wrong in the reassuring direction for exactly the sites that matter.
+
+Priority argument for whoever picks this up: the action-firing span is an
+INTERACTIVE path — a user waiting on a direct interaction, with the budget
+chosen to protect responsiveness — while every other exposed span they have is
+background or batch, where an overrun costs throughput rather than perceived
+latency. That is the case where fixing this changes user-visible behaviour
+rather than tightening a bound.
+
+This is NOT the same fix. The parser has **no engine handle at all**: nothing
+under `latex-syntax/` references `ComputeEngine`, `_deadlineFrame` or
+`_timeRemaining`, which is deliberate — `LatexSyntax` is an injected,
+structurally-typed dependency (`ILatexSyntax`), and that decoupling is the
+architecture described in `CLAUDE.md` and
+`docs/architecture/CURRENT-ARCHITECTURE.md`. So there is no deadline for a
+strided check to read, and adding one means threading a deadline (or an
+abstract "should I stop" callback) across the `ILatexSyntax` boundary.
+
+Fix shape when picked up: give the parser an optional cancellation callback
+supplied at construction or per-parse, checked strided in `parseExpression`
+(`latex-syntax/parse.ts`), the recursive chokepoint of the parse walk — and
+keep it engine-agnostic so the boundary stays structural. Deferred from the
+2026-08-15 round deliberately: it is an interface change to a decoupled
+subsystem, not the localized addition the canonicalization half was, and it
+should not land in the same pass as a release.
 
 ### `evaluate()` eagerly expands symbolic `Product`s, then distributes — superlinear blowup on the plotting shape (OPEN, perf/design)
 
@@ -335,7 +469,7 @@ that applies to `_`-prefixed members too, 60 of which are already declared
 there — so each conversion is an implementation + interface change, not a
 one-file edit.
 
-### A collection-TYPED but valueless operand is mishandled by seven operator families, six still open (OPEN, correctness — one audit, all MEASURED)
+### A collection-TYPED but valueless operand was mishandled by seven operator families (FIXED 2026-08-15 — all seven closed)
 
 Audited 2026-08-15 across all 95 `.isCollection` predicate sites in
 `src/compute-engine` (71 are genuine capability checks and are correct as
@@ -374,7 +508,7 @@ subsystem where a wrong `True` feeds assumption discharge. `Which`/`If`
 hard-throw where they should stay symbolic — and the compiled path already
 gets this right (`interval-javascript-target.ts` tests
 `c.isCollection || c.type.matches('collection')`), so interpreter and compiler
-currently disagree about what a collection-typed condition is.
+disagreed about what a collection-typed condition is.
 
 Two of these are guard FAMILIES where a partial fix reopens the hole on
 another route: `Sum`/`Product` is four guards (`library/arithmetic.ts` at the
@@ -385,8 +519,49 @@ canonical and evaluate sites, `library/utils.ts` in `canonicalBigop` and
 For `Sum`/`Product` the fix is NOT to widen the capability tests: that would
 send a valueless body into the reducer, which walks zero elements and answers
 `Sum(L) → 0` — a worse wrong answer than `L`. The fall-through in
-`bigopGenerator` should DECLINE instead, which is what the 2026-08-11 ruling
+`bigopGenerator` DECLINES instead, which is what the 2026-08-11 ruling
 already made `ListFrom`/`SetFrom`/`TupleFrom` do for the same operand class.
+
+**RESOLUTION (2026-08-15).** All six remaining families fixed; every row above
+now stays symbolic on the valueless operand and is unchanged once the symbol
+is assigned. One shared predicate, `isValuelessCollectionTyped()`
+(`collection-utils.ts`), states the operand class in one place, using the
+`!isCollection && type.matches('collection')` spelling the comparison
+operators (`undecidedCollectionComparison`) and the emitters already used —
+NOT `typesOverlap(…, 'collection')`, which would also reclassify every
+top-typed symbol and is a much larger change. The six sites:
+
+- `Sum`/`Product` — the `indexes.length === 0` fall-through in `reduceBigOp`
+  (`library/utils.ts`) returns `NON_ENUMERABLE_DOMAIN`. All four
+  `reduceBigOp` call sites in `library/arithmetic.ts` (sync and async, both
+  operators) already map that to a decline, so one edit closes the family.
+- `SetMinus` — all three copies: the eager fold declines when any exclusion
+  operand is of this class, and `isExcludedByKleene` and the
+  `membershipKleene` query decomposition answer `undefined` instead of
+  falling to their scalar disequality arm.
+- `Union` — the singleton promotion now tests `type.matches('collection')`
+  rather than `'set'`, so a valueless `list` operand is no longer collapsed
+  into one element.
+- The missing-value behavior gate (`boxed-function.ts` steps 4a and 3a) —
+  "no collection operand" reads as collection-SHAPED. Both gates gained the
+  disjunct together; they decide the same question on two routes.
+- The statistics aggregates — `Quartiles`/`InterquartileRange` had applied a
+  symbolic-datum guard since they were written and were already correct; the
+  other nine reached the numeric kernels, which read a valueless symbol as
+  `NaN` via `.re`. The rule is now shared (`hasSymbolicDatum`) and applied to
+  all eleven, so they cannot drift apart again. This also fixes the same
+  defect for a valueless SCALAR symbol (`Mean(y)` committed `NaN`).
+- `Which`/`If` — `isBooleanishCondition` holds a condition whose type is
+  already a boolean collection but which carries no value, ending the
+  interpreter/compiler disagreement. The throw is still reserved for a
+  condition that can never be boolean, where the spell-check hint is the
+  useful outcome.
+
+Pinned by `test/compute-engine/valueless-collection-typed-operand.test.ts`
+(38 cases), which writes every row as a PAIR — symbolic while valueless, the
+real answer once assigned — so a fix that made an operator inert forever
+would fail. Blast radius measured: the full suite is green with **zero**
+snapshot changes (4 306 snapshots).
 
 Fixed in this pass, recorded here because they came from the same audit: the
 `Equal`/`NotEqual` broadcast crash (see the CHANGELOG entry) and its latent
@@ -400,7 +575,7 @@ see the CHANGELOG): `Subset(EmptySet, S)` with `S` a declared, unassigned
 still permits a collection, and answers `False` only when the type rules one
 out.
 
-### `_mapAutoCompileStats` is a process-global singleton with three undocumented gates (OPEN, observability — small)
+### `_mapAutoCompileStats` is a process-global singleton with three undocumented gates (DOCUMENTED 2026-08-15 — not a defect)
 
 The accessor shipped in 0.110.0 so a consuming process could see whether a
 lazy `Map` drain compiled. It works. But it has six ways of handing a careful
@@ -514,10 +689,29 @@ and each returns numbers a careful person would believe:
    when they were one measurement repeated. Consistency across an axis that
    is not varied reads exactly like corroboration.
 
-Worth either a documented note naming both gates and the singleton scoping,
-or a per-engine snapshot with a reset — the counters exist for consumers who
-cannot otherwise see this path, so "reports zero unless you already know two
-undocumented preconditions" undercuts the feature.
+**RESOLVED 2026-08-15 as the documented note**, not the per-engine snapshot.
+The accessor works; every wrong number above came from a probe reading the
+instrument off-route, so the gap was documentation, not behavior — and a
+per-engine snapshot would have been a real behavior change (the counters
+instrument a module-level compile cache shared by every engine, so per-engine
+counters would describe something the cache does not do).
+
+The note lives on the accessor's own declaration, `_mapAutoCompileStats` in
+`types-engine.ts` — the surface a consumer actually reads before using it,
+rather than a separate document they would have to know to look for. It leads
+with the WORKED WRONG MEASUREMENT (the `toString()` relocation, which fires on
+ordinary use rather than on a probe design), then names the three gates, the
+route table showing that "consumed" is narrower than "touched", and the
+counter-vs-cache scope split that makes a second measurement of the same shape
+in the same engine read 0/0. The `iterationLimit`/comprehension interaction is
+recorded there too, as the source-shape property it is.
+
+Not carried into the note, because they are about how to run an investigation
+rather than how to use the accessor: silent-zero path 6 (an unverified
+correction from a trusted source, which happened twice here in both
+directions) and the general lesson that consistency across an axis you never
+varied reads exactly like corroboration. Those belong to method, and are
+recorded in this entry above.
 
 ### An indexed read out of a collection with complex elements was classified from the WHOLE collection (FIXED 2026-08-15; this also closed the `complexPromotion` collection-body item)
 
@@ -596,6 +790,27 @@ Fix shape when picked up: the call site's complexness has to consider the
 ARGUMENTS as well as the body, and the emitted user function then needs a
 complex-lane specialization for the call sites that pass one — a per-call-site
 monomorphization the emitter does not do today.
+
+RE-VERIFIED 2026-08-15, still live and unchanged by the collection-element
+fix above. With `a(t) := √(t−1)`, `b(x) := 2x`, at `t = 0.3`, on the
+`compile()` route:
+
+    |b(a(t))/2 − 1|   complexPromotion ON   → NaN
+                      complexPromotion OFF  → NaN   (identical: the option
+                                                     buys nothing here)
+                      interpreter           → 1.3038404810405297
+    m(t) := n(t) + 1  (BODY nesting, control) ON → {re: 1, im: 0.8366600265}
+
+Both compiled results report `success: true`, so the wrong value is silent.
+The control confirms the defect is specific to ARGUMENT position, exactly as
+filed — body nesting promotes correctly.
+
+DEFERRED from the 2026-08-15 round, deliberately and with the priority caveat
+below understood: the fix is a per-call-site monomorphization of the emitted
+user function, which is a new capability in the emitter rather than a guard
+correction, and it is not a change to make in the pass that cuts a release.
+It is the largest of the four items reviewed in that round and the only one
+left open on purpose.
 
 PRIORITY CAVEAT, and the reason not to inherit "nothing is waiting on this":
 the deferral above was written when the flag's one prospective consumer had

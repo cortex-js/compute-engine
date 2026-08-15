@@ -300,6 +300,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         }
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
+        // Symbolic data: stay inert rather than fold a valueless symbol to
+        // `NaN` — see `hasSymbolicDatum`.
+        if (hasSymbolicDatum(ops)) return undefined;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactMean(engine, vals);
@@ -324,6 +327,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine, numericApproximation }) => {
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
+        // Symbolic data: stay inert rather than fold a valueless symbol to
+        // `NaN` — see `hasSymbolicDatum`.
+        if (hasSymbolicDatum(ops)) return undefined;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactMedianOf(engine, sortExact(vals));
@@ -351,6 +357,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         }
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
+        // Symbolic data: stay inert rather than fold a valueless symbol to
+        // `NaN` — see `hasSymbolicDatum`.
+        if (hasSymbolicDatum(ops)) return undefined;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactVariance(engine, vals, false);
@@ -374,6 +383,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine, numericApproximation }) => {
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
+        // Symbolic data: stay inert rather than fold a valueless symbol to
+        // `NaN` — see `hasSymbolicDatum`.
+        if (hasSymbolicDatum(ops)) return undefined;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactVariance(engine, vals, true);
@@ -402,6 +414,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         }
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
+        // Symbolic data: stay inert rather than fold a valueless symbol to
+        // `NaN` — see `hasSymbolicDatum`.
+        if (hasSymbolicDatum(ops)) return undefined;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals)
@@ -428,6 +443,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine, numericApproximation }) => {
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
+        // Symbolic data: stay inert rather than fold a valueless symbol to
+        // `NaN` — see `hasSymbolicDatum`.
+        if (hasSymbolicDatum(ops)) return undefined;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals)
@@ -454,6 +472,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine, numericApproximation }) => {
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
+        // Symbolic data: stay inert rather than fold a valueless symbol to
+        // `NaN` — see `hasSymbolicDatum`.
+        if (hasSymbolicDatum(ops)) return undefined;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactKurtosis(engine, vals);
@@ -477,6 +498,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine, numericApproximation }) => {
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
+        // Symbolic data: stay inert rather than fold a valueless symbol to
+        // `NaN` — see `hasSymbolicDatum`.
+        if (hasSymbolicDatum(ops)) return undefined;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactSkewness(engine, vals);
@@ -500,6 +524,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine, numericApproximation }) => {
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
+        // Symbolic data: stay inert rather than fold a valueless symbol to
+        // `NaN` — see `hasSymbolicDatum`.
+        if (hasSymbolicDatum(ops)) return undefined;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactMode(engine, vals);
@@ -551,10 +578,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // SYMBOLIC data (a valueless symbol, an unresolved expression) has no
         // numeric reading: stay inert rather than sort NaN placeholders into
         // the quantile split and bake a definite `(…, NaN, …)` tuple that a
-        // later assignment contradicts. A NaN LITERAL is a number and still
-        // flows through (absent-datum semantics, §3.C).
-        for (const v of flattenArguments(ops))
-          if (!isNumber(v)) return undefined;
+        // later assignment contradicts. See `hasSymbolicDatum`, which is the
+        // rule the whole aggregate family now shares.
+        if (hasSymbolicDatum(ops)) return undefined;
         const xs = ops;
         const [mid, lower, upper] = (
           bignumPreferred(engine)
@@ -576,6 +602,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine, numericApproximation }) => {
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
+        // Symbolic data: stay inert rather than fold a valueless symbol to
+        // `NaN` — see `hasSymbolicDatum`.
+        if (hasSymbolicDatum(ops)) return undefined;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) {
@@ -583,9 +612,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return subtract(engine, q3, q1);
           }
         }
-        // Symbolic data: stay inert — see `Quartiles`.
-        for (const v of flattenArguments(ops))
-          if (!isNumber(v)) return undefined;
         const xs = ops;
         return engine.number(
           bignumPreferred(engine)
@@ -865,6 +891,31 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+/**
+ * Does this aggregate's input contain a datum with no numeric reading?
+ *
+ * A valueless symbol — whether declared scalar (`y`) or declared
+ * `list<number>` and not yet assigned — flattens to itself, and every numeric
+ * kernel below reads it as `NaN` via `.re`. Folding that produces a definite
+ * `NaN` that the SAME expression contradicts once the symbol is assigned
+ * (`Mean(L)` answered `NaN`, and `2` once `L := [1,2,3]`), so the aggregate
+ * stays inert instead and answers when the data arrives.
+ *
+ * A NaN LITERAL is a number and still flows through, which is what keeps
+ * absent-datum semantics (§3.C) intact: `aggregateAbsence` runs first and owns
+ * the `Missing`/`NaN`/empty-input cases, and this guard only sees what it let
+ * past.
+ *
+ * `Quartiles` and `InterquartileRange` have applied this rule since they were
+ * written; the rest of the family reached the kernels unguarded until
+ * 2026-08-15. Sharing one predicate is what keeps them from drifting apart
+ * again.
+ */
+function hasSymbolicDatum(ops: ReadonlyArray<Expression>): boolean {
+  for (const v of flattenArguments(ops)) if (!isNumber(v)) return true;
+  return false;
+}
 
 function* flattenArguments(
   args: ReadonlyArray<Expression>

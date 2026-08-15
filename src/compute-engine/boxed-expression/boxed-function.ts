@@ -3329,7 +3329,17 @@ export class BoxedFunction
         if (
           (behavior === 'propagate' || behavior === 'reject') &&
           tail.some((x) => isSymbol(x, 'Missing')) &&
-          !tail.some((x) => x.isCollection)
+          // "No collection operand" must be read as collection-SHAPED, not as
+          // the `isCollection` CAPABILITY: an operand declared `list<number>`
+          // with no value yet is destined to broadcast, but cannot be
+          // enumerated now. Testing only `isCollection` fired the scalar gate
+          // for it, so `Add(Missing, L)` committed a scalar `NaN` where the
+          // same expression gives `[NaN, NaN]` once `L` is assigned. With the
+          // disjunct the gate stands down and the application stays symbolic
+          // until the value arrives, which is the honest undecided answer.
+          // This test must stay in lockstep with its twin in `evaluateAsync`
+          // (step 3a) — the two gates decide the same question on two routes.
+          !tail.some((x) => x.isCollection || x.type.matches('collection'))
         ) {
           if (behavior === 'reject')
             return this.engine.error([
@@ -3777,13 +3787,16 @@ export class BoxedFunction
       // 3a/ Missing-value behavior gate (§3.E) — parity with the sync path's
       // step 4a. A `propagate` operator with an absent `Missing` scalar operand
       // (no collection operand) yields `NaN`; a `reject` operator errors.
+      // "No collection operand" is collection-SHAPED, not the `isCollection`
+      // capability — see the sync gate (step 4a) for why the two must gain
+      // this disjunct together.
       //
       if (def instanceof _BoxedOperatorDefinition) {
         const behavior = def.resolvedMissingBehavior;
         if (
           (behavior === 'propagate' || behavior === 'reject') &&
           tail.some((x) => isSymbol(x, 'Missing')) &&
-          !tail.some((x) => x.isCollection)
+          !tail.some((x) => x.isCollection || x.type.matches('collection'))
         ) {
           if (behavior === 'reject')
             return this.engine.error([

@@ -19,7 +19,7 @@ import { MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
 import { reduceCollection, enumerationDeclined } from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
-import { isTuple } from '../collection-utils.js';
+import { isTuple, isValuelessCollectionTyped } from '../collection-utils.js';
 
 /**
  * Does the norm of this point BROADCAST — i.e. does a component carry a
@@ -2125,6 +2125,22 @@ export function* reduceBigOp<T>(
       if (enumerationDeclined(value)) return NON_ENUMERABLE_DOMAIN;
       return yield* reduceCollection(value, fn, initial);
     }
+    // A body that is DEFINITELY collection-typed but carries no value — a
+    // symbol declared `list<number>`, or a call whose head returns one — is
+    // not the scalar this fall-through assumes. Accumulating it treats the
+    // whole collection as one term, so `Sum(L)` answered `0 + L` = `L`, a
+    // plausible-looking value that the same expression contradicts once `L`
+    // is assigned (`Sum(L)` → 6 for `L := [1,2,3]`). DECLINE instead, which
+    // leaves the big op symbolic until the value arrives.
+    //
+    // Declining is not interchangeable with widening the `isCollection` test
+    // above: that would send the valueless body into `reduceCollection`,
+    // which walks zero elements and folds to the bare `initial` — `Sum(L)`
+    // → 0, a WORSE wrong answer than `L` because it is indistinguishable
+    // from a correct sum over an empty collection. This is the same
+    // resolution the 2026-08-11 ruling gave `ListFrom`/`SetFrom`/`TupleFrom`
+    // for the same operand class.
+    if (isValuelessCollectionTyped(value)) return NON_ENUMERABLE_DOMAIN;
     return fn(initial, value) ?? undefined;
   }
 

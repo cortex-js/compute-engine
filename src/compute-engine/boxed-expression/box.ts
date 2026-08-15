@@ -29,6 +29,7 @@ import {
   symbol,
 } from '../../math-json/utils.js';
 import { isValidSymbol, validateSymbol } from '../../math-json/symbols.js';
+import { checkDeadline } from '../../common/interruptible.js';
 
 import { isOne, isZero } from '../numerics/rationals.js';
 import { SMALL_INTEGER } from '../numerics/numeric.js';
@@ -256,12 +257,49 @@ type BoxFunctionOptions = {
   scope?: Scope;
 };
 
+/**
+ * Stride for the canonicalization walk's deadline check (see
+ * `boxFunctionInternal`), the idiom `common/interruptible.ts` documents.
+ *
+ * The walk is a plain recursion, not a generator, so `run()`/`runAsync()` —
+ * which enforce a deadline BETWEEN yields — do not apply to it. Without an
+ * in-walk check the deadline was honored only at the boundaries BETWEEN
+ * canonicalization calls, so a single long walk ran to completion no matter
+ * how small the budget: measured 2026-08-15, a 12 000-term sum parsed under
+ * `ce.withTimeLimit({ ms: 1 })` ran 2 799 ms to completion — a 2 799×
+ * overrun, and unbounded in the input size rather than the ~2× recorded when
+ * the item was filed. A deadline is a correctness boundary, so an unbounded
+ * overrun is a defect independent of how large today's workloads are.
+ *
+ * At the canonicalization cost measured above (~6.5 µs/node) 1024 nodes is
+ * roughly 6 ms, so the residual overrun is bounded by one stride rather than
+ * by the size of the input.
+ */
+const CANONICALIZE_DEADLINE_STRIDE = 0x3ff;
+
 function boxFunctionInternal(
   ce: ComputeEngine,
   name: MathJsonSymbol,
   ops: readonly ExpressionInput[],
   options?: BoxFunctionOptions
 ): Expression {
+  // A deadline frame is armed only by an enclosing `ce.withTimeLimit()` span,
+  // so work outside a span pays one `undefined` comparison and nothing else.
+  //
+  // The stride counter lives ON THE FRAME, not in a module-level variable, so
+  // it counts the nodes of the span that armed it and only those. A shared
+  // counter would let a nested canonicalization on a DIFFERENT engine consume
+  // stride boundaries — reachable, because a canonical handler runs arbitrary
+  // caller code — at moments when the engine being checked has no frame armed;
+  // the check is then a no-op and the engine that DOES have a budget waits up
+  // to another full stride, so the one-stride bound above would not hold.
+  const frame = ce._deadlineFrame;
+  if (
+    frame !== undefined &&
+    ((frame.tick = (frame.tick ?? 0) + 1) & CANONICALIZE_DEADLINE_STRIDE) === 0
+  )
+    checkDeadline(frame);
+
   options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
 
@@ -1968,6 +2006,35 @@ function withSourceOffsets(
  * the reader whose clock expired (Tycho item 163). Identified by NAME, never
  * `instanceof`: plugin bundles re-bundle engine code.
  */
+/**
+ * Is `e` a cancellation — an expired deadline, an abort signal, an iteration
+ * or recursion-depth breach?
+ *
+ * The two `catch` blocks around a `canonical` handler log the error and fall
+ * back to a NON-canonical `BoxedFunction`, which is right for a handler that
+ * genuinely failed on its operands but wrong for a cancellation: a caller who
+ * armed `ce.withTimeLimit()` would get their span back NORMALLY, holding a
+ * silently degraded expression, with the breach visible only as a line on the
+ * console. That is a worse outcome than the unbounded overrun the strided
+ * check in `boxFunctionInternal` was added to fix, because it looks like
+ * success. Verified before the fix by a canonical handler that builds nodes
+ * (which re-enters the strided check from inside the `try`): the span returned
+ * normally with `isCanonical === false`.
+ *
+ * Every other catch site in the engine already makes this exception —
+ * `abstract-boxed-expression.ts`, `rules.ts`, `stochastic-equal.ts`,
+ * `boxed-function.ts` — so this only brings `box.ts` into line with them.
+ *
+ * Identified by NAME, never `instanceof`: plugin bundles re-bundle engine
+ * code, so a `CancellationError` crossing a bundle boundary is not an instance
+ * of the host's class. `isTimeoutCancellation` is deliberately NOT reused —
+ * it admits only `cause: 'timeout'`, and an abort or an iteration-limit breach
+ * must propagate here for the same reason a timeout must.
+ */
+function isCancellation(e: unknown): boolean {
+  return e instanceof Error && e.name === 'CancellationError';
+}
+
 function canonicalErrorDetail(e: unknown): unknown {
   if (!(e instanceof Error)) return e;
   if (e.name === 'CancellationError') {
@@ -2019,6 +2086,7 @@ function applyOperatorDefinition(
         result = opDef.canonical(xs, { engine: ce, scope });
         if (result) return withSourceOffsets(result, metadata);
       } catch (e) {
+        if (isCancellation(e)) throw e;
         // Multi-arg form: a non-Error thrown value keeps its structure in the
         // console (and a Symbol or null-prototype object, whose implicit
         // string conversion throws, cannot break the recovery path).
@@ -2149,6 +2217,7 @@ function applyOperatorDefinition(
         return withSourceOffsets(result, metadata);
       }
     } catch (e) {
+      if (isCancellation(e)) throw e;
       // Multi-arg form — see the lazy-path catch above.
       console.error(
         `ComputeEngine: error canonicalizing \`${name}\`:`,

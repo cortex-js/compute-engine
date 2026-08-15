@@ -55,6 +55,53 @@
 
 ### Issues Resolved
 
+- **Operators no longer commit an answer for a collection-typed variable that
+  has no value yet.** A symbol declared `list<number>` (or `vector<2>`, or a
+  call whose head returns one) is collection-*shaped*, but cannot be
+  enumerated until it is assigned. Six operator families read "cannot
+  enumerate" as "is a scalar" and took their scalar path, producing an answer
+  that the same expression contradicted once the value arrived:
+
+  With `ce.declare('L', 'list<number>')` and no value assigned yet:
+
+  ```epsil
+  Sum(L)                  // was L,       now symbolic (6 once L = [1,2,3])
+  Union(L, {1})           // was {L, 1},  now symbolic ({5,1} once L = [5])
+  1 ∈ {1,2} \ L           // was True,    now undecided (False once L = [1])
+  Mean(L)                 // was NaN,     now symbolic (2 once L = [1,2,3])
+  Missing + L             // was NaN,     now symbolic ([NaN,NaN] once assigned)
+  ```
+
+  and with `ce.declare('B', 'list<boolean>')`, `Which(B, 1, True, 2)` threw
+  out of `evaluate()` and is now held.
+
+  The `SetMinus` row is the one to note: it *inverted* a membership answer,
+  and a wrong `True` there feeds assumption discharge. `Which` hard-threw out
+  of `evaluate()` where the compiled path already held the same condition, so
+  the interpreter and the compiler disagreed about what a collection-typed
+  condition is; they now agree.
+
+  Once the symbol is assigned, every one of these gives exactly what it gave
+  before — the fix withdraws wrong answers, it does not make the operators
+  inert. The same correction also reaches a valueless *scalar* symbol in the
+  statistics aggregates: `Mean(y)` stays symbolic instead of folding to `NaN`.
+  An absent datum is unaffected: `Mean([1, Missing, 3])` is still `NaN`.
+
+- **Canonicalization now honors a `withTimeLimit` deadline while it runs, not
+  only between runs.** The walk is a plain recursion, so nothing checked the
+  budget inside it and a single long canonicalization ran to completion no
+  matter how small the limit — the overrun scaled with the size of the input
+  rather than being bounded by the deadline. A 12 000-term sum parsed under
+  `withTimeLimit({ ms: 1 })` ran 2 799 ms; it now cancels in 6 ms, and a
+  50 ms budget lands at 54 ms. Work outside a `withTimeLimit` span is
+  unaffected and pays no measurable cost.
+
+  One half of `parse()` is still unbounded: the LaTeX parser is a decoupled,
+  injected dependency with no access to the engine's deadline, so giving it
+  one is an interface change and has not been made yet. A span around
+  `ce.parse()` can still overrun by the parser's share of the work, which is
+  roughly half.
+
 - **Compiling an indexed read out of a collection with complex elements no
   longer produces a wrong value.** A list is compiled element by element and
   each element picks its own real-or-complex lowering, so the emitted array is

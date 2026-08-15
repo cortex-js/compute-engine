@@ -836,6 +836,37 @@ export function isPossiblyCollectionTyped(expr: Expression): boolean {
 }
 
 /**
+ * True when `expr` is **definitely collection-shaped but carries no value
+ * yet**: a symbol declared `list<number>`/`vector<2>` that has not been
+ * assigned, or an application whose head returns a collection (`L(1)` under
+ * `L: (number) -> vector<2>`).
+ *
+ * `isCollection` answers a CAPABILITY question — "can I enumerate this NOW" —
+ * and is `false` for such an operand because there is nothing to walk. A site
+ * that uses `isCollection` to ask the different question "is this operand
+ * collection-SHAPED" therefore takes its scalar path for an operand that is
+ * not a scalar, and commits an answer that the same expression contradicts
+ * once the symbol is assigned. Reducing `Sum(L)` to `L`, promoting `L` to the
+ * singleton `Set(L)` inside a `Union`, and excluding nothing for a `SetMinus`
+ * whose exclusion operand is `L` are all that mistake.
+ *
+ * The test is `type.matches('collection')` — the type DEFINITELY is a
+ * collection — not `typesOverlap(…, 'collection')`, which would also catch a
+ * top-typed (`unknown`/`any`) operand. Widening that far reclassifies every
+ * undeclared symbol and is a different, much larger change; the narrow test is
+ * the one the comparison operators (`undecidedCollectionComparison`,
+ * `library/relational-operator.ts`) and the compiled paths
+ * (`compilation/interval-javascript-target.ts`) already use, so this keeps one
+ * convention across the interpreter and the emitters.
+ *
+ * A caller that also wants the possibly-collection operands should spell it
+ * `isValuelessCollectionTyped(x) || isPossiblyCollectionTyped(x)`.
+ */
+export function isValuelessCollectionTyped(expr: Expression): boolean {
+  return !expr.isCollection && expr.type.matches('collection');
+}
+
+/**
  * The `broadcastable<T>` result type of an element-wise numeric operator
  * (`Add`/`Multiply`) when at least one operand `isPossiblyCollectionTyped`.
  *

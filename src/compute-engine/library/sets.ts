@@ -28,6 +28,7 @@ import {
   enumerableFromAllSources,
   enumerableFromSource,
   typeSaturatedSubsetOf,
+  isValuelessCollectionTyped,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
 import type {
@@ -1060,8 +1061,18 @@ function union(
   // member-guard set): wrapping such an operand in `Set([op])` would collapse
   // the whole set into a single literal element (SYM P3-10). Only a genuine
   // scalar (neither a collection nor set-typed) is promoted to a singleton set.
+  //
+  // The type test is `collection`, not `set`: a symbol declared `list<number>`
+  // with no value yet is collection-SHAPED, so promoting it committed the same
+  // collapse — `Union(L, Set(1))` answered `Set(L, 1)`, with `L` as a single
+  // ELEMENT, where the assigned `L := [5]` gives `Set(5, 1)`. Widening to
+  // `collection` subsumes the `set` case (a set is a collection) and leaves
+  // such an operand unwrapped, so the finiteness gate below keeps the whole
+  // `Union` symbolic until the value arrives.
   const xs = ops.map((op) =>
-    op.isCollection || op.type.matches('set') ? op : ce.function('Set', [op])
+    op.isCollection || op.type.matches('collection')
+      ? op
+      : ce.function('Set', [op])
   );
 
   // A Set literal can only be folded when every operand is a FINITE,
@@ -1203,6 +1214,16 @@ function isExcludedByKleene(
   x: Expression
 ): boolean | undefined {
   if (val.isCollection) return val.contains(x);
+  // A valueless collection-typed operand excludes its MEMBERS, which are not
+  // knowable yet — so the answer is UNDECIDED, not the scalar disequality
+  // below. Falling through asked `x = L` where the question is `x ∈ L`; both
+  // happen to be undecided for a free `L` today, so this arm currently only
+  // corrects the REASON rather than the verdict. Stating it explicitly keeps
+  // the three `SetMinus` exclusion rules (this one, `setMinus`'s eager fold,
+  // and the `membershipKleene` query decomposition) on one rule: a partial fix
+  // reopens the hole on whichever route was left behind, and `notEqualKleene`
+  // growing stronger on free variables would turn this into a wrong verdict.
+  if (isValuelessCollectionTyped(val)) return undefined;
   // Scalar exclusion: `x` is excluded iff `x = val`
   return kleeneNot(notEqualKleene(ce, x, val));
 }
@@ -1325,6 +1346,12 @@ function membershipKleene(
         // Non-finite exclusion: `x ∉ val`
         const m = membershipKleene(ce, x, val, depth + 1);
         conjunct = m === undefined ? undefined : !m;
+      } else if (isValuelessCollectionTyped(val)) {
+        // Third copy of the exclusion rule (see `isExcludedByKleene` and the
+        // eager fold in `setMinus`): a valueless collection-typed operand
+        // excludes its unknown MEMBERS, so the conjunct is undecided rather
+        // than the scalar disequality below.
+        conjunct = undefined;
       } else {
         conjunct = notEqualKleene(ce, x, val);
       }
@@ -1451,6 +1478,18 @@ function setMinus(
   // provide the semantics for infinite sets (e.g. SetMinus(ComplexNumbers, {0})).
   const [col, ...values] = ops;
   if (!col || col.isFiniteCollection !== true) return undefined;
+
+  // An exclusion operand that is DEFINITELY collection-typed but carries no
+  // value — a symbol declared `list<number>`, or a call whose head returns one
+  // — excludes its MEMBERS, and they are not knowable yet. `isExcludedBy` is
+  // two-valued and would fall to its scalar arm (`val.isSame(element)`, always
+  // false here), so every element survived and the fold committed a set that
+  // the same expression contradicts once the symbol is assigned:
+  // `Element(1, SetMinus(Set(1,2), L))` answered `True`, and `False` once
+  // `L := [1]`. INVERTING a membership answer is the worst shape this can
+  // take, because a wrong `True` feeds assumption discharge. Stay symbolic;
+  // the `contains`/iterator handlers answer once `L` has a value.
+  if (values.some(isValuelessCollectionTyped)) return undefined;
 
   const elements = [...col.each()].filter(
     (element) => !values.some((val) => isExcludedBy(val, element))

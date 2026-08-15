@@ -674,6 +674,24 @@ function absentConditionError(ce: ComputeEngine): Expression {
 
 function isBooleanishCondition(evaluated: Expression): boolean {
   if (evaluated.type.matches('boolean')) return true;
+  // A condition whose TYPE is already a boolean collection but which carries
+  // no value yet — a symbol declared `list<boolean>`, or a call whose head
+  // returns one — has cells that cannot be walked, so the element-wise check
+  // below cannot run. That makes it UNDECIDED, not "not a boolean at all":
+  // the caller holds the operator on `true` here and reserves the throw for a
+  // condition that can never be one (a number, a misspelled symbol), where
+  // the spell-check hint is the useful outcome. Without this,
+  // `Which(B, 1, True, 2)` with `B` declared `list<boolean>` threw out of
+  // `evaluate()` — while the SAME condition evaluates element-wise once `B`
+  // is assigned, and while the compiled path already holds it
+  // (`compilation/interval-javascript-target.ts` tests
+  // `c.isCollection || c.type.matches('collection')`), so the interpreter and
+  // the compiler disagreed about what a collection-typed condition is.
+  if (
+    !evaluated.isCollection &&
+    evaluated.type.matches(BOOLEAN_COLLECTION_TYPE)
+  )
+    return true;
   if (!evaluated.isCollection || !evaluated.isFiniteCollection) return false;
   const items = Array.from(evaluated.each()) as Expression[];
   // A broadcast (list) condition is held when every cell is boolean — or ABSENT

@@ -589,10 +589,77 @@ export interface IComputeEngine {
    * occurred. This is the only surface that says whether a given `Map` drain
    * compiled, re-validated or fell back.
    *
-   * The counters are process-global and cumulative, not per-engine — the
-   * compile cache they instrument is shared by every engine in the process —
-   * so every engine returns the same object, and a caller measures one drain by
-   * reading the counters before and after it and taking the difference.
+   * ## Read the counters BEFORE stringifying anything
+   *
+   * The instrument has several ways of handing a careful reader numbers that
+   * look right and are not. None throws or warns, so start with the one that
+   * fires on the most reflexive debugging action there is — printing the
+   * value:
+   *
+   * ```ts
+   * const before = { ...ce._mapAutoCompileStats };
+   * const r = ce.parse(MAP).N();
+   * console.log(r.evaluate().toString());        // ← "just looking at it"
+   * const d = delta(before, ce._mapAutoCompileStats);  // attempts 1, hits 10
+   * ```
+   *
+   * That reads as "`evaluate()` compiles 10 elements". It does not:
+   * `evaluate()` compiles NOTHING, and `toString()` is the consumer.
+   * Serializing a lazy result materializes a fixed 10-element preview
+   * regardless of the drain size, so stringifying inside a measured region
+   * both does work and RELOCATES the attribution onto whatever call preceded
+   * it. The reader ends up with a coherent, wrong causal picture in which
+   * nothing looks off.
+   *
+   * ## Three gates, all of which fail as zeros
+   *
+   * The counters move only when all three hold, and a zero means "the
+   * instrument was inert", not "the path did not run":
+   *
+   * 1. `ce.precision === 'machine'`. At the default bignum-preferred
+   *    precision the float tier never attempts — correctly, since at bignum
+   *    the interpreter produces digits float64 cannot match.
+   * 2. A numeric route: `.N()`, or `.evaluate()` on an `N(…)`-marked body. A
+   *    bare `.evaluate()` reports zero at any drain size.
+   * 3. The lazy result must actually be CONSUMED. `.N()` on a `Map` returns a
+   *    lazy collection; if nothing iterates it, nothing compiles.
+   *
+   * "Consumed" is narrower than "touched" — measured one call at a time at
+   * n = 2000, machine precision, `Range`-sourced, as `attempts`/`compiledHits`:
+   *
+   * ```text
+   *   .N()          0 / 0      builds the lazy collection, compiles nothing
+   *   .evaluate()   0 / 0      compiles NOTHING
+   *   .toString()   1 / 10     serializing materializes a 10-element preview
+   *   [...each()]   1 / 2000   the whole drain
+   *   .at(1500)     1 / 1      exactly one element
+   *   .count        0 / 0      answers structurally
+   *   .json         0 / 0      answers structurally
+   * ```
+   *
+   * ## Scope: the counters and the cache do not match
+   *
+   * The counters are process-global and cumulative, not per-engine — every
+   * engine returns the same object and `new ComputeEngine()` does not reset
+   * it — so absolute reads are meaningless and a multi-engine process
+   * aggregates. Always take DELTAS across the region you are measuring.
+   *
+   * The compile CACHE has a different scope from the counters, which is worth
+   * stating side by side because the natural assumption is that they match:
+   * the cache keys on the expression SHAPE (re-parsing does not defeat it) and
+   * is PER-ENGINE, while the counters are MODULE-WIDE. So a second measurement
+   * of the same `Map` shape in the same engine reads 0/0. Comparing routes by
+   * running them in sequence — the natural way to build the table above —
+   * gives a real number for the first route and zeros for the rest, which
+   * reads as "only `each()` compiles". Measure each route in a FRESH engine,
+   * and still take deltas.
+   *
+   * One more source-shape property that is not a defect: `iterationLimit`
+   * never gates the counters, but it does bound the DRAIN for a
+   * COMPREHENSION-sourced collection, because the limit is spent materializing
+   * the comprehension before the `Map` ever drains. A `Range`-sourced
+   * collection is lazy and costs no iterations. So an instrument sourced from
+   * a comprehension must raise `iterationLimit` above the element count.
    *
    * Reachable at runtime with no stability promise, like the other
    * `_`-prefixed members: the shape and the counter set may change.
