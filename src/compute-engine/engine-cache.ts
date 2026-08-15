@@ -16,6 +16,24 @@ type CacheEntry = {
   purge?: (v: unknown) => unknown;
 };
 
+/**
+ * MUTABLE-OBJECT DISPOSITION (ruling B3's cache inventory, ruling B12): this
+ * is the engine's one GLOBAL, STRONG value retainer — its entries live as long
+ * as the engine and are held by name, not weakly — so **no entry may ever hold
+ * a `BoxedObject`, directly or nested inside a value**. An object stored here
+ * would survive every scope, outliving the program's last reference to it, and
+ * an object-derived entry could never be invalidated (a field store advances
+ * no engine axis and this store records no dependencies).
+ *
+ * The rule is upheld by what gets stored, not by machinery: the five named
+ * caches built through it hold rule sets and constant tables (simplification
+ * rules, univariate-root rules, harmonization rules, the constructible
+ * trigonometric-value tables), all built from the standard library and from
+ * literals, with no route to a user value. It is pinned adversarially by a
+ * test rather than by a guard, because adding a containment scan to a
+ * name-keyed store of arbitrary payloads would cost every build a walk to
+ * defend against a case no caller can currently produce.
+ */
 export class EngineCacheStore {
   private _entries: Record<string, CacheEntry> = {};
 

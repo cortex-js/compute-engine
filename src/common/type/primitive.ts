@@ -40,6 +40,12 @@ export const SCALAR_TYPES: PrimitiveType[] = [
 export const VALUE_TYPES: PrimitiveType[] = [
   'value',
   'color',
+  // `object` is a value, but deliberately NOT a collection: field access is
+  // not element access, so it sits beside `record` rather than under
+  // `collection` with it (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, ruling
+  // B6). Keeping it out of `COLLECTION_TYPES` is what makes `object` and
+  // `record` disjoint in the primitive lattice.
+  'object',
   ...COLLECTION_TYPES,
   ...SCALAR_TYPES,
 ] as const as PrimitiveType[];
@@ -98,6 +104,7 @@ export function isValidType(t: any): t is Readonly<Type> {
     t.kind === 'tuple' ||
     t.kind === 'list' ||
     t.kind === 'record' ||
+    t.kind === 'object' ||
     t.kind === 'dictionary' ||
     t.kind === 'set' ||
     t.kind === 'broadcastable' ||

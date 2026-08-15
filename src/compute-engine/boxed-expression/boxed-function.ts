@@ -144,11 +144,16 @@ import {
   sgn,
 } from './sgn.js';
 import { cachedValue, CachedValue } from './cache.js';
+import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
 import {
-  CACHE_STATS,
-  recordCache,
-  instrumentedCachedValue,
-} from '../../common/cache-stats.js';
+  beginObjectDeps,
+  endObjectDeps,
+  mergeObjectDeps,
+  objectDepsValid,
+  objectReadCount,
+  type ObjectDeps,
+} from './object-deps.js';
+import { containsObject } from './object-walk.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
@@ -170,6 +175,15 @@ import {
  * infinite, otherwise 5 from the head and 5 from the tail
  */
 const DEFAULT_MATERIALIZATION: [number, number] = [5, 5] as const;
+
+/** One memoized collection-facet answer (see `BoxedFunction._facetMemo`). The
+ * value is wrapped so that a facet legitimately answering `undefined` is
+ * distinguishable from one not yet computed. `objectDeps` is recorded PER
+ * FACET rather than shared with the slot's symbol-dependency snapshot: the
+ * three facets are computed independently, and a `count` that read a mutable
+ * object's field must not drag an `isEmpty` that read nothing into being
+ * invalidated with it. */
+type FacetEntry<T> = { value: T; objectDeps?: ObjectDeps };
 
 /** Tick counter for the cooperative deadline checkpoint in
  * `_computeValue`/`_computeValueAsync`. Module-scoped (shared across
@@ -347,7 +361,17 @@ export class BoxedFunction
    * the projection can re-enter the same node through a binding cycle, and
    * `cachedValue`'s stamp-then-compute order returned the PREVIOUS
    * generation's value as current on the re-entrant read, freezing an
-   * in-flight answer at the current generation. */
+   * in-flight answer at the current generation.
+   *
+   * MUTABLE-OBJECT DISPOSITION (ruling B3's cache inventory): this cache
+   * records no object-version dependencies and needs none. An effects answer
+   * is derived from declarations, signatures and function bodies — the
+   * projection walks structure and consults definitions, and evaluates
+   * nothing — so it can never reach `BoxedObject._field()` and can never be
+   * derived from a field's contents. The payload is an effect set, which
+   * cannot contain an expression, let alone an object, so the
+   * no-object-in-a-payload rule is satisfied by construction too. Bypassing
+   * `cachedValue` therefore costs this slot nothing. */
   private _effects: CachedValue<ComputedEffects> = {
     value: null,
     generation: -1,
@@ -428,9 +452,9 @@ export class BoxedFunction
          * discipline). */
         worldVersion: number;
         deps: MemoDeps;
-        count?: { value: number | undefined };
-        isEmpty?: { value: boolean | undefined };
-        isFinite?: { value: boolean | undefined };
+        count?: FacetEntry<number | undefined>;
+        isEmpty?: FacetEntry<boolean | undefined>;
+        isFinite?: FacetEntry<boolean | undefined>;
       }
     | undefined = undefined;
 
@@ -1169,15 +1193,12 @@ export class BoxedFunction
       if (!this.isValid || this.isNumber !== true) return undefined;
       return sgn(this);
     };
-    if (CACHE_STATS)
-      return instrumentedCachedValue(
-        'sgn',
-        this._sgn,
-        gen,
-        compute,
-        (a, b) => a === b
-      );
-    return cachedValue(this._sgn, gen, compute);
+    return cachedValue(
+      this._sgn,
+      gen,
+      compute,
+      CACHE_STATS ? { cls: 'sgn', same: (a, b) => a === b } : undefined
+    );
   }
 
   get isNaN(): boolean | undefined {
@@ -1716,7 +1737,19 @@ export class BoxedFunction
     // key it was consulted with — which costs a purity projection and an
     // `isConstant` subtree walk — is necessarily the same one now. See
     // `_typeGeneration`.
-    if (this._typeGeneration === generation && this._type.value !== null) {
+    //
+    // This path bypasses `cachedValue`, so it repeats that helper's two
+    // object-dependency duties itself: an entry whose recorded
+    // `(object, version)` pairs no longer hold must NOT be served (a field
+    // store advances no engine generation, so `_typeGeneration` alone cannot
+    // see it), and a served entry must fold its dependencies into any
+    // enclosing collector, since a hit performs no field reads of its own.
+    if (
+      this._typeGeneration === generation &&
+      this._type.value !== null &&
+      objectDepsValid(this._type.objectDeps)
+    ) {
+      mergeObjectDeps(this._type.objectDeps);
       if (CACHE_STATS) recordCache('type', 'hitFastPath');
       return this._type.value ?? BoxedType.unknown;
     }
@@ -1734,17 +1767,20 @@ export class BoxedFunction
     const compute = (): BoxedType =>
       new BoxedType(type(this), this.engine._typeResolver);
     const result =
-      (CACHE_STATS
-        ? instrumentedCachedValue(
-            'type',
-            this._type,
-            gen,
-            compute,
-            // A wasted recompute is one that lands on the same type; BoxedType
-            // has no cheap identity, so compare the serialized form.
-            (a, b) => a?.toString() === b?.toString()
-          )
-        : cachedValue(this._type, gen, compute)) ?? BoxedType.unknown;
+      cachedValue(
+        this._type,
+        gen,
+        compute,
+        CACHE_STATS
+          ? {
+              cls: 'type',
+              // A wasted recompute is one that lands on the same type;
+              // BoxedType has no cheap identity, so compare the serialized
+              // form.
+              same: (a, b) => a?.toString() === b?.toString(),
+            }
+          : undefined
+      ) ?? BoxedType.unknown;
     // Record the generation OBSERVED ON ENTRY: a computation that bumped the
     // generation (signature inference does) must leave the fast path closed.
     this._typeGeneration = generation;
@@ -1937,10 +1973,18 @@ export class BoxedFunction
     const before = _lazyValueProvisionalReads;
     const cyclesBefore = cycleDetectionCount();
     let result: Expression;
+    // Collect the mutable-object field reads this evaluation performs, so the
+    // entry can be dropped by a later store to any object it read. A throw
+    // unwinds past the store below, so the collector is closed in the
+    // `finally` and its contents are simply discarded — a failed computation
+    // commits neither a value nor dependencies.
+    beginObjectDeps();
+    let objectDeps: ObjectDeps | undefined;
     try {
       result = this._computeValue(options)();
     } finally {
       this._lazyValueInFlight = false;
+      objectDeps = endObjectDeps();
     }
     // The settled-only gate, on BOTH provisional channels: this memo's own
     // re-entrancy marker, and the symbol-binding cycle guard, whose
@@ -1958,7 +2002,7 @@ export class BoxedFunction
       return result;
     }
 
-    this._storeLazyCollectionValue(result, generation, options);
+    this._storeLazyCollectionValue(result, generation, options, objectDeps);
 
     // `CE_CACHE_STATS` only: the read above was classified `missGeneration`
     // exactly when a same-epoch, generation-keyed entry was present; if the
@@ -1989,8 +2033,17 @@ export class BoxedFunction
       this._lazyValueEpoch === this.engine._worldVersion &&
       (this._value.generation === undefined ||
         (this._value.generation === this.engine._anyVersion &&
-          this._lazyValueScope === this.engine.context?.lexicalScope))
+          this._lazyValueScope === this.engine.context?.lexicalScope)) &&
+      // A store to a mutable object advances no engine generation and no
+      // epoch, so an entry whose value was derived from an object field
+      // carries its own `(object, version)` stamps and is checked here.
+      objectDepsValid(this._value.objectDeps)
     ) {
+      // A hit reads nothing, so an enclosing cache-backed computation would
+      // otherwise commit as if this value had no dependencies at all and go
+      // on serving it after a store. Hand this entry's (just validated)
+      // dependencies outward.
+      mergeObjectDeps(this._value.objectDeps);
       if (CACHE_STATS)
         recordCache(
           'lazyValue',
@@ -2015,13 +2068,24 @@ export class BoxedFunction
   private _storeLazyCollectionValue(
     result: Expression,
     generation: number,
-    options?: Partial<EvaluateOptions>
+    options?: Partial<EvaluateOptions>,
+    objectDeps?: ObjectDeps
   ): void {
+    // A payload that transitively holds a mutable object is never memoized:
+    // the entry would keep that object alive for the node's lifetime (ruling
+    // B12), and the object's own contents are not part of what the version
+    // stamps validate. This covers the self-priming write below too, which is
+    // why the check sits ahead of both.
+    if (containsObject(result)) {
+      if (CACHE_STATS) recordCache('lazyValue', 'declineStore');
+      return;
+    }
     const key = this._lazyCollectionMemoKey(generation);
     if (CACHE_STATS && key === false) recordCache('lazyValue', 'declineStore');
     if (key !== false) {
       this._value.generation = key;
       this._value.value = result;
+      this._value.objectDeps = objectDeps;
       // Sampled AFTER the walk, like the element memo's stamp: a bump the
       // walk itself caused (signature inference) is absorbed rather than
       // making the entry born stale.
@@ -2132,12 +2196,21 @@ export class BoxedFunction
     const generation = this.engine._anyVersion;
     const before = _lazyValueProvisionalReads;
     const cyclesBefore = cycleDetectionCount();
+    // The object-dependency collector cannot be used here: it brackets a
+    // dynamic extent of the host call stack, and every `await` below breaks
+    // that extent. This path therefore SAMPLES the global field-read counter
+    // instead and declines to memoize at all if any object field was read
+    // while it ran — the same fail-closed sampling the two provisional
+    // channels beside it use, and for the same reason: no entry is always
+    // safe, a dependency-free entry derived from a field is not.
+    const objectReadsBefore = objectReadCount();
 
     const result = await this._computeValueAsync(options)();
 
     if (
       _lazyValueProvisionalReads !== before ||
-      cycleDetectionCount() !== cyclesBefore
+      cycleDetectionCount() !== cyclesBefore ||
+      objectReadCount() !== objectReadsBefore
     ) {
       if (CACHE_STATS) recordCache('lazyValue', 'declineStore');
       return result;
@@ -2345,9 +2418,18 @@ export class BoxedFunction
     const ce = this.engine;
     const slot = this._facetMemo;
     if (slot !== undefined && slot.worldVersion === ce._worldVersion) {
-      const entry = slot[facet] as { value: T } | undefined;
+      const entry = slot[facet] as FacetEntry<T> | undefined;
       if (entry !== undefined) {
-        if (memoDepsStillValid(this, slot.deps)) {
+        // A store to a mutable object moves neither `_worldVersion` nor any
+        // symbol dependency, so a facet answer derived from a field carries
+        // its own `(object, version)` stamps and is checked here; serving it
+        // also hands those stamps to any enclosing collector, since a hit
+        // performs no reads of its own.
+        if (
+          memoDepsStillValid(this, slot.deps) &&
+          objectDepsValid(entry.objectDeps)
+        ) {
+          mergeObjectDeps(entry.objectDeps);
           if (CACHE_STATS) recordCache('collectionFacet', 'hit');
           return entry.value;
         }
@@ -2364,7 +2446,19 @@ export class BoxedFunction
     const provisionalBefore = _lazyValueProvisionalReads;
     const iterationBreachesBefore = iterationLimitCancellationCount();
     _facetComputeCount += 1;
-    const value = compute();
+    // A facet answer is a number or a boolean, so it can never CONTAIN an
+    // object; it can perfectly well be DERIVED from one's fields, though
+    // (`Count(p.friends)`), which is what the collector records. A `compute()`
+    // that throws (a deadline cancellation) unwinds past every store below,
+    // so the collector is closed in the `finally` and discarded.
+    beginObjectDeps();
+    let value: T;
+    let objectDeps: ObjectDeps | undefined;
+    try {
+      value = compute();
+    } finally {
+      objectDeps = endObjectDeps();
+    }
     if (
       cycleDetectionCount() !== cyclesBefore ||
       _lazyValueProvisionalReads !== provisionalBefore ||
@@ -2405,8 +2499,9 @@ export class BoxedFunction
     // The (facet → T) pairing is maintained by the three call sites (`count`
     // is the only `number`-valued facet), which the keyed slot type cannot
     // express generically — hence the `unknown` hop.
-    (target as unknown as Record<typeof facet, { value: T }>)[facet] = {
+    (target as unknown as Record<typeof facet, FacetEntry<T>>)[facet] = {
       value,
+      objectDeps,
     };
     return value;
   }

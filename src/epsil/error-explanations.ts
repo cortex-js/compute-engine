@@ -50,6 +50,10 @@ Named arguments are checked against the declaration the call resolves through; w
 
 The same error covers an OVERLOADED function whose overloads accept the call but disagree about which argument fills which parameter — the names then pick an argument order rather than just an implementation, and the engine will not guess. Call it positionally, or give the overloads distinct parameter types.`,
 
+  'argument-names-required': `The called function requires every argument to be written with its parameter's name ("Person(firstName: \"Alan\", age: 42)"); the message lists the names, in declaration order.
+
+Object-type constructors are the functions in this shape. An object type's fields are frequently several of the same type, so a positional call that transposed two of them would be accepted in silence and build a wrong object with no error anywhere. Because the arguments are named, their order does not matter.`,
+
   'argument-optional-skipped': `A named argument supplied an optional parameter while an optional parameter declared before it was left out.
 
 Arguments are matched to declared positions, and there is no way to leave a hole in the argument list — so an optional parameter can only be named when every optional parameter declared before it is also supplied (by position or by name). Supply the earlier optional too, or omit both.`,

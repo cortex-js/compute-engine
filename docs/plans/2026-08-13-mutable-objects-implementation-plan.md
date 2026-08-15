@@ -116,7 +116,55 @@ parses, serializes, and participates in ceiling checks (0a). Effort: S.
 
 ## Phase 1 — Object core (the value, the type, the store)
 
-The center of gravity. Sub-steps in dependency order:
+The center of gravity. Sub-steps in dependency order.
+
+> **Step 1 DONE 2026-08-14** —
+> `docs/plans/2026-08-14-object-representation-decision.md` (revision 2,
+> dual-reviewed, 12 findings applied; the type-pinning fork user-ruled).
+> Three of its findings CHANGE this phase's ordering, and supersede the
+> sketch below where they differ:
+>
+> - **The dependency-recording channel (step 7) is a PREREQUISITE for
+>   the property store (step 5), not a follow-up.** The `object-store`
+>   event mask is `any`-only with the callable axis NOT selected (a
+>   semantic/callable blanket per store would cold engine-wide memos in
+>   exactly the store-heavy loops objects exist for), so per-object
+>   version dependencies are the ONLY precise invalidation channel and
+>   must exist before stores are exposed. A store-in-a-loop
+>   microbenchmark is an acceptance criterion.
+> - **`.json` ships the FULL B5 serializer form in Phase 1** — the
+>   `["Object", <record>, "'TypeName'"]` wrapper over the shared
+>   structural walk, with `CircularReference` depth+type markers. No
+>   provisional shape ever ships. Phase 3 then adds only the serializer
+>   OPTION and the `RecordFrom` operator arm over the same walk. The
+>   walk keeps its OWN ancestor stack (the shared cycle guard is
+>   flag-only and cannot produce the marker's depth).
+> - **The nominal type is PINNED at construction** (never re-resolved
+>   by name), which is what makes "layouts never migrate" true across a
+>   `type` re-run. Within one program a re-declaration is now an error
+>   anyway (the redefinition discipline, shipped 0.108.0), so the
+>   mixed-generation surface exists only across notebook cells.
+>
+> **Work packages** (each independently verifiable):
+> **1A** — the `BoxedObject` kind: class, add-a-kind checklist edits,
+> identity equality (both `same()` and the early `eqImpl()` branch),
+> pinned type, `.json` + structural walk + cycle guards, cross-engine
+> ingress rejection, and an engine-internal factory so the kind is
+> testable before a user-facing constructor exists.
+> **1B** — `type P = object<…>` declaration (nominal, B13 invariant
+> stored fields, `object-type-not-inline`) + the named-argument
+> constructor (B7 every field required; first `state` emitter; never
+> folded or served from caches).
+> **1C** — the per-entry object-version dependency channel
+> (stack-scoped collectors with hit-merging) + the cache exclusion
+> inventory (B3), including the universal "no cache payload
+> transitively contains an object" rule.
+> **1D** — field read, property store, the `object-store` state event,
+> and the B3 adversarial acceptance matrix; the Appendix A
+> rebinding-sugar replacement (the phase's one breaking change —
+> measure snapshot blast radius before landing).
+> **1E** — evaluation-order audit (B8) and the appendix's own examples
+> as verbatim tests.
 
 1. **Representation decision (first design task, before code).** An
    object value = identity + mutable slot table + per-object version

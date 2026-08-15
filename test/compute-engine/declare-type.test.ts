@@ -698,6 +698,50 @@ describe('DeclareType statement replacement: dependent ARITY', () => {
     expect(ce.type('tuple<integer, integer>').matches('e1')).toBe(true);
   });
 
+  test('an OBJECT dependent is covered: its field types are mentions too', () => {
+    // The structural walk behind this re-check must descend into an
+    // `object<…>` layout exactly as it does into a `record<…>` body. An
+    // object layout is legal ONLY as the body of a named type declaration —
+    // which is precisely what this walk reads — so a missed arm here means a
+    // dependent object type silently keeps an application that now matches
+    // nothing. `inout` is the only variance a stored field admits (ruling
+    // B13), so both types use it.
+    const ce = new ComputeEngine();
+    ce.declareType('h2', 'tuple<v: T>', {
+      typeParams: ['inout T'],
+      fromStatement: true,
+    });
+    ce.declareType('h1', 'object<b: h2<T>>', {
+      typeParams: ['inout T'],
+      fromStatement: true,
+    });
+    expect(() =>
+      ce.declareType('h2', 'tuple<v: T, u: U>', {
+        typeParams: ['inout T', 'inout U'],
+        fromStatement: true,
+      })
+    ).toThrow(
+      /generic-alias-arity[\s\S]*"h1" applies "h2" to 1 type argument[\s\S]*2 type parameters/
+    );
+  });
+
+  test('an OBJECT dependent is re-checked against a newly ADDED bound', () => {
+    // The bounds half of the same walk: adding `T: integer` must reject the
+    // `k1` layout that already applies `k2<string>`.
+    const ce = new ComputeEngine();
+    ce.declareType('k2', 'tuple<v: T>', {
+      typeParams: ['inout T'],
+      fromStatement: true,
+    });
+    ce.declareType('k1', 'object<b: k2<string>>', { fromStatement: true });
+    expect(() =>
+      ce.declareType('k2', 'tuple<v: T>', {
+        typeParams: ['inout T: integer'],
+        fromStatement: true,
+      })
+    ).toThrow(/generic-alias-bound/);
+  });
+
   // The control: an arity-PRESERVING replacement under a dependent lands, both
   // for a plain type and for a parameterized one.
   test('an arity-preserving replacement with a dependent still succeeds', () => {

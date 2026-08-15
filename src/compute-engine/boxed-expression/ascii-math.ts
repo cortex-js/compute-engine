@@ -12,7 +12,19 @@ import {
   roundToDecimalPlace,
   roundMeasurementForDisplay,
 } from '../numerics/strings.js';
-import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
+import {
+  isFunction,
+  isSymbol,
+  isString,
+  isNumber,
+  isObject,
+} from './type-guards.js';
+import {
+  CYCLE_DETECTED,
+  CycleQuery,
+  enterCycleQuery,
+  exitCycleQuery,
+} from './cycle-guard.js';
 import {
   broadcastContextMessage,
   broadcastFrames,
@@ -842,6 +854,29 @@ export function toAsciiMath(
   //
   if (isString(expr)) {
     return `"${expr.string.replace(/"/g, '\\"')}"`;
+  }
+
+  //
+  // An object?
+  //
+  // Displays show contents (they were never round-trippable, so they need no
+  // conversion option), in declared field order: `Person(name: "Alan", age:
+  // 42)`. User data can now be cyclic, so the traversal takes the shared
+  // value-walk cycle guard, keyed on the instance: re-entering an object that
+  // is already being printed elides its contents as `Person(...)` instead of
+  // recursing forever. Nothing here is memoized — the value is mutable.
+  //
+  if (isObject(expr)) {
+    const guard = enterCycleQuery(expr, CycleQuery.ObjectSlots);
+    if (guard === CYCLE_DETECTED) return `${expr.typeName}(...)`;
+    try {
+      const fields = [...expr._slots].map(
+        ([key, value]) => `${key}: ${serialize(value)}`
+      );
+      return `${expr.typeName}(${fields.join(', ')})`;
+    } finally {
+      exitCycleQuery(expr, guard);
+    }
   }
 
   //

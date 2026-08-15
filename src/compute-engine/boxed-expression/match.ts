@@ -10,7 +10,13 @@ import { permutations } from '../../common/utils.js';
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
 import { isOperatorDef } from './utils.js';
 import { sameSyntactic } from './compare.js';
-import { isNumber, isFunction, isSymbol, isString } from './type-guards.js';
+import {
+  isNumber,
+  isFunction,
+  isSymbol,
+  isString,
+  isObject,
+} from './type-guards.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 
 /** Internal options extending the public PatternMatchOptions */
@@ -127,6 +133,18 @@ function matchOnce(
   //
   if (isWildcard(pattern))
     return captureWildcard(wildcardName(pattern)!, expr, substitution);
+
+  //
+  // Match an object
+  //
+  // An object matches nothing but itself: there is no destructuring of
+  // objects in v1, and a contents match would be as time-varying as contents
+  // equality. Decided here so that neither side can fall into a structural
+  // branch (an object on either side of a comparison answers by reference
+  // identity, everywhere).
+  //
+  if (isObject(pattern) || isObject(expr))
+    return expr === pattern ? substitution : null;
 
   // Reset accept variant (we don't want to call it recursively for the same
   // expression, but we do want to call it for the arguments)

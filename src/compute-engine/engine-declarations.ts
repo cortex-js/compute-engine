@@ -92,6 +92,7 @@ import {
   setProvisionalLiteral,
 } from './boxed-expression/provisional-application.js';
 import {
+  assertObjectLayoutIsNominalBody,
   checkTypeConstructorNamespace,
   installConstructorFunction,
   isMintedConstructor,
@@ -99,8 +100,8 @@ import {
   mintTypeConstructor,
 } from './type-constructors.js';
 import {
+  adoptsForeignEngineObject,
   isFunction,
-  isForeignEngineObject,
   isNumber,
   isString,
   isSymbol,
@@ -590,9 +591,14 @@ export function setSymbolValue(
 
   // An object belongs to the engine that constructed it, so a binding in THIS
   // engine cannot hold one from another (`ce.assign` and every path that
-  // installs a value reach this setter). A host API throws rather than
-  // returning an error value, matching this function's other refusals below.
-  if (isForeignEngineObject(value as Expression, ce)) {
+  // installs a value reach this setter). The check is TRANSITIVE — a `List` or
+  // dictionary holding a foreign object is not itself an object, yet binding
+  // it retains the object all the same — and is gated on
+  // `anyObjectExists()` inside `adoptsForeignEngineObject`, so a session that
+  // has never constructed an object pays one boolean read. A host API throws
+  // rather than returning an error value, matching this function's other
+  // refusals below.
+  if (adoptsForeignEngineObject([value as Expression], ce)) {
     throw new Error(
       `object-foreign-engine: cannot assign an object that belongs to a different engine to "${id}"`
     );
@@ -1005,6 +1011,15 @@ export function declareType(
               allowObjectType: alias !== true,
             })
           : type;
+
+    // The STRUCTURAL routes — a `Type` object or a `BoxedType`, which a host
+    // can hand to `declareType()` — have no text to parse, so the
+    // `allowObjectType` gate just above never sees them. `mintTypeConstructor`
+    // applies the same rule at the mint site, but `mint: false` skips minting
+    // altogether; without this call a declaration made that way installs an
+    // aliased or nested `object<…>` layout unchecked.
+    if (typeof type !== 'string')
+      assertObjectLayoutIsNominalBody(alias === true, def);
   } catch (e) {
     rollbackTypeHalf();
     throw e;
@@ -1530,6 +1545,13 @@ function mentionsOf(
       case 'tuple':
         t.elements.forEach((el) => visit(el.type));
         return;
+      // An `object<…>` layout is legal exactly where this walk runs — as the
+      // body of a named type declaration — so its field types are a prime
+      // place for a mention to hide. Without this arm `type Person =
+      // object<b: Box<integer>>` reports zero mentions of `Box`, and a later
+      // change to `Box`'s arity or parameter bounds skips the re-check that
+      // would have caught `Person`'s now-invalid application.
+      case 'object':
       case 'record':
         Object.values(t.elements).forEach(visit);
         return;
@@ -1973,7 +1995,9 @@ export function assignFn(
   // An object belongs to the engine that constructed it. Checked here as well
   // as in `setSymbolValue` because a first assignment to an undeclared name
   // installs its value through the declaration path instead of the setter.
-  if (isForeignEngineObject(arg2 as Expression, ce)) {
+  // Transitive, for the reason given there: a container holding a foreign
+  // object smuggles it in.
+  if (adoptsForeignEngineObject([arg2 as Expression], ce)) {
     throw new Error(
       `object-foreign-engine: cannot assign an object that belongs to a different engine to "${id}"`
     );

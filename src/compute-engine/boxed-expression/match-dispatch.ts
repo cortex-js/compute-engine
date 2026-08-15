@@ -9,6 +9,7 @@ import {
   isDictionary,
   isFunction,
   isNumber,
+  isObject,
   isString,
   isSymbol,
   sym,
@@ -183,6 +184,15 @@ export interface MatchPlan {
  * invalidation is needed. (Empirically verified: `canonical.ops === canonical.ops`
  * is stable across reads and across `.evaluate()` calls, and differs between two
  * independently-boxed but structurally-identical `Match`es.)
+ *
+ * **Mutable-object disposition** (ruling B3's cache inventory). Nothing here
+ * needs object-version dependencies. The payload is a classification PLAN —
+ * per-arm shape and literal-kind tags, deliberately holding no closures and no
+ * evaluated values (see the "never cache the result across evaluations" notes
+ * below) — so it can neither retain an object nor go stale when one's fields
+ * change; the plan describes the pattern's syntax, which a store cannot
+ * touch. Matching itself still runs per evaluation, and an object matches
+ * only itself by reference (`BoxedObject.match`).
  */
 const planCache = new WeakMap<ReadonlyArray<Expression>, MatchPlan>();
 
@@ -520,6 +530,11 @@ function wrapRest(
  * pin resolving to a list) defer to the matcher for safety.
  */
 function leafEquals(subject: Expression, value: Expression): boolean {
+  // An OBJECT on either side compares by reference identity — the same answer
+  // every equality tier gives, and the reason a pinned object value selects
+  // its case only for the very object it pins. Decided before the leaf
+  // branches so neither side can be read as content.
+  if (isObject(value) || isObject(subject)) return subject === value;
   // The matcher treats an undecidable `isEqual` (undefined) as no-match.
   if (isNumber(value))
     return isNumber(subject) && value.isEqual(subject) === true;

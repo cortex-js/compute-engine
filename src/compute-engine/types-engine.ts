@@ -870,6 +870,37 @@ export interface IComputeEngine {
     }
   ): Expression;
 
+  /**
+   * Construct an **object** — the engine's mutable value kind — of the
+   * nominal type named `typeName`, with the given stored fields (insertion
+   * order is the declared field order).
+   *
+   * The nominal type is resolved once and PINNED on the instance, a fresh
+   * identity is minted for every call, and the result is always canonical and
+   * always already evaluated.
+   *
+   * This is the ONLY construction path for objects until the user-facing
+   * named-argument constructor lands: `box()`/`parse()` never mint one, which
+   * is what makes "a parsed snapshot is a record under the `Object`
+   * provenance head, never an object" true by construction.
+   *
+   * Throws when a field value is an object belonging to a different engine
+   * (`object-foreign-engine`).
+   *
+   * @internal
+   */
+  _object(
+    typeName: string,
+    slots: Iterable<readonly [string, Expression]> | Record<string, Expression>,
+    metadata?: Metadata,
+    /** The resolved nominal type to PIN on the instance, when the caller has
+     * it. Required for a PARAMETERIZED object type, whose name alone resolves
+     * to the bare declaration record: `Cell<integer>` — the applied reference
+     * the call site solved for — is what the constructed value's type must be.
+     * Ignored unless it names `typeName`. */
+    pinnedType?: BoxedType
+  ): Expression;
+
   /** @internal Compile a boxed expression. */
   _compile(
     expr: Expression,

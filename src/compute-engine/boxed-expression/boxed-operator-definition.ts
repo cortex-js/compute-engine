@@ -73,6 +73,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'bindingSites',
   'broadcastable',
   'inspectsErrors',
+  'namedArgumentsRequired',
   'missingBehavior',
   'missingStrip',
   'associative',
@@ -171,6 +172,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   broadcastable = false;
 
   inspectsErrors = false;
+  namedArgumentsRequired = false;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
   missingStrip: 'all' | number[] = 'all';
   associative = false;
@@ -825,6 +827,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
     this.broadcastable = def.broadcastable ?? this.broadcastable;
     this.inspectsErrors = def.inspectsErrors ?? this.inspectsErrors;
+    this.namedArgumentsRequired =
+      def.namedArgumentsRequired ?? this.namedArgumentsRequired;
     this.missingBehavior = def.missingBehavior ?? this.missingBehavior;
     this.missingStrip = def.missingStrip ?? this.missingStrip;
     this.associative = def.associative ?? this.associative;

@@ -149,6 +149,12 @@ function forEachApplication(t: Type, cb: (ref: TypeReference) => void): void {
       for (const el of t.elements) forEachApplication(el.type, cb);
       return;
     case 'record':
+    // An object type's stored fields hold ordinary types, so an applied
+    // reference nested in one must be found here too — otherwise a body such
+    // as `object<t: tree<T>>` would look application-free and the deferral
+    // analysis would judge the declaration settled while `tree` is still an
+    // unfulfilled forward reference.
+    case 'object':
       for (const v of Object.values(t.elements)) forEachApplication(v, cb);
       return;
     case 'reference':
@@ -332,6 +338,27 @@ export function analyzeVariance(
           visit(v, polarity, step(path, k), shadowed, deferredVia);
         return;
 
+      // A STORED FIELD is a read/write position, so it is INVARIANT whatever
+      // polarity encloses it: the field can be read (an output use of its
+      // type) and stored into (an input use), and a type variable that occurs
+      // in one therefore verifies only as `inout`. Declaring it `out` would
+      // admit `Cell<integer> <: Cell<number>` and let a store of `1.5`
+      // through the widened view leave a non-integer in an `integer` field —
+      // the parameterized twin of the Counter/Gauge unsoundness
+      // (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Generic object types",
+      // ruling B13).
+      //
+      // A variable occurring only in a COMPUTED property's signature is not a
+      // stored field and keeps the ordinary variance rules; computed
+      // properties (accessor blocks) are a later phase, and when they land
+      // they attach to the declaration, not to this layout, so they will
+      // reach `visit` through their own signature case and need no change
+      // here.
+      case 'object':
+        for (const [k, v] of Object.entries(t.elements))
+          visit(v, 'inout', step(path, k), shadowed, deferredVia);
+        return;
+
       case 'reference': {
         if (t.args === undefined) return;
         const decl = declarationOf(t);
@@ -464,19 +491,27 @@ function describePath(path: string): string {
   return path === '' ? 'the body' : `\`${path}\``;
 }
 
+/** The first non-deferred occurrence of `param` at `polarity`, if any. */
+function occurrenceAt(
+  analysis: VarianceAnalysis,
+  param: string,
+  polarity: Polarity
+): { path: string } | undefined {
+  return analysis.occurrences.find(
+    (x) =>
+      x.param === param &&
+      x.deferredVia === undefined &&
+      x.polarity === polarity
+  );
+}
+
 /** One representative occurrence of `polarity`, by path. */
 function representative(
   analysis: VarianceAnalysis,
   param: string,
   polarity: Polarity
 ): string {
-  const o = analysis.occurrences.find(
-    (x) =>
-      x.param === param &&
-      x.deferredVia === undefined &&
-      x.polarity === polarity
-  );
-  return describePath(o?.path ?? '');
+  return describePath(occurrenceAt(analysis, param, polarity)?.path ?? '');
 }
 
 function violationMessage(
@@ -496,8 +531,24 @@ function violationMessage(
       : `is declared \`${declared}\` (${WORD[declared]})`;
 
   // 2. The offending occurrence(s), BY PATH.
+  //
+  // A parameter can be invariant two ways, and they need different words. The
+  // usual way is a pair of occurrences pulling in opposite directions. The
+  // other is a SINGLE occurrence in a position that is itself read/write — a
+  // stored field of an object type, or an argument of a reference whose own
+  // parameter is `inout` — where there is no output occurrence and no input
+  // occurrence to point at, and the both-directions phrasing would name "the
+  // body" twice and mislead.
+  const hasOut = occurrenceAt(analysis, p, 'out') !== undefined;
+  const hasIn = occurrenceAt(analysis, p, 'in') !== undefined;
+  const invariantPositionOnly = observed === 'inout' && !hasOut && !hasIn;
+
   let where: string;
-  if (observed === 'inout')
+  if (invariantPositionOnly)
+    where =
+      `but \`${p}\` appears in a read/write position (${representative(analysis, p, 'inout')})` +
+      `, so it can only be invariant`;
+  else if (observed === 'inout')
     where =
       `but \`${p}\` appears in both output (${representative(analysis, p, 'out')})` +
       ` and input (${representative(analysis, p, 'in')}) positions, so it can only be invariant`;
@@ -518,13 +569,17 @@ function violationMessage(
     return `${clause}\n    (${a} \`${typeName}<integer>\` is then no longer usable as ${a} \`${typeName}<number>\`)`;
   });
   // The structural alternative is listed LAST: only the author knows whether
-  // the wider subtyping is worth the split.
+  // the wider subtyping is worth the split. Offered only when there IS an
+  // occurrence of the offending polarity to move — with a read/write position
+  // as the sole occurrence (an object's stored field), moving it out is not
+  // available and the line would point at nothing.
   const offending = flip(declared); // `declared` is never `inout` here
-  lines.push(
-    `  • or keep \`${typeName}\` ${WORD[declared]} by moving the ${
-      offending === 'in' ? 'input' : 'output'
-    } occurrence (${representative(analysis, p, offending)}) out of the body — e.g. split it off into a type of its own`
-  );
+  if (!invariantPositionOnly)
+    lines.push(
+      `  • or keep \`${typeName}\` ${WORD[declared]} by moving the ${
+        offending === 'in' ? 'input' : 'output'
+      } occurrence (${representative(analysis, p, offending)}) out of the body — e.g. split it off into a type of its own`
+    );
 
   const late =
     ctx?.triggeredBy === undefined

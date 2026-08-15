@@ -14,6 +14,7 @@ import {
   TupleTypeNode,
   RecordTypeNode,
   RecordEntryNode,
+  ObjectTypeNode,
   DictionaryTypeNode,
   SetTypeNode,
   BroadcastableTypeNode,
@@ -286,6 +287,16 @@ export class Parser {
    */
   private allowWhere: boolean;
 
+  /**
+   * Whether the `object<name: T, …>` layout form may be parsed at all.
+   *
+   * `false` everywhere except the routes that declare a NAMED type, which is
+   * what enforces "an object type is legal only as the definition of a named
+   * type" without every annotation site having to check for one. See
+   * {@link parseObjectType}. The bare `object` primitive is unaffected.
+   */
+  private allowObjectType: boolean;
+
   /** True once a `where` clause has been seen (pre-scanned or parsed). The
    * declaration-time validation (`validateDeclaredType`) is gated on it, so a
    * type string without a clause pays nothing. */
@@ -305,11 +316,13 @@ export class Parser {
       typeResolver?: TypeResolver;
       allowTrailing?: boolean;
       allowWhere?: boolean;
+      allowObjectType?: boolean;
       typeVars?: readonly TypeParameter[];
     }
   ) {
     this.allowTrailing = options?.allowTrailing ?? false;
     this.allowWhere = options?.allowWhere ?? true;
+    this.allowObjectType = options?.allowObjectType ?? false;
     // A PRE-SEEDED parse (the body of a generic type alias): the alias's own
     // parameters are in scope from the first token, exactly as if an enclosing
     // `where` clause had quantified them, so `tuple<T, T>` reads `T` as a VARIABLE
@@ -349,7 +362,15 @@ export class Parser {
     this.errorAtToken(this.current, message, suggestion);
   }
 
-  errorAtToken(token: Token, message: string, suggestion?: string): never {
+  errorAtToken(
+    token: Token,
+    message: string,
+    suggestion?: string,
+    /** A machine-readable code for the failure, copied onto the thrown error
+     * so a caller that reports diagnostics can name the rule that was broken
+     * instead of matching on the message text. */
+    code?: string
+  ): never {
     let input = this.lexer.input;
     // In prefix mode, scope the displayed source (and the `set(`/`list(` … "did
     // you mean" heuristics that scan `input`) to the range consumed so far, so
@@ -385,9 +406,11 @@ export class Parser {
     const err = new Error(formattedMessage.join('\n')) as Error & {
       position?: number;
       rawMessage?: string;
+      code?: string;
     };
     err.position = token.position;
     err.rawMessage = message;
+    if (code !== undefined) err.code = code;
     throw err;
   }
 
@@ -945,6 +968,7 @@ export class Parser {
       this.parseListType() ||
       this.parseTupleType() ||
       this.parseRecordType() ||
+      this.parseObjectType() ||
       this.parseDictionaryType() ||
       this.parseSetType() ||
       this.parseBroadcastableType() ||
@@ -1563,6 +1587,59 @@ export class Parser {
     }
 
     return undefined;
+  }
+
+  /**
+   * `object` — bare, meaning "any object" — and `object<name: T, …>`, the
+   * stored-field layout of an object type.
+   *
+   * The layout form is admitted only when the parse was started with
+   * `allowObjectType`, which the routes that declare a NOMINAL type set and
+   * nothing else does. `object<…>` is legal only as the definition of a named
+   * type (`type Person = object<…>`): objects are nominal, so an inline
+   * occurrence in an annotation (`let x: object<id: string>`) would name a
+   * type nothing can ever construct or conform to, and a structural ALIAS to
+   * a layout would make two aliases of one shape interchangeable — the
+   * subtyping between object types the appendix rules out. Refusing the form
+   * here makes every other route fail closed. (The declaring route then
+   * additionally rejects an occurrence NESTED inside the body, such as
+   * `type T = list<object<…>>`, which is inline by the same rule.)
+   *
+   * The BARE spelling is unrestricted: it is an ordinary primitive type.
+   *
+   * Spec: `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Declaring an object
+   * type" (the `object-type-not-inline` paragraph).
+   */
+  private parseObjectType(): ObjectTypeNode | undefined {
+    if (this.current.type !== 'IDENTIFIER' || this.current.value !== 'object')
+      return undefined;
+
+    const objectToken = this.current;
+    this.advance(); // consume 'object'
+
+    const entries: RecordEntryNode[] = [];
+
+    if (this.match('<')) {
+      if (!this.allowObjectType)
+        this.errorAtToken(
+          objectToken,
+          'An `object<…>` type may only be the definition of a named type',
+          'Object types are nominal: declare one with `type Person = object<…>` (not `type alias`), then refer to `Person` here',
+          'object-type-not-inline'
+        );
+
+      if ((this.current as Token).type !== '>') {
+        do {
+          const entry = this.parseRecordEntry();
+          if (!entry) this.error('Expected object field');
+          entries.push(entry);
+        } while (this.match(','));
+      }
+
+      this.expect('>');
+    }
+
+    return this.createNode<ObjectTypeNode>('object', { entries });
   }
 
   private parseRecordEntry(): RecordEntryNode | undefined {

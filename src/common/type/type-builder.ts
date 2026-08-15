@@ -13,6 +13,7 @@ import {
   TensorTypeNode,
   TupleTypeNode,
   RecordTypeNode,
+  ObjectTypeNode,
   DictionaryTypeNode,
   SetTypeNode,
   BroadcastableTypeNode,
@@ -244,6 +245,19 @@ export class TypeBuilder implements ASTVisitor<Type> {
     }
 
     return { kind: 'record', elements };
+  }
+
+  /** `object` with no field list is the bare primitive ("any object"); with
+   * one it is the stored-field layout, which only ever appears as the
+   * definition of a declared nominal type. */
+  visitObjectType(node: ObjectTypeNode): Type {
+    if (node.entries.length === 0) return 'object';
+
+    const elements: Record<string, Type> = {};
+    for (const entry of node.entries)
+      elements[entry.key] = this.buildType(entry.valueType);
+
+    return { kind: 'object', elements };
   }
 
   visitDictionaryType(node: DictionaryTypeNode): Type {

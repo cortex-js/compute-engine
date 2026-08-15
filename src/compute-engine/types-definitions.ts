@@ -1474,6 +1474,32 @@ export type OperatorDefinitionFlags = {
   inspectsErrors: boolean;
 
   /**
+   * Whether every argument of an application MUST be written with its
+   * parameter's name (`Person(firstName: "Alan", age: 42)`).
+   *
+   * A positional call to such an operator is rejected with
+   * `argument-names-required`, naming the parameters in order so the author
+   * can add the names. Names make the call order-free, so a named call may
+   * list the arguments in any order.
+   *
+   * The one operator class that sets it today is the object-type constructor:
+   * an object type's fields are often several of the same type (`Person` has
+   * two adjacent `string` fields), and a positional call that transposed two
+   * of them would be accepted silently and produce a wrong object with no
+   * error anywhere (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Declaring an
+   * object type", ruling B11).
+   *
+   * The check runs in the canonicalization seam that normalizes named
+   * arguments (`box.ts`), because that is the last point at which named and
+   * positional calls are still distinguishable: normalization rewrites a
+   * named call into declaration order, after which the handlers see the same
+   * operands either way.
+   *
+   * **Default**: `false`
+   */
+  namedArgumentsRequired: boolean;
+
+  /**
    * How this operator treats an absent (`Missing`) operand, per the
    * missing-value typing design
    * (`docs/plans/2026-07-22-missing-value-typing-design.md`, §3.A). The

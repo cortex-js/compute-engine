@@ -218,6 +218,11 @@ function collectFreeVariables(
       collectFreeVariables(t.values, bound, into);
       return;
     case 'record':
+    // An object type's stored fields are ordinary type positions: a variable
+    // occurring in one is free exactly as it would be in a record field.
+    // (What differs is its VARIANCE, which `variance.ts` decides, not this
+    // walk.)
+    case 'object':
       for (const x of Object.values(t.elements))
         collectFreeVariables(x, bound, into);
       return;
@@ -292,6 +297,7 @@ function hasFreeVariables(
     case 'dictionary':
       return hasFreeVariables(t.values, bound);
     case 'record':
+    case 'object':
       for (const x of Object.values(t.elements))
         if (hasFreeVariables(x, bound)) return true;
       return false;
@@ -459,7 +465,8 @@ export function substituteTypeVariables(
       const values = substituteTypeVariables(t.values, bindings);
       return values === t.values ? t : { ...t, values };
     }
-    case 'record': {
+    case 'record':
+    case 'object': {
       let changed = false;
       const elements: Record<string, Type> = {};
       for (const [key, value] of Object.entries(t.elements)) {
@@ -723,6 +730,7 @@ function walk(
       walk(t.values, declared, forbidden, into);
       return;
     case 'record':
+    case 'object':
       for (const x of Object.values(t.elements))
         walk(x, declared, forbidden, into);
       return;
@@ -1470,6 +1478,25 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
         elements[k] = skeleton(v, covariant, membership);
       return { ...t, elements };
     }
+    case 'object': {
+      // A stored field is an INVARIANT position, so this follows the rule the
+      // `reference` case below applies to an `inout` argument rather than the
+      // record case above: in MEMBERSHIP mode a layout with a variable in any
+      // field admits no layout but itself, so the whole position reads as the
+      // top of its polarity instead. Outside membership mode the fields
+      // skeletonize in place, polarity unchanged (invariance neither flips it
+      // nor preserves it — it admits only equality, which the post-solve
+      // re-gate decides).
+      if (
+        membership &&
+        Object.values(t.elements).some((v) => hasFreeTypeVariables(v))
+      )
+        return covariant ? 'any' : 'never';
+      const elements: Record<string, Type> = {};
+      for (const [k, v] of Object.entries(t.elements))
+        elements[k] = skeleton(v, covariant, membership);
+      return { ...t, elements };
+    }
     case 'union':
     case 'intersection':
       return {
@@ -1588,7 +1615,7 @@ function elementTypeOf(type: Type): Type | undefined {
  *
  * Only the kinds the broadcast machinery actually MAPS are peeled. The lift
  * ADMISSION gate is deliberately looser than the mapping (`validate.ts` admits
- * any `couldBeCollectionOperand` at a threadable position), and the two must
+ * any `couldBeUnkeyedCollectionOperand` at a threadable position), and the two must
  * not be conflated: a `set` operand is admitted but never mapped (`Conjugate(
  * Set(1, 2))` stays inert), and a TUPLE binds whole and atomically
  * (`Negate((1, 2))` is a tuple, and `f((1, 2))` under `(T) -> T where T`
@@ -1864,14 +1891,23 @@ function walkPattern(
       );
     }
 
-    case 'record': {
+    case 'record':
+    // An object layout matches field-wise exactly as a record layout does; it
+    // only matches ANOTHER object layout, never a record, because the two are
+    // disjoint categories. Solving through a layout is defensive today: a
+    // layout is only ever a declared type's definition, and a signature that
+    // mentions an object type mentions the nominal REFERENCE, which the
+    // `reference` case handles. The mirror is here so a future position that
+    // does carry one does not fall into the silent `default` arm.
+    case 'object': {
       if (
         phase === 'lower' &&
         covariant &&
         !algebra().isSubtype(actual, groundSkeleton(pattern, true))
       )
         return false;
-      if (typeof actual !== 'object' || actual.kind !== 'record') return true;
+      if (typeof actual !== 'object' || actual.kind !== pattern.kind)
+        return true;
       let ok = true;
       for (const [key, value] of Object.entries(pattern.elements)) {
         const a = actual.elements[key];

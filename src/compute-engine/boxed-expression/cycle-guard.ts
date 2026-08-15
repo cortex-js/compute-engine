@@ -77,6 +77,22 @@ export const CycleQuery = {
   Each: 1 << 22,
   Dereference: 1 << 23,
   IsEnumerableCollection: 1 << 24,
+  /**
+   * A DETECTION-ONLY traversal of an object's stored fields, keyed on the
+   * `BoxedObject` instance itself rather than on a binding definition.
+   *
+   * The header above records the premise that a function expression is a
+   * finite tree and cannot refer back to itself, so every cycle must traverse
+   * a symbol. Objects break that premise for VALUE walks: `a.friend = b` with
+   * `b.friend = a` is a cycle in ordinary user data, with no symbol on the
+   * path. A walk that only needs to TERMINATE (printing, AsciiMath, a `has`
+   * search) takes this flag and emits an elision when it fires. A walk that
+   * needs to describe the cycle — the `.json` serialization, whose
+   * `["CircularReference", n, …]` marker carries the ancestor depth — cannot
+   * use it: this guard is a flag-only bitmask with no path tracking, so it
+   * keeps its own explicit ancestor stack instead (see `object-walk.ts`).
+   */
+  ObjectSlots: 1 << 25,
 } as const;
 
 /** A bitmask of the query kinds currently in progress for a binding. */

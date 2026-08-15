@@ -12,6 +12,7 @@ import {
   isSymbol,
   isString,
   isDictionary,
+  isObject,
 } from './type-guards.js';
 import { boundVariableBindings, sameBindingDef } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
@@ -270,6 +271,15 @@ export function same(
 ): boolean {
   if (a === b) return true;
 
+  // An OBJECT is compared by reference identity, unconditionally: it is the
+  // one mutable kind, so two objects that are equal by contents now can differ
+  // a moment later, and "are these the same object" is the only question whose
+  // answer stays true. Reaching the structural branches below would answer
+  // `true` for two distinct objects with equal slots. Having already failed
+  // the `a === b` fast path, the answer here is always `false`; it is written
+  // as the identity comparison because that is the rule, not the outcome.
+  if (isObject(a) || isObject(b)) return (a as Expression) === (b as Expression);
+
   // A symbol is compared as a symbol, never as its value: exactly one operand
   // being a symbol falls through to the type-mismatch branches below and is
   // `false`.
@@ -414,6 +424,21 @@ function eqImpl(
   inputB: number | Expression,
   prover: boolean
 ): boolean | undefined {
+  // An OBJECT operand decides by reference identity, and nothing may answer
+  // ahead of it — including the two operator `eq` handlers immediately below,
+  // which run on the RAW operands and would therefore beat the
+  // post-evaluation object branch further down. `a == obj` where `a` is a
+  // function expression whose operator supplies an `eq` handler must still be
+  // a reference comparison, not whatever that handler makes of an object it
+  // was never written for. (Appendix B, "Equality": object comparisons always
+  // decide by reference identity and are never inert.)
+  //
+  // The post-evaluation branch below is still needed and is not redundant
+  // with this one: an operand that is a CONSTRUCTOR CALL is not an object
+  // until it has been evaluated, and only that branch sees it.
+  if (isObject(a) || (typeof inputB !== 'number' && isObject(inputB)))
+    return (a as unknown) === (inputB as unknown);
+
   // We want to give a chance to the eq handler of the functions first.
   // The tier is passed to the handler: a handler that does prover-tier work
   // (e.g. relation equivalence) declines when `prover` is false.
@@ -442,6 +467,23 @@ function eqImpl(
     const b0 = inputB.isCanonical ? inputB : inputB.canonical;
     b = b0.unknowns.length > 0 ? b0 : b0.N();
   }
+
+  //
+  // The second half of the object rule: an operand that only BECAME an object
+  // by being evaluated (a constructor call) is caught here, after evaluation,
+  // and still ahead of every path that could otherwise answer for it — the
+  // operator `eq` handlers below, the numeric-difference branch, and the
+  // assumptions database. (An operand that was already an object on entry was
+  // decided by the pre-pass at the top of this function, before the two
+  // handler calls that run on the raw operands.) An `assume(a == b)` on two
+  // distinct objects must not flip the verdict — an object comparison is a
+  // fact about references, not a constraint assumptions can furnish.
+  // (Appendix B, "Equality": object comparisons always decide by reference
+  // identity and are never inert. A per-type contents-comparison opt-in — the
+  // deferred `Equatable` protocol — would carve into this branch and the
+  // pre-pass above, and nowhere else.)
+  //
+  if (isObject(a) || isObject(b)) return (a as Expression) === (b as Expression);
 
   //
   // Do we have at least one function expression?
@@ -608,6 +650,15 @@ export function cmp(
   a: Expression,
   b: number | Expression
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
+  // Objects are UNORDERED — there is no `<` on references — so an object
+  // operand answers `undefined` up front. This is a guard, not an
+  // optimization: without it an object compared against a function expression
+  // falls into the function branch below, which computes `a.sub(b)` and
+  // `.N()`s the difference on an operand that has no numeric view at all.
+  // (`docs/plans/2026-08-14-object-representation-decision.md`, "Equality":
+  // "`cmp()` keeps returning `undefined` (objects are unordered)".)
+  if (isObject(a) || (typeof b !== 'number' && isObject(b))) return undefined;
+
   if (isNumber(a)) {
     //
     // Special case when b is a plain machine number

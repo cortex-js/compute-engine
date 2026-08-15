@@ -7,9 +7,18 @@ import type {
   Scope,
 } from '../global-types';
 
-import { isDictionary, isFunction, isSymbol } from './type-guards';
+import { isDictionary, isFunction, isObject, isSymbol } from './type-guards';
 import { isValueDef, isOperatorDef } from './utils';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats';
+import {
+  accumulateObjectDeps,
+  beginObjectDeps,
+  endObjectDeps,
+  mergeObjectDeps,
+  objectDepsValid,
+  type ObjectDeps,
+} from './object-deps';
+import { containsObject } from './object-walk';
 
 /**
  * Element memoization for lazy collection operators (Tycho item 126).
@@ -115,6 +124,13 @@ interface ElementMemoCache {
    * by a recording walk that was abandoned or overflowed the cap. */
   complete: boolean;
   elements: Expression[];
+  /** The mutable objects whose FIELDS the walk read, with their versions at
+   * read time (`object-deps.ts`). A store bumps no engine version and moves no
+   * symbol dependency, so an element computed from `p.age` would otherwise be
+   * served forever; these stamps are what invalidate it. Objects reached as
+   * operands are refused outright by `snapshotDeps` — this covers the other
+   * route, where the walk reaches one through a symbol's stored value. */
+  objectDeps?: ObjectDeps;
 }
 
 /** Keyed on the boxed instance. A `WeakMap` so an unreferenced collection
@@ -462,6 +478,16 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
       eligible = false;
       return;
     }
+    // An OBJECT is mutable and identity-bearing: a memoized element derived
+    // from one would be served after a store changed the field it read, and
+    // the memo entry would keep the object alive for the engine's lifetime.
+    // Neither the epoch key nor the symbol-dependency walk can express "this
+    // object at this version", so an object operand is refused outright.
+    if (isObject(e)) {
+      if (DEBUG_DEPS) console.log('[deps] ineligible: object operand');
+      eligible = false;
+      return;
+    }
     if (isFunction(e)) {
       // A BINDER's declared binding sites (a Comprehension's indices, a
       // Series' expansion variable) are the walk's own machinery, not
@@ -580,6 +606,18 @@ export function validElementMemo(
     if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
     return undefined;
   }
+  // A store to a mutable object advances neither `_worldVersion` nor any
+  // symbol dependency's `_writeVersion`, so an entry whose elements were
+  // computed from object fields is validated against its own recorded
+  // `(object, version)` stamps.
+  if (!objectDepsValid(entry.objectDeps)) {
+    if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
+    return undefined;
+  }
+  // Serving the entry performs no field reads, so an enclosing cache-backed
+  // computation would commit dependency-free and go on serving these elements
+  // after a store. Hand the (just validated) stamps outward.
+  mergeObjectDeps(entry.objectDeps);
   if (CACHE_STATS) recordCache('elementMemo', 'hit');
   return entry;
 }
@@ -639,10 +677,16 @@ function commitRecordedWalk(
   startDeps: ElementMemoDep[] | undefined,
   suspendedWrite: boolean,
   suspendedEpochChange: boolean,
-  complete: boolean
+  complete: boolean,
+  objectDeps: ObjectDeps | undefined
 ): void {
   // A partial entry with nothing in it would only churn the cache.
   if (!complete && buffer.length === 0) return;
+  // An element that IS (or transitively holds) a mutable object is never
+  // memoized: the entry would keep it alive for as long as the collection
+  // instance lives (ruling B12), and its contents are not part of what the
+  // version stamps validate.
+  if (buffer.some(containsObject)) return;
   // PARTIAL entries are for PURE instances only. `each()` refuses partials,
   // so a later complete walk of an impure instance re-draws from scratch and
   // replaces the prefix — an `at(1)` read before and after that walk would
@@ -669,6 +713,7 @@ function commitRecordedWalk(
     deps: endDeps,
     complete,
     elements: buffer,
+    objectDeps,
   });
 }
 
@@ -701,6 +746,21 @@ export function* elementMemoRecordingStream(
   // Dependencies are static in the tree, so a pre-walk snapshot is valid; it
   // is the baseline the end-of-walk snapshot is diffed against.
   const startDeps = snapshotDeps(expr);
+  /** The mutable-object field reads made by the walk itself. A collector is
+   * opened around each PULL rather than around the whole generator: the
+   * generator suspends at every `yield`, and a collector left open across
+   * that boundary would collect the CONSUMER's reads (which belong to the
+   * consumer's own cache entry, not to this one) and would be popped out of
+   * order by any collector the consumer opens. */
+  let objectDeps: ObjectDeps | undefined;
+  const pull = (): IteratorResult<Expression, undefined> => {
+    beginObjectDeps();
+    try {
+      return iter.next();
+    } finally {
+      objectDeps = accumulateObjectDeps(objectDeps, endObjectDeps());
+    }
+  };
   // The boundary samples live OUTSIDE the try: an abrupt closure (a `break`
   // jumps from the yield straight into the `finally`) skips the loop's
   // post-yield comparison, so the `finally` must re-compare against the last
@@ -709,7 +769,7 @@ export function* elementMemoRecordingStream(
   let gen = ce._semanticVersion;
   let epoch = ce._worldVersion;
   try {
-    let result = iter.next();
+    let result = pull();
     // Bumps INSIDE `next()` are the walk's own and are absorbed; only a bump
     // observed across a yield boundary is the consumer's. Configuration
     // changes (tolerance/precision/angular unit/jit) bump
@@ -725,7 +785,7 @@ export function* elementMemoRecordingStream(
       // consumer, not the element body.
       if (ce._semanticVersion !== gen) suspendedWrite = true;
       if (ce._worldVersion !== epoch) suspendedEpochChange = true;
-      result = iter.next();
+      result = pull();
       gen = ce._semanticVersion;
       epoch = ce._worldVersion;
     }
@@ -750,7 +810,8 @@ export function* elementMemoRecordingStream(
       startDeps,
       suspendedWrite,
       suspendedEpochChange,
-      drained && !overflow
+      drained && !overflow,
+      objectDeps
     );
   }
 }
@@ -788,6 +849,12 @@ export function elementMemoFillTo(
   const elements: Expression[] = [];
   let complete = false;
   const iter = makeStream();
+  // The drain is synchronous and uninterrupted by consumer code, so ONE
+  // collector brackets the whole of it: every mutable-object field read below
+  // belongs to this entry. It is closed in the `finally` so a throw (a
+  // deadline cancellation) discards it along with the uncommitted prefix.
+  beginObjectDeps();
+  let objectDeps: ObjectDeps | undefined;
   try {
     while (elements.length < limit) {
       const r = iter.next();
@@ -798,6 +865,7 @@ export function elementMemoFillTo(
       elements.push(r.value);
     }
   } finally {
+    objectDeps = endObjectDeps();
     if (!complete) iter.return?.();
   }
 
@@ -805,13 +873,17 @@ export function elementMemoFillTo(
   // instance would be replaced by a later re-drawing complete walk, so
   // `at()` reads before and after would disagree — partials are pure-only.
   const deps = complete || expr.isPure ? snapshotDeps(expr) : undefined;
-  if (deps !== undefined) {
+  // …and the same payload rule: an element holding a mutable object is never
+  // memoized, because the entry would keep that object alive (ruling B12) and
+  // its contents are not part of what the version stamps validate.
+  if (deps !== undefined && !elements.some(containsObject)) {
     const ce = expr.engine;
     elementMemoCaches.set(expr, {
       worldVersion: ce._worldVersion,
       deps,
       complete,
       elements,
+      objectDeps,
     });
   }
   return elements;

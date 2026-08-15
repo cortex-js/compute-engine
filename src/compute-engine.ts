@@ -150,6 +150,7 @@ import {
   isString,
   isTensor,
   isDictionary,
+  isObject,
   isCollection,
   isIndexedCollection,
   numericValue,
@@ -163,6 +164,7 @@ export {
   isString,
   isTensor,
   isDictionary,
+  isObject,
   isCollection,
   isIndexedCollection,
   numericValue,
@@ -174,6 +176,7 @@ export type { BoxedNumber } from './compute-engine/boxed-expression/boxed-number
 export type { BoxedSymbol } from './compute-engine/boxed-expression/boxed-symbol.js';
 export type { BoxedFunction } from './compute-engine/boxed-expression/boxed-function.js';
 export type { BoxedString } from './compute-engine/boxed-expression/boxed-string.js';
+export type { BoxedObject } from './compute-engine/boxed-expression/boxed-object.js';
 
 // ── Global registration ─────────────────────────────────────────────
 // The self-registration slot is the only discovery channel that works with
@@ -201,6 +204,7 @@ export type { BoxedString } from './compute-engine/boxed-expression/boxed-string
   isString,
   isTensor,
   isDictionary,
+  isObject,
   isCollection,
   isIndexedCollection,
   numericValue,

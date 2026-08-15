@@ -124,7 +124,23 @@ interface MapCompileCache {
   attemptedThisDrain?: boolean;
 }
 
-/** Keyed on the (rewrapped, memo-stable) `Map` instance. */
+/**
+ * Keyed on the (rewrapped, memo-stable) `Map` instance.
+ *
+ * MUTABLE-OBJECT DISPOSITION (ruling B3's cache inventory): this cache holds a
+ * COMPILED CLOSURE, which is exactly the payload the object rules forbid — a
+ * closure that captured an object would retain it for the instance's lifetime
+ * and would read fields the cache never validated. Nothing records
+ * object-version dependencies here, so the exclusion is total and it is
+ * enforced upstream, at compilation rather than at this commit: objects have
+ * no compiled representation at all, so a body that reads a field declines
+ * (`Field`'s compile handler) and a body that constructs one declines
+ * (`type-constructors.ts`), leaving no compiled artifact to cache. A `Map`
+ * over object elements likewise fails to compile, since no compiled type
+ * admits an object. When objects DO gain a compiled representation, this cache
+ * must gain either dependency recording or an explicit object refusal — the
+ * fail-closed direction is the refusal.
+ */
 const mapCompileCaches = new WeakMap<Expression, MapCompileCache>();
 
 /** Instrumentation for tests: every path bumps a counter, so tests assert

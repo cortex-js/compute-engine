@@ -8,6 +8,7 @@ import {
   isFunction,
   isSymbol,
   isString,
+  isObject,
   numericValue,
 } from './type-guards.js';
 
@@ -209,6 +210,7 @@ const RANKS = [
   'fn',
   'power',
   'string',
+  'object',
   'other',
 ] as const;
 export type Rank = (typeof RANKS)[number];
@@ -292,6 +294,12 @@ function rank(expr: Expression): Rank {
   if (isFunction(expr)) return 'fn';
 
   if (isString(expr)) return 'string';
+
+  // Objects rank beside the other opaque values, after strings. They are
+  // unordered as a matter of semantics (`cmp()` answers `undefined` for
+  // them), so the rank exists only to give a sort a deterministic, total
+  // comparator — see the `'object'` arm of `order()`.
+  if (isObject(expr)) return 'object';
 
   return 'other';
 }
@@ -466,6 +474,16 @@ export function order(a: Expression, b: Expression): number {
       return -1;
     }
     return aComplexity - bComplexity;
+  }
+
+  // Two objects are ordered by CONSTRUCTION order (their per-engine serial),
+  // which is the only property of an object that is both total and stable:
+  // contents change under a store, so any content-derived order would make a
+  // sorted array unsort itself. Distinct objects never compare `0`, so a sort
+  // of a list of objects is deterministic; `a === b` was answered at the top.
+  if (rankA === 'object') {
+    if (isObject(a) && isObject(b)) return a._serial - b._serial;
+    return 0;
   }
 
   if (rankA === 'string') {

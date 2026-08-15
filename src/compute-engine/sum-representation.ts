@@ -268,6 +268,12 @@ export function taggedSumInType(
           if (r !== undefined) return r;
         }
         return undefined;
+      // An `object<…>` layout carries nested field types exactly as a record
+      // body does, so it is descended into identically. It reaches this walk
+      // only as the body of a named type declaration (elsewhere an object is
+      // an opaque nominal reference), but the contract stated in `default:`
+      // below requires every container-like kind to be enumerated.
+      case 'object':
       case 'record':
         for (const y of Object.values(x.elements)) {
           const r = visit(y);

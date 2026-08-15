@@ -34,6 +34,7 @@ import {
   substituteTypeVariables,
 } from './instantiate.js';
 import { typeToDedupKey } from './serialize.js';
+import { declarationOf } from './reference.js';
 import { subtypingVarianceOf } from './variance.js';
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
@@ -101,6 +102,14 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   set: [],
   tuple: [],
   record: [],
+  // Bare `object` ("any object") has no primitive subtypes and is a subtype of
+  // no primitive but `value`/`expression`/`any`. In particular it is DISJOINT
+  // from `record`, in both directions: the two are sibling categories, one
+  // immutable and structural, one mutable and nominal, and a value of one is
+  // never a value of the other (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B,
+  // ruling B6). Declared object types reach `object` through the nominal rule
+  // in `isSubtype`, not through this table.
+  object: [],
   // `record` is a `dictionary` with statically-known keys — the type tree in
   // `doc/08-guide-types.md` nests it under `dictionary`.
   dictionary: ['record'],
@@ -560,6 +569,8 @@ function typeCategory(t: Type): PrimitiveType | undefined {
       return 'tuple';
     case 'record':
       return 'record';
+    case 'object':
+      return 'object';
     case 'dictionary':
       return 'dictionary';
     case 'collection':
@@ -985,6 +996,13 @@ export function isSubtype(
     // A record is a subtype of `record`
     if (rhs === 'record') return lhs.kind === 'record';
 
+    // Bare `object` means "any object", and it is the ONE common bound every
+    // declared object type has. Relating each of them to it does not
+    // contradict "no subtyping between object types": it relates them to a
+    // single top, never to each other (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix
+    // B, ruling B6).
+    if (rhs === 'object') return isObjectType(lhs);
+
     // A dictionary is a subtype of `dictionary`. So is a record: a record is
     // a dictionary with statically-known keys (`doc/08-guide-types.md`, the
     // type tree places `record` under `dictionary`).
@@ -1310,6 +1328,40 @@ export function isSubtype(
   }
 
   //
+  // Handle Object Type
+  //
+  // Every stored field is a read/write position, so field types are
+  // INVARIANT: two layouts relate only when they have exactly the same field
+  // names and each pair of field types is mutually a subtype of the other.
+  // Width subtyping is unsound for the same reason depth subtyping is — a
+  // store through the narrower view would write a value the wider view's
+  // declared type forbids (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "No
+  // subtyping between object types", the Counter/Gauge example).
+  //
+  // This is a backstop, not the rule authors meet: an `object<…>` layout is
+  // only ever the definition of a NOMINAL reference, and nominal references
+  // never unfold to their definitions, so two declared object types are
+  // unrelated even when their layouts are identical.
+  //
+  if (lhs.kind === 'object' && rhs.kind === 'object') {
+    const lhsKeys = Object.keys(lhs.elements);
+    const rhsKeys = Object.keys(rhs.elements);
+    if (lhsKeys.length !== rhsKeys.length) return false;
+    for (const key of rhsKeys) {
+      if (!(key in lhs.elements)) return false;
+      if (!isSubtype(lhs.elements[key], rhs.elements[key])) return false;
+      if (!isSubtype(rhs.elements[key], lhs.elements[key])) return false;
+    }
+    return true;
+  }
+
+  // An object is never a record, and a record is never an object: the two are
+  // sibling categories in the lattice, not refinements of one another (ruling
+  // B6). Stated explicitly so neither falls through to a structural rule that
+  // reads the two layouts as the same shape.
+  if (lhs.kind === 'object' || rhs.kind === 'object') return false;
+
+  //
   // Handle dictionaries
   //
 
@@ -1572,6 +1624,36 @@ function isScalar(type: Type): boolean {
   return false;
 }
 
+/**
+ * Is `type` an **object** type — the bare `object` primitive, a stored-field
+ * layout, or a nominal reference declared as one?
+ *
+ * The nominal case is what makes `Person <: object` hold: a nominal reference
+ * is otherwise opaque and never unfolds to its definition, so without this it
+ * would be a subtype of nothing but itself. Reading only the DEFINITION (never
+ * the field types) keeps the answer independent of the layout, which is what
+ * "every declared object type is a subtype of bare `object` and of nothing
+ * else" requires.
+ *
+ * The `seen` set guards a definition chain that cycles through references
+ * (`type A = B` where `B` resolves back to `A`), which the resolver admits
+ * while a forward reference is unfulfilled.
+ */
+export function isObjectType(type: Type, seen?: Set<TypeReference>): boolean {
+  if (type === 'object') return true;
+  if (typeof type === 'string') return false;
+  if (type.kind === 'object') return true;
+  if (type.kind === 'reference') {
+    const decl = declarationOf(type);
+    if (seen === undefined) seen = new Set();
+    if (seen.has(decl)) return false;
+    seen.add(decl);
+    const def = decl.def;
+    return def === undefined ? false : isObjectType(def, seen);
+  }
+  return false;
+}
+
 function isCollection(type: Type): boolean {
   if (isIndexedCollection(type)) return true;
   if (typeof type === 'string')
@@ -1638,8 +1720,18 @@ function peeledRowMatches(lhs: ListType, elements: Type): boolean {
   );
 }
 
+/**
+ * An object is a value: it is inert data, not an operator or a symbol, so it
+ * inherits `value` (and through it `expression`) exactly as scalars and
+ * collections do. Admitting object types here is what lets an object satisfy a
+ * `value`- or `expression`-typed parameter or binding, which most library
+ * signatures and many annotations use. Note that objects reach this predicate
+ * only through `isObjectType`, which does NOT relate two object types to each
+ * other — the single common bound stays bare `object`
+ * (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, ruling B6).
+ */
 function isValue(type: Type): boolean {
-  return isScalar(type) || isCollection(type);
+  return isScalar(type) || isCollection(type) || isObjectType(type);
 }
 
 function isFunction(type: Type): boolean {
@@ -1739,6 +1831,10 @@ const LOSSY_SUPERTYPE = new Set<string>([
   'set',
   'tuple',
   'record',
+  // Widening two unrelated object types to bare `object` loses everything the
+  // types said, so `widen` prefers an explicit union — the same call the other
+  // container categories make.
+  'object',
   'dictionary',
   'map',
   'any',
@@ -1899,6 +1995,7 @@ const SUPERTYPE_PROBE_ORDER: PrimitiveType[] = [
   'number',
   'list',
   'record',
+  'object',
   'dictionary',
   'set',
   'tuple',

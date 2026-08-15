@@ -83,6 +83,7 @@ import {
   isDictionary,
   isFunction,
   isNumber,
+  isObject,
   isString,
   isSymbol,
   sym,
@@ -791,7 +792,13 @@ function fieldBearingType(
       t === 'expression' ||
       t === 'missing' ||
       // The BARE kinds are field-bearing but carry no field information.
+      // `object` belongs here for the same reason `record` does: it promises
+      // fields exist without naming them, so a property read on a value
+      // annotated bare `object` must DEFER to the runtime rather than be
+      // rejected statically (the `Field` evaluate handler reads it correctly
+      // via its `isObject(base)` arm).
       t === 'record' ||
+      t === 'object' ||
       t === 'dictionary' ||
       t === 'tuple'
     )
@@ -4310,6 +4317,36 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const property = (): Expression | undefined =>
         evaluateProtocolProperty(ce, base, name, { numericApproximation });
 
+      // A MUTABLE OBJECT: a pure load of the stored, already-evaluated value.
+      // Dispatching on the VALUE's kind rather than on its static type is what
+      // makes this exact: the layout is pinned on the instance at
+      // construction, so the slots are the authority on what the object has,
+      // whatever a later redeclaration did to the type of the same name.
+      //
+      // The read runs no user code and evaluates nothing (stores write
+      // evaluated values), so it carries no effect label and needs none —
+      // its cache consequence travels the per-object version dependency
+      // channel instead, which `_field()` reports into. Objects are not
+      // collections and this is not element access, so nothing here delegates
+      // to `At` the way the dictionary arm below does.
+      if (isObject(base)) {
+        const value = base._field(name);
+        if (value !== undefined) return value;
+        // The field list is fixed at declaration, so a name the layout does
+        // not carry is a defect, not an out-of-band access: no absence marker.
+        // The protocol-property route gets its turn first, exactly as it does
+        // on the record and named-tuple arms below — a conforming object may
+        // answer a name that is not one of its stored fields — and the error
+        // that follows names what IS stored.
+        return (
+          property() ??
+          ce.error(
+            ['unknown-field', name, [...base._slots.keys()].join(', ')],
+            base.typeName
+          )
+        );
+      }
+
       // An ABSENT base propagates the marker, exactly as a chained `At` does
       // (`d.zz.x` ≡ `d["zz"]["x"]` even through the miss).
       if (isAbsentValue(base)) return base;
@@ -4327,11 +4364,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return (
           property() ??
           ce.typeError(
-            parseType('record | dictionary | tuple'),
+            parseType('record | object | dictionary | tuple'),
             base.type,
             base
           )
         );
+
+      // A settled OBJECT type whose VALUE is not (yet) a `BoxedObject` — an
+      // unresolved symbol, a call that has not been evaluated. Only the
+      // instance's own slots can answer a field read, so stay symbolic rather
+      // than guessing from the layout; the branch above answers as soon as a
+      // real object arrives.
+      if (rt.kind === 'object') return undefined;
 
       if (rt.kind === 'record') {
         // A tagged nominal value: the payload is the single dictionary
@@ -4374,6 +4418,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const t = base.type.type;
       const rt = fieldBearingType(t);
       if (rt === undefined || rt === 'none') return undefined;
+      // A MUTABLE OBJECT declines, fail-closed: objects have no compiled
+      // representation at all yet (their constructor's own compile handler
+      // declines for the same reason), and lowering a field read to a plain
+      // property access would silently produce a value with none of an
+      // object's identity or mutation semantics. The engine⇄compiled boundary
+      // for objects is a later phase.
+      if (rt.kind === 'object') return undefined;
 
       const isNominal =
         typeof t === 'object' && t.kind === 'reference' && t.alias !== true;

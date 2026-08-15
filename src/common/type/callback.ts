@@ -102,7 +102,8 @@ export function deepEraseCallbackTypes(t: Type): Type {
       const values = deepEraseCallbackTypes(t.values);
       return values === t.values ? t : { ...t, values };
     }
-    case 'record': {
+    case 'record':
+    case 'object': {
       let changed = false;
       const elements: Record<string, Type> = {};
       for (const [key, value] of Object.entries(t.elements)) {

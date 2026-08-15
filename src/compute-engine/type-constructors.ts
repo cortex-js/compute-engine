@@ -1,4 +1,5 @@
 import type {
+  EffectSet,
   FunctionSignature,
   NamedElement,
   RecordType,
@@ -10,6 +11,7 @@ import { isSubtype, provablyDisjoint } from '../common/type/subtype.js';
 import { groundSkeleton } from '../common/type/instantiate.js';
 import { applyTypeReference, declarationOf } from '../common/type/reference.js';
 import { subtypingVarianceOf } from '../common/type/variance.js';
+import { assertObjectTypeNotInline } from '../common/type/parse.js';
 
 import type {
   BoxedDefinition,
@@ -165,6 +167,62 @@ function removeMintedTypeConstructor(
 }
 
 /**
+ * An `object<…>` LAYOUT is legal in exactly one position: as the WHOLE
+ * definition body of a NOMINAL named type. Two positions are rejected here:
+ *
+ * - the body of a structural ALIAS. Object types are nominal, and two aliases
+ *   of one layout would be interchangeable — the subtyping between object
+ *   types `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B ("No subtyping between
+ *   object types") rules out.
+ * - a layout NESTED anywhere else — inside the body (`list<object<a:
+ *   integer>>`, `object<…> | integer`) or as a FIELD type of a layout body.
+ *   That names a second, unnamed object type: no constructor is minted for it
+ *   and no value can inhabit it.
+ *
+ * The TEXT route enforces the same rule while parsing (the `allowObjectType`
+ * option and `assertObjectTypeNotInline()`, `common/type/parse.ts`), so a
+ * declaration written as a type string never reaches here in a rejected shape.
+ * This check covers the route that has no text to parse: a host handing
+ * `declareType()` a structural `Type` (`{ kind: 'object', elements: … }`) or a
+ * `BoxedType`. Without it `ce.declareType('P', {kind:'object', …},
+ * {alias: true})` minted an object constructor for a transparent alias.
+ *
+ * Thrown before any mutation this module makes, so the caller's rollback puts
+ * the type half back and the declaration stays atomic.
+ *
+ * `declareType()` calls it directly as well, for the structural inputs it
+ * accepts: minting is what brings the check here, and `mint: false` (the
+ * internal escape hatch, `engine-declarations.ts`) skips minting — so a
+ * declaration made that way would install an unchecked layout.
+ */
+export function assertObjectLayoutIsNominalBody(
+  alias: boolean,
+  body: Type
+): void {
+  // A NOMINAL declaration whose body is a layout is the legal spelling, so
+  // only its fields remain to be checked; an ALIAS may not spell a layout at
+  // all, so the body itself is checked too. `assertObjectTypeNotInline`
+  // (`common/type/parse.ts`) applies exactly the first rule — it treats a
+  // layout body as legal and walks its fields — so the alias case is handled
+  // by rejecting a layout body before delegating. Sharing that walk is
+  // deliberate: it answers the same question for the type-TEXT route, and two
+  // copies would drift the first time a composite `Type` kind is added.
+  const bodyIsLayout = typeof body === 'object' && body.kind === 'object';
+  if (!(alias && bodyIsLayout)) {
+    assertObjectTypeNotInline(body);
+    return;
+  }
+
+  const err = new Error(
+    'object-type-not-inline: an `object<…>` type may only be the definition of a named type. Object types are nominal: declare one with `type Person = object<…>` (not `type alias`), then refer to `Person` here'
+  ) as Error & { code?: string; rawMessage?: string };
+  err.code = 'object-type-not-inline';
+  err.rawMessage =
+    'An `object<…>` type may only be the definition of a named type';
+  throw err;
+}
+
+/**
  * D4/D4b: the constructor signature derived from a type's definition body.
  *
  * - `tuple` body → n-ary, one parameter per slot; named slots become named
@@ -219,6 +277,33 @@ function deriveConstructorSignature(
   if (body === 'nothing') return close({ kind: 'signature', args: [], result });
   if (typeof body === 'object') {
     if (body.kind === 'record') return undefined;
+    // An OBJECT body mints an n-ary constructor with one NAMED parameter per
+    // stored field, in declaration order: `Person: (firstName: string,
+    // lastName: string, age: integer) state -> Person`. Three things follow
+    // from that shape, all required by Appendix B:
+    //
+    // - Every field is a parameter and none is optional, so an object never
+    //   exists half-initialized and "reading a field that was never set"
+    //   needs no rule (ruling B7).
+    // - The parameters carry NAMES, which is what lets the named-argument
+    //   machinery permute a call written in any order (Appendix C). Names are
+    //   also REQUIRED here — see the `namedArgumentsRequired` flag set by
+    //   `mintTypeConstructor`.
+    // - The arrow carries `state`: constructing an object mints a fresh
+    //   identity, so re-running the call is observable and the application
+    //   must never be folded or served from a cache ("Every construction
+    //   makes a new object").
+    if (body.kind === 'object') {
+      const args: NamedElement[] = Object.entries(body.elements).map(
+        ([name, type]) => ({ name, type })
+      );
+      return close({
+        kind: 'signature',
+        args,
+        effects: ['state'],
+        result,
+      });
+    }
     if (body.kind === 'tuple') {
       if (alias && body.elements.some((x) => x.name !== undefined))
         return undefined;
@@ -263,6 +348,11 @@ export function mintTypeConstructor(
   ref: TypeReference,
   body: Type
 ): void {
+  // First, and before any mutation: an `object<…>` layout may only be the
+  // whole body of a nominal type. The text route already refused every other
+  // position while parsing; this catches the structural one.
+  assertObjectLayoutIsNominalBody(ref.alias === true, body);
+
   // A re-registration replaces both halves together: drop the previous minted
   // constructor even when the new body mints none (e.g. a body edited from a
   // tuple to a record).
@@ -286,12 +376,29 @@ export function mintTypeConstructor(
 
   const nAry = typeof body === 'object' && body.kind === 'tuple';
 
+  // An OBJECT body: the fields, in declaration order. Captured here so the
+  // evaluate handler below can pair them with the operands it receives — which
+  // arrive in exactly this order, whether the call was written positionally
+  // (rejected, see `namedArgumentsRequired`) or by name (permuted into
+  // declaration order by the canonicalization seam).
+  const objectFields: string[] | undefined =
+    typeof body === 'object' && body.kind === 'object'
+      ? Object.keys(body.elements)
+      : undefined;
+
   const def: OperatorDefinition = {
     description: alias
       ? `Checked identity constructor for the type alias \`${name}\``
       : `Constructor for the type \`${name}\``,
-    // Construction neither reads nor writes anything: an empty effects slot.
-    pure: true,
+    // Constructing an OBJECT mints a fresh identity, which two calls with
+    // identical arguments can tell apart (`==` answers reference identity), so
+    // it carries the `state` label and everything the effects system does with
+    // an impure application follows: never constant-folded, never served from
+    // an evaluation cache, never memoized. Every other constructor neither
+    // reads nor writes anything: an empty effects slot.
+    ...(objectFields === undefined
+      ? { pure: true }
+      : { effects: ['state'] as EffectSet }),
     // A pure container: it STORES its operands, and no position ever invokes a
     // function-valued one. (Same reading as `Tuple`/`KeyValuePair`.)
     invokes: false,
@@ -308,7 +415,51 @@ export function mintTypeConstructor(
     ...(typeParams === undefined ? { type: () => (alias ? body : ref) } : {}),
   };
 
-  if (alias) {
+  if (objectFields !== undefined) {
+    // An object constructor is the one constructor that BUILDS something: a
+    // fresh `BoxedObject` with the evaluated arguments in its slots. (Every
+    // other nominal constructor's value IS its own application — see the
+    // comment on `def.eq` below.) Operands arrive evaluated (`lazy: false`),
+    // which is the same rule a field store follows: what is stored is the
+    // evaluated value, never the unevaluated expression.
+    //
+    // No `eq` handler: two applications of this constructor are NOT equal
+    // operand-wise. `constructorEq`'s injectivity reading is right for an
+    // inert tagged value and wrong here — each application makes its own
+    // object, and the comparison tiers answer reference identity on the
+    // constructed values (`compare.ts`), which is what "two constructor calls
+    // make two different objects" means.
+    //
+    // Argument names are REQUIRED (ruling B11): an object type's fields are
+    // often several of the same type, so a positional call that transposed two
+    // of them would be accepted in silence. The rejection happens in the
+    // canonicalization seam, the last place a positional call is still
+    // distinguishable from a permuted named one.
+    def.namedArgumentsRequired = true;
+    const fields = objectFields;
+    def.evaluate = (ops, { engine, expression }) => {
+      // DECLINE a call whose operand count is not the field count, leaving the
+      // application unevaluated. Validation normally rejects such a call before
+      // it reaches here (every field is a required, named parameter — see
+      // `deriveConstructorSignature`), but this handler is the one place an
+      // object VALUE is minted, so it also has to be the place that refuses to
+      // mint a malformed one: pairing `n` operands with `m` fields positionally
+      // would store `undefined` in a slot, and a slot is required to hold an
+      // evaluated expression — the `.json` walk and the AsciiMath printer both
+      // call methods on slot values and would throw on the hole.
+      if (ops.length !== fields.length) return undefined;
+      const slots = new Map<string, Expression>();
+      for (let i = 0; i < fields.length; i++) slots.set(fields[i], ops[i]);
+      // The application's own type is what gets PINNED on the value. For an
+      // unparameterized type that is just the nominal reference, which
+      // resolving the name would have produced anyway; for a PARAMETERIZED
+      // one it is the applied reference the call site solved for
+      // (`Cell<integer>`), which the name alone cannot reproduce — resolving
+      // `Cell` yields the bare declaration record, and a value carrying that
+      // matches no use of the type.
+      return engine._object(name, slots, undefined, expression?.type);
+    };
+  } else if (alias) {
     // The identity: `pt(1, 2)` → the plain tuple `(1, 2)`; a unary body
     // returns the checked operand itself. Operands arrive evaluated
     // (`lazy: false`), and an invalid application never reaches here.
@@ -354,6 +505,11 @@ export function mintTypeConstructor(
   // other constructor, this same sum's variants included when they are
   // representation-disjoint, keeps the erasure above verbatim.
   def.compile = (args, compile, context) => {
+    // An OBJECT constructor declines, fail-closed: compiled targets have no
+    // object representation yet (the engine⇄compiled boundary for objects is
+    // Appendix B ruling B9, a later phase), and erasing the construction would
+    // silently produce a value with none of an object's identity semantics.
+    if (objectFields !== undefined) return undefined;
     const info = sumVariantInfo(ce, name);
     const js = (context?.language ?? 'javascript') === 'javascript';
     if (info?.policy === 'tagged') {

@@ -83,7 +83,10 @@ import {
   recordTypeProvenance,
   currentBoxingEpoch,
 } from './boxed-expression/type-provenance.js';
-import { isSymbol } from './boxed-expression/type-guards.js';
+import {
+  adoptsForeignEngineObject,
+  isSymbol,
+} from './boxed-expression/type-guards.js';
 import {
   InferenceRollbackFrame,
   activeRollbackFrame,
@@ -123,6 +126,7 @@ import { aggregateHotHeadDispatch } from './boxed-expression/rule-index.js';
 import { validatePattern } from './boxed-expression/boxed-patterns.js';
 import { BoxedString } from './boxed-expression/boxed-string.js';
 import { BoxedFunction } from './boxed-expression/boxed-function.js';
+import { makeObject } from './boxed-expression/boxed-object.js';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression.js';
 import './boxed-expression/init-lazy-refs.js';
 import { _BoxedOperatorDefinition } from './boxed-expression/boxed-operator-definition.js';
@@ -3264,7 +3268,32 @@ export class ComputeEngine implements IComputeEngine {
   ): Expression {
     const canonical = options?.canonical ?? true;
 
+    // `_fn` constructs a `BoxedFunction` directly, so it does not pass through
+    // `boxFunctionInternal` and would otherwise be an unguarded cross-engine
+    // ingress: an operand that is, or transitively contains, an object from
+    // another engine would be adopted into this engine's expression with its
+    // typing and invalidation still wired to the other one. (Invariant 8 of
+    // `docs/plans/2026-08-14-object-representation-decision.md`,
+    // "Cross-engine ingress".) The check is one boolean read until an object
+    // has been constructed somewhere in the process.
+    if (adoptsForeignEngineObject(ops, this))
+      return this.error('object-foreign-engine');
+
     return new BoxedFunction(this, name, ops, { ...options, canonical });
+  }
+
+  /**
+   * Construct an object of the nominal type `typeName`. See
+   * {@link IComputeEngine._object} — this is the only path that mints one.
+   * @internal
+   */
+  _object(
+    typeName: string,
+    slots: Iterable<readonly [string, Expression]> | Record<string, Expression>,
+    metadata?: Metadata,
+    pinnedType?: BoxedType
+  ): Expression {
+    return makeObject(this, typeName, slots, metadata, pinnedType);
   }
 
   /**

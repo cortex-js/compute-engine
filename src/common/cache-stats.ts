@@ -91,40 +91,14 @@ export function recordBump(kind: BumpKind): void {
   bumps[kind] += 1;
 }
 
-/**
- * A drop-in replacement for `cachedValue()` (boxed-expression/cache.ts) that
- * classifies the read. Replicates its logic EXACTLY — including the
- * stamp-before-compute order, which the two call sites (`_sgn`, `_type`)
- * tolerate — so behavior is identical with stats on or off. `same` is only
- * consulted on a generation miss with a previous value, to detect a wasted
- * (same-answer) recompute.
- */
-export function instrumentedCachedValue<T>(
-  cls: CacheClass,
-  v: { value: T | null; generation: number | undefined },
-  generation: number | undefined,
-  fn: () => T,
-  same: (a: T, b: T) => boolean
-): T {
-  if (v.generation === generation && v.value !== null) {
-    recordCache(cls, generation === undefined ? 'hitConstant' : 'hit');
-    return v.value;
-  }
-
-  let ev: CacheEvent;
-  if (v.value === null) ev = 'missCold';
-  else if (generation === undefined || v.generation === undefined)
-    ev = 'missKeyShape';
-  else ev = 'missGeneration';
-
-  const prev = v.value;
-  v.generation = generation;
-  v.value = fn();
-  recordCache(cls, ev);
-  if (ev === 'missGeneration' && prev !== null && same(prev, v.value))
-    recordCache(cls, 'missGenerationWasted');
-  return v.value;
-}
+// The instrumented mirror of `cachedValue()` used to live here, as a
+// stats-recording clone of that function. It was folded INTO `cachedValue()`
+// itself (`boxed-expression/cache.ts`, the optional `stats` argument) once the
+// helper grew object-version dependency tracking: a clone would have had to
+// mirror the hit validation, the hit-time dependency merge, the
+// payload-contains-an-object refusal and the throw-commits-nothing rule, and a
+// mirror that drifts is a correctness hole that only appears under
+// `CE_CACHE_STATS`. One implementation, one behavior, stats on or off.
 
 export type CacheStatsSnapshot = {
   caches: Record<CacheClass, CacheCounters>;

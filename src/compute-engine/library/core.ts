@@ -1935,6 +1935,43 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], options) => x?.evaluate(options),
     },
 
+    Object: {
+      description:
+        'Provenance head for the snapshot of a mutable object: ' +
+        '`["Object", <record>, "\'TypeName\'"]`. The record holds the ' +
+        "object's stored fields at the moment it was serialized; the second " +
+        'operand names the nominal type the object had. Not a constructor ' +
+        'and not an ascription — it wraps data, it does not make an object.',
+      complexity: 9000,
+      // The type-name operand is a STRING (`"'Person'"` in MathJSON), the
+      // shape the object walk emits, so nothing here risks auto-declaring a
+      // type name as a variable and this definition needs no `lazy`/canonical
+      // handler. It is optional: the form stays valid without it.
+      signature: '(any, string?) -> unknown',
+      // The head is PROVENANCE, not an ascription: the static type is the
+      // wrapped record's, never the named nominal object type. Reporting the
+      // object type would be the `Typed` mistake the spec review killed — a
+      // reloaded snapshot would statically be a `Person` while the value is a
+      // record, admitting object-only dispatch and property stores that then
+      // fail or corrupt at runtime. (`docs/TYPE_SYSTEM_ROADMAP.md`
+      // Appendix B, "Serialization".)
+      //
+      // What makes that contract say something is the SHAPE of the body the
+      // object walk emits: the `["Dictionary", ["KeyValuePair", …], …]`
+      // operator form, which re-boxes as a `BoxedDictionary` typed from its
+      // keys (`record<name: string, age: finite_integer>`). A body with no
+      // operator definition — `["Record", …]`, which no library declares —
+      // would re-box as an inert application typed `unknown`, and this
+      // handler would report `unknown` for every snapshot.
+      type: ([x]) => x?.type ?? 'unknown',
+      // Transparent: it yields the wrapped record. Reconstruction is
+      // deliberately NOT the evaluation semantics — a snapshot must never
+      // silently mint a fresh object, so this handler never constructs one
+      // (`ce._object()` is the only path that does). Re-boxing an object's
+      // `.json` is a ONE-WAY door: what comes back is data.
+      evaluate: ([x], options) => x?.evaluate(options),
+    },
+
     Text: {
       description:
         'A sequence of strings, annotated expressions and other Text expressions',

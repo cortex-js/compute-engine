@@ -214,6 +214,14 @@ export function typeToString(type: Type, precedence = 0): string {
       result = `record<${elements}>`;
       break;
 
+    case 'object':
+      // The stored-field layout of an object type: the same surface form as a
+      // record, with the `object` head naming the mutable/nominal category.
+      result = `object<${Object.entries(type.elements)
+        .map(([key, value]) => `${key}: ${typeToString(value)}`)
+        .join(', ')}>`;
+      break;
+
     case 'dictionary':
       result = `dictionary<${typeToString(type.values)}>`;
       break;
@@ -343,6 +351,8 @@ function getPrecedence(kind: string): number {
     case 'list':
       return LIST_PRECEDENCE;
     case 'record':
+    // Bracketed exactly like `record<…>`, so it never needs parentheses.
+    case 'object':
       return RECORD_PRECEDENCE;
     case 'dictionary':
       return DICTIONARY_PRECEDENCE;

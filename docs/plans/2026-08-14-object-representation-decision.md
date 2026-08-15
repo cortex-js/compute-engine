@@ -61,7 +61,17 @@ unconditionally, at every tier.
     `["Object", <record>, "'TypeName'"]` with the record produced by
     the shared structural walk (stored fields only, lazy recipes
     pass through, `CircularReference` depth+type markers on
-    back-edges). No provisional shape ever ships (review finding:
+    back-edges). **The record is emitted as the `Dictionary` operator
+    form** (`["Dictionary", ["KeyValuePair", …], …]`), amended
+    2026-08-14: `Record` has no operator definition anywhere in the
+    engine, so a `["Record", …]` payload is an inert application whose
+    type is `unknown` — which would make the `Object` head's
+    "types as its record operand" contract vacuous. `Dictionary` is a
+    real operator whose boxed value derives a `record<…>` type from
+    its identifier keys, so the wrapper's contract becomes meaningful
+    and the reloaded snapshot is a genuine record-typed value. See the
+    `RecordFrom` entry in `ROADMAP.md` for the shipped defect this
+    uncovered and its consequences for Appendix B Phase 3. No provisional shape ever ships (review finding:
     `.json` is public behavior on a mutable, possibly cyclic value —
     an unspecified interim form would leak). Consequence for
     sequencing: the structural walk is a Phase 1 deliverable (steps

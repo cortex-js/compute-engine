@@ -42,6 +42,7 @@ import {
   isSymbol,
   isString,
   isFunction,
+  isObject,
   containsContinuationOperand,
 } from './type-guards.js';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils.js';
@@ -1211,6 +1212,17 @@ function serializeJsonExpression(
       dict[key] = serializeJson(ce, value, options);
     return { dict };
   }
+
+  // Is it an object (the mutable value kind)?
+  //
+  // Its `.json` IS the conversion: the `["Object", <record>, "'TypeName'"]`
+  // form over the shared structural walk, computed fresh (never memoized —
+  // the value is mutable) and cycle-marked. One walk, one mechanism, so the
+  // record here is byte-identical to what `RecordFrom(object)` returns. The
+  // arm exists ahead of the `.json` fallback at the bottom because this is
+  // where the serializer's `objects: 'record' | 'reject'` option will be
+  // honored (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Serialization").
+  if (isObject(expr)) return expr.json;
 
   // Is it a string?
   if (isString(expr)) return serializeJsonString(expr.string, options);

@@ -180,6 +180,9 @@ type OperatorDefinitionFlags = {
   scoped: boolean;
   broadcastable: boolean;
   inspectsErrors: boolean;
+  /** True when every argument must be written with its parameter's name (an
+   * object-type constructor). See `types-definitions.ts`. */
+  namedArgumentsRequired: boolean;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
   missingStrip: 'all' | number[];
   associative: boolean;
@@ -2687,6 +2690,60 @@ export type ExpressionInput =
   | readonly [MathJsonSymbol, ...ExpressionInput[]]
   | MathJsonExpression
   | Expression;
+
+/**
+ * Narrowed interface for **object** expressions — the engine's one mutable
+ * value kind (a reference to a record whose stored fields can be changed in
+ * place).
+ *
+ * Obtained via `isObject()`. The instance IS the heap record: host reference
+ * identity of the expression is object identity, so every comparison tier
+ * (`isSame`, `isEqual`, `isIdenticallyEqual`) answers `a === b` for objects,
+ * and no code path may clone, rebuild or re-box one.
+ *
+ * The members below are engine-internal (they are how the property-access
+ * operators and the serialization walk reach the slots); user code reads and
+ * writes fields through the language's property syntax, not through these.
+ *
+ * Design: `docs/plans/2026-08-14-object-representation-decision.md`;
+ * semantics: `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B.
+ *
+ * @category Boxed Expression
+ */
+export interface ObjectInterface {
+  /** The name of the nominal type this object was constructed with. The
+   * resolved type itself is pinned on the instance and returned by `.type`;
+   * this is the name that rides serialization (the `Object` provenance head
+   * and `CircularReference` markers). */
+  readonly typeName: string;
+
+  /** The stored fields, in declared (insertion) order. Read-only from the
+   * outside: `_store()` is the sole writer.
+   * @internal */
+  readonly _slots: ReadonlyMap<string, Expression>;
+
+  /** Per-object cache currency: starts at 0 and increments on every store
+   * that actually changes a slot. A cached result derived from this object's
+   * fields is valid only while the counter it recorded still matches.
+   * @internal */
+  readonly _version: number;
+
+  /** Per-engine construction serial, assigned once. Identity-based `hash`
+   * derives from it; it never depends on contents.
+   * @internal */
+  readonly _serial: number;
+
+  /** Read a stored field: a pure load of an already-evaluated value, running
+   * no user code. `undefined` if the object has no such field.
+   * @internal */
+  _field(name: string): Expression | undefined;
+
+  /** The sole slot writer. Storing the identical node is a total no-op (no
+   * version bump); any other store writes the slot and increments
+   * `_version`.
+   * @internal */
+  _store(name: string, value: Expression): void;
+}
 
 /** Interface for dictionary-like structures.
  * Use `isDictionary()` to check if an expression is a dictionary.

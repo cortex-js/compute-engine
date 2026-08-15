@@ -456,6 +456,7 @@ export function typeContainsMissing(t: Readonly<Type>): boolean {
     case 'dictionary':
       return typeContainsMissing(t.values);
     case 'record':
+    case 'object':
       return Object.values(t.elements).some((x) => typeContainsMissing(x));
     default:
       return false;
@@ -989,6 +990,7 @@ function containsArm(
     case 'tuple':
       return t.elements.some((e) => containsArm(e.type, visited));
     case 'record':
+    case 'object':
       return Object.values(t.elements).some((x) => containsArm(x, visited));
     case 'dictionary':
       return containsArm(t.values, visited);

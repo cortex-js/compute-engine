@@ -46,6 +46,7 @@ import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
 import {
   hasNamedArguments,
   inlineLiteralSignature,
+  namesRequiredOperands,
   normalizeNamedArguments,
   protocolMemberParts,
   qualifiedFieldParts,
@@ -95,7 +96,14 @@ import {
 } from '../function-utils.js';
 import { canonicalNegate } from './negate.js';
 import { canonical } from './canonical-utils.js';
-import { isNumber, isFunction, isSymbol } from './type-guards.js';
+import {
+  isNumber,
+  isFunction,
+  isSymbol,
+  isDictionary,
+  isObject,
+  adoptsForeignEngineObject,
+} from './type-guards.js';
 import { symbolAtSite, replaceAtSite } from './binding-sites.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
 import { rebindToBindings } from './binders.js';
@@ -268,6 +276,14 @@ function boxFunctionInternal(
   }
 
   const structural = options.structural ?? false;
+
+  // An operand that IS, or that transitively CONTAINS, an object from another
+  // engine cannot be adopted into this engine's expression (see the same check
+  // in `boxInternal`). In a session that has never constructed an object this
+  // is a single boolean read for the whole operand list; only once an object
+  // exists anywhere does the per-operand walk run.
+  if (adoptsForeignEngineObject(ops, ce))
+    return ce.error('object-foreign-engine');
 
   //
   // Hold
@@ -646,6 +662,17 @@ function boxInternal(
   if (expr instanceof NumericValue) return fromNumericValue(ce, expr);
 
   if (expr instanceof _BoxedExpression) {
+    // An object belongs to the engine that constructed it — its pinned type,
+    // its state events and its cache dependencies all speak to that engine —
+    // so adopting a foreign one here would produce an expression whose
+    // invalidation is wired to the wrong place. This route adopts the
+    // pre-boxed expression WHOLE, so the check has to be transitive: a `List`
+    // or dictionary holding a foreign object is not itself an object, yet
+    // adopting it retains the object all the same. Refuse as a value, the
+    // errors-as-values convention of every expression route.
+    if (adoptsForeignEngineObject([expr], ce))
+      return ce.error('object-foreign-engine');
+
     // While rebuilding after a devolved shadow, an operand boxed before the
     // shadow existed still carries the stale operator binding (see
     // `rebindDevolvedSymbol`). A normal pass never asks.
@@ -1449,6 +1476,32 @@ function makeCanonicalFunctionCore(
       metadata,
       canonical: true,
     });
+  }
+
+  //
+  // An operator that REQUIRES named arguments (an object-type constructor —
+  // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, ruling B11) rejects any argument
+  // written positionally.
+  //
+  // Checked HERE, before the permutation below, because that is the last point
+  // at which a named call and a positional one are still distinguishable:
+  // normalization rewrites a named call into declaration order, and from then
+  // on every consumer sees the same operand list either way. A MIXED call is
+  // rejected too (`Person("Alan", lastName: "Turing")`): naming the arguments
+  // is what makes the call order-free, and one positional argument puts a slot
+  // back under the control of its position.
+  //
+  if (
+    ops.length > 0 &&
+    !isValueDef(def) &&
+    def.operator.namedArgumentsRequired
+  ) {
+    const blamed = namesRequiredOperands(ce, ops, def.operator.signature.type);
+    if (blamed !== undefined)
+      return new BoxedFunction(ce, name, flatten(semiCanonical(ce, blamed)), {
+        metadata,
+        canonical: true,
+      });
   }
 
   //

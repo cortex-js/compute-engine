@@ -43,25 +43,43 @@ function deepFreeze<T>(obj: T): T {
   return obj;
 }
 
+/**
+ * Options accepted by the type-string entry points.
+ *
+ * `allowObjectType` admits the `object<name: T, …>` layout form, which is
+ * legal ONLY as the definition of a named type (`type Person = object<…>`).
+ * The routes that declare a type set it; every other route leaves it off and
+ * the parse refuses the form with an `object-type-not-inline` error. The bare
+ * `object` primitive is unaffected either way. See
+ * `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Declaring an object type".
+ */
+export interface ParseTypeOptions {
+  allowObjectType?: boolean;
+}
+
 export function parseType(
   s: undefined,
   typeResolver?: TypeResolver,
-  typeVars?: readonly TypeParameter[]
+  typeVars?: readonly TypeParameter[],
+  options?: ParseTypeOptions
 ): undefined;
 export function parseType(
   s: TypeString | Type,
   typeResolver?: TypeResolver,
-  typeVars?: readonly TypeParameter[]
+  typeVars?: readonly TypeParameter[],
+  options?: ParseTypeOptions
 ): Type;
 export function parseType(
   s: TypeString | Type | undefined,
   typeResolver?: TypeResolver,
-  typeVars?: readonly TypeParameter[]
+  typeVars?: readonly TypeParameter[],
+  options?: ParseTypeOptions
 ): Type | undefined;
 export function parseType(
   s: TypeString | Type | undefined,
   typeResolver?: TypeResolver,
-  typeVars?: readonly TypeParameter[]
+  typeVars?: readonly TypeParameter[],
+  options?: ParseTypeOptions
 ): Type | undefined {
   if (s === undefined) return undefined;
   // Check if it's a primitive type or already a Type object
@@ -69,6 +87,15 @@ export function parseType(
 
   // Parse the type string
   if (typeof s !== 'string') return undefined;
+
+  // A parse that admits the `object<…>` layout is a DECLARATION body, never a
+  // hot path, and it reads the same text differently from every other route —
+  // so it neither consults nor fills the string-keyed cache, and it skips the
+  // resolver-less first attempt (which would refuse the form and throw).
+  if (options?.allowObjectType === true)
+    return assertObjectTypeNotInline(
+      parseTypeUncached(s, typeResolver, typeVars, options).type
+    );
 
   // A PRE-SEEDED parse is uncacheable: identical text means different things
   // under different seeds (`tuple<T, T>` with `T` seeded is an open type; with
@@ -125,10 +152,15 @@ function cacheResult(s: TypeString, type: Type): Type {
 function parseTypeUncached(
   s: TypeString,
   typeResolver: TypeResolver | undefined,
-  typeVars: readonly TypeParameter[] | undefined
+  typeVars: readonly TypeParameter[] | undefined,
+  options?: ParseTypeOptions
 ): { type: Type; sawForwardRef: boolean } {
   try {
-    const parser = new Parser(s, { typeResolver, typeVars });
+    const parser = new Parser(s, {
+      typeResolver,
+      typeVars,
+      allowObjectType: options?.allowObjectType,
+    });
     const ast = parser.parseType();
     const type = buildTypeFromAST(ast, typeResolver, typeVars);
 
@@ -150,6 +182,10 @@ function parseTypeUncached(
       wrapped.code = error.code;
       wrapped.rawMessage = error.message;
     }
+    // The type PARSER also codes some failures (`errorAtToken`'s `code`
+    // argument), and a caller that reports diagnostics needs the code to
+    // survive the wrap exactly as a type-variable violation's does.
+    wrapped.code ??= (error as { code?: string }).code;
     // …and the BARE message, so a caller that reports the failure does not have
     // to quote the whole type string back at the author. `rawMessage` is the
     // type parser's own convention (set by `errorAtToken`).
@@ -193,18 +229,95 @@ export function parseTypePrefix(
   source: string,
   typeResolver?: TypeResolver,
   typeVars?: readonly TypeParameter[],
-  options?: { allowWhere?: boolean }
+  options?: { allowWhere?: boolean } & ParseTypeOptions
 ): { type: Type; end: number } {
   const parser = new Parser(source, {
     typeResolver,
     allowTrailing: true,
     allowWhere: options?.allowWhere ?? false,
+    allowObjectType: options?.allowObjectType,
     typeVars,
   });
   const ast = parser.parseTypePrefix();
   const type = buildTypeFromAST(ast, typeResolver, typeVars);
   if (parser.sawWhereClause) validateDeclaredType(type, typeResolver);
+  if (options?.allowObjectType === true) assertObjectTypeNotInline(type);
   return { type, end: parser.endOffset };
+}
+
+/**
+ * The second half of the "an object type is legal only as the definition of a
+ * named type" rule, for the routes that admit the layout form at all.
+ *
+ * The parser refuses `object<…>` outright everywhere else; here the form is
+ * admitted, so what is left to check is its POSITION: only a body that IS the
+ * layout declares an object type. A body that merely CONTAINS one
+ * (`type T = list<object<a: integer>>`, `type T = object<…> | integer`) names
+ * a layout no constructor is ever minted for and no value can inhabit, which
+ * is inline by the same rule.
+ *
+ * The walk stops at a type REFERENCE: a layout reached through one belongs to
+ * that reference's own declaration, which was checked when it was declared
+ * (and following it could cycle).
+ */
+export function assertObjectTypeNotInline(type: Type): Type {
+  // The body IS a layout: legal, provided no FIELD spells another one. A
+  // field holding `object<…>` names a second, unnamed object type — inline by
+  // the same rule; it must be declared and referred to by name.
+  const inline =
+    typeof type === 'object' && type.kind === 'object'
+      ? Object.values(type.elements).some(containsObjectLayout)
+      : containsObjectLayout(type);
+  if (!inline) return type;
+
+  const err = new Error(
+    'object-type-not-inline: an `object<…>` type may only be the definition of a named type. Object types are nominal: declare one with `type Person = object<…>` (not `type alias`), then refer to `Person` here'
+  ) as Error & { code?: string; rawMessage?: string };
+  err.code = 'object-type-not-inline';
+  err.rawMessage =
+    'An `object<…>` type may only be the definition of a named type';
+  throw err;
+}
+
+/** Does `t` contain an `object<…>` layout anywhere (not following type
+ * references)? See {@link assertObjectTypeNotInline}. */
+function containsObjectLayout(t: Type): boolean {
+  if (typeof t === 'string') return false;
+  switch (t.kind) {
+    case 'object':
+      return true;
+    case 'record':
+      return Object.values(t.elements).some(containsObjectLayout);
+    case 'union':
+    case 'intersection':
+      return t.types.some(containsObjectLayout);
+    case 'negation':
+      return containsObjectLayout(t.type);
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return containsObjectLayout(t.elements);
+    case 'dictionary':
+      return containsObjectLayout(t.values);
+    case 'tuple':
+      return t.elements.some((e) => containsObjectLayout(e.type));
+    case 'callback':
+      return containsObjectLayout(t.signature);
+    case 'signature':
+      return (
+        containsObjectLayout(t.result) ||
+        (t.args?.some((a) => containsObjectLayout(a.type)) ?? false) ||
+        (t.optArgs?.some((a) => containsObjectLayout(a.type)) ?? false) ||
+        (t.variadicArg !== undefined &&
+          containsObjectLayout(t.variadicArg.type))
+      );
+    case 'reference':
+      return t.args?.some(containsObjectLayout) ?? false;
+    default:
+      return false;
+  }
 }
 
 //

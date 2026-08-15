@@ -117,6 +117,15 @@ export interface RecordEntryNode extends ASTNode {
   valueType: TypeNode;
 }
 
+/** The parse of `object<name: T, …>` — the stored-field layout of an object
+ * type. Its entries reuse {@link RecordEntryNode}: the two forms have the same
+ * surface grammar, and only their semantics differ (an object type is nominal
+ * and its fields are invariant read/write positions). */
+export interface ObjectTypeNode extends ASTNode {
+  kind: 'object';
+  entries: RecordEntryNode[];
+}
+
 export interface DictionaryTypeNode extends ASTNode {
   kind: 'dictionary';
   valueType: TypeNode;
@@ -213,6 +222,7 @@ export type TypeNode =
   | TensorTypeNode
   | TupleTypeNode
   | RecordTypeNode
+  | ObjectTypeNode
   | DictionaryTypeNode
   | SetTypeNode
   | BroadcastableTypeNode
@@ -239,6 +249,7 @@ export interface ASTVisitor<T> {
   visitTensorType(node: TensorTypeNode): T;
   visitTupleType(node: TupleTypeNode): T;
   visitRecordType(node: RecordTypeNode): T;
+  visitObjectType(node: ObjectTypeNode): T;
   visitDictionaryType(node: DictionaryTypeNode): T;
   visitSetType(node: SetTypeNode): T;
   visitBroadcastableType(node: BroadcastableTypeNode): T;
@@ -280,6 +291,8 @@ export function visitNode<T>(node: TypeNode, visitor: ASTVisitor<T>): T {
       return visitor.visitTupleType(node);
     case 'record':
       return visitor.visitRecordType(node);
+    case 'object':
+      return visitor.visitObjectType(node);
     case 'dictionary':
       return visitor.visitDictionaryType(node);
     case 'set':

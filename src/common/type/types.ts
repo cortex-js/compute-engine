@@ -48,6 +48,7 @@ export type PrimitiveType =
   | 'set'
   | 'dictionary'
   | 'record'
+  | 'object'
   | 'tuple'
   | 'value'
   | 'scalar'
@@ -295,6 +296,39 @@ export type RecordType = {
   elements: Record<string, Type>;
 };
 
+/** The stored-field layout of an **object** type — the engine's one mutable
+ * value kind.
+ *
+ * Structurally this looks like {@link RecordType}, and the two are read the
+ * same way (an ordered map from field name to field type), but they behave in
+ * opposite ways, and the difference is deliberate:
+ *
+ * - An object type is **nominal**. This shape is only ever the definition
+ *   (`def`) of a declared {@link TypeReference}: `type Person = object<…>`.
+ *   Two object types with identical layouts are unrelated, because a store
+ *   through one view would break the other's declared field types (write
+ *   `1.5` into an `object<count: integer>` viewed as `object<count: number>`).
+ *   The nominal reference is what supplies that opacity; this shape only
+ *   carries the layout.
+ * - Every field is a read/write position, so a field type is **invariant**:
+ *   two object layouts relate only when every field type is mutually equal,
+ *   and a type variable occurring in a field verifies only as `inout`.
+ *
+ * The bare primitive `'object'` means "any object" and is the one common
+ * bound every declared object type is a subtype of. It sits BESIDE `record`
+ * in the lattice and is disjoint from it — sibling categories, one
+ * immutable/structural, one mutable/nominal — and is deliberately not a
+ * collection.
+ *
+ * Spec: `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Declaring an object type",
+ * "No subtyping between object types", "Generic object types" (ruling B13),
+ * and the lattice bullet of "The rest of the system" (ruling B6).
+ */
+export type ObjectType = {
+  kind: 'object';
+  elements: Record<string, Type>;
+};
+
 /** A dictionary is a collection of key-value pairs.
  *
  * The keys are strings. The set of keys is also not defined as part of the
@@ -499,6 +533,7 @@ export type Type =
   | SetType
   | BroadcastableType
   | RecordType
+  | ObjectType
   | DictionaryType
   | TupleType
   | SymbolType

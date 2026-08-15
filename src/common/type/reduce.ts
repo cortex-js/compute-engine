@@ -21,6 +21,7 @@ import type {
   NegationType,
   DictionaryType,
   RecordType,
+  ObjectType,
   TypeReference,
 } from './types.js';
 import { isValidPrimitiveType, NUMERIC_TYPES_SET } from './primitive.js';
@@ -71,6 +72,9 @@ export function reduceType(type: Type): Type {
 
     case 'record':
       return reduceRecordType(type);
+
+    case 'object':
+      return reduceObjectType(type);
 
     case 'dictionary':
       return reduceDictionaryType(type);
@@ -664,6 +668,28 @@ function reduceRecordType(type: RecordType): Type {
     ...type,
     elements: reducedElements,
   });
+}
+
+/**
+ * Reduce an object layout — every field type reduced, and NOTHING ELSE.
+ *
+ * Deliberately not `reduceRecordType`: a record's reduction drops `nothing`
+ * fields and collapses an emptied record to the bare `record` primitive, both
+ * of which are sound for a structural type read only for its contents. An
+ * object's field set is its LAYOUT — what its constructor requires and what
+ * its stores may write — so dropping a field would silently change the type's
+ * meaning, and collapsing to the bare `object` primitive would turn a specific
+ * layout into "any object". An `'error'` field still poisons the whole type,
+ * as everywhere else.
+ */
+function reduceObjectType(type: ObjectType): Type {
+  const reducedElements: Record<string, Type> = {};
+  for (const [key, value] of Object.entries(type.elements))
+    reducedElements[key] = reduceType(value);
+
+  if (Object.values(reducedElements).some((t) => t === 'error')) return 'error';
+
+  return decorate({ ...type, elements: reducedElements });
 }
 
 function reduceDictionaryType(type: DictionaryType): Type {

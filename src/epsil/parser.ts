@@ -1644,8 +1644,17 @@ export class Parser {
       }
     }
 
-    // A `type` body IS the whole type, so it may carry a trailing clause.
-    const body = this.parseTypeBody(eq.end, { allowWhere: true });
+    // A `type` body IS the whole type, so it may carry a trailing clause — and
+    // a NOMINAL `type` body is the ONE position where an `object<…>` layout is
+    // legal (every other route refuses the form with `object-type-not-inline`).
+    // A `type alias` body is not one of them: an object type is nominal, and a
+    // structural alias to a layout would make two aliases of the same shape
+    // interchangeable — exactly the subtyping between object types Appendix B
+    // rules out.
+    const body = this.parseTypeBody(eq.end, {
+      allowWhere: true,
+      allowObjectType: !isAlias,
+    });
     unseedParams();
     if (body === null) {
       unseed();
@@ -5052,7 +5061,7 @@ export class Parser {
    * {@link misplacedWhereClause}). */
   private parseTypeBody(
     typeSourceStart: number,
-    options?: { allowWhere?: boolean }
+    options?: { allowWhere?: boolean; allowObjectType?: boolean }
   ): {
     node: MathJsonExpression;
     end: number;
@@ -5067,7 +5076,7 @@ export class Parser {
         this.source.slice(typeSourceStart),
         this.typeResolver,
         undefined,
-        { allowWhere }
+        { allowWhere, allowObjectType: options?.allowObjectType }
       );
       // The type parsed, but a clause this context does not admit follows it.
       if (
@@ -5105,6 +5114,17 @@ export class Parser {
       if (protocol !== null) {
         this.error(
           ['protocol-in-type-position', protocol],
+          errStart,
+          Math.max(errEnd, errStart + 1)
+        );
+        return null;
+      }
+      // An `object<…>` layout outside a named type's definition: the type
+      // parser codes the refusal, so the author gets the rule by name rather
+      // than a generic type-annotation failure.
+      if ((e as { code?: string }).code === 'object-type-not-inline') {
+        this.error(
+          ['object-type-not-inline'],
           errStart,
           Math.max(errEnd, errStart + 1)
         );

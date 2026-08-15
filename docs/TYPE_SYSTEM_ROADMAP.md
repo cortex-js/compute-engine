@@ -1966,8 +1966,20 @@ record `RecordFrom` would produce, **wrapped in a dedicated `Object`
 head carrying the object's nominal type name**:
 
 ```json
-["Object", ["Record", ["Tuple", "'firstName'", "'Alan'"], …], "'Person'"]
+["Object", ["Dictionary", ["KeyValuePair", {"str": "firstName"}, "'Alan'"], …], "'Person'"]
 ```
+
+*(Amended 2026-08-14, during Phase 1.* An earlier draft of this line
+wrote the body as `["Record", ["Tuple", …], …]`. There is no `Record`
+operator in the engine: such a payload boxes to an inert application
+whose type is `unknown`, which would make this wrapper's own contract —
+"its static type is the wrapped record's type" — vacuous. `Dictionary`
+is a real operator whose boxed value **derives** a `record<…>` type
+from its identifier keys, so the reloaded snapshot is a genuine
+record-typed value. This is the same fact that makes `RecordFrom`
+redundant and currently broken; see the `RecordFrom` entry in
+`ROADMAP.md`, which also records the consequence for Phase 3 —
+the `…From` arm named below belongs on `DictionaryFrom`.)*
 
 An earlier revision used a `Typed` ascription wrapper here, and the
 spec review killed it: `Typed` is *asserted* ascription — its type
@@ -2866,4 +2878,5 @@ proposed by Appendix B and are not implemented.
 | `argument-optional-skipped` | a named optional supplied while an optional declared before it is not — the no-optional-holes rule (Appendix C) |
 | `object-property-conflict` † | both a stored field and an explicit accessor declared for the same property name (Appendix B) |
 | `conformance-widens-declared-contract` † | a conformance whose implementation effects widen a dispatcher union past a dependent's declared effect contract; names every violated dependent and the exceeding labels (Appendix B, "Changing a field is an effect") |
-| `object-type-not-inline` † | `object<…>` used inline in an annotation rather than as the definition of a named type (Appendix B) |
+| `object-type-not-inline` | `object<…>` used anywhere other than as the definition of a named type — inline in an annotation, or nested inside a declaration body (Appendix B) |
+| `argument-names-required` | a call to an operator whose arguments must each be written with their parameter's name (an object-type constructor, ruling B11) passed one positionally |

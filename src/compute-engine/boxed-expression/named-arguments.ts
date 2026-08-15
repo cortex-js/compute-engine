@@ -163,6 +163,55 @@ export function hasNamedArguments(
   return ops.some(isCarrier);
 }
 
+/**
+ * The operand list to emit for a call to an operator that REQUIRES named
+ * arguments (`namedArgumentsRequired`) when some argument was written
+ * positionally — or `undefined` when every argument carries its name and the
+ * call may proceed.
+ *
+ * The `argument-names-required` diagnostic replaces the FIRST positional
+ * argument, the earliest place an author can act on it, and it lists the
+ * declared names in order, which is the whole fix: someone looking at
+ * `Person("Alan", "Turing", 42)` can read off what to write. Names also make
+ * the call order-free, so the list is a menu, not a sequence to match.
+ *
+ * Every OTHER carrier is unwrapped to the value it carries — the same rule
+ * {@link blame} follows. Left in place each would canonicalize into an
+ * `argument-names-unavailable` error of its own and bury the real diagnostic
+ * under advice ("call it with positional arguments") that is the exact
+ * opposite of what this callee wants.
+ */
+export function namesRequiredOperands(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<ExpressionInput>,
+  signature: Type | undefined
+): ExpressionInput[] | undefined {
+  let first = -1;
+  for (let i = 0; i < ops.length; i++)
+    if (!isCarrier(ops[i])) {
+      first = i;
+      break;
+    }
+  if (first < 0) return undefined;
+
+  const names =
+    signature !== undefined &&
+    typeof signature === 'object' &&
+    signature.kind === 'signature'
+      ? (slotNames(signature).filter((n) => n !== undefined) as string[])
+      : [];
+  const detail =
+    names.length > 0
+      ? `write each argument with its name: ${quoteList(names)}`
+      : 'write each argument with its parameter name';
+
+  const values: ExpressionInput[] = hasNamedArguments(ops)
+    ? splitNamedArguments(ops).args.map((a) => a.value)
+    : [...ops];
+  values[first] = ce.error(['argument-names-required', detail]);
+  return values;
+}
+
 /** The operand list of a raw (possibly unboxed) function application whose
  * operator is `op`, or `undefined` when `x` is not one — the same three input
  * spellings {@link isCarrier} distinguishes. */
@@ -473,6 +522,9 @@ const WRITTEN_ORDER_ARGUMENT_CODES: ReadonlySet<string> = new Set([
   'argument-order-invalid',
   'argument-optional-skipped',
   'argument-names-unavailable',
+  // Reported before any permutation is attempted (there are no names to
+  // permute with), so its operand index counts written positions.
+  'argument-names-required',
 ]);
 
 /**

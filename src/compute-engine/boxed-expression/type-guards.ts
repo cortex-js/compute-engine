@@ -1,5 +1,8 @@
+import { anyObjectExists } from './object-deps.js';
+
 import type {
   Expression,
+  ExpressionInput,
   DictionaryInterface,
   NumberLiteralInterface,
   SymbolInterface,
@@ -8,6 +11,7 @@ import type {
   TensorInterface,
   CollectionInterface,
   IndexedCollectionInterface,
+  ObjectInterface,
 } from '../global-types.js';
 import type { NumericValue } from '../numeric-value/types.js';
 
@@ -92,6 +96,105 @@ export function isDictionary(
   expr: Expression | null | undefined
 ): expr is Expression & DictionaryInterface {
   return expr?._kind === 'dictionary';
+}
+
+/**
+ * Is this expression an **object** — the engine's mutable value kind?
+ *
+ * A `_kind` string check, never `instanceof`: plugin bundles re-bundle engine
+ * code, so a class-identity check would answer `false` for an object that
+ * crossed the host/plugin boundary.
+ */
+export function isObject(
+  expr: Expression | null | undefined
+): expr is Expression & ObjectInterface {
+  return expr?._kind === 'object';
+}
+
+/**
+ * Is `expr` an object belonging to a DIFFERENT engine than `ce`?
+ *
+ * An object belongs to the engine that constructed it: its pinned type, its
+ * state events and its cache-dependency records all speak to that engine, so
+ * adopting one into another engine's expression would produce a value whose
+ * invalidation and typing are wired to the wrong place. Every ingress that
+ * adopts a pre-boxed value checks this and rejects with
+ * `object-foreign-engine`. The comparison is host reference identity on the
+ * engine, which is safe across bundle copies.
+ *
+ * (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Lifetime": an object cannot be
+ * handed to a different engine.)
+ */
+export function isForeignEngineObject(
+  expr: Expression | null | undefined,
+  ce: unknown
+): boolean {
+  return expr?._kind === 'object' && expr.engine !== ce;
+}
+
+/**
+ * Does `expr` hold — at any depth — an object constructed by an engine other
+ * than `ce`?
+ *
+ * The transitive form of {@link isForeignEngineObject}. A DIRECT check on the
+ * adopted expression is not enough, because a pre-boxed container is not
+ * itself an object: `ce.box(otherList)` where `otherList` is a `List` holding
+ * a foreign object adopts the container whole and smuggles the object in with
+ * it. (`docs/plans/2026-08-14-object-representation-decision.md`,
+ * "Cross-engine ingress", and invariant 8 in the same note.)
+ *
+ * The walk stops AT an object — an object's own slots were checked against
+ * ITS engine when they were stored, so descending would re-litigate a
+ * different engine's invariant — and otherwise descends only into function
+ * operands and dictionary values, both finite trees, so it always terminates
+ * (a cycle can only run THROUGH an object, which is where it stops).
+ *
+ * It only inspects already-boxed values. A raw MathJSON container holding a
+ * boxed object needs no scan here: every leaf of a raw form is boxed by
+ * `boxInternal` (`box.ts`), which applies this same check to it on the way in.
+ *
+ * Callers MUST gate this behind `anyObjectExists()`: it runs on the
+ * per-operand loop of every function boxing, one of the engine's hottest
+ * paths, and in a session that has never constructed an object the answer is
+ * `false` by construction. {@link adoptsForeignEngineObject} applies that gate
+ * for them, which is why it, and not this function, is what ingress points
+ * call.
+ */
+function containsForeignEngineObject(
+  expr: ExpressionInput | Expression | null | undefined,
+  ce: unknown
+): boolean {
+  if (expr === null || typeof expr !== 'object') return false;
+  const x = expr as Expression;
+  // A raw MathJSON array or dictionary literal has no `_kind`; see above for
+  // why it needs no scan.
+  if (x._kind === undefined) return false;
+  if (isObject(x)) return x.engine !== ce;
+  if (isFunction(x))
+    return x.ops.some((op) => containsForeignEngineObject(op, ce));
+  if (isDictionary(x))
+    return x.values.some((v) => containsForeignEngineObject(v, ce));
+  return false;
+}
+
+/**
+ * {@link containsForeignEngineObject} over a whole operand list, with the
+ * process-wide gate applied ONCE for the list. Every cross-engine ingress
+ * point that adopts operands calls this one — the boxing routes, `ce._fn`,
+ * `subs()` substitution values and the `ce.assign`/`Assign` route — so neither
+ * the gate nor the transitivity is forgotten at a call site.
+ *
+ * It lives here rather than in `box.ts` so that the assignment routes in
+ * `engine-declarations.ts` can call it: `box.ts` reaches
+ * `engine-declarations.ts` through `named-arguments.ts` → `multi-clause.ts`,
+ * so an import the other way would close a dependency cycle.
+ */
+export function adoptsForeignEngineObject(
+  ops: readonly (ExpressionInput | Expression)[],
+  ce: unknown
+): boolean {
+  if (!anyObjectExists()) return false;
+  return ops.some((op) => containsForeignEngineObject(op, ce));
 }
 
 export function isCollection(

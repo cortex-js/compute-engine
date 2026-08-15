@@ -459,8 +459,12 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `The type "${args[0]}" is declared inside a block: types are global, so type declarations are only allowed at the top level of a program`;
     case 'type-redefinition':
       return `The type "${args[0]}" is declared twice in this program; a name may only be declared once per program (re-running an edited declaration in a later program still replaces it)`;
+    case 'object-type-not-inline':
+      return `An "object<…>" type may only be the definition of a named type: object types are nominal, so declare one with "type Person = object<…>" (not "type alias"), then use "Person" here`;
     case 'protocol-redefinition':
       return `The protocol "${args[0]}" is declared twice in this program; a name may only be declared once per program (re-running an edited declaration in a later program still replaces it)`;
+    case 'function-redefinition':
+      return `Two clauses of "${args[0]}" in this program have the same parameter list, so the second would silently replace the first; give them different parameter lists to dispatch between them (re-running an edited definition in a later program still replaces it)`;
     case 'protocol-declaration-not-top-level':
       return `The protocol "${args[0]}" is declared inside a block: protocols are global, so protocol declarations are only allowed at the top level of a program`;
     case 'protocol-name-expected':

@@ -827,6 +827,65 @@ to *builtins* only, and the "`foo` is defined here" related-information
 pointer had nothing that could trigger it; both now work for the file's own
 functions.
 
+### `RecordFrom` is broken, and probably redundant (found 2026-08-14)
+
+`RecordFrom` declares `(collection) -> record` but returns an inert,
+untyped application:
+
+```
+RecordFrom([("a", 1), ("b", 2)])  →  Record(("a", 1), ("b", 2))   type: unknown
+DictionaryFrom(  same input    )  →  {"dict":{"a":1,"b":2}}       type: record<a: finite_integer, b: finite_integer>
+```
+
+The cause: **`Record` has no operator definition anywhere in the
+engine** — `ce.box(['Record', …]).operatorDefinition` is `undefined`.
+`RecordFrom` is the only member of the `…From` family whose result is
+not a value of the type its signature promises, so its declared result
+type lies.
+
+The deeper point (user observation, 2026-08-14): a record and a
+dictionary differ only in the TYPE world. In MathJSON there is no
+distinction, and the engine already implements exactly that model —
+`BoxedDictionary` synthesizes a `record<…>` type when every key is a
+bare identifier and a `dictionary<…>` type otherwise, so record-ness is
+DERIVED from the value rather than carried by a separate
+representation. That makes `RecordFrom` redundant with
+`DictionaryFrom`, not merely buggy: the latter already returns exactly
+what the former promises.
+
+Three ways out, needing a product ruling: delete `RecordFrom`
+(public-surface deprecation), alias it to `DictionaryFrom`, or give
+`Record` a real operator definition. A `Typed(Dictionary(…),
+"record<…>")` spelling was also considered and is NOT needed — the
+derivation already happens, and ascription would only be meaningful for
+ordinary widening (`record<a: number>` over a literal `1`), which is
+plain `Typed` usage rather than a record mechanism.
+
+**Blocks Appendix B Phase 3**, which currently names `RecordFrom(object)`
+as the object-serialization conversion — "not a new operator, a new arm
+on that family" — including the plumbing note about widening its
+signature to `collection | object`. If `RecordFrom` goes away that arm
+belongs on `DictionaryFrom`, and the appendix must be amended before
+Phase 3 is implemented. (Phase 1's serialization walk was switched to
+emit the `Dictionary` operator form for this reason.)
+
+### A literal argument to an `inout`-parameterized constructor over-narrows (found 2026-08-14)
+
+`let c: Cell<integer> = Cell(value: 1)` is rejected with "expected
+`Cell<integer>`, got `Cell<finite_integer>`": the integer literal `1`
+infers `finite_integer`, the type parameter is declared `inout` (hence
+invariant), and invariance refuses the narrower instantiation. Verified
+PRE-EXISTING and not specific to object types — a shipped tuple body
+behaves identically (`type Box<inout T> = tuple<value: T>` with
+`Box(1)`), so this is the standing interaction between literal type
+inference and `inout` invariance, surfaced by Appendix B's generic
+object types (B13 makes every stored field invariant, so object
+declarations meet it routinely). The fix direction is to let a literal
+argument widen to the parameter's declared instantiation when one is
+given by the annotation, rather than solving the parameter from the
+literal's narrowest type; it needs its own ruling because the same
+rule governs every `inout` nominal.
+
 ### Protocols residue (protocols + compiled dispatch landed 2026-08-12)
 
 - **A provisional rebuild of a VALUE-bound literal never re-verifies its
