@@ -1,5 +1,116 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The Epsil function arrow is now `=>`; `|->` is an error with a fix-it.** An
+  anonymous function is written `x => x + 1`, `(a, b) => a + b`,
+  `(x: integer) => x`, `() => 1` — the same arrow a `match` case already uses
+  (`pattern => body`), so one glyph means "yields" everywhere. The old `|->` sat
+  one character away from the pipe `|>` it most often appears next to
+  (`xs |> Map(_ |-> f(_), _)`), and read as the blackboard `↦` rather than as
+  the lambda arrow every mainstream language spells `=>`. Function TYPES keep
+  `->` (`(number) -> number`) and dictionary entries keep `->` (`{k -> v}`):
+  `->` is the type-level and key-value arrow, `=>` is the value-level one.
+
+  ```epsil
+  let square = x => x^2
+  [1, 2, 3] |> Map(_ => _^2, _)                // ➔ [1, 4, 9]
+  match n { 0 => "zero"; k if k > 0 => "pos"; otherwise => "neg" }
+  ```
+
+  Because `=>` is shared with the `match` arm, a guard ends at the first `=>` at
+  the arm's own nesting depth: `n if valid => n` is guard `valid`, body `n`. A
+  lambda-valued guard needs parentheses (`n if (f => f)(n) => …`) — which
+  forbids nothing useful, since a bare function value is always truthy. Arm
+  bodies are unaffected: `0 => x => x + 1` is an arm whose value is a lambda.
+
+  Writing `|->` now reports `mapsto-arrow-legacy` with a fix-it that rewrites it
+  to `=>`, and the program is still parsed as the function it meant so no
+  cascade follows. Unicode input accepts both `⇒` (U+21D2) and `↦` (U+21A6) for
+  the arrow; the fancy-symbol serializer emits `⇒`, for lambdas and `match` arms
+  alike (`↦` is no longer emitted). The ASCII-math serializer and every
+  diagnostic and hint that spelled the arrow now say `=>`. Along the way,
+  `↦`/`⇒` were found never to have worked in a typed parameter list
+  (`(x: integer) ↦ x` reported a spurious `unexpected-symbol ":"`) or as a
+  `match` case arrow — both fixed.
+
+- **`record` and `object` types are written with braces.**
+  `record{x: integer, y: integer}` replaces `record<x: integer, y: integer>`,
+  and `type Person = object{name: string, age: integer}` replaces the
+  `object<…>` form. Braces now mean an unordered, keyed field set — matching the
+  `{…}` value literals for sets and dictionaries — while angle brackets keep
+  meaning type arguments or an ordered element list, so `list<integer>`,
+  `dictionary<string>`, `set<T>`, `callback<…>`, `Pair<T, U>` and
+  `tuple<x: integer, y: integer>` (element names are labels on positions, not
+  keys) are unchanged. `record{}` and bare `record` / `object` are also
+  unchanged. The old spelling is a parse error naming the brace form
+  (`A record type is written with braces: \`record{key: type,
+  …}\``); type strings serialize with braces, so `typeToString` output and
+  anything that snapshots it changes accordingly.
+
+  ```epsil
+  let p: record{x: integer, y: integer} = {x -> 1, y -> 2}
+  type Person = object{name: string, age: integer}
+  function origin() -> record { {x -> 0, y -> 0} }   // bare `record` + a body
+  ```
+
+  In Epsil, a `{` after a bare `record`/`object` opens a field list only when it
+  is followed by `}` or by `name :`; otherwise it is the block body of a
+  function whose return type is the bare `record`/`object`, as in the last line
+  above. Where a block is required — the return type of a `function` declaration
+  — the two readings are told apart by looking for the body after the candidate
+  field list, so `-> record { }` and `-> record { x: integer }` are a bare
+  `record` plus a body, and `-> record{a: integer} { … }` is a field list plus a
+  body.
+
+  Fixed while here: record and object keys and tuple element labels that are not
+  plain identifiers (``record{`直径`: string}``, ``tuple<`my x`: integer>``)
+  serialized unquoted, producing a type string `parseType` could not read back;
+  they are now backtick-quoted on the way out.
+
+### New Features
+
+- **New `range` type: an index span.** A `Range` that denotes a contiguous,
+  ascending run of 1-based collection indexes — integer bounds, at least 1,
+  ascending, one apart, finite — now has the narrower type `range` instead of
+  `indexed_collection<integer>`. `["Range", 2, 5]` is a `range`; a stepped
+  `["Range", 1, 10, 2]` (a gather, not a span), a descending `["Range", 5, 2]`,
+  and a symbolic `["Range", a, b]` keep the wider type, as do fractional and
+  infinite ranges.
+
+  `range` is a subtype of `indexed_collection<integer>` and a SIBLING of `list`
+  — neither is a subtype of the other — so everything that accepted a `Range`
+  before still accepts one, and the elements are still typed `integer`. What the
+  type adds is the ability for a span-consuming operator to require a usable
+  span at the TYPE level rather than checking at runtime. It is an index span,
+  not a mathematical interval (that is `Interval`) and not the statistical range
+  of a data set (that is `Min`/`Max`). There is deliberately no empty span:
+  `["Range", 1, 0]` already means the descending pair `[1, 0]`.
+
+### Issues Resolved
+
+- **A pipe whose stage maps now has the type of the mapped collection.** A unary
+  function literal on the right of `|>` maps over a collection topic instead of
+  being applied to it as a whole, so `xs |> x => x^2` means `Map(x => x^2, xs)`.
+  Its static type described the wrong thing: it reported the stage's RESULT type
+  — an element — so the whole pipe fell back to `unknown` and every consumer
+  downstream, arithmetic broadcast in particular, read it as a scalar. It now
+  reports the collection type that the equivalent `Map` reports, with the same
+  shape and element type.
+
+  ```epsil
+  [1, 2, 3] |> n => n^2
+  // type was `unknown`, now `vector<3>`
+
+  [(True, True), (True, False), (False, True)] |> p => p[1] && p[2]
+  // type was `unknown`, now `list<broadcastable<boolean>^3>`
+  ```
+
+  The escapes from the implicit `Map` are unchanged and still type as an
+  application: a bare function symbol (`xs |> Sum`), a string topic, a
+  non-collection topic, and a parameter annotation claiming the whole collection
+  (`xs |> (l: list<number>) => Length(l)`).
+
 ## 0.111.0 _2026-08-15_
 
 ### New Features

@@ -96,11 +96,11 @@ hypotenuse(3, 4)
 // ➔ 5
 ```
 
-Anonymous functions use `|->`. They are especially useful for a small
+Anonymous functions use `=>`. They are especially useful for a small
 transformation passed to a collection operator:
 
 ```epsil
-Map(n |-> n^2, 1..5)
+Map(n => n^2, 1..5)
 // ➔ [1, 4, 9, 16, 25]
 ```
 
@@ -141,8 +141,8 @@ endpoints. Use a pipeline when data goes through several transformations:
 
 ```epsil
 1..10
-  |> Filter(_, n |-> n % 2 == 0)
-  |> Map(n |-> n^2, _)
+  |> Filter(n => n % 2 == 0)
+  |> n => n^2                         // Map(n => n^2, _)
   |> Sum
 // ➔ 220
 ```

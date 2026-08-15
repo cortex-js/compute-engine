@@ -532,6 +532,22 @@ canonicalization entirely, 100% of the cost at those sites is in the unbounded
 parser. Their audit had recorded the exposure as "half fixed, half remaining",
 which was wrong in the reassuring direction for exactly the sites that matter.
 
+**FIELD MEASUREMENT ON REAL CONTENT (Tycho, on imported Desmos formula
+slots, 2026-08-15) — quote this WITH its shape caveat or not at all.** 6 679
+slots across 585 states: **0.232 ms/slot raw, 0.380 ms/slot canonical, worst
+single slot 71 ms** (a 69 KB list literal), and the **worst slot under a 50 ms
+span elapsed 53.9 ms — 1.08x**, against the ~110 ms the synthetic curve above
+projects.
+
+The caveat is not decoration: **their slots are wide flat LIST LITERALS, not
+deep operator chains**, which is exactly why they land an order of magnitude
+under the projection. Quoted bare, these numbers support "the unbounded parse
+is not a problem in practice", which is FALSE for content that is deep chains
+rather than wide literals. The field number is evidence for that shape; the
+synthetic curve remains the right guide for the other. Recorded at the
+consumer's own insistence, and against their interest — it lowers the urgency
+of work they had asked us to prioritise.
+
 Priority argument for whoever picks this up: the action-firing span is an
 INTERACTIVE path — a user waiting on a direct interaction, with the budget
 chosen to protect responsiveness — while every other exposed span they have is
@@ -968,10 +984,30 @@ recorded in this entry above.
 ### An indexed read out of a collection with complex elements was classified from the WHOLE collection (FIXED 2026-08-15; this also closed the `complexPromotion` collection-body item)
 
 The filed item was "`complexPromotion` does not look through a
-COLLECTION-valued user function, which is the shape its motivating witness
-has". Investigating it found a larger defect underneath, on the DEFAULT compile
-path with no option set, and fixing that one closed the filed item as a side
-effect.
+COLLECTION-valued user function". Investigating it found a larger defect
+underneath, on the DEFAULT compile path with no option set, and fixing that one
+closed the filed item as a side effect.
+
+**RETRACTED 2026-08-15 — the witness attribution, not the defect.** The item
+was filed with the argument that the collection-valued boundary was "exactly
+the shape of the witness the item was filed for", the consumer's chain running
+through a `PointList`. That argument was withdrawn by the consumer: the probe
+behind it called a method that does not exist on their tagged-union
+`ParametricFunction`, so every sample threw into a bare `catch` and was counted
+as non-finite. **It reported 0/201 unconditionally — every route, every flag
+state, every engine version, and so could not have returned anything else.**
+Re-measured correctly, their witness samples 186/201 finite with the flag ON
+and 0/201 with it OFF, and — the decisive control — **186/201 on 0.110.0 too,
+before this fix**. So the delta is the FLAG, not the release, and the
+collection boundary never blocked that witness: the complex value arises in a
+scalar body the look-through already reached.
+
+What survives unchanged: the boundary was a REAL defect and this fix is real.
+`w(t) := [√(t−1), √(t−2)]` with `|w(t)[1]/2 − 1|` genuinely flips `NaN` →
+1.08397416943394 across the version bump, verified here and on their bundle.
+The fix stands on that, not on the witness. Recorded because scoping or
+sequencing arguments that cite "this is the shape the consumer actually hits"
+must not survive the evidence they rested on.
 
 A list is emitted ELEMENT BY ELEMENT and each element picks its own
 real-vs-complex lowering, so the run-time array is heterogeneous: `[i·t, 1]`
@@ -1004,9 +1040,8 @@ Pinned in `test/compute-engine/compile-complex-element-access.test.ts`.
 
 **Why this closed the `complexPromotion` item.** The opt-in always promoted
 INSIDE a collection-valued body — `_fn_w` returned `[{re, im}, {re, im}]` — and
-what was missing was the call site reading those elements as complex. The filed
-witness now matches the interpreter, for a `List` body and for the `PointList`
-body the consumer's chain actually uses:
+what was missing was the call site reading those elements as complex. Both the
+`List` and `PointList` body shapes now match the interpreter:
 
     z(t) := √(t−1)           ;  |z(t)/2 − 1|      OFF NaN  ON 1.08397416943394
     w(t) := [√(t−1), √(t−2)] ;  |w(t)[1]/2 − 1|   OFF NaN  ON 1.08397416943394
@@ -1023,6 +1058,52 @@ indexed reads now: with promotion ON, `Less(w(t)[1], 2)` fails closed. What it
 replaces is not a working comparison — measured before the fix, that expression
 compiled to a CONSTANT `false` (`{re, im} < 2` is never true), wrong at `t = 2`
 where the interpreter answers `True`. Ruled 2026-08-15: land it.
+
+### Enabling `complexPromotion` makes scalar arithmetic over a collection-valued call STOP COMPILING (OPEN, correctness — regression from the flag, reported by a consumer's pricing pass)
+
+Turning the opt-in on causes `Multiply`/`Add`/`Divide` to decline with
+"cannot compile scalar arithmetic over a list-valued operand" for expressions
+that compiled — CORRECTLY — with it off. Found by the consumer pricing
+enablement across their corpus: 25 compiled-band losses over 18 of 687 states,
+of which **9 are this class and only 14 are the documented ordering-comparison
+declines**. Reproduced here on a bare engine:
+
+    w(t) := [√(t−1), √(t−2)]
+
+    2·w(t)      OFF compiles     ON declines   <-- regression
+    w(t) + 1    OFF compiles     ON declines   <-- regression
+    w(t) / 2    OFF compiles     ON declines   <-- regression
+    2·w(t)[1]   OFF compiles     ON compiles   (indexed, so scalar)
+
+Two controls isolate the trigger to a CONJUNCTION: a collection-valued body
+with **no radical** (`p(t) := [2t, t+1]`) compiles under both flag states, and
+a **scalar** radical body (`z(t) := √(t−1)`) compiles under both. It is
+specifically a collection-valued body containing a radical, consumed as a
+WHOLE operand by scalar arithmetic.
+
+**This is a real loss, not a wrong answer being withdrawn — which is what
+separates it from the ordering-comparison declines.** Those replaced a
+constant `false` that was wrong at t = 2. Here the OFF path is correct at both
+ends of the domain:
+
+    t = 3.0   interpreter [2.8284271247461902, 2]   compiled OFF [2.8284271247461903, 2]
+    t = 0.3   interpreter [1.673…i, 2.607…i]        compiled OFF [null, null]
+
+Right in the real domain, and correctly projected out by `realOnly` outside it.
+Enabling promotion replaces a correct compilation with a decline and an
+interpreter fallback, for an expression whose promotion is not even needed —
+whole-collection scalar arithmetic never reads an element as complex.
+
+Likely mechanism (HYPOTHESIS, not measured): promotion widens the operand's
+type, and an existing scalar-arithmetic guard keyed on that type then answers
+differently. That would make it the same lens as items 184/188/189 — a
+type-level question answered about a collection that describes no individual
+element — except induced by the flag rather than by the operand.
+
+Fix shape when picked up: the scalar-arithmetic guard should not tighten
+because promotion is enabled, when the operand is consumed whole. Note this is
+a cost of ENABLING, so it does not affect the default path; it does change the
+enablement calculus for a consumer, and it was priced by neither side.
 
 ### `complexPromotion` loses a complex value passed as an ARGUMENT to a scalar-bodied user function (OPEN, correctness — promotion-only)
 
@@ -1254,7 +1335,7 @@ engine asks the author to be explicit rather than guessing (design doc
 were both fixed on 2026-08-13: the qualified protocol spelling
 `Protocol.member(self: x, …)` permutes against the named protocol's
 requirement signature, and an inline function-literal callee
-`((x: number) |-> x + 1)(x: 5)` permutes against its own syntactic
+`((x: number) => x + 1)(x: 5)` permutes against its own syntactic
 parameter list — including UNANNOTATED inline literals, whose names
 are read from the expression, not the inferred type. What still
 declines through `Apply` is a callee whose names are genuinely not
@@ -1272,7 +1353,7 @@ calls ahead of the assignment, and unannotated literals.)
 - **Unannotated function literals are not addressable by name through
   a BINDING** — type inference drops parameter names
   (`effects-inference.ts` types a bare parameter as
-  `{ type: 'unknown' }`), so `f := (a, b) |-> …; f(a: 1, b: 2)`
+  `{ type: 'unknown' }`), so `f := (a, b) => …; f(a: 1, b: 2)`
   declines even though the same literal applied inline now works.
   MEASURED 2026-08-13: the one-line fix breaks 37 tests across 11
   suites + 1 snapshot, including semantic suites (`effects-contracts`,
@@ -1366,7 +1447,7 @@ which route OWNS the clause install, so the second one can recognise its own
 work rather than re-running it. Worth doing together with anything else that
 wants canonicalization and evaluation to share an installation step.
 
-**Tier 2 — `let`/`const` bindings.** `let g = (a: integer) |-> a` declares
+**Tier 2 — `let`/`const` bindings.** `let g = (a: integer) => a` declares
 NOTHING at canonicalization, so this tier is a genuine gap rather than a
 loosened signature. It needs a decision on how much of an initializer the pass
 may believe: an explicit annotation is safe, an inferred type less so, and a
@@ -1386,7 +1467,7 @@ much as for dictionaries, since record-ness is derived from the value. The
 operator definition is gone from `library/collections.ts`, its reference
 entry from `doc/82-reference-collections.md`, and
 `test/compute-engine/collections.test.ts` now pins that the head is inert
-while `DictionaryFrom` on the same input types `record<…>`. Appendix B
+while `DictionaryFrom` on the same input types `record{…}`. Appendix B
 Phase 3's object-serialization arm therefore belongs on `DictionaryFrom`;
 the appendix still says `RecordFrom` and must be amended before Phase 3 is
 implemented. The diagnosis that led to the ruling is kept below.
@@ -1396,7 +1477,7 @@ untyped application:
 
 ```
 RecordFrom([("a", 1), ("b", 2)])  →  Record(("a", 1), ("b", 2))   type: unknown
-DictionaryFrom(  same input    )  →  {"dict":{"a":1,"b":2}}       type: record<a: finite_integer, b: finite_integer>
+DictionaryFrom(  same input    )  →  {"dict":{"a":1,"b":2}}       type: record{a: finite_integer, b: finite_integer}
 ```
 
 The cause: **`Record` has no operator definition anywhere in the
@@ -1408,7 +1489,7 @@ type lies.
 The deeper point (user observation, 2026-08-14): a record and a
 dictionary differ only in the TYPE world. In MathJSON there is no
 distinction, and the engine already implements exactly that model —
-`BoxedDictionary` synthesizes a `record<…>` type when every key is a
+`BoxedDictionary` synthesizes a `record{…}` type when every key is a
 bare identifier and a `dictionary<…>` type otherwise, so record-ness is
 DERIVED from the value rather than carried by a separate
 representation. That makes `RecordFrom` redundant with
@@ -1421,9 +1502,9 @@ names for one operation forever, and the declared result type still
 over-promises when a key is not an identifier); or give `Record` a real
 operator definition (rejected — it contradicts the derived-record-ness model
 and adds a second value representation to maintain). A `Typed(Dictionary(…),
-"record<…>")` spelling was also considered and is NOT needed — the
+"record{…}")` spelling was also considered and is NOT needed — the
 derivation already happens, and ascription would only be meaningful for
-ordinary widening (`record<a: number>` over a literal `1`), which is
+ordinary widening (`record{a: number}` over a literal `1`), which is
 plain `Typed` usage rather than a record mechanism.
 
 Phase 1's serialization walk had already been switched to emit the
@@ -1610,7 +1691,7 @@ rule governs every `inout` nominal.
   re-derivation (`consultsRegistry`, `effects-inference.ts`) keeps a
   definition fresh when its body reaches a protocol dispatcher directly or
   through OPERATOR-definition callees, but a body that reaches one only
-  through a VALUE-bound literal (`g := (x) |-> speak(x)` stored as a value
+  through a VALUE-bound literal (`g := (x) => speak(x)` stored as a value
   binding, then `f` calling `g`) freezes `g`'s arrow as read at `f`'s
   install: the walk cannot see that the value's own arrow is
   registry-dependent. Consistent with the shipped construction-time
@@ -1627,7 +1708,7 @@ rule governs every `inout` nominal.
   (`denotesFunction`, function-utils.ts) cannot answer and the
   constant-nullary reject fires. A loud error, not silent wrong values
   — and the explicit-lambda spelling
-  (`Map((x) |-> InverseFunction(Sin)(x), xs)`) works. The protocol-member
+  (`Map((x) => InverseFunction(Sin)(x), xs)`) works. The protocol-member
   case was fixable with a registry-keyed syntactic recognizer
   (`isQualifiedProtocolMember`); these shapes need per-operator
   knowledge ("which operator applications denote function values when

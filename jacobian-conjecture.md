@@ -147,8 +147,7 @@ in Epsil:
 
 ```epsil
 P(t) = $t^3 - 6t^2 + 11t - 6$
-let roots = Solve(P(t) == 0, t)
-Map(roots, r |-> (t - r, Simplify(P(t) / (t - r))))
+Solve(P(t) == 0, t) |> r => (t - r, Simplify(P(t) / (t - r)))
 // ➔ [(t - 1, t^2 - 5t + 6), (t - 2, t^2 - 4t + 3), (t - 3, t^2 - 3t + 2)]
 ```
 
@@ -174,8 +173,8 @@ usually associated with NP problems, playing out in algebraic geometry.
 essentially never land on the solution variety; you'd be looking for a
 positive-codimension miracle. No amount of raw compute in any CAS finds this by
 enumeration. And a direct assault on a found candidate's fibers is also out of
-reach of today's solvers — asking Epsil to solve `F(x,y,z) == (-1/4, 0, 0)` as
-a raw degree-7 system returns the equation unsolved, symbolically intact. The
+reach of today's solvers — asking Epsil to solve `F(x,y,z) == (-1/4, 0, 0)` as a
+raw degree-7 system returns the equation unsolved, symbolically intact. The
 fibers only become computable _through the structure_ (factor the cubic, as
 above).
 

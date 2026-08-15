@@ -52,12 +52,11 @@ total
 is a single `Map` — no printing, no mutation:
 
 ```epsil
-Map(k |->
+1..15 |> k =>
   if k % 15 == 0 { "FizzBuzz" }
   else if k % 3 == 0 { "Fizz" }
   else if k % 5 == 0 { "Buzz" }
-  else { k },
-  1..15)
+  else { k }
 // ➔ [1, 2, "Fizz", 4, "Buzz", "Fizz", 7, 8, "Fizz", "Buzz", 11, "Fizz", 13, 14, "FizzBuzz"]
 ```
 
@@ -161,8 +160,8 @@ let y = 5
 **A truth table**, as a `Map` over the four boolean pairs:
 
 ```epsil
-Map(p |-> p[1] && p[2],
-    [(True, True), (True, False), (False, True), (False, False)])
+[(True, True), (True, False), (False, True), (False, False)] 
+  |> p => p[1] && p[2]
 // ➔ [True, False, False, False]
 ```
 
@@ -198,7 +197,7 @@ pair carried in a two-element list literal, stays exact all the way to F(200)
 — far past the 2⁵³ limit of floating point:
 
 ```epsil
-Fold((p, _) |-> [p[2], p[1] + p[2]], [0, 1], 1..200)[1]
+Fold((p, _) => [p[2], p[1] + p[2]], [0, 1], 1..200)[1]
 // ➔ 280571172992510140037611932413038677189525
 ```
 
@@ -230,21 +229,21 @@ Map(fib, 1..10)
 
 A single-clause spelling with a conditional is equivalent
 (`fact(n) = 1 if n <= 1 else n * fact(n - 1)`), as is the two-step form —
-declare with `let`, then assign a `|->` lambda. Note that *mutually*
+declare with `let`, then assign a `=>` lambda. Note that *mutually*
 recursive functions still require declaring all the names with `let` before
 defining any of them.
 
 ## Higher-Order Functions
 
 Functions are values: they can be passed as arguments and returned from other
-functions. A `|->` lambda captures the variables in scope where it is created.
+functions. A `=>` lambda captures the variables in scope where it is created.
 
 **A numeric-derivative factory.** `deriv` returns a lambda that closes over
 both the function `f` and the step `h`. The central-difference estimate is
 computed *exactly* (as a rational):
 
 ```epsil
-deriv(f, h) = x |-> (f(x + h) - f(x - h)) / (2h)
+deriv(f, h) = x => (f(x + h) - f(x - h)) / (2h)
 g(x) = x^3
 let dg = deriv(g, 1/1000)
 dg(2)
@@ -255,7 +254,7 @@ Pipe the call into `N` for a floating-point value — numericization reaches
 through the user-function/closure call:
 
 ```epsil
-deriv(f, h) = x |-> (f(x + h) - f(x - h)) / (2h)
+deriv(f, h) = x => (f(x + h) - f(x - h)) / (2h)
 g(x) = x^3
 let dg = deriv(g, 1/1000)
 dg(2) |> N
@@ -266,7 +265,7 @@ dg(2) |> N
 different results, confirming each lambda captures the right binding:
 
 ```epsil
-compose(f, g) = x |-> f(g(x))
+compose(f, g) = x => f(g(x))
 inc(x) = x + 1
 sq(x) = x^2
 let h = compose(sq, inc)
@@ -275,14 +274,14 @@ let h = compose(sq, inc)
 ```
 
 **A counter factory.** `makeCounter` returns a zero-parameter lambda
-(`() |-> …`) whose **block body** (`do { … }`) runs several statements and
+(`() => …`) whose **block body** (`do { … }`) runs several statements and
 yields the last one. The lambda closes over `count` and mutates it on each
 call:
 
 ```epsil
 function makeCounter() {
   let count = 0
-  () |-> do { count = count + 1; count }
+  () => do { count = count + 1; count }
 }
 let c = makeCounter()
 c()
@@ -293,7 +292,7 @@ c()
 
 `do { … }` opens a statement block in expression position: it evaluates its
 statements in order and its value is the final one (a bare `{ … }` there is a
-set/dictionary literal instead). `() |-> …` is a lambda that takes no
+set/dictionary literal instead). `() => …` is a lambda that takes no
 parameters.
 
 Each `makeCounter()` call captures its own `count`, so counters are
@@ -302,7 +301,7 @@ independent:
 ```epsil
 function makeCounter() {
   let count = 0
-  () |-> do { count = count + 1; count }
+  () => do { count = count + 1; count }
 }
 let a = makeCounter()
 let b = makeCounter()
@@ -441,7 +440,7 @@ $e^{i\pi/3}$
 imaginary part: (1+i)(2+i)(3+i) = 10i:
 
 ```epsil
-Product(Map(k |-> k + i, Range(1, 3)))
+Product(Map(k => k + i, Range(1, 3)))
 // ➔ 10i
 ```
 
@@ -483,7 +482,7 @@ the polynomial:
 
 ```epsil
 let roots = Solve(x^2 - 5x + 6 == 0, x)
-Map(r |-> r^2 - 5r + 6, roots)
+roots |> r => r^2 - 5r + 6
 // ➔ [0, 0]
 ```
 
@@ -542,7 +541,7 @@ Sum(Exp(2*Pi*i*k/5), (k, 0, 4))
 an exact rational — the 10th harmonic number:
 
 ```epsil
-Fold((a, k) |-> a + 1/k, 0, 1..10)
+Fold((a, k) => a + 1/k, 0, 1..10)
 // ➔ 7381/2520
 ```
 
@@ -586,7 +585,7 @@ per value, folded onto the header with `StringJoin` in a pipeline:
 
 ```epsil
 let header = "n\tn^2\tn^3\n"
-1..5 |> Map(n |-> "\(n)\t\(n^2)\t\(n^3)\n", _) |> Fold(StringJoin, header, _)
+1..5 |> n => "\(n)\t\(n^2)\t\(n^3)\n" |> Fold(StringJoin, header)
 ```
 
 produces (tabs aligned, newline-separated rows):
@@ -624,7 +623,7 @@ into its code points, `Map` shifts each, and `StringFrom(…, "unicode-scalars")
 rebuilds the string. Shifting back decodes, so the cipher round-trips:
 
 ```epsil
-shift(s, k) = s |> UnicodeScalars |> Map(c |-> c + k, _) |> StringFrom(_, "unicode-scalars")
+shift(s, k) = s |> UnicodeScalars |> c => c + k |> StringFrom(_, "unicode-scalars")
 (shift("hello", 3), shift(shift("hello", 3), -3))
 // ➔ ("khoor", "hello")
 ```
@@ -666,7 +665,7 @@ let xs = [4, 8, 15, 16, 23, 42]
 `_` is the piped value:
 
 ```epsil
-1..10 |> Filter(_, n |-> n % 2 == 0) |> Reduce(_, (acc, n) |-> acc + n)
+1..10 |> Filter(n => n % 2 == 0) |> Reduce((acc, n) => acc + n)
 // ➔ 30
 ```
 
@@ -703,10 +702,10 @@ If the slot can be inferred based on the type of the previous argument, it can b
 And a lambda is automatically converted to a map:
 
 ```epsil
-1..100 |> x |-> x^2
+1..100 |> x => x^2
 
 // Shorthand for:
-1..100 |> Map(x |-> x^2, _)
+1..100 |> Map(x => x^2, _)
 ```
 
 
@@ -725,7 +724,7 @@ dot(...p, ...q)
 explicit initial value:
 
 ```epsil
-Fold((acc, n) |-> acc + n^2, 0, 1..5)
+Fold((acc, n) => acc + n^2, 0, 1..5)
 // ➔ 55
 ```
 
@@ -754,7 +753,7 @@ computation — it surfaces as `NaN` while the valid inputs still compute. Here
 
 ```epsil
 let inputs = [16, -4, "banana", 81]
-Map(x |-> Sqrt(x), inputs)
+inputs |> x => Sqrt(x)
 // ➔ [4, 2i, NaN, 9]
 ```
 
