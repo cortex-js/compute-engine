@@ -198,6 +198,36 @@ The `any` bump remains: `_type`/`_sgn`/value memos on expressions that
 read fields are `any`-keyed today and get their precision from the
 object-dependency channel, not from mask width.
 
+### OPEN RULING for 1D — this note and the shipped code disagree
+
+**Do not wire the `object-store` event without resolving this.** The
+mask paragraph above specifies `any: true`. The shipped 1C inventory
+reasons from the opposite premise: `object-deps.ts` states that "a
+field store advances no engine axis — not `any`, not `semantic`, not
+`world`", and the per-object dependency channel was built on that
+basis. Both are currently true only because **no event exists yet** —
+`_store` emits nothing, so the shipped comment describes reality and
+the mask paragraph describes an intention. They cannot both survive 1D.
+
+The fork:
+
+- **Keep `any: true`** (recommended for v1) — fail-safe: any cache not
+  yet wired to the per-object channel still invalidates. Cost: every
+  store colds all generation-keyed caches, which is coarse in exactly
+  the store-heavy loops objects exist for. The store-loop microbenchmark
+  named in the acceptance criteria is what decides whether that cost is
+  tolerable.
+- **Zero-mask** — the per-object channel becomes the sole invalidator,
+  which is precise and cheap, but every cache family must be *proven*
+  wired or excluded, because anything missed goes stale silently. The
+  B3 inventory claims that completeness; it has not been tested against
+  an actual emitter.
+
+Whichever is chosen, `object-deps.ts`'s comment must be updated in the
+same change — leaving it asserting "no engine axis" while the event
+bumps `any` would be a false statement in the file a future reader
+consults first.
+
 ## Per-entry object-version dependencies (shape only; step 7 builds it)
 
 A cache entry that read object fields records
