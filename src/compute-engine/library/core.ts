@@ -2828,9 +2828,51 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const seqName = sym(op1.op1)!;
           const subscript = op1.op2;
 
+          // Declared-name precedence governs the Assign LHS too (user ruling
+          // 2026-08-15, second half of the subscripted-assignment round): a
+          // subscripted LHS whose JOINED name is declared assigns to THAT
+          // symbol — `declare('l_P')` then `l_{P} := P²+1` binds `l_P`, and
+          // must NOT define a family on the base letter `l` (documents use
+          // `f` and `f_x` as unrelated names; the Desmos importer measured a
+          // real base-letter clobber from the family reading). This mirrors
+          // the expression-position rule pinned in
+          // `subscript-declared-name-precedence.test.ts`: declaration
+          // presence is the disambiguator. It also resolves the
+          // lambda-assignment ambiguity handled below — with a declaration
+          // present the author's intent is stated, so a function-literal RHS
+          // binds the declared symbol here instead of erroring. Sequence
+          // recurrences are unaffected: defining `a_1 := 1` or
+          // `a_n := a_{n-1}+1` registers NO `a_1`/`a_n` symbol definitions
+          // (verified), so re-running those rows never trips this branch.
+          const joinedName = isSymbol(subscript)
+            ? `${seqName}_${subscript.symbol}`
+            : isNumber(subscript) && Number.isInteger(subscript.re)
+              ? `${seqName}_${subscript.re}`
+              : undefined;
+          if (
+            joinedName !== undefined &&
+            ce.lookupDefinition(joinedName) != null
+          ) {
+            const val = op2.evaluate();
+            // Errors surface as VALUES on this route, exactly as on the
+            // regular symbol-assignment path below.
+            try {
+              ce.assign(joinedName, val);
+            } catch (e) {
+              if (isEffectContractError(e))
+                return effectContractErrorValue(ce, e);
+              if (isTypeCompatibilityError(e))
+                return typeCompatibilityErrorValue(ce, e);
+              throw e;
+            }
+            return val;
+          }
+
           // A FUNCTION LITERAL on the right of a subscripted-name assignment
           // is refused outright (user ruling 2026-08-15, option (d) of the
-          // subscripted-lambda entry in ROADMAP.md). The notation is
+          // subscripted-lambda entry in ROADMAP.md; the declared-name check
+          // above already took the unambiguous cases, so this is the
+          // UNDECLARED joined name only). The notation is
           // genuinely ambiguous — `l_P := P ↦ body` reads either as defining
           // a function NAMED `l_P` (Desmos treats the subscript as pure
           // spelling, and documents routinely use `f` and `f_x` as unrelated

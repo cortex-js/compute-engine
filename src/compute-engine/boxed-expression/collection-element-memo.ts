@@ -604,8 +604,30 @@ export function memoDepsStillValid(expr: Expression, deps: MemoDeps): boolean {
     // binding to compare or version to read; its validity is the resolution
     // re-check below.
     if (d.valueDef !== undefined) {
-      if (d.occurrence.valueDefinition !== d.valueDef) return false;
-      if (d.valueDef._writeVersion !== d.version) return false;
+      if (d.occurrence.valueDefinition !== d.valueDef) {
+        // The pinned binding's inner definition was replaced. When BOTH the
+        // fill-time definition and the current one are VALUELESS, this is a
+        // re-auto-declare, not a semantic change: a definition holding no
+        // value never supplies what a walk reads — the name resolves through
+        // the scope chain, which the re-resolution check below validates.
+        // Bare-symbol canonicalization performs exactly such a swap on a
+        // lambda-body free (`ce.symbol(name)` auto-declares the name and
+        // `updateDef` replaces the shared wrapper's inner definition in
+        // place), so failing on identity here made every snapshot that
+        // walked such a body born-stale: each facet probe recomputed, the
+        // recompute re-canonicalized the body and swapped the binding again,
+        // and one `ce.parse` built ~460K broadcast lambdas before timing out
+        // (ROADMAP.md "Tycho item 186"). Identity — and the `_writeVersion`
+        // continuity that hangs off it — is load-bearing only when either
+        // side holds a value.
+        const cur = d.occurrence.valueDefinition;
+        if (
+          cur === undefined ||
+          cur.value !== undefined ||
+          d.valueDef.value !== undefined
+        )
+          return false;
+      } else if (d.valueDef._writeVersion !== d.version) return false;
     }
     const r = resolveDepBinding(ce, depScope, d.name);
     if (d.resolvedOperator !== undefined) {

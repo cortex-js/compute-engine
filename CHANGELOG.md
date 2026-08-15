@@ -28,6 +28,36 @@
 
 ### Issues Resolved
 
+- **Canonicalizing a broadcast `At` over a comprehension-derived index range
+  no longer takes minutes in a document scope** (Tycho item 186 — the
+  surviving half of item 182's storm class). Parsing
+  `L[1+3(0..(\mathrm{Length}(D)-1))]` with `D` a lazy comprehension whose
+  body reaches a user function carrying an undeclared free symbol burned
+  120–240 s in one `ce.parse`: re-auto-declaring that free symbol during
+  canonicalization replaced its binding wrapper's inner definition in
+  place, which made every collection-facet memo snapshot that had walked
+  the lambda body born-stale, so each `count`/`isEmpty` probe re-scanned
+  the comprehension and rebuilt broadcast lambdas (~460K constructions)
+  until the deadline. Dependency validation now treats a valueless→
+  valueless rebind of a pinned binding as benign — the name still resolves
+  through the scope chain, which is separately re-checked — while a rebind
+  where either side holds a value invalidates as before. The witness parse
+  now canonicalizes in ~15 ms at full production size.
+
+- **Assigning a function literal to a subscripted name is now an explicit
+  error instead of a silent no-op.** `l_P \coloneq P \mapsto
+  \sqrt{P[1]^2+P[2]^2}` fell into the sequence-definition machinery
+  (`a_n := a_{n-1} + 2`), which bound nothing usable and reported nothing —
+  the definition silently vanished, and in some shapes the BASE letter `l`
+  was overwritten. The notation is genuinely ambiguous (a function *named*
+  `l_P`, or a *family* `l` indexed by `P`?), so it now returns an
+  `ambiguous-assignment` error naming both working spellings: write
+  `l_P(P) \coloneq ⟨body⟩` to define a function named `l_P`, or assign an
+  expression in `P` (not a function literal) to define a family. Integer
+  recurrences, the expression-bodied family form `l_P \coloneq P^2+1`,
+  head-application definitions, and assigning function *values* via
+  `ce.assign()` are all unchanged.
+
 - **Declaring a function with a placeholder signature no longer breaks the
   definition that follows.** `ce.declare('f', '(unknown) -> unknown')`
   followed by `f(P) \coloneq \sqrt{P[1]^2+P[2]^2}` was refused with

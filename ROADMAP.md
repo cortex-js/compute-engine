@@ -671,16 +671,29 @@ the non-lambda family form, head-application, and the
 `ce.assign(name, ⟨Function value⟩)` API route, which is deliberately
 untouched — the ruling is notation-level).
 
-Noted, verified, and left OPEN (out of this ruling's scope): the
-declared-name-precedence convention does NOT govern the Assign LHS. A
-declared `l_P` does not stop `l_{P} \coloneq P²+1` from binding the
-base `l` and leaving the declared `l_P` unbound (verified on 0.109.0 by
-the importer and on the working tree here; the precedence pins in
-`subscript-declared-name-precedence.test.ts` cover expression
-positions, not the sequence-definition branch). Whether the presence of
-a declared joined name should divert the whole subscripted-assignment
-family to symbol assignment is a follow-on ruling if a consumer ever
-needs it; nothing known depends on it today.
+**SECOND-HALF RULING (2026-08-15, same day): declared-name precedence
+now governs the Assign LHS too.** The gap had been noted as open: a
+declared `l_P` did not stop `l_{P} \coloneq P²+1` from binding the base
+`l` and leaving the declared `l_P` unbound (verified on 0.109.0 by the
+importer and on the working tree; the precedence pins covered
+expression positions only). The user ruled declared-wins: a subscripted
+Assign LHS whose JOINED name (symbol or integer subscript) is declared
+assigns to THAT symbol — declaration presence is the disambiguator,
+the same principle as the expression-position rule. Consequences,
+implemented together in the same `Assign` Subscript branch: (1)
+`declare('l_P')` + `l_{P} := P²+1` binds `l_P` and never touches `l`;
+(2) the declared + FUNCTION-LITERAL case binds the declared symbol
+instead of erroring — the declaration states the intent, so the
+original Tycho row-4 shape is now functional end to end (through the
+placeholder-refinement machinery ruled earlier in this entry) — and the
+`ambiguous-assignment` error covers the UNDECLARED joined name only;
+(3) a declared NUMERIC joined name (`declare('b_1')` + `b_1 := 5`) wins
+over the sequence base case. Recurrences are unaffected: sequence
+definitions register no `a_1`/`a_n` symbol definitions (verified), so
+re-running a base-case row still updates the sequence store. The
+importer's adoption checklist item "case C tells us whether the
+precedence observation moved" — it moved, in the declared-wins
+direction. Same pin file: `subscript-lambda-assign.test.ts`.
 
 ### Tycho item 190 — compiled real-domain emission for a complex-promoting chain over an `unknown`-typed parameter (OPEN)
 
@@ -958,10 +971,16 @@ test fails under the pre-fix rule). Suites green: item-182 pins,
 collections, lazy-collection regimes/compile/broadcast, map-auto-compile,
 collection-element-memo (717 tests), plus typecheck.
 
-Still open from this investigation (recorded below, unchanged): the
-`toNumericValue` `console.assert` violations at `boxed-function.ts` reached
-via `canonicalDivide` → `factor()`, and the `TYPE_CACHE` clear-all
-eviction cliff (real, measured, refuted as 186's cause).
+Still open from this investigation: the `TYPE_CACHE` clear-all eviction
+cliff (real, measured, refuted as 186's cause). The `toNumericValue`
+`console.assert` violations (`boxed-function.ts`, `isCanonical ||
+isStructural`, reached via `canonicalDivide` → `factor()` →
+`toNumericValue`) NO LONGER REPRODUCE post-fix — 0 firings on both the
+strip and full-document harness runs (was ~9 per storm run), so the only
+known trigger was an expression the storm's own cascades built. The latent
+question — whether that call chain can hand `toNumericValue` a raw
+expression through some other route — has no known reproduction; downgraded
+from "worth its own look" to a note on the assert site.
 
 --- original investigation record follows ---
 

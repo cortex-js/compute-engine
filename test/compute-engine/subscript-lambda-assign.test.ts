@@ -38,17 +38,20 @@ describe('subscripted-name LHS with a function-literal RHS is refused', () => {
     expect(ce.box('l_P').evaluate().toString()).toBe('"l_P"');
   });
 
-  test('declared joined name: same error (precedence does not govern this LHS)', () => {
-    // Declaring `l_P` first does NOT collapse the Assign LHS to the symbol —
-    // the declared-name-precedence rule covers expression positions, not the
-    // sequence-definition branch (verified against 0.109.0 and the working
-    // tree). So the ruling applies uniformly.
+  test('declared joined name + lambda: BINDS the declared symbol (declared-wins ruling)', () => {
+    // Declaration presence resolves the ambiguity (second-half ruling,
+    // 2026-08-15): the declared joined name takes the assignment, so the
+    // lambda binds `l_P` — the original Tycho row-4 shape is functional —
+    // and the `ambiguous-assignment` error covers the UNDECLARED case only.
     const ce = new ComputeEngine();
     ce.declare('l_P', { signature: '(unknown) -> unknown' });
     const r = ce
       .parse(`l_{P}\\coloneq ${LAMBDA_BODY}`, { strict: false })
       .evaluate();
-    expect(r.operator).toBe('Error');
+    expect(r.operator).not.toBe('Error');
+    expect(
+      ce.parse('l_{P}([3,4])', { strict: false }).evaluate().toString()
+    ).toBe('5');
   });
 
   test('numeric subscript: same error (`b_1 := x ↦ x²` was garbage too)', () => {
@@ -95,6 +98,35 @@ describe('the neighboring spellings are unchanged', () => {
     expect(
       ce.parse('l_{P}([3,4])', { strict: false }).evaluate().toString()
     ).toBe('5');
+  });
+
+  test('declared joined name + expression: assigns the SYMBOL, base letter untouched', () => {
+    // The collision case the declared-wins ruling exists for: a declared
+    // `l_P` must take `l_{P} := P²+1` as a value assignment — defining a
+    // family on the base letter `l` instead would silently shadow the
+    // declaration (and documents use `f` and `f_x` as unrelated names).
+    const ce = new ComputeEngine();
+    ce.declare('l_P', 'unknown');
+    ce.parse('l_{P} \\coloneq P^2+1', { strict: false }).evaluate();
+    expect(ce.box('l_P').evaluate().toString()).toBe('P^2 + 1');
+    expect(ce.box('l').evaluate().toString()).toBe('l');
+  });
+
+  test('declared NUMERIC joined name wins over the sequence base case', () => {
+    const ce = new ComputeEngine();
+    ce.declare('b_1', 'number');
+    ce.parse('b_1 \\coloneq 5', { strict: false }).evaluate();
+    expect(ce.box('b_1').evaluate().toString()).toBe('5');
+  });
+
+  test('re-running a sequence base case still updates the sequence store', () => {
+    // Sequence definitions register no `a_1`/`a_n` symbol definitions, so
+    // declared-wins never captures a recurrence re-run.
+    const ce = new ComputeEngine();
+    ce.parse('a_1 \\coloneq 1', { strict: false }).evaluate();
+    ce.parse('a_1 \\coloneq 3', { strict: false }).evaluate();
+    ce.parse('a_n \\coloneq a_{n-1} + 2', { strict: false }).evaluate();
+    expect(ce.parse('a_3', { strict: false }).evaluate().toString()).toBe('7');
   });
 
   test('the API route is untouched: ce.assign(name, ⟨Function value⟩)', () => {
