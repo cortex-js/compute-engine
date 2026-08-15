@@ -109,7 +109,64 @@ const GENERATED_NAME_RE = /(?<![\p{L}\p{N}_])_(?:tv|cse)[\p{L}\p{N}_]*/gu;
  * stalling the compile. Armed through `withTimeLimit`, which nests as
  * `min()` — an already-armed tighter ambient deadline still governs.
  */
-const CONSTANT_FOLD_BUDGET_MS = 100;
+const CONSTANT_FOLD_BUDGET_MS = 2000;
+
+/**
+ * The most estimated WORK UNITS a subtree may cost before the fold declines
+ * (`foldCostEstimate`). This is the eligibility decision, and it is a property
+ * of the EXPRESSION alone, so the same input always compiles to the same
+ * output.
+ *
+ * It replaced a wall-clock budget, which made the decision depend on machine
+ * load: the folded value comes from `.N()` in bignum while the structural
+ * lowering computes in doubles, so the two branches differ in the last digits,
+ * and a timeout crossing silently swapped one for the other. A real case —
+ * `A(0.3)` over a 7-term `Sum` of user functions — measured 37–89 ms against a
+ * 100 ms budget, so under parallel test load it folded sometimes and not
+ * others, and two engines compiling the same source disagreed at the 13th
+ * digit. Compiled output must be reproducible for a given input, or it cannot
+ * be regression-tested.
+ */
+const CONSTANT_FOLD_MAX_COST = 200_000;
+
+/**
+ * How deep `foldCostEstimate` walks before giving up and declining.
+ *
+ * The estimator exists to keep the fold cheap, so it must not become the
+ * expense it guards against: without a depth bound, a deeply nested tree costs
+ * a full walk on EVERY node the top-down fold visits, which is quadratic in
+ * depth. A tree deeper than this is also very unlikely to be a constant worth
+ * folding. Exceeding it yields an infinite estimate — the same "decline" the
+ * cost ceiling produces, so there is one failure mode rather than two.
+ */
+const CONSTANT_FOLD_MAX_DEPTH = 48;
+
+/**
+ * How many nodes `foldCostEstimate` may visit before declining.
+ *
+ * The depth bound alone does not bound the estimator: a WIDE call graph —
+ * composed helpers that each call the one below a few times — branches as
+ * fan-out^depth while staying shallow. A 12-level, 4-way composition took
+ * 26.6 s to analyze, far more than evaluating it would have cost, and nothing
+ * bounded it because the estimate is computed BEFORE the anti-hang deadline
+ * is armed. This makes the estimator's own work finite in every shape.
+ */
+const CONSTANT_FOLD_MAX_VISITS = 20_000;
+
+/**
+ * `foldCostEstimate`'s working state for one estimate.
+ *
+ * `cache` is a real memo of settled per-function costs, so a function called
+ * from many places is analyzed once. `inProgress` is the separate
+ * cycle guard — a name currently being expanded is recursive and has no
+ * static bound. They must stay distinct: collapsing them into one set is what
+ * turned the memo into a cycle guard and made the estimator exponential.
+ */
+type FoldCostContext = {
+  readonly cache: Map<string, number>;
+  readonly inProgress: Set<string>;
+  visits: number;
+};
 
 /**
  * Cap on `engine.maxCollectionSize` while a constant fold evaluates: bounds
@@ -1397,6 +1454,18 @@ export class BaseCompiler {
     const savedAngularUnit = engine.angularUnit;
     const neutralizeAngle = savedAngularUnit !== 'rad';
     if (neutralizeAngle && containsDerivativeHead(expr)) return undefined;
+
+    // The eligibility decision, and the LAST gate before the expensive part:
+    // everything above is a cheap structural check, so the estimate is only
+    // paid for a subtree that would otherwise be evaluated. It is a property
+    // of the expression alone, which is what makes the compiled output
+    // reproducible — see `CONSTANT_FOLD_MAX_COST`.
+    // Spelled as a NEGATED "within budget" rather than "over budget": a
+    // comparison against `NaN` is false either way, so `> ceiling` would have
+    // ADMITTED an estimate that arithmetic had turned into `NaN` instead of
+    // declining it. Only a finite estimate at or under the ceiling folds.
+    if (!(BaseCompiler.foldCostEstimate(expr) <= CONSTANT_FOLD_MAX_COST))
+      return undefined;
     BaseCompiler._boundVarsCtx = undefined;
     BaseCompiler._binderShield = [];
     try {
@@ -1499,6 +1568,282 @@ export class BaseCompiler {
     // spelling applies (float formatting, complex support, negative-literal
     // parenthesization).
     return BaseCompiler.emitFoldedValue(value, target, prec);
+  }
+
+  /**
+   * A DETERMINISTIC estimate of what evaluating `expr` at compile time will
+   * cost, in abstract work units — the constant fold's eligibility test.
+   *
+   * Deterministic is the whole point: the decision depends only on the
+   * expression, so one input always produces one compiled output (see
+   * `CONSTANT_FOLD_MAX_COST` for the load-dependent behaviour this replaced).
+   *
+   * The estimate is deliberately an OVER-approximation, and it is MONOTONE —
+   * a node never costs less than the sum of its parts. Monotonicity is
+   * load-bearing rather than tidy: the fold is attempted top-down at every
+   * node, so if a parent could estimate cheaper than a child, it could fold a
+   * subtree the child had already refused, and the cost ceiling would depend
+   * on where the walk happened to start.
+   *
+   * The multiplying constructs are the ones that actually decide cost:
+   *
+   * - a `Sum`/`Product` over a resolvable finite range costs its body once per
+   *   iteration, so the body is multiplied by the trip count;
+   * - a `Map`/`Filter` over a collection of resolvable size costs its callback
+   *   once per element, likewise;
+   * - an applied user function costs its own body, memoized by name in
+   *   `FoldCostContext.cache` so a function reached from many call sites is
+   *   analyzed once, with a separate in-progress set guarding recursion (a
+   *   recursive definition has no static bound, so it declines).
+   *
+   * The estimator's own work is bounded by `CONSTANT_FOLD_MAX_VISITS` as well
+   * as by depth, because it runs BEFORE the anti-hang deadline is armed and
+   * so has no other backstop.
+   *
+   * Anything whose count cannot be resolved statically returns `Infinity` —
+   * fail closed (D6), the same answer the depth bound gives, and the same
+   * shape every other gate in this folder uses. `Infinity` propagates through
+   * the arithmetic below without special-casing.
+   */
+  private static foldCostEstimate(
+    expr: Expression,
+    depth = 0,
+    ctx?: FoldCostContext
+  ): number {
+    const c = ctx ?? { inProgress: new Set<string>(), cache: new Map(), visits: 0 };
+    // The estimator's OWN work is bounded, not just the tree's depth. Depth
+    // alone does not bound a wide call graph: composed helpers that each call
+    // the one below a few times branch as fan-out^depth, and a 12-level,
+    // 4-way composition took 26.6 s to analyze before this cap existed — far
+    // more than the evaluation it was guarding. Exhausting the budget
+    // declines, like every other unresolvable answer here.
+    if (++c.visits > CONSTANT_FOLD_MAX_VISITS) return Infinity;
+    if (depth > CONSTANT_FOLD_MAX_DEPTH) return Infinity;
+    if (isNumber(expr) || isString(expr)) return 1;
+    if (isSymbol(expr)) return 1;
+    if (isDictionary(expr)) {
+      let total = 1;
+      for (const v of expr.values) {
+        total += BaseCompiler.foldCostEstimate(v, depth + 1, c);
+        if (total >= Infinity) return Infinity;
+      }
+      return total;
+    }
+    if (!isFunction(expr)) return 1;
+
+    const op = expr.operator;
+    const ops = expr.ops;
+
+    // A big op costs its body once per iteration. `bigOpBoundConstant`
+    // already answers `undefined` for a bound that is symbolic or mentions a
+    // compile-bound name, which is exactly when there is no static count.
+    if (op === 'Sum' || op === 'Product') {
+      const body = BaseCompiler.foldCostEstimate(ops[0], depth + 1, c);
+      // A non-finite body poisons the product REGARDLESS of the count: in
+      // JavaScript `0 * Infinity` is `NaN`, and `NaN > ceiling` is false, so
+      // a zero-trip node wrapping an unpriceable body would have sailed
+      // through the gate as "cheap". Non-finite in, non-finite out.
+      if (!Number.isFinite(body)) return Infinity;
+
+      // The INDEXED form (`Sum(body, Limits(i, a, b))`) repeats its body once
+      // per iteration.
+      if (ops.length >= 2) {
+        const trips = BaseCompiler.bigOpTripCount(expr);
+        if (trips === undefined) return Infinity;
+        return 1 + trips * body;
+      }
+
+      // The one-operand COLLECTION-REDUCER form (`Sum(xs)`) reduces every
+      // element of its operand, so it costs the collection's size — not the
+      // three syntax nodes the generic arm would have counted.
+      // `Sum(Range(1, 1000000))` took 1.07 s to fold under the generic
+      // pricing, close enough to the anti-hang deadline that load could
+      // decide the outcome again.
+      // An UNRESOLVABLE size takes the same optimistic fallback the
+      // `Map`/`Filter` arm uses, and for the same reason: this estimate also
+      // runs over a callee's BODY, where the bounds are the function's own
+      // parameters and are symbolic by construction. `g(k) := Sum(Take(…, k))`
+      // has no static size in the body, yet `g(3)` is a perfectly ordinary
+      // constant fold — declining here refused it. A size that IS resolvable
+      // is still priced, which is what keeps `Sum(Range(1, 1000000))` out.
+      const size = BaseCompiler.staticCollectionSize(ops[0], depth + 1);
+      return 1 + (size ?? 1) * body;
+    }
+
+    // A collection PIPELINE costs its callback once per element. The size
+    // comes from the source (`staticCollectionSize`), so a pipeline over a
+    // literal range is priced by that range even though the pipeline itself
+    // is only a few nodes. Without this a `Sum(Map(f, 1..100000))` estimated
+    // at a dozen units — the multiplying construct is the collection, not the
+    // syntax — and evaluating it forced all 100 000 elements.
+    if ((op === 'Map' || op === 'Filter') && ops.length >= 2) {
+      // `Map(f, xs)` is callback-first; `Filter(xs, f)` is collection-first.
+      const [callback, source] =
+        op === 'Map' ? [ops[0], ops[1]] : [ops[1], ops[0]];
+      const size = BaseCompiler.staticCollectionSize(source, depth + 1);
+      const perElement = BaseCompiler.foldCostEstimate(callback, depth + 1, c);
+      const sourceCost = BaseCompiler.foldCostEstimate(source, depth + 1, c);
+      if (!Number.isFinite(perElement) || !Number.isFinite(sourceCost))
+        return Infinity;
+      // An UNRESOLVABLE source size is priced as a single element rather than
+      // as infinite, because the bound may live in a CONSUMER above this node
+      // rather than in the source below it: `Take(Map(f, 1..∞), 10)` walks ten
+      // elements, and `staticCollectionSize` prices that correctly from the
+      // `Take`. Declining here instead would refuse every bounded infinite
+      // pipeline — the shape the lazy-stream lowering exists for. A pipeline
+      // with neither a resolvable source nor a bounding consumer is not
+      // under-guarded: it cannot produce a finite collection, so the
+      // evaluation returns a non-number and the fold declines on the value.
+      //
+      // The size is read from SYNTAX, so a collection returned by a USER
+      // FUNCTION (`myrange(n) := Range(1, n)`, then `Map(f, myrange(10^6))`)
+      // is invisible here and takes this same one-element fallback however
+      // large it really is. That gap is bounded not by this estimate but by
+      // `CONSTANT_FOLD_MAX_COLLECTION_SIZE`, which clamps
+      // `engine.maxCollectionSize` for the evaluation: materialization stops
+      // early and the fold declines on the value instead. Anything that
+      // raises or relocates that clamp has to revisit this line.
+      return 1 + sourceCost + (size ?? 1) * perElement;
+    }
+
+    // A user-defined function costs its own body. Memoized by NAME: a
+    // function applied ten times is analyzed once, so the estimator stays
+    // linear in the program rather than in the call graph. A name already on
+    // the path is recursive and has no static bound.
+    const literal = BaseCompiler.userFunctionLiteral(expr.engine, op);
+    let calleeCost = 0;
+    if (literal !== undefined && isFunction(literal) && literal.ops.length > 0) {
+      const cached = c.cache.get(op);
+      if (cached !== undefined) {
+        // A genuine CACHE, not merely a cycle guard. Without it the name was
+        // added to a set for the duration of one expansion and removed on the
+        // way out, so a function called from N sibling positions was re-walked
+        // N times, independently, at every level — the estimator was
+        // exponential in the call graph while its own docstring claimed it was
+        // linear.
+        calleeCost = cached;
+      } else {
+        if (c.inProgress.has(op)) return Infinity; // recursive: no static bound
+        c.inProgress.add(op);
+        calleeCost = BaseCompiler.foldCostEstimate(literal.ops[0], depth + 1, c);
+        c.inProgress.delete(op);
+        // Only a settled answer is cached. An `Infinity` reached because the
+        // VISIT BUDGET ran out is a property of this walk, not of the
+        // function, so caching it would make the estimate depend on where the
+        // walk started — the very order-dependence this design removes.
+        if (Number.isFinite(calleeCost)) c.cache.set(op, calleeCost);
+      }
+      if (!Number.isFinite(calleeCost)) return Infinity;
+    }
+
+    let total = 1 + calleeCost;
+    for (const operand of ops) {
+      total += BaseCompiler.foldCostEstimate(operand, depth + 1, c);
+      if (total >= Infinity) return Infinity;
+    }
+    return total;
+  }
+
+  /**
+   * The number of iterations a `Sum`/`Product` node performs, or `undefined`
+   * when it has no statically resolvable count (a symbolic or non-finite
+   * bound, an `Element` domain, a multi-index form). Used only by
+   * `foldCostEstimate`, where `undefined` means "decline".
+   */
+  /**
+   * The element count a collection-valued expression yields, when it is
+   * statically resolvable, for `foldCostEstimate`'s pipeline pricing.
+   * `undefined` means "no static size", which the caller turns into a
+   * decline.
+   *
+   * Only the shapes whose size is readable from the SYNTAX are answered — a
+   * literal `List`/`Set`, a `Range` with literal bounds, and the bounding
+   * consumers `Take`/`Drop` — because the point is to price the walk without
+   * performing it. Anything else (a symbolic bound, an infinite range, a
+   * `Filter` whose survivor count is only known by running it) declines, so
+   * the estimate never under-reports the work.
+   */
+  private static staticCollectionSize(
+    expr: Expression,
+    depth: number
+  ): number | undefined {
+    if (depth > CONSTANT_FOLD_MAX_DEPTH) return undefined;
+    if (!isFunction(expr)) return undefined;
+    const ops = expr.ops;
+    if (expr.operator === 'List' || expr.operator === 'Set') return ops.length;
+    if (expr.operator === 'Range') {
+      // Read the bounds WITHOUT rounding. `bigOpBoundConstant` floors, which
+      // is right for an integer iteration index but wrong here: a `Range`
+      // takes a real step, and flooring turned `Range(1, 100000, 0.5)` into
+      // step `0`, so the size read as unknown and the pipeline was priced as
+      // a single element — it folded in 984 ms, back within reach of the
+      // anti-hang deadline this estimate exists to keep out of the decision.
+      const lo = ops.length > 1 ? BaseCompiler.realBoundOf(ops[0]) : 1;
+      const hi = BaseCompiler.realBoundOf(ops.length > 1 ? ops[1] : ops[0]);
+      const step = ops.length > 2 ? BaseCompiler.realBoundOf(ops[2]) : undefined;
+      if (lo === undefined || hi === undefined) return undefined;
+      const s = step ?? (hi >= lo ? 1 : -1);
+      if (s === 0 || !Number.isFinite(s)) return undefined;
+      // A step pointing away from the stop yields an empty range, not a
+      // negative count.
+      if ((hi - lo) / s < 0) return 0;
+      const n = Math.floor((hi - lo) / s) + 1;
+      return Number.isFinite(n) ? Math.max(0, n) : undefined;
+    }
+    // A bounding consumer caps its source: `Take(xs, n)` walks at most `n`.
+    if (expr.operator === 'Take' && ops.length >= 2) {
+      const n = BaseCompiler.bigOpBoundConstant(ops[1]);
+      if (n === undefined) return undefined;
+      const src = BaseCompiler.staticCollectionSize(ops[0], depth + 1);
+      return src === undefined ? Math.max(0, n) : Math.min(src, Math.max(0, n));
+    }
+    if (expr.operator === 'Drop' && ops.length >= 2) {
+      const src = BaseCompiler.staticCollectionSize(ops[0], depth + 1);
+      const n = BaseCompiler.bigOpBoundConstant(ops[1]);
+      if (src === undefined || n === undefined) return undefined;
+      return Math.max(0, src - Math.max(0, n));
+    }
+    // A `Map` preserves its source's length.
+    if (expr.operator === 'Map' && ops.length >= 2)
+      return BaseCompiler.staticCollectionSize(ops[1], depth + 1);
+    return undefined;
+  }
+
+  /**
+   * The exact finite real value of a `Range` bound or step, or `undefined`.
+   *
+   * Distinct from `bigOpBoundConstant`, which FLOORS: that is correct for an
+   * integer iteration index, but a `Range` step is a real, and flooring
+   * `0.5` to `0` silently reports "no static size". Shares the same safety
+   * conditions — a name bound by an enclosing binder has no compile-time
+   * value, and a nonzero imaginary part leaves no ordering.
+   */
+  private static realBoundOf(expr: Expression | undefined): number | undefined {
+    if (expr === undefined) return undefined;
+    if (BaseCompiler.mentionsCompileBoundName(expr)) return undefined;
+    const im = expr.im;
+    if (!Number.isNaN(im) && im !== 0) return undefined;
+    const re = expr.re;
+    return Number.isFinite(re) ? re : undefined;
+  }
+
+  private static bigOpTripCount(expr: Expression): number | undefined {
+    if (!isFunction(expr)) return undefined;
+    const indexes = expr.ops.slice(1);
+    if (indexes.length !== 1) return undefined;
+    const limits = indexes[0];
+    if (!isFunction(limits, 'Limits')) return undefined;
+    const lower = BaseCompiler.bigOpBoundConstant(limits.op2);
+    const upper = BaseCompiler.bigOpBoundConstant(limits.op3);
+    if (lower === undefined || upper === undefined) return undefined;
+    // Both bounds arrive already floored from `bigOpBoundConstant` — which is
+    // what `normalizeIndexingSet` does to a Sum/Product index as well — so the
+    // count is a plain difference. Spelling it `ceil(lower)`, the textbook
+    // form for UNROUNDED real bounds, would read as a floor/ceil asymmetry
+    // that does not exist here, and could not round anything if it did.
+    const trips = upper - lower + 1;
+    if (!Number.isFinite(trips)) return undefined;
+    return Math.max(0, trips);
   }
 
   /**

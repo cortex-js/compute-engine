@@ -89,6 +89,25 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### The value-half two-step bypasses the default-`!scope` ceiling
+
+Since the 2026-08-15 ruling, a named function definition with no effect
+annotation is refused when its body provably writes to an outer variable
+(`docs/EFFECTS-MODEL.md`, "Scope is opt-in"). The gate sits at the
+operator-definition construction seam, so one route bypasses it:
+`ce.declare('f', '(number) -> number')` followed by
+`ce.assign('f', literal)` stores the literal on a **value** definition
+and installs a proven writer bare (its arrow still carries the inferred
+`scope`, so arrow-reading consumers are not lied to — only the install
+gate is missed). Closing it needs a discriminator between global installs
+and block-local `let` bindings inside the value-definition constructor: a
+closure writing its enclosing literal's local is confined from outside
+and must stay installable, so the constructor cannot refuse every
+scope-arrowed literal it stores. The mutable-closure pins in
+`test/compute-engine/user-function-purity.test.ts` (the "fib arc" block)
+currently pin this residual route's permissive behavior and flip when
+this closes.
+
 ### ~~`.N()` of a divergent infinite `Sum`/`Product` silently returns a truncated partial~~ (FIXED 2026-08-14, same day)
 
 `Sum(i, i=1..∞).N()` answered `50015001` — the 10001-term iteration-limit
@@ -425,6 +444,13 @@ So this is an implementation + interface change, not a one-file edit.
 
 ### Degree-mode folding flips `angularUnit` per fold attempt, purging caches (OPEN, perf — small)
 
+Measured before `foldCostEstimate` replaced the wall-clock budget. That
+change narrows the exposure but does not remove it: the cost gate returns
+BEFORE the setter is touched, so a subtree the estimator declines now
+costs nothing here, while every subtree that actually folds still pays
+the two purges below. The numbers therefore still hold for the folding
+case, which is the common one.
+
 The 0.108.0 degree-mode fold fix neutralizes `engine.angularUnit` around
 each constant-fold evaluation (necessary — see the CHANGELOG entry). The
 setter is not a cheap flag: `set angularUnit` calls `_reset()`, which
@@ -448,22 +474,46 @@ engine. Hoisting therefore has to make the derivative lowering's unit
 explicit rather than ambient, or degree-mode derivatives silently stop
 being rewritten. Raised by the compilation session, who own the folder.
 
-### The constant-fold budget is WALL-CLOCK, so folded output is not reproducible (OPEN, design question — EXPLICIT compile path only)
+### ~~The constant-fold budget is WALL-CLOCK, so folded output is not reproducible~~ (FIXED 2026-08-14)
 
-`CONSTANT_FOLD_BUDGET_MS = 100` (`compilation/base-compiler.ts`) is a
-wall-clock budget per constant subtree. Inside it the subtree folds to a
-literal; over it, it degrades to structural compilation. Correctness is
-not at stake — the gates are written so a clamped evaluation yields a
-correct value or a non-literal, never a wrong fold — but whether a
-borderline-expensive constant folds can differ between two runs of the
-same compile on the same input.
+`CONSTANT_FOLD_BUDGET_MS` was a wall-clock budget per constant subtree:
+inside it the subtree folded to a literal, over it it degraded to
+structural compilation. That made the DECISION depend on machine load,
+and the two branches do not produce identical numbers — a folded value
+comes from `.N()` in bignum while the structural lowering computes in
+doubles — so the same source could compile to values differing in the
+last digits.
 
-The strongest argument for changing it is testability, not performance:
-a deterministic proxy (node/term count, or an element-count cap like the
-one the collection arm already uses) would make compiled OUTPUT
-reproducible for a given input, and therefore pinnable in a test. As it
-stands, the folded code of a near-budget constant must not be pinned —
-`doc/13-guide-compile.md` documents the caveat for users.
+**It stopped being theoretical.** `definition-order.test.ts`
+("three-definition Sum matrix") went intermittently red in FULL parallel
+runs only, passing in isolation and under `--runInBand`, with a different
+failing subset each time. The probe `A(0.3)` — a 7-term `Sum` over two
+user functions — measured 37–89 ms against the 100 ms budget, so under
+test load it folded sometimes and not others, and two engines compiling
+the same source disagreed at the 13th digit:
+folded `-0.5248276195481336` (which matches the interpreter) versus
+structural `-0.5248276195478552`. Two other explanations were chased and
+refuted first — a cross-engine cache (the engine cache is per-instance)
+and leaked `BigDecimal.precision` (an in-band run passes, which is the
+worst case for a leaked global).
+
+**Fixed** by replacing the wall clock with `foldCostEstimate` — a
+deterministic, monotone, over-approximating cost in abstract work units
+(`CONSTANT_FOLD_MAX_COST`), bounded by `CONSTANT_FOLD_MAX_DEPTH` so the
+estimator cannot become the expense it guards against. Multiplying
+constructs are priced by their counts: a `Sum`/`Product` over a
+resolvable range by its trip count, a `Map`/`Filter` by its source's
+static size. Anything with no statically resolvable count declines (D6).
+Monotonicity is load-bearing: the fold is attempted top-down at every
+node, so a parent must never estimate cheaper than a child. The deadline
+remains only as an anti-hang net, raised well clear of anything the
+estimate admits, so it never decides.
+
+Two properties worth keeping: the decline path got CHEAPER (a
+`Sum(Map(f, 1..100000))` now declines in ~3 ms instead of evaluating for
+~100 ms before the clock ran out), and a bound that lives in a CONSUMER
+rather than a source still folds (`Take(Map(f, 1..∞), 10)`), because
+`staticCollectionSize` prices the `Take`.
 
 **Scope: the EXPLICIT `compile()` path only.** Constant folding does not
 run on the implicit `Map`-drain path at all: `tryConstantFold` declines

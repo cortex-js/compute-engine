@@ -250,6 +250,89 @@ describe('COMPILE constant folding - constant collections', () => {
   });
 });
 
+describe('COMPILE constant folding - eligibility is deterministic', () => {
+  // The fold decision is a property of the EXPRESSION, never of elapsed time.
+  // It used to be a 100ms wall-clock budget, and a real case measured 37-89ms
+  // against it: under parallel test load it folded sometimes and not others,
+  // and since a folded value comes from `.N()` in bignum while the structural
+  // lowering computes in doubles, the two branches disagreed at the 13th
+  // digit. Two engines compiling the same source produced different numbers
+  // (`definition-order.test.ts`, intermittently red in full runs only).
+  it('compiles the same source to the same output every time', () => {
+    const e = new ComputeEngine();
+    for (const def of [
+      'a(t)\\coloneq[\\cos t,\\sin t]',
+      'h(i)\\coloneq\\operatorname{mod}(10^4\\sin(10^4i),1)',
+      'A(t)\\coloneq\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^i}a(2^it+2\\pi h(i+.5))',
+    ])
+      e.parse(def).evaluate();
+
+    const results = new Set<string>();
+    for (let i = 0; i < 5; i++)
+      results.add(compile(e.parse('A(0.3)')).code as string);
+    expect(results.size).toBe(1);
+  });
+
+  it('prices the one-operand collection-reducer form by its source size', () => {
+    // `Sum(xs)` reduces every element of `xs`, but it is only three syntax
+    // nodes — the generic pricing let `Sum(Range(1, 1000000))` fold, taking
+    // 1.07s, close enough to the anti-hang deadline that load could decide
+    // the outcome again. The multiplying construct is the collection.
+    expect(compile(ce.box(['Sum', ['Range', 1, 1000000]] as any)).code).toContain(
+      'Array.from'
+    );
+    // A small one still folds — the form is priced, not refused.
+    expect(compile(ce.box(['Sum', ['Range', 1, 50]] as any)).code).toBe('1275');
+  });
+
+  it('reads a fractional Range step without rounding it away', () => {
+    // The bound reader used for an integer iteration index FLOORS, which
+    // turned a 0.5 step into 0 — reported as "no static size", priced as a
+    // single element, and folded in 984ms.
+    const e = ce.box([
+      'Sum',
+      ['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, 100000, 0.5]],
+    ] as any);
+    expect(compile(e).code).not.toMatch(/^[\d.]+$/);
+  });
+
+  it('a NaN estimate declines rather than sailing through the ceiling', () => {
+    // `0 * Infinity` is `NaN` in JavaScript, and `NaN > ceiling` is false —
+    // so a zero-iteration node wrapping an unpriceable body would have been
+    // admitted as "cheap". A non-finite child poisons the product, and the
+    // gate is written as a negated "within budget" so NaN cannot pass it.
+    const e = ce.box([
+      'Sum',
+      ['Sum', ['Square', 'j'], ['Limits', 'j', 1, 'n']],
+      ['Limits', 'i', 1, 0],
+    ] as any);
+    expect(() => compile(e)).not.toThrow();
+  });
+
+  it('prices a collection pipeline by its element count, not its node count', () => {
+    // `Sum(Map(f, 1..100000))` is a handful of nodes but forces 100 000
+    // elements. The estimate multiplies the callback by the source size, so
+    // it declines up front instead of evaluating until a clock ran out.
+    const big = ce.box([
+      'Sum',
+      ['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, 100000]],
+    ] as any);
+    expect(compile(big).code).toContain('Array.from');
+
+    // A bound that lives in a CONSUMER rather than the source still folds:
+    // the source is infinite, the `Take` is what makes it finite.
+    const bounded = ce.box([
+      'Sum',
+      [
+        'Take',
+        ['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, { num: '+Infinity' }]],
+        10,
+      ],
+    ] as any);
+    expect(compile(bounded).code).toBe('385');
+  });
+});
+
 describe('COMPILE constant folding - declines', () => {
   it('constantFold: false preserves the structural lowering', () => {
     const e = ce.parse(
