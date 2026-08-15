@@ -28,6 +28,23 @@
 
 ### Issues Resolved
 
+- **A compiled `Range` with a computed bound no longer loses every element
+  but the first.** On the `javascript` target, a range whose bound was an
+  expression rather than a literal — `1..(Length(L)/3)` — compiled to the
+  single-element list `[1]` when it appeared inside arithmetic, so a
+  comprehension over it produced one element instead of all of them. The
+  result was wrong rather than refused: the compiled function reported
+  success and returned a short list, disagreeing with interpretation,
+  which was always correct.
+
+  The constant-folding guard tested the compiled bound with `parseFloat`,
+  which reads a leading numeric prefix and ignores the rest. `Length(L)/3`
+  compiles to `0.3333333333333333 * (_.L).length`, so the guard read the
+  bound as 0.333, computed a descending range of length one, and emitted
+  it as a literal. Only a bound that is entirely numeric is folded now;
+  every computed bound defers its length to run time. A literal bound
+  (ascending or descending) folds exactly as before.
+
 - **Compiling the same expression twice now always produces the same code.**
   Compile-time constant folding decided whether to fold a subtree using a
   wall-clock budget, so the decision depended on machine load — and the two

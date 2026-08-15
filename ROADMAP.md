@@ -402,6 +402,62 @@ Regression pins: `test/compute-engine/tycho-item-184-gather-count.test.ts`
 (14 tests, including the mask/scalar-index/chained-access shapes that must
 keep declining to claim a count).
 
+### A declared `(unknown) -> unknown` breaks the definition that follows (OPEN — needs a ruling)
+
+Declaring a head with a PLACEHOLDER signature makes a later definition
+fail, where declaring nothing at all — or declaring a CONCRETE signature —
+both work. Measured on 0.109.0 and on the working tree, same definition
+body (`l_P(P) := sqrt(P[1]^2 + P[2]^2)`), calling `l_P([3,4])`:
+
+| declaration before the definition | result |
+|---|---|
+| none | **5** (correct) |
+| `(P: indexed_collection) -> number` (concrete) | **5** (correct) |
+| `(unknown) -> unknown`, head-call spelling `l_P(P) := …` | `incompatible-type`, binding INERT |
+| `(unknown) -> unknown`, lambda spelling `l_P := P ↦ …` | no error, binding still INERT |
+
+So a placeholder declaration is strictly MORE restrictive than no
+declaration, which is incoherent on its face: `unknown` means "no
+information yet" everywhere else in this engine, and here it is behaving
+as a binding constraint.
+
+The lattice arithmetic is doing exactly what it should — this is not an
+`unknown`-specific rule and not invariance. `unknown` is the TOP
+(`number <: unknown` true, `unknown <: number` false), and arrows get
+ordinary variance: `(unknown) -> number <: (number) -> number` is TRUE
+(parameter, contravariant) while `(number) -> unknown <: (number) ->
+number` is FALSE (result, covariant). The head-call spelling INFERS the
+parameter type from the body (`P[1]` ⇒ `P: dictionary |
+indexed_collection`) and then checks that inferred lambda against the
+declaration, where contravariance requires
+`unknown <: dictionary | indexed_collection` — false. Correct
+arithmetic, applied to a premise that should not have been a constraint.
+
+The two spellings also DIVERGE, which is a defect independent of the
+ruling: the lambda route reconciles against the declaration, the
+head-call route type-checks the body-inferred lambda against it. Same
+user intent, opposite semantics.
+
+**The ruling needed**: does a declared `unknown` (in parameter or result
+position) constrain? Recommended answer NO — treat it as absent, so a
+placeholder declaration behaves like no declaration. That matches
+`unknown`'s meaning elsewhere, restores the table's top two rows as the
+baseline, and removes the spelling divergence. The alternative (keep it
+constraining) has to explain why declaring less should permit less.
+Deliberately NOT fixed here: it is a change to declaration semantics, not
+a local repair, and both spellings must land together.
+
+Reported by Tycho (their item on the ledger) as a QUESTION, not a defect
+— they hit it via a manager that declared heads with a derived
+`(unknown) -> unknown`, and they have since fixed that derivation at its
+root, so nothing is blocked. Their argument for the NO answer is worth
+recording: a definition that binds-but-unoptimized keeps a whole class of
+derivation bugs VISIBLE, where a silently inert one hides them — which is
+exactly how their bug stayed invisible.
+
+Incidental, from their trace and not chased here: their manager declares
+the head twice with the same signature before assigning. Benign today.
+
 ### Tycho item 186 — the item-182 class SURVIVES in document context (OPEN, filed 2026-08-14)
 
 Tycho's item-182 witness re-check FAILED after adopting 0.109.0: their
@@ -432,6 +488,51 @@ I had not accounted for — N=450 (divisible) was slow, N=301/302
 (non-divisible) were fast. The shape is a pure MAGNITUDE threshold at
 L-length 304, indifferent to divisibility, and the pad-to-a-multiple-of-3
 workaround is dead.
+
+**ROOT CAUSE LOCATED (2026-08-14). The remaining work is architectural —
+see "what is left" below.**
+
+The driver chain, captured from a live stack on the reproduction:
+
+```
+serializeJson -> _resolveOnly -> serializeJsonExpression -> isDictionary
+  -> BoxedFunction.get type -> isFiniteIndexedCollection
+  -> get isFiniteCollection -> _memoizedFacet
+  -> comprehensionIsFinite -> scanIndependentClauses
+  -> BoxedFunction.evaluate -> add -> lazyBroadcastMap -> ce.function('Map', ...)
+```
+
+Counted on the same runs (`makeCanonicalFunction` by operator):
+NL=303 builds 4,325 canonical functions total; **NL=304 builds 462,197**,
+of which ~114,550 each of `Map`, `Function` and `Block` — i.e. ~114K
+BROADCAST LAMBDAS constructed where one is needed. That is item 182's
+storm shape reaching the ELEMENT memo instead of the facet getters.
+Repair-frame counters rule out the retry loop: 0 rebuilds on both sides,
+max depth 4, so the frames are just a proxy for boxing volume (6,195 vs
+341,485).
+
+**One real defect found and FIXED in the process** (does not close 186).
+`CE_DEBUG_DEPS=1` reported **47,439 memo declines on ONE canonicalization,
+all of them "valueless 'c' not chain-resolved"** — case (3) of
+`snapshotDeps`, where the resolution chain reaches a DIFFERENT value
+binding than the occurrence's pinned one. That case declared the whole
+instance ineligible on the grounds that "neither version stream alone is
+trustworthy" — which is an argument for tracking BOTH streams, not for
+giving up. It now records two deps (pinned binding and chain target), so
+a write to either invalidates; over-invalidation costs a refill, whereas
+declining costs the memo entirely. Declines for that reason: 47,439 → 0.
+Tests green (627 across the item-182 pins, collections, lazy-collection
+and map-auto-compile suites).
+
+**WHAT IS LEFT, and why this needs its own session.** With eligibility
+fixed the storm is UNCHANGED (30 s at NL=304). So the memo is no longer
+declining — it simply never HITS, because the facet/element memos are
+keyed PER INSTANCE (`this._facetMemo`) while the storm re-boxes the same
+logical subexpression as ~462K FRESH instances, each with a cold memo.
+Fixing 186 therefore means stopping the re-boxing, or giving the memo a
+key that survives re-boxing — an architectural change to canonicalization,
+not another eligibility repair. The same "fresh instances defeat
+per-instance memoization" shape was item 182's "64K fresh Ranges".
 
 **REPRODUCED IN THIS REPO, against CE SOURCE, with a profile.** Tycho's
 probe runs on our working tree through the item-182 src-redirect hook:

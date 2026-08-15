@@ -401,12 +401,48 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
         });
         return;
       }
-      // (3) The chain resolves to a DIFFERENT value binding than the
-      // pinned one: `assign` would write the chain target while the
-      // occurrence keeps reading its pinned def (or vice versa — which one
-      // the walk consults depends on constness and route), so neither
-      // version stream alone is trustworthy. Ineligible, as before.
-      if (!isValueDef(resolved) || resolved.value !== valueDef) {
+      // (3) The chain resolves to a DIFFERENT value binding than the pinned
+      // one: `assign` would write the chain target while the occurrence keeps
+      // reading its pinned def (or vice versa — which one the walk consults
+      // depends on constness and route), so neither version stream alone is
+      // trustworthy.
+      //
+      // That is an argument for tracking BOTH, not for giving up: a write to
+      // either binding must invalidate, and recording two deps says exactly
+      // that. Over-invalidation is safe here (it costs a refill), whereas
+      // declaring the instance ineligible costs the memo entirely — measured
+      // at 47,439 declines on ONE canonicalization of Tycho's item-186
+      // witness, all of them this branch on a single lambda-body free, each
+      // one re-running `scanIndependentClauses` and re-constructing broadcast
+      // lambdas (Tycho item 186; the 182 storm's shape through the element
+      // memo).
+      //
+      // Only when the chain target is itself a VALUE binding: its inner
+      // definition carries the `_writeVersion` that makes the second stream
+      // checkable. A chain target that is not a value binding leaves nothing
+      // to compare, so that stays ineligible.
+      if (isValueDef(resolved) && resolved.value !== valueDef) {
+        seen.add(valueDef);
+        // Stream 1 — the occurrence's PINNED binding.
+        deps.push({
+          occurrence,
+          name,
+          valueDef,
+          version: valueDef._writeVersion,
+          resolved,
+        });
+        // Stream 2 — the binding the chain actually resolves the name to.
+        seen.add(resolved.value);
+        deps.push({
+          occurrence,
+          name,
+          valueDef: resolved.value,
+          version: resolved.value._writeVersion,
+          resolved,
+        });
+        return;
+      }
+      if (!isValueDef(resolved)) {
         if (DEBUG_DEPS)
           console.log(
             `[deps] ineligible: valueless '${name}' not chain-resolved`

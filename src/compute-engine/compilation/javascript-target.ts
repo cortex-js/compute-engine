@@ -2724,14 +2724,24 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // stop < start (`Range(5, 1)` → [5,4,3,2,1]); the implicit step is
       // ±1, never a fixed +1 (which silently compiled a descending range
       // to []).
-      const fStop = parseFloat(stop);
-      const fStart = parseFloat(start);
-
-      // `parseFloat` returns NaN (never null) for symbolic bounds, so a
-      // `!== null` guard would always pass and emit `Array.from({length: NaN})`
-      // — silently yielding `[]` for any symbolic Range. Test for numeric
-      // constants with `!isNaN`; symbolic bounds fall through to the runtime
-      // length branch below.
+      // `Number`, NOT `parseFloat`. Both reject a purely symbolic bound, but
+      // `parseFloat` reads a LEADING NUMERIC PREFIX and ignores the rest, so
+      // it accepts a symbolic bound whose compiled form merely STARTS with a
+      // number and reports that prefix as the bound. `Length(L)/3` compiles
+      // to `0.3333333333333333 * (_.L).length`, which `parseFloat` read as
+      // 0.333: against a start of 1 that computed a DESCENDING range of
+      // length `floor(|0.333 - 1|) + 1 = 1`, so the range was emitted as the
+      // single-element literal `[1]` and the rest of it silently vanished —
+      // a wrong VALUE behind `success: true` (Tycho item 187; their witness
+      // was `[… for i = (1..(Length(L)/3))-1]` yielding one element). `Number`
+      // requires the WHOLE string to be numeric, so any expression falls
+      // through to the runtime-length branch below, which is correct for both
+      // symbolic and computed bounds.
+      //
+      // Only a bound the compiler emitted as a bare literal is constant-folded
+      // here; everything else defers its length to run time.
+      const fStop = Number(stop);
+      const fStart = Number(start);
       if (!isNaN(fStop) && !isNaN(fStart)) {
         const dir = fStop >= fStart ? 1 : -1;
         const len = Math.floor(Math.abs(fStop - fStart)) + 1;

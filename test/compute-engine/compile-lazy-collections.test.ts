@@ -305,3 +305,99 @@ describe('COMPILE lazy infinite collections', () => {
     });
   });
 });
+
+//
+// TYCHO ITEM 187 — a `Range` with a COMPUTED bound must not fold to a literal.
+//
+// The javascript target constant-folds a `Range` whose bounds are numeric
+// literals. The guard used `parseFloat` on the COMPILED BOUND SOURCE, and
+// `parseFloat` reads a leading numeric PREFIX and ignores the rest — so a
+// symbolic bound whose compiled form merely starts with a number was accepted
+// as a constant, and its prefix was used as the bound.
+//
+// `Length(L)/3` compiles to `0.3333333333333333 * (_.L).length`. Read as
+// 0.333 against a start of 1, that is a DESCENDING range of length
+// `floor(|0.333 - 1|) + 1 = 1`, so the whole range was emitted as `[1]` and
+// every element past the first silently vanished — a wrong VALUE behind
+// `success: true`, which is the worst failure shape for a compile target.
+//
+// The witness needed BOTH an arithmetic wrapper around the range AND a bound
+// the constant folder could not see: a literal bound folds before the guard
+// is reached, and an unwrapped range takes a different lowering. `Number`
+// requires the whole string to be numeric, so every computed bound now falls
+// through to the runtime-length branch.
+//
+describe('Tycho item 187 — computed Range bounds keep every element', () => {
+  function run(iter: unknown): unknown {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<number>');
+    ce.declare('n', 'number');
+    const js = ce.getCompilationTarget('javascript')!;
+    const expr = ce.box([
+      'Comprehension',
+      ['Tuple', 'i', 'i'],
+      ['Element', 'i', iter],
+    ] as never);
+    const r = js.compile(expr, { realOnly: true } as never);
+    expect(r?.success).toBe(true);
+    return r!.run!({ L: [1, 2, 3, 4, 5, 6, 7, 8, 9], n: 3 } as never);
+  }
+
+  test('the witness: an arithmetic-shifted range over a computed bound', () => {
+    // Was [[0,0]] — one element instead of three.
+    expect(run(['Subtract', ['Range', 1, ['Divide', ['Length', 'L'], 3]], 1])).toEqual([
+      [0, 0],
+      [1, 1],
+      [2, 2],
+    ]);
+  });
+
+  test('the same range UNSHIFTED (was already correct)', () => {
+    expect(run(['Range', 1, ['Divide', ['Length', 'L'], 3]])).toEqual([
+      [1, 1],
+      [2, 2],
+      [3, 3],
+    ]);
+  });
+
+  test('a LITERAL shifted range still constant-folds correctly', () => {
+    expect(run(['Subtract', ['Range', 1, 3], 1])).toEqual([
+      [0, 0],
+      [1, 1],
+      [2, 2],
+    ]);
+  });
+
+  test('a plain symbolic bound was never affected', () => {
+    expect(run(['Range', 1, 'n'])).toEqual([
+      [1, 1],
+      [2, 2],
+      [3, 3],
+    ]);
+  });
+
+  test('a DESCENDING literal range keeps auto-descending', () => {
+    // The folded branch still runs for genuinely literal bounds, so the
+    // implicit ±1 step must survive the guard change.
+    expect(run(['Range', 5, 1])).toEqual([
+      [5, 5],
+      [4, 4],
+      [3, 3],
+      [2, 2],
+      [1, 1],
+    ]);
+  });
+
+  test('compiled agrees with interpreted on the witness', () => {
+    const ce = new ComputeEngine();
+    const L = ['List', 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    const interpreted = ce
+      .box([
+        'Comprehension',
+        ['Tuple', 'i', 'i'],
+        ['Element', 'i', ['Subtract', ['Range', 1, ['Divide', ['Length', L], 3]], 1]],
+      ] as never)
+      .evaluate();
+    expect(interpreted.toString()).toBe('[(0, 0),(1, 1),(2, 2)]');
+  });
+});
