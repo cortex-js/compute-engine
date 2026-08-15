@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-27.
+**Last updated:** 2026-08-15.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -33,7 +33,14 @@ clean-parse 3/345 → 278/345, throws 9 → 0). Fresh unseen-sample validation
 measured 97.4% clean parse with 0 throws/0 hangs; the remaining MathNet work
 is a small notation tail tracked below.
 
-**0.96.0 released 2026-07-26** (latest). It carried the **symbol-identity
+**0.110.0 released 2026-08-15** (latest). The 0.97–0.110 line carried the
+Tycho-compatibility rounds through items 177–190 (the canonicalization-time
+facet-probe storm and its document-context survivor, the `Add` collection-view
+nesting fix, `broadcastable` divide admission, opt-in `complexPromotion`),
+compile-time constant folding on a deterministic cost estimate, named-argument
+calls, protocols with compiled dispatch, mutable objects phases 0–1, the
+`unknown`-as-placeholder ruling, the default-`!scope` ceiling, and the Epsil
+parameter-shadowing repair. **0.96.0** (2026-07-26) carried the **symbol-identity
 repair** — a stored value's free symbols now denote the binding they were
 canonicalized against, not whatever an inner scope calls that name, with
 dereference (`evaluateInOwnBindings`), named-parameter rebind, and the
@@ -104,198 +111,29 @@ after a builtin, check the system scope's binding is untouched) and, if
 it reproduces, the same shadowing-declare treatment the dispatcher path
 uses.
 
-### ~~An Epsil function parameter does not shadow a same-named outer `const`~~ (FIXED 2026-08-14)
+### Quadrature-dependent compile tests can be silently vacated by a smarter fold
 
-Reported 2026-08-14. The Epsil interpreter resolves a parameter to an
-outer binding of the same name, so a function receives the wrong value —
-silently, with no error:
+The wall-clock-assertion sweep (2026-08-14) found that the antiderivative-first
+fold had turned both cost-guard integrands in `compile-integrate.test.ts` into
+closed forms, so `r.run()` performed no numeric integration at all and the tests
+pinned a path the runner never took. Those two now assert that `r.code` contains
+`_SYS.integrate(`, so a future smarter fold cannot silently re-vacate them. The
+same emitted-code guard has NOT been applied to the other quadrature-dependent
+tests in that file, and any of their repros could be intercepted by the same
+fold as it improves.
 
-```
-const g = (x) |-> x + 1
-const f = (g) |-> g(2)
-f((x) |-> x * 10)
-```
+### The declare-WITH-value route bypasses the default-`!scope` ceiling
 
-`f`'s parameter is named `g`, so `g(2)` must apply the lambda passed in
-and give **20**. Epsil answers **3** — the outer `g` (2 + 1). Confirmed
-interpreter-side, not a compile artifact: it reproduces with
-`ce.jit = 'off'`, and the same program built as MathJSON and evaluated
-answers 20 correctly. Removing the outer `g` also gives 20, which
-isolates it to the shadowing rather than to the call.
-
-The COMPILED path is not affected in the same way — it fails closed with
-`Unknown operator g` rather than answering wrongly — which narrows the
-fault to Epsil scope construction rather than to anything in compilation.
-A silently wrong answer in the reference implementation is the worst
-shape a defect can take here, since every parity comparison trusts it.
-
-Unowned as of filing: found while tracing a review finding, and the
-block-local function-compilation session declined it as outside its area.
-
-**Fixed 2026-08-14.** The defect was engine-wide canonicalization, not
-Epsil parsing: a function literal's body is deliberately canonicalized
-BEFORE its parameters are declared (declaring first breaks nested-closure
-capture), and while value-position symbol references compensated through
-the engine's shadowed-parameter stack, the OPERATOR-position resolver
-`lookupApplicable()` (`function-utils.ts`) did not — so the head of
-`g(2)` inside `(g) |-> g(2)` walked out to the enclosing scope, found the
-outer `g`, and cached that definition on the node permanently. The raw-
-MathJSON route only looked correct because `ce.box(wholeProgram)`
-canonicalizes every statement before any `Declare` evaluates, so no outer
-`g` existed yet; Epsil executes statement by statement. Fix:
-`lookupApplicable` now consults the shadowed-parameter stack and stops
-the scope walk at the recorded boundary scope (each stack frame records
-the lexical scope enclosing the construct at push time), so a shadowed
-head resolves to the construct's own binding or, when absent, is
-auto-declared locally exactly as in the no-outer-binding case. Regression
-tests: `test/epsil/execute.test.ts`, "a parameter shadows a same-named
-outer binding" (nine shapes, including the default-JIT hot loop). The
-compiled path's own head-position blindness is a SEPARATE surviving
-defect — see the next entry.
-
-### ~~The compiler resolves a head-position parameter to a same-named engine global~~ (RULED + FIXED 2026-08-14)
-
-Found 2026-08-14 while fixing the interpreter-side shadowing entry above,
-and independent of it: with `f` assigned in the engine,
-`compile(ce.parse('(f,x) |-> f(x)'))` emits code that inlines the GLOBAL
-`f` and ignores the function argument entirely — `run(v => v*10, 2)`
-returns 3 (global `t+1` applied), where the interpreter now correctly
-returns 20. Two mechanisms in `base-compiler.ts`, both verified
-load-bearing by toggling each off: `mentionsCompileBoundName` tests only
-value-position symbols and not the application head (unlike its sibling
-`mentionsExcludedName`), so `tryConstantFold` evaluates the call through
-the engine and bakes the constant; and `tryCompileUserFunction` resolves
-the head by name against engine definitions without checking
-`target.boundVars`. The same head blindness affects loop indices and
-block locals used in head position.
-
-Both one-line guards were implemented and verified (compiler fails
-closed, interpreter fallback answers correctly), then REVERTED, because
-two tests pin the current emission and explicitly forbid changing it
-there (`compile-cse.test.ts`, the two "calls the GLOBAL `f`" notes). That
-pin's stated justification — that head-position shadowing resolving to
-the global is "shared by the interpreter and the compiler" — is void now
-that the interpreter half is fixed, so the compiler is the only side
-answering wrongly. Needs a ruling: (a) fail closed (re-apply the two
-guards, rewrite the two CSE pins to assert fail-closed instead of
-`_fn_f(`), (b) keep as-is (compiled higher-order calls keep ignoring
-their function argument and disagreeing with the interpreter), or
-(c) compile the parameter call directly (genuine higher-order compile
-support, a feature, unattempted). With the guards in, the `compile*`
-suites were 2472 passed / 2 failed — the failures being exactly the two
-CSE pins; with them reverted, 2474 / 0.
-
-**Ruled 2026-08-14, option (a): fail closed.** Both guards are applied in
-`base-compiler.ts` (`isCompileBoundName` head check in the fold gate;
-`target.boundVars` check before `tryCompileUserFunction`), the two
-`compile-cse.test.ts` pins now assert the decline (`cannot compile`, no
-`_fn_f` in emitted code), and four behavioral tests landed in
-`compile-underscore-param-shadowing.test.ts` — including a case the fix
-round discovered was ALSO silently wrong: a call of a BLOCK-LOCAL
-function was fold-resolved to a same-named engine global (returned 3,
-now compiles to the local and returns 20). A closed `Sum` whose index
-shares a global function name still folds (over-refusal canary, 306
-both regimes). Direct higher-order compilation — emitting a real JS
-call of the parameter instead of declining — remains a possible future
-feature, recorded here, not a bug.
-
-### ~~Test assertions on wall-clock time make full-suite runs unreliable~~ (FIXED 2026-08-14)
-
-Several suites assert elapsed milliseconds, so they fail under parallel
-load and pass in isolation — the signal is machine state, not
-correctness. Observed 2026-08-14:
-
-| Test | Measured | Asserted |
-| :--- | :--- | :--- |
-| `latex-syntax/arithmetic` — divergent series terminates | 5133 ms | < 5000 ms |
-| `compile-performance` — simple arithmetic compiles quickly | (varies) | fixed budget |
-| `compile-integrate` — high-power integrand degrades at the deadline | (varies) | deadline-shaped |
-
-The cost is not the individual flake, it is that a red full run stops
-meaning anything: three separate sessions in one day spent time
-attributing failures that were only load, and a genuinely broken tree
-would have looked identical. This is the same defect class that was just
-removed from the constant folder — a decision keyed on elapsed time
-rather than on the work itself — and the same remedy applies: assert a
-deterministic bound (iteration or step count), keeping a generous
-wall-clock limit only as a hang backstop rather than as the assertion.
-
-**Fixed 2026-08-14.** The sweep found ~90 elapsed-ms assertions across 28
-test files, not just the three named; all were converted. Hang guards
-now assert the termination outcome (the result an infinite path can
-never produce) under a generous jest timeout; regression guards assert a
-deterministic count — compile node-visits (a test-local spy on
-`BaseCompiler.compile`, the single recursive entry point), quadrature
-evaluation counts, Monte Carlo sample counts, memoization spy
-call-counts. Two tests needed their input magnitudes raised
-(`points-arithmetic` to 1e8, `trigonometry` chain depth to 24/26)
-because their non-timing assertions passed in both regimes — without
-that, dropping the stopwatch would have left them asserting nothing.
-Remaining wall-clock checks are deliberate and documented in place:
-`deadline-regressions.test.ts` `toFixed` timings (the fix changed only
-algorithmic complexity, not outputs or call shape — eliminating it needs
-an instrumented `BigDecimal.toFixed`), `assumptions.test.ts:365` and
-`fungrim-loader.test.ts:96` (~100× and ~66× headroom, no counter
-available without `src/` instrumentation), the relative
-compiled-vs-interpreter comparisons in `compile-performance.test.ts`,
-and `quadrature-deadline.test.ts`'s 30× end-to-end backstop.
-
-A second erosion class surfaced while converting `compile-integrate`:
-the antiderivative-first fold had turned both cost-guard integrands into
-closed forms, so `r.run()` performed no numeric integration at all and
-the tests pinned a path the runner never took (the item-96 NaN test's
-`NaN` came from `20*NaN`, not from the Monte Carlo fast path it
-claims). Both tests now use integrands the fold declines and assert
-`r.code` contains `_SYS.integrate(` so a future smarter fold cannot
-silently re-vacate them. Open question for a later pass: apply that
-same emitted-code guard to the other quadrature-dependent tests in
-`compile-integrate.test.ts`, since any of their repros could be
-intercepted by the same fold as it improves.
-
-### ~~The value-half two-step bypasses the default-`!scope` ceiling~~ (CLOSED 2026-08-15, same day, by ruling)
-
-`ce.declare('f', '(number) -> number')` — or the object spelling
-`ce.declare('f', { signature: … })` — followed by
-`ce.assign('f', writerLiteral)` used to install a proven escaping writer
-bare, because that route stores the literal on a value definition and
-misses the operator-definition construction gate. The staged-diff review
-(Codex, HIGH) flagged it; the user ruled the ceiling supersedes the
-2026-08-01 bare-specifier arc on this route too, and the gate now lives
-in `assertDeclaredEffects` (`engine-declarations.ts`), enabled on the
-two declare-then-assign reconciliation callers. The former "fib arc"
-pins were retold with `random` (the inferred track's re-stamp freedom
-survives for every label except `scope`) plus explicit refusal pins.
-
-**Narrowed residual, still open:** the declare-WITH-value route —
-`ce.declare('f', { type: '(…) -> …', value: writerLiteral })`, the
-third `assertDeclaredEffects` caller — stays ungated, because the same
-code path serves block-local `let` bindings whose writer closures (a
-closure mutating its enclosing literal's local) must remain
-installable, and no global-vs-local discriminator is available at that
-seam (the Epsil static pass also evaluates top-level declares under
-pushed scopes, so context depth does not separate the two). Its arrow
-still carries the inferred `scope` honestly.
-
-### ~~`.N()` of a divergent infinite `Sum`/`Product` silently returns a truncated partial~~ (FIXED 2026-08-14, same day)
-
-`Sum(i, i=1..∞).N()` answered `50015001` — the 10001-term iteration-limit
-prefix — the harmonic series answered `9.7877…`, and `Product(n, n=1..∞)`
-a huge exact partial product: silently wrong finite numbers for series
-with no finite value. Surfaced by the compile-time constant-folding work
-(the folder would have baked `50015001` behind `success: true`).
-
-**Fixed by ruling (2026-08-14):** an infinite-domain big op under `.N()`
-whose convergence the Richardson acceleration cannot establish now stays
-**unevaluated** instead of falling back to brute truncation (`Sum` and
-`Product` evaluate handlers, `library/arithmetic.ts`; the constant folder
-independently refuses such subtrees via
-`BaseCompiler.containsUnboundedBigOp` as defense in depth). The
-default-domain spelling `Limits(x, Nothing, Nothing)` (a bare `Sum(f, x)`
-index) is now recognized by the acceleration as `1..+∞`, so convergent
-open-interval sums compute their true limit (`Σ 1/x² = π²/6`) rather
-than a truncation. Known cost, accepted by the ruling: a convergent
-series the acceleration cannot certify now stays symbolic where it
-previously returned an uncertified truncation — see the entry below.
+`ce.declare('f', { type: '(...) -> ...', value: writerLiteral })` — the third
+`assertDeclaredEffects` caller — installs a proven escaping writer without the
+scope ceiling that the two declare-then-assign reconciliation routes got on
+2026-08-15. It stays ungated because the same code path serves block-local
+`let` bindings whose writer closures (a closure mutating its enclosing
+literal's local) must remain installable, and no global-vs-local discriminator
+is available at that seam: the Epsil static pass also evaluates top-level
+declares under pushed scopes, so context depth does not separate the two. The
+arrow it installs still carries the inferred `scope` label honestly, so the
+effect stays visible; what is missing is the refusal.
 
 ### A compiled user function declared `-> complex` returns a corrupt value
 
@@ -334,7 +172,9 @@ The Richardson/Neville acceleration behind infinite-series `.N()`
 (`acceleratedInfiniteSum`, `library/utils.ts`) extrapolates the partial
 sums with `power: 1` — an asymptotic expansion in **integer** powers of
 `1/N`. A convergent series whose tail does not have that shape never
-certifies, and since the divergence ruling (previous entry) removed the
+certifies, and since the 2026-08-14 divergence ruling — an infinite-domain
+big op under `.N()` whose convergence the acceleration cannot establish now
+stays unevaluated rather than returning a truncated partial sum — removed the
 truncation fallback, it now evaluates to itself instead of to a number.
 
 Measured 2026-08-14 — the gap is narrow and specific:
@@ -363,1188 +203,44 @@ certified error estimate, so a divergent series still declines rather
 than acquiring a plausible-looking value. Regression-test against the
 table above, and add `Σ 1/n^1.5 = ζ(1.5)` as the headline case.
 
-### ~~Tycho item 184 — a gather member defeated the count and emptiness of the collection carrying it~~ (FIXED 2026-08-14)
-
-Filed by Tycho against 0.107.0: `Map(f, Zip(At(L, I), L))` reported
-`count === undefined`, while `At(L, I)` and the `Zip` each counted fine
-once evaluated. Found by their elementwise min/max lowering, whose
-emitted shape is exactly `Map(f, Zip(…))`.
-
-Root cause, in two halves. `At(xs, I)` with an integer-collection index
-is a GATHER: it is typed `list<T>` and iterates correctly, but it
-produces elements eagerly and carries no `collection` handlers, so it is
-not `isCollection` until evaluated. (1) `At` had no `elementCount`
-handler, so a raw gather answered `count === undefined`; `Zip` takes the
-MINIMUM over its members' counts, so one gather member erased the whole
-`Zip`'s count, and a `Map` delegating to that `Zip` lost it too. (2) The
-`isEmptyCollection` getter short-circuits to `undefined` whenever
-`isCollection` is false, so a gather member also left the `Zip`'s
-emptiness UNKNOWN — and `materialize()` returns the lazy form unchanged
-when emptiness is indeterminate, so the `Map` stayed SYMBOLIC rather
-than producing its elements. Tycho reported the count; the
-materialization half was found while fixing it and is the more
-user-visible of the two.
-
-Both fixes are evaluation-free, which the item-182 round makes a
-requirement rather than a preference — a facet handler that evaluates is
-how that storm started. An integer gather is POSITION-PRESERVING (an
-out-of-range index contributes the absence marker rather than being
-dropped), so its length is exactly the index's, readable from the
-operands alone: `At` gained an `elementCount` handler restricted to the
-shapes whose length is decidable that way (single index, indexed-collection
-source, provably numeric index element type). A boolean MASK is excluded
-by design — it filters, so its length is the number of `True` entries,
-unknowable without walking it. `Zip`'s `isEmpty` handler gained a
-count-derived fallback (`isEmptySource`) for members whose
-`isEmptyCollection` short-circuits.
-
-Regression pins: `test/compute-engine/tycho-item-184-gather-count.test.ts`
-(14 tests, including the mask/scalar-index/chained-access shapes that must
-keep declining to claim a count).
-
-### A declared `(unknown) -> unknown` breaks the definition that follows (RULED 2026-08-15 — IMPLEMENTED; resolution at the end of this entry)
-
-**FOLLOW-UP STATUS (measured 2026-08-15, second session — the pair came
-apart; the follow-up as framed is CLOSED).** The follow-up was recorded as
-"refine an `unknown` PARAMETER from the call site", with two consumer cases
-said to need exactly that. Measured on the landed tree, neither one is that
-work:
-
-- **The D-240 indexed-access class is ALREADY FIXED** by the ruling as
-  landed. Every shape measured — `f(t)[1]`, `f(t)[k]` with a symbolic
-  index, an `unknown` parameter indexed in the body, a symbolic collection
-  argument — compiles and agrees with the interpreter, under no
-  declaration, `(unknown) -> unknown`, bare `function`, and a lambda
-  assigned to a declared head. The declared head refines to
-  `(dictionary | indexed_collection) -> broadcastable<number>` and the
-  call passes the list whole. The only shape that still fails closed is a
-  head DECLARED but never assigned, which is the intended D6 posture
-  (nothing exists to refine from) and is now pinned as such.
-- **Tycho item 190 is NOT a refinement defect**, and the fix direction
-  recorded for it is REFUTED. See its entry below for the measurement.
-  Nothing about call-site parameter refinement would change its emission.
-
-So no call-site-refinement work is outstanding from this ruling. Both
-halves are pinned in
-`test/compute-engine/unknown-param-call-site-refinement.test.ts` (16
-tests), which keeps the D-240 class from regressing and holds the item-190
-refutation as executable evidence.
-
-Ownership note: the session that ruled and implemented this
-(`compute-engine-53`) ended mid-dual-review. Its work is COMMITTED
-(`43ab3c81`), not staged, and its pin files
-(`placeholder-signature-refinement.test.ts`,
-`subscript-lambda-assign.test.ts`, 24 tests) pass on the current tree.
-
-Declaring a head with a PLACEHOLDER signature makes a later definition
-fail, where declaring nothing at all — or declaring a CONCRETE signature —
-both work. Measured on 0.109.0 and on the working tree, same definition
-body (`l_P(P) := sqrt(P[1]^2 + P[2]^2)`), calling `l_P([3,4])`:
-
-| declaration before the definition | result |
-|---|---|
-| none | **5** (correct) |
-| `(P: indexed_collection) -> number` (concrete) | **5** (correct) |
-| `(unknown) -> unknown`, head-call spelling `l_P(P) := …` | `incompatible-type`, binding INERT |
-| `(unknown) -> unknown`, lambda spelling `l_P := P ↦ …` | no error, binding still INERT |
-
-So a placeholder declaration is strictly MORE restrictive than no
-declaration, which is incoherent on its face: `unknown` means "no
-information yet" everywhere else in this engine, and here it is behaving
-as a binding constraint.
-
-The lattice arithmetic is doing exactly what it should — this is not an
-`unknown`-specific rule and not invariance. `unknown` is the TOP
-(`number <: unknown` true, `unknown <: number` false), and arrows get
-ordinary variance: `(unknown) -> number <: (number) -> number` is TRUE
-(parameter, contravariant) while `(number) -> unknown <: (number) ->
-number` is FALSE (result, covariant). The head-call spelling INFERS the
-parameter type from the body (`P[1]` ⇒ `P: dictionary |
-indexed_collection`) and then checks that inferred lambda against the
-declaration, where contravariance requires
-`unknown <: dictionary | indexed_collection` — false. Correct
-arithmetic, applied to a premise that should not have been a constraint.
-
-The two spellings also DIVERGE, which is a defect independent of the
-ruling: the lambda route reconciles against the declaration, the
-head-call route type-checks the body-inferred lambda against it. Same
-user intent, opposite semantics.
-
-**The ruling needed**: does a declared `unknown` (in parameter or result
-position) constrain? Recommended answer NO — treat it as absent, so a
-placeholder declaration behaves like no declaration. That matches
-`unknown`'s meaning elsewhere, restores the table's top two rows as the
-baseline, and removes the spelling divergence. The alternative (keep it
-constraining) has to explain why declaring less should permit less.
-Deliberately NOT fixed here: it is a change to declaration semantics, not
-a local repair, and both spellings must land together.
-
-Reported by Tycho (their item on the ledger) as a QUESTION, not a defect
-— they hit it via a manager that declared heads with a derived
-`(unknown) -> unknown`, and they have since fixed that derivation at its
-root, so nothing is blocked. Their argument for the NO answer is worth
-recording: a definition that binds-but-unoptimized keeps a whole class of
-derivation bugs VISIBLE, where a silently inert one hides them — which is
-exactly how their bug stayed invisible.
-
-Incidental, from their trace and not chased here: their manager declares
-the head twice with the same signature before assigning. Benign today.
-
-Verification addendum (2026-08-15, second investigation — all four rows
-re-reproduced on the working tree):
-
-- The two spellings share ONE root check — `matchesDeclaredTypeAxes`
-  against the declared signature, reached from the assign path in
-  `engine-declarations.ts`: `ce.assign('l_P', P ↦ …)` throws the same
-  `incompatible-type` as the head-call spelling. (CORRECTION of this
-  entry's earlier "swallowed throw" claim: the parse route's lambda-row
-  silence is NOT a suppressed error. `l_{P} := ⟨lambda⟩` canonicalizes
-  its LHS as `Subscript(l, P)` and takes the SEQUENCE-definition path —
-  the `a_n := a_{n-1}+1` machinery — never targeting `l_P` at all; it is
-  equally inert with NO declaration. Filed separately below. The `Assign`
-  evaluate handler does surface type-compatibility throws as error
-  VALUES; there is no swallow.)
-- `(any) -> any` fails IDENTICALLY (contravariant parameter:
-  `any <: dictionary | indexed_collection` is false), so the ruling
-  covers `any` in parameter position too, not just `unknown`.
-- Result-position `unknown` already does not constrain on this route:
-  `(indexed_collection) -> unknown` assigns and calls fine (result is
-  covariant, `broadcastable<number> <: unknown` is true). A bare
-  `function` declaration also works — it is today's workaround.
-- The published type documentation (`doc/08-guide-types.md`, "The
-  `unknown` type") states `unknown` "is compatible with all types, and
-  all types are compatible with it… a wildcard in type matching [that]
-  can be replaced or refined as more information becomes available."
-  The declaration check contradicts this documented contract; the
-  subtype lattice (`unknown` as top, one-directional) implements a
-  different meaning than the docs promise.
-- The doc/lattice divergence is INDEPENDENT of the declaration check
-  and the ruling should say which side moves. The doc's claim is
-  bidirectional ("compatible with all types, AND all types are
-  compatible with it"), but no predicate implements that:
-  `BoxedType.matches()` delegates to subtyping (its own docstring says
-  it answers "is this a subtype of `other`"), so
-  `type('unknown').matches('number')` is `false` while
-  `type('number').matches('unknown')` is `true` — verified. Either
-  `unknown` becomes bidirectionally compatible in the subtype/matching
-  layer (matches the doc; the declaration check falls out for free; but
-  it makes `unknown` a wildcard EVERYWHERE — large, unmeasured blast
-  radius across inference, dedup keys, and overload resolution), or the
-  declaration check alone treats declared `unknown`/`any` as
-  non-constraining and the doc is corrected to describe the top-type
-  lattice it actually has (small, local change). These are
-  different-sized changes; the doc currently promises the larger one.
-- The codebase itself implements BOTH readings of `unknown` in
-  different corners, which is further evidence the ruling should pick
-  one meaning and document it. `isSubtype` treats `unknown` as a
-  near-top (`everything <: unknown` except `nothing`/`missing`), but
-  `superType`/`widen` treat it as an IDENTITY element — `widen(unknown,
-  T)` returns `T`, the placeholder reading ("no information; the other
-  operand wins"). Under a genuine top-type reading the join would be
-  `unknown`. Verified: `widen('unknown','missing')` = `missing`.
-  (`superType` gives `nothing` the same identity treatment — the
-  erasure semantics leaking into the join.)
-- A third doc mismatch, same family: the type-guide table
-  (`doc/08-guide-types.md`, `unknown` row) says "Every other type
-  matches `unknown`", but `nothing.matches('unknown')` and
-  `missing.matches('unknown')` are `false` — the unit types are
-  subtypes only of `any` and themselves. No rationale is recorded for
-  that exclusion (the `nothing` rule dates to the original type-system
-  bring-up, "wip: types"; `missing` copied it by stated symmetry —
-  "behaves like `nothing`"), but it is defensible as absence-is-opt-in:
-  a slot whose type is undetermined should not silently accept an
-  absence marker; absence must be admitted explicitly (`A | missing`)
-  or via `any`. Whichever way the ruling goes, the doc sentence needs
-  the same reconciliation as the bidirectionality claim.
-- Precedent inside the engine for the NO answer: the multi-clause route
-  already accepts a bare parameter when the declared type is
-  `unknown`/`any` ("a bare param narrows nothing" —
-  `assertClauseFitsDeclared`, fixed 2026-08-14), and
-  `ascribeDeclaredParameterTypes` deliberately skips stamping
-  `unknown`/`any` parameters.
-
-**RESOLUTION (ruled and implemented 2026-08-15).** The user ruled:
-`unknown` is a PLACEHOLDER (aligning with `doc/08-guide-types.md`), `any`
-is a CONTRACT (the identity function is `(any) -> any`), and the doc
-gains the `nothing`/`missing` caveat.
-
-Implementation notes, in the order the evidence forced them:
-
-- The literal lattice flip (`unknown <: T` = true in `isSubtype`) was
-  TRIED AND REVERTED within the hour: canonicalization DISPATCH gates
-  need positive type evidence, and a wildcard `unknown` poisons them —
-  measured immediately, `P[1]^2` canonicalized as `MatrixPower` (the
-  element access types `unknown`, which then "matched" `matrix`), and
-  even the NO-declaration row of the repro matrix went inert. Do not
-  re-attempt: the placeholder semantics cannot live in the raw subtype
-  relation while `matches()` doubles as the dispatch predicate.
-- The ruling is implemented at the DECLARATION boundary instead:
-  `refineDeclaredPlaceholders` (`boxed-expression/effects-inference.ts`)
-  replaces `unknown` parameter/result slots of a declared ground
-  signature with the definition's inferred slots — PER-POSITION, so a
-  concrete declared parameter is kept while an `unknown` result of the
-  same arrow refines (Tycho's addendum: their derived `-> unknown`
-  results erased every call's type; a per-declaration rule would have
-  missed that half). It runs inside `matchesDeclaredTypeAxes` and, more
-  importantly, at the head of all three install routes in
-  `engine-declarations.ts` (value-def assign, operator-def assign,
-  declare-with-value), which then PERSIST the refined type — a
-  check-time-only refinement accepted the definition but left the stored
-  `(unknown) -> …` signature driving call-site broadcasting, so
-  `l_P([3,4])` broadcast elementwise instead of passing the list whole.
-- `any` slots are NOT refined: `(any) -> any` + a collection-only body
-  still refuses with `incompatible-type`, on both routes (the parse
-  route surfaces it as an error value). A Tycho row that declared
-  `-> any` and lost its compiled indexed access is therefore INTENDED
-  behavior post-ruling: `-> any` states a contract; a consumer that
-  means "not known yet" writes `-> unknown` (now refinable) or declares
-  bare `function`.
-- Doc updated (`doc/08-guide-types.md`): the `unknown` section now
-  states the refinement behavior, the `nothing`/`missing` (and
-  `error`/`never`) exclusions — absence is opt-in — and the
-  placeholder-vs-contract split against `any`; the `unknown` table row
-  carries the same caveat.
-- Pins: `test/compute-engine/placeholder-signature-refinement.test.ts` —
-  route parity for the repro matrix, per-position refinement, the `any`
-  contract refusal on both routes, and the lattice invariants (raw
-  `unknown` stays one-directional; `nothing`/`missing` excluded).
-- COMPILATION posture (user-confirmed 2026-08-15, same ruling round):
-  OPTIMISTIC over `unknown` — assume a match and let it fail at runtime.
-  This is already the JS target's implemented policy (the item-80 rule:
-  runtime projection over static provably-X gates; `_SYS.at`/`_SYS.bcast`
-  carry the runtime dispatch — verified: `f(t)[2]` on a bare-`function`
-  head and `x[2]+1` on an `unknown` symbol both compile and run). Two
-  boundaries survive it: (1) EVIDENCE beats optimism — the D6 declines
-  that remain fire only on proof (a statically-collection body under a
-  numeric accumulation, a contradicted declaration), where "assume a
-  match" would knowingly emit wrong code, and in JS wrongness is SILENT
-  coercion, not a runtime failure (`Σ "ab"` compiled to `"ababab"`
-  behind `success: true` is the incident that created the D6 posture);
-  (2) shader targets (glsl/wgsl) have no runtime-failure channel, so a
-  genuinely-open shape there declines and takes the `fallback` path
-  rather than rendering garbage.
-
-### Assigning a lambda to a SUBSCRIPTED name is silently inert (RULED option (d) + IMPLEMENTED 2026-08-15; resolution at the end of this entry)
-
-`l_{P} \coloneq P \mapsto …` (parse route) canonicalizes its LHS as
-`Subscript(l, P)` and is captured by the SEQUENCE-definition machinery
-(the `a_n := a_{n-1}+1` feature): the `Assign` evaluate's Subscript
-branch treats `l` as a sequence name and `P` as a symbolic index, defines
-no usable binding, and returns without a diagnostic — `l_P([3,4])` stays
-inert. Declaration-independent (reproduces with no prior `declare`) and
-long-standing; it was row 4 of the placeholder-signature matrix and was
-initially mis-diagnosed there as a swallowed type error.
-
-The head-call spelling (`l_{P}(P) \coloneq …`) is immune — application
-position collapses `l_{P}` to the symbol `l_P` — and so is any
-non-subscripted name. Needs a ruling rather than a patch: `a_n := ⟨expr
-in n⟩` is legitimate sequence syntax, so the question is whether a
-FUNCTION-LITERAL RHS (whose parameter, not the subscript, binds the
-body) should divert to symbol assignment, or whether a subscripted-name
-lambda assignment should be an explicit error instead of a silent no-op.
-The silent no-op is the only clearly wrong outcome.
-
-**RESOLUTION (ruled 2026-08-15, option (d): explicit error).** Four
-options were weighed: (a) eta-collapse (`l_P := P ↦ body` ≡ `l(P) :=
-body`, binding the base letter), (b) strict sequence semantics (the
-family's members are function values, uniform with `l_P := P²+1`), (c)
-a name-sensitive rule (collapse when the lambda's parameter equals the
-subscript, family otherwise), and (d) an explicit error naming the
-working spellings. The user chose (d), sympathetic to (c) but bound by
-corpus safety. Field evidence from the Desmos importer (687-state
-corpus) decided it: their pipeline only ever emits head-application
-assignments, so (d) is unreachable from imported content; 10 live
-states use the subscript-equals-parameter coincidence on the
-HEAD-APPLICATION form, killing any name-keyed rule as a refactor-away
-regression; and 111 states use a bare head and subscripted heads on the
-same letter (`f` alongside `f_x`) as UNRELATED names, making any
-base-letter-binding semantics — (a) and (b) — a clobber hazard. The
-importer independently measured that clobber through its public
-`definitions` seam (their probe
-`docs/scratch/subscript-assign-family-probe.mts`: a zero-parameter
-subscripted entry overwrote a sibling base-letter definition behind a
-"skipped" report) and is guarding that seam on their side.
-
-Implemented in the `Assign` evaluate's Subscript branch
-(`library/core.ts`): a syntactic `Function`-literal RHS returns an
-`ambiguous-assignment` error value naming both disambiguating
-spellings, BEFORE any sequence bookkeeping runs — so neither the base
-letter nor the joined name is touched. Covers symbolic, numeric, and
-multi-index subscripts, declared or not. Pins:
-`test/compute-engine/subscript-lambda-assign.test.ts` (the error rows
-plus the four spellings that must keep working: integer recurrences,
-the non-lambda family form, head-application, and the
-`ce.assign(name, ⟨Function value⟩)` API route, which is deliberately
-untouched — the ruling is notation-level).
-
-**SECOND-HALF RULING (2026-08-15, same day): declared-name precedence
-now governs the Assign LHS too.** The gap had been noted as open: a
-declared `l_P` did not stop `l_{P} \coloneq P²+1` from binding the base
-`l` and leaving the declared `l_P` unbound (verified on 0.109.0 by the
-importer and on the working tree; the precedence pins covered
-expression positions only). The user ruled declared-wins: a subscripted
-Assign LHS whose JOINED name (symbol or integer subscript) is declared
-assigns to THAT symbol — declaration presence is the disambiguator,
-the same principle as the expression-position rule. Consequences,
-implemented together in the same `Assign` Subscript branch: (1)
-`declare('l_P')` + `l_{P} := P²+1` binds `l_P` and never touches `l`;
-(2) the declared + FUNCTION-LITERAL case binds the declared symbol
-instead of erroring — the declaration states the intent, so the
-original Tycho row-4 shape is now functional end to end (through the
-placeholder-refinement machinery ruled earlier in this entry) — and the
-`ambiguous-assignment` error covers the UNDECLARED joined name only;
-(3) a declared NUMERIC joined name (`declare('b_1')` + `b_1 := 5`) wins
-over the sequence base case. Recurrences are unaffected: sequence
-definitions register no `a_1`/`a_n` symbol definitions (verified), so
-re-running a base-case row still updates the sequence store. The
-importer's adoption checklist item "case C tells us whether the
-precedence observation moved" — it moved, in the declared-wins
-direction. Same pin file: `subscript-lambda-assign.test.ts`.
-
-### Tycho item 190 — compiled real-domain emission for a complex-promoting chain over an `unknown`-typed parameter (RULED + IMPLEMENTED 2026-08-15; resolution at the end of this entry)
-
-Another member of 187's blocking class: a wrong VALUE behind
-`success: true`. Reproduced bare on the working tree, `z(t) := sqrt(t-1)`:
-
-```
-|z(0.3)/2 - 1|   CONSTANT arg  -> compiled 1.08397416943394   = interpreted   OK
-|z(t)/2 - 1|     SYMBOLIC arg  -> compiled ok:true, run(t=0.3) -> NaN         WRONG
-```
-
-The constant case is right only because it FOLDED — its emitted code is
-the literal `1.08397416943394`, i.e. the interpreter's answer baked in.
-The symbolic case emits real-domain code:
-`Math.abs(0.5 * _SYS.bcastFn((_tv1) => _fn_z(_tv1), _.t) + -1)`.
-
-**Their framing does not fit, and this is the load-bearing correction.**
-The ask was "promote when the chain's TYPE says complex is reachable".
-Measured, the type says the opposite: `complex <: finite_number` is
-FALSE, `z` types `(unknown) -> finite_number`, and `z(t)` types
-`finite_number` — a type that EXCLUDES complex. So no type-driven
-promotion can fire; given that type, `Math.sqrt` is the correct emission.
-The defect is upstream of the emission.
-
-**CORRECTION (measured 2026-08-15, second session). The "where the type
-degrades" diagnosis below was wrong, and the fix direction it recommended
-is REFUTED. This is not a typing defect and not an `unknown`-parameter
-defect; it is a deliberate, pinned LANE decision in the compiler.**
-
-The refutation is a single measurement: declare `u: real` — a fully
-concrete parameter, no placeholder anywhere — and `sqrt(u-1)` types
-`finite_complex`, exactly the type the recommended refinement was supposed
-to restore. The emission is STILL `Math.abs(0.5 * Math.sqrt(_.u + -1) +
--1)` and the value is STILL NaN. Complex admission in the type is not what
-selects the lane, so no amount of call-site refinement can change this
-result.
-
-What actually selects the lane: `Sqrt`/`Ln`/`Log` pick their real-vs-complex
-lowering from the OPERAND, never from the node's type, and
-`BaseCompiler.isComplexValued` (`compilation/base-compiler.ts`, the
-`Sqrt`/`Ln`/`Log` branch) carries an explicit carve-out added 2026-07-31
-that answers `false` — real kernel — for a real operand of merely UNKNOWN
-sign, overriding the `finite_complex` type. The carve-out is deliberate and
-load-bearing: it is what keeps `√(⌈x⌉²+⌈y⌉²)` plotting on the hot path, and
-Tycho item 144 exists because over-reporting complexness there blanked
-Desmos-corpus render states (pinned in `compile-glsl.test.ts`, "Tycho item
-144", and `compile.test.ts`, "still admits an unknown-sign REAL kernel
-operand").
-
-So item 190 is the CONTRACT working as pinned, not a bug against it — the
-same accepted class as `Map(_ ↦ √_, [-4,-9,-16])` compiling to
-`[NaN, NaN, NaN]` while `.N()` answers `[2i, 3i, 4i]`, which
-`tryConstantFold` documents and accepts today. Fixing 190 means CHANGING
-that contract, which is a product decision, not a repair.
-
-Measured inputs to that decision:
-
-- The complex lane is CORRECT for this chain: with `u: complex` the same
-  expression lowers through `_SYS.csqrt`/`_SYS.cabs` and returns
-  1.08397416943394, matching `.N()` to full precision. Nothing needs to be
-  built — only selected.
-- It costs about **2.3×** on the affected chains (200k-point sweep of
-  `|√(u+1)/2 − 1|`: real lane 9 ms, complex lane 21 ms). The cost falls
-  only on chains containing an unknown-sign `Sqrt`/`Ln`/`Log`; everything
-  else keeps its current emission.
-- A real-typed free symbol still takes plain-number inputs under the
-  complex lane, because `complexOperandCode` lifts a real operand to
-  `{re, im: 0}`. Only a symbol DECLARED `complex` requires `{re, im}` from
-  the caller, which is already true today.
-- **COMPOSITION WITH `realOnly` — measured 2026-08-15, and it resolves the
-  unwrap question for any consumer that already passes `realOnly: true`.**
-  The two options compose exactly as a plotting consumer would want.
-  Matrix (`z(t) := sqrt(t-1)`; `run` values raw, NaN is a real `number`):
-
-  | case | neither | realOnly | promotion | BOTH |
-  |---|---|---|---|---|
-  | lands REAL via `Abs`, `\|z(t)/2-1\|` @t=0.3 | NaN | NaN | 1.08397416943394 | **1.08397416943394** |
-  | final real, im=0, `sqrt(u)` @u=4 | 2 | 2 | `{re:2,im:0}` | **2** |
-  | genuinely complex, `sqrt(u)` @u=-4 | NaN | NaN | `{re:0,im:2}` | **NaN** |
-
-  So under BOTH flags: the promoting chain computes correctly, a
-  zero-imaginary result UNWRAPS to a plain number, and a genuinely complex
-  result becomes NaN — the clean out-of-domain signal. `realOnly` therefore
-  already answers the open unwrap question for consumers who pass it, and
-  the object-shape corollary above applies only to `complexPromotion`
-  WITHOUT `realOnly`. Per-expression enablement is reachable from a
-  plotting seam that already passes `realOnly: true`; no new seam needed.
-
-- CONSUMER-FACING COROLLARY on the OUTPUT side, verified 2026-08-15 and
-  worth stating because the input note above does not imply it: under the
-  option a REAL-VALUED result comes back as a complex OBJECT, diverging
-  from interpretation in shape. Measured, promotion ON:
-  `sqrt(u)` @u=4 → `{re:2,im:0}` (interpreted `2`), `sqrt(u)+1` @u=4 →
-  `{re:3,im:0}` (interpreted `3`), `2*sqrt(u)` @u=9 → `{re:6,im:0}`
-  (interpreted `6`). Consistent with the design — an unknown-sign `Sqrt`
-  takes the complex lane, and these are unknown-sign — but the consequence
-  for a compile-first consumer is that enabling the option GLOBALLY turns
-  every such previously-numeric result into an object. The 190 witness
-  itself is unaffected because `Abs` lands real through `_SYS.cabs`, so
-  the unwrap machinery exists; whether a zero-imaginary result should
-  unwrap to a number is an open call for the option's owner. Until it is
-  decided, a consumer wanting 190 fixed should scope the option per
-  expression rather than switch it on across a document.
-- The shader targets are a separate question: they have a complex lane
-  (`buildComplexPreamble` in `gpu-target.ts`) but no runtime-failure
-  channel, and item 144's pins are GLSL. Any change should be able to keep
-  the carve-out for `glsl`/`wgsl` while moving `javascript`/`python`.
-
-Refutation pinned in
-`test/compute-engine/unknown-param-call-site-refinement.test.ts`
-(`sqrtOfRealOfUnknownSign`), which also pins today's NaN so the fixture
-flips when the contract does.
-
-`realOnly` is NOT the lever — `true`, `false` and default all emit the
-same code (measured).
-
-**190 IS UNMITIGABLE FROM THE CONSUMER SIDE — the sharpest argument for
-prioritising it over 188/189.** Tycho evaluated a 187-style interim
-compile-decline and shipped NOTHING, for a reason that is really about
-this defect's shape: **no sound decline predicate exists on their side,
-because detecting "complex-promoting symbolic chain" requires exactly the
-type information whose ABSENCE is the defect.** Our type system is the
-blind oracle here, so any consumer-side gate would have to be a
-`sqrt`/`log` operator heuristic that rots as our typing evolves — a class
-their standing rules forbid, rightly.
-
-That distinguishes 190 from its queue-mates: 188 and 189 both have
-shipped, pinned interims, so waiting costs those rows only the workaround.
-**190 has no workaround available to anyone, and cannot have one until we
-fix it.**
-
-Tempering that, and recorded so nobody over-reads the above: their
-exposure is ZERO-DELTA. The only measured witness draws nothing either
-way — the compiled NaN already routes their sampler to per-point
-interpreted evaluation, which IS the recorded ≥240 s starvation, so a
-decline would change neither pixels nor cost. Their watch needs no
-predicate: the D-73 parity sweep catches the class corpus-wide and both
-190 probes re-run at the adopting release. So: no mitigation is possible,
-but also no additional harm accrues while it waits. Fix it properly rather
-than fast — and know that nobody can paper over it meanwhile.
-
-Adoption consequence: 190 has NO interim to retire, which makes its
-adoption cheaper than 188's or 189's.
-
-Production stakes (theirs): this is D-234's actual root — `skz0syspxp`'s
-radical chain samples 0/201 finite on BOTH compiled routes while
-interpreted is finite — and it is behind a ≥240 s SPA-open starvation,
-since a 0-finite compile sends their sampler to per-point CE evaluation.
-Their previously recorded "expanded route gives 186/201" asymmetry does
-NOT reproduce and is retired, along with the by-ref framing of the old
-D-234 offer.
-
-**RESOLUTION (ruled and implemented 2026-08-15): the default contract
-STAYS, and the correct emission becomes available through an opt-in compile
-option, `complexPromotion`.**
-
-Four options were weighed: (a) close 190 as intended; (b) narrow the
-carve-out outright on `javascript`/`python`; (c) promote only where the
-enclosing chain can absorb a complex value; (d) an opt-in flag. The user
-chose (d). The deciding fact came from the consumer side: Tycho already has
-a per-document "complex mode" switch, so they do not need to detect which
-expressions require promotion — the document-level setting maps straight
-onto the option. That removes the one real objection to (d), which was that
-a consumer cannot target the flag per expression.
-
-Option (b) was rejected on a cost it hides: with an unknown-sign radical
-reported complex, an ordering comparison over one has no truth value and
-must decline, so `Less(Sqrt(x), 2)` — the shape of every plotted radical
-inequality — stops compiling. That decline is CORRECT, which is why the
-option still causes it when enabled; making it unconditional would have
-traded one silent-wrong-value class for a large fail-closed class.
-
-What landed:
-
-- `complexPromotion?: boolean` on the compile options and on `CompileTarget`
-  (default off). Honored by `javascript` and `python`; `glsl`/`wgsl` ignore
-  it and keep the real kernel, so item 144's render-state pins are
-  untouched.
-- `BaseCompiler.promotesRadicalToComplex(head, args)` is the single
-  predicate both the analysis (`isComplexValued`) and every target emitter
-  consult, so parent and child cannot disagree on a node's value SHAPE.
-  Its rule is the mathematical one — promote unless the operand is PROVABLY
-  non-negative — deliberately NOT "the node's type admits complex": an
-  unknown-sign `√(t−1)` types the wide `finite_number`, so a type-keyed rule
-  would have left the option inert on its own witness.
-- `isComplexValuedUserCall` — under the opt-in only, a call to a user
-  function follows its BODY. This is what actually fixes 190: the radical
-  sits inside `z(t) := √(t−1)`, the promotion happens inside the emitted
-  `_fn_z`, and the call site `z(t)` types `finite_number`, which says
-  nothing about complexness. Without the look-through the caller read a
-  number where `_fn_z` returned `{re, im}` — NaN, i.e. the original bug
-  wearing a different hat. Self- and mutual recursion decline via a
-  `visited` set.
-- The option is latched from the OUTERMOST compilation and restored on the
-  way out, so a nested target cannot flip the lane mid-compile and a
-  promoted compile cannot leak into the next one. The latch also enforces
-  the option's LANGUAGE scope (`javascript`/`python` only): the direct
-  `compile(expr, { target })` route stamps the caller's choice onto whatever
-  target object it is handed, so gating at the registered-target entry would
-  have missed it — measured, a raw GLSL target plus the flag turned a working
-  `mod(100000.0 * sqrt(x + -1.0), 1.0)` into a D6 decline.
-- The user-call look-through DECLINES a body that is or may be a COLLECTION.
-  `isComplexValued` answers for a list from `ops.some(…)`, so one complex
-  ELEMENT would report the whole call complex, and the scalar pulled out of
-  it inherits that verdict because `At` types `unknown`: with
-  `g(t) := [√(t−1), 1]`, `g(t)[2] + 1` returned `{re: NaN}` instead of `2`.
-  Both a definite-collection test (`type.matches('collection')`) and the
-  possible-collection one (`isPossiblyCollectionTyped`) are required —
-  neither subsumes the other.
-- The Python promoted path uses `np.emath.*`, not `cmath.*`: the operand is a
-  REAL of unknown sign, so zero is in range, and `cmath.log(0)` raises
-  `ValueError` where the interpreter answers `-∞`; `cmath` also rejects the
-  numpy arrays this target supports elsewhere.
-
-Measured after: the witness returns 1.08397416943394 under the flag and the
-unchanged NaN without it; all 53 compile suites pass (2484 tests, 222
-snapshots) with the flag off, i.e. the default emission is byte-identical.
-
-Pins: `test/compute-engine/unknown-param-call-site-refinement.test.ts` (26
-tests) — both sides of the flag, the non-negative-operand case, `Ln`, the
-Python route, the GLSL non-participation, the ordering-comparison decline
-and its still-compiling default, and the no-leak-between-compilations
-check. Documented in `doc/13-guide-compile.md` ("Complex Promotion"),
-including that `realOnly` is the independent, composable output-boundary
-projection.
-
-### ~~Tycho item 189 — `Add` lifts a non-tensor collection operand WHOLE instead of zipping it~~ (FIXED 2026-08-15; filed 2026-08-15)
-
-**ACCEPTANCE TEST INDEPENDENTLY VERIFIED (2026-08-15).** Ran Tycho's own
-`d189-nested-anatomy-probe.mts` in-document against CE SOURCE through the
-item-182 src-redirect hook — the criterion agreed with them when the
-ruling was issued was "all 900 members scalar". Result:
-
-```
-g.operator=List nops=900 count=900
-first 20 nested idx:                                  (empty)
-distinct nested JSON among first 50 nested: 0
-```
-
-Zero nested members, list length preserved, and the probe now exits 0
-printing `ACCEPTANCE PASS — CE item 189: all members scalar, zero nested`
-(re-verified 2026-08-15 after Tycho defused it — it previously threw
-dereferencing `nestedIdx[0]`, having been written when the defect was
-present and assuming a nested member existed to dump, so a pass used to
-look like a stack trace). Tycho's diagonal-residue lane is retirable.
-
-**RESOLVED 2026-08-15. The title above is the third one this entry has had,
-and the two earlier ones were both wrong about the layer.** Neither the
-elementwise `Which` selection nor the conditional-value distribution is at
-fault: the defect is a missing guard in `addTensors`
-(`boxed-expression/arithmetic-add.ts`), and it is reachable with no
-piecewise, no colour constructor, no document context, and three elements:
-
-```
-[1,2,3] + [4,5,6] + Range(1,3)   →  [[6,7,8],[8,9,10],[10,11,12]]
-                                     (correct answer: [6,9,12])
-[1,2,3] + [4,5,6] + Reverse([7,8,9]) → [[14,13,12],[16,15,14],[18,17,16]]
-                                     (correct answer: [14,15,16])
-```
-
-Silent wrong value in core arithmetic, present on published 0.109.0.
-
-**Mechanism.** `addTensors` buckets each operand as a tensor or a scalar. A
-collection that is not a tensor VALUE — a `Range`, a `Reverse`/`Take` view,
-or the lazy `Map` that a broadcast over more than
-`MAX_SIZE_EAGER_COLLECTION` (= 100) elements produces — is not a tensor
-value, so it landed in the SCALAR bucket. Each cell's sum then starts at
-the combined scalar sum, so every cell of the result became
-`<whole collection> + <that cell>`: an n-member list of n-element
-collections, O(n²), with only the diagonal (member k's k-th entry) holding
-the intended value. The kernel's existing `tensors.length < 2` decline does
-not cover the shape — two plain lists plus one collection view leaves
-exactly two tensors.
-
-`mulTensors` (`arithmetic-mul-div.ts`) already carried the guard
-(`if (isBroadcastableCollection(x)) return undefined;`), and its comment
-claimed "`addTensors` avoids this via its `tensors.length < 2` decline".
-That claim was false; the comment is corrected in the same change. The fix
-is the mirrored decline in `addTensors`, so the caller falls through to
-`broadcastOverIndexedCollections`, which zips.
-
-**Why every hand-written probe missed it, and why the field hit it.** The
-size threshold is incidental but decisive in practice. Below 101 elements a
-broadcast materializes eagerly, so `Sqrt([…])` IS a tensor value and all
-operands take the correct path; above it the same sub-expression stays a
-lazy `Map` and falls into the scalar bucket. Tycho's witness
-(`wsne0l2tcv`) had 900 elements; every bare repro either side wrote used
-N = 4.
-
-**The two refuted diagnoses, kept because both were argued from code
-reading rather than measurement.**
-
-1. *`evaluateElementwiseSelection` misgates the arm.* I proposed that the
-   arm's list-valued-ness is decided with `isBroadcastableCollection`, so an
-   arm answering `false` would be stored whole. Instrumenting the gate on
-   Tycho's own in-document probe refuted it: the selection ran once and
-   classified both arms correctly (`list<number>` indexed, `finite_real`
-   lifted).
-
-2. *Canonicalization distributes the colour constructor into the arms, and
-   distribution across an elementwise selection is the error.* The
-   distribution is real — `threadConditional`
-   (`boxed-expression/boxed-function.ts`) turns `Hsv(0,0,Which(c,a,b))` into
-   `Which(c, Hsv(0,0,a), …)` at EVALUATION time (rules T6/T7 of
-   `docs/plans/2026-07-12-conditional-values-design.md`) — and I ruled that
-   it should be suppressed for an elementwise selection. **That ruling was
-   measured and does not hold.** Selection indexes a distributed
-   list-valued arm at `j` correctly, and a counterfactual run of the
-   witness shape with the distribution removed by hand still produced 707
-   nested members: the guarded arm sums three collection operands either
-   way, so the nesting came from the `Add` underneath, not from the
-   distribution above it. **Nothing in `threadConditional` was changed.**
-   The one durable observation from that reading is a cost point, not a
-   correctness one: distributing builds the constructor once per ARM rather
-   than once per selection. It is not filed as a defect.
-
-**Verification.** Reproduced bare in the engine, with no consumer code, by
-replaying the witness's own document shape (registry body
-`Hsv(0,0,f(X,Y))` stored while `X`/`Y` are unknown, grids substituted
-after): 707 nested / 193 scalar members before, **all 900 members scalar
-after**, which is the acceptance criterion Tycho set. Values verified
-numerically against the source formula at n = 3/100/128/400 (max error
-3.6e-15).
-
-Regression pins:
-`test/compute-engine/tycho-item-189-add-collection-view-nesting.test.ts`
-(12 tests: `Range`/`Reverse`/`Take` operands; a genuine scalar still
-broadcasting; pure vector and matrix tensor sums unchanged; tuples still
-adding component-wise; the `N()` route; the lazy-broadcast shape at
-n = 100/101/128/400 with a numeric value check; and the witness's
-900-member colour-grid census). Non-vacuity verified: 9 of the 12 fail with
-the guard disabled, and the 3 that pass are the deliberate controls.
-
-**For Tycho.** Their diagonal-residue lane in `graph/dynamic-color.ts` is
-R1 implemented by hand and retires at this adoption — re-run
-`docs/scratch/d189-nested-anatomy-probe.mts`, expect all members scalar,
-then delete the lane's same-length rule. One heads-up: that probe does not
-currently run on their tree — `resolveAllComputedCollections` returns no
-`g` entry (only `X`, `Y`, `P`), on published 0.109.0 as well as against CE
-source, so the harness needs repair on their side before it can serve as
-the acceptance check.
-
-### ~~Tycho item 188 — `Divide` rejects a `broadcastable<vector<…>>` numerator that it then broadcasts~~ (FIXED 2026-08-15; filed 2026-08-15)
-
-**RESOLVED 2026-08-15**, taking their FIRST ask (type the operand the way
-evaluation treats it) rather than the second (soften the check to non-fatal).
-The first turned out to be the smaller change after all, and it keeps the
-checker failing closed on operands that are genuinely non-numeric.
-
-Two layers, both measured:
-
-1. **Admission** (`typeCouldBeNumericCollection`, `collection-utils.ts`). Its
-   `broadcastable<S>` arm asked only whether `S` was numeric-SCALAR-ish
-   (`isSubtype(S, number) || isSubtype(number, S)`), so a collection or tuple
-   BASE — `broadcastable<vector<n>>`, `broadcastable<list<number>>`,
-   `broadcastable<tuple<number,number>>` — answered `false` and fell through
-   `checkNumericArgs` to its final `else`, which bakes
-   `Error(incompatible-type, number, …)` at canonicalization. It now recurses
-   into the base, so the invariant is "admit the lift exactly where the base is
-   admitted". The companion `typeIsProvablyNonNumericCollection` — which
-   REJECTS, and had the mirrored hole — is now written as the literal negation
-   of the admit predicate so the two halves cannot drift apart again. Because
-   every numeric operator validates through `checkNumericArgs`, the same
-   operand is now accepted by `Add`, `Multiply`, `Subtract` and `Negate` too;
-   `Divide` was only where Tycho happened to hit it.
-
-The same delegation closed a second, unrelated hole in that arm: a mixed union
-base (`broadcastable<finite_integer | string>`) was refused while the identical
-`list<finite_integer | string>` was admitted, because the hand-rolled test
-asked `isSubtype(S, number) || isSubtype(number, S)` — neither of which holds
-for a union with one non-numeric member — where `couldBeNumericElement`
-distributes over the union arms.
-
-The **shape-preservation layer** took two landings. The first echoed
-`num.type` verbatim and was withdrawn under dual review: echoing asserts the
-numerator's ELEMENT TIER survives division, and it does not —
-`Divide(broadcastable<vector<finite_integer^2>>, <integer-valued call>)` typed
-integer components while `[6,2]/4 = [3/2,1/2]` is rational. The second landing
-(same day, user-ruled to proceed together with the tuple-branch fix below) is
-the correct form: `Divide` keeps a shaped numerator's STRUCTURE — a tuple, or
-a `broadcastable<…>` lift of a vector/tuple/list base — but derives every
-component through `quotientComponentType` (`arithmetic.ts`), which applies
-byte-for-byte the same tier rules as the handler's scalar branches, ratified
-possibly-zero-denominator convention included. So:
-
-- `broadcastable<vector<finite_integer^2>> / <integer call>` →
-  `broadcastable<vector<finite_rational^2>>` (tier moved, shape kept);
-- over an unknown-typed application (`g(t)` before `g` assigns, which reports
-  `isFinite === false` since it could be NaN) the components widen to `number`
-  — printed `broadcastable<vector<2>>` — exactly as scalar `x / g(t)` widens;
-- a shaped or possibly-shaped DENOMINATOR still makes no claim
-  (`tuple / tuple` is rejected by `canonicalDivide`), and a broadcast-lifted
-  SCALAR denominator (`broadcastable<number>`) preserves the numerator's
-  shape, since a scalar or an elementwise collection divide both do.
-
-Consumer-visible result: the row is valid in BOTH document positions, and its
-value is identical in both (`G(0.7) = [-0.329034…, 0.584950…]`, matching the
-source formula). The declared types still differ by position —
-`(unknown) -> broadcastable<vector<…>>` above the callees' definitions,
-`(unknown) -> vector<2>` below them — and that difference is honest rather
-than a residue: above the definitions CE genuinely cannot prove the arguments
-are not collections.
-
-Regression pins:
-`test/compute-engine/tycho-item-188-broadcastable-vector-divide.test.ts`
-(18 tests: the lift really is `broadcastable<vector<…>>`; the row is valid with
-callees unassigned; validity and value are position-independent; the quotient
-keeps the shape with per-denominator element tiers mirroring the scalar path;
-a lifted integer vector's quotient claims rational — not integer — components,
-so the withdrawn echo cannot return; tuple component tiers widen the same way;
-`broadcastable<S>` and `list<S>` are admitted alike for four bases including a
-mixed union; the four sibling operators admit the same operand; a provably
-non-numeric lift is still rejected). Non-vacuity verified — 8 of the first 10
-fail under the pre-fix predicate. Full suite: **zero** snapshot changes
-(4,269 snapshots, all unchanged); the only failures in the measuring run were
-2 tests of a concurrent session's in-flight, untracked item-190 test file,
-attributed by discriminator runs (they pass both with and without this change
-once that session's own edit landed).
-
-Their second-chance registration queue is theirs to keep or retire — it buys
-order-robustness independent of this defect, and nothing here obliges them to
-remove it.
-
-Trigger note worth keeping: this surfaced the day they STOPPED declaring
-evidence-free placeholder arrows. Better call types exposed an over-strict
-check that all-`unknown` types used to sail past — so improving type
-information upstream made a downstream check start failing, which is the kind
-of coupling to expect more of as inference sharpens.
-
-### ~~`Divide`'s tuple branch over-claims the element tier~~ (FIXED 2026-08-15; discovered same day reviewing the item-188 fix)
-
-**RESOLVED 2026-08-15** (user-ruled to fix immediately rather than defer). The
-hoisted tuple branch (item 165) returned the numerator's type verbatim, so
-`Divide(tuple<finite_integer, finite_integer>, <integer-valued call>)` claimed
-INTEGER components where the quotient is rational (`[6,2]/4 = [3/2,1/2]`) —
-while the bare list path widened correctly, so the two disagreed on the same
-arithmetic.
-
-The fix keeps the tuple STRUCTURE (item 165's actual point — a `PointList`
-quotient must not collapse to `number`) and derives each component through
-`quotientComponentType` (`arithmetic.ts`), which mirrors the handler's scalar
-branches byte for byte: `finite_rational` for integer/integer, `finite_real`
-for real/real, `number` over a possibly-NaN denominator (an unknown-typed
-application reports `isFinite === false`), and the scalar path's ratified
-possibly-zero-denominator convention (an unproven-nonzero denominator still
-claims a finite tier; only a literal 0 — folded away by `canonicalDivide`
-anyway — yields the top type). The finiteness half of the original filing was
-therefore NOT a defect: claiming `finite_real` over a possibly-zero
-denominator is the handler's own documented scalar convention, and the
-component widening now follows it identically — consistency-by-construction,
-with the convention question belonging to the scalar rules alone.
-
-The same helper drives the restored item-188 broadcast-shape branch above
-(`quotientShapeType` recurses structurally, so `matrix` bases widen row-wise
-too). Item 165's pins (`tycho-item-165-pointlist-divide-type.test.ts`,
-`points-arithmetic.test.ts`) pass unchanged — they pin the tuple STRUCTURE,
-not the component tiers — and the measured snapshot blast radius is ZERO
-(4,269 snapshots, unchanged). New pins live in the item-188 test file
-(tuple component widening per denominator; the tuple/tuple rejection).
-
-One asymmetry noted, deliberately untouched: the bare dimensioned-list path
-(`vector<finite_integer^2> / <integer call>`) routes through the
-boxed-function broadcast arm and types `vector<finite_number^2>` — sound but
-one tier wider than the tuple/lift paths' `finite_rational`. Tightening it
-means changing the shared broadcast-arm element computation, a different
-blast radius from this fix.
-
----
-
-Original report, kept for the record:
-
-`Divide`'s operand check accepts a plain vector numerator and REFUSES the
-`broadcastable` wrapper around the same thing, even though `broadcastable<T>`
-is precisely the marker for "this broadcasts elementwise". Reproduced bare
-on 0.109.0 and the working tree:
-
-```
-h(a,b) := [cos(a+b), sin(a-b)]        // h(1,2) : vector<finite_number^2>
-h(1,2) / 2                            // OK, evaluates elementwise
-H(a,b) := h(2a,3b)                    // with X, Y declared-but-unassigned:
-H(X(t),Y(t)) / g(t)                   // numerator : broadcastable<vector<finite_number^2>>
-  -> Error(incompatible-type, "number", "broadcastable<vector<finite_number^2>>")
-```
-
-The evaluator disagrees with its own checker: `[1,2]/2` evaluates to
-`[1/2,1]`, and `h(1,2)/2` evaluates elementwise — the checker rejects a
-shape evaluation handles. The error is baked in at canonicalization, so
-the row does not merely warn, it fails.
-
-**The consumer-visible half is worse than the type error.** Because the
-numerator's type depends on whether its callees are ASSIGNED yet, a row's
-PARSE VALIDITY depends on document position: the same definition parses
-invalid before its callees assign and valid afterwards. Tycho's document
-cells register in order, so their `G` cell was silently dropped from
-registration. Position-dependent validity is not something a consumer can
-reason about or work around cleanly; their interim is a second-chance
-registration queue that re-processes position-invalid rows after the whole
-document has assigned.
-
-Their ask, either half sufficient: type vector-operand arithmetic the way
-evaluation actually treats it, or make the operand check NON-FATAL while an
-operand's type may still refine. The second is the smaller change and
-matches the "don't fail closed on a type that is still moving" posture.
-
-### ~~Tycho item 186 — the item-182 class SURVIVES in document context~~ (FIXED 2026-08-15; filed 2026-08-14)
-
-**RESOLVED 2026-08-15.** The "architectural" conclusion below was wrong in
-one load-bearing detail: the storm's 66K facet probes hit ONE STABLE
-comprehension instance (D), not fresh ones — instrumented
-`scanIndependentClauses` counted 66,297 of 66,301 calls on the same object.
-The ~462K fresh `Map`/`Function`/`Block` builds are the OUTPUT of those
-rescans, not the driver. The memo on that one instance never served because
-of one dependency-validation rule: `memoDepsStillValid` failed whenever a
-dep's occurrence no longer pinned the identical inner value definition —
-and bare-symbol canonicalization (`ce.symbol(name)` →
-`_declareSymbolValue`/`updateDef`, observed live under
-`BoxedSymbol.get canonical` inside `inScope`) re-auto-declares a
-lambda-body free like `R_xz`'s `c`, replacing the shared binding wrapper's
-inner definition in place while bumping no version axis. Only ~8 such swaps
-occur per parse, but each one makes every snapshot pinning the previous
-definition object born-stale, the recompute re-triggers the swap, and the
-`count`/`isEmpty` store ping-pong (a fresh slot wipes the sibling facet's
-entry) doubles the burn: measured 26,523 `occurrence-valuedef-swap`
-validation failures on the symbol `c` in one 4 s window, 28,824 slot
-replacements, 56 hits.
-
-**The fix** (`memoDepsStillValid`, `collection-element-memo.ts`): a swap
-from one VALUELESS pinned definition to another VALUELESS one is a
-re-auto-declare, not a semantic change — a definition holding no value
-never supplies what a walk reads; the name resolves through the scope
-chain, which the re-resolution check still validates. Identity (and
-`_writeVersion` continuity) stays load-bearing when either side holds a
-value. Measured on Tycho's own probe (`MODE=strip`, CE source): C₂ span at
-NL=304 ceiling-burn → **67 ms**; the "every literal value storms" arm
-(`DBOUND=101` at NL=303) ceiling → 79 ms; production-scale NL=3708 → 206 ms
-strip / **14 ms** in the full 17-cell document (whole document evaluates in
-1.3 s). Scan volume at NL=3708: 8 `scanIndependentClauses` calls, 11
-broadcast-lambda constructions (was ~47K `lazyBroadcastMap` calls inside
-one 4 s window). The 303→304 "magnitude threshold" was never a size effect
-— it was whichever arm's canonicalization happened to re-trigger the swap
-between probes, which is why literal bounds stormed at every size while the
-symbolic bound flipped at an arbitrary-looking length.
-
-Regression pins: `test/compute-engine/tycho-item-186-valueless-rebind.test.ts`
-(3 tests: benign swap serves, value-holding swap still invalidates,
-name-becomes-reachable still invalidates; non-vacuity verified — the first
-test fails under the pre-fix rule). Suites green: item-182 pins,
-collections, lazy-collection regimes/compile/broadcast, map-auto-compile,
-collection-element-memo (717 tests), plus typecheck.
-
-Still open from this investigation: the `TYPE_CACHE` clear-all eviction
-cliff (real, measured, refuted as 186's cause). The `toNumericValue`
-`console.assert` violations (`boxed-function.ts`, `isCanonical ||
-isStructural`, reached via `canonicalDivide` → `factor()` →
-`toNumericValue`) NO LONGER REPRODUCE post-fix — 0 firings on both the
-strip and full-document harness runs (was ~9 per storm run), so the only
-known trigger was an expression the storm's own cascades built. The latent
-question — whether that call chain can hand `toNumericValue` a raw
-expression through some other route — has no known reproduction; downgraded
-from "worth its own look" to a note on the assert site.
-
---- original investigation record follows ---
-
-Tycho's item-182 witness re-check FAILED after adopting 0.109.0: their
-`lizeqlnn5e` C₂ range-broadcast-`At` color head still burns ≥120–240 s in
-ONE canonical `ce.parse`, A/B-identical on 0.108.0 and 0.109.0 — so it is
-neither cured by 182's facet memo nor caused by a 0.109.0 rider. Filed as
-a NEW item rather than reopening 182 (their hygiene rule: the shipped fix
-was adopted, the surviving symptom gets fresh attribution).
-
-Their CPU profile (10 ms sampling, 154 s run): 133 s inclusive under
-`ce.parse` → `withRootRepair`/`_withRepairFrame` → deep type-lattice
-helpers, self-time dominated by small type helpers plus 16.5 s GC. A
-TYPE-computation storm inside recursive canonicalization repair — the
-182 family through a path the facet memo does not cover.
-
-**Context-bound, as 182 was**: bare-engine repros run in 2–6 ms across
-five registration recipes; the storm needs their `DocumentCEManager`
-context (document engine profile, `resolveSymbol` handler, pass-1
-declares, scopes). Their `At` override was disabled in the probes.
-
-**Divisibility hypothesis: REFUTED.** I proposed that the cliff was really
-"3 ∤ length(L)" (which makes the comprehension bound `length(L)/3` an
-exact rational instead of an integer) rather than a magnitude threshold.
-Tycho ran the discriminator: N=306 and N=309 are both divisible by 3 and
-both at-ceiling (30.2 s), with the 303/304 boundary re-confirmed in the
-same run set. Their original sweep also already contained counterexamples
-I had not accounted for — N=450 (divisible) was slow, N=301/302
-(non-divisible) were fast. The shape is a pure MAGNITUDE threshold at
-L-length 304, indifferent to divisibility, and the pad-to-a-multiple-of-3
-workaround is dead.
-
-**ROOT CAUSE LOCATED (2026-08-14). The remaining work is architectural —
-see "what is left" below.**
-
-The driver chain, captured from a live stack on the reproduction:
-
-```
-serializeJson -> _resolveOnly -> serializeJsonExpression -> isDictionary
-  -> BoxedFunction.get type -> isFiniteIndexedCollection
-  -> get isFiniteCollection -> _memoizedFacet
-  -> comprehensionIsFinite -> scanIndependentClauses
-  -> BoxedFunction.evaluate -> add -> lazyBroadcastMap -> ce.function('Map', ...)
-```
-
-Counted on the same runs (`makeCanonicalFunction` by operator):
-NL=303 builds 4,325 canonical functions total; **NL=304 builds 462,197**,
-of which ~114,550 each of `Map`, `Function` and `Block` — i.e. ~114K
-BROADCAST LAMBDAS constructed where one is needed. That is item 182's
-storm shape reaching the ELEMENT memo instead of the facet getters.
-Repair-frame counters rule out the retry loop: 0 rebuilds on both sides,
-max depth 4, so the frames are just a proxy for boxing volume (6,195 vs
-341,485).
-
-**One real defect found and FIXED in the process** (does not close 186).
-`CE_DEBUG_DEPS=1` reported **47,439 memo declines on ONE canonicalization,
-all of them "valueless 'c' not chain-resolved"** — case (3) of
-`snapshotDeps`, where the resolution chain reaches a DIFFERENT value
-binding than the occurrence's pinned one. That case declared the whole
-instance ineligible on the grounds that "neither version stream alone is
-trustworthy" — which is an argument for tracking BOTH streams, not for
-giving up. It now records two deps (pinned binding and chain target), so
-a write to either invalidates; over-invalidation costs a refill, whereas
-declining costs the memo entirely. Declines for that reason: 47,439 → 0.
-Tests green (627 across the item-182 pins, collections, lazy-collection
-and map-auto-compile suites).
-
-**WHAT IS LEFT, and why this needs its own session.** With eligibility
-fixed the storm is UNCHANGED (30 s at NL=304). So the memo is no longer
-declining — it simply never HITS, because the facet/element memos are
-keyed PER INSTANCE (`this._facetMemo`) while the storm re-boxes the same
-logical subexpression as ~462K FRESH instances, each with a cold memo.
-Fixing 186 therefore means stopping the re-boxing, or giving the memo a
-key that survives re-boxing — an architectural change to canonicalization,
-not another eligibility repair. The same "fresh instances defeat
-per-instance memoization" shape was item 182's "64K fresh Ranges".
-
-**REPRODUCED IN THIS REPO, against CE SOURCE, with a profile.** Tycho's
-probe runs on our working tree through the item-182 src-redirect hook:
-
-```
-cd ~/dev/tycho && MODE=strip NL=304 CEIL=8000 \
-  node --cpu-prof \
-    --import ~/.nvm/versions/node/v22.13.1/lib/node_modules/tsx/dist/loader.mjs \
-    --import ~/dev/compute-engine/docs/scratch/2026-08-14-item182-ce-src-redirect.mjs \
-    docs/scratch/d21-lizeq-boundary.mts
-```
-
-`NL=303` → C₂ span 56 ms. `NL=304` → the span consumes whatever ceiling
-it is given (8 s, 12 s, 20 s all fully spent), and the engine emits
-`error canonicalizing At: Timeout exceeded`. `MODE=strip` is a 7-cell
-dependency closure, so nothing else in the document is involved.
-
-**Attributed profile (source names, 9.8 s sample):** 79.4% INCLUSIVE in a
-single `ce.parse` → `box` → `withRootRepair` → `_withRepairFrame` →
-`makeCanonicalFunction`. One canonicalization consumes the whole budget.
-Self time is spread across small helpers, led by the element-memo
-dependency machinery (`collection-element-memo.ts` 8.1%,
-`collectParameterDefs` 3.3%) and the type lattice (`isSubtype` 4.4%,
-`type` 2.8%, `matches` 1.4%), plus 5.2% GC. So this is the item-182
-disease family reaching the ELEMENT memo's dependency closure and the
-type lattice, through canonicalization repair — a path the facet memo
-(which fixed 182) does not cover.
-
-**The pathological object, per Tycho's isolation** — an `At`-broadcast
-whose range EXTENT is a SYMBOLIC expression over a sized literal
-collection: `At(L, 1+3·(0..(Length(D)-1)))`. Three findings pin it:
-- Literalizing C₂'s OWN extent (`0..1234` for `0..(Length(D)-1)`) makes
-  it 2 ms **at the full 3708-element L** — so magnitude is not the driver.
-- FORM, not magnitude, of D's bound: rewriting `(1..(Length(L)/3))-1` to
-  the numerically IDENTICAL literal `(1..101)-1` at L=303 flips the FAST
-  side to the ceiling. Every literal value storms.
-- The 303→304 boundary is immobile to unrelated document content (both
-  directions tested), so it is intrinsic to this dep closure.
-
-**No consumer-side lever exists.** Tycho cannot emit literal bounds as an
-interim workaround: `L` is ACTION-written in that document (a ticker
-rewrites it), so D's length is genuinely runtime-variable and
-literalizing is semantically wrong. Bounding this is ours.
-
-**Separate real defect found while profiling**: 9 failing
-`console.assert`s per run at `boxed-function.ts:889` (`toNumericValue`
-asserting `isCanonical || isStructural`), reached via
-`canonicalDivide` → `toNumericValue` → `factor()` → `toNumericValue`. Not
-the hot loop, but an invariant violated repeatedly on this shape and
-worth its own look.
-
-**Refuted, do not retry — the TYPE-STRING CACHE thrash.** The mechanism
-below is REAL and measurable, but Tycho's boundary-mobility test (which I
-designed as the discriminator) refuted it as the cause of 186: stripping
-all 10 unrelated rows left L=304 still storming (predicted fast), and
-adding 300 distinct-size `Range` rows plus 30 distinct-length literal
-lists (~12.4k numbers) left L=303 at 150–188 ms (predicted slow). The
-boundary is immobile to unrelated content, so a document-wide working-set
-overflow is not it. Kept here because the cliff itself is real and worth
-fixing on its own merits.
-
-`TYPE_CACHE` (`common/type/parse.ts`) is capped at 2048 entries and
-evicts by CLEARING THE ENTIRE MAP, on the stated assumption that "the
-working set of distinct type strings is small". That assumption fails for
-types carrying LENGTHS: every distinct vector size is its own type string
-(`vector<finite_integer^303>`, `^304`, …), so a program indexing or
-slicing many differently-sized collections builds a large working set.
-
-Measured directly (re-parsing a working set of W distinct length-typed
-strings in a loop): W ≤ 2048 costs 0.04–0.11 µs/parse; **W = 2100 costs
-4.25 µs/parse — a 40–100× cliff — and stays flat above it** (4.08 at
-2500, 3.76 at 4000). Clearing drops 100% of entries per overflow, so the
-hit rate collapses rather than degrading, and the time goes to re-parsing
-and re-`deepFreeze`ing plus the garbage that creates.
-
-That reproduces every signature in Tycho's profile: a sharp cliff at a
-size threshold, a flat ceiling above it, self-time in small type helpers,
-heavy GC, and context-boundness (a bare repro's working set never reaches
-the cap, which is why their five bare recipes run in 2–6 ms). It also
-explains why 304 looks arbitrary: what crosses the cap is the WHOLE
-program's working set, so the boundary is a property of the document, not
-of the expression that tipped it over.
-
-**Testable prediction, handed to Tycho:** the boundary should MOVE if
-unrelated parts of the document change how many distinct type strings it
-generates. Their offered subterm-separation probe can test this directly.
-
-**Eviction policy is NOT the fix** — measured. Replacing the clear with
-FIFO eviction of the oldest entry made it slightly worse (5.8 vs
-4.3 µs/parse over-cap): a working set larger than the cache, re-parsed in
-a repeating order, is the worst case for any eviction policy. The lever
-is either reducing the number of distinct type strings (cache a
-length-parameterized type by structure, with the length as a parameter)
-or sizing the cache to the working set.
-
-**DISPOSITION (2026-08-15): dormant — no real workload engages the cliff;
-observability landed instead of a speculative fix.** The cliff reproduces
-on demand (0.02 µs/parse cached → ~3 µs the moment a cycling working set
-crosses the 2048 cap, ~150×, flat above — re-measured on current source),
-but the full lizeqlnn5e document at production size, post-item-186 fix,
-mints only 329 distinct type strings — ONE of them length-carrying — with
-zero overflow clears and a 97.1% hit rate over 11,245 reads. The
-hundreds-of-distinct-sizes pressure existed only in the synthetic
-boundary-mobility probe. The structural levers above stay unbuilt until a
-workload shows clears; what landed is the re-open trigger: `TYPE_CACHE` now
-reports under `CE_CACHE_STATS` as the `typeParse` class (hits, cold
-stores, and `evictClear` — the count of whole-cache overflow drops), so a
-thrashing program is diagnosable from a run flag. `evictClear > 0` on a
-real workload re-opens this item.
-
-**Honesty note on 182's verification.** The "span#2 10.4 s → 31 ms"
-figure recorded in 182's section came from their
-`d21-lizeq-head-extract.mts` harness on CE source. Their re-check says
-the class survives against the real document, so that figure measured a
-narrower thing than 182's section claims for it — read it as "the
-extracted head got fast", not "the document head got fast".
-
-Their 5 s registry-head guard stays load-bearing, so there is no
-production hang; the cost is one permanently-refused color row.
-
-### ~~Tycho item 182 — canonicalization-time collection-facet probe storm on a range-broadcast `At` head~~ (FIXED 2026-08-14; but see item 186 above — the class SURVIVES in document context)
-
-Original filing: parsing `255(0.5 + L[1+3(0..Length(D)-1)]/60)/255` inside
-a live Tycho document scope burned ~9.4 s in one 5 s span (and, without a
-deadline, exhausted a 4 GB heap in ~130 s — Tycho's 5 s guard was
-load-bearing against a crash class). Root-caused and fixed the same day.
-
-**The disease, fully resolved by measurement** (the filing's
-repair-machinery lead was wrong — zero rebuilds, zero devolves): every
-`count`/`isFinite`/`isEmpty` facet read on the symbolic-bound
-`Range(0, Length(D)-1)` ran `hasSymbolicRangeBounds` →
-`operandNumericValue` → **`(Length(D)-1).N()` — a full numeric evaluation
-per probe, with no cache anywhere in the chain** (~2–4 ms each, answering
-`undefined` every time). Each cascade re-scanned D's comprehension
-(`scanIndependentClauses` re-evaluates clause domains per scan), re-boxed
-the domain's Ranges (~6 fresh instances per cascade — the measured 64K
-fresh `Range`s), and constructed fresh broadcast lambdas whose parameter
-declares + now-dirty scope pops advanced `ce._anyVersion` ~104K times in
-one 5 s parse — invalidating every generation-keyed cache engine-wide
-(type: 332K wasted recomputes, effects: 479K, lazy-value: 52K, all
-measured 100% wasted), so nothing ever cached and the loop amplified
-itself. The OOM arm was this loop's unbounded allocation churn. A fourth
-instance of the self-invalidation class (after `inference{valueType}`, the
-2^depth shape-query double-read, and item 181's clean pops).
-
-**The fix — three pieces, all landed 2026-08-14:**
-
-- **Dependency-precise collection-facet memo**
-  (`BoxedFunction._memoizedFacet`, wired into the `count`/
-  `isEmptyCollection`/`isFiniteCollection` getters): entries validated by
-  `ce._worldVersion` plus per-dependency `_writeVersion`/resolution
-  re-checks (`snapshotMemoDeps`/`memoDepsStillValid`, the element memo's
-  machinery — `docs/plans/2026-08-02-dependency-precise-memo-invalidation.md`),
-  so the cascade's own declares cannot invalidate it. A `ce._anyVersion`
-  key was tried first and refuted by exactly that self-invalidation. No
-  purity gate (facets are shape queries; the element memo already applies
-  to impure instances by the `docs/RANDOMNESS-MODEL.md` §6 ruling);
-  settled-only store (cycle-guard + lazy-value provisional counters); an
-  ineligible instance is simply never stored (today's uncached behavior).
-- **Eligibility repairs in the shared dependency machinery**
-  (`collection-element-memo.ts`), without which the document's
-  comprehension never memoized: (1) FORWARD-REFERENCE HEAL — an
-  occurrence pinned to a valueless auto-declared binding whose name the
-  chain resolves to an operator definition is trackable (inner-identity +
-  resolution re-check) instead of ineligible; (2) a valueless occurrence
-  the chain resolves to NOTHING (`R_xz`'s auto-declared free `c` — no
-  reachable binding at all) is trackable with `resolved: undefined` — the
-  one event that changes what the walk reads is a binding for that name
-  becoming reachable, which flips the re-resolution and invalidates.
-  (A first cut resolved such occurrences through the lambda body's OWN
-  scope chain instead; REFUTED — closures re-root at evaluation
-  (`captureClosures`), so the walk reads the ambient chain, and the
-  body-chain dependency validated right through an ambient assign. The
-  map-auto-compile re-enable test caught it serving a stale drain.)
-- **Kind-swap invalidation hole closed** (pre-existing, latent in the
-  element memo, exposed by the new pins): an operator→scalar redefinition
-  (`assign('f', 5)` over a function `f`) emits zero-mask
-  `redefine {callableAfter: false}` — NO version axis moves — so "operator
-  redefinition always bumps `_worldVersion`" held only for same-kind
-  redefinitions. Walked user-lambda heads are now recorded as operator
-  dependencies validated by inner-identity re-resolution. Relatedly,
-  `ce.iterationLimit` changes what count/element walks answer yet
-  advances no version axis, so the memo's settled-only gate DECLINES to
-  store any facet computation during which an iteration-limit
-  cancellation fired (`iterationLimitCancellationCount()`,
-  `common/interruptible.ts`) — a limit-degraded "unknown" is recomputed
-  per read, the pre-memo behavior. (A companion change making the
-  `ce.iterationLimit` setter emit a `config` state event is written but
-  ships separately: it lives in `src/compute-engine/index.ts`, which
-  carries concurrent unrelated work.)
-
-**Results** (all in-repo, no Tycho-side run needed): the bare repro
-(`docs/scratch/2026-08-14-item182-bare-repro.mts`) parses the head slot in
-~5 ms in BOTH arms — the OOM arm included; the real-document harness
-(`docs/scratch/2026-08-14-item182-ce-src-redirect.mjs` running Tycho's
-`d21-lizeq-head-extract.mts` on CE source) shows span#2 at 31 ms (was
-~10.4 s) and the whole 17-cell document evaluating in ~2.9 s. The
-`Assertion failed` breadcrumb from the deadline-salvage path no longer
-reproduces (it lived inside the storm's timeout unwinding). Regression
-pins: `test/compute-engine/tycho-item-182-facet-probe-storm.test.ts` —
-facet-compute budget (32 measured, 200 pinned, non-vacuity floor), warm
-re-parse, per-instance stability, dependency/ephemeral-write/kind-swap
-invalidation.
-
-The filing's second observation is a SEPARATE, still-open item — see
-"Deadline granularity in the canonicalization walk" below. It was
-promoted out of this section deliberately: this heading is struck through
-and moves to the log when Tycho adopts the fixing release, and the
-granularity item must not be archived with it.
+### `Divide` over a bare dimensioned list types one tier wider than the tuple and lift paths
+
+Deliberately untouched when `quotientComponentType` (`arithmetic.ts`) landed on
+2026-08-15: `vector<finite_integer^2> / <integer-valued call>` routes through
+the boxed-function broadcast arm and types `vector<finite_number^2>`, where the
+tuple and `broadcastable<...>` paths derive `finite_rational` for the same
+arithmetic. The wider claim is SOUND, just imprecise. Tightening it means
+changing the shared broadcast-arm element computation, a different blast radius
+from the per-component derivation that fixed the tuple and lift branches —
+measure the snapshot count before starting.
+
+### `TYPE_CACHE` evicts by clearing the whole map — a real cliff, dormant today
+
+`TYPE_CACHE` (`common/type/parse.ts`) is capped at 2048 entries and evicts by
+CLEARING THE ENTIRE MAP, on the stated assumption that the working set of
+distinct type strings is small. That assumption fails for types carrying
+LENGTHS: every distinct vector size is its own type string
+(`vector<finite_integer^303>`, `^304`, ...). Measured by re-parsing a working
+set of W distinct length-typed strings in a loop: W <= 2048 costs
+0.02-0.11 us/parse, W = 2100 costs ~3-4 us/parse — a ~150x cliff — and stays
+flat above it, because clearing drops 100% of entries per overflow so the hit
+rate collapses rather than degrading.
+
+Eviction POLICY is not the fix, measured: FIFO eviction of the oldest entry was
+slightly worse (5.8 vs 4.3 us/parse over-cap), since a working set larger than
+the cache, re-parsed in a repeating order, is the worst case for any policy.
+The levers are reducing the number of distinct type strings (cache a
+length-parameterized type by structure, with the length as a parameter) or
+sizing the cache to the working set.
+
+**Dormant, with a re-open trigger.** No real workload engages it: the largest
+consumer document measured mints 329 distinct type strings — ONE of them
+length-carrying — with zero overflow clears and a 97.1% hit rate over 11,245
+reads, and the hundreds-of-distinct-sizes pressure existed only in a synthetic
+probe. So the structural levers stay unbuilt and observability landed instead:
+`TYPE_CACHE` reports under `CE_CACHE_STATS` as the `typeParse` class (hits,
+cold stores, and `evictClear` — the count of whole-cache overflow drops).
+**`evictClear > 0` on a real workload re-opens this item.**
 
 ### Deadline granularity in the canonicalization walk (OPEN; second observation of Tycho item 182)
 
@@ -1617,70 +313,27 @@ the ablation shows the terms interact, so measure both. Any change here
 needs the snapshot blast radius measured first; product expansion is
 long-standing behavior with wide pin coverage.
 
-### ~~Auto-compile instrumentation is unreachable from a consumer install~~ (FIXED 2026-08-14)
+### `process.env`-gated diagnostics are stripped from the published bundle
 
-`_mapAutoCompileStats` (`library/map-auto-compile.ts`) counts
-`attempts`/`compiledHits`/`revalidations`/`recompiles`/
-`elementFallbacks`/`nanDoubleChecks`, and is the only surface that says
-whether a `Map` drain compiled, re-validated or fell back. It is
-reachable from the repo and NOT from the published package: the bundle
-has no `./library/map-auto-compile` subpath export and the symbol does
-not appear in `dist/esm-min` at all (Tycho grepped it: 0 hits). Its own
-doc comment scopes it to tests.
+Measured against `dist/esm-min/compute-engine.js` (2026-08-14): `process.env`
+occurs 0 times, and so do `CE_CACHE_STATS` and `mapAutoCompileStats`. Every
+`process.env`-gated diagnostic in this repo — `CE_CACHE_STATS`,
+`CE_DEBUG_DEPS`, `CE_MEMO_PARANOID` — is therefore ELIMINATED from the
+published artifact, not merely defaulted off in it. They serve CE's own
+Node-side debugging and CI, and are unreachable for EVERY consumer of the
+package, browser or Node alike; adding another one reproduces the same dead
+end a consumer already hit asking whether a `Map` drain compiled.
 
-So when a consumer asks "did this drain compile, and did that decision
-change between runs?" — the question a wandering evaluation cost makes
-them ask — we can answer it in-repo and they cannot answer it at all.
-Tycho hit exactly this while investigating a `Map`-of-`Sum` row
-(2026-08-14) and said they would use the surface immediately if it
-existed.
-
-`CE_DEBUG_DEPS` does not cover it (it is referenced only in
-`collection-element-memo.ts`, for element/facet snapshot eligibility),
-which is why their first attempt produced no output.
-
-**The env-gated idiom is NOT the fix, and the reason generalizes.**
-Measured against the shipped bundle (`dist/esm-min/compute-engine.js`):
-`CE_CACHE_STATS` occurs 0 times, `process.env` occurs 0 times, and
-`mapAutoCompileStats` occurs 0 times. So every `process.env`-gated
-diagnostic in this repo — `CE_CACHE_STATS`, `CE_DEBUG_DEPS`,
-`CE_MEMO_PARANOID` — is eliminated from the published artifact, not
-merely defaulted off in it. Those flags serve CE's own Node-side
-debugging and CI, and they are unreachable for EVERY consumer of the
-package, browser or Node alike. Adding one more of them would reproduce
-the same dead end this entry is about.
-
-Fix shape when picked up: expose the counters as an `_`-prefixed ENGINE
-MEMBER (`ce._mapAutoCompileStats`). That is this repo's established
-shape for "reachable at runtime, no stability promise" — `_deadline`,
-`_random()`, `_compile()`, `_getSymbolValue()`, `_epsilBatchId` all live
-there. It survives bundling, needs no subpath export, and works from a
-browser, which is where the consumer asking the question runs. Keep an
-env-gated dump alongside it for Node/CI if wanted; it costs nothing, it
-just cannot be the consumer-facing half.
-
-Scope note for whoever implements it: a new engine member must land on
-`IComputeEngine` as well, and that applies to `_`-prefixed members —
-60 of them are already declared there, including every one named above.
-So this is an implementation + interface change, not a one-file edit.
-
-**Fixed 2026-08-14** as specified: `ce._mapAutoCompileStats` is a getter
-on the engine class and declared on `IComputeEngine` (`types-engine.ts`),
-backed by a new dependency-free leaf module
-`src/compute-engine/map-auto-compile-stats.ts` — the counters had to
-move out of `library/map-auto-compile.ts` because the ESLint layering
-zone forbids `types-*.ts` from importing under `library/`, and the old
-path re-exports both symbols so existing test imports are untouched. The
-counters are process-global and cumulative by design (the compile cache
-they instrument is a module-level `WeakMap` shared by every engine in
-the process); a caller measures a single drain by diffing before/after.
-No reset was added to the engine surface — a reset on a process-global
-object called from one engine would perturb another. Marked `@internal`,
-so `src/api.md` is unaffected. The generalization the entry raised —
-that `CE_CACHE_STATS`, `CE_DEBUG_DEPS`, and `CE_MEMO_PARANOID` are all
-eliminated from the published bundle and thus unreachable for every
-consumer — remains true and undecided as policy; this fix made exactly
-one surface consumer-reachable.
+The established shape for a consumer-reachable diagnostic is an `_`-prefixed
+ENGINE MEMBER (`_deadline`, `_random()`, `_compile()`, and now
+`_mapAutoCompileStats`): it survives bundling, needs no subpath export, and
+works in a browser, which is where the consumer asking the question runs. One
+surface was converted that way on 2026-08-14; whether the remaining env flags
+should follow is UNDECIDED as policy. Note for whoever picks it up: a new
+engine member must also be declared on `IComputeEngine` (`types-engine.ts`) —
+that applies to `_`-prefixed members too, 60 of which are already declared
+there — so each conversion is an implementation + interface change, not a
+one-file edit.
 
 ### Degree-mode folding flips `angularUnit` per fold attempt, purging caches (OPEN, perf — small)
 
@@ -1714,333 +367,18 @@ engine. Hoisting therefore has to make the derivative lowering's unit
 explicit rather than ambient, or degree-mode derivatives silently stop
 being rewritten. Raised by the compilation session, who own the folder.
 
-### ~~The constant-fold budget is WALL-CLOCK, so folded output is not reproducible~~ (FIXED 2026-08-14)
+### Eleven test files leak `BigDecimal.precision`
 
-`CONSTANT_FOLD_BUDGET_MS` was a wall-clock budget per constant subtree:
-inside it the subtree folded to a literal, over it it degraded to
-structural compilation. That made the DECISION depend on machine load,
-and the two branches do not produce identical numbers — a folded value
-comes from `.N()` in bignum while the structural lowering computes in
-doubles — so the same source could compile to values differing in the
-last digits.
-
-**It stopped being theoretical.** `definition-order.test.ts`
-("three-definition Sum matrix") went intermittently red in FULL parallel
-runs only, passing in isolation and under `--runInBand`, with a different
-failing subset each time. The probe `A(0.3)` — a 7-term `Sum` over two
-user functions — measured 37–89 ms against the 100 ms budget, so under
-test load it folded sometimes and not others, and two engines compiling
-the same source disagreed at the 13th digit:
-folded `-0.5248276195481336` (which matches the interpreter) versus
-structural `-0.5248276195478552`. Two other explanations were chased and
-refuted first — a cross-engine cache (the engine cache is per-instance)
-and leaked `BigDecimal.precision` (an in-band run passes, which is the
-worst case for a leaked global).
-
-**Fixed** by replacing the wall clock with `foldCostEstimate` — a
-deterministic, monotone, over-approximating cost in abstract work units
-(`CONSTANT_FOLD_MAX_COST`), bounded by `CONSTANT_FOLD_MAX_DEPTH` so the
-estimator cannot become the expense it guards against. Multiplying
-constructs are priced by their counts: a `Sum`/`Product` over a
-resolvable range by its trip count, a `Map`/`Filter` by its source's
-static size. Anything with no statically resolvable count declines (D6).
-Monotonicity is load-bearing: the fold is attempted top-down at every
-node, so a parent must never estimate cheaper than a child. The deadline
-remains only as an anti-hang net, raised well clear of anything the
-estimate admits, so it never decides.
-
-Two properties worth keeping: the decline path got CHEAPER (a
-`Sum(Map(f, 1..100000))` now declines in ~3 ms instead of evaluating for
-~100 ms before the clock ran out), and a bound that lives in a CONSUMER
-rather than a source still folds (`Take(Map(f, 1..∞), 10)`), because
-`staticCollectionSize` prices the `Take`.
-
-**Scope: the EXPLICIT `compile()` path only.** Constant folding does not
-run on the implicit `Map`-drain path at all: `tryConstantFold` declines
-outright when `target.symbolDeps !== undefined`, which is its first gate,
-before any budget is armed — and `map-auto-compile.ts` always passes
-`symbolDeps`. The gate is deliberate (folding consults engine state
-transitively with no per-read hook, so it would under-report the capture
-set the implicit-compile cache is keyed on and serve a baked constant
-after a dependency changed) and is pinned by "a capture-set request
-(symbolDeps) declines all folding" in `compile-subtree-folding.test.ts`.
-
-Recorded because this entry previously claimed the opposite. Tycho
-measured ~3× non-monotonic wander (1849–5442 ms) on a `Map`-of-`Sum` row
-while adopting 0.108.0, and the fold budget was written up here as the
-explanation. It is NOT: their own A/B found `constantFold: true`/`false`
-moved that row's compile time by nothing (28/3/3 ms vs 3/2/5 ms) against
-an evaluation wandering by seconds, and the `symbolDeps` gate above means
-the implicit path never consults the budget either. **The cause of that
-wander is unidentified and is somewhere in the DRAIN, not in the
-compile.** Anyone picking this up should not "fix" the fold budget
-expecting the wander to move.
-
-`Map` now takes the mapping function first (`Map(f, xs…)`, signature
-`(function, collection+)`); the flip swept src, tests, docs, and the
-Fungrim corpus/artifact. Two follow-ups:
-
-- ~~Fungrim provenance~~ **CLOSED 2026-08-14.** The translator emits
-  callback-first Map (fork commit `0bb0a441`, 69/69 fork tests), the
-  regenerated corpus is byte-identical to the checked-in one, and
-  `data/fungrim/MANIFEST.json` pins the new fork commit
-  (`generated` 2026-08-14; `pin.sha256` unchanged — it covers only
-  `pygrim/`). The corpus → artifact chain is fully reproducible again:
-  `validate --check`, drift 0/0/0, freshness, solve-templates and
-  compile-properties checks all green.
-- ~~Pre-existing recompile drift: 98 rules re-orient~~ **ABSORBED via
-  full regen 2026-08-14** (user ruling): 0 dropped / 0 added / 98
-  changed — canonical-form modernization on the match side plus
-  orientation and purpose corrections (e.g. `fungrim:664b4c` now FOLDS
-  the Dedekind-eta quotient into `ModularJ` as simplify, retiring its
-  exiled-to-expand workaround; `033d39` folds into `1/λ(τ)`). Gates
-  green after: drift 0/0/0, artifact-freshness OK, fungrim suites
-  148/148 (count pins updated: byPurpose simplify 1311→1304, expand
-  116→123), rule-dispatch oracle byte-identical (172/172 snapshots).
-
-### ~~Same-clause replacement within one program~~ (RULED and IMPLEMENTED 2026-08-14)
-
-**User ruling**: a clause that REPLACES one defined by another statement
-of the same compilation unit now fails with a `function-redefinition`
-diagnostic. Across units — two `ce.parse`/`ce.evaluate` calls, a re-run
-notebook cell — it stays last-wins, and the host routes, which carry no
-origin stamp, are never affected.
-
-The deferral's stated basis was "no evidence either way"; the argument
-that settled it is the notebook one Tycho put forward: cells are
-re-executed and edited in place, so a duplicated parameter list is more
-often stale text than a deliberate hot-fix, and the failure was silent
-AND value-changing.
-
-Only REPLACEMENT is refused. Clause ADDITION at a distinct parameter list
-(`fib(0) = 0; fib(1) = 1; fib(n) = …`) is what multi-clause functions
-exist for and is untouched. "Same clause" is not a new judgement: it is
-`sameParameterDomain` (`multi-clause.ts`), the test dispatch itself uses
-to choose replace-vs-append, so what is refused is exactly what would
-have been silently overwritten.
-
-A latent defect surfaced while implementing it and is fixed in the same
-change: matching origin stamps by anchor OBJECT identity is not sound,
-because one statement is boxed more than once from the same source (the
-static pre-pass, then the evaluation loop) and those boxings produce
-different anchor objects. Stamps now match on the source RANGE when both
-carry one, with object identity as the fallback for hand-built MathJSON
-(`sameStatement`, `declaration-origin.ts`).
-
-Pins: `test/epsil/redefinition-discipline.test.ts` ("the discipline over
-function clauses", 20 tests across addition / within-unit refusal /
-across-unit last-wins / host-route exemption / the static tier).
-
-**The static tier landed 2026-08-14**, closing the gap the first
-implementation left: `epsil check` and the `executeEpsil` pre-pass now
-report a duplicated clause BEFORE anything runs, so all four constructs
-of the discipline are reported on both tiers. The clause collector is
-pass-local like the declaration one, but keyed by parameter DOMAIN rather
-than by name, and it reads the domain off the CANONICALIZED literal
-because the test is type-level: an unannotated parameter has no type in
-the source, and renaming a parameter does not make a new clause. The
-shared predicate `sameParameterDomain` moved into the engine-free leaf
-`src/compute-engine/clause-identity.ts`, so both tiers decide clause
-identity with one piece of code. A statement is recorded as a first
-definition only when canonicalization actually installed its clause
-(`canonInstallSkipped`), the counterpart of the declaration half's
-`DECLARATION_BLOCKING_CODES` gate.
-
-Two corner cases still read differently on the two tiers, because the
-static pass canonicalizes but never EVALUATES: with `x := 5` (or a `let f
-: …` declaration the clause does not fit) followed by two same-domain
-clauses, the run refuses both clauses on their own terms while the static
-pass — which cannot see the assigned value — reports the duplication.
-Both tiers report an error on the same statements, so no program passes
-`epsil check` and then fails; only the wording differs.
-
-### ~~Declare-then-define rejects an UNANNOTATED clause parameter~~ (found and FIXED 2026-08-14)
-
-```
-let fact: (integer) -> integer
-fact(0) = 1
-fact(n) = n * fact(n - 1)   // was: the clause "(unknown) -> integer" is not an
-fact(5)                     //   arm of the declared type "(integer) -> integer"
-```
-
-§4.3a calls the declared signature authoritative, and the clause route
-already ascribed the declared RESULT onto an unannotated body
-(`reconcileFunctionLiteralReturn`) — but not the declared PARAMETER
-types. A bare parameter therefore inferred `unknown`, everything computed
-from it widened (`n - 1` became `number`), and the recursive self-call
-failed against the very declaration written to make it check. The shape
-§4.3a calls the prescribed form for a recursive definition only worked
-when every parameter was annotated a second time. The same shape had
-always been accepted on the single-function route (`ce.declare` then
-`ce.assign`), so this was a route inconsistency rather than a rule.
-
-Three parts, because the first two were each insufficient alone — the
-sequence is worth keeping, since the second and third were only found by
-probing the first:
-
-1. `ascribeDeclaredParameterTypes` (`engine-declarations.ts`) grew an
-   `includeScalar` option and is now called on the clause route. Its
-   existing skips do the load-bearing work: an ANNOTATED parameter is
-   never stamped, so every clause that actually narrows is still checked
-   positionally by `assertClauseFitsDeclared` and that check does not
-   become vacuous — the concern that had kept this function off the
-   clause route entirely.
-2. The ascription had to move AHEAD of `args[1].canonical` in
-   `DefineFunction`'s canonical handler (`library/core.ts`), before the
-   recursion knot retypes the target and loses the declaration. Ascribing
-   at clause-install time is too late: the body has already canonicalized
-   against `unknown` and the `incompatible-type` error is baked into it,
-   so re-boxing that body preserves the error.
-3. A `SINGLE_CLAUSE_DECLARED` side-channel (`multi-clause.ts`) remembers
-   the declaration for a lone clause, which keeps the §4.2 plain
-   representation and so has no clause state to hold it. Without it the
-   declaration went invisible the moment clause 1 installed, and a second
-   bare clause was neither ascribed nor arm-checked: `f(n) = 1` then
-   `f(m) = 2` built `((n: integer) -> integer) & ((unknown) -> number)`
-   instead of reporting the redefinition. Same problem, and the same
-   shape of fix, as the neighbouring `SINGLE_CLAUSE_ORIGIN`.
-
-`assertClauseFitsDeclared` additionally accepts a parameter still typed
-`unknown` after all that — a declaration whose type at that position
-mentions a quantified variable, or is `unknown`/`any`, is deliberately
-not stamped — because a bare parameter narrows nothing, so its arm is the
-declared parameter itself.
-
-Pins: `test/epsil/multi-clause.test.ts` — the bare recursive `fact`, the
-no-weakening check on the declared domain, and the annotated-parameter
-arm check that must still fail.
-
-### Compile-time constant folding is NON-DETERMINISTIC under machine load — design revisit needed (root cause found 2026-08-14)
-
-The "three-definition Sum matrix" tests compare the COMPILED result of the
-same program built in different definition orders. In a full suite run they
-disagree in the last few digits:
-
-```
-- -0.5248276195478552   (control order)
-+ -0.5248276195481336   (order A,h,a)
-```
-
-Established so far:
-
-- The file passes **32/32 in isolation**, both parallel and `--runInBand`.
-- The failing SUBSET changes between full runs — 4 tests in one, 2 in the
-  next, all within the same describe block — so it is not a deterministic
-  logic error.
-- The assertion compares two engines constructed inside ONE test, so
-  whatever differs is process-global state that earlier suites in the same
-  worker have already perturbed, not a stored baseline drifting.
-- Pairwise runs against the obvious numeric neighbours do NOT reproduce it:
-  `numbers`, `compile-subtree-folding`, `canonical-folding`,
-  `compile-lazy-collections`, `deadline-regressions`,
-  `lazy-collection-regimes` each pass when run immediately before it.
-
-**Both obvious candidates are REFUTED — do not re-derive them.**
-
-- *A cross-engine cache.* The engine cache is per-engine: `EngineCacheStore`
-  keeps `_entries` as an INSTANCE field and the only instantiation is the
-  engine's own `_cacheStore`, so no module-level store exists and two engines
-  in one test cannot see each other's entries.
-- *Leaked `BigDecimal.precision`.* It is process-global, and eleven test files
-  under `test/compute-engine/` do set it with no `afterAll`/`afterEach`
-  restore (`bug-fixes`, `comparisons`, `deadline-regressions`,
-  `lazy-collection-regimes`, `numbers`, `performance`,
-  `pointlist-lazy-broadcast`, `random-compile`, `serialization`, `timeout`,
-  `statistics`) — but it is NOT this mechanism. Probed directly: the control
-  order and every failing order produce byte-identical compiled output, both
-  at the default precision and after deliberately leaking precision 100 into
-  the process. Restoring precision in those eleven files is still worth doing
-  as hygiene; it will not fix this.
-
-A full `--runInBand` run — all 511 suites in ONE process — PASSES. The failure
-appears only under PARALLEL execution.
-
-**Do not read that as refuting process-global state; it does not.** In-band
-runs every suite sequentially in one process, while a parallel run splits them
-across worker processes each holding a DIFFERENT subset. So a polluting suite
-and this one can land in the same worker with nothing in between, where the
-in-band ordering happens to put other work between them. In-band passing shows
-only that the full sequential ordering does not trigger it. (Recorded because
-the stronger claim was made and withdrawn in the same session — the
-distinction is easy to get wrong.)
-
-**Isolation passing (32/32) is weak evidence for the same reason**, and this
-generalizes beyond this entry. Running a suite alone shows only that it needs
-no help from a neighbour; it says nothing about whether a real defect is being
-TRIGGERED by a neighbour it legitimately shares a worker with in ordinary
-runs. "Passes in isolation" is evidence for *not self-contained*, never for
-*not a real defect* — the inference that felt safe to three separate sessions
-today and is wrong in the same way both times. What the conclusion here rests
-on instead is the other three legs: the 13th-digit magnitude, three
-independent sessions hitting it across unrelated diffs, and the object work
-eliminated by a clean full run.
-
-**ROOT CAUSE — the load-sensitivity hypothesis is CONFIRMED, and it is a
-design defect, not a flaky test.** Compile-time constant folding evaluates a
-constant subtree under a WALL-CLOCK budget: `CONSTANT_FOLD_BUDGET_MS = 100`
-in `src/compute-engine/compilation/base-compiler.ts`, armed around
-`tryConstantFold` via `withTimeLimit`. `tryConstantFold`'s own doc records
-the consequence as accepted: *"a deadline-degradable numeric operator
-(adaptive quadrature is best-effort under a deadline) folds to the estimate
-the budget allows."* Under CPU contention that operator completes fewer
-iterations inside the same 100 ms, so it folds to a DIFFERENT estimate —
-and the compiled program therefore contains a different constant. The
-13th-digit disagreement between definition orders is that estimate moving,
-not the orders differing.
-
-**What was accepted was the magnitude of the folded value; what was not
-noticed is that COMPILED OUTPUT BECOMES A FUNCTION OF MACHINE LOAD.**
-Consequences worth weighing in the revisit:
-
-- The same source compiled twice on the same machine can differ. Compiled
-  artifacts are not reproducible, and anything that caches or fingerprints
-  one is caching a load-dependent value.
-- No test can pin a compiled numeric result exactly — which is what
-  `definition-order.test.ts` was trying to do, and why it looked flaky.
-- The failure is silent and small. A 13th-digit drift will not be noticed
-  until something downstream amplifies it.
-
-**Reproducer** (much smaller than "a full suite"; deterministic):
-
-```
-npx jest --config ./config/jest.config.cjs -- \
-  test/compute-engine/definition-order.test.ts \
-  test/compute-engine/arithmetic.test.ts \
-  test/compute-engine/trigonometry.test.ts \
-  test/compute-engine/number-theory.test.ts
-      -> 5 failed, three runs out of three
-
-same four files with --maxWorkers=1   -> 163 passed
-same four files with --runInBand      -> 163 passed
-```
-
-Any three sizeable suites reproduce it; the neighbours' CONTENT is
-irrelevant (an earlier bisect that appeared to implicate the mutable-object
-suites was measuring added load, not those files). One worker never
-reproduces it.
-
-**Direction for the revisit — a fold should be all-or-nothing.** The budget
-exists so a pathological constant degrades to structural compilation instead
-of stalling the compile, and the doc notes typical folds complete in
-MICROSECONDS. So discarding a fold whose evaluation exhausted its budget —
-rather than keeping the partial estimate — costs almost nothing in the
-common case and removes this entire class: either the value was computed to
-completion (deterministic) or the subtree is compiled structurally and
-evaluated at run time (also deterministic). The open implementation question
-is whether the deadline mechanism can report "degraded" distinctly from
-"completed"; if `withTimeLimit` cannot, that signal has to be added, and any
-operator that is *best-effort by design* (adaptive quadrature) must be
-excluded from folding regardless, since it can return an approximation
-without ever hitting the deadline.
-
-A deterministic budget (an iteration or step count rather than wall-clock)
-is the other candidate. It removes load-dependence but not
-approximation-dependence, so it is strictly weaker than the all-or-nothing
-rule unless combined with it.
-
-Until this is resolved, `definition-order.test.ts`'s Sum-matrix assertions
-are expected to fail under parallel load and are NOT evidence of a
-regression in whatever is being changed.
+`BigDecimal.precision` is process-global, and eleven files under
+`test/compute-engine/` set it with no `afterAll`/`afterEach` restore:
+`bug-fixes`, `comparisons`, `deadline-regressions`, `lazy-collection-regimes`,
+`numbers`, `performance`, `pointlist-lazy-broadcast`, `random-compile`,
+`serialization`, `timeout`, `statistics`. It was probed and REFUTED as the
+cause of the 2026-08-14 `definition-order.test.ts` last-digit drift (that was
+the wall-clock constant-fold budget, since replaced by the deterministic
+`foldCostEstimate`), so this is hygiene rather than a known-live defect — but a
+leaked global precision is exactly the kind of state that makes a parallel
+run's failures unattributable.
 
 ### `Reverse` of a tuple: static type lies about element order (found 2026-08-14, string-spec review round 2)
 
@@ -2054,72 +392,15 @@ order. The fix is entangled with the Phase 0 tuple decision in
 tuples are excluded from the `(T) -> T` bounds or get their own result
 typing); resolve them together.
 
-### ~~`typeCouldBeCollection` omits `dictionary`/`record`, so spreading a valueless dictionary-typed symbol errors~~ (found and FIXED 2026-08-14, record-spread status check)
+### `BoxedDictionary` construction throws raw JS errors
 
-`dictionary<...>` and `record<...>` are subtypes of `collection`, but
-`typeCouldBeCollection` (`src/compute-engine/collection-utils.ts`) returned
-`false` for them, so `ListFrom`'s valueless-collection inertness gate
-(USER-RULED 2026-08-11: a collection-TYPED operand with no value yet must
-stay unresolved, not be wrapped as a scalar datum) misfired for
-dictionary/record-typed symbols: `let d1: dictionary<integer>` then the
-Epsil merge `{->, ...d1, "k" -> 3}` errored with "Expected a collection of
-pairs, got dictionary<integer>" instead of staying symbolic. Values were
-unaffected — only the declared-but-unassigned case.
-
-Fixed (USER-RULED 2026-08-14) by SPLITTING the predicate, since it served
-two different questions:
-
-- `typeCouldBeCollection` now answers "could be a collection of ANY kind"
-  (gains `dictionary`/`record`, both primitives and kinds) and is used by
-  the materializer inertness gates (`ListFrom`/`SetFrom`/`TupleFrom`,
-  `canEnumerateCollectionOperands`) and the enumerability/draw-free probes
-  (`enumerableFromAllSources`, `isDrawFreeBroadcast`).
-- `typeCouldBeUnkeyedCollection` (new) answers "could be an UNKEYED
-  collection" — one whose members are elements (`list`/`set`/`tuple`/bare
-  `collection`), not key–value pairs — and feeds broadcast/threadable
-  admission via `couldBeUnkeyedCollectionOperand` (the renamed
-  `couldBeCollectionOperand`; policy field `couldBeUnkeyedCollection`).
-  Only the KEYED collections (`dictionary`/`record`) are excluded, so
-  `Sin(dict)`/`dict + 1` keep their loud `incompatible-type` errors.
-
-The admission boundary is keyed vs unkeyed, NOT indexed vs non-indexed:
-an "indexed" split (excluding `set`) was tried first and REFUTED by three
-test pins — `Conjugate(Set(1, 2))` under `(T) -> T where T: number` must
-be lift-admitted and bind WHOLE, typing `set<finite_integer>` (§5.3 D10,
-pinned in `generic-function-literals.test.ts` and
-`type-variables-linalg.test.ts`), and the coset idiom
-`|H \cap xH| \geq 2p - n` must parse clean
-(`set-label-tolerance.test.ts`). Set operands in scalar positions staying
-typed-symbolic is deliberate (image-of-a-set semantics stays open); do
-not re-attempt dropping `set` from admission.
-
-Dual-review round applied same day (Codex 0 findings, Opus 10): the
-unkeyed predicate is the OLD predicate renamed (byte-identical
-membership), so broadcast admission is exactly unchanged from before the
-split — the behavioral change is entirely the widening of
-`typeCouldBeCollection`. Applied from the findings: the scalar-numeric
-INFERENCE exclusion in `checkNumericArgs` (`excludedFromScalarInference`,
-validate.ts) is now WIDER than admission — the Tycho-121 signature-
-widening hazard is keyedness-independent, so a `dictionary<…>`-shaped
-operand is no longer `infer('real')`ed in non-strict mode; the widened
-predicate's six `boxed-function.ts` consumers were audited — the
-broadcast-participant sites and the positional `_materializedAt` gate use
-the unkeyed predicate (a keyed-typed application can never answer
-positional `at()` — `BoxedDictionary` has no `at` handler — so paying an
-evaluation there bought a guaranteed `undefined`), while the unadopted
-`isEnumerableCollection` fallback deliberately keeps the wide one (a
-dictionary-typed application IS walkable through the materialize
-fallbacks, so `undefined` beats the old wrong `false`); and
-`DictionaryFrom`/`RecordFrom` now return boxed `incompatible-type` errors
-for malformed elements instead of throwing uncaught JS exceptions out of
-`evaluate()` (verified escaping before the fix).
-
-Residual, recorded not fixed: `boxed-dictionary.ts` `_initFromExpression`
-still has raw construction-time `throw new Error` calls (non-string key,
-`Nothing` key, wrong pair arity). Those are constructor invariants behind
-canonical-handler validation, a different reachability class from the
-evaluate-handler throws fixed above; converting them needs its own
-analysis of which callers rely on fail-fast construction.
+`boxed-dictionary.ts` `_initFromExpression` still has raw construction-time
+`throw new Error` calls (non-string key, `Nothing` key, wrong pair arity),
+where the sibling `DictionaryFrom`/`RecordFrom` evaluate handlers were
+converted to return boxed `incompatible-type` errors on 2026-08-14. These are
+constructor invariants sitting behind canonical-handler validation — a
+different reachability class from the evaluate-handler throws — so converting
+them needs its own analysis of which callers rely on fail-fast construction.
 
 ### Ground-type invariant leak in `parameterized-nominal-constructor.test.ts` (dev-assert noise)
 
@@ -3849,6 +2130,7 @@ by the invariant `d/dx(F) ≈ f` across base CE / CE+R/F / SymPy / Mathematica
 numericize — PolyLog, elliptic kernels):
 CE 0/35 · CE+R/F 21/35 · SymPy 7/35 · Mathematica 32/35 (CE+R/F **12 → 20**
 after the R31 nested-radical substitution fallback — closing
+
 #2/#10/#11/#12/#15/#16/#17/#18 — then **20 → 21** after the R32
 Euler-substitution lever ("Lever C") closing the √(quadratic)-nested **#9**; see
 **Coverage tracks → Rubi**). (Rubi chapter translation — the
@@ -4342,154 +2624,63 @@ evaluating a user-lambda application bumps `_generation` twice per level.
 
 #### P1. Differentiation performance — CLOSED, measured-unprofitable (2026-07-19)
 
-**Do not re-attempt either lever without a new profile.** Both were re-measured
-on 0.87.0 and neither pays. The section is kept — rather than deleted — because
-the superseded 2026-06-16 write-up promised a **~5× ceiling** that does not
-exist, and that number will otherwise invite this dead end to be re-walked.
+**Do not re-attempt either lever without a new profile.** Kept rather than
+deleted because a superseded 2026-06-16 write-up promised a **~5x ceiling**
+that does not exist, and that number will otherwise invite this dead end to be
+re-walked. Re-measured on 0.87.0 over `benchmarks/cases.json` D01-D09 (warm,
+300 iters/case, baseline median 0.162 ms): dropping the final `f.evaluate()` in
+`D`'s evaluate handler (`library/calculus.ts`) buys **1.36x**, not the claimed
+2-3.5x, and still carries its 12-snapshot blast radius plus the
+`ln(e)`-no-longer-folds regressions; deferring per-node canonicalization in
+`derivative.ts` tops out at ~1.3-1.5x for a rewrite of every rule path in a
+980-line file. Combined ceiling ~2x.
 
-**What the 2026-06-16 profile said, and what is actually true.** Re-measured on
-the same 9 benchmark cases (`benchmarks/cases.json` D01–D09), same path
-(`ce.box(['D', f, 'x']).evaluate()`, warm, 300 iters/case; baseline median
-**0.162 ms**, consistent with the 0.17 ms the cross-library benchmark reports):
+**The helper tax is real but is not a differentiation problem.** `.mul()` costs
+33.9 us where `ce.function('Multiply', ...)` costs 2.8 us for byte-identical
+output (part of the gap is genuine capability — `mul()` distributes over sums).
+A clean CPU profile of `.mul()` alone puts the largest single self-time frame
+at `isSubtype`, 6.7%; the cost is diffuse across the type system (~18%),
+definition lookup (~6%) and numeric conversion (~6%), so closing the
+34 us -> 2.8 us gap needs ~92% removed and no incremental patch reaches that.
+Reducing `.mul()` cost is a **representation-level** project, not a perf item.
 
-| cost center          | 2026-06-16 | measured 2026-07-19 |
-| -------------------- | ---------- | ------------------- |
-| final `f.evaluate()` | ~60%       | **~27%**            |
-| `differentiate()`    | ~20%       | **~44%**            |
-| box/bind/alloc       | ~20%       | ~29%                |
+Traps for anyone who retries. An `isTensorProductOperand` fast path in
+`sortProductOperands` (`order.ts`) measured NULL — the predicate runs 4 times
+per `mul()`, ~5% of its cost — and was reverted; note the bottom type `never`
+IS a subtype of `matrix`/`vector`, so it must stay off any such allowlist
+(`nothing` is safe). For n-ary assembly use the n-ary `add(...xs)`/`mul(...xs)`
+helpers (`arithmetic-add.ts`/`arithmetic-mul-div.ts`): a
+`reduce((a, b) => a.add(b))` accumulator re-canonicalizes the growing sum every
+step and pays the helper tax **quadratically** (65x at 50 terms).
 
-The evaluate share collapsed. The likely cause is the
-**2026-07-19 evaluate-handler contract fix** (non-lazy handlers now trust
-pre-evaluated operands instead of re-descending them — see the interpreter-perf
-item above): it already harvested most of what "drop the redundant final
-evaluate" was written to claim.
+#### P2. The `.unknowns` numeric gate is not universally sound (funnel LANDED 2026-07-26, scope cut in half)
 
-- **Lever A — drop the final `f.evaluate()`** (`library/calculus.ts`, the
-  `return f?.evaluate()` at the end of the `D` evaluate handler; the old "~213"
-  line reference was stale): measures **1.36×** (0.162 → 0.119 ms), not the
-  ~2–3.5× claimed. Still carries its documented 12-snapshot blast radius and the
-  `ln(e)`-no-longer-folds regressions. **Not worth a semantic change to `D`.**
-- **Lever B — defer per-node canonicalization** in `derivative.ts`: unchanged in
-  principle (the helper tax is real — see below), but with `differentiate()` at
-  44% of the call, its ceiling is ~1.3–1.5× for a rewrite of every rule path in
-  a 980-line file. It also optimizes _around_ `.mul()` rather than fixing it,
-  leaving every other `.mul()` caller slow.
-- **Combined ceiling is ~2×, not ~5×.** The 2026-06-16 conclusion — that the
-  residual is intrinsic to the boxed/bound representation and not closable by
-  deferral — still holds and is now the whole story.
+`boxed-expression/numerics.ts` exports one gate in three shapes —
+`numberLiteralOf()` (the literal), `numericValueOf()` (a finite real machine
+`number`), and `complexValueOf()` (the `[re, im]` pair, finiteness deliberately
+NOT filtered) — all of which check `.unknowns` before `.N()`. Kept here for the
+rule the round discovered, which governs every future call site.
 
-**The helper tax is real but is not a differentiation problem.** `derivative.ts`
-builds every node through `.mul()/.add()/.div()/.pow()/.neg()`, and those
-helpers are genuinely expensive (measured over 400 distinct operand pairs, so
-not a memoization artifact):
+Partial numericization floats the exponents, so `.N()` resolves symbolic
+identities that carry free variables and that `simplify()` cannot see:
+`(4-root b / 4-root a)^2 - sqrt(b)/sqrt(a)` numericizes to `0` with `a`, `b`
+unknown. Gating Rubi's `PossibleZeroQ` (`zeroQ`) on `.unknowns` therefore made
+it answer "not zero" for a true zero and LOST a closed form outright
+(integration-rules #544).
 
-| construction                        | `.mul()` | `ce.function('Multiply', …)` |
-| ----------------------------------- | -------- | ---------------------------- |
-| `sin(nx) · xⁿ` (byte-identical out) | 33.9 µs  | 2.8 µs                       |
-| symbol · number                     | 14.8 µs  | 2.1 µs                       |
-| `.div()`                            | 17.4 µs  | 5.3 µs                       |
-
-Some of the gap is real capability (`mul()` distributes over sums — `2·(x+1)` →
-`2x+2` where canonical `Multiply` gives `2(x+1)`), but for non-sum operands the
-outputs are identical and the cost is not. **This is engine-wide, not specific
-to `D`.**
-
-**Corollaries measured 2026-07-26** (canonicalization-deferral audit): (1) For
-n-ary assembly, use the n-ary `add(...xs)`/`mul(...xs)` helpers
-(`arithmetic-add.ts`/`arithmetic-mul-div.ts`) — same semantics as chained
-`.add()`/`.mul()` (like-term collection, distribution) in one pass. A
-`reduce((a, b) => a.add(b))` accumulator pays the helper tax **quadratically**
-(65× at 50 terms): the growing sum is re-canonicalized every step
-(tensor-fields `addn` fixed this way; remaining small-N accumulator sites are
-catalogued in the audit memory, the rubi ones deliberately left — their result
-shapes depend on stepwise `mul()` distribution). (2) The lever that *did* pay,
-orthogonal to the two measured-unprofitable deferral levers above: `subs()` and
-`map()` now skip the rebuild entirely when no operand changed and the node is
-already in the requested form (up to ~200× on substitutions that touch little
-of the tree; ~1× when most nodes change, so no regression). Deferral of
-per-part canonicalization during build-up remains a ~1.7× constant — parts are
-consumed as-is by a canonical parent, never re-canonicalized — consistent with
-the Lever B ceiling.
-
-**Attempted and reverted (2026-07-19): `isTensorProductOperand` fast path.**
-`sortProductOperands` (`order.ts`) maps that predicate — two `type.matches()`
-walks per operand — over every product, to decide whether ≥2 operands are
-tensors. A conservative scalar-primitive early-out measured **null** (mul 34.6
-vs 33.9 µs; diff median within noise): the predicate runs only **4 times per
-`mul()`**, ≈5% of its cost. Reverted — it is not worth a correctness-sensitive
-early-out around the P0-26 non-commutativity guard for no gain. (Trap for anyone
-who retries: the bottom type `never` **is** a subtype of `matrix`/`vector`, so it
-must stay off any such allowlist; `nothing` is safe.)
-
-**Why `.mul()` has no cheap fix: the cost is diffuse.** A clean long-run CPU
-profile of `.mul()` alone (tsx startup amortized out) puts the largest single
-self-time frame at `isSubtype`, **6.7%**. Clusters: type system
-(`isSubtype`/`matches`/`get type`/`isPrimitiveSubtype`) ≈ 18%, definition lookup
-(`lookup`/`lookupApplicable`) ≈ 6%, numeric conversion
-(`ExactNumericValue`/`toNumericValue`) ≈ 6%, `mul` itself 5.2%, `Product` 1.7%,
-`sortProductOperands` 1.4%. Closing the 34 µs → 2.8 µs gap needs ~92% removed;
-no incremental patch reaches that. Reducing `.mul()` cost is a
-**representation-level** project (the same per-node type-query/binding tax the
-2026-07-21 tensor unification addressed for collection values), not a perf
-item. Recorded here so it is not mistaken for a contained optimization.
-
-#### P2. Funnel the open-coded "numeric value or nothing" idiom — LANDED 2026-07-26, with the scope cut in half
-
-`boxed-expression/numerics.ts` now exports one gate in three shapes:
-`numberLiteralOf()` (the literal, for callers that need the exact
-representation), `numericValueOf()` (a finite real machine `number`), and
-`complexValueOf()` (the `[re, im]` pair, finiteness deliberately **not**
-filtered — `numericMagnitude` needs `∞` to stay `∞`, since callers spell the
-reject as `magnitude > tolerance`, which `NaN` silently passes). All three check
-`.unknowns` before `.N()`. Converted: `library/utils.ts` (both accelerated
-infinite series), `symbolic/interpret.ts`, `symbolic/simplify-power.ts`
-(`denestSqrt3` only), `boxed-expression/utils.ts` (`getPiTerm`, gate spelled out
-— `numerics` imports `utils`, so the edge cannot be reversed),
-`library/statistics.ts`, `nonlinear-fit.ts`. Full suite green, **0 of 4179
-snapshots changed**. Tests: `test/compute-engine/numeric-value-of.test.ts`.
-
-**The finding that halved the scope: the `.unknowns` gate is not universally
-sound, and "constant-factor waste" was the wrong diagnosis for `rubi/` and
-`solver-utils`.** Partial numericization floats the exponents, so `.N()`
-resolves symbolic identities that carry free variables and that `simplify()`
-cannot see:
-
-```
-(⁴√b / ⁴√a)² − √b / √a     →  .N()  →  0        (unknowns: a, b)
-```
-
-Gating Rubi's `PossibleZeroQ` (`zeroQ`) on `.unknowns` therefore made it answer
-"not zero" for a true zero and **lost a closed form outright** —
-integration-rules #544, the R28a mixed-parity poly-numerator × binomial-radical
-split. Bisected to that single predicate; the rest of the rubi conversion was
-inert.
-
-So the rule for any future call site is: **ask which branch `undefined` lands
-the caller in.** The funnel is for sites where "no numeric value" is the
-give-up branch. It must not be applied where the site exists to *probe a
-symbolic expression numerically* — those keep a bare `.N()` and now say so in a
-comment: `zeroQ` and the `PosAux` sign heuristic (`rubi/rubi-utils.ts`),
+So the rule is: **ask which branch `undefined` lands the caller in.** The
+funnel is for sites where "no numeric value" is the give-up branch. It must NOT
+be applied where the site exists to probe a symbolic expression numerically —
+`zeroQ` and the `PosAux` sign heuristic (`rubi/rubi-utils.ts`),
 `numericMagnitude` (`symbolic/solver-utils.ts`, hence `symbolic/recurrences.ts`
-which consumes it), and the rationalize-denominator safety gate
-(`symbolic/simplify-power.ts`). Note that at two of those the gate is not even
-conservative — `numericMagnitude(diff) > 1e-9` and the rationalize gate both
-*accept* on a non-value, so declining would have made them more permissive, not
-less.
+which consumes it), and the rationalize-denominator gate
+(`symbolic/simplify-power.ts`) each keep a bare `.N()` and say so in a comment.
+At two of those the gate is not even conservative — they accept on a
+non-value — so declining would have made them more permissive, not less.
 
-**Do not cache `unknowns` for this** (the 2026-07-26 measurement retires that
-sub-item). The gate is 2–50× cheaper than the `.N()` it replaces — 0.042 µs on
-a literal, 0.28 µs on a small exact sum, 1.2 µs on `sin(2)+cos(3)√5−7/11+e²`,
-against 0.12 / 12.7 / 63.0 µs for the corresponding `.N().re`. Worst case (a
-bare literal, where the gate never fires) is ~35% of a very cheap call; on
-anything symbolic it is noise. A `cachedValue`-keyed `_unknowns` would add
-invalidation surface for no measurable win.
-
-One deliberate semantic tightening rode along, in
-`bodyReproducesSamples` (`symbolic/interpret.ts`): the open-coded form compared
-`NaN > tol`, which is `false`, so a sample that did not numericize counted as
-*reproduced* — it could vouch for a closed form it never checked. It now
-returns `false`. Unreachable in practice (`Interpret`'s samples are numeric
-data), and the suite is green either way.
+**Do not cache `unknowns` for this**: the gate is 2-50x cheaper than the `.N()`
+it replaces, so a `cachedValue`-keyed `_unknowns` would add invalidation
+surface for no measurable win.
 
 #### Free-variable `eq()` follow-ups (reordered to sampling-first 2026-08-03; both levers unbuilt, tracked so they aren't re-derived)
 
@@ -4619,6 +2810,7 @@ Two design-level residues are deliberately carried forward:
   evaluated derivative of a known function is not yet tightened (documented in
   `library/calculus.ts`); it is blocked on evaluate-recursion and
   underscore-lambda LaTeX serialization, so it waits on those.
+
 ### Test-suite ledger — skips and `@fixme` markers (sweep 2026-07-18)
 
 Deferred capability recorded directly in the test suite (beyond the Wester
@@ -4994,8 +3186,10 @@ is in git history. The only items deliberately left open:
   true locals (unchanged); `_.name` write when reads resolve there; a
   documented DECLINE when reads bake a folded value or a constant (no
   coherent write target). GLSL/WGSL/Python byte-identical. This also
-  RESOLVED the "compiled assignment to an outer binding is write-lost"
-  entry below by mechanism, not by fiat — see there.
+  RESOLVED the separately-filed "compiled assignment to an outer binding is
+  write-lost" defect by mechanism, not by fiat: the shared helper is what
+  gives an outer-binding write a coherent target, so both symptoms had one
+  cause.
 
 - **Degenerate big-op round (2026-08-03), flagged not fixed:**
   - `sameSyntactic` (`boxed-expression/compare.ts`) is mis-named: despite its
