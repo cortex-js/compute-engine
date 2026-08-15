@@ -391,11 +391,20 @@ The LaTeX parser handles a subtraction chain iteratively and returns a
 left-nested `Subtract(Subtract(Subtract(1, 2), 3), …)` (`latexSyntax.parse()`
 succeeds at 1 500 terms), but BOXING that result — raw or canonical —
 recurses once per nesting level and throws `RangeError: Maximum call stack
-size exceeded` from `boxFunctionInternal` (`boxed-expression/box.ts`) at
-about 400 terms canonical / 600 terms raw. So `ce.parse('1-2-3-…-400')`
-throws while `ce.parse('1+2+3+…+12000')` succeeds. Pre-existing (reproduced
-on the pre-fix parser); not touched by the fix above, which changed the `Add`
-and multiplicative folds only.
+size exceeded` from `boxFunctionInternal` (`boxed-expression/box.ts`). So
+`ce.parse('1-2-3-…-400')` throws while `ce.parse('1+2+3+…+12000')` succeeds.
+
+Thresholds measured by bisection AFTER the same round's frame-headroom work
+in `box.ts` (the `RAW_OPERAND` shortcut, which skips five frames per operand
+on the recursive boxing path): **385 terms canonical, 749 terms raw**. The
+raw path is where the headroom landed — it was about 600 before — while the
+canonical path is essentially unmoved, so the shape a consumer actually hits
+(`ce.parse` defaults to canonical) is no better than it was. The headroom
+work reduced frames per level; it did not change the fact that boxing
+recurses once per nesting level, so this stays a threshold, not a fix.
+
+Pre-existing: reproduced on the pre-fix parser, and not addressed by the flat
+chain fix above, which changed the `Add` and multiplicative folds only.
 
 Two candidate fixes, needing a ruling because the first changes raw parse
 output: (a) have the `-` infix parser fold a subtraction run into one flat
@@ -504,6 +513,97 @@ keep it engine-agnostic so the boundary stays structural. Deferred from the
 2026-08-15 round deliberately: it is an interface change to a decoupled
 subsystem, not the localized addition the canonicalization half was, and it
 should not land in the same pass as a release.
+
+### `executeEpsil` ran on past an expired time budget, and the Epsil parser was quadratic (FIXED 2026-08-15)
+
+Two defects on the Epsil side of the same "budget is decorative" family as the
+two LaTeX-parser entries above — but a SEPARATE mechanism (Epsil has its own
+`lexer.ts`/`parser.ts`/`execute-epsil.ts`; nothing in the LaTeX-parser fix
+touches it, and a consumer note that recorded the two as "riding the same
+fix" was wrong).
+
+**Budget.** `executeEpsil` caught every `CancellationError` per statement,
+converted it to an error value (`evaluation-canceled` diagnostic when
+non-final) and CONTINUED with the next statement. The engine only checks the
+deadline inside long-running work (every 256 evaluations, inside collection
+walks), so a program of many cheap statements finished however far past its
+deadline it was. Measured on 5 000 `xN = N + 1` statements, cold engine:
+
+    budget    BEFORE                             AFTER
+    none      840 ms  completed                  219 ms  completed
+    1 ms      621 ms  completed, 20 timeout      29 ms  value = Error(timeout),
+                       diagnostics (1 in ~250            stopped at statement 1,
+                       statements)                       1 diagnostic
+    50 ms     506 ms  completed, 20 diagnostics   51 ms  stopped
+    200 ms    458 ms  completed, 20 diagnostics  146 ms  completed (fits)
+
+Severity — CORRECTNESS, not latency (the consumer's framing, which is sharper
+than the original filing and is the reason the fix matters): the two failure
+modes have the identical observable (flat elapsed, "completed"), but "overran
+its budget" and "ran a program with 20 statements missing from the middle,
+then kept executing against the resulting state" have very different blast
+radii. Imperative-with-errors-as-values is exactly the semantics where a
+skipped assignment is least detectable — nothing throws; later statements read
+a stale or absent binding and produce a plausible value. Consumer field
+evidence on the diagnostics point: their notebook evaluator
+(`ce-notebook-evaluator.ts:1227`) routes a cancellation to a first-class
+`timeout` outcome before the ok path and surfaces every diagnostic on the ok
+path — so at least one host does read the surface, which matters if the
+count-based-cancellation ruling below is ever argued on "nobody reads
+diagnostics".
+
+The static pass had the same swallow site — `catch { continue }` around
+`ce.box(statement)` — so a timeout raised while boxing was eaten as "a
+statement the engine cannot box". Fix: `checkDeadline(ce._deadlineFrame)`
+before every statement in both loops; the static pass rethrows a timeout
+(`isTimeoutCancellation`, by name for cross-bundle safety) and writes its
+findings into the caller's array as it goes (a `static-type-error` established
+before the breach is kept — dual review, Codex finding); `executeEpsil`
+catches the throw, skips the advisory pre-evaluation scans, and lets the
+evaluation loop's own first check record the cancellation; the evaluation
+loop `break`s after a `timeout` cancellation. Count-based caps are per-construct configuration
+(`docs/TIMEOUT-MODEL.md` §9) and deliberately still continue.
+
+Not changed, but now documented (`src/epsil/docs/evaluation.md`
+Interruptibility): a `for`/`while` cut short by `iterationLimit` leaves its
+partial assignments in place, so `total = 0; for i in 1..5000 { total =
+total + i*2 }; total` yields 1 051 650 (24× under the true 25 005 000) with
+an `error`-severity `evaluation-canceled` diagnostic on the loop and NO error
+on `value`. This is the errors-are-values contract applied to an imperative
+statement, not a truncation the interpreter hides — but a host that renders
+`value` without `diagnostics` shows a wrong number. Whether a count-based
+cancellation should ALSO end the program (making both kinds fatal) is a
+product ruling; the current split follows the timeout model's budget-vs-config
+distinction.
+
+**Parser.** `startsWithSymbolToken` (the positional-`=` check: does the
+left-hand side START with a symbol token, so `+x = 5` compares while `x = 5`
+assigns) scanned `this.tokens` from index 0 for every bare-`=` statement —
+O(N²) over the program; 69% of a 16 000-statement parse. Now a binary search
+(`firstTokenAtOrAfter`, tokens are in source order). Second-order: the lexer's
+character predicates (`isBreak` etc.) did `Array.prototype.includes` on
+`PATTERN_SYNTAX`, an expanded array of thousands of code points, per source
+character — now `Set` views. Parse of `xN = N + 1` programs:
+
+    N        BEFORE                AFTER
+    500       9 ms  (18 µs/stmt)    5 ms  (9 µs/stmt)
+    2 000    77 ms  (39 µs/stmt)    7 ms  (4 µs/stmt)
+    8 000   521 ms  (65 µs/stmt)   29 ms  (4 µs/stmt)
+    16 000 1765 ms (110 µs/stmt)   61 ms  (4 µs/stmt)
+
+The static pass and the evaluation loop are both linear (measured 2 000 →
+8 000 statements). The Epsil parser itself has no engine handle
+(`parseEpsil(source)`), so the raw parse — now ~4 µs/statement — is the one
+phase still outside the deadline; `executeEpsil` checks it immediately after.
+
+Pinned by `test/epsil/execute.test.ts` ("an expired time budget ends the
+program": an already-expired span runs no statement; a host function that
+expires the deadline mid-program stops the following statement while the
+preceding one keeps its effect; a count-based cap does NOT stop the program;
+`staticDiagnostics` under an expired span throws and leaves the engine clean —
+outcome assertions, no elapsed-time assertions). The positional-`=` behavior
+the token lookup serves is pinned by `test/epsil/lints.test.ts` (`+x = 5`,
+`(x) = 5`).
 
 ### `evaluate()` eagerly expands symbolic `Product`s, then distributes — superlinear blowup on the plotting shape (OPEN, perf/design)
 
