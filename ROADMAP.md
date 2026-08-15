@@ -928,6 +928,22 @@ projection.
 
 ### ~~Tycho item 189 — `Add` lifts a non-tensor collection operand WHOLE instead of zipping it~~ (FIXED 2026-08-15; filed 2026-08-15)
 
+**ACCEPTANCE TEST INDEPENDENTLY VERIFIED (2026-08-15).** Ran Tycho's own
+`d189-nested-anatomy-probe.mts` in-document against CE SOURCE through the
+item-182 src-redirect hook — the criterion agreed with them when the
+ruling was issued was "all 900 members scalar". Result:
+
+```
+g.operator=List nops=900 count=900
+first 20 nested idx:                                  (empty)
+distinct nested JSON among first 50 nested: 0
+```
+
+Zero nested members, list length preserved. The probe then throws
+dereferencing `nestedIdx[0]` — it was written when the defect was present
+and assumes at least one nested member exists to dump, so the crash IS
+the pass signal. Tycho's diagonal-residue lane is retirable.
+
 **RESOLVED 2026-08-15. The title above is the third one this entry has had,
 and the two earlier ones were both wrong about the layer.** Neither the
 elementwise `Which` selection nor the conditional-value distribution is at
