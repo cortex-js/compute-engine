@@ -649,6 +649,20 @@ function addTensors(
       if (!packed) return undefined;
       tensors.push(packed);
     } else {
+      // A COLLECTION that is not a tensor value (a `Range`, a `Filter`/
+      // `Take`/`Reverse` view, or the lazy `Map` that a broadcast over more
+      // than `MAX_SIZE_EAGER_COLLECTION` elements produces) must NOT fall
+      // into the scalar bucket: the loops below start each cell's sum at the
+      // combined SCALAR sum, so a collection there makes every cell of the
+      // result a whole collection — `[1,2,3] + [4,5,6] + Range(1,3)` became
+      // `[[6,7,8],[8,9,10],[10,11,12]]` instead of the element-wise
+      // `[6,9,12]`, with only the diagonal correct. Decline the kernel so the
+      // caller falls through to `broadcastOverIndexedCollections`, which zips
+      // it. The `tensors.length < 2` decline below does NOT cover this: two
+      // plain lists plus one collection view leaves exactly two tensors.
+      // Tuples are excluded by `isBroadcastableCollection` — they add
+      // component-wise by design (`addTuples`).
+      if (isBroadcastableCollection(evaluated)) return undefined;
       scalars.push(evaluated);
     }
   }

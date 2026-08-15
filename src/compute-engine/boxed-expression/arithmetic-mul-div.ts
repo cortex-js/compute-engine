@@ -1776,11 +1776,14 @@ function mulTensors(
       // operands was element-wise. Decline the kernel so the caller falls
       // through to `broadcastOverIndexedCollections`, which zips it.
       //
-      // `addTensors` avoids this via its `tensors.length < 2` decline; that
-      // route is not mirrored here because it would also move plain
-      // scalar·vector products off the tensor path and change their result
-      // typing. Tuples are excluded — they scale component-wise by design
-      // (`mulTuples`).
+      // `addTensors` carries the same guard, for the same reason. It does NOT
+      // get the effect for free from its `tensors.length < 2` decline — two
+      // plain lists plus one collection view leaves exactly two tensors, and
+      // that gap is what made `[1,2,3] + [4,5,6] + Range(1,3)` return a
+      // nested `[[6,7,8],…]`. Its `< 2` decline is not mirrored here for a
+      // different reason: it would also move plain scalar·vector products off
+      // the tensor path and change their result typing. Tuples are excluded —
+      // they scale component-wise by design (`mulTuples`).
       if (isBroadcastableCollection(x)) return undefined;
       scalars.push(x);
     }

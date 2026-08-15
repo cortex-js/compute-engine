@@ -404,31 +404,37 @@ keep declining to claim a count).
 
 ### A declared `(unknown) -> unknown` breaks the definition that follows (RULED 2026-08-15 — IMPLEMENTED; resolution at the end of this entry)
 
-**FOLLOW-UP WORK THIS RULING DOES NOT YET COVER, with a ready-made
-acceptance pair.** The per-position placeholder semantics fixes declared
-`unknown` in the DECLARATION direction. It does not yet refine an
-`unknown` PARAMETER from the call site, and there are now two consumer
-cases that need exactly that, failing today for the same reason from
-different directions:
+**FOLLOW-UP STATUS (measured 2026-08-15, second session — the pair came
+apart; the follow-up as framed is CLOSED).** The follow-up was recorded as
+"refine an `unknown` PARAMETER from the call site", with two consumer cases
+said to need exactly that. Measured on the landed tree, neither one is that
+work:
 
-- **The D-240 indexed-access class** — an `unknown` parameter should
-  refine so that `f(t)[k]` compiles instead of failing closed.
-- **Tycho item 190** (see its entry below) — `z(t) := sqrt(t-1)` with an
-  `unknown` parameter widens `sqrt(unknown)` to `finite_number`, and
-  `complex <: finite_number` is FALSE, so complex admission is dropped
-  and the JS target correctly emits a real `Math.sqrt`. Compiled
-  `|z(t)/2-1|` at t=0.3 returns NaN where interpreted returns
-  1.08397416943394. Measured: the ruling AS STAGED does not fix it.
+- **The D-240 indexed-access class is ALREADY FIXED** by the ruling as
+  landed. Every shape measured — `f(t)[1]`, `f(t)[k]` with a symbolic
+  index, an `unknown` parameter indexed in the body, a symbolic collection
+  argument — compiles and agrees with the interpreter, under no
+  declaration, `(unknown) -> unknown`, bare `function`, and a lambda
+  assigned to a declared head. The declared head refines to
+  `(dictionary | indexed_collection) -> broadcastable<number>` and the
+  call passes the list whole. The only shape that still fails closed is a
+  head DECLARED but never assigned, which is the intended D6 posture
+  (nothing exists to refine from) and is now pinned as such.
+- **Tycho item 190 is NOT a refinement defect**, and the fix direction
+  recorded for it is REFUTED. See its entry below for the measurement.
+  Nothing about call-site parameter refinement would change its emission.
 
-Take both as regression fixtures if this work is picked up. The pair is
-worth more than either alone: 190 would catch a refinement that restores
-indexed access while still dropping NUMERIC-DOMAIN information, which the
-D-240 case cannot detect. Tycho's repros are bare and in their scratch
-directory, against the installed engine.
+So no call-site-refinement work is outstanding from this ruling. Both
+halves are pinned in
+`test/compute-engine/unknown-param-call-site-refinement.test.ts` (16
+tests), which keeps the D-240 class from regressing and holds the item-190
+refutation as executable evidence.
 
 Ownership note: the session that ruled and implemented this
-(`compute-engine-53`) has ended, and no successor has claimed the
-follow-up.
+(`compute-engine-53`) ended mid-dual-review. Its work is COMMITTED
+(`43ab3c81`), not staged, and its pin files
+(`placeholder-signature-refinement.test.ts`,
+`subscript-lambda-assign.test.ts`, 24 tests) pass on the current tree.
 
 Declaring a head with a PLACEHOLDER signature makes a later definition
 fail, where declaring nothing at all — or declaring a CONCRETE signature —
@@ -695,7 +701,7 @@ importer's adoption checklist item "case C tells us whether the
 precedence observation moved" — it moved, in the declared-wins
 direction. Same pin file: `subscript-lambda-assign.test.ts`.
 
-### Tycho item 190 — compiled real-domain emission for a complex-promoting chain over an `unknown`-typed parameter (OPEN)
+### Tycho item 190 — compiled real-domain emission for a complex-promoting chain over an `unknown`-typed parameter (RULED + IMPLEMENTED 2026-08-15; resolution at the end of this entry)
 
 Another member of 187's blocking class: a wrong VALUE behind
 `success: true`. Reproduced bare on the working tree, `z(t) := sqrt(t-1)`:
@@ -718,21 +724,94 @@ FALSE, `z` types `(unknown) -> finite_number`, and `z(t)` types
 promotion can fire; given that type, `Math.sqrt` is the correct emission.
 The defect is upstream of the emission.
 
-**Where the type degrades.** The type system is honest when the argument
-type is known: `sqrt(u-1)` with `u: real` types `finite_complex`, and
-`sqrt(-0.7)` types `finite_complex`. It is the `unknown` PARAMETER that
-loses it — `z`'s parameter infers `unknown`, `sqrt(unknown)` widens to
-`finite_number`, and the complex admission is dropped before the compiler
-ever sees the chain. Interpretation promotes at runtime regardless, which
-is why interpreted is correct and compiled is not.
+**CORRECTION (measured 2026-08-15, second session). The "where the type
+degrades" diagnosis below was wrong, and the fix direction it recommended
+is REFUTED. This is not a typing defect and not an `unknown`-parameter
+defect; it is a deliberate, pinned LANE decision in the compiler.**
 
-**So this is the same family as the `unknown` per-position ruling**, and
-that ruling as currently staged does NOT fix it (measured: still NaN on
-the working tree). Whoever finishes that work should check this case: an
-`unknown` parameter that refines from the call site would let the body
-type against the real argument, restoring `finite_complex` and with it a
-correct emission. That is the most promising fix direction and it is
-cheaper than teaching the target a runtime real/complex promotion.
+The refutation is a single measurement: declare `u: real` — a fully
+concrete parameter, no placeholder anywhere — and `sqrt(u-1)` types
+`finite_complex`, exactly the type the recommended refinement was supposed
+to restore. The emission is STILL `Math.abs(0.5 * Math.sqrt(_.u + -1) +
+-1)` and the value is STILL NaN. Complex admission in the type is not what
+selects the lane, so no amount of call-site refinement can change this
+result.
+
+What actually selects the lane: `Sqrt`/`Ln`/`Log` pick their real-vs-complex
+lowering from the OPERAND, never from the node's type, and
+`BaseCompiler.isComplexValued` (`compilation/base-compiler.ts`, the
+`Sqrt`/`Ln`/`Log` branch) carries an explicit carve-out added 2026-07-31
+that answers `false` — real kernel — for a real operand of merely UNKNOWN
+sign, overriding the `finite_complex` type. The carve-out is deliberate and
+load-bearing: it is what keeps `√(⌈x⌉²+⌈y⌉²)` plotting on the hot path, and
+Tycho item 144 exists because over-reporting complexness there blanked
+Desmos-corpus render states (pinned in `compile-glsl.test.ts`, "Tycho item
+144", and `compile.test.ts`, "still admits an unknown-sign REAL kernel
+operand").
+
+So item 190 is the CONTRACT working as pinned, not a bug against it — the
+same accepted class as `Map(_ ↦ √_, [-4,-9,-16])` compiling to
+`[NaN, NaN, NaN]` while `.N()` answers `[2i, 3i, 4i]`, which
+`tryConstantFold` documents and accepts today. Fixing 190 means CHANGING
+that contract, which is a product decision, not a repair.
+
+Measured inputs to that decision:
+
+- The complex lane is CORRECT for this chain: with `u: complex` the same
+  expression lowers through `_SYS.csqrt`/`_SYS.cabs` and returns
+  1.08397416943394, matching `.N()` to full precision. Nothing needs to be
+  built — only selected.
+- It costs about **2.3×** on the affected chains (200k-point sweep of
+  `|√(u+1)/2 − 1|`: real lane 9 ms, complex lane 21 ms). The cost falls
+  only on chains containing an unknown-sign `Sqrt`/`Ln`/`Log`; everything
+  else keeps its current emission.
+- A real-typed free symbol still takes plain-number inputs under the
+  complex lane, because `complexOperandCode` lifts a real operand to
+  `{re, im: 0}`. Only a symbol DECLARED `complex` requires `{re, im}` from
+  the caller, which is already true today.
+- **COMPOSITION WITH `realOnly` — measured 2026-08-15, and it resolves the
+  unwrap question for any consumer that already passes `realOnly: true`.**
+  The two options compose exactly as a plotting consumer would want.
+  Matrix (`z(t) := sqrt(t-1)`; `run` values raw, NaN is a real `number`):
+
+  | case | neither | realOnly | promotion | BOTH |
+  |---|---|---|---|---|
+  | lands REAL via `Abs`, `\|z(t)/2-1\|` @t=0.3 | NaN | NaN | 1.08397416943394 | **1.08397416943394** |
+  | final real, im=0, `sqrt(u)` @u=4 | 2 | 2 | `{re:2,im:0}` | **2** |
+  | genuinely complex, `sqrt(u)` @u=-4 | NaN | NaN | `{re:0,im:2}` | **NaN** |
+
+  So under BOTH flags: the promoting chain computes correctly, a
+  zero-imaginary result UNWRAPS to a plain number, and a genuinely complex
+  result becomes NaN — the clean out-of-domain signal. `realOnly` therefore
+  already answers the open unwrap question for consumers who pass it, and
+  the object-shape corollary above applies only to `complexPromotion`
+  WITHOUT `realOnly`. Per-expression enablement is reachable from a
+  plotting seam that already passes `realOnly: true`; no new seam needed.
+
+- CONSUMER-FACING COROLLARY on the OUTPUT side, verified 2026-08-15 and
+  worth stating because the input note above does not imply it: under the
+  option a REAL-VALUED result comes back as a complex OBJECT, diverging
+  from interpretation in shape. Measured, promotion ON:
+  `sqrt(u)` @u=4 → `{re:2,im:0}` (interpreted `2`), `sqrt(u)+1` @u=4 →
+  `{re:3,im:0}` (interpreted `3`), `2*sqrt(u)` @u=9 → `{re:6,im:0}`
+  (interpreted `6`). Consistent with the design — an unknown-sign `Sqrt`
+  takes the complex lane, and these are unknown-sign — but the consequence
+  for a compile-first consumer is that enabling the option GLOBALLY turns
+  every such previously-numeric result into an object. The 190 witness
+  itself is unaffected because `Abs` lands real through `_SYS.cabs`, so
+  the unwrap machinery exists; whether a zero-imaginary result should
+  unwrap to a number is an open call for the option's owner. Until it is
+  decided, a consumer wanting 190 fixed should scope the option per
+  expression rather than switch it on across a document.
+- The shader targets are a separate question: they have a complex lane
+  (`buildComplexPreamble` in `gpu-target.ts`) but no runtime-failure
+  channel, and item 144's pins are GLSL. Any change should be able to keep
+  the carve-out for `glsl`/`wgsl` while moving `javascript`/`python`.
+
+Refutation pinned in
+`test/compute-engine/unknown-param-call-site-refinement.test.ts`
+(`sqrtOfRealOfUnknownSign`), which also pins today's NaN so the fixture
+flips when the contract does.
 
 `realOnly` is NOT the lever — `true`, `false` and default all emit the
 same code (measured).
@@ -765,12 +844,6 @@ than fast — and know that nobody can paper over it meanwhile.
 Adoption consequence: 190 has NO interim to retire, which makes its
 adoption cheaper than 188's or 189's.
 
-**Ride the pending release?** My read: NO for the fix. The mechanism above
-is measured, but the FIX is a judgement about where to intervene
-(call-site refinement of `unknown` parameters vs runtime promotion in the
-target), it interacts with a ruling still under review, and a wrong choice
-here re-lands as another silent-wrong-value. It queues with 188/189.
-
 Production stakes (theirs): this is D-234's actual root — `skz0syspxp`'s
 radical chain samples 0/201 finite on BOTH compiled routes while
 interpreted is finite — and it is behind a ≥240 s SPA-open starvation,
@@ -779,110 +852,177 @@ Their previously recorded "expanded route gives 186/201" asymmetry does
 NOT reproduce and is retired, along with the by-ref framing of the old
 D-234 offer.
 
-### Tycho item 189 — an elementwise-selected list-valued ARM is lifted WHOLE instead of indexed (OPEN)
+**RESOLUTION (ruled and implemented 2026-08-15): the default contract
+STAYS, and the correct emission becomes available through an opt-in compile
+option, `complexPromotion`.**
 
-**This is a bug against RATIFIED semantics, not an open design question.**
-`docs/plans/2026-07-27-elementwise-which-design.md` is marked
-"**Status: RATIFIED 2026-07-27 — R1–R4 as recommended, user-confirmed**",
-and R1 says exactly what Tycho is asking for:
+Four options were weighed: (a) close 190 as intended; (b) narrow the
+carve-out outright on `javascript`/`python`; (c) promote only where the
+enclosing chain can absorb a complex value; (d) an opt-in flag. The user
+chose (d). The deciding fact came from the consumer side: Tycho already has
+a per-document "complex mode" switch, so they do not need to detect which
+expressions require promotion — the document-level setting maps straight
+onto the option. That removes the one real objection to (d), which was that
+a consumer cannot target the flag per expression.
 
-> Per position j, the selected clause is the first whose condition is
-> `True` at j… The output cell is the selected arm's value at j: a scalar
-> arm lifts; **a list-valued arm is indexed at j**. This is `np.select`.
+Option (b) was rejected on a cost it hides: with an unknown-sign radical
+reported complex, an ordering comparison over one has no truth value and
+must decline, so `Less(Sqrt(x), 2)` — the shape of every plotted radical
+inequality — stops compiling. That decline is CORRECT, which is why the
+option still causes it when enabled; making it unconditional would have
+traded one silent-wrong-value class for a large fail-closed class.
 
-Reported by Tycho (item 189, witness `wsne0l2tcv`): a piecewise over
-900-element collections returns a 900-element list in which the 193
-`otherwise` positions hold scalars (correct, scalar arm lifts) while each
-of the 707 GUARDED positions holds the arm's ENTIRE 900-element broadcast,
-un-indexed. Element k's k-th entry is the correct value — i.e. only the
-diagonal is meaningful, which is precisely R1's "indexed at j" recovered
-by hand. Cost is O(N²) where O(N) was intended: 900 → 636,300 nested
-elements, and every element-reading consumer sees collections where
-scalars belong. Off-diagonal entries frequently go complex through
-`sqrt(1-l²)` with `l > 1`, independent evidence that only the diagonal
-was ever meaningful.
+What landed:
 
-**FIRST DIAGNOSIS REFUTED BY MEASUREMENT (2026-08-15).** I proposed that
-`evaluateElementwiseSelection` (`library/control-structures.ts`) misgates
-the arm: it decides list-valued-ness with `isBroadcastableCollection`
-(`isIndexedCollection === true && !isTuple`), so an arm answering `false`
-would be stored whole and lifted into every selected position. Wrong.
+- `complexPromotion?: boolean` on the compile options and on `CompileTarget`
+  (default off). Honored by `javascript` and `python`; `glsl`/`wgsl` ignore
+  it and keep the real kernel, so item 144's render-state pins are
+  untouched.
+- `BaseCompiler.promotesRadicalToComplex(head, args)` is the single
+  predicate both the analysis (`isComplexValued`) and every target emitter
+  consult, so parent and child cannot disagree on a node's value SHAPE.
+  Its rule is the mathematical one — promote unless the operand is PROVABLY
+  non-negative — deliberately NOT "the node's type admits complex": an
+  unknown-sign `√(t−1)` types the wide `finite_number`, so a type-keyed rule
+  would have left the option inert on its own witness.
+- `isComplexValuedUserCall` — under the opt-in only, a call to a user
+  function follows its BODY. This is what actually fixes 190: the radical
+  sits inside `z(t) := √(t−1)`, the promotion happens inside the emitted
+  `_fn_z`, and the call site `z(t)` types `finite_number`, which says
+  nothing about complexness. Without the look-through the caller read a
+  number where `_fn_z` returned `{re, im}` — NaN, i.e. the original bug
+  wearing a different hat. Self- and mutual recursion decline via a
+  `visited` set.
+- The option is latched from the OUTERMOST compilation and restored on the
+  way out, so a nested target cannot flip the lane mid-compile and a
+  promoted compile cannot leak into the next one. The latch also enforces
+  the option's LANGUAGE scope (`javascript`/`python` only): the direct
+  `compile(expr, { target })` route stamps the caller's choice onto whatever
+  target object it is handed, so gating at the registered-target entry would
+  have missed it — measured, a raw GLSL target plus the flag turned a working
+  `mod(100000.0 * sqrt(x + -1.0), 1.0)` into a D6 decline.
+- The user-call look-through DECLINES a body that is or may be a COLLECTION.
+  `isComplexValued` answers for a list from `ops.some(…)`, so one complex
+  ELEMENT would report the whole call complex, and the scalar pulled out of
+  it inherits that verdict because `At` types `unknown`: with
+  `g(t) := [√(t−1), 1]`, `g(t)[2] + 1` returned `{re: NaN}` instead of `2`.
+  Both a definite-collection test (`type.matches('collection')`) and the
+  possible-collection one (`isPossiblyCollectionTyped`) are required —
+  neither subsumes the other.
+- The Python promoted path uses `np.emath.*`, not `cmath.*`: the operand is a
+  REAL of unknown sign, so zero is in range, and `cmath.log(0)` raises
+  `ValueError` where the interpreter answers `-∞`; `cmath` also rejects the
+  numpy arrays this target supports elsewhere.
 
-Instrumented the gate and ran Tycho's own in-document discriminator probe
-against CE SOURCE through the item-182 src-redirect hook. The selection
-path ran ONCE, with two arms, and classified BOTH CORRECTLY:
+Measured after: the witness returns 1.08397416943394 under the flag and the
+unchanged NaN without it; all 53 compile suites pass (2484 tests, 222
+snapshots) with the flag off, i.e. the default emission is byte-identical.
+
+Pins: `test/compute-engine/unknown-param-call-site-refinement.test.ts` (26
+tests) — both sides of the flag, the non-negative-operand case, `Ln`, the
+Python route, the GLSL non-participation, the ordering-comparison decline
+and its still-compiling default, and the no-leak-between-compilations
+check. Documented in `doc/13-guide-compile.md` ("Complex Promotion"),
+including that `realOnly` is the independent, composable output-boundary
+projection.
+
+### ~~Tycho item 189 — `Add` lifts a non-tensor collection operand WHOLE instead of zipping it~~ (FIXED 2026-08-15; filed 2026-08-15)
+
+**RESOLVED 2026-08-15. The title above is the third one this entry has had,
+and the two earlier ones were both wrong about the layer.** Neither the
+elementwise `Which` selection nor the conditional-value distribution is at
+fault: the defect is a missing guard in `addTensors`
+(`boxed-expression/arithmetic-add.ts`), and it is reachable with no
+piecewise, no colour constructor, no document context, and three elements:
 
 ```
-arm0  isIdx=true   passes=true   type=list<number>     <- indexed, correct
-arm1  isIdx=false  passes=false  type=finite_real      <- scalar 0.8, lifted, correct
+[1,2,3] + [4,5,6] + Range(1,3)   →  [[6,7,8],[8,9,10],[10,11,12]]
+                                     (correct answer: [6,9,12])
+[1,2,3] + [4,5,6] + Reverse([7,8,9]) → [[14,13,12],[16,15,14],[18,17,16]]
+                                     (correct answer: [14,15,16])
 ```
 
-So the elementwise-selection path is INNOCENT: it saw a numeric piecewise
-and handled it per R1. Tycho's independent reading agrees from the other
-side — the stored nested members answer `isIndexedCollection = TRUE`, not
-the `false` my diagnosis needed.
+Silent wrong value in core arithmetic, present on published 0.109.0.
 
-**Where that leaves it, and it is a real narrowing.** The arms at the gate
-are `list<number>` and `finite_real`; the 707 nested members are
-`indexed_collection<color>`, each a lazy `Map(Hsv(0,0,_1), Map(Multiply(…),
-Map(Add(…), …)))` chain. Different types, different layer. **The nesting is
-produced AFTER the selection, at the colour/`Hsv` layer** — something
-broadcasts the colour construction over the 900 positions in a way that
-leaves each position holding the whole 900-element colour collection rather
-than its own element. The next question is what applies `Hsv` over the
-selection result, not anything inside `Which`.
+**Mechanism.** `addTensors` buckets each operand as a tensor or a scalar. A
+collection that is not a tensor VALUE — a `Range`, a `Reverse`/`Take` view,
+or the lazy `Map` that a broadcast over more than
+`MAX_SIZE_EAGER_COLLECTION` (= 100) elements produces — is not a tensor
+value, so it landed in the SCALAR bucket. Each cell's sum then starts at
+the combined scalar sum, so every cell of the result became
+`<whole collection> + <that cell>`: an n-member list of n-element
+collections, O(n²), with only the diagonal (member k's k-th entry) holding
+the intended value. The kernel's existing `tensors.length < 2` decline does
+not cover the shape — two plain lists plus one collection view leaves
+exactly two tensors.
 
-That also explains why bare shapes at N=4 broadcast correctly: they
-exercise the selection path, which works.
+`mulTensors` (`arithmetic-mul-div.ts`) already carried the guard
+(`if (isBroadcastableCollection(x)) return undefined;`), and its comment
+claimed "`addTensors` avoids this via its `tensors.length < 2` decline".
+That claim was false; the comment is corrected in the same change. The fix
+is the mirrored decline in `addTensors`, so the caller falls through to
+`broadcastOverIndexedCollections`, which zips.
 
-**MECHANISM ESTABLISHED (Tycho measurement, 2026-08-15) — there are TWO
-`Which`es, and I instrumented the wrong one.** Their registry body hands us
-ONE colour application over the whole piecewise:
-`["Hsv", 0, 0, ["Which", cond, <arm>, 0.8]]` (json-head verified). OUR
-canonicalization then DISTRIBUTES the colour constructor into the arms:
-`["Which", cond, ["Hsv", 0, 0, <arm>], …]`. The inner NUMERIC `Which` I
-measured — arms `list<number>` / `finite_real` — selects correctly, which
-is why the gate looked innocent. The broken layer is the DISTRIBUTED
-COLOUR `Which`, whose guarded arm is a colour-typed expression over the
-collections, and whose per-position value is that arm's whole 900-element
-colour broadcast — the `indexed_collection<color>` `Map`-chains the census
-found.
+**Why every hand-written probe missed it, and why the field hit it.** The
+size threshold is incidental but decisive in practice. Below 101 elements a
+broadcast materializes eagerly, so `Sqrt([…])` IS a tensor value and all
+operands take the correct path; above it the same sub-expression stays a
+lazy `Map` and falls into the scalar bucket. Tycho's witness
+(`wsne0l2tcv`) had 900 elements; every bare repro either side wrote used
+N = 4.
 
-**RULING — fix at the DISTRIBUTION (do not distribute into the arms of an
-elementwise selection), not at the selection.** Reasoning, which does not
-depend on reading the implementation:
+**The two refuted diagnoses, kept because both were argued from code
+reading rather than measurement.**
 
-1. The pre-distribution form is one `Hsv` applied to the SELECTED value.
-   That is the author's meaning and it is well defined per position.
-2. `f(Which(c, a, b))` → `Which(c, f(a), f(b))` is sound for SCALAR
-   selection. Across an ELEMENTWISE selection it converts each arm from
-   "this position's value" into "the whole collection", manufacturing an
-   indexing obligation that the original shape did not have. The rewrite
-   is being applied through a boundary where it does not hold.
-3. It also duplicates work: the colour construction is built once per ARM
-   instead of once per selection, against the spirit of R2 ("arm
-   evaluation at most once, whole, only if selected somewhere").
-4. Repairing it at the selection instead (index the distributed arm at j)
-   leaves the O(N²) structure being built and then indexed back down —
-   correct but wasteful, and it treats the symptom.
+1. *`evaluateElementwiseSelection` misgates the arm.* I proposed that the
+   arm's list-valued-ness is decided with `isBroadcastableCollection`, so an
+   arm answering `false` would be stored whole. Instrumenting the gate on
+   Tycho's own in-document probe refuted it: the selection ran once and
+   classified both arms correctly (`list<number>` indexed, `finite_real`
+   lifted).
 
-Indexing a list-valued arm at `j` should ALSO hold as an invariant — it
-already does for arms that reach the gate — but it is the safety net, not
-the fix.
+2. *Canonicalization distributes the colour constructor into the arms, and
+   distribution across an elementwise selection is the error.* The
+   distribution is real — `threadConditional`
+   (`boxed-expression/boxed-function.ts`) turns `Hsv(0,0,Which(c,a,b))` into
+   `Which(c, Hsv(0,0,a), …)` at EVALUATION time (rules T6/T7 of
+   `docs/plans/2026-07-12-conditional-values-design.md`) — and I ruled that
+   it should be suppressed for an elementwise selection. **That ruling was
+   measured and does not hold.** Selection indexes a distributed
+   list-valued arm at `j` correctly, and a counterfactual run of the
+   witness shape with the distribution removed by hand still produced 707
+   nested members: the guarded arm sums three collection operands either
+   way, so the nesting came from the `Add` underneath, not from the
+   distribution above it. **Nothing in `threadConditional` was changed.**
+   The one durable observation from that reading is a cost point, not a
+   correctness one: distributing builds the constructor once per ARM rather
+   than once per selection. It is not filed as a defect.
 
-**Verification obligation for whoever implements**: I could NOT reproduce
-the distribution bare (a lowercase unknown `hsv` head stays undistributed;
-it needs the real `Hsv` operator and the document context), so this ruling
-is made on semantics, not on a reproduction. Verify against Tycho's
-witness: after the fix their anatomy probe must report all members scalar.
+**Verification.** Reproduced bare in the engine, with no consumer code, by
+replaying the witness's own document shape (registry body
+`Hsv(0,0,f(X,Y))` stored while `X`/`Y` are unknown, grids substituted
+after): 707 nested / 193 scalar members before, **all 900 members scalar
+after**, which is the acceptance criterion Tycho set. Values verified
+numerically against the source formula at n = 3/100/128/400 (max error
+3.6e-15).
 
-**Their interim** (shipped, tagged retire-at-fix): a diagonal-residue lane
-in the colour seam taking a same-length nested member's k-th element —
-which is R1 implemented by the consumer. At the fixing release they re-run
-the anatomy probe (members should all be scalars) and delete the lane.
-Answer to their "or state the intended semantics" ask: **it is not
-intended, R1 already rules it, keep the lane as a workaround and retire
-it.**
+Regression pins:
+`test/compute-engine/tycho-item-189-add-collection-view-nesting.test.ts`
+(12 tests: `Range`/`Reverse`/`Take` operands; a genuine scalar still
+broadcasting; pure vector and matrix tensor sums unchanged; tuples still
+adding component-wise; the `N()` route; the lazy-broadcast shape at
+n = 100/101/128/400 with a numeric value check; and the witness's
+900-member colour-grid census). Non-vacuity verified: 9 of the 12 fail with
+the guard disabled, and the 3 that pass are the deliberate controls.
+
+**For Tycho.** Their diagonal-residue lane in `graph/dynamic-color.ts` is
+R1 implemented by hand and retires at this adoption — re-run
+`docs/scratch/d189-nested-anatomy-probe.mts`, expect all members scalar,
+then delete the lane's same-length rule. One heads-up: that probe does not
+currently run on their tree — `resolveAllComputedCollections` returns no
+`g` entry (only `X`, `Y`, `P`), on published 0.109.0 as well as against CE
+source, so the harness needs repair on their side before it can serve as
+the acceptance check.
 
 ### ~~Tycho item 188 — `Divide` rejects a `broadcastable<vector<…>>` numerator that it then broadcasts~~ (FIXED 2026-08-15; filed 2026-08-15)
 
