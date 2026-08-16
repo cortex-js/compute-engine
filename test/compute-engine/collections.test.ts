@@ -794,6 +794,146 @@ describe('SLICE (2,3)', () => {
   });
 });
 
+// The `(indexed_collection<T>, range)` arm (docs/STRING_ROADMAP.md, Phase 0c):
+// `Slice(xs, r)` is `Slice(xs, First(r), Last(r))`, inheriting the positional
+// arm's end clamping. The parameter is typed `range` — an ascending, step-1,
+// finite span of 1-based indices — so a descending or stepped `Range` is a
+// STATIC type error rather than a runtime reinterpretation (`Slice(xs, 3, 2)`
+// is empty, but the collection `3..2` is the pair `[3, 2]`); a gather by
+// arbitrary indices is `At(xs, indices)`.
+describe('SLICE (range)', () => {
+  test('is Slice(xs, First(r), Last(r))', () => {
+    expect(evaluate(['Slice', list, ['Range', 2, 3]])).toBe(
+      evaluate(['Slice', list, 2, 3])
+    );
+    expect(evaluate(['Slice', list, ['Range', 2, 3]])).toMatchInlineSnapshot(
+      `["List", 13, 5]`
+    );
+    expect(evaluate(['Slice', list, ['Range', 1, 1]])).toMatchInlineSnapshot(
+      `["List", 7]`
+    );
+    expect(evaluate(['Slice', list, ['Range', 1, 7]])).toBe(evaluate(list));
+  });
+
+  test('clamps the end and yields [] past the end, like the positional arm', () => {
+    expect(evaluate(['Slice', list, ['Range', 6, 20]])).toBe(
+      evaluate(['Slice', list, 6, 20])
+    );
+    expect(evaluate(['Slice', list, ['Range', 6, 20]])).toMatchInlineSnapshot(
+      `["List", 3, 11]`
+    );
+    expect(evaluate(['Slice', list, ['Range', 8, 9]])).toMatchInlineSnapshot(
+      `["List"]`
+    );
+    expect(evaluate(['Slice', emptyList, ['Range', 1, 3]])).toMatchInlineSnapshot(
+      `["List"]`
+    );
+  });
+
+  test('every source kind the positional arm accepts', () => {
+    for (const xs of [range, linspace, tuple, matrix])
+      expect(evaluate(['Slice', xs, ['Range', 2, 3]])).toBe(
+        evaluate(['Slice', xs, 2, 3])
+      );
+    // A lazy infinite source: the span bounds the result.
+    const e = engine.box([
+      'Slice',
+      ['Range', 1, 'PositiveInfinity'],
+      ['Range', 3, 5],
+    ]);
+    expect(e.count).toBe(3);
+    expect(e.isFiniteCollection).toBe(true);
+    expect(engine.box(['ListFrom', e]).evaluate().json).toEqual([
+      'List',
+      3,
+      4,
+      5,
+    ]);
+  });
+
+  test('the collection facets agree with the positional arm', () => {
+    const viaSpan = engine.box(['Slice', list, ['Range', 2, 5]]);
+    const viaBounds = engine.box(['Slice', list, 2, 5]);
+    expect(viaSpan.count).toBe(viaBounds.count);
+    expect(viaSpan.at(1)?.json).toEqual(viaBounds.at(1)?.json);
+    expect(viaSpan.at(-1)?.json).toEqual(viaBounds.at(-1)?.json);
+    expect(viaSpan.at(5)).toBeUndefined();
+    expect(viaSpan.type.toString()).toBe(viaBounds.type.toString());
+    expect(viaSpan.type.toString()).toMatchInlineSnapshot(
+      `list<finite_integer>`
+    );
+  });
+
+  test('a symbol declared or inferred `range` is a span operand', () => {
+    const ce = new ComputeEngine();
+    ce.declare('r', 'range');
+    ce.assign('r', ce.box(['Range', 2, 3]));
+    expect(ce.box(['ListFrom', ['Slice', list, 'r']]).evaluate().json).toEqual(
+      ['List', 13, 5]
+    );
+    // Inferred from the assigned value: `Range(3, 4)` qualifies as a span.
+    ce.assign('q', ce.box(['Range', 3, 4]));
+    expect(ce.box('q').type.toString()).toBe('range');
+    expect(ce.box(['ListFrom', ['Slice', list, 'q']]).evaluate().json).toEqual(
+      ['List', 5, 19]
+    );
+  });
+
+  test('a span operand whose VALUE is not a span declines at run time', () => {
+    // Validation rejects such an operand statically (and `assign` refuses a
+    // non-span value for a `range` symbol), so the only route to the facets is
+    // an unvalidated STRUCTURAL construction. Even there, the runtime re-check
+    // must refuse to reinterpret a non-contiguous value as `(first, last)`
+    // bounds — and it checks every position, not just the endpoints:
+    // `[1, 100, 3]` has the count and endpoints of `1..3` and must not slice
+    // as it. A list that IS a span by value (`[2, 3]`) is read as one.
+    const ce = new ComputeEngine();
+    const xs = ce.box(list);
+    const slice = (span: Expression) =>
+      ce.function('Slice', [xs, ce.box(span)], { form: 'structural' });
+    for (const bad of [
+      ['List', 1, 100, 3],
+      ['Range', 4, 2],
+      ['Range', 1, 5, 2],
+      ['List', 0, 1],
+      ['List'],
+    ] as Expression[]) {
+      const e = slice(bad);
+      expect(e.count).toBeUndefined();
+      expect(e.at(1)).toBeUndefined();
+    }
+    const ok = slice(['List', 2, 3]);
+    expect(ok.count).toBe(2);
+    expect(ok.at(1)?.json).toBe(13);
+  });
+
+  test('a descending, stepped, or symbolic Range is a STATIC type error', () => {
+    // Each of these types as `indexed_collection<integer|number>`, not
+    // `range`, so the range arm rejects it at validation — the expression is
+    // never evaluated as a (start, end) window.
+    for (const r of [
+      ['Range', 3, 2],
+      ['Range', 1, 7, 2],
+      ['Range', 'a', 'b'],
+      ['List', 2, 3],
+    ] as Expression[]) {
+      const e = engine.box(['Slice', list, r]);
+      expect(e.type.toString()).toBe('error');
+      expect(e.op2.operator).toBe('Error');
+      expect(e.op2.op1.json).toEqual([
+        'ErrorCode',
+        "'incompatible-type'",
+        "'range'",
+        expect.any(String),
+      ]);
+    }
+    // A span in the wrong slot is a type error too: `end` is a number.
+    expect(
+      engine.box(['Slice', list, ['Range', 2, 3], 5]).type.toString()
+    ).toBe('error');
+  });
+});
+
 describe('SLICE -1,1', () => {
   test('empty list', () =>
     expect(evaluate(['Slice', emptyList, -1, 1])).toMatchInlineSnapshot(

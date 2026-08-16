@@ -54,7 +54,13 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     expect(sig(ce, 'Triple')).toBe(
       '(first: T, second: U, third: V) -> tuple<T, U, V> where T, U, V'
     );
-    expect(sig(ce, 'Reverse')).toBe('(T) -> T where T: indexed_collection');
+    // `Reverse` is an overload set since the per-kind result rule landed
+    // (`docs/STRING_ROADMAP.md`, "Signature refinement", Phase 0b): a `list`
+    // operand is echoed (shape included); every other indexed kind — tuple,
+    // range, an opaque `indexed_collection<T>` — results in `list<T>`.
+    expect(sig(ce, 'Reverse')).toBe(
+      '((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)'
+    );
   });
 
   test('the twelve constructor-pattern operators carry `where` signatures', () => {
@@ -65,8 +71,10 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     expect(sig(ce, 'Drop')).toBe(
       '(xs: indexed_collection<T>, count: number) -> list<T> where T'
     );
+    // `Slice` is an overload set since the `range` arm landed (Phase 0c of
+    // `docs/STRING_ROADMAP.md`); both arms carry the `where` clause.
     expect(sig(ce, 'Slice')).toBe(
-      '(value: indexed_collection<T>, start: number, end: number) -> list<T> where T'
+      '((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)'
     );
     expect(sig(ce, 'DeleteAt')).toBe(
       '(indexed_collection<T>, integer) -> list<T> where T'
@@ -256,21 +264,18 @@ describe('TYPE VARIABLES / Single, Pair, Triple — per-position echo', () => {
 });
 
 //
-// Reverse — the one identity-preserving echo.
+// Reverse — the per-kind result rule: a `list` is echoed (shape included),
+// every other indexed kind results in `list<T>`.
 //
 
-describe('TYPE VARIABLES / Reverse — `(T) -> T where T: indexed_collection`', () => {
-  test('the operand type is echoed VERBATIM — kind and dimensions', () => {
+describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)`', () => {
+  test('a list operand is echoed VERBATIM — kind and dimensions', () => {
     const ce = engine();
     ce.declare('rvM', 'matrix<integer^(2x3)>');
-    ce.declare('rvT', 'tuple<integer, string>');
-    // Dimensions survive: this is what makes it an identity echo rather than
-    // the plain `list<T>` of `Sort`/`Unique`.
+    // Dimensions survive: reversal is closed over lists, shape included, which
+    // is what distinguishes it from the plain `list<T>` of `Sort`/`Unique`.
     expect(ce.function('Reverse', [ce.box('rvM')]).type.toString()).toBe(
       'matrix<integer^(2x3)>'
-    );
-    expect(ce.function('Reverse', [ce.box('rvT')]).type.toString()).toBe(
-      'tuple<integer, string>'
     );
     expect(
       ce.function('Reverse', [ce.box(['List', 1, 2, 3])]).type.toString()
@@ -282,13 +287,33 @@ describe('TYPE VARIABLES / Reverse — `(T) -> T where T: indexed_collection`', 
         ])
         .type.toString()
     ).toBe('list<string^2>');
-    // A Range keeps its (unmaterialized) indexed-collection kind.
-    expect(
-      ce.function('Reverse', [ce.box(['Range', 1, 10])]).type.toString()
-    ).toBe('indexed_collection<integer>');
     // An empty list keeps `never`.
     expect(ce.function('Reverse', [ce.box(['List'])]).type.toString()).toBe(
       'list<never>'
+    );
+  });
+
+  test('every other indexed kind results in `list<T>` — never its own type', () => {
+    const ce = engine();
+    // A tuple type carries its per-position element types in ORDER, so an
+    // echo would claim `tuple<integer, string>` for a value whose first
+    // element is the string (this was a live defect, filed 2026-08-14 and
+    // fixed by the per-kind rule). The result is a list of the join.
+    ce.declare('rvT', 'tuple<integer, string>');
+    expect(ce.function('Reverse', [ce.box('rvT')]).type.toString()).toBe(
+      'list<integer | string>'
+    );
+    expect(
+      ce.function('Reverse', [ce.box(['Tuple', 1, { str: 'a' }])]).type.toString()
+    ).toBe('list<finite_integer | string>');
+    // A span reversed is descending, which the `range` type excludes.
+    expect(
+      ce.function('Reverse', [ce.box(['Range', 1, 10])]).type.toString()
+    ).toBe('list<integer>');
+    // An opaque indexed collection: element type kept, kind is `list`.
+    ce.declare('rvI', 'indexed_collection<boolean>');
+    expect(ce.function('Reverse', [ce.box('rvI')]).type.toString()).toBe(
+      'list<boolean>'
     );
   });
 
@@ -345,27 +370,109 @@ describe('TYPE VARIABLES / Reverse — `(T) -> T where T: indexed_collection`', 
   });
 
   test('ACCEPTED deltas on the unknown/any edge (§4.3 bound-join table)', () => {
-    // Was `indexed_collection` (the handler echoed the post-narrowing type);
-    // the absorbing-`unknown` rule now makes the result `unknown`.
+    // An `unknown` operand cannot bind the `list` arm's `T` (nothing proves
+    // it a list), so the generic `list<T>` arm answers with `T` unbound:
+    // `list<unknown>`. (Under the former single `(T) -> T` bound the
+    // absorbing-`unknown` rule made this `unknown`.)
     const ce = engine();
     ce.declare('rvU', 'unknown');
     expect(ce.function('Reverse', [ce.box('rvU')]).type.toString()).toBe(
-      'unknown'
+      'list<unknown>'
     );
-    // An `any`-typed operand is ADMITTED (result `any`): §4.5 parity requires
-    // it, because the ground `(indexed_collection) -> indexed_collection`
-    // admits `any` unconditionally through the unknown/any gate. `any` is
-    // therefore absorbed exactly as `unknown` is (D8). Same for the
+    // An `any`-typed operand is ADMITTED: §4.5 parity requires it, because
+    // the ground `(indexed_collection<T>) -> list<T>` admits `any`
+    // unconditionally through the unknown/any gate. Same for the
     // already-migrated `Inverse: (T) -> T where T: matrix`.
     const ce2 = engine();
     ce2.declare('rvA', 'any');
     expect(ce2.function('Reverse', [ce2.box('rvA')]).isValid).toBe(true);
     expect(ce2.function('Reverse', [ce2.box('rvA')]).type.toString()).toBe(
-      'any'
+      'list<unknown>'
     );
     const ce3 = engine();
     ce3.declare('ivA', 'any');
     expect(ce3.function('Inverse', [ce3.box('ivA')]).isValid).toBe(true);
+  });
+});
+
+//
+// The per-kind result rule (`docs/STRING_ROADMAP.md`, "Signature refinement",
+// Phase 0b): `list -> list`, every other indexed kind -> `list<T>`.
+//
+
+describe('TYPE VARIABLES / collections — the per-kind result rule', () => {
+  const kinds = (ce: ReturnType<typeof engine>) => {
+    ce.declare('pkV', 'vector<integer^3>');
+    ce.declare('pkT', 'tuple<integer, string>');
+    ce.declare('pkR', 'range');
+    ce.declare('pkI', 'indexed_collection<boolean>');
+  };
+  const t = (ce: ReturnType<typeof engine>, op: string, ...rest: any[]) =>
+    ce.function(op, [ce.box(rest[0]), ...rest.slice(1)]).type.toString();
+
+  test('length-preserving operations echo a list (shape included) and give list<T> otherwise', () => {
+    const ce = engine();
+    kinds(ce);
+    for (const op of ['Reverse', 'RotateLeft', 'RotateRight']) {
+      expect(t(ce, op, 'pkV')).toBe('vector<integer^3>');
+      // A tuple's per-position types would come back in the wrong order; a
+      // rotated/reversed span is not a span.
+      expect(t(ce, op, 'pkT')).toBe('list<integer | string>');
+      expect(t(ce, op, 'pkR')).toBe('list<integer>');
+      expect(t(ce, op, 'pkI')).toBe('list<boolean>');
+    }
+    // The optional offset does not change the arm.
+    expect(t(ce, 'RotateLeft', 'pkV', ce.box(2))).toBe('vector<integer^3>');
+    expect(t(ce, 'RotateRight', 'pkR', ce.box(2))).toBe('list<integer>');
+  });
+
+  test('length-changing operations give list<T> for EVERY kind (a list result carries no length)', () => {
+    const ce = engine();
+    kinds(ce);
+    for (const op of ['Rest', 'Most']) {
+      // Formerly `(indexed_collection) -> indexed_collection`, which lost the
+      // element type altogether.
+      expect(t(ce, op, 'pkV')).toBe('list<integer>');
+      expect(t(ce, op, 'pkT')).toBe('list<integer | string>');
+      expect(t(ce, op, 'pkR')).toBe('list<integer>');
+      expect(t(ce, op, 'pkI')).toBe('list<boolean>');
+    }
+  });
+
+  test('Filter keeps the element type but never the source SHAPE or kind (indexed sources)', () => {
+    const ce = engine();
+    kinds(ce);
+    const p = ce.box(['Function', ['Greater', '_', 1], '_']);
+    // Formerly echoed the source type: `vector<3>` for a filter of a
+    // 3-vector, `tuple<…>` for a filtered tuple, `range` for a filtered span.
+    expect(t(ce, 'Filter', 'pkV', p)).toBe('list<integer>');
+    expect(t(ce, 'Filter', 'pkT', p)).toBe('list<integer | string>');
+    expect(t(ce, 'Filter', 'pkR', p)).toBe('list<integer>');
+    expect(t(ce, 'Filter', 'pkI', p)).toBe('list<boolean>');
+    // A matrix filters ROWS: the element type is the row type.
+    expect(
+      t(ce, 'Filter', ['List', ['List', 1, 2], ['List', 3, 4]], p)
+    ).toBe('list<vector<finite_integer^2>>');
+    // A non-indexed source keeps its type: no arity or shape to lie about.
+    ce.declare('pkS', 'set<integer>');
+    expect(t(ce, 'Filter', 'pkS', p)).toBe('set<integer>');
+  });
+
+  test('the value a lazy view materializes to inhabits the claimed type', () => {
+    const ce = engine();
+    const cases: [any, string][] = [
+      [['Reverse', ['Tuple', 1, { str: 'a' }]], 'list<finite_integer | string>'],
+      [['Reverse', ['Range', 1, 4]], 'list<integer>'],
+      [['Rest', ['Range', 1, 4]], 'list<integer>'],
+      [['RotateLeft', ['Range', 1, 4]], 'list<integer>'],
+      [['Filter', ['Range', 1, 4], ['Function', ['Greater', '_', 2], '_']], 'list<integer>'],
+    ];
+    for (const [expr, claimed] of cases) {
+      const e = ce.box(expr);
+      expect(e.type.toString()).toBe(claimed);
+      const v = e.evaluate({ materialization: true });
+      expect(v.type.matches(claimed)).toBe(true);
+    }
   });
 });
 

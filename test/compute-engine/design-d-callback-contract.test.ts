@@ -419,11 +419,15 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
       '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T'
     );
     expect(hasCallbackMetadata(ce, 'Filter')).toBe(false);
-    // §7 rule 1: the result stays with the `type:` handler — the source's own
-    // collection kind and indexedness, which the signature cannot express.
+    // §7 rule 1: the result stays with the `type:` handler — the source's
+    // indexedness, which the signature cannot express. Since the per-kind
+    // result rule (`docs/STRING_ROADMAP.md`, Phase 0b) that handler yields
+    // `list<T>` for an indexed source rather than echoing the source's own
+    // type: filtering changes the length, so the former `vector<3>` claim for
+    // a filtered 3-vector was a lie.
     expect(
       ce.box(['Filter', ['List', 1, 2, 3], 'IsPrime']).type.toString()
-    ).toBe('vector<finite_integer^3>');
+    ).toBe('list<finite_integer>');
   });
 
   it('stamps an inline literal identically on every route', () => {

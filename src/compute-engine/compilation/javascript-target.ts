@@ -2051,6 +2051,34 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // start past the end → empty; end clamped to [1, len].
   Slice: (args, compile) => {
     const coll = collArg('Slice', args[0], compile);
+    // The `(indexed_collection<T>, range)` arm: `Slice(xs, r)` is
+    // `Slice(xs, First(r), Last(r))`. The `range` type guarantees an
+    // ascending, step-1 span with `first ≥ 1`, so only the end needs
+    // clamping — `Array.prototype.slice` does that itself — and a start past
+    // the end yields `[]` for free. Gate on the STATIC type, not the operand's
+    // head: a symbol declared/inferred `range` compiles through this arm just
+    // as a literal `Range` does. A collection operand of any wider type never
+    // validated, so it cannot reach here; fail closed anyway rather than
+    // reading `_r[0]` off an arbitrary array as a bound.
+    //
+    // The static type does NOT vouch for the VALUE a `range` symbol receives
+    // at run time (`run({ r: [5, 2] })` hands the compiled function an
+    // arbitrary array), so the emitted code re-checks the span invariant —
+    // every position holds `first + k`, `first ≥ 1` — exactly as the
+    // interpreter's `spanBounds` (`library/collections.ts`) does, and fails
+    // LOUDLY on a violation (the `PointList` precedent above: a `RangeError`
+    // at run time) rather than silently slicing a stepped `[2, 4]` as `2..4`
+    // or a descending `[5, 2]` as `[]`. The interpreter declines by leaving
+    // the expression unevaluated; compiled code has no inert value to return,
+    // so throwing is its fail-closed. The walk is O(span length), no more than
+    // the slice it guards.
+    if (args.length === 2 && args[1] != null) {
+      if (!args[1].type.matches('range'))
+        throw new Error(
+          'Slice: the two-argument form takes an ascending index span (`range`)'
+        );
+      return `((_l, _r) => { if (!Array.isArray(_r) || _r.length === 0 || !Number.isInteger(_r[0]) || _r[0] < 1) throw new RangeError('Slice: the span argument is not an ascending index range at run time'); for (let _k = 1; _k < _r.length; _k++) if (_r[_k] !== _r[0] + _k) throw new RangeError('Slice: the span argument is not an ascending index range at run time'); return _l.slice(_r[0] - 1, _r[_r.length - 1]); })(${coll}, ${compile(args[1])})`;
+    }
     if (args[1] == null || args[2] == null)
       throw new Error('Slice: missing index');
     return `((_l, _s, _e) => { _s = Math.round(_s); if (!Number.isFinite(_s)) _s = 1; _e = Math.round(_e); if (!Number.isFinite(_e)) _e = _l.length; if (_s < 1) _s = _l.length + 1 + _s; if (_s < 1) _s = 1; if (_s > _l.length) return []; if (_e < 1) _e = _l.length + 1 + _e; if (_e < 1) _e = 1; if (_e > _l.length) _e = _l.length; return _l.slice(_s - 1, _e); })(${coll}, ${compile(args[1])}, ${compile(args[2])})`;

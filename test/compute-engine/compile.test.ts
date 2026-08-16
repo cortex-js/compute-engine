@@ -2124,6 +2124,40 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(runJs(e, ['Slice', 'd', 3, 2])).toEqual([]);
   });
 
+  // The `(indexed_collection<T>, range)` arm (docs/STRING_ROADMAP.md, Phase
+  // 0c): `Slice(xs, r)` is `Slice(xs, First(r), Last(r))`, and the `range`
+  // type guarantees an ascending step-1 span with first ≥ 1, so the lowering
+  // only needs the end clamped (native `slice` does that) and a start past
+  // the end to yield []. Every value verified against the interpreter.
+  it('Slice with a range span compiles to a native slice', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Slice', 'd', ['Range', 2, 3]])).toEqual([20, 30]);
+    expect(runJs(e, ['Slice', 'd', ['Range', 1, 1]])).toEqual([10]);
+    expect(runJs(e, ['Slice', 'd', ['Range', 2, 99]])).toEqual([20, 30]);
+    expect(runJs(e, ['Slice', 'd', ['Range', 4, 6]])).toEqual([]);
+    // A symbol typed `range` compiles through the same arm; the span is a
+    // runtime argument.
+    e.declare('r', 'range');
+    const r = compile(e.box(['Slice', 'd', 'r']), {
+      fallback: false,
+      realOnly: true,
+      constantFold: false,
+    })!;
+    expect(r.success).toBe(true);
+    expect(r.run!({ r: [2, 3] })).toEqual([20, 30]);
+    expect(r.run!({ r: [3, 4, 5] })).toEqual([30]);
+    // The static type does not vouch for the VALUE handed to `run()`: a
+    // stepped, descending, empty, fractional, or non-array span is a
+    // run-time RangeError (fail loudly), never a silent slice — mirroring
+    // the interpreter's `spanBounds`, which declines such a value.
+    for (const bad of [[2, 4], [5, 2], [], [1.5, 2.5], [0, 1], [1, 100, 3], 7])
+      expect(() => r.run!({ r: bad })).toThrow(RangeError);
+    // A descending or stepped Range is not a `range`: rejected at
+    // validation, so it never reaches the compiler.
+    expect(e.box(['Slice', 'd', ['Range', 3, 2]]).isValid).toBe(false);
+    expect(e.box(['Slice', 'd', ['Range', 1, 3, 2]]).isValid).toBe(false);
+  });
+
   it('IsEmpty / Count / Contains / Unique compile', () => {
     const e = mkEngine();
     // IsEmpty/Contains are boolean-valued: compile without realOnly (a

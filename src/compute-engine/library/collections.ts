@@ -58,7 +58,6 @@ import {
   staticCollectionDims,
   widen,
 } from '../../common/type/utils.js';
-import { RANGE_STRUCTURAL_TYPE } from '../../common/type/primitive.js';
 import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import {
@@ -3619,8 +3618,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // result (§7, rule 1).
     signature:
       '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
-    // If the input collection is indexed, the output collection is indexed.
-    type: (ops) => ops[0].type,
+    // If the input collection is indexed, the output collection is indexed —
+    // but NOT the source's own type. Filtering changes the length, so echoing
+    // the source type claimed `vector<3>` for a filtered 3-vector, `tuple<…>`
+    // (with its arity and per-position element types) for a filtered tuple,
+    // and `range` for a filtered span that is no longer contiguous. Per the
+    // per-kind result rule (`docs/STRING_ROADMAP.md`, "Signature refinement",
+    // Phase 0b) an indexed source yields `list<T>` — the element type kept,
+    // the shape dropped. A non-indexed source (a set) keeps its type: no
+    // arity or shape to lie about, and its kind IS preserved.
+    type: (ops) => {
+      const t = ops[0].type;
+      if (!t.matches('indexed_collection')) return t;
+      return { kind: 'list', elements: collectionElementType(t.type) ?? 'any' };
+    },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalCallbackOperand(ops[1], {
@@ -5844,7 +5855,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'If the collection has only one element, return an empty collection.',
     ],
     complexity: 8200,
-    signature: '(indexed_collection) -> indexed_collection',
+    // Per-kind result rule (`docs/STRING_ROADMAP.md`, "Signature refinement",
+    // Phase 0b): dropping an element changes the arity, so no indexed kind
+    // but `list` is closed under it — and a `list` result carries no length,
+    // so `list<T>` is exactly right for every kind. (The previous bare
+    // `indexed_collection` result lost the element type altogether.)
+    signature: '(indexed_collection<T>) -> list<T> where T',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -5906,7 +5922,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the collection without the last element.',
       'If the collection has only one element, return an empty collection.',
     ],
-    signature: '(indexed_collection) -> indexed_collection',
+    // Per-kind result rule: see `Rest` — same reasoning, same result type.
+    signature: '(indexed_collection<T>) -> list<T> where T',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -5960,12 +5977,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Slice: {
     description: [
-      'Return a range of elements from an indexed collection.',
-      'If the index is negative, it is counted from the end.',
+      'Return a contiguous run of elements from an indexed collection.',
+      'Given `start` and `end` (1-based, inclusive), a negative index is counted from the end and out-of-bounds indices are clamped.',
+      'Given a `range` (an ascending index span such as `2..4`), returns the elements at those indices: `Slice(xs, r)` is `Slice(xs, First(r), Last(r))`.',
     ],
     complexity: 8200,
+    // Two arms. The `range` arm is the one the sequence-search family
+    // consumes (`Slice(xs, RangeOf(xs, needle)) == needle`, see
+    // `docs/STRING_ROADMAP.md`, "The `range` type"). It is typed `range` — an
+    // ASCENDING, step-1, finite span of 1-based indices — rather than the
+    // wider `indexed_collection<integer>` on purpose: a descending or stepped
+    // `Range` (`Range(4, 2)`, `Range(1, 9, 2)`) types as the wider kind and is
+    // therefore rejected STATICALLY. Unpacking such a collection into
+    // `(start, end)` bounds would contradict its own meaning (`Slice(xs, 4,
+    // 2)` is EMPTY, but the collection `4..2` is the pair `[4, 2]`); a gather
+    // by arbitrary indices is `At(xs, indices)`, which accepts the wider type.
     signature:
-      '(value: indexed_collection<T>, start: number, end: number) -> list<T> where T',
+      '((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -6025,17 +6053,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Reverse: {
     description: 'Reverse the order of the elements of an indexed collection.',
     complexity: 8200,
-    signature: '(T) -> T where T: indexed_collection',
-    // Reversing an INDEX SPAN leaves the `range` type: the result is
-    // descending (`Reverse(1..10)` is `[10, 9, …, 1]`) and `range` admits
-    // only ascending spans, so the declared `(T) -> T` would bind `T = range`
-    // and claim a type the value does not have. Widen to the honest
-    // supertype instead. (Reversal is one of the operations that motivates
-    // the per-kind result rule in `docs/STRING_ROADMAP.md`, "Signature
-    // refinement"; this handler is that rule's `range` case.) Every other
-    // operand type declines by returning `undefined`, keeping the signature.
-    type: ([xs]) =>
-      xs?.type.type === 'range' ? RANGE_STRUCTURAL_TYPE : undefined,
+    // Per-kind result rule (`docs/STRING_ROADMAP.md`, "Signature refinement",
+    // Phase 0b). A single `(T) -> T where T: indexed_collection` bound would
+    // promise kind-preservation for EVERY indexed kind, and the runtime cannot
+    // deliver it: a `tuple` type carries its arity and per-position element
+    // types, and a `range` admits only ascending, non-empty, step-1 spans. So:
+    // a `list` operand keeps its full type (this operation is closed over
+    // lists, shape included); every other indexed kind — tuple, range, an
+    // opaque `indexed_collection<T>` — results in `list<T>`, which is what the
+    // lazy view materializes to. Static promise and runtime laziness are
+    // decoupled: the value stays a lazy view either way.
+    // Reversal in particular: `Reverse((1, "a"))` is `("a", 1)`, so the old
+    // `(T) -> T` claim of `tuple<finite_integer, string>` had the element
+    // types in the wrong ORDER; and `Reverse(1..10)` is `[10, 9, …, 1]`,
+    // descending, which the `range` type excludes.
+    signature:
+      '((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -6390,7 +6423,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Rotate the elements of the collection to the left by n positions.',
     complexity: 8200,
-    signature: '(indexed_collection, integer?) -> indexed_collection',
+    // Per-kind result rule (`docs/STRING_ROADMAP.md`, "Signature refinement",
+    // Phase 0b). A single `(T) -> T where T: indexed_collection` bound would
+    // promise kind-preservation for EVERY indexed kind, and the runtime cannot
+    // deliver it: a `tuple` type carries its arity and per-position element
+    // types, and a `range` admits only ascending, non-empty, step-1 spans. So:
+    // a `list` operand keeps its full type (this operation is closed over
+    // lists, shape included); every other indexed kind — tuple, range, an
+    // opaque `indexed_collection<T>` — results in `list<T>`, which is what the
+    // lazy view materializes to. Static promise and runtime laziness are
+    // decoupled: the value stays a lazy view either way.
+    // A rotation is length-preserving, so the `list` arm keeps the shape
+    // (`vector<3>` in, `vector<3>` out); a rotated `range` is not a span.
+    signature:
+      '((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -6480,7 +6526,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Rotate the elements of the collection to the right by n positions.',
     complexity: 8200,
-    signature: '(indexed_collection, integer?) -> indexed_collection',
+    // Per-kind result rule: see `RotateLeft`.
+    signature:
+      '((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -9378,6 +9426,59 @@ function* extremumBy(
   return best;
 }
 
+/** Read the `[first, last]` bounds of a `Slice` span operand — the second
+ * argument of the `(indexed_collection<T>, range)` arm.
+ *
+ * Returns `undefined` when the operand is NOT a span at all (a number, a
+ * symbol bound to a number, a symbolic index): the caller then reads the
+ * positional `(start, end)` arm. Returns `null` when the operand IS a
+ * collection but its bounds cannot be resolved right now (unknown count, a
+ * symbolic endpoint), so every facet declines rather than guessing.
+ *
+ * The bounds are validated at runtime even though the static `range` type
+ * already promises them: the elements must be integers, `first ≥ 1`, and the
+ * count must be exactly `last - first + 1` (contiguous, ascending, step 1).
+ * A collection that fails the check — reachable only through a `range`
+ * declaration whose value does not honor it, or a raw/structural
+ * construction that skipped validation — resolves to `null`; it is never
+ * reinterpreted as a descending or stepped window, which is precisely what
+ * the `range` parameter type exists to rule out.
+ *
+ * A symbol whose value is a `Range` is read through the symbol's collection
+ * facets (`count`/`at` delegate to the value), so `Slice(xs, r)` with
+ * `r := 2..4` resolves without a separate dereference. */
+function spanBounds(
+  op: Expression | undefined
+): [number, number] | null | undefined {
+  if (op === undefined) return undefined;
+  if (!op.isCollection) return undefined;
+  const n = op.count;
+  if (n === undefined || !Number.isFinite(n) || n < 1) return null;
+  // Exact integers only: `toInteger` ROUNDS, and a rounded fractional bound
+  // (`1.5..3.5` → `[2, 4]`) would pass the contiguity check below while
+  // describing a different window than the collection's elements.
+  const first = exactInteger(op.at(1));
+  if (first === null || first < 1) return null;
+  // EVERY position must hold `first + k`: checking only the endpoints and the
+  // count would accept `[1, 100, 3]` (count 3, last − first + 1 = 3) as the
+  // span `1..3`. A `Range` value is contiguous by construction, but the
+  // operand can be any collection a `range` declaration admitted, and the
+  // whole point of this check is to decline rather than reinterpret. `n` is
+  // finite (checked above) and a span is as long as the window it selects,
+  // so the walk costs no more than the slice itself.
+  for (let k = 1; k < n; k++)
+    if (exactInteger(op.at(k + 1)) !== first + k) return null;
+  return [first, first + n - 1];
+}
+
+/** The value of an integer literal, or `null` for anything else (a
+ * non-integer, a non-finite value, a symbol, an unsafe-range integer). */
+function exactInteger(e: Expression | undefined): number | null {
+  const n = toInteger(e);
+  if (n === null) return null;
+  return e !== undefined && isNumber(e) && e.isInteger === true ? n : null;
+}
+
 /** Resolve a `Slice` expression's normalized 1-based [start, end] window
  * against its source's count, so every facet (`count`/`isFinite`/`at`/
  * `iterator`) agrees. Negative indices count from the end of the source.
@@ -9394,8 +9495,20 @@ function sliceBounds(
   if (!isFunction(expr)) return undefined;
   const count = expr.op1.count;
   if (count === undefined) return undefined;
-  const startParam = integerParam(expr.op2);
-  const endParam = integerParam(expr.op3);
+  let startParam: number | undefined | null;
+  let endParam: number | undefined | null;
+  const span = spanBounds(expr.op2);
+  if (span !== undefined) {
+    // The `range` arm: `Slice(xs, r)` is `Slice(xs, First(r), Last(r))`.
+    // Both bounds are ≥ 1 by the span's definition, so the negative-index
+    // branches below never fire for this arm; the end still clamps to the
+    // source count.
+    if (span === null) return undefined;
+    [startParam, endParam] = span;
+  } else {
+    startParam = integerParam(expr.op2);
+    endParam = integerParam(expr.op3);
+  }
   // A symbolic bound is indeterminate, not a default: every facet that reads
   // `sliceBounds` reports `undefined` when it returns `undefined`.
   if (startParam === null || endParam === null) return undefined;

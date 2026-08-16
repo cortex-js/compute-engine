@@ -146,9 +146,11 @@ describe('the `range` index-span type', () => {
     // operand. Each case below returned `range` at some point during
     // development, for a value that plainly is not one.
     test('Reverse of a span widens (the result is descending)', () => {
+      // Per the per-kind result rule (`docs/STRING_ROADMAP.md`, Phase 0b) a
+      // non-list indexed operand results in `list<T>`.
       expect(
         ce.function('Reverse', [ce.expr(['Range', 1, 10])]).type.toString()
-      ).toBe('indexed_collection<integer>');
+      ).toBe('list<integer>');
     });
 
     test('Map over a span with an unknown-typed callback widens', () => {

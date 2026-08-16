@@ -4,6 +4,8 @@ import {
   widen,
 } from '../../common/type/subtype.js';
 import { isEffectSubset } from '../../common/type/effects.js';
+import { deepEraseCallbackTypes } from '../../common/type/callback.js';
+import { reduceType } from '../../common/type/reduce.js';
 import {
   freeTypeVariables,
   paramAt,
@@ -994,6 +996,43 @@ export function triStateSelect(
 }
 
 /**
+ * The parameter at `index` of a near-miss arm, as it should be DISPLAYED in
+ * an `incompatible-type` message.
+ *
+ * Typing uses the arm's instantiation (`arm`), where a type variable that got
+ * no call-site bound and carries no declared bound falls to `unknown` — so
+ * the instantiated parameter reads `indexed_collection<unknown>`, an
+ * impossible-looking requirement for what is really "any indexed
+ * collection". For display only, such a variable is shown at its GROUND
+ * SKELETON (`any`, which `reduceType` normalizes back to the bare
+ * constructor), restoring the declared signature's wording. This mirrors the
+ * single-signature path's `displayParam` in `validate.ts` (§8), so an
+ * overload set diagnoses a bad operand with the same words a plain signature
+ * would. Nothing that types the call reads this.
+ */
+function displayParamAt(
+  arm: FunctionSignature,
+  declared: FunctionSignature,
+  solution: TypeInferenceResult | undefined,
+  index: number
+): Type | undefined {
+  const ground = paramAt(arm, index);
+  if (ground === undefined) return undefined;
+  if (solution === undefined || solution.unbound.size === 0) return ground;
+  const pattern = paramAt(declared, index);
+  if (pattern === undefined) return ground;
+  const displayBindings: Record<string, Type> = {
+    ...solution.bindings,
+    ...Object.fromEntries([...solution.unbound].map((v) => [v, 'any' as Type])),
+  };
+  const t = substituteTypeVariables(
+    deepEraseCallbackTypes(pattern),
+    displayBindings
+  );
+  return freeTypeVariables(t).size === 0 ? reduceType(t) : ground;
+}
+
+/**
  * Diagnose a call that no arm accepts, so the caller can blame the operands
  * actually at fault instead of the whole list.
  *
@@ -1073,7 +1112,12 @@ export function diagnoseNoMatch(
   // instantiation failed is scored on its bound-reading, which is what names
   // the violated declared bound.
   let fewest = Infinity;
-  let candidates: { arm: FunctionSignature; refutes: number[] }[] = [];
+  let candidates: {
+    arm: FunctionSignature;
+    declared: FunctionSignature;
+    solution: TypeInferenceResult | undefined;
+    refutes: number[];
+  }[] = [];
   for (const declared of arityViable) {
     const instantiated = instantiateArm(
       declared,
@@ -1082,6 +1126,7 @@ export function diagnoseNoMatch(
       ce._typeResolver
     );
     const arm = instantiated.instance;
+    const solution = instantiated.solution;
     let refutes: number[];
     if (trial !== undefined) {
       // The trial's verdict IS full validation's: the refuted positions are
@@ -1099,16 +1144,16 @@ export function diagnoseNoMatch(
     }
     if (refutes.length < fewest) {
       fewest = refutes.length;
-      candidates = [{ arm, refutes }];
+      candidates = [{ arm, declared, solution, refutes }];
     } else if (refutes.length === fewest) {
-      candidates.push({ arm, refutes });
+      candidates.push({ arm, declared, solution, refutes });
     }
   }
 
   const refuted = new Map<number, Type>();
-  for (const { arm, refutes } of candidates) {
+  for (const { arm, declared, solution, refutes } of candidates) {
     for (const i of refutes) {
-      const param = paramAt(arm, i);
+      const param = displayParamAt(arm, declared, solution, i);
       if (param === undefined) continue;
       const prior = refuted.get(i);
       refuted.set(i, prior === undefined ? param : widen(prior, param));
