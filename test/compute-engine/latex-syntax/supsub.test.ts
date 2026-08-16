@@ -602,27 +602,40 @@ describe('SUBSCRIPTED FUNCTION APPLICATION', () => {
 });
 
 describe('PRIMED SYMBOLS WITH SUBSCRIPTS', () => {
-  // f'_n - is this (f')_n or (f_n)'?
+  // `f'_n` is `(f_n)'`, not `(f')_n`: the subscript is part of the function's
+  // NAME, so the prime applies to the subscripted symbol. `f'_n` and `f_n'`
+  // therefore denote the same thing. (The Desmos editor emits the prime-first
+  // spelling; before this convention was settled, `f'_n(x)` bound the prime to
+  // the bare `f` and the trailing `(x)` degraded to an invisible product.)
   test('Prime with subscript', () => {
-    // Currently: subscript is applied first, then prime
-    expect(ce.parse("f'_n")).toMatchInlineSnapshot(
-      `["Subscript", ["Derivative", "f"], "n"]`
-    );
+    expect(ce.parse("f'_n")).toMatchInlineSnapshot(`["Prime", "f_n"]`);
     expect(ce.parse("f_n'")).toMatchInlineSnapshot(`["Prime", "f_n"]`);
+    // A subscript that is an EXPRESSION is not folded into the name (in either
+    // spelling): it stays a `Subscript`, which canonicalization then lifts
+    // into a function literal of its free variables.
     expect(ce.parse("f'_{n+1}").json).toMatchInlineSnapshot(`
       [
-        Subscript,
+        Derivative,
         [
-          Derivative,
+          Function,
+          [
+            Block,
+            [
+              Subscript,
+              f,
+              [
+                Add,
+                n,
+                1,
+              ],
+            ],
+          ],
           f,
-        ],
-        [
-          Add,
           n,
-          1,
         ],
       ]
     `);
+    expect(ce.parse("f_{n+1}'").json).toEqual(ce.parse("f'_{n+1}").json);
   });
 });
 

@@ -71,14 +71,14 @@
 ### New Features
 
 - **A lambda parameter can be a tuple pattern: `((p, q)) => p && q`.** Tuple
-  destructuring existed in `let (a, b) = v`, `(a, b) := v` and `match`, but
-  not where a per-element pair shows up most — a callback parameter and a
-  `for` header. A parameter written with a second pair of parentheses is ONE
-  parameter that takes a tuple and binds a name to each component (Kotlin's
-  `{ (a, b) -> … }`), reusing the pattern grammar `let` already has: bare
-  names, `_` to skip a position, nested `(…)` patterns. `(p, q) => …` is
-  unchanged (two parameters). `for (p, q) in pairs { … }` accepts the same
-  pattern. In MathJSON the pattern sits in a parameter position:
+  destructuring existed in `let (a, b) = v`, `(a, b) := v` and `match`, but not
+  where a per-element pair shows up most — a callback parameter and a `for`
+  header. A parameter written with a second pair of parentheses is ONE parameter
+  that takes a tuple and binds a name to each component (Kotlin's
+  `{ (a, b) -> … }`), reusing the pattern grammar `let` already has: bare names,
+  `_` to skip a position, nested `(…)` patterns. `(p, q) => …` is unchanged (two
+  parameters). `for (p, q) in pairs { … }` accepts the same pattern. In MathJSON
+  the pattern sits in a parameter position:
   `["Function", body, ["Tuple", "p", "q"]]`.
 
   ```epsil
@@ -93,30 +93,29 @@
   `pattern-element-annotation`). Destructuring lambdas are interpreted — the
   compile targets decline them explicitly rather than bind the wrong names.
   Fixed while here: the JavaScript target's `Integrate` lowering tested a
-  parameter-name array with `!== undefined` (vacuously true), so a
-  parameter with no readable name compiled the integrand against the
-  enclosing scope.
+  parameter-name array with `!== undefined` (vacuously true), so a parameter
+  with no readable name compiled the integrand against the enclosing scope.
 
 - **A callback whose parameter count cannot fit its operator is now a
   `callback-arity` error, statically.** Partial application is a feature of
-  ordinary positional calls (`f(1)` on a binary `f` is a function awaiting
-  the second argument), but inside a collection operator the OPERATOR decides
-  how many arguments the callback receives, so a mismatch is never what was
-  meant — and the operators disagreed about it, several silently:
+  ordinary positional calls (`f(1)` on a binary `f` is a function awaiting the
+  second argument), but inside a collection operator the OPERATOR decides how
+  many arguments the callback receives, so a mismatch is never what was meant —
+  and the operators disagreed about it, several silently:
   `Map((p, q) => p + q, [1,2,3])` answered three closures typed `vector<3>`,
   `Sort(xs, (a, b, c) => a < b)` returned `xs` UNSORTED, `Fold` buried an
-  `Error` in a nested closure, `Filter`/`Any`/`All`/`Reduce` stayed inert,
-  and `Map(p => p, xs, ys)` threw `Too many arguments` only once an element
-  was forced. Every callback-taking collection operator now checks in its
-  canonical handler (so it fires on the box, parse, `ce.function` and Epsil
-  routes) whether a function literal — or a symbol with a known, non-generic
-  signature — can accept the argument count it supplies: `Map` one per
-  source, the per-element family one, `Reduce`/`Fold`/`Scan` two, `Fill`
-  two, and the mode selectors `Sort`/`Ordering` (key or comparator) and
-  `Iterate` (`f(previous)` or `f(index, previous)`) either of their two.
-  A nullary literal (`() => True`) is a constant and fits any slot;
-  a callback of unknown arity (`function`, `callback<…>`, generic) is not
-  checked. The message names both sides and the fix:
+  `Error` in a nested closure, `Filter`/`Any`/`All`/`Reduce` stayed inert, and
+  `Map(p => p, xs, ys)` threw `Too many arguments` only once an element was
+  forced. Every callback-taking collection operator now checks in its canonical
+  handler (so it fires on the box, parse, `ce.function` and Epsil routes)
+  whether a function literal — or a symbol with a known, non-generic signature —
+  can accept the argument count it supplies: `Map` one per source, the
+  per-element family one, `Reduce`/`Fold`/`Scan` two, `Fill` two, and the mode
+  selectors `Sort`/`Ordering` (key or comparator) and `Iterate` (`f(previous)`
+  or `f(index, previous)`) either of their two. A nullary literal (`() => True`)
+  is a constant and fits any slot; a callback of unknown arity (`function`,
+  `callback<…>`, generic) is not checked. The message names both sides and the
+  fix:
 
   ```
   Map calls its callback with 1 argument (each element of the collection);
@@ -124,26 +123,24 @@
   pattern parameter: ((p, q)) => …
   ```
 
-  The tuple-pattern hint is offered only when the source's elements are
-  provably tuples of exactly the declared width. Suggested on the shape of the
-  mismatch alone it named rewrites that cannot work — `Map((p, q) => p + q,
-  [1, 2, 3])` proposed `((p, q)) => …` for a list of NUMBERS. The arity error
-  itself is a fact about the callback and is unchanged; only the suggested fix
-  is now gated.
+  The tuple-pattern hint is offered only when the source's elements are provably
+  tuples of exactly the declared width. Suggested on the shape of the mismatch
+  alone it named rewrites that cannot work — `Map((p, q) => p + q, [1, 2, 3])`
+  proposed `((p, q)) => …` for a list of NUMBERS. The arity error itself is a
+  fact about the callback and is unchanged; only the suggested fix is now gated.
 
 - **A pipe stage that cannot take one value is a `pipe-stage-arity` error.**
-  `x |> f` hands `f` exactly one value, so a multi-parameter stage can never
-  be applied. It used to fall through to the currying path and answer a
-  residual closure with no diagnostic — `[100, 200] |> (x, y, z) => x + y + z`
-  evaluated to `(_1, _2) => …` — which in a pipeline is never what was meant.
-  This applies to a named stage too: `xs |> add` on a two-parameter `add` is
-  the error, not a partial application.
+  `x |> f` hands `f` exactly one value, so a multi-parameter stage can never be
+  applied. It used to fall through to the currying path and answer a residual
+  closure with no diagnostic — `[100, 200] |> (x, y, z) => x + y + z` evaluated
+  to `(_1, _2) => …` — which in a pipeline is never what was meant. This applies
+  to a named stage too: `xs |> add` on a two-parameter `add` is the error, not a
+  partial application.
 
   It is deliberately NOT the `callback-arity` error above. A pipe stage is not
-  an operator-owned callback slot — `x |> f` is an application whose argument
-  is written to the left — and the remedy differs: a pipe points at the CALL
-  form, with `_` marking the piped value's slot, rather than at a tuple
-  pattern.
+  an operator-owned callback slot — `x |> f` is an application whose argument is
+  written to the left — and the remedy differs: a pipe points at the CALL form,
+  with `_` marking the piped value's slot, rather than at a tuple pattern.
 
   ```
   A pipe passes its stage exactly 1 value; `(x, y, z) => x + y + z` declares 3
@@ -151,13 +148,13 @@
   `_` in the piped value's slot: `xs |> Fold(f, 0, _)`
   ```
 
-  When the piped value is a collection of tuples, the tuple pattern still
-  works: `pairs |> ((p, q)) => p + q`. `epsil doc pipe-stage-arity` explains
-  the whole rule.
+  When the piped value is a collection of tuples, the tuple pattern still works:
+  `pairs |> ((p, q)) => p + q`. `epsil doc pipe-stage-arity` explains the whole
+  rule.
 
   Fixed while here: `Fill((i: integer) => 2i, (2, 2))` compiled to JavaScript
-  (silently accepting a unary generator) while the interpreter threw on the
-  same expression; both routes now agree.
+  (silently accepting a unary generator) while the interpreter threw on the same
+  expression; both routes now agree.
 
 - **New `range` type: an index span.** A `Range` that denotes a contiguous,
   ascending run of 1-based collection indexes — integer bounds, at least 1,
@@ -178,109 +175,116 @@
 
 ### Issues Resolved
 
+- **A prime written before a subscript now attaches to the subscripted name.**
+  `F'_{0}(t)` and `F^{\prime}_{0}(t)` (both spellings the Desmos editor emits)
+  parsed as `Multiply(t, Subscript(Prime(F), 0))`: the prime bound to the bare
+  `F`, the subscript then applied to the derivative, and the trailing `(t)`
+  degraded to an invisible product instead of an application. All three
+  spellings — `F'_{0}(t)`, `F^{\prime}_{0}(t)` and `F_{0}'(t)` — now parse
+  identically, as `Apply(Derivative(F_0, 1), t)`, the derivative of the function
+  named `F_0`. Higher orders (`F''_{0}(t)`) and the bare form (`F'_{0}`) follow
+  the same rule, and a subscript that is an expression (`F'_{n+1}`) keeps the
+  `Subscript` reading it already had in the `F_{n+1}'` spelling.
+
 - **Element-wise arithmetic over a collection of complex values now compiles.**
   The JavaScript target broadcasts scalar arithmetic across a list operand
   through its `_SYS.bcast` runtime helper, and that path used to decline the
-  moment any element was complex-valued, reporting `success: false` with
-  "cannot compile scalar arithmetic over a list-valued operand" and falling
-  back to interpretation. `2·[1+i, 3+i]` now compiles and produces the
-  interpreter's `[2+2i, 6+2i]`. This also removes a cost of enabling the
-  opt-in `complexPromotion` compile option: with `w(t) := [√(t−1), √(t−2)]`,
-  turning the option on made `2·w(t)`, `w(t)+1` and `w(t)/2` stop compiling,
-  because promotion makes every element of that body complex. All three
-  compile with the option on and match interpretation at both ends of the
-  domain. A collection whose elements DISAGREE about being complex
-  (`[1+i, 2]`, which is emitted as the heterogeneous `[{re, im}, 2]`) still
-  fails closed: one scalar closure is mapped over every position, so no single
-  real-or-complex convention fits it.
+  moment any element was complex-valued, reporting `success: false` with "cannot
+  compile scalar arithmetic over a list-valued operand" and falling back to
+  interpretation. `2·[1+i, 3+i]` now compiles and produces the interpreter's
+  `[2+2i, 6+2i]`. This also removes a cost of enabling the opt-in
+  `complexPromotion` compile option: with `w(t) := [√(t−1), √(t−2)]`, turning
+  the option on made `2·w(t)`, `w(t)+1` and `w(t)/2` stop compiling, because
+  promotion makes every element of that body complex. All three compile with the
+  option on and match interpretation at both ends of the domain. A collection
+  whose elements DISAGREE about being complex (`[1+i, 2]`, which is emitted as
+  the heterogeneous `[{re, im}, 2]`) still fails closed: one scalar closure is
+  mapped over every position, so no single real-or-complex convention fits it.
 
-- **A complex argument to a rounding, min/max or integer-division head no
-  longer compiles to NaN.** `Floor`, `Ceiling`, `Round`, `Truncate`, `Fract`,
-  `Max`, `Min`, `Clamp`, `Mod`, `Remainder`, `GCD` and `LCM` lower to real-only
-  target code — there is no rounding of a complex number, and the complex
-  numbers carry no total order — but unlike the special functions (`Erf`,
-  `Gamma`, `Zeta`), which already failed closed, these were spelled as function
-  codegen and slipped past that check. `Floor(x + (1+i))` compiled to
-  `Math.floor({re, im})` and returned NaN while reporting `success: true`;
-  `Mod(x + (1+i), 2)` returned NaN where the interpreter answers `1`. They now
-  fail closed and the interpreter answers. Real operands are unaffected —
-  `Floor(x)` still compiles to `Math.floor(_.x)`.
+- **A complex argument to a rounding, min/max or integer-division head no longer
+  compiles to NaN.** `Floor`, `Ceiling`, `Round`, `Truncate`, `Fract`, `Max`,
+  `Min`, `Clamp`, `Mod`, `Remainder`, `GCD` and `LCM` lower to real-only target
+  code — there is no rounding of a complex number, and the complex numbers carry
+  no total order — but unlike the special functions (`Erf`, `Gamma`, `Zeta`),
+  which already failed closed, these were spelled as function codegen and
+  slipped past that check. `Floor(x + (1+i))` compiled to `Math.floor({re, im})`
+  and returned NaN while reporting `success: true`; `Mod(x + (1+i), 2)` returned
+  NaN where the interpreter answers `1`. They now fail closed and the
+  interpreter answers. Real operands are unaffected — `Floor(x)` still compiles
+  to `Math.floor(_.x)`.
 
 - **`&&` and `||` (`And`/`Or`) now short-circuit.** The operands are evaluated
-  left to right, in the order written, and evaluation stops at the first
-  `false` (for `&&`) or the first `true` (for `||`); the remaining operands do
-  not run. Before, `And`/`Or` were declared eager and commutative: every
-  operand was evaluated (`false && f()` still called `f()`, and a guard such as
+  left to right, in the order written, and evaluation stops at the first `false`
+  (for `&&`) or the first `true` (for `||`); the remaining operands do not run.
+  Before, `And`/`Or` were declared eager and commutative: every operand was
+  evaluated (`false && f()` still called `f()`, and a guard such as
   `k <= n && xs[k] > 0` still read `xs[k]` out of range), and canonicalization
   sorted the operands, so `g() && f()` could even run `f()` first — while the
   JavaScript compilation target already emitted a short-circuiting `&&`, so
   compiled and interpreted code disagreed on side effects and errors. The
   operands of `And`/`Or` are no longer reordered at canonicalization
-  (`["And", "q", "p"]` stays as written); nested `And`/`Or` are still
-  flattened, and the symbolic simplifications (`A ∧ ¬A → False`, duplicate
-  removal, absorption, CNF/DNF) are unchanged. `Nand`, `Nor` and `Implies`
-  short-circuit the same way (`Nand` stops at the first `false`, `Nor` at the
-  first `true`, `Implies` skips its consequent when the antecedent is
-  `false`), and so do chained comparisons: `a < b < c`, `a = b = c` and their
-  `<=`/`!=` forms stop at the first adjacent pair that is false, so `c` is not
-  evaluated once `a < b` fails. `Xor` and `Equivalent` cannot short-circuit
-  (every operand affects the result) and are unchanged. When an operand is a
-  collection the operation is element-wise, every operand is evaluated once,
-  and the result is a list.
+  (`["And", "q", "p"]` stays as written); nested `And`/`Or` are still flattened,
+  and the symbolic simplifications (`A ∧ ¬A → False`, duplicate removal,
+  absorption, CNF/DNF) are unchanged. `Nand`, `Nor` and `Implies` short-circuit
+  the same way (`Nand` stops at the first `false`, `Nor` at the first `true`,
+  `Implies` skips its consequent when the antecedent is `false`), and so do
+  chained comparisons: `a < b < c`, `a = b = c` and their `<=`/`!=` forms stop
+  at the first adjacent pair that is false, so `c` is not evaluated once `a < b`
+  fails. `Xor` and `Equivalent` cannot short-circuit (every operand affects the
+  result) and are unchanged. When an operand is a collection the operation is
+  element-wise, every operand is evaluated once, and the result is a list.
 
 - **A lazy collection's callback now runs exactly once per element per
-  consumption.** `Sum`, `Product`, `Reduce`, `Max`, `Min`, `GCD`/`LCM`,
-  `Length` and the statistics family (`Mean`, `Median`, `Variance`, …) used
-  to run one or more probe enumerations before the real one — pulling a
-  first element to learn whether the collection declines to enumerate,
-  asking whether it is empty before counting it, or scanning for an absent
-  datum and for symbolic data in separate passes — so `Sum(Map(f, xs))` ran
-  `f` N+1 times over N elements, `Max(Map(f, xs))` 2N+1 times and
-  `Mean(Map(f, xs))` 2N times. With callbacks that write to a variable or a
-  mutable object, the extra runs were observable (Appendix B of
-  `docs/TYPE_SYSTEM_ROADMAP.md`, ruling B8). Each consumer now reads every
-  verdict off the single walk it already performs; the computed values are
-  unchanged.
+  consumption.** `Sum`, `Product`, `Reduce`, `Max`, `Min`, `GCD`/`LCM`, `Length`
+  and the statistics family (`Mean`, `Median`, `Variance`, …) used to run one or
+  more probe enumerations before the real one — pulling a first element to learn
+  whether the collection declines to enumerate, asking whether it is empty
+  before counting it, or scanning for an absent datum and for symbolic data in
+  separate passes — so `Sum(Map(f, xs))` ran `f` N+1 times over N elements,
+  `Max(Map(f, xs))` 2N+1 times and `Mean(Map(f, xs))` 2N times. With callbacks
+  that write to a variable or a mutable object, the extra runs were observable
+  (Appendix B of `docs/TYPE_SYSTEM_ROADMAP.md`, ruling B8). Each consumer now
+  reads every verdict off the single walk it already performs; the computed
+  values are unchanged.
 
 - **`Max`/`Min` of a descending or single-sample `Linspace` were wrong, and
-  `Max`/`Min`/`Mean` of a symbolic one returned `NaN`.** `Max(Linspace(5, 1,
-  3))` — the elements `[5, 3, 1]` — returned `1` and `Min` returned `5`,
-  because the extremum was read off a fixed endpoint that is only right for
-  an ascending run; and `Max(Linspace(1, 5, 1))`, whose single sample is
-  `1`, returned `5`. The extremum is now taken over the samples that exist
-  (a symbolic count stays symbolic). And a finite collection that
-  *declines* to enumerate (`Linspace(a, 1, 3)` with `a` unknown) was read as
-  *empty* by the absent-datum gate, so `Max`, `Min`, `Mean` and the other
-  aggregates answered `NaN`; they now stay symbolic (`max(Linspace(a, 1, 3))`),
-  as `Sum` already did. `Max([])` and `Max(Missing)` are still `NaN`.
+  `Max`/`Min`/`Mean` of a symbolic one returned `NaN`.**
+  `Max(Linspace(5, 1, 3))` — the elements `[5, 3, 1]` — returned `1` and `Min`
+  returned `5`, because the extremum was read off a fixed endpoint that is only
+  right for an ascending run; and `Max(Linspace(1, 5, 1))`, whose single sample
+  is `1`, returned `5`. The extremum is now taken over the samples that exist (a
+  symbolic count stays symbolic). And a finite collection that _declines_ to
+  enumerate (`Linspace(a, 1, 3)` with `a` unknown) was read as _empty_ by the
+  absent-datum gate, so `Max`, `Min`, `Mean` and the other aggregates answered
+  `NaN`; they now stay symbolic (`max(Linspace(a, 1, 3))`), as `Sum` already
+  did. `Max([])` and `Max(Missing)` are still `NaN`.
 
-- **`for` and `while` loops round-trip through the Epsil serializer.** A
-  `Loop` used to serialize only in the call spelling `Loop(do {…}, x in xs)`
-  — re-parseable, but not what the author wrote. It now prints as
-  `for x in xs { … }`, `for (p, q) in pairs { … }` or `while c { … }`, and
-  a `break`/`continue` inside a loop body prints as the keyword. Outside a
-  loop body — at the top level, or inside a function literal within a loop,
-  where the parser would report `control-outside-loop` — the call form
-  `Break()`/`Continue()` is kept, tracked by a serializer-side loop depth
-  that resets at every function-literal boundary, exactly as the parser's
-  does. `Loop` shapes the surface grammar cannot spell keep the call form.
+- **`for` and `while` loops round-trip through the Epsil serializer.** A `Loop`
+  used to serialize only in the call spelling `Loop(do {…}, x in xs)` —
+  re-parseable, but not what the author wrote. It now prints as
+  `for x in xs { … }`, `for (p, q) in pairs { … }` or `while c { … }`, and a
+  `break`/`continue` inside a loop body prints as the keyword. Outside a loop
+  body — at the top level, or inside a function literal within a loop, where the
+  parser would report `control-outside-loop` — the call form
+  `Break()`/`Continue()` is kept, tracked by a serializer-side loop depth that
+  resets at every function-literal boundary, exactly as the parser's does.
+  `Loop` shapes the surface grammar cannot spell keep the call form.
 
 - **A duplicate name in a lambda parameter list is a parse diagnostic.**
   `(x, x) => x`, `(x: integer, x) => x` and a tuple-pattern leaf repeating a
-  name (`((p, p)) => p`, `(x, (p, x)) => …`) now report `unexpected-symbol`
-  at parse time, the same diagnostic `let (p, p) = v` gives, instead of
-  surfacing later as an "already declared" error out of canonicalization
-  (and nothing at all from `epsil check`). `_` discards a position and may
-  repeat.
+  name (`((p, p)) => p`, `(x, (p, x)) => …`) now report `unexpected-symbol` at
+  parse time, the same diagnostic `let (p, p) = v` gives, instead of surfacing
+  later as an "already declared" error out of canonicalization (and nothing at
+  all from `epsil check`). `_` discards a position and may repeat.
 
 - **A signature mixing optional parameters with a variadic tail is rejected on
   the type-object route too.** The type-string grammar has always refused
   `(number, number?, number+) -> number` ("Variadic arguments cannot be used
   with optional arguments"), but a `Type` object built by hand and passed to
   `ce.declare()` slipped through — a type that existed but had no spelling
-  `parseType` could read back. `BoxedType` now enforces the same rule for
-  every object-route entry, nested signatures included, with the same
-  message (`code: 'variadic-with-optional'`).
+  `parseType` could read back. `BoxedType` now enforces the same rule for every
+  object-route entry, nested signatures included, with the same message
+  (`code: 'variadic-with-optional'`).
 
 - **A pipe whose stage maps now has the type of the mapped collection.** A unary
   function literal on the right of `|>` maps over a collection topic instead of
@@ -337,26 +341,36 @@
   declared `list<integer>` symbol, a list literal — the declared element type
   echoed the collection's own elements and ignored the scalar entirely, so
   `\frac{1}{2}(1..4)` reported `list<integer>` while evaluating to
-  `[1/2, 1, 3/2, 2]`. The scalar's numeric tier is now combined into the
-  element type: `\frac{1}{2}(1..4)`, `(1..4)/2` and `(1..4)+\frac{1}{2}` report
+  `[1/2, 1, 3/2, 2]`. The scalar's numeric tier is now combined into the element
+  type: `\frac{1}{2}(1..4)`, `(1..4)/2` and `(1..4)+\frac{1}{2}` report
   `list<rational>`, `0.5(1..4)` and `0.5·L` (with `L: list<integer>`) report
   `list<real>`, and `2(1..4)` still reports `list<integer>`. The most visible
   consequence: a comprehension declares its binder from that element type, so
-  `x \operatorname{for} x = \frac{1}{2}(1..4)` used to fail with `Symbol "x":
-  the value "1/2" of type "finite_rational" is not compatible with the type
-  "integer"`; it now yields `[1/2, 1, 3/2, 2]`. `i·[i, 2i]` likewise reported
+  `x \operatorname{for} x = \frac{1}{2}(1..4)` used to fail with
+  `Symbol "x": the value "1/2" of type "finite_rational" is not compatible with the type "integer"`;
+  it now yields `[1/2, 1, 3/2, 2]`. `i·[i, 2i]` likewise reported
   `vector<imaginary^2>` for a value of `[-1, -2]` and now reports
   `vector<finite_complex^2>` — neither sums nor products are closed over the
   imaginary numbers.
 
-- **A loop or comprehension binder no longer fails when the iterated
-  collection under-declares its elements.** A binder's index type is a GUESS
-  read off the collection's declared element type, but it was recorded as if
-  the user had declared it, so an element outside that type aborted the whole
-  iteration with an `incompatible-type` error instead of iterating. Such a
-  binder now widens its guess to cover the value, matching how every other
-  inferred type behaves on assignment. A binding site that genuinely declares
-  a type is unaffected and still holds its values to it.
+- **A loop or comprehension binder no longer fails when the iterated collection
+  under-declares its elements.** A binder's index type is a GUESS read off the
+  collection's declared element type, but it was recorded as if the user had
+  declared it, so an element outside that type aborted the whole iteration with
+  an `incompatible-type` error instead of iterating. Such a binder now widens
+  its guess to cover the value, matching how every other inferred type behaves
+  on assignment. A binding site that genuinely declares a type is unaffected and
+  still holds its values to it.
+
+- **Broadcasting a scalar over a nested list no longer retypes the inner
+  symbols.** With `L := [1, 2]`, merely boxing `2 · [L, L]` (or `1 + [L, L]`)
+  narrowed `L`'s recorded type from `vector<finite_integer^2>` to `real` — the
+  value stayed `[1, 2]`, so a later broadcast over `L` in the same engine
+  claimed an unsound type. The numeric-argument check walked the elements of a
+  list operand and inferred the scalar context onto each of them, including an
+  element that is itself a collection-valued symbol. Elements that are or may be
+  collections are now skipped, exactly as a top-level collection operand already
+  was; plain scalar elements are still inferred.
 
 ## 0.111.0 _2026-08-15_
 
@@ -2133,6 +2147,17 @@
   `hash` saw the nesting, violating the documented `isSame ⇒ equal hash`
   contract; a negated rational coefficient with a `Power` factor hit the same
   problem. `.json`, `isSame` and `hash` agree again.
+
+- **A `PointList` body is now differentiated componentwise.** With a lambda
+  stored as a symbol's value —
+  `p := (t) \mapsto \operatorname{PointList}(\sin t, \cos t, t)` — `p'(0.25)`
+  returned a sum of inert `Apply(Derivative("PointList", …), …)` terms, because
+  the differentiator applied the generic chain rule to the `PointList` OPERATOR.
+  It now differentiates each component and keeps the `PointList` head, so
+  `p'(0.25)` is the point `(0.9689…, -0.2474…, 1)`, matching what the same curve
+  already gave when defined as `g(t) \coloneq …`. This holds for components that
+  are themselves lists (`PointList(t\cdot[1,2], t^2)`, which zips to a list of
+  points): differentiation and the zip commute.
 
 ## 0.104.1 _2026-08-11_
 

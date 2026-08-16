@@ -96,6 +96,69 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### Tycho items 192/193/194 — residue after the 2026-08-15 fixes (OPEN)
+
+The three items were fixed the same day (`PointList` takes the elementwise
+derivative branch and `F'_{0}(t)` parses like `F_{0}'(t)`, item 192;
+`Equal`/`NotEqual`, `Which`/`If` and `Sum`/`Product` type handlers now answer
+`broadcastable<…>` for a comparison whose collection-ness is statically
+undecidable, item 193; arithmetic broadcast over a `Range`/list combines the
+scalar's numeric tier into the element type and comprehension/loop binders are
+declared with `inferred: true`, item 194 — pins in
+`test/compute-engine/tycho-item-19{2,3,4}-*.test.ts`). Three questions were
+surfaced and deliberately NOT decided in that round; the third has since been
+fixed:
+
+- **`Unique(indexed_collection)` types bare `collection`** (drops the
+  `indexed_` qualifier), and **`At(U, i)` on a bare `indexed_collection`
+  types `unknown`.** These are why the item-193 witness (`frqpa78i6s`) reaches
+  `C = U[i]` with no element type at all; a concrete element type through
+  `Unique`/`At` would let the comparison type as a definite `list<boolean>`
+  instead of `broadcastable<boolean>`, which Tycho's `matches('collection')`
+  gate declines. Tycho is filing these separately; the CE-side fix is in the
+  `Unique` and `At` type handlers (`library/collections.ts`).
+- **`Add` and `Multiply` widen collection cells by different evidence.**
+  `addType` (`boxed-expression/arithmetic-add.ts`) widens the cells by ANY
+  numeric co-operand, including a merely inferred scalar; the `Multiply`
+  collection arm (`library/arithmetic.ts`) requires `isDeclaredScalarNumber`
+  because widening on an inferred type made `t ↦ 2a(t)` under
+  `(list<real>) -> list<real>` type `list<number>` and broke the
+  forward-reference repair pin in `list-parameter-indexing.test.ts`. With
+  `L: list<integer>` and `j` auto-inferred `number`, `j·L` reports
+  `list<integer>` while `j+L` reports `list<number>`. Both are sound; which
+  rule is the convention is a design call.
+- **`BoxedSymbol.infer()` did not mark its own writes inferred** — FIXED
+  2026-08-15 at the source (`boxed-expression/boxed-symbol.ts`). The
+  `def.value.type.isUnknown` arm of its guard wrote a concrete type onto the
+  value definition while leaving `inferredType` false, so a binding created
+  as `ce.declare(x, 'unknown')` and then narrowed by a use — a loop or
+  comprehension index narrowed to the iterated collection's CLAIMED element
+  type — became an enforceable declaration, and the next assignment of a
+  wider value (`1/2` into an index guessed `integer`) was rejected by
+  `assertAssignableValueDef` (`engine-declarations.ts`) with
+  `incompatible-type` instead of widening the type. `infer()` now sets
+  `def.value.inferredType = true` alongside the type write, which is what the
+  provenance model asks for (inferred means revisable, declared means
+  enforceable — `docs/EFFECTS-MODEL.md`, "Annotation provenance"); a DECLARED
+  concrete type is untouched, since the guard only lets a write through when
+  the type is already inferred or still `unknown`. The fix covers the sites
+  the earlier workaround did not: the destructuring leaves in
+  `library/control-structures.ts` and the auto-declare shadow in
+  `validate.ts`. The two binder-declaration sites in
+  `boxed-expression/box.ts` keep their `inferred: site.type === undefined`
+  spelling — redundant for the assignment path now, kept because it states
+  the binding's provenance before any inference runs, for the readers of
+  `inferredType` that ask whether a type was declared. Blast radius measured
+  on the full suite: 526 suites / 28037 tests / 4306 snapshots pass, zero
+  snapshot changes. Pins: the "inference marks its own writes inferred"
+  block in `test/compute-engine/tycho-item-194-range-broadcast-type.test.ts`
+  (widening on the inferred track, and the declared-type contract still
+  throwing).
+- Also open from item 192(b): a compound (`Subscript`) prime base with no
+  application yields `Derivative(Subscript(alpha,1))` while a fused name
+  yields `Prime(F_0)` — pre-existing, whether `Prime` or `Derivative` is the
+  canonical no-argument head is a convention question.
+
 ### `And`/`Or` (`&&`/`||`) did not short-circuit and reordered their operands (FIXED 2026-08-15)
 
 Reported by the user against Epsil and confirmed at the engine level:

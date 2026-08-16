@@ -1704,8 +1704,10 @@ describe('POINT/TUPLE ARITHMETIC — could-be-numeric elements match the validat
     const p = ce.parse('2(1, 0.3m)');
     expect(p.operator).toBe('Multiply');
     // Phase C representation unification: literal lists type honestly
-    // (list<finite_…^dims>).
-    expect(p.type.toString()).toBe('tuple<finite_integer, vector<finite_integer^3>>');
+    // (list<finite_…^dims>). The float factor folds INTO the cells, so the
+    // component is a vector of REALS — the value is `[0.6, 1.2, 1.8]`, which
+    // the previous `finite_integer` cell claim did not admit (Tycho item 194).
+    expect(p.type.toString()).toBe('tuple<finite_integer, vector<finite_real^3>>');
   });
 
   test('provably non-numeric component: tuple<number, list<string>> symbol still groups as Tuple', () => {

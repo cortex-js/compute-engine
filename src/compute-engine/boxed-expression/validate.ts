@@ -489,7 +489,17 @@ export function checkNumericArgs(
         // (not just free symbols), so a concrete literal list containing an
         // inferred function call still needs the walk.
         if (x.isLazyCollection) continue;
-        for (const y of x.each()) y.infer(inferredType);
+        // An ELEMENT that is itself a collection is consumed by NESTED
+        // broadcast, not as a scalar, so it gets the same exclusion the
+        // top-level operand gets on the branch below. Without it,
+        // `Multiply(2, [L, L])` with `L := [1, 2]` narrowed `L`'s value
+        // definition from `vector<finite_integer^2>` to `real` while
+        // evaluating to the matrix `[[2, 4], [2, 4]]` — an unsound declared
+        // type for a value that is still a list, and one that made a second
+        // broadcast over the same symbol claim `vector<real^2>` for a
+        // `matrix<...^(2x2)>` result.
+        for (const y of x.each())
+          if (!excludedFromScalarInference(y)) y.infer(inferredType);
       } else if (!excludedFromScalarInference(x)) x.infer(inferredType);
     // A possibly-collection operand (a `vector<n>`-returning application,
     // `number | list`, a tuple, a `dictionary<…>`-shaped signature) is not a

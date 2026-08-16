@@ -2499,8 +2499,26 @@ function canonicalizeBinder(
         if (sym === undefined) continue;
         // An explicit `ce.declare()` is not affected by `noAutoDeclare`: it
         // always lands in the target (this operator's) scope.
+        // A site WITHOUT a declared type gets an INFERRED `unknown` binding,
+        // not a declared one. A binder's canonical handler then narrows the
+        // index to whatever the iterated collection's element type claims
+        // (`canonicalLoopLike` in `library/control-structures.ts` does this
+        // for `Loop`/`Comprehension`) — a GUESS, which an element whose
+        // actual value falls outside the claimed element type must be able to
+        // widen at the per-iteration `ce.assign(index, value)` rather than be
+        // rejected by it as `incompatible-type` (`assignFn`,
+        // `engine-declarations.ts`, which widens on the inferred track and
+        // enforces on the declared one). `BoxedSymbol.infer()` also marks the
+        // types it writes inferred, so this is belt-and-braces; declaring the
+        // provenance HERE keeps the binding honest even before any inference
+        // runs, for the readers of `inferredType` that ask whether a type was
+        // declared. A site that DOES declare a type states a real contract
+        // and stays on the declared track.
         if (!scope.bindings.has(sym.symbol))
-          ce.declare(sym.symbol, site.type ?? 'unknown');
+          ce.declare(sym.symbol, {
+            type: site.type ?? 'unknown',
+            inferred: site.type === undefined,
+          });
       }
       result = applyOperatorDefinition(
         ce,
@@ -2588,8 +2606,18 @@ function bindBindingSites(
       // The 'post' phase is the authoritative one: a handler that reshapes
       // its operands (or supplies a default variable) can reveal a site the
       // 'pre' phase could not see, and that site still gets its binding here.
+      // As in the 'pre' phase above: a site without a declared type gets an
+      // INFERRED binding, so the narrowing a binder's canonical handler
+      // applies (from the iterated collection's claimed element type) stays a
+      // revisable guess rather than a contract the per-iteration assignment
+      // must satisfy.
       if (!scope.bindings.has(id))
-        ce._inScope(scope, () => ce.declare(id, site.type ?? 'unknown'));
+        ce._inScope(scope, () =>
+          ce.declare(id, {
+            type: site.type ?? 'unknown',
+            inferred: site.type === undefined,
+          })
+        );
       // From the scope's OWN binding, not by name: `ce.symbol()` resolves a
       // constant-named variable (`D(f, Pi)`) to the interned constant rather
       // than to the binding this node just declared for it.

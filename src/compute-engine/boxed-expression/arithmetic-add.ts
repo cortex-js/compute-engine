@@ -3,7 +3,7 @@ import { getImaginaryFactor } from './utils.js';
 import { flatten } from './flatten.js';
 import { order, sortAddTerms } from './order.js';
 import { Type } from '../../common/type/types.js';
-import { widen } from '../../common/type/utils.js';
+import { collectionElementType, widen } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
@@ -277,6 +277,104 @@ export function canonicalAdd(
   return ce._fn('Add', sortAddTerms(xs));
 }
 
+/**
+ * The result type of an elementwise arithmetic operation whose single shaped
+ * COLLECTION operand absorbs scalar co-operands into its cells: the
+ * collection's structure with its element type widened by the scalar types.
+ *
+ * This keeps the declared type a sound upper bound of the evaluated value.
+ * Echoing the collection operand's type verbatim claimed `integer` cells for
+ * `(1..4)·1/2`, whose values are `1/2, 1, 3/2, 2` — and a comprehension
+ * binder declared from that element type then rejected its own first value.
+ *
+ * Structure is preserved wherever the type can carry it: a `list` kind keeps
+ * its dimensions, a parameterized `collection`/`indexed_collection`/`set`
+ * keeps its kind. A collection spelling whose element type is baked into the
+ * NAME cannot carry a widened element — `range`'s members are integers by
+ * definition — so those degrade to `indexed_collection<E>`.
+ *
+ * A cell that is ITSELF a collection (`list<list<number>>`, whose inner shape
+ * lives in `elements` rather than in `dimensions`) absorbs the scalars one
+ * level further down, recursively: the scalar joins the innermost cells, never
+ * the collection cell itself. A union of a scalar and a collection would be a
+ * type no evaluated value ever has, and union matching is all-members, so it
+ * also makes `type.matches('collection')` answer a confident `false`.
+ *
+ * Returns `collectionType` unchanged when there is nothing to sharpen: no
+ * scalars, an element type that already covers them, a type whose element
+ * type is unknown (`any`, or a non-collection), or a collection cell this
+ * function cannot rebuild (`tuple`, `record`, `dictionary`, or a reference to
+ * a type alias).
+ */
+export function absorbScalarsIntoCells(
+  collectionType: Readonly<Type>,
+  scalarTypes: ReadonlyArray<Type>
+): Type {
+  if (scalarTypes.length === 0) return collectionType as Type;
+  // The cell type ONE level down, not the type one index yields. On a `list`
+  // kind a multi-dimensional shape lives in `dimensions` rather than in nested
+  // `elements`, so read `elements` directly: `collectionElementType` would
+  // answer a `matrix`'s ROW type (`vector`), and widening a scalar into that
+  // produced the nonsense `list<list<finite_integer | vector>>` for `2Y`.
+  const elt =
+    typeof collectionType !== 'string' && collectionType.kind === 'list'
+      ? collectionType.elements
+      : collectionElementType(collectionType);
+  if (elt === undefined || elt === 'any') return collectionType as Type;
+  // `elements` is the LEAF only when it is a scalar. A DIMENSIONLESS nested
+  // collection (`list<list<number>>`, the type of `List(L, L)` for
+  // `L: list<number>`) carries its inner shape in `elements` instead, so the
+  // scalar folds into the INNER cells: recurse. Widening a scalar against a
+  // collection cell would produce `list<finite_integer | list<number>>` — a
+  // union of a scalar and a collection, which is never inhabited by the
+  // evaluated value (every element stays a list) and makes
+  // `type.matches('collection')` answer a confident `false`.
+  let cell: Type;
+  if (isSubtype(elt, 'collection')) {
+    // Only the kinds whose `elements` is a single rebuildable cell type can be
+    // recursed into. A `tuple`/`record`/`dictionary` cell, or a `reference` to
+    // a (possibly recursive) alias, keeps the collection type unchanged: sound
+    // but imprecise, and never a scalar-plus-collection union. Not following
+    // `reference.def` here is also what keeps this recursion terminating — a
+    // type cycle can only close through that edge.
+    if (
+      typeof elt === 'string' ||
+      (elt.kind !== 'list' &&
+        elt.kind !== 'collection' &&
+        elt.kind !== 'indexed_collection' &&
+        elt.kind !== 'set')
+    )
+      return collectionType as Type;
+    cell = absorbScalarsIntoCells(elt, scalarTypes);
+  } else {
+    cell = widen(elt, ...scalarTypes);
+    // Neither sum nor product is closed over `imaginary`: `i + (-i) = 0` and
+    // `i · i = -1` are both real. `finite_complex` covers the closure — the
+    // same repair the scalar tail of `addType` applies to its final widen.
+    if (cell === 'imaginary') cell = 'finite_complex';
+  }
+  // Nothing was sharpened (the new cell type is equivalent to the element
+  // type, either because the widen added nothing or because the nested recursion
+  // came back unchanged): hand back the original spelling so `2·(1..4)` still
+  // types as it did.
+  if (isSubtype(cell, elt)) return collectionType as Type;
+  // Rebuild in place only for the kinds whose `elements` IS a single cell
+  // type. A `tuple` keeps an ARRAY there, a `record` a field map and a
+  // `dictionary` none at all, so writing a cell type into those would produce
+  // a malformed type; they keep their own spelling.
+  if (typeof collectionType !== 'string') {
+    if (
+      collectionType.kind === 'list' ||
+      collectionType.kind === 'collection' ||
+      collectionType.kind === 'indexed_collection' ||
+      collectionType.kind === 'set'
+    )
+      return { ...collectionType, elements: cell };
+    return collectionType as Type;
+  }
+  return { kind: 'indexed_collection', elements: cell };
+}
+
 export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   if (args.length === 0) return 'finite_integer'; // = 0
   if (args.length === 1) return args[0].type;
@@ -310,12 +408,10 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
       // declared type must remain a sound UPPER bound of the evaluated
       // value (the honest literal cell type made verbatim propagation
       // over-narrow).
-      const tt = tensors[0].type.type;
-      if (typeof tt !== 'string' && tt.kind === 'list' && others.length > 0) {
-        const cell = widen(tt.elements, ...others.map((x) => x.type.type));
-        return { kind: 'list', elements: cell, dimensions: tt.dimensions };
-      }
-      return tt;
+      return absorbScalarsIntoCells(
+        tensors[0].type.type,
+        others.map((x) => x.type.type)
+      );
     }
   }
   // Collection-typed operands (declared matrix/vector/list symbols, OR a
@@ -355,20 +451,10 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
       // cells (`vector<3>`), not `finite_integer` — the evaluated value's
       // elements include `a`.
       const scalars = args.filter((x) => !isBroadcastShaped(x));
-      if (
-        scalars.length > 0 &&
-        typeof collected !== 'string' &&
-        collected.kind === 'list'
-      )
-        return {
-          kind: 'list',
-          elements: widen(
-            collected.elements,
-            ...scalars.map((x) => x.type.type)
-          ),
-          dimensions: collected.dimensions,
-        };
-      return collected;
+      return absorbScalarsIntoCells(
+        collected,
+        scalars.map((x) => x.type.type)
+      );
     }
     return widen(...args.map((x) => x.type.type));
   }

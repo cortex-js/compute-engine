@@ -506,6 +506,21 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           rollbackFrame.record({ undo: () => target._restoreTypeSlots(slots) });
         }
         def.value.type = inferred;
+        // A type this method writes is INFERRED, never a contract. Without
+        // this the `type.isUnknown` arm of the guard above turned a guess
+        // into a hard declaration: a binding created as
+        // `ce.declare(x, 'unknown')` and then narrowed by a use (a loop or
+        // comprehension index narrowed to the iterated collection's claimed
+        // element type, say `integer`) kept `inferredType === false`, so a
+        // later assignment of a wider value (`1/2`) was rejected by
+        // `assertAssignableValueDef` (`engine-declarations.ts`) instead of
+        // widening the type. On the inferred track the assignment widens, as
+        // the provenance model requires — inferred means revisable, declared
+        // means enforceable (`docs/EFFECTS-MODEL.md`, "Annotation
+        // provenance"). A DECLARED concrete type is untouched: the guard
+        // above only lets a write through when the type is already inferred
+        // or still `unknown`.
+        def.value.inferredType = true;
         // Single emission point for the write's passive observers: the
         // provenance history, the fresh-inference set (unknown → concrete
         // during a boxing, for the fresh-matrix-inference repair), and the

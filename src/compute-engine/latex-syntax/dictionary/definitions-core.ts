@@ -37,6 +37,7 @@ import { isEquationOperator, isInequalityOperator } from '../utils.js';
 import { BoxedType } from '../../../common/type/boxed-type.js';
 import { reducedRationalFromDecimal } from '../../numerics/rationals.js';
 import { parseQuantifier } from './definitions-logic.js';
+import { absorbSubscripts } from '../parse-symbol.js';
 
 // ---------------------------------------------------------------------------
 // Component-access member-name table (C2)
@@ -3401,6 +3402,69 @@ function serializeLeibnizPartial(
   return `\\frac{${numer}}{${denomParts.join(' ')}} ${fn}(${argList})`;
 }
 
+/**
+ * Consume a subscript written AFTER the prime marks (`F'_0`, `F^{\prime}_0`)
+ * and fold it into the base, so the prime applies to the subscripted symbol
+ * `F_0`.
+ *
+ * The subscript of a primed function name is part of the NAME, not something
+ * applied to the derivative: `F'_0(t)` and `F_0'(t)` denote the same thing
+ * (the Desmos editor emits the prime-first spelling, `\prime` or `'`). Without
+ * this the `_` was left for the generic subscript parselet, which produced
+ * `Subscript(Prime(F), 0)` and — the visible symptom — left the following
+ * `(t)` to be read as an invisible product instead of an application.
+ *
+ * Returns `lhs` unchanged (with the parser position untouched) when no
+ * subscript follows.
+ */
+function absorbPrimeSubscript(
+  parser: Parser,
+  lhs: MathJsonExpression
+): MathJsonExpression {
+  if (parser.atEnd || parser.peek !== '_') return lhs;
+
+  // A base spelled with a single token (`F`) folds the subscript into the
+  // symbol NAME (`F_0`), which is exactly what `parseSymbol()` does for the
+  // `F_0'` spelling; a longer name — a LaTeX command such as `\alpha`, or a
+  // `\operatorname{…}` symbol — keeps the `Subscript` reading, again matching
+  // that spelling. The LaTeX spelling is no longer available here, but a
+  // one-code-point name can only have come from the single-token branch.
+  const id = symbol(lhs);
+  if (id !== null && [...id].length === 1) {
+    const info = parser.resolveSymbol(id);
+    // A base with `subscriptEvaluate` owns the meaning of its subscripts and
+    // never absorbs them; an indexed collection absorbs only a subscript whose
+    // joined name is itself declared (both rules live in `absorbSubscripts`).
+    if (!info?.subscriptEvaluate) {
+      const beforeSubscripts = parser.index;
+      const joined = absorbSubscripts(
+        parser,
+        id,
+        info?.type.matches('indexed_collection') ?? false
+      );
+      if (joined !== id) return joined;
+      // `absorbSubscripts()` can consume input yet return the base name
+      // unchanged: an empty braced subscript (`F'_{}`) is meaningless
+      // decoration that it swallows and drops. The parser is then no longer
+      // positioned on `_`, so the fallback below must not run — it would read
+      // the FOLLOWING token as the subscript (turning `F'_{}(t)` into
+      // `Subscript(Prime(F), t)` with a stray `)`). Return the base and let
+      // the usual prime/application parsing continue, so that `F'_{}(t)`
+      // parses like `F_{}'(t)`.
+      if (parser.index !== beforeSubscripts) return lhs;
+    }
+  }
+
+  const index = parser.index;
+  parser.nextToken(); // consume '_'
+  const sub = parser.parseGroup() ?? parser.parseToken();
+  if (sub === null || isEmptySequence(sub)) {
+    parser.index = index;
+    return lhs;
+  }
+  return ['Subscript', lhs, sub];
+}
+
 function parsePrime(
   parser: Parser,
   lhs: MathJsonExpression,
@@ -3413,6 +3477,10 @@ function parsePrime(
     else if (parser.match('\\tripleprime')) order += 3;
     else break;
   }
+
+  // `F'_0(t)` names the derivative of `F_0`: fold a trailing subscript into
+  // the base before anything below inspects it.
+  lhs = absorbPrimeSubscript(parser, lhs);
 
   // If the lhs is a Prime/Derivative, increase the derivation order
   const lhsh = operator(lhs);

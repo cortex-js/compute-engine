@@ -700,7 +700,27 @@ function differentiateNode(
   // `Tuple` OPERATOR, leaving inert `Apply(Derivative("Tuple", …), …)` nodes
   // (reported by the Tycho team as item 174; a Frenet-frame document built on
   // `f'(t)/|f'(t)|` never closed and drew nothing).
-  if (expr.operator === 'List' || expr.operator === 'Tuple') {
+  //
+  // `PointList` belongs here too: it is the explicit point-container head that
+  // importers emit, and evaluating it yields a `Tuple` (scalar components) or a
+  // `List` of tuples (one or more collection components, which it zips). Either
+  // way d/dt acts componentwise on the operands, and zipping commutes with it,
+  // so differentiating the operands and keeping the `PointList` head gives the
+  // same answer as differentiating the evaluated form. Keeping the head matters
+  // because `PointList` is load-bearing downstream (plot lowering). Without
+  // this case a `PointList` body reached the generic chain rule and produced
+  // inert `Apply(Derivative("PointList", …), …)` nodes — the same failure as
+  // item 174, resurfacing for `PointList` as Tycho item 192(a). It only bit the
+  // route that differentiates an UNEVALUATED body: a function literal stored as
+  // a symbol's VALUE (`p` assigned `Function(PointList(…), t)`, reached via
+  // `Derivative(p, 1)`), whereas an operator definition (`g(t) := …`) is
+  // resolved by applying and EVALUATING it, which had already turned the
+  // `PointList` into a `Tuple`.
+  if (
+    expr.operator === 'List' ||
+    expr.operator === 'Tuple' ||
+    expr.operator === 'PointList'
+  ) {
     const elements = expr.ops.map(
       (op) =>
         differentiate(op, v, depth + 1, trace) ??

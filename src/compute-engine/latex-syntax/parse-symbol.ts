@@ -374,7 +374,7 @@ export function parseInvalidSymbol(parser: Parser): MathJsonExpression | null {
  *
  * The parser index is left just after the last absorbed subscript.
  */
-function absorbSubscripts(
+export function absorbSubscripts(
   parser: Parser,
   id: string,
   requireResolution: boolean

@@ -23,6 +23,7 @@ import {
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
@@ -133,14 +134,29 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // element-wise (see `evaluateElementwiseSelection`): the result is a
         // list of the branches' element types.
         const shape = elementwiseConditionShape([cond]);
+        const armList = [ifTrue, ifFalse].filter((x) => x !== undefined);
         if (shape)
           return elementwiseResultType(
-            [ifTrue, ifFalse].filter((x) => x !== undefined),
+            armList,
             shape.length,
             // The else branch IS the default clause: without one, unselected
             // positions are the `NaN` no-match cell.
             ifFalse !== undefined
           );
+        // A condition that is only POSSIBLY a boolean collection selects
+        // element-wise for some of its runtime values and picks a single arm
+        // for the others, so the honest result is `broadcastable` of the
+        // element-wise cell type. Without an else branch the scalar outcome is
+        // `Nothing`, which `broadcastable` does not cover, so keep that arm.
+        if (possiblyElementwiseCondition([cond])) {
+          const broadcast: Type = {
+            kind: 'broadcastable',
+            elements: elementwiseCellType(armList, ifFalse !== undefined),
+          };
+          return ifFalse !== undefined
+            ? broadcast
+            : reduceType({ kind: 'union', types: [broadcast, 'nothing'] });
+        }
         // Without an else branch a false condition yields `Nothing`, and the
         // `Nothing` arm must survive in the type: `widen` treats `nothing` as
         // a join identity and would swallow it, so build the union explicitly.
@@ -461,6 +477,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             // every position, so the `NaN` no-match cell is unreachable.
             dflt >= 0
           );
+        // A condition that is only POSSIBLY a boolean collection selects
+        // element-wise for some of its runtime values and picks a single arm
+        // for the others: `broadcastable` of the element-wise cell type is the
+        // type that covers both.
+        if (possiblyElementwiseCondition(conds))
+          return {
+            kind: 'broadcastable',
+            elements: elementwiseCellType(arms, dflt >= 0),
+          };
         return widen(...arms.map((x) => x.type.type));
       },
       canonical: (args, options) => {
@@ -736,6 +761,13 @@ const BOOLEAN_COLLECTION_TYPE = parseType(
 );
 
 /**
+ * The cell type of `BOOLEAN_COLLECTION_TYPE`, used to recognize a
+ * `broadcastable<boolean>` condition — one that is a boolean collection only
+ * for some of its possible runtime values (`possiblyElementwiseCondition`).
+ */
+const CONDITION_CELL_TYPE = parseType('boolean | missing');
+
+/**
  * The materialized cells of a condition that activates the ELEMENT-WISE
  * selection path, or `undefined` when it does not.
  *
@@ -967,9 +999,10 @@ function armElementType(t: Readonly<Type>): Type {
 }
 
 /**
- * The type of an element-wise selection: a list of the arms' element types (a
- * list-valued arm contributes its ELEMENT type, since it is indexed
- * position-wise; a scalar arm contributes its own type, since it lifts).
+ * The type of ONE CELL of an element-wise selection: the join of the arms'
+ * element types (a list-valued arm contributes its ELEMENT type, since it is
+ * indexed position-wise; a scalar arm contributes its own type, since it
+ * lifts).
  *
  * `hasDefault` — a clause whose condition is literally `True` (for `If`, an
  * else branch) — decides whether the no-match cell can occur. Without one, a
@@ -982,15 +1015,57 @@ function armElementType(t: Readonly<Type>): Type {
  * element-wise conditional an over-wide union, which breaks that same
  * dispatch.
  */
+function elementwiseCellType(
+  arms: ReadonlyArray<Expression>,
+  hasDefault: boolean
+): Type {
+  const armTypes = arms.map((x) => armElementType(x.type.type));
+  return hasDefault ? widen(...armTypes) : widen(...armTypes, 'number');
+}
+
+/**
+ * True when a condition is only POSSIBLY a boolean collection: its type is
+ * `broadcastable<boolean>`, the union `boolean | indexed_collection<boolean>`
+ * the engine gives a comparison whose broadcast outcome it cannot settle
+ * statically — `C = U_1` with `C` declared `indexed_collection` and `U_1`
+ * top-typed is `[True,False,True]` when `U_1` turns out to be a scalar and the
+ * single boolean of a whole-collection compare when it turns out to be a
+ * collection (`library/relational-operator.ts`, `comparisonResultType`).
+ *
+ * Such a condition takes the element-wise selection path at runtime only in
+ * the first case, so neither the element-wise list type nor the scalar join of
+ * the arms is honest on its own: the result is `broadcastable` of the same
+ * cell type the element-wise path would produce.
+ *
+ * The `kind` test is load-bearing. `matches('broadcastable<boolean>')` would
+ * also accept a plain scalar `boolean` condition, since a scalar is a member
+ * of the union that `broadcastable<T>` abbreviates.
+ */
+function possiblyElementwiseCondition(
+  conds: ReadonlyArray<Expression | undefined>
+): boolean {
+  return conds.some((cond) => {
+    const t = cond?.type.type;
+    return (
+      t !== undefined &&
+      typeof t !== 'string' &&
+      t.kind === 'broadcastable' &&
+      isSubtype(t.elements, CONDITION_CELL_TYPE)
+    );
+  });
+}
+
+/**
+ * The type of an element-wise selection: a list of `elementwiseCellType`, given
+ * the statically known length of the condition (`undefined` when the length is
+ * not provable, which yields an unbounded `list`).
+ */
 function elementwiseResultType(
   arms: ReadonlyArray<Expression>,
   length: number | undefined,
   hasDefault: boolean
 ): Type {
-  const armTypes = arms.map((x) => armElementType(x.type.type));
-  const elements = hasDefault
-    ? widen(...armTypes)
-    : widen(...armTypes, 'number');
+  const elements = elementwiseCellType(arms, hasDefault);
   // The union-free clause (tensor-unification design §D3 rule 2): a
   // dimensioned `list` type IS the tensor claim (`isTensor` is exactly
   // `dimensions !== undefined`), and a heterogeneous cell population never

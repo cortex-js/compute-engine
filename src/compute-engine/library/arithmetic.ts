@@ -79,6 +79,7 @@ import {
   add,
   addType,
   addN,
+  absorbScalarsIntoCells,
 } from '../boxed-expression/arithmetic-add.js';
 import {
   mul,
@@ -183,6 +184,7 @@ import {
   couldBeNumericTuple,
   isLinearAlgebraCollection,
   isBroadcastCollectionType,
+  isDeclaredScalarNumber,
   isPossiblyCollectionTyped,
   broadcastableResultTypeOf,
   isTuple,
@@ -1842,23 +1844,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // tensor's honest cell type with the scalar types so the
             // declared type stays a sound upper bound (`x·[0,0,1,1]` has
             // `number` cells, not `finite_integer`).
-            const tt = tensorOps[0].type.type;
-            if (
-              typeof tt !== 'string' &&
-              tt.kind === 'list' &&
-              others.length > 0
-            ) {
-              const cell = widen(
-                tt.elements,
-                ...others.map((x) => x.type.type)
-              );
-              return {
-                kind: 'list',
-                elements: cell,
-                dimensions: tt.dimensions,
-              };
-            }
-            return tensorOps[0].type;
+            return absorbScalarsIntoCells(
+              tensorOps[0].type.type,
+              others.map((x) => x.type.type)
+            );
           }
         }
         // Collection-typed operands (declared matrix/vector/list symbols, or
@@ -1871,7 +1860,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // scalars/unknown-typed symbols are not collection types, so the
         // all-scalar numeric paths below are untouched.
         const collectionOps = ops.filter((x) => isLinearAlgebraCollection(x));
-        if (collectionOps.length === 1) return collectionOps[0].type;
+        if (collectionOps.length === 1) {
+          // Scalar FACTORS fold into the cells elementwise — `(1..4)/2` (which
+          // `canonicalDivide` rewrites to `Multiply(1/2, …)`), `0.5·L` — so
+          // they must widen the ELEMENT type, exactly as in `addType`.
+          // Echoing the collection operand's type verbatim claimed `integer`
+          // cells for a product whose values are rationals.
+          // Only DECLARED scalar numbers participate — a literal, or a symbol
+          // or call whose numeric type the user stated. An `unknown`-typed
+          // factor carries no tier to combine (and would widen every cell to
+          // `any`); a merely INFERRED numeric type is retractable evidence —
+          // the same rule `canonicalAdd` applies to its scalar-plus-tuple
+          // rejection — and letting a guess of `number` widen the cells makes
+          // the literal's result type disagree with a declared signature that
+          // the operand types actually satisfy.
+          const others = ops.filter((x) => !isLinearAlgebraCollection(x));
+          if (others.every((x) => isDeclaredScalarNumber(x)))
+            return absorbScalarsIntoCells(
+              collectionOps[0].type.type,
+              others.map((x) => x.type.type)
+            );
+          return collectionOps[0].type;
+        }
         if (collectionOps.length > 1)
           return widen(...collectionOps.map((x) => x.type.type));
         // An operand whose collection-ness is not statically visible (a top

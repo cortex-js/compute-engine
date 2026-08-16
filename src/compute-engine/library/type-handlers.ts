@@ -534,6 +534,21 @@ export function bigOpResultType(
   const body = ops[0];
   if (ops.length > 1 && body?.type.matches('indexed_collection'))
     return body.type;
+  // A body that is only POSSIBLY a collection carries its `broadcastable<T>`
+  // type through for the same reason: `broadcastable<T>` abbreviates the union
+  // `T | indexed_collection<T>`, so it covers both the scalar accumulation and
+  // the element-wise one, and the big-op cannot decide between them until the
+  // body evaluates. A `Which` whose condition is a comparison the engine
+  // cannot statically prove will broadcast (`comparisonResultType` in
+  // `library/relational-operator.ts`) is the case that produces such a body.
+  const bodyType = body?.type.type;
+  if (
+    ops.length > 1 &&
+    bodyType !== undefined &&
+    typeof bodyType !== 'string' &&
+    bodyType.kind === 'broadcastable'
+  )
+    return body!.type;
   return 'number';
 }
 
