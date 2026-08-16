@@ -2155,10 +2155,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // **IMPORTANT** Head should work on non-canonical expressions
         if (args.length !== 1) return null;
         const op1 = args[0];
+        // A symbol operand is NOT folded here: `Head(x)` reports the head of
+        // the value bound to `x` at evaluation time (`x := a + 1` → `Add`),
+        // so folding it to `Symbol` at canonicalization would be value-blind
+        // — and would freeze `f(e) = Head(e)` to the literal `Symbol` at
+        // definition time. Only an unbound symbol has head `Symbol`, and only
+        // evaluation can tell.
+        if (isSymbol(op1)) return ce._fn('Head', canonical(ce, args));
         return ce.expr(op1.operator);
       },
-      evaluate: (ops, { engine: ce }) =>
-        ce.symbol(ops[0]?.operator ?? 'Undefined'),
+      evaluate: ([x], { engine: ce }) => {
+        if (x === undefined) return ce.symbol('Undefined');
+        // Held (lazy) operand: a symbol is resolved through its binding, so
+        // `Head(x)` sees the value of `x`, not the symbol itself.
+        if (isSymbol(x)) x = x.canonical.evaluate();
+        return ce.symbol(x.operator);
+      },
     },
 
     Tail: {
@@ -2173,8 +2185,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return ce._fn('Tail', canonical(ce, args));
       },
       // **IMPORTANT** Tail should work on non-canonical expressions
-      evaluate: ([x], { engine: ce }) =>
-        isFunction(x) ? ce._fn('Sequence', x.ops) : ce.Nothing,
+      evaluate: ([x], { engine: ce }) => {
+        // Held (lazy) operand: a symbol is resolved through its binding, so
+        // `Tail(x)` with `x := a + 1` yields `Sequence(a, 1)` (see `Head`).
+        if (isSymbol(x)) x = x.canonical.evaluate();
+        return isFunction(x) ? ce._fn('Sequence', x.ops) : ce.Nothing;
+      },
     },
 
     Spread: {

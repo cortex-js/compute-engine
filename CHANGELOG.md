@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **`Head` and `Tail` are no longer value-blind on a symbol operand.** Both
+  are lazy (structural) operators, and their canonical fold treated a symbol
+  operand as the structure itself: `["Head", "x"]` canonicalized to the
+  literal `"Symbol"` regardless of what `x` was bound to, and `["Tail", "x"]`
+  evaluated to `Nothing`. This also froze a user function `f(e) = Head(e)`
+  to the constant `Symbol` at definition time (`f(3 + y)` returned `Symbol`).
+  A symbol operand now stays symbolic at canonicalization and is resolved
+  through its binding at evaluation: with `x := a + 1`, `Head(x)` is `Add`
+  and `Tail(x)` is `Sequence(a, 1)`; an unbound symbol still has head
+  `Symbol` and no tail. Compound operands fold structurally as before
+  (`Head(a + 1)` is `Add` even when `a` has a value).
+
 ## 0.113.0 _2026-08-16_
 
 ### Breaking Changes
@@ -184,7 +200,13 @@
   a parameter DECLARED complex keeps the existing call-site coercion, and
   arguments that are not provably scalar keep the previous runtime broadcast.
   Shader targets are unchanged (their statically typed signatures fail
-  closed on such a call).
+  closed on such a call). The same lane also reaches the two collection
+  shapes of the defect: a collection of complex scalars broadcast into
+  scalar parameters (`b(L)` with `L: list<complex>`, previously `[NaN, NaN]`)
+  takes the elements' lane, and a bare user-function symbol used as an
+  element callback over such a source (`Map(b, L)`, previously `[NaN, NaN]`
+  while the inline `Map(x ↦ 2x, L)` was correct) is compiled through its
+  eta-expansion so the call inside grants the lane.
 
   Found alongside it: an emitted user-function body compiled under the
   CALLER's `Block` local-shape frames, so a body reading a global `k` while
