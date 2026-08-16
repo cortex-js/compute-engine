@@ -8,6 +8,7 @@ import {
   functionResult,
   functionArity,
   hasFunctionSignature,
+  collectionElementType,
 } from '../../src/common/type/utils';
 import type { Type } from '../../src/common/type/types';
 import { reduceType } from '../../src/common/type/reduce';
@@ -2059,5 +2060,65 @@ describe('`callback<…>` misuse on the Epsil annotation route', () => {
     );
     // `callback<` ends at offset 16, `integer` at 23.
     expect(diagnostic.range).toEqual([16, 23]);
+  });
+});
+
+describe('the element type of an UNPARAMETERIZED collection type', () => {
+  // `collection` is not `collection<any>`. Someone who writes the bare form has
+  // said nothing about the members, so their type is the PLACEHOLDER `unknown`
+  // — open to refinement — rather than the CONTRACT `any`, which is a promise
+  // the author would have had to make (ruling of 2026-08-15, `unknown` as
+  // placeholder; `(any) -> any` is the identity function's signature).
+  //
+  // This used to disagree with itself: the helper answered `any` while the
+  // operators that actually extract an element answered `unknown`, so the same
+  // question had two answers and a caller's behavior turned on which it asked.
+  // BOTH SPELLINGS ARE PINNED HERE TOGETHER, which is the point of this
+  // block — a fix to one side that forgets the other fails here.
+  const BARE = [
+    'collection',
+    'indexed_collection',
+    'list',
+    'set',
+    'tuple',
+    'dictionary',
+    'record',
+  ] as const;
+
+  test.each(BARE)('collectionElementType(%s) is `unknown`', (type) => {
+    expect(collectionElementType(parseType(type))).toBe('unknown');
+  });
+
+  // `range` is the one unparameterized case whose elements ARE known — finite
+  // positive integers — so it is concrete by fact, not by contract, and must
+  // not be swept into the rule above.
+  test('collectionElementType(range) stays `integer`', () => {
+    expect(collectionElementType(parseType('range'))).toBe('integer');
+  });
+
+  // A parameterized type still reports exactly what it was given: the change
+  // is about the ABSENCE of an argument, never about losing one.
+  test.each([
+    ['collection<integer>', 'integer'],
+    ['indexed_collection<string>', 'string'],
+    ['list<boolean>', 'boolean'],
+  ])('collectionElementType(%s) is %s', (type, expected) => {
+    expect(collectionElementType(parseType(type))).toBe(expected);
+  });
+
+  // The other spelling of the same question — what the engine reports for an
+  // element actually pulled out of a bare-typed collection. Imported lazily,
+  // matching the `callback<…>` block above: this suite is otherwise free of
+  // engine dependencies.
+  test('the extraction operators agree with the helper', () => {
+    const {
+      ComputeEngine,
+    } = require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    const ce = new ComputeEngine();
+    ce.declare('anIndexed', 'indexed_collection');
+    ce.declare('aCollection', 'collection');
+    expect(ce.box(['At', 'anIndexed', 1]).type.toString()).toBe('unknown');
+    expect(ce.box(['First', 'aCollection']).type.toString()).toBe('unknown');
+    expect(ce.box(['Last', 'anIndexed']).type.toString()).toBe('unknown');
   });
 });

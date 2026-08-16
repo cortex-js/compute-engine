@@ -1271,7 +1271,7 @@ with a plausible `list<unknown>` type and no diagnostic anywhere. Usage counts
 therefore invert the priority here — the three with real incidence are already
 covered downstream, and the one with none is the live hazard.
 
-### The element type of a bare `collection`/`indexed_collection` is `any` in one place and `unknown` in another (OPEN, types — small, found while investigating Tycho item 193)
+### The element type of a bare `collection`/`indexed_collection` is `any` in one place and `unknown` in another (FIXED 2026-08-16)
 
 `collectionElementType()` (`src/common/type/utils.ts`) answers **`any`** for the
 bare `collection` and `indexed_collection` types, while the operators that
@@ -1297,6 +1297,38 @@ goes, and pin both spellings in the same test so they cannot drift again.
 Found while chasing Tycho item 193, but NOT its cause — 193 is understood
 (see the `Which`/`Sum` typing under bare operands) and this is upstream
 housekeeping rather than a contributor to it.
+
+**RULED AND FIXED 2026-08-16: `unknown` wins; the extraction operators were
+right and the helper now agrees with them.** The placeholder ruling of
+2026-08-15 settles it rather than leaving a coin-flip: `any` is something the
+author SAID — "anything may go here", the promise `(any) -> any` makes —
+while `unknown` is the ABSENCE of a statement. Writing `collection` is not
+writing `collection<any>`, so the honest element type is the placeholder.
+
+Scope was wider than the entry's title: `list`, `set`, `tuple`, `dictionary`
+and `record` answered `any` for their bare forms too, and all of them moved.
+Fixing only the two named types would have left the helper internally
+inconsistent — `unknown` for some bare collections and `any` for others, with
+no principle separating them. `range` is the one deliberate exception and is
+unchanged: its members really are known to be finite positive integers, which
+is a fact rather than an absent statement.
+
+Measured behavioral delta across 56 call sites, by A/B-ing the helper: FOUR
+result types change, all in the same direction (a false contract becomes an
+open placeholder).
+
+    Join(C, C)      list<any>  ->  list<unknown>
+    Filter(C, p)    list<any>  ->  list<unknown>
+    Add(C, 1)       list<any>  ->  list<unknown>
+    Multiply(C, 2)  list<any>  ->  list<unknown>
+
+Everything else was already normalizing to `unknown` downstream, which is why
+the full suite passed with ZERO snapshot churn (4312 snapshots) — nothing had
+pinned the old `list<any>` shape.
+
+Both spellings are pinned together in `test/common/types.test.ts`
+("the element type of an UNPARAMETERIZED collection type"), so a future fix to
+one side that forgets the other fails a test.
 
 ### Enabling `complexPromotion` makes scalar arithmetic over a collection-valued call STOP COMPILING (FIXED 2026-08-15 — reported by a consumer's pricing pass)
 

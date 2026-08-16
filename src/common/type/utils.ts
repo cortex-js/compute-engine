@@ -317,19 +317,36 @@ export function functionResult(
   return widen(...arms.map(armResult));
 }
 
+// An UNPARAMETERIZED collection type states nothing about its elements, so
+// its element type is the PLACEHOLDER `unknown`, not the contract `any`.
+//
+// The two are not synonyms (ruling of 2026-08-15, `unknown` as placeholder):
+// `any` is something the author SAID — "anything may go here", the promise
+// `(any) -> any` makes — while `unknown` is the absence of a statement, open
+// to refinement as evidence arrives. Someone who writes `collection` has not
+// written `collection<any>`; they have said nothing about the members.
+//
+// These used to answer `any` while the operators that actually extract an
+// element answered `unknown` (`At(C, 1)`, `First(D)` on a bare-typed `C`/`D`),
+// so the two spellings of the same question disagreed and a caller's behavior
+// turned on which one it consulted. `unknown` is the reading that matches what
+// a reader of `At(C, 1)` can actually conclude, so the operators are right and
+// the helper now agrees with them. Both spellings are pinned together in
+// `test/common/types.test.ts` so they cannot drift apart again.
 export function collectionElementType(type: Readonly<Type>): Type | undefined {
-  if (type === 'collection') return 'any';
-  if (type === 'indexed_collection') return 'any';
-  if (type === 'list') return 'any';
-  // Unlike the unparameterized collection types above, an index span's
-  // element type is KNOWN: its members are finite positive integers. (`any`
+  if (type === 'collection') return 'unknown';
+  if (type === 'indexed_collection') return 'unknown';
+  if (type === 'list') return 'unknown';
+  // An index span is the ONE unparameterized case whose element type is
+  // genuinely known: its members are finite positive integers. That is a fact
+  // about `range`, not an absence of one, so it stays concrete. (`unknown`
   // would be sound but would lose the precision `Range` had before the
   // `range` type existed, when it typed as `indexed_collection<integer>`.)
   if (type === 'range') return 'integer';
-  if (type === 'set') return 'any';
-  if (type === 'tuple') return 'any';
-  if (type === 'dictionary') return 'any';
-  if (type === 'record') return 'any';
+  if (type === 'set') return 'unknown';
+  if (type === 'tuple') return 'unknown';
+  if (type === 'dictionary') return 'unknown';
+  if (type === 'record') return 'unknown';
   if (typeof type === 'string') return undefined;
 
   if (type.kind === 'collection' || type.kind === 'indexed_collection')

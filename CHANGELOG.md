@@ -83,6 +83,22 @@
 
 ### Issues Resolved
 
+- **The element type of an unparameterized collection type is now `unknown`,
+  not `any`.** `collection`, `indexed_collection`, `list`, `set`, `tuple`,
+  `dictionary` and `record` written without a type argument reported `any` for
+  their elements, while the operators that actually extract one (`At`,
+  `First`, `Last`) reported `unknown` — so the same question had two answers
+  and a caller's behavior turned on which it asked. `unknown` is the correct
+  reading: `any` is a CONTRACT the author states ("anything may go here"),
+  while writing a bare `collection` states nothing about the members at all.
+
+  In practice four result types get more honest — `Join`, `Filter`, and scalar
+  arithmetic broadcast over a bare-typed collection now report
+  `list<unknown>` where they claimed `list<any>`. `range` is unchanged
+  (`integer`): its members genuinely are known, which is a fact rather than an
+  absent statement. A parameterized type still reports exactly what it was
+  given.
+
 - **A speculative parse no longer narrows a symbol declared `unknown`.**
   `ce.parse(latex, { speculative: true })` promises to leave no trace in the
   engine's type state, and it confines a narrowing use by shadowing the
