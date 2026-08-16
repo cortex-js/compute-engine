@@ -146,7 +146,9 @@ import {
   unfaithfulComparisonAggregate,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { compileDiagnosticOf } from './diagnostics.js';
 import type {
+  CompileMode,
   CompileTarget,
   CompiledOperators,
   CompiledFunctions,
@@ -170,6 +172,17 @@ import type {
  * separately — `varsObjectName` — because it needs a narrower rename rule.)
  */
 const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set(['_SYS']);
+
+/**
+ * The compile modes the JavaScript target offers (`CompileMode`): all three.
+ * Its emitters implement the complex lowering (`_SYS.c*`), so `'complex'` and
+ * `'auto'` are deliverable; the effective default is therefore `'auto'`.
+ */
+const JS_SUPPORTED_MODES: readonly CompileMode[] = [
+  'strict',
+  'complex',
+  'auto',
+];
 
 const JAVASCRIPT_OPERATORS: CompiledOperators = {
   Add: ['+', 11],
@@ -3909,9 +3922,26 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 };
 
-/** Convert a Complex instance to a plain {re, im} object */
+/**
+ * Convert a Complex instance produced by a TRANSCENDENTAL kernel (`csqrt`,
+ * `cexp`, `casin`, …) to a plain `{re, im}` object, chopping each component
+ * at the kernel-roundoff scale (`ROUNDOFF_TOLERANCE`, 1e-14) — exactly the
+ * chop `apply.ts` applies to the interpreter's complex results, and for the
+ * same reason: `Complex(0.5, 0).asin()` returns `im: 5.55e-17`, dust from
+ * the complex log/sqrt formulation, and `Exp(Ln(-2))` leaves `im =
+ * 2.449e-16`. The dust is removed WHERE IT IS CREATED so that the runner's
+ * result convention can test `im !== 0` EXACTLY (a value whose imaginary
+ * part is exactly zero comes back as a plain `number`) without chopping at
+ * the boundary — ARCHITECTURE.md's rule is never to chop in ring arithmetic
+ * or constructors (`1 + 1e-12i` is a legitimate value and stays one), and
+ * the ring helpers (`cplx`, the emitted `cadd`/`cmul` closures, `cneg`,
+ * `cconj`) do not go through this function.
+ */
 function toRI(c: Complex): { re: number; im: number } {
-  return { re: c.re, im: c.im };
+  return {
+    re: chop(c.re, ROUNDOFF_TOLERANCE),
+    im: chop(c.im, ROUNDOFF_TOLERANCE),
+  };
 }
 
 /**
@@ -5133,6 +5163,13 @@ const SYS_HELPERS = {
     typeof x === 'number'
       ? { re: x, im: 0 }
       : (x as { re: number; im: number }),
+  // The exact runtime realness test of a value that may be a plain number or
+  // a `{re, im}` object: true when the imaginary part is exactly zero. The
+  // `complexIsReal` hook of this target (`CompileTarget.complexIsReal`); the
+  // test is exact because the transcendental kernels chop their own roundoff
+  // dust (`toRI`).
+  cisreal: (x: unknown): boolean =>
+    typeof x === 'number' || (x as { im: number }).im === 0,
   // Element-wise addition, mirroring the interpreter's `Add` broadcast
   // (`addTensors`/`broadcastOverIndexedCollections`): scalar+scalar is ordinary
   // addition; over (possibly nested) arrays it recurses element-wise. Used as
@@ -5645,7 +5682,8 @@ const SYS_HELPERS = {
   catanh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).atanh()),
   cabs: (z: ComplexResult) => new Complex(z.re, z.im).abs(),
   carg: (z: ComplexResult) => new Complex(z.re, z.im).arg(),
-  cconj: (z: ComplexResult) => toRI(new Complex(z.re, z.im).conjugate()),
+  // Ring operation, not a kernel: no roundoff chop (see `toRI`).
+  cconj: (z: ComplexResult) => ({ re: z.re, im: -z.im }),
   cneg: (z: ComplexResult) => ({ re: -z.re, im: -z.im }),
   // Color helpers
   ...colorHelpers,
@@ -5994,6 +6032,37 @@ function makeSysHelpers(ce: ComputeEngine): SysHelpers {
 /**
  * JavaScript-specific function extension that provides system functions
  */
+/**
+ * The compiled JavaScript runner's RESULT CONVENTION (design §5,
+ * `docs/plans/2026-08-16-compile-complex-mode.md`), applied at the boundary
+ * of every `run()` call: a value whose imaginary part is EXACTLY zero comes
+ * back as a plain `number`; otherwise as `{re, im}`. Both directions are
+ * guaranteed — a returned `ComplexResult` always has `im !== 0`, and a real
+ * value is never returned as `{re, im: 0}` — so a consumer's per-sample test
+ * is the single `typeof v === 'number'`, and a `{re, im}` with a non-zero
+ * imaginary part tells "outside the real domain" from a genuine `NaN`.
+ * Booleans pass through (never coerced), and so does anything else; a
+ * collection is normalized element by element (a fresh array — the compiled
+ * value may alias caller data).
+ *
+ * The test is EXACT, not a chop: the transcendental kernels remove their own
+ * roundoff dust (`toRI`), and chopping here would violate the "never chop in
+ * ring arithmetic" rule (`1 + 1e-12i` is `{re: 1, im: 1e-12}`).
+ */
+function normalizeRunResult(r: unknown): unknown {
+  if (typeof r === 'number' || typeof r === 'boolean') return r;
+  if (Array.isArray(r)) return r.map(normalizeRunResult);
+  if (
+    typeof r === 'object' &&
+    r !== null &&
+    typeof (r as ComplexResult).re === 'number' &&
+    typeof (r as ComplexResult).im === 'number' &&
+    (r as ComplexResult).im === 0
+  )
+    return (r as ComplexResult).re;
+  return r;
+}
+
 export class ComputeEngineFunction extends Function {
   SYS: SysHelpers;
 
@@ -6006,7 +6075,7 @@ export class ComputeEngineFunction extends Function {
     this.SYS = makeSysHelpers(ce);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
-        super.apply(thisArg, [this.SYS, ...argumentsList]),
+        normalizeRunResult(super.apply(thisArg, [this.SYS, ...argumentsList])),
       get: (target, prop) => {
         if (prop === 'toString') return (): string => body;
         if (prop === 'isCompiled') return true;
@@ -6031,7 +6100,7 @@ export class ComputeEngineFunctionLiteral extends Function {
     this.SYS = makeSysHelpers(ce);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
-        super.apply(thisArg, [this.SYS, ...argumentsList]),
+        normalizeRunResult(super.apply(thisArg, [this.SYS, ...argumentsList])),
       get: (target, prop) => {
         if (prop === 'toString')
           return (): string =>
@@ -6135,6 +6204,13 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',
+      // The compile modes this target offers (`CompileMode`), and the two
+      // lowering hooks the complex discipline is emitted through: the
+      // idempotent number → complex lift (`_SYS.cplx`) and the exact runtime
+      // realness test. See `CompileTarget.supportedModes`.
+      supportedModes: JS_SUPPORTED_MODES,
+      complexLift: (code) => `_SYS.cplx(${code})`,
+      complexIsReal: (code) => `_SYS.cisreal(${code})`,
       // Per-compilation naming state for generated temporaries. Created here —
       // `createTarget()` is called once per compilation — so `tempVar()` numbers
       // `_tv1, _tv2, …` deterministically and two compiles of one expression
@@ -6165,7 +6241,9 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         error,
         'javascript',
         this.createTarget(),
-        options.vars ? new Set(Object.keys(options.vars)) : undefined
+        options.vars ? new Set(Object.keys(options.vars)) : undefined,
+        compileDiagnosticOf(e, error),
+        options.realOnly
       );
     }
   }
@@ -6257,6 +6335,9 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     const target = this.createTarget({
       constantFold,
       complexPromotion: options.complexPromotion,
+      // The caller's requested compile mode; validated against
+      // `supportedModes` and latched by `BaseCompiler.compile` at depth 0.
+      mode: options.mode,
       foldExcludedOps: foldExcludedOps.size > 0 ? foldExcludedOps : undefined,
       operators: operatorLookup,
       varsObjectRefs,
@@ -6375,53 +6456,21 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
 
 /**
  * Wrap a compiled result so non-real values are projected to a real number or,
- * when they are not representable as one, `NaN` (fail closed, D6):
- * - A complex `{ re, im }` collapses to `re` when the imaginary part chops to
- *   zero at the roundoff scale (`ROUNDOFF_TOLERANCE`), else `NaN`.
- * - A boolean is NOT a real number — the interpreter never numericizes a
- *   boolean-valued expression to 0/1 (`True.N()` stays `True`) — so it maps to
- *   `NaN` rather than silently passing through as a non-number (CO-P2-25).
+ * when they are not representable as one, `NaN` (fail closed, D6) — the
+ * `realOnly` projection, `BaseCompiler.projectRealOnly` (see its docstring for
+ * the rules: complex → `re` when the imaginary part chops to zero at the
+ * roundoff scale, top-level boolean → `NaN`, arrays component-wise). The same
+ * projection is applied by `buildInterpreterFallback` to a decline's runner.
  */
 function wrapRealOnly(
   result: CompilationResult<'javascript'>
 ): CompilationResult<'javascript', number> {
   const origRun = result.run;
-  // Recurses into arrays: a tuple/list result carries its components in
-  // number slots, so a `{ re, im }` there must be coerced too. This is the
-  // ONLY `realOnly` component check — a provably-complex component is folded
-  // like any other and projected here, exactly as a component that only
-  // becomes complex when the compiled function is called.
-  // Only complex values are coerced inside a collection: a boolean ELEMENT is
-  // a legitimate result (`Equal` over a collection yields `[false, …]`), so
-  // the top-level boolean → NaN rule below must not recurse.
-  //
-  // The imaginary part is CHOPPED, not compared to zero exactly, at the
-  // kernel-roundoff scale — matching `apply.ts`'s complex-result chop, NOT
-  // `ce.tolerance` (kernel dust is a property of the arithmetic; using the
-  // user tolerance both re-broke this under a tightened tolerance and, being
-  // snapshotted at compile time, diverged from the interpreter after a
-  // tolerance change). An exact test was a REGRESSION source (2026-07-30):
-  // the bounded inverse trig / inverse hyperbolic heads type as `complex` for
-  // an argument of unknown magnitude, so an IN-domain call is routed through
-  // `_SYS.casin` & co., and `Complex(0.5, 0).asin()` returns `im: 5.55e-17` —
-  // dust from the complex log/sqrt formulation. Projected exactly, that dust
-  // made `y = arcsin(x)` compile to `NaN` at every point of its domain. A
-  // genuinely complex value is nowhere near the roundoff scale (`arcsin(2)`
-  // has `im = -1.317`) and still fails closed to `NaN`.
-  const coerceComponents = (r: unknown): unknown => {
-    if (Array.isArray(r)) return r.map(coerceComponents);
-    if (typeof r === 'object' && r !== null && 'im' in r)
-      return chop((r as ComplexResult).im, ROUNDOFF_TOLERANCE) === 0
-        ? (r as ComplexResult).re
-        : NaN;
-    return r;
-  };
-  const realRun = ((...args: unknown[]) => {
+  const realRun = ((...args: unknown[]) =>
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-    const r = (origRun as Function)(...args);
-    if (typeof r === 'boolean') return NaN;
-    return coerceComponents(r);
-  }) as unknown as CompiledRunner<number>;
+    BaseCompiler.projectRealOnly(
+      (origRun as Function)(...args)
+    )) as unknown as CompiledRunner<number>;
   return {
     ...result,
     run: realRun,

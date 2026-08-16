@@ -160,9 +160,13 @@ describe('COMPILE COMPLEX - _SYS helpers (execution)', () => {
     // never runs and the result is a bare number rather than `{re, im}`.
     const expr = ce.expr(['Exp', ['Complex', 0, Math.PI]]);
     const result = compile(expr, { fallback: false, constantFold: false });
-    const val = result.run!() as { re: number; im: number };
-    expect(val.re).toBeCloseTo(-1, 10);
-    expect(val.im).toBeCloseTo(0, 10);
+    expect(result.code).toContain('_SYS.cpow(Math.E, ');
+    // Result convention (design §5, 2026-08-16): the kernel chops its own
+    // roundoff dust (`im = 1.22e-16` → 0), and a value whose imaginary part
+    // is exactly zero comes back as a plain NUMBER, never `{re, im: 0}`.
+    const val = result.run!();
+    expect(typeof val).toBe('number');
+    expect(val).toBeCloseTo(-1, 10);
   });
 
   it('should execute cabs', () => {
@@ -373,10 +377,12 @@ describe('COMPILE COMPLEX - reciprocal trig functions', () => {
     // variable-free expression emits a bare number and the complex `{re, im}`
     // lowering under test is never exercised.
     const result = compile(expr, { fallback: false, constantFold: false });
-    const val = result.run!() as { re: number; im: number };
-    // sec(i) = 1/cos(i) = 1/cosh(1)
-    expect(val.re).toBeCloseTo(1 / Math.cosh(1), 5);
-    expect(val.im).toBeCloseTo(0, 5);
+    expect(result.code).toContain('_SYS.csec(');
+    // sec(i) = 1/cos(i) = 1/cosh(1), a real value: by the result convention
+    // (design §5) it comes back as a plain number, not `{re, im: 0}`.
+    const val = result.run!();
+    expect(typeof val).toBe('number');
+    expect(val).toBeCloseTo(1 / Math.cosh(1), 5);
   });
 
   it('should compute complex csc', () => {
@@ -445,9 +451,13 @@ describe('COMPILE COMPLEX - integration', () => {
     // emitted complex arithmetic; folding this variable-free expression at
     // compile time would emit a real literal instead.
     const result = compile(expr, { fallback: false, constantFold: false });
-    const val = result.run!() as { re: number; im: number };
-    expect(val.re).toBeCloseTo(0, 10);
-    expect(val.im).toBeCloseTo(0, 10);
+    // The emitted arithmetic is complex (`_SYS.cpow`); the RESULT is real, so
+    // by the result convention (design §5) it is a plain number: the kernel
+    // chops its roundoff dust and an exactly-zero imaginary part is dropped.
+    expect(result.code).toContain('_SYS.cpow(Math.E, ');
+    const val = result.run!();
+    expect(typeof val).toBe('number');
+    expect(val).toBeCloseTo(0, 10);
   });
 });
 
@@ -1308,7 +1318,9 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
     expect(r.success).toBe(true);
     expect(r.code).toBe('_fn_Q(({ re: 1, im: -1 }))');
     expect(r.code).not.toContain('_SYS.cplx(');
-    expect(r.run!({})).toEqual({ re: 1, im: 0 });
+    // `(1-i) + i = 1`: a real value comes back as a plain number (result
+    // convention, design §5), never `{re: 1, im: 0}`.
+    expect(r.run!({})).toBe(1);
     // …and the interpreter agrees, in its own (collapsed) spelling.
     expect(
       engine.box(['Q', ['Complex', 1, -1]]).evaluate().toString()
@@ -1345,14 +1357,16 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
     expect(r.run!({ w: 2 })).toEqual({ re: 2, im: 1 });
     // …and an already-complex object passes through instead of nesting as
     // `{ re: { re, im }, im: 0 }`, which is the property the branch rests on.
-    expect(r.run!({ w: { re: 1, im: -1 } })).toEqual({ re: 1, im: 0 });
+    // (`(1-i) + i = 1` is real, so the result convention of design §5 hands
+    // it back as the plain number `1`.)
+    expect(r.run!({ w: { re: 1, im: -1 } })).toBe(1);
     expect(r.run!({ w: { re: 3, im: 4 } })).toEqual({ re: 3, im: 5 });
 
     const withSymbol = makeEngine();
     withSymbol.assign('v', withSymbol.box(['Complex', 1, -1]));
     const rs = compile(withSymbol.box(['Q', 'v']), { constantFold: false });
     expect(rs.code).toContain('_SYS.cplx(');
-    expect(rs.run!({})).toEqual({ re: 1, im: 0 });
+    expect(rs.run!({})).toBe(1);
   });
 
   // THE VALUE POSITION. Everything above is a direct CALL, and the argument

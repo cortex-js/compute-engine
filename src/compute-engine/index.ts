@@ -283,10 +283,19 @@ export type {
   CompiledFunctions,
   CompilationOptions,
   CompilationResult,
+  CompileMode,
+  CompileDiagnostic,
+  CompileDiagnosticKind,
   LanguageTarget,
   TargetSource,
   CompiledFunction,
 } from './compilation/types.js';
+export {
+  CompileDeclineError,
+  LaneMismatchError,
+  isCompileDeclineError,
+  isLaneMismatchError,
+} from './compilation/diagnostics.js';
 
 // Export BigDecimal for arbitrary-precision arithmetic
 export { BigDecimal } from '../big-decimal/index.js';

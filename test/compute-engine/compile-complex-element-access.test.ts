@@ -359,10 +359,10 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
     // interpreter's answer, now reproduced element by element.
     const r = compiled(W, ['Multiply', 2, ['w', 't']], true);
     expect(r.success).toBe(true);
-    expect(r.run!(IN as any)).toEqual([
-      { re: 2 * Math.SQRT2, im: 0 },
-      { re: 2, im: 0 },
-    ]);
+    // In-domain the elements are real: the result convention (design §5,
+    // applied element by element) hands them back as plain numbers, never as
+    // `{re, im: 0}`.
+    expect(r.run!(IN as any)).toEqual([2 * Math.SQRT2, 2]);
     const out = r.run!(OUT as any) as unknown as { re: number; im: number }[];
     expect(out[0].re).toBe(0);
     expect(out[0].im).toBeCloseTo(2 * Math.sqrt(0.7), 12);

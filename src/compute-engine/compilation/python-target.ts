@@ -1,6 +1,7 @@
 import type { Expression } from '../global-types.js';
 
 import type {
+  CompileMode,
   CompileTarget,
   CompiledOperators,
   CompiledFunctions,
@@ -8,6 +9,7 @@ import type {
   CompilationOptions,
   CompilationResult,
 } from './types.js';
+import { compileDiagnosticOf } from './diagnostics.js';
 import {
   BaseCompiler,
   couldBeCollectionParticipant,
@@ -2660,6 +2662,17 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
  * The generated code is compatible with NumPy arrays and supports
  * vectorized operations.
  */
+/**
+ * The compile modes the Python target offers (`CompileMode`): all three. Its
+ * emitters implement the complex lowering (native `complex`, `cmath`), so
+ * `'complex'` and `'auto'` are deliverable; the effective default is `'auto'`.
+ */
+const PYTHON_SUPPORTED_MODES: readonly CompileMode[] = [
+  'strict',
+  'complex',
+  'auto',
+];
+
 export class PythonTarget implements LanguageTarget<Expression> {
   /** Whether to include 'import numpy as np' in generated code */
   private includeImports: boolean;
@@ -2685,6 +2698,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
   ): CompileTarget<Expression> {
     return {
       language: 'python',
+      // The compile modes this target offers (`CompileMode`) and the two
+      // lowering hooks the complex discipline is emitted through: Python's
+      // own `complex()` is the idempotent lift, and `.imag == 0` the exact
+      // realness test. See `CompileTarget.supportedModes`.
+      supportedModes: PYTHON_SUPPORTED_MODES,
+      complexLift: (code) => `complex(${code})`,
+      complexIsReal: (code) => `(complex(${code}).imag == 0)`,
       // Chained relations join with Python's `and`, not `&&`.
       chainOp: 'and',
       // Evaluate a shared middle operand of a chained relation exactly once
@@ -2823,7 +2843,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
         error,
         'python',
         this.createTarget(),
-        options.vars ? new Set(Object.keys(options.vars)) : undefined
+        options.vars ? new Set(Object.keys(options.vars)) : undefined,
+        compileDiagnosticOf(e, error)
       );
     }
   }
@@ -2846,6 +2867,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
       varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
       constantFold: options.constantFold,
       complexPromotion: options.complexPromotion,
+      // The caller's requested compile mode; validated against
+      // `supportedModes` and latched by `BaseCompiler.compile` at depth 0.
+      mode: options.mode,
       naming: BaseCompiler.newNamingContext(expr, [
         options.preamble,
         ...(vars ? Object.values(vars) : []),
@@ -2910,6 +2934,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
       varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
       constantFold: options.constantFold,
       complexPromotion: options.complexPromotion,
+      // The caller's requested compile mode; validated against
+      // `supportedModes` and latched by `BaseCompiler.compile` at depth 0.
+      mode: options.mode,
       naming: BaseCompiler.newNamingContext(expr, [
         options.preamble,
         ...(vars ? Object.values(vars) : []),

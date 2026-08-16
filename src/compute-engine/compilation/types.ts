@@ -8,6 +8,72 @@ import type { Interval, IntervalResult } from '../interval/types.js';
 export type TargetSource = string;
 
 /**
+ * The arithmetic discipline a compilation runs under — how a NUMERIC binding
+ * whose static type is wide (`unknown`, `number`, `finite_number`, an
+ * unannotated parameter) is shaped, and what happens when a complex-shaped
+ * value reaches one (`docs/plans/2026-08-16-compile-complex-mode.md`, §2):
+ *
+ * - `'strict'` — shape follows STATIC analysis: a `complex`/`imaginary`-typed
+ *   value, a `Complex(…)` literal, `ImaginaryUnit`, a symbol whose assigned
+ *   value is complex and a radical/logarithm of a PROVABLY negative operand
+ *   are complex-shaped; a wide binding is REAL, and a complex-shaped value
+ *   meeting one FAILS CLOSED (a `LaneMismatch` decline). No promotion of an
+ *   unknown-sign radical. This is the shader targets' model, applied to
+ *   every target.
+ * - `'complex'` — a wide numeric binding is COMPLEX, lifted at its use;
+ *   unknown-sign radicals/logarithms promote. Always sound, only slower.
+ * - `'auto'` — `strict` plus promotion of the unknown-sign radicals, and on
+ *   a `LaneMismatch` the compilation is redone ONCE in `complex` mode.
+ *
+ * Migration step 1 (2026-08-16): the option is accepted, validated and
+ * resolved end to end, and reported on the result; every setting still
+ * compiles with today's emission (no promotion beyond `complexPromotion`, no
+ * lane-mismatch decline, no retry). The disciplines land in the later steps.
+ */
+export type CompileMode = 'strict' | 'complex' | 'auto';
+
+/**
+ * Which of the two kinds of compile decline a diagnostic reports:
+ *
+ * - `'capability'` — a compilable thing that this target or mode cannot
+ *   lower (an unsupported operator, a mode the target does not offer, a
+ *   comparison over a statically non-real operand). Nothing wrong was ever
+ *   computed; the expression simply has no compiled value here.
+ * - `'correctness'` — a value the compiler could have computed WRONGLY is
+ *   withdrawn instead (a complex-shaped value meeting a real-shaped binding).
+ *
+ * A consumer counting declines must keep the two apart: the second kind is
+ * a fix, not a regression.
+ */
+export type CompileDiagnosticKind = 'capability' | 'correctness';
+
+/**
+ * A structured compile decline, carried on `CompilationResult.diagnostic`
+ * beside the human-readable `error` string (which stays a string: it is
+ * interpolated into warning messages).
+ *
+ * - `code` — a stable machine-readable identifier: `'lane-mismatch'`,
+ *   `'unsupported-mode'`, `'compile-error'` (the generic fail-closed
+ *   decline), ….
+ * - `kind` — see `CompileDiagnosticKind`.
+ * - `message` — the human-readable reason (same text as `error`).
+ * - `boundary` — for a lane mismatch, the binding boundary that refused
+ *   ("user-function parameter", "Block local", …).
+ * - `binding` — a USER-LEGIBLE name for the binding: an authored identifier
+ *   (the parameter `x` of `b`, the local `k`) or an honest description ("the
+ *   accumulator of the `Reduce`") — never a compiler-internal temporary.
+ * - `value` — the LaTeX of the complex-shaped expression that reached it.
+ */
+export type CompileDiagnostic = {
+  code: string;
+  kind: CompileDiagnosticKind;
+  message: string;
+  boundary?: string;
+  binding?: string;
+  value?: string;
+};
+
+/**
  * Compile a sub-expression of the construct a handler is lowering.
  *
  * `opIndex` is the operand index the sub-expression sits at in the construct's
@@ -553,6 +619,64 @@ export interface CompileTarget<Expr = unknown> {
   complexPromotion?: boolean;
 
   /**
+   * The compile mode REQUESTED for this compilation (`CompileMode`). Set by
+   * the built-in targets from the caller's `mode` option, and by the direct
+   * custom-target route (`compile(expr, { target })`), which STAMPS the
+   * resolved effective mode here per call — like `constantFold` and
+   * `complexPromotion`, an omitted option resets the field, so a reused
+   * caller target never carries a previous call's choice. Read ONCE, at the
+   * outermost compilation (`BaseCompiler.compile` at depth 0), where it is
+   * validated against `supportedModes` — a requested mode the target does
+   * not offer is a `capability` decline (`code: 'unsupported-mode'`), never a
+   * silent coercion — and latched for the whole compilation as
+   * `BaseCompiler.mode`. Absent ⇒ the target's default: `'auto'` when
+   * `supportedModes` includes it, else `'strict'`.
+   */
+  mode?: CompileMode;
+
+  /**
+   * The compile modes this target offers (default `['strict']`). The built-in
+   * `javascript` and `python` targets declare all three; `interval-js`,
+   * `glsl` and `wgsl` declare `['strict']` (intervals are real; a shader has
+   * one static shape per value). A custom target that declares `'complex'`
+   * or `'auto'` must also provide `complexLift` and `complexIsReal` (checked
+   * when the target is passed to `compile()`); a DIRECT target additionally
+   * needs `reset()` for `'auto'` to be offered — without it a requested
+   * `'auto'` resolves to `'strict'` (there is no fresh-state retry to run).
+   */
+  supportedModes?: readonly CompileMode[];
+
+  /**
+   * The idempotent number → complex lift, as target source: given code for a
+   * value that may be a plain number or already complex, return code that
+   * yields the complex representation (`_SYS.cplx(x)` on JavaScript,
+   * `complex(x)` on Python). Required of a target that offers `'complex'` or
+   * `'auto'`; complex mode lifts every wide numeric operand AT ITS USE
+   * through this hook.
+   */
+  complexLift?: (code: TargetSource) => TargetSource;
+
+  /**
+   * The runtime realness test, as target source: given code for a value that
+   * may be complex, return a boolean expression that is true when its
+   * imaginary part is exactly zero. Required of a target that offers
+   * `'complex'` or `'auto'`; the runtime rule for ordering comparisons and
+   * integer-only heads over a maybe-complex operand is emitted through it.
+   */
+  complexIsReal?: (code: TargetSource) => TargetSource;
+
+  /**
+   * Drop everything a failed compilation attempt wrote to this target
+   * (helper preamble, emitted user-function definitions, temporaries, bound
+   * frames). Required of a DIRECT (caller-owned, reusable) target for
+   * `'auto'` to be offered: an escalation recompiles on fresh state, and a
+   * target reused across the retry would otherwise carry the failed
+   * attempt's output into the second emission. Registered targets are
+   * constructed per compilation and need no hook.
+   */
+  reset?: () => void;
+
+  /**
    * The most elements a constant COLLECTION may inline to when it is
    * constant-folded — an INCLUSIVE maximum, so a collection of exactly this
    * size still inlines. Defaults to 49, matching the JavaScript `Range`
@@ -1068,6 +1192,28 @@ export interface CompilationOptions<Expr = unknown> {
   preamble?: string;
 
   /**
+   * The arithmetic discipline to compile under — `'strict'`, `'complex'` or
+   * `'auto'` (see `CompileMode`). Effective mode = this option ?? the
+   * target's `mode` ?? the target's default (`'auto'` if its `supportedModes`
+   * includes it, else `'strict'`). The `javascript` and `python` targets
+   * offer all three, so their default is `'auto'`; `interval-js`, `glsl` and
+   * `wgsl` offer `'strict'` only. Requesting a mode the target does not offer
+   * is a `capability` decline (`success: false`, `diagnostic.code ===
+   * 'unsupported-mode'`), never a silent coercion.
+   *
+   * The result reports what was used: `CompilationResult.mode` is the
+   * discipline the returned code was compiled under, `promoted` whether an
+   * unknown-sign radical was lowered through a complex kernel, and
+   * `escalation` (under `'auto'`) why the compilation was redone in complex
+   * mode.
+   *
+   * Migration step 1 (2026-08-16): accepted, validated and reported; every
+   * setting still emits today's code (`complexPromotion` and `realOnly` are
+   * honored exactly as before). See `CompileMode` for the disciplines.
+   */
+  mode?: CompileMode;
+
+  /**
    * When true, complex results (`{ re, im }`) are converted to real numbers:
    * - If the imaginary part is zero, the real part is returned
    * - Otherwise, `NaN` is returned
@@ -1363,6 +1509,39 @@ export type CompilationResult<
    * be compiled to the target (e.g. `Unknown operator \`SinIntegral\``).
    */
   error?: string;
+
+  /**
+   * When `success` is `false`, the structured form of `error`: a stable
+   * `code`, the decline `kind` (`'capability'` — nothing compilable was lost
+   * that was ever computed right; `'correctness'` — a value that would have
+   * been computed wrongly is withdrawn) and, for a lane mismatch, the
+   * boundary and a user-legible binding name. `error` stays a string. Set by
+   * the built-in targets on every decline.
+   */
+  diagnostic?: CompileDiagnostic;
+
+  /**
+   * The arithmetic discipline the returned code was compiled under —
+   * `'strict'` or `'complex'` (never `'auto'`, which is a policy over the
+   * two). Set by the built-in targets on every result. See `CompileMode`.
+   */
+  mode?: 'strict' | 'complex';
+
+  /**
+   * Whether any promotable head (an unknown-sign `Sqrt`/`Ln`/`Log`, …) was
+   * lowered through a complex kernel — the signal that this compiled unit
+   * would NOT compute the same value on a shader target's real kernel, even
+   * when no escalation happened. Set by the built-in targets on every result.
+   */
+  promoted?: boolean;
+
+  /**
+   * Under `mode: 'auto'`, present when the strict-mode attempt declined with a
+   * lane mismatch and the compilation was redone in complex mode: the
+   * diagnostic of the FAILED strict attempt (its `boundary` and `binding` say
+   * why the slow way was taken).
+   */
+  escalation?: CompileDiagnostic;
 
   /**
    * Library/helper code that must be included before the compiled `code`.

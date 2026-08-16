@@ -179,13 +179,16 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
     ).toBeCloseTo(ce.box(['Haversine', 30]).N().re, 10);
     // InverseHaversine types `finite_complex` for a symbolic real (honest
     // domain join, like the Arcsin family — it is complex outside [0, 1]),
-    // so the compiled result is `{re, im}`; the angle scaling applies
-    // linearly to the complex value, matching `radiansToAngle`.
+    // so the compiled arithmetic is complex; the angle scaling applies
+    // linearly to the complex value, matching `radiansToAngle`. In domain the
+    // value is real, and the runner's result convention (design §5,
+    // 2026-08-16) hands it back as a plain NUMBER — the kernel chops its
+    // roundoff dust and an exactly-zero imaginary part is dropped.
     const inv = js.compile(ce.box(['InverseHaversine', ce.symbol('x')])).run!({
       x: 0.5,
     });
-    expect(inv.re).toBeCloseTo(90, 10);
-    expect(inv.im).toBeCloseTo(0, 10);
+    expect(typeof inv).toBe('number');
+    expect(inv).toBeCloseTo(90, 10);
     // Out of domain the compiled value is genuinely complex, agreeing with
     // the interpreter (2.0634… rad scaled by 180/π).
     const out = js.compile(ce.box(['InverseHaversine', ce.symbol('x')])).run!({

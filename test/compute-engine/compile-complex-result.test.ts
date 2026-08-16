@@ -440,13 +440,15 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
     // `constantFold: false`: the dust is produced by the EMITTED complex
     // `exp`/`log` pair. Folding this variable-free expression at compile time
     // computes it through the engine instead and emits the exact real `-2`,
-    // leaving nothing for the chop below to act on.
-    expect(
-      compile(expr, { fallback: false, constantFold: false }).run!()
-    ).toMatchObject({
-      re: -2,
-      im: expect.any(Number),
-    });
+    // leaving nothing for the chop to act on.
+    //
+    // Since 2026-08-16 (design §5) the kernels chop their OWN dust (`toRI`),
+    // so even without `realOnly` the runner's result convention sees an
+    // exactly-zero imaginary part and hands back the plain number `-2`; the
+    // `realOnly` projection then has nothing left to do.
+    const r = compile(expr, { fallback: false, constantFold: false });
+    expect(r.code).toContain('_SYS.cpow(Math.E, _SYS.cln(');
+    expect(r.run!()).toBe(-2);
     expect(compile(expr, { realOnly: true, fallback: false }).run!()).toBe(-2);
 
     // A list/tuple result is projected COMPONENTWISE: dust projects, a

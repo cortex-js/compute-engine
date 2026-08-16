@@ -42,3 +42,31 @@ export function implicitCompile(
     return undefined;
   }
 }
+
+/**
+ * `implicitCompile` for a caller that needs a NUMERIC function of its
+ * variables (`NDSolve` right-hand sides, the nonlinear-fit model): the
+ * compiled `run` projected to a real number — a plain `number` passes;
+ * anything else (a `{re, im}` `ComplexResult` with a non-zero imaginary part,
+ * a boolean, a collection) is `NaN`. No chop: the compiled runner's result
+ * convention already returns a value whose imaginary part is exactly zero as
+ * a `number` (the transcendental kernels chop their own roundoff dust), so a
+ * `{re, im}` here is a genuine domain escape.
+ *
+ * Returns `undefined` when the expression does not compile (same contract as
+ * `implicitCompile`). Replaces the former `realOnly: true` option at these
+ * call sites (`docs/plans/2026-08-16-compile-complex-mode.md` §5).
+ */
+export function implicitCompileNumeric(
+  ce: IComputeEngine,
+  expr: Expression
+): ((vars: Record<string, number>) => number) | undefined {
+  const compiled = implicitCompile(ce, expr);
+  if (!compiled?.success || typeof compiled.run !== 'function')
+    return undefined;
+  const run = compiled.run as (vars: Record<string, number>) => unknown;
+  return (vars) => {
+    const v = run(vars);
+    return typeof v === 'number' ? v : NaN;
+  };
+}

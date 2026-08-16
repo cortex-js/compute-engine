@@ -1,5 +1,55 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Compiled JavaScript result convention: a value whose imaginary part is
+  exactly zero now comes back as a plain `number`, never as `{re, im: 0}`.**
+  Both directions are guaranteed at the `run()` boundary — a returned
+  `{re, im}` always has `im !== 0`, and a real value is never an object — so a
+  consumer's per-sample test is the single `typeof v === 'number'`. Applies
+  element by element to collection results, and to the interpreter-backed
+  fallback runner. The transcendental complex kernels (`_SYS.casin`,
+  `_SYS.cexp`, `_SYS.cpow`, …) now chop their own roundoff dust at the
+  machine scale (as the interpreter's `apply` does), which is what lets the
+  boundary test be exact instead of a chop: `arcsin(0.5)` compiled through
+  the complex kernel is the number `0.5235…`, and `1 + 1e-12i` stays
+  `{re: 1, im: 1e-12}` (nothing is chopped in ring arithmetic).
+  `realOnly: true` still projects as before. Step 1 of the compile-mode
+  migration (`docs/plans/2026-08-16-compile-complex-mode.md`).
+
+### New Features
+
+- **`compile()` accepts a `mode` option — `'strict'`, `'complex'` or
+  `'auto'`** — the arithmetic discipline a compilation runs under (what a
+  wide-typed numeric binding is shaped as, and what happens when a
+  complex-shaped value reaches one). The effective mode is `options.mode` ??
+  the target's `mode` ?? the target's default (`'auto'` on `javascript` and
+  `python`, `'strict'` on `interval-js`, `glsl` and `wgsl`); requesting a mode
+  a target does not offer is a `capability` decline, never a silent coercion.
+  A custom `CompileTarget` declares what it offers with `supportedModes` and
+  the `complexLift` / `complexIsReal` (and, for a reusable direct target,
+  `reset`) hooks. In this release every setting still compiles with the
+  strict-shaped emission; the strict lane-mismatch declines, the complex
+  discipline and `auto`'s escalation land in the following steps.
+- **`CompilationResult` gains `mode`, `promoted`, `escalation` and
+  `diagnostic`.** `diagnostic` is the structured form of `error` on every
+  decline — `{ code, kind: 'capability' | 'correctness', message, boundary?,
+  binding?, value? }` — so a consumer's census never re-cuts a taxonomy from
+  message text; `mode` and `promoted` report the discipline the code was
+  compiled under and whether a radical was promoted (`'strict'` / `false` in
+  this release). `LaneMismatchError` / `CompileDeclineError` and the
+  `CompileMode` / `CompileDiagnostic` types are exported.
+
+### Bug Fixes
+
+- **The interpreter-backed compile fallback honors the runner contract in
+  both directions.** A `{re, im}` value passed in `vars` is declared as a
+  complex number (it was declared `number`, so `run()` threw an
+  `incompatible-type` error on the assignment), and a boolean-valued or
+  complex-valued result comes back as a boolean / `{re, im}` instead of the
+  unconditional `.re` (`NaN` for a boolean, the real part of a genuinely
+  complex value). Shared by every target's `fallback: true` decline.
+
 ## 0.114.0 _2026-08-16_
 
 ### Breaking Changes

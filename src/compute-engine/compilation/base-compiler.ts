@@ -86,15 +86,20 @@ import type {
 } from '../boxed-expression/match-dispatch.js';
 
 import type {
+  CompileDiagnostic,
+  CompileMode,
   CompileTarget,
   CompilationResult,
   CompiledFunction,
   CompiledRunner,
+  ComplexResult,
   CseRegionInstance,
   NamingContext,
   OperandCompiler,
   TargetSource,
 } from './types.js';
+import { CompileDeclineError } from './diagnostics.js';
+import { chop, ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
 import { candidateAt, childRegionAt, harvestCse } from './cse.js';
 import type { CseHarvest, CseHarvestOptions, CseRegion } from './cse.js';
 import {
@@ -1201,11 +1206,28 @@ export class BaseCompiler {
     // `mod(100000.0 * sqrt(x + -1.0), 1.0)` into a D6 decline. Restricting the
     // latch here — the one choke-point every target funnels through — enforces
     // the option's documented scope on every entry path at once.
+    // The compile MODE (`CompileMode`) is latched here too, from the outermost
+    // compilation only and for the same reason: the analysis and every
+    // emitter must agree on each node's value SHAPE for the whole
+    // compilation. `resolveCompileMode` validates the requested mode against
+    // the target's `supportedModes` — a mode the target does not offer is a
+    // `capability` decline, thrown here so it surfaces through the target's
+    // ordinary decline channel — and supplies the target's default when none
+    // was requested. It is resolved BEFORE either latch is written: the throw
+    // happens outside the `try`/`finally` below, so a latch mutated ahead of
+    // it would never be restored.
     const prevPromotion = BaseCompiler._complexPromotion;
-    if (BaseCompiler._compileDepth === 0)
+    const prevMode = BaseCompiler._mode;
+    const nextMode =
+      BaseCompiler._compileDepth === 0
+        ? BaseCompiler.resolveCompileMode(target)
+        : prevMode;
+    if (BaseCompiler._compileDepth === 0) {
       BaseCompiler._complexPromotion =
         target.complexPromotion === true &&
         BaseCompiler.COMPLEX_PROMOTION_LANGUAGES.has(target.language ?? '');
+      BaseCompiler._mode = nextMode;
+    }
     BaseCompiler._compileDepth += 1;
     // Only a genuine CHANGE of the bound-variable context invalidates: the
     // inner targets of a recursion carry the SAME `boundVars` set object
@@ -1229,6 +1251,7 @@ export class BaseCompiler {
     } finally {
       BaseCompiler._compileDepth -= 1;
       BaseCompiler._complexPromotion = prevPromotion;
+      BaseCompiler._mode = prevMode;
       if (nextBoundCtx !== prevBoundCtx) {
         BaseCompiler._boundVarsCtx = prevBoundCtx;
         BaseCompiler._invalidateComplexMemo();
@@ -1254,6 +1277,55 @@ export class BaseCompiler {
    */
   static get complexPromotion(): boolean {
     return BaseCompiler._complexPromotion;
+  }
+
+  /**
+   * The compile mode of the OUTERMOST compilation (`CompileMode`), latched by
+   * `compile()` at depth 0 from the target's `mode` (validated against its
+   * `supportedModes`, defaulting per `resolveCompileMode`) and restored on
+   * the way out. `'strict'` outside any compilation.
+   *
+   * Migration step 1 (2026-08-16): plumbed and reported, not yet consulted
+   * by the analysis or the emitters — every setting compiles as `'strict'`
+   * (plus the `complexPromotion` opt-in, honored as before). The strict
+   * lane-mismatch declines, the complex discipline and `auto`'s escalation
+   * are the later steps of `docs/plans/2026-08-16-compile-complex-mode.md`.
+   */
+  private static _mode: CompileMode = 'strict';
+
+  static get mode(): CompileMode {
+    return BaseCompiler._mode;
+  }
+
+  /**
+   * The effective compile mode for `target`: its requested `mode` when set
+   * and offered by its `supportedModes` (default `['strict']`), else the
+   * target's default — `'auto'` when offered, otherwise `'strict'`.
+   *
+   * A REQUESTED mode the target does not offer throws a `CompileDeclineError`
+   * (`code: 'unsupported-mode'`, `kind: 'capability'`): the caller asked for
+   * a discipline this target cannot deliver, and silently compiling in
+   * another would hand back code whose value shape the caller did not ask
+   * for.
+   */
+  static resolveCompileMode(target: CompileTarget<Expression>): CompileMode {
+    const supported: readonly CompileMode[] = target.supportedModes ?? [
+      'strict',
+    ];
+    const requested = target.mode;
+    if (requested === undefined)
+      return supported.includes('auto') ? 'auto' : 'strict';
+    if (!supported.includes(requested))
+      throw new CompileDeclineError({
+        code: 'unsupported-mode',
+        kind: 'capability',
+        message: `mode '${requested}' is not offered by the '${
+          target.language ?? 'custom'
+        }' compilation target (offered: ${supported
+          .map((m) => `'${m}'`)
+          .join(', ')}). Fail closed (D6).`,
+      });
+    return requested;
   }
 
   /**
@@ -12063,12 +12135,24 @@ export class BaseCompiler {
   }
 
   /**
-   * Attach `freeSymbols` / `unsupported` (from `analyzeReferences`) to a
-   * compilation result, returning the same object. Used by the built-in
-   * targets to make every result carry its declarative reference analysis.
+   * Attach `freeSymbols` / `unsupported` (from `analyzeReferences`) and the
+   * mode report (`mode`, `promoted`) to a compilation result, returning the
+   * same object. Used by the built-in targets to make every result carry its
+   * declarative reference analysis and the discipline it was compiled under.
+   *
+   * Migration step 1 (2026-08-16): the report is the constant `mode:
+   * 'strict'`, `promoted: false` — every setting still compiles with the
+   * strict-shaped emission, and the one promotion that exists today (the
+   * `complexPromotion` opt-in) is not yet tracked into `promoted`. The later
+   * steps compute both from the compilation.
    */
   static withReferences<
-    R extends { freeSymbols?: string[]; unsupported?: string[] },
+    R extends {
+      freeSymbols?: string[];
+      unsupported?: string[];
+      mode?: 'strict' | 'complex';
+      promoted?: boolean;
+    },
   >(
     result: R,
     expr: Expression,
@@ -12077,8 +12161,57 @@ export class BaseCompiler {
   ): R {
     return Object.assign(
       result,
-      BaseCompiler.analyzeReferences(expr, target, varsKeys)
+      BaseCompiler.analyzeReferences(expr, target, varsKeys),
+      BaseCompiler.modeReport()
     );
+  }
+
+  /**
+   * The `mode`/`promoted` fields every built-in result carries (see
+   * `CompilationResult`). Step 1 of the compile-mode migration: constant.
+   */
+  static modeReport(): { mode: 'strict' | 'complex'; promoted: boolean } {
+    return { mode: 'strict', promoted: false };
+  }
+
+  /**
+   * The `realOnly` RESULT projection: non-real values become a real number
+   * or, when not representable as one, `NaN` (fail closed):
+   * - a complex `{re, im}` collapses to `re` when the imaginary part chops to
+   *   zero at the roundoff scale (`ROUNDOFF_TOLERANCE`), else `NaN`;
+   * - a top-level boolean is NOT a real number — the interpreter never
+   *   numericizes a boolean-valued expression to 0/1 (`True.N()` stays
+   *   `True`) — so it maps to `NaN` rather than passing through;
+   * - an array (tuple/list result) is projected component-wise, and only its
+   *   COMPLEX components are coerced: a boolean ELEMENT is a legitimate
+   *   result (`Equal` over a collection yields `[false, …]`).
+   *
+   * The imaginary part is CHOPPED, not compared to zero exactly, at the
+   * kernel-roundoff scale — matching `apply.ts`'s complex-result chop, NOT
+   * `ce.tolerance` (kernel dust is a property of the arithmetic; using the
+   * user tolerance both re-broke this under a tightened tolerance and, being
+   * snapshotted at compile time, diverged from the interpreter after a
+   * tolerance change). The JavaScript runner now normalizes an exactly-zero
+   * imaginary part to a number before this projection sees it, so the chop
+   * here matters only for a `{re, im}` that reaches it another way (an
+   * interpreter-backed fallback value, a component of a collection).
+   *
+   * Applied by the JavaScript target to a compiled runner (`wrapRealOnly`)
+   * and by `buildInterpreterFallback` to a decline's interpreter-backed
+   * runner, so `realOnly: true` promises a number on both paths.
+   */
+  static projectRealOnly(r: unknown): unknown {
+    if (typeof r === 'boolean') return NaN;
+    return BaseCompiler.projectRealOnlyComponents(r);
+  }
+
+  private static projectRealOnlyComponents(r: unknown): unknown {
+    if (Array.isArray(r)) return r.map(BaseCompiler.projectRealOnlyComponents);
+    if (typeof r === 'object' && r !== null && 'im' in r)
+      return chop((r as ComplexResult).im, ROUNDOFF_TOLERANCE) === 0
+        ? (r as ComplexResult).re
+        : NaN;
+    return r;
   }
 
   /**
@@ -12095,30 +12228,76 @@ export class BaseCompiler {
    * `Function` literal uses the positional `lambda` calling convention.
    *
    * `error` is preserved on the result so the caller can report *why* it could
-   * not be compiled without re-throwing; `compileTarget` (when available) drives
-   * the declarative `freeSymbols`/`unsupported` reference analysis. This method
-   * never throws for a compile reason — the reference analysis is guarded.
+   * not be compiled without re-throwing, and `diagnostic` (the structured form
+   * — the payload of a `CompileDeclineError`, or the generic `capability`
+   * diagnostic `compileDiagnosticOf` builds from the message) is set beside
+   * it; `compileTarget` (when available) drives the declarative
+   * `freeSymbols`/`unsupported` reference analysis. This method never throws
+   * for a compile reason — the reference analysis is guarded.
+   *
+   * The runner honors the compiled runner's value contract in both
+   * directions (design D7, `docs/plans/2026-08-16-compile-complex-mode.md`
+   * §8): each `vars` value is declared from its RUNTIME SHAPE (`complex` for
+   * a `{re, im}` object, `number` for a number), and a scalar result comes
+   * back as a plain `number` when its imaginary part is exactly zero, as a
+   * `{re, im}` `ComplexResult` otherwise, and as a boolean when it is one —
+   * the same convention a successful JavaScript compile uses, so a caller
+   * cannot tell a decline from a compile by the SHAPE of the values.
    */
   static buildInterpreterFallback<T extends string>(
     expr: Expression,
     error: string,
     targetName: T,
     compileTarget: CompileTarget<Expression> | undefined,
-    varsKeys: Set<string> | undefined
+    varsKeys: Set<string> | undefined,
+    diagnostic?: CompileDiagnostic,
+    realOnly?: boolean
   ): CompilationResult<T> {
     const ce = expr.engine;
+    diagnostic ??= {
+      code: 'compile-error',
+      kind: 'capability',
+      message: error,
+    };
+    // The `realOnly` projection (`BaseCompiler.projectRealOnly`) applies to a
+    // decline's runner exactly as it applies to a compiled one: the caller was
+    // promised a number, and the interpreter's `{re, im}` or boolean value
+    // reaches them through this runner.
+    const project = (v: unknown): unknown =>
+      realOnly ? BaseCompiler.projectRealOnly(v) : v;
 
-    // Materialize an interpreted result matching the compiled-runner numeric
-    // contract: a scalar yields its real part as a float, a finite indexed
-    // collection becomes a nested JS array of element values. A scalar leaf is
+    // Materialize an interpreted result matching the compiled-runner value
+    // contract: a scalar yields a `number` (imaginary part exactly zero), a
+    // `{re, im}` object (otherwise) or a boolean; a finite indexed collection
+    // becomes a nested JS array of element values. A scalar leaf is
     // numericized first — `evaluate()` correctly stays symbolic for an exact
     // argument (`ln(2)` evaluates to `Ln(2)`), and `.re` of a symbolic
     // expression is NaN, so without `.N()` every decline whose expression has
     // no non-symbolic evaluation would run to NaN instead of its value.
-    const interpretedRunValue = (e: Expression): number | unknown[] => {
+    const interpretedRunValue = (
+      e: Expression
+    ): number | boolean | ComplexResult | unknown[] => {
       if (e.isCollection) return [...e.each()].map(interpretedRunValue);
-      return e.N().re;
+      if (isSymbol(e, 'True')) return true;
+      if (isSymbol(e, 'False')) return false;
+      const n = e.N();
+      if (isSymbol(n, 'True')) return true;
+      if (isSymbol(n, 'False')) return false;
+      const im = n.im;
+      // `im` is NaN for a symbolic residue (no numeric value): a number, not
+      // an object, is the honest shape for "no value" — `re` is NaN too.
+      if (im !== 0 && !Number.isNaN(im)) return { re: n.re, im };
+      return n.re;
     };
+    // The interpreter's value for a runtime argument: a `{re, im}` object is a
+    // complex number, anything else boxes as it always did.
+    const isComplexArg = (v: unknown): v is ComplexResult =>
+      typeof v === 'object' &&
+      v !== null &&
+      typeof (v as ComplexResult).re === 'number' &&
+      typeof (v as ComplexResult).im === 'number';
+    const boxArg = (v: unknown): Expression =>
+      isComplexArg(v) ? ce.number(ce.complex(v.re, v.im)) : ce.expr(v as never);
 
     // Declarative reference analysis so the (success: false) result still tells
     // the caller *why* it could not be compiled without parsing `error`. Never
@@ -12139,11 +12318,11 @@ export class BaseCompiler {
     // the function to its positional arguments via the interpreter; otherwise
     // positional arguments are silently dropped.
     if (isFunction(expr, 'Function')) {
-      const lambdaRun = ((...args: number[]) =>
-        interpretedRunValue(
-          ce
-            .function('Apply', [expr, ...args.map((a) => ce.expr(a))])
-            .evaluate()
+      const lambdaRun = ((...args: unknown[]) =>
+        project(
+          interpretedRunValue(
+            ce.function('Apply', [expr, ...args.map(boxArg)]).evaluate()
+          )
         )) as unknown as CompiledRunner;
       return {
         target: targetName,
@@ -12152,13 +12331,15 @@ export class BaseCompiler {
         calling: 'lambda',
         run: lambdaRun,
         error,
+        diagnostic,
+        ...BaseCompiler.modeReport(),
         ...refs,
       } as CompilationResult<T>;
     }
 
     // Otherwise the expression uses the `expression` calling convention:
     // `run({ x, y, ... })` with a variables object.
-    const fallbackRun = ((vars: Record<string, number>) => {
+    const fallbackRun = ((vars: Record<string, unknown>) => {
       ce.pushScope();
       try {
         if (vars && typeof vars === 'object') {
@@ -12166,11 +12347,20 @@ export class BaseCompiler {
             // Declare a fresh local shadow before assigning so `popScope` fully
             // restores the previous state (a bare `assign` would mutate an
             // outer/global binding and leak the argument value engine-wide).
-            ce.declare(k, 'number');
-            ce.assign(k, v);
+            // The shadow's type is the value's RUNTIME shape: a `{re, im}`
+            // object is a complex number (declaring it `number` would reject
+            // the assignment and run the expression against an unbound
+            // symbol), a number is a number.
+            if (isComplexArg(v)) {
+              ce.declare(k, 'complex');
+              ce.assign(k, ce.number(ce.complex(v.re, v.im)));
+            } else {
+              ce.declare(k, 'number');
+              ce.assign(k, v as number);
+            }
           }
         }
-        return interpretedRunValue(expr.evaluate());
+        return project(interpretedRunValue(expr.evaluate()));
       } finally {
         ce.popScope();
       }
@@ -12182,6 +12372,8 @@ export class BaseCompiler {
       calling: 'expression',
       run: fallbackRun,
       error,
+      diagnostic,
+      ...BaseCompiler.modeReport(),
       ...refs,
     } as CompilationResult<T>;
   }

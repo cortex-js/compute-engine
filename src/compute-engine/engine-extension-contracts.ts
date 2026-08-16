@@ -171,6 +171,53 @@ function assertCompileTargetContract(
       'Invalid compile target: "beginCompilation" must be a function'
     );
   }
+
+  assertCompileTargetModesContract(target);
+}
+
+const COMPILE_MODES: readonly string[] = ['strict', 'complex', 'auto'];
+
+/**
+ * The compile-mode declaration of a custom target (`CompileTarget.mode`,
+ * `supportedModes`, `complexLift`, `complexIsReal`, `reset`): each is
+ * well-formed when present, and a target that DECLARES `'complex'` or
+ * `'auto'` provides the two lowering hooks the complex discipline is emitted
+ * through — a declaration without them is rejected here, at option
+ * validation, rather than discovered as a missing hook mid-emission.
+ * (`reset()` is not required: without it a direct target's `'auto'` resolves
+ * to `'strict'`, see `CompileTarget.supportedModes`.)
+ */
+function assertCompileTargetModesContract(
+  target: Record<string, unknown>
+): void {
+  if (
+    target.mode !== undefined &&
+    !COMPILE_MODES.includes(target.mode as string)
+  )
+    throw new Error(
+      `Invalid compile target: "mode" must be one of ${COMPILE_MODES.map((m) => `"${m}"`).join(', ')}`
+    );
+  const declared = target.supportedModes;
+  if (declared !== undefined) {
+    if (
+      !Array.isArray(declared) ||
+      declared.some((m) => !COMPILE_MODES.includes(m as string))
+    )
+      throw new Error(
+        `Invalid compile target: "supportedModes" must be an array of ${COMPILE_MODES.map((m) => `"${m}"`).join(', ')}`
+      );
+    if (
+      (declared.includes('complex') || declared.includes('auto')) &&
+      (typeof target.complexLift !== 'function' ||
+        typeof target.complexIsReal !== 'function')
+    )
+      throw new Error(
+        'Invalid compile target: a target whose "supportedModes" includes "complex" or "auto" must provide the "complexLift()" and "complexIsReal()" hooks'
+      );
+  }
+  for (const hook of ['complexLift', 'complexIsReal', 'reset'] as const)
+    if (target[hook] !== undefined && typeof target[hook] !== 'function')
+      throw new Error(`Invalid compile target: "${hook}" must be a function`);
 }
 
 function assertOperatorEntry(operator: string, value: unknown): void {
@@ -277,6 +324,15 @@ export function assertCompilationOptionsContract(
   if (options.fallback !== undefined && typeof options.fallback !== 'boolean') {
     throw new Error(
       'Invalid compilation option "fallback": expected a boolean'
+    );
+  }
+
+  if (
+    options.mode !== undefined &&
+    !COMPILE_MODES.includes(options.mode as string)
+  ) {
+    throw new Error(
+      'Invalid compilation option "mode": expected "strict", "complex" or "auto"'
     );
   }
 

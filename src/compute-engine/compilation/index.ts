@@ -1,5 +1,6 @@
 // Re-export all compilation types and classes
 export * from './types.js';
+export * from './diagnostics.js';
 export * from './base-compiler.js';
 export * from './javascript-target.js';
 export * from './gpu-target.js';

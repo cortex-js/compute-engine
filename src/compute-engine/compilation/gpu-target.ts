@@ -19,6 +19,7 @@ import {
 } from './constant-folding.js';
 
 import type {
+  CompileMode,
   CompileTarget,
   CompiledOperators,
   CompiledFunction,
@@ -27,6 +28,7 @@ import type {
   CompilationOptions,
   CompilationResult,
 } from './types.js';
+import { compileDiagnosticOf } from './diagnostics.js';
 import {
   BaseCompiler,
   isProvablyCharacterOperand,
@@ -8138,6 +8140,12 @@ type GPUUserFunctionSignature = {
  * function naming differences, vector constructors, function declaration
  * syntax, and shader structure.
  */
+/**
+ * The compile modes the shader targets offer (`CompileMode`): `'strict'`
+ * only. See `createTarget`.
+ */
+const GPU_SUPPORTED_MODES: readonly CompileMode[] = ['strict'];
+
 export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   /** Language identifier (e.g., 'glsl', 'wgsl') */
   protected abstract readonly languageId: string;
@@ -8249,6 +8257,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const rules = this.getShapeRules();
     const target: GPURandomTarget & GPUShapeRulesTarget = {
       language: this.languageId,
+      // A shader value has ONE static shape (`float` or `vec2`), decided by
+      // type analysis — the strict discipline IS this target's model, and the
+      // only mode it offers (`CompileMode`). A requested `'complex'`/`'auto'`
+      // is the `unsupported-mode` decline.
+      supportedModes: GPU_SUPPORTED_MODES,
       // Constant-collection folding inlines up to the SAME limit this
       // target's `Range` handler already inlines to. On a shader target a
       // dynamic collection has no lowering at all, so for a constant one the
@@ -8854,7 +8867,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         error,
         this.languageId,
         this.createTarget(),
-        options.vars ? new Set(Object.keys(options.vars)) : undefined
+        options.vars ? new Set(Object.keys(options.vars)) : undefined,
+        compileDiagnosticOf(e, error)
       );
     }
   }
@@ -8880,6 +8894,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         ? new Set(Object.keys(userFunctions))
         : undefined,
       constantFold: options.constantFold,
+      // The caller's requested compile mode; validated against
+      // `supportedModes` (strict only here) by `BaseCompiler.compile`.
+      mode: options.mode,
       functions: (id) => {
         if (userFunctions && id in userFunctions) {
           const fn = userFunctions[id];

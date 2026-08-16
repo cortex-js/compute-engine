@@ -2974,13 +2974,11 @@ describe('COMPILE user-defined function calls', () => {
       expect(r.success).toBe(true);
       // The wrap is inside the closure, around the element parameter.
       expect(r.code).toMatch(/_SYS\.bcastFn\(\(\w+, (\w+)\) =>.*re: \1, im: 0/);
-      // Same values as the interpreter, in the complex convention the
-      // complex-returning callee uses on this target.
-      expect(r.run!({})).toEqual([
-        { re: 1, im: 0 },
-        { re: 1, im: 0 },
-        { re: 1, im: 0 },
-      ]);
+      // Same values as the interpreter. The callee computes in the complex
+      // convention, but the elements are real, so the runner's result
+      // convention (design §5, 2026-08-16, applied element by element) hands
+      // them back as plain numbers, never `{re: 1, im: 0}`.
+      expect(r.run!({})).toEqual([1, 1, 1]);
     });
   });
 

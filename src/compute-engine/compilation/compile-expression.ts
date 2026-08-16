@@ -1,7 +1,8 @@
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import type { Expression, JSSource } from '../global-types.js';
-import type { CompileTarget, CompilationResult } from './types.js';
+import type { CompileMode, CompileTarget, CompilationResult } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
+import { compileDiagnosticOf } from './diagnostics.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 
@@ -21,6 +22,7 @@ type CompileExpressionOptions<T extends string = string> = {
   fallback?: boolean;
   realOnly?: boolean;
   complexPromotion?: boolean;
+  mode?: CompileMode;
   iterationBudget?: number;
   quadrature?: 'adaptive' | 'monte-carlo';
   symbolDeps?: Set<MathJsonSymbol>;
@@ -35,6 +37,14 @@ type CompileExpressionOptions<T extends string = string> = {
  * for JS-executable targets, a `run` function.
  *
  * When `realOnly` is true, the return type of `run` is narrowed to `number`.
+ *
+ * `mode` selects the arithmetic discipline (`'strict'` | `'complex'` |
+ * `'auto'`, see `CompileMode` in `compilation/types.ts`); the effective mode
+ * is `options.mode` ?? the target's `mode` ?? the target's default (`'auto'`
+ * where offered, else `'strict'`), and a mode the target does not offer is a
+ * `capability` decline. The result reports the discipline used (`mode`),
+ * whether a radical was promoted (`promoted`) and, on a decline, the
+ * structured `diagnostic` beside `error`.
  *
  * If the expression cannot be compiled, falls back to interpretation
  * (success: false, run: applicableN1) unless `options.fallback` is false,
@@ -125,6 +135,19 @@ export function compile<T extends string = 'javascript'>(
       // omitted option must reset the field, or a target reused after a
       // `complexPromotion: true` call would silently keep promoting.
       options.target.complexPromotion = options.complexPromotion;
+      // The effective compile mode, resolved for a DIRECT target and stamped
+      // per call (an omitted option must reset the field, like the two
+      // above). A direct target offers `'complex'` only with the two lowering
+      // hooks and `'auto'` only with `reset()` as well (there is no fresh
+      // per-compilation target to retry on); a requested `'auto'` that the
+      // target declares but cannot retry resolves to `'strict'`, as
+      // documented on `CompileTarget.supportedModes`. A requested mode the
+      // target does not declare at all is the `unsupported-mode` decline,
+      // raised by `BaseCompiler.compile` when it latches the mode.
+      options.target.mode = resolveDirectTargetMode(
+        options.target,
+        options.mode
+      );
       const code = BaseCompiler.compileRoot(rewritten, options.target);
       return BaseCompiler.withReferences(
         {
@@ -167,6 +190,7 @@ export function compile<T extends string = 'javascript'>(
       preamble: options?.preamble,
       realOnly: options?.realOnly,
       complexPromotion: options?.complexPromotion,
+      mode: options?.mode,
       iterationBudget: options?.iterationBudget,
       quadrature: options?.quadrature,
       symbolDeps: options?.symbolDeps,
@@ -204,9 +228,47 @@ export function compile<T extends string = 'javascript'>(
         error,
         target,
         compileTarget,
-        options?.vars ? new Set(Object.keys(options.vars)) : undefined
+        options?.vars ? new Set(Object.keys(options.vars)) : undefined,
+        compileDiagnosticOf(e, error),
+        options?.realOnly
       );
     }
     throw e;
   }
+}
+
+/**
+ * The effective compile mode for a DIRECT (caller-owned) target: the modes it
+ * OFFERS are its declared `supportedModes` (default `['strict']`) narrowed by
+ * the hooks each needs — `'complex'` needs `complexLift` and `complexIsReal`
+ * (the declaration contract already rejects a target declaring it without
+ * them), `'auto'` needs those and `reset()`. A requested `'auto'` that is
+ * declared but not offered (no `reset()`) resolves to `'strict'`; the
+ * default with nothing requested is `'auto'` when offered, else `'strict'`.
+ * Any other requested mode is returned as-is for `BaseCompiler.compile` to
+ * validate against the declared list (the `unsupported-mode` decline).
+ *
+ * Only the per-call `options.mode` is "requested". The resolved value is
+ * STAMPED onto `target.mode` by the caller (like `constantFold` and
+ * `complexPromotion`), so on a reused direct target `target.mode` holds the
+ * PREVIOUS call's resolution — reading it back as a request would make an
+ * omitted `mode` inherit the last explicit choice instead of resetting to the
+ * target's default.
+ */
+function resolveDirectTargetMode(
+  target: CompileTarget<Expression>,
+  requested: CompileMode | undefined
+): CompileMode {
+  const declared: readonly CompileMode[] = target.supportedModes ?? ['strict'];
+  const hasLowering =
+    typeof target.complexLift === 'function' &&
+    typeof target.complexIsReal === 'function';
+  const offersAuto =
+    declared.includes('auto') &&
+    hasLowering &&
+    typeof target.reset === 'function';
+  if (requested === undefined) return offersAuto ? 'auto' : 'strict';
+  if (requested === 'auto' && declared.includes('auto') && !offersAuto)
+    return 'strict';
+  return requested;
 }

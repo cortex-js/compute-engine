@@ -17,6 +17,8 @@ import {
 import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import type {
+  CompileDiagnostic,
+  CompileMode,
   CompileTarget,
   CompiledOperators,
   CompiledFunctions,
@@ -26,6 +28,7 @@ import type {
   CompiledRunner,
   OperandCompiler,
 } from './types.js';
+import { compileDiagnosticOf } from './diagnostics.js';
 import { IntervalArithmetic } from '../interval/index.js';
 import type { Interval, IntervalResult } from '../interval/types.js';
 
@@ -768,6 +771,12 @@ function processInput(input: unknown): unknown {
 /**
  * Interval arithmetic JavaScript target implementation.
  */
+/**
+ * The compile modes the interval target offers (`CompileMode`): `'strict'`
+ * only — intervals are real.
+ */
+const INTERVAL_SUPPORTED_MODES: readonly CompileMode[] = ['strict'];
+
 export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
   getOperators(): CompiledOperators {
     return INTERVAL_JAVASCRIPT_OPERATORS;
@@ -782,6 +791,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
   ): CompileTarget<Expression> {
     return {
       language: 'interval-javascript',
+      // Intervals are real: the strict discipline is the only mode this
+      // target offers (`CompileMode`); a requested `'complex'`/`'auto'` is
+      // the `unsupported-mode` decline.
+      supportedModes: INTERVAL_SUPPORTED_MODES,
       // See `CompileTarget.varsObjectName`: free symbols read as `_.<id>`
       // (below), so a lambda parameter spelled `_` must not shadow the vars
       // object.
@@ -887,7 +900,12 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       const error =
         result.error ??
         `Cannot compile \`${expr.operator}\` to the interval-js target`;
-      return this.buildIntervalFallback(expr, error, options);
+      return this.buildIntervalFallback(
+        expr,
+        error,
+        options,
+        result.diagnostic
+      );
     }
     return result;
   }
@@ -908,7 +926,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
   private buildIntervalFallback(
     expr: Expression,
     error: string,
-    options: CompilationOptions<Expression>
+    options: CompilationOptions<Expression>,
+    diagnostic?: CompileDiagnostic
   ): CompilationResult<'interval-js', IntervalResult | Interval> {
     console.warn(
       `Compilation fallback for "${expr.operator}" (target: interval-js): ${error}`
@@ -918,7 +937,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       error,
       'interval-js',
       this.createTarget(),
-      options.vars ? new Set(Object.keys(options.vars)) : undefined
+      options.vars ? new Set(Object.keys(options.vars)) : undefined,
+      diagnostic
     );
     // `run` is guaranteed present for an executable target (interval-js).
     const interpreterRun = base.run as (
@@ -956,6 +976,9 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     }
 
     const target = this.createTarget({
+      // The caller's requested compile mode; validated against
+      // `supportedModes` (strict only here) by `BaseCompiler.compile`.
+      mode: options.mode,
       // Constant folding is UNSOUND on this target, unconditionally: it bakes
       // a subtree's `.N()` value as a zero-width point, discarding the
       // outward-rounded enclosure the structural interval code computes. A
@@ -1054,6 +1077,8 @@ function compileToIntervalTarget(
       success: false,
       code: '',
       error: (e as Error).message,
+      diagnostic: compileDiagnosticOf(e),
+      ...BaseCompiler.modeReport(),
     } as CompilationResult<'interval-js', IntervalResult | Interval>;
   }
   // Prepend any user-defined function definitions accumulated while compiling

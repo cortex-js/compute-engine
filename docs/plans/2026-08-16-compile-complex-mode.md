@@ -638,7 +638,21 @@ Migration order — four separately stageable units, each with its own gate
 and a stated observable change; nothing in an earlier step depends on a
 later one being present:
 
-1. **Plumbing, no behavior change.** `mode` accepted end to end (options →
+1. **Plumbing, no behavior change.** — **IMPLEMENTED 2026-08-16** (unstaged
+   at the time of writing; test file
+   `test/compute-engine/compile-mode-plumbing.test.ts`; error classes in
+   `compilation/diagnostics.ts`; the mode latch is `BaseCompiler.mode`,
+   resolved by `BaseCompiler.resolveCompileMode` at depth 0 and, for a
+   direct target, pre-resolved by `resolveDirectTargetMode` in
+   `compile-expression.ts`). Two defaults taken as stated: `result.diagnostic`
+   and `result.promoted` exist; on a decline `mode`/`promoted` are stamped
+   too (`'strict'`/`false`). One reading resolved: a direct target that
+   DECLARES `'auto'` without `reset()` resolves a requested `'auto'` to
+   `'strict'` (§4/§6 table) rather than being rejected (the §9 phrasing) —
+   declaring `'complex'`/`'auto'` without `complexLift`/`complexIsReal` IS
+   rejected. Snapshot/pin blast radius measured: 10 test pins moved from
+   `{re: x, im: 0}` to `x` (the §5 convention), no snapshot files changed.
+   `mode` accepted end to end (options →
    target → `BaseCompiler` static, read once) with the effective-mode
    resolution of §5; `LaneMismatchError` and `CompileDiagnostic` types;
    `mode`/`promoted`/`escalation`/`diagnostic` result fields (`mode` reports
@@ -675,7 +689,12 @@ later one being present:
    (`_fn_K$z01`, `_fn_b$z1`) is rewritten to pin the VALUE. Observable
    change: `mode: 'complex'` now computes. Gate: the "Complex mode result
    convention", D2, D6, D8 and "Non-numeric wide bindings" witnesses.
-4. **`auto` and the option surface.** `auto` = strict + promotion (the §2
+4. **`auto` and the option surface.** Also decide here (user-ruled
+   2026-08-16 to wait for this step, from the step-1 review): whether the
+   DEFAULT `R` of `CompiledRunner`/`CompilationResult` — today `number |
+   ComplexResult` — is widened to what runners actually return (`boolean`,
+   nested arrays), as one deliberate public-type change alongside removing
+   the `realOnly: true → number` overload; or left as-is. `auto` = strict + promotion (the §2
    promotable set lowered through the complex kernels, `promoted: true`),
    escalating on `LaneMismatch` through the single retry site on fresh
    state (§4); `complexPromotion` → `mode: 'complex'` alias with warning;

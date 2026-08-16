@@ -25,7 +25,7 @@ import type { Expression, IComputeEngine } from './global-types.js';
 import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
 import { numberLiteralOf } from './boxed-expression/numerics.js';
 import { differentiate } from './symbolic/derivative.js';
-import { implicitCompile } from './implicit-compile.js';
+import { implicitCompileNumeric } from './implicit-compile.js';
 import {
   levenbergMarquardt,
   type LMResult,
@@ -255,14 +255,14 @@ function makeNumericFn(
   expr: Expression,
   freeNames: string[]
 ): NumFn {
-  const compiled = implicitCompile(ce, expr, { realOnly: true });
-  if (compiled?.success) return compiled.run as NumFn;
+  const compiled = implicitCompileNumeric(ce, expr);
+  if (compiled) return compiled;
   return (vars: Record<string, number>) => {
     const sub: Record<string, Expression> = {};
     for (const name of freeNames) sub[name] = ce.number(vars[name] ?? NaN);
-    // Match the compiled path (`wrapRealOnly` in the JS target): a nonzero
-    // imaginary part is a domain escape and coerces to NaN, rather than being
-    // silently truncated to its real part.
+    // Match the compiled path (`implicitCompileNumeric`'s projection): a
+    // nonzero imaginary part is a domain escape and coerces to NaN, rather
+    // than being silently truncated to its real part.
     return realValue(expr.subs(sub));
   };
 }

@@ -230,10 +230,11 @@ describe('MULTI-CLAUSE COMPILE — complex-valued dispatch', () => {
     // emitted at all.
     const rh = compile(ce.box(['h', 1, 0.5]), { constantFold: false });
     expect(rh?.code).toContain('re: 0.5, im: 0');
-    expect((rh?.run?.({}) as { re: number }).re).toBeCloseTo(
-      ce.box(['h', 1, 0.5]).N().re,
-      12
-    );
+    // `0.5 + 1` is real: the result convention (design §5) hands it back as
+    // a plain number, never `{re: 1.5, im: 0}`.
+    const v = rh?.run?.({});
+    expect(typeof v).toBe('number');
+    expect(v).toBeCloseTo(ce.box(['h', 1, 0.5]).N().re, 12);
   });
 
   it('coerces a provably-real clause BODY to the complex convention', () => {

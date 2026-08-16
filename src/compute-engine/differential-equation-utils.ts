@@ -1,5 +1,5 @@
 import type { Expression, IComputeEngine } from './global-types.js';
-import { implicitCompile } from './implicit-compile.js';
+import { implicitCompileNumeric } from './implicit-compile.js';
 import { isFunction, isSymbol, sym } from './boxed-expression/type-guards.js';
 import {
   rk45System,
@@ -320,9 +320,9 @@ function prepareODE(
         independentName,
         stateNames
       );
-      const compiled = implicitCompile(ce, compiledRhs, { realOnly: true });
-      if (!compiled?.success) return undefined;
-      runs.push(compiled.run as (vars: Record<string, number>) => number);
+      const compiled = implicitCompileNumeric(ce, compiledRhs);
+      if (!compiled) return undefined;
+      runs.push(compiled);
     }
 
     return {
@@ -370,9 +370,8 @@ function prepareODE(
       independentName,
       stateNames
     );
-    const compiled = implicitCompile(ce, compiledRhs, { realOnly: true });
-    if (!compiled?.success) return undefined;
-    const run = compiled.run as (vars: Record<string, number>) => number;
+    const run = implicitCompileNumeric(ce, compiledRhs);
+    if (!run) return undefined;
 
     return {
       f: (x, y) => {
@@ -399,9 +398,8 @@ function prepareODE(
     independentName,
     stateName
   );
-  const compiled = implicitCompile(ce, compiledRhs, { realOnly: true });
-  if (!compiled?.success) return undefined;
-  const run = compiled.run as (vars: Record<string, number>) => number;
+  const run = implicitCompileNumeric(ce, compiledRhs);
+  if (!run) return undefined;
 
   return {
     f: (x, [y]) => {
