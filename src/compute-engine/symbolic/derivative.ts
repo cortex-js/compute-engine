@@ -1178,26 +1178,44 @@ function differentiateNode(
     // is a correct answer there, a scalar rule is not.
     if (!comps) return undefined;
 
-    // `Real(Conjugate(vᵢ) · vᵢ′)` rather than the bare product: the operand's
-    // components may be complex. The two forms agree for a real component,
-    // and `isReal` cannot separate the cases here — a symbolic `cos(t)` over
-    // a free `t` reports `isReal === false`, meaning "not PROVABLY real"
-    // rather than "provably complex" — so the Hermitian form is emitted
-    // unconditionally and the simplifier removes it where it is inert.
-    const hermitian = (c: Expression, cPrime: Expression): Expression =>
-      ce.function('Real', [
-        ce.function('Multiply', [ce.function('Conjugate', [c]), cPrime]),
-      ]);
+    // `Real(Conjugate(vᵢ) · vᵢ′)` rather than the bare product, because the
+    // operand's components may be complex. The two forms agree whenever the
+    // component is real, and the bare product is worth keeping there: it is
+    // the form that COLLAPSES. `d/dt |(cos t, −sin t, 1)|` is `0` as a bare
+    // product and a 112-character non-reducing expression as a Hermitian one
+    // (`Real`/`Conjugate` do not fold away over a symbolic argument), which
+    // matters to a caller that re-serializes derivatives inside a size-capped
+    // expansion loop — it spends budget rather than failing, so the loss is
+    // silent.
+    //
+    // `isReal === true` means PROVABLY real, so the bare product is taken
+    // only where realness is established and the Hermitian form is the
+    // conservative default. Note what this does NOT buy, because the obvious
+    // reading is wrong: `D` BINDS its variable, so inside the differentiation
+    // the variable is a bound symbol typed `unknown` no matter what the
+    // enclosing scope declared — with `t` declared `real`,
+    // `D(|(t, 2)|, t)` still takes the Hermitian branch, because `t` is not
+    // that `t` here. The guard therefore fires for components that are real
+    // WITHOUT depending on the bound variable (literals: `D(|(1, 2)|, t)`
+    // collapses to `0`), and not for the `cos(t)` shapes where the collapse
+    // would matter most. Recovering those needs the bound variable to carry
+    // the declared type — separate work, not a tweak to this guard.
+    const numeratorTerm = (c: Expression, cPrime: Expression): Expression =>
+      c.isReal === true && cPrime.isReal === true
+        ? ce.function('Multiply', [c, cPrime])
+        : ce.function('Real', [
+            ce.function('Multiply', [ce.function('Conjugate', [c]), cPrime]),
+          ]);
 
     const terms: Expression[] = [];
     for (const c of comps) {
       const cPrime = differentiate(c, v, depth + 1, trace);
       if (cPrime === undefined) return undefined;
-      terms.push(hermitian(c, cPrime));
+      terms.push(numeratorTerm(c, cPrime));
     }
     recordD(trace, expr, v, 'derivative.tuple-norm', () =>
       ce.function('Divide', [
-        add(...comps.map((c) => hermitian(c, dPlaceholder(c, v)))),
+        add(...comps.map((c) => numeratorTerm(c, dPlaceholder(c, v)))),
         expr,
       ])
     );
