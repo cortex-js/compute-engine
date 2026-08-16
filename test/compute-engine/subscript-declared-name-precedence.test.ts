@@ -146,7 +146,8 @@ describe('SUBSCRIPT: trigger-spelled base with a declared joined name', () => {
     ce: ComputeEngine,
     latex: string,
     resolveSymbol?: (id: string) => any
-  ) => JSON.stringify(ce.parse(latex, { canonical: false, resolveSymbol }).json);
+  ) =>
+    JSON.stringify(ce.parse(latex, { canonical: false, resolveSymbol }).json);
 
   // A per-call oracle that knows one joined name, and nothing else.
   const alpha1 = (id: string) =>
@@ -313,7 +314,9 @@ describe('SUBSCRIPT: trigger-spelled COLLECTION base with a declared non-functio
     expect(json(ce, '\\eta_{w}')).toBe('"eta_w"');
     expect(ce.parse('\\eta_w').evaluate().re).toBe(1.33);
     // 1-based: `eta_1` is 0/20, `eta_2` is 1/20
-    expect(ce.parse('\\eta_w+\\eta_2').evaluate().re).toBeCloseTo(1.33 + 1 / 20);
+    expect(ce.parse('\\eta_w+\\eta_2').evaluate().re).toBeCloseTo(
+      1.33 + 1 / 20
+    );
   });
 
   test('round-trip: the serializer spelling of `eta_w` re-parses to itself', () => {
@@ -330,5 +333,37 @@ describe('SUBSCRIPT: trigger-spelled COLLECTION base with a declared non-functio
     ce.declare('eta', 'list<number>');
     expect(json(ce, '\\eta_w')).toBe('["At","eta","w"]');
     expect(json(ce, '\\eta_{w}')).toBe('["At","eta","w"]');
+  });
+
+  test('the Unicode spelling of the base follows the same rule', () => {
+    const ce = new ComputeEngine();
+    ce.declare('eta', 'list<number>');
+    ce.declare('eta_w', 'real');
+    expect(json(ce, 'η_w')).toBe('"eta_w"');
+    expect(json(ce, 'η_1')).toBe('["At","eta",1]');
+  });
+
+  test('a per-call `resolveSymbol` oracle can declare the joined name', () => {
+    const ce = new ComputeEngine();
+    ce.declare('eta', 'list<number>');
+    const oracle = (id: string) =>
+      id === 'eta_w' ? { type: 'real' } : undefined;
+    expect(
+      JSON.stringify(
+        ce.parse('\\eta_w', { canonical: false, resolveSymbol: oracle }).json
+      )
+    ).toBe('"eta_w"');
+    expect(json(ce, '\\eta_w')).toBe('["At","eta","w"]');
+  });
+
+  test('a `subscriptEvaluate` dictionary-spelled base never absorbs', () => {
+    const ce = new ComputeEngine();
+    ce.declare('eta', {
+      subscriptEvaluate: (subscript, { engine }) =>
+        engine.number((subscript.re ?? 0) * 2),
+    });
+    ce.declare('eta_5', 'real');
+    expect(json(ce, '\\eta_5')).toBe('["Subscript","eta",5]');
+    expect(ce.parse('\\eta_5').evaluate().re).toBe(10);
   });
 });
