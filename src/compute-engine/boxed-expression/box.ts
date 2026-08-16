@@ -1391,7 +1391,8 @@ function isSpreadOperand(x: ExpressionInput): boolean {
 }
 
 /** The CONCRETE scalar primitives {@link admissibleElementType} admits: the
- * numeric types plus `boolean`, `string` and `color`. Every other primitive —
+ * numeric types plus `boolean`, `character`, `string` and `color`. Every other
+ * primitive —
  * the abstract supertypes (`scalar`, `value`, `expression`, …), the bare
  * composite names (`'tuple'`, `'collection'`, …) and `unknown`/`any`/`never` —
  * declines.
@@ -1403,6 +1404,10 @@ function isSpreadOperand(x: ExpressionInput): boolean {
 const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
   ...NUMERIC_TYPES,
   'boolean',
+  // `character` is a concrete leaf scalar (one grapheme cluster, no subtypes)
+  // and is the ELEMENT type of every string, so it is the type a callback
+  // parameter over a string source — or over `Characters(s)` — deserves.
+  'character',
   'string',
   'color',
 ]);
@@ -1911,14 +1916,19 @@ function makeCanonicalFunctionCore(
           }
           return r;
         });
-        if (cleaned.some((r) => !r.isValid)) {
-          const fn = new BoxedFunction(ce, name, cleaned, {
-            metadata,
-            canonical: true,
-          });
-          fn._resolvedOverload = valueResolutionOut.resolution;
-          return fn;
-        }
+        // `validateArguments` returns a non-null list not only when an
+        // operand was REJECTED but also when one was SUBSTITUTED and every
+        // entry is valid — a one-cluster string literal narrowed to the
+        // `character` a declared parameter expects, or an operand repaired
+        // by matrix inference. Building the call from `boxedOps` here would
+        // discard that substitution (the operator-definition route keeps it),
+        // so the cleaned list is used whether or not it carries an error.
+        const fn = new BoxedFunction(ce, name, cleaned, {
+          metadata,
+          canonical: true,
+        });
+        fn._resolvedOverload = valueResolutionOut.resolution;
+        return fn;
       }
       const fn = new BoxedFunction(ce, name, boxedOps, {
         metadata,

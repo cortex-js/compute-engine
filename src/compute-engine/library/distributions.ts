@@ -516,6 +516,14 @@ function empiricalQuantile(
   const n = data.length;
   if (n === 0) return undefined;
 
+  // Every element must be a NUMBER. The sort below orders by `.re`, which is
+  // `NaN` for a non-numeric element, so the comparator returns `NaN`, the sort
+  // is a silent no-op, and the `pv <= 0` / `>= 1` / `n === 1` exits return
+  // `sorted[0]` — handing back the element itself. For a string source (an
+  // indexed collection of characters) that meant returning a CHARACTER from a
+  // handler whose signature says `-> number`. Stay inert instead.
+  if (data.some((x) => !isNumber(x))) return undefined;
+
   const sorted = [...data].sort((a, b) => a.re - b.re);
   if (pv <= 0) return sorted[0];
   if (pv >= 1) return sorted[n - 1];

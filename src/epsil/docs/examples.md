@@ -888,18 +888,18 @@ The program pulls together most of the language:
 type alias json = number | string | boolean | missing | list<json> | dictionary
 
 let digits = Characters("0123456789")
-isDigit(c: string | missing) = c in digits
-isWs(c: string | missing) = c == " " || c == "\n" || c == "\t" || c == "\r"
+isDigit(c: character | missing) = c in digits
+isWs(c: character | missing) = c == " " || c == "\n" || c == "\t" || c == "\r"
 
 // Index of the first non-whitespace character at or after i
-function skipWs(cs: list<string>, i: integer) -> integer {
+function skipWs(cs: list<character>, i: integer) -> integer {
   let j = i
   while j <= Length(cs) && isWs(cs[j]) { j = j + 1 }
   j
 }
 
 // A run of digits starting at i, as (value, indexAfter)
-function parseDigits(cs: list<string>, i: integer) -> tuple<integer, integer> {
+function parseDigits(cs: list<character>, i: integer) -> tuple<integer, integer> {
   let j = i
   let n = 0
   while j <= Length(cs) && isDigit(cs[j]) {
@@ -910,7 +910,7 @@ function parseDigits(cs: list<string>, i: integer) -> tuple<integer, integer> {
 }
 
 // Number: -?int(.frac)?((e|E)(+|-)?exp)? — kept exact, so 2.5e-1 is 1/4
-function parseNumber(cs: list<string>, i: integer) -> tuple<json, integer> {
+function parseNumber(cs: list<character>, i: integer) -> tuple<json, integer> {
   let j = i
   let sign = 1
   if cs[j] == "-" {
@@ -941,7 +941,7 @@ function parseNumber(cs: list<string>, i: integer) -> tuple<json, integer> {
 }
 
 // Characters of a string body from i up to the closing quote
-function scanString(cs: list<string>, i: integer) -> tuple<string, integer> {
+function scanString(cs: list<character>, i: integer) -> tuple<string, integer> {
   let j = i
   let out = []
   while cs[j] != "\"" {
@@ -963,10 +963,10 @@ function scanString(cs: list<string>, i: integer) -> tuple<string, integer> {
 }
 
 // String: cs[i] is the opening quote
-parseString(cs: list<string>, i: integer) = scanString(cs, i + 1)
+parseString(cs: list<character>, i: integer) = scanString(cs, i + 1)
 
 // Array: cs[i] is "[" — elements become a list
-function parseArray(cs: list<string>, i: integer) -> tuple<json, integer> {
+function parseArray(cs: list<character>, i: integer) -> tuple<json, integer> {
   let j = skipWs(cs, i + 1)
   let out = []
   if cs[j] == "]" { j = j + 1 }
@@ -986,7 +986,7 @@ function parseArray(cs: list<string>, i: integer) -> tuple<json, integer> {
 }
 
 // Object: cs[i] is "{" — key-value pairs become a dictionary
-function parseObject(cs: list<string>, i: integer) -> tuple<json, integer> {
+function parseObject(cs: list<character>, i: integer) -> tuple<json, integer> {
   let j = skipWs(cs, i + 1)
   let keys = []
   let vals = []
@@ -1011,7 +1011,7 @@ function parseObject(cs: list<string>, i: integer) -> tuple<json, integer> {
 }
 
 // Any JSON value, dispatched on its first character
-function parseValue(cs: list<string>, i: integer) -> tuple<json, integer> {
+function parseValue(cs: list<character>, i: integer) -> tuple<json, integer> {
   let j = skipWs(cs, i)
   match cs[j] {
     "\"" => parseString(cs, j)

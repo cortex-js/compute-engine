@@ -55,26 +55,34 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
       '(first: T, second: U, third: V) -> tuple<T, U, V> where T, U, V'
     );
     // `Reverse` is an overload set since the per-kind result rule landed
-    // (`docs/STRING_ROADMAP.md`, "Signature refinement", Phase 0b): a `list`
-    // operand is echoed (shape included); every other indexed kind — tuple,
-    // range, an opaque `indexed_collection<T>` — results in `list<T>`.
+    // (`docs/STRING_ROADMAP.md`, "Signature refinement", Phase 0b): a `string`
+    // operand and a `list` operand are each echoed (shape included); every
+    // other indexed kind — tuple, range, an opaque `indexed_collection<T>` —
+    // results in `list<T>`. The string arm is spelled with a BOUNDED type
+    // variable rather than the ground type `string` so that an `unknown`-typed
+    // operand (which refutes no arm) does not win it — see the unknown/any
+    // deltas test below.
     expect(sig(ce, 'Reverse')).toBe(
-      '((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)'
+      '((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)'
     );
   });
 
   test('the twelve constructor-pattern operators carry `where` signatures', () => {
     const ce = engine();
+    // `Take`/`Drop` gained a leading string-preserving arm with Strings
+    // Phase 1: a prefix (or suffix) of a string's characters is a string.
     expect(sig(ce, 'Take')).toBe(
-      '(xs: indexed_collection<T>, count: number) -> list<T> where T'
+      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)'
     );
     expect(sig(ce, 'Drop')).toBe(
-      '(xs: indexed_collection<T>, count: number) -> list<T> where T'
+      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)'
     );
     // `Slice` is an overload set since the `range` arm landed (Phase 0c of
-    // `docs/STRING_ROADMAP.md`); both arms carry the `where` clause.
+    // `docs/STRING_ROADMAP.md`); every arm carries the `where` clause. Strings
+    // Phase 1 gave each of the two spans a leading string-preserving twin: a
+    // contiguous run of a string's characters is a string.
     expect(sig(ce, 'Slice')).toBe(
-      '((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)'
+      '((value: T, span: range) -> T where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)'
     );
     expect(sig(ce, 'DeleteAt')).toBe(
       '(indexed_collection<T>, integer) -> list<T> where T'
@@ -89,11 +97,17 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
       '(indexed_collection<T>, integer, T) -> list<T> where T'
     );
     // The `order`/`key` slots stay the PRIMITIVE `function`, not an arrow: a
-    // function-typed SYMBOL operand must still be admitted there.
+    // function-typed SYMBOL operand must still be admitted there. `Sort` and
+    // `Unique` also gained a leading string-preserving arm with Strings
+    // Phase 1: a reordering (or a de-duplication) of a string's characters is
+    // a string. `Sort` keeps its OPTIONAL `order` in that arm — an overload
+    // arm may carry an optional parameter, so no arity split is needed.
     expect(sig(ce, 'Sort')).toBe(
-      '(indexed_collection<T>, order: function?) -> list<T> where T'
+      '((T, order: function?) -> T where T: string) & ((indexed_collection<T>, order: function?) -> list<T> where T)'
     );
-    expect(sig(ce, 'Unique')).toBe('(collection<T>) -> list<T> where T');
+    expect(sig(ce, 'Unique')).toBe(
+      '((T) -> T where T: string) & ((collection<T>) -> list<T> where T)'
+    );
     expect(sig(ce, 'RandomShuffle')).toBe(
       '(indexed_collection<T>) random -> list<T> where T'
     );
@@ -345,13 +359,23 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
   test('the declared bound still rejects a non-indexed operand', () => {
     const ce = engine();
     ce.declare('rvS', 'set<integer>');
-    for (const e of [
-      ce.function('Reverse', [ce.box('rvS')]),
-      ce.function('Reverse', [ce.string('hello')]),
-    ]) {
-      expect(e.type.toString()).toBe('error');
-      expect(e.toString()).toContain('incompatible-type');
-    }
+    const e = ce.function('Reverse', [ce.box('rvS')]);
+    expect(e.type.toString()).toBe('error');
+    expect(e.toString()).toContain('incompatible-type');
+  });
+
+  test('a STRING operand is admitted now that strings are indexed collections', () => {
+    // Before strings became `indexed_collection<character>` this was an
+    // `incompatible-type` error, alongside the `set` case above. A string is
+    // an indexed collection of its grapheme clusters, so the declared bound
+    // admits it — and the dedicated string-preserving arm (`(T) -> T where
+    // T: string`) wins most-specific-wins, so the result is `string`, not
+    // `list<character>`: reversing a string's characters yields a string
+    // (`docs/STRING_ROADMAP.md`, "String preservation rule").
+    const ce = engine();
+    expect(ce.function('Reverse', [ce.string('hello')]).type.toString()).toBe(
+      'string'
+    );
   });
 
   test('evaluation is unchanged', () => {
@@ -562,14 +586,19 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
     expect(ce.box(['RandomShuffle', ['List', 1, 2, 3]]).isPure).toBe(false);
   });
 
-  test('`Tally`s string branch was unreachable — dropped with the conversion', () => {
-    // The audit asked whether the deleted handler's `t === 'string'` arm was
-    // live: it was not — a string is not a `collection`, so the operand is
-    // refused before any element type is computed.
+  test('`Tally` over a string counts its characters', () => {
+    // The audit had asked whether the deleted handler's `t === 'string'` arm
+    // was live: it was not, because a string was not a `collection` then. It
+    // is one now — an indexed collection of its grapheme clusters — so the
+    // operand is admitted and `T` binds to `character`.
     const ce = engine();
     const e = ce.box(['Tally', { str: 'hello' }]);
-    expect(e.isValid).toBe(false);
-    expect(e.toString()).toContain('incompatible-type');
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe(
+      'tuple<list<character>, list<integer>>'
+    );
+    // `hello`: h, e, l (twice), o.
+    expect(e.evaluate().toString()).toBe('(["h","e","l","o"], [1,1,2,1])');
   });
 
   test('§8 DISPLAY — an unconstrained variable shows its ground skeleton', () => {

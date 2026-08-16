@@ -270,9 +270,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             `list<number^${shapeOps?.map((x) => x.toString()).join('x') ?? ''}>`
           );
         }
-        if (!value.type.matches('list')) return 'nothing';
+        // When the operand is not a numeric list the evaluate handler
+        // DECLINES (the call stays unevaluated), so the honest static type
+        // is the declared result `value`, not `nothing` — `nothing` claimed
+        // an absent value for an expression the runtime keeps intact.
+        if (!value.type.matches('list')) return 'value';
         const col = value.type.type as ListType;
-        if (!isSubtype(col.elements, 'number')) return 'nothing';
+        if (!isSubtype(col.elements, 'number')) return 'value';
         return parseType(
           `list<number^${shapeOps?.map((x) => x.toString()).join('x') ?? ''}>`
         );
@@ -301,6 +305,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (op1.isNumber) {
           return reshapeWithCycling(ce, [op1], targetShape);
         }
+
+        // A STRING stays inert. It is an indexed collection of its characters,
+        // so the conversion below would accept it and `Reshape("abcdef",
+        // (2,3))` would answer `[["a","b","c"],["d","e","f"]]` — a nested list
+        // of characters for a value the user handed in as text, and one the
+        // `type` handler above does not predict either. Reshaping text is not
+        // a defined operation (`docs/STRING_ROADMAP.md`, "String preservation
+        // rule"): rebuild explicitly from `Characters(s)` if that is what is
+        // wanted.
+        if (isString(op1)) return undefined;
 
         // If a finite indexable collection, convert to a list
         // -> shaped `List` tensor value
@@ -359,6 +373,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const depth = toInteger(ops[1]);
           if (depth === null || depth < 0) return undefined;
           if (op1.isNumber) return ce.expr(['List', op1]);
+          // A string operand is a LEAF, like a scalar: it is an indexed
+          // collection of characters, but flattening never shreds a string
+          // (`docs/STRING_ROADMAP.md`, design constraint 6).
+          if (isString(op1)) return ce.expr(['List', op1]);
           if (!isFiniteIndexedCollection(op1) && !isTensorValue(op1))
             return undefined;
           return ce.function('List', flattenToDepth(op1, depth));
@@ -366,6 +384,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Handle scalar - return single-element list
         if (op1.isNumber) return ce.expr(['List', op1]);
+
+        // A string is a leaf here too — see the depth form above.
+        if (isString(op1)) return ce.expr(['List', op1]);
 
         if (isTensorValue(op1)) {
           // Structural consumer: any shape-regular list flattens.
@@ -403,6 +424,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Transpose of scalar is the scalar itself
         if (op1.isNumber) return op1;
+
+        // A string is a RANK-1 sequence of characters, and transposing a
+        // rank-1 value is the identity — the same answer the vector branch
+        // below gives. Answering here rather than there keeps the string a
+        // STRING: the conversion just below would turn it into a `List` of its
+        // characters, and `Transpose("abc")` would return `["a","b","c"]`,
+        // silently changing the kind of a value it did not change at all
+        // (`docs/STRING_ROADMAP.md`, "String preservation rule").
+        if (isString(op1)) return op1;
 
         if (!isTensorValue(op1) && isFiniteIndexedCollection(op1))
           op1 = ce.function('List', [...op1.each()]);
@@ -3957,7 +3987,11 @@ function buildNestedList(
 function flattenToDepth(xs: Expression, depth: number): Expression[] {
   const result: Expression[] = [];
   for (const e of xs.each()) {
-    if (depth >= 1 && isFiniteIndexedCollection(e))
+    // A STRING is a LEAF, never descended into, at any depth: a string is an
+    // indexed collection of its characters, but `Flatten(["ab", "cd"])` is
+    // `["ab", "cd"]`, not `["a", "b", "c", "d"]` — the choice users expect
+    // (`docs/STRING_ROADMAP.md`, design constraint 6).
+    if (depth >= 1 && isFiniteIndexedCollection(e) && !isString(e))
       result.push(...flattenToDepth(e, depth - 1));
     else result.push(e);
   }

@@ -174,6 +174,7 @@ import {
   isNumber,
   isFunction,
   isString,
+  isCharacter,
   isSymbol,
   isContinuationOperand,
 } from '../boxed-expression/type-guards.js';
@@ -187,6 +188,7 @@ import {
   isDeclaredScalarNumber,
   isPossiblyCollectionTyped,
   broadcastableResultTypeOf,
+  isTextAtom,
   isTuple,
 } from '../collection-utils.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
@@ -3920,7 +3922,12 @@ function reducerElementError(
   term: Expression
 ): Expression | undefined {
   if (acc.operator === 'Error') return acc;
-  if (isString(term)) return acc.engine.typeError('number', term.type);
+  // Text elements — a string, or a CHARACTER (which is what walking a string
+  // source now yields) — get a typed error rather than silently folding to
+  // `NaN`. Both kinds are covered so `Sum`/`Product` surface the same
+  // diagnostic whichever text shape reaches the fold.
+  if (isString(term) || isCharacter(term))
+    return acc.engine.typeError('number', term.type);
   return undefined;
 }
 
@@ -4322,6 +4329,15 @@ function processMinMaxItem(
     return [endpoint, []];
   }
 
+  // TEXT is ATOMIC in an extremum. A string is an indexed collection of its
+  // grapheme clusters, so without this guard `Max("abc")` would fold the
+  // collection branch below and answer `max("a", "b", "c")` — the extremum of
+  // the CHARACTERS, which is not what any reader of `Max("abc")` asks for.
+  // Falling through to the non-number arm at the end leaves the string operand
+  // symbolic, which is exactly what it produced before strings became
+  // collections (`docs/STRING_ROADMAP.md`, design constraint 5).
+  if (isTextAtom(item)) return [undefined, [item]];
+
   if (item.isCollection) {
     // Only a finite, enumerable collection can be folded for an extremum.
     // An infinite one (an Interval's dyadic sampler, a Map over it) would
@@ -4494,13 +4510,22 @@ function evaluateGcdLcm(
   // remains (`gcd([[12, 18], 24]) → 6` in one evaluation). An infinite or
   // enumeration-declined collection would grind to the deadline or silently
   // vanish, so it stays symbolic instead (mirrors the Min/Max fold).
-  if (ops.some((x) => x.isCollection)) {
+  //
+  // TEXT is ATOMIC here and contributes ITSELF. A string is an indexed
+  // collection of its grapheme clusters, so without this exclusion
+  // `GCD("abc", 4)` would expand to `gcd(4, "a", "b", "c")`; the string falls
+  // through to the non-integer arm below and leaves the call symbolic, which
+  // is what it produced before strings became collections
+  // (`docs/STRING_ROADMAP.md`, design constraint 5).
+  const expandable = (x: Expression): boolean =>
+    x.isCollection === true && !isTextAtom(x);
+  if (ops.some(expandable)) {
     let ok = true;
     let current: Expression[] = [...ops];
-    while (ok && current.some((x) => x.isCollection)) {
+    while (ok && current.some(expandable)) {
       const expanded: Expression[] = [];
       for (const op of current) {
-        if (op.isCollection) {
+        if (expandable(op)) {
           if (op.isFiniteCollection !== true) {
             ok = false;
             break;

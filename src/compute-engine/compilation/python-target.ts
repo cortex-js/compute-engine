@@ -14,6 +14,7 @@ import {
   isFlatAllStringComparisonParticipant,
   isMixedStringOrderingParticipants,
   isNumericTupleParticipant,
+  isProvablyCharacterOperand,
   isProvablyStringComparisonParticipant,
   isProvablyStringOperand,
   isProvablyTupleParticipant,
@@ -77,6 +78,48 @@ function pyClampedCount(
   const n = tryGetConstant(count);
   if (n !== undefined) return `${Math.max(0, Math.round(n))}`;
   return `max(0, int(np.floor((${compile(count)}) + 0.5)))`;
+}
+
+/**
+ * Fail closed (D6) when any participant is — or is a collection of — a
+ * CHARACTER.
+ *
+ * A character is one UAX #29 grapheme cluster. Python's stdlib cannot segment
+ * a string into them, order two of them by code-point sequence with any
+ * guarantee of matching the interpreter's `compare.ts` rule, or re-assemble
+ * them, so the whole `character` row of the compile matrix is closed on this
+ * target for v1. Python's SCALAR string support is untouched: this asks about
+ * `character` evidence only, and `character` and `string` are disjoint types.
+ * (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+ */
+function assertPyNoCharacterOperand(
+  kind: string,
+  args: ReadonlyArray<Expression>
+): void {
+  const isCharacterish = (a: Expression): boolean => {
+    if (isProvablyCharacterOperand(a)) return true;
+    // A STRING's own element type IS `character` (it is an indexed collection
+    // of its grapheme clusters), so the element walk below would report every
+    // string as characterish and close the SCALAR string support this target
+    // already ships — string equality and all-string orderings. A string
+    // operand is answered by the string gates instead
+    // (`assertPyNoStringOperand`, `pyCollArg`), never here.
+    if (isProvablyStringOperand(a)) return false;
+    const elt = collectionElementType(resolveTypeForCompilation(a.type.type));
+    return (
+      elt !== undefined &&
+      elt !== 'never' &&
+      isSubtype(resolveTypeForCompilation(elt), 'character')
+    );
+  };
+  if (args.some(isCharacterish))
+    throw new Error(
+      `${kind}: cannot compile — a character participant. A character is one ` +
+        `UAX #29 grapheme cluster, and this target has no stdlib grapheme ` +
+        `segmentation or code-point-sequence ordering to reproduce the ` +
+        `interpreter's character semantics. Fail closed (D6) — the ` +
+        `interpreter evaluates it.`
+    );
 }
 
 /**
@@ -371,6 +414,7 @@ function compilePythonEquality(
     args.every(isProvablyTupleParticipant) &&
     args.every(isNumericTupleParticipant);
   if (!tupleEquality) assertPyComparableAggregate(kind, args);
+  assertPyNoCharacterOperand(kind, args);
   const stringScalarEquality = isPyStringScalarEquality(args);
   const stringCollectionEquality =
     collCount >= 2 && args.every(isFlatAllStringComparisonParticipant);
@@ -730,6 +774,12 @@ const PYTHON_OPERATORS: CompiledOperators = {
  * target's `isIndexedCollectionOperand`. */
 function isPyCollectionOperand(e: Expression): boolean {
   const t = e.type;
+  // A STRING matches `indexed_collection` in the type lattice (its elements
+  // are its grapheme clusters) but is not a NumPy array, and Python has no
+  // stdlib grapheme segmentation — `len()` counts code points — so string
+  // collection operations do not compile to Python at all and must FAIL
+  // CLOSED here rather than lower as if the string were an array.
+  if (t.matches('string')) return false;
   return t.matches('list') || t.matches('indexed_collection');
 }
 
@@ -1286,6 +1336,7 @@ function compilePythonRelation(
   // symbolic), and the point-list shape the aggregate gate admits for equality
   // is closed here by `assertPyNoNestedTupleOrdering`.
   assertPyComparableAggregate(kind, args);
+  assertPyNoCharacterOperand(kind, args);
   assertPyNoNestedTupleOrdering(kind, args);
   assertPyNoMixedStringOrdering(kind, args);
   if (args.length === 2)
@@ -1336,6 +1387,24 @@ function pyCollArg(
   compile: (expr: Expression) => string,
   position?: number
 ): string {
+  // A STRING is an indexed collection of its GRAPHEME CLUSTERS, and this
+  // target cannot produce them: Python's stdlib has no UAX #29 segmentation,
+  // so `len(s)` counts code points and `s[i]` selects one — both diverging from
+  // the interpreter on a combining sequence, a ZWJ emoji family or a
+  // regional-indicator flag. Named separately from the generic diagnostic
+  // below, so the reason is the target capability rather than a shape
+  // mismatch (the shape now MATCHES).
+  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+  if (arg && arg.type.matches('string'))
+    throw new Error(
+      `${kind}: cannot compile a string collection to this target — a ` +
+        `string's elements are UAX #29 grapheme clusters and Python has no ` +
+        `stdlib grapheme segmentation, so the emitted code would walk code ` +
+        `points instead. Fail closed (D6) — the interpreter evaluates it.`
+    );
+  // A collection of CHARACTERS is closed for the same capability reason: an
+  // element is one grapheme cluster this target cannot order or re-segment.
+  if (arg) assertPyNoCharacterOperand(kind, [arg]);
   if (
     !arg ||
     !(arg.type.matches('list') || arg.type.matches('indexed_collection'))
@@ -1361,6 +1430,8 @@ function pyCollArg(
 function pyCouldBeIndexedCollectionOperand(e: Expression): boolean {
   const t = resolveTypeForCompilation(e.type.type);
   if (t === 'unknown' || t === 'any' || t === 'value') return false;
+  // A string is not an array-shaped operand — see `isPyCollectionOperand`.
+  if (t === 'string') return false;
   if (typeof t === 'object' && t.kind === 'union')
     return t.types.some((m) => isSubtype(m, 'indexed_collection'));
   return isSubtype(t, 'indexed_collection');
@@ -2181,7 +2252,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // numeric index, since the other arm is a dictionary and a keyed lookup has
     // no compiled equivalent.
     const provablyIndexed =
-      base.type.matches('list') || base.type.matches('indexed_collection');
+      !base.type.matches('string') &&
+      (base.type.matches('list') || base.type.matches('indexed_collection'));
     if (!provablyIndexed) {
       if (!pyCouldBeIndexedCollectionOperand(base))
         throw new Error(

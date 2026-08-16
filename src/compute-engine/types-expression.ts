@@ -2668,6 +2668,27 @@ export interface StringInterface {
 }
 
 /**
+ * Narrowed interface for a character expression — one NFC-normalized grapheme
+ * cluster (UAX #29).
+ *
+ * Obtained via `isCharacter()`.
+ *
+ * `string` holds the cluster's content and is deliberately spelled the same as
+ * `StringInterface.string`, so a consumer that only needs the text (the
+ * `String` interpolation join, `StringJoin`) can read either kind through one
+ * property without first deciding which it has.
+ *
+ * @category Boxed Expression
+ */
+export interface CharacterInterface {
+  /** The content of the character: exactly one grapheme cluster. */
+  readonly string: string;
+
+  /** The Unicode scalar values (code points) of the cluster. */
+  readonly unicodeScalars: number[];
+}
+
+/**
  * Narrowed interface for tensor expressions.
  *
  * Obtained via `isTensor()`.

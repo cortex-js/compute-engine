@@ -312,7 +312,7 @@ declares under pushed scopes, so context depth does not separate the two. The
 arrow it installs still carries the inferred `scope` label honestly, so the
 effect stays visible; what is missing is the refusal.
 
-### A compiled user function declared `-> complex` returns a corrupt value
+### A compiled user function declared `-> complex` returns a corrupt value (FIXED 2026-08-16)
 
 A user function whose signature declares a `complex` result compiles to a
 call whose emitted body does SCALAR arithmetic on the complex `{re, im}`
@@ -342,6 +342,141 @@ JavaScript target's user-function emission: the body must compile under
 the same complex-operand dispatch a top-level expression gets, or the
 declaration must fail closed. Check the other targets for the same hole
 while there.
+
+**FIXED 2026-08-16.** The title understates it: the corruption is in the
+declared `complex` PARAMETER, not the result, and it hit three of the four
+argument shapes — the entry's own repro is only one of them.
+
+    argument to `Q(z) = z + i`, declared `(complex) -> complex`
+                                  BEFORE                      AFTER
+    static complex (1-i)          {re:'[object Object]0',…}   {re:1, im:0}
+    static real (u: real, u=2)    {re:'[object Object]0',…}   {re:2, im:1}
+    untyped symbol, given 2       {re:2, im:1}  (accident)    {re:2, im:1}
+    untyped symbol, given {re,im} {re:'[object Object]0',…}   {re:1, im:0}
+
+**Mechanism**, measured by instrumenting the definition emission rather than
+inferred: the emitted body was `const _fn_Q = (z) => ({ re: z + 0, im: 1 })`
+— it correctly BUILDS a complex result but reads `z` in the REAL lane, and
+`userCallComplexLanes` reported `lanes: [false]` with an empty complex frame.
+The lane is chosen from the ARGUMENT, and a declared-complex parameter is
+explicitly given lane `false` on the assumption that the base emission already
+handles it. It does not. The static-real row is the clearest tell: the call
+site DID wrap the argument to `{re:2, im:0}`, and the real-lane body then
+added the object.
+
+**Fix, in three parts.** (1) A parameter the signature declares complex is
+entered into the body's complex frame for every call site
+(`addDeclaredComplexParams`) — a property of the FUNCTION, so no `$z`
+specialization. (2) The call-site coercion is gated on the PARAMETER's
+declared type instead of the argument's realness, so every call delivers an
+object. (3) The wrap has three forms, because no single one is correct: a
+complex number LITERAL is passed through (this compiler already emits it as an
+object), a provably real argument is wrapped statically at zero runtime cost,
+and everything else goes through the new idempotent `_SYS.cplx` helper.
+
+**Why the third part is not optional:** an untyped free symbol supplied at
+`run()` time may be a plain number OR a complex object, and a real IS a
+complex, so neither is a contract violation and no static choice serves both.
+Two tighter tests were tried and both silently dropped the wrap from exactly
+that case — `isComplexValued` answers "could be complex" and is TRUE for an
+untyped symbol, and the argument's TYPE is no better, because `Q(w)` INFERS
+`w: complex` from the declared parameter.
+
+**Not radical promotion, so no tension with the Tycho-190 rule** ("the lane
+comes from the operand, never the node type"): nothing is inferred complex
+from an operand's sign here, and `complexPromotion` is not consulted. The
+author WROTE `(complex) -> complex`; the lane is that declaration read back,
+and the call site is made to honour it.
+
+**Other targets: nothing to do.** The `{re, im}` convention is
+JavaScript-only — both call-site computations are already gated on
+`target.language === 'javascript'`, and the GPU/lowering path returns from
+`emitFunctionLiteralDefinition` before the frame block, so the seeding cannot
+reach it.
+
+**A second half, found by review and NOT by the tests above:** putting the body
+in the complex lane broke the VALUE position. The argument coercion lives in
+`emitUserFunctionCall`, which only the CALL route reaches, so a function
+referenced by name — `Map`'s callback, `CountIf`, `Find`, `_SYS.bcastFn` — was
+handed raw elements by its consumer and read `.re`/`.im` off a plain number:
+`Map(Q, [1,2,3])` answered `[{re: null, im: null}, …]` behind `success: true`
+where the previous real-lane emission was correct. The first fix had traded one
+silent-wrong class for another, one position over.
+
+Fixed with a coercing shim under its own name
+(`ensureUserFunctionValueRef` → `const _fn_Q$v = (x) => _fn_Q(_SYS.cplx(x));`),
+so the two routes do not share a cache entry. It uses the RUNTIME helper
+because an element's realness belongs to the SOURCE, not to the reference, and
+the reference is compiled without one. A function with no declared-complex
+parameter gets no shim, so its emitted code is byte-identical.
+
+The lane assignment is also language-gated now, matching both call-site
+coercions: `{re, im}` is a JavaScript convention, and `interval-javascript`
+reaches the same arrow emission without ever wrapping its arguments.
+
+Pinned in `test/compute-engine/compile-complex.test.ts` ("a declared `complex`
+PARAMETER"): the three wrap forms, the value position over a real source and
+over a complex one, and the no-shim case. Verified non-vacuous — each fails
+with the corresponding half reverted.
+
+### A MULTI-CLAUSE function with a declared `complex` parameter compiles silently wrong (OPEN, correctness — found 2026-08-16 by review, PRE-EXISTING)
+
+Surfaced while reviewing the declared-complex-parameter fix above, and
+explicitly measured NOT to be caused by it: identical before and after, with
+the same emitted code both ways.
+
+    function S(0) -> complex { 0 }
+    function S(z: complex) -> complex { z + 1 }
+
+    compile(S(w)).run({ w: 2 })   ->  {"re": null}     success: true
+    interpreter                   ->  3
+
+The emitted call is a bare `_fn_S(_.w)` with no wrap. A multi-clause function
+has no single literal, so `userFunctionLiteral` returns `undefined` and the
+arrow emission — where a declared-complex parameter is put in the complex lane
+— is never reached; it compiles whole, as a guard chain, in the real lane.
+`coerceToComplex` also returns false, because `userFunctionParamType` declines
+on an intersection signature and the `multiClauseParamIsComplex` fallback does
+not fire for this shape. So neither half of the single-clause treatment
+applies, and the body reads `.re` off whatever arrives.
+
+Fix direction: give multi-clause bodies the same complex lane, or fail closed
+on a clause set whose parameter is declared complex until they have it. Note
+the review's stated mechanism for this entry ("the call site NOW wraps every
+argument where before the gate limited the damage") does NOT hold — the call
+site wraps on neither side; the defect is independent of the argument gate.
+
+### A protocol MEMBER whose parameter is declared `complex` is handed the argument unwrapped (OPEN, correctness — found 2026-08-16 by review, PRE-EXISTING)
+
+The third `coerceToComplex` computation — the multi-candidate member dispatch
+in `userFunctionsPreamble` (`base-compiler.ts`, ~11203) — still opens with
+`if (!BaseCompiler.isProvablyRealValued(a)) return false;`, the precondition
+the two call-site computations dropped when the declared-complex-parameter
+entry above was fixed. The candidate helper bodies carry `Typed` parameters, so
+they lower in the complex lane, and an argument that is neither a complex
+literal nor provably real reaches them unwrapped.
+
+Measured identical before and after that fix, so it is pre-existing:
+
+    protocol Scaler { function scale(self: Self, k: complex) -> complex }
+    type real is Scaler { function scale(self: Self, k: complex) -> complex { k + 1 } }
+    ce.declare('w', 'complex')
+
+    emitted                 _fn_scale$Scaler$e0$cx(2, _.w)     <- no wrap
+    run({ w: 3 })           {"re": null}                       success: true
+    run({ w: {re:0,im:1} }) {"re": 1, "im": 1}                  correct
+
+**The witness matters here.** The obvious shape — an UNTYPED symbol — cannot
+reach this code: the protocol route validates first and fails closed with
+`incompatible-type: complex vs unknown`. What reaches it is a symbol DECLARED
+complex that receives a plain number at run time, which passes validation
+because a real IS a complex. A reproduction attempt using an untyped symbol
+will wrongly conclude the defect is not there.
+
+Fix direction: the same treatment the other two sites got — drop the
+precondition and route unanimous-complex positions through `complexWrap` /
+`_SYS.cplx` — or state in the comment why these helper bodies are provably
+real-lane.
 
 ### `.N()` declines convergent series whose tail is not an integer power of 1/N
 
@@ -1617,6 +1752,18 @@ functions (run-time guard dispatch, real lane), and the shader targets
 `1 + 0.8366…i`. The Julia-map test's pin moved from `_fn_K(` to
 `_fn_K$z01(` — its `z` slot is wide-typed and receives `x + iy`, so it IS
 the complex lane, and the self-call resolves to the same specialization.
+Two more shapes of the same defect, found on the "anything else?" pass and
+fixed the same way: a collection of complex scalars BROADCAST into scalar
+parameters (`b(L)`, `L: list<complex>` → `[NaN, NaN]`) now takes the
+elements' lane (`hasUniformComplexScalarElements`, granted only when the
+call broadcasts per element and every element is a complex scalar — a mixed
+list still has no lane), and a bare user-function symbol used as an ELEMENT
+callback (`Map(b, L)` → `[NaN, NaN]`, while `Map(x ↦ 2x, L)` was right) is
+compiled through its eta-expansion `(_x: complex) ↦ b(_x)`
+(`complexElementCallbackEta`, wired in the JS target's `fnArg`; unary
+callbacks only — a combiner-shaped `Reduce`/`Scan` callback keeps its
+previous emission, and a bare callback over a REAL source still emits the
+bare `_fn_b` reference).
 Regression suite: `test/compute-engine/compile-complex.test.ts`, "complex
 ARGUMENT to a wide-typed user-function parameter".
 
@@ -1765,6 +1912,78 @@ then reports complex while the emitted `_fn_b` is still real-lane, and parent
 and child disagreeing on value SHAPE is the invariant compiled correctness
 rests on. This half is a short redo; it must land together with the emission
 half, never before it.
+
+### A combiner callback (`Reduce`/`Scan`) whose ACCUMULATOR turns complex mid-fold compiles silently wrong (INTERIM FAIL-CLOSED SHIPPED 2026-08-16; the real fix is the OPEN package below)
+
+Found while closing the "complex ARGUMENT to a user function" entry above.
+Two independent lanes flow through a combiner: the ELEMENT lane (the same
+one `Map(b, L)` now handles) and the ACCUMULATOR lane, and the second is not
+reasoned about at all — not for a bare user-function symbol and not for an
+inline lambda. Measured with `L: list<complex>` = `[1+2i, i]`:
+
+    Reduce(L, h, 0)   h(a,x) := a + 2x   bare    -> NaN                       interp 2+6i
+    Reduce(L, (a,x) ↦ a + 2x, 0)         INLINE  -> {re: "[object Object]0"}   interp 2+6i
+
+**INTERIM SHIPPED 2026-08-16 (user-ruled): the INLINE-lambda shape now FAILS
+CLOSED rather than miscompiling.** `Reduce` and `Scan` decline when the seed is
+provably real and the combiner's body yields complex — the accumulator would
+have to widen part-way through, which this lowering does not model. The caller
+falls back to the interpreter and gets the right answer. The predicate is
+`BaseCompiler.reduceAccumulatorWidens`.
+
+The gate keys on the BODY's complexness under the fold's own lanes (element
+bound complex, accumulator left real), never on the element type alone — which
+is what keeps `Reduce(L, (a,x) ↦ a + |x|, 0)` over the same complex `L`
+compiling, since `|x|` is real and nothing widens. A complex SEED also keeps
+compiling (the accumulator starts complex, so nothing widens), as do builtin
+combiners and every real source.
+
+`Scan` was measured to have the same defect and is gated identically; it
+corrupts from the SECOND element on — `[{re:2,im:4}, {re:"[object Object]0",
+im:2}]` where the interpreter gives `[2+4i, 2+6i]` — the first element being
+right only because the seed has not yet met a complex value.
+
+**⚠️ THE BARE-SYMBOL ROW ABOVE IS NOT FAIL-CLOSED, contrary to the premise the
+ruling was given.** Re-measured at HEAD: `h(a,x) := a + 2x; Reduce(L, h, 0)`
+compiles with `success: true` and answers NaN — a silent miscompile of the same
+class, not a decline. The interim gate deliberately does NOT cover it, because
+widening how much compilation is refused is a product decision and the ruling
+enumerated its scope; extending the gate is a matter of accepting a
+non-literal combiner in `reduceAccumulatorWidens`. **This shape still ships
+silently wrong and needs a ruling.**
+
+**STILL OPEN — the real fix**, unchanged by the interim: accumulator-lane
+widening, seed coercion, and callback lane binding, so these folds compile
+correctly instead of declining. Pinned meanwhile in
+`test/compute-engine/compile-complex.test.ts` ("a fold whose ACCUMULATOR would
+widen mid-fold"), including the shapes that must KEEP compiling — the
+over-broad-gate direction is what those assertions catch.
+    Reduce(L, n, 0)   n(a,x) := a + |x|  bare    -> NaN                       interp 1+√5
+    Reduce(L, (a,x) ↦ a + |x|, 0)        inline  -> 3.236…  CORRECT (real accumulator)
+    Scan(L, h, 0)                        bare    -> [NaN, NaN]                interp [2+4i, 2+6i]
+
+All behind `success: true`. The bare `n` row is the element lane only (the
+inline form is right); every other row is the accumulator: the seed `0` is
+real, the combiner's RESULT is complex, so from the second step the
+accumulator holds `{re, im}` while the body was compiled with `a` real —
+`a + {re,im}` concatenates in JavaScript, which is the string in row 2.
+
+Fix shape (recommended, "one-step widening"): the accumulator's lane is
+complex when the seed is complex, or when the body's result is complex
+under (accumulator real, element at its lane) — monotone, so one
+re-analysis with the accumulator complex settles it. Then coerce the SEED
+to `{re, im}` when the lane is complex (the same call-boundary coercion the
+`M(10, 0)` seed case in `tryCompileUserFunction` already applies), compile
+the callback with the accumulator bound complex (inline: a `_localComplex`
+frame on the lambda's parameters; bare symbol: the eta-expansion
+`(a: complex, x: complex) ↦ h(a, x)`, extending `complexElementCallbackEta`
+which today declines combiner shapes), and make `isComplexValued` answer
+the accumulator lane for `Reduce`/`Scan` so the parent agrees on the value
+shape. Alternatives considered: element lane only (cheap, but brings the
+bare form to parity with an inline form that is itself wrong), or fail
+closed when the seed is real and the body result complex-valued (safe,
+does not break the working real-accumulator row, but withdraws compile from
+exactly the fractal-style iterations that want it — an interim at best).
 
 ### The constant fold's own 2000 ms stall guard can still swap a folded value for a lowered one (OPEN, correctness — narrow residual; the AMBIENT-deadline path is already correct)
 
@@ -2105,7 +2324,34 @@ plain `Typed` usage rather than a record mechanism.
 Phase 1's serialization walk had already been switched to emit the
 `Dictionary` operator form for this reason.
 
-### Appendix B's mutability gate (B1) — RULED 2026-08-15, scheduled for Phase 2
+### Appendix B's mutability gate (B1) — the GATE SHIPPED 2026-08-16; the rebinding sugar's retirement is still open
+
+**Status.** The gate itself landed (work package 2C commit 1):
+`mutabilityGate()` (the memoized predicate) / `mutabilityGateProblem()`
+(the message) in
+`src/compute-engine/engine-protocols.ts`, checked on all three registration
+routes — `declareConformance()` (statement and box),
+`declareProtocolImplementationImpl()` (host), and `settleFieldBacking()`
+(protocol replacement, which leaves a now-inadmissible edge PENDING rather
+than removing it, since conformance is monotone). Pinned by
+`test/compute-engine/protocol-mutability-gate.test.ts` (50 tests: the
+gate matrix across statement/box/host, conditional conformance on object and
+non-object heads, the Appendix B `Badge` message verbatim, and the
+replacement/inheritance consequences). 45 tests across 7 files were migrated
+to object targets; the migration recipe is one line — declare the type as
+`object{…}`.
+
+**STILL OPEN: retiring the rebinding sugar** (`p.name = v` ⇝
+`p = «set name»(p, v)`, and with it `property-assignment-target-invalid`).
+The gate is what makes the sugar retirable — every legal receiver is now an
+object — but the lowering, its compiler path (`base-compiler.ts`) and
+Appendix A's variable-root restriction are untouched. Two consequences to
+clear with it: the compiled property-SET lowering is currently unreachable,
+because the only legal receivers are object types and objects have no
+compiled representation until Phase 4 (pinned as fail-closed in
+`test/compute-engine/protocol-dispatch-compile.test.ts`); and
+`xs[1].name = v` still reports `property-assignment-target-invalid` where
+Appendix B says a store into an object element should work.
 
 **Ruling: B1 stands as written.** A writable property is meaningful only on a
 mutable object, so a protocol with a `readwrite` property (or a member
@@ -2139,10 +2385,10 @@ meanings selected by the receiver's type is what produced the Phase 1D
 aliasing defect, where a store into an object was lowered to a rebinding and
 every other reference to that object kept the old contents.
 
-**Scheduling: Phase 2, with its companions.** The implementation plan
-scheduled B1 twice — Phase 1 step 5 named `protocol-requires-object` as part
-of 1D's sugar retirement, and Phase 2 lists the mutability gate as its own
-bullet. Phase 2 wins: field-backed satisfaction (a stored field satisfies a
+**Scheduling (historical): Phase 2, with its companions.** The implementation
+plan scheduled B1 twice — Phase 1 step 5 named `protocol-requires-object` as
+part of 1D's sugar retirement, and Phase 2 lists the mutability gate as its own
+bullet. Phase 2 won: field-backed satisfaction (a stored field satisfies a
 `readwrite` requirement with no accessor written) and `object-property-conflict`
 are what a migrated conformance is re-pointed AT, and without them "what does
 an explicit `set` accessor on an object mean" has no implemented answer.
@@ -2168,24 +2414,50 @@ type's edges, the way `declareProtocolImpl` already does for a replaced
 protocol. Scheduled with the Phase 2 "Protocol replacement" bullet of
 `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`.
 
-**Migration cost, measured 2026-08-15** (the implementation was landed,
-measured and reverted pending this ruling): **32 protocol tests** across
-`protocols.test.ts`, `protocol-properties.test.ts` and
-`protocol-dispatch-compile.test.ts`, every one because its fixture conforms a
-`readwrite` protocol to a non-object type. Appendix B item 5 calls the
-migration "mechanical"; it is not, and that wording should be amended when
-Phase 2 lands.
+**Migration cost, MEASURED on landing (2026-08-16): 45 tests** across
+`protocol-properties.test.ts` (23), `protocols.test.ts` (9),
+`protocol-dispatch-compile.test.ts` (5), `effects-state-label.test.ts` (3),
+`object-store.test.ts` (2), `protocol-field-backed.test.ts` (1),
+`test/epsil/protocols.test.ts` (1), plus one executable `epsil-live` block in
+`src/epsil/docs/protocols.md`. (A pre-ruling dry run on 2026-08-15 measured 32,
+over three files; the shortfall was the effects and object-store suites, which
+gained fixtures in between.) Every one conformed a `readwrite` — or
+declared-`state` — protocol to a non-object type.
 
-Until Phase 2, the rebinding sugar ships alongside the property store. That is
-stable rather than broken — the store claims a name the object's own layout
-declares, the sugar serves everything else, and the dispatch guard in
-`library/core.ts` keeps them from fighting — but it is two mechanisms for one
-syntax, and Phase 1D does not formally close until the sugar is gone.
+Appendix B item 5 calls the migration "mechanical". For a fixture whose point
+is the CONFORMANCE it is: declare the type as `object{…}`, and its constructor
+becomes named-argument. Two classes needed real rewriting, and both are worth
+knowing before the sugar retires:
 
-### A field store's EXPRESSION-level effect is still `scope`, not `state` (found 2026-08-15 in review; the inference half FIXED same day, OPEN — narrow residual)
+- **A setter must decide what it now means.** Rebuilding
+  (`Person(n: v, age: self.age)`) preserves a rebinding test; storing
+  (`self.n = v` then `self`) is the behaviour the gate exists to enable, and
+  makes the write visible through every alias. Fixtures were migrated to
+  whichever the test was actually about.
+- **The P17 setter-validation surface needs an object with NO field of the
+  property's name.** A stored field of the same name satisfies the requirement
+  by itself (Appendix B's field backing) and removes the hand-written accessors
+  under test. The fixtures use `object{v: string}` against properties
+  `hash`/`name`.
 
-Appendix B rules that changing a field carries the `state` effect. Half of that
-now holds and half does not.
+One consequence has NO migration: the compiled property-SET lowering in
+`base-compiler.ts` is currently unreachable, because every legal receiver is
+now an object and objects have no compiled representation until Phase 4. Those
+tests were re-pointed to pin the fail-closed verdict instead
+(`protocol-dispatch-compile.test.ts`), and the loop-body declared-type-merge
+claim they also carried was preserved by re-expressing it over a function
+member.
+
+Until the sugar retires, it ships alongside the property store. That is stable
+rather than broken — the store claims a name the object's own layout declares,
+the sugar serves everything else, and the dispatch guard in `library/core.ts`
+keeps them from fighting — but it is two mechanisms for one syntax, and Phase
+1D does not formally close until the sugar is gone.
+
+### A field store's EXPRESSION-level effect is still `scope`, not `state` (found 2026-08-15 in review; the inference half FIXED same day, the expression half FIXED 2026-08-16 — CLOSED)
+
+Appendix B rules that changing a field carries the `state` effect. That held on
+the inference channel and not on the expression channel; both now hold.
 
 **Fixed (2026-08-15).** A function whose body stores into a field infers
 `state`: `function rename(x: M) { x.id = "XXXX" }` reports `["state"]` where it
@@ -2198,24 +2470,147 @@ importantly the property rebinding sugar on a value type — still takes
 `scopeWrite` unchanged, which is why this landed with zero churn to the six
 `protocol-dispatch-compile` tests that the earlier blunt attempt broke.
 
-**Still open.** At the EXPRESSION level a store reports `scope`, read straight
-off `Assign`'s declared signature (`(symbol | expression, any) scope -> any`).
+**Fixed (2026-08-16).** At the EXPRESSION level a store now reports `state`.
 `Assign` spells two different operations — a binding write and a heap store —
-and one declared arrow cannot say both, while `effects-of.ts` has no
-per-operator hook that could decide per call site. Impact is a wrong label, not
-a wrong answer: the expression is impure either way, so nothing is folded or
-cached, and mutations are not lost.
+and one declared arrow (`(symbol | expression, any) scope -> any`) cannot say
+both, so the label is decided per call site: `mutationEffects()` in
+`effects-of.ts` replaces `scope` with `state` when the `Assign` target is a
+`Field` whose root is a bare symbol whose DEFINITION's type resolves to an
+`object{…}` layout declaring that field — the same evidence
+`Walker.isFieldStore` uses on the inference channel; a bare-symbol receiver is
+read off its definition (because `Assign` keeps its left operand raw), a nested
+or indexed one from its canonical type. Assignment to a plain symbol and to a
+record field keeps `scope` untouched.
 
-The clean resolution is the one the sugar retirement brings: once
-`Assign(Field(…))` means only "store" (see the B1 entry above), the arrow can
-simply say `state`. Doing it before then requires either a per-operator effects
-hook or a special case in `effects-of.ts`, for a label nobody currently
-consumes differently from `scope`.
+The same hook labels a four-operand `ProtocolProperty` — the setter invocation
+of a `readwrite` protocol property — `state`, since a writable property is
+meaningful only on a mutable object (Appendix B, "Which types can conform").
+That verdict is taken from the SHAPE of the call, without asking which
+conformer's setter was selected, which is deliberately generous in one
+direction: the Appendix A rebinding sugar (`d.name = v` on a tuple, which
+rebinds `d` and mutates nothing) lowers to the same four-operand form and would
+be labelled `state` too, so such a statement reports `["scope", "state"]` rather
+than `["scope"]`. Asking the registry instead would answer "pure" for a genuine
+object whose conformance had not registered yet — an inference walk runs before,
+and independently of, conformance registration — and a body annotated `pure`
+could then mutate its caller's object. The over-label is now unreachable in any
+case: the B1 mutability gate refuses a value type conforming to a settable
+property, so no value type has a setter to assign through.
 
-Effect CONTRACTS are enforced correctly on the fixed half: annotating a
-storing function `pure` is now refused with
+On top of the fixed contribution, both halves union in what the AUTHORED
+accessor bodies do, read off the stored literal's stamped arrow
+(`protocolAccessorEffects` in `effects-of.ts`): a computed getter whose body
+draws makes the qualified read `random`, and a setter that writes an outer
+binding makes the set `scope` as well as `state`.
+
+Effect CONTRACTS are enforced on both halves: annotating a
+storing function `pure` is refused with
 `incompatible-type: expected \`pure effects\`, got \`state effects\``, the same
 shape a `scope` write or a `Random()` draw already produced.
+
+### A protocol accessor's body cannot see its own receiver (found 2026-08-16, FIXED 2026-08-16)
+
+An authored `get`/`set` block is stored as a function literal whose receiver is
+declared `Self`, and the `Self` substitution used to happen per dispatch rather
+than on the stored literal. The effect walk therefore saw that parameter typed
+`unknown`, and a store the accessor performed on it was invisible:
+
+```
+type Q = object{n: integer} is Aged {
+  set age(self: Self, v: integer) -> Self { self.n = v
+    self }
+}
+```
+
+The setter's arrow reported no effects, where the identical body written as
+`function f(x: Q) { x.n = v }` reports `state`. What was lost is the accessor's
+own contract: annotating that setter `pure` would not have been refused by the
+body evidence.
+
+FIXED: `declareConformance` now applies the `Self` substitution to the stored
+implementation block ONCE, at registration, before the block is either
+validated or stored (`groundedImplementationBlock` /
+`groundedImplementationLiteral` in `engine-protocols.ts`). Every consumer — the
+P17 check, the effect walk, dispatch's `apply()`, and the literal's own `.type`
+arrow, which `protocolAccessorEffects()` in `effects-of.ts` reads — therefore
+sees a ground receiver type. The setter above now infers `state` and its stored
+arrow carries it.
+
+The rewrite is RECURSIVE over the whole literal, so it reaches every position
+that carries a type-expression source text, not just the receiver: the
+parameter slots, BOTH marker shapes (`["Function", ["Typed", body, sig], …]`
+and the canonical form where the marker sits inside the Block wrapping its last
+statement — the second used to throw `Function body must be a scoped Block
+expression` out of `.evaluate()` on the raw-MathJSON route), a `let`'s
+annotation inside the body (`let s: Self = self`, which rides as
+`["Declare", name, T, …]` and used to fail with `Failed to parse type "Self"`
+and no diagnostic), and the annotations of any nested literal. Grouping is
+preserved when a text is re-serialized (`isGroupedTypeText`): a fully
+parenthesized annotation means "this value IS a function", and `typeToString`
+emits the ungrouped spelling, which `bodySlotSignature` would re-read as the
+literal's own contract. `implementationLiteralAt` (the compile path) was
+dropping grouping the same way and now preserves it too.
+
+Covered by `test/compute-engine/protocol-property-effects.test.ts` ("an accessor
+body's own effects ARE propagated") and
+`test/compute-engine/protocol-annotated-members.test.ts`.
+
+REMAINING, narrower: a CONDITIONAL conformance (`type list<T> is P where T:
+number { … }`) is left unsubstituted. Its `Self` is a head PATTERN, whose only
+ground stand-in is the widest instantiation (`list<number>`), and P17 checks the
+implementation's COVARIANT positions against the pattern instead — so a stored
+literal ground to the widest instantiation fails that check (a member declaring
+`-> Self` would read as `-> list<number>` and be rejected against `-> list<T>`;
+verified by running `test/compute-engine/protocol-conditional.test.ts` against
+that variant). Closing it needs somewhere to keep the author's text apart from
+what dispatch reads. `implementationLiteralAt` declines a conditional edge for
+the same reason. Pinned by the `KNOWN GAP` block of
+`test/compute-engine/protocol-annotated-members.test.ts`.
+
+### An effect annotation on a protocol implementation member makes it uncallable (found 2026-08-16, FIXED 2026-08-16)
+
+Any effect marker on any member of an `is P { … }` implementation block — a
+function member, a `get`, or a `set` — registered without complaint and then
+failed at every dispatch with `Error("Function body must be a scoped Block
+expression")`. Removing the marker made the same program work:
+
+```
+type T = object{n: integer} is S {
+  function f(self: Self) pure -> integer { self.n }   // f(t) → Error(…)
+  function f(self: Self) -> integer { self.n }        // f(t) → 5
+}
+```
+
+Two consequences. The member was unusable, and — because the annotation never
+reached a contract check — an implementation block's declared effects were never
+checked against what its body does: `function f(self: Self) pure -> number {
+Random() }` registered happily, where the same annotation on a top-level
+`function h() pure -> number { Random() }` is correctly refused with
+`incompatible-type: expected pure effects, got random effects`.
+
+FIXED, in two halves:
+
+- CALLABILITY. An effect specifier lowers to a full marker signature in the
+  literal's body slot (`["Typed", body, "'(self: Self) pure -> integer'"]`).
+  That text mentions `Self`; `canonicalFunctionLiteral` parses a body-slot
+  marker and, when it does not parse, replaces the body with an error
+  expression — leaving the literal with no Block for a body. The `Self`
+  substitution on the stored literal (see the entry above) makes the marker
+  parse, so an annotated member is callable on the statement route and the box
+  route alike. A member annotated with the target's own name (`self: Box`)
+  always worked, which is why the bug looked property-specific.
+- CONTRACT. `implementationProblem` now checks a member's OWN declared effects
+  against the effects inferred from its body — the same `declared ⊇ inferred`
+  rule a top-level definition is held to, reported through the same
+  `incompatible-type` error value with the same two arguments (expected effects,
+  inferred effects). It applies to `get`/`set` accessors as well as function
+  members, so a `pure` setter that stores into its receiver is refused. Like
+  every other per-member problem, the first one refuses the conformance as a
+  whole: nothing is registered. A host (JavaScript) implementation is unaffected
+  — it carries no signature and stays trusted (design P10).
+
+Covered by `test/compute-engine/protocol-annotated-members.test.ts`. The
+conditional-conformance residue is described in the entry above.
 
 ### A field store's no-op guard almost never fires (found 2026-08-15, OPEN — needs a product ruling)
 
@@ -3942,6 +4337,92 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
   honest — negative end over an infinite source is an infinite tail,
   negative start over one is inert, unknown-length sources report
   finiteness unknown.
+
+### Strings — operators left for a later phase (opened 2026-08-16)
+
+Phase 1 of the strings work made `string` an indexed collection of
+`character` (`docs/STRING_ROADMAP.md`, "Decision: strings become indexed
+collections of characters"; implementation plan
+`docs/plans/2026-08-16-string-phase1-character-type.md`). The library audit
+done for that phase (Appendix A of the plan) classified every signature that
+admits `collection<T>` / `indexed_collection<T>`. Phase 1 shipped the
+string-preserving arm for the operators the preservation rule makes
+mandatory; the entries below are the ones deliberately left out, each with
+the reason it is a judgement call rather than a forced consequence.
+
+- **String arms for `RandomShuffle`, `RandomSample` and `DeleteAt`.** All
+  three produce a permutation or a subset of the source's own elements, so by
+  the preservation rule ("subset or reordering of the input's own characters
+  ⇒ string in, string out") they belong with `Reverse` and `Take`. They were
+  not in the Phase-0 per-kind set, so nothing in their declared signature
+  forced the arm in Phase 1 and they still return `list<character>`. Adding
+  them is a static-result-type break, so it wants its own release note.
+
+- **Inner strings for the chunking family:** `Chunk`, `Partition`, `ChunkBy`
+  and `SlidingWindow`. The outer result is a list either way; what is open is
+  whether each inner chunk — a contiguous run of the source's own characters
+  — is a `string` or a `list<character>`. Today it is `list<character>`.
+  `list<string>` is defensible and arguably more useful, and the same
+  question applies to `Permutations` and `Combinations`, whose inner elements
+  are reorderings and subsets of the source's characters.
+
+- **`Tally`'s values half.** `Tally(s)` returns
+  `tuple<list<character>, list<integer>>`. Whether the distinct values should
+  come back as characters (as now) or as one-character strings is the same
+  open choice as the chunking family's, and should be decided with it so the
+  library is consistent.
+
+- **`RandomChoice`.** It draws *with* replacement, so its result is a
+  multiset over the source's own elements — arguably element-preserving,
+  arguably list-out. Needs a ruling before it can be classified.
+
+- ~~`Reshape` on a string / `Differences("abc")`~~ — CLOSED 2026-08-16:
+  `Reshape`'s `type` handler now reports the declared `value` (not
+  `nothing`) when it declines, and `Differences` refuses a source whose
+  element type is provably non-numeric with one `incompatible-type` error
+  at the operand instead of building error elements.
+
+The Phase 2 work items themselves — the `Join`/`StringJoin` role split, the
+generic contiguous-subsequence family (`ContainsSequence`, `RangeOf`,
+`StartsWith`, `EndsWith`), `StringReplace`, trim/pad/repeat, the case
+operations, `StringCompare` and `NumberFrom` — are specified in
+`docs/STRING_ROADMAP.md` and are tracked there, not duplicated here.
+
+### `DigitsFrom` ignores an integer `base` argument (found 2026-08-16)
+
+`DigitsFrom(s, base)` is declared `(string, (string|integer)?) -> integer`,
+but its handler resolves the base with
+`(isString(op2) ? op2.string : undefined) ?? sym(op2) ?? 10`
+(`src/compute-engine/library/core.ts`, in the `DigitsFrom` evaluate handler).
+For an integer base neither branch matches — `isString` is false and a number
+has no symbol name — so the fallback `10` is always used:
+
+- `DigitsFrom("101", 2)` is `101`, not `5`.
+- `DigitsFrom("2a", 16)` is an `unexpected-digit` error on `a`, not `42`.
+- A *string* base (`DigitsFrom("101", "2")`) reaches the range check first
+  and reports `unexpected-base NaN`, so that spelling is broken too.
+
+Only the base-less form and the `0x`/`0b` prefixes work. This is independent
+of the strings work — it predates it — but it was found while documenting the
+conversion pair `IntegerString`/`DigitsFrom`, and it makes the pair
+non-round-tripping for any base other than 10. `IntegerString(n, base)` is
+correct, so only the parsing direction needs fixing.
+
+### `StringFrom` with no `format` does not use `unicode-scalars` (found 2026-08-16)
+
+`doc/97-reference-strings.md` documented the default format as
+`unicode-scalars`, with the examples `StringFrom(128287)` → `"🔟"` and
+`StringFrom([127467, 127479])` → `"🇫🇷"`. The handler instead treats a missing
+format as `'default'` and returns `value.toString()`, so those two calls
+produce the strings `"128287"` and `"[127467,127479]"`. The explicit
+`unicode-scalars` format does produce the documented results.
+
+The documentation has been corrected to describe the actual behavior (a
+missing format means "the argument's default string representation"), so
+nothing is misleading today. What is open is which of the two the operator
+*should* do: "convert anything to its printable form" and "decode a
+collection of code points" are different jobs, and `String(x)` already covers
+the first.
 
 ### Coverage tracks
 

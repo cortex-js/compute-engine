@@ -363,6 +363,18 @@ export function serializeEpsil(
       ),
 
     //
+    // Character
+    //
+    // A character value arrives as the call form `["CharacterFrom", "'x'"]`
+    // (MathJSON has no character literal, and neither does Epsil). It is
+    // deliberately NOT shortened to the one-character string `"x"`: at top
+    // level that reparses as a `string`, not a `character`, and an INVALID
+    // constructor such as `CharacterFrom("ab")` (an error value) would come
+    // back as the perfectly valid string `"ab"`. The generic call form
+    // `CharacterFrom("x")` reparses to the same value with the same
+    // validation, so no entry is needed here — the fallback handles it.
+
+    //
     // List
     //
     List: (expr: MathJsonExpression): FormattingBlock =>

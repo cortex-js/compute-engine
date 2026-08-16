@@ -25,6 +25,7 @@ export class BoxedType {
   static finite_integer = new BoxedType('finite_integer');
   static finite_real = new BoxedType('finite_real');
   static string = new BoxedType('string');
+  static character = new BoxedType('character');
   static dictionary = new BoxedType('dictionary');
 
   static setNumber = new BoxedType('set<number>');

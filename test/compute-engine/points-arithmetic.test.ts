@@ -696,11 +696,14 @@ describe('POINT/TUPLE ARITHMETIC — dishonest collection-broadcast types', () =
     expect(errorCode(r.op1)).toBe('incompatible-type');
   });
 
-  test('At still rejects a string value', () => {
+  test('At now ACCEPTS a string value (strings are collections of characters)', () => {
     const ce = new ComputeEngine();
+    // Strings became indexed collections of characters, so `At` accepts one:
+    // the former `incompatible-type` refusal is gone and the call selects the
+    // first character.
     const r = ce.box(['At', ce.string('hello'), 1]);
-    expect(r.isValid).toBe(false);
-    expect(errorCode(r.op1)).toBe('incompatible-type');
+    expect(r.isValid).toBe(true);
+    expect(r.evaluate().string).toBe('h');
   });
 
   // Genuine collection access is unaffected by the custom canonical handler.

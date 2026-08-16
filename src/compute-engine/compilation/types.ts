@@ -190,6 +190,21 @@ export interface CompileTarget<Expr = unknown> {
   /** Format string literals for the target language */
   string: (str: string) => string;
 
+  /**
+   * Format a CHARACTER literal (exactly one UAX #29 grapheme cluster) for the
+   * target language, or `undefined` when the target cannot represent one.
+   *
+   * A character is not simply a short string: every operation that consumes one
+   * — ordering by code-point sequence, segmenting a string into characters,
+   * counting them — needs grapheme-cluster awareness the target may not have.
+   * A target that omits this makes every character-valued expression fail
+   * closed (D6), which is why it is a separate capability from `string` rather
+   * than a reuse of it: Python has string literals but no stdlib grapheme
+   * segmentation, and GLSL/WGSL have no text at all.
+   * (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+   */
+  character?: (str: string) => string;
+
   /** Format numeric literals for the target language */
   number: (n: number) => string;
 

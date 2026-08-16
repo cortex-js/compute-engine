@@ -18,7 +18,7 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
   broadcastLengthMismatch,
   isBroadcastableCollection,
-  isFiniteIndexedCollection,
+  isFiniteBroadcastParticipant,
   isTuple,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
@@ -44,6 +44,7 @@ import { spellCheckMessage } from '../boxed-expression/validate.js';
 import {
   isFunction,
   isSymbol,
+  isString,
   isAbsentValue,
   sym,
 } from '../boxed-expression/type-guards.js';
@@ -420,9 +421,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // it here would force every component of a value the restriction is
         // meant to keep held, changing the lazy guard semantics for a shape
         // that can never enter the distribution path anyway.
-        if (expr.type.matches('collection') && !expr.type.matches('tuple')) {
+        // A STRING is excluded for the same reason a tuple is: it is an
+        // indexed collection of characters, but it is atomic under
+        // element-wise distribution, so `When("ab", c)` must stay a restricted
+        // string rather than become a list of restricted characters.
+        if (
+          expr.type.matches('collection') &&
+          !expr.type.matches('tuple') &&
+          !expr.type.matches('string')
+        ) {
           const ev = expr.evaluate(options);
-          if (isFiniteIndexedCollection(ev) && !isTuple(ev)) {
+          if (isFiniteBroadcastParticipant(ev)) {
             const n = ev.count ?? Infinity;
             if (n <= MAX_SIZE_EAGER_COLLECTION) {
               const result = Array.from(ev.each()).map((elem) =>
@@ -622,7 +631,12 @@ function whenCollectionHandlers(): CollectionHandlers {
     | undefined => {
     if (!isFunction(expr, 'When')) return undefined;
     const v = expr.op1;
-    if (!v.isCollection || isTuple(v)) return undefined;
+    // A string is excluded alongside a tuple: both are indexed collections
+    // that stay ATOMIC under element-wise restriction, so `When("ab", c)` is a
+    // restricted string, not a collection of restricted characters. This must
+    // agree with the distribution gate in `When`'s evaluate handler, which
+    // excludes the same two kinds.
+    if (!v.isCollection || isTuple(v) || isString(v)) return undefined;
     const cond = expr.op2;
     return {
       value: v,

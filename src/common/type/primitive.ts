@@ -24,6 +24,11 @@ export const INDEXED_COLLECTION_TYPES: PrimitiveType[] = [
   // not a subtype of it: a `Range` value is not a `List`, and neither kind is
   // a subtype of the other.
   'range',
+  // A string is an indexed collection of its grapheme clusters (see the
+  // `string` entry in `types.ts`). A sibling of `list`, not a subtype: joining
+  // two strings can merge their boundary characters, so a string's element
+  // sequence is a property of the whole string rather than of its parts.
+  'string',
 ];
 
 /**
@@ -50,6 +55,28 @@ export const RANGE_STRUCTURAL_TYPE: Type = Object.freeze({
   elements: 'integer',
 }) as Type;
 
+/**
+ * The structural reading of the `string` type: a string is an indexed
+ * collection of `character` (one grapheme cluster each).
+ *
+ * `string` is the second primitive carrying a hidden element type (the first
+ * is `range`), so every site that destructures a parameterized collection
+ * (subtype checks against `indexed_collection<T>`, type-variable binding,
+ * element-type readers) has to expand it — hence ONE shared constant rather
+ * than a literal repeated at each site. The BROADCAST admission sites are the
+ * deliberate exception: strings are broadcast-atomic, so they must not expand
+ * there (see `broadcastableCollectionElementType` in `subtype.ts`).
+ *
+ * Frozen for the same reason `RANGE_STRUCTURAL_TYPE` is: it is shared by
+ * reference across every `string` subtype and pattern-match call in the
+ * process, so an in-place mutation would silently corrupt every subsequent
+ * `string` check for the lifetime of the process.
+ */
+export const STRING_STRUCTURAL_TYPE: Type = Object.freeze({
+  kind: 'indexed_collection',
+  elements: 'character',
+}) as Type;
+
 export const COLLECTION_TYPES: PrimitiveType[] = [
   ...INDEXED_COLLECTION_TYPES,
   'collection',
@@ -62,7 +89,13 @@ export const SCALAR_TYPES: PrimitiveType[] = [
   'scalar',
   ...NUMERIC_TYPES,
   'boolean',
-  'string',
+  // `character` is a scalar; `string` is NOT (it moved to
+  // `INDEXED_COLLECTION_TYPES` when strings became collections). Keeping
+  // `string` in both would make `scalar` and `collection` overlap, and every
+  // predicate that reads them as the two branches of `value` would carry a
+  // hidden exception. See `docs/plans/2026-08-16-string-phase1-character-type.md`
+  // (decision D1).
+  'character',
 ] as const as PrimitiveType[];
 
 export const VALUE_TYPES: PrimitiveType[] = [

@@ -148,6 +148,7 @@ import {
   isSymbol,
   isFunction,
   isString,
+  isCharacter,
   isTensor,
   isDictionary,
   isObject,
@@ -162,6 +163,7 @@ export {
   isSymbol,
   isFunction,
   isString,
+  isCharacter,
   isTensor,
   isDictionary,
   isObject,
@@ -176,6 +178,7 @@ export type { BoxedNumber } from './compute-engine/boxed-expression/boxed-number
 export type { BoxedSymbol } from './compute-engine/boxed-expression/boxed-symbol.js';
 export type { BoxedFunction } from './compute-engine/boxed-expression/boxed-function.js';
 export type { BoxedString } from './compute-engine/boxed-expression/boxed-string.js';
+export type { BoxedCharacter } from './compute-engine/boxed-expression/boxed-character.js';
 export type { BoxedObject } from './compute-engine/boxed-expression/boxed-object.js';
 
 // ── Global registration ─────────────────────────────────────────────
@@ -202,6 +205,7 @@ export type { BoxedObject } from './compute-engine/boxed-expression/boxed-object
   isSymbol,
   isFunction,
   isString,
+  isCharacter,
   isTensor,
   isDictionary,
   isObject,

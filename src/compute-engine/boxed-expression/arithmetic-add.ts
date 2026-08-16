@@ -30,6 +30,7 @@ import {
   hasAccessibleComponents,
   isDeclaredScalarNumber,
   isFiniteIndexedCollection,
+  isFiniteBroadcastParticipant,
   isBroadcastableCollection,
   isUnknownLengthBroadcast,
   lazyBroadcastMap,
@@ -545,7 +546,7 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   // dispatch and a mixed `List + Tuple` (point-list + point) broadcasts the
   // tuple over the list instead of falling inert in `addTuples`. Tuples
   // themselves are excluded — they add component-wise, never broadcast.
-  if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
+  if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
     const r = broadcastOverIndexedCollections(
       xs[0].engine,
       'Add',
@@ -597,7 +598,7 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
 
   // Broadcast over a non-tensor finite indexed collection (see `add` — checked
   // before the tuple branch so `List + Tuple` broadcasts; tuples excluded).
-  if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
+  if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
     const r = broadcastOverIndexedCollections(
       xs[0].engine,
       'Add',
@@ -644,7 +645,7 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
       const rt = addTensors(xs[0].engine, xs);
       if (rt) return rt;
     }
-    if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
+    if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
       const r = broadcastOverIndexedCollections(
         xs[0].engine,
         'Add',

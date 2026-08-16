@@ -26,6 +26,7 @@ import { isOperatorDef } from '../boxed-expression/utils.js';
 import {
   isCollectionShaped,
   isFiniteIndexedCollection,
+  isFiniteBroadcastParticipant,
   isTuple,
 } from '../collection-utils.js';
 import {
@@ -307,7 +308,7 @@ function finishShortCircuit(
   evalOptions: Partial<EvaluateOptions>
 ): Expression | undefined {
   const isCollectionValue = (x: Expression) =>
-    isFiniteIndexedCollection(x) && !isTuple(x);
+    isFiniteBroadcastParticipant(x);
   if (!ops.some(isCollectionValue) && values.some(isCollectionValue))
     return ce.function(name, values).evaluate(evalOptions);
   return reduce(values, { engine: ce });

@@ -11,6 +11,7 @@ import {
   isNumber,
   isObject,
   isString,
+  isCharacter,
   isSymbol,
   sym,
 } from './type-guards.js';
@@ -538,8 +539,15 @@ function leafEquals(subject: Expression, value: Expression): boolean {
   // The matcher treats an undecidable `isEqual` (undefined) as no-match.
   if (isNumber(value))
     return isNumber(subject) && value.isEqual(subject) === true;
-  if (isString(value))
-    return isString(subject) && subject.string === value.string;
+  // Text compares by CONTENT across the string/character kind boundary, the
+  // same bridge `isSame` implements: a one-cluster string literal in pattern
+  // position must select a character subject (`match c { "[" => … }` over a
+  // character from `Characters(s)`), and vice versa.
+  if (isString(value) || isCharacter(value))
+    return (
+      (isString(subject) || isCharacter(subject)) &&
+      subject.string === value.string
+    );
   if (isSymbol(value))
     return isSymbol(subject) && subject.symbol === value.symbol;
   return subject.match(value) !== null;

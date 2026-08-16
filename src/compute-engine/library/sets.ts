@@ -28,6 +28,7 @@ import {
   enumerableFromAllSources,
   enumerableFromSource,
   typeSaturatedSubsetOf,
+  isTextAtom,
   isValuelessCollectionTyped,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
@@ -1197,9 +1198,17 @@ function validateSetArguments(
 }
 
 /** A trailing SetMinus operand excludes its *members* when it is itself a
- * set/collection, and excludes itself as a value otherwise. */
+ * set/collection, and excludes itself as a value otherwise.
+ *
+ * TEXT is ATOMIC here and excludes ITSELF. A string is an indexed collection
+ * of its grapheme clusters, so reading it as a collection made
+ * `SetMinus(Set("ab", "cd"), "ab")` remove the CHARACTERS `"a"` and `"b"` —
+ * neither of which is a member — and leave `"ab"` in the set it was asked to
+ * remove it from. Removing a string's characters is spelled explicitly as
+ * `SetMinus(s, Characters(t))` (`docs/STRING_ROADMAP.md`, design constraint
+ * 5). */
 function isExcludedBy(val: Expression, x: Expression): boolean {
-  if (val.isCollection) return val.contains(x) === true;
+  if (val.isCollection && !isTextAtom(val)) return val.contains(x) === true;
   return val.isSame(x);
 }
 
@@ -1213,7 +1222,9 @@ function isExcludedByKleene(
   val: Expression,
   x: Expression
 ): boolean | undefined {
-  if (val.isCollection) return val.contains(x);
+  // Text is atomic — see `isExcludedBy`, whose rule this mirrors: a string
+  // operand excludes itself as a value, never its characters as members.
+  if (val.isCollection && !isTextAtom(val)) return val.contains(x);
   // A valueless collection-typed operand excludes its MEMBERS, which are not
   // knowable yet — so the answer is UNDECIDED, not the scalar disequality
   // below. Falling through asked `x = L` where the question is `x ∈ L`; both

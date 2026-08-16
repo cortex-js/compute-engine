@@ -129,6 +129,10 @@ import { boxRules } from './boxed-expression/rules.js';
 import { aggregateHotHeadDispatch } from './boxed-expression/rule-index.js';
 import { validatePattern } from './boxed-expression/boxed-patterns.js';
 import { BoxedString } from './boxed-expression/boxed-string.js';
+import {
+  BoxedCharacter,
+  isSingleGraphemeCluster,
+} from './boxed-expression/boxed-character.js';
 import { BoxedFunction } from './boxed-expression/boxed-function.js';
 import { makeObject } from './boxed-expression/boxed-object.js';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression.js';
@@ -3202,6 +3206,25 @@ export class ComputeEngine implements IComputeEngine {
 
   string(s: string, metadata?: Metadata): Expression {
     return new BoxedString(this, s, metadata);
+  }
+
+  character(s: string, metadata?: Metadata): Expression {
+    // The caller is responsible for having checked the one-cluster criterion
+    // (`isSingleGraphemeCluster`); a caller that cannot, goes through
+    // `CharacterFrom`, which reports a diagnostic instead. Throwing here
+    // rather than silently truncating keeps "a character is exactly one
+    // grapheme cluster" a class invariant. This must be a real throw, not
+    // `console.assert`: all `console.*` calls are stripped from the minified
+    // production build, so an assert would enforce the invariant only in
+    // development.
+    if (!isSingleGraphemeCluster(s))
+      throw new Error(
+        `ce.character(): "${s}" is not exactly one grapheme cluster. ` +
+          `A character is exactly one user-perceived character (one UAX #29 ` +
+          `extended grapheme cluster); use ce.string() for arbitrary text, ` +
+          `or CharacterFrom() to get a diagnostic instead of a throw.`
+      );
+    return new BoxedCharacter(this, s, metadata);
   }
 
   /** Create a boxed symbol */

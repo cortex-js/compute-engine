@@ -809,11 +809,20 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
   //   `compileJSPointList` classifies the component (throw vs per-point slot);
   // - with NO source, the definition handler classifies it itself, on a
   //   language it lowers (`glsl`): decline vs a `Tuple`-identical emission.
-  const table: { type: string; scalar: boolean; slot: unknown }[] = [
+  const table: {
+    type: string;
+    scalar: boolean;
+    slot: unknown;
+    glslRejects?: RegExp;
+  }[] = [
     { type: 'set<number>', scalar: false, slot: undefined }, // a collection
     { type: 'dictionary', scalar: false, slot: undefined }, // …so is a map
     { type: 'unknown', scalar: true, slot: 7 }, // the load-bearing plot case
-    { type: 'string', scalar: true, slot: 'ab' }, // not a collection here
+    // On the JS route a string component is a SLOT (strings are broadcast-
+    // atomic, so it is never a source). The GLSL route rejects it instead:
+    // the shader targets have no text type, so a text-typed symbol fails
+    // closed rather than being emitted as a numeric uniform.
+    { type: 'string', scalar: true, slot: 'ab', glslRejects: /text-typed/ },
     { type: 'boolean', scalar: true, slot: true },
   ];
 
@@ -850,13 +859,17 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
 
   it.each(table)(
     'library route (no source): a `$type` component is scalar=$scalar',
-    ({ type, scalar }) => {
+    ({ type, scalar, glslRejects }) => {
       const ce = splitEngine(type);
       const glsl = new GLSLTarget();
       const build = () =>
         glsl.compile(ce.box(['PointList', 'x', 'c']), { realOnly: true });
       if (!scalar) {
         expect(build).toThrow(/is collection-valued/);
+        return;
+      }
+      if (glslRejects) {
+        expect(build).toThrow(glslRejects);
         return;
       }
       // A slot emits byte-identically to the equivalent `Tuple`.

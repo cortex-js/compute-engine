@@ -11,6 +11,7 @@ import {
   isFunction,
   isSymbol,
   isString,
+  isCharacter,
   isDictionary,
   isObject,
 } from './type-guards.js';
@@ -332,11 +333,22 @@ export function same(
   }
 
   //
-  // BoxedString
+  // BoxedString and BoxedCharacter
   //
-  if (isString(a) || isString(b)) {
-    if (!isString(a) || !isString(b)) return false;
-    return a.string === b.string;
+  // The two kinds BRIDGE: a character and a one-cluster string holding the
+  // same content are the same VALUE, so they compare equal in both directions
+  // (and `BoxedCharacter.hash` uses `BoxedString`'s formula so hashing agrees).
+  // This is a value law — two values with identical scalar sequences are equal
+  // — not a type conversion: `f(c: character)` still refuses a `string`-TYPED
+  // argument. Without it, `c == "a"`, `"a" in "abc"` and `IndexOf("abc", "b")`
+  // would each need their own narrowing hook, since all of them reduce to
+  // `isSame`. See `docs/plans/2026-08-16-string-phase1-character-type.md`
+  // (decision D5).
+  if (isString(a) || isString(b) || isCharacter(a) || isCharacter(b)) {
+    const sa = isString(a) || isCharacter(a) ? a.string : undefined;
+    const sb = isString(b) || isCharacter(b) ? b.string : undefined;
+    if (sa === undefined || sb === undefined) return false;
+    return sa === sb;
   }
 
   //
@@ -521,6 +533,16 @@ function eqImpl(
     if (a.isCollection && b.isCollection) {
       // A set never equals a sequence, whatever the elements
       if (a.type.matches('set') !== b.type.matches('set')) return false;
+      // A STRING never equals a collection of another kind, whatever the
+      // characters. A string is an indexed collection of its grapheme
+      // clusters, so without this the element walk below compared `"ab"` with
+      // `["a", "b"]` character by character and answered True — but `string`
+      // and `list<character>` are SIBLINGS in the lattice, neither a subtype
+      // of the other, and two values of different kinds are different values
+      // (`docs/STRING_ROADMAP.md`). Two strings never reach here: identical
+      // ones are caught by `isSame` above, and differing ones have differing
+      // characters.
+      if (isString(a) !== isString(b)) return false;
       const ca = a.count;
       const cb = b.count;
       if (ca === undefined || cb === undefined) return undefined;
@@ -1027,6 +1049,42 @@ export function cmp(
     }
 
     return undefined;
+  }
+
+  //
+  // A character
+  //
+  // Ordered by the NFC CODE-POINT sequence of the cluster, not by
+  // `String.prototype.<`: that compares UTF-16 code UNITS, which places every
+  // astral character (U+10000 and above, encoded as a surrogate pair starting
+  // at 0xD800) BELOW U+E000–U+FFFF — an order no reader expects. The
+  // character/string bridge applies here too, so a one-cluster string on
+  // either side is compared by the same rule
+  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D8).
+  // The bridge stops there: a string of two or more clusters is NOT a
+  // character, and ordering it against one would answer a comparison the
+  // design leaves inert, so that pair yields `undefined`. A string's `count`
+  // is its number of NFC grapheme clusters, which is the same "exactly one
+  // character" test `isSingleGraphemeCluster` (`boxed-character.ts`) applies —
+  // read here off the string's own facet, since importing that module into
+  // this one would close a dependency cycle through
+  // `abstract-boxed-expression.ts`.
+  if (isCharacter(a) || (typeof b !== 'number' && isCharacter(b))) {
+    const scalarsOf = (x: Expression): number[] | undefined => {
+      if (isCharacter(x)) return x.unicodeScalars;
+      if (isString(x) && x.count === 1) return x.unicodeScalars;
+      return undefined;
+    };
+    const sa = scalarsOf(a);
+    const sb = typeof b === 'number' ? undefined : scalarsOf(b);
+    if (sa === undefined || sb === undefined) return undefined;
+    const n = Math.min(sa.length, sb.length);
+    for (let i = 0; i < n; i++) {
+      if (sa[i] < sb[i]) return '<';
+      if (sa[i] > sb[i]) return '>';
+    }
+    if (sa.length === sb.length) return '=';
+    return sa.length < sb.length ? '<' : '>';
   }
 
   //

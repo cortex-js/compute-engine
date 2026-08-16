@@ -66,7 +66,10 @@ import {
   sym,
 } from './boxed-expression/type-guards.js';
 import { functionLiteralReturnMarker } from './boxed-expression/function-literal.js';
-import { inferFunctionLiteralEffects } from './boxed-expression/effects-inference.js';
+import {
+  describeEffects,
+  inferFunctionLiteralEffects,
+} from './boxed-expression/effects-inference.js';
 import {
   isOperatorDef,
   isValueDef,
@@ -936,6 +939,14 @@ export function declareConformance(
       ]);
   }
 
+  // P12's `Self` substitution is applied to the block ONCE, here, before it is
+  // either validated or stored: every consumer downstream — the P17 check, the
+  // effect walk, dispatch's `apply()`, the literal's own `.type` arrow — reads
+  // the stored literal with an ordinary resolver that does not know `Self`.
+  // See {@link groundedImplementationLiteral}.
+  if (impl !== undefined)
+    impl = groundedImplementationBlock(ce, impl, target, targetKey, params);
+
   // The implementation block is validated BEFORE anything is stored: a
   // rejected block must leave the previous implementation (and `pending`)
   // untouched, so that a re-run with an edited, broken block does not destroy
@@ -949,7 +960,11 @@ export function declareConformance(
       impl,
       params
     );
-    if (failure !== null) return ce.error([failure.code, failure.message]);
+    if (failure !== null)
+      return ce.error([
+        failure.code,
+        ...(failure.errorArgs ?? [failure.message]),
+      ] as [string, string, ...string[]]);
   }
 
   // Registering a conformance can WIDEN a dispatcher's DERIVED effect set (the
@@ -1683,8 +1698,17 @@ function meetDescription(a: Type, b: Type): string {
 //
 
 /** A rejected implementation: the error code and its message. The statement
- * route turns this into an error VALUE, the host route into a throw. */
-type ImplementationProblem = { code: string; message: string };
+ * route turns this into an error VALUE, the host route into a throw.
+ *
+ * `errorArgs` overrides the error VALUE's arguments on the statement route, for
+ * a problem whose code renders its own message from a fixed argument list
+ * (`incompatible-type` reads two: expected, then got). `message` stays the
+ * prose the host route throws, so both routes still say the same thing. */
+type ImplementationProblem = {
+  code: string;
+  message: string;
+  errorArgs?: [string, ...string[]];
+};
 
 const GET_PREFIX = '__get__';
 const SET_PREFIX = '__set__';
@@ -1753,6 +1777,196 @@ function selfSubstitutingResolver(
 function typeTextOf(op: Expression | undefined): string | undefined {
   if (op === undefined) return undefined;
   return isString(op) ? op.string : sym(op);
+}
+
+/**
+ * The GROUND spelling of one type-annotation text, or `undefined` when the text
+ * must be kept exactly as the author wrote it.
+ *
+ * `undefined` for two different reasons, both of which mean "leave it alone":
+ * the text already parses against the engine's own resolver (so it mentions no
+ * `Self` and rewriting it would only churn the author's spelling), or it parses
+ * against neither resolver (not a type at all — reporting that is the P17
+ * validation's job, not this rewrite's).
+ *
+ * GROUPING is preserved. A fully parenthesized annotation is this repo's
+ * spelling for "the value here IS a function", as opposed to the literal's own
+ * contract: `["Typed", body, "'((integer) -> Box)'"]` is a return type, while
+ * the same text ungrouped is the marker signature of the enclosing literal
+ * (`isGroupedTypeText` / `returnTypeText` in `common/type/utils.ts`, and the
+ * gate in `bodySlotSignature`). `typeToString` always emits the UNGROUPED
+ * spelling, so re-wrapping is what keeps a grouped annotation from being
+ * re-read as a contract it never was.
+ */
+function groundTypeText(
+  ce: IComputeEngine,
+  text: string,
+  resolver: TypeResolver
+): string | undefined {
+  try {
+    parseType(text, ce._typeResolver);
+    return undefined; // Already ground; keep the author's spelling.
+  } catch {
+    /* Falls through to the `Self`-substituting attempt. */
+  }
+  try {
+    const s = typeToString(parseType(text, resolver));
+    return isGroupedTypeText(text) ? `(${s})` : s;
+  } catch {
+    return undefined; // Not a type either way — P17 reports it.
+  }
+}
+
+/**
+ * One implementation function literal with every `Self`-mentioning type
+ * annotation REWRITTEN to name the conformance target (P12's substitution
+ * applied once, at registration, instead of per dispatch).
+ *
+ * `Self` is a substitution token no ordinary type resolver knows, so a stored
+ * literal that still spells it is unreadable by every consumer OUTSIDE this
+ * module, in three ways that matter:
+ *
+ * - A body-slot MARKER signature — what an effect specifier lowers to
+ *   (`function size(self: Self) pure -> integer` becomes
+ *   `["Typed", body, "'(self: Self) pure -> integer'"]`) — is signature-shaped,
+ *   so `canonicalFunctionLiteral` parses it and, when it does not parse,
+ *   REPLACES the body with an error expression. The literal then has no Block
+ *   for a body and every dispatch to it failed with
+ *   `Error("Function body must be a scoped Block expression")`. A member with
+ *   any effect specifier was therefore uncallable.
+ * - The effect walk and the literal's own `.type` arrow (read by
+ *   `protocolAccessorEffects` in `effects-of.ts`) saw a `self: Self` receiver
+ *   as `unknown`, so a store the body performs on it — `self.n = v` in an
+ *   authored `set` accessor — looked like no effect at all.
+ * - An annotation INSIDE the body (`let s: Self = self`) failed to parse where
+ *   the same annotation spelled with the target's own name succeeded.
+ *
+ * The rewrite is therefore RECURSIVE over the whole literal: every node that
+ * carries a type-expression source text, wherever it sits. That covers the
+ * parameter slots, both marker shapes (`["Function", ["Typed", body, sig], …]`
+ * as the Epsil parser and the raw MathJSON box route deliver it, and the
+ * CANONICAL form where the marker has moved inside the Block and wraps its
+ * last statement — `bodySlotSignature` reads both, so a hand-authored
+ * canonical-form literal reaches the same failure), a `let`'s annotation
+ * inside the body, and the annotations of any nested literal.
+ */
+function groundedImplementationLiteral(
+  ce: IComputeEngine,
+  fn: Expression,
+  resolver: TypeResolver
+): Expression {
+  if (!isFunction(fn, 'Function') || fn.nops === 0) return fn;
+
+  /** Which operand of `node`, if any, carries a type-expression SOURCE text.
+   * Two shapes reach here: `["Typed", value, T]` — a parameter annotation, a
+   * return/marker ascription, or a cast — and `["Declare", name, T?, attrs?]`,
+   * which is how a body's `let s: Self = self` rides. `Declare`'s type operand
+   * is optional and its slot may instead hold the attributes dictionary, so
+   * the slot is claimed only when {@link typeTextOf} actually reads text out
+   * of it. */
+  const typeSlot = (node: Expression): number | undefined => {
+    if (isFunction(node, 'Typed') && node.nops === 2) return 1;
+    if (isFunction(node, 'Declare') && node.nops >= 2) return 1;
+    return undefined;
+  };
+
+  const rewrite = (node: Expression): Expression => {
+    if (!isFunction(node)) return node;
+    const slot = typeSlot(node);
+    const ops = node.ops.map((op, i) =>
+      i === slot ? op : rewrite(op)
+    ) as Expression[];
+    if (slot !== undefined) {
+      const text = typeTextOf(node.ops[slot]);
+      const g =
+        text === undefined ? undefined : groundTypeText(ce, text, resolver);
+      if (g !== undefined) ops[slot] = ce.string(g);
+    }
+    if (ops.every((op, i) => op === node.ops[i])) return node;
+    return ce._fn(node.operator, ops, { canonical: false });
+  };
+
+  return rewrite(fn);
+}
+
+/**
+ * {@link groundedImplementationLiteral}, memoized on the RAW literal's identity
+ * and the conformance target.
+ *
+ * One Epsil statement registers its implementation block up to three times per
+ * batch (the static pre-pass canonicalizes it, then the evaluation loop
+ * canonicalizes and evaluates it — the same reason ruling P47's duplicate check
+ * keys on the block expression's identity). Grounding mints fresh nodes, and
+ * `settleFieldBacking` compares the author's entries by REFERENCE to decide
+ * whether the merged map changed (`mergedMapMatches`); without the memo every
+ * pass would hand it new objects, rebuild `edge.impl`, and emit the spurious
+ * `config` state events that comparison exists to avoid.
+ *
+ * Safe to keep across batches: the grounded text names a TYPE, and the name is
+ * re-resolved wherever it is read, so a later redefinition of that type is
+ * picked up without invalidating the memo.
+ */
+const groundedLiteralMemo = new WeakMap<Expression, Map<string, Expression>>();
+
+function memoizedGroundedLiteral(
+  ce: IComputeEngine,
+  fn: Expression,
+  resolver: TypeResolver,
+  targetKey: string
+): Expression {
+  let perTarget = groundedLiteralMemo.get(fn);
+  if (perTarget === undefined) {
+    perTarget = new Map();
+    groundedLiteralMemo.set(fn, perTarget);
+  }
+  const hit = perTarget.get(targetKey);
+  if (hit !== undefined) return hit;
+  const grounded = groundedImplementationLiteral(ce, fn, resolver);
+  perTarget.set(targetKey, grounded);
+  return grounded;
+}
+
+/**
+ * An implementation block with every Epsil function literal in it grounded at
+ * `Self = target` — see {@link groundedImplementationLiteral} for why the
+ * substitution has to happen on the STORED literal rather than per dispatch.
+ *
+ * Returns the input map unchanged when nothing needed rewriting, so the object
+ * IDENTITY that `settleFieldBacking`/`mergedMapMatches` compare on survives.
+ *
+ * A CONDITIONAL conformance is returned unchanged: its `Self` is a head PATTERN
+ * (`list<T>`), so the only ground stand-in is the widest instantiation
+ * (`list<number>`), and P17 checks the implementation's COVARIANT positions
+ * against the pattern instead — a stored literal ground to the widest
+ * instantiation would fail that check. The same reason `implementationLiteralAt`
+ * declines a conditional edge.
+ */
+function groundedImplementationBlock(
+  ce: IComputeEngine,
+  impl: Record<string, Expression | JSImplementation>,
+  target: Type,
+  targetKey: string,
+  params?: readonly TypeParameter[]
+): Record<string, Expression | JSImplementation> {
+  if (params !== undefined) return impl;
+  const resolver = selfSubstitutingResolver(
+    ce._typeResolver,
+    target,
+    targetKey
+  );
+  let changed = false;
+  const out: Record<string, Expression | JSImplementation> =
+    Object.create(null);
+  for (const [key, value] of Object.entries(impl)) {
+    if (!isExpressionImplementation(value)) {
+      out[key] = value;
+      continue;
+    }
+    const grounded = memoizedGroundedLiteral(ce, value, resolver, targetKey);
+    if (grounded !== value) changed = true;
+    out[key] = grounded;
+  }
+  return changed ? out : impl;
 }
 
 /**
@@ -2235,7 +2449,21 @@ function implementationProblem(
     // Like the rest of the loop this runs at `Self = target`; the walk reads
     // heads by name and needs no resolver.
     const ceiling = accessor === null ? signatureEffects(expected) : undefined;
-    if (ceiling !== undefined) {
+    // The member's OWN effect specifier is a contract on its body, held to the
+    // same `declared ⊇ inferred` rule as a top-level definition: writing
+    // `function h() pure -> number { Random() }` at the top level is refused
+    // with `incompatible-type`, and the same member inside an implementation
+    // block must be refused the same way. Unlike the requirement ceiling above
+    // this applies to a `get`/`set` accessor too — an accessor is where a
+    // `pure` annotation could otherwise conceal a store into the receiver.
+    //
+    // PRECEDENCE: the requirement's ceiling is tested first, so a body that
+    // breaks both bounds reports `protocol-signature-mismatch` naming the
+    // protocol's ceiling — the outer contract, and the one whose fix site is
+    // not this block. The member's own annotation is reported only once that
+    // ceiling is satisfied or absent.
+    const stated = declared?.effects;
+    if (ceiling !== undefined || stated !== undefined) {
       let inferred: ReturnType<typeof inferFunctionLiteralEffects> | undefined;
       try {
         inferred = inferFunctionLiteralEffects(ce, value);
@@ -2249,21 +2477,33 @@ function implementationProblem(
       // the same trusted posture the definition-annotation check takes for an
       // opaque head (`boxed-operator-definition.ts`, the trusted-annotation
       // escape).
-      if (
-        inferred !== undefined &&
-        !inferred.unresolvedHead &&
-        !isEffectSubset(inferred.effects, ceiling)
-      )
-        return {
-          code: 'protocol-signature-mismatch',
-          message: `the body of \`${describeMember(accessor, member)}\` ${effectCeilingDetail(
-            'infers the effects',
-            // Not `undefined`: the empty set fits every ceiling.
-            inferred.effects!,
-            ceiling,
-            `${record.name}.${member}`
-          )}`,
-        };
+      if (inferred !== undefined && !inferred.unresolvedHead) {
+        if (ceiling !== undefined && !isEffectSubset(inferred.effects, ceiling))
+          return {
+            code: 'protocol-signature-mismatch',
+            message: `the body of \`${describeMember(accessor, member)}\` ${effectCeilingDetail(
+              'infers the effects',
+              // Not `undefined`: the empty set fits every ceiling.
+              inferred.effects!,
+              ceiling,
+              `${record.name}.${member}`
+            )}`,
+          };
+        if (stated !== undefined && !isEffectSubset(inferred.effects, stated))
+          return {
+            code: 'incompatible-type',
+            message: `the body of \`${describeMember(accessor, member)}\` infers the effects \`${describeEffects(
+              inferred.effects
+            )}\`, which the effects it declares (\`${describeEffects(stated)}\`) do not cover`,
+            // The two arguments `incompatible-type` renders as
+            // "expected `…`, got `…`" — the shape a violated top-level effect
+            // annotation produces (`effectContractErrorValue`).
+            errorArgs: [
+              `${describeEffects(stated)} effects`,
+              `${describeEffects(inferred.effects)} effects`,
+            ],
+          };
+      }
     }
 
     // The COVARIANT positions of a CONDITIONAL conformance, at the head pattern
@@ -4318,12 +4558,19 @@ export function requirementArityOf(
  * re-parsed at `Self = edge.target` (P12's substitution, via the same
  * {@link selfSubstitutingResolver} the P17 validation uses) and re-serialized.
  *
- * The interpreter never enforces these annotations: `apply()` runs the stored
- * literal with its `Self` annotations unparseable (so effectively
- * unannotated), after `dispatchMember` has checked the arguments at
+ * The interpreter does not enforce these annotations either: `apply()` runs the
+ * stored literal after `dispatchMember` has checked the arguments at
  * `Self = runtime type`. Substituting the edge's target — a SUPERTYPE of every
- * runtime receiver the edge admits — is therefore sound for the compiled
- * body: it admits everything the interpreter admits.
+ * runtime receiver the edge admits — is therefore sound for the compiled body:
+ * it admits everything the interpreter admits.
+ *
+ * The pass below is a SECOND grounding: `declareConformance` already grounds
+ * the block it stores ({@link groundedImplementationBlock}), so for a ground
+ * edge this normally finds nothing left to substitute. It is kept because it is
+ * the one that FAILS CLOSED — an annotation that does not re-parse makes the
+ * whole literal `null`, so the compiler declines instead of emitting a body
+ * whose contract it could not read, whereas the registration-time rewrite
+ * deliberately leaves such a text verbatim for P17 to report.
  *
  * Returns `null` for a host callback, a conditional edge (the v1 compiler
  * declines those before asking), or an annotation that fails to re-parse.
@@ -4344,9 +4591,14 @@ export function implementationLiteralAt(
     edge.target,
     edge.targetKey
   );
+  // GROUPING is preserved: a fully parenthesized annotation says "this value IS
+  // a function", and `typeToString` emits the ungrouped spelling, which
+  // `bodySlotSignature` would re-read as the literal's OWN contract. Same rule
+  // as {@link groundTypeText}.
   const ground = (text: string): string | null => {
     try {
-      return typeToString(parseType(text, resolver));
+      const s = typeToString(parseType(text, resolver));
+      return isGroupedTypeText(text) ? `(${s})` : s;
     } catch {
       return null;
     }

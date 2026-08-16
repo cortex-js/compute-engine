@@ -1,6 +1,177 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A string is now an indexed collection of characters:
+  `string <: indexed_collection<character>`.** Strings can be counted,
+  indexed (1-based), iterated and searched with the ordinary collection
+  operators — `Length("shop")` is `4`, `"abc"[2]` is `"b"`,
+  `isDigit(c) = c in "0123456789"` works — and the elements are grapheme
+  clusters, so a ZWJ emoji family or a regional-indicator flag counts as one
+  character.
+
+  The lattice change is global, and this is the part to re-audit: **every**
+  user-authored function, protocol conformance or pattern typed over
+  `collection<T>` / `indexed_collection<T>` / `collection` now silently
+  accepts strings. Where a definition was written assuming "collection" meant
+  "list-like", it will now also be selected for a string argument.
+
+  To exclude strings, intersect the bound with a negation. This is the
+  spelling that works today:
+
+  ```epsil
+  f(xs: T) -> integer where T: collection & !string = Length(xs)
+
+  f([1, 2])   // ➔ 2
+  f("ab")     // ➔ incompatible-type: expected `collection & !string`,
+              //    got `string`
+  ```
+
+  ```js
+  ce.declare('f', '(T) -> integer where T: collection & !string');
+  ce.function('f', [ce.box(['List', 1, 2])]).isValid;  // ➔ true
+  ce.function('f', [ce.string('ab')]).isValid;         // ➔ false
+  //   incompatible-type: expected `collection & !string`, got `string`
+  ```
+
+  `character` is a **primitive type**, not a collection kind. A consumer that
+  classifies values should ask the type — `type.matches('character')`,
+  `type.matches('indexed_collection<character>')` — rather than comparing
+  type strings: a string still reports its type as `string`, never as
+  `indexed_collection<character>`, exactly as a `range` reports `range`.
+
+- **`string` is no longer a `scalar`.** `scalar` is now "a `boolean`, a
+  `character`, or a `number`". A declaration `x: scalar` no longer admits a
+  string, and `ce.type('string').matches('scalar')` is `false`. Keeping
+  `string` in both branches would have made `scalar` and `collection`
+  overlap, so every predicate that treats them as the two halves of `value`
+  would carry a hidden exception. Declare `string` (or `string | number`)
+  where a string was intended.
+
+- **A new `character` type: exactly one user-perceived character.** It is a
+  scalar and a **disjoint sibling** of `string` — a character is not a
+  one-character string and a string is not a character, in either direction.
+  A character has no elements, which is what makes recursive walks over a
+  string's characters terminate structurally.
+
+  Consequences for existing MathJSON and code:
+
+  - `Characters` / `GraphemeClusters` migrate from `(string) -> list<string>`
+    to `(string) -> list<character>`. The elements print the same and compare
+    equal to the corresponding one-character strings (a value law: two values
+    with the same NFC scalar sequence are equal, so `c == "a"` and
+    `"a" in "abc"` still work), but their **MathJSON changes**: a character
+    serializes as the call form `["CharacterFrom", "'a'"]`, so
+    `["Characters", {str: "ab"}]` is now
+    `["List", ["CharacterFrom", "'a'"], ["CharacterFrom", "'b'"]]`. Any
+    consumer that reads that JSON expecting bare string literals must be
+    updated. `StringSplit(s, "")` is unchanged and still yields one-character
+    **strings**.
+  - `StringJoin` accepts characters as well as strings, so
+    `StringJoin(Characters(s))` still round-trips.
+  - A one-character string **literal** narrows to a character in a position
+    that expects one; a multi-character literal there is an
+    `incompatible-type` error. Only literals narrow — a `string`-typed
+    expression must be converted explicitly with `CharacterFrom(s)`.
+
+- **`Sort`, `Reverse`, `Take`, … return a `string` for a string input**, both
+  as the static type and as the runtime value. The element-preserving
+  operators — `Reverse`, `Rest`, `Most`, `Take`, `Drop`, `Slice`, `Unique`,
+  `Sort`, `RotateLeft`, `RotateRight`, `Filter`, and likewise `TakeWhile`,
+  `DropWhile` and `Dedup` — are closed over the kind, so `Sort("cba")` is
+  `"abc"`, not `["a", "b", "c"]`. The element-**transforming** higher-order
+  operators (`Map`, `FlatMap`, `Scan`, `Zip`) stay list-out permanently, even
+  for a character-to-character callback; rejoin explicitly with `String(...)`.
+
+  One caveat is inherent to grapheme segmentation rather than a defect: a
+  string-preserving operator segments, operates, then joins and re-segments,
+  and joining can merge adjacent characters. So the result may have a
+  different character count than the input — reversing can move a combining
+  mark next to a different base character. `String(Characters(s)) == s`
+  always holds; `Characters(String(cs))` may have *fewer* elements than `cs`.
+
+- **Materializers and set operators read a string as its characters.**
+  `ListFrom("abc")` is `["a", "b", "c"]` (it used to be `["abc"]`), and the
+  same flip applies to `SetFrom`, `TupleFrom` and the spread element:
+  `[..."ab"]` is `["a", "b"]`, where a string operand used to be an
+  `incompatible-type` error. `Union` and `Intersection` likewise read a
+  string operand as its characters, so `Union(Set(1), "ab")` is
+  `Set(1, "a", "b")`. `SetMinus` deliberately does **not** follow: its
+  trailing operands name *values* to exclude, so `SetMinus(S, "ab")` still
+  removes the string `"ab"` from `S` rather than the characters `a` and `b`.
+
+- **`Max`, `Min`, `GCD` and `LCM` no longer expand a string operand.** They
+  treat a string atomically; a string is not a number, so these stay
+  symbolic instead of silently folding over characters. `Sum` and `Product`
+  continue to report a typed error on a string element.
+
+- **Lone surrogates are replaced with `U+FFFD` at construction.** A native
+  JavaScript string can hold an unpaired UTF-16 surrogate, on which
+  segmentation, UTF-8 encoding, equality and serialization are undefined.
+  Every string entering the engine is now scanned once and each unpaired
+  surrogate becomes the REPLACEMENT CHARACTER, so every string value is
+  well-formed Unicode and every downstream operation is total.
+  `ce.string('a\ud800b').string` is `"a�b"`, with `Length` 3.
+
+- **Compilation: string collection operations are grapheme-correct in
+  JavaScript and fail closed elsewhere.** `Length(s)`, `s[i]`, iteration-
+  derived operators (`Map`, `Filter`, `Reduce`, `Contains`, …) and the
+  string-preserving operators compile to segmented JavaScript — `Length` of a
+  string never lowers to the host `.length`, which counts UTF-16 code units.
+  Python has no grapheme segmentation in its standard library, so those
+  operations now report a target-capability diagnostic (`success: false`)
+  rather than compiling to a code-point approximation; GLSL and WGSL reject
+  string-typed operands as before.
+
 ### New Features
+
+- **The `character` type, and strings as collections.** A `character` is
+  exactly one user-perceived character (one Unicode grapheme cluster), a
+  scalar alongside `boolean` and `number`. Build one with `CharacterFrom(s)`
+  (an empty or multi-character string is a diagnostic, never a truncation),
+  with `ce.character('x')` from the host API, or by writing a one-character
+  string literal where a character is expected. `String(c)` converts back,
+  and `CharacterFrom(String(c)) == c` always holds.
+
+  With `string <: indexed_collection<character>`, the collection library
+  applies to strings directly:
+
+  ```epsil
+  Length("shop")                     // ➔ 4
+  "abc"[2]                           // ➔ "b"
+  isDigit(c) = c in "0123456789"     // character membership
+  isDigit("7")                       // ➔ True
+  Tally("mississippi")               // character frequencies
+  ```
+
+  `c in s` is **character** membership, not substring search — `"ab" in
+  "abc"` is `False`, consistent with every other collection. A generic
+  contiguous-subsequence family (`ContainsSequence`, `RangeOf`, `StartsWith`,
+  `EndsWith`) is the separate operation for substring search, and is not
+  available yet.
+
+  Two properties keep the change from leaking where it would be wrong.
+  Strings are **broadcast-atomic**: a broadcasting operator applied to a
+  string receives the whole string, so `String("ab", 1)` is `"ab1"` and a
+  lambda with a scalar parameter is applied to the string rather than mapped
+  over its characters. Strings are also **`Flatten`-atomic**:
+  `Flatten(["ab", "cd"])` is `["ab", "cd"]`.
+
+  `String` called with exactly one finite collection **joins** that
+  collection's elements instead of broadcasting over them, which is what
+  makes `String(Characters(s)) == s` hold. This applies to EVERY collection
+  kind, not just text: `String([1, 2])` is now `"12"` (it used to broadcast
+  to `["1", "2"]`); to map over the elements write `Map(String, [1, 2])`.
+  Multi-argument calls still broadcast (`String("x", [1, 2])` is
+  `["x1", "x2"]`).
+
+  Character equality and ordering are defined on the NFC scalar sequence and
+  are deliberately never locale-aware: canonical forms, dedup keys and match
+  plans must be identical on every host. Collation, if it ever ships, will be
+  an explicit argument.
+
+  See the [Strings reference](/compute-engine/reference/strings/) and the
+  type-lattice section of the [Types guide](/compute-engine/guides/types/).
 
 - **`hold` functions — user-defined functions whose arguments are not
   evaluated.** A definition prefixed with `hold` (`hold f(e) = Head(e)`,
@@ -27,6 +198,50 @@
 
 ### Issues Resolved
 
+- **A `Reduce`/`Scan` whose accumulator would turn complex mid-fold now
+  declines instead of miscompiling.** Only the element lane was modelled, so a
+  fold with a real initial value and a combiner yielding complex values seeded
+  a real accumulator and then added complex values to it — answering
+  `{ re: '[object Object]0', im: 2 }` behind `success: true` where the
+  interpreter gives `2 + 6i`. Such a fold now fails closed and falls back to
+  the interpreter, which returns the correct value.
+
+  **This can turn a compile that used to succeed into a fallback**, so an
+  iteration over complex data seeded with a real value (a fractal-style
+  accumulation, for example) may run interpreted where it previously compiled.
+  That is deliberate and interim: the correct answer replaces a silently wrong
+  one. Folds whose accumulator stays real keep compiling, as do those seeded
+  with a complex value, builtin combiners, and every fold over a real source.
+  Accumulator-lane widening — which will let these compile correctly again —
+  is tracked as follow-up work.
+
+- **An effect annotation on a member of a protocol implementation block no
+  longer makes that member uncallable, and is now checked against the body.**
+  Writing `type Box = object{n: integer} is Sized { function size(self: Self)
+  pure -> integer { self.n } }` registered without complaint and then failed at
+  every call with `Error("Function body must be a scoped Block expression")`;
+  removing `pure` made the same program work. An effect specifier lowers to a
+  full signature stamped on the literal's body, and that signature mentions
+  `Self` — a substitution token no type resolver knows — so it did not parse
+  and the body was replaced by an error. The substitution is now applied to the
+  stored implementation once, when the conformance is registered, so the
+  annotated member is callable from Epsil source and from raw MathJSON alike.
+  (A host implementation is a JavaScript callback with no signature to carry an
+  annotation, and is unaffected.)
+
+  With the annotation now reaching a contract check, a member's declared
+  effects are held to the same rule as a top-level definition's — declared must
+  cover inferred — and violating it is refused with the same
+  `incompatible-type` error, reading "expected pure effects, got random
+  effects".
+  The check covers `get`/`set` accessors too, so a `pure` setter that stores
+  into its receiver is now refused; as with every other implementation problem,
+  the conformance as a whole is rejected and nothing is registered. A
+  side-effect of the same substitution: an authored accessor's own effects are
+  now visible at all — a setter whose body writes `self.n = v` infers `state`,
+  where it previously inferred nothing because its receiver was typed
+  `unknown`.
+
 - **A compiled user function with a declared `complex` parameter no longer
   returns a corrupt value.** The emitted body read the parameter in the real
   lane while the call site handed it a `{ re, im }` object, so the body's
@@ -45,6 +260,12 @@
   artifact may legitimately receive either a number or a complex object —
   goes through a new idempotent runtime coercion.
 
+  The same applies where the function is referenced as a VALUE rather than
+  called — as `Map`'s callback, for instance. Those consumers hand the callee
+  a raw element, so such a reference now resolves to a small coercing shim; a
+  function with no complex parameter is unaffected and its emitted code is
+  unchanged.
+
   JavaScript only; the `{ re, im }` convention does not exist on the other
   targets, which are unaffected.
 
@@ -59,11 +280,22 @@
   nothing, so annotating it `pure` was accepted while calling it mutated the
   caller's object. All three now report `state`, and a `pure` annotation on any
   of them is refused with `incompatible-type: expected pure effects, got state
-  effects`. Assignment to a plain symbol is unchanged (`scope`), as is a
-  qualified property READ (pure). The label is decided per call site, because
-  `Assign` spells both a binding write and a store and `ProtocolProperty`
-  spells both a read (three operands) and a set (four), and one declared arrow
-  cannot say both.
+  effects`. Nested and indexed receivers count (`o.child.age = 9`, `xs[i].age =
+  9`); assignment to a plain symbol is unchanged (`scope`). A qualified property
+  READ contributes no `state`, but both halves now also report what an AUTHORED
+  accessor body does, so a computed getter whose body draws makes the read
+  `random`. The label is decided per call site, because `Assign` spells both a
+  binding write and a store and `ProtocolProperty` spells both a read (three
+  operands) and a set (four), and one declared arrow cannot say both.
+
+  A set is read as a store from the SHAPE of the call, without asking which
+  conformer's setter was selected — deliberately generous in one direction, and
+  the alternative is unsound: an inference walk runs before conformances
+  register, so a registry-derived answer would report a genuine store pure and
+  let a `pure` annotation stand. The one case it over-labels — the value-type
+  rebinding sugar `d.name = v` on a tuple, which reports `["scope", "state"]`
+  where it mutates nothing — is unreachable now that the B1 mutability gate
+  refuses a value type conforming to a settable property.
 
 - **`Head` and `Tail` are no longer value-blind on a symbol operand.** Both
   are lazy (structural) operators, and their canonical fold treated a symbol
@@ -82,6 +314,46 @@
 ## 0.113.0 _2026-08-16_
 
 ### Breaking Changes
+
+- **A protocol that can modify object state can now only be conformed to by
+  object types (the mutability gate).** A protocol with at least one
+  `readwrite` property, or a function member whose *declared* effects include
+  `state`, is object-only; conforming any other kind of type to it is the new
+  `protocol-requires-object` error:
+
+  ```epsil
+  protocol Identifiable { readwrite id: string }
+  type Badge = record{id: string} is Identifiable
+  // -> protocol-requires-object: the `Identifiable` protocol has settable
+  //    properties. `Badge` is a record, and records are immutable; declare
+  //    `Badge` as an object type to conform.
+  ```
+
+  The reason is that a writable property is only meaningful on something that
+  can be written to. Protocol properties were designed before the language had
+  mutable values, so `p.name = v` on a record or tuple was given the only
+  meaning then available — call the setter, which builds a *new* value, and
+  rebind `p` to it. With `object{…}` types in the language that workaround is
+  superfluous, and keeping it meant one syntax with two meanings selected by
+  the receiver's type.
+
+  **Migration is one line: declare the type as `object{…}` instead.**
+  `type Person = tuple<n: string, age: integer>` becomes
+  `type Person = object{n: string, age: integer}`; its constructor then takes
+  named arguments (`Person(n: "Bob", age: 42)`), and a `set` handler stores
+  into the receiver and returns it (`{ self.n = v   self }`) rather than
+  rebuilding. A protocol with only `readonly` properties and no declared
+  `state` is unaffected, and so is a protocol whose function members carry a
+  *bare* arrow or an explicit `pure` — a bare requirement's effects are derived
+  from its conformers, so it never gates. Settable properties on builtin types
+  (`type string is Tagged` with a `readwrite tag`) are gone permanently: a
+  builtin can never be an object type. This applies on every route — the Epsil
+  `type … is …` statement, the `DeclareConformance` MathJSON form, and
+  `ce.declareProtocolImplementation()` (which throws). Replacing an existing
+  protocol so that it starts to gate is not rejected and does not remove
+  anything — conformance is monotone — but leaves the now-inadmissible
+  conformances pending, which the end-of-batch `protocol-implementation-pending`
+  warning reports.
 
 - **Collection operators no longer promise to return their operand's own
   kind; the static result type is now honest per kind.** `Reverse`,

@@ -41,6 +41,7 @@ import {
   isNumber,
   isSymbol,
   isString,
+  isCharacter,
   isFunction,
   isObject,
   containsContinuationOperand,
@@ -1226,6 +1227,15 @@ function serializeJsonExpression(
 
   // Is it a string?
   if (isString(expr)) return serializeJsonString(expr.string, options);
+
+  // Is it a character? MathJSON has only string literals, so a character
+  // serializes as the CALL form its constructor operator produces — the wire
+  // format that canonicalizes back to the identical character. The payload
+  // goes through the same escaping and shorthand handling a string literal
+  // does, so the operand of the call is a well-formed MathJSON string
+  // whichever `shorthands` the caller asked for.
+  if (isCharacter(expr))
+    return ['CharacterFrom', serializeJsonString(expr.string, options)];
 
   // Is it a symbol?
   if (isSymbol(expr)) {

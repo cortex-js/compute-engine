@@ -13,6 +13,7 @@ import type { MathJsonExpression } from '../math-json/types.js';
 import {
   isFunction,
   isNumber,
+  isString,
   isSymbol,
   sym,
 } from './boxed-expression/type-guards.js';
@@ -275,7 +276,53 @@ export function enumerableFromAllSources(
  * un-evaluated eager collection operand costs nothing here.
  */
 export function isBroadcastableCollection(x: Expression): boolean {
-  return x.isIndexedCollection === true && !isTuple(x);
+  return x.isIndexedCollection === true && !isTuple(x) && !isTextAtom(x);
+}
+
+/**
+ * True when `expr` is TEXT — a `string` value, or an expression whose static
+ * type is `string`.
+ *
+ * A string is an indexed collection of its grapheme clusters, so `string` now
+ * matches `indexed_collection` and a `string`-typed SYMBOL reports
+ * `isIndexedCollection === true`. But a string stays ATOMIC under broadcast
+ * and threading: `f(s) = s < "m"` applied to `"a"` must compare the whole
+ * string, not map over one character (`docs/STRING_ROADMAP.md`, design
+ * constraint 5).
+ *
+ * Matches on the static TYPE as well as the value kind, and — again mirroring
+ * {@link isTuple} — follows a symbol's runtime value binding. Both extra hops
+ * are load-bearing. A `string`-typed symbol or an application returning
+ * `string` is not a `BoxedString` node, so the value-level `isString` guard
+ * alone lets it through. And a lambda parameter left `unknown` by inference
+ * (`w(c) = c == " "`) is not `string`-TYPED either, yet it HOLDS a string at
+ * call time — without the value hop, `w(" ")` broadcast the body over the one
+ * grapheme cluster of `" "` and answered `["True"]` instead of `True`.
+ */
+export function isTextAtom(expr: Expression): boolean {
+  if (isString(expr)) return true;
+  if (expr.type.matches('string')) return true;
+  if (isSymbol(expr)) {
+    const v = expr.value;
+    if (v !== undefined && !isSymbol(v)) return isString(v);
+  }
+  return false;
+}
+
+/**
+ * A broadcast participant of KNOWN-FINITE length: the operands an eager,
+ * element-wise broadcast zips over.
+ *
+ * This is `isFiniteIndexedCollection` narrowed by the same two atomicity
+ * exclusions {@link isBroadcastableCollection} applies — tuples carry
+ * point/vector semantics, and strings are atomic under broadcast (a
+ * scalar-parameter operator applied to a string must receive the WHOLE
+ * string, never one grapheme cluster at a time; `docs/STRING_ROADMAP.md`
+ * design constraint 5). It exists so that rule lives in ONE place instead of
+ * being re-spelled at every eager broadcast site.
+ */
+export function isFiniteBroadcastParticipant(x: Expression): boolean {
+  return isFiniteIndexedCollection(x) && !isTuple(x) && !isTextAtom(x);
 }
 
 /**
@@ -492,6 +539,13 @@ export function typeCouldBeCollection(type: Type): boolean {
       type === 'list' ||
       // An index span is an indexed collection of integers.
       type === 'range' ||
+      // A string is an indexed collection of its grapheme clusters. Admitted
+      // HERE (this is the "do not mistake an unresolved collection-typed
+      // operand for a scalar datum" predicate, and a valueless `string`-typed
+      // symbol is exactly such a case) but deliberately NOT in
+      // `typeCouldBeUnkeyedCollection` below, which is broadcast/threading
+      // admission — strings are broadcast-atomic.
+      type === 'string' ||
       type === 'set' ||
       type === 'tuple' ||
       type === 'dictionary' ||
@@ -589,6 +643,14 @@ export function typeCouldBeUnkeyedCollection(type: Type): boolean {
  * resolution used for result typing admit different arms.
  */
 export function couldBeUnkeyedCollectionOperand(op: Expression): boolean {
+  // A STRING never qualifies. This is threadable/broadcast admission, and
+  // strings are broadcast-atomic: admitting one here would let a string
+  // literal through EVERY scalar position of a threadable operator on the
+  // strength of "it could be broadcast", which is exactly what must not
+  // happen — `f(c: character)` has to refuse `"ab"`. The type half
+  // (`typeCouldBeUnkeyedCollection`) already excludes `string` for the same
+  // reason; this is the value half of the same rule.
+  if (isTextAtom(op)) return false;
   return (
     isFiniteIndexedCollection(op) || typeCouldBeUnkeyedCollection(op.type.type)
   );
@@ -1108,7 +1170,7 @@ export function broadcastOverIndexedCollections(
   strictLengths = true
 ): Expression | undefined {
   const isBroadcast = (x: Expression): boolean =>
-    isFiniteIndexedCollection(x) && !isTuple(x);
+    isFiniteBroadcastParticipant(x);
 
   const cols = xs.filter(isBroadcast);
   if (cols.length === 0) return undefined;
@@ -1585,6 +1647,19 @@ export function repeat(
 }
 
 /**
+ * Does `x` supply CELLS to a zip, or is it lifted whole into every cell?
+ *
+ * A collection supplies cells; anything else is repeated. A STRING is the
+ * exception: it is an indexed collection of its characters, yet it stays
+ * ATOMIC under broadcast, so `String("x=", [1, 2])` must lift `"x="` into both
+ * cells rather than pair `"x"` with `1` and `"="` with `2`. Same rule as
+ * `isBroadcastableCollection`, applied at the zip.
+ */
+function zipParticipates(x: Expression): boolean {
+  return x.isCollection && !isTextAtom(x);
+}
+
+/**
  * Zips together multiple collections into a single iterator.
  *
  * Example:
@@ -1608,7 +1683,8 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
 
   if (items.length === 1) {
     const item = items[0];
-    const iter = item.each();
+    // A STRING is atomic under broadcast — see `zipParticipates` above.
+    const iter = zipParticipates(item) ? item.each() : undefined;
     if (!iter) {
       // Return the value, then be done
       let done = false;
@@ -1631,7 +1707,7 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
 
   // Get the length of the shortest collection
   const shortest = Math.min(
-    ...items.map((x) => (x.isCollection ? (x.count ?? 1) : Infinity))
+    ...items.map((x) => (zipParticipates(x) ? (x.count ?? 1) : Infinity))
   );
 
   // If the shortest collection is empty, return an empty iterator
@@ -1645,7 +1721,9 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
 
   // Get iterators for each item
   // If an item is not a collection, repeat it
-  const iterators = items.map((x) => (x.isCollection ? x.each() : repeat(x)));
+  const iterators = items.map((x) =>
+    zipParticipates(x) ? x.each() : repeat(x)
+  );
   let count = 0;
 
   // Return an iterator that zips the items

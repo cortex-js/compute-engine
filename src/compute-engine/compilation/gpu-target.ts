@@ -29,6 +29,8 @@ import type {
 } from './types.js';
 import {
   BaseCompiler,
+  isProvablyCharacterOperand,
+  isProvablyStringOperand,
   pointHasBroadcastComponent,
   statementBodyHead,
 } from './base-compiler.js';
@@ -3319,8 +3321,12 @@ function compileGPUAt(
   }
 
   // A collection-typed index that is NOT a literal list: there is no tier for
-  // it (its entries are not readable at compile time).
-  if (isSubtype(it, 'collection')) {
+  // it (its entries are not readable at compile time). A STRING is excluded:
+  // it matches `collection` in the lattice (its elements are its grapheme
+  // clusters) but this target has no strings at all, so the honest diagnostic
+  // is the "provably not a number" one below, which names the type — the
+  // diagnostic a string index has always received.
+  if (isSubtype(it, 'collection') && !isSubtype(it, 'string')) {
     const k = BaseCompiler.aggregateComponentCount(index);
     // A NEGATIVE count is the type builder's encoding of an UNKNOWN extent
     // (`list<number^?>` → `dimensions: [-1]`), not a width — the same reading
@@ -5637,6 +5643,61 @@ function gpuRandomDraw(target: CompileTarget<Expression>): string {
     `_gpu_rnd_draw(uvec2(floatBitsToUint(gl_FragCoord.x), ` +
     `floatBitsToUint(gl_FragCoord.y)), ${state.spatialCounter})`
   );
+}
+
+/**
+ * The names of the SYMBOLS in `expr` whose own static type is text — a
+ * `string` or a `character`.
+ *
+ * Walks symbol NODES only, so a string LITERAL is never collected — a
+ * `Declare(x, "number")` type annotation carries its type as a string operand
+ * and is not a text VALUE. See the call site in `createTargetFor` for what the
+ * set is used for.
+ *
+ * The walk follows the BODY of every user-defined function the expression
+ * references, by name in operator position (`g(u)`) or as a value (`Map(g, …)`).
+ * Those bodies are compiled against the compilation ROOT's target
+ * (`userFunctions.root`), so their free symbols pass through the same
+ * `mangleId` gate this set feeds — but they are not reachable from `expr`
+ * itself, and a `string`-typed global referenced only inside such a body used
+ * to be emitted as a bare identifier in the definition: `g(x) := If(sv < tv, x,
+ * 0)` produced `float _fn_g(float x) { return ((sv < tv) ? (x) : (0.0)); }`,
+ * comparing two floats where the interpreter compares text. Each name is
+ * expanded at most once, so a self- or mutually recursive definition cannot
+ * loop here (the GPU targets refuse recursion anyway). A MULTI-CLAUSE function
+ * has no single literal and needs no walk: its emission is JavaScript-only, so
+ * a shader compilation already fails closed on it.
+ */
+function gpuTextSymbols(expr: Expression | undefined): ReadonlySet<string> {
+  const out = new Set<string>();
+  const expanded = new Set<string>();
+  const walkUserFunctionBody = (e: Expression, name: string): void => {
+    if (expanded.has(name)) return;
+    expanded.add(name);
+    const engine = e.engine;
+    if (engine === undefined) return;
+    const literal = BaseCompiler.userFunctionLiteral(engine, name);
+    // `['Function', body, ...params]`: only the body can name a free symbol.
+    // A text-typed PARAMETER needs no collecting here — the emitted signature
+    // must be fully typed, and `gpuTypeOfDeclaredType` has no shader type for
+    // text, so such a parameter fails closed in `lowering.define`.
+    if (literal !== undefined && literal.ops.length > 0) walk(literal.ops[0]);
+  };
+  const walk = (e: Expression): void => {
+    if (isSymbol(e)) {
+      if (isProvablyStringOperand(e) || isProvablyCharacterOperand(e))
+        out.add(e.symbol);
+      else walkUserFunctionBody(e, e.symbol);
+      return;
+    }
+    if (isFunction(e)) {
+      if (typeof e.operator === 'string' && e.operator !== '')
+        walkUserFunctionBody(e, e.operator);
+      for (const op of e.ops) walk(op);
+    }
+  };
+  if (expr !== undefined) walk(expr);
+  return out;
 }
 
 /** The message for a random form that would need general collection indexing. */
@@ -8259,7 +8320,25 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // genuinely free symbol.
         return undefined;
       },
-      string: (str) => JSON.stringify(str),
+      // TEXT has no shader representation, so a string literal in ANY
+      // position fails closed (D6) rather than emitting one.
+      //
+      // GLSL and WGSL have no string type, no character type and no text
+      // storage class: there is nothing a quoted literal could be. This hook
+      // used to emit `JSON.stringify(str)`, so `List("a", "b")` came out as
+      // `vec2("a", "b")` and `Equal("a", "b")` as `"a" == "b"` — source no
+      // driver accepts, behind a reported `success: true`. Declining here
+      // covers every position at once, because this is the ONE hook the base
+      // compiler emits a string value through.
+      string: (str) => {
+        throw new Error(
+          `A string literal (${JSON.stringify(str)}) is not supported on the ` +
+            `${this.languageId} target: the shader languages have no text ` +
+            `type — no string, no character, no grapheme-cluster indexing — ` +
+            `so there is no value a quoted literal could lower to. ` +
+            `Fail closed (D6).`
+        );
+      },
       // Bound to the language so a NON-FINITE literal (`NaN`, `±∞`,
       // `ComplexInfinity`) reaches the right `gpuNonFiniteLiteral` spelling
       // rather than the GLSL default.
@@ -8336,6 +8415,42 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     options: Partial<CompileTarget<Expression>> = {}
   ): CompileTarget<Expression> {
     const target = this.createTarget(options);
+    // A TEXT-TYPED SYMBOL is the same target limitation as the string literal
+    // the `string` hook refuses, one step later: a `string`- or
+    // `character`-typed free symbol emits a bare identifier, which the caller
+    // then declares as a `float` uniform — `Less(sv, tv)` over two
+    // `string`-typed symbols came out as `sv < tv`, comparing two numbers
+    // where the interpreter compares text, behind a reported `success: true`.
+    //
+    // Consulted from `mangleId`, which is the one hook EVERY free-symbol
+    // emission passes through (`BaseCompiler.compileExpr`) and which no
+    // caller of `createTargetFor` overrides. The offending names are collected
+    // once per compiled root by walking SYMBOL nodes only — never a string
+    // LITERAL, so a type annotation carried as a string operand
+    // (`Declare(x, "number")`) is not mistaken for a text value.
+    //
+    // The gate is NAME-KEYED, not occurrence-keyed: `mangleId` receives only an
+    // identifier, so once a name is used text-typed ANYWHERE in the compiled
+    // root (including inside a user-function body the walk follows) every
+    // occurrence of that name is refused — a loop index that happens to share
+    // its name with a `string`-typed symbol is refused too. That is a
+    // deliberate over-refusal in the fail-closed direction (D6): the compiler
+    // declines and the interpreter answers, which is never a wrong value.
+    const textSymbols = gpuTextSymbols(expr);
+    if (textSymbols.size > 0) {
+      const inner = target.mangleId;
+      target.mangleId = (id) => {
+        if (textSymbols.has(id))
+          throw new Error(
+            `The symbol \`${id}\` is text-typed, which is not supported on ` +
+              `the ${this.languageId} target: the shader languages have no ` +
+              `text type — no string, no character, no grapheme-cluster ` +
+              `indexing — so it would be emitted as a bare identifier and ` +
+              `declared as a numeric uniform. Fail closed (D6).`
+          );
+        return inner ? inner(id) : id;
+      };
+    }
     const state = gpuRandomState(target);
     state.stage = stage;
     state.hostFrame = expr?.engine?._randomFrame !== undefined;

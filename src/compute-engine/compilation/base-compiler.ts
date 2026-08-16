@@ -33,12 +33,16 @@ import { parseType } from '../../common/type/parse.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import type { Type, TypeReference } from '../../common/type/types.js';
 import { declarationOf } from '../../common/type/reference.js';
-import { isRelationalOperator } from '../latex-syntax/utils.js';
+import {
+  isInequalityOperator,
+  isRelationalOperator,
+} from '../latex-syntax/utils.js';
 import { normalizeIndexingSet } from '../library/utils.js';
 import {
   isSymbol,
   isNumber,
   isString,
+  isCharacter,
   isFunction,
   isDictionary,
 } from '../boxed-expression/type-guards.js';
@@ -309,6 +313,29 @@ export function isProvablyStringOperand(x: Expression): boolean {
   if (isString(x)) return true;
   const t = resolveTypeForCompilation(x.type.type);
   return t !== 'never' && isSubtype(t, 'string');
+}
+
+/**
+ * True when `x` is PROVABLY a CHARACTER: a character value, or an operand whose
+ * (alias-resolved) static type is a subtype of `character`.
+ *
+ * `character` and `string` are DISJOINT siblings in the type lattice (neither is
+ * a subtype of the other), so `isProvablyStringOperand` never answers true for a
+ * character and every character-specific lowering has to ask this question
+ * separately. Same `isSubtype`-not-`.matches` discipline as the string
+ * predicate: only positive evidence gates, so an `unknown`-typed operand is
+ * never treated as a character.
+ *
+ * A character lowers to a ONE-CLUSTER target string, so it compares by value
+ * with `===` — but NOT with `<`, which on JavaScript strings compares UTF-16
+ * code units while the interpreter orders characters by their NFC code-point
+ * sequence (`compare.ts`).
+ * (`docs/plans/2026-08-16-string-phase1-character-type.md`, decisions D8/D13.)
+ */
+export function isProvablyCharacterOperand(x: Expression): boolean {
+  if (isCharacter(x)) return true;
+  const t = resolveTypeForCompilation(x.type.type);
+  return t !== 'never' && isSubtype(t, 'character');
 }
 
 /**
@@ -660,6 +687,12 @@ export function couldBeCollectionParticipant(x: Expression): boolean {
     const r = resolveTypeForCompilation(t);
     if (r === 'unknown' || r === 'any' || r === 'value' || r === 'never')
       return false;
+    // A STRING is a subtype of `collection` (its elements are its grapheme
+    // clusters) but is ATOMIC at run time: it lowers to a JS string, and both
+    // the interpreter and the emitted scalar comparison treat it as one value.
+    // Answering `true` here would make every string participant look like a
+    // possibly-element-wise operand and close the scalar `===` admission.
+    if (r === 'string') return false;
     if (typeof r !== 'string' && r.kind === 'union')
       return r.types.some((m) => walk(m, visited));
     return isSubtype(r, 'collection');
@@ -2231,7 +2264,7 @@ export class BaseCompiler {
     // declines, like every other unresolvable answer here.
     if (++c.visits > CONSTANT_FOLD_MAX_VISITS) return Infinity;
     if (depth > CONSTANT_FOLD_MAX_DEPTH) return Infinity;
-    if (isNumber(expr) || isString(expr)) return 1;
+    if (isNumber(expr) || isString(expr) || isCharacter(expr)) return 1;
     if (isSymbol(expr)) return 1;
     if (isDictionary(expr)) {
       let total = 1;
@@ -2712,7 +2745,10 @@ export class BaseCompiler {
         target.boundVars?.has(s) === true ||
         target.varsKeys?.has(s) === true;
       if (registry && !isBoundOrMapped && !registry.misses?.has(s)) {
-        const userFn = BaseCompiler.ensureUserFunctionEmitted(
+        // The VALUE position, so a declared-complex parameter needs the
+        // coercing shim: this reference may end up as `Map`'s callback, which
+        // passes raw elements (see `ensureUserFunctionValueRef`).
+        const userFn = BaseCompiler.ensureUserFunctionValueRef(
           expr.engine,
           s,
           target
@@ -2801,6 +2837,28 @@ export class BaseCompiler {
     // Is it a string?
     if (isString(expr)) {
       return target.string(expr.string);
+    }
+
+    // Is it a CHARACTER? A character is exactly one grapheme cluster, and on a
+    // target that can represent one the faithful lowering is the one-character
+    // string it denotes — the distinction between the two kinds is compile-time
+    // only. Gated on the target's own `character` capability rather than on
+    // `string`, because holding the cluster is only half of it: ordering two
+    // characters, segmenting a string into them and counting them all need
+    // grapheme-cluster awareness. Python has string literals but no stdlib
+    // grapheme segmentation, and GLSL/WGSL have no text at all, so both decline
+    // here instead of emitting a target string that would then be compared with
+    // the wrong order or indexed by the wrong unit.
+    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    if (isCharacter(expr)) {
+      if (target.character === undefined)
+        throw new Error(
+          `Cannot compile a character to target '${target.language ?? '?'}': ` +
+            `it has no character representation (a character is one UAX #29 ` +
+            `grapheme cluster, which this target cannot segment or order). ` +
+            `Fail closed (D6) — the interpreter evaluates it.`
+        );
+      return target.character(expr.string);
     }
 
     // It must be a function expression...
@@ -3043,10 +3101,19 @@ export class BaseCompiler {
         isBroadcastableHead &&
         args.some(
           (a) =>
-            a.isCollection ||
-            a.type.matches('list') ||
-            a.type.matches('indexed_collection') ||
-            isBoundPossiblyCollectionTyped(a)
+            // A STRING is not a list-valued operand FOR THIS PURPOSE. It
+            // matches `collection`/`indexed_collection` in the lattice (its
+            // elements are its grapheme clusters) but is ATOMIC under
+            // broadcast on both sides — the interpreter's
+            // `isFiniteBroadcastParticipant` excludes it, and it lowers to one
+            // JS string, not an array — so a broadcastable head over it is
+            // ordinary scalar code. Same exemption as the sibling gates
+            // (`compilesToArray`, `isArrayOperand`) carry.
+            !isProvablyStringOperand(a) &&
+            (a.isCollection ||
+              a.type.matches('list') ||
+              a.type.matches('indexed_collection') ||
+              isBoundPossiblyCollectionTyped(a))
         )
       ) {
         const opMap = target.operators?.(h);
@@ -3228,14 +3295,20 @@ export class BaseCompiler {
           // JAVASCRIPT ONLY, so that other targets keep their existing
           // lowering unchanged: this diverts to a JS-specific handler, and the
           // hazard being avoided is a JS coercion rule.
+          // A STRING operand is exempt from this divert: it matches
+          // `collection` in the lattice (its elements are its grapheme
+          // clusters) but lowers to a JS string, which the infix `<`/`===`
+          // compares exactly as the interpreter does — the coercion hazard
+          // this divert guards against does not arise.
           const relationalOverCollection =
             target.language === 'javascript' &&
             (isRelationalOperator(h) ||
               BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h)) &&
             args.some(
               (x) =>
-                x.type.matches('collection') ||
-                isBoundPossiblyCollectionTyped(x)
+                !isProvablyStringOperand(x) &&
+                (x.type.matches('collection') ||
+                  isBoundPossiblyCollectionTyped(x))
             );
           // An ORDERING that MIXES a string operand with one that is not
           // provably a string. The raw infix `<` agrees with the interpreter
@@ -3260,10 +3333,28 @@ export class BaseCompiler {
           // even though the operand's own type is not a subtype of `string`
           // (`Less(1, L)` compiled to `[false, false]` where the interpreter
           // leaves both comparisons inert).
+          //
+          // A BINARY ALL-STRING ordering diverts as well, even though it is
+          // ADMITTED: the JavaScript ordering codegen emits the same infix
+          // comparison, but with each operand first put through the ingress
+          // conditioning the interpreter applies when it boxes a string (NFC
+          // normalization, then the lone-surrogate replacement — `_SYS.ct`).
+          // The interpreter compares content that was conditioned at boxing
+          // time, so a raw infix comparison of a decomposed `"e" + U+0301`
+          // bound to a string parameter against a precomposed `"é"` literal
+          // disagrees with it. Maintainer ruling, 2026-08-16. A CHAINED
+          // all-string ordering deliberately stays on the infix path here: the
+          // chain lowering below binds temporaries so each operand is
+          // evaluated exactly once and the comparisons short-circuit, and the
+          // binary arm in `compileJSCollectionBoolean` reproduces neither — so
+          // a chain keeps comparing un-conditioned operands.
           const orderingOverString =
             target.language === 'javascript' &&
             isRelationalOperator(h) &&
-            isMixedStringOrderingParticipants(args);
+            (isMixedStringOrderingParticipants(args) ||
+              (isInequalityOperator(h) &&
+                args.length === 2 &&
+                args.every(isProvablyStringOperand)));
           // PYTHON, the same two divert rules as the ordering gates on that
           // target (`assertPyNoMixedStringOrdering` /
           // `assertPyComparableAggregate`, python-target.ts): an ordering whose
@@ -3295,15 +3386,36 @@ export class BaseCompiler {
             (args.some((x) => unfaithfulComparisonAggregate(x) !== null) ||
               args.some(
                 (x) =>
-                  x.type.matches('collection') ||
-                  isBoundPossiblyCollectionTyped(x)
+                  // A string operand is exempt — see the JavaScript divert
+                  // above. Python's `<` on `str` is the interpreter's own
+                  // string comparison.
+                  !isProvablyStringOperand(x) &&
+                  (x.type.matches('collection') ||
+                    isBoundPossiblyCollectionTyped(x))
               ) ||
               isMixedStringOrderingParticipants(args));
-          // Compile as an operator (only for non-collection arguments)
+          // An ORDERING with a CHARACTER participant, on EVERY target. The
+          // interpreter orders two characters by their NFC CODE-POINT sequence
+          // (`compare.ts`), whereas `String.prototype.<` compares UTF-16 code
+          // UNITS — which places every astral character (U+10000 and above,
+          // encoded as a surrogate pair starting at 0xD800) BELOW U+E000–U+FFFF.
+          // Probed: `Less(CharacterFrom("\u{10000}"), CharacterFrom(""))`
+          // is `False` in the interpreter and `true` under the raw infix `<`, a
+          // wrong answer behind `success: true`. Declining here lets the head
+          // fall through to the target's own ordering codegen, which emits a
+          // code-point comparator on JavaScript and fails closed elsewhere.
+          // (`docs/plans/2026-08-16-string-phase1-character-type.md`, D8/D13.)
+          const orderingOverCharacter =
+            isRelationalOperator(h) && args.some(isProvablyCharacterOperand);
+          // Compile as an operator (only for non-collection arguments). A
+          // STRING operand is not a collection FOR THIS PURPOSE: it matches
+          // `collection` in the lattice but lowers to a target string, which
+          // the infix operators compare exactly as the interpreter does.
           if (
-            args.every((x) => !x.isCollection) &&
+            args.every((x) => !x.isCollection || isProvablyStringOperand(x)) &&
             !relationalOverCollection &&
             !orderingOverString &&
+            !orderingOverCharacter &&
             !pyOrderingUnfaithful
           ) {
             if (isRelationalOperator(h) && args.length > 2) {
@@ -3932,7 +4044,15 @@ export class BaseCompiler {
       target.absence !== undefined &&
       args.length === 2 &&
       args.some(isObjectDomainMissing) &&
-      args.every((a) => !a.isCollection && !a.type.matches('collection'))
+      // A STRING participant is not a collection FOR THIS PURPOSE: it matches
+      // `collection` in the lattice (its elements are its grapheme clusters)
+      // but compares as ONE value on both the interpreter and the compiled
+      // side, which is exactly the shape this scalar Kleene guard handles.
+      args.every(
+        (a) =>
+          isProvablyStringOperand(a) ||
+          (!a.isCollection && !a.type.matches('collection'))
+      )
     ) {
       if (target.absence.object === undefined)
         throw new Error(
@@ -4504,6 +4624,13 @@ export class BaseCompiler {
         // by the symbol branch, and a concrete tuple by the `isCollection`
         // branch. Reordering these reintroduces the bug.
         if (isTuple(a)) return false;
+        // A STRING is an indexed collection of its grapheme clusters in the
+        // type lattice, but it does NOT lower to a JS array and is atomic
+        // under broadcast — it must reach the scalar path, exactly as before
+        // strings became collections. Same placement rule as `isTuple` above:
+        // ahead of the `isCollection` and symbol branches, both of which a
+        // string now matches.
+        if (isProvablyStringOperand(a)) return false;
         if (a.isCollection) return true;
         if (isSymbol(a))
           return a.type.matches('list') || a.type.matches('indexed_collection');
@@ -4529,6 +4656,7 @@ export class BaseCompiler {
         args.some(
           (a) =>
             !compilesToArray(a) &&
+            !isProvablyStringOperand(a) &&
             (a.type.matches('collection') || isBoundPossiblyCollectionTyped(a))
         )
       )
@@ -4672,11 +4800,14 @@ export class BaseCompiler {
     // `compile-fallback.test.ts`).
     if (h === 'Multiply') {
       const isArrayish = (a: Expression): boolean =>
-        isTensorValue(a) ||
-        isNumericTuple(a) ||
-        a.type.matches('list') ||
-        a.type.matches('indexed_collection') ||
-        isBoundPossiblyCollectionTyped(a);
+        // A string matches `indexed_collection` but is not array-shaped — see
+        // `compilesToArray` above.
+        !isProvablyStringOperand(a) &&
+        (isTensorValue(a) ||
+          isNumericTuple(a) ||
+          a.type.matches('list') ||
+          a.type.matches('indexed_collection') ||
+          isBoundPossiblyCollectionTyped(a));
       const collection = args.filter(isArrayish);
       if (collection.length >= 2) {
         // A possibly-collection operand (a declared `broadcastable<T>` OR a
@@ -4729,10 +4860,13 @@ export class BaseCompiler {
     // both scalar OR array at run time, which `_SYS.bcast` handles either way.
     // If none is, this is ordinary scalar code — leave it be.
     const isArrayOperand = (a: Expression): boolean =>
-      a.isCollection ||
-      a.type.matches('list') ||
-      a.type.matches('indexed_collection') ||
-      isBoundPossiblyCollectionTyped(a);
+      // A string matches `indexed_collection` but is not array-shaped — see
+      // `compilesToArray` above.
+      !isProvablyStringOperand(a) &&
+      (a.isCollection ||
+        a.type.matches('list') ||
+        a.type.matches('indexed_collection') ||
+        isBoundPossiblyCollectionTyped(a));
     if (!args.some(isArrayOperand)) return null;
 
     // What the closure's element parameter for each operand holds at run time:
@@ -6489,9 +6623,29 @@ export class BaseCompiler {
       const elem = narrowedElements[i];
       const name = (elem.ops[0] as Expression & { symbol: string }).symbol;
       const collExpr = elem.ops[1];
-      const collection = isFunction(collExpr, 'Range')
-        ? BaseCompiler.compileRangeIterable(collExpr, bodyTarget)
-        : BaseCompiler.compile(collExpr, bodyTarget);
+      let collection: string;
+      if (isFunction(collExpr, 'Range'))
+        collection = BaseCompiler.compileRangeIterable(collExpr, bodyTarget);
+      else if (isProvablyStringOperand(collExpr)) {
+        // A STRING source iterates its GRAPHEME CLUSTERS — the elements the
+        // interpreter's `BoxedString.each()` yields. The bare `for (const c of
+        // "abc")` a target string would give iterates CODE POINTS instead, so a
+        // ZWJ emoji family or a combining sequence would be torn into several
+        // loop iterations where the interpreter runs one. `_SYS.chars` is the
+        // interpreter's own segmenter, so segment first and iterate the array.
+        // Only JavaScript has that helper; every other target declines rather
+        // than emit the code-point loop.
+        // (`docs/plans/2026-08-16-string-phase1-character-type.md`, D13.)
+        if (target.language !== 'javascript')
+          throw new Error(
+            `Cannot iterate a string on target '${target.language ?? '?'}': ` +
+              `its elements are UAX #29 grapheme clusters and this target has ` +
+              `no grapheme segmentation, so the emitted loop would run over ` +
+              `code points instead. Fail closed (D6) — the interpreter ` +
+              `evaluates it.`
+          );
+        collection = `_SYS.chars(${BaseCompiler.compile(collExpr, bodyTarget)})`;
+      } else collection = BaseCompiler.compile(collExpr, bodyTarget);
       inner = `for (const ${name} of ${collection}) { ${inner} }`;
     }
 
@@ -9511,6 +9665,40 @@ export class BaseCompiler {
   }
 
   /**
+   * Enter every parameter of `h` whose DECLARED type is a non-real number into
+   * the body's complex shape frame, on top of whatever call-site lanes already
+   * put there ({@link laneFrames}).
+   *
+   * A declared-complex parameter is a property of the FUNCTION, not of any one
+   * call, so it needs no `$z`-suffixed specialization: the base emission is the
+   * complex-lane one and every call site coerces its argument to match. Silent
+   * on a generic or multi-clause signature, where `userFunctionParamType`
+   * declines — those keep the previous emission exactly.
+   */
+  private static addDeclaredComplexParams(
+    h: string,
+    literal: Expression & FunctionInterface,
+    target: CompileTarget<Expression>,
+    frames: { complex: Map<string, boolean>; vector: Map<string, number> }
+  ): void {
+    // The `{ re, im }` representation is a JavaScript convention, and BOTH
+    // call-site coercions bail on any other language — so the body-side lane
+    // must too, or a target that never wraps its arguments (interval-javascript
+    // reaches this same arrow emission) would compile the body against an
+    // object it is never handed.
+    if (target.language !== 'javascript') return;
+    const engine = literal.engine as unknown as ComputeEngine;
+    literal.ops.slice(1).forEach((p, i) => {
+      const name = functionLiteralParameterName(p);
+      if (!name) return;
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      if (pt === undefined || !isNonRealNumber(pt)) return;
+      frames.complex.set(name, true);
+      frames.vector.set(name, BaseCompiler.LOCAL_SCALAR);
+    });
+  }
+
+  /**
    * If head `h` names a user-defined function (see `userFunctionLiteral`),
    * ensure its definition is emitted once into `target.userFunctions.defs` as a
    * named local function and return the call-site source `_fn_h(arg, …)`.
@@ -9582,12 +9770,15 @@ export class BaseCompiler {
     // would NaN-poison the whole call. The coercion is PER PARAMETER: on the
     // broadcast path below it is applied inside the scalar closure, to the
     // element, not to the whole argument.
-    const coerceToComplex = args.map((a, i) => {
-      if (
-        target.language !== 'javascript' ||
-        !BaseCompiler.isProvablyRealValued(a)
-      )
-        return false;
+    // Gated on the PARAMETER's declared type alone, never on the argument's:
+    // the callee's body is compiled in the complex lane for a declared-complex
+    // parameter whatever the call site passes, so every call owes it a
+    // `{ re, im }`. Restricting this to a provably-REAL argument left the
+    // other arguments unwrapped against a complex-lane body — the
+    // `'[object Object]0'` class. `emitUserFunctionCall` picks the static wrap
+    // or the runtime `_SYS.cplx` per argument from its realness.
+    const coerceToComplex = args.map((_a, i) => {
+      if (target.language !== 'javascript') return false;
       const pt = BaseCompiler.userFunctionParamType(engine, h, i);
       if (pt !== undefined) return isNonRealNumber(pt);
       // A multi-clause function has an INTERSECTION signature, from which
@@ -9713,12 +9904,10 @@ export class BaseCompiler {
       typeof signature === 'object' && signature.kind === 'signature'
         ? signature.args
         : undefined;
-    const coerceToComplex = args.map((a, i) => {
-      if (
-        target.language !== 'javascript' ||
-        !BaseCompiler.isProvablyRealValued(a)
-      )
-        return false;
+    // Parameter-typed, not argument-typed — see the sibling computation in
+    // `ensureUserFunctionEmitted` for why.
+    const coerceToComplex = args.map((_a, i) => {
+      if (target.language !== 'javascript') return false;
       const pt = paramTypes?.[i]?.type;
       return pt !== undefined && isNonRealNumber(pt);
     });
@@ -9756,7 +9945,36 @@ export class BaseCompiler {
     const compiledArgs = args.map((a) =>
       BaseCompiler.compileValueOperand(a, target)
     );
-    const complexWrap = (code: string): string => `({ re: ${code}, im: 0 })`;
+    // Deliver a `{ re, im }` to a declared-complex parameter, in whichever of
+    // three forms the argument's static shape already settles:
+    //
+    //  - provably COMPLEX: the emitted code is already an object, so it is
+    //    passed through untouched — no wrap, no runtime test;
+    //  - provably REAL: wrapped statically, the shape being known;
+    //  - neither (an untyped free symbol bound at `run()` time — the common
+    //    case): the caller may hand over a plain number OR an already-complex
+    //    object and only a runtime test can tell, so `_SYS.cplx` decides. It
+    //    is idempotent, so an object passes through instead of nesting.
+    const complexWrap = (code: string, arg: Expression | undefined): string => {
+      // Only a complex NUMBER LITERAL is skipped, and only because this
+      // compiler emits it as the `{ re, im }` object itself, so the wrap would
+      // be pure redundancy. Neither looser test works: `isComplexValued`
+      // answers "could be complex" and is true for an untyped symbol, and the
+      // TYPE is no better — `Q(w)` INFERS `w: complex` from the declared
+      // parameter, yet `run({ w: 2 })` may still supply a plain number, since
+      // a real is a complex. Both dropped the wrap from the very case that
+      // needs it.
+      if (
+        arg !== undefined &&
+        isNumber(arg) &&
+        arg.isNumberLiteral === true &&
+        isNonRealNumber(arg.type.type)
+      )
+        return code;
+      if (arg !== undefined && BaseCompiler.isProvablyRealValued(arg))
+        return `({ re: ${code}, im: 0 })`;
+      return `_SYS.cplx(${code})`;
+    };
 
     // The interpreter BROADCASTS a user function over a collection argument
     // (`applyFunctionLiteral` / the step-2b lambda broadcast): `q(L)` with
@@ -9810,8 +10028,13 @@ export class BaseCompiler {
       // entire call onto the direct scalar path, so a sibling collection
       // argument never broadcast.
       const params = args.map(() => BaseCompiler.tempVar(target));
+      // Inside the broadcast closure the wrap applies to the ELEMENT the
+      // broadcast selected, but the ARGUMENT's realness still settles it: a
+      // provably real-valued operand — a scalar like `0`, or a collection of
+      // reals — yields only real elements, so the static wrap holds and no
+      // runtime test is emitted. Anything else takes `_SYS.cplx`.
       const callParams = params.map((p, i) =>
-        coerceToComplex[i] ? complexWrap(p) : p
+        coerceToComplex[i] ? complexWrap(p, args[i]) : p
       );
       return `_SYS.bcastFn((${params.join(', ')}) => ${name}(${callParams.join(
         ', '
@@ -9819,7 +10042,9 @@ export class BaseCompiler {
     }
 
     return `${name}(${compiledArgs
-      .map((code, i) => (coerceToComplex[i] ? complexWrap(code) : code))
+      .map((code, i) =>
+        coerceToComplex[i] ? complexWrap(code, args[i]) : code
+      )
       .join(', ')})`;
   }
 
@@ -10173,6 +10398,128 @@ export class BaseCompiler {
   }
 
   /**
+   * Would this fold's ACCUMULATOR have to widen to complex part-way through,
+   * while its seed is real? That is the shape the combiner lowering compiles
+   * silently wrong, and the interim fail-closed gate (ruled 2026-08-16) keys
+   * on it.
+   *
+   * Two lanes flow through a combiner: the ELEMENT lane and the ACCUMULATOR
+   * lane. Only the first is reasoned about. When the seed is real and the
+   * body's result is complex, the emitted `reduce` seeds a number and then
+   * adds `{re, im}` objects to it, so the accumulator is a number on the first
+   * step and an object afterwards — `Reduce(L, (a,x) ↦ a + 2x, 0)` over
+   * `[1+2i, i]` answered `{re: "[object Object]0", im: 2}` behind
+   * `success: true`, where the interpreter gives `2+6i`.
+   *
+   * The test is the BODY's complexness under the fold's own lanes, never the
+   * element type alone: `Reduce(L, (a,x) ↦ a + |x|, 0)` over the same complex
+   * `L` is CORRECT and must keep compiling, because `|x|` is real and the
+   * accumulator never widens. So the body is analyzed with the element
+   * parameter bound complex and the accumulator parameter left real — exactly
+   * the lanes the emitted fold would run — and only a complex RESULT declines.
+   *
+   * Scope is deliberately the INLINE lambda, matching the ruling. A bare
+   * function SYMBOL combiner reaches the same defect (measured: it compiles
+   * and answers NaN behind `success: true`, contrary to the premise the ruling
+   * was given), but widening how much compilation is refused is a product call
+   * — see the ROADMAP entry. Extending this to that shape is a matter of
+   * accepting a non-literal `op` here.
+   */
+  static reduceAccumulatorWidens(
+    coll: Expression,
+    op: Expression,
+    init: Expression | undefined | null
+  ): boolean {
+    // A seedless fold takes its first ELEMENT as the seed, so the accumulator
+    // starts in the element's own lane and never widens mid-fold.
+    if (init === undefined || init === null) return false;
+    if (!BaseCompiler.isProvablyRealValued(init)) return false;
+
+    const elt = BaseCompiler.collectionElementTypeOf(coll);
+    if (elt === undefined || !isNonRealNumber(elt)) return false;
+
+    if (!isFunction(op, 'Function') || op.nops !== 3) return false;
+    const body = op.op1;
+    const accName = functionLiteralParameterName(op.ops[1]);
+    const eltName = functionLiteralParameterName(op.ops[2]);
+    if (!accName || !eltName) return false;
+
+    // The element parameter is complex, the accumulator is not — the state the
+    // emitted fold is actually in on its first step.
+    const complex = new Map<string, boolean>([[eltName, true]]);
+    const vector = new Map<string, number>([
+      [eltName, BaseCompiler.LOCAL_SCALAR],
+      [accName, BaseCompiler.LOCAL_SCALAR],
+    ]);
+    return BaseCompiler.withLocalShapeFrame(
+      complex,
+      vector,
+      () => BaseCompiler.isComplexValued(body),
+      true
+    );
+  }
+
+  /**
+   * The name to use where a user function is referenced as a VALUE rather than
+   * called — `Map(Q, xs)`, `CountIf`, `Find`, `_SYS.bcastFn`.
+   *
+   * The consumers of a function value hand the callee a RAW element: the
+   * argument coercion lives in `emitUserFunctionCall`, which only the call
+   * route reaches. So a function with a declared-complex parameter, whose body
+   * `addDeclaredComplexParams` puts in the complex lane, cannot be passed by
+   * name — `Map(Q, [1, 2, 3])` fed plain numbers to a body reading `.re`/`.im`
+   * and answered `[{re: null, im: null}, …]` behind `success: true`, where the
+   * previous real-lane emission computed correctly.
+   *
+   * The fix is a coercing shim under its OWN name, so the two routes do not
+   * share a cache entry: `const _fn_Q$v = (x) => _fn_Q(_SYS.cplx(x));`. The
+   * runtime helper is used rather than a static wrap because an element's
+   * realness is a property of the source, not of the reference, and the
+   * reference is compiled without one — `_SYS.cplx` is idempotent, so a
+   * complex element passes through and a real one is wrapped.
+   *
+   * Returns the plain name unchanged when there is nothing to coerce, so the
+   * emitted code for every function without a declared-complex parameter is
+   * byte-identical to before.
+   */
+  static ensureUserFunctionValueRef(
+    engine: ComputeEngine,
+    h: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
+    if (name === undefined) return undefined;
+    if (target.language !== 'javascript') return name;
+    const registry = target.userFunctions;
+    if (!registry) return name;
+
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return name;
+    const nParams = literal.ops.length - 1;
+    const complexParam: boolean[] = [];
+    for (let i = 0; i < nParams; i++) {
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      complexParam.push(pt !== undefined && isNonRealNumber(pt));
+    }
+    if (!complexParam.some((c) => c)) return name;
+
+    const shimName = `${name}$v`;
+    if (!registry.defs.has(shimName)) {
+      const params = complexParam.map(() => BaseCompiler.tempVar(target));
+      const args = params.map((p, i) =>
+        complexParam[i] ? `_SYS.cplx(${p})` : p
+      );
+      registry.defs.set(
+        shimName,
+        `const ${shimName} = (${params.join(', ')}) => ${name}(${args.join(
+          ', '
+        )});`
+      );
+    }
+    return shimName;
+  }
+
+  /**
    * Emit `literal` once into `registry.defs` as the named local function for
    * `h` (`const _fn_h = …`) and return that local name.
    *
@@ -10306,10 +10653,25 @@ export class BaseCompiler {
         // complex local would otherwise be lowered complex over its plain
         // numeric value. This is the same discipline the GPU definition
         // lowering applies to its own parameter frame.
+        // A parameter the signature DECLARES complex is complex in the body
+        // for every call site, so it is entered here whether or not this
+        // emission carries call-site lanes. Without it the body read the
+        // parameter in the real lane while the call site handed it a
+        // `{ re, im }` — `_fn_Q = (z) => ({ re: z + 0, im: 1 })` over an
+        // object, i.e. `re: '[object Object]0'` behind `success: true`.
+        //
+        // This is not radical PROMOTION and does not go through
+        // `complexPromotion`: nothing is being inferred complex from an
+        // operand's sign. The author WROTE `(complex) -> complex`, and the
+        // call site is made to honour it (`coerceToComplex` /`_SYS.cplx`), so
+        // the lane here is that declaration being read back — which is why
+        // the Tycho-190 rule ("the lane comes from the operand, never the
+        // node type") is not in tension with it.
         const frames =
           lanes === undefined
             ? { complex: new Map<string, boolean>(), vector: new Map() }
             : BaseCompiler.laneFrames(literal, lanes);
+        BaseCompiler.addDeclaredComplexParams(h, literal, target, frames);
         const body = BaseCompiler.withLocalShapeFrame(
           frames.complex,
           frames.vector,

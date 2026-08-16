@@ -343,6 +343,10 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   // would be sound but would lose the precision `Range` had before the
   // `range` type existed, when it typed as `indexed_collection<integer>`.)
   if (type === 'range') return 'integer';
+  // A string's elements are its grapheme clusters, so — like `range` — its
+  // element type is genuinely KNOWN rather than absent. See
+  // `STRING_STRUCTURAL_TYPE` (`primitive.ts`).
+  if (type === 'string') return 'character';
   if (type === 'set') return 'unknown';
   if (type === 'tuple') return 'unknown';
   if (type === 'dictionary') return 'unknown';
@@ -911,7 +915,14 @@ export function overlapsForDeferredValidation(
   if (typeof t !== 'string' && t.kind === 'union')
     return t.types.some((arm) => overlapsForDeferredValidation(arm, param));
 
-  // Only collection-kind parameters participate in deferral.
+  // Only collection-kind parameters participate in deferral. A `string`
+  // operand is deliberately NOT treated as collection-like below, even though
+  // a string IS an indexed collection of its grapheme clusters: deferral
+  // exists for operands whose conformance cannot be decided statically (a bare
+  // `list`, unknown elements), and a string's element type is fully known
+  // (`character`), so `isSubtype` decides it exactly. Admitting it here would
+  // defer — and therefore accept — `Determinant("abc")`, whose `matrix`
+  // parameter a string can never satisfy.
   const paramIsCollection =
     (typeof param === 'string' &&
       (param === 'list' ||
@@ -982,10 +993,19 @@ export function overlapsForDeferredValidation(
  * union. Unwrap any collection branch to its element type and widen the
  * branches, so the wrapper never nests a list or a union inside the broadcast
  * result. (For a plain scalar this is the identity.)
+ *
+ * `string` is the one collection type that is NOT unwrapped. A string is an
+ * indexed collection of its characters, but it is ATOMIC under broadcast —
+ * exactly as `broadcastableCollectionElementType` records by declining to
+ * give `string` a broadcast element type — so a `-> string` handler result
+ * contributes a whole `string` per cell, never a `character`. Without the
+ * exception `String("x=", [1, 2])`, whose value is `["x=1", "x=2"]`, typed
+ * `list<character^2>`.
  */
 export function broadcastElementType(type: Readonly<Type>): Type {
   if (typeof type !== 'string' && type.kind === 'union')
     return widen(...type.types.map((t) => broadcastElementType(t)));
+  if (type === 'string') return 'string';
   return collectionElementType(type) ?? (type as Type);
 }
 

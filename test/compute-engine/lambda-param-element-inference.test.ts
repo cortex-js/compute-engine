@@ -824,15 +824,27 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     }
   );
 
-  test('a string element type annotates too', () => {
+  test('a character element type annotates too', () => {
+    // `Characters(s)` reports `list<character>` since strings became indexed
+    // collections of characters, so the stamp is `character`, not `string`.
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Filter',
       ['Characters', { str: 'abc' }],
       ['Function', ['Equal', 'c', { str: 'a' }], 'c'],
     ]);
-    expect(expr.ops[1].type.toString()).toBe('(c: string) -> boolean');
+    expect(expr.ops[1].type.toString()).toBe('(c: character) -> boolean');
     expect(expr.evaluate().toString()).toBe('["a"]');
+  });
+
+  test('a string SOURCE stamps `character` on the callback parameter', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Filter',
+      { str: 'abc' },
+      ['Function', ['Equal', 'c', { str: 'a' }], 'c'],
+    ]);
+    expect(expr.ops[1].type.toString()).toBe('(c: character) -> boolean');
   });
 
   test('a scalar Map is annotated AND still fuses (follow-up 1)', () => {

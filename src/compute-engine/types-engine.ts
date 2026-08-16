@@ -1072,6 +1072,15 @@ export interface IComputeEngine {
 
   string(s: string, metadata?: Metadata): Expression;
 
+  /**
+   * Create a boxed character — one user-perceived character.
+   *
+   * `s` must be exactly one grapheme cluster after NFC normalization; use the
+   * `CharacterFrom` operator when the content is not known to satisfy that, as
+   * it reports a diagnostic instead.
+   */
+  character(s: string, metadata?: Metadata): Expression;
+
   error(message: string | string[], where?: string): Expression;
 
   typeError(

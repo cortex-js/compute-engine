@@ -10,7 +10,11 @@ import {
   serialize as serializeLatex,
 } from '../latex-syntax/latex-syntax.js';
 
-import { checkType, checkArity } from '../boxed-expression/validate.js';
+import {
+  checkType,
+  checkArity,
+  expectsCharacterNotString,
+} from '../boxed-expression/validate.js';
 import { collectTuplePattern } from '../boxed-expression/tuple-pattern.js';
 import { instantiatedResultType } from '../boxed-expression/generic-instantiation.js';
 import { canonicalForm } from '../boxed-expression/canonical.js';
@@ -174,9 +178,15 @@ import {
   isSymbol,
   isFunction,
   isString,
+  isCharacter,
   isAbsentValue,
   sym,
 } from '../boxed-expression/type-guards.js';
+import {
+  isSingleGraphemeCluster,
+  narrowStringLiteralToCharacter,
+} from '../boxed-expression/boxed-character.js';
+import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -185,6 +195,58 @@ import {
 
 // xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html
 // https://www.haskell.org/onlinereport/haskell2010/haskellch9.html#x16-1720009.1
+
+/**
+ * LITERAL NARROWING at a typed declaration or assignment: the character a
+ * string LITERAL denotes when it is being stored into a name whose DECLARED
+ * type expects a character and refuses a string. Returns `undefined` when no
+ * narrowing applies, so every call site reads
+ * `narrowDeclaredCharacter(...) ?? <its existing behavior>`.
+ *
+ * Epsil has no character literal — `"a"` is a string — so without this a
+ * `character`-typed name could never be initialized or written from spelled-
+ * out text (`let c: character = "a"`). This is the same conversion argument
+ * validation performs at a `character` parameter, reached through the same two
+ * helpers (`expectsCharacterNotString`, `narrowStringLiteralToCharacter`), so
+ * the declaration and the call site cannot disagree about which literals
+ * narrow or which declared types accept a narrowing.
+ *
+ * Keyed on the RAW, un-evaluated right-hand operand on purpose: only a
+ * syntactic literal narrows. A symbol that happens to hold a one-cluster
+ * string does NOT implicitly convert and must be written `CharacterFrom(s)`
+ * (`docs/STRING_ROADMAP.md`, design constraint 4). An empty or multi-cluster
+ * literal narrows to nothing and falls through to the ordinary
+ * `incompatible-type` declared-type diagnostic.
+ */
+function narrowDeclaredCharacter(
+  ce: ComputeEngine,
+  declared: Type | undefined,
+  rawValue: Expression | undefined
+): Expression | undefined {
+  if (declared === undefined || rawValue === undefined) return undefined;
+  if (!isString(rawValue)) return undefined;
+  if (!expectsCharacterNotString(declared)) return undefined;
+  return narrowStringLiteralToCharacter(ce, rawValue);
+}
+
+/**
+ * The type `name` was DECLARED with, or `undefined` when the name is unbound,
+ * is not a value binding, or carries only an INFERRED type.
+ *
+ * The inferred case is excluded because an inferred type is a summary of what
+ * has been stored so far, not a contract the next store must satisfy: widening
+ * it is the normal outcome, so treating it as a narrowing target would convert
+ * values the binding never promised to hold.
+ */
+function declaredTypeOfSymbol(
+  ce: ComputeEngine,
+  name: string
+): Type | undefined {
+  const def = ce.lookupDefinition(name);
+  if (def === undefined || !isValueDef(def)) return undefined;
+  if (def.value.inferredType) return undefined;
+  return def.value.type?.type;
+}
 
 /** A `Pipe` right operand that is statically refutable as a function: a bare
  * number, string, or boolean (`True`/`False`) literal. Such an operand can
@@ -647,13 +709,6 @@ function binderClauseOperands(
   const sites = expr.operatorDefinition?.bindingSites?.(expr.ops, 'post');
   if (sites === undefined || sites.length === 0) return undefined;
   return new Set(sites.map((site) => site.path[0]));
-}
-
-// Split a string into grapheme clusters (UAX #29, via `Intl.Segmenter`).
-// Shared by `Characters` and its synonym `GraphemeClusters`.
-function splitGraphemeClusters(s: string): string[] {
-  const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
-  return Array.from(segmenter.segment(s), (seg) => seg.segment);
 }
 
 // The Unicode White_Space property, spelled out code point by code point so
@@ -3413,7 +3468,21 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const symbol = isSymbol(op1) ? op1 : op1.evaluate();
         const symbolName = sym(symbol);
         if (!symbolName) return undefined;
-        const val = op2.evaluate();
+        // `c = "a"` where `c` was declared `character` — see
+        // `narrowDeclaredCharacter`. The narrowed character IS the assigned
+        // value, so it replaces the evaluation of the operand. The `isString`
+        // test is repeated here so that the scope-chain walk
+        // `declaredTypeOfSymbol` performs is skipped for every assignment
+        // whose right-hand side is not a literal string, which is nearly all
+        // of them (`x = x + 1` in a loop body).
+        const val =
+          (isString(op2)
+            ? narrowDeclaredCharacter(
+                ce,
+                declaredTypeOfSymbol(ce, symbolName),
+                op2
+              )
+            : undefined) ?? op2.evaluate();
         // P2's rebinding sugar, canonicalized form: `p.name = v` lowered to
         // `p = «set name»(p, v)`. A REFUSED write — a setter result that does
         // not fit the receiver (P25 amendment), a missing implementation —
@@ -3555,7 +3624,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // attributes `value`.
         const valueSource = valueOp ?? attrs?.get('value');
         const hasValue = valueSource !== undefined;
-        const value = hasValue ? valueSource!.evaluate() : undefined;
+        // `let c: character = "a"` — see `narrowDeclaredCharacter`. The
+        // narrowed character IS the declared value, so it replaces the
+        // evaluation of the operand rather than being applied after it.
+        const value =
+          narrowDeclaredCharacter(ce, type, valueSource) ??
+          (hasValue ? valueSource!.evaluate() : undefined);
 
         // Resolve the remaining attributes. Both flags are read in EITHER
         // encoding, as `declareTypeStatement` reads `alias`: the `{dict: …}`
@@ -4015,15 +4089,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     // (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "A store writes the
     // evaluated value".)
     //
-    // KNOWN GAP: a set through this operator can MUTATE an object — an
-    // author's `set` handler storing into a field, or the accessor the engine
-    // synthesizes for a field-backed property — and neither this definition
-    // nor a synthesized host setter carries the `state` effect that describes
-    // it, so such a write reads as pure to the effect walker. Labelling it is
-    // the next bullet of "Phase 2 — Protocol integration" in
-    // `docs/plans/2026-08-13-mutable-objects-implementation-plan.md` ("a
-    // `readwrite` requirement implies `state` on its setter").
+    // A SET through this operator (the FOUR-operand form) carries the `state`
+    // effect, and the signature below does not spell it: three operands are a
+    // READ and four are a WRITE, so one declared arrow cannot describe both.
+    // The label is applied per call site instead, by `mutationEffects()` in
+    // `boxed-expression/effects-of.ts` on the runtime channel and by the
+    // `ProtocolProperty` arm of `boxed-expression/effects-inference.ts` on the
+    // inference channel. What justifies labelling every set rather than asking
+    // the registry what the selected handler does: a writable property is
+    // meaningful only on a mutable object
+    // (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Which types can conform"),
+    // so a set is a heap store by definition — an author's `set` handler
+    // storing into a field, or the accessor the engine synthesizes for a
+    // field-backed property.
     ProtocolProperty: {
+      // Neither half invokes a function-valued operand: a READ loads or
+      // computes the property and a SET hands the value to the setter, and in
+      // both the operands are the protocol name, the property name, the
+      // receiver and the value — never a callback this operator applies. The
+      // flag makes the two effect channels agree on that: the runtime
+      // projection stops consulting `invokesAt`, and the `ProtocolProperty`
+      // arm of `effects-inference.ts` correspondingly skips `projectOperands`.
+      invokes: false,
       description:
         'Read (or write) a protocol PROPERTY through a NAMED protocol — the ' +
         'lowering of the qualified field form `person.(Nameable.name)` ' +
@@ -4817,7 +4904,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(collection, any) -> any',
       type: ([op1, op2], { engine: ce }) => {
-        if (isString(op1) && asSmallInteger(op2) !== null) return 'integer';
+        // A string base is read as a NUMERAL in base `op2` — the whole
+        // `isString(op1)` branch of the `canonical` handler below, never the
+        // collection-element reading further down. Mirroring the same test
+        // here matters now that a string is an indexed collection of
+        // characters: a subscript that is not a usable base (`"abc"_x`) fell
+        // through and reported `character`, while `canonical` produced the
+        // `Baseform(…, Error("invalid-base"))` node — an error, not a
+        // character.
+        if (isString(op1)) {
+          const base = asSmallInteger(op2);
+          return base !== null && base > 1 && base <= 36 ? 'integer' : 'error';
+        }
 
         // A subscript on a blackboard-bold RING constant canonicalizes to the
         // quotient ring `ℤ_n = ℤ/nℤ` (see the `canonical` handler below), so
@@ -5162,12 +5260,40 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(any*) -> string',
       evaluate: (ops, { engine }) => {
         if (ops.length === 0) return engine.string('');
-        // Join the *values*: a string operand contributes its content —
-        // `.toString()` on a string is its serialized form, with quotes,
-        // which used to leak into the result (`String("x = ", 3)` produced
-        // the content `"x = "3`).
+        // SINGLE-COLLECTION JOIN. `String` is `broadcastable`, and a
+        // `list<character>` is an ordinary broadcast-eligible list, so without
+        // this carve-out `String(Characters(s))` would map element-wise and
+        // return a `list<string>` — breaking the conversion law
+        // `String(Characters(s)) == s`. One argument that is a collection
+        // (and not itself text) therefore JOINS that collection's elements.
+        // This mirrors the identical branch `StringJoin` already implements.
+        // A NON-FINITE collection stays symbolic: there is nothing to join.
+        // Multi-argument calls are unchanged.
+        if (
+          ops.length === 1 &&
+          !isString(ops[0]) &&
+          !isCharacter(ops[0]) &&
+          ops[0].isCollection
+        ) {
+          if (ops[0].isFiniteCollection !== true) return undefined;
+          return engine.string(
+            [...ops[0].each()]
+              .map((x) =>
+                isString(x) || isCharacter(x) ? x.string : x.toString()
+              )
+              .join('')
+          );
+        }
+        // Join the *values*: a string (or character) operand contributes its
+        // content — `.toString()` on a string is its serialized form, with
+        // quotes, which used to leak into the result (`String("x = ", 3)`
+        // produced the content `"x = "3`).
         return engine.string(
-          ops.map((x) => (isString(x) ? x.string : x.toString())).join('')
+          ops
+            .map((x) =>
+              isString(x) || isCharacter(x) ? x.string : x.toString()
+            )
+            .join('')
         );
       },
     },
@@ -5185,22 +5311,88 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'single finite collection of strings. A non-string argument (or ' +
           'collection element) leaves the expression unevaluated.',
       ],
-      signature: '((string | collection<string>)*) -> string',
+      // The element type admits `character` as well as `string`: the elements
+      // of a string, and of `Characters(s)`, are characters, so
+      // `StringJoin(Characters(s))` must type-check. (The variadic form is
+      // unchanged; `Join` takes over variadic concatenation in Phase 2.)
+      signature:
+        '((string | character | collection<string | character>)*) -> string',
       evaluate: (ops, { engine }) => {
         // A single collection argument (e.g. `StringJoin(Reverse(Characters(s)))`):
         // join its elements. A lazy collection (e.g. a `Map` result) is
         // materialized via `.each()`; a non-finite collection stays symbolic.
         let items = ops;
-        if (ops.length === 1 && !isString(ops[0]) && ops[0].isCollection) {
+        if (
+          ops.length === 1 &&
+          !isString(ops[0]) &&
+          !isCharacter(ops[0]) &&
+          ops[0].isCollection
+        ) {
           if (ops[0].isFiniteCollection !== true) return undefined;
           items = [...ops[0].each()];
         }
         const parts: string[] = [];
         for (const op of items) {
-          if (!isString(op)) return undefined;
+          // A CHARACTER contributes its content just as a string does — the
+          // elements of a string, and of `Characters(s)`, are characters, so
+          // `StringJoin(Characters(s))` must round-trip.
+          if (!isString(op) && !isCharacter(op)) return undefined;
           parts.push(op.string);
         }
         return engine.string(parts.join(''));
+      },
+    },
+
+    // Build a character — exactly one user-perceived character — from a
+    // string. Follows the house `XFrom` conversion convention (`StringFrom`,
+    // `ListFrom`, …). This is also the WIRE FORM of a character value:
+    // `BoxedCharacter.json` is `["CharacterFrom", "'x'"]`, and the `canonical`
+    // handler below is what makes `box(json(c))` the identical character.
+    CharacterFrom: {
+      description: [
+        'CharacterFrom(s): the character `s` denotes. `s` must be exactly ' +
+          'one user-perceived character (one grapheme cluster) after NFC ' +
+          'normalization; an empty or multi-character string is an error.',
+      ],
+      signature: '(string) -> character',
+      canonical: (ops, { engine: ce }) => {
+        const xs = flatten(ops);
+        // A one-cluster string LITERAL becomes the character value right here.
+        // The round-trip law `box(json(c)) === c` depends on it: the wire form
+        // must canonicalize back to the value it came from, not to a call that
+        // merely evaluates to it.
+        //
+        // A string LITERAL that is NOT one cluster is decided here too, as the
+        // same error value `evaluate` would produce. Its verdict cannot change
+        // between canonicalization and evaluation — the text is written in the
+        // source — so deciding it now is what lets `epsil check` report
+        // `CharacterFrom("ab")` without running the program, exactly as it
+        // already reports a multi-cluster literal passed to a `character`
+        // parameter. Any NON-literal operand (a symbol, a call) keeps the call
+        // form, and `evaluate` decides once the text is known.
+        if (xs.length === 1 && isString(xs[0])) {
+          if (isSingleGraphemeCluster(xs[0].string))
+            return ce.character(xs[0].string);
+          return ce.error(
+            ['incompatible-type', 'character', 'string'],
+            xs[0].toString()
+          );
+        }
+        return ce._fn('CharacterFrom', checkArity(ce, xs, 1));
+      },
+      evaluate: ([s], { engine }) => {
+        if (!isString(s)) return undefined;
+        if (!isSingleGraphemeCluster(s.string))
+          // The operand's TYPE is fine — `string` is what the signature asks
+          // for — but its VALUE is not one character. Reported with the same
+          // code the literal-narrowing failure uses at a `character`-typed
+          // parameter, so both spellings of "this text is not one character"
+          // surface identically.
+          return engine.error(
+            ['incompatible-type', 'character', 'string'],
+            s.toString()
+          );
+        return engine.character(s.string);
       },
     },
 
@@ -5217,7 +5409,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'stable integer decompositions see UnicodeScalars, Utf8 and Utf16. ' +
           'A non-string argument leaves the expression unevaluated.',
       ],
-      signature: '(string) -> list<string>',
+      signature: '(string) -> list<character>',
       // The evaluate guard (`isString`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
@@ -5226,7 +5418,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (!isString(s)) return undefined;
         return engine.function(
           'List',
-          splitGraphemeClusters(s.string).map((c) => engine.string(c))
+          splitGraphemeClusters(s.string).map((c) => engine.character(c))
         );
       },
     },
@@ -5292,35 +5484,54 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         if (fmt === 'default') return engine.string(value.toString());
 
+        /**
+         * The integer code units `value` supplies, or `undefined` when it
+         * supplies none — the caller then reports the
+         * `indexed_collection<integer>` type error.
+         *
+         * A STRING is refused outright, even though a string IS an indexed
+         * collection now: its elements are CHARACTERS, not integers, so
+         * decoding one as code units yielded a U+FFFD REPLACEMENT CHARACTER
+         * per character (`StringFrom("abc", "utf-8")` answered `"���"`).
+         * That was a clean type error before strings became collections, and
+         * it stays one. Any other element that is not an integer is refused
+         * for the same reason: substituting U+FFFD for it hides the mistake
+         * inside a plausible-looking string.
+         */
+        const codeUnits = (): number[] | undefined => {
+          if (isString(value) || !value.isIndexedCollection) return undefined;
+          const units: number[] = [];
+          for (const x of value.each()) {
+            const n = toInteger(x);
+            if (n === null) return undefined;
+            units.push(n);
+          }
+          return units;
+        };
+
         if (fmt === 'utf-8') {
-          if (!value.isIndexedCollection) {
+          const units = codeUnits();
+          if (units === undefined) {
             return engine.typeError(
               parseType('indexed_collection<integer>'),
               value.type
             );
           }
           return engine.string(
-            new TextDecoder('utf-8').decode(
-              new Uint8Array(
-                [...value.each()].map((x) => toInteger(x) ?? 0xfffd)
-              )
-            )
+            new TextDecoder('utf-8').decode(new Uint8Array(units))
           );
         }
 
         if (fmt === 'utf-16') {
-          if (!value.isIndexedCollection) {
+          const units = codeUnits();
+          if (units === undefined) {
             return engine.typeError(
               parseType('indexed_collection<integer>'),
               value.type
             );
           }
           return engine.string(
-            new TextDecoder('utf-16').decode(
-              new Uint16Array(
-                [...value.each()].map((x) => toInteger(x) ?? 0xfffd)
-              )
-            )
+            new TextDecoder('utf-16').decode(new Uint16Array(units))
           );
         }
 
@@ -5328,17 +5539,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const cp = toInteger(value);
           if (cp !== null) return engine.string(String.fromCodePoint(cp));
 
-          if (!value.isIndexedCollection) {
+          const units = codeUnits();
+          if (units === undefined) {
             return engine.typeError(
               parseType('indexed_collection<integer>|integer'),
               value.type
             );
           }
-          return engine.string(
-            String.fromCodePoint(
-              ...[...value.each()].map((x) => toInteger(x) ?? 0xfffd)
-            )
-          );
+          return engine.string(String.fromCodePoint(...units));
         }
 
         return engine.string(value.toString());
@@ -5408,7 +5616,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     GraphemeClusters: {
       description:
         'A collection of grapheme clusters from a string. Synonym of Characters.',
-      signature: '(string) -> list<string>',
+      signature: '(string) -> list<character>',
       // The evaluate guard (`isString`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
@@ -5417,7 +5625,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (!isString(str)) return undefined;
         return engine.function(
           'List',
-          splitGraphemeClusters(str.string).map((c) => engine.string(c))
+          splitGraphemeClusters(str.string).map((c) => engine.character(c))
         );
       },
     },
@@ -5454,14 +5662,26 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (sym(op2) === 'Nothing')
           return ce.number(Number.parseInt(op1str, 10));
 
-        const base = op2.re;
-        if (!op2.isInteger || !Number.isFinite(base) || base < 2 || base > 36)
-          return ce.error(['unexpected-base', base.toString()], op2.toString());
+        // The declared signature admits the base as an INTEGER
+        // (`DigitsFrom("101", 2)`) or as a numeric STRING
+        // (`DigitsFrom("101", "2")`), so both are resolved to a number here
+        // before the range check. Reading them separately is what made the
+        // operand a no-op: the range check read `op2.re` (fine for an integer,
+        // `NaN` for a string, hence `unexpected-base NaN`) while `fromDigits`
+        // was handed `op2.string ?? sym(op2) ?? 10`, which is `10` for an
+        // integer operand — so `DigitsFrom("101", 2)` parsed "101" in base TEN
+        // and answered 101 instead of 5.
+        const base = isString(op2)
+          ? Number.parseInt(op2.string.trim(), 10)
+          : (asSmallInteger(op2) ?? NaN);
+        if (!Number.isInteger(base) || base < 2 || base > 36) {
+          // An operand that resolves to no number at all (a free symbol) is
+          // reported as written, since `NaN` names nothing the reader gave.
+          const shown = Number.isNaN(base) ? op2.toString() : `${base}`;
+          return ce.error(['unexpected-base', shown], op2.toString());
+        }
 
-        const [value, rest] = fromDigits(
-          op1str,
-          (isString(op2) ? op2.string : undefined) ?? sym(op2) ?? 10
-        );
+        const [value, rest] = fromDigits(op1str, base);
 
         if (rest) return ce.error(['unexpected-digit', rest[0]], rest);
 

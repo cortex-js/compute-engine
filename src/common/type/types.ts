@@ -21,7 +21,7 @@
  *    - `scalar`
  *      - `<number>`
  *      - `boolean`: a boolean value: `True` or `False`.
- *      - `string`: a string of characters.
+ *      - `character`: exactly one user-perceived character (grapheme cluster).
  *    - `collection`
  *       - `set`: a collection of unique expressions, e.g. `set<string>`.
  *       - `record`: a collection of specific key-value pairs,
@@ -36,6 +36,8 @@
  *              tensor when the type of its elements is a number
  *           - `tuple`: a fixed-size collection of named or unnamed elements,
  *              e.g. `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
+ *           - `string`: a string of characters, i.e. an indexed collection of
+ *              `character`. A sibling of `list<character>`, not a subtype.
  *
  *
  *
@@ -67,7 +69,23 @@ export type PrimitiveType =
   | 'function'
   | 'symbol'
   | 'boolean'
+  // A string of characters. Structurally an INDEXED COLLECTION of `character`
+  // (`STRING_STRUCTURAL_TYPE` in `primitive.ts`, which every site that
+  // destructures a parameterized collection expands it to): a string is
+  // iterable, 1-based indexable and countable, with grapheme clusters as its
+  // elements. It is NOT a `scalar` (that branch of `value` now holds numbers,
+  // booleans and `character`), and it is a SIBLING of `list<character>`, not
+  // a subtype of it — grapheme segmentation is a property of the whole
+  // string, so joining two strings can merge their boundary characters while
+  // list concatenation never merges elements. Strings stay ATOMIC under
+  // broadcast and `Flatten`. See `docs/STRING_ROADMAP.md`.
   | 'string'
+  // Exactly one user-perceived character: one NFC-normalized grapheme cluster
+  // (UAX #29). A `scalar`, and a DISJOINT sibling of `string` — not a subtype,
+  // because a subtype of a collection type would be statically iterable while
+  // the runtime says a character has no elements. See
+  // `docs/STRING_ROADMAP.md` ("The `character` value model").
+  | 'character'
   | 'color'
   | 'expression'
   | 'unknown'

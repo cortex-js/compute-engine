@@ -46,7 +46,13 @@ import { toAsciiMath } from './ascii-math.js';
 // Dynamic import for serializeJson to avoid circular dependency
 import { cmp, eq, eqIdentical, same } from './compare.js';
 import { CancellationError } from '../../common/interruptible.js';
-import { isSymbol, isString, isNumber, isFunction } from './type-guards.js';
+import {
+  isSymbol,
+  isString,
+  isCharacter,
+  isNumber,
+  isFunction,
+} from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
 import { symbolAtSite } from './binding-sites.js';
 import { extractIntervalBounds } from './inequality-bounds.js';
@@ -797,7 +803,10 @@ export abstract class _BoxedExpression implements Expression {
     }
     if (typeof other === 'string') {
       const val = this.value;
-      return isString(val) ? val.string === other : false;
+      // A CHARACTER answers this too: its content is text, and the string/
+      // character bridge in `same()` makes the two kinds equal values whenever
+      // their content matches, so the primitive overload must not disagree.
+      return isString(val) || isCharacter(val) ? val.string === other : false;
     }
     return same(this, other);
   }

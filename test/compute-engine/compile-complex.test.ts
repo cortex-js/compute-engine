@@ -1253,3 +1253,261 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
     expect(r.run!({ k: 5 })).toBe(7);
   });
 });
+
+describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
+  // A user function whose signature declares a `complex` parameter used to
+  // compile its BODY in the real lane while the call site handed it a
+  // `{ re, im }` object, so the body's arithmetic ran on the object:
+  //
+  //   const _fn_Q = (z) => ({ re: z + 0, im: 1 });   // z is {re,im}
+  //   Q(1-i)  ->  { re: '[object Object]0', im: 1 }  // success: true
+  //
+  // The `'[object Object]'` is the tell — a string concatenation where a
+  // number was meant — returned behind `success: true`, i.e. a silently wrong
+  // value rather than a decline.
+  //
+  // The parameter is now complex in the body for every call site (a property
+  // of the FUNCTION, not of a call, so no `$z` specialization), and the call
+  // site delivers an object in one of THREE forms. Each test below pins one
+  // of them by asserting on the emitted CODE, not only on the value: the
+  // shapes are what distinguish the branches, and a value assertion alone
+  // passes for whichever branch happens to run.
+  //
+  // This is NOT radical promotion and does not consult `complexPromotion`:
+  // the author WROTE `(complex) -> complex`.
+  //
+  // `constantFold: false` throughout is load-bearing, not boilerplate: the
+  // arguments below are fully known at compile time, so folding would reduce
+  // the whole call to a constant and never exercise the wrap logic under test.
+  const makeEngine = () => {
+    const { ComputeEngine } =
+      require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    // A fresh engine per test: each one installs its own `Q` (and in one case
+    // a `v`/`u`), and the shared `engine` from `../utils` is reused across
+    // this whole file.
+    const engine = new ComputeEngine();
+    engine.declare('Q', { signature: '(complex) -> complex' });
+    // Q(z) = z + i
+    engine.assign(
+      'Q',
+      engine.box(['Function', ['Block', ['Add', 'z', ['Complex', 0, 1]]], 'z'])
+    );
+    return engine;
+  };
+
+  // FORM 1 — a complex number LITERAL passes through unwrapped, because this
+  // compiler emits it as the `{ re, im }` object itself. The argument must be
+  // the literal AT THE CALL: a symbol merely holding a complex value is not a
+  // number literal and takes form 3 (pinned below), which is what makes the
+  // code assertion here necessary rather than decorative.
+  it('a complex LITERAL argument passes through unwrapped: (1-i) + i = 1', () => {
+    const engine = makeEngine();
+    const r = compile(engine.box(['Q', ['Complex', 1, -1]]), {
+      constantFold: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_fn_Q(({ re: 1, im: -1 }))');
+    expect(r.code).not.toContain('_SYS.cplx(');
+    expect(r.run!({})).toEqual({ re: 1, im: 0 });
+    // …and the interpreter agrees, in its own (collapsed) spelling.
+    expect(
+      engine.box(['Q', ['Complex', 1, -1]]).evaluate().toString()
+    ).toBe('1');
+  });
+
+  // FORM 2 — a provably REAL argument is wrapped statically, so no runtime
+  // test is emitted. The negative assertion is the one that backs that claim:
+  // a regression degenerating to `_SYS.cplx({ re: _.u, im: 0 })` would still
+  // contain the static substring.
+  it('a provably REAL argument is wrapped statically, with no runtime test', () => {
+    const engine = makeEngine();
+    engine.declare('u', 'real');
+    const r = compile(engine.box(['Q', 'u']), { constantFold: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('{ re: _.u, im: 0 }');
+    expect(r.code).not.toContain('_SYS.cplx(');
+    expect(r.run!({ u: 2 })).toEqual({ re: 2, im: 1 });
+  });
+
+  // FORM 3 — everything else takes the runtime coercion, and it is the branch
+  // that carries the real weight: the same compiled artifact may be handed a
+  // plain number OR a complex object at `run()` time, and a real IS a complex,
+  // so neither is a contract violation and no static choice serves both.
+  //
+  // A complex-valued SYMBOL lands here too, not on form 1 — it is not a number
+  // literal, and it is not provably real either.
+  it('any other argument takes the runtime coercion and accepts either shape', () => {
+    const engine = makeEngine();
+    const r = compile(engine.box(['Q', 'w']), { constantFold: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.cplx(');
+    // A plain number is wrapped…
+    expect(r.run!({ w: 2 })).toEqual({ re: 2, im: 1 });
+    // …and an already-complex object passes through instead of nesting as
+    // `{ re: { re, im }, im: 0 }`, which is the property the branch rests on.
+    expect(r.run!({ w: { re: 1, im: -1 } })).toEqual({ re: 1, im: 0 });
+    expect(r.run!({ w: { re: 3, im: 4 } })).toEqual({ re: 3, im: 5 });
+
+    const withSymbol = makeEngine();
+    withSymbol.assign('v', withSymbol.box(['Complex', 1, -1]));
+    const rs = compile(withSymbol.box(['Q', 'v']), { constantFold: false });
+    expect(rs.code).toContain('_SYS.cplx(');
+    expect(rs.run!({})).toEqual({ re: 1, im: 0 });
+  });
+
+  // THE VALUE POSITION. Everything above is a direct CALL, and the argument
+  // coercion lives in `emitUserFunctionCall`, which only the call route
+  // reaches. A function referenced by NAME — `Map`'s callback, `CountIf`,
+  // `Find`, `_SYS.bcastFn` — is handed raw elements by its consumer, so
+  // putting the body in the complex lane without a shim broke it:
+  // `Map(Q, [1,2,3])` answered `[{re: null, im: null}, …]` behind
+  // `success: true` where the real-lane emission had been correct.
+  //
+  // The shim is a separate name (`_fn_Q$v`) so the two routes do not share a
+  // cache entry, and it uses the RUNTIME helper because an element's realness
+  // belongs to the source, not to the reference — which the reference is
+  // compiled without.
+  it('a value-position reference coerces raw elements: Map(Q, real list)', () => {
+    const engine = makeEngine();
+    const expr = engine.box(['Map', 'Q', ['List', 1, 2, 3]]);
+    const r = compile(expr, { constantFold: false });
+    expect(r.success).toBe(true);
+    // The callback passed to `Map` is the shim, not the bare definition.
+    expect(r.code).toContain('_fn_Q$v');
+    expect(r.run!({})).toEqual([
+      { re: 1, im: 1 },
+      { re: 2, im: 1 },
+      { re: 3, im: 1 },
+    ]);
+    // Interpreter parity, in its own spelling.
+    expect(expr.evaluate().toString()).toBe('[(1 + i),(2 + i),(3 + i)]');
+  });
+
+  it('the same reference still handles COMPLEX elements', () => {
+    // The shim must not break the case that already worked: `_SYS.cplx` is
+    // idempotent, so a complex element passes through rather than nesting.
+    const engine = makeEngine();
+    const r = compile(
+      engine.box([
+        'Map',
+        'Q',
+        ['List', ['Complex', 1, 1], ['Complex', 2, 0]],
+      ]),
+      { constantFold: false }
+    );
+    expect(r.run!({})).toEqual([
+      { re: 1, im: 2 },
+      { re: 2, im: 1 },
+    ]);
+  });
+
+  it('a function with NO complex parameter gets no shim', () => {
+    // The shim is emitted only where there is something to coerce, so every
+    // other function's emitted code is unchanged.
+    const { ComputeEngine } =
+      require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    const engine = new ComputeEngine();
+    engine.declare('P', { signature: '(real) -> real' });
+    engine.assign(
+      'P',
+      engine.box(['Function', ['Block', ['Add', 'z', 1]], 'z'])
+    );
+    const r = compile(engine.box(['Map', 'P', ['List', 1, 2, 3]]), {
+      constantFold: false,
+    });
+    expect(r.code).not.toContain('$v');
+    expect(r.code).not.toContain('_SYS.cplx(');
+    expect(r.run!({})).toEqual([2, 3, 4]);
+  });
+});
+
+describe('COMPILE COMPLEX - a fold whose ACCUMULATOR would widen mid-fold', () => {
+  // INTERIM FAIL-CLOSED, ruled 2026-08-16. Two lanes flow through a combiner —
+  // the ELEMENT lane and the ACCUMULATOR lane — and only the first is modelled.
+  // A real seed folded by a body that yields complex seeds a number and then
+  // adds `{re, im}` objects to it:
+  //
+  //   Reduce([1+2i, i], (a,x) => a + 2x, 0)
+  //     was  { re: '[object Object]0', im: 2 }   success: true
+  //     interpreter                              2 + 6i
+  //
+  // Declining is the interim; the real fix (accumulator-lane widening, seed
+  // coercion, callback lane binding) is its own work package in ROADMAP.md.
+  //
+  // The discriminator is the BODY's complexness under the fold's own lanes,
+  // never the element type alone — which is what keeps the correct fold
+  // compiling, and is the assertion that would catch an over-broad gate.
+  const makeEngine = () => {
+    const { ComputeEngine } =
+      require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    const engine = new ComputeEngine();
+    // L = [1+2i, i]
+    engine.assign(
+      'L',
+      engine.box(['List', ['Complex', 1, 2], ['Complex', 0, 1]])
+    );
+    return engine;
+  };
+  /** `(a, x) => a + 2x` — widens a real accumulator to complex. */
+  const WIDENS = ['Function', ['Add', 'a', ['Multiply', 2, 'x']], 'a', 'x'];
+  /** `(a, x) => a + |x|` — `|x|` is real, so the accumulator never widens. */
+  const STAYS_REAL = ['Function', ['Add', 'a', ['Abs', 'x']], 'a', 'x'];
+
+  test.each([['Reduce'], ['Scan']])(
+    '%s declines a real seed with a complex-yielding body',
+    (head) => {
+      const engine = makeEngine();
+      const r = compile(engine.box([head, 'L', WIDENS, 0]), {
+        constantFold: false,
+      });
+      expect(r.success).toBe(false);
+    }
+  );
+
+  test.each([['Reduce'], ['Scan']])(
+    '%s still compiles when the accumulator stays real',
+    (head) => {
+      const engine = makeEngine();
+      const r = compile(engine.box([head, 'L', STAYS_REAL, 0]), {
+        constantFold: false,
+      });
+      expect(r.success).toBe(true);
+    }
+  );
+
+  test('a COMPLEX seed compiles: nothing widens', () => {
+    // The accumulator starts in the complex lane, so the shape the gate is
+    // about never arises.
+    const engine = makeEngine();
+    const r = compile(engine.box(['Reduce', 'L', WIDENS, ['Complex', 0, 1]]), {
+      constantFold: false,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  test('a REAL source is untouched by the gate', () => {
+    const { ComputeEngine } =
+      require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    const engine = new ComputeEngine();
+    engine.assign('R', engine.box(['List', 1, 2, 3]));
+    const r = compile(
+      engine.box([
+        'Reduce',
+        'R',
+        ['Function', ['Add', 'a', 'x'], 'a', 'x'],
+        0,
+      ]),
+      { constantFold: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toBe(6);
+  });
+
+  test('a builtin combiner is untouched by the gate', () => {
+    const engine = makeEngine();
+    const r = compile(engine.box(['Scan', 'L', 'Add', 0]), {
+      constantFold: false,
+    });
+    expect(r.success).toBe(true);
+  });
+});

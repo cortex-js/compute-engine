@@ -88,13 +88,15 @@ describe('an else-less If as a block statement', () => {
     // destructuring assignments from a tuple-returning call.
     executeEpsil(
       ce,
+      // `Characters` yields `list<character>` since strings became indexed
+      // collections of characters, so the example's annotations move with it.
       'let digits = Characters("0123456789")\n' +
-        'isDigit(c: string | missing) = c in digits\n' +
-        'function parseDigits(cs: list<string>, i: integer) -> tuple<integer, integer> {\n' +
+        'isDigit(c: character | missing) = c in digits\n' +
+        'function parseDigits(cs: list<character>, i: integer) -> tuple<integer, integer> {\n' +
         '  let j = i\n  let n = 0\n' +
         '  while j <= Length(cs) && isDigit(cs[j]) { n = 10 * n + 1\n j = j + 1 }\n' +
         '  (n, j)\n}\n' +
-        'function parseNumber(cs: list<string>, i: integer) -> tuple<number, integer> {\n' +
+        'function parseNumber(cs: list<character>, i: integer) -> tuple<number, integer> {\n' +
         '  let j = i\n  let sign = 1\n' +
         '  if cs[j] == "-" {\n    sign = -1\n    j = j + 1\n  }\n' +
         '  let n = 0\n  (n, j) := parseDigits(cs, j)\n' +

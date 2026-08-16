@@ -3,6 +3,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
+import { checkSource } from '../../src/cli/check';
 
 //
 // Epsil execution (Phase 4, Stage 2). `executeEpsil` parses a program and
@@ -1042,9 +1043,17 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
     expect(run('let xs = [1,2]\n[...xs]').value.toString()).toBe('[1,2]');
   });
 
-  test('a scalar or string spread is a loud error', () => {
+  test('a scalar spread is a loud error', () => {
     expect(run('[...5]').value.isValid).toBe(false);
-    expect(run('[..."ab", 1]').value.isValid).toBe(false);
+  });
+
+  test('a STRING spread expands to its characters', () => {
+    // Formerly a loud error, because a string was not a collection. A string
+    // is an indexed collection of its grapheme clusters now, and `...` is an
+    // EXPLICIT expansion the author wrote (unlike a broadcast lift, where
+    // strings stay atomic), so it yields one element per character — the same
+    // reading JavaScript and Python spread give.
+    expect(run('[..."ab", 1]').value.toString()).toBe('["a","b",1]');
   });
 
   test('an infinite spread stays lazy', () => {
@@ -1567,5 +1576,91 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(200);
+  });
+});
+
+describe('EPSIL EXECUTE — literal narrowing at a `character` declaration', () => {
+  // Epsil has no character literal, so a one-grapheme-cluster string LITERAL
+  // written at a `character`-typed name becomes that character — the same
+  // conversion that already happens at a `character` PARAMETER
+  // (`docs/STRING_ROADMAP.md`, design constraint 4). A non-literal string does
+  // NOT convert, and a multi-cluster literal is still an error.
+
+  test('`let c: character = "a"` runs and binds the character', () => {
+    const { value, diagnostics } = run('let c: character = "a"\nc');
+    expect(diagnostics).toEqual([]);
+    expect(value.type.toString()).toBe('character');
+    expect(value.isSame(new ComputeEngine().character('a'))).toBe(true);
+    expect(checkSource('let c: character = "a"').diagnostics).toEqual([]);
+  });
+
+  test('`const` and a reassignment narrow the same way', () => {
+    expect(run('const c: character = "a"\nc').value.type.toString()).toBe(
+      'character'
+    );
+    expect(checkSource('const c: character = "a"').diagnostics).toEqual([]);
+    // An ASSIGNMENT to an already-declared `character` name narrows too.
+    const { value, diagnostics } = run('let c: character = "a"\nc = "b"\nc');
+    expect(diagnostics).toEqual([]);
+    expect(value.type.toString()).toBe('character');
+    expect(value.isSame(new ComputeEngine().character('b'))).toBe(true);
+  });
+
+  test('a one-cluster NON-ASCII literal narrows too', () => {
+    // "One character" is one CLUSTER, not one code point: the flag of France
+    // is the regional-indicator pair F + R (two astral code points).
+    const { value, diagnostics } = run(
+      'let c: character = "\u{1F1EB}\u{1F1F7}"\nc'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.type.toString()).toBe('character');
+  });
+
+  test('a MULTI-cluster literal is still an error, statically and at run time', () => {
+    const { diagnostics } = run('let c: character = "ab"\nc');
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(JSON.stringify(diagnostics)).toContain('incompatible-type');
+    const checked = checkSource('let c: character = "ab"').diagnostics;
+    expect(checked.length).toBe(1);
+    expect(checked[0].severity).toBe('error');
+    expect(JSON.stringify(checked[0])).toContain('incompatible-type');
+  });
+
+  test('a NON-literal string does not implicitly convert', () => {
+    // Only literals narrow; `CharacterFrom(s)` is the explicit conversion.
+    const { diagnostics } = run('let s = "a"\nlet c: character = s\nc');
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(JSON.stringify(diagnostics)).toContain('incompatible-type');
+    // The explicit conversion is accepted.
+    expect(
+      run(
+        'let s = "a"\nlet c: character = CharacterFrom(s)\nc'
+      ).value.type.toString()
+    ).toBe('character');
+  });
+});
+
+describe('EPSIL CHECK — `CharacterFrom` of a bad literal is a STATIC error', () => {
+  // The operand is written in the source, so its cluster count cannot change
+  // between canonicalization and evaluation: `CharacterFrom` decides a string
+  // LITERAL at canonicalization, which is what lets `epsil check` report it
+  // without running the program.
+
+  test('a multi-cluster or empty literal is reported by `epsil check`', () => {
+    for (const source of ['CharacterFrom("ab")', 'CharacterFrom("")']) {
+      const { diagnostics } = checkSource(source);
+      expect(diagnostics.length).toBe(1);
+      expect(diagnostics[0].severity).toBe('error');
+      expect(JSON.stringify(diagnostics[0])).toContain('incompatible-type');
+    }
+  });
+
+  test('a one-cluster literal and a non-literal operand are silent', () => {
+    expect(checkSource('CharacterFrom("a")').diagnostics).toEqual([]);
+    // A symbol operand keeps the call form — its text is not known until the
+    // program runs, so there is nothing to report statically.
+    expect(checkSource('let s = "ab"\nCharacterFrom(s)').diagnostics).toEqual(
+      []
+    );
   });
 });

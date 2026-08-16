@@ -31,9 +31,11 @@ import {
   isBroadcastCollectionType,
   isDrawFreeBroadcast,
   isFiniteIndexedCollection,
+  isFiniteBroadcastParticipant,
   isFixedShapeCollection,
   isKnownFinitenessBroadcast,
   isLinearAlgebraCollection,
+  isTextAtom,
   isNumericTuple,
   couldBeUnkeyedCollectionOperand,
   isPossiblyCollectionTyped,
@@ -61,6 +63,7 @@ import {
   isNumber,
   isFunction,
   isString,
+  isCharacter,
   isSymbol,
   isContinuationOperand,
   isFoldBarrierProduct,
@@ -3155,7 +3158,7 @@ export class BoxedFunction
         // lambda must not be captured here.
         !isLambdaDef(def) &&
         !hasRawOperand &&
-        this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
+        this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
         !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
       ) {
         // Hybrid laziness: past the eager threshold — or for a provably-finite
@@ -3213,7 +3216,7 @@ export class BoxedFunction
       if (
         def instanceof _BoxedOperatorDefinition &&
         def._isLambda &&
-        this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
+        this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
         paramsAreScalar(def)
       ) {
         // Hybrid laziness: past the eager threshold — or for a provably-finite
@@ -3286,8 +3289,14 @@ export class BoxedFunction
         // evaluate them a SECOND time: `f(Random(), L)` under
         // `(broadcastable<number>, list<number>)` drew twice, against the
         // evaluate-once ruling (2026-07-24).
+        //
+        // The predicate MUST be the same one handed to `declaredBroadcast`
+        // below: a gate that admits more than the broadcast itself does (an
+        // `isFiniteIndexedCollection` gate lets a STRING through, while
+        // `isFiniteBroadcastParticipant` treats a string as broadcast-atomic)
+        // enters the branch for operands the broadcast will then decline.
         someMappableCollection(this.ops!, declaredPlan, (x) =>
-          isFiniteIndexedCollection(x)
+          isFiniteBroadcastParticipant(x)
         )
       ) {
         // Broadcast rulings (2026-07-24), as in steps 2/2b: lifted operands are
@@ -3299,11 +3308,17 @@ export class BoxedFunction
           declaredLiteral,
           declaredPlan,
           evaluateBroadcastLiftsOnce(this._ops!, options),
-          (x) => isFiniteIndexedCollection(x) && !isTuple(x),
+          (x) => isFiniteBroadcastParticipant(x),
           options
         );
         if (mapped) return mapped;
       }
+
+      //
+      // 2d/ A lazy collection that PROMISES a string
+      //
+      const preserved = evaluateStringPreservingCollection(this, def);
+      if (preserved) return preserved;
 
       //
       // 3/ Handle evaluation of lazy collections
@@ -3628,7 +3643,7 @@ export class BoxedFunction
         // Mirrors the sync path: a lambda takes its own step-2b arm.
         !isLambdaDef(def) &&
         !hasRawOperand &&
-        this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
+        this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
         !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
       ) {
         // Hybrid laziness: past the eager threshold — or for a provably-finite
@@ -3678,7 +3693,7 @@ export class BoxedFunction
       if (
         def instanceof _BoxedOperatorDefinition &&
         def._isLambda &&
-        this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
+        this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
         paramsAreScalar(def)
       ) {
         // Hybrid laziness: past the eager threshold — or for a provably-finite
@@ -3749,9 +3764,10 @@ export class BoxedFunction
       if (
         declaredPlan &&
         declaredLiteral &&
-        // Evaluate-once, as in the sync step 2c — see the note there.
+        // Evaluate-once, and the same predicate as the broadcast below, as in
+        // the sync step 2c — see the note there.
         someMappableCollection(this.ops!, declaredPlan, (x) =>
-          isFiniteIndexedCollection(x)
+          isFiniteBroadcastParticipant(x)
         )
       ) {
         const mapped = await declaredBroadcastAsync(
@@ -3760,7 +3776,7 @@ export class BoxedFunction
           declaredLiteral,
           declaredPlan,
           await evaluateBroadcastLiftsOnceAsync(this._ops!, options),
-          (x) => isFiniteIndexedCollection(x) && !isTuple(x),
+          (x) => isFiniteBroadcastParticipant(x),
           options
         );
         if (mapped) return mapped;
@@ -3780,6 +3796,12 @@ export class BoxedFunction
       // the `!def.evaluate` gate below already has, and no collection operator
       // is in that shape today.
       //
+      // A lazy collection that PROMISES a string — mirrors the sync path's
+      // step 2d. The join is synchronous (a string is finite and its
+      // characters are already segmented), so there is no async variant.
+      const preserved = evaluateStringPreservingCollection(this, def);
+      if (preserved) return preserved;
+
       const materialization = options?.materialization ?? false;
       if (materialization !== false && !def.evaluate && this.isLazyCollection)
         return materialize(this, def, options);
@@ -4032,7 +4054,7 @@ export class BoxedFunction
  * site: a tuple is an atomic value (a point/vector), never mapped over.
  */
 function isBroadcastParticipant(op: Expression): boolean {
-  return isFiniteIndexedCollection(op) && !isTuple(op);
+  return isFiniteBroadcastParticipant(op);
 }
 
 /**
@@ -4234,10 +4256,44 @@ function skipBroadcastForVectorOps(
     (operator === 'Equal' || operator === 'NotEqual') &&
     ops.filter(
       (x) =>
-        x.isCollection ||
-        isPossiblyCollectionTyped(x) ||
-        x.type.matches('collection')
+        // A STRING is a collection of its characters in the lattice, but it is
+        // ATOMIC here: `Equal(["a","b"], "a")` must keep broadcasting the list
+        // against the whole string (`["True","False"]`), which counting the
+        // string as a second collection would turn into the whole-collection
+        // `False`.
+        !isTextAtom(x) &&
+        (x.isCollection ||
+          isPossiblyCollectionTyped(x) ||
+          x.type.matches('collection'))
     ).length >= 2
+  )
+    return true;
+  // `String` called with EXACTLY ONE collection argument JOINS that
+  // collection's elements instead of mapping over them — that carve-out lives
+  // in its `evaluate` handler and is what makes the conversion law
+  // `String(Characters(s)) == s` hold. Broadcasting first would fan the call
+  // out element-wise and produce a `list<string>`, so the handler would never
+  // see the collection. Multi-argument calls (`String("x=", [1,2])`) keep the
+  // coercing-join-with-broadcast semantics and are deliberately not skipped.
+  // See `docs/STRING_ROADMAP.md` design constraint 3.
+  //
+  // The collection-typed disjunct is what makes the TYPE path agree with the
+  // value path. An EAGER collection operator — `Characters(s)`,
+  // `UnicodeScalars(s)` — only becomes a collection VALUE when it evaluates,
+  // so `isCollection` is `false` on the un-evaluated node the type path reads,
+  // and `String(Characters(s))` reported `list<character>` for a value that is
+  // a plain `string`. Its declared result type still proves it will be a
+  // collection. `unknown`/`any` are deliberately excluded: they match
+  // `collection` without proving anything, and `String(x)` on an untyped
+  // operand must keep the broadcast lift.
+  if (
+    operator === 'String' &&
+    ops.length === 1 &&
+    !isTextAtom(ops[0]) &&
+    (ops[0].isCollection ||
+      (!ops[0].type.isUnknown &&
+        ops[0].type.type !== 'any' &&
+        ops[0].type.matches('collection')))
   )
     return true;
   return false;
@@ -4617,7 +4673,7 @@ function type(expr: BoxedFunction): Type {
             // operand a collection-typed slot binds WHOLE never lifts the
             // result (the value path binds it whole too).
             (declaredSlots === undefined || declaredSlots.at(i).mappable) &&
-            ((isFiniteIndexedCollection(x) && !isTuple(x)) ||
+            (isFiniteBroadcastParticipant(x) ||
               isBroadcastCollectionType(x) ||
               (!deferToHandler && isFixedShapeCollection(x)))
         );
@@ -4765,7 +4821,7 @@ function type(expr: BoxedFunction): Type {
             // Per-slot under a DECLARED `broadcastable<T>` signature: a
             // collection-typed slot binds its argument whole and never lifts.
             (declaredSlots === undefined || declaredSlots.at(i).mappable) &&
-            ((isFiniteIndexedCollection(x) && !isTuple(x)) ||
+            (isFiniteBroadcastParticipant(x) ||
               // Collection-TYPED operands too (Tycho item 73): `h(L+1)` /
               // `h(2L)` — an unevaluated expression statically typed as a
               // list/vector broadcasts through the lambda at runtime (the
@@ -4883,7 +4939,7 @@ function type(expr: BoxedFunction): Type {
             // Per-slot under a DECLARED `broadcastable<T>` signature, as at the
             // operator-def lambda site above.
             (valueSlots === undefined || valueSlots.at(i).mappable) &&
-            ((isFiniteIndexedCollection(x) && !isTuple(x)) ||
+            (isFiniteBroadcastParticipant(x) ||
               // Collection-TYPED operands too (Tycho item 73): `h(L+1)` /
               // `h(2L)` — an unevaluated expression statically typed as a
               // list/vector broadcasts through the lambda at runtime (the
@@ -4975,7 +5031,7 @@ function applyFunctionLiteral(
       ? declaredType
       : value.type.type;
   if (
-    ops.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
+    ops.some((x) => isFiniteBroadcastParticipant(x)) &&
     paramsAreScalar(broadcastGateType)
   ) {
     // Hybrid laziness, as at the operator-def lambda broadcast (step 2b):
@@ -5015,7 +5071,7 @@ function applyFunctionLiteral(
           // directly would bind the whole row to a scalar parameter and stop at
           // rank 1, disagreeing with the D10 leaf-rank typing.
           results.push(
-            zipped.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))
+            zipped.some((x) => isFiniteBroadcastParticipant(x))
               ? expr.engine._fn(expr.operator, zipped).evaluate(options)
               : apply(value, zipped, options)
           );
@@ -5050,7 +5106,7 @@ function applyFunctionLiteral(
       value,
       declaredPlan,
       ops,
-      (x) => isFiniteIndexedCollection(x) && !isTuple(x),
+      (x) => isFiniteBroadcastParticipant(x),
       options
     );
     if (mapped) return mapped;
@@ -5574,6 +5630,65 @@ function isOperatorDefinition(
   source: BoxedOperatorDefinition | Type
 ): source is BoxedOperatorDefinition {
   return typeof source === 'object' && source !== null && 'signature' in source;
+}
+
+/**
+ * The STRING a lazy collection promised, when its declared result type says
+ * `string` — otherwise `undefined`, leaving evaluation to take its ordinary
+ * course.
+ *
+ * The element-selecting collection operators (`Reverse`, `Rest`, `Most`,
+ * `Take`, `Drop`, `Slice`, `RotateLeft`, `RotateRight`, `Filter`, `TakeWhile`,
+ * `DropWhile`, `Dedup`) each return a subset or a reordering of the source's
+ * own elements, so each is closed over strings and declares a
+ * `(string, …) -> string` overload arm. A node that resolved to that arm must
+ * evaluate to a string VALUE; without this step it would evaluate to its lazy
+ * view, or — under an explicit `materialization` request — to a `List` of its
+ * characters, either of which contradicts the type it just reported. See
+ * `docs/STRING_ROADMAP.md`, "String preservation rule".
+ *
+ * It lives HERE, keyed on the declared type, rather than in an `evaluate`
+ * handler on each of those operators, because the presence of an `evaluate`
+ * handler is exactly what tells the step below that an operator materializes
+ * itself: adding one to `Take` disabled materialization for every list and
+ * range source (measured: 24 failures in `test/compute-engine/collections.test.ts`).
+ *
+ * Laziness is not lost by being eager here — a string is always finite, and
+ * its characters are already segmented and in memory.
+ *
+ * RE-SEGMENTATION CAVEAT: concatenating the selected characters can MERGE
+ * adjacent grapheme clusters or split one apart, so the result may hold a
+ * different number of characters than were selected — reversing `"xé"`
+ * written as `x` + `e` + COMBINING ACUTE ACCENT puts the combining mark first,
+ * where it attaches to nothing and stands as a character of its own. A
+ * character-selecting operation is closed over strings but NOT over character
+ * COUNTS; that is inherent to Unicode segmentation, not a defect
+ * (`docs/STRING_ROADMAP.md`, design constraint 3).
+ */
+function evaluateStringPreservingCollection(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition
+): Expression | undefined {
+  // The walk below goes through `each()`, which falls back to `evaluate()`
+  // when the operator has no `iterator` handler of its own — that would
+  // re-enter this very method. Requiring the handler keeps the step to the
+  // lazy collection operators it is about, with no re-entrancy.
+  if (def.collection?.iterator === undefined) return undefined;
+  if (!expr.isLazyCollection) return undefined;
+  if (!expr.type.matches('string')) return undefined;
+  // A collection that cannot state a finite element count (a symbolic bound,
+  // an unwalkable source) must stay inert: an empty walk there would answer
+  // `""` for a string the operator never actually computed.
+  if (expr.isFiniteCollection !== true) return undefined;
+  const count = expr.count;
+  if (count === undefined || !Number.isFinite(count)) return undefined;
+
+  const parts: string[] = [];
+  for (const c of expr.each()) {
+    if (!isCharacter(c) && !isString(c)) return undefined;
+    parts.push(c.string);
+  }
+  return expr.engine.string(parts.join(''));
 }
 
 /**  Eagerly evaluate xs by iterating over its elements.

@@ -8,7 +8,7 @@ import type {
   TypeResolver,
 } from './types.js';
 import { typeToString } from './serialize.js';
-import { RANGE_STRUCTURAL_TYPE } from './primitive.js';
+import { RANGE_STRUCTURAL_TYPE, STRING_STRUCTURAL_TYPE } from './primitive.js';
 import { declarationOf, withTypeArguments } from './reference.js';
 import { subtypingVarianceOf } from './variance.js';
 
@@ -1568,6 +1568,9 @@ function elementTypeOf(type: Type): Type | undefined {
     // (`common/type/utils.ts`), which this function's contract promises to
     // match exactly.
     if (type === 'range') return 'integer';
+    // A string's element type is likewise KNOWN: one index into a string
+    // yields one grapheme cluster, i.e. a `character`.
+    if (type === 'string') return 'character';
     if (
       type === 'collection' ||
       type === 'indexed_collection' ||
@@ -1764,6 +1767,33 @@ function walkPattern(
   // infer `T = any` and report `list<any>` instead of `list<integer>`.
   // Expanding to the structural reading binds `T` from the span's elements.
   if (actual === 'range') actual = RANGE_STRUCTURAL_TYPE;
+
+  // `string` is the other primitive with a hidden element type, and needs the
+  // same expansion for the same reason: without it, `Sort("abc")` — whose
+  // parameter is `indexed_collection<T>` — would leave `T` unbound and infer
+  // `T = any` instead of `T = character`.
+  //
+  // Restricted to a COLLECTION-kind pattern, which is the only place the
+  // expansion buys anything. Expanding unconditionally also rewrote the actual
+  // for a UNION pattern, and there it does harm: `type lu<T> = list<T> |
+  // string` applied to a string stopped matching its own ground `string` arm
+  // (an `indexed_collection<character>` is not a `string`), so Rule U never
+  // refuted the open `list<T>` arm and `T` fell through to `unknown` instead
+  // of `never`.
+  //
+  // `broadcastable` is deliberately NOT in this list: strings are
+  // broadcast-atomic, so `broadcastableCollectionElementType` (`subtype.ts`)
+  // declines `string` and `isSubtype('string', broadcastable<T>)` is false.
+  // Binding `T = character` from a string at such a pattern would infer an
+  // element type for a slot the string cannot inhabit as a collection.
+  if (
+    actual === 'string' &&
+    (pattern.kind === 'list' ||
+      pattern.kind === 'set' ||
+      pattern.kind === 'collection' ||
+      pattern.kind === 'indexed_collection')
+  )
+    actual = STRING_STRUCTURAL_TYPE;
 
   switch (pattern.kind) {
     case 'signature': {

@@ -2503,6 +2503,26 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
 
+  // A character value serializes exactly like the one-character string it
+  // denotes — `\text{x}` — because LaTeX has no notation that distinguishes
+  // the two. Serialize-only, with no `latexTrigger`: `\text{x}` parses back as
+  // a STRING, and narrowing it to a character is the job of argument
+  // validation at a `character`-typed position, not of the parser.
+  {
+    name: 'CharacterFrom',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      // The operand of a character value is a MathJSON string literal, so its
+      // CONTENT goes straight into the `\text{…}` (serializing the operand
+      // would wrap it in a `\text{…}` of its own and nest them).
+      const s = stringValue(operand(expr, 1));
+      if (s === null)
+        return `\\operatorname{CharacterFrom}(${serializer.serialize(
+          operand(expr, 1)
+        )})`;
+      return `\\text{${sanitizeLatex(s)}}`;
+    },
+  },
+
   // Text serializer — reconstructs \text{...} with inline $...$ for math
   {
     name: 'Text',

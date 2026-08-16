@@ -1107,6 +1107,15 @@ function allExact(vals: ReadonlyArray<Expression>): boolean {
  * Extract paired samples from the two accepted conventions: two equal-length
  * collections (`[xs, ys]`), or one collection of 2-element (x, y) pairs. Returns
  * `null` if the shape is not one of these (the caller turns that into an error).
+ *
+ * Every extracted datum must be a NUMBER, the same precondition `collectData`
+ * enforces for the one-sample statistics. Without it the non-numeric elements
+ * reached `machineVals`, which reads `numberLiteralOf(v)?.re ?? NaN`, and the
+ * regression handlers returned `NaN` coefficients — a definite wrong answer
+ * where staying inert is the honest one. A string source makes this concrete:
+ * a string is an indexed collection of its characters, so
+ * `Covariance("abc", "abc")` walked three characters per side and answered
+ * `NaN`.
  */
 function extractPairs(
   ops: ReadonlyArray<Expression>
@@ -1120,6 +1129,7 @@ function extractPairs(
       if (!el.isFiniteCollection) return null;
       const pair = [...el.each()];
       if (pair.length !== 2) return null;
+      if (!isNumber(pair[0]) || !isNumber(pair[1])) return null;
       xs.push(pair[0]);
       ys.push(pair[1]);
     }
@@ -1128,7 +1138,10 @@ function extractPairs(
   if (ops.length === 2) {
     const [a, b] = ops;
     if (!a.isFiniteCollection || !b.isFiniteCollection) return null;
-    return { xs: [...a.each()], ys: [...b.each()] };
+    const xs = [...a.each()];
+    const ys = [...b.each()];
+    if (!xs.every(isNumber) || !ys.every(isNumber)) return null;
+    return { xs, ys };
   }
   return null;
 }

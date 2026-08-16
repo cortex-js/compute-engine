@@ -19,7 +19,7 @@ import {
   hasAccessibleComponents,
   isDeclaredScalarNumber,
   isEnumerableSource,
-  isFiniteIndexedCollection,
+  isFiniteBroadcastParticipant,
   isPossiblyCollectionTyped,
   isTuple,
   lazyBroadcastMap,
@@ -91,6 +91,7 @@ import {
   isNumber,
   isObject,
   isString,
+  isCharacter,
   isSymbol,
   sym,
 } from '../boxed-expression/type-guards.js';
@@ -136,6 +137,34 @@ export const DEFAULT_LINSPACE_COUNT = 50;
 function integerParam(op: Expression | undefined): number | undefined | null {
   if (op === undefined || isSymbol(op, 'Nothing')) return undefined;
   return toIntegerOperand(op);
+}
+
+/**
+ * Concatenate characters back into a string, for the operators whose result
+ * is a subset or a reordering of the source's own characters.
+ *
+ * Returns `undefined` — decline — if any element is not text, so a handler
+ * never fabricates a string out of elements it did not understand.
+ *
+ * RE-SEGMENTATION CAVEAT: concatenation can MERGE adjacent grapheme clusters
+ * or split one apart, so the result may hold a different number of characters
+ * than were handed in. Reversing `"xé"` written as `x` + `e` + COMBINING ACUTE
+ * ACCENT, for instance, puts the combining mark first, where it attaches to
+ * nothing and stands as a character of its own. A character-selecting
+ * operation is closed over strings but NOT over character COUNTS; that is
+ * inherent to Unicode grapheme segmentation, not a defect
+ * (`docs/STRING_ROADMAP.md`, design constraint 3).
+ */
+function joinCharacters(
+  ce: ComputeEngine,
+  elements: Iterable<Expression>
+): Expression | undefined {
+  const parts: string[] = [];
+  for (const c of elements) {
+    if (isCharacter(c) || isString(c)) parts.push(c.string);
+    else return undefined;
+  }
+  return ce.string(parts.join(''));
 }
 
 /**
@@ -806,6 +835,14 @@ function mapResultType(
     // `collection` below and rebuilt with a `Set` head.
     if (source === 'range')
       return { kind: 'indexed_collection', elements: elementType as Type };
+    // A STRING source yields a LIST, permanently: `Map` is element-
+    // TRANSFORMING, and there is no type-level rule worth its complexity for
+    // detecting "the callback returns characters", so a mapped string is a
+    // `list<R>` even for a character→character callback. Rejoin explicitly
+    // with `String(...)`. See `docs/STRING_ROADMAP.md` ("String preservation
+    // rule").
+    if (source === 'string')
+      return { kind: 'list', elements: elementType as Type };
     // dictionary/record/tuple/etc.: yield a plain collection of the results.
     return { kind: 'collection', elements: elementType as Type };
   }
@@ -947,6 +984,14 @@ function fieldBearingType(
  * a bare `object` annotation (which promises fields without naming them), a
  * union. Those defer to the runtime route, where `objectFieldStore` puts the
  * instance's own layout back in charge.
+ *
+ * `isObjectFieldStore()` in `boxed-expression/effects-of.ts` resolves a
+ * receiver by the same two rules, for a different purpose: labelling the
+ * assignment's EFFECT. It deliberately parts company on the union case, where
+ * it claims the store rather than declining — an effect label cannot be
+ * deferred to evaluation the way this precedence decision can, and the store
+ * does happen. Keep the receiver resolution in step; that one arm is meant to
+ * differ.
  */
 export function objectLayoutOwnsField(
   ce: ComputeEngine,
@@ -2053,6 +2098,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const isListType = (op: Expression): boolean => {
         const t = op.type.type;
         const isTupleKind = typeof t !== 'string' && t.kind === 'tuple';
+        // A string is an indexed collection of characters, but it is ATOMIC
+        // here for the same reason a tuple is: `PointList("ab", …)` must treat
+        // the string as one component, not zip over its grapheme clusters.
+        // The `evaluate` predicate (`isFiniteBroadcastParticipant`) excludes
+        // strings too, so type and value stay in agreement.
+        if (t === 'string') return false;
         return !isTupleKind && op.type.matches('indexed_collection');
       };
       if (ops.some(isListType)) return parseType('list<tuple>');
@@ -2060,7 +2111,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     evaluate: (ops, { engine: ce, numericApproximation }) => {
       const isListComponent = (op: Expression): boolean =>
-        isFiniteIndexedCollection(op) && !isTuple(op);
+        isFiniteBroadcastParticipant(op);
       // Fail closed on a collection component that cannot be safely zipped —
       // infinite or unknown-length (e.g. `Range(1,∞)`) or non-indexed (a
       // Set): stay inert rather than silently degrading to a plain point.
@@ -2114,6 +2165,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const isProvablyNonScalar = (t: Type): boolean => {
         if (typeof t !== 'string' && t.kind === 'union')
           return t.types.some(isProvablyNonScalar);
+        // A STRING is a subtype of `collection` (its elements are its grapheme
+        // clusters) but occupies a SCALAR slot here: it lowers to one target
+        // string, exactly as `Tuple` compiles it, and the runtime `PointList`
+        // treats a string component atomically for the same reason
+        // (`isFiniteBroadcastParticipant` excludes strings).
+        if (t === 'string') return false;
         return isSubtype(t, 'collection');
       };
       const nonScalar = args.findIndex((a) => isProvablyNonScalar(a.type.type));
@@ -3276,6 +3333,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // supertype — the same reasoning as `mapResultType`'s `range` case,
           // which this fallback path bypasses.
           if (s === 'range') return 'indexed_collection';
+          // A STRING source must not be echoed either, and for a stronger
+          // reason: `Map` is permanently list-out over a string (a mapped
+          // string is a `list`, even when the callback returns characters —
+          // `docs/STRING_ROADMAP.md`, "String preservation rule"), so echoing
+          // `string` would promise a value the runtime never produces. The
+          // element type is the unknown one this branch is handling.
+          if (s === 'string') return 'list';
           if (s === 'indexed_collection' && ops[1].type.type !== s) return s;
           return ops[1].type;
         }
@@ -3627,8 +3691,32 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Phase 0b) an indexed source yields `list<T>` — the element type kept,
     // the shape dropped. A non-indexed source (a set) keeps its type: no
     // arity or shape to lie about, and its kind IS preserved.
+    // A STRING source keeps its kind too, for the same reason a set does:
+    // filtering a string's characters yields a string, and `string` carries
+    // neither an arity nor a shape to lie about (`docs/STRING_ROADMAP.md`,
+    // "String preservation rule"). The value follows the type —
+    // `evaluateStringPreservingCollection` in
+    // `boxed-expression/boxed-function.ts` joins the kept characters, so a
+    // filtered string is an eager `string` value, not a lazy view.
+    // Re-segmentation caveat: rejoining the kept characters can merge or split
+    // grapheme clusters, so the result may hold a different number of
+    // characters than the predicate accepted — filtering away a base character
+    // leaves its combining mark to attach to whatever now precedes it.
     type: (ops) => {
       const t = ops[0].type;
+      // Tested with `matches` (a SUBTYPE test) rather than by comparing the
+      // type constructor, so that a transparent alias or reference whose
+      // resolved type is `string` also gets the string-preserving result — an
+      // identity test on the constructor let such a source fall through to
+      // `list<character>`, and `evaluateStringPreservingCollection`
+      // (`boxed-expression/boxed-function.ts`) keys on the DECLARED result
+      // type being `string`, so the lazy result was never joined. The subtype
+      // test does not over-admit: `unknown` and `any` are not subtypes of
+      // `string`, and neither is a union such as `string | list<T>` that only
+      // reaches `string` through one arm — for those the runtime may well
+      // produce a list, so claiming `string` would be a promise the
+      // evaluation cannot keep.
+      if (t.matches('string')) return t;
       if (!t.matches('indexed_collection')) return t;
       return { kind: 'list', elements: collectionElementType(t.type) ?? 'any' };
     },
@@ -4184,11 +4272,36 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection) -> indexed_collection',
     type: (ops) => {
       const elt = collectionElementType(ops[0].type.type) ?? 'number';
+      // Each element is a SUBTRACTION of two source elements, so echoing the
+      // source's element type is only honest when subtraction is closed over
+      // it. For a numeric source it is. For a non-numeric one it is not:
+      // `Differences("abc")` would claim `list<character>` for a list of
+      // unevaluated `Subtract` nodes (a character minus a character is not a
+      // character, and is not defined at all). Report the element type as
+      // unknown there rather than a type the runtime cannot produce; the
+      // runtime itself stays inert.
+      if (!isSubtype(elt, 'number')) return 'list';
       return { kind: 'list', elements: elt };
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
+      // A source whose elements are PROVABLY not numbers (a string's
+      // characters, a list of booleans) cannot be differenced: every element
+      // of the result would be an `incompatible-type` error from `Subtract`.
+      // Refuse the whole call with one typed error at the operand instead of
+      // building a lazy view that manufactures an error per element. Sources
+      // whose element type is unknown or merely wider than `number` are left
+      // alone — they may well hold numbers at run time.
+      const elt = collectionElementType(collection.type.type);
+      if (elt !== undefined && engine.type(elt).isDisjointFrom('number'))
+        return engine._fn('Differences', [
+          engine.typeError(
+            parseType('collection<number>'),
+            collection.type,
+            collection
+          ),
+        ]);
       return engine._fn('Differences', [collection]);
     },
     collection: {
@@ -4495,7 +4608,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const resultType = callbackResultType(ops[1]);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
         return parseType('list');
-      const inner = collectionElementType(resultType);
+      // A `string` callback result is NOT peeled: the runtime splice keeps a
+      // string whole (strings are atomic under deep descent), so the element
+      // type is the string itself, not `character`. Type and value must agree.
+      const inner =
+        resultType === 'string' ? undefined : collectionElementType(resultType);
       return { kind: 'list', elements: inner ?? resultType };
     },
     canonical: (ops, { engine }) => {
@@ -4577,7 +4694,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               const { value, done } = source.next();
               if (done) return { value: undefined, done: true };
               const mapped = f([value]) ?? absenceMarker(expr.engine, expr);
-              if (mapped.isCollection) inner = mapped.each();
+              // A STRING result is a single element, not a collection to
+              // splice: strings are atomic under every deep-descent walk
+              // (`docs/STRING_ROADMAP.md`, design constraint 6), so a
+              // `(T) -> string` callback contributes one string per source
+              // element rather than exploding into its characters.
+              if (mapped.isCollection && !isString(mapped))
+                inner = mapped.each();
               else return { value: mapped, done: false };
             }
           },
@@ -5435,7 +5558,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
 
         const def = expr.baseDefinition;
-        const at = def?.collection?.at;
+        // A STRING implements element access on the boxed VALUE
+        // (`BoxedString.at`) rather than through an operator definition's
+        // `collection` handlers — a string literal has no operator definition
+        // to carry them — so there is nothing for the dispatch below to find.
+        // Fall back to the value's own accessor, which applies the same
+        // 1-based / negative-from-the-end convention every other indexed
+        // collection uses.
+        const at =
+          def?.collection?.at ??
+          (isString(expr)
+            ? (xs: Expression, i: number | string) =>
+                typeof i === 'number' ? xs.at(i) : undefined
+            : undefined);
         if (!at) {
           // The current value offers no element access. When at least one
           // index has already been consumed and the value is PROVABLY not
@@ -5461,6 +5596,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Case A: string key (dictionary-style access).
         const s = isString(opAtIndex) ? opAtIndex.string : undefined;
         if (s !== undefined) {
+          // A STRING is an INDEXED collection of its characters: it has no
+          // keys at all, so `At("abc", "b")` is not a lookup that missed, it
+          // is a lookup a string does not offer. The string fallback accessor
+          // installed above answers numeric indices only and returns
+          // `undefined` for a key, which the branch below would read as an
+          // absent key and answer with the absence marker. Decline the
+          // dispatch instead, leaving the expression unevaluated.
+          if (isString(expr)) return undefined;
           const v = at(expr, s);
           if (v === undefined)
             return index + 1 < ops.length
@@ -5542,13 +5685,29 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Take: {
     description: ['Return `n` elements from a collection.'],
     complexity: 8200,
-    signature: '(xs: indexed_collection<T>, count: number) -> list<T> where T',
+    // The leading arm is the string-preservation rule: taking a prefix of a
+    // string's characters yields a string (`docs/STRING_ROADMAP.md`, "String
+    // preservation rule"). It is spelled as a BOUNDED type variable
+    // (`T where T: string`) rather than the ground type `string` for the same
+    // reason `Reverse`'s `T: list` arm is: an `unknown`- or `any`-typed
+    // operand refutes no arm, so a ground `string` parameter would win
+    // most-specific-wins on every untyped operand and claim `string` for a
+    // call that usually returns a list. A bounded variable with no call-site
+    // binding does not.
+    signature:
+      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)',
     // No `evaluate` handler: materialization goes through the generic lazy-
     // collection path, driven by the `count`/`at`/`iterator` handlers below.
     // (A previous handler materialized eagerly from its operands — but the
     // operands are evaluated first, so an unknown-length lazy source arrived
     // already collapsed to its display preview, placeholder included, and
     // `Take` returned the preview's elements instead of its own.)
+    // The string arm is served by the same lazy handlers: a lazy collection
+    // whose declared type is `string` evaluates to the string its characters
+    // spell (see `evaluateStringPreservingCollection` in
+    // `boxed-expression/boxed-function.ts`). Re-segmentation caveat: rejoining
+    // the taken characters can merge or split grapheme clusters, so the result
+    // may hold a different number of characters than were taken.
     collection: {
       // A non-positive bound yields the empty collection whatever the source
       // is, so the walk is faithful even over an unwalkable one — without this
@@ -5634,7 +5793,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Drop: {
     description: ['Return the collection without the first n elements.'],
     complexity: 8200,
-    signature: '(xs: indexed_collection<T>, count: number) -> list<T> where T',
+    // The leading arm is the string-preservation rule: dropping a prefix of a
+    // string's characters yields a string (`docs/STRING_ROADMAP.md`, "String
+    // preservation rule"), and a node that resolves to it evaluates to that
+    // string (`evaluateStringPreservingCollection` in
+    // `boxed-expression/boxed-function.ts`). Re-segmentation caveat: rejoining
+    // the remaining characters can merge or split grapheme clusters, so the
+    // result may hold a different number of characters than were left.
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
+    signature:
+      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -5860,7 +6032,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // but `list` is closed under it — and a `list` result carries no length,
     // so `list<T>` is exactly right for every kind. (The previous bare
     // `indexed_collection` result lost the element type altogether.)
-    signature: '(indexed_collection<T>) -> list<T> where T',
+    // The LEADING arm is the string-preservation rule: dropping the first
+    // character of a string yields a string (`docs/STRING_ROADMAP.md`, "String
+    // preservation rule"), and a node that resolves to it evaluates to that
+    // string (`evaluateStringPreservingCollection` in
+    // `boxed-expression/boxed-function.ts`). Re-segmentation caveat: rejoining
+    // the remaining characters can merge or split grapheme clusters, so the
+    // result may hold a different number of characters than the input minus
+    // one.
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
+    signature:
+      '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -5922,8 +6108,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the collection without the last element.',
       'If the collection has only one element, return an empty collection.',
     ],
-    // Per-kind result rule: see `Rest` — same reasoning, same result type.
-    signature: '(indexed_collection<T>) -> list<T> where T',
+    // Per-kind result rule: see `Rest` — same reasoning, same result type,
+    // and the same leading string-preserving arm (dropping the LAST character
+    // of a string yields a string; rejoining what remains can merge or split
+    // grapheme clusters, so the result may hold a different number of
+    // characters than the input minus one).
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
+    signature:
+      '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -5992,8 +6188,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `(start, end)` bounds would contradict its own meaning (`Slice(xs, 4,
     // 2)` is EMPTY, but the collection `4..2` is the pair `[4, 2]`); a gather
     // by arbitrary indices is `At(xs, indices)`, which accepts the wider type.
+    // Each arm gets a leading string-preserving twin: a contiguous run of a
+    // string's characters is a string (`docs/STRING_ROADMAP.md`, "String
+    // preservation rule"), and a node that resolves to one evaluates to that
+    // string (`evaluateStringPreservingCollection` in
+    // `boxed-expression/boxed-function.ts`). Re-segmentation caveat: rejoining
+    // the sliced characters can merge or split grapheme clusters, so the
+    // result may hold a different number of characters than the slice spans —
+    // slicing away a base character can leave its combining mark behind.
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
     signature:
-      '((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)',
+      '((value: T, span: range) -> T where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -6067,8 +6276,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `(T) -> T` claim of `tuple<finite_integer, string>` had the element
     // types in the wrong ORDER; and `Reverse(1..10)` is `[10, 9, …, 1]`,
     // descending, which the `range` type excludes.
+    // The LEADING arm is the string-preservation rule: reversing a string's
+    // characters yields a string (`docs/STRING_ROADMAP.md`, "String
+    // preservation rule"), and a node that resolves to it evaluates to that
+    // string (`evaluateStringPreservingCollection` in
+    // `boxed-expression/boxed-function.ts`). Re-segmentation caveat: rejoining
+    // the reversed characters can merge or split grapheme clusters, so the
+    // result may hold a different number of characters than the input — a
+    // combining mark that trailed its base character now leads, attached to
+    // nothing.
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not —
+    // which is exactly how the `T: list` arm beside it already behaves.
     signature:
-      '((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)',
+      '((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -6435,8 +6659,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // decoupled: the value stays a lazy view either way.
     // A rotation is length-preserving, so the `list` arm keeps the shape
     // (`vector<3>` in, `vector<3>` out); a rotated `range` is not a span.
+    // The LEADING arm is the string-preservation rule: a rotation of a
+    // string's characters is a string (`docs/STRING_ROADMAP.md`, "String
+    // preservation rule"), and a node that resolves to it evaluates to that
+    // string (`evaluateStringPreservingCollection` in
+    // `boxed-expression/boxed-function.ts`). Re-segmentation caveat: rejoining
+    // the rotated characters can merge or split grapheme clusters, so the
+    // result may hold a different number of characters than the input, even
+    // though a rotation of the character ARRAY is length-preserving.
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
     signature:
-      '((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
+      '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -6526,9 +6763,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Rotate the elements of the collection to the right by n positions.',
     complexity: 8200,
-    // Per-kind result rule: see `RotateLeft`.
+    // Per-kind result rule and leading string-preserving arm: see
+    // `RotateLeft`, including its re-segmentation caveat (rejoining the
+    // rotated characters can merge or split grapheme clusters, so the result
+    // may hold a different number of characters than the input).
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
     signature:
-      '((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
+      '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -6804,12 +7049,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the elements of the collection sorted according to the given comparison function.',
     complexity: 8200,
-    // The result always rebuilds as a `List` (see `evaluate`), so the result
-    // type is `list<T>`, not the source's (possibly indexed/Range) type. The
-    // `order` slot stays the PRIMITIVE `function`, not an arrow: a
-    // function-typed *symbol* operand must be admitted there (pinned by
-    // `collection-callback-signatures.test.ts`).
-    signature: '(indexed_collection<T>, order: function?) -> list<T> where T',
+    // Apart from the string arm the result always rebuilds as a `List` (see
+    // `evaluate`), so the result type is `list<T>`, not the source's (possibly
+    // indexed/Range) type. The `order` slot stays the PRIMITIVE `function`,
+    // not an arrow: a function-typed *symbol* operand must be admitted there
+    // (pinned by `collection-callback-signatures.test.ts`).
+    // The LEADING arm is the string-preservation rule: sorting a string's
+    // characters yields a string (`docs/STRING_ROADMAP.md`, "String
+    // preservation rule"). The optional `order` needs no arity split — an
+    // overload arm may carry an optional parameter, and most-specific-wins
+    // picks this arm for a string operand with or without a comparator.
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
+    signature:
+      '((T, order: function?) -> T where T: string) & ((indexed_collection<T>, order: function?) -> list<T> where T)',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Sort', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
@@ -6824,10 +7080,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (xs.isFiniteCollection !== true) return undefined;
       const indices = sortedIndices(xs, fn);
       if (!indices) return undefined;
-      return ce.function(
-        'List',
-        indices.map((i) => xs.at(i)!)
-      );
+      const elements = indices.map((i) => xs.at(i)!);
+      // The string arm: a sorted string is a string. `Sort` is eager and has
+      // no lazy collection handlers, so the join happens here rather than in
+      // `evaluateStringPreservingCollection`. Re-segmentation caveat:
+      // rejoining the sorted characters can merge or split grapheme clusters,
+      // so the result may hold a different number of characters than the
+      // input — sorting moves a combining mark next to whatever character now
+      // precedes it.
+      if (isString(xs)) return joinCharacters(ce, elements);
+      return ce.function('List', elements);
     },
   },
 
@@ -7237,13 +7499,29 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Unique: {
     description: 'Return a list of the unique elements of the collection.',
     complexity: 8200,
-    signature: '(collection<T>) -> list<T> where T',
+    // The LEADING arm is the string-preservation rule: the distinct characters
+    // of a string, in first-occurrence order, are a string
+    // (`docs/STRING_ROADMAP.md`, "String preservation rule").
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
+    signature:
+      '((T) -> T where T: string) & ((collection<T>) -> list<T> where T)',
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
     evaluate: (ops, { engine: ce }) => {
       if (!ops[0].isFiniteCollection) return undefined;
       const [values, _counts] = tally(ops[0]!);
+      // The string arm: `Unique` is eager and has no lazy collection handlers,
+      // so the join happens here rather than in
+      // `evaluateStringPreservingCollection`. Re-segmentation caveat:
+      // rejoining the distinct characters can merge or split grapheme
+      // clusters, so the result may hold a different number of characters than
+      // there were distinct ones.
+      if (isString(ops[0])) return joinCharacters(ce, values);
       return ce.function('List', values);
     },
   },
@@ -8311,8 +8589,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             ],
             keyValue.toString()
           );
-        const key = keyValue.op1;
+        const rawKey = keyValue.op1;
         const value = keyValue.op2;
+        // A CHARACTER key is accepted as the one-character string it denotes:
+        // a dictionary key is text, and `Tally(Characters(s))` — the everyday
+        // producer of character keys — must keep building a dictionary whose
+        // entries `d["m"]` finds. Anything else is a type error.
+        const key = isCharacter(rawKey) ? ce.string(rawKey.string) : rawKey;
         if (!isString(key))
           return ce.error(
             ['incompatible-type', 'string', key.type.toString()],

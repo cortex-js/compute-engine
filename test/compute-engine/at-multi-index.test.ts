@@ -38,8 +38,11 @@ describe('At: extra indices on a non-indexable value', () => {
       'Error("incompatible-dimensions", "3 indices vs 2-dimensional collection")'
     ));
 
-  test('a string element is not indexable either', () =>
-    expect(boxEval(['At', ['List', "'ab'", "'cd'"], 1, 2])).toBe(DIM_ERROR_2));
+  test('a string element IS indexable — a string is a collection of characters', () =>
+    // Before strings became `indexed_collection<character>` a second index on
+    // a string element was an `incompatible-dimensions` error; now it selects
+    // that string's second character.
+    expect(boxEval(['At', ['List', "'ab'", "'cd'"], 1, 2])).toBe('"b"'));
 
   test('a scalar dictionary value with a trailing index errors', () =>
     expect(
@@ -78,10 +81,10 @@ describe('At: single-index and edge conventions preserved', () => {
     // keeps reporting absence rather than a dimension error.
     expect(boxEval(['At', LIST, 10, 2])).toBe('"Missing"'));
 
-  test('a string base still reports its (pre-existing) type error', () =>
-    expect(boxEval(['At', "'hello'", 2])).toBe(
-      'Error(ErrorCode("incompatible-type", "dictionary | indexed_collection", "string"), "hello")'
-    ));
+  test('a string base is indexed 1-based, like any indexed collection', () =>
+    // Formerly an `incompatible-type` error against
+    // `dictionary | indexed_collection`; a string now satisfies that parameter.
+    expect(boxEval(['At', "'hello'", 2])).toBe('"e"'));
 });
 
 describe('At: a value that could still be a collection stays inert', () => {

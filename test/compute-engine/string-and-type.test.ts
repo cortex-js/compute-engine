@@ -42,9 +42,9 @@ describe('String operator joins values, not serialized forms', () => {
   test('symbol operands contribute their value', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 42);
-    expect(
-      ce.box(['String', { str: 'x is ' }, 'x']).evaluate().string
-    ).toBe('x is 42');
+    expect(ce.box(['String', { str: 'x is ' }, 'x']).evaluate().string).toBe(
+      'x is 42'
+    );
   });
 });
 
@@ -115,7 +115,11 @@ describe('StringFrom joins a collection of code points', () => {
     const ce = new ComputeEngine();
     expect(
       ce
-        .box(['StringFrom', ['List', 100, 101, 102], { str: 'unicode-scalars' }])
+        .box([
+          'StringFrom',
+          ['List', 100, 101, 102],
+          { str: 'unicode-scalars' },
+        ])
         .evaluate().string
     ).toBe('def');
   });
@@ -247,11 +251,7 @@ describe('StringSplit splits a string into substrings', () => {
     // ruling 2026-08-14). The rainbow flag (flag + VS16 + ZWJ + rainbow) is
     // one grapheme cluster containing two surrogate pairs.
     const ce = new ComputeEngine();
-    expect(split(ce, { str: 'a🏳️‍🌈b' }, { str: '' })).toEqual([
-      'a',
-      '🏳️‍🌈',
-      'b',
-    ]);
+    expect(split(ce, { str: 'a🏳️‍🌈b' }, { str: '' })).toEqual(['a', '🏳️‍🌈', 'b']);
     expect(split(ce, { str: '' }, { str: '' })).toEqual([]);
   });
 });
@@ -261,10 +261,7 @@ describe('IntegerString preserves the sign', () => {
   // `IntegerString(-42)` was `"42"` and the `DigitsFrom` round-trip broke
   // for negative integers (docs/STRING_ROADMAP.md, ruling 2026-08-14).
   const intString = (ce: ComputeEngine, ...ops: any[]): string =>
-    ce
-      .box(['IntegerString', ...ops])
-      .evaluate()
-      .string!;
+    ce.box(['IntegerString', ...ops]).evaluate().string!;
 
   test('negative integers keep their sign in base 10 and other bases', () => {
     const ce = new ComputeEngine();
@@ -275,10 +272,59 @@ describe('IntegerString preserves the sign', () => {
 
   test('DigitsFrom(IntegerString(n)) round-trips a negative integer', () => {
     const ce = new ComputeEngine();
-    const roundTrip = ce
-      .box(['DigitsFrom', ['IntegerString', -42]])
-      .evaluate();
+    const roundTrip = ce.box(['DigitsFrom', ['IntegerString', -42]]).evaluate();
     expect(roundTrip.re).toBe(-42);
+  });
+});
+
+describe('DigitsFrom honours its base argument', () => {
+  // Regression: the range check read the base from `op2.re` while the parse
+  // was handed `op2.string ?? sym(op2) ?? 10`. An INTEGER base matched neither
+  // of those, so base 10 was always used (`DigitsFrom("101", 2)` answered 101
+  // instead of 5, and `DigitsFrom("2a", 16)` reported `unexpected-digit 'a'`);
+  // a numeric-STRING base failed the range check instead, with
+  // `unexpected-base NaN`.
+  const digits = (ce: ComputeEngine, ...ops: any[]) =>
+    ce.box(['DigitsFrom', ...ops]).evaluate();
+
+  test('an INTEGER base is used', () => {
+    const ce = new ComputeEngine();
+    expect(digits(ce, { str: '101' }, 2).re).toBe(5);
+    expect(digits(ce, { str: '2a' }, 16).re).toBe(42);
+    expect(digits(ce, { str: 'z' }, 36).re).toBe(35);
+  });
+
+  test('a numeric STRING base is used', () => {
+    const ce = new ComputeEngine();
+    expect(digits(ce, { str: '101' }, { str: '2' }).re).toBe(5);
+    expect(digits(ce, { str: '2a' }, { str: '16' }).re).toBe(42);
+  });
+
+  test('the base-less form and the 0x/0b prefixes are unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(digits(ce, { str: '101' }).re).toBe(101);
+    expect(digits(ce, { str: '-42' }).re).toBe(-42);
+    expect(digits(ce, { str: '0xff' }).re).toBe(255);
+    expect(digits(ce, { str: '0b101' }).re).toBe(5);
+  });
+
+  test('a base outside 2..36 is an error', () => {
+    const ce = new ComputeEngine();
+    for (const base of [1, 0, 37, 99]) {
+      const e = digits(ce, { str: '101' }, base);
+      expect(e.operator).toBe('Error');
+      expect(e.toString()).toContain('unexpected-base');
+    }
+  });
+
+  test('DigitsFrom(IntegerString(n, b), b) round-trips', () => {
+    const ce = new ComputeEngine();
+    for (const base of [2, 8, 16, 36]) {
+      for (const n of [0, 5, 42, 1234, -77]) {
+        const s = ce.box(['IntegerString', n, base]).evaluate();
+        expect(ce.box(['DigitsFrom', s, base]).evaluate().re).toBe(n);
+      }
+    }
   });
 });
 

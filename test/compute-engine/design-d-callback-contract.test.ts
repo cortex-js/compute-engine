@@ -1787,8 +1787,12 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
     expect(ce.box('Add').type.toString()).toBe('(value+) -> value');
     // …and an unconverted POLYTYPE keeps its `where` display: the trigger is
     // the presence of a `callback<S>`, not being generic (R-D5, scoping).
+    // `Sort` gained a leading string-preserving arm with Strings Phase 1 (a
+    // reordering of a string's characters is a string), so what is pinned here
+    // is that BOTH arms still display their `where` clause and neither slot
+    // was converted to a `callback<S>`.
     expect(ce.box('Sort').type.toString()).toBe(
-      '(indexed_collection<T>, order: function?) -> list<T> where T'
+      '((T, order: function?) -> T where T: string) & ((indexed_collection<T>, order: function?) -> list<T> where T)'
     );
   });
 

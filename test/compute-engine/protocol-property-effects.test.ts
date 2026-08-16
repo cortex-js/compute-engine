@@ -560,21 +560,10 @@ type R = object{s: string}`,
   });
 });
 
-describe('KNOWN GAP: an accessor body’s own effects are not propagated', () => {
-  test('an authored `set` block that stores infers NO effects of its own', () => {
-    // Pinned as a gap, not as a contract. The stored implementation literal
-    // declares its receiver as `Self`, and the effect walk sees that parameter
-    // typed `unknown` — the `Self` substitution happens per dispatch, not on
-    // the stored literal — so the walk cannot tell that `self.n = v` is a store
-    // and reports nothing.
-    //
-    // Harmless today only because nothing consults it: property members get no
-    // dispatcher, so unlike a FUNCTION member there is no derived union for an
-    // accessor's effects to feed. It becomes load-bearing the moment a setter
-    // that does something BESIDES storing — draws, writes a global — has to be
-    // reported at the call site, since the `state` the call site contributes is
-    // fixed by the call's shape and says nothing about the rest of the body.
-    const { ce } = run(COMPUTED);
+describe('an accessor body’s own effects ARE propagated', () => {
+  /** The stored implementation literal for `key` on the single conformance
+   * edge of the `Aged` protocol. */
+  function storedAccessor(ce: ComputeEngine, key: string): Expression {
     const registry = (
       ce as unknown as {
         _protocolRegistry: Record<
@@ -583,9 +572,40 @@ describe('KNOWN GAP: an accessor body’s own effects are not propagated', () =>
         >;
       }
     )._protocolRegistry;
-    const setter = registry['Aged']!.conformances[0]!.impl!['__set__age']!;
+    return registry['Aged']!.conformances[0]!.impl![key]!;
+  }
+
+  test('an authored `set` block that stores infers `state` of its own', () => {
+    // The receiver of a stored implementation literal is written `Self`, a
+    // substitution token no type resolver knows. Until the substitution was
+    // applied to the STORED literal (it used to happen per dispatch), the
+    // effect walk saw that parameter typed `unknown` and could not tell that
+    // `self.n = v` is a store, so the setter reported no effects at all — and
+    // a `pure` annotation on it would not have been refused by body evidence.
+    const { ce } = run(COMPUTED);
     expect(
-      inferFunctionLiteralEffects(ce as never, setter).effects
+      inferFunctionLiteralEffects(ce as never, storedAccessor(ce, '__set__age'))
+        .effects
+    ).toEqual(['state']);
+  });
+
+  test('the stored setter’s ARROW carries `state`', () => {
+    // `protocolAccessorEffects()` in `effects-of.ts` reads the effects off this
+    // arrow, so the substitution has to reach the stored literal's own type,
+    // not just a walk run over it.
+    const { ce } = run(COMPUTED);
+    const setter = storedAccessor(ce, '__set__age');
+    expect(String(setter.type)).toContain('state');
+    expect(String(setter.type)).toContain('self: Q');
+  });
+
+  test('a non-storing `get` block still infers nothing', () => {
+    // The other side of the same coin: substituting `Self` must not invent
+    // effects for a body that has none.
+    const { ce } = run(COMPUTED);
+    expect(
+      inferFunctionLiteralEffects(ce as never, storedAccessor(ce, '__get__age'))
+        .effects
     ).toBeUndefined();
   });
 });

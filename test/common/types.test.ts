@@ -986,7 +986,10 @@ describe('isSubtype POSITIVE', () => {
   it('should match primitive types that are a subtype', () => {
     expect(isSubtype('integer', 'number')).toBe(true);
     expect(isSubtype('integer', 'real')).toBe(true);
-    expect(isSubtype('string', 'scalar')).toBe(true);
+    // A `character` is the TEXT scalar; `string` left `scalar` when strings
+    // became indexed collections of characters
+    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D1).
+    expect(isSubtype('character', 'scalar')).toBe(true);
   });
 
   it('should match refined numeric types', () => {
@@ -1236,8 +1239,11 @@ describe('isSubtype Tests NEGATIVE', () => {
 
   it('should not match different primitive types', () => {
     expect(isSubtype('number', 'boolean')).toBe(false);
-    // strings are not collections
-    expect(isSubtype('string', 'collection')).toBe(false);
+    // A string IS a collection now — an indexed collection of its grapheme
+    // clusters — but a character is not (it has no elements).
+    expect(isSubtype('string', 'collection')).toBe(true);
+    expect(isSubtype('character', 'collection')).toBe(false);
+    expect(isSubtype('string', 'scalar')).toBe(false);
   });
 
   it('should return false if lhs is a primitive and rhs is a complex type', () => {
@@ -2120,5 +2126,57 @@ describe('the element type of an UNPARAMETERIZED collection type', () => {
     expect(ce.box(['At', 'anIndexed', 1]).type.toString()).toBe('unknown');
     expect(ce.box(['First', 'aCollection']).type.toString()).toBe('unknown');
     expect(ce.box(['Last', 'anIndexed']).type.toString()).toBe('unknown');
+  });
+});
+
+describe('a `string` actual at a BROADCASTABLE pattern is atomic', () => {
+  // `string` carries a hidden element type (its grapheme clusters), so
+  // type-variable binding expands it to `indexed_collection<character>` at a
+  // COLLECTION-kind pattern: `(indexed_collection<T>) -> T` applied to a
+  // string binds `T = character`, not `T = any`.
+  //
+  // `broadcastable<T>` is the deliberate exception. Strings are
+  // broadcast-atomic — a scalar-parameter operator applied to a string
+  // receives the WHOLE string — so `isSubtype('string', broadcastable<S>)`
+  // holds only when the string itself inhabits `S`, never when `S` is the
+  // element type. Binding `T = character` there named a slot the string
+  // cannot inhabit: `broadcastable<character>` refuses `string`.
+  //
+  // The atomic actual therefore binds AS ITSELF, exactly as a `tuple` (the
+  // other broadcast-atomic composite) does.
+
+  // Imported lazily, like the blocks above: `inferTypeArguments` needs the
+  // type algebra the engine installs at construction.
+  const infer = (signature: string, actual: string): string | null => {
+    const {
+      ComputeEngine,
+    } = require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    new ComputeEngine();
+    const {
+      inferTypeArguments,
+    } = require('../../src/common/type/instantiate') as typeof import('../../src/common/type/instantiate');
+    const r = inferTypeArguments(parseType(signature) as any, [actual]);
+    return r ? typeToString(r.T) : null;
+  };
+
+  test('`broadcastable<T>` vs `string` binds `T = string`, not `character`', () => {
+    expect(infer('(broadcastable<T>) -> T where T', 'string')).toBe('string');
+    // And the binding is coherent — the actual inhabits the slot it produced.
+    expect(isSubtype('string', parseType('broadcastable<string>'))).toBe(true);
+    expect(isSubtype('string', parseType('broadcastable<character>'))).toBe(
+      false
+    );
+  });
+
+  test('a `tuple` actual — the analogous atomic kind — binds the same way', () => {
+    expect(
+      infer('(broadcastable<T>) -> T where T', 'tuple<integer, integer>')
+    ).toBe('tuple<integer, integer>');
+  });
+
+  test('a COLLECTION-kind pattern still expands the string', () => {
+    expect(infer('(indexed_collection<T>) -> T where T', 'string')).toBe(
+      'character'
+    );
   });
 });

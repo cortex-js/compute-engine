@@ -16,6 +16,7 @@ import {
   isFunction,
   isSymbol,
   isString,
+  isCharacter,
   isNumber,
   isObject,
 } from './type-guards.js';
@@ -852,7 +853,10 @@ export function toAsciiMath(
   //
   // A string ?
   //
-  if (isString(expr)) {
+  // A character prints exactly like the one-character string it denotes: the
+  // two are the same value, and AsciiMath has no character literal to
+  // distinguish them with.
+  if (isString(expr) || isCharacter(expr)) {
     return `"${expr.string.replace(/"/g, '\\"')}"`;
   }
 

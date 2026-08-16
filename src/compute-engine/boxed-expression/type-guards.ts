@@ -8,6 +8,7 @@ import type {
   SymbolInterface,
   FunctionInterface,
   StringInterface,
+  CharacterInterface,
   TensorInterface,
   CollectionInterface,
   IndexedCollectionInterface,
@@ -72,6 +73,20 @@ export function isString(
   expr: Expression | null | undefined
 ): expr is Expression & StringInterface {
   return expr?._kind === 'string';
+}
+
+/**
+ * Is this expression a **character** — exactly one grapheme cluster?
+ *
+ * A character is a DISJOINT sibling of a string, not a special case of one:
+ * `isString` answers `false` for a character and vice versa. Code that wants
+ * "text content, either kind" tests both and reads `.string`, which both
+ * interfaces expose.
+ */
+export function isCharacter(
+  expr: Expression | null | undefined
+): expr is Expression & CharacterInterface {
+  return expr?._kind === 'character';
 }
 
 /**

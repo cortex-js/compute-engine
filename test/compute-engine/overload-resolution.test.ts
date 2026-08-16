@@ -56,7 +56,10 @@ describe('overload resolution: arm selection', () => {
 describe('overload resolution: diagnostics', () => {
   it('rejects a call no arm accepts', () => {
     const ce = engine();
-    const b = ce.box(['Rnd', { str: 'x' }]);
+    // A BOOLEAN: none of the arms (`collection`, `number`, `set<real>`)
+    // admits it. (A string is no longer such an operand — a string is an
+    // indexed collection of its characters, so the `collection` arm takes it.)
+    const b = ce.box(['Rnd', 'True']);
     expect(b.isValid).toBe(false);
     // The expected type names the whole overload set at that position.
     expect(b.toString()).toContain('collection | number | set<real>');

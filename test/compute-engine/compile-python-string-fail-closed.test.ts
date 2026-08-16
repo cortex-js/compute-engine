@@ -139,9 +139,12 @@ describe('Python: a UNION arm that is a collection disqualifies the scalar ==', 
     }
     // The interpreter, which the fallback reaches, broadcasts.
     ce.assign('uq', ce.box(['List', { str: 'a' }, { str: 'b' }]));
-    expect(ce.box(['Equal', 'uq', { str: 'a' }]).evaluate().toString()).toBe(
-      '["True","False"]'
-    );
+    expect(
+      ce
+        .box(['Equal', 'uq', { str: 'a' }])
+        .evaluate()
+        .toString()
+    ).toBe('["True","False"]');
   });
 
   test('an INFERRED Epsil union with a collection arm declines too', () => {
@@ -392,7 +395,10 @@ describe('Python: ORDERINGS decline only the MIXED string case', () => {
     ce.declare('pl1', 'list<tuple<number, number>>');
     ce.declare('pl2', 'list<tuple<number, number>>');
     expect(() =>
-      python.compileFunction(ce.box(['Less', 'pl1', 'pl2']), 'f', ['pl1', 'pl2'])
+      python.compileFunction(ce.box(['Less', 'pl1', 'pl2']), 'f', [
+        'pl1',
+        'pl2',
+      ])
     ).toThrow(/Less.*ELEMENTS are tuples/s);
   });
 
@@ -884,10 +890,151 @@ describeMaybe('PYTHON STRING/AGGREGATE COMPARISON PARITY (venv)', () => {
         ['List', 1, 2, 3],
         ['List', 1, 2],
       ],
-      [['List', 1], ['List', 1, 2]],
+      [
+        ['List', 1],
+        ['List', 1, 2],
+      ],
     ] as const)
-      expect(
-        engine.box(['Less', ...pair] as any).evaluate().operator
-      ).toBe('Error');
+      expect(engine.box(['Less', ...pair] as any).evaluate().operator).toBe(
+        'Error'
+      );
+  });
+});
+
+describe('Python: string COLLECTION operations fail closed', () => {
+  // Python has no stdlib grapheme segmentation (`len()` counts code points),
+  // so string collection operations do not compile to Python at all. Since
+  // `string` became a subtype of `indexed_collection<character>`, the
+  // collection-operand predicates (`isPyCollectionOperand`, `pyCollArg`) match
+  // a string type, so each carries an explicit string exclusion; these pin it.
+
+  test('`Length` of a string literal is rejected', () => {
+    expect(() => code(ce.box(['Length', { str: 'shop' }]))).toThrow();
+    // The interpreter answers correctly (grapheme clusters).
+    expect(
+      ce
+        .box(['Length', { str: 'shop' }])
+        .evaluate()
+        .toString()
+    ).toBe('4');
+  });
+
+  test('`Map` over a string literal is rejected', () => {
+    expect(() =>
+      code(ce.box(['Map', ['Function', 'c', 'c'], { str: 'abc' }]))
+    ).toThrow();
+  });
+});
+
+describe('Python: the WHOLE string-collection row fails closed (D13)', () => {
+  // Every cell of the compile matrix's string rows is `fail closed` on this
+  // target: a string's elements are UAX #29 grapheme clusters, and Python's
+  // stdlib cannot produce them — `len(s)` counts code points, `s[i]` selects
+  // one, and `for c in s` walks them — so any lowering would disagree with the
+  // interpreter on a combining sequence, a ZWJ emoji family or a
+  // regional-indicator flag.
+  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+  const S = { str: 'abc' };
+  const pred = ['Function', ['Equal', 'c', { str: 'b' }], 'c'];
+
+  test.each([
+    ['Length', ['Length', S]],
+    ['At', ['At', S, 2]],
+    ['Count', ['Count', S]],
+    ['IsEmpty', ['IsEmpty', S]],
+    ['Contains', ['Contains', S, { str: 'b' }]],
+    ['IndexOf', ['IndexOf', S, { str: 'b' }]],
+    ['Map', ['Map', pred, S]],
+    ['Filter', ['Filter', S, pred]],
+    ['Any', ['Any', S, pred]],
+    ['All', ['All', S, pred]],
+    ['Reverse', ['Reverse', S]],
+    ['Take', ['Take', S, 2]],
+    ['Drop', ['Drop', S, 1]],
+    ['Rest', ['Rest', S]],
+    ['Most', ['Most', S]],
+    ['Slice', ['Slice', S, 1, 2]],
+    ['Unique', ['Unique', S]],
+    ['Sort', ['Sort', S]],
+    ['RotateLeft', ['RotateLeft', S, 1]],
+    ['RotateRight', ['RotateRight', S, 1]],
+    ['Characters', ['Characters', S]],
+  ] as const)('%s over a string is rejected', (_name, src) => {
+    expect(() => code(ce.box(src as never))).toThrow();
+  });
+
+  test('the diagnostic names the TARGET CAPABILITY, not a shape mismatch', () => {
+    // A string now MATCHES `indexed_collection`, so "operand is not an indexed
+    // collection" would be a false reason. The message must say what Python
+    // cannot do.
+    expect(() => code(ce.box(['Length', S]))).toThrow(/grapheme segmentation/);
+  });
+
+  test('`for c in s` in a compiled body is rejected', () => {
+    // The emitted `for c in "abc"` would iterate CODE POINTS.
+    expect(() =>
+      code(
+        ce.box([
+          'Comprehension',
+          ['Equal', 'c', { str: 'a' }],
+          ['Element', 'c', S],
+        ])
+      )
+    ).toThrow(/grapheme segmentation/);
+  });
+
+  test('a string-typed free SYMBOL is rejected in the same shapes', () => {
+    ce.declare('sv', 'string');
+    for (const src of [
+      ['Length', 'sv'],
+      ['At', 'sv', 2],
+      ['Reverse', 'sv'],
+    ])
+      expect(() => code(ce.box(src as never))).toThrow();
+  });
+});
+
+describe('Python: the `character` scalar row fails closed (D13, v1)', () => {
+  // A character is one grapheme cluster. Python `str` could HOLD one, but this
+  // target cannot segment a string into characters, so the whole row is closed
+  // for v1 rather than shipped half-working.
+  const chr = (s: string) => ['CharacterFrom', { str: s }] as const;
+
+  test('a `CharacterFrom` literal is rejected', () => {
+    expect(() => code(ce.box(chr('x') as never))).toThrow(
+      /no character representation/
+    );
+  });
+
+  test('character comparisons are rejected', () => {
+    for (const head of ['Equal', 'NotEqual', 'Less', 'Greater'])
+      expect(() => code(ce.box([head, chr('a'), chr('b')] as never))).toThrow();
+  });
+
+  test('a character-TYPED symbol is rejected in a comparison', () => {
+    ce.declare('cv', 'character');
+    ce.declare('dv', 'character');
+    for (const head of ['Equal', 'Less'])
+      expect(() => code(ce.box([head, 'cv', 'dv'] as never))).toThrow(
+        /character participant/
+      );
+  });
+
+  test('a `list<character>` literal is rejected', () => {
+    expect(() => code(ce.box(['List', chr('a'), chr('b')] as never))).toThrow(
+      /no character representation/
+    );
+  });
+
+  test('`String(c)` is rejected', () => {
+    expect(() => code(ce.box(['String', chr('a')] as never))).toThrow();
+  });
+
+  test('string SCALAR support is untouched', () => {
+    // The tier-2 admissions above must not be collateral damage of the
+    // character gate: `character` and `string` are DISJOINT types, so string
+    // evidence never triggers it.
+    expect(code(ce.box(['Equal', { str: 'a' }, { str: 'a' }]))).toContain('==');
+    expect(code(ce.box(['Less', { str: 'a' }, { str: 'b' }]))).toBeTruthy();
   });
 });

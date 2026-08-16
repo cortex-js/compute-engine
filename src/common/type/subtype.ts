@@ -10,6 +10,7 @@ import {
   RANGE_STRUCTURAL_TYPE,
   SCALAR_TYPES,
   SCALAR_TYPES_SET,
+  STRING_STRUCTURAL_TYPE,
   VALUE_TYPES,
 } from './primitive.js';
 import type {
@@ -125,7 +126,15 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   function: [],
   symbol: [],
   boolean: [],
+  // A string has no primitive subtypes. It is a subtype of
+  // `indexed_collection` (and thence `collection`) through the
+  // `indexed_collection` entry above, which lists it. Against a PARAMETERIZED
+  // rhs (`indexed_collection<character>`, `collection<character>`) it is
+  // expanded structurally to `STRING_STRUCTURAL_TYPE` in `isSubtype`. In
+  // particular `character` is NOT here: the two are disjoint siblings.
   string: [],
+  // One grapheme cluster: an atom with no subtypes. Disjoint from `string`.
+  character: [],
   color: [],
   expression: EXPRESSION_TYPES,
 };
@@ -530,6 +539,39 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
     const bHi = b.upper ?? Infinity;
     return aHi < bLo || bHi < aLo;
   }
+
+  // `string` is a primitive with a HIDDEN element type (`character`), so the
+  // coarse category test below cannot separate it from a PARAMETERIZED
+  // collection: `string <: indexed_collection`, so the two share that bucket
+  // and the test reports "may overlap" for `string` vs
+  // `indexed_collection<number>`. Decide on the ELEMENT instead — every string
+  // value's elements are characters, so a string inhabits
+  // `indexed_collection<E>` exactly when `character <: E`.
+  //
+  // The "an empty collection inhabits both" caveat at the bottom of this
+  // function does NOT apply here: `string` is one monomorphic type, not a
+  // family, so there is no `string<never>` analogue of `list<never>` for the
+  // empty string to inhabit — the empty string is a `string`, whose element
+  // type is `character` whether or not it has any elements.
+  //
+  // Load-bearing beyond tidiness: `box.ts` keeps an argument-type error only
+  // when every candidate parameter is provably disjoint from the operand, so
+  // without this a `(broadcastable<number>) -> number` parameter silently
+  // admitted a string argument that the plain `(number)` spelling refuses
+  // (the generalized Tycho item 157(4) contract).
+  const stringVsParameterized = (
+    text: Type,
+    other: Type
+  ): boolean | undefined => {
+    if (text !== 'string') return undefined;
+    if (typeof other === 'string') return undefined;
+    if (other.kind !== 'collection' && other.kind !== 'indexed_collection')
+      return undefined;
+    return !isSubtype('character', other.elements);
+  };
+  const stringDisjoint =
+    stringVsParameterized(a, b) ?? stringVsParameterized(b, a);
+  if (stringDisjoint !== undefined) return stringDisjoint;
 
   // Category test: every type sits in a primitive "bucket" the lattice knows
   // about (`list`, `tuple`, `string`, `function`, …). If two buckets have an
@@ -1190,6 +1232,16 @@ export function isSubtype(
   // a subtype of `list<T>`, so `range <: list<integer>` stays false, which is
   // the intent (they are sibling kinds).
   if (lhs === 'range') return isSubtype(RANGE_STRUCTURAL_TYPE, rhs);
+
+  // `string` is the other primitive with a structural reading: a string is an
+  // indexed collection of `character`, so it must satisfy a PARAMETERIZED
+  // collection rhs (`string <: indexed_collection<character>`,
+  // `string <: collection<character>`) that the primitive-vs-primitive table
+  // above cannot express. As with `range`, this does NOT make a string a
+  // `list` — `string <: list<character>` stays false, which is the intent
+  // (they are sibling kinds, because joining strings can merge their boundary
+  // characters while joining lists never merges elements).
+  if (lhs === 'string') return isSubtype(STRING_STRUCTURAL_TYPE, rhs);
 
   // A primitive type is not a subtype of a composite type (except a union)
   if (typeof lhs === 'string') return false;

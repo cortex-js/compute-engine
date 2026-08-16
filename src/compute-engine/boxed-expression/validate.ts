@@ -64,9 +64,11 @@ import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
   isSymbol,
   isFunction,
+  isString,
   isContinuationOperand,
   containsContinuationOperand,
 } from './type-guards.js';
+import { narrowStringLiteralToCharacter } from './boxed-character.js';
 
 // Parsed once: the type of an indexed collection whose every element is a
 // number. Used in `checkNumericArgs` to accept collections for broadcasting on
@@ -532,6 +534,10 @@ export function checkType(
 
   if (arg.type.matches(type)) return arg;
 
+  // A one-cluster string literal at a `character` parameter narrows.
+  const narrowed = narrowCharacterLiteral(ce, arg, type);
+  if (narrowed !== undefined) return narrowed;
+
   // Value-component type (`0`, `integer<0..10>`): tri-state admission —
   // membership or undecidability admits; only proven refutation errors.
   // See `value-membership.ts`.
@@ -545,6 +551,68 @@ export function checkType(
   if (overlapsForDeferredValidation(arg.type.type, type)) return arg;
 
   return ce.typeError(type, arg.type, arg);
+}
+
+/**
+ * Does `param` expect a CHARACTER and refuse a string?
+ *
+ * True for the bare `character` type, and for a union that has a `character`
+ * arm and no arm that already admits a string. An arm admitting the string
+ * operand as-is means the call has a home for the literal as written, so
+ * narrowing would silently resolve it to a DIFFERENT arm than the one the
+ * author's value matched.
+ *
+ * "Admits a string" is tested with `isSubtype('string', arm)` rather than by
+ * comparing the arm to the literal `'string'`: an identity test missed a
+ * reference or alias arm that resolves to `string`, a nested union with a
+ * `string` arm inside it, and a SUPERTYPE arm such as `value`, `expression`
+ * or `any` — each of which accepts the string without help. `isSubtype`
+ * resolves aliases and looks through nested unions itself, so no recursion is
+ * needed here.
+ *
+ * Exported because literal narrowing happens in two places that must agree on
+ * which declared types trigger it: argument validation (below) and a typed
+ * declaration or assignment (`Declare`/`Assign` in `library/core.ts`).
+ */
+export function expectsCharacterNotString(param: Type): boolean {
+  if (param === 'character') return true;
+  if (typeof param === 'string') return false;
+  if (param.kind !== 'union') return false;
+  let hasCharacter = false;
+  for (const arm of param.types) {
+    if (isSubtype('string', arm)) return false;
+    if (arm === 'character') hasCharacter = true;
+  }
+  return hasCharacter;
+}
+
+/**
+ * LITERAL NARROWING: a string literal in a `character`-expecting position
+ * becomes the character it denotes.
+ *
+ * Epsil has no character literal — `"a"` is a string — so without this the
+ * `character` type would be unusable in practice: `f(c: character)` could
+ * never be called with a written-out character. The criterion is the one
+ * `CharacterFrom` applies (`isSingleGraphemeCluster`), so there is exactly one
+ * definition of "one character" in the system; a multi-cluster or empty
+ * literal returns `undefined` here and falls through to the ordinary
+ * `incompatible-type` error.
+ *
+ * Confined to LITERALS on purpose: a `string`-TYPED expression does NOT
+ * implicitly convert (`docs/STRING_ROADMAP.md`, design constraint 4) and must
+ * be written `CharacterFrom(s)`.
+ *
+ * Returns `undefined` when no narrowing applies, so every call site is
+ * `narrowCharacterLiteral(...) ?? <its existing behavior>`.
+ */
+function narrowCharacterLiteral(
+  ce: ComputeEngine,
+  op: Expression,
+  param: Type
+): Expression | undefined {
+  if (!isString(op)) return undefined;
+  if (!expectsCharacterNotString(param)) return undefined;
+  return narrowStringLiteralToCharacter(ce, op);
 }
 
 export function checkTypes(
@@ -1061,6 +1129,15 @@ export function validateArguments(
     }
 
     if (!op.type.matches(param)) {
+      // A one-cluster string literal at a `character` parameter narrows to
+      // the character it denotes; a multi-cluster one falls through to the
+      // ordinary type error below.
+      const asCharacter = narrowCharacterLiteral(ce, op, param);
+      if (asCharacter !== undefined) {
+        result.push(asCharacter);
+        substituted = true;
+        continue;
+      }
       // Value-component parameter (`0`, `integer<0..10>`): tri-state
       // admission (§4.4). A concrete value passing membership ADMITS; a
       // symbolic operand that is not provably disjoint is UNDECIDABLE and
@@ -1210,6 +1287,15 @@ export function validateArguments(
       continue;
     }
     if (!op.type.matches(param)) {
+      // Literal narrowing at a `character` parameter — see the required-param
+      // gate.
+      const asCharacter = narrowCharacterLiteral(ce, op, param);
+      if (asCharacter !== undefined) {
+        result.push(asCharacter);
+        substituted = true;
+        i += 1;
+        continue;
+      }
       // Value-component tri-state admission — see the required-param gate
       // (deferred: the final inference pass must not narrow a symbol to the
       // value type).
@@ -1306,6 +1392,14 @@ export function validateArguments(
         continue;
       }
       if (!op.type.matches(varParam)) {
+        // Literal narrowing at a `character` parameter — see the
+        // required-param gate.
+        const asCharacter = narrowCharacterLiteral(ce, op, varParam);
+        if (asCharacter !== undefined) {
+          result.push(asCharacter);
+          substituted = true;
+          continue;
+        }
         // Value-component tri-state admission — see the required-param gate
         // (deferred: the final inference pass must not narrow a symbol to
         // the value type).

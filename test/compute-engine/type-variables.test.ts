@@ -1356,7 +1356,10 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
     const ce2 = fresh();
     ce2.declare('rvA', 'any');
     expect(ce2.function('Reverse', [ce2.box('rvA')]).isValid).toBe(true);
-    expect(ce2.function('Reverse', [ce2.string('hello')]).isValid).toBe(false);
+    // A `set` is genuinely wrong for an `indexed_collection` bound; a STRING
+    // is not, since strings became indexed collections of their characters.
+    ce2.declare('rvSet', 'set<integer>');
+    expect(ce2.function('Reverse', [ce2.box('rvSet')]).isValid).toBe(false);
   });
 
   test('a NESTED top type is NOT waived — both routes refuse (D8 is top-level)', () => {

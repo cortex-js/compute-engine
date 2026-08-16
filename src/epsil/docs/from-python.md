@@ -233,8 +233,9 @@ Arithmetic broadcasts over a list elementwise, without anything like NumPy:
 |:--|:--|
 | `f"x is {x}"` | `"x is \(x)"` — works in any string literal |
 | `"a" + "b"` | `StringJoin("a", "b")` — `+` on strings is a **type error** |
-| `len(s)` | `Length(Characters(s))` — strings are not collections |
-| `s[0]` | `Characters(s)[1]` |
+| `len(s)` | `Length(s)` — a string is a collection of its characters (grapheme clusters, not code points) |
+| `s[0]` | `s[1]` — 1-based; each element is a `character` |
+| `c in s` | `c in s` — character membership; substring search is a separate operation |
 | `s.split()` / `s.split(",")` | `StringSplit(s)` / `StringSplit(s, ",")` |
 | `"".join(parts)` | `StringJoin(…)`, or `Fold` over the parts |
 | `str(x)` | `String(x)` |
@@ -244,14 +245,17 @@ Arithmetic broadcasts over a list elementwise, without anything like NumPy:
 ```epsil
 let name = "world"
 let parts = StringSplit("a b c")
-("hello \(name)", StringJoin("a", "b"), Length(Characters(name)), parts[2])
+("hello \(name)", StringJoin("a", "b"), Length(name), parts[2])
 // ➔ ("hello world", "ab", 5, "b")
 ```
 
-There is no `.upper()`, `.replace()`, `.find()` or `.strip()`: the string
-library today is `Characters`, `GraphemeClusters`, `UnicodeScalars`,
-`StringSplit`, `StringJoin`, `StringFrom` and `String`. Decompose to a list of
-characters or code points, work there, and rebuild.
+There is no `.upper()`, `.replace()`, `.find()` or `.strip()` yet. A string
+is an indexed collection of `character` values, so the generic collection
+operators apply directly (`Length`, `Reverse`, `Filter`, `Sort`, `Contains`,
+`IndexOf`, `Map` — the element-preserving ones return a string, `Map` returns
+a list; rejoin with `String(...)`). For a specific decomposition use
+`Characters`, `UnicodeScalars`, `Utf8`/`Utf16`; `StringSplit`, `StringJoin`,
+`StringFrom` and `String` round out the library.
 
 ## Errors
 

@@ -18,6 +18,7 @@ import {
   isTuple,
   hasAccessibleComponents,
   isFiniteIndexedCollection,
+  isFiniteBroadcastParticipant,
   isBroadcastableCollection,
   isUnknownLengthBroadcast,
   lazyBroadcastMap,
@@ -1589,7 +1590,7 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
   // Tuples (points/vectors, incl. Desmos point-lists like `(1, 0.3n)` with a
   // list component) are EXCLUDED — they scale component-wise via `mulTuples`,
   // never broadcast as a list.
-  if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
+  if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
     const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, false, true);
     if (r) return r;
   }
@@ -1634,7 +1635,7 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
     if (r) return r;
   }
   // Broadcast over a non-tensor finite indexed collection (see `mul`).
-  if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
+  if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
     const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
     if (r) return r;
   }
@@ -1667,7 +1668,7 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
       const rt = mulTensors(ce, xs, true);
       if (rt) return rt;
     }
-    if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
+    if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
       const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
       if (r) return r;
     }

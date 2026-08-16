@@ -138,6 +138,7 @@ import {
   couldBeCollectionParticipant,
   isFlatAllStringComparisonParticipant,
   isNumericTupleParticipant,
+  isProvablyCharacterOperand,
   isProvablyStringComparisonParticipant,
   isProvablyStringOperand,
   isProvablyTupleParticipant,
@@ -224,6 +225,69 @@ function assertNoStringOperand(
 }
 
 /**
+ * True when the operand is a SCALAR piece of text: provably a `string` or
+ * provably a `character`.
+ *
+ * `character` and `string` are disjoint siblings in the type lattice, so
+ * `isProvablyStringOperand` alone answers "no" for a character and every
+ * text-accepting lowering has to ask both questions. A character lowers to the
+ * one-cluster JS string it denotes, so wherever a string operand is
+ * concatenated or compared by value, a character operand is handled by exactly
+ * the same emitted code — which is why the two are admitted together by
+ * `StringJoin`/`String`, the operators whose interpreter counterparts take
+ * either kind.
+ */
+function isProvablyTextOperand(x: Expression): boolean {
+  return isProvablyStringOperand(x) || isProvablyCharacterOperand(x);
+}
+
+/**
+ * True when the ELEMENTS a collection operand yields may be text at run time:
+ * the operand is provably a `string` (which `elementsArg` segments into
+ * one-cluster strings), or its element type OVERLAPS `string`/`character` — a
+ * `list<string>` proves it, a `list<number | string>` admits it.
+ *
+ * The "overlap" direction (`couldMatch`, which distributes over unions) is what
+ * a value-equality lowering needs: an element that is text at run time must go
+ * through the interpreter's text conditioning even when the static type only
+ * allows it. Call sites are element-comparison lowerings (`Contains`,
+ * `Unique`) that have already run `requirePrimitiveElements`, so a top-typed
+ * element type — for which `couldMatch` also answers true — has failed closed
+ * before reaching this test.
+ */
+function hasPossiblyTextElements(e: Expression | undefined): boolean {
+  if (e === undefined) return false;
+  if (isProvablyStringOperand(e)) return true;
+  const elt = collectionElementType(jsType(e));
+  if (elt === undefined) return false;
+  return couldMatch(elt, 'string') || couldMatch(elt, 'character');
+}
+
+/**
+ * True when `e`'s static type ADMITS text without proving it — a union with an
+ * arm that is a subtype of `string` or `character`, e.g. `string | list<number>`
+ * (an alias is resolved first, by `jsType`).
+ *
+ * Such an operand is invisible to `isProvablyStringOperand` (the union is not a
+ * subtype of `string`) yet IS a subtype of `indexed_collection` — string and
+ * list both are — so `isIndexedCollectionOperand` admits it and the list
+ * lowerings would run `.slice()`, `.reverse()` and `...` spread over a JS
+ * STRING at run time, operating on UTF-16 code units behind `success: true`
+ * (`Reverse` on a decomposed `"é"` would split the base letter from its
+ * combining mark). `elementsArg` cannot rescue it either: segmenting is gated
+ * on PROOF of a string, so the union is passed through unsegmented. The
+ * collection funnels therefore fail closed on it (D6).
+ */
+function couldBeStringOperand(e: Expression): boolean {
+  const t = jsType(e);
+  if (typeof t !== 'object' || t.kind !== 'union') return false;
+  return t.types.some(
+    (m) =>
+      m !== 'never' && (isSubtype(m, 'string') || isSubtype(m, 'character'))
+  );
+}
+
+/**
  * True when the operand's own type PROVES a number — the disqualifier for the
  * scalar string-equality admission below. `unknown` is not proof (nothing is
  * known), and neither is `never`.
@@ -288,7 +352,23 @@ function isProvablyNumericOperand(x: Expression): boolean {
  */
 function isStringScalarEquality(args: ReadonlyArray<Expression>): boolean {
   if (args.length !== 2) return false;
-  if (!args.some(isProvablyStringOperand)) return false;
+  // A CHARACTER is text evidence too, on the same footing as a string: it
+  // lowers to the one-cluster JS string it denotes, and the interpreter's
+  // equality BRIDGES the two kinds (`compare.ts` / `BoxedCharacter.isSame` —
+  // a character and a one-cluster string with the same NFC content are equal),
+  // so the strict `===` is faithful for a character/character and a
+  // character/string pair alike. Without this clause a two-character `Equal`
+  // had no text evidence at all and fell through to the NUMERIC tolerance
+  // lowering, which is `Math.abs("a" - "a") <= tol` — `NaN <= tol` — so
+  // `CharacterFrom("a") == CharacterFrom("a")` compiled to `false` where the
+  // interpreter answers `True` (probed).
+  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+  if (
+    !args.some(
+      (a) => isProvablyStringOperand(a) || isProvablyCharacterOperand(a)
+    )
+  )
+    return false;
   if (args.some(isProvablyNumericOperand)) return false;
   if (args.some((a) => unfaithfulComparisonAggregate(a) !== null)) return false;
   return !args.some(
@@ -487,9 +567,31 @@ function compileJSEquality(
   const stringCollection = !stringScalar && isStringCollectionEquality(args);
   if (!stringScalar && !stringCollection) assertNoStringOperand(kind, args);
   if (stringScalar) {
-    // Strict, NOT the tolerance test: the interpreter compares strings exactly.
-    const op = kind === 'Equal' ? '===' : '!==';
-    return `((${compile(args[0])}) ${op} (${compile(args[1])}))`;
+    // Content equality with NO tolerance — the interpreter's text semantics
+    // (`compare.ts` compares `a.string === b.string`) — emitted as `_SYS.eqt`.
+    //
+    // `eqt` puts a STRING/STRING pair through the same ingress conditioning the
+    // interpreter applies when it boxes a string or a character (NFC, then the
+    // lone-surrogate replacement) before comparing, which a bare `===` does
+    // not: `===` answers `false` for a decomposed host string bound to a
+    // parameter that the interpreter reads as equal to its precomposed
+    // literal. Both operands are normalized — maintainer ruling, 2026-08-16,
+    // closing what was pinned until then as "DOCUMENTED DIVERGENCE: a non-NFC
+    // runtime string is not normalized" in
+    // `compile-string-fail-closed.test.ts`. Literals are unaffected: they are
+    // boxed, hence already conditioned, before codegen.
+    //
+    // Every other pair falls back to strict `===` inside `eqt`, which is what
+    // keeps the admitted possibly-text participants honest: this lowering also
+    // takes a bare `unknown` operand, and stringifying it would make
+    // `Equal(anyq, "1")` answer `true` for the NUMBER 1, where the interpreter
+    // answers `False`. That is why the character arm uses `eqt` too rather
+    // than the `_SYS.cmpc` comparator the character ORDERINGS use — the two
+    // agree on every text pair, since `cmpc` conditions its operands
+    // identically.
+    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    const eq = `_SYS.eqt(${compile(args[0])}, ${compile(args[1])})`;
+    return kind === 'Equal' ? `(${eq})` : `(!${eq})`;
   }
   // Equality over a (possibly-)collection operand: a raw `Math.abs(a - b)`
   // over a list silently coerces (`[1,2,3] - 2` → NaN), so the scalar codegen
@@ -649,7 +751,73 @@ function compileJSCollectionBoolean(
     // function would otherwise catch the same shapes under "no element-wise
     // runtime dispatch".
     assertComparableAggregate(kind, args);
+    // A CHARACTER participant is diverted here from the infix path in
+    // `BaseCompiler` (`orderingOverCharacter`), because a raw `<` on the
+    // one-cluster JS strings characters lower to compares UTF-16 code UNITS,
+    // which sorts every astral character below U+E000–U+FFFF. The interpreter
+    // orders characters by their code-point SEQUENCE (`compare.ts`, decision
+    // D8), which is what `_SYS.cmpc` reproduces.
+    //
+    // BINARY all-character only. A chained character ordering would need the
+    // evaluate-each-operand-once temporaries the infix chain path binds, and a
+    // character MIXED with anything else fails closed for the same reason a
+    // mixed string ordering does: the interpreter leaves
+    // `Less(CharacterFrom("a"), 1)` symbolic, whereas an emitted comparison
+    // answers a plausible-looking boolean. A character/one-cluster-string pair
+    // does compare in the interpreter, but it lands on the mixed-string gate
+    // below, which keeps it closed until that widening is decided.
+    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    if (args.some(isProvablyCharacterOperand)) {
+      if (args.length === 2 && args.every(isProvablyCharacterOperand)) {
+        const op =
+          JS_ORDERING_OPERATORS[kind as keyof typeof JS_ORDERING_OPERATORS];
+        return `(_SYS.cmpc(${compile(args[0], 0)}, ${compile(
+          args[1],
+          1
+        )}) ${op} 0)`;
+      }
+      throw new Error(
+        `${kind}: cannot compile — an ordering that mixes a character ` +
+          `operand with an operand that is not provably a character (or a ` +
+          `chained character ordering). A BINARY all-character ordering does ` +
+          `compile, through the code-point comparator the interpreter uses. ` +
+          `Fail closed (D6) — the interpreter evaluates it.`
+      );
+    }
     assertNoMixedStringOrdering(kind, args);
+    // A BINARY ALL-STRING ordering is diverted here from the infix path in
+    // `BaseCompiler` so that both operands can be put through the same ingress
+    // conditioning the interpreter applies when it boxes a string — Unicode
+    // NFC normalization, then the lone-surrogate → U+FFFD replacement
+    // (`_SYS.ct`, see `conditionText`). The COMPARISON stays the raw infix
+    // `<`/`<=`/`>`/`>=`: the interpreter compares two strings with JavaScript's
+    // own `<` on their already-conditioned content (`compare.ts`), i.e. UTF-16
+    // code-unit order AFTER normalization, so the faithful lowering conditions
+    // the operands and keeps the operator. (Not `_SYS.cmpc`, the character
+    // comparator: it orders by CODE POINT, which would place every astral
+    // character above U+E000–U+FFFF instead of below it, disagreeing with the
+    // interpreter on strings.) Without the conditioning, a decomposed
+    // `"e" + U+0301` bound to a string parameter compared as LESS than the
+    // precomposed `"é"` literal, where the interpreter reads the two as the
+    // same string. Maintainer ruling, 2026-08-16.
+    //
+    // A string LITERAL is left unwrapped: it was conditioned when it was boxed,
+    // so `_SYS.ct` on it is a no-op, and skipping it keeps a literal/literal
+    // comparison emitting exactly what it emitted before.
+    //
+    // BINARY only, and the divert in `BaseCompiler` matches: a CHAINED
+    // all-string ordering stays on the infix path there, which binds
+    // temporaries so that each operand is evaluated exactly once and the
+    // comparisons short-circuit — neither of which this arm reproduces.
+    if (args.length === 2 && args.every(isProvablyStringOperand)) {
+      const op =
+        JS_ORDERING_OPERATORS[kind as keyof typeof JS_ORDERING_OPERATORS];
+      const conditioned = (i: 0 | 1): string =>
+        isString(args[i])
+          ? `(${compile(args[i], i)})`
+          : `_SYS.ct(${compile(args[i], i)})`;
+      return `(${conditioned(0)} ${op} ${conditioned(1)})`;
+    }
   }
   // SCALAR operands still lower normally. This handler is also reached from
   // INSIDE the `_SYS.bcast` closure that `BaseCompiler.tryCompileBroadcast`
@@ -801,6 +969,14 @@ function compileScalarBooleanBody(
  */
 function isIndexedCollectionOperand(e: Expression): boolean {
   const t = e.type;
+  // A STRING is an indexed collection of its grapheme clusters in the type
+  // lattice, so it MATCHES `indexed_collection` — but it does not lower to a
+  // JS array, and the generic lowerings would be wrong on it in ways that look
+  // right: `Length` would emit `.length`, which counts UTF-16 code units, not
+  // characters. Excluded EXPLICITLY (it used to be excluded only as a side
+  // effect of `string` not matching `indexed_collection`), so string
+  // operations fail closed here until the grapheme-aware lowerings exist.
+  if (t.matches('string')) return false;
   return t.matches('list') || t.matches('indexed_collection');
 }
 
@@ -824,6 +1000,8 @@ function isIndexedCollectionOperand(e: Expression): boolean {
 function couldBeIndexedCollectionOperand(e: Expression): boolean {
   const t = jsType(e);
   if (t === 'unknown' || t === 'any' || t === 'value') return false;
+  // A string is not an array-shaped operand — see `isIndexedCollectionOperand`.
+  if (t === 'string') return false;
   if (typeof t === 'object' && t.kind === 'union')
     return t.types.some((m) => isSubtype(m, 'indexed_collection'));
   return isSubtype(t, 'indexed_collection');
@@ -1165,6 +1343,12 @@ function isPointListSource(e: Expression): boolean {
   if (t === 'tuple') return false;
   if (typeof t !== 'string' && (t.kind === 'tuple' || t.kind === 'union'))
     return false;
+  // A STRING matches `indexed_collection` (its elements are its grapheme
+  // clusters) but is NOT a zip source: it lowers to a JS string, which has a
+  // `.length` and so would zip into garbage, and the runtime `PointList`
+  // treats it atomically too. It is a scalar SLOT — the same value in every
+  // point.
+  if (t === 'string') return false;
   return e.type.matches('indexed_collection');
 }
 
@@ -1176,6 +1360,9 @@ function isPointListSource(e: Expression): boolean {
 function isProvablyNonScalarType(t: Type): boolean {
   if (typeof t !== 'string' && t.kind === 'union')
     return t.types.some(isProvablyNonScalarType);
+  // A string occupies a SCALAR slot — see `isPointListSource` and the mirror
+  // guard in the `PointList` definition handler.
+  if (t === 'string') return false;
   return isSubtype(t, 'collection');
 }
 
@@ -1529,7 +1716,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.cexp(${compile(args[0])})`;
     return `Math.exp(${compile(args[0])})`;
   },
-  First: (args, compile) => `${compile(args[0])}[0]`,
+  // A STRING source is SEGMENTED first: `"s"[0]` selects a UTF-16 code unit,
+  // which for an astral character is half a surrogate pair and for a decomposed
+  // sequence only the base letter, where the interpreter yields the whole
+  // grapheme cluster (`docs/plans/2026-08-16-string-phase1-character-type.md`,
+  // decision D13).
+  First: (args, compile) =>
+    isProvablyStringOperand(args[0])
+      ? `_SYS.chars(${compile(args[0])})[0]`
+      : `${compile(args[0])}[0]`,
   Floor: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `Math.floor(${compile(args[0])})`;
@@ -1583,10 +1778,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const arg = args[0];
     if (arg === null || arg === undefined)
       throw new Error('Length: no argument');
+    // A STRING's length is its GRAPHEME-CLUSTER count, which is what the
+    // interpreter's `BoxedString.count` reports. Never `.length` on the JS
+    // string: that counts UTF-16 code units, so a ZWJ family emoji would
+    // measure 8 and a decomposed `"é"` 2, where the interpreter answers 1.
+    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    if (isProvablyStringOperand(arg))
+      return `_SYS.chars(${compile(arg)}).length`;
     if (!isIndexedCollectionOperand(arg))
       throw new Error(
         `Length: cannot compile — operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
+      );
+    // A union with a text arm (`string | list<number>`) is a subtype of
+    // `indexed_collection` — a string is one — and so passes the test above,
+    // but `.length` on the JS string it may hold at run time counts UTF-16
+    // code units, not the grapheme clusters the interpreter counts. Refused
+    // (D6); see `couldBeStringOperand`.
+    if (couldBeStringOperand(arg))
+      throw new Error(
+        `Length: cannot compile — operand may be text at run time (its type ` +
+          `has a string arm), and \`.length\` counts UTF-16 code units, not ` +
+          `characters. Fail closed (D6) — the interpreter evaluates it.`
       );
     return `(${compile(arg)}).length`;
   },
@@ -1615,7 +1828,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `At: only the single-index form compiles; multi-index (nested) ` +
           `access is not supported. Fail closed (D6).`
       );
-    const provablyIndexed = isIndexedCollectionOperand(coll);
+    // A STRING base is indexed by GRAPHEME CLUSTER, so it is segmented first
+    // and `_SYS.at` then applies the ordinary 1-based / negative-from-the-end
+    // convention to the cluster array — which is exactly what the interpreter's
+    // `BoxedString.at` does (`boxed-string.ts`: a negative index resolves to
+    // `count + index + 1`, and anything out of range yields no value). Indexing
+    // the JS string directly would select UTF-16 code units and hand back half
+    // a surrogate pair.
+    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    const stringBase = isProvablyStringOperand(coll);
+    const provablyIndexed = stringBase || isIndexedCollectionOperand(coll);
     if (!provablyIndexed && !couldBeIndexedCollectionOperand(coll))
       throw new Error(
         `At: cannot compile — first operand is not an indexed collection ` +
@@ -1640,7 +1862,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `boolean | indexed_collection | number | string`), so refusing on
     // "not provably real" declined ordinary compilable code such as `P[n]`
     // inside a comprehension. Matching the interpreter beats refusing.
-    const base = `_SYS.at(${compile(coll)}, ${compile(index)})`;
+    const base = `_SYS.at(${stringBase ? `_SYS.chars(${compile(coll)})` : compile(coll)}, ${compile(index)})`;
     // `_SYS.at` marks an out-of-band SCALAR access with `NaN` (the numeric
     // absence marker). For an OBJECT-domain collection (non-numeric elements),
     // absence must instead be the target null (`undefined`, I6) so the object
@@ -1680,12 +1902,30 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const init = args[2];
     if (coll === null || coll === undefined || op === null || op === undefined)
       throw new Error('Reduce: missing argument');
-    if (!isIndexedCollectionOperand(coll))
+    // A STRING source folds over its CHARACTERS — see `elementsArg`. The gate
+    // runs here, ahead of the combiner checks, so the order in which the two
+    // diagnostics are reported is unchanged; the operand itself is compiled
+    // below, where it was.
+    if (!isProvablyStringOperand(coll) && !isIndexedCollectionOperand(coll))
       throw new Error(
         `Reduce: cannot compile — first operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
       );
     let combiner = builtinCombiner(op);
+    // The four builtin folds are ARITHMETIC, and the interpreter refuses to
+    // apply them to characters: `Reduce("abc", Add)` is an
+    // `incompatible-type` error there (probed), whereas the emitted
+    // `(_a, _b) => _a + _b` over one-cluster strings CONCATENATES and would
+    // answer `"abc"` behind `success: true`. A CUSTOM combiner is unaffected —
+    // whatever it does to a character, it does the same thing compiled.
+    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    if (combiner !== undefined && isProvablyStringOperand(coll))
+      throw new Error(
+        `Reduce: cannot compile — an ${(op as Expression & { symbol?: string }).symbol ?? 'arithmetic'} ` +
+          `fold over a string folds over its CHARACTERS, which the ` +
+          `interpreter rejects with an \`incompatible-type\` error rather ` +
+          `than combining. Fail closed (D6) — the interpreter evaluates it.`
+      );
     if (
       combiner === undefined &&
       (isFunction(op, 'Function') || isSymbol(op))
@@ -1702,6 +1942,24 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         undefined,
         BaseCompiler.collectionElementTypeOf(coll),
       ]);
+      // INTERIM FAIL-CLOSED (ruled 2026-08-16). Only the ELEMENT lane is
+      // reasoned about in this lowering; the ACCUMULATOR lane is not, so a
+      // real seed folded by a body that yields complex seeds a number and then
+      // adds `{re, im}` objects to it — `Reduce(L, (a,x) => a + 2x, 0)` over
+      // `[1+2i, i]` answered `{re: "[object Object]0", im: 2}` behind
+      // `success: true` where the interpreter gives `2+6i`. Declining is the
+      // interim: the real fix is accumulator-lane widening plus seed coercion,
+      // tracked in ROADMAP.md as its own work package. A fold whose
+      // accumulator stays real (`a + |x|` over the same complex source) is
+      // correct and keeps compiling — see `reduceAccumulatorWidens`.
+      if (BaseCompiler.reduceAccumulatorWidens(coll, op, init))
+        throw new Error(
+          `Reduce: the accumulator would have to become complex part-way ` +
+            `through the fold, which this lowering does not support — it ` +
+            `would seed a real accumulator and then add complex values to ` +
+            `it, silently. Fail closed (D6). Evaluate instead, or seed the ` +
+            `fold with a complex initial value.`
+        );
       combiner = customCombiner(op, compile, target);
     }
     if (combiner === undefined)
@@ -1710,7 +1968,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `Add/Multiply/Min/Max folds, function literals, and user-defined ` +
           `functions compile on the JavaScript target. Fail closed (D6).`
       );
-    const collCode = compile(coll);
+    const collCode = elementsArg('Reduce', coll, compile);
     // With an initial value, seed the reduce; without one, the native reduce
     // uses the first element as the seed (matching the interpreter, which
     // returns the sole/first element for a singleton and folds pairwise). A
@@ -1728,11 +1986,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   //
   // `Last` is the last element (`At(coll, -1)`); an empty collection yields NaN
   // (the interpreter's `Nothing` projected onto a real target).
-  Last: (args, compile) => `_SYS.at(${collArg('Last', args[0], compile)}, -1)`,
+  Last: (args, compile) =>
+    `_SYS.at(${elementsArg('Last', args[0], compile)}, -1)`,
   // All-but-first / all-but-first-n / first-n. `Take`/`Drop` clamp the count to
   // ≥ 0 so a negative count matches the interpreter (`Take(xs, -2) = []`,
   // `Drop(xs, -2) = xs`), and JS `slice` already clamps a count past the end.
-  Rest: (args, compile) => `(${collArg('Rest', args[0], compile)}).slice(1)`,
+  Rest: (args, compile) =>
+    joinIfString(
+      args[0],
+      `(${elementsArg('Rest', args[0], compile)}).slice(1)`
+    ),
   Take: (args, compile) => {
     if (args[1] == null) throw new Error('Take: missing count');
     // A statically infinite operand (`Take(Map(f, 1..∞), n)`) compiles as a
@@ -1751,25 +2014,40 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         );
       return `_SYS.takeIter(${emitLazyStream(args[0]!, compile)}, ${compile(args[1])})`;
     }
-    const coll = collArg('Take', args[0], compile);
-    return `(${coll}).slice(0, ${clampedSliceCount(args[1], compile)})`;
+    const coll = elementsArg('Take', args[0], compile);
+    return joinIfString(
+      args[0],
+      `(${coll}).slice(0, ${clampedSliceCount(args[1], compile)})`
+    );
   },
   Drop: (args, compile) => {
-    const coll = collArg('Drop', args[0], compile);
+    const coll = elementsArg('Drop', args[0], compile);
     if (args[1] == null) throw new Error('Drop: missing count');
-    return `(${coll}).slice(${clampedSliceCount(args[1], compile)})`;
+    return joinIfString(
+      args[0],
+      `(${coll}).slice(${clampedSliceCount(args[1], compile)})`
+    );
   },
   // Reverse and (ascending, numeric) Sort — copy first so the source array is
   // not mutated. A custom `Sort` comparator is not lowered (fails closed).
   Reverse: (args, compile) =>
-    `(${collArg('Reverse', args[0], compile)}).slice().reverse()`,
+    joinIfString(
+      args[0],
+      `(${elementsArg('Reverse', args[0], compile)}).slice().reverse()`
+    ),
   Sort: (args, compile) => {
-    const coll = collArg('Sort', args[0], compile);
+    const coll = elementsArg('Sort', args[0], compile);
     if (args.length > 1)
       throw new Error(
         `Sort: a custom comparator does not compile; only the default ` +
           `ascending numeric sort is supported. Fail closed (D6).`
       );
+    // A STRING source sorts its CHARACTERS, which are ordered by code-point
+    // sequence, not numerically: the numeric comparator below would answer NaN
+    // for every pair and leave the array in source order. `_SYS.cmpc` is the
+    // interpreter's own character order (`compare.ts`, decision D8).
+    if (isProvablyStringOperand(args[0]))
+      return joinIfString(args[0], `(${coll}).slice().sort(_SYS.cmpc)`);
     return `(${coll}).slice().sort((_a, _b) => _a - _b)`;
   },
   // Flat concatenation of the (top-level) elements of each collection operand.
@@ -1793,49 +2071,99 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   GraphemeClusters: (args, compile) =>
     compileJSCharacters('GraphemeClusters', args, compile),
   // String concatenation. Two interpreter shapes compile (probed):
-  //  - VARIADIC, every operand a string — `StringJoin("a", "b")` → `"ab"`, and
-  //    the nullary form is the empty string;
-  //  - a SINGLE indexed collection of strings — `StringJoin(Characters(s))`.
+  //  - VARIADIC, every operand a scalar piece of TEXT — a string or a
+  //    character, which the interpreter accepts interchangeably
+  //    (`StringJoin("a", "b")` → `"ab"`, `StringJoin(CharacterFrom("a"), "b")`
+  //    → `"ab"`), and the nullary form is the empty string;
+  //  - a SINGLE indexed collection of text — `StringJoin(Characters(s))`.
   // Everything else fails closed, because the interpreter leaves it
-  // UNEVALUATED rather than coercing: a non-string operand (`StringJoin("a", 1)`
+  // UNEVALUATED rather than coercing: a non-text operand (`StringJoin("a", 1)`
   // is an `incompatible-type` error, not `"a1"` — that is `String`, a different
   // operator) and, notably, the MIXED arity form `StringJoin("a", ["b","c"])`,
   // which stays inert even though every leaf is a string.
+  //
+  // A SCALAR character operand takes the variadic branch, never the
+  // single-collection one: a character lowers to the one-cluster JS string it
+  // denotes, so it concatenates like a string, whereas the collection branch
+  // would demand an indexed collection of it and fail.
   //
   // The result is `.normalize()`d because the interpreter's `engine.string()`
   // stores every string in Unicode NFC: joining `"e"` and `U+0301` yields the
   // single precomposed `"é"` there, and a raw `+` would not.
   StringJoin: (args, compile) => {
     if (args.length === 0) return '""';
-    if (args.length === 1 && !isProvablyStringOperand(args[0])) {
+    if (args.length === 1 && !isProvablyTextOperand(args[0])) {
       const coll = args[0];
       const elt = collectionElementType(jsType(coll));
       // `never` is the element type of the EMPTY literal `[]`: no element can
       // fail to be a string, and `[].join("")` is the interpreter's `""`.
+      // `character` elements are admitted alongside `string` ones: a character
+      // is exactly one grapheme cluster and lowers to a one-cluster JS string,
+      // so joining an array of them is the same `join("")`. This is the
+      // element type `Characters(s)` now reports, and the interpreter's
+      // `StringJoin` accepts either kind.
       if (
         !isIndexedCollectionOperand(coll) ||
         elt === undefined ||
-        (elt !== 'never' && !isSubtype(elt, 'string'))
+        (elt !== 'never' &&
+          !isSubtype(elt, 'string') &&
+          !isSubtype(elt, 'character'))
       )
         throw new Error(
           `StringJoin: cannot compile — the single-operand form requires an ` +
-            `indexed collection whose elements are provably strings ` +
-            `(\`list<string>\`); a non-string operand or element leaves the ` +
-            `interpreter's \`StringJoin\` unevaluated. ` +
+            `indexed collection whose elements are provably strings or ` +
+            `characters (\`list<string>\`, \`list<character>\`); a ` +
+            `non-string operand or element leaves the interpreter's ` +
+            `\`StringJoin\` unevaluated. ` +
             `Fail closed (D6) — the interpreter evaluates it.`
         );
       return `((${compile(coll)}).join("").normalize())`;
     }
-    if (!args.every(isProvablyStringOperand))
+    if (!args.every(isProvablyTextOperand))
       throw new Error(
         `StringJoin: cannot compile — every operand of the variadic form must ` +
-          `be provably a string. The interpreter leaves the expression ` +
-          `UNEVALUATED on a non-string operand, and a collection operand ` +
-          `alongside another operand (\`StringJoin("a", ["b", "c"])\`) stays ` +
-          `inert too. Fail closed (D6) — the interpreter evaluates it.`
+          `be provably a string or a character. The interpreter leaves the ` +
+          `expression UNEVALUATED on a non-text operand, and a collection ` +
+          `operand alongside another operand ` +
+          `(\`StringJoin("a", ["b", "c"])\`) stays inert too. ` +
+          `Fail closed (D6) — the interpreter evaluates it.`
       );
     const parts = args.map((a) => `(${compile(a)})`).join(' + ');
     return `((${parts}).normalize())`;
+  },
+  // Textual rendering. Only the TEXT-IN shape compiles: every operand provably
+  // a string or a character, which the interpreter concatenates verbatim
+  // (probed: `String("a", CharacterFrom("b"))` is `"ab"`). A character is one
+  // grapheme cluster and lowers to the one-cluster JS string it denotes, so
+  // `String(c)` is that string — the round-trip law
+  // `CharacterFrom(String(c)) == c`.
+  //
+  // Everything else fails closed (D6), and two shapes deserve naming: a NUMBER
+  // operand, whose interpreter rendering follows the engine's number-formatting
+  // options rather than JS `toString` (`String(0.1 + 0.2)` is not
+  // `"0.30000000000000004"`); and the single-COLLECTION join carve-out
+  // (`String(Characters(s))` evaluates to `s`), whose declared result type is
+  // still `list<character>` rather than `string`, so compiling it would pin a
+  // shape whose static contract is unsettled.
+  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+  String: (args, compile) => {
+    if (args.length === 0) return '""';
+    if (
+      !args.every(
+        (a) => isProvablyStringOperand(a) || isProvablyCharacterOperand(a)
+      )
+    )
+      throw new Error(
+        `String: cannot compile — every operand must be provably a string or ` +
+          `a character. Rendering any other value reproduces the engine's ` +
+          `number- and expression-formatting options, which this target does ` +
+          `not carry. Fail closed (D6) — the interpreter evaluates it.`
+      );
+    if (args.length === 1) return `(${compile(args[0])})`;
+    // `.normalize()` because the interpreter stores every string in NFC
+    // (`engine.string()`), so concatenating a base letter and a combining mark
+    // must compose, exactly as `StringJoin` does it.
+    return `((${args.map((a) => `(${compile(a)})`).join(' + ')}).normalize())`;
   },
   // 1-based index of the first element equal to `value`, or 0 if not found.
   // The element test is EXACT, matching the interpreter's `.isSame()`, which
@@ -1854,33 +2182,82 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // and a tolerance leaf would only trade it for wrong answers on genuinely
   // distinct nearby numbers.
   IndexOf: (args, compile) => {
-    const coll = collArg('IndexOf', args[0], compile);
+    const coll = elementsArg('IndexOf', args[0], compile);
     if (args[1] == null) throw new Error('IndexOf: missing value');
+    // TEXT is admitted on BOTH sides. The gates here used to close every text
+    // element and every text needle because the element test was a numeric
+    // tolerance comparison (`Math.abs(a - b) <= tol`, which is `NaN <= tol` for
+    // text, so a string needle was never found). That test is now the strict
+    // `===` emitted below, which is content equality with no tolerance — the
+    // interpreter's own `isSame` for a string or a character — and the
+    // interpreter's `BoxedString.contains`/`indexWhere` walk the same grapheme
+    // clusters `_SYS.chars` produces. So `IndexOf(["a","b"], "b")` and
+    // `IndexOf(Characters("abc"), "c")` compile and agree with interpretation.
+    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    //
+    // The test is `_SYS.eqt`, not a bare `===`: it puts a text pair through the
+    // interpreter's own ingress conditioning (NFC, then the lone-surrogate
+    // replacement) before comparing, so a decomposed needle bound to a compiled
+    // parameter IS found in a haystack of precomposed literals — the same
+    // maintainer ruling (2026-08-16) that made the compiled string equality
+    // normalize both sides. Every non-text pair falls back to `===` unchanged.
+    if (isProvablyStringOperand(args[0])) {
+      assertComparableAggregate('IndexOf', [args[1]]);
+      return `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${compile(
+        args[1]
+      )})`;
+    }
     // An AGGREGATE needle is invisible to the element test — `===` on two
     // distinct arrays is reference identity, so
     // `IndexOf([[1,2],[3,4]], Tuple(3,4))` ran to 0 where the interpreter
-    // answers 2. The string gates below are RETAINED for the same fail-closed
-    // reason they were introduced (pinned in this file's suite), even though
-    // the exact `===` leaf would now compare strings faithfully: relaxing them
-    // is a separate decision, not part of the exactness fix.
+    // answers 2.
     assertComparableAggregate('IndexOf', [args[1]]);
-    assertNoStringOperand('IndexOf', [args[1]]);
-    const elt = collectionElementType(jsType(args[0]));
-    if (elt !== undefined && elt !== 'never' && isSubtype(elt, 'string'))
-      throw new Error(
-        `IndexOf: cannot compile — the collection has string elements, which ` +
-          `are not supported by this target (the element test is a numeric ` +
-          `tolerance comparison, NaN for strings). Fail closed (D6) — the ` +
-          `interpreter evaluates it.`
-      );
-    // Strict `===` is the whole element test, plus one departure: NaN.
+    // A needle that is a SCALAR piece of text compares faithfully with `===`
+    // and is let through. What the string gate still closes is a needle whose
+    // text evidence is NESTED — a `list<string>`, which `===` would compare by
+    // reference identity, never finding it where the interpreter compares the
+    // lists structurally. `assertNoStringOperand` is the recursive
+    // (evidence-anywhere) predicate, which is why it has to be skipped rather
+    // than narrowed for the scalar case.
+    if (!isProvablyTextOperand(args[1])) {
+      assertNoStringOperand('IndexOf', [args[1]]);
+      // The same reference-identity failure applies to ANY collection-typed
+      // needle, text or not: `IndexOf(xs, n)` with `n: list<number>` compiled
+      // to a `findIndex` whose `===` never matches a distinct array, so it
+      // ran to 0 where the interpreter compares the lists structurally and
+      // answers the position (probe: `xs = [[1],[2]]`, `n = [1]` → 0 vs 1).
+      // `assertComparableAggregate` above only closes dictionaries, records
+      // and tuples; this closes the remaining collection kinds. A text needle
+      // (a `string`, which is now itself a collection type) is excluded by
+      // the guard on this block, since `===` IS its faithful test.
+      if (
+        !(args[1].type.type === 'unknown' || args[1].type.type === 'any') &&
+        args[1].type.matches('collection')
+      )
+        throw new Error(
+          `IndexOf: cannot compile — the needle is a collection, which the ` +
+            `compiled element test compares by reference identity, never ` +
+            `finding it where the interpreter compares element-wise. Fail ` +
+            `closed (D6) — the interpreter evaluates it.`
+        );
+    }
+    // No element-type gate: the only shapes the removed one closed were the
+    // wholly-text element types (`isSubtype(elt, 'string' | 'character')`),
+    // which the `===` leaf now handles faithfully. A MIXED element type such as
+    // `number | string` never satisfied that subtype test, so it was never
+    // closed here — and needs no closing, since `===` is exact for every
+    // element sort (see the boolean note below).
+    //
+    // `_SYS.eqt` is the whole element test: strict `===` for every non-text
+    // pair, and conditioned (NFC, well-formed) content equality for a text
+    // pair, which is what the interpreter compares. Plus one departure: NaN.
     // `NaN === NaN` is false, so a NaN needle would never be found, where the
     // interpreter's structural `.isSame()` answers 1 — hence the both-NaN
     // short-circuit. BOOLEAN-ness needs no guard: `true === 1` is false
     // natively (it was the earlier `Math.abs(true - 1) <= tol` leaf that found
     // a boolean needle in a numeric haystack, and a numeric needle in a
     // boolean one, where the interpreter answers 0).
-    return `((_v) => (${coll}).findIndex((_x) => (_x !== _x && _v !== _v) || _x === _v) + 1)(${compile(
+    return `((_v) => (${coll}).findIndex((_x) => (_x !== _x && _v !== _v) || _SYS.eqt(_x, _v)) + 1)(${compile(
       args[1]
     )})`;
   },
@@ -1897,37 +2274,40 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length > 2)
       throw new Error('Map: multi-collection form is not compiled');
     if (args[1] == null) throw new Error('Map: missing source collection');
-    const coll = collArg('Map', args[1], compile);
+    const coll = elementsArg('Map', args[1], compile);
     return `((_f) => (${coll}).map((_x) => _f(_x)))(${fnArg('Map', args[0], args[1], compile)})`;
   },
   Filter: (args, compile) => {
-    const coll = collArg('Filter', args[0], compile);
+    const coll = elementsArg('Filter', args[0], compile);
     if (args[1] == null) throw new Error('Filter: missing predicate');
-    return `((_f) => (${coll}).filter((_x) => _f(_x)))(${fnArg('Filter', args[1], args[0], compile)})`;
+    return joinIfString(
+      args[0],
+      `((_f) => (${coll}).filter((_x) => _f(_x)))(${fnArg('Filter', args[1], args[0], compile)})`
+    );
   },
   // Number of elements satisfying the predicate.
   CountIf: (args, compile) => {
-    const coll = collArg('CountIf', args[0], compile);
+    const coll = elementsArg('CountIf', args[0], compile);
     if (args[1] == null) throw new Error('CountIf: missing predicate');
     return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${fnArg('CountIf', args[1], args[0], compile)})`;
   },
   // First element satisfying the predicate; none → NaN (the interpreter's
   // `Nothing` projected onto a real target, matching `Last`).
   Find: (args, compile) => {
-    const coll = collArg('Find', args[0], compile);
+    const coll = elementsArg('Find', args[0], compile);
     if (args[1] == null) throw new Error('Find: missing predicate');
     return `((_f) => ((${coll}).find((_x) => _f(_x)) ?? NaN))(${fnArg('Find', args[1], args[0], compile)})`;
   },
   // 1-based index of the first element satisfying the predicate, or 0 if
   // none — `findIndex` is 0-based and returns -1, so `+ 1` maps both.
   IndexWhere: (args, compile) => {
-    const coll = collArg('IndexWhere', args[0], compile);
+    const coll = elementsArg('IndexWhere', args[0], compile);
     if (args[1] == null) throw new Error('IndexWhere: missing predicate');
     return `((_f) => (${coll}).findIndex((_x) => _f(_x)) + 1)(${fnArg('IndexWhere', args[1], args[0], compile)})`;
   },
   // List of the 1-based indexes of the elements satisfying the predicate.
   Position: (args, compile) => {
-    const coll = collArg('Position', args[0], compile);
+    const coll = elementsArg('Position', args[0], compile);
     if (args[1] == null) throw new Error('Position: missing predicate');
     return `((_f) => (${coll}).flatMap((_x, _i) => _f(_x) ? [_i + 1] : []))(${fnArg('Position', args[1], args[0], compile)})`;
   },
@@ -2044,13 +2424,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // All but the last element; an empty or singleton collection yields [].
   Most: (args, compile) =>
-    `(${collArg('Most', args[0], compile)}).slice(0, -1)`,
+    joinIfString(
+      args[0],
+      `(${elementsArg('Most', args[0], compile)}).slice(0, -1)`
+    ),
   // 1-based inclusive range. Mirrors the interpreter's Slice collection
   // handler exactly: indexes are rounded (`toInteger`); a start/end < 1 is
   // counted from the end (so a start of 0 resolves PAST the end → empty);
   // start past the end → empty; end clamped to [1, len].
   Slice: (args, compile) => {
-    const coll = collArg('Slice', args[0], compile);
+    const coll = elementsArg('Slice', args[0], compile);
     // The `(indexed_collection<T>, range)` arm: `Slice(xs, r)` is
     // `Slice(xs, First(r), Last(r))`. The `range` type guarantees an
     // ascending, step-1 span with `first ≥ 1`, so only the end needs
@@ -2077,22 +2460,42 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         throw new Error(
           'Slice: the two-argument form takes an ascending index span (`range`)'
         );
-      return `((_l, _r) => { if (!Array.isArray(_r) || _r.length === 0 || !Number.isInteger(_r[0]) || _r[0] < 1) throw new RangeError('Slice: the span argument is not an ascending index range at run time'); for (let _k = 1; _k < _r.length; _k++) if (_r[_k] !== _r[0] + _k) throw new RangeError('Slice: the span argument is not an ascending index range at run time'); return _l.slice(_r[0] - 1, _r[_r.length - 1]); })(${coll}, ${compile(args[1])})`;
+      return joinIfString(
+        args[0],
+        `((_l, _r) => { if (!Array.isArray(_r) || _r.length === 0 || !Number.isInteger(_r[0]) || _r[0] < 1) throw new RangeError('Slice: the span argument is not an ascending index range at run time'); for (let _k = 1; _k < _r.length; _k++) if (_r[_k] !== _r[0] + _k) throw new RangeError('Slice: the span argument is not an ascending index range at run time'); return _l.slice(_r[0] - 1, _r[_r.length - 1]); })(${coll}, ${compile(args[1])})`
+      );
     }
     if (args[1] == null || args[2] == null)
       throw new Error('Slice: missing index');
-    return `((_l, _s, _e) => { _s = Math.round(_s); if (!Number.isFinite(_s)) _s = 1; _e = Math.round(_e); if (!Number.isFinite(_e)) _e = _l.length; if (_s < 1) _s = _l.length + 1 + _s; if (_s < 1) _s = 1; if (_s > _l.length) return []; if (_e < 1) _e = _l.length + 1 + _e; if (_e < 1) _e = 1; if (_e > _l.length) _e = _l.length; return _l.slice(_s - 1, _e); })(${coll}, ${compile(args[1])}, ${compile(args[2])})`;
+    return joinIfString(
+      args[0],
+      `((_l, _s, _e) => { _s = Math.round(_s); if (!Number.isFinite(_s)) _s = 1; _e = Math.round(_e); if (!Number.isFinite(_e)) _e = _l.length; if (_s < 1) _s = _l.length + 1 + _s; if (_s < 1) _s = 1; if (_s > _l.length) return []; if (_e < 1) _e = _l.length + 1 + _e; if (_e < 1) _e = 1; if (_e > _l.length) _e = _l.length; return _l.slice(_s - 1, _e); })(${coll}, ${compile(args[1])}, ${compile(args[2])})`
+    );
   },
   IsEmpty: (args, compile) =>
-    `((${collArg('IsEmpty', args[0], compile)}).length === 0)`,
+    `((${elementsArg('IsEmpty', args[0], compile)}).length === 0)`,
   // Number of elements — same as `Length` for an indexed collection.
-  Count: (args, compile) => `(${collArg('Count', args[0], compile)}).length`,
+  Count: (args, compile) =>
+    `(${elementsArg('Count', args[0], compile)}).length`,
   // Membership via SameValueZero (`includes`) — value equality only for
   // primitive elements, so compound element types fail closed.
   Contains: (args, compile) => {
     if (args[0]) requirePrimitiveElements('Contains', args[0]);
-    const coll = collArg('Contains', args[0], compile);
+    const coll = elementsArg('Contains', args[0], compile);
     if (args[1] == null) throw new Error('Contains: missing value');
+    // A TEXT membership test cannot be the raw SameValueZero of `includes`:
+    // the interpreter compares strings by their CONDITIONED content (NFC, then
+    // the lone-surrogate replacement), so a decomposed `"e" + U+0301` needle
+    // bound to a compiled parameter must be found in a haystack of precomposed
+    // literals — which `includes` misses, since the two are different
+    // code-unit sequences. `_SYS.eqt` is the same element test `IndexOf` uses,
+    // and it falls back to strict `===` for every non-text pair. The
+    // both-NaN disjunct keeps `includes`'s SameValueZero verdict on NaN, which
+    // `===` alone would lose.
+    if (hasPossiblyTextElements(args[0]) || isProvablyTextOperand(args[1]))
+      return `((_v) => (${coll}).some((_x) => (_x !== _x && _v !== _v) || _SYS.eqt(_x, _v)))(${compile(
+        args[1]
+      )})`;
     return `(${coll}).includes(${compile(args[1])})`;
   },
   // Unique elements in first-occurrence order (`Set` preserves insertion
@@ -2100,21 +2503,37 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // elements, so compound element types fail closed).
   Unique: (args, compile) => {
     if (args[0]) requirePrimitiveElements('Unique', args[0]);
-    return `[...new Set(${collArg('Unique', args[0], compile)})]`;
+    const elements = elementsArg('Unique', args[0], compile);
+    // TEXT elements are de-duplicated on their CONDITIONED content, because
+    // that is what the interpreter's boxed strings hold: a decomposed
+    // `"e" + U+0301` and a precomposed `"é"` supplied at run time are ONE
+    // element there, and two distinct keys in a raw `Set`. `_SYS.uniqt`
+    // conditions each string element before the `Set` and yields the
+    // conditioned form (again matching the interpreter's boxed content); the
+    // numeric path keeps the bare `Set` byte-identically.
+    if (hasPossiblyTextElements(args[0]))
+      return joinIfString(args[0], `_SYS.uniqt(${elements})`);
+    return joinIfString(args[0], `[...new Set(${elements})]`);
   },
   // Rotate left/right by n positions (default 1). The shift is rounded and
   // normalized modulo the length, matching the interpreter; a non-finite
   // shift falls back to the default 1 (the interpreter's `toInteger` treats
   // it as missing); an empty collection yields [].
   RotateLeft: (args, compile) => {
-    const coll = collArg('RotateLeft', args[0], compile);
+    const coll = elementsArg('RotateLeft', args[0], compile);
     const n = args[1] == null ? '1' : compile(args[1]);
-    return `((_l, _n) => { if (_l.length === 0) return []; _n = Math.round(_n); if (!Number.isFinite(_n)) _n = 1; _n = ((_n % _l.length) + _l.length) % _l.length; return [..._l.slice(_n), ..._l.slice(0, _n)]; })(${coll}, ${n})`;
+    return joinIfString(
+      args[0],
+      `((_l, _n) => { if (_l.length === 0) return []; _n = Math.round(_n); if (!Number.isFinite(_n)) _n = 1; _n = ((_n % _l.length) + _l.length) % _l.length; return [..._l.slice(_n), ..._l.slice(0, _n)]; })(${coll}, ${n})`
+    );
   },
   RotateRight: (args, compile) => {
-    const coll = collArg('RotateRight', args[0], compile);
+    const coll = elementsArg('RotateRight', args[0], compile);
     const n = args[1] == null ? '1' : compile(args[1]);
-    return `((_l, _n) => { if (_l.length === 0) return []; _n = Math.round(_n); if (!Number.isFinite(_n)) _n = 1; _n = ((-_n % _l.length) + _l.length) % _l.length; return [..._l.slice(_n), ..._l.slice(0, _n)]; })(${coll}, ${n})`;
+    return joinIfString(
+      args[0],
+      `((_l, _n) => { if (_l.length === 0) return []; _n = Math.round(_n); if (!Number.isFinite(_n)) _n = 1; _n = ((-_n % _l.length) + _l.length) % _l.length; return [..._l.slice(_n), ..._l.slice(0, _n)]; })(${coll}, ${n})`
+    );
   },
   // Element-wise combination: a list of tuples (compiled as arrays), with
   // the length of the shortest input.
@@ -2221,7 +2640,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // booleans, which a numeric collection cannot prove — the interpreter
   // stays inert there.
   Any: (args, compile) => {
-    const coll = collArg('Any', args[0], compile);
+    const coll = elementsArg('Any', args[0], compile);
     if (args[1] == null)
       throw new Error(
         `Any: only the predicate form compiles. Fail closed (D6).`
@@ -2229,7 +2648,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `((_f) => (${coll}).some((_x) => _f(_x)))(${fnArg('Any', args[1], args[0], compile)})`;
   },
   All: (args, compile) => {
-    const coll = collArg('All', args[0], compile);
+    const coll = elementsArg('All', args[0], compile);
     if (args[1] == null)
       throw new Error(
         `All: only the predicate form compiles. Fail closed (D6).`
@@ -2244,13 +2663,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // never-false-predicate caveat).
     if (isLazyStream(args[0]))
       return `_SYS.takeWhileIter(${emitLazyStream(args[0]!, compile)}, ${fnArg('TakeWhile', args[1], args[0], compile)})`;
-    const coll = collArg('TakeWhile', args[0], compile);
-    return `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? _l.slice() : _l.slice(0, _i); })(${fnArg('TakeWhile', args[1], args[0], compile)}, ${coll})`;
+    const coll = elementsArg('TakeWhile', args[0], compile);
+    return joinIfString(
+      args[0],
+      `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? _l.slice() : _l.slice(0, _i); })(${fnArg('TakeWhile', args[1], args[0], compile)}, ${coll})`
+    );
   },
   DropWhile: (args, compile) => {
-    const coll = collArg('DropWhile', args[0], compile);
+    const coll = elementsArg('DropWhile', args[0], compile);
     if (args[1] == null) throw new Error('DropWhile: missing predicate');
-    return `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? [] : _l.slice(_i); })(${fnArg('DropWhile', args[1], args[0], compile)}, ${coll})`;
+    return joinIfString(
+      args[0],
+      `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? [] : _l.slice(_i); })(${fnArg('DropWhile', args[1], args[0], compile)}, ${coll})`
+    );
   },
   // Map + flatten one level. Native `flatMap` matches the interpreter for
   // both shapes: a collection-valued mapping is spliced, a scalar result is
@@ -2282,6 +2707,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         undefined,
         BaseCompiler.collectionElementTypeOf(coll),
       ]);
+    // Same interim fail-closed as `Reduce` above, and for the same reason: a
+    // real seed folded by a complex-yielding body widens the accumulator
+    // mid-fold, which this lowering does not model. `Scan` corrupts from the
+    // SECOND element on — over `[1+2i, i]` it answered
+    // `[{re:2,im:4}, {re:"[object Object]0",im:2}]` behind `success: true`,
+    // where the interpreter gives `[2+4i, 2+6i]`; the first element is right
+    // because the seed has not yet been added to a complex value.
+    if (builtin === undefined && BaseCompiler.reduceAccumulatorWidens(coll, op, init))
+      throw new Error(
+        `Scan: the accumulator would have to become complex part-way ` +
+          `through the fold, which this lowering does not support — it ` +
+          `would seed a real accumulator and then add complex values to ` +
+          `it, silently. Fail closed (D6). Evaluate instead, or seed the ` +
+          `fold with a complex initial value.`
+      );
     const combiner =
       builtin ??
       (isFunction(op, 'Function') || isSymbol(op)
@@ -2957,7 +3397,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isComplexValued(arg)) return `_SYS.csech(${compile(arg)})`;
     return `1 / Math.cosh(${compile(arg)})`;
   },
-  Second: (args, compile) => `${compile(args[0])}[1]`,
+  /** A string source is segmented first — see `First`. */
+  Second: (args, compile) =>
+    isProvablyStringOperand(args[0])
+      ? `_SYS.chars(${compile(args[0])})[1]`
+      : `${compile(args[0])}[1]`,
   Heaviside: '_SYS.heaviside',
   Sign: 'Math.sign',
   Sinc: '_SYS.sinc',
@@ -3008,7 +3452,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.ctanh(${compile(args[0])})`;
     return `Math.tanh(${compile(args[0])})`;
   },
-  Third: (args, compile) => `${compile(args[0])}[2]`,
+  /** A string source is segmented first — see `First`. */
+  Third: (args, compile) =>
+    isProvablyStringOperand(args[0])
+      ? `_SYS.chars(${compile(args[0])})[2]`
+      : `${compile(args[0])}[2]`,
   PointX: (args, compile) => compilePointComponent(args[0], 0, compile),
   PointY: (args, compile) => compilePointComponent(args[0], 1, compile),
   PointZ: (args, compile) => compilePointComponent(args[0], 2, compile),
@@ -4404,13 +4852,16 @@ function mulTensor(...args: BcastValue[]): BcastValue {
  *   broadcast
  *
  * The scalar leaf has a STRING branch (tier 2, 2026-08-08): when either side is
- * a string the comparison is a strict `===`, the interpreter's own string
- * semantics (`compare.ts`, no tolerance). Without it the leaf fell through to
- * `Math.hypot(NaN, …) <= tol` → `false`, so two EQUAL string lists answered
- * `false`. It is the mirror of the Python target's `_ce_eqcoll` string leaf, and
- * it is faithful for a MIXED leaf pair too (`Equal("a", 1)` is `False` in the
- * interpreter, and `"a" === 1` is `false`) — though only the all-string shapes
- * are ADMITTED at compile time (`isStringCollectionEquality`).
+ * a string the comparison is content equality with no tolerance, the
+ * interpreter's own string semantics (`compare.ts`). Without it the leaf fell
+ * through to `Math.hypot(NaN, …) <= tol` → `false`, so two EQUAL string lists
+ * answered `false`. It is the mirror of the Python target's `_ce_eqcoll` string
+ * leaf, and it is faithful for a MIXED leaf pair too (`Equal("a", 1)` is
+ * `False` in the interpreter, and `eqText("a", 1)` is `false`) — though only the
+ * all-string shapes are ADMITTED at compile time
+ * (`isStringCollectionEquality`). It compares CONDITIONED content (`eqText`),
+ * not raw UTF-16, because the interpreter's strings are NFC and well-formed by
+ * the time it compares them.
  */
 function eqTensor(
   a: unknown,
@@ -4427,7 +4878,7 @@ function eqTensor(
   }
   if (aArr) return a.map((x) => eqTensor(x, b, tol)) as (boolean | unknown[])[];
   if (bArr) return b.map((y) => eqTensor(a, y, tol)) as (boolean | unknown[])[];
-  if (typeof a === 'string' || typeof b === 'string') return a === b;
+  if (typeof a === 'string' || typeof b === 'string') return eqText(a, b);
   const part = (v: unknown): { re: number; im: number } =>
     typeof v === 'object' && v !== null && 're' in v
       ? (v as { re: number; im: number })
@@ -4585,12 +5036,99 @@ function rref(m: number[][]): number[][] | number {
 let graphemeSegmenter: Intl.Segmenter | undefined = undefined;
 
 /**
+ * Put a value through the SAME ingress conditioning the interpreter applies
+ * when it boxes a string or a character — Unicode NFC normalization, then the
+ * lone-surrogate → U+FFFD replacement (`boxed-string.ts`, `boxed-character.ts`)
+ * — and return the resulting text.
+ *
+ * Every text comparison in a compiled artifact goes through it, because the
+ * interpreter's own text comparisons (`a.string === b.string`) run on already-
+ * conditioned content: without it the decomposed `"e" + U+0301` and the
+ * precomposed `"é"` are different code-unit sequences here and compare unequal,
+ * where the interpreter answers equal. Literals and everything `_SYS.chars`
+ * produces are already conditioned, so this only changes a raw host string
+ * bound to a compiled parameter.
+ */
+function conditionText(x: unknown): string {
+  const s = String(x).normalize();
+  // `toWellFormed` is Node ≥ 20 / ES2024; older hosts keep the raw string,
+  // which only matters for the lone surrogates they cannot replace anyway.
+  return (
+    (s as unknown as { toWellFormed?: () => string }).toWellFormed?.() ?? s
+  );
+}
+
+/**
+ * The interpreter's element/scalar equality for text: two strings are equal
+ * when their CONDITIONED content is identical (see {@link conditionText}), and
+ * anything else falls back to strict identity.
+ *
+ * The fallback keeps every non-text shape byte-for-byte as it was: a number, a
+ * boolean and an array compare exactly as `===` did, and a string paired with a
+ * non-string is `false` either way (`Equal("1", 1)` is `False` in the
+ * interpreter). Only a string/string pair changes, and only when one side is
+ * not already NFC.
+ */
+function eqText(a: unknown, b: unknown): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return a === b;
+  return conditionText(a) === conditionText(b);
+}
+
+/**
+ * `Unique` over a collection whose elements may be TEXT.
+ *
+ * Each string element is put through the interpreter's ingress conditioning
+ * (see {@link conditionText}) before it becomes a `Set` key, so a decomposed
+ * `"e" + U+0301` and a precomposed `"é"` supplied at run time collapse to the
+ * single element the interpreter answers, instead of surviving as two distinct
+ * code-unit sequences. The CONDITIONED form is what comes out, matching the
+ * content the interpreter's boxed strings hold. Non-string elements are keyed
+ * and returned unchanged, so a mixed collection keeps `Set`'s SameValueZero
+ * verdict (NaN included) on every non-text element.
+ */
+function uniqueText(l: unknown[]): unknown[] {
+  return [
+    ...new Set(l.map((x) => (typeof x === 'string' ? conditionText(x) : x))),
+  ];
+}
+
+/**
  * Runtime helpers injected as `_SYS` into compiled JavaScript functions.
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
  */
 const SYS_HELPERS = {
   bcast,
   bcastFn,
+  // Element/scalar equality that is faithful for text — see `eqText`. Emitted
+  // by `IndexOf`'s element test, where the elements and the needle may be text
+  // or anything else; the equality LOWERINGS reach the same verdict through
+  // `cmpc`, which conditions its operands identically.
+  eqt: eqText,
+  // The interpreter's ingress conditioning for text — NFC normalization, then
+  // the lone-surrogate replacement (see `conditionText`) — as a standalone
+  // helper. Emitted by the all-string ORDERINGS, which compare the conditioned
+  // operands with the raw infix `<`/`<=`/`>`/`>=` the interpreter itself uses
+  // on strings; the equality lowerings reach the same conditioning inside
+  // `eqt`/`cmpc` instead.
+  ct: conditionText,
+  // `Unique` over possibly-text elements — see `uniqueText`.
+  uniqt: uniqueText,
+  // Coerce a value to the `{ re, im }` complex representation, idempotently.
+  //
+  // A user function whose signature declares a `complex` PARAMETER compiles
+  // its body in the complex lane, so the callee reads `.re`/`.im` off that
+  // parameter and the call site owes it an object. When the argument is
+  // provably real the wrap is emitted statically (`({ re: x, im: 0 })`, no
+  // runtime cost); when its realness is not decidable at compile time — an
+  // untyped free symbol supplied at `run()` time, the commonest shape — the
+  // caller may hand over either a plain number or an already-complex object,
+  // and only a runtime test can tell. Passing a number through unwrapped made
+  // the callee compute `x.re` on a number; wrapping an object unconditionally
+  // would nest it as `{ re: { re, im }, im: 0 }`. This does neither.
+  cplx: (x: unknown): { re: number; im: number } =>
+    typeof x === 'number'
+      ? { re: x, im: 0 }
+      : (x as { re: number; im: number }),
   // Element-wise addition, mirroring the interpreter's `Add` broadcast
   // (`addTensors`/`broadcastOverIndexedCollections`): scalar+scalar is ordinary
   // addition; over (possibly nested) arrays it recurses element-wise. Used as
@@ -4655,9 +5193,49 @@ const SYS_HELPERS = {
     if (typeof s !== 'string')
       throw new Error('Characters: expected a string operand');
     graphemeSegmenter ??= new Intl.Segmenter('en', { granularity: 'grapheme' });
-    return Array.from(graphemeSegmenter.segment(s.normalize()), (seg) =>
+    // `conditionText`, not a bare `.normalize()`: the interpreter conditions a
+    // string at INGRESS — NFC normalization AND the lone-surrogate → U+FFFD
+    // replacement of `String.prototype.toWellFormed` (`BoxedString`'s
+    // constructor) — so a raw host string bound to a compiled parameter must go
+    // through the same two steps here. Without the second one, a lone surrogate
+    // reaching `Characters`, indexing, iteration or a string-preserving
+    // operator would be segmented as itself, where the interpreter has already
+    // replaced it with U+FFFD.
+    return Array.from(graphemeSegmenter.segment(conditionText(s)), (seg) =>
       seg.segment.normalize()
     );
+  },
+  // Order two CHARACTERS (each a one-cluster string) the way the interpreter
+  // does: by their Unicode SCALAR sequence, comparing code point against code
+  // point and, on a common prefix, the shorter cluster first
+  // (`compare.ts`, decision D8).
+  //
+  // Not `a < b`: `String.prototype.<` compares UTF-16 code UNITS, so every
+  // astral character — U+10000 and above, encoded as a surrogate pair whose
+  // lead unit is 0xD800–0xDBFF — sorts BELOW the private-use and specials
+  // block U+E000–U+FFFF. `"\u{10000}" < ""` is `true` under the raw operator
+  // and `False` in the interpreter. `Array.from` iterates CODE POINTS (not
+  // code units), which is what makes the surrogate pair one comparison.
+  //
+  // Returns the usual −1/0/1, so it doubles as the comparator for a
+  // character `Sort`.
+  //
+  // Each operand is put through the SAME ingress conditioning the interpreter
+  // applies when it boxes a character — Unicode NFC normalization, then the
+  // lone-surrogate → U+FFFD replacement of `String.prototype.toWellFormed`
+  // (`boxed-character.ts`). Without it the decomposed `"e" + U+0301` and the
+  // precomposed `"é"` are different code-point sequences here and compare
+  // unequal, where the interpreter — which normalized both at boxing time —
+  // answers equal. Literals and everything `_SYS.chars` produces are already
+  // conditioned, so this only changes a raw host string bound to a compiled
+  // parameter.
+  cmpc: (a: unknown, b: unknown): number => {
+    const sa = Array.from(conditionText(a), (c) => c.codePointAt(0)!);
+    const sb = Array.from(conditionText(b), (c) => c.codePointAt(0)!);
+    const n = Math.min(sa.length, sb.length);
+    for (let i = 0; i < n; i++)
+      if (sa[i] !== sb[i]) return sa[i] < sb[i] ? -1 : 1;
+    return sa.length === sb.length ? 0 : sa.length < sb.length ? -1 : 1;
   },
   // --- Lazy infinite-collection streams ---------------------------------
   // A STATICALLY infinite collection (`Range(1, ∞)` and the Map/Filter/Drop/
@@ -5510,6 +6088,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         return result;
       },
       string: (str) => JSON.stringify(str),
+      // A character lowers to the one-cluster JS string it denotes. This target
+      // can honour the rest of the character contract too: `_SYS.chars`
+      // segments a string into clusters and `_SYS.cmpc` orders two of them by
+      // code-point sequence, so declaring the capability here is not merely
+      // "it has string literals".
+      character: (str) => JSON.stringify(str),
       number: (n) => n.toString(),
       complex: (re, im) => `({ re: ${re}, im: ${im} })`,
       // Evaluate shared middle operands of a chained relation exactly once
@@ -6245,6 +6829,19 @@ function collArg(
       `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
         `is not an indexed collection (list/vector/range). Fail closed (D6).`
     );
+  // A union with a text arm (`string | list<number>`) passes the test above —
+  // a string IS an indexed collection in the type lattice — but may be a JS
+  // string at run time, where `.slice()`/`.reverse()`/spread walk UTF-16 code
+  // units instead of the grapheme clusters the interpreter walks. Proof of a
+  // string is what `elementsArg` segments on, so this operand would reach the
+  // array lowering unsegmented. Refused here (D6). See `couldBeStringOperand`.
+  if (couldBeStringOperand(arg))
+    throw new Error(
+      `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
+        `may be text at run time (its type has a string arm), which the ` +
+        `compiled list lowering would walk as UTF-16 code units rather than ` +
+        `characters. Fail closed (D6) — the interpreter evaluates it.`
+    );
   // An infinite pipeline cannot materialize to an array; only `Take`/
   // `TakeWhile` bound one (they lower it via `emitLazyStream` before ever
   // reaching this funnel). Everything else fails closed here — at compile
@@ -6257,6 +6854,63 @@ function collArg(
         `to compile. Fail closed (D6).`
     );
   return compile(arg);
+}
+
+/**
+ * Compile a collection operand that MAY be a string, as the array of its
+ * elements.
+ *
+ * A string is an indexed collection of its grapheme clusters, but it lowers to
+ * a JS string, which is not array-shaped: `.length` counts UTF-16 code units,
+ * `.slice` cuts between them, and `for … of` walks code points — every one of
+ * them disagreeing with the interpreter on a combining sequence, a ZWJ emoji
+ * family or a regional-indicator flag. So a string source is SEGMENTED first,
+ * with `_SYS.chars` (the interpreter's own `Intl.Segmenter` decomposition), and
+ * the existing list lowering then runs over the resulting array of one-cluster
+ * strings, which faithfully models the interpreter's `list<character>`.
+ *
+ * Used only by the operators whose interpreter behaviour over a string source
+ * is the element walk this reproduces. Anything else keeps calling `collArg`
+ * and keeps failing closed on a string — notably the linear-algebra operators,
+ * where the interpreter treats a string as a rank-0 leaf.
+ * (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+ */
+function elementsArg(
+  kind: string,
+  arg: Expression | undefined,
+  compile: (expr: Expression) => string,
+  position?: number
+): string {
+  if (arg !== undefined && isProvablyStringOperand(arg))
+    return `_SYS.chars(${compile(arg)})`;
+  // Segmenting is gated on PROOF of a string, so an operand that merely MAY be
+  // text (`string | list<number>`) is not segmented here — it would reach the
+  // array lowering as a JS string. `collArg` refuses it (see
+  // `couldBeStringOperand`), which is why this funnel needs no test of its own.
+  return collArg(kind, arg, compile, position);
+}
+
+/**
+ * Re-assemble the STRING result of a string-preserving operator.
+ *
+ * `Reverse`, `Take`, `Sort` and their kin answer a `string` for a `string`
+ * source (the "string preservation rule", `docs/STRING_ROADMAP.md`), so the
+ * array of clusters `elementsArg` produced — and the array operation ran over —
+ * is joined back into one string. `.normalize()` because the interpreter stores
+ * every string in NFC (`engine.string()`), so a joined pair of clusters that
+ * composes must come out composed, exactly as `StringJoin` does it.
+ *
+ * The result may have a DIFFERENT character count than the source: joining
+ * clusters can compose or reorder combining marks into new clusters
+ * (`Reverse("é")` puts the combining acute first). That is inherent to the
+ * operation, and the interpreter re-segments the same way.
+ *
+ * A non-string source is returned untouched, so each call site keeps its
+ * existing list lowering byte-identically.
+ */
+function joinIfString(source: Expression | undefined, code: string): string {
+  if (source === undefined || !isProvablyStringOperand(source)) return code;
+  return `(${code}).join("").normalize()`;
 }
 
 /**
@@ -6486,7 +7140,10 @@ export function requirePrimitiveElements(kind: string, arg: Expression): void {
     (elt === 'number' ||
       isSubtype(elt, 'real') ||
       isSubtype(elt, 'boolean') ||
-      isSubtype(elt, 'string'));
+      isSubtype(elt, 'string') ||
+      // A character lowers to a one-cluster JS string, so it compares by
+      // value with `===` exactly as a string does.
+      isSubtype(elt, 'character'));
   if (primitive && !BaseCompiler.isComplexValued(arg)) return;
   throw new Error(
     `${kind}: cannot compile — the interpreter compares elements ` +
@@ -6673,6 +7330,13 @@ function isElementwiseBigOpBody(body: Expression): boolean {
   const tt = jsType(body);
   if (typeof tt !== 'string' && tt.kind === 'tuple') return false;
   if (BaseCompiler.isComplexValued(body)) return false;
+  // A STRING body is NOT element-wise. It matches `indexed_collection` in the
+  // lattice (its elements are its grapheme clusters) but lowers to a JS
+  // string, so the `_SYS.bcast` fold would concatenate rather than accumulate
+  // — `Σ_{i=0}^{2} "ab"` running to `"ababab"` behind `success: true`, which
+  // is exactly the item-121 garbage `assertScalarBigOpBody` declines. Falling
+  // through to that assertion is what keeps the decline.
+  if (isProvablyStringOperand(body)) return false;
   return (
     body.type.matches('list') ||
     body.type.matches('indexed_collection') ||

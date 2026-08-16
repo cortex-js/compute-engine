@@ -25,6 +25,12 @@ import type { ComputeEngine } from '../compute-engine.js';
 // `unboundSignatureHint` supplies the same near-miss wording the runtime
 // declared-type check uses, so the static and runtime messages never drift.
 import { unboundSignatureHint } from '../compute-engine/boxed-expression/type-compatibility-error.js';
+// The two halves of literal narrowing, imported rather than restated so that
+// this pass and the runtime cannot disagree about which string literals become
+// characters: `expectsCharacterNotString` decides which declared types trigger
+// the conversion, `isSingleGraphemeCluster` decides which literals qualify.
+import { expectsCharacterNotString } from '../compute-engine/boxed-expression/validate.js';
+import { isSingleGraphemeCluster } from '../compute-engine/boxed-expression/boxed-character.js';
 import {
   isDictionary,
   isFunction,
@@ -1009,6 +1015,20 @@ function declaredTypeMismatch(
     isString(value) ||
     isSymbol(value, 'True') ||
     isSymbol(value, 'False');
+  // LITERAL NARROWING: `let c: character = "a"` is not a mismatch. Epsil has
+  // no character literal, so a one-grapheme-cluster string LITERAL written at
+  // a name whose declared type expects a character (and refuses a string)
+  // becomes that character — the same conversion `Declare` performs when the
+  // statement runs, decided by the same two predicates. A multi-cluster or
+  // empty literal narrows to nothing and is still reported, and a non-literal
+  // string never converts (`docs/STRING_ROADMAP.md`, design constraint 4).
+  if (
+    isString(value) &&
+    expectsCharacterNotString(declared.type) &&
+    isSingleGraphemeCluster(value.string)
+  )
+    return undefined;
+
   const mismatch = isClosedLiteral
     ? !value.type.matches(declared)
     : declared.isDisjointFrom(value.type);

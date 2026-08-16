@@ -115,3 +115,35 @@ export function splitGraphemes(string: string): string | string[] {
 
   return result;
 }
+
+/**
+ * Split a string into UAX #29 extended grapheme clusters — the engine's
+ * definition of "one user-perceived character".
+ *
+ * This is the authoritative segmentation for the `character` type, the
+ * `Characters`/`GraphemeClusters` operators, and every string collection
+ * facet (`count`, `each`, `at`). It delegates to the host's `Intl.Segmenter`,
+ * so it tracks the host's Unicode version rather than the hand-rolled
+ * approximation `splitGraphemes` above implements for LaTeX tokenization.
+ *
+ * Lives in `common/` rather than beside its callers because both
+ * `compute-engine/boxed-expression/` (the `character` value model) and
+ * `compute-engine/library/` (the string operators) need it, and this module
+ * imports nothing — so neither direction can create an import cycle.
+ */
+export function splitGraphemeClusters(s: string): string[] {
+  clusterSegmenter ??= new Intl.Segmenter('en', { granularity: 'grapheme' });
+  return Array.from(clusterSegmenter.segment(s), (seg) => seg.segment);
+}
+
+/**
+ * Built on first use, then reused by every `splitGraphemeClusters` call.
+ *
+ * Constructing an `Intl.Segmenter` compiles a locale-aware segmentation
+ * table and is orders of magnitude more expensive than segmenting a short
+ * string, and this function runs once per character of every string the
+ * engine iterates (`BoxedString.each`/`at`, `Characters`, and the
+ * one-cluster check behind `ce.character()`). The instance is stateless —
+ * `segment()` returns a fresh iterator each call — so sharing it is safe.
+ */
+let clusterSegmenter: Intl.Segmenter | undefined = undefined;

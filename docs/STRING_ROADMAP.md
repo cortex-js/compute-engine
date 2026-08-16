@@ -1051,6 +1051,48 @@ operator to land on.
    `doc/97-reference-strings.md` (it currently states "Strings are not
    handled as collections" and documents `Characters` as `list<string>` —
    both false after this phase). Ships as one unit (constraint 8).
+
+   **Shipped 2026-08-16** (implementation plan with the decisions the spec
+   left open and a library signature audit:
+   `docs/plans/2026-08-16-string-phase1-character-type.md`). Deviations
+   from, and resolutions of, the text above — all recorded there as
+   decisions D1–D15:
+   - `string` LEFT `scalar`: it moved from the scalar kinds to the indexed
+     collection kinds (`scalar` = boolean | character | number). The spec
+     did not say; keeping it in both would have made `scalar` and
+     `collection` overlap.
+   - Value-level equality bridges the two kinds: a character `isSame` the
+     one-cluster string with identical NFC content (same hash formula), so
+     `Contains`/`Tally`/`Unique`/`Set` membership/`Equal`/`IndexOf` work
+     without per-operator narrowing hooks. TYPES stay disjoint; literal
+     narrowing (constraint 4) lives in argument validation only.
+   - `Sort` keeps its optional `order` — no arity split: an overload with an
+     optional parameter plus most-specific-wins already picks the string
+     arm. String arms are spelled `(T, …) -> T where T: string` (a BOUNDED
+     variable, not the ground type `string`, which would win on every
+     `unknown` operand). Runtime: lazy string-preserving views are joined by
+     a type-driven step in `boxed-function.ts`
+     (`evaluateStringPreservingCollection`), because adding an `evaluate`
+     handler to a lazy operator disables its materialization.
+   - `TakeWhile`/`DropWhile`/`Dedup` also got the string arm: their type
+     handlers already echoed the source type (a constraint-8 lie for a list
+     runtime).
+   - Ruled atomic under the new lattice: `Max`/`Min`/`Supremum`/`Infimum`,
+     `GCD`/`LCM`, `SetMinus`'s `value*` slots, `StringFrom`. `Transpose(s)`
+     is the identity; `Reshape(s, …)` is inert; `Shape("abc")` = `(3)`,
+     `Rank` = 1. Ruled element-wise (honest reading): `Union`/`Intersection`,
+     `ListFrom`/`SetFrom`/`TupleFrom`, and spread `[..."ab"]` → characters
+     (grapheme clusters). All of these were confirmed by the user on
+     2026-08-16.
+   - `character` compile row: JavaScript lowers a character as a one-cluster
+     JS string with `===` equality and a code-point-sequence comparator;
+     Python fails closed on the whole string-collection AND character rows;
+     GLSL/WGSL now also fail closed on a bare string literal (a pre-existing
+     hole: they emitted `"a"` as shader source).
+   - Deferred to Phase 2 (filed in `ROADMAP.md`): string arms for
+     `RandomShuffle`/`RandomSample`/`DeleteAt`; the inner-string question for
+     `Chunk`/`Partition`/`ChunkBy`/`SlidingWindow`/`Permutations`/
+     `Combinations`; `Tally`'s values half.
 2. **`Join`/`StringJoin` roles + substring/case operations.** (The
    `string -> string` arms for the element-preserving operators all
    land in Phase 1; what remains here is the one role change and the new
