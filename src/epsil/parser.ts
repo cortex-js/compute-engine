@@ -6399,14 +6399,33 @@ export class Parser {
       const listOps = fnOps(left)!.slice(1);
       // Seed the bound names with the PLAIN parameters before walking the
       // patterns, so a pattern leaf colliding with one is caught whichever
-      // side comes first in the list. A repeat between two plain parameters
-      // is not reported here — only pattern leaves are checked.
-      for (const p of listOps) {
+      // side comes first in the list. A plain parameter repeating an earlier
+      // one — `(x, x) => …`, `(x: integer, x) => …` — is the same mistake as a
+      // repeated pattern leaf and gets the same `unexpected-symbol`
+      // diagnostic here, instead of surfacing later as a redeclaration error
+      // out of canonicalization. The repeat is dropped from the parameter
+      // list, as a rejected pattern is.
+      // Duplicates are tracked by POSITION, not by node: a bare parameter is
+      // a plain string, so two occurrences of `x` are value-equal and a
+      // node-keyed set would drop the first, valid, one along with the repeat.
+      const duplicates = new Set<number>();
+      listOps.forEach((p, i) => {
         const name = boundName(p);
-        if (name !== null && name !== '_') names.add(name);
-      }
+        if (name === null || name === '_') return;
+        if (names.has(name)) {
+          const o = nodeOffsets(p);
+          this.error(
+            ['unexpected-symbol', name],
+            o ? o[0] - this.baseOffset : 0,
+            o ? o[1] - this.baseOffset : 0
+          );
+          duplicates.add(i);
+        }
+        names.add(name);
+      });
       const params: MathJsonExpression[] = [];
-      for (const p of listOps) {
+      for (const [i, p] of listOps.entries()) {
+        if (duplicates.has(i)) continue;
         if (isTuple(p)) {
           if (this.checkDestructuringPattern(p, names)) params.push(p);
         } else if (isParam(p)) params.push(p);

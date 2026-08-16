@@ -691,17 +691,39 @@ describe('EPSIL `break` AND `continue`', () => {
     expect(codes(src)).toContain('control-outside-loop');
   });
 
-  test('they round-trip through the serializer in call form', () => {
-    // The serializer has no loop context: a `["Break"]` reached at the top
-    // level or inside a function literal has no enclosing loop, and a bare
-    // `break` there would re-parse as a `control-outside-loop` error. The
-    // call form is the one spelling that is faithful everywhere. (`Loop`
-    // itself does print as `for … in … { … }` / `while … { … }`; emitting the
-    // keyword form for `break`/`continue` needs a loop-depth counter that
-    // resets at every function-literal boundary — see ROADMAP.md.)
+  test('they round-trip in call form outside a loop', () => {
+    // Outside a loop the call form is the only faithful spelling: a bare
+    // `break` reached at the top level, or inside a function literal defined
+    // in a loop, has no enclosing loop and re-parses as the
+    // `control-outside-loop` error above rather than as this node.
     expect(serializeEpsil(['Break'])).toBe('Break()');
     expect(serializeEpsil(['Continue'])).toBe('Continue()');
     expect(validEpsil('Break()')).toStrictEqual(['Break']);
     expect(validEpsil('Continue()')).toStrictEqual(['Continue']);
+    // A function literal is a boundary for the serializer exactly as it is
+    // for the parser, so the literal's body keeps the call form even though
+    // the literal itself sits in a loop body.
+    expect(
+      serializeEpsil(validEpsil('for x in xs { g(Function(Break())) }'))
+    ).toBe('for x in xs {g(Function(Break()))}');
+  });
+
+  test('they serialize as the keyword inside a loop body', () => {
+    // The serializer tracks the same loop depth the parser does, so a
+    // `["Break"]` sitting in a body that is itself printing as `for`/`while`
+    // gets the keyword — the spelling the source used.
+    expect(serializeEpsil(validEpsil('for x in xs { break }'))).toBe(
+      'for x in xs {break}'
+    );
+    expect(serializeEpsil(validEpsil('while c { continue }'))).toBe(
+      'while c {continue}'
+    );
+    // An `if`, a `match` arm and a `do` block are not loop boundaries.
+    expect(
+      serializeEpsil(validEpsil('for x in xs { if x > 2 { break } }'))
+    ).toBe('for x in xs {if x > 2 {break}}');
+    expect(serializeEpsil(validEpsil('for x in xs { do { continue } }'))).toBe(
+      'for x in xs {do {continue}}'
+    );
   });
 });

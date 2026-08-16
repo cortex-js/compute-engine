@@ -96,21 +96,6 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
-### `break` / `continue` serialize as `Break()` / `Continue()`, never as the keywords
-
-Found while giving `Loop` its `for … in … { … }` / `while … { … }`
-serialization (2026-08-15). The body of a serialized loop still prints
-`for x in xs {Break()}`: `serialize-epsil.ts` has no loop context, and a
-bare `break` emitted for a `["Break"]` that sits at the top level or inside
-a function literal would re-parse as a `control-outside-loop` error, so
-the call form is the only spelling that is faithful everywhere
-(`test/epsil/statements.test.ts` pins it). Emitting the keyword form
-inside a loop needs a serializer-side loop-depth counter that increments
-in the `Loop` handler and RESETS at every function-literal boundary (the
-`Function` handler, `serializeNamedDef`, `serializeImplMember`) — the same
-discipline `parser.ts` keeps with `inLoopContext`. Not a correctness
-defect (the output re-parses to the same tree); a spelling gap.
-
 ### `defineFunctionClause` may write through to a builtin instead of shadowing it
 
 Flagged during the nested-`DefineFunction` block-local fix (2026-08-15):

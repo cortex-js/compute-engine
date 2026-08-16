@@ -213,6 +213,32 @@ describe('EPSIL TUPLE PARAMETER DESTRUCTURING — diagnostics', () => {
     expect(codes('((p, (q, p))) => p')).toEqual(['unexpected-symbol']);
   });
 
+  test('a duplicate PLAIN parameter is the same diagnostic (user-ruled 2026-08-15)', () => {
+    // Before this, `(x, x) => x` was silent at parse time and surfaced only
+    // as a redeclaration error out of canonicalization — the same miss the
+    // pattern-leaf check closes. `_` discards, so it may repeat.
+    expect(codes('(x, x) => x')).toEqual(['unexpected-symbol']);
+    expect(codes('(x: integer, x) => x')).toEqual(['unexpected-symbol']);
+    // Only the REPEAT is dropped from the parameter list: the first `x` (and
+    // every other parameter) survives, so the recovered literal still has the
+    // shape the author wrote minus the duplicate.
+    const [ast] = parseEpsil('(x, y, x) => x + y');
+    expect(
+      JSON.stringify(ast).replace(/,?"sourceOffsets":\[\d+,\d+\]/g, '')
+    ).toBe(
+      JSON.stringify({
+        fn: [
+          'Function',
+          { fn: ['Add', { sym: 'x' }, { sym: 'y' }] },
+          { sym: 'x' },
+          { sym: 'y' },
+        ],
+      })
+    );
+    expect(codes('(_, _) => 1')).toEqual([]);
+    expect(codes('(x, y) => x + y')).toEqual([]);
+  });
+
   test('distinct pattern names stay diagnostic-free', () => {
     expect(codes('(p, q) => p + q')).toEqual([]);
     expect(codes('((p, q)) => p + q')).toEqual([]);

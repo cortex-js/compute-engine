@@ -198,6 +198,34 @@ export function serializeEpsil(
     return fmt.text();
   }
 
+  /**
+   * Lexically enclosing SERIALIZED loop bodies — the `break`/`continue`
+   * context, mirroring the parser's own `loopDepth` (`parser.ts`,
+   * `inLoopContext`). Zero means "not inside a `for`/`while` body", and
+   * `["Break"]` / `["Continue"]` then have to take their call spelling
+   * `Break()` / `Continue()`: a bare `break` there re-parses as the
+   * `control-outside-loop` diagnostic.
+   *
+   * Per-serialization state (a closure over this call), not a module global,
+   * so concurrent serializations cannot see each other's depth.
+   */
+  let loopDepth = 0;
+
+  /** Serialize with the `break`/`continue` context set to `depth`: one deeper
+   * for a loop body, zero for a function-literal body (the boundary a `break`
+   * may not cross). The serializer must reset at exactly the boundaries the
+   * parser resets at, or a round trip either fails to parse or silently
+   * rebinds a `break` to the wrong loop. */
+  function inLoopContext<T>(depth: number, serialize: () => T): T {
+    const saved = loopDepth;
+    loopDepth = depth;
+    try {
+      return serialize();
+    } finally {
+      loopDepth = saved;
+    }
+  }
+
   function serializeString(s: string): FormattingBlock {
     // @todo:
     // could be more clever: if `s` contains line feeds, use a `"""` string
@@ -592,6 +620,29 @@ export function serializeEpsil(
       serializeLoop(expr) ?? serializeGenericFunction(expr),
 
     //
+    // `break` / `continue` — the keyword spelling, but ONLY when this node is
+    // being serialized inside the body of a loop that is itself taking its
+    // `for`/`while` keyword spelling (`loopDepth > 0`). Everywhere else the
+    // call form `Break()` / `Continue()` is the only faithful one: at the top
+    // level, or inside a function literal defined in a loop, a bare keyword
+    // re-parses as the `control-outside-loop` diagnostic instead of the node
+    // it came from.
+    //
+    // `Break(value)` — the engine's valued form — has no keyword spelling
+    // at all (`break value` is not surface syntax), so it keeps the call
+    // form regardless of the depth.
+    //
+    Break: (expr: MathJsonExpression): FormattingBlock =>
+      loopDepth > 0 && nops(expr) === 0
+        ? fmt.text('break')
+        : serializeGenericFunction(expr),
+
+    Continue: (expr: MathJsonExpression): FormattingBlock =>
+      loopDepth > 0 && nops(expr) === 0
+        ? fmt.text('continue')
+        : serializeGenericFunction(expr),
+
+    //
     // Function literal (typed function literals, Phase 4)
     //
     // An annotated `Function` literal — one carrying `["Typed", …]` parameters
@@ -601,52 +652,13 @@ export function serializeEpsil(
     // (Named typed defs go through the `Assign` handler, which reconstructs the
     // `f(x: integer) -> real = …` / `function … { … }` syntax.)
     //
-    Function: (expr: MathJsonExpression): FormattingBlock => {
-      const params = operands(expr).slice(1);
-      const op1 = operand(expr, 1);
-      const hasTypedParam = params.some((p) => operator(p) === 'Typed');
-      const hasReturn = operator(op1) === 'Typed';
-      // A pattern parameter with a leaf that is not a name — `Tuple(1, "q")`,
-      // reachable from raw MathJSON — has NO parameter-list spelling at all, so
-      // the whole literal takes the generic form. This has to be decided here,
-      // ahead of the annotation test: an annotation elsewhere in the parameter
-      // list would otherwise force the arrow spelling and emit the unspellable
-      // parameter as an empty slot (`(x: integer, ) => …`), which does not
-      // re-parse.
-      if (!paramsAreSpellable(params)) return serializeGenericFunction(expr);
-      // A DESTRUCTURING parameter has no generic-form spelling that reads as
-      // one: `Function(p + q, (p, q))` re-parses correctly but looks like the
-      // two-parameter literal. The mapsto form says which it is, so a literal
-      // carrying one takes the arrow spelling even with no annotation
-      // anywhere.
-      const destructuring = params.some((p) => operator(p) === 'Tuple');
-      if (!hasTypedParam && !hasReturn && !destructuring)
-        return serializeGenericFunction(expr);
-      // A plain return-type ascription has no anonymous-mapsto spelling; drop
-      // it (the body is serialized without the ascription), as LaTeX and
-      // ASCII-math do.
-      const { bodyExpr, decomposed } = fnLiteralParts(expr);
-      // A marker that DECOMPOSED is not an ascription though — it is the
-      // literal's own signature (`docs/EFFECTS-MODEL.md`, "Epsil surface"),
-      // and dropping it would silently weaken the literal. None of its pieces
-      // has an anonymous-mapsto spelling — the specifier and quantifier slots
-      // exist only on the named definition forms, and the mapsto's `-> ‹ret›`
-      // slot does not exist at all — so a marker-carrying anonymous literal
-      // falls back to the generic `Function(…)` spelling, where the `Typed`
-      // handler below keeps the marker as an explicit `Typed(body, "‹sig›")`
-      // call (option B, ruled 2026-08-01; widened from "effect-bearing" to
-      // "decomposed" 2026-08-04). That re-parses to this very node, so the
-      // round-trip is lossless — including a ground marker whose result is
-      // NARROWER than the body's inferred type, which the dropped-ascription
-      // path would have silently widened.
-      if (decomposed) return serializeGenericFunction(expr);
-      const arrow = options?.fancySymbols ? '⇒' : '=>';
-      return fmt.line(
-        serializeParamList(params),
-        ` ${arrow} `,
-        serializeExpression(bodyExpr)
-      );
-    },
+    Function: (expr: MathJsonExpression): FormattingBlock =>
+      // A function literal is a `break`/`continue` BOUNDARY: the parser resets
+      // its loop context both for a `=>` body and for every argument of an
+      // explicit `Function(…)` call, so a `break` written inside a lambda
+      // defined in a loop is outside that loop. Both spellings this handler
+      // can produce are covered by resetting here.
+      inLoopContext(0, () => serializeFunctionLiteral(expr)),
 
     //
     // Type ascription: serialized transparently (the annotation is dropped, as
@@ -1427,6 +1439,60 @@ export function serializeEpsil(
       params.map((p, i) => serializeParam(p, markerTypes[i]))
     );
 
+  /** The body of the `Function` entry in `FUNCTIONS` — an ANONYMOUS function
+   * literal, in its mapsto spelling `(x: integer) => body` or, for a literal
+   * with nothing to annotate, the generic `Function(body, …params)` call
+   * form. Split out from the table entry only so the entry can wrap it in
+   * the `break`/`continue` boundary both spellings need. */
+  const serializeFunctionLiteral = (
+    expr: MathJsonExpression
+  ): FormattingBlock => {
+    const params = operands(expr).slice(1);
+    const op1 = operand(expr, 1);
+    const hasTypedParam = params.some((p) => operator(p) === 'Typed');
+    const hasReturn = operator(op1) === 'Typed';
+    // A pattern parameter with a leaf that is not a name — `Tuple(1, "q")`,
+    // reachable from raw MathJSON — has NO parameter-list spelling at all, so
+    // the whole literal takes the generic form. This has to be decided here,
+    // ahead of the annotation test: an annotation elsewhere in the parameter
+    // list would otherwise force the arrow spelling and emit the unspellable
+    // parameter as an empty slot (`(x: integer, ) => …`), which does not
+    // re-parse.
+    if (!paramsAreSpellable(params)) return serializeGenericFunction(expr);
+    // A DESTRUCTURING parameter has no generic-form spelling that reads as
+    // one: `Function(p + q, (p, q))` re-parses correctly but looks like the
+    // two-parameter literal. The mapsto form says which it is, so a literal
+    // carrying one takes the arrow spelling even with no annotation
+    // anywhere.
+    const destructuring = params.some((p) => operator(p) === 'Tuple');
+    if (!hasTypedParam && !hasReturn && !destructuring)
+      return serializeGenericFunction(expr);
+    // A plain return-type ascription has no anonymous-mapsto spelling; drop
+    // it (the body is serialized without the ascription), as LaTeX and
+    // ASCII-math do.
+    const { bodyExpr, decomposed } = fnLiteralParts(expr);
+    // A marker that DECOMPOSED is not an ascription though — it is the
+    // literal's own signature (`docs/EFFECTS-MODEL.md`, "Epsil surface"),
+    // and dropping it would silently weaken the literal. None of its pieces
+    // has an anonymous-mapsto spelling — the specifier and quantifier slots
+    // exist only on the named definition forms, and the mapsto's `-> ‹ret›`
+    // slot does not exist at all — so a marker-carrying anonymous literal
+    // falls back to the generic `Function(…)` spelling, where the `Typed`
+    // handler keeps the marker as an explicit `Typed(body, "‹sig›")`
+    // call (option B, ruled 2026-08-01; widened from "effect-bearing" to
+    // "decomposed" 2026-08-04). That re-parses to this very node, so the
+    // round-trip is lossless — including a ground marker whose result is
+    // NARROWER than the body's inferred type, which the dropped-ascription
+    // path would have silently widened.
+    if (decomposed) return serializeGenericFunction(expr);
+    const arrow = options?.fancySymbols ? '⇒' : '=>';
+    return fmt.line(
+      serializeParamList(params),
+      ` ${arrow} `,
+      serializeExpression(bodyExpr)
+    );
+  };
+
   /**
    * One member of a protocol-implementation block:
    * `function|get|set NAME(params) ‹effects› -> ret { … }`.
@@ -1440,6 +1506,15 @@ export function serializeEpsil(
    * would not re-parse.
    */
   const serializeImplMember = (
+    keyword: 'function' | 'get' | 'set',
+    member: string,
+    fn: MathJsonExpression
+  ): FormattingBlock | null =>
+    // An implementation body is a `break`/`continue` boundary, like any
+    // function body (`parser.ts` parses it with the loop context reset).
+    inLoopContext(0, () => serializeImplMemberBody(keyword, member, fn));
+
+  const serializeImplMemberBody = (
     keyword: 'function' | 'get' | 'set',
     member: string,
     fn: MathJsonExpression
@@ -1470,6 +1545,15 @@ export function serializeEpsil(
   // specifier sits between the parameter list and the arrow (Swift-style); it
   // is omitted, along with its space, when the literal declares no effects.
   const serializeNamedDef = (
+    name: MathJsonExpression,
+    fn: MathJsonExpression
+  ): FormattingBlock =>
+    // A named definition's body — braced (`function f(x) { … }`) or math
+    // form (`f(x) = …`) — is a `break`/`continue` boundary: the parser
+    // resets the loop context for both spellings.
+    inLoopContext(0, () => serializeNamedDefBody(name, fn));
+
+  const serializeNamedDefBody = (
     name: MathJsonExpression,
     fn: MathJsonExpression
   ): FormattingBlock => {
@@ -1805,9 +1889,18 @@ export function serializeEpsil(
         bindingText = name === null ? null : escapeSymbol(name);
       }
       if (bindingText === null) return null;
-      return serializeHeadedBlock(
-        fmt.line('for ', bindingText, ' in ', headOperand(collection)),
-        body
+      // The head is serialized OUTSIDE the loop context — the parser reads
+      // the collection at the enclosing depth (`parseFor` calls `inLoopContext`
+      // around the body only), so a `["Break"]` buried in the collection
+      // expression must keep whatever spelling that enclosing depth gives it.
+      const head = fmt.line(
+        'for ',
+        bindingText,
+        ' in ',
+        headOperand(collection)
+      );
+      return inLoopContext(loopDepth + 1, () =>
+        serializeHeadedBlock(head, body)
       );
     }
 
@@ -1815,9 +1908,11 @@ export function serializeEpsil(
     if (args.length === 1) {
       const parts = whileParts(args[0]);
       if (parts === null) return null;
-      return serializeHeadedBlock(
-        fmt.line('while ', headOperand(parts.cond)),
-        parts.body
+      // As in the `for` case, the condition belongs to the enclosing loop
+      // context: `parseWhile` parses it before entering the body's context.
+      const head = fmt.line('while ', headOperand(parts.cond));
+      return inLoopContext(loopDepth + 1, () =>
+        serializeHeadedBlock(head, parts.body)
       );
     }
 
@@ -1832,6 +1927,13 @@ export function serializeEpsil(
 
     const op = OPERATORS[opName];
     if (!op) return null;
+    // `MapsTo` prints as `x => body`, which the parser reads as a LAMBDA — a
+    // `break`/`continue` boundary. (The parser itself rewrites the node into
+    // `["Function", …]`, so a raw `MapsTo` head reaches the serializer only
+    // from hand-written MathJSON.) Recursing with the depth already zeroed
+    // cannot loop.
+    if (opName === 'MapsTo' && loopDepth !== 0)
+      return inLoopContext(0, () => serializeOperator(expr));
     const opSymbol = options?.fancySymbols
       ? (op.fancySymbol ?? op.symbol)
       : op.symbol;

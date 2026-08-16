@@ -139,30 +139,27 @@ describe('diagnostics', () => {
     expect(ce.box(['g', 1, N('y', 3)] as any).toString()).toBe('g(1, 3)');
   });
 
-  test('an optional hole is reported ahead of an unsatisfiable `+` tail', () => {
-    // Two problems in one call: `b` is skipped (R1) AND the `+` tail is empty.
-    // The hole is the more specific diagnostic — it names the parameter the
-    // author skipped — so it is the one reported.
-    //
-    // The signature is built as a Type OBJECT because the type-string parser
-    // rejects optional and variadic parameters in the same signature
-    // ("Variadic arguments cannot be used with optional arguments",
-    // common/type/parser.ts).
+  test('a signature mixing optional parameters with a `+` tail is not declarable (user-ruled 2026-08-15)', () => {
+    // This test used to build such a signature as a Type OBJECT to reach the
+    // "optional hole beats unsatisfiable `+` tail" precedence branch, because
+    // the type-STRING parser refuses the combination ("Variadic arguments
+    // cannot be used with optional arguments", common/type/parser.ts). The
+    // object route now enforces the same rule (`BoxedType`), so the scenario
+    // cannot be built at all and the branch is unreachable through the engine.
     const ce = new ComputeEngine();
-    ce.declare('v', {
-      kind: 'signature',
-      args: [{ name: 'a', type: 'number' }],
-      optArgs: [
-        { name: 'b', type: 'number' },
-        { name: 'c', type: 'number' },
-      ],
-      variadicArg: { name: 'rest', type: 'number' },
-      variadicMin: 1,
-      result: 'number',
-    } as any);
-    const call = ce.box(['v', N('a', 1), N('c', 3)] as any);
-    expect(errorCodes(call)).toEqual(['argument-optional-skipped']);
-    expect(call.toString()).toContain('`b` is not');
+    expect(() =>
+      ce.declare('v', {
+        kind: 'signature',
+        args: [{ name: 'a', type: 'number' }],
+        optArgs: [
+          { name: 'b', type: 'number' },
+          { name: 'c', type: 'number' },
+        ],
+        variadicArg: { name: 'rest', type: 'number' },
+        variadicMin: 1,
+        result: 'number',
+      } as any)
+    ).toThrow('Variadic arguments cannot be used with optional arguments');
   });
 
   test('an unfilled required parameter reports `missing` — a named call never curries (C5)', () => {

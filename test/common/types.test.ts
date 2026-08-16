@@ -402,11 +402,12 @@ describe('Collection Type Parser', () => {
     // The converse does NOT hold: a dictionary states no keys, so it cannot
     // stand in for a record that requires them.
     expect(
-      isSubtype(parseType('dictionary<integer>'), parseType('record{x: integer}'))
+      isSubtype(
+        parseType('dictionary<integer>'),
+        parseType('record{x: integer}')
+      )
     ).toBe(false);
-    expect(
-      isSubtype(parseType('dictionary'), parseType('record'))
-    ).toBe(false);
+    expect(isSubtype(parseType('dictionary'), parseType('record'))).toBe(false);
   });
 
   it('should parse a record with exotic keys', () => {
@@ -861,6 +862,116 @@ describe('Argument order in a function signature', () => {
     expect(typeToString(parseType('(collection+) -> set'))).toBe(
       '(collection+) -> set'
     );
+  });
+});
+
+describe('optional parameters and a variadic tail are exclusive on BOTH routes', () => {
+  // The type-string grammar has always refused the combination: argument
+  // validation fills every optional slot before the variadic parameter takes
+  // anything, so in `(number, number?, number+)` the optional slot is not
+  // optional at all. A hand-built `Type` OBJECT is refused by the same rule
+  // when it is boxed (`BoxedType`'s constructor). Until that check existed,
+  // such an object could be declared and would serialize to
+  // `(number, number?, number+) -> number` — a string `parseType()` cannot
+  // read back, i.e. a type with no spelling.
+  const RULE = 'Variadic arguments cannot be used with optional arguments';
+
+  const OPT_PLUS_VARIADIC: Type = {
+    kind: 'signature',
+    args: [{ type: 'number' }],
+    optArgs: [{ type: 'number' }],
+    variadicArg: { type: 'number' },
+    variadicMin: 1,
+    result: 'number',
+  };
+
+  /** A fresh engine. Required lazily: this file is otherwise free of engine
+   * dependencies. */
+  function engine(): any {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    return new ComputeEngine();
+  }
+
+  it('rejects the type OBJECT on `ce.declare`', () => {
+    expect(() => engine().declare('h', OPT_PLUS_VARIADIC)).toThrow(RULE);
+  });
+
+  it('rejects the same signature NESTED inside another type', () => {
+    // A signature reached through a collection element is just as unspellable
+    // as a top-level one, so the check is a full walk of the type.
+    const nested: Type = { kind: 'list', elements: OPT_PLUS_VARIADIC };
+    expect(() => engine().declare('hs', nested)).toThrow(RULE);
+  });
+
+  it('rejects the same signature as a polytype `where`-clause BOUND', () => {
+    // A type parameter's bound is a full type. Left unchecked, the declared
+    // polytype would print as `(T) -> T where T: (number, number?, number+)
+    // -> number` — a spelling `parseType` refuses — which is exactly the
+    // "type with no spelling" the object-route check exists to prevent.
+    const poly: Type = {
+      kind: 'signature',
+      args: [{ type: { kind: 'variable', name: 'T' } }],
+      result: { kind: 'variable', name: 'T' },
+      typeParams: [{ name: 'T', bound: OPT_PLUS_VARIADIC }],
+    };
+    expect(() => engine().declare('hp', poly)).toThrow(RULE);
+  });
+
+  it('still rejects the STRING form in the parser', () => {
+    expect(() => parseType('(number, number?, number+) -> number')).toThrow(
+      RULE
+    );
+    // The `*` tail is refused on the same rule.
+    expect(() => parseType('(number, number?, number*) -> number')).toThrow(
+      RULE
+    );
+  });
+
+  it('rejects a required parameter after an optional one (string route only)', () => {
+    // The object route cannot express the ORDER of the parameter list — the
+    // required, optional and variadic parameters live in separate fields — so
+    // this ordering rule has nothing to enforce there.
+    expect(() => parseType('(number?, number) -> number')).toThrow(
+      'A required argument cannot follow an optional argument'
+    );
+  });
+
+  /** A legal shape is accepted by BOTH routes: the string parses and
+   * round-trips, and the hand-built object declares and serializes to the same
+   * spelling (which parses back). */
+  function acceptsOnBothRoutes(spelling: string, built: Type): void {
+    expect(typeToString(parseType(spelling))).toBe(spelling);
+    expect(() => engine().declare('ok', built)).not.toThrow();
+    expect(typeToString(built)).toBe(spelling);
+    expect(typeToString(parseType(typeToString(built)))).toBe(spelling);
+  }
+
+  it('accepts a `*` tail after a required parameter', () => {
+    acceptsOnBothRoutes('(number, number*) -> number', {
+      kind: 'signature',
+      args: [{ type: 'number' }],
+      variadicArg: { type: 'number' },
+      variadicMin: 0,
+      result: 'number',
+    });
+  });
+
+  it('accepts a bare `+` tail', () => {
+    acceptsOnBothRoutes('(number+) -> number', {
+      kind: 'signature',
+      variadicArg: { type: 'number' },
+      variadicMin: 1,
+      result: 'number',
+    });
+  });
+
+  it('accepts an optional parameter with NO variadic tail', () => {
+    acceptsOnBothRoutes('(number, number?) -> number', {
+      kind: 'signature',
+      args: [{ type: 'number' }],
+      optArgs: [{ type: 'number' }],
+      result: 'number',
+    });
   });
 });
 

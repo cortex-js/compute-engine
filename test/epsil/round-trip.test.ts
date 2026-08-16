@@ -301,6 +301,83 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
     'while loop (several statements)',
     ['Loop', ['Block', ['If', ['Not', 'c'], ['Break']], ['Block', 'a', 'b']]],
   ],
+  // Outside any loop there is no keyword spelling: a bare `break` would
+  // re-parse as the `control-outside-loop` diagnostic, which the harness
+  // rejects, so this row also guards the call-form fallback.
+  ['top-level Break', ['Break']],
+  ['top-level Continue', ['Continue']],
+  [
+    'for loop containing continue',
+    ['Loop', ['Block', ['Continue']], ['Element', 'x', 'xs']],
+  ],
+  // `break`/`continue` take their keyword spelling only inside a serialized
+  // loop body, so the round trip has to survive both sides of that boundary:
+  // the keyword in the body, and the call form in a function literal defined
+  // in the body (the parser resets its loop context there, so a keyword would
+  // re-parse as `control-outside-loop` instead of as this node).
+  [
+    'break inside a nested if in a loop',
+    [
+      'Loop',
+      ['Block', ['If', ['Greater', 'x', 2], ['Block', ['Break']]], ['f', 'x']],
+      ['Element', 'x', 'xs'],
+    ],
+  ],
+  [
+    'break inside a match arm in a loop',
+    [
+      'Loop',
+      ['Block', ['Match', 'x', ['MatchCase', 1, ['Break']]]],
+      ['Element', 'x', 'xs'],
+    ],
+  ],
+  [
+    'valued Break in a loop (no keyword spelling)',
+    ['Loop', ['Block', ['Break', 3]], ['Element', 'x', 'xs']],
+  ],
+  [
+    'Break in a function literal in a loop',
+    [
+      'Loop',
+      ['Block', ['g', ['Function', ['Break'], 'y']]],
+      ['Element', 'x', 'xs'],
+    ],
+  ],
+  [
+    'loop in a function literal in a loop',
+    [
+      'Loop',
+      [
+        'Block',
+        [
+          'Function',
+          [
+            'Block',
+            ['Loop', ['Block', ['Break']], ['Element', 'z', 'zs']],
+            ['Break'],
+          ],
+          'y',
+        ],
+      ],
+      ['Element', 'x', 'xs'],
+    ],
+  ],
+  [
+    'Break in a generic Loop nested in a loop',
+    [
+      'Loop',
+      [
+        'Block',
+        [
+          'Loop',
+          ['Block', ['Break']],
+          ['Element', 'y', 'ys'],
+          ['Element', 'z', 'zs'],
+        ],
+      ],
+      ['Element', 'x', 'xs'],
+    ],
+  ],
   ['infinite Loop (no surface spelling)', ['Loop', ['Block', 'a']]],
   [
     'Loop with several iterator clauses (no surface spelling)',
@@ -370,17 +447,46 @@ describe('EPSIL LOOP SPELLING', () => {
     // Several statements, inline: `;`-separated, as in any brace block.
     ['for x in xs { f(x)\n g(x) }', 'for x in xs {f(x); g(x)}'],
     ['while c { f()\n g()\n h() }', 'while c {f(); g(); h()}'],
-    // `break`/`continue` keep their CALL spelling: they lower to `Break()` /
-    // `Continue()`, and the serializer has no loop context, so the keyword
-    // would re-parse outside a loop as an error (pinned in statements.test.ts).
-    // The call form re-parses to the same node inside the loop.
-    ['for x in xs { break }', 'for x in xs {Break()}'],
-    ['while c { continue }', 'while c {Continue()}'],
-    ['for x in xs { if x > 2 { break } }', 'for x in xs {if x > 2 {Break()}}'],
+    // `break`/`continue` take their KEYWORD spelling inside a serialized loop
+    // body — including nested in an `if`, a `match` arm, or a `do` block,
+    // none of which is a loop boundary for the parser either. Outside a loop
+    // they keep the call form `Break()` / `Continue()` (pinned in
+    // statements.test.ts), which is the only spelling that re-parses there.
+    ['for x in xs { break }', 'for x in xs {break}'],
+    ['while c { continue }', 'while c {continue}'],
+    ['for x in xs { if x > 2 { break } }', 'for x in xs {if x > 2 {break}}'],
+    ['for x in xs { do { break } }', 'for x in xs {do {break}}'],
+    ['while c { if d { continue } }', 'while c {if d {continue}}'],
+    // The valued form has no keyword spelling (`break value` is not surface
+    // syntax), so it stays a call even inside the loop.
+    ['for x in xs { Break(3) }', 'for x in xs {Break(3)}'],
     // Nesting.
     [
       'for x in xs { for y in ys { f(x, y) } }',
       'for x in xs {for y in ys {f(x, y)}}',
+    ],
+    // A FUNCTION LITERAL resets the loop context, exactly as in the parser: a
+    // `break` written inside a lambda defined in a loop is outside that loop,
+    // so the node keeps its call form there. Both literal spellings — the
+    // annotated arrow and the generic `Function(…)` call — are boundaries.
+    [
+      'for x in xs { g((y: integer) => Break()) }',
+      'for x in xs {g((y: integer) => Break())}',
+    ],
+    [
+      'for x in xs { g(Function(Break())) }',
+      'for x in xs {g(Function(Break()))}',
+    ],
+    [
+      'for x in xs { function h(y) { Break() } }',
+      'for x in xs {function h(y) {Break()}}',
+    ],
+    ['for x in xs { h(y) = Break() }', 'for x in xs {h(y) = Break()}'],
+    // …and a loop INSIDE that literal starts a fresh context, so its own body
+    // gets the keyword again.
+    [
+      'for x in xs { function h(y) { for z in zs { break } } }',
+      'for x in xs {function h(y) {for z in zs {break}}}',
     ],
   ])('%s', (src, expected) => {
     expect(spell(src)).toBe(expected);
@@ -400,7 +506,7 @@ describe('EPSIL LOOP SPELLING', () => {
       [
         'for x in xs {',
         '  let y = x + 1',
-        '  if y > 2 {Break()}',
+        '  if y > 2 {break}',
         '  g(y)',
         '}',
       ].join('\n')

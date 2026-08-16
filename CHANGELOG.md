@@ -124,6 +124,37 @@
   pattern parameter: ((p, q)) => …
   ```
 
+  The tuple-pattern hint is offered only when the source's elements are
+  provably tuples of exactly the declared width. Suggested on the shape of the
+  mismatch alone it named rewrites that cannot work — `Map((p, q) => p + q,
+  [1, 2, 3])` proposed `((p, q)) => …` for a list of NUMBERS. The arity error
+  itself is a fact about the callback and is unchanged; only the suggested fix
+  is now gated.
+
+- **A pipe stage that cannot take one value is a `pipe-stage-arity` error.**
+  `x |> f` hands `f` exactly one value, so a multi-parameter stage can never
+  be applied. It used to fall through to the currying path and answer a
+  residual closure with no diagnostic — `[100, 200] |> (x, y, z) => x + y + z`
+  evaluated to `(_1, _2) => …` — which in a pipeline is never what was meant.
+  This applies to a named stage too: `xs |> add` on a two-parameter `add` is
+  the error, not a partial application.
+
+  It is deliberately NOT the `callback-arity` error above. A pipe stage is not
+  an operator-owned callback slot — `x |> f` is an application whose argument
+  is written to the left — and the remedy differs: a pipe points at the CALL
+  form, with `_` marking the piped value's slot, rather than at a tuple
+  pattern.
+
+  ```
+  A pipe passes its stage exactly 1 value; `(x, y, z) => x + y + z` declares 3
+  parameters. A stage that takes several arguments is written as a call, with
+  `_` in the piped value's slot: `xs |> Fold(f, 0, _)`
+  ```
+
+  When the piped value is a collection of tuples, the tuple pattern still
+  works: `pairs |> ((p, q)) => p + q`. `epsil doc pipe-stage-arity` explains
+  the whole rule.
+
   Fixed while here: `Fill((i: integer) => 2i, (2, 2))` compiled to JavaScript
   (silently accepting a unary generator) while the interpreter threw on the
   same expression; both routes now agree.
@@ -146,6 +177,48 @@
   `["Range", 1, 0]` already means the descending pair `[1, 0]`.
 
 ### Issues Resolved
+
+- **`&&` and `||` (`And`/`Or`) now short-circuit.** The operands are evaluated
+  left to right, in the order written, and evaluation stops at the first
+  `false` (for `&&`) or the first `true` (for `||`); the remaining operands do
+  not run. Before, `And`/`Or` were declared eager and commutative: every
+  operand was evaluated (`false && f()` still called `f()`, and a guard such as
+  `k <= n && xs[k] > 0` still read `xs[k]` out of range), and canonicalization
+  sorted the operands, so `g() && f()` could even run `f()` first — while the
+  JavaScript compilation target already emitted a short-circuiting `&&`, so
+  compiled and interpreted code disagreed on side effects and errors. The
+  operands of `And`/`Or` are no longer reordered at canonicalization
+  (`["And", "q", "p"]` stays as written); nested `And`/`Or` are still
+  flattened, and the symbolic simplifications (`A ∧ ¬A → False`, duplicate
+  removal, absorption, CNF/DNF) are unchanged.
+
+- **`for` and `while` loops round-trip through the Epsil serializer.** A
+  `Loop` used to serialize only in the call spelling `Loop(do {…}, x in xs)`
+  — re-parseable, but not what the author wrote. It now prints as
+  `for x in xs { … }`, `for (p, q) in pairs { … }` or `while c { … }`, and
+  a `break`/`continue` inside a loop body prints as the keyword. Outside a
+  loop body — at the top level, or inside a function literal within a loop,
+  where the parser would report `control-outside-loop` — the call form
+  `Break()`/`Continue()` is kept, tracked by a serializer-side loop depth
+  that resets at every function-literal boundary, exactly as the parser's
+  does. `Loop` shapes the surface grammar cannot spell keep the call form.
+
+- **A duplicate name in a lambda parameter list is a parse diagnostic.**
+  `(x, x) => x`, `(x: integer, x) => x` and a tuple-pattern leaf repeating a
+  name (`((p, p)) => p`, `(x, (p, x)) => …`) now report `unexpected-symbol`
+  at parse time, the same diagnostic `let (p, p) = v` gives, instead of
+  surfacing later as an "already declared" error out of canonicalization
+  (and nothing at all from `epsil check`). `_` discards a position and may
+  repeat.
+
+- **A signature mixing optional parameters with a variadic tail is rejected on
+  the type-object route too.** The type-string grammar has always refused
+  `(number, number?, number+) -> number` ("Variadic arguments cannot be used
+  with optional arguments"), but a `Type` object built by hand and passed to
+  `ce.declare()` slipped through — a type that existed but had no spelling
+  `parseType` could read back. `BoxedType` now enforces the same rule for
+  every object-route entry, nested signatures included, with the same
+  message (`code: 'variadic-with-optional'`).
 
 - **A pipe whose stage maps now has the type of the mapped collection.** A unary
   function literal on the right of `|>` maps over a collection topic instead of

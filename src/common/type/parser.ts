@@ -39,7 +39,10 @@ import {
   TypeParameter,
   TypeResolver,
 } from './types.js';
-import { PRIMITIVE_TYPES_SET } from './primitive.js';
+import {
+  PRIMITIVE_TYPES_SET,
+  VARIADIC_WITH_OPTIONAL_MESSAGE,
+} from './primitive.js';
 import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 
 /**
@@ -1195,7 +1198,7 @@ export class Parser {
     ).length;
 
     if (hasOptional && hasVariadic) {
-      this.error('Variadic arguments cannot be used with optional arguments');
+      this.error(VARIADIC_WITH_OPTIONAL_MESSAGE);
     }
 
     if (variadicCount > 1) {

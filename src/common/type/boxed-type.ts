@@ -4,6 +4,10 @@ import { typeToString } from './serialize.js';
 import { parseType } from './parse.js';
 import { narrow, signatureEffects, widen } from './utils.js';
 import {
+  hasOptionalWithVariadic,
+  VARIADIC_WITH_OPTIONAL_MESSAGE,
+} from './primitive.js';
+import {
   hasFreeTypeVariables,
   isPolymorphicType,
   matchesPolytypePattern,
@@ -104,6 +108,21 @@ export class BoxedType {
     // boxing it silently is what lets it escape into the algebra, whose helpers
     // assert on an open input.
     if (typeof this.type === 'object' && typeof type !== 'string') {
+      // The type-string grammar refuses a signature that combines optional
+      // parameters with a variadic tail (see
+      // `VARIADIC_WITH_OPTIONAL_MESSAGE`), and a hand-built `Type` object has
+      // to be refused for the same reason: admitting one mints a type with no
+      // spelling — `typeToString()` prints
+      // `(number, number?, number+) -> number`, which `parseType()` then
+      // cannot read back.
+      if (hasOptionalWithVariadic(this.type)) {
+        const err = new Error(
+          `The type \`${typeToString(this.type)}\` is invalid: ${VARIADIC_WITH_OPTIONAL_MESSAGE}`
+        ) as Error & { code?: string; rawMessage?: string };
+        err.code = 'variadic-with-optional';
+        err.rawMessage = VARIADIC_WITH_OPTIONAL_MESSAGE;
+        throw err;
+      }
       if (this.isPolymorphic) validateDeclaredType(this.type, typeResolver);
       else if (hasFreeTypeVariables(this.type))
         throw new TypeVariableError(

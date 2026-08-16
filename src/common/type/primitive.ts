@@ -113,6 +113,85 @@ export const PRIMITIVE_TYPES_SET: ReadonlySet<PrimitiveType> = new Set(
   PRIMITIVE_TYPES
 );
 
+/**
+ * The rule a function signature's parameter list must satisfy, whichever
+ * route the type arrives by: it may declare OPTIONAL parameters or a VARIADIC
+ * tail, never both.
+ *
+ * The reason is the consumption model. Argument validation fills every
+ * optional slot before it starts feeding the variadic parameter, so in
+ * `(number, number?, number+)` the optional slot is not optional at all — it
+ * has to be supplied before the variadic tail can take anything. The two
+ * spellings would contradict each other, so the combination is refused
+ * instead of being given a surprising meaning.
+ *
+ * The type-STRING grammar enforces it at parse time (`parseFunctionSignature`
+ * in `parser.ts`); a hand-built `Type` object is checked with
+ * {@linkcode hasOptionalWithVariadic} when it is boxed (the `BoxedType`
+ * constructor). Both report this message.
+ */
+export const VARIADIC_WITH_OPTIONAL_MESSAGE =
+  'Variadic arguments cannot be used with optional arguments';
+
+/**
+ * Does `t` contain — at any depth — a function signature that combines
+ * optional parameters with a variadic tail? See
+ * {@linkcode VARIADIC_WITH_OPTIONAL_MESSAGE} for the rule such a signature
+ * breaks.
+ *
+ * A signature nested inside another type (`list<(number, number?, number+) ->
+ * number>`) is just as unspellable as a top-level one, so the check is a full
+ * walk. A type REFERENCE is not resolved — what a name stands for was checked
+ * when that name was declared — but the type ARGUMENTS applied to it are
+ * walked, since they come from the same hand-built type.
+ */
+export function hasOptionalWithVariadic(t: Type): boolean {
+  if (typeof t === 'string') return false;
+  switch (t.kind) {
+    case 'signature':
+      if ((t.optArgs?.length ?? 0) > 0 && t.variadicArg !== undefined)
+        return true;
+      return (
+        hasOptionalWithVariadic(t.result) ||
+        (t.args?.some((a) => hasOptionalWithVariadic(a.type)) ?? false) ||
+        (t.optArgs?.some((a) => hasOptionalWithVariadic(a.type)) ?? false) ||
+        (t.variadicArg !== undefined &&
+          hasOptionalWithVariadic(t.variadicArg.type)) ||
+        // A polytype's `where`-clause bounds are full types too — a bound
+        // that is itself such a signature would serialize into a `where`
+        // clause the parser refuses to read back.
+        (t.typeParams?.some(
+          (p) => p.bound !== undefined && hasOptionalWithVariadic(p.bound)
+        ) ??
+          false)
+      );
+    case 'callback':
+      return hasOptionalWithVariadic(t.signature);
+    case 'record':
+    case 'object':
+      return Object.values(t.elements).some(hasOptionalWithVariadic);
+    case 'union':
+    case 'intersection':
+      return t.types.some(hasOptionalWithVariadic);
+    case 'negation':
+      return hasOptionalWithVariadic(t.type);
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return hasOptionalWithVariadic(t.elements);
+    case 'dictionary':
+      return hasOptionalWithVariadic(t.values);
+    case 'tuple':
+      return t.elements.some((e) => hasOptionalWithVariadic(e.type));
+    case 'reference':
+      return t.args?.some(hasOptionalWithVariadic) ?? false;
+    default:
+      return false;
+  }
+}
+
 export function isValidPrimitiveType(s: any): s is PrimitiveType {
   if (typeof s !== 'string') return false;
   return PRIMITIVE_TYPES_SET.has(s as PrimitiveType);
