@@ -1358,7 +1358,11 @@ describe('phase 3: `Map` — the callback-first signature', () => {
         .toString()
     ).toBe('[9,12]');
 
-    // Arity-mismatched callback: the diagnostic VALUE, verbatim.
+    // Arity-mismatched callback: the diagnostic VALUE, verbatim. Since the
+    // static callback-arity check (2026-08-15) this is settled at
+    // CANONICALIZATION — a unary literal cannot be applied to one element of
+    // each of two sources — instead of at application time, where it used to
+    // surface as a thrown `Too many arguments`.
     expect(
       ce
         .box([
@@ -1369,8 +1373,8 @@ describe('phase 3: `Map` — the callback-first signature', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe(
-      'Too many arguments for function "(a) => a + 1": expected 1, got 2'
+    ).toContain(
+      'Map calls its callback with 2 arguments (one element from each of the 2 collections); `(a) => a + 1` declares 1 parameter'
     );
 
     // A named callback is shared, never rebuilt — on both clauses.
@@ -2128,7 +2132,12 @@ describe('the stamp declines on an ARITY mismatch', () => {
   // two-parameter literal at a unary slot used to take a PARTIAL stamp (the
   // first parameter annotated, the second bare). The whole stamp declines
   // instead; evaluation is identical either way — the arity error dominates.
-  it('a binary literal at a unary slot is left entirely bare', () => {
+  it('a binary literal at a unary slot is rejected, never half-stamped', () => {
+    // Since the static callback-arity check (2026-08-15) the arity error
+    // dominates at CANONICALIZATION: `Filter` applies its predicate to one
+    // element, so a binary literal can never be applied and the slot holds the
+    // diagnostic. The stamp still never runs — which is what this test is
+    // about — and there is no half-annotated literal to be found anywhere.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     const e = ce.box([
@@ -2136,11 +2145,10 @@ describe('the stamp declines on an ARITY mismatch', () => {
       'cs',
       ['Function', ['Greater', 'a', 'b'], 'a', 'b'],
     ]);
-    expect(e.toMathJson()).toEqual([
-      'Filter',
-      'cs',
-      ['Function', ['Less', 'b', 'a'], 'a', 'b'],
-    ]);
+    expect(e.toString()).toContain(
+      'Filter calls its callback with 1 argument (each element of the collection); `(a, b) => b < a` declares 2 parameters'
+    );
+    expect(e.toString()).not.toContain('Typed');
   });
 
   it('the matching arity still stamps', () => {

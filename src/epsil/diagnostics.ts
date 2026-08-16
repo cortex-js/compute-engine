@@ -77,6 +77,8 @@ export type DiagnosticCode =
   | 'mapsto-arrow-expected' // `->` (KeyValuePair) whose left side is shaped like a parameter list — `(x: number) -> x^2`, `(x, y) -> x + y`, `= x -> x + 1` — a function written with the wrong arrow; recovered as the intended `=>`
   | 'mapsto-arrow-legacy' // the retired `|->` spelling of the mapsto arrow — `x |-> x + 1`; carries a fixit replacing it by `=>` and is recovered AS the arrow, so the rest of the program parses normally
   | 'parameter-name-mismatch' // %0 = lambda parameter name, %1 = name in the type annotation — a typed declaration's annotation and its lambda initializer name the same positional parameter differently
+  | 'pattern-binding-expected' // a leaf of a destructuring pattern (`((p, q)) => …`, `for (p, q) in xs`, `let (p, q) = v`) that is neither a name, `_`, nor a nested pattern — a pattern in BINDING position matches by shape alone, so it has no place for a literal to match against
+  | 'pattern-element-annotation' // a per-element type annotation inside a destructuring pattern — `((p: integer, q)) => …`; a pattern position binds a name and states no type
   | 'symbol-expected'
   | 'unbalanced-verbatim-symbol' // %0 = symbol name
   | 'unexpected-symbol'; // %0 symbol, %1 = trace

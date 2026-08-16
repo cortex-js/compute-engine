@@ -10,6 +10,7 @@ import {
 } from '../latex-syntax/latex-syntax.js';
 
 import { checkType, checkArity } from '../boxed-expression/validate.js';
+import { collectTuplePattern } from '../boxed-expression/tuple-pattern.js';
 import { instantiatedResultType } from '../boxed-expression/generic-instantiation.js';
 import { canonicalForm } from '../boxed-expression/canonical.js';
 import { asSmallInteger, toInteger } from '../boxed-expression/numerics.js';
@@ -329,6 +330,91 @@ function pipeImplicitMap(
 }
 
 /**
+ * Derivations of `pipeImplicitMapType`, keyed on the pipe STAGE (a held
+ * operand, so a stable object for the lifetime of the canonical `Pipe`).
+ *
+ * The memo is what makes the derivation affordable on a type read, and it is
+ * load-bearing rather than an optimization. Deriving the type canonicalizes
+ * the stage, which DECLARES the stage's parameter and so advances the engine's
+ * `any` axis. `BoxedFunction.type` records the generation it observed ON
+ * ENTRY, deliberately leaving its fast path closed when the computation itself
+ * bumped the generation — so an unmemoized derivation would recompute on every
+ * single read, and each recompute would advance the axis again, retiring the
+ * `_type`/`_sgn` caches of every other expression in the engine. That is the
+ * self-invalidating read that cost ~60–90 s per `.type` in Tycho item 181;
+ * measured here it was 157 µs/read versus 0.05 µs for a non-mapping pipe.
+ *
+ * The recorded generation is the one observed AFTER the derivation, for the
+ * same reason: keying on the entry generation would never match. An entry is
+ * served only when the axis has not moved since (a later declaration or
+ * assignment can change the answer) and the topic is the same object, since
+ * the type depends on both operands while only the stage is the key.
+ */
+const PIPE_IMPLICIT_MAP_TYPE = new WeakMap<
+  Expression,
+  { generation: number; topic: Expression; type: Type | undefined }
+>();
+
+/**
+ * The static type of a `Pipe` whose stage implicitly MAPS — the collection
+ * type of the `Map` the evaluate handler will build, or `undefined` when the
+ * stage is an ordinary application (the caller then falls back to the stage's
+ * declared result type).
+ *
+ * Without this, `xs |> x ↦ f(x)` typed as `f`'s RESULT — a scalar — while it
+ * evaluates to a collection, so the whole pipe degraded to `unknown` and
+ * downstream inference lost both the shape and the element type that the
+ * equivalent `Map(x ↦ f(x), xs)` reports.
+ *
+ * The operands are HELD (the `lazy` flag), so they arrive UNBOUND: a raw
+ * `List` topic types `unknown` and answers `false` to `isCollection`, and the
+ * decision cannot be made on them as they stand. They are therefore
+ * canonicalized here — the same `.canonical` / `canonicalWithFreshPlaceholders`
+ * pair the evaluate handler applies, so the gate sees exactly the operands the
+ * implicit `Map` will be built from, and the reported type is exactly the
+ * evaluated expression's type rather than a tighter guess. Canonicalizing also
+ * DECLARES any free symbol in the topic — the same declaration evaluating the
+ * pipe would make, and still refinable by a later explicit `declare` — which
+ * is why the cheap structural pre-gate comes first: only a `Function` LITERAL
+ * stage can map, so a named-function or call stage (`xs |> Sum`,
+ * `xs |> Take(10)`) pays nothing at all. The arity is not pre-checked — the
+ * placeholder shorthand `xs |> _^2` is a one-operand `Function` until
+ * canonicalization supplies its parameter — so `pipeImplicitMap` makes the
+ * final decision, including its string-topic and whole-collection-annotation
+ * escapes.
+ */
+function pipeImplicitMapType(
+  ce: ComputeEngine,
+  topic: Expression | undefined,
+  stage: Expression
+): Type | undefined {
+  if (topic === undefined) return undefined;
+  if (!isFunction(stage, 'Function')) return undefined;
+
+  const memo = PIPE_IMPLICIT_MAP_TYPE.get(stage);
+  if (
+    memo !== undefined &&
+    memo.generation === ce._anyVersion &&
+    memo.topic === topic
+  )
+    return memo.type;
+
+  const mapped = pipeImplicitMap(
+    ce,
+    topic.canonical,
+    canonicalWithFreshPlaceholders(stage),
+    stage
+  );
+  const type = mapped?.type.type;
+  PIPE_IMPLICIT_MAP_TYPE.set(stage, {
+    generation: ce._anyVersion,
+    topic,
+    type,
+  });
+  return type;
+}
+
+/**
  * The operator definition an operand of `Signature` names, resolved on EVERY
  * route.
  *
@@ -406,7 +492,7 @@ function holdValuesShieldNames(spec: Expression): string[] {
  *   `Release`, under whatever frame is active then. DERIVED from the
  *   definition flag, not a name check — it is the same quote-position rule the
  *   projection uses to make `effectsOf(Hold(Random()))` empty.
- * - A lazy collection VIEW in value position — `Map(x |-> Random(), xs)`
+ * - A lazy collection VIEW in value position — `Map(x => Random(), xs)`
  *   escaping as the result, directly or inside `List`/`Tuple` cells — is a
  *   COMPLETED value: its lambda draws at materialization (the §6 escape
  *   ruling of `docs/RANDOMNESS-MODEL.md`), so its `Function` subtree is
@@ -417,7 +503,7 @@ function holdValuesShieldNames(spec: Expression): string[] {
  *   derived from the definition's binding-site selector, not from a list of
  *   operator names: the operands that carry binding sites are its clauses
  *   and stay scanned, exactly as a `Map`'s source collection does.
- * - Any OTHER surviving application (`ListFrom(Map(x |-> Random(), xs))`
+ * - Any OTHER surviving application (`ListFrom(Map(x => Random(), xs))`
  *   with an unresolved length, an `At` over it, …) is work THIS evaluation
  *   was supposed to finish: everything beneath it — lambdas included — is
  *   scanned, so the draws it still owes are detected and the frame is kept.
@@ -765,50 +851,6 @@ function randomListType(
 }
 
 /**
- * Match a destructuring `Tuple` pattern against a value, returning the
- * `(name, value)` pairs to bind — in pattern order, `_` positions dropped — or
- * an `Error` value if the shapes do not match.
- *
- * The pattern is irrefutable in FORM (a raw `Tuple` of bare symbols, `_`, or
- * nested tuple patterns), so the only way to fail is a runtime SHAPE mismatch.
- * The ENTIRE tree is matched here, before the caller writes anything: a
- * mismatch nested under an already-matched sibling — `(a, (b, c)) := (1, 5)` —
- * must not leave `a` written. (It did when matching and binding shared one
- * pass: the nested level's shape was only checked once the walk reached it.)
- */
-function collectTuplePattern(
-  ce: ComputeEngine,
-  pattern: Expression,
-  v: Expression,
-  out: [name: string, value: Expression][]
-): Expression | null {
-  if (!isFunction(pattern, 'Tuple'))
-    return ce.typeError('tuple', pattern.type, pattern.toString());
-  if (!isFunction(v, 'Tuple'))
-    return ce.typeError('tuple', v.type, v.toString());
-  if (v.nops !== pattern.nops)
-    return ce.typeError(
-      parseType(`tuple<${Array(pattern.nops).fill('unknown').join(', ')}>`)!,
-      v.type,
-      v.toString()
-    );
-  for (let i = 0; i < pattern.nops; i++) {
-    const p = pattern.ops[i];
-    const el = v.ops[i];
-    if (isFunction(p, 'Tuple')) {
-      const err = collectTuplePattern(ce, p, el.evaluate(), out);
-      if (err) return err;
-      continue;
-    }
-    const name = sym(p);
-    if (!name) return ce.typeError('symbol', p.type, p.toString());
-    if (name === '_') continue;
-    out.push([name, el]);
-  }
-  return null;
-}
-
-/**
  * Bind a destructuring `Tuple` pattern, invoking `bindOne` at every named
  * position. Shared by the two destructuring routes: the `let (x, y) = v`
  * declaration (`Declare`) and the `(x, y) := v` assignment (`Assign`).
@@ -840,7 +882,7 @@ function bindTuplePattern(
   validateOne?: (name: string, value: Expression) => Expression | null
 ): Expression | null {
   const pairs: [name: string, value: Expression][] = [];
-  const err = collectTuplePattern(ce, pattern, v, pairs);
+  const err = collectTuplePattern(pattern, v, pairs);
   if (err) return err;
   if (validateOne) {
     for (const [name, value] of pairs) {
@@ -1977,7 +2019,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // What makes that contract say something is the SHAPE of the body the
       // object walk emits: the `["Dictionary", ["KeyValuePair", …], …]`
       // operator form, which re-boxes as a `BoxedDictionary` typed from its
-      // keys (`record<name: string, age: finite_integer>`). A body with no
+      // keys (`record{name: string, age: finite_integer}`). A body with no
       // operator definition — `["Record", …]`, which no library declares —
       // would re-box as an inert application typed `unknown`, and this
       // handler would report `unknown` for every snapshot.
@@ -2176,12 +2218,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // expression, so neither the operator-def nor the value-def arm of
       // `boxed-function.ts`'s `type()` runs — and `functionResult` of a polytype
       // hands back the OPEN result, which must never escape as a `.type` (§4.2).
-      // Left alone it degraded to `unknown`: `Apply(x |-> x, 5)` typed
+      // Left alone it degraded to `unknown`: `Apply(x => x, 5)` typed
       // `unknown` while `f(5)` under the same signature typed `integer`. The
       // application-head spelling `[⟨literal⟩, 5]` canonicalizes to `Apply`, so
       // it is covered by the same line.
       // Same solver as the value-definition arm, but NOT its `threadable`
-      // gate: `apply()` binds each argument WHOLE — `Apply(x |-> (x, x),
+      // gate: `apply()` binds each argument WHOLE — `Apply(x => (x, x),
       // [1, 2])` evaluates to `([1,2], [1,2])`, not to a list of pairs (a
       // broadcasting BODY such as `2x` broadcasts on its own, inside the
       // binding, and does not make this route a map). So no position is
@@ -2260,8 +2302,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // means (rung 2 — `apply()` bubbles it) instead of freezing with it.
       inspectsErrors: true,
       signature: '(value, function) -> unknown',
-      type: ([_x, f]) =>
-        f ? (functionResult(f.type.type) ?? 'unknown') : undefined,
+      // `Pipe(x, f)` is `f(x)`, so its type is `f`'s result type — EXCEPT when
+      // the stage implicitly maps (`pipeImplicitMapType`), where the pipe is a
+      // collection of that result rather than the result itself.
+      type: ([x, f], { engine: ce }) =>
+        f
+          ? (pipeImplicitMapType(ce, x, f) ??
+            functionResult(f.type.type) ??
+            'unknown')
+          : undefined,
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 2) return ce._fn('Pipe', checkArity(ce, ops, 2));
         // Reject early only a statically-refutable rhs: a bare number, string,
@@ -4807,14 +4856,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // We canonicalize the symbol in the current
         // context. This allows the symbol to be interpreted as if dynamically scoped, not lexically scoped (lexical vs dynamic scoping)
         // let x = 5;
-        // f := () |-> x
+        // f := () => x
         // {
         //  x := 10;
         //  f()
         // }
         // This will return 5. But:
         // let x = 5;
-        // f := () |-> Symbol(x)
+        // f := () => Symbol(x)
         // {
         //  x := 10;
         //  f()

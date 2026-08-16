@@ -2149,6 +2149,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         `Function: a multi-statement (Block) body cannot compile to a ` +
           `Python lambda. Fail closed (D6).`
       );
+    BaseCompiler.assertNoDestructuringParams(args.slice(1));
     const params = args
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');

@@ -116,6 +116,11 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   'argument-names-unavailable',
   'argument-optional-skipped',
   'argument-names-required',
+  // A collection operator's callback declares a different number of
+  // parameters than the operator passes it (`Map((p, q) => p + q, xs)`). The
+  // operators mint it from their canonical handlers, so — like the
+  // named-argument codes above — it is settled before anything runs.
+  'callback-arity',
   'incompatible-type',
   'incompatible-dimensions',
   'invalid-axis',
@@ -1153,6 +1158,12 @@ export function describeError(error: MathJsonExpression): string {
       return payload.length === 0
         ? 'unexpected argument'
         : `unexpected argument \`${payload.join(', ')}\``;
+    case 'callback-arity':
+      // No site: the payload is a complete sentence that already quotes the
+      // callback, and the report's caret points at the call.
+      return payload.length === 0
+        ? 'the callback takes the wrong number of parameters'
+        : payload.join(' ');
     case 'invalid-symbol':
       detail =
         payload.length === 0

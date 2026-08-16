@@ -625,6 +625,21 @@ while x > 0 { x }
 for x in xs { x }
 ```
 
+The loop variable may be a **tuple pattern**, using the same grammar as
+[`let (a, b) = v`](/epsil/declarations/#destructuring-declarations) — bare
+names, `_` to skip a position, nested `(…)` patterns:
+
+```epsil
+let s = 0
+for (p, q) in [(1, 2), (3, 4)] { s = s + p * q }
+s
+// ➔ 14
+```
+
+Each element must be a tuple of the pattern's shape; one that is not stops
+the loop with the `incompatible-type` error value as its result, the same one
+the destructuring `let` produces.
+
 `in` is contextual: only the loop-variable `in` introduces the iterator
 clause. A second, later `in` in the collection expression is still the
 ordinary membership operator, so `for x in a in b { … }` iterates over the

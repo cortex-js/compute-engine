@@ -28,12 +28,16 @@ import {
   sym,
 } from './boxed-expression/type-guards.js';
 import {
+  functionLiteralBoundNames,
   functionLiteralDeclaredSignature,
   functionLiteralParameterName,
+  functionLiteralParameterNames,
   functionLiteralParameterType,
+  isDestructuringParameter,
   mentionsQuantifiedVariable,
   resolveFunctionLiteralTypes,
 } from './boxed-expression/function-literal.js';
+import { collectTuplePattern } from './boxed-expression/tuple-pattern.js';
 import { errorValue } from './boxed-expression/error-value.js';
 import {
   beginProvisionalCapture,
@@ -514,6 +518,14 @@ export function canonicalFunctionLiteralArguments(
   // string (mirroring how `Declare` keeps its type operand raw).
   const params = ops.slice(1).map((x) => {
     if (isSymbol(x)) return x;
+    // A DESTRUCTURING parameter — a raw `["Tuple", …]` pattern, spelled
+    // `((p, q)) => …` in Epsil. It counts as one parameter and binds its leaf
+    // names; the pattern operand is kept RAW (`isDestructuringParameter`).
+    if (isDestructuringParameter(x)) {
+      const bad = illFormedPatternLeaf(x);
+      if (bad !== undefined) return ce.error('expected-a-symbol', bad);
+      return x;
+    }
     if (isFunction(x, 'Typed') && isSymbol(x.op1)) {
       const normalized = normalizeTypedParameter(ce, x);
       // A `where` clause on a PARAMETER annotation is a rank-2 spelling, and
@@ -528,15 +540,18 @@ export function canonicalFunctionLiteralArguments(
   });
 
   // Collect the declared types of annotated parameters so they are visible
-  // during body canonicalization (the §6.1 pre-declare mechanism).
+  // during body canonicalization (the §6.1 pre-declare mechanism). A
+  // destructuring pattern contributes every leaf name it binds — each is an
+  // ordinary parameter as far as the body is concerned, and each must shadow a
+  // library constant of the same spelling exactly as a named parameter does.
   const shadowNames: string[] = [];
   const shadowTypes = new Map<string, Type>();
   for (const param of params) {
-    const name = functionLiteralParameterName(param);
-    if (!name) continue;
-    shadowNames.push(name);
+    const names = functionLiteralParameterNames(param);
+    if (names.length === 0) continue;
+    shadowNames.push(...names);
     const t = functionLiteralParameterType(param);
-    if (t !== undefined) shadowTypes.set(name, t);
+    if (t !== undefined) shadowTypes.set(names[0], t);
   }
 
   // A body-slot return-type ascription `["Typed", body, type]` is normalized
@@ -634,24 +649,33 @@ export function canonicalFunctionLiteralArguments(
   // (e.g. a parameter unreferenced in the body). Annotated parameters get
   // their declared type, non-inferred.
   for (const param of params) {
-    const name = functionLiteralParameterName(param);
-    if (!name || block.localScope!.bindings.has(name)) continue;
-    const t = functionLiteralParameterType(param);
-    if (t !== undefined)
-      ce.declare(name, { inferred: false, type: t }, block.localScope);
-    else {
-      // A bare parameter whose first reference sat in a NESTED Block scope (an
-      // `if` branch, a loop body) auto-declared its shared binding there, not
-      // here. Adopt that binding as the parameter's: it is the one every body
-      // occurrence resolves to, and the one that carries the type evidence
-      // inference wrote (e.g. `cs[j]` ⇒ `cs: indexed_collection`). Declaring a
-      // fresh `unknown` binding instead severs the signature from the body's
-      // evidence, and the lambda auto-broadcast then wrongly maps the function
-      // over a collection argument that the body consumes whole.
-      const shared = shadowedDefs.get(name);
-      if (shared !== undefined) block.localScope!.bindings.set(name, shared);
-      else
-        ce.declare(name, { inferred: true, type: 'unknown' }, block.localScope);
+    for (const name of functionLiteralParameterNames(param)) {
+      if (block.localScope!.bindings.has(name)) continue;
+      // A destructuring pattern's leaves carry no annotation of their own, so
+      // they always take the bare-parameter branch below.
+      const t = isDestructuringParameter(param)
+        ? undefined
+        : functionLiteralParameterType(param);
+      if (t !== undefined)
+        ce.declare(name, { inferred: false, type: t }, block.localScope);
+      else {
+        // A bare parameter whose first reference sat in a NESTED Block scope
+        // (an `if` branch, a loop body) auto-declared its shared binding there,
+        // not here. Adopt that binding as the parameter's: it is the one every
+        // body occurrence resolves to, and the one that carries the type
+        // evidence inference wrote (e.g. `cs[j]` ⇒ `cs: indexed_collection`).
+        // Declaring a fresh `unknown` binding instead severs the signature from
+        // the body's evidence, and the lambda auto-broadcast then wrongly maps
+        // the function over a collection argument that the body consumes whole.
+        const shared = shadowedDefs.get(name);
+        if (shared !== undefined) block.localScope!.bindings.set(name, shared);
+        else
+          ce.declare(
+            name,
+            { inferred: true, type: 'unknown' },
+            block.localScope
+          );
+      }
     }
   }
 
@@ -1004,6 +1028,29 @@ function repairWave(
 }
 
 /**
+ * The first leaf of a destructuring parameter pattern that is not a binding
+ * position, rendered for a diagnostic, or `undefined` when the pattern is
+ * well formed.
+ *
+ * A pattern in PARAMETER position is a BINDING pattern, not a `match` pattern:
+ * its leaves are names (`_` discards a position) and nested patterns. A literal
+ * or an expression leaf — `((1, q)) => …` — has nothing to bind, so it is
+ * rejected rather than read as a value to match against.
+ */
+function illFormedPatternLeaf(pattern: Expression): string | undefined {
+  if (!isFunction(pattern, 'Tuple')) return undefined;
+  for (const el of pattern.ops) {
+    if (isFunction(el, 'Tuple')) {
+      const bad = illFormedPatternLeaf(el);
+      if (bad !== undefined) return bad;
+      continue;
+    }
+    if (!isSymbol(el)) return el.toString();
+  }
+  return undefined;
+}
+
+/**
  * Make each PARAMETER OPERAND denote the binding the body `Block` declares for
  * it — step 5 of the binder discipline
  * (`docs/plans/2026-07-26-binder-mechanism-design.md` §1.3), for the one binder
@@ -1030,7 +1077,19 @@ function bindParameterOperands(
 ): ReadonlyArray<Expression> {
   const scope = block.localScope;
   if (!scope) return params;
+  const bindLeaf = (leaf: Expression): Expression => {
+    if (isFunction(leaf, 'Tuple'))
+      return ce._fn('Tuple', leaf.ops.map(bindLeaf), { canonical: false });
+    const name = sym(leaf);
+    if (name === undefined || name === '_') return leaf;
+    return ce._bindingSymbol(name, scope) ?? leaf;
+  };
   return params.map((param) => {
+    // A destructuring pattern binds through its LEAVES: each is pointed at the
+    // Block's own binding, the same repair the named-parameter branch below
+    // makes, so `staticParameterBinding` can read a leaf's definition straight
+    // off the operand.
+    if (isDestructuringParameter(param)) return bindLeaf(param);
     const name = functionLiteralParameterName(param);
     if (!name) return param;
     // Inline value-def check (`isValueDef` lives in `utils.ts`, which this
@@ -1085,12 +1144,13 @@ function rebindParameters(
 
   const names: string[] = [];
   for (const param of params) {
-    const name = functionLiteralParameterName(param);
-    if (!name || names.includes(name)) continue;
-    // Inline value-def check (`isValueDef` lives in `utils.ts`, which this
-    // module cannot import).
-    const binding = scope.bindings.get(name);
-    if (binding !== undefined && 'value' in binding) names.push(name);
+    for (const name of functionLiteralParameterNames(param)) {
+      if (names.includes(name)) continue;
+      // Inline value-def check (`isValueDef` lives in `utils.ts`, which this
+      // module cannot import).
+      const binding = scope.bindings.get(name);
+      if (binding !== undefined && 'value' in binding) names.push(name);
+    }
   }
   if (names.length === 0) return block;
 
@@ -1768,6 +1828,68 @@ function declareParameterActivation(
     markActivation(activation.value, staticBinding);
 }
 
+/** One name a call frame binds for one parameter. */
+type ParameterBinding = {
+  name: string;
+  /**
+   * The node that carries the name's declared type and its static binding: the
+   * parameter operand itself for a plain (or `Typed`) parameter, and the
+   * pattern's leaf SYMBOL for a destructured position. `bindParameterOperands`
+   * points both at the body Block's own binding, which is what lets
+   * `staticParameterBinding` read the definition straight off the node.
+   */
+  site: Expression;
+  value: Expression;
+};
+
+/**
+ * Expand a call's (parameter, argument) pairs into the name-level bindings its
+ * frame installs, destructuring each `((p, q))` pattern parameter against its
+ * argument.
+ *
+ * Returns the `Error` value instead when a pattern does not match its
+ * argument's shape. That is the SAME error `let (p, q) = v` produces for the
+ * same mismatch — both routes go through `collectTuplePattern`, and neither has
+ * a mismatch-specific error of its own.
+ */
+function parameterBindings(
+  params: ReadonlyArray<Expression>,
+  args: ReadonlyArray<Expression>
+): { leaves: ParameterBinding[]; error?: undefined } | { error: Expression } {
+  const leaves: ParameterBinding[] = [];
+  for (let i = 0; i < args.length && i < params.length; i++) {
+    const param = params[i];
+    if (!isDestructuringParameter(param)) {
+      const name = functionLiteralParameterName(param);
+      if (name) leaves.push({ name, site: param, value: args[i] });
+      continue;
+    }
+    const pairs: [name: string, value: Expression][] = [];
+    const err = collectTuplePattern(param, args[i], pairs);
+    if (err) return { error: err };
+    const sites = patternLeafSites(param);
+    for (const [name, value] of pairs)
+      leaves.push({ name, site: sites.get(name) ?? param, value });
+  }
+  return { leaves };
+}
+
+/** Each name a destructuring pattern binds, mapped to the leaf symbol NODE
+ * that binds it. */
+function patternLeafSites(pattern: Expression): Map<string, Expression> {
+  const sites = new Map<string, Expression>();
+  const walk = (p: Expression): void => {
+    if (isFunction(p, 'Tuple')) {
+      for (const el of p.ops) walk(el);
+      return;
+    }
+    const n = sym(p);
+    if (n !== undefined && n !== '_' && !sites.has(n)) sites.set(n, p);
+  };
+  walk(pattern);
+  return sites;
+}
+
 /** The literal's OWN binding for a parameter: the operand's, falling back to
  * the body scope's for a literal whose operand was never bound to it (a
  * hand-built `Function` node that skipped `bindParameterOperands`). */
@@ -1847,10 +1969,7 @@ function captureClosures(
       // because they are re-created at evaluation time when the Declare
       // op is processed by evaluateStatements.
       const innerParamNames = new Set(
-        expr.ops
-          .slice(1)
-          .map((op) => functionLiteralParameterName(op))
-          .filter((s) => s)
+        functionLiteralBoundNames(expr.ops.slice(1))
       );
       const closureBindings: Map<string, BoxedDefinition> = new Map();
       for (const [key, val] of innerBlock.localScope.bindings) {
@@ -2275,7 +2394,7 @@ function makeLambda(
       const unappliedParams = params.slice(args.length);
       const allSymbols = new Set([
         ...body.symbols,
-        ...params.map((p) => functionLiteralParameterName(p)),
+        ...functionLiteralBoundNames(params),
       ]);
       const extraSymbols = unappliedParams.map((_, i) => {
         let name = `_${i + 1}`;
@@ -2290,19 +2409,29 @@ function makeLambda(
       // symbol with its original (already-normalized) type operand. The bare
       // fresh symbols are used for body substitution; the wrapped versions
       // become the new Function parameters.
-      const extras = unappliedParams.map((param, i) =>
-        isFunction(param, 'Typed')
+      //
+      // An unapplied DESTRUCTURING parameter is carried over VERBATIM instead
+      // (`extras`, the PURE residual below): the body reads the pattern's own
+      // leaf names, and there is nothing to rename them to — a fresh symbol
+      // names the whole tuple, not its components. The DEFERRED residual is the
+      // opposite case: it re-applies the ORIGINAL literal, which does its own
+      // destructuring, so its parameter must be the single fresh symbol that
+      // receives the tuple whole (`extraSymbols`).
+      const extras = unappliedParams.map((param, i) => {
+        if (isDestructuringParameter(param)) return param;
+        return isFunction(param, 'Typed')
           ? ce._fn('Typed', [extraSymbols[i], param.op2], { canonical: false })
-          : extraSymbols[i]
-      );
+          : extraSymbols[i];
+      });
 
-      // Rename remaining params to fresh names in the body
-      const substitutions = Object.fromEntries(
-        unappliedParams.map((param, i) => [
-          functionLiteralParameterName(param),
-          extraSymbols[i],
-        ])
-      );
+      // Rename remaining params to fresh names in the body. A destructuring
+      // parameter is not renamed (see `extras` above), so it contributes none.
+      const substitutions: Record<string, Expression> = {};
+      for (let i = 0; i < unappliedParams.length; i++) {
+        if (isDestructuringParameter(unappliedParams[i])) continue;
+        const name = functionLiteralParameterName(unappliedParams[i]);
+        if (name) substitutions[name] = extraSymbols[i];
+      }
 
       // Evaluate body with known args in a fresh scope
       let evaluatedKnownArgs = args.map((a) => a.evaluate());
@@ -2375,7 +2504,14 @@ function makeLambda(
           returnTypeOp !== undefined
             ? ce._fn('Typed', [deferred, returnTypeOp], { canonical: false })
             : deferred,
-          ...extras,
+          // The deferred residual re-applies the original literal, so an
+          // unapplied destructuring parameter takes its fresh SYMBOL here (the
+          // `Apply` above passes it whole, and the original literal
+          // destructures it), not the pattern `extras` carries for the pure
+          // residual.
+          ...unappliedParams.map((param, i) =>
+            isDestructuringParameter(param) ? extraSymbols[i] : extras[i]
+          ),
         ]);
       }
 
@@ -2385,20 +2521,22 @@ function makeLambda(
         parent: capturedScope,
         bindings: new Map(),
       };
-      for (let i = 0; i < args.length; i++) {
-        const name = functionLiteralParameterName(params[i]);
-        if (name)
-          // Typed binding only in strict mode, where the applied prefix was
-          // validated in step 3.
-          declareParameterActivation(
-            ce,
-            name,
-            params[i],
-            evaluatedKnownArgs[i],
-            freshScope,
-            bodyFn.localScope
-          );
-      }
+      // The applied prefix binds exactly as a saturated call's parameters do,
+      // destructuring included (step 5); a pattern in the prefix whose argument
+      // has the wrong shape is the same error value here.
+      const boundPrefix = parameterBindings(params, evaluatedKnownArgs);
+      if (boundPrefix.error !== undefined) return boundPrefix.error;
+      for (const leaf of boundPrefix.leaves)
+        // Typed binding only in strict mode, where the applied prefix was
+        // validated in step 3.
+        declareParameterActivation(
+          ce,
+          leaf.name,
+          leaf.site,
+          leaf.value,
+          freshScope,
+          bodyFn.localScope
+        );
 
       // Re-parent body scope to chain through freshScope, so nested
       // scoped expressions (Sum, Product) can find params by walking up:
@@ -2408,9 +2546,7 @@ function makeLambda(
       const bodyScope = bodyFn.localScope!;
       const savedParent = bodyScope.parent;
       bodyScope.parent = freshScope;
-      const curryParamNames = params
-        .slice(0, args.length)
-        .map((p) => functionLiteralParameterName(p));
+      const curryParamNames = boundPrefix.leaves.map((l) => l.name);
       const hiddenBindings = hideBodyScopeParams(bodyScope, curryParamNames);
 
       // Named 'call': a function-application activation frame. The debugger's
@@ -2490,21 +2626,24 @@ function makeLambda(
 
     // Declare parameters in the fresh scope. Annotated parameters are declared
     // with their declared type, non-inferred (§6.4); bare parameters stay
-    // inferred as before.
-    const paramNames = params.map((p) => functionLiteralParameterName(p));
-    for (let i = 0; i < params.length; i++) {
-      if (paramNames[i])
-        // Arguments were validated in step 4b, so a strict-mode typed binding
-        // is known compatible.
-        declareParameterActivation(
-          ce,
-          paramNames[i]!,
-          params[i],
-          evaluatedArgs[i],
-          freshScope,
-          bodyFn.localScope
-        );
-    }
+    // inferred as before. A DESTRUCTURING parameter binds one name per pattern
+    // leaf, taken from the matching component of its (tuple) argument; a shape
+    // mismatch is an error value and the body never runs.
+    const bound = parameterBindings(params, evaluatedArgs);
+    if (bound.error !== undefined) return bound.error;
+    const leaves = bound.leaves;
+    const paramNames = leaves.map((l) => l.name);
+    for (const leaf of leaves)
+      // Arguments were validated in step 4b, so a strict-mode typed binding
+      // is known compatible.
+      declareParameterActivation(
+        ce,
+        leaf.name,
+        leaf.site,
+        leaf.value,
+        freshScope,
+        bodyFn.localScope
+      );
 
     // Re-parent body scope to chain through freshScope, so nested
     // scoped expressions (Sum, Product) can find params by walking up:
@@ -2571,7 +2710,7 @@ function makeLambda(
       // three fall out of asking the right question: a re-binding lambda
       // declares a DIFFERENT binding, and an `x` that came from the argument's
       // value carries the caller's binding, so neither matches.
-      if (result.has(paramNames as string[])) {
+      if (result.has(paramNames)) {
         // ONE binding per parameter — the literal's own. `hideBodyScopeParams`
         // has removed it from `bodyScope` for the duration of the call, and
         // the call's value lives in a SEPARATE definition in `freshScope`; the
@@ -2580,14 +2719,13 @@ function makeLambda(
         // parameter's binding can be found. The raw-occurrence case is still
         // name-keyed — a raw symbol carries no binding at all.
         const subs: ParameterSub[] = [];
-        for (let i = 0; i < params.length; i++) {
-          const name = paramNames[i];
-          if (!name || !result.has(name)) continue;
+        for (const leaf of leaves) {
+          if (!result.has(leaf.name)) continue;
           subs.push([
-            staticParameterBinding(params[i], name, bodyScope),
-            name,
-            evaluatedArgs[i],
-            evaluatedArgs[i].has(name),
+            staticParameterBinding(leaf.site, leaf.name, bodyScope),
+            leaf.name,
+            leaf.value,
+            leaf.value.has(leaf.name),
           ]);
         }
         if (subs.length > 0) result = bindingKeyedSubs(result, subs);

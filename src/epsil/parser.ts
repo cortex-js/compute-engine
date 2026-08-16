@@ -512,6 +512,20 @@ export class Parser {
    */
   private lastBareEqualNode: MathJsonExpression | null = null;
 
+  /**
+   * Nodes that came out of a parenthesized group holding exactly one value —
+   * `(expr)`, whose parentheses are redundant and leave no trace on the node
+   * (the group returns its content, whose span excludes them).
+   *
+   * Only one construct cares: a mapsto LHS, where the extra pair of
+   * parentheses is what distinguishes the ONE destructured parameter of
+   * `((p, q)) => p && q` from the TWO parameters of `(p, q) => p && q`. Node
+   * identity is exact — `wrap()` returns a fresh object per node — and holding
+   * the nodes weakly keeps a parse from retaining every `(expr)` group it ever
+   * saw: membership is only ever asked about a node the caller already holds.
+   */
+  private readonly redundantlyParenthesized = new WeakSet<object>();
+
   /** Set by {@link recoverAtStatementBoundary}: the statement that just
    * returned `null` has ALREADY emitted its diagnostic and resynchronized to
    * the next statement boundary. The statement loops (`parseProgram`,
@@ -2933,23 +2947,38 @@ export class Parser {
   /** `for x in xs { … }` → `["Loop", body, ["Element", "x", "xs"]]` (engine
    * `Loop`; the iterator clause is `Element`). The loop variable and the `in`
    * keyword are consumed contextually here, so the `Element` *infix* operator
-   * (also spelled `in`) never enters the collection's expression grammar. */
+   * (also spelled `in`) never enters the collection's expression grammar.
+   *
+   * The loop variable may be a TUPLE DESTRUCTURING PATTERN — `for (p, q) in
+   * pairs { … }` — using the same pattern grammar as `let (p, q) = v`
+   * (`parseDeclarationPattern`), and lowering to the same raw `Tuple` in the
+   * binding position of the `Element` clause. Each iteration binds the
+   * pattern's leaves to the element's components; an element that is not a
+   * tuple of the pattern's arity is the same shape-mismatch error value the
+   * destructuring `let` produces. */
   private parseFor(): MathJsonExpression | null {
     const kw = this.advance(); // 'for'
     const varTok = this.current;
-    if (varTok.type !== 'SYMBOL' && varTok.type !== 'VERBATIM_SYMBOL') {
-      this.error(['symbol-expected'], varTok.start, varTok.end);
-      return null;
+    let varNode: MathJsonExpression;
+    if (varTok.type === 'OPEN_PAREN') {
+      const pattern = this.parseDeclarationPattern(new Set());
+      if (pattern === null) return null;
+      varNode = pattern;
+    } else {
+      if (varTok.type !== 'SYMBOL' && varTok.type !== 'VERBATIM_SYMBOL') {
+        this.error(['symbol-expected'], varTok.start, varTok.end);
+        return null;
+      }
+      this.advance();
+      this.harvest(varTok);
+      const varName =
+        varTok.type === 'VERBATIM_SYMBOL' ? (varTok.value ?? '') : varTok.text;
+      // The loop variable is a binding: a literal word cannot name it
+      // (`for oo in …`); the verbatim form still can.
+      if (varTok.type === 'SYMBOL' && LITERAL_WORDS.has(varName))
+        this.error(['reserved-word', varName], varTok.start, varTok.end);
+      varNode = this.wrap({ sym: varName }, varTok.start, varTok.end);
     }
-    this.advance();
-    this.harvest(varTok);
-    const varName =
-      varTok.type === 'VERBATIM_SYMBOL' ? (varTok.value ?? '') : varTok.text;
-    // The loop variable is a binding: a literal word cannot name it
-    // (`for oo in …`); the verbatim form still can.
-    if (varTok.type === 'SYMBOL' && LITERAL_WORDS.has(varName))
-      this.error(['reserved-word', varName], varTok.start, varTok.end);
-    const varNode = this.wrap({ sym: varName }, varTok.start, varTok.end);
 
     // The contextual `in` keyword (a SYMBOL token, consumed directly — not as
     // the `Element` infix operator).
@@ -5977,6 +6006,27 @@ export class Parser {
   }
 
   /**
+   * Whether the current token is a `)` that closes into a lambda arrow — the
+   * current token and any immediately following `)` tokens, then `=>` (or the
+   * wrong-arrow `->`).
+   *
+   * The one caller is the annotated-group diagnostic in
+   * {@link parseParenthesizedBody}: a nested group has finished parsing and
+   * sits on its own closing parenthesis, and the question is whether the
+   * groups it closes into are a lambda's parameter list — which is what makes
+   * the group a destructuring PATTERN rather than a misplaced annotation.
+   */
+  private atLambdaArrowPastCloseParens(): boolean {
+    if (!this.check('CLOSE_PAREN')) return false;
+    let i = this.pos;
+    while (this.tokens[i]?.type === 'CLOSE_PAREN') i += 1;
+    const token = this.tokens[i];
+    if (token === undefined) return false;
+    const text = this.operatorText(token);
+    return text === '=>' || text === '->';
+  }
+
+  /**
    * Whether the current token is the `match` case arrow `=>` — in any of its
    * spellings, including the Unicode `⇒`/`↦` and the retired `|->`, all of
    * which `operatorText` folds onto `=>`.
@@ -6287,9 +6337,21 @@ export class Parser {
 
   /** Extract the parameters from a mapsto LHS: a bare symbol (one parameter),
    * or a `Tuple` of parameters (`(x, y) => …`). Each parameter is either a
-   * bare symbol or a typed `["Typed", sym, type]` node (`(x: integer) => …`).
+   * bare symbol, a typed `["Typed", sym, type]` node (`(x: integer) => …`), or
+   * a TUPLE DESTRUCTURING PATTERN — one parameter that binds several names.
    * A parenthesized single parameter arrives here already unwrapped. A
-   * non-parameter LHS element is a diagnostic and is dropped. */
+   * non-parameter LHS element is a diagnostic and is dropped.
+   *
+   * **Destructuring.** A parameter may be a tuple pattern, spelled with a
+   * second pair of parentheses: `((p, q)) => p && q` is a UNARY function whose
+   * argument is a pair, destructured into `p` and `q`, while `(p, q) => p && q`
+   * stays the binary function it has always been. The two spellings differ only
+   * by those parentheses, which is why the LHS is tested against
+   * {@link redundantlyParenthesized}. Patterns nest and mix freely:
+   * `(x, (p, q)) => …` is binary with its second parameter destructured, and
+   * `((a, (b, c))) => …` is unary with a nested pattern. (Kotlin's design, and
+   * the same pattern grammar `let (a, b) = v` and `match` already use.)
+   */
   private mapstoParams(left: MathJsonExpression): MathJsonExpression[] {
     const emit = (bad: MathJsonExpression) => {
       const o = nodeOffsets(bad);
@@ -6300,27 +6362,130 @@ export class Parser {
       );
     };
 
-    // A parameter is a bare symbol or a `["Typed", sym, type]` node.
+    // A parameter is a bare symbol or a `["Typed", sym, type]` node. A tuple
+    // pattern is handled separately at each site: it reports its own leaf
+    // diagnostics, so it must not also be reported as "not a symbol".
     const isParam = (p: MathJsonExpression): boolean => {
       if (symbolNameOf(p) !== null) return true;
       const pops = fnOps(p);
       return pops !== null && pops[0] === 'Typed';
     };
+    const isTuple = (p: MathJsonExpression): boolean => {
+      const pops = fnOps(p);
+      return pops !== null && pops[0] === 'Tuple';
+    };
+    // The name a plain parameter binds: a bare symbol, or the symbol inside a
+    // `["Typed", sym, type]` annotation.
+    const boundName = (p: MathJsonExpression): string | null => {
+      const s = symbolNameOf(p);
+      if (s !== null) return s;
+      const pops = fnOps(p);
+      if (pops !== null && pops[0] === 'Typed' && pops[1] !== undefined)
+        return symbolNameOf(pops[1]);
+      return null;
+    };
 
-    const ops = fnOps(left);
-    if (ops !== null && ops[0] === 'Tuple') {
+    // Every name bound by this parameter list, shared across all of its tuple
+    // patterns so a leaf repeating a name — `((p, p)) => …`, `(x, (p, x)) => …`
+    // — is a parse diagnostic here rather than a redeclaration error surfacing
+    // later out of canonicalization.
+    const names = new Set<string>();
+
+    // A `Tuple` LHS is the parameter LIST — unless the extra parentheses of
+    // `((p, q)) => …` made it a single destructured parameter.
+    // `isTuple` already implies `left` is an object node, which is what the
+    // weak set can hold.
+    if (isTuple(left) && !this.redundantlyParenthesized.has(left as object)) {
+      const listOps = fnOps(left)!.slice(1);
+      // Seed the bound names with the PLAIN parameters before walking the
+      // patterns, so a pattern leaf colliding with one is caught whichever
+      // side comes first in the list. A repeat between two plain parameters
+      // is not reported here — only pattern leaves are checked.
+      for (const p of listOps) {
+        const name = boundName(p);
+        if (name !== null && name !== '_') names.add(name);
+      }
       const params: MathJsonExpression[] = [];
-      for (const p of ops.slice(1)) {
-        if (isParam(p)) params.push(p);
+      for (const p of listOps) {
+        if (isTuple(p)) {
+          if (this.checkDestructuringPattern(p, names)) params.push(p);
+        } else if (isParam(p)) params.push(p);
         else emit(p);
       }
       return params;
     }
 
+    if (isTuple(left))
+      return this.checkDestructuringPattern(left, names) ? [left] : [];
+
     if (isParam(left)) return [left];
 
     emit(left);
     return [];
+  }
+
+  /**
+   * Validate a tuple pattern in PARAMETER position, reporting each leaf that
+   * cannot bind. Returns whether the pattern is usable.
+   *
+   * A pattern here is a BINDING pattern, not a `match` pattern: its leaves are
+   * names, `_` to discard a position, and nested patterns. A literal or a
+   * computed leaf — `((1, q)) => …` — matches nothing and binds nothing, so it
+   * is rejected (`pattern-binding-expected`) rather than read as a value to
+   * match against. A per-element type annotation is rejected too, by
+   * `parseParenthesizedBody`: a pattern position states no type.
+   *
+   * `names` collects the names already bound by the parameter list this
+   * pattern belongs to (including its own outer levels), so a leaf repeating
+   * one of them is reported as `unexpected-symbol` — the same diagnostic
+   * `parseDeclarationPattern` emits for `let (p, p) = v`. `_` discards a
+   * position rather than binding, so it may repeat.
+   */
+  private checkDestructuringPattern(
+    pattern: MathJsonExpression,
+    names: Set<string>
+  ): boolean {
+    const ops = fnOps(pattern);
+    if (ops === null || ops[0] !== 'Tuple') return false;
+    let ok = true;
+    for (const el of ops.slice(1)) {
+      const name = symbolNameOf(el);
+      if (name !== null) {
+        if (name !== '_') {
+          if (names.has(name)) {
+            const o = nodeOffsets(el);
+            this.error(
+              ['unexpected-symbol', name],
+              o ? o[0] - this.baseOffset : 0,
+              o ? o[1] - this.baseOffset : 0
+            );
+            ok = false;
+          }
+          names.add(name);
+        }
+        continue;
+      }
+      const elOps = fnOps(el);
+      if (elOps !== null && elOps[0] === 'Tuple') {
+        if (!this.checkDestructuringPattern(el, names)) ok = false;
+        continue;
+      }
+      // An ANNOTATED leaf was already reported where its `:` was parsed
+      // (`parseParenthesizedBody`, `pattern-element-annotation`); reporting it
+      // again here as "not a binding position" would double up on one mistake.
+      if (elOps !== null && elOps[0] === 'Typed') {
+        ok = false;
+        continue;
+      }
+      const o = nodeOffsets(el);
+      this.error(
+        ['pattern-binding-expected'],
+        o ? o[0] - this.baseOffset : 0,
+        o ? o[1] - this.baseOffset : 0
+      );
+      ok = false;
+    }
+    return ok;
   }
 
   /** Is a `KeyValuePair`'s left operand shaped like a parameter list — a
@@ -6911,15 +7076,44 @@ export class Parser {
     // spelling of a lambda, and `combineInfix` reports the ONE real problem
     // (`mapsto-arrow-expected`) instead of a spurious `:` complaint.
     if (typed && !this.atLambdaArrow()) {
-      const o = nodeOffsets(values[values.length - 1]);
+      // A DESTRUCTURING PATTERN in a lambda parameter list — `((p: integer,
+      // q)) => …`, `(x, (p: integer, q)) => …` — is the one shape where the
+      // annotation is not merely misplaced but meaningless: a pattern position
+      // binds a name by position and states no type, so say that instead of
+      // complaining about the `:`. Recognized by the group being multi-valued
+      // (so pattern-shaped, not a parenthesized single parameter) and closing
+      // into a run of `)` that ends at the arrow.
+      const isPatternElement =
+        values.length >= 2 && this.atLambdaArrowPastCloseParens();
+      // Underline the first ANNOTATED element — with several elements the last
+      // one usually carries no annotation (`((p: integer, q)) => …`). Outside a
+      // pattern the group is a single value, where last and annotated coincide.
+      const annotated = isPatternElement
+        ? (values.find((v) => fnOps(v)?.[0] === 'Typed') ??
+          values[values.length - 1])
+        : values[values.length - 1];
+      const o = nodeOffsets(annotated);
       this.error(
-        ['unexpected-symbol', ':'],
+        isPatternElement
+          ? ['pattern-element-annotation']
+          : ['unexpected-symbol', ':'],
         o ? o[0] - this.baseOffset : open.start,
         o ? o[1] - this.baseOffset : end
       );
     }
-    // A single value is a parenthesized expression, not a 1-tuple.
-    if (values.length === 1) return values[0];
+    // A single value is a parenthesized expression, not a 1-tuple. Record the
+    // node so a mapsto LHS can tell `((p, q)) => …` — ONE destructured
+    // parameter — from `(p, q) => …`, two parameters. The redundant
+    // parentheses are the whole difference between the two spellings, and they
+    // leave no other trace: the group returns its content node, whose span
+    // covers only the inner parentheses. See `mapstoParams`.
+    if (values.length === 1) {
+      // A number or string literal is a MathJSON primitive, not an object, so
+      // it cannot be held weakly — and it can never be a parameter list.
+      if (typeof values[0] === 'object' && values[0] !== null)
+        this.redundantlyParenthesized.add(values[0]);
+      return values[0];
+    }
     return this.wrap(
       ['Tuple', ...values] as MathJsonExpression[],
       open.start,

@@ -455,15 +455,31 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     expect(harvest.candidates).toHaveLength(0);
   });
 
-  it('keeps a VARIADIC-tail built-in callback (`Less`) opaque', () => {
-    // One required parameter plus a variadic tail: no single wrapper arity,
-    // so emission refuses and the harvest must agree.
+  it('refuses a VARIADIC-tail built-in callback (`Or`) outright', () => {
+    // `Or` is `(boolean+) -> boolean`: a variadic tail, so it has no single
+    // wrapper arity, emission refuses it with `Fail closed`, and the harvest
+    // agrees (no candidate).
+    //
+    // The probe used to be spelled with `Less` (`(any, any+) -> boolean`), but
+    // since the static callback-arity check (2026-08-15) that call never
+    // reaches the compiler: `Less` needs at least TWO arguments and `Map`
+    // supplies one, so it is rejected while it is canonicalized. `Or`'s `+`
+    // tail admits ONE argument, so the arity check declines on it, the call
+    // stays valid, and the emission gate under test is reached.
     const engine = new ComputeEngine();
-    const expr = mappedTwice(engine, 'Less');
+    const expr = mappedTwice(engine, 'Or');
+    expect(expr.isValid).toBe(true);
     expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
 
     const harvest = harvestCse(expr, { admitPureUserFunctions: true });
     expect(harvest.candidates).toHaveLength(0);
+
+    // The `Less` spelling is still refused, one stage earlier.
+    const bad = mappedTwice(new ComputeEngine(), 'Less');
+    expect(bad.isValid).toBe(false);
+    expect(() => compile(bad, { fallback: false })).toThrow(
+      /invalid expression/
+    );
   });
 
   it('keeps a `vars`-MAPPED built-in name opaque', () => {

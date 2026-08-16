@@ -692,9 +692,13 @@ describe('EPSIL `break` AND `continue`', () => {
   });
 
   test('they round-trip through the serializer in call form', () => {
-    // `Loop` has no keyword spelling in the serializer, so a bare `break`
-    // would re-parse OUTSIDE a loop (a `control-outside-loop` error). The
-    // call form is the faithful one.
+    // The serializer has no loop context: a `["Break"]` reached at the top
+    // level or inside a function literal has no enclosing loop, and a bare
+    // `break` there would re-parse as a `control-outside-loop` error. The
+    // call form is the one spelling that is faithful everywhere. (`Loop`
+    // itself does print as `for … in … { … }` / `while … { … }`; emitting the
+    // keyword form for `break`/`continue` needs a loop-depth counter that
+    // resets at every function-literal boundary — see ROADMAP.md.)
     expect(serializeEpsil(['Break'])).toBe('Break()');
     expect(serializeEpsil(['Continue'])).toBe('Continue()');
     expect(validEpsil('Break()')).toStrictEqual(['Break']);

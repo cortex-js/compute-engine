@@ -32,6 +32,14 @@ Check the signature with "epsil doc <FunctionName>". Optional parameters never p
 
 Check the signature with "epsil doc <FunctionName>". A common cause is passing a collection's elements separately where the function expects the collection itself (or the reverse).`,
 
+  'callback-arity': `A collection operator was given a callback that declares a different number of parameters than the operator passes it — "Map((p, q) => p + q, xs)", where Map applies the callback to one element at a time.
+
+An ordinary call may supply fewer arguments than a function declares: "f(1)" on a two-parameter "f" is partial application, and yields a function awaiting the rest. Inside a collection operator that is never what was meant, because the OPERATOR decides how many arguments the callback receives — so "Map" would build a list of leftover functions rather than a list of results. The check is therefore specific to operator-owned callback slots; ordinary calls still curry.
+
+If the elements are pairs (or tuples) and the callback meant to take one apart, write the parameter as a tuple pattern: "Map(((p, q)) => p + q, pairs)" — the extra parentheses make it ONE parameter that is destructured, not two parameters.
+
+A few operators read the callback's arity as a choice between two modes and accept either: "Sort" takes a unary sort key or a binary comparator, and "Iterate" takes "f(previous)" or "f(index, previous)". Those report this error only when the callback matches neither.`,
+
   'argument-name-unknown': `A call passed an argument by name ("f(rate: 0.05)"), but the called function declares no parameter with that name; the message lists the names it does declare, and a "did you mean" points at the closest one.
 
 Only parameters that carry a name in the function's declaration can be addressed by name — an unnamed parameter is positional-only. Check the signature with "epsil doc <FunctionName>".`,

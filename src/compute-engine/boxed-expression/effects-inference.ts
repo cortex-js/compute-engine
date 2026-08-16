@@ -33,12 +33,15 @@ import {
 import { substituteDeclaredBounds } from './generic-instantiation.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import {
+  destructuringParameterType,
   functionLiteralBody,
+  functionLiteralBoundNames,
   functionLiteralDeclaredEffects,
   functionLiteralDeclaredSignature,
   functionLiteralParameters,
   functionLiteralReturnMarker,
   functionLiteralReturnType,
+  isDestructuringParameter,
   isScalarType,
   mentionsQuantifiedVariable,
 } from './function-literal.js';
@@ -624,6 +627,15 @@ export function functionLiteralSignatureType(expr: Expression): Type {
     params.length > 0
       ? params.map((p, i) => {
           if (p.type !== undefined) return { name: p.name, type: p.type };
+          // A DESTRUCTURING parameter (`((p, q)) => …`) states its own slot:
+          // the tuple shape its pattern will match. See
+          // `destructuringParameterType` for why the slot must not read as a
+          // bare `unknown` scalar.
+          if (
+            paramOps[i] !== undefined &&
+            isDestructuringParameter(paramOps[i])
+          )
+            return { type: destructuringParameterType(paramOps[i]) };
           const inferred = inferredCollectionParameterType(paramOps[i]);
           if (inferred !== undefined) return { name: p.name, type: inferred };
           return { type: 'unknown' as Type };
@@ -812,6 +824,12 @@ function walkLiteral(
     params.set(p.name, p.type === undefined ? null : signatureEffects(p.type));
     if (p.type !== undefined) paramTypes.set(p.name, p.type);
   }
+  // A DESTRUCTURING parameter (`((p, q)) => …`) has no single name, so the
+  // loop above entered only an empty one for it. Its leaves are parameters
+  // like any other, and carry no annotation of their own — `null` throughout.
+  if (isFunction(literal, 'Function'))
+    for (const name of functionLiteralBoundNames(literal.ops.slice(1)))
+      if (!params.has(name)) params.set(name, null);
 
   const body = functionLiteralBody(literal);
   if (body === undefined) return;
@@ -877,8 +895,10 @@ function collectSymbolsMasked(
   if (!isFunction(expr)) return;
   out.add(expr.operator);
   if (expr.operator === 'Function') {
+    // Every name the parameter list binds, destructuring leaves included.
     const extended = new Set(mask);
-    for (const p of functionLiteralParameters(expr)) extended.add(p.name);
+    for (const name of functionLiteralBoundNames(expr.ops.slice(1)))
+      extended.add(name);
     for (const op of expr.ops) collectSymbolsMasked(op, extended, out);
     return;
   }

@@ -12,6 +12,7 @@ import {
   signatureEffects,
 } from '../../common/type/utils.js';
 import { isFunction, isString, sym } from './type-guards.js';
+import { tuplePatternNames } from './tuple-pattern.js';
 
 /**
  * Shared accessors for the shape of a `Function` literal so that no call site
@@ -96,6 +97,77 @@ export function resolveFunctionLiteralTypes(expr: Expression): void {
 export function functionLiteralParameterName(param: Expression): string {
   if (isFunction(param, 'Typed')) return sym(param.op1) ?? '';
   return sym(param) ?? '';
+}
+
+/**
+ * True when a `Function` parameter operand is a DESTRUCTURING PATTERN — a raw
+ * `["Tuple", …]` node — rather than a plain (possibly annotated) name.
+ *
+ * Such a parameter still counts as ONE parameter: it consumes one argument,
+ * which must be a tuple of the pattern's arity, and binds the pattern's leaf
+ * names to that tuple's components. Epsil spells it with a second pair of
+ * parentheses — `((p, q)) => p && q` is unary, `(p, q) => p && q` is binary.
+ *
+ * The pattern operand is kept RAW (never canonicalized), for the same reason
+ * the `Declare`/`Assign` destructuring targets are: canonicalizing a
+ * single-letter leaf would fold it into the library constant of that name
+ * (`i` → `ImaginaryUnit`).
+ */
+export function isDestructuringParameter(param: Expression): boolean {
+  return isFunction(param, 'Tuple');
+}
+
+/**
+ * Every name a single `Function` parameter operand BINDS, in pattern order.
+ *
+ * One name for a plain or `Typed` parameter (empty when the operand is not a
+ * symbol at all); for a destructuring pattern, the pattern's leaf names with
+ * `_` positions — which bind nothing — dropped, nested patterns included.
+ *
+ * This is what every walker that asks "which names does this lambda bind?"
+ * must use; {@link functionLiteralParameterName} answers only for the
+ * single-name shapes and returns `''` for a pattern.
+ */
+export function functionLiteralParameterNames(param: Expression): string[] {
+  if (isDestructuringParameter(param)) return tuplePatternNames(param);
+  const name = functionLiteralParameterName(param);
+  return name ? [name] : [];
+}
+
+/**
+ * The type a destructuring parameter's argument must have: a tuple whose
+ * arity is the pattern's, with a nested tuple type at each nested pattern
+ * position and `unknown` everywhere else.
+ *
+ * Surfacing this on the literal's arrow (rather than the `unknown` a bare
+ * parameter gets) is what states the arity the application will enforce, and
+ * what keeps the parameter from reading as a SCALAR slot — a scalar slot
+ * invites the collection-argument broadcast, which would map the lambda over
+ * the tuple's components instead of binding the tuple whole.
+ *
+ * The COMPONENT types stay `unknown`: a pattern position carries no
+ * annotation of its own (per-element annotations are rejected at parse), and
+ * the per-application element-type inference declines to stamp a pattern
+ * parameter (`annotateFunctionLiteralParams` rewrites bare SYMBOL parameters
+ * only).
+ */
+export function destructuringParameterType(param: Expression): Type {
+  if (!isFunction(param, 'Tuple')) return 'unknown';
+  const elements = param.ops.map((el) =>
+    isFunction(el, 'Tuple')
+      ? { type: destructuringParameterType(el) }
+      : { type: 'unknown' as Type }
+  );
+  return { kind: 'tuple', elements };
+}
+
+/** Every name the parameter list of a `Function` literal binds, in order. */
+export function functionLiteralBoundNames(
+  params: ReadonlyArray<Expression>
+): string[] {
+  const names: string[] = [];
+  for (const p of params) names.push(...functionLiteralParameterNames(p));
+  return names;
 }
 
 /** The declared type of a single `Function` parameter operand, or `undefined`

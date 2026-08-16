@@ -1064,7 +1064,7 @@ volumes
             const params = op.ops.slice(1);
             if (
               params.length > 0 &&
-              params.every((p) => functionLiteralParameterName(p) !== null)
+              params.every((p) => functionLiteralParameterName(p) !== '')
             )
               // `ce.function()` (not `_fn`): the canonical handler wraps the
               // body in the scoped Block that `makeLambda` requires.

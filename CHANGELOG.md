@@ -70,6 +70,64 @@
 
 ### New Features
 
+- **A lambda parameter can be a tuple pattern: `((p, q)) => p && q`.** Tuple
+  destructuring existed in `let (a, b) = v`, `(a, b) := v` and `match`, but
+  not where a per-element pair shows up most — a callback parameter and a
+  `for` header. A parameter written with a second pair of parentheses is ONE
+  parameter that takes a tuple and binds a name to each component (Kotlin's
+  `{ (a, b) -> … }`), reusing the pattern grammar `let` already has: bare
+  names, `_` to skip a position, nested `(…)` patterns. `(p, q) => …` is
+  unchanged (two parameters). `for (p, q) in pairs { … }` accepts the same
+  pattern. In MathJSON the pattern sits in a parameter position:
+  `["Function", body, ["Tuple", "p", "q"]]`.
+
+  ```epsil
+  [(True, True), (True, False), (False, True), (False, False)]
+    |> Map(((p, q)) => p && q, _)         // ➔ [True, False, False, False]
+  for (name, age) in people { … }
+  ```
+
+  A shape mismatch at the call is the same `incompatible-type` error the
+  destructuring `let` produces; a literal or a per-element type annotation
+  inside the pattern is a parse diagnostic (`pattern-binding-expected`,
+  `pattern-element-annotation`). Destructuring lambdas are interpreted — the
+  compile targets decline them explicitly rather than bind the wrong names.
+  Fixed while here: the JavaScript target's `Integrate` lowering tested a
+  parameter-name array with `!== undefined` (vacuously true), so a
+  parameter with no readable name compiled the integrand against the
+  enclosing scope.
+
+- **A callback whose parameter count cannot fit its operator is now a
+  `callback-arity` error, statically.** Partial application is a feature of
+  ordinary positional calls (`f(1)` on a binary `f` is a function awaiting
+  the second argument), but inside a collection operator the OPERATOR decides
+  how many arguments the callback receives, so a mismatch is never what was
+  meant — and the operators disagreed about it, several silently:
+  `Map((p, q) => p + q, [1,2,3])` answered three closures typed `vector<3>`,
+  `Sort(xs, (a, b, c) => a < b)` returned `xs` UNSORTED, `Fold` buried an
+  `Error` in a nested closure, `Filter`/`Any`/`All`/`Reduce` stayed inert,
+  and `Map(p => p, xs, ys)` threw `Too many arguments` only once an element
+  was forced. Every callback-taking collection operator now checks in its
+  canonical handler (so it fires on the box, parse, `ce.function` and Epsil
+  routes) whether a function literal — or a symbol with a known, non-generic
+  signature — can accept the argument count it supplies: `Map` one per
+  source, the per-element family one, `Reduce`/`Fold`/`Scan` two, `Fill`
+  two, and the mode selectors `Sort`/`Ordering` (key or comparator) and
+  `Iterate` (`f(previous)` or `f(index, previous)`) either of their two.
+  A nullary literal (`() => True`) is a constant and fits any slot;
+  a callback of unknown arity (`function`, `callback<…>`, generic) is not
+  checked. The message names both sides and the fix:
+
+  ```
+  Map calls its callback with 1 argument (each element of the collection);
+  `(p, q) => p + q` declares 2 parameters. To take a pair apart, use a tuple
+  pattern parameter: ((p, q)) => …
+  ```
+
+  Fixed while here: `Fill((i: integer) => 2i, (2, 2))` compiled to JavaScript
+  (silently accepting a unary generator) while the interpreter threw on the
+  same expression; both routes now agree.
+
 - **New `range` type: an index span.** A `Range` that denotes a contiguous,
   ascending run of 1-based collection indexes — integer bounds, at least 1,
   ascending, one apart, finite — now has the narrower type `range` instead of

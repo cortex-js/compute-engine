@@ -497,6 +497,10 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `The parameter "${args[0]}" shadows the constant of the same name: inside the body, "${args[0]}" is the argument, not the constant. Rename the parameter, or use the constant's value directly`;
     case 'zero-index':
       return `Indexing is 1-based: xs[1] is the first element (index 0 yields NaN)`;
+    case 'pattern-binding-expected':
+      return `A destructuring pattern binds names by position: each element must be a name, "_" to skip the position, or a nested "(…)" pattern. To match against a value, use a "match" expression`;
+    case 'pattern-element-annotation':
+      return `A destructuring pattern position binds a name and states no type; drop the annotation (write "((p, q)) => …") or take the tuple as one named parameter and unpack it in the body`;
     case 'range-pattern-bounds':
       return `Range pattern bounds must be numeric literals; use a guard (e.g. "n if n >= lo && n <= hi => …") to test against a computed bound`;
     case 'range-pattern-step':

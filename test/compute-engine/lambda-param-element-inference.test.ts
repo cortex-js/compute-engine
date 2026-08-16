@@ -391,16 +391,15 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
     expect(expr.evaluate().toString()).toBe('[(1, "a"),(2, "b"),(3, "c")]');
   });
 
-  test('an arity-mismatched callback keeps its diagnostic verbatim', () => {
-    // The §6/§10 diagnostic-parity pin: a UNARY callback over two sources is
-    // admitted and errors at application. Under the callback-first signature
-    // (2026-08-14 flip) the declared slot `(T) -> U` is unary, so a unary
-    // literal matches S's arity and IS stamped from the sources' joined
-    // element type before the call-time arity error fires — the stamp is
-    // visible in the canonical form, while the error VALUE stays byte-
-    // identical to what the metadata spelling produced. (A callback whose
-    // arity matches the CALL — the zip form's success path — mismatches the
-    // unary S and stays unstamped under R-D6, exactly as before.)
+  test('an arity-mismatched callback is rejected at canonicalization', () => {
+    // The §6/§10 diagnostic-parity pin, restated for the static
+    // callback-arity check (2026-08-15). A UNARY callback over TWO sources
+    // cannot be applied — `Map(f, xs, ys)` passes one element of each — so
+    // the slot now carries the diagnostic instead of a stamped literal that
+    // would only fail later, at application, with a thrown
+    // `Too many arguments`. The declared slot `(T) -> U` is still unary and
+    // would still have accepted the stamp; the arity check runs first and the
+    // whole operand is replaced, so no stamp survives into the canonical form.
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Map',
@@ -410,13 +409,18 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
     ]);
     expect(expr.toMathJson()).toEqual([
       'Map',
-      ['Function', ['Add', 'a', 1], ['Typed', 'a', "'finite_integer'"]],
+      [
+        'Error',
+        [
+          'ErrorCode',
+          'callback-arity',
+          'Map calls its callback with 2 arguments (one element from each of the 2 collections); `(a) => a + 1` declares 1 parameter',
+        ],
+      ],
       ['List', 1, 2],
       ['List', 3, 4],
     ]);
-    expect(expr.evaluate().toString()).toBe(
-      'Too many arguments for function "(a) => a + 1": expected 1, got 2'
-    );
+    expect(expr.type.toString()).toBe('error');
   });
 
   test('the multi-collection form has no compiled lowering (unchanged)', () => {
@@ -662,12 +666,23 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
     ).toEqual(['Partition', 'us', ['Function', ['Less', 'n', 3], 'n']]);
   });
 
-  test.each(['Reduce', 'TakeWhile', 'DropWhile', 'Partition'])(
+  // Each operator gets a callback of the arity IT applies: `Reduce` folds
+  // with `(accumulator, element)`, the three predicate operators test one
+  // element. A unary callback at `Reduce` was never applicable — it threw
+  // `Too many arguments` at evaluation — and since the static callback-arity
+  // check (2026-08-15) it is rejected at canonicalization, which would test
+  // the rejection rather than the sharing pin this case is about.
+  test.each([
+    ['Reduce', '(acc, n) => acc + n'],
+    ['TakeWhile', 'n => n > 1'],
+    ['DropWhile', 'n => n > 1'],
+    ['Partition', 'n => n > 1'],
+  ])(
     '%s: the sharing pin holds — a NAMED callback is never rebuilt',
-    (op) => {
+    (op, callback) => {
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-      executeEpsil(ce, 'let pred = n => n > 1');
+      executeEpsil(ce, `let pred = ${callback}`);
       expect(ce.box([op, 'cs', 'pred'] as any).toMathJson()).toEqual([
         op,
         'cs',

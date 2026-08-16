@@ -271,6 +271,42 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   ],
   ['If (generic function form)', ['If', 'c', 't', 'e']],
 
+  // Loops. `for` carries an `Element` iterator clause; `while` is an
+  // unconditional `Loop` whose body opens with the break guard. A shape the
+  // surface grammar cannot spell (several clauses, no guard) keeps the generic
+  // `Loop(…)` call form, which re-parses to itself.
+  ['for loop', ['Loop', ['Block', 'a'], ['Element', 'x', 'xs']]],
+  [
+    'for loop (tuple pattern)',
+    [
+      'Loop',
+      ['Block', ['Add', 'p', 'q']],
+      ['Element', ['Tuple', 'p', 'q'], 'pairs'],
+    ],
+  ],
+  [
+    'for loop (several statements)',
+    ['Loop', ['Block', 'a', 'b', 'c'], ['Element', 'x', 'xs']],
+  ],
+  ['for loop (empty body)', ['Loop', ['Block'], ['Element', 'x', 'xs']]],
+  [
+    'for loop containing break',
+    ['Loop', ['Block', ['Break']], ['Element', 'x', 'xs']],
+  ],
+  [
+    'while loop',
+    ['Loop', ['Block', ['If', ['Not', 'c'], ['Break']], ['Block', 'a']]],
+  ],
+  [
+    'while loop (several statements)',
+    ['Loop', ['Block', ['If', ['Not', 'c'], ['Break']], ['Block', 'a', 'b']]],
+  ],
+  ['infinite Loop (no surface spelling)', ['Loop', ['Block', 'a']]],
+  [
+    'Loop with several iterator clauses (no surface spelling)',
+    ['Loop', ['Block', 'a'], ['Element', 'x', 'xs'], ['Element', 'y', 'ys']],
+  ],
+
   // Destructuring assignment: a `Tuple` in the target position of `Assign`.
   // Nothing special in the serializer — the generic infix `:=` form already
   // spells a tuple target — but it must keep round-tripping as an `Assign`
@@ -306,6 +342,108 @@ describe('EPSIL ROUND-TRIP', () => {
     expect(diagnostics.map((d) => d.message)).toEqual([]);
 
     expect(normalize(value)).toEqual(normalize(expr));
+  });
+});
+
+//
+// Loop statements: the keyword spelling, not the `Loop(…)` call form.
+//
+// The corpus above pins the round-trip; these pin the SURFACE form the
+// serializer emits, so a `for`/`while` that was parsed comes back spelled the
+// way it was written (modulo the inline-block spacing every brace block uses,
+// `if c {1}`).
+//
+describe('EPSIL LOOP SPELLING', () => {
+  const spell = (src: string): string => serializeEpsil(parseEpsil(src)[0]!);
+
+  test.each([
+    ['for x in xs { x }', 'for x in xs {x}'],
+    ['for (p, q) in pairs { p + q }', 'for (p, q) in pairs {p + q}'],
+    // A nested pattern, and a collection that is itself an expression.
+    ['for (a, (b, c)) in zip(u, v) { a }', 'for (a, (b, c)) in zip(u, v) {a}'],
+    ['while c { x }', 'while c {x}'],
+    ['while x > 0 { x - 1 }', 'while x > 0 {x - 1}'],
+    // A negated condition survives the guard's own `Not`.
+    ['while !done { step() }', 'while !done {step()}'],
+    ['for x in xs { }', 'for x in xs {}'],
+    ['while c { }', 'while c {}'],
+    // Several statements, inline: `;`-separated, as in any brace block.
+    ['for x in xs { f(x)\n g(x) }', 'for x in xs {f(x); g(x)}'],
+    ['while c { f()\n g()\n h() }', 'while c {f(); g(); h()}'],
+    // `break`/`continue` keep their CALL spelling: they lower to `Break()` /
+    // `Continue()`, and the serializer has no loop context, so the keyword
+    // would re-parse outside a loop as an error (pinned in statements.test.ts).
+    // The call form re-parses to the same node inside the loop.
+    ['for x in xs { break }', 'for x in xs {Break()}'],
+    ['while c { continue }', 'while c {Continue()}'],
+    ['for x in xs { if x > 2 { break } }', 'for x in xs {if x > 2 {Break()}}'],
+    // Nesting.
+    [
+      'for x in xs { for y in ys { f(x, y) } }',
+      'for x in xs {for y in ys {f(x, y)}}',
+    ],
+  ])('%s', (src, expected) => {
+    expect(spell(src)).toBe(expected);
+    // …and the spelling re-parses to what the source parsed to.
+    const [reparsed, diagnostics] = parseEpsil(expected);
+    expect(diagnostics.map((d) => d.message)).toEqual([]);
+    expect(normalize(reparsed)).toEqual(normalize(parseEpsil(src)[0]));
+  });
+
+  test('a multi-statement body stacks like a parsed one', () => {
+    const src = 'for x in xs { let y = x + 1\n if y > 2 { break }\n g(y) }';
+    const out = serializeEpsil(parseEpsil(src)[0]!, {
+      margin: 30,
+      softMargin: 24,
+    } as any);
+    expect(out).toBe(
+      [
+        'for x in xs {',
+        '  let y = x + 1',
+        '  if y > 2 {Break()}',
+        '  g(y)',
+        '}',
+      ].join('\n')
+    );
+    expect(parseEpsil(out)[1].map((d) => d.message)).toEqual([]);
+  });
+});
+
+//
+// A parameter list that cannot be spelled at all takes the generic
+// `Function(…)` call form — including when an annotation elsewhere in the list
+// would otherwise force the arrow spelling. A `Tuple` pattern with a non-name
+// leaf (raw MathJSON; the parser never builds one) has no source spelling, and
+// emitting it as an empty slot — `(x: integer, ) => body` — does not re-parse.
+//
+describe('EPSIL UNSPELLABLE PARAMETER PATTERN', () => {
+  const literal: MathJsonExpression = [
+    'Function',
+    'body',
+    ['Typed', 'x', { str: 'integer' }],
+    ['Tuple', 1, 'q'],
+  ];
+
+  test('an annotated literal with an unspellable pattern takes the call form', () => {
+    const out = serializeEpsil(literal);
+    expect(out).toBe('Function(body, x, (1, q))');
+    const [value, diagnostics] = parseEpsil(out);
+    expect(diagnostics.map((d) => d.message)).toEqual([]);
+    // Re-parses as a `Function` literal with the pattern intact. (The stray
+    // `Typed` is transparent in the generic form, as everywhere else — the
+    // annotation, not the structure, is what is dropped.)
+    expect(normalize(value)).toEqual([
+      'Function',
+      'body',
+      'x',
+      ['Tuple', { num: '1' }, 'q'],
+    ]);
+  });
+
+  test('the same pattern in a named definition takes the call form too', () => {
+    const out = serializeEpsil(['DefineFunction', 'f', literal]);
+    expect(out).toBe('DefineFunction(f, Function(body, x, (1, q)))');
+    expect(parseEpsil(out)[1].map((d) => d.message)).toEqual([]);
   });
 });
 

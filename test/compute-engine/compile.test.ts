@@ -1489,19 +1489,24 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toThrow(/Fail closed|invalid expression/);
   });
 
-  it('native callback extra arguments do not leak into lambda parameters', () => {
+  it('a binary mapping function over ONE collection is rejected outright', () => {
     // Native `.map` passes `(x, index, array)`; the interpreter passes only
-    // `(x)` (an under-applied CE function curries, it never sees the index).
-    // A binary mapping function must therefore NOT receive the element index
-    // as its second argument: the compiled result is NaN per element (missing
-    // argument on a real target), never index-polluted values like [10, 21, 32].
+    // `(x)`. The compiled result therefore had to be NaN per element (missing
+    // argument on a real target), never index-polluted values like
+    // [10, 21, 32] — which is what this used to assert.
+    //
+    // Since the static callback-arity check (2026-08-15) the question no
+    // longer arises for a decidable literal: `Map(f, xs)` supplies one
+    // argument, so a binary literal is refused while the call is
+    // canonicalized and never reaches any lowering. The index can no longer
+    // leak because the shape that could leak it is not constructible.
     const e = mkEngine();
-    const v = runJs(e, [
-      'Map',
-      ['Function', ['Add', 'x', 'y'], 'x', 'y'],
-      'd',
-    ]) as number[];
-    expect(v).toEqual([NaN, NaN, NaN]);
+    const expr = e.box(['Map', ['Function', ['Add', 'x', 'y'], 'x', 'y'], 'd']);
+    expect(expr.isValid).toBe(false);
+    expect(expr.toString()).toContain(
+      'Map calls its callback with 1 argument (each element of the collection); `(x, y) => x + y` declares 2 parameters'
+    );
+    expect(() => runJs(e, expr)).toThrow(/invalid expression/);
   });
 
   it('Tabulate/Fill dimensions are rounded and clamped like the interpreter', () => {
@@ -2959,7 +2964,10 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // (`BaseCompiler.isBinaryInfixValueOperator`).
     const e = new ComputeEngine();
     const js = new JavaScriptTarget();
-    for (const op of ['Negate', 'Not', 'Less', 'Greater', 'And', 'Or']) {
+    // A VARIADIC operator symbol accepts the two arguments `Reduce` passes, so
+    // the static callback-arity check (2026-08-15) declines on it, the call
+    // stays valid, and the combiner gate under test is what refuses it.
+    for (const op of ['Less', 'Greater', 'And', 'Or']) {
       expect(() =>
         // The list and seed are constant, so constant folding would answer from
         // the interpreter and never reach the combiner check under test.
@@ -2968,6 +2976,20 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
           constantFold: false,
         })
       ).toThrow(/Fail closed/);
+    }
+    // A FIXED-arity operator symbol (`Negate`, `Not`) cannot take two
+    // arguments at all, so it is rejected one stage earlier — the static
+    // callback-arity check turns the call into an `Error` while it is
+    // canonicalized, and the compiler never sees the combiner. Neither
+    // refusal ever compiles, which is what matters here.
+    for (const op of ['Negate', 'Not']) {
+      expect(e.box(['Reduce', L, op, 0]).type.toString()).toBe('error');
+      expect(() =>
+        js.compile(e.box(['Reduce', L, op, 0]), {
+          realOnly: true,
+          constantFold: false,
+        })
+      ).toThrow(/invalid expression/);
     }
     // Binary arithmetic operator symbols still compile.
     expect(
@@ -2981,15 +3003,26 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
   it('Map/Filter over an operator symbol fall back to the interpreter — finding 1', () => {
     const e = new ComputeEngine();
     const js = new JavaScriptTarget();
-    // A NON-expandable operator symbol (variadic `Less`) still fails closed…
+    // A NON-expandable operator symbol still fails closed at the compiler's
+    // own callback gate. `Or` is `(boolean+) -> boolean`: its `+` tail admits
+    // the ONE argument `Filter` supplies, so the static callback-arity check
+    // (2026-08-15) declines on it and the call reaches the compiler.
     // The list is constant, so constant folding would answer from the
     // interpreter and never reach the callback check under test.
+    expect(() =>
+      js.compile(e.box(['Filter', L, 'Or']), {
+        realOnly: true,
+        constantFold: false,
+      })
+    ).toThrow(/Fail closed/);
+    // `Less` requires at least two arguments, so it is refused one stage
+    // earlier: the static check rejects the call while it is canonicalized.
     expect(() =>
       js.compile(e.box(['Filter', L, 'Less']), {
         realOnly: true,
         constantFold: false,
       })
-    ).toThrow(/Fail closed/);
+    ).toThrow(/invalid expression/);
     // …but a UNARY one is eta-expanded into a real callback rather than
     // refused: `Map(Negate, L)` is a valid application at `Negate`'s own
     // arity (it is only a *combiner* that needs two parameters). It compiles
@@ -3004,24 +3037,41 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
   it('Reduce with a non-binary combiner arity fails closed — finding 2', () => {
     const e = new ComputeEngine();
     const js = new JavaScriptTarget();
-    // Unary Function literal: the interpreter raises an arity error; the
-    // compiled fold must not silently return 3.
+    // Unary user function whose arity the static callback-arity check
+    // (2026-08-15) cannot read: `cb` is declared with the `function` wildcard,
+    // which promises callers nothing about arity, so the check declines and
+    // the call stays valid. The compiler resolves the symbol to its unary
+    // literal and refuses it at the combiner-arity gate (`customCombiner`
+    // requires `literal.nops - 1 === 2`). The interpreter raises an arity
+    // error there; the compiled fold must not silently return 3.
     // The list and seed are constant, so constant folding would answer from the
     // interpreter and never reach the combiner-arity check under test.
+    e.declare('cb', 'function');
+    e.assign('cb', e.box(['Function', ['Add', 'x', 1], 'x']));
+    expect(e.box(['Reduce', L, 'cb', 0]).isValid).toBe(true);
+    expect(() =>
+      js.compile(e.box(['Reduce', L, 'cb', 0]), {
+        realOnly: true,
+        constantFold: false,
+      })
+    ).toThrow(/Fail closed/);
+    // A unary callback whose arity IS statically readable — an inline literal,
+    // or a symbol assigned one with no wildcard declaration — is refused one
+    // stage earlier, while the call is canonicalized, and never reaches that
+    // gate.
     expect(() =>
       js.compile(e.box(['Reduce', L, ['Function', ['Add', 'x', 1], 'x'], 0]), {
         realOnly: true,
         constantFold: false,
       })
-    ).toThrow(/Fail closed/);
-    // Unary user-defined function symbol.
+    ).toThrow(/invalid expression/);
     e.assign('inc', e.box(['Function', ['Add', 'a', 1], 'a']));
     expect(() =>
       js.compile(e.box(['Reduce', L, 'inc', 0]), {
         realOnly: true,
         constantFold: false,
       })
-    ).toThrow(/Fail closed/);
+    ).toThrow(/invalid expression/);
     // A binary Function literal still compiles.
     expect(
       compile(
@@ -3041,9 +3091,14 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     expect(() =>
       js.compile(e.box(['Tabulate', f, -2]), { realOnly: true })
     ).toThrow(/Fail closed/);
-    // 2-D: a non-positive second dimension also fails closed.
+    // 2-D: a non-positive second dimension also fails closed. The generator
+    // takes TWO indexes here — `Tabulate(f, n, m)` computes `f(i, j)`, so the
+    // unary `f` used for the 1-D cases is an arity error the static
+    // callback-arity check (2026-08-15) reports first, which would test the
+    // wrong thing.
+    const f2 = ['Function', ['Multiply', 'x', 'y'], 'x', 'y'];
     expect(() =>
-      js.compile(e.box(['Tabulate', f, 3, 0]), { realOnly: true })
+      js.compile(e.box(['Tabulate', f2, 3, 0]), { realOnly: true })
     ).toThrow(/Fail closed/);
     // A positive dimension still compiles.
     expect(
@@ -3063,6 +3118,28 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
       compile(e.box(['Reduce', ['List', 1, 2, 3], 'Add']), { fallback: false })!
         .run!()
     ).toBe(6);
+  });
+
+  it('Integrate with a DESTRUCTURING integrand parameter fails closed', () => {
+    // `((p, q)) => p + q` takes ONE argument and binds `p` and `q` to that
+    // tuple's components. No compile target lowers the tuple match, so the
+    // quadrature emitter must refuse the integrand instead of unwrapping it:
+    // it used to drop the `Function` wrapper and compile the body against the
+    // LIMIT's index variable, emitting `_SYS.integrate((x) => (P + _.q), 0, 1)`
+    // — two unrelated ambient reads, and `x` unused.
+    //
+    // `vars` is what routes the node to the quadrature emitter at all: the
+    // antiderivative-first attempt is skipped when the integrand references a
+    // `vars`-mapped symbol (a caller's external input must not be folded away).
+    const e = new ComputeEngine();
+    const integral = e.box([
+      'Integrate',
+      ['Function', ['Add', 'p', 'q'], ['Tuple', 'p', 'q']],
+      ['Limits', 'x', 0, 1],
+    ]);
+    expect(() =>
+      compile(integral, { fallback: false, vars: { p: 'P' } })
+    ).toThrow(/destructuring parameter/);
   });
 });
 
@@ -3373,14 +3450,21 @@ describe('COMPILE built-in operator name as a callback', () => {
     // single wrapper arity. Rather than emitting a dangling `_.Random` that
     // throws `_f is not a function` at RUN time, they refuse at compile time.
     const e = new ComputeEngine();
-    for (const op of ['Random', 'Less', 'NotLess']) {
+    // `Random` accepts a single argument, so it reaches the emission gate and
+    // pins the specific refusal message.
+    expect(() =>
+      compile(e.box(['Map', 'Random', XS]), { fallback: false })
+    ).toThrow(
+      /Random: cannot compile as a first-class function[\s\S]*Fail closed/
+    );
+    // `Less`/`NotLess` require at least TWO arguments while `Map` supplies
+    // one, so since the static callback-arity check (2026-08-15) the call is
+    // already invalid when the compiler sees it. The refusal reads
+    // `Cannot compile invalid expression`; nothing is emitted either way.
+    for (const op of ['Less', 'NotLess']) {
       expect(() =>
         compile(e.box(['Map', op, XS]), { fallback: false })
-      ).toThrow(
-        new RegExp(
-          `${op}: cannot compile as a first-class function[\\s\\S]*Fail closed`
-        )
-      );
+      ).toThrow(/Fail closed|invalid expression/);
     }
     // With the default fallback route the interpreter answers instead.
     const r = compile(e.box(['Map', 'Random', XS]));

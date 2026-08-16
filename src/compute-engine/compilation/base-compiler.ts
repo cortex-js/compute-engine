@@ -44,9 +44,12 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import {
+  functionLiteralBoundNames,
   functionLiteralParameterName,
   functionLiteralParameterType,
+  isDestructuringParameter,
 } from '../boxed-expression/function-literal.js';
+import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
 import { multiClauseState } from '../multi-clause.js';
 import type { FunctionClause } from '../multi-clause.js';
 import {
@@ -3311,6 +3314,7 @@ export class BaseCompiler {
           target
         );
       // Default: JavaScript arrow function
+      BaseCompiler.assertNoDestructuringParams(args.slice(1));
       const params = args
         .slice(1)
         .map((x) => functionLiteralParameterName(x) || '_');
@@ -4861,6 +4865,33 @@ export class BaseCompiler {
         out.add(sym.symbol);
     }
     return out;
+  }
+
+  /**
+   * Fail closed on a DESTRUCTURING parameter (`((p, q)) => p + q`).
+   *
+   * Every target lowers a lambda to `(name₁, …, nameₙ) => body`, one emitted
+   * name per parameter operand, and reads a parameter operand that yields no
+   * name as the throwaway `_`. A pattern parameter yields no name, so the
+   * body's references to its leaves would compile as references to whatever
+   * `p` and `q` mean OUTSIDE the lambda — silently wrong code, not an error
+   * (measured: `Map(((p, q)) => p + q, xs)` emitted
+   * `(_p) => _.p + _.q`, reading two unrelated globals).
+   *
+   * Refusing is the D6 fail-closed rule. Destructuring in the emitted code is
+   * a real option for some targets (a JS tuple is an array), but it has to be
+   * decided per target and per tuple REPRESENTATION, so no target claims it
+   * today.
+   */
+  static assertNoDestructuringParams(params: ReadonlyArray<Expression>): void {
+    for (const p of params)
+      if (isDestructuringParameter(p))
+        throw new Error(
+          `Cannot compile a function literal with a destructuring parameter ` +
+            `"${p.toString()}": no compile target lowers the tuple match. ` +
+            `Take the tuple as one named parameter and read its components ` +
+            `in the body.`
+        );
   }
 
   /**
@@ -6878,11 +6909,10 @@ export class BaseCompiler {
     const h = expr.operator;
     if (h === 'Function') {
       // ["Function", body, ...params]: a parameter may legitimately be
-      // complex, so shield only — never force it real (Tycho item 60).
-      const params = expr.ops
-        .slice(1)
-        .map((p) => (isSymbol(p) ? p.symbol : undefined))
-        .filter((p): p is string => p !== undefined);
+      // complex, so shield only — never force it real (Tycho item 60). A
+      // destructuring parameter contributes its LEAF names, which is what the
+      // body actually references.
+      const params = functionLiteralBoundNames(expr.ops.slice(1));
       return { bodies: expr.ops.slice(0, 1), real: [], shielded: params };
     }
     if (h !== 'Sum' && h !== 'Product' && h !== 'Loop' && h !== 'Comprehension')
@@ -6896,7 +6926,15 @@ export class BaseCompiler {
       const ops = (clause as Expression & { ops: ReadonlyArray<Expression> })
         .ops;
       const name = ops[0];
-      if (!isSymbol(name)) continue;
+      if (!isSymbol(name)) {
+        // An `Element` clause may DESTRUCTURE its index (`for (p, q) in
+        // pairs`): the clause binds the pattern's leaf names, and those are
+        // what the body references, so shield them. They are never `real` —
+        // a tuple component is not a numeric loop counter.
+        if (!isLimits && isFunction(name, 'Tuple'))
+          shielded.push(...tuplePatternNames(name));
+        continue;
+      }
       shielded.push(name.symbol);
       // A `Limits` index, or an `Element` index over a `Range`/`Linspace`, is
       // a numeric loop counter: real by construction. An `Element` index over
@@ -9756,6 +9794,7 @@ export class BaseCompiler {
     bodyExpr: Expression;
     bodyTarget: CompileTarget<Expression>;
   } {
+    BaseCompiler.assertNoDestructuringParams(literal.ops.slice(1));
     const declared = literal.ops
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');
@@ -10489,10 +10528,11 @@ export class BaseCompiler {
       literal: Expression & FunctionInterface,
       bound: ReadonlySet<string>
     ): void => {
-      const params = literal.ops
-        .slice(1)
-        .map((p) => functionLiteralParameterName(p))
-        .filter((name) => name !== '');
+      // A destructuring parameter binds its LEAF names, not a name of its own,
+      // so `functionLiteralBoundNames` (not `functionLiteralParameterName`) is
+      // what shadows them here: analysed as unbound, the leaves would read as
+      // free ambient symbols of the enclosing scope.
+      const params = functionLiteralBoundNames(literal.ops.slice(1));
       const saved = declaredTypes;
       declaredTypes = BaseCompiler.literalDeclaredParamTypes(literal);
       try {
@@ -10792,10 +10832,10 @@ export class BaseCompiler {
       // Binding forms: shadow their bound variables in the body, but visit the
       // bound expressions (limits / collections) in the outer scope.
       if (h === 'Function') {
-        const params = ops
-          .slice(1)
-          .map((p) => functionLiteralParameterName(p))
-          .filter((name) => name !== '');
+        // A destructuring parameter binds its LEAF names, not a name of its
+        // own; shadowing only the readable parameter names would leave those
+        // leaves analysed as free ambient symbols.
+        const params = functionLiteralBoundNames(ops.slice(1));
         visit(ops[0], params.length ? union(bound, params) : bound);
         return;
       }

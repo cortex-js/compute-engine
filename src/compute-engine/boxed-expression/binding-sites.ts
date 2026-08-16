@@ -108,13 +108,37 @@ function indexingSetSite(
   op: Expression | undefined,
   i: number,
   type: TypeString | undefined
-): BindingSite | undefined {
+): BindingSite[] {
+  // A DESTRUCTURING loop variable — `for (p, q) in pairs { … }`, lowered to
+  // `Element(Tuple(p, q), pairs)` — binds one name per pattern leaf, so the
+  // clause yields one site per leaf instead of one for the whole operand.
+  // Restricted to `Element`: a `Tuple` indexing set is `Sum(f, Tuple(n, 1,
+  // 10))`, whose first operand is the index itself, not a pattern.
+  if (isFunction(op, 'Element') && isFunction(op.ops[0], 'Tuple')) {
+    const sites: BindingSite[] = [];
+    const walk = (node: Expression, path: number[]): void => {
+      if (isFunction(node, 'Tuple')) {
+        node.ops.forEach((el, k) => walk(el, [...path, k]));
+        return;
+      }
+      // `_` is the pipe placeholder (`xs |> Map(f, _)`), not a name: a
+      // pattern slot spelled `_` discards its component. Binding it here
+      // would shadow the placeholder inside the loop body. The lambda-
+      // parameter walker (`lambdaParamSites`) and `tuplePatternNames`
+      // (`boxed-expression/tuple-pattern.ts`) drop it for the same reason.
+      if (isSymbol(node) && node.symbol === '_') return;
+      const site = siteFor(node, path, type);
+      if (site) sites.push({ ...site, clauseLocal: true });
+    };
+    walk(op.ops[0], [i, 0]);
+    return sites;
+  }
   const site =
     isFunction(op) && INDEXING_SET_OPERATORS.has(op.operator)
       ? siteFor(op.ops[0], [i, 0], type)
       : // A bare symbol (`Sum(body, n, 1, 10)`) or `Hold(n)`.
         siteFor(op, [i], type);
-  return site === undefined ? undefined : { ...site, clauseLocal: true };
+  return site === undefined ? [] : [{ ...site, clauseLocal: true }];
 }
 
 /**
@@ -131,10 +155,8 @@ export function indexingSetSites(
 ): BindingSiteSelector {
   return (ops) => {
     const sites: BindingSite[] = [];
-    for (let i = first; i < ops.length; i++) {
-      const site = indexingSetSite(ops[i], i, type);
-      if (site) sites.push(site);
-    }
+    for (let i = first; i < ops.length; i++)
+      sites.push(...indexingSetSite(ops[i], i, type));
     return sites.length === 0 ? NO_SITES : sites;
   };
 }
@@ -149,8 +171,8 @@ export function limitsIndexSites(
   type?: TypeString
 ): BindingSiteSelector {
   return (ops) => {
-    const site = indexingSetSite(ops[index], index, type);
-    return site ? [site] : NO_SITES;
+    const sites = indexingSetSite(ops[index], index, type);
+    return sites.length === 0 ? NO_SITES : sites;
   };
 }
 
@@ -165,6 +187,19 @@ export function lambdaParamSites(op: number): BindingSiteSelector {
     const sites: BindingSite[] = [];
     for (let i = 1; i < literal.nops; i++) {
       const param = literal.ops[i];
+      // A DESTRUCTURING parameter (`((p, q)) => …`) binds one name per pattern
+      // leaf, each at its own path inside the pattern.
+      if (isFunction(param, 'Tuple')) {
+        const walk = (node: Expression, path: number[]): void => {
+          if (isFunction(node, 'Tuple')) {
+            node.ops.forEach((el, k) => walk(el, [...path, k]));
+            return;
+          }
+          if (isSymbol(node) && node.symbol !== '_') sites.push({ path });
+        };
+        walk(param, [op, i]);
+        continue;
+      }
       if (functionLiteralParameterName(param) === '') continue;
       sites.push({
         path: isFunction(param, 'Typed') ? [op, i, 0] : [op, i],

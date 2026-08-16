@@ -5795,6 +5795,7 @@ function compileToTarget(
 
   if (isFunction(expr, 'Function')) {
     const args = expr.ops;
+    BaseCompiler.assertNoDestructuringParams(args.slice(1));
     const params = args
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');
@@ -6938,11 +6939,41 @@ function compileIntegrate(
   let lambdaVars = limits.map((l) => l.index);
   let bodyExpr = args[0];
   if (isFunction(args[0], 'Function')) {
+    // A destructuring parameter (`((p, q)) => p + q`) binds its leaf names to
+    // the components of one tuple argument; no target lowers that match, and
+    // dropping the wrapper here would compile `p` and `q` as reads of whatever
+    // they mean OUTSIDE the integrand. Refuse (D6) rather than miscompile.
+    BaseCompiler.assertNoDestructuringParams(args[0].ops.slice(1));
     const names = args[0].ops
       .slice(1)
       .map((p) => functionLiteralParameterName(p));
-    if (names.length === limits.length && names.every((n) => n !== undefined))
-      lambdaVars = names as string[];
+    // `functionLiteralParameterName` returns `''` — never `undefined` — for a
+    // parameter operand that is not a name, so the emptiness test is what
+    // actually screens one out. (It used to read `n !== undefined`, which is
+    // vacuous for a `string`: a parameter with no name became the empty
+    // variable name, and the integrand body's references to what it really
+    // binds compiled as references to the ENCLOSING scope instead.)
+    if (names.length === limits.length && names.every((n) => n !== ''))
+      lambdaVars = names;
+    else if (names.some((n) => n === ''))
+      // The literal binds SOMETHING this code cannot name. Falling back to the
+      // limits' index variables would compile the body's references to those
+      // unreadable bindings as ambient reads — the same silent-miscompile the
+      // destructuring refusal above prevents. Fail closed instead.
+      //
+      // A backstop: the only unnameable parameter shape reaching here today is
+      // the `Tuple` pattern the assertion above already rejects (every other
+      // non-symbol parameter is an `expected-a-symbol` error at
+      // canonicalization, so the whole node is invalid before compilation).
+      // It exists so a future parameter shape cannot re-open the hole.
+      throw new Error(
+        `Integrate: cannot compile an integrand whose parameter ` +
+          `"${args[0].ops.slice(1).find((p) => functionLiteralParameterName(p) === '')?.toString()}" ` +
+          `has no readable name — the body's references to what it binds would ` +
+          `compile as references to the enclosing scope. Fail closed (D6). ` +
+          `Use a named parameter, or an integrand expressed directly in the ` +
+          `limits' index variables.`
+      );
     bodyExpr = args[0].ops[0];
   }
 

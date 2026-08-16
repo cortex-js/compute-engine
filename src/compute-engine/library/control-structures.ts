@@ -5,6 +5,10 @@ import {
 import { checkConditions } from '../boxed-expression/rules.js';
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
 import {
+  collectTuplePattern,
+  tuplePatternNames,
+} from '../boxed-expression/tuple-pattern.js';
+import {
   broadcastElementType,
   collectionElementType,
   resolveTypeForCompilation,
@@ -1319,6 +1323,14 @@ function canonicalLoopLike(
       if (!ce.context.lexicalScope.bindings.has(indexExpr.symbol))
         ce.declare(indexExpr.symbol, 'unknown');
     }
+    // A DESTRUCTURING loop variable — `for (p, q) in pairs { … }` — declares
+    // one binding per pattern leaf, so the body's occurrences bind to this
+    // loop's scope rather than auto-declaring in the enclosing one.
+    if (isFunction(indexExpr, 'Tuple')) {
+      for (const name of tuplePatternNames(indexExpr))
+        if (!ce.context.lexicalScope.bindings.has(name))
+          ce.declare(name, 'unknown');
+    }
     const collCanonical = collExpr.canonical;
     // These clauses are rebuilt with `_fn`, which bypasses the `Element`
     // canonical handler — so nothing narrows the iterated operand. Yet
@@ -1346,7 +1358,12 @@ function canonicalLoopLike(
     // that preserves `BoxedType` identity). The collection type is resolved
     // first so an ALIAS (`type ints = list<integer>`) contributes its
     // element type too.
-    const idxCanonical = indexExpr.canonical;
+    // A destructuring pattern stays RAW, exactly as the `Declare`/`Assign`
+    // destructuring targets do: canonicalizing it would fold a single-letter
+    // leaf into the library constant of that name (`i` → `ImaginaryUnit`).
+    const idxCanonical = isFunction(indexExpr, 'Tuple')
+      ? indexExpr
+      : indexExpr.canonical;
     if (isSymbol(idxCanonical)) {
       const elt = collectionElementType(
         resolveTypeForCompilation(collCanonical.type.type)
@@ -1438,7 +1455,8 @@ function* runLoop(
 }
 
 /** The index variable names of a comprehension's `Element` clauses, in order
- * (the wildcard `Nothing` is skipped — it binds nothing). */
+ * (the wildcard `Nothing` is skipped — it binds nothing; a destructuring
+ * pattern contributes each of its leaves). */
 function comprehensionIndexNames(
   elements: ReadonlyArray<Expression>
 ): string[] {
@@ -1448,6 +1466,7 @@ function comprehensionIndexNames(
     const idx = el.ops[0];
     if (idx && isSymbol(idx) && idx.symbol !== 'Nothing')
       names.push(idx.symbol);
+    else if (isFunction(idx, 'Tuple')) names.push(...tuplePatternNames(idx));
   }
   return names;
 }
@@ -1616,6 +1635,9 @@ function comprehensionIsDependent(clauses: ReadonlyArray<Expression>): boolean {
     if (coll && seen.length > 0 && coll.has(seen)) return true;
     const idx = clause.ops[0];
     if (idx && isSymbol(idx) && idx.symbol !== 'Nothing') seen.push(idx.symbol);
+    // A destructuring index (`for (p, q) in pairs`) binds each pattern leaf,
+    // so a later clause's domain mentioning any leaf makes it dependent.
+    else if (isFunction(idx, 'Tuple')) seen.push(...tuplePatternNames(idx));
   }
   return false;
 }
@@ -1818,6 +1840,9 @@ function comprehensionIsEnumerable(expr: Expression): boolean | undefined {
     const idx = clause.ops[0];
     if (idx && isSymbol(idx) && idx.symbol !== 'Nothing')
       bound.push(idx.symbol);
+    // A destructuring index (`for (p, q) in pairs`) binds each pattern leaf,
+    // so a later clause's domain mentioning any leaf is a dependent domain.
+    else if (isFunction(idx, 'Tuple')) bound.push(...tuplePatternNames(idx));
   }
   return unknown ? undefined : true;
 }
@@ -1909,6 +1934,11 @@ function* runNestedElements(
       if (!ce.context.lexicalScope.bindings.has(idx.symbol))
         ce.declare(idx.symbol, 'unknown');
     }
+    // A destructuring loop variable declares one binding per pattern leaf.
+    if (isFunction(idx, 'Tuple'))
+      for (const name of tuplePatternNames(idx))
+        if (!ce.context.lexicalScope.bindings.has(name))
+          ce.declare(name, 'unknown');
   }
   yield* runNested(body, elements, 0, ce, state, onLeaf);
 }
@@ -1946,10 +1976,14 @@ function* runNested(
   const indexExpr = elem.ops[0];
   const collExpr = elem.ops[1];
 
-  if (!indexExpr || !isSymbol(indexExpr) || !collExpr) {
+  const pattern = isFunction(indexExpr, 'Tuple') ? indexExpr : undefined;
+  if (
+    !indexExpr ||
+    (!isSymbol(indexExpr) && pattern === undefined) ||
+    !collExpr
+  )
     return;
-  }
-  const name = indexExpr.symbol;
+  const name = isSymbol(indexExpr) ? indexExpr.symbol : '';
 
   // Re-evaluate the collection on each entry so that dependent bindings
   // (e.g. `Element(y, Range(1, x))`) see the current value of `x`.
@@ -1965,9 +1999,27 @@ function* runNested(
   // the parent scope looking for a binding to assign into.
   const skipAssign = name === 'Nothing';
   for (const value of collection.each()) {
-    // Ephemeral index write: bumps `_anyVersion` and the index def's
-    // `_writeVersion`, not `_semanticVersion` (see `assignLoopIndex`).
-    if (!skipAssign) assignLoopIndex(ce, name, value);
+    if (pattern !== undefined) {
+      // A DESTRUCTURING loop variable (`for (p, q) in pairs { … }`): match the
+      // element against the pattern and bind one leaf at a time. An element
+      // that is not a tuple of the pattern's arity is the same shape-mismatch
+      // error value `let (p, q) = v` produces; it stops the loop and becomes
+      // its value, matching how `evaluateStatements` treats a fault.
+      const pairs: [name: string, value: Expression][] = [];
+      const err = collectTuplePattern(pattern, value.evaluate(), pairs);
+      if (err) {
+        state.stopped = true;
+        state.value = err;
+        yield err;
+        return;
+      }
+      // Ephemeral index write, as in the single-name branch below.
+      for (const [leaf, v] of pairs) assignLoopIndex(ce, leaf, v);
+    } else if (!skipAssign) {
+      // Ephemeral index write: bumps `_anyVersion` and the index def's
+      // `_writeVersion`, not `_semanticVersion` (see `assignLoopIndex`).
+      assignLoopIndex(ce, name, value);
+    }
     yield* runNested(body, elements, index + 1, ce, state, onLeaf);
     if (state.stopped) return;
   }

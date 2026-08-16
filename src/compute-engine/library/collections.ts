@@ -27,6 +27,7 @@ import {
   typeCouldBeCollection,
   windowedCollectionOps,
 } from '../collection-utils.js';
+import { callbackArityError, type CallbackSupply } from './callback-arity.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
@@ -57,6 +58,7 @@ import {
   staticCollectionDims,
   widen,
 } from '../../common/type/utils.js';
+import { RANGE_STRUCTURAL_TYPE } from '../../common/type/primitive.js';
 import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import {
@@ -435,6 +437,46 @@ function shorthandFunctionOperand(
   return fn;
 }
 
+// How many arguments each family of collection operators passes its callback,
+// and what those arguments are — the operator half of the static
+// callback-arity check (`callback-arity.ts`). Shared here so the wording is
+// identical across the family and a slot cannot silently drift from what its
+// `evaluate`/`collection` handlers actually apply.
+
+/** A per-ELEMENT callback: `Filter`, `Any`, `Map` over one source, … */
+const PER_ELEMENT_SUPPLY: CallbackSupply = {
+  count: 1,
+  describes: 'each element of the collection',
+  destructurable: true,
+};
+
+/** An ACCUMULATING callback: `Reduce`, `Fold`, `Scan`. */
+const ACCUMULATOR_SUPPLY: CallbackSupply = {
+  count: 2,
+  describes: 'the accumulator and the current element',
+};
+
+/** `Sort`/`Ordering` use the callback's arity as a MODE SELECTOR: a unary
+ * sort key, or a binary comparator (see `sortedIndices`). Either fits; only a
+ * callback matching neither is an error. */
+const SORT_SUPPLY: ReadonlyArray<CallbackSupply> = [
+  { count: 1, describes: 'a sort key for one element' },
+  { count: 2, describes: 'the two elements being compared' },
+];
+
+/** `Iterate` likewise selects on arity: a unary function receives the previous
+ * value alone, a binary one the index as well (see `iterateArgs`). */
+const ITERATE_SUPPLY: ReadonlyArray<CallbackSupply> = [
+  { count: 1, describes: 'the previous value' },
+  { count: 2, describes: 'the 1-based index and the previous value' },
+];
+
+/** `Fill(f, (rows, cols))` computes every cell as `f(i, j)`. */
+const FILL_SUPPLY: CallbackSupply = {
+  count: 2,
+  describes: 'the 1-based row and column indexes of the cell',
+};
+
 /**
  * The canonical function literal for a higher-order operator's callback slot,
  * or `undefined` when the operand is a plain VALUE that only a PARAMETERLESS
@@ -456,11 +498,28 @@ function shorthandFunctionOperand(
  * written `["Function", 42]` is a deliberate nullary literal, not a value that
  * had to be lifted, and a symbol keeps deferring to its (possibly later)
  * definition.
+ *
+ * `arity` names the operator and how many arguments it will pass, so an
+ * accepted operand additionally goes through the static callback-arity check
+ * ({@link callbackArityError}): a callback that needs more parameters than the
+ * operator supplies is rejected here rather than silently currying. Passing it
+ * is what wires an operator into that check.
  */
 function canonicalCallbackOperand(
-  op: Expression | undefined
+  op: Expression | undefined,
+  arity?: {
+    operator: string;
+    supply: CallbackSupply | ReadonlyArray<CallbackSupply>;
+  }
 ): Expression | undefined {
   if (op === undefined) return undefined;
+  // An accepted callback, with the arity check applied when the caller wired
+  // one. The check declines (returns `undefined`) whenever the operand's
+  // parameter count is not statically readable.
+  const accept = (fn: Expression): Expression =>
+    arity === undefined
+      ? fn
+      : (callbackArityError(fn, arity.operator, arity.supply) ?? fn);
   const fn = canonicalFunctionLiteral(op);
   // The operand a canonical handler REJECTS is replaced by the error, which is
   // how such a handler reports one, so the diagnostic matches the eager
@@ -473,7 +532,7 @@ function canonicalCallbackOperand(
   // there for this very reason — reported here instead of leaving the
   // application silently inert.
   if (fn === undefined) return isString(op) ? reject() : undefined;
-  if (op.type.matches('function')) return fn;
+  if (op.type.matches('function')) return accept(fn);
   // A SYMBOL is normally left to defer to its (possibly later) definition —
   // that is `canonicalFunctionLiteral`'s step 2 and the forward-reference
   // contract. One whose DECLARED type is already provably not a function
@@ -495,11 +554,11 @@ function canonicalCallbackOperand(
     const declared = def && 'value' in def ? def.value.type.type : undefined;
     if (declared !== undefined && provablyDisjoint(declared, 'function'))
       return reject(declared);
-    return fn;
+    return accept(fn);
   }
   // `["Function", body, ...params]`: a lift with no parameter is a constant.
   if (isFunction(fn, 'Function') && fn.nops < 2) return reject();
-  return fn;
+  return accept(fn);
 }
 
 /**
@@ -511,12 +570,22 @@ function canonicalCallbackOperand(
  * These operators are deliberately kept non-`lazy`: their `evaluate` handlers
  * read pre-evaluated operands, and a held operand arrives UNBOUND on the
  * `ce.box`/parse routes (see the lazy-operator trap in CLAUDE.md).
+ *
+ * `supply` is the eager half of the static callback-arity check the lazy
+ * operators get through {@link canonicalCallbackOperand}: how many arguments
+ * this operator passes its callback, so a callback declaring more parameters
+ * than that is rejected instead of silently curried. It runs AFTER the
+ * signature validation, so an operand the signature already faulted (an
+ * `Error`, or `Partition`'s `integer` chunk-size arm) is left as validation
+ * reported it — the arity check declines on anything that is not a readable
+ * callback.
  */
 function canonicalFunctionSlot(
   ce: ComputeEngine,
   operator: string,
   ops: ReadonlyArray<Expression>,
-  index: number
+  index: number,
+  supply?: CallbackSupply | ReadonlyArray<CallbackSupply>
 ): Expression {
   const xs = flatten(ops);
   const fn = shorthandFunctionOperand(xs[index]);
@@ -531,7 +600,18 @@ function canonicalFunctionSlot(
     ? validateArguments(ce, args, sig, false, false)
     : undefined;
 
-  return ce._fn(operator, adjusted ?? args);
+  const final = adjusted ?? args;
+  const arityError =
+    supply === undefined || final[index] === undefined
+      ? undefined
+      : callbackArityError(final[index], operator, supply);
+
+  return ce._fn(
+    operator,
+    arityError === undefined
+      ? final
+      : final.map((x, i) => (i === index ? arityError : x))
+  );
 }
 
 /**
@@ -2933,8 +3013,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // (`Count([True, False, True], True)`) has none and still counts as a
       // value.
       if (ops.length === 2 && isPredicateShorthand(ops[1])) {
-        const fn = canonicalCallbackOperand(ops[1]);
+        const fn = canonicalCallbackOperand(ops[1], {
+          operator: 'Count',
+          supply: PER_ELEMENT_SUPPLY,
+        });
         if (fn) ops = [ops[0], fn];
+      } else if (ops.length === 2) {
+        // A CALLABLE operand at the 2-arg form is a predicate (the type-based
+        // dispatch in `evaluate` below), so it is an operator-owned callback
+        // slot and takes the static arity check — without it a 2-parameter
+        // predicate threw `Filter predicate must return "True" or "False"`
+        // out of `evaluate` on every route. A value to match is not callable,
+        // and the check declines on it.
+        const arityError = callbackArityError(
+          ops[1],
+          'Count',
+          PER_ELEMENT_SUPPLY
+        );
+        if (arityError) ops = [ops[0], arityError];
       }
 
       const stripped =
@@ -3044,7 +3140,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('Any', [collection]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'Any',
+        supply: PER_ELEMENT_SUPPLY,
+      });
       if (!fn) return null;
       return engine._fn('Any', [collection, fn]);
     },
@@ -3069,7 +3168,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('All', [collection]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'All',
+        supply: PER_ELEMENT_SUPPLY,
+      });
       if (!fn) return null;
       return engine._fn('All', [collection, fn]);
     },
@@ -3142,6 +3244,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // `unknown` — without this the whole Map would type `unknown` and
           // the arithmetic broadcast would treat it as a scalar).
           const s = sourceType(ops[1]);
+          // An index span must NOT be echoed: `range` promises a contiguous
+          // ascending run of positive integers, and nothing constrains an
+          // unknown-typed lambda's output to that shape, so `Map(f, 1..5)`
+          // would claim a type its value need not have. Widen to the honest
+          // supertype — the same reasoning as `mapResultType`'s `range` case,
+          // which this fallback path bypasses.
+          if (s === 'range') return 'indexed_collection';
           if (s === 'indexed_collection' && ops[1].type.type !== s) return s;
           return ops[1].type;
         }
@@ -3157,8 +3266,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     canonical: (ops, { engine }) => {
       // The mapping function is the FIRST argument; every following argument
-      // is a source collection.
-      const fn = canonicalCallbackOperand(ops[0]);
+      // is a source collection. It is applied to one element from EACH source
+      // (`Map(f, xs, ys)` is zipWith), so that is the arity it must accept.
+      // With NO source there is nothing to map and the call declines below;
+      // the arity check would otherwise report a nonsensical "0 arguments".
+      const sourceCount = ops.length - 1;
+      const fn = canonicalCallbackOperand(
+        ops[0],
+        sourceCount === 0
+          ? undefined
+          : {
+              operator: 'Map',
+              supply:
+                sourceCount === 1
+                  ? PER_ELEMENT_SUPPLY
+                  : {
+                      count: sourceCount,
+                      describes: `one element from each of the ${sourceCount} collections`,
+                    },
+            }
+      );
       const collections = ops
         .slice(1)
         .map((c) => checkCollectionOperand(engine, c));
@@ -3459,7 +3586,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'Filter',
+        supply: PER_ELEMENT_SUPPLY,
+      });
       if (!collection.isValid || !fn) return null;
 
       return engine._fn('Filter', [collection, fn]);
@@ -3717,7 +3847,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '(collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> value where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'Reduce',
+        supply: ACCUMULATOR_SUPPLY,
+      });
       if (!collection.isValid || !fn) return null;
 
       const initial = ops[2]?.canonical;
@@ -3859,7 +3992,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '(reducer: callback<(unknown, T) -> unknown>, initial: value, collection<T>) -> value where T',
     canonical: (ops, { engine }) => {
-      const fn = canonicalCallbackOperand(ops[0]);
+      const fn = canonicalCallbackOperand(ops[0], {
+        operator: 'Fold',
+        supply: ACCUMULATOR_SUPPLY,
+      });
       const initial = ops[1]?.canonical;
       const collection = checkCollectionOperand(engine, ops[2]);
       if (!fn || !initial?.isValid || !collection.isValid) return null;
@@ -3894,7 +4030,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'Scan',
+        supply: ACCUMULATOR_SUPPLY,
+      });
       if (!collection.isValid || !fn) return null;
       // An initial value is optional, but when one is PROVIDED it must not be
       // silently dropped if invalid — otherwise `Scan(xs, f, Divide(1))` would
@@ -4046,7 +4185,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'TakeWhile',
+        supply: PER_ELEMENT_SUPPLY,
+      });
       if (!collection.isValid || !fn) return null;
       return engine._fn('TakeWhile', [collection, fn]);
     },
@@ -4185,7 +4327,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'DropWhile',
+        supply: PER_ELEMENT_SUPPLY,
+      });
       if (!collection.isValid || !fn) return null;
       return engine._fn('DropWhile', [collection, fn]);
     },
@@ -4284,7 +4429,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'FlatMap',
+        supply: PER_ELEMENT_SUPPLY,
+      });
       if (!collection.isValid || !fn) return null;
       return engine._fn('FlatMap', [collection, fn]);
     },
@@ -5826,9 +5974,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // refinement"; this handler is that rule's `range` case.) Every other
     // operand type declines by returning `undefined`, keeping the signature.
     type: ([xs]) =>
-      xs?.type.type === 'range'
-        ? parseType('indexed_collection<integer>')
-        : undefined,
+      xs?.type.type === 'range' ? RANGE_STRUCTURAL_TYPE : undefined,
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -6364,7 +6510,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T',
     canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'IndexWhere', ops, 1),
+      canonicalFunctionSlot(engine, 'IndexWhere', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Zero;
@@ -6404,7 +6550,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '(collection<T>, predicate: callback<(T) -> boolean>) -> any where T',
     canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'Find', ops, 1),
+      canonicalFunctionSlot(engine, 'Find', ops, 1, PER_ELEMENT_SUPPLY),
     // Returns a single element, or `Nothing` when no element matches: the
     // element type of the collection, not the collection type.
     type: (ops) =>
@@ -6447,7 +6593,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T',
     canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'CountIf', ops, 1),
+      canonicalFunctionSlot(engine, 'CountIf', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Zero;
@@ -6486,7 +6632,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '(collection<T>, predicate: callback<(T) -> boolean>) -> list<integer> where T',
     canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'Position', ops, 1),
+      canonicalFunctionSlot(engine, 'Position', ops, 1, PER_ELEMENT_SUPPLY),
     type: () => 'list<integer>',
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
@@ -6524,7 +6670,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(indexed_collection, order: function?) -> list<integer>',
     canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'Ordering', ops, 1),
+      canonicalFunctionSlot(engine, 'Ordering', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
@@ -6556,7 +6702,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `collection-callback-signatures.test.ts`).
     signature: '(indexed_collection<T>, order: function?) -> list<T> where T',
     canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'Sort', ops, 1),
+      canonicalFunctionSlot(engine, 'Sort', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
@@ -6587,7 +6733,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection, key: function) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'MaxBy',
+        supply: PER_ELEMENT_SUPPLY,
+      });
       if (!collection.isValid || !fn) return null;
       return engine._fn('MaxBy', [collection, fn]);
     },
@@ -6611,7 +6760,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection, key: function) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'MinBy',
+        supply: PER_ELEMENT_SUPPLY,
+      });
       if (!collection.isValid || !fn) return null;
       return engine._fn('MinBy', [collection, fn]);
     },
@@ -6656,7 +6808,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('ArgMax', [collection]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'ArgMax',
+        supply: PER_ELEMENT_SUPPLY,
+      });
       if (!fn) return null;
       return engine._fn('ArgMax', [collection, fn]);
     },
@@ -6692,7 +6847,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('ArgMin', [collection]);
-      const fn = canonicalCallbackOperand(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1], {
+        operator: 'ArgMin',
+        supply: PER_ELEMENT_SUPPLY,
+      });
       if (!fn) return null;
       return engine._fn('ArgMin', [collection, fn]);
     },
@@ -6801,7 +6959,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return parseType('indexed_collection<list>');
     },
     canonical: (ops, { engine }) => {
-      const fn = canonicalCallbackOperand(ops[0]);
+      // One index per DIMENSION operand (`Tabulate(f, n, m)` computes
+      // `f(i, j)`), so the number of dimensions is the arity the generator
+      // must accept. With no dimension at all the tabulation is empty and
+      // there is no application to check.
+      const dimCount = ops.length - 1;
+      const fn = canonicalCallbackOperand(
+        ops[0],
+        dimCount === 0
+          ? undefined
+          : {
+              operator: 'Tabulate',
+              supply: {
+                count: dimCount,
+                describes:
+                  dimCount === 1
+                    ? 'the 1-based index of the element'
+                    : `the ${dimCount} 1-based indexes of the element, one per dimension`,
+              },
+            }
+      );
       if (!fn) return null;
 
       if (!ops[2])
@@ -7122,7 +7299,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '(collection<T>, integer | callback<(T) -> boolean>, integer?) -> list<list<T>> where T',
     canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'Partition', ops, 1),
+      canonicalFunctionSlot(engine, 'Partition', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
 
@@ -7286,7 +7463,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // must be admitted there).
     signature: '(collection<T>, key: function) -> list<list<T>> where T',
     canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'ChunkBy', ops, 1),
+      canonicalFunctionSlot(engine, 'ChunkBy', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);
@@ -7428,7 +7605,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(collection, key: function) -> dictionary<list>',
     canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'GroupBy', ops, 1),
+      canonicalFunctionSlot(engine, 'GroupBy', ops, 1, PER_ELEMENT_SUPPLY),
     // Provable declines only (finite, walkable source required); success also
     // depends on the key function and the element walk, so never `true` —
     // see `canEnumerateFiniteSource`.
@@ -7577,7 +7754,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // honest statement of what is checkable here.
     signature: '(function, initial: any?) -> list',
     canonical: ([f, initialExpr], { engine }) => {
-      const fn = canonicalCallbackOperand(f);
+      const fn = canonicalCallbackOperand(f, {
+        operator: 'Iterate',
+        supply: ITERATE_SUPPLY,
+      });
       if (!fn) return null;
       const initial = initialExpr?.canonical;
       if (!initial) return engine._fn('Iterate', [fn]);
@@ -7780,7 +7960,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(function, tuple) -> list',
     canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'Fill', ops, 0),
+      canonicalFunctionSlot(engine, 'Fill', ops, 0, FILL_SUPPLY),
     collection: {
       isEnumerable: (expr) =>
         isFunction(expr) && isFunction(expr.op2) && fillDims(expr.op2) !== null,

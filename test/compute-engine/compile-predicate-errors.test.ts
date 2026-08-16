@@ -283,15 +283,26 @@ describe('combiner and index callbacks', () => {
     );
   });
 
+  // Each operator gets a generator of the arity IT applies: `Tabulate(f, n)`
+  // computes `f(i)` while `Fill(f, (rows, cols))` computes `f(i, j)`. The
+  // extra `Fill` parameter is not incidental — a UNARY generator there is an
+  // arity error the interpreter raises the moment an element is produced, and
+  // the static callback-arity check (2026-08-15) now rejects the call before
+  // it can reach the compiler at all. Passing one here tested the compiler
+  // against an expression the interpreter never accepted.
   for (const op of ['Tabulate', 'Fill'] as const) {
     const dims = op === 'Tabulate' ? [3] : [['Tuple', 2, 2]];
+    const params = (type: string) =>
+      op === 'Tabulate'
+        ? [['Typed', 'i', type]]
+        : [['Typed', 'i', type], ['Typed', 'j', type]];
     it(`${op} admits an integer-annotated index parameter`, () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
         op,
-        ['Function', ['Multiply', 2, 'i'], ['Typed', 'i', "'integer'"]],
+        ['Function', ['Multiply', 2, 'i'], ...params("'integer'")],
         ...(dims as any),
-      ]);
+      ] as any);
       expect(js(expr).success).toBe(true);
     });
 
@@ -303,9 +314,9 @@ describe('combiner and index callbacks', () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
         op,
-        ['Function', ['Multiply', 2, 'i'], ['Typed', 'i', "'integer<1..2>'"]],
+        ['Function', ['Multiply', 2, 'i'], ...params("'integer<1..2>'")],
         ...(dims as any),
-      ]);
+      ] as any);
       expect(() => js(expr)).toThrow(/Fail closed \(D6\)/);
     });
   }

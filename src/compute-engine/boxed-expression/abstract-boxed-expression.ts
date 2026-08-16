@@ -47,7 +47,7 @@ import { toAsciiMath } from './ascii-math.js';
 import { cmp, eq, eqIdentical, same } from './compare.js';
 import { CancellationError } from '../../common/interruptible.js';
 import { isSymbol, isString, isNumber, isFunction } from './type-guards.js';
-import { functionLiteralParameterName } from './function-literal.js';
+import { functionLiteralParameterNames } from './function-literal.js';
 import { symbolAtSite } from './binding-sites.js';
 import { extractIntervalBounds } from './inequality-bounds.js';
 import { labelFor } from './explain-labels.js';
@@ -1442,11 +1442,14 @@ function getReferences(
   // canonicalizes with a typed parameter).
   if (expr.operator === 'Function') {
     const ops = expr.ops;
+    // A DESTRUCTURING parameter (`((p, q)) => …`) binds every leaf of its
+    // pattern, which is why the names come from
+    // `functionLiteralParameterNames` (plural) rather than the single-name
+    // accessor: reading only the latter left `p` and `q` reported free.
     const params = new Set<string>();
-    for (let i = 1; i < ops.length; i++) {
-      const name = functionLiteralParameterName(ops[i]);
-      if (name !== '') params.add(name);
-    }
+    for (let i = 1; i < ops.length; i++)
+      for (const name of functionLiteralParameterNames(ops[i]))
+        params.add(name);
     const innerFree = new Set<string>();
     const innerRef = new Set<string>();
     if (ops.length > 0) getReferences(ops[0], innerFree, innerRef);

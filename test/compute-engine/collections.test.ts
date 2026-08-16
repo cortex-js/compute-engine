@@ -1899,22 +1899,26 @@ describe('MAP (variadic / zipWith)', () => {
       str(['Map', ['Function', ['Power', 'x', 2], 'x'], ['List', 1, 2, 3]])
     ).toEqual('[1,4,9]'));
 
-  test('arity mismatch: too few lambda params yields an evaluation error', () => {
+  test('arity mismatch: too few lambda params is a STATIC error', () => {
     // The mapping function declares one parameter but two collections are
-    // supplied. The call canonicalizes fine (isValid), but the existing
-    // arity-validation machinery reports the mismatch when the function is
-    // applied (documented behavior, not a new check): plain evaluate() yields
-    // an error value; forcing materialization (via .at() or materialization)
-    // throws the same "Too many arguments" error.
+    // supplied, and `Map(f, xs, ys)` passes one element of EACH. Since the
+    // static callback-arity check (2026-08-15) that is settled while the call
+    // is canonicalized — the callback slot holds the diagnostic and the call
+    // is invalid — rather than at application time, where it used to surface
+    // as a thrown `Too many arguments` on every materializing route (.at(),
+    // each(), Take).
     const expr = engine.box([
       'Map',
       ['Function', ['Power', 'x', 2], 'x'],
       ['List', 1, 2],
       ['List', 3, 4],
     ]);
-    expect(expr.isValid).toBe(true);
-    expect(expr.evaluate().toString()).toContain('Too many arguments');
-    expect(() => expr.at(1)).toThrow(/Too many arguments/);
+    expect(expr.isValid).toBe(false);
+    expect(expr.type.toString()).toBe('error');
+    expect(expr.toString()).toContain(
+      'Map calls its callback with 2 arguments (one element from each of the 2 collections); `(x) => x^2` declares 1 parameter'
+    );
+    expect(() => expr.at(1)).not.toThrow();
   });
 
   // Regression pin: `.N()` on a user-written lazy Map keeps the lazy Map form,

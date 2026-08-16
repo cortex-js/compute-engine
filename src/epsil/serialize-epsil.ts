@@ -571,6 +571,27 @@ export function serializeEpsil(
       serializeBraceBlockStatement('do ', expr),
 
     //
+    // Loop: the two loop statements, in the shapes the parser lowers them to
+    // (`parseFor` / `parseWhile`):
+    //
+    //   Loop(Block(…), Element(x, xs))              →  for x in xs { … }
+    //   Loop(Block(…), Element(Tuple(p, q), pairs)) →  for (p, q) in pairs { … }
+    //   Loop(Block(If(Not(c), Break()), Block(…)))  →  while c { … }
+    //
+    // `while` has no head of its own: it lowers to an unconditional `Loop`
+    // whose body opens with a guard that breaks when the condition fails, so
+    // the `while` spelling is recovered by matching that guard exactly.
+    //
+    // Anything else — several iterator clauses, a non-`Block` body, a
+    // destructuring pattern whose leaves are not all names, or a bare `Loop(…)`
+    // with no `while` guard (an infinite loop, which the grammar cannot spell)
+    // — falls through to the generic `Loop(…)` call form, which re-parses
+    // faithfully.
+    //
+    Loop: (expr: MathJsonExpression): FormattingBlock =>
+      serializeLoop(expr) ?? serializeGenericFunction(expr),
+
+    //
     // Function literal (typed function literals, Phase 4)
     //
     // An annotated `Function` literal — one carrying `["Typed", …]` parameters
@@ -585,7 +606,22 @@ export function serializeEpsil(
       const op1 = operand(expr, 1);
       const hasTypedParam = params.some((p) => operator(p) === 'Typed');
       const hasReturn = operator(op1) === 'Typed';
-      if (!hasTypedParam && !hasReturn) return serializeGenericFunction(expr);
+      // A pattern parameter with a leaf that is not a name — `Tuple(1, "q")`,
+      // reachable from raw MathJSON — has NO parameter-list spelling at all, so
+      // the whole literal takes the generic form. This has to be decided here,
+      // ahead of the annotation test: an annotation elsewhere in the parameter
+      // list would otherwise force the arrow spelling and emit the unspellable
+      // parameter as an empty slot (`(x: integer, ) => …`), which does not
+      // re-parse.
+      if (!paramsAreSpellable(params)) return serializeGenericFunction(expr);
+      // A DESTRUCTURING parameter has no generic-form spelling that reads as
+      // one: `Function(p + q, (p, q))` re-parses correctly but looks like the
+      // two-parameter literal. The mapsto form says which it is, so a literal
+      // carrying one takes the arrow spelling even with no annotation
+      // anywhere.
+      const destructuring = params.some((p) => operator(p) === 'Tuple');
+      if (!hasTypedParam && !hasReturn && !destructuring)
+        return serializeGenericFunction(expr);
       // A plain return-type ascription has no anonymous-mapsto spelling; drop
       // it (the body is serialized without the ascription), as LaTeX and
       // ASCII-math do.
@@ -899,13 +935,13 @@ export function serializeEpsil(
         const get = key.startsWith('__get__');
         const set = key.startsWith('__set__');
         const member = get || set ? key.slice('__get__'.length) : key;
-        members.push(
-          serializeImplMember(
-            get ? 'get' : set ? 'set' : 'function',
-            member,
-            fn
-          )
+        const line = serializeImplMember(
+          get ? 'get' : set ? 'set' : 'function',
+          member,
+          fn
         );
+        if (line === null) return serializeGenericFunction(expr);
+        members.push(line);
       }
       if (members.length === 0) return fmt.line(head, ' {}');
       return fmt.stack(
@@ -987,7 +1023,8 @@ export function serializeEpsil(
         const op1 = operand(rhs, 1);
         const hasTypedParam = params.some((p) => operator(p) === 'Typed');
         const hasReturn = operator(op1) === 'Typed';
-        if (hasTypedParam || hasReturn) return serializeNamedDef(name, rhs);
+        if ((hasTypedParam || hasReturn) && paramsAreSpellable(params))
+          return serializeNamedDef(name, rhs);
       }
       return serializeOperator(expr) ?? serializeGenericFunction(expr);
     },
@@ -1005,7 +1042,8 @@ export function serializeEpsil(
         name !== null &&
         symbol(name) !== null &&
         rhs !== null &&
-        operator(rhs) === 'Function'
+        operator(rhs) === 'Function' &&
+        paramsAreSpellable(operands(rhs).slice(1))
       )
         return serializeNamedDef(name, rhs);
       return serializeGenericFunction(expr);
@@ -1304,10 +1342,49 @@ export function serializeEpsil(
     t === 'false' ||
     t in EPSIL_VALUE_SPELLING;
 
+  /** A destructuring `Tuple` pattern — `(p, q)`, `(a, (b, c))` — as source.
+   * Returns `null` when a leaf is not a name (so the caller falls back to the
+   * generic `Function(…)` spelling rather than emitting something that would
+   * not re-parse). */
+  const serializeDestructuringPattern = (
+    p: MathJsonExpression
+  ): string | null => {
+    const parts: string[] = [];
+    for (const el of operands(p)) {
+      if (operator(el) === 'Tuple') {
+        const nested = serializeDestructuringPattern(el);
+        if (nested === null) return null;
+        parts.push(nested);
+        continue;
+      }
+      const name = symbol(el);
+      if (name === null) return null;
+      parts.push(escapeSymbol(name));
+    }
+    return `(${parts.join(', ')})`;
+  };
+
+  /** Does every parameter in the list have a spelling? A destructuring pattern
+   * whose leaves are not all names (reachable from raw MathJSON, never from
+   * the parser) has none, and `serializeParam` would emit it as an empty slot,
+   * so a parameter list containing one cannot be reconstructed at all: the
+   * caller falls back to the generic `Function(…)` call form. */
+  const paramsAreSpellable = (params: readonly MathJsonExpression[]): boolean =>
+    params.every(
+      (p) =>
+        operator(p) !== 'Tuple' || serializeDestructuringPattern(p) !== null
+    );
+
   const serializeParam = (
     p: MathJsonExpression,
     markerType?: Type
   ): FormattingBlock => {
+    // A DESTRUCTURING parameter — `((p, q)) => …`, one parameter that binds a
+    // pattern of names. `serializeParamList` supplies the surrounding
+    // parentheses of the parameter list, so the pattern's own pair is what
+    // makes the doubled spelling that distinguishes it from two parameters.
+    if (operator(p) === 'Tuple')
+      return fmt.text(serializeDestructuringPattern(p) ?? '');
     const typed = operator(p) === 'Typed';
     const nameSym = typed ? symbol(operand(p, 1)) : symbol(p);
     // A BARE operand at a quantified position carries no type of its own (it
@@ -1357,13 +1434,18 @@ export function serializeEpsil(
    * The `function` branch of {@link serializeNamedDef} with the keyword made
    * a parameter (a property handler spells `get`/`set` instead) and the body
    * always braced — an implementation member has no math form.
+   *
+   * `null` when a parameter has no spelling, so the whole declaration falls
+   * back to its generic call form rather than emitting a member line that
+   * would not re-parse.
    */
   const serializeImplMember = (
     keyword: 'function' | 'get' | 'set',
     member: string,
     fn: MathJsonExpression
-  ): FormattingBlock => {
+  ): FormattingBlock | null => {
     const params = operands(fn).slice(1);
+    if (!paramsAreSpellable(params)) return null;
     const { bodyExpr, retType, specifier, argTypes } = fnLiteralParts(fn);
     const specPart = specifier !== null ? ` ${specifier}` : '';
     const retPart = retType !== null ? ` -> ${retType}` : '';
@@ -1646,6 +1728,100 @@ export function serializeEpsil(
       ' else ',
       serializeConditionalOperand(alternative, CONDITIONAL_PRECEDENCE)
     );
+  }
+
+  /** The `‹head› { … }` statement layout: inline when it fits, otherwise the
+   * head line, the body one indent in, and the closing brace back under the
+   * head. Built like the `if` block form — as an OUTER stack anchored at the
+   * KEYWORD, not at the `{` — because a `StackBlock` aligns its continuation
+   * lines to the column where the stack begins, and anchoring at the brace
+   * staircases the body far to the right. Unlike
+   * `serializeBraceBlockStatement`, the head is a block, so it can contain
+   * serialized subexpressions (a loop variable, a collection, a condition). */
+  function serializeHeadedBlock(
+    head: FormattingBlock,
+    body: MathJsonExpression
+  ): FormattingBlock {
+    const statements = blockStatements(body);
+    if (statements.length === 0) return fmt.line(head, ' {}');
+    return fmt.choice(
+      fmt.line(head, ' ', serializeBraceBlockInline(body)),
+      fmt.stack(
+        fmt.line(head, ' {'),
+        fmt.indent(fmt.stack(...statements)),
+        fmt.text('}')
+      )
+    );
+  }
+
+  /** The `while` lowering `Loop(Block(If(Not(cond), Break()), body))` taken
+   * apart into its condition and its body block, or `null` when the
+   * single-operand `Loop` does not have exactly that shape. */
+  function whileParts(
+    loopBody: MathJsonExpression
+  ): { cond: MathJsonExpression; body: MathJsonExpression } | null {
+    if (!isBlock(loopBody) || nops(loopBody) !== 2) return null;
+    const guard = operand(loopBody, 1);
+    const body = operand(loopBody, 2);
+    if (guard === null || body === null || !isBlock(body)) return null;
+    if (operator(guard) !== 'If' || nops(guard) !== 2) return null;
+    const negated = operand(guard, 1);
+    const control = operand(guard, 2);
+    if (operator(negated) !== 'Not' || nops(negated) !== 1) return null;
+    if (operator(control) !== 'Break' || nops(control) !== 0) return null;
+    const cond = operand(negated, 1);
+    if (cond === null) return null;
+    return { cond, body };
+  }
+
+  /** `Loop` in one of its two Epsil statement spellings — `for … in … { … }`
+   * and `while … { … }` — or `null` for a shape that has neither (the caller
+   * then emits the generic call form). */
+  function serializeLoop(expr: MathJsonExpression): FormattingBlock | null {
+    // The head expressions sit where the parser resumes at precedence 0 and
+    // then requires a `{`, so they are parenthesized on the same rule as an
+    // `if` condition: a conditional (or anything binding more loosely) would
+    // otherwise swallow what follows it.
+    const headOperand = (x: MathJsonExpression): FormattingBlock =>
+      serializeConditionalOperand(x, CONDITIONAL_PRECEDENCE + 1);
+
+    const args = operands(expr);
+
+    // `for`: one `Element` iterator clause, a `Block` body.
+    if (args.length === 2) {
+      const [body, clause] = args;
+      if (!isBlock(body)) return null;
+      if (operator(clause) !== 'Element' || nops(clause) !== 2) return null;
+      const binding = operand(clause, 1);
+      const collection = operand(clause, 2);
+      if (binding === null || collection === null) return null;
+      // The loop variable is either a name or a destructuring `Tuple` pattern
+      // (`for (p, q) in pairs`), the same pattern grammar as `let (p, q) = v`.
+      let bindingText: string | null;
+      if (operator(binding) === 'Tuple')
+        bindingText = serializeDestructuringPattern(binding);
+      else {
+        const name = symbol(binding);
+        bindingText = name === null ? null : escapeSymbol(name);
+      }
+      if (bindingText === null) return null;
+      return serializeHeadedBlock(
+        fmt.line('for ', bindingText, ' in ', headOperand(collection)),
+        body
+      );
+    }
+
+    // `while`: no iterator clause, and a body that opens with the break guard.
+    if (args.length === 1) {
+      const parts = whileParts(args[0]);
+      if (parts === null) return null;
+      return serializeHeadedBlock(
+        fmt.line('while ', headOperand(parts.cond)),
+        parts.body
+      );
+    }
+
+    return null;
   }
 
   // Invisible-multiply (`2x`) is handled by the `Multiply` entry in

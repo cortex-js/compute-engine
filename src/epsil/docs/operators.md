@@ -265,6 +265,58 @@ function to `f`. Typed parameters can be written in parentheses:
 (x: integer) => x + 1
 ```
 
+A parameter can instead be a **tuple pattern**, written with a second pair of
+parentheses. It is still ONE parameter — it takes one argument, a tuple, and
+binds a name to each component:
+
+```epsil
+[(True, True), (True, False)] |> Map(((p, q)) => p && q, _)
+// ➔ [True, False]
+```
+
+The doubled parentheses are the whole difference: `(p, q) => p && q` is the
+two-parameter function it has always been, and `((p, q)) => p && q` is the
+one-parameter function that takes a pair apart. Patterns mix with plain
+parameters and nest, exactly as in
+[`let (a, b) = v`](/epsil/declarations/#destructuring-declarations) — bare
+names, `_` to skip a position, nested `(…)` patterns, and nothing else (a
+literal or a per-element type annotation is a diagnostic):
+
+```epsil
+(x, (p, q)) => x + p + q   // two parameters, the second destructured
+((a, (b, c))) => a + b + c // one parameter, nested
+((p, _)) => p              // one parameter, second component discarded
+```
+
+The argument must be a tuple of the pattern's shape; anything else yields an
+`incompatible-type` error value, the same one the destructuring `let`
+produces. A destructuring lambda is interpreted, never compiled: no compile
+target lowers the tuple match, so a compiled context falls back rather than
+emit code that binds the wrong names.
+
+**Callbacks and arity.** An ordinary call with too few arguments partially
+applies the function — `f(1)` on a two-parameter `f` is a function awaiting
+the second argument. Inside a collection operator that never happens: the
+operator decides how many arguments the callback receives (`Map` supplies
+one element per source collection, `Filter`/`Any`/`All`/`Count`/`TakeWhile`
+supply one, `Reduce`/`Fold` supply the accumulator and the element), and a
+lambda whose parameter count cannot match is a `callback-arity` error at
+parse/canonicalization time rather than a list of leftover closures. The
+message names both sides and, for the pair case, the fix:
+
+```epsil
+Map((p, q) => p + q, [(1, 2), (3, 4)])
+// error: Map calls its callback with 1 argument (each element of the
+// collection); `(p, q) => p + q` declares 2 parameters. To take a pair
+// apart, use a tuple pattern parameter: ((p, q)) => …
+```
+
+`Sort` (a key or a comparator) and `Iterate` (`f(previous)` or
+`f(index, previous)`) accept either of their two arities; a `() => …`
+literal is a constant and fits any slot. A callback whose arity is not
+statically known — a value typed `function` or `callback<…>`, a generic
+function — is not checked here and is applied as before.
+
 The `MapsTo` name in the table is internal to parsing: it names the operator,
 not the function value the expression produces.
 

@@ -165,6 +165,17 @@ let y = 5
 // ➔ [True, False, False, False]
 ```
 
+The same table with a [tuple pattern
+parameter](/epsil/operators/#anonymous-functions), which names the two
+components instead of indexing them. The extra parentheses are what make it
+ONE parameter taking a pair, rather than two parameters:
+
+```epsil
+[(True, True), (True, False), (False, True), (False, False)]
+  |> Map(((p, q)) => p && q, _)
+// ➔ [True, False, False, False]
+```
+
 ## Integers and Number Theory
 
 **Modular exponentiation.** `a^b % m` is computed exactly, then reduced. By

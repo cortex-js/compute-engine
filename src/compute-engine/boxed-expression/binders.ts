@@ -8,7 +8,7 @@ import type {
   TaggedValueDefinition,
 } from '../global-types.js';
 import { isFunction, isSymbol, isDictionary, isNumber } from './type-guards.js';
-import { functionLiteralParameterName } from './function-literal.js';
+import { functionLiteralParameterNames } from './function-literal.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 
 /**
@@ -35,11 +35,12 @@ export function boundVariableNames(expr: Expression): readonly string[] {
   const names: string[] = [];
   if (bindings) names.push(...bindings.keys());
   if (isLambda) {
+    // Every name the parameter list binds — a destructuring parameter
+    // (`((p, q)) => …`) binds each of its pattern's leaves, and a walk that
+    // missed them would treat a body occurrence of `p` as free.
     const ops = expr.ops;
-    for (let i = 1; i < ops.length; i++) {
-      const n = functionLiteralParameterName(ops[i]);
-      if (n) names.push(n);
-    }
+    for (let i = 1; i < ops.length; i++)
+      names.push(...functionLiteralParameterNames(ops[i]));
   }
   return names.length === 0 ? NO_BINDERS : names;
 }
@@ -169,12 +170,11 @@ export function boundVariableBindings(
       map.set(name, def !== undefined && 'value' in def ? def.value : null);
   if (isLambda) {
     const ops = expr.ops;
-    for (let i = 1; i < ops.length; i++) {
-      const n = functionLiteralParameterName(ops[i]);
-      // Only as a fallback: the body Block's own binding (set above when this
-      // node is the Block) is the definition-precise one.
-      if (n && !map.has(n)) map.set(n, null);
-    }
+    for (let i = 1; i < ops.length; i++)
+      for (const n of functionLiteralParameterNames(ops[i]))
+        // Only as a fallback: the body Block's own binding (set above when this
+        // node is the Block) is the definition-precise one.
+        if (!map.has(n)) map.set(n, null);
   }
   // A lambda with no extractable parameter names binds nothing after all:
   // return `undefined` rather than an empty map, so `extendBinders` does not
