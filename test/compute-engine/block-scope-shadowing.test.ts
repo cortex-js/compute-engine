@@ -109,3 +109,96 @@ describe('block-local Declare shadows a constant-named symbol', () => {
     );
   });
 });
+
+describe('a function CLAUSE named after a builtin shadows it, never writes through', () => {
+  // `defineFunctionClause` (`multi-clause.ts`) clears `existing` when the name
+  // resolves to a system-scope builtin, then its single-clause branch delegates
+  // to `ce.assign` — which resolves a name up the WHOLE scope chain and mutates
+  // what it finds in place. On the face of it that delegation could overwrite
+  // the builtin's own binding instead of creating a current-scope shadow, which
+  // is what the protocol DISPATCHER path had to be given
+  // `declareShadowingFunction` to avoid.
+  //
+  // MEASURED: it cannot, and not because of any one guard. By the time
+  // `defineFunctionClause` runs, the current scope ALREADY holds its own
+  // binding for the name and `existing` is never the system-scope definition —
+  // so the builtin is structurally out of `assign`'s reach and the `isBuiltin`
+  // branch is not even the operative protection on this route. Several layers
+  // put that binding there (the unconditional `DefineFunction` hoist in
+  // `control-structures.ts`, the recursion-knot shell in `core.ts`, and
+  // `assign`'s own `shadowBuiltin` test in `engine-declarations.ts`), and
+  // disabling any ONE of them individually still leaves the builtin intact.
+  //
+  // So this is an END-TO-END BEHAVIOR PIN, not a guard pin: it does not fail if
+  // a single layer is removed, and it is not evidence that any particular layer
+  // is load-bearing. What it catches is a refactor that removes the protection
+  // wholesale — the shape the entry was filed about — and it records the
+  // measurement, so the next reader does not re-derive it from scratch.
+  //
+  // Imported lazily: the rest of this file drives the shared engine from
+  // `../utils`, while these probes each need a FRESH one (a shadow install is
+  // engine state) plus the Epsil surface for the `do { … }` block form.
+  const { ComputeEngine: Engine } =
+    require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+  const {
+    executeEpsil,
+  } = require('../../src/epsil/execute-epsil') as typeof import('../../src/epsil/execute-epsil');
+
+  /** Define a one-clause `name` inside a block and call it there; then use the
+   * name again OUTSIDE the block. Returns both values plus whether the system
+   * scope's definition record survived untouched.
+   *
+   * The two call sites are given separately because they are asking different
+   * questions. `innerCall` must reach the user's clause, so it passes a SCALAR:
+   * the clause's parameter is unannotated, and handing `Length` a list would
+   * broadcast elementwise (`[42,42,42]`) — true, documented, and beside the
+   * point here. `outerCall` is whatever exercises the builtin naturally, which
+   * for a value-bound builtin like `Pi` is the bare name. */
+  function shadowProbe(name: string, innerCall: string, outerCall: string) {
+    const engine = new Engine();
+    const systemScope = engine.contextStack[0]?.lexicalScope;
+    const before = systemScope?.bindings.get(name);
+    const result = executeEpsil(
+      engine,
+      `let inner = do { function ${name}(x) { 42 }; ${innerCall} }\nlet outer = ${outerCall}`
+    );
+    return {
+      diagnostics: result.diagnostics ?? [],
+      inner: engine.box('inner').evaluate().toString(),
+      outer: engine.box('outer').evaluate().toString(),
+      systemDefUntouched: systemScope?.bindings.get(name) === before,
+    };
+  }
+
+  test.each([
+    ['Sin', 'Sin(0)', 'Sin(0)', '0'],
+    ['Abs', 'Abs(-3)', 'Abs(-3)', '3'],
+    ['Length', 'Length(0)', 'Length([1,2,3])', '3'],
+  ])(
+    'operator builtin %s: the block sees the clause, the outer call sees the builtin',
+    (name, innerCall, outerCall, builtinResult) => {
+      const probe = shadowProbe(name, innerCall, outerCall);
+      expect(probe.diagnostics).toEqual([]);
+      // Inside the block the user's clause answers…
+      expect(probe.inner).toBe('42');
+      // …and outside it the builtin is intact, with its definition record the
+      // very same object — the write-through would have replaced it in place.
+      expect(probe.outer).toBe(builtinResult);
+      expect(probe.systemDefUntouched).toBe(true);
+    }
+  );
+
+  // A builtin bound as a VALUE definition rather than an operator one takes a
+  // different branch of `assign`, so it is probed separately: the guard quoted
+  // above sits inside the `isOperatorDef` arm and does not cover these.
+  test.each([
+    ['Pi', 'pi'],
+    ['ExponentialE', 'e'],
+  ])('value builtin %s is shadowed, not overwritten', (name, builtinResult) => {
+    const probe = shadowProbe(name, `${name}(1)`, name);
+    expect(probe.diagnostics).toEqual([]);
+    expect(probe.inner).toBe('42');
+    expect(probe.outer).toBe(builtinResult);
+    expect(probe.systemDefUntouched).toBe(true);
+  });
+});
