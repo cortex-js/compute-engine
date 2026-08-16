@@ -1513,17 +1513,20 @@ export class BaseCompiler {
   private static elementComplexness(
     collection: Expression
   ): boolean[] | undefined {
-    const direct = BaseCompiler.withCollectionElements(collection, (elements) => {
-      const out: boolean[] = [];
-      for (const e of elements) {
-        const v = BaseCompiler.broadcastLeafComplexness(e);
-        // One element with no single answer leaves the whole collection with
-        // none: a broadcast maps ONE closure over every position.
-        if (v === undefined) return undefined;
-        out.push(v);
+    const direct = BaseCompiler.withCollectionElements(
+      collection,
+      (elements) => {
+        const out: boolean[] = [];
+        for (const e of elements) {
+          const v = BaseCompiler.broadcastLeafComplexness(e);
+          // One element with no single answer leaves the whole collection with
+          // none: a broadcast maps ONE closure over every position.
+          if (v === undefined) return undefined;
+          out.push(v);
+        }
+        return out;
       }
-      return out;
-    });
+    );
     if (direct !== undefined) return direct;
 
     if (
@@ -1586,13 +1589,17 @@ export class BaseCompiler {
   private static broadcastLeafComplexness(
     element: Expression
   ): boolean | undefined {
-    // Not a collection: the closure receives this value itself.
+    // Not a collection: the closure receives this value itself. The
+    // possibly-collection arm is the BOUND predicate, matching
+    // `elementComplexness`'s own operand test and `tryCompileBroadcast`'s
+    // `isArrayOperand` — the three decide the same question (does this node
+    // reach the closure as an array?) and must not drift apart.
     if (
       !(
         element.isCollection ||
         element.type.matches('list') ||
         element.type.matches('indexed_collection') ||
-        isPossiblyCollectionTyped(element)
+        isBoundPossiblyCollectionTyped(element)
       )
     )
       return BaseCompiler.isComplexValued(element);
@@ -4263,6 +4270,11 @@ export class BaseCompiler {
    *    total order, which is the same reason `Less`/`Greater` fail closed on a
    *    complex operand.
    *  - INTEGER DIVISION (`Mod`, `Remainder`, `GCD`, `LCM`).
+   *  - STATISTICS (`Mean`, `Median`, the variance/deviation pair and their
+   *    population forms, `Mode`, `Kurtosis`, `Skewness`, `Quartiles`,
+   *    `InterquartileRange`) — the `_SYS.*` reducers behind them sum and
+   *    compare plain numbers. Measured: `Mean([i, 2i])` compiled to `NaN`
+   *    where the interpreter answers the complex mean.
    *
    * Measured on the DEFAULT path with `x` bound to `0`, so the operand
    * `x + (1+i)` is complex but not a foldable literal. Every one of these
@@ -4305,6 +4317,17 @@ export class BaseCompiler {
       'Remainder',
       'GCD',
       'LCM',
+      'Mean',
+      'Median',
+      'Variance',
+      'PopulationVariance',
+      'StandardDeviation',
+      'PopulationStandardDeviation',
+      'Mode',
+      'Kurtosis',
+      'Skewness',
+      'Quartiles',
+      'InterquartileRange',
     ]);
 
   /**

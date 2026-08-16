@@ -100,7 +100,7 @@ describe('COMPILE deterministic naming', () => {
     expect(third).toBe(first);
     expect(first).toMatchInlineSnapshot(`
       float _tv1 = 0.0;
-      for (int i = 1; i <= n; i++) {
+      for (int i = 1; i <= int(floor(n)); i++) {
         _tv1 += sin(float(i));
       }
       return _tv1;

@@ -32,9 +32,20 @@ the same day: resource lifecycle is a **separate dimension, not a
 NOT the `ce.effects` snapshot (mechanism recorded as a lean pending
 ratification); the label-emission rule was respecified
 (intrinsic-to-the-consumer, ordinary projection); `finish`'s own
-effects joined the `with` projection rule; `effect` types are
+effects joined the `with` projection rule; resource types are
 object-backed by definition; `with` is an expression, adding a third
 static escape case.
+A ruling round 2026-08-15 ratified the R4 leans: the tracking
+mechanism is **scope-attached finalization** (the `with` scope's
+evaluation context runs an optional `finish` handler at removal — no
+new stack; the eval-context stack IS the frame stack); namespacing is
+**builtin-wins**; `with`-as-expression and unconditional `finish`
+effects stand; the declaration keyword is **`resource`** (protocol
+stays `Resource`; `effect` reserved for a possible marker-label
+route); object backing applies to the **handle wrapper**, the payload
+`T` is unconstrained. The ambient-form declaration mechanism was
+**reopened** the same day, and the discharge-surface open question
+closed (declaration-site only, never use sites).
 v5 folds in the round-3 dual review
 (`docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R3.md`, 16 findings — all 16
 rulings validated). Headline v5 rulings, each specified in its section:
@@ -612,9 +623,9 @@ types give a label acquire/release/revocation behavior that none of the
 four axes expresses — by design, not omission: the axes classify what
 an **application** does (*use*), while lifecycle governs when a
 **value** stops being usable (*retention*) — the use-vs-retention split
-"Resource frames" opens with. Lifecycle therefore lives on the effect
-*type* (conformance to the `Resource` protocol, Appendix A), is
-consumed only by the `with` delimiter, and never appears as label
+"Resource frames" opens with. Lifecycle therefore lives on the
+resource *type* (conformance to the `Resource` protocol, Appendix A),
+is consumed only by the `with` delimiter, and never appears as label
 metadata this table must carry. The four-axes completeness claim above
 is scoped to application semantics.
 
@@ -1962,7 +1973,7 @@ remain retained-not-validated for now.
   `Typed(body, "‹sig›")` call inside the generic `Function(…)` form —
   which re-parses to the same MathJSON. Effect-free ascriptions and
   grouped (return-type) spellings stay transparent as before. A lambda
-  specifier slot (`(x) random |-> …`) was considered and deferred until
+  specifier slot (`(x) random => …`) was considered and deferred until
   authoring demand exists — the declaration form (`let f: (real) random
   -> real = …`) covers authoring today.
 
@@ -2127,8 +2138,9 @@ capabilities" — and release it at frame exit. *(Since revised — round-4
 review, Theme A: resource lifecycle is **not** a `frameProtocol` kind,
 and handles are **not** exposed through `ce.effects` — the registry
 snapshot is immutable for a whole evaluation, which per-frame bindings
-would violate. The mechanism is a separate per-evaluation
-resource-frame stack; the registry's semantics are the design
+would violate. The mechanism, ruled 2026-08-15, is **scope-attached
+finalization** — the `with` scope's evaluation context runs `finish`
+when it is removed; the registry's semantics are the design
 **precedent to imitate**, not machinery inherited. See "The mechanism"
 in Appendix A.)*
 
@@ -2191,19 +2203,13 @@ appears.
 
 ## Open questions
 
-- Should discharge declarations get Epsil surface syntax, or remain
-  definition-API-only (sufficient for builtins/hosts, the only foreseeable
-  dischargers)? Lean: API-only until a user-level handler story exists.
-  *(Appendix A refines the lean: if the `with` frame ships, discharge
-  metadata lives on the effect-type declaration — "a frame discharges
-  exactly its effect type's label" — still never at use sites.)*
-- Resource frames: the two headline questions — settlement vs
-  revocation for escaped lazy values, and the delimiter surface — were
-  **both ruled 2026-08-14** (revocation + static diagnostics; the `with`
-  binding block with release implied by the `Resource` protocol — see
-  Appendix A). Still open: Appendix A's "To pin before implementation"
-  list (abnormal-exit paths, erroring `finish`, box-route binder form,
-  variant-operand emission).
+- Resource frames: the headline questions are ruled — settlement vs
+  revocation and the delimiter surface (2026-08-14: revocation + static
+  diagnostics; the `with` binding block with release implied by the
+  `Resource` protocol), and the tracking mechanism (2026-08-15:
+  scope-attached finalization — Appendix A, "The mechanism"). Still
+  open: the ambient-form declaration mechanism (reopened 2026-08-15)
+  and the rest of Appendix A's "To pin before implementation" list.
 
 Resolved since v3: the `write` local/global split (v4: confinement
 inference, "Scope writes"); `host` vs `entropy` (v4: `host` superseded by
@@ -2213,7 +2219,10 @@ randomness, `time` reads the clock); the syntax final form (v4, ruled
 "Grammar and AST"); and **dependency order** (v5, ruled 2026-07-31:
 unresolved named head → `{any}`, unannotated parameters stay optimistic,
 explicit annotation over an unresolved head installs as trusted — see
-"Inference").
+"Inference"). Also resolved: the **discharge surface** (2026-08-15) —
+no use-site syntax, ever; discharge metadata lives on the definition
+for builtins and on the `resource`-type declaration for user resources,
+per Appendix A's uniform rule.
 
 
 ## Appendix A — Resource lifetime and user-declared effects: the `with` frame
@@ -2229,13 +2238,23 @@ the frame-kind metadata below covers instead); **(c)** the escape story
 is **static diagnostics where detectable, dynamic revocation as the
 backstop**. Everything else here is exploratory. *(A round-4 dual spec
 review — `docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R4.md` — was folded in
-2026-08-14; "The mechanism" subsection below is that review's Theme-A
-resolution, recorded as a lean pending ratification.)*
+2026-08-14. A ruling round 2026-08-15 then ratified: the tracking
+mechanism — scope-attached finalization, "The mechanism" below; `with`
+as an expression; unconditional `finish` effects; the builtin-wins
+namespacing policy; and the `resource` keyword. The ambient-form
+declaration mechanism was REOPENED the same day — see "Ambient
+form".)*
 
-### The `effect` declaration — one form, three registrations
+### The `resource` declaration — one form, three registrations
+
+*(Keyword ruled 2026-08-15: **`resource`**, not `effect` — the fused
+declaration is specifically the lifecycle-bearing case, and the word
+matches the `Resource` protocol it conforms to. `effect` stays free for
+a possible future lifecycle-less marker-label route — the "Exploration:
+user-declared effect labels" territory.)*
 
 ```epsil
-effect file : integer {
+resource file : integer {
   finish(self: Self) { fs_close(self) }
 }
 
@@ -2252,14 +2271,15 @@ One declaration performs three registrations:
    *is* the type name: the global type registry supplies
    collision-freedom among user labels, and declaration rejects names
    already in the builtin roster. That resolves collisions among user
-   labels and against *current* builtins; the harder half of the
-   Label-admission exploration's namespacing question — a **future**
-   builtin admission claiming a name a user already declared (builtin
-   admission is a normal minor-version event) — remains open: either
-   accept it as residual risk with a builtin-wins policy (the user
-   declaration then errors on the newer engine version), or reserve a
-   prefix/sigil for user labels so the guarantee holds across
-   versions. Axes are fixed per that exploration: impure, action, no
+   labels and against *current* builtins. For the harder half — a
+   **future** builtin admission claiming a name a user already declared
+   (builtin admission is a normal minor-version event) — the policy is
+   **ruled (2026-08-15): builtin wins.** The user declaration errors on
+   the newer engine version with a clear diagnostic and the user
+   renames; no prefix or sigil is imposed. This matches the ratified
+   version-skew posture for labels (an unknown label is a hard error;
+   adding a label is a visible minor-version event). Axes are fixed
+   per that exploration: impure, action, no
    frame kind, not handler-backed — lifecycle is carried by the
    *type*, not by an axis (see "The mechanism" below, and "Label
    kinds").
@@ -2275,18 +2295,20 @@ protocol Resource {
 
 `finish` is the protocol's only member (ruling (b): no `init`).
 
-**Object-backed, by definition.** An `effect X : T` declaration is
-**object-backed**: it declares a nominal *object* type (per
-`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B — reference identity,
-per-object version counters) with a private payload slot of type `T`,
-plus the two extra registrations above. This is load-bearing for
-ruling (c): revocation marks the *object* dead, so every alias observes
-it; a value-typed handle would leave copies alive after `finish` and
-make revocation unsound. Consequence, consistent with the sequencing
-note below: `effect` declarations cannot ship before the
-mutable-objects object phases.
+**Object-backed, by definition — the handle, not the payload.** A
+`resource X : T` declaration is **object-backed**: the *handle* — the
+value the constructor returns and `with` binds — is a nominal *object*
+(per `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B: reference identity,
+per-object version counters) wrapping a private payload slot of type
+`T`. `T` itself may be **any type** — the `integer` above, a tuple, a
+string; nothing constrains the payload. What must be an object is the
+wrapper, and that is load-bearing for ruling (c): revocation marks the
+wrapper dead, so every alias observes it; a value-typed handle would
+leave live copies after `finish` and make revocation unsound.
+Consequence, consistent with the sequencing note below: `resource`
+declarations cannot ship before the mutable-objects object phases.
 
-### The mechanism — a lifecycle dimension, not a frame kind (round-4 resolution; lean, pending ratification)
+### The mechanism — a lifecycle dimension on scopes, not a frame kind (ruled 2026-08-15)
 
 The "Resource frames" section proposed a third `frameProtocol` kind
 exposed through `ce.effects`. Both halves are revised:
@@ -2297,22 +2319,39 @@ exposed through `ce.effects`. Both halves are revised:
   today, `clock` anticipated), with a replay-obligation protocol for
   partially-evaluated survivors. Resource lifecycle changes nothing
   about what any label means; it governs when a *value* stops being
-  usable. It is a separate dimension, carried by the effect **type's**
-  `Resource` conformance, consumed only by `with` — and deliberately
+  usable. It is a separate dimension, carried by the resource
+  **type's** `Resource` conformance, consumed only by `with` — and deliberately
   not a metadata axis (see "Label kinds"). `random` and a future
   `clock` keep `frameProtocol`; resource types never have one.
-- **Not the `ce.effects` registry.** The registry is an immutable
-  snapshot captured once per evaluation ("Host capabilities");
-  per-frame bindings appearing and vanishing mid-evaluation would
-  violate exactly that contract. Instead, `with` maintains a
-  **per-evaluation resource-frame stack**: entries keyed by handle
-  identity (object identity — see above), pushed at frame entry,
-  popped — running `finish` — at exit, and carried across async
-  continuations with the evaluation. The stack is what finish-ordering,
-  revocation marking, and the ambient form's "current frame" lookup
-  resolve against. The registry's semantics are the design *precedents
-  to imitate* — try/finally restoration including async, per-evaluation
-  isolation — not machinery inherited.
+- **Not the `ce.effects` registry — scopes, with a finalization
+  handler** *(ruled 2026-08-15)*. The registry is an immutable snapshot
+  captured once per evaluation ("Host capabilities"); per-frame
+  bindings appearing and vanishing mid-evaluation would violate exactly
+  that contract. Instead `with` reuses the machinery it already needs
+  as a scoped binder: its scope's **evaluation context** carries an
+  optional **finalization handler**, run when that context is
+  removed — which *is* frame exit. No new data structure exists: the
+  eval-context stack is the frame stack, finish-ordering is context
+  nesting, and the ambient "current frame" is a chain walk. Three
+  precisions keep this sound against the engine's known scope
+  behaviors:
+  1. The handler belongs to the **dynamic activation**, never to the
+     lexical scope object or its bindings — escaping closures copy and
+     re-root scope objects (`captureClosures`,
+     `src/compute-engine/function-utils.ts`), and a copied `with`
+     scope must NOT carry the finalizer, or `finish` runs twice or at
+     capture time.
+  2. Async is correct by construction: async evaluation already
+     removes its context **by identity** (`ce._removeEvalContext`),
+     not by popping the top, precisely so interleaved frames unwind
+     their own context when they settle — so `finish` runs when the
+     `with` evaluation settles, not at its first suspension point.
+  3. Context removal is a hot path (hundreds of thousands of pops in
+     a large evaluation); the finalizer must be a cheap flag test,
+     adding nothing to ordinary pops.
+  The registry's semantics remain the design *precedents to imitate* —
+  try/finally restoration including async, per-evaluation isolation —
+  not machinery inherited.
 - **Mock/deny gap, named.** Builtin capabilities are mockable and
   deniable via the registry; user resource types are not
   handler-backed, so they have no equivalent. Mocking works at the
@@ -2327,7 +2366,7 @@ exposed through `ce.effects`. Both halves are revised:
 
 The label is **intrinsic to the consuming callable**, and it reaches
 applications only through ordinary projection. Precisely: a callable
-with a parameter of effect type `file` carries `file` in its **own
+with a parameter of resource type `file` carries `file` in its **own
 effect set**, derived from the signature and never annotated
 (possession of a handle parameter is derivable information):
 
@@ -2367,8 +2406,8 @@ its value is the block's trailing value. That choice creates the third
 static escape case ruled on below — a trailing value that names the
 frame binding.
 
-Every binding a `with` introduces must be of an effect type (diagnostic
-otherwise). Multiple bindings finish in **reverse declaration order**,
+Every binding a `with` introduces must be of a resource type
+(diagnostic otherwise). Multiple bindings finish in **reverse declaration order**,
 and an error in a later initializer still finishes the earlier bindings
 (try-with-resources semantics):
 
@@ -2380,8 +2419,9 @@ with f = file("~/log.txt"), g = file("~/out.txt") {
 
 ### Discharge falls out uniformly
 
-**A frame discharges exactly the label of the effect type it delimits —
-and nothing else.**
+**A frame discharges exactly the label it delimits — the resource
+type's label for a `with` binding, the frame-kind label for the ambient
+form — and nothing else.**
 
 - `with f = file(…)` discharges `file` — sound because revocation
   (below) guarantees nothing outside the frame can use the handle — but
@@ -2411,9 +2451,10 @@ body is right there, ordinary inference applies. A `with` is pure only
 when acquisition, the label-subtracted body, and every `finish` are all
 pure.
 
-This also answers the standing discharge-surface open question:
-discharge metadata lives on the effect-type **declaration** (for
-builtins, on the definition as today), never at use sites.
+This also answers the standing discharge-surface open question (closed
+2026-08-15 — see "Open questions"): discharge metadata lives on the
+resource-type **declaration** (for builtins, on the definition as
+today), never at use sites.
 
 ### The escape story (ruling (c))
 
@@ -2454,15 +2495,21 @@ with random(seed) {
 }
 ```
 
-The unifying rule, stated (it is **not** the `effect`-declaration
-path): every builtin label with a non-null `frameProtocol` kind
-(`random`/`seed` today; `time`/`clock` anticipated) is a valid head of
-the unnamed `with` form, recognized directly by the grammar — no
-nominal type, no `Resource` conformance, no `finish`. Its delimiting
-semantics come from the frame kind's own obligation protocol, and "the
-current frame" resolves against the same per-evaluation frame stack
-("The mechanism"). It matches the existing ambient semantics exactly
-and needs no handle. An explicit handle (`rnd.next`) would turn the
+How a label declares itself a valid head of this unnamed form is
+**reopened (2026-08-15)** — an earlier draft's rule ("the grammar
+recognizes builtin frame-kind labels directly") was judged ad hoc; a
+clean *declaration* mechanism for ambient effects is wanted. Candidates
+on the table: (i) the grammar rule as drafted — frame-kind labels are
+unnamed-form heads, bypassing the `resource` path entirely; (ii) a
+**well-known identifier** — the unnamed form desugars to a binding of a
+conventional symbol that frame-participating operators consult; (iii)
+the delimiter's definition **performs the binding itself** — declaring
+an ambient effect means declaring what it assigns on frame entry.
+Whichever wins, the semantic constraints stand: no `Resource`
+conformance, no `finish`, delimiting semantics from the frame kind's
+own obligation protocol, "the current frame" resolved against the
+scope chain ("The mechanism"), and the existing ambient behavior
+preserved exactly. An explicit handle (`rnd.next`) would turn the
 frame into a first-class capability value — capability threading,
 itself escapable, and a second way to draw with distinct replay
 accounting — so the lean is: **ambient effects stay ambient; only
@@ -2480,20 +2527,22 @@ genuine resources get named handles.**
   and the abnormal paths — error-value propagation, timeout abort,
   async cancellation (imitate the registry's
   try/finally-including-async discipline).
-- Ratify the mechanism lean ("The mechanism"): lifecycle dimension +
-  per-evaluation resource-frame stack. Decide the future-builtin
-  namespacing policy (registration point 2: builtin-wins vs reserved
-  sigil).
+- The ambient-form declaration mechanism ("Ambient form", reopened
+  2026-08-15): grammar recognition vs well-known identifier vs
+  delimiter-performed binding.
 - A per-resource-type deny/mock surface — or ratify
   constructor-shadowing plus underlying-capability denial as the
   answer ("The mechanism", third bullet).
+- The `captureClosures` interaction: a copied `with` scope must not
+  carry the finalization handler ("The mechanism", precision 1) —
+  needs a pin test when built.
 - Box-route representation: `with` is a scoped binder and belongs on
   the `scoped:` binding-site-selector framework, never an improvised
   binding.
-- Whether a parameter typed as a variant containing an effect type
+- Whether a parameter typed as a variant containing a resource type
   (`file | string`) makes the callable carry the label (lean: yes,
   conservative).
 - Sequencing unchanged from "Resource frames": after the
   mutable-objects object phases (object backing is definitional — see
-  "The `effect` declaration"); intersects Stage 4 for connection-like
+  "The `resource` declaration"); intersects Stage 4 for connection-like
   resources.

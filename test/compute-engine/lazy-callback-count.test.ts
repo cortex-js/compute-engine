@@ -32,15 +32,17 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 //
 
 /**
- * Epsil preamble defining a counter `n` and two effectful callbacks that bump
- * it: `t1()` returns 1, `b1()` returns true. Multi-letter names throughout —
- * a bare `i` parses as the imaginary unit.
+ * Epsil preamble defining a counter `n` and three effectful callbacks that
+ * bump it: `t1()` returns 1, `b1()` returns true, `no1()` returns false.
+ * Multi-letter names throughout — a bare `i` parses as the imaginary unit.
  */
 const PRE = `let n = 0
 function t1() scope -> integer { n = n + 1
   1 }
 function b1() scope -> boolean { n = n + 1
   true }
+function no1() scope -> boolean { n = n + 1
+  false }
 `;
 
 /**
@@ -75,6 +77,52 @@ describe('lazy collection: one consumption runs the callback once per element', 
   test('Sum over a lazy Filter: 3 elements, 3 runs', () => {
     expect(run(`let s = Sum(Filter([1, 2, 3], (x) => b1()))\n(s, n)`)) //
       .toBe('(6, 3)');
+  });
+
+  // The shape every other `Filter` row here misses: a predicate that REJECTS
+  // every element. Those rows all accept, so their fold walks something and
+  // takes the `walked > 0` path out of `enumerationDeclinedAfterWalk`. With
+  // nothing walked, the helper had to tell "declined" from "genuinely empty",
+  // and asked `isEmptyCollection` — which for a filter enumerates the source
+  // again looking for a match it will never find. That was a SECOND full pass:
+  // 2N runs for N source elements, the very duplication B8 forbids. The
+  // verdict now comes from `isEnumerableCollection`, which propagates
+  // structurally from the source and never walks.
+  //
+  // Asserted across all four folds because each reaches the helper by its own
+  // route (the plain fold, the reducer, and the two extremum paths).
+  test.each([
+    ['Sum', 'let s = Sum(Filter([1, 2, 3, 4, 5], (x) => no1()))', '(0, 5)'],
+    [
+      'Reduce',
+      'let s = Reduce(Filter([1, 2, 3, 4, 5], (x) => no1()), (a, x) => a + x, 0)',
+      '(0, 5)',
+    ],
+    ['Max', 'let s = Max(Filter([1, 2, 3, 4, 5], (x) => no1()))', '(NaN, 5)'],
+    ['Min', 'let s = Min(Filter([1, 2, 3, 4, 5], (x) => no1()))', '(NaN, 5)'],
+  ])(
+    '%s over an ALL-REJECTING lazy Filter: 5 source elements, 5 runs',
+    (_label, body, expected) => {
+      expect(run(`${body}\n(s, n)`)).toBe(expected);
+    }
+  );
+
+  // SEEDLESS `Reduce` asks the helper from its own call site — the seeded and
+  // seedless folds are separate branches of the evaluate handler, and the
+  // seedless one has no accumulator to count with, so it passes "did the fold
+  // ever produce a value" (0 or 1) rather than a walk count. The rows above
+  // all seed, so only this one covers that branch.
+  //
+  // An empty seedless fold has no value: `s` is `Nothing`, which is ERASED
+  // from a tuple, so the program's value is the 1-tuple carrying the count
+  // alone. `(5)` is therefore "no result, five predicate runs"; a regression
+  // to the double walk would read `(10)`.
+  test('seedless Reduce over an ALL-REJECTING lazy Filter: 5 runs', () => {
+    expect(
+      run(
+        `let s = Reduce(Filter([1, 2, 3, 4, 5], (x) => no1()), (a, x) => a + x)\n(s, n)`
+      )
+    ).toBe('(5)');
   });
 
   test('Product over a lazy Map: 3 elements, 3 runs', () => {

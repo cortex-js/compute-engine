@@ -1231,6 +1231,117 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       expect(r.success).toBe(true);
     });
 
+    // The STATISTICS reducers are real-only for the same reason: `_SYS.mean` &
+    // co. sum and compare plain numbers. Measured before the gate reached them:
+    // `Mean([i, 2i])` compiled to `NaN` where the interpreter answers the
+    // complex mean.
+    test.each([
+      ['Mean'],
+      ['Median'],
+      ['Variance'],
+      ['PopulationVariance'],
+      ['StandardDeviation'],
+      ['PopulationStandardDeviation'],
+      ['Mode'],
+      ['Kurtosis'],
+      ['Skewness'],
+      ['Quartiles'],
+      ['InterquartileRange'],
+    ])('%s over a complex-element list fails closed', (h) => {
+      const engine = new ComputeEngine();
+      const r = compile(
+        engine.box([
+          h,
+          ['List', 'ImaginaryUnit', ['Multiply', 2, 'ImaginaryUnit']],
+        ] as any),
+        { constantFold: false }
+      );
+      expect(r.success).toBe(false);
+    });
+
+    it('real statistics data is untouched', () => {
+      const r = compile(ce.box(['Mean', ['List', 1, 2, 3]] as any), {
+        constantFold: false,
+      });
+      expect(r.success).toBe(true);
+      expect(r.run!({})).toBe(2);
+    });
+  });
+
+  // A statistics head applied to a SINGLE DATUM rather than a collection.
+  // `_SYS.mean` & co. iterate their argument, so `Mean(x)` emitted
+  // `_SYS.mean(4)` and threw "values is not iterable" at RUN TIME behind
+  // `success: true`, where the interpreter answers `4`. This is not a complex-
+  // lane problem — it hit plain real operands, which is the likelier shape in a
+  // plotted expression.
+  //
+  // The interpreter treats one datum exactly as a one-element list, verified
+  // head by head at `x = 4` (the scalar and the `[4]` forms agree in every
+  // row), so the compiled path now wraps a runtime scalar and the existing
+  // reducers reproduce interpretation with no per-head special case.
+  describe('a statistics head over a SINGLE DATUM matches interpretation', () => {
+    const AT_4 = { x: 4 };
+
+    test.each([
+      ['Mean', 4],
+      ['Median', 4],
+      ['Mode', 4],
+      ['PopulationVariance', 0],
+      ['PopulationStandardDeviation', 0],
+    ])('%s(x) is %p, as the interpreter answers', (h, expected) => {
+      const engine = new ComputeEngine();
+      const r = compile(engine.box([h, 'x'] as any), { constantFold: false });
+      expect(r.success).toBe(true);
+      expect(r.run!(AT_4 as any)).toBe(expected);
+    });
+
+    // The SAMPLE forms divide by `n − 1`, which is zero for one datum — NaN in
+    // the interpreter too, so this row is agreement, not breakage.
+    test.each([
+      ['Variance'],
+      ['StandardDeviation'],
+      ['Kurtosis'],
+      ['Skewness'],
+      ['InterquartileRange'],
+    ])('%s(x) is NaN, as the interpreter answers', (h) => {
+      const engine = new ComputeEngine();
+      const r = compile(engine.box([h, 'x'] as any), { constantFold: false });
+      expect(r.success).toBe(true);
+      expect(r.run!(AT_4 as any)).toBeNaN();
+    });
+
+    it('Quartiles(x) is (NaN, 4, NaN)', () => {
+      const engine = new ComputeEngine();
+      const r = compile(engine.box(['Quartiles', 'x'] as any), {
+        constantFold: false,
+      });
+      expect(r.success).toBe(true);
+      expect(r.run!(AT_4 as any)).toEqual([NaN, 4, NaN]);
+    });
+
+    it('a COLLECTION operand is unaffected — the wrap is runtime-shaped', () => {
+      // The static type cannot decide this: a bare symbol may be bound to a
+      // number or to an array at call time, so the coercion tests the value.
+      const engine = new ComputeEngine();
+      const r = compile(engine.box(['Mean', 'x'] as any), {
+        constantFold: false,
+      });
+      expect(r.success).toBe(true);
+      expect(r.run!({ x: [1, 2, 3] } as any)).toBe(2);
+      expect(r.run!(AT_4 as any)).toBe(4);
+    });
+
+    it('a single COMPLEX datum still fails closed', () => {
+      // The real-only gate runs ahead of the lowering, so widening the shape
+      // does not reopen the complex hole.
+      const engine = new ComputeEngine();
+      const r = compile(
+        engine.box(['Mean', ['Add', ['Complex', 1, 1], 'x']] as any),
+        { constantFold: false }
+      );
+      expect(r.success).toBe(false);
+    });
+
     it('a real LIST operand still broadcasts through these heads', () => {
       // The gate keys on complex-ness, not on list-ness: the ordinary
       // element-wise `Floor` must be untouched.

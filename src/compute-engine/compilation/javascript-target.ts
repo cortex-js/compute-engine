@@ -4046,6 +4046,37 @@ function indexValue(v: unknown): number {
   return NaN;
 }
 
+/**
+ * Adapt a statistics reducer so a SINGLE DATUM is accepted, not just a
+ * collection of them.
+ *
+ * `Mean(x)` is a legal expression whatever `x` is, and the interpreter answers
+ * it by treating one datum exactly as a one-element list — measured head by
+ * head at `x = 4`, the scalar and the `[4]` columns agree everywhere:
+ * `Mean`/`Median`/`Mode` are `4`, `Variance`/`StandardDeviation`/`Kurtosis`/
+ * `Skewness`/`InterquartileRange` are `NaN` (the sample forms divide by
+ * `n − 1 = 0`), the population forms are `0`, and `Quartiles` is
+ * `(NaN, 4, NaN)`. The reducers in `numerics/statistics.ts` reproduce every one
+ * of those from `[x]`, so wrapping is all that is needed — no per-head special
+ * case, and no divergence to keep in sync.
+ *
+ * Without this the compiled code threw at RUN TIME behind `success: true`:
+ * `Mean(x)` emitted `_SYS.mean(4)` and the reducer's `for…of` raised
+ * "values is not iterable", where the interpreter answers `4`. Wrapping happens
+ * here rather than in `numerics/statistics.ts` because those reducers are
+ * shared with the interpreter, which reaches them through its own
+ * collection-shaped call path and must keep its stricter contract.
+ *
+ * The static type is no help at the emission site — a bare symbol can be bound
+ * to a number OR an array at call time — so the test is on the runtime value.
+ */
+function oneDatumOk<T>(
+  reduce: (values: Iterable<number>) => T
+): (values: Iterable<number> | number) => T {
+  return (values) =>
+    typeof values === 'number' ? reduce([values]) : reduce(values);
+}
+
 function bcast(
   f: (...xs: BcastValue[]) => BcastValue,
   ...args: BcastValue[]
@@ -4873,17 +4904,17 @@ const SYS_HELPERS = {
   lcm,
   lngamma: gammaln,
   limit,
-  mean,
-  median,
-  variance,
-  populationVariance,
-  standardDeviation,
-  populationStandardDeviation,
-  kurtosis,
-  skewness,
-  mode,
-  quartiles,
-  interquartileRange,
+  mean: oneDatumOk(mean),
+  median: oneDatumOk(median),
+  variance: oneDatumOk(variance),
+  populationVariance: oneDatumOk(populationVariance),
+  standardDeviation: oneDatumOk(standardDeviation),
+  populationStandardDeviation: oneDatumOk(populationStandardDeviation),
+  kurtosis: oneDatumOk(kurtosis),
+  skewness: oneDatumOk(skewness),
+  mode: oneDatumOk(mode),
+  quartiles: oneDatumOk(quartiles),
+  interquartileRange: oneDatumOk(interquartileRange),
   covariance,
   populationCovariance,
   correlation,
@@ -6968,7 +6999,10 @@ function compileIntegrate(
       // It exists so a future parameter shape cannot re-open the hole.
       throw new Error(
         `Integrate: cannot compile an integrand whose parameter ` +
-          `"${args[0].ops.slice(1).find((p) => functionLiteralParameterName(p) === '')?.toString()}" ` +
+          `"${args[0].ops
+            .slice(1)
+            .find((p) => functionLiteralParameterName(p) === '')
+            ?.toString()}" ` +
           `has no readable name — the body's references to what it binds would ` +
           `compile as references to the enclosing scope. Fail closed (D6). ` +
           `Use a named parameter, or an integrand expressed directly in the ` +

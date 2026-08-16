@@ -171,7 +171,8 @@ function tupleElementCount(source: Expression | undefined): number | undefined {
   if (source === undefined) return undefined;
   const elements = collectionElementType(source.type.type);
   if (elements === undefined) return undefined;
-  if (typeof elements !== 'object' || elements.kind !== 'tuple') return undefined;
+  if (typeof elements !== 'object' || elements.kind !== 'tuple')
+    return undefined;
   return elements.elements?.length;
 }
 

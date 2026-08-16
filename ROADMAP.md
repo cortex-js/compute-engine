@@ -125,8 +125,13 @@ fixed:
   `(list<real>) -> list<real>` type `list<number>` and broke the
   forward-reference repair pin in `list-parameter-indexing.test.ts`. With
   `L: list<integer>` and `j` auto-inferred `number`, `j·L` reports
-  `list<integer>` while `j+L` reports `list<number>`. Both are sound; which
-  rule is the convention is a design call.
+  `list<integer>` while `j+L` reports `list<number>`. Both are sound.
+  RULED 2026-08-15 (user, at review): keep the asymmetry as shipped —
+  `Multiply` widens only on DECLARED scalar evidence, `Add` keeps its
+  pre-existing looser rule; revisit only if a failing input for `Add`'s rule
+  turns up. Likewise ruled the same day: the `f'_n` spelling parses as
+  `(f_n)'` (the item-192(b) convention), the two flipped inline snapshots in
+  `test/compute-engine/latex-syntax/supsub.test.ts` are the record.
 - **`BoxedSymbol.infer()` did not mark its own writes inferred** — FIXED
   2026-08-15 at the source (`boxed-expression/boxed-symbol.ts`). The
   `def.value.type.isUnknown` arm of its guard wrote a concrete type onto the
@@ -219,6 +224,24 @@ derived from the signature (`holdsOnlyBooleanOperands`: every parameter
 `boolean`), not from a name list. `Xor`/`Equivalent` are unchanged (every
 operand affects the result). Pins: `logic.test.ts` (Nand/Nor/Implies),
 `relational-operators.test.ts` § "Chains SHORT-CIRCUIT".
+
+### An `int`-declared shader parameter used in float ARITHMETIC emitted an ill-typed shader behind `success: true` (FIXED 2026-08-15, user-ruled — found while fixing Tycho item 191)
+
+`compileFunction(expr, 'f', 'float', [['K', 'int']])` emitted
+`float f(int K) { return K + 1.0; }` for `K + 1` (WGSL: `fn f(K: i32) -> f32
+{ return K + 1.0; }`) — neither language promotes int to float, so the
+driver rejected the program: the same silent-failure class as Tycho item 191,
+in the arithmetic rather than the loop header. Ruling (2026-08-15): cast at
+the reference site. `gpuDeclaredBodyTarget` (`gpu-target.ts`) now binds an
+integer-declared scalar (`int`/`i32`/`uint`/`u32`) to `float(K)` / `f32(K)`,
+so every reference is a float; `gpuTypeOfValue` reports it as a float (a
+call boundary that used to fail closed on an `int` argument into a float
+slot now converts — `compile-gpu-user-functions.test.ts` flipped), the `At`
+index path no longer double-casts, and the `Sum`/`Product` loop header reads
+the raw slot (`GPUDeclaredType.ref`) so an int bound stays `j <= K` while a
+bound EXPRESSION reads `int(floor(float(K) + -1.0))`. Known limit, documented
+at `gpuDeclaredIsIntegerScalar`: the conversion loses precision above 2^24.
+Pins: `test/compute-engine/tycho-item-191-gpu-loop-bound-typing.test.ts`.
 
 ### `defineFunctionClause` may write through to a builtin instead of shadowing it
 
@@ -1427,6 +1450,54 @@ Found by a sweep over every numeric head with a complex operand, run to check
 that the collection fix above had not introduced a lane disagreement. It had
 not; this was pre-existing on the scalar path and reached collections only
 because element-wise lowering mirrors the scalar one.
+
+### A statistics head over a SINGLE DATUM threw at run time behind `success: true` (FIXED 2026-08-15 — user-ruled)
+
+`Mean(x)` is a legal expression whatever `x` is, and the interpreter answers it
+by treating one datum exactly as a one-element list. The compiled path did not:
+`_SYS.mean` & co. iterate their argument, so `Mean(x)` emitted `_SYS.mean(4)`
+and raised "values is not iterable" at RUN TIME, after reporting
+`success: true`. Measured at `x = 4`, on the DEFAULT path with no compile option
+set:
+
+    Mean(x)        compiled: runtime throw    interpreter: 4
+    Mean([1,2,3])  compiled: 2                interpreter: 2
+
+Not a complex-lane defect — it hit plain REAL operands, which is the likelier
+shape in a plotted expression. It surfaced during the complex-lane round only
+because a reviewer probed the statistics heads with a complex argument and read
+the resulting throw as a missing real-only gate. Adding those heads to the
+real-only set (which was done, and is right for
+`Mean([i, 2i])` → the interpreter's complex mean) fixes only the complex half
+and leaves the real-scalar crash untouched; the two are separate defects
+sharing one symptom.
+
+The interpreter's single-datum semantics were measured head by head at `x = 4`
+before anything was written, and the scalar and one-element-list columns agree
+in every row:
+
+| head                             | scalar | `[4]` |
+| -------------------------------- | ------ | ----- |
+| `Mean` / `Median` / `Mode`        | 4      | 4     |
+| `Variance` / `StandardDeviation` | NaN    | NaN   |
+| `Kurtosis` / `Skewness` / `InterquartileRange` | NaN | NaN |
+| `PopulationVariance` / `PopulationStandardDeviation` | 0 | 0 |
+| `Quartiles`                      | (NaN, 4, NaN) | (NaN, 4, NaN) |
+
+The NaNs are not breakage: the sample forms divide by `n − 1`, which is zero for
+one datum.
+
+**Ruled 2026-08-15 (user, option (a) of two):** make the compiled path handle a
+scalar operand rather than fail closed on it — the semantics are not ambiguous,
+the interpreter already defines them. Fixed by wrapping a runtime scalar at the
+`_SYS` binding site in `compilation/javascript-target.ts` (`oneDatumOk`), so the
+existing reducers reproduce every row above with no per-head special case and no
+second definition of the semantics to keep in sync. The wrap is deliberately
+NOT in `numerics/statistics.ts`: those reducers are shared with the interpreter,
+which reaches them through its own collection-shaped path and keeps the stricter
+contract. It is also deliberately a RUNTIME test rather than a static one — a
+bare symbol can be bound to a number or to an array at call time, so the
+emission site cannot decide. Pinned in `test/compute-engine/compile.test.ts`.
 
 ### `complexPromotion` loses a complex value passed as an ARGUMENT to a scalar-bodied user function (OPEN, correctness — promotion-only)
 

@@ -2830,7 +2830,12 @@ function gpuAtFramedIndex(
         `is not a scalar number — a positional shader access indexes by a ` +
         `float, and neither language converts to one implicitly`,
     };
-  return v.element === 'f' ? undefined : { cast: true };
+  // An integer-declared scalar is already referenced through a float
+  // conversion (`gpuDeclaredBodyTarget`), so it passes for a float here; the
+  // `cast` arm is kept for any future declared spelling that binds bare.
+  return v.element === 'f' || gpuDeclaredIsIntegerScalar(v)
+    ? undefined
+    : { cast: true };
 }
 
 /**
@@ -3711,14 +3716,53 @@ function compileGPUSumProduct(
 
   // Compiled BEFORE the loop statements are pushed, so anything the bounds
   // themselves hoist lands ahead of the loop that consumes them.
+  //
+  // The counter is declared as an integer, but a non-literal bound normally
+  // compiles to a FLOAT expression (shader scalar math is float, and a
+  // constant-folded `Length(L)` is spelled `3.0`). Neither GLSL ES nor WGSL
+  // promotes int to float, so `int j = K; j <= K + -1.0` is a driver-side
+  // type error that rejects the whole shader behind `success: true` (Tycho
+  // item 191). Convert such a bound to the counter's type in the header —
+  // `int(floor(x))` / `i32(floor(x))` — flooring first so a non-integer bound
+  // reads the way the JavaScript target's `Math.floor(bound)` and the
+  // constant arm's `Math.floor` (`BaseCompiler.bigOpBoundConstant`) do
+  // (`int(x)` alone truncates toward zero, disagreeing for a negative bound).
+  //
+  // The exception is a bound that is ALREADY a shader integer: a name the
+  // caller declared `int`/`i32` (a `compileFunction` parameter, a shader
+  // uniform). Ordinary references to it go through a float conversion
+  // (`gpuDeclaredBodyTarget`), which the header does not want — `floor()`
+  // takes only a float, and `int(floor(float(K)))` is a needless round trip
+  // — so such a bound is used bare (a `uint`/`u32` is converted with
+  // `int(K)`/`i32(K)`, no flooring needed). A declared bound with any other
+  // type (`bool`, a vector) is no loop bound at all and fails closed (D6).
+  const boundCode = (bound: Expression, which: 'lower' | 'upper'): string => {
+    const declared = gpuDeclaredTypeOf(bound);
+    const value = declared?.value;
+    if (declared === undefined || (value !== undefined && value.width === 1 && value.element === 'f')) {
+      const code = BaseCompiler.compile(bound, target);
+      return isWGSL ? `i32(floor(${code}))` : `int(floor(${code}))`;
+    }
+    // `var()` binds an integer-declared scalar to `float(K)`; the header wants
+    // the integer itself, so it reads the raw slot.
+    if (value !== undefined && value.width === 1 && value.element === 'i')
+      return declared.ref;
+    if (value !== undefined && value.width === 1 && value.element === 'u')
+      return isWGSL ? `i32(${declared.ref})` : `int(${declared.ref})`;
+    throw new Error(
+      `${kind}: the ${which} bound \`${bound.toString()}\` is declared ` +
+        `"${declared.spelling}" by the caller, which is not ` +
+        `a scalar number — a loop bound must be one. Fail closed (D6).`
+    );
+  };
   const lowerStr =
     lowerNum !== undefined
       ? String(lowerNum)
-      : BaseCompiler.compile(limitsOps[1], target);
+      : boundCode(limitsOps[1], 'lower');
   const upperStr =
     upperNum !== undefined
       ? String(upperNum)
-      : BaseCompiler.compile(limitsOps[2], target);
+      : boundCode(limitsOps[2], 'upper');
 
   // The loop index is declared and referenced bare — reject a reserved name
   // (fail closed, D6) rather than emit a shader that fails to compile.
@@ -7683,7 +7727,39 @@ type GPUDeclaredType = {
    * fails closed when it reaches a user-function call boundary.
    */
   value?: GPUValueType;
+  /**
+   * The identifier the emitted source references the name by — its own name,
+   * or a WGSL input's field of the entry point's `input` struct. This is the
+   * RAW slot, before the float conversion `gpuDeclaredBodyTarget` wraps around
+   * an integer-declared scalar (see `gpuDeclaredIsIntegerScalar`), for the
+   * few positions that consume the integer itself (a loop bound).
+   */
+  ref: string;
 };
+
+/**
+ * Is `v` a caller-declared scalar INTEGER (`int`/`i32`/`uint`/`u32`)?
+ *
+ * Shader scalar math on these targets is float: every number literal is
+ * emitted with a decimal point (`formatGPUNumber`) and no synthesized
+ * user-function parameter is ever an integer (`gpuTypeOfDeclaredType`). Neither
+ * GLSL ES nor WGSL promotes an integer to a float, so an integer-declared
+ * name reaching float arithmetic bare (`float f(int K) { return K + 1.0; }`)
+ * is a driver-side type error behind a reported success. Such a name is
+ * therefore CONVERTED where it is referenced (`gpuDeclaredBodyTarget` binds it
+ * to `float(K)` / `f32(K)`), and every reading of it downstream is a float
+ * (`gpuTypeOfValue`, `gpuAtFramedIndex`). User-ruled 2026-08-15 (cast at the
+ * reference site rather than fail closed) while fixing Tycho item 191.
+ *
+ * The conversion is LOSSY above 2^24 (≈16.7M): a shader float has a 24-bit
+ * significand, so an integer uniform carrying a larger count or identifier
+ * reads rounded in float arithmetic. Loop bounds and plot parameters never
+ * approach that; it is a known limit of the float lowering, not a defect to
+ * rediscover.
+ */
+function gpuDeclaredIsIntegerScalar(v: GPUValueType | undefined): boolean {
+  return v !== undefined && v.width === 1 && (v.element === 'i' || v.element === 'u');
+}
 
 /**
  * Normalize a shader type SPELLING of EITHER language, or `undefined` for one
@@ -7779,9 +7855,9 @@ function gpuDeclaredShapeFrame(
 ): Map<string, number> {
   const frame = new Map<string, number>();
   const types = new Map<string, GPUDeclaredType>();
-  for (const { name, type } of declarations) {
+  for (const { name, type, ref } of declarations) {
     const value = gpuNormalizeShaderType(type);
-    types.set(name, { spelling: type.trim(), value });
+    types.set(name, { spelling: type.trim(), value, ref: ref ?? name });
     frame.set(
       name,
       value === undefined
@@ -7826,7 +7902,21 @@ function gpuDeclaredBodyTarget(
   declarations: ReadonlyArray<GPUShaderDeclaration>
 ): CompileTarget<Expression> {
   if (declarations.length === 0) return target;
-  const refs = new Map(declarations.map((d) => [d.name, d.ref ?? d.name]));
+  const isWGSL = target.language === 'wgsl';
+  // An integer-declared scalar is referenced through a float conversion; see
+  // `gpuDeclaredIsIntegerScalar` for why. Positions that need the raw integer
+  // read `GPUDeclaredType.ref` instead of `var()`.
+  const refs = new Map(
+    declarations.map((d) => {
+      const ref = d.ref ?? d.name;
+      return [
+        d.name,
+        gpuDeclaredIsIntegerScalar(gpuNormalizeShaderType(d.type))
+          ? `${isWGSL ? 'f32' : 'float'}(${ref})`
+          : ref,
+      ];
+    })
+  );
   return {
     ...target,
     var: (id) => refs.get(id) ?? target.var(id),
@@ -7921,8 +8011,14 @@ function gpuTypeOfValue(expr: Expression, isWGSL: boolean): string | undefined {
   // declared spelling with no static value type here answers `undefined`: it
   // is not a float, and its call sites fail closed naming it.
   const declared = gpuDeclaredTypeOf(expr);
-  if (declared !== undefined)
+  if (declared !== undefined) {
+    // An integer-declared scalar is referenced through a float conversion
+    // (`gpuDeclaredBodyTarget`), so what a call site or return slot receives
+    // IS a float.
+    if (gpuDeclaredIsIntegerScalar(declared.value))
+      return gpuScalarType(isWGSL);
     return declared.value && gpuSpellValueType(declared.value, isWGSL);
+  }
   // A name framed `bool` by a synthesized user-function signature.
   if (isSymbol(expr) && BaseCompiler.isLocalBoolean(expr.symbol)) return 'bool';
   if (BaseCompiler.isComplexValued(expr)) return gpuVecType(2, isWGSL);

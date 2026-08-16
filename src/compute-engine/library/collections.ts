@@ -524,7 +524,8 @@ function canonicalCallbackOperand(
   const accept = (fn: Expression): Expression =>
     arity === undefined
       ? fn
-      : (callbackArityError(fn, arity.operator, arity.supply, arity.source) ?? fn);
+      : (callbackArityError(fn, arity.operator, arity.supply, arity.source) ??
+        fn);
   const fn = canonicalFunctionLiteral(op);
   // The operand a canonical handler REJECTS is replaced by the error, which is
   // how such a handler reports one, so the diagnostic matches the eager
@@ -9059,18 +9060,39 @@ function tally(collection: Expression): [ReadonlyArray<Expression>, number[]] {
  * to duplicate evaluations. The counts are pinned in
  * `test/compute-engine/lazy-callback-count.test.ts`.
  *
- * `isEmptyCollection` is consulted ONLY when the walk produced nothing,
- * because reading that facet is itself a walk for some collections
- * (`Filter.isEmpty` enumerates its source up to the first match). A walk that
- * produced elements settles the question on its own.
+ * A walk that produced elements settles the question on its own. When it
+ * produced nothing, a collection that is provably ENUMERABLE settles it too:
+ * it can produce elements, so producing none means there were none. That test
+ * is structural — `isEnumerableCollection` propagates from the source
+ * (`enumerableFromSource`) and is documented never to read its own
+ * `count`/`isEmpty` — so it costs O(depth) and never enumerates.
+ *
+ * That fast path is the whole point. `isEmptyCollection` IS a walk for some
+ * collections (`Filter.isEmpty` enumerates its source up to the first match),
+ * so consulting it here made a fold over a filter whose predicate rejects
+ * EVERY element pay for two full passes — the fold's own, then the emptiness
+ * probe's — running the predicate 2N times for N source elements. That is the
+ * duplicate materialization ruling B8 forbids, in the one shape the
+ * walk-count tests missed (their filters all accept, so they leave by the
+ * `walked > 0` path).
+ *
+ * Only `true` is a fast path. Non-enumerability is NOT evidence of a decline,
+ * because it can come from a source this walk never had to touch: `Zip([], xs)`
+ * with a non-enumerable `xs` reports `isEnumerableCollection === false`
+ * (`enumerableFromAllSources` fails on `xs`) while being definitely empty —
+ * its iterator stops at the empty first input and never reaches `xs`. Treating
+ * that as a decline would leave `Sum(Zip([], xs))` symbolic instead of 0. So
+ * `false` and `undefined` alike fall through to `isEmptyCollection`, which
+ * preserves the original reading exactly for every collection that does not
+ * take the fast path.
  */
 export function enumerationDeclinedAfterWalk(
   collection: Expression,
   walked: number
 ): boolean {
   if (walked > 0) return false;
-  if (collection.isEmptyCollection === true) return false;
-  return true;
+  if (collection.isEnumerableCollection === true) return false;
+  return collection.isEmptyCollection !== true;
 }
 
 /**

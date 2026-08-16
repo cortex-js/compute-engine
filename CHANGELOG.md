@@ -175,6 +175,52 @@
 
 ### Issues Resolved
 
+- **A `Sum` or `Product` with a symbolic bound now compiles to a shader that
+  GLSL/WGSL drivers accept.** The loop counter is declared as an integer, but a
+  bound such as `K - 1` (or a constant-folded `Length(L)`) is a float
+  expression, and shader languages have no implicit int→float promotion — so
+  `for (int j = 0; j <= K + -1.0; j++)` was reported as a successful compilation
+  and then rejected by the driver as `'<=' : wrong operand types`. Both bounds,
+  for both operators and both targets, are now converted in the loop header
+  (`int(floor(K + -1.0))` / `i32(floor(…))`), flooring a non-integer bound the
+  way the JavaScript target does. Constant bounds are unchanged. In the same
+  fix, a `compileFunction()` parameter (or shader uniform) declared `int`,
+  `i32`, `uint` or `u32` is now converted to a float wherever the body uses
+  it in arithmetic (`float(K) + 1.0`), where before it was spliced in bare
+  and produced the same driver-side type error; an integer-declared loop bound
+  is used directly (`j <= K`), and an `int` argument passed to a float-typed
+  user function is converted instead of failing compilation. The conversion is
+  a 32-bit float and loses precision above 2²⁴.
+
+- **A statistics function applied to a single value now works when compiled.**
+  `Mean(x)`, `Median(x)`, `Variance(x)` and the rest are legal whatever `x` is,
+  and interpretation answers them by treating one datum as a one-element list —
+  `Mean(4)` is `4`, `Variance(4)` is `NaN` (the sample form divides by `n − 1`),
+  `PopulationVariance(4)` is `0`. The compiled versions instead threw
+  `values is not iterable` at run time, after reporting a successful
+  compilation. They now agree with interpretation in every case, including when
+  the same compiled function is called with a number one time and an array the
+  next. A statistics head over COMPLEX data (`Mean([i, 2i])`) now fails closed
+  and falls back to interpretation, rather than compiling to `NaN`.
+
+- **Differentiating a point-valued function bound by `assign` is componentwise
+  again.** A lambda whose body head is `PointList` differentiated correctly when
+  the function was defined by parsing (`g(t) \coloneq \operatorname{PointList}(\sin t, \cos t, t)`)
+  but not when the same lambda was installed through `ce.assign()` — there the
+  chain rule treated `PointList` as an opaque 3-ary function and produced
+  `Apply(Derivative("PointList", 0, 1, 0), …)` rather than differentiating each
+  component. A `Tuple` body was componentwise under both binding forms, which is
+  what made the asymmetry easy to miss. `p'(0.25)` for an assign-bound
+  `(t) \mapsto \operatorname{PointList}(\sin t, \cos t, t)` now gives
+  `(0.9689…, -0.2474…, 1)` on every route — the prime form, `D(p(t), t)`,
+  `Derivative(p, 1)` and the `\mapsto` spelling — matching the parse-bound
+  result. The head stays `PointList`, and list-valued components zip as before.
+
+  This matters disproportionately because installing a definition through
+  `assign` is the registration route a host uses when it holds the lambda
+  programmatically rather than as source text, so every point-valued curve
+  registered that way had an inert derivative.
+
 - **A prime written before a subscript now attaches to the subscripted name.**
   `F'_{0}(t)` and `F^{\prime}_{0}(t)` (both spellings the Desmos editor emits)
   parsed as `Multiply(t, Subscript(Prime(F), 0))`: the prime bound to the bare

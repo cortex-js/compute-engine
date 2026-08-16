@@ -1189,8 +1189,7 @@ export function isSubtype(
   // Note this does NOT make a range a `list` — `indexed_collection<T>` is not
   // a subtype of `list<T>`, so `range <: list<integer>` stays false, which is
   // the intent (they are sibling kinds).
-  if (lhs === 'range')
-    return isSubtype(RANGE_STRUCTURAL_TYPE, rhs);
+  if (lhs === 'range') return isSubtype(RANGE_STRUCTURAL_TYPE, rhs);
 
   // A primitive type is not a subtype of a composite type (except a union)
   if (typeof lhs === 'string') return false;

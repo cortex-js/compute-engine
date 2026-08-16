@@ -1076,22 +1076,27 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
     ).toThrow(/lowers to "vec2<bool>" but parameter "w" is declared "vec2f"/);
   });
 
-  it('GLSL: an `int` scalar parameter into a float callee fails closed', () => {
+  it('GLSL: an `int` scalar parameter into a float callee is converted', () => {
     // The engine emits every GPU number literal with a decimal point and
-    // `gpuTypeOfDeclaredType` never synthesizes an integer parameter, so an
-    // `int` argument and a `float` slot are two different types here. Fail
-    // closed rather than lean on GLSL's implicit widening — WGSL has none.
+    // `gpuTypeOfDeclaredType` never synthesizes an integer parameter, so
+    // shader scalar math is float throughout. An integer-declared scalar is
+    // therefore referenced through a float conversion (`float(n)`), which is
+    // what reaches the callee's `float` slot — neither language would widen
+    // it implicitly (user-ruled 2026-08-15, found while fixing Tycho item
+    // 191; previously this failed closed).
     const ce = engineWithUndeclaredH();
-    expect(() =>
-      glsl.compileFunction(ce.parse('h(n)'), 'wrap', 'float', [['n', 'int']])
-    ).toThrow(/lowers to "int" but parameter "w" is declared "float"/);
+    const code = glsl.compileFunction(ce.parse('h(n)'), 'wrap', 'float', [
+      ['n', 'int'],
+    ]);
+    expect(code).toContain('_fn_h(float(n))');
   });
 
-  it('WGSL: a `u32` scalar parameter into an f32 callee fails closed', () => {
+  it('WGSL: a `u32` scalar parameter into an f32 callee is converted', () => {
     const ce = engineWithUndeclaredH();
-    expect(() =>
-      wgsl.compileFunction(ce.parse('h(n)'), 'wrap', 'float', [['n', 'u32']])
-    ).toThrow(/lowers to "u32" but parameter "w" is declared "f32"/);
+    const code = wgsl.compileFunction(ce.parse('h(n)'), 'wrap', 'float', [
+      ['n', 'u32'],
+    ]);
+    expect(code).toContain('_fn_h(f32(n))');
   });
 
   it('a declared type with no static value shape fails closed NAMING it', () => {
