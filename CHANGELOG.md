@@ -198,6 +198,51 @@
 
 ### Issues Resolved
 
+- **`Reduce` under `.N()` no longer errors when the reducer's accumulator
+  turns complex mid-fold.** `["Reduce", [1, 2, 3], ["Function", z² + c, z, k],
+  0]` with a complex `c` (declared, assigned, substituted or a literal)
+  evaluated correctly with `.evaluate()` (`−0.25 + 0.5i`) but `.N()` returned
+  `Error("unexpected-mathjson", "{\"re\":null,\"im\":0.5}")`. The compiled
+  fast path `Reduce` takes under numeric approximation checked that the seed
+  and the elements were real, but not that the reducer's RESULT stayed real:
+  the compiled reducer returned a `{re, im}` object into a number
+  accumulator, the next step computed on the object, and boxing the result
+  failed. The fast path now hands the fold to the interpreted reducer at the
+  first non-number result, redoing that step from the still-valid numeric
+  accumulator; a real reducer keeps the fast path unchanged. Reported by
+  Tycho against 0.112.0/0.113.0.
+
+- **`.abs()` on a negation now returns the absolute value, not the
+  negation.** `BoxedFunction.abs()` short-circuited on both an `Abs` head and
+  a `Negate` head by returning the receiver unchanged. That is right for
+  `Abs` — `‖x‖ = |x|` is idempotent — and wrong for `Negate`, since
+  `|−x| = |x|`: `ce.parse('-x').abs()` answered `-x`, which evaluates to −3
+  at `x = 3`. The reachable consequence was a stored NEGATIVE uncertainty:
+  `PlusMinus` and `Measurement` call `.abs()` on the error term when
+  canonicalizing, so `PlusMinus(5, -e)` kept `-e` and serialized `5 ± -e`. A
+  numeric negative was always normalized (`PlusMinus(5, -3)` → `3`) because
+  the literal path never reaches the short-circuit, which is why this
+  survived.
+
+- **The derivative of a vector norm no longer uses the scalar `|x|` rule.**
+  `Abs` over a tuple is the Euclidean norm, but the derivative table carried
+  only the scalar rule `d|x|/dx = sign(x)` and applied it to any `Abs` head.
+  Through the chain rule that produced `Sign((cos t, 1)) · (−sin t, 0)` — a
+  tuple multiplied by a tuple — surfacing either as a nonsense value or as an
+  `incompatible-type` tuple/number error depending on what enclosed it. The
+  norm's derivative is now the projection of the component velocities onto
+  the unit vector, `d|v|/dt = (Σᵢ vᵢ·vᵢ′)/|v|`, checked against a central
+  difference at several points per shape. An operand with no
+  statically-known components (a symbol typed `list<number>`) declines and
+  leaves `D` inert rather than guessing; a scalar `|x|` is unchanged.
+
+  The reported witness was a head DECLARED before it was bound
+  (`ce.declare('F', 'function')`, then an assignment), where the two routes
+  disagreed: declaring first installs a value definition rather than an
+  operator definition, and only the latter folded the constant norm away
+  before differentiating — so the scalar rule fired on one route and was
+  masked on the other. Both routes now agree.
+
 - **A declared subscripted symbol spelled with a Greek (dictionary) base is
   no longer captured as an index once the base becomes a collection.** With
   `\eta_w = 1.33` and `\eta` bound to a list, `\eta_w` parsed as
@@ -369,6 +414,42 @@
   anything — conformance is monotone — but leaves the now-inadmissible
   conformances pending, which the end-of-batch `protocol-implementation-pending`
   warning reports.
+
+- **Assigning to a protocol property is now a store, and no longer rebinds the
+  variable.** `p.name = v` used to be sugar for `p = «set name»(p, v)`: the
+  `set` handler returned an updated value and the assignment rebound the
+  left-hand variable to it. It now invokes the handler against the object `p`
+  refers to and discards whatever the handler returns; the assignment evaluates
+  to the **value assigned**, not to the receiver.
+
+  ```epsil
+  type Person = object{n: string, age: integer} is Nameable { … }
+  let p = Person(n: "Bob", age: 42)
+  let alias = p
+
+  p.name = "Ada"   // ➔ "Ada"   (was: Person(n: "Ada", age: 42))
+  alias.name       // ➔ "Ada"   — the very same object was modified
+  ```
+
+  Three consequences. The target no longer has to be a variable, so
+  `xs[1].name = v` stores into the list's element (previously
+  `property-assignment-target-invalid`, a diagnostic that is now retired
+  entirely). A receiver that is not an object — a record, a tuple, a builtin —
+  is `immutable-value-assignment`, reported identically whether the target's
+  type is known when the program is canonicalized or only when it runs. That is
+  reachable in ordinary code: after the mutability gate above a value type can
+  no longer carry a *settable* property, but it can still carry a `readonly`
+  one, and writing to it (`q.tag = "z"`, or the qualified `q.(Tagged.tag) =
+  "z"`) reports the target's type rather than the property's read-only-ness —
+  nothing about an immutable value can be written, whichever property is named.
+  And a
+  `set` handler's declared result is no longer checked against the receiver:
+  nothing consumes it, so returning something else is no longer
+  `protocol-signature-mismatch`. Returning the receiver remains the useful
+  convention. The qualified spelling is now a write as well as a read:
+  `p.(Nameable.name) = v` means the same store, restricted to the protocol
+  named. Compiled targets refuse a property store (fail closed) rather than
+  emitting a rebinding, since objects have no compiled representation yet.
 
 - **Collection operators no longer promise to return their operand's own
   kind; the static result type is now honest per kind.** `Reverse`,

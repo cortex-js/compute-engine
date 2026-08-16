@@ -1968,6 +1968,28 @@ real, the combiner's RESULT is complex, so from the second step the
 accumulator holds `{re, im}` while the body was compiled with `a` real —
 `a + {re,im}` concatenates in JavaScript, which is the string in row 2.
 
+**Interpreter surface of the same defect, FIXED 2026-08-16:** `Reduce`'s
+compiled fast path under `.N()` (`library/collections.ts`) fed the compiled
+reducer's `{re, im}` result back into its JS-number accumulator, so
+`Reduce([1,2,3], (z,k) ↦ z² + c, 0)` with a complex `c` returned
+`Error("unexpected-mathjson", "{\"re\":null,\"im\":0.5}")` from `.N()` while
+`.evaluate()` was correct (Tycho, against 0.112.0/0.113.0; the `re: null` is
+the same value the compiled real-lane `z·z`-on-an-object produces). The fast
+path now switches to the interpreted reducer at the first non-number result;
+pinned in `test/compute-engine/reduce-complex-accumulator.test.ts`. The
+COMPILED `Reduce` (`compile()` of the whole expression) is still the open
+defect above.
+
+**Intended resolution (2026-08-16): not another lane.** This is the sixth
+instance of the same design property — the per-node analysis guesses REAL
+for a wide-typed binding site — and the fix under consideration is a
+compile MODE that flips the default direction (`complex` mode: anything not
+provably real is complex; `real` mode: complex evidence fails closed;
+`auto` default). See `docs/plans/2026-08-16-compile-complex-mode.md`, which
+lists this item among the ones it retires and the decisions it needs (one
+knob or two, comparison semantics, cost). The per-item fix below is what to
+do if that design is declined.
+
 Fix shape (recommended, "one-step widening"): the accumulator's lane is
 complex when the seed is complex, or when the body's result is complex
 under (accumulator real, element at its lane) — monotone, so one
@@ -2324,7 +2346,7 @@ plain `Typed` usage rather than a record mechanism.
 Phase 1's serialization walk had already been switched to emit the
 `Dictionary` operator form for this reason.
 
-### Appendix B's mutability gate (B1) — the GATE SHIPPED 2026-08-16; the rebinding sugar's retirement is still open
+### Appendix B's mutability gate (B1) — SHIPPED 2026-08-16, sugar retired the same day
 
 **Status.** The gate itself landed (work package 2C commit 1):
 `mutabilityGate()` (the memoized predicate) / `mutabilityGateProblem()`
@@ -2341,17 +2363,23 @@ replacement/inheritance consequences). 45 tests across 7 files were migrated
 to object targets; the migration recipe is one line — declare the type as
 `object{…}`.
 
-**STILL OPEN: retiring the rebinding sugar** (`p.name = v` ⇝
-`p = «set name»(p, v)`, and with it `property-assignment-target-invalid`).
-The gate is what makes the sugar retirable — every legal receiver is now an
-object — but the lowering, its compiler path (`base-compiler.ts`) and
-Appendix A's variable-root restriction are untouched. Two consequences to
-clear with it: the compiled property-SET lowering is currently unreachable,
-because the only legal receivers are object types and objects have no
-compiled representation until Phase 4 (pinned as fail-closed in
-`test/compute-engine/protocol-dispatch-compile.test.ts`); and
-`xs[1].name = v` still reports `property-assignment-target-invalid` where
-Appendix B says a store into an object element should work.
+**The rebinding sugar retired the same day** (work package 2C commit 2).
+`p.name = v` no longer lowers to `p = «set name»(p, v)`: it is a STORE on
+every route, it evaluates to the value assigned rather than to whatever the
+`set` handler returns, and a non-object receiver is
+`immutable-value-assignment` at whichever of the two timings settles the
+target's type. Deleted with it: `protocolPropertyAssignment()` and its
+`'rebind'` verdict, `property-assignment-target-invalid` (all emission
+sites), and the registration check that forced an annotated `set` result to
+fit the receiver — a result nothing consumes cannot be constrained.
+`protocolPropertyStore()` in `src/compute-engine/engine-protocols.ts` is the
+replacement, reached from the third rung of `Assign`'s evaluate ladder.
+`xs[1].name = v` now stores into the element, as Appendix B says it should.
+The qualified spelling `p.(Named.name) = v` became the same store restricted
+to the named protocol (a fourth operand on `ProtocolProperty`). The compiled
+property-SET lowering, which had no reachable receiver anyway — objects have
+no compiled representation until Phase 4 — now fails closed (D6) with a
+message that no longer talks about rebinding.
 
 **Ruling: B1 stands as written.** A writable property is meaningful only on a
 mutable object, so a protocol with a `readwrite` property (or a member
@@ -2448,11 +2476,47 @@ tests were re-pointed to pin the fail-closed verdict instead
 claim they also carried was preserved by re-expressing it over a function
 member.
 
-Until the sugar retires, it ships alongside the property store. That is stable
-rather than broken — the store claims a name the object's own layout declares,
-the sugar serves everything else, and the dispatch guard in `library/core.ts`
-keeps them from fighting — but it is two mechanisms for one syntax, and Phase
-1D does not formally close until the sugar is gone.
+With the sugar gone there is one mechanism for the syntax, and Phase 1D of
+`docs/plans/2026-08-13-mutable-objects-implementation-plan.md` is formally
+closed.
+
+### A store through an UNANNOTATED parameter was not labelled at all (found and FIXED 2026-08-16)
+
+`function k(x) pure { x.id = "Z" }` was ACCEPTED, and calling it mutated the
+caller's object behind the `pure` contract:
+
+```epsil
+type M = object{id: string}
+function k(x) pure { x.id = "Z" }   // was accepted; now refused
+let m = M(id: "a")
+k(m)
+m.id                                 // was "Z" — mutated behind a `pure` contract
+```
+
+Both effect channels resolve the receiver from DECLARED types — inside an
+unentered `Function` literal there is no frame binding the parameters, so
+canonicalizing `x` reports `unknown` and decides nothing. With no evidence the
+assignment fell to the `scope` path, where `assignTargets()`
+(`boxed-expression/effects-inference.ts`) attributed it to the base symbol `x`
+— a parameter, hence confined — and the literal inferred no effect at all.
+
+**Fixed: an UNDECIDED receiver is treated as a store.** After the rebinding
+sugar retired, assignment through a `Field` target is a store and never a
+binding write, so a receiver nothing is known about is either a heap store or a
+runtime error — `state` is the sound over-approximation of both, and it is what
+refuses the `pure`. Applied on both channels, which must not disagree about the
+same assignment: `Walker.isFieldStore` (`effects-inference.ts`) and
+`isObjectFieldStore` (`effects-of.ts`). A receiver whose type IS decided and is
+not an object stays unlabelled — `p.name = v` on a record is
+`immutable-value-assignment`, which changes nothing.
+
+The alternative — refusing the confinement exemption, so the write reports
+`scope` — was rejected: `scope` claims a BINDING was written, which a store
+never does, and it trips the default-`!scope` ceiling, so the ordinary
+`function rename(x) { x.id = "X" }` would have been refused outright and forced
+to carry a label that misdescribes it. `state` does not trip that ceiling, so
+the bare definition installs and works; it is pinned along with the refusal in
+`test/compute-engine/protocol-property-effects.test.ts`.
 
 ### `readonly` in a protocol does not stop a holder of the OBJECT from writing the field (found 2026-08-16, OPEN — needs a product ruling)
 
@@ -2471,13 +2535,13 @@ reads `"Ada"`. But `p.name = "Grace"` stores straight through the object's
 layout and succeeds: it never consults `Named` at all.
 
 Measured while pinning this, and part of the same surface problem: the Epsil
-spelling `p.(Named.name) = "Grace"` does not reach that readonly refusal at all.
-It is rejected earlier by `property-assignment-target-invalid`, identically for
-a `readwrite` protocol, with a message — "the protocol property `Named.name` can
-only be assigned through a variable: `p.name = …` rebinds `p`, and only a
-binding can be rebound" — that talks about REBINDING, which is not what an
-object receiver does, and that steers the author to `p.name = …`: the exact
-write that bypasses `readonly`.
+spelling `p.(Named.name) = "Grace"` DOES now reach that readonly refusal — with
+the sugar retired it lowers to `ProtocolProperty("Named", "name", p, "Grace")`,
+the protocol view, and answers `protocol-property-readonly-set`. So the two
+spellings of one write disagree: the qualified one is refused, the unqualified
+`p.name = "Grace"` stores straight through the layout and succeeds. That is the
+surprise stated sharply rather than a second defect, and it is what the
+alternatives below have to resolve.
 
 Kept for now, and the reasons are real. Two protocols may legitimately see one
 field with different mutability — a type can conform to a `readonly Named` and
