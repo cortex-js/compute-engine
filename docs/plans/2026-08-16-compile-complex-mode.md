@@ -1,8 +1,15 @@
 # Compile-time complex arithmetic as a MODE, not a per-node guess
 
-Status: DESIGN, revision 5 (2026-08-16). Not started. Rev 4 was read by
-the Tycho team (via CE-POC); rev 5 folds their three requirements and one
-design limit (marked **[field]**); §10 lists what is still asked of them.
+Status: DESIGN, revision 6 (2026-08-16) — the implementation baseline. Rev 4
+was read by the Tycho team (via CE-POC); rev 5 folded their requirements and
+field data (marked **[field]**); rev 6 is the final dual-review pass (13
+findings, `docs/scratch/2026-08-16-compile-complex-mode_SPEC_REVIEW.md`
+round 3): post-rename drift removed, the accumulator boundary reconciled with
+the shipped `combinerPlan`, and every default an implementer would otherwise
+guess at stated. Two API shapes in this revision are the author's defaults,
+not rulings, and can be vetoed before step 1 lands: `result.diagnostic`
+(structured decline payload beside the unchanged `error: string`, §4) and
+`result.promoted` (the promotion-without-escalation signal, §4).
 Review history: `docs/scratch/2026-08-16-compile-complex-mode_SPEC_REVIEW.md`
 (two dual-review rounds, 28 findings, all folded in). Field data from Tycho
 against the released 0.113.0 (relayed by CE-POC 2026-08-16) is folded in
@@ -230,18 +237,18 @@ are grounded, not sketched. The `auto` column also shows `result.mode`.
 | input            | today (default)                       | `mode: 'strict'`                                    | `mode: 'auto'` (default)                                                   | `mode: 'complex'`                                     | value at `a = −2` / `z = 1+2i`              |
 | ---------------- | ------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------- |
 | `2a + 1`         | `2 * _.a + 1`                         | same                                              | same — `mode: 'strict'`                                                       | `_SYS.cadd(_SYS.cmul(2, _SYS.cplx(_.a)), 1)` → boundary → `number` | `−3` in every setting                     |
-| `√a`             | `Math.sqrt(_.a)`                      | same (`NaN` for negative `a`)                     | PROMOTED: `_SYS.csqrt({re: _.a, im: 0})` — `mode: 'strict'`, no escalation   | `_SYS.csqrt(_SYS.cplx(_.a))`                          | real: `NaN`; auto/complex: `{re: 0, im: 1.414…}` |
-| `\|√a\|`         | `Math.abs(Math.sqrt(_.a))`            | same (`NaN`)                                      | `_SYS.cabs(_SYS.csqrt({re: _.a, im: 0}))` — `mode: 'strict'`; result is a `number` (`Abs` is real-typed) | `_SYS.cabs(_SYS.csqrt(_SYS.cplx(_.a)))`  | real: `NaN`; auto/complex: `1.414…` (a number) — Tycho's `\|w(t)[1]/2 − 1\|` witness is this row |
+| `√a`             | `Math.sqrt(_.a)`                      | same (`NaN` for negative `a`)                     | PROMOTED: `_SYS.csqrt({re: _.a, im: 0})` — `mode: 'strict'`, no escalation   | `_SYS.csqrt(_SYS.cplx(_.a))`                          | strict: `NaN`; auto/complex: `{re: 0, im: 1.414…}` |
+| `\|√a\|`         | `Math.abs(Math.sqrt(_.a))`            | same (`NaN`)                                      | `_SYS.cabs(_SYS.csqrt({re: _.a, im: 0}))` — `mode: 'strict'`; result is a `number` (`Abs` is real-typed) | `_SYS.cabs(_SYS.csqrt(_SYS.cplx(_.a)))`  | strict: `NaN`; auto/complex: `1.414…` (a number) — Tycho's `\|w(t)[1]/2 − 1\|` witness is this row |
 | `√(−2)`          | `({re: 0, im: 1.414…})`               | same — PROVABLY negative is complex-shaped statically, in every setting | same                                             | same                                                  | `{re: 0, im: 1.414…}`                       |
 | `√z`             | `_SYS.csqrt(_.z)`                     | same — typed complex is complex in every setting  | same                                                                       | same                                                  | `{re: 1.27…, im: 0.78…}`                    |
 | `z² + z`         | complex `_re/_im` split-scalar block  | same (this is the fractal iteration's shape)      | same — `mode: 'strict'`                                                       | same                                                  | `{re: −2, im: 6}`                           |
 | `b(a)`           | `_fn_b(_.a)`, `_fn_b = (x) => 2 * x`  | same                                              | same — `mode: 'strict'`                                                       | `_fn_b(_.a)`, `_fn_b = (x) => cmul(2, cplx(x))`       | `−4` (complex mode: `number` at the boundary) |
-| `b(√a)`          | `_fn_b(Math.sqrt(_.a))` (`NaN` for negative `a`) | same (`NaN`; no promotion, no mismatch)   | promoted `√a` meets wide `x` → `LaneMismatch` → ESCALATES — `mode: 'complex'`, `escalation.boundary = 'user-function parameter'` | `_fn_b(_SYS.csqrt(cplx(_.a)))`, complex-lane `_fn_b` | real: `NaN`; auto/complex: `{re: 0, im: 2.828…}` |
-| `b(z)`           | `_fn_b$z1(_.z)` (the 2026-08-15 lane specialization) | `LaneMismatch` DECLINE — "complex-shaped `z` bound to wide parameter `x` of `b`; declare `x` complex or compile with `mode: 'complex'`" (GLSL declines the same call today) | ESCALATES — `mode: 'complex'` | `_fn_b(_.z)`, complex-lane `_fn_b`          | real: declined; auto/complex: `{re: 2, im: 4}` |
-| `√a < 2`         | `Math.sqrt(_.a) < 2`                  | same (`false` for negative `a`: `NaN < 2`)        | promoted operand → D2 runtime rule: `(_t = csqrt(…), _t.im === 0 && _t.re < 2)` — `mode: 'strict'`; today's `complexPromotion` DECLINES this (Tycho's ordering-decline class) | same runtime rule                          | real: `false`; auto/complex: `false` — and `true` at `a = 1` in all |
+| `b(√a)`          | `_fn_b(Math.sqrt(_.a))` (`NaN` for negative `a`) | same (`NaN`; no promotion, no mismatch)   | promoted `√a` meets wide `x` → `LaneMismatch` → ESCALATES — `mode: 'complex'`, `escalation.boundary = 'user-function parameter'` | `_fn_b(_SYS.csqrt(cplx(_.a)))`, complex-lane `_fn_b` | strict: `NaN`; auto/complex: `{re: 0, im: 2.828…}` |
+| `b(z)`           | `_fn_b$z1(_.z)` (the 2026-08-15 lane specialization) | `LaneMismatch` DECLINE — "complex-shaped `z` bound to wide parameter `x` of `b`; declare `x` complex or compile with `mode: 'complex'`" (GLSL declines the same call today) | ESCALATES — `mode: 'complex'` | `_fn_b(_.z)`, complex-lane `_fn_b`          | strict: declined; auto/complex: `{re: 2, im: 4}` |
+| `√a < 2`         | `Math.sqrt(_.a) < 2`                  | same (`false` for negative `a`: `NaN < 2`)        | promoted operand → D2 runtime rule: `(_t = csqrt(…), _t.im === 0 && _t.re < 2)` — `mode: 'strict'`; today's `complexPromotion` DECLINES this (Tycho's ordering-decline class) | same runtime rule                          | strict: `false`; auto/complex: `false` — and `true` at `a = 1` in all |
 | `i < 2`          | declines                              | declines (statically non-real, D2)                | declines                                                                   | declines                                              | —                                           |
 | `a < 3`          | `_.a < 3`                             | same                                              | same                                                                       | `_t = cplx(_.a); _t.im === 0 && _t.re < 3` (D2)       | `true`                                      |
-| `Reduce(L, (p, x) ↦ p + 2x, 0)` | compiled `p + 2x` real-lane: `"[object Object]0"` (open defect) | seed `0` real, combiner RESULT complex-shaped → `LaneMismatch` DECLINE at the accumulator | ESCALATES — `mode: 'complex'` | accumulator complex; correct                | auto/complex: `2 + 6i` for `L = [1+2i, i]`  |
+| `Reduce(L, (p, x) ↦ p + 2x, 0)` | `2 + 6i` — `combinerPlan` (shipped 2026-08-16) widens the accumulator lane and lifts the seed | same — this boundary computes both lanes on the current compiler and never mismatches (§3) | same — `mode: 'strict'`, no escalation, `promoted: false` | same | `2 + 6i` in every setting for `L = [1+2i, i]` |
 | `K(n, z) := if n ≤ 0 then z else K(n−1, z)² + c` typed `(integer, complex) -> complex`, `K(10, x + i·y)` | complex-lane `_fn_K` | same — every value typed complex, no wide binding, no promotion; `mode: 'strict'`; identical on GLSL (`vec2`) | same, `mode: 'strict'` | same | the fractal (unchanged, digit parity) |
 | the same `K` with `z` UNANNOTATED, called `K(10, x + i·y)` | `_fn_K$z01` (yesterday's lane specialization) | `LaneMismatch` DECLINE — complex-shaped argument to wide `z` | ESCALATES — `mode: 'complex'` | complex-lane `_fn_K` | same fractal, via escalation |
 
@@ -353,56 +360,89 @@ includes promoted heads); "wide" means a numeric binding not typed complex;
 | recursive self-call                                             | falls out of the parameter rule                                       | falls out                                                | falls out                                     |
 | `Block` local (`Declare`/`Assign`, later mutation)              | a local's shape is its FIRST binding's shape (`noteLocalComplex`); a later complex-shaped assignment to a real-shaped local DECLINES | `Declare(z, complex, 2)` and a later real assignment to a complex local lift | lift at use |
 | callback element parameter (`Map`/`Filter`/…)                   | element type complex → parameter complex (today's element inference); a wide parameter over a complex-typed source DECLINES | a real element of a typed-complex collection lifts at the read | lift at use |
-| `Reduce`/`Scan` accumulator                                     | IMPLEMENTED 2026-08-16 (`combinerPlan`): the accumulator lane is the seed's, widened once by the body's result; the combiner is compiled under that lane, and a real seed into a complex lane is lifted — so this row never mismatches: it is the one boundary that already computes both lanes correctly | a real seed to a complex accumulator lane lifts (`_SYS.cplx`) | as implemented |
+| `Reduce`/`Scan` accumulator                                     | IMPLEMENTED 2026-08-16 on the JavaScript and Python targets (`combinerPlan`): the accumulator lane is the seed's, widened once by the body's result; the combiner is compiled under that lane, and a real seed into a complex lane is lifted — so on those targets this row never mismatches. The GPU targets have no `combinerPlan` and DECLINE the shape (§9 step 5) | a real seed to a complex accumulator lane lifts (`_SYS.cplx`) | as implemented |
 | collection element (`List`/`Tuple` literal, `At`)               | element-by-element as today; an `At` whose element shapes DISAGREE declines as today (`assertNoAmbiguousComplexElementRead`) | a real element read as complex lifts | every wide element lifts at use               |
 | `Which`/`If` arms                                               | today's arm coercion (item 60): a provably-real arm beside a complex one is lifted; unchanged | unchanged                             | unchanged                                     |
 | result of the compiled unit                                     | typed/promoted complex → `{re, im}`; boolean → boolean; number → number | —                                                       | §5 convention                                 |
 
 ## 4. `LaneMismatch`: the decline, its payload, and the retry site
 
-- A named `Error` subclass, `LaneMismatchError`, with a stable `code:
-  'lane-mismatch'` and a structured payload: the boundary kind (a §3 row),
-  the binding (function and parameter name, local, accumulator, …), the
-  complex-shaped VALUE's expression, and the mode that would have compiled
-  it (`'complex'`). Its message is human-readable and names the fix
-  ("declare `x` complex, or compile with `mode: 'complex'`").
+- **`LaneMismatchError`** — a named `Error` subclass with `code:
+  'lane-mismatch'` and a structured payload `{ boundary, binding, value,
+  kind: 'correctness', message }`: `boundary` is a §3 row name; `binding` is
+  USER-LEGIBLE by contract [field] — an authored identifier (the parameter
+  `x` of `b`, the local `k`, the symbol `w`), or, where the binding has no
+  authored name, an honest description ("an unnamed parameter of `b`",
+  "the accumulator of the `Reduce`", "element 2 of the list") — never a
+  compiler-internal spelling (`_t3`, `_tv1`, `_fn_b`); `value` is the
+  complex-shaped expression's LaTeX; `message` names the fix ("declare `x`
+  complex, or compile with `mode: 'complex'`"). Row identity is NOT in the
+  payload: the consumer's seam calls `compile` per row and already knows
+  which row; what it cannot reconstruct is a name a user recognizes, and
+  "your document moved to the CPU because of `_t3`" is worse than saying
+  nothing.
+- **Result fields (JavaScript, Python, interval-js — every target that
+  returns a `CompilationResult`).** `CompilationResult` gains:
+  - `mode: 'strict' | 'complex'` — the discipline the returned code was
+    compiled under;
+  - `promoted: boolean` — whether any promotable head was lowered through a
+    complex kernel (the §2 promotion set); the signal a consumer needs to
+    tell "this row would have been real on the shader lane" WITHOUT an
+    escalation (`|√a|` under `auto`: `mode: 'strict'`, `promoted: true`, no
+    `escalation`) — required by §7's document-scoped lane selection [field];
+  - `escalation?: CompileDiagnostic` — present when `auto` escalated: the
+    diagnostic of the FAILED strict attempt (so `binding` and `boundary`
+    say why);
+  - `diagnostic?: CompileDiagnostic` — present on any decline (`success:
+    false`), structured beside the unchanged human-readable `error: string`
+    (which stays a string: three targets string-interpolate it into their
+    fallback warnings today, and widening it would print `[object Object]`
+    — the very shape bug this design removes).
+  `CompileDiagnostic = { code: string; kind: 'capability' | 'correctness';
+  message: string; boundary?: string; binding?: string; value?: string }`.
+  Every decline carries `kind` per the table below, so a consumer's census
+  never re-cuts a taxonomy after the fact.
+- **`kind` table (exhaustive):** `LaneMismatch` → `correctness` (a value
+  the previous release computed wrongly is withdrawn); the D2 COMPILE-TIME
+  decline for a statically non-real operand (`Less(i, 2)`) → `capability`
+  (nothing wrong was ever computed; the expression has no compiled value);
+  "mode not offered on this target" (`complex` on `glsl`) → `capability`;
+  every retained pre-existing fail-closed decline → `capability`. The D2
+  RUNTIME rule is not a decline (it compiles). Consequently §1's sentence
+  reads precisely: `auto` escalates the `LaneMismatch` correctness declines
+  and D2's runtime rule removes the capability declines that were ordering
+  comparisons over a maybe-complex operand; the static-non-real D2 declines
+  and the target-capability declines remain, loudly, in every mode.
 - **One catch-and-retry site:** `compile()` in `compile-expression.ts`, the
   public entry, around the target compile — for the registered-target route
   AND the direct-target route (which today bypasses `languageTarget.compile`
   and reaches `BaseCompiler.compileRoot` with no catch of its own; it is
-  routed through the same wrapper). Targets never retry themselves.
-- **Observability [field requirement]:** `CompilationResult` gains
-  `mode: 'strict' | 'complex'` (the mode actually used) and, when `auto`
-  escalated, `escalation: { boundary, binding, value }` — the payload above.
-  **`binding` is USER-LEGIBLE by contract [field]:** it names an AUTHORED
-  identifier (the parameter `x` of `b`, the local `k`, the symbol `w`), or,
-  where the binding has no authored name, an honest description of an
-  unnamed one ("an unnamed parameter of `b`", "the accumulator of the
-  `Reduce`", "element 2 of the list") — never a compiler-internal spelling
-  (`_t3`, `_tv1`, `_fn_b`). The consumer's seam calls `compile` per row, so
-  it already knows WHICH row; what it cannot reconstruct is a name a user
-  recognizes, and "your document moved to the CPU because of `_t3`" is
-  worse than saying nothing. Row identity is therefore NOT part of the
-  payload. Every decline this design emits — `LaneMismatch`, the D2
-  compile-time decline for a statically non-real operand, and the existing
-  fail-closed declines it keeps — also carries `kind: 'capability' |
-  'correctness'` (§1's distinction), so a consumer's census can count the
-  two apart without re-cutting a taxonomy after the fact.
-  A decline that is NOT escalated (strict mode forced; a target that offers no
-  complex mode) surfaces the same payload in `result.error`. A consumer can
-  say "this went the slow way, and here is why", and — for a consumer whose
-  seam chooses targets per row — WHICH row and why (§7).
+  routed through the same wrapper). Targets never retry themselves. **The
+  retry runs on FRESH compilation state:** a `LaneMismatch` can be thrown
+  after the failed attempt has populated mutable target state (helper
+  preamble, user-function definitions, temp-name counter, CSE session,
+  bound-variable frames). For a registered target the wrapper constructs a
+  new per-compilation target as it does today; for a DIRECT target (a
+  caller-owned `CompileTarget`) escalation requires the target to declare
+  `'auto'` in `supportedModes` AND provide `reset()` (drop everything the
+  failed attempt wrote) — without it `auto` on that target resolves to
+  `strict` (§6) and a `LaneMismatch` is reported, not retried.
 - `interval-js` declines by returning `success: false` without throwing
   (documented in `compile-expression.ts`); it is excluded from escalation by
-  construction and reports the payload in `error`.
+  construction and reports the payload in `diagnostic`.
 
 ## 5. The option surface: ONE knob (ruled)
 
-- `mode?: 'strict' | 'complex' | 'auto'` (default `'auto'`) — the ONLY option,
-  on `CompileExpressionOptions` and on `CompileTarget` (the target field
-  replaces `complexPromotion`). Precedence: an explicit options-level `mode`
-  wins over a target-level one; a target-level `mode` is the default for
-  compilations through that target.
+- `mode?: 'strict' | 'complex' | 'auto'` — the ONLY option, on
+  `CompileExpressionOptions` and on `CompileTarget` (the target field
+  replaces `complexPromotion`). **Effective mode** = `options.mode` ??
+  `target.mode` ?? (`'auto'` if the target's `supportedModes` includes it,
+  else `'strict'`); the registered `javascript`/`python` targets support all
+  three, so their default is `auto`; `interval-js`, `glsl`, `wgsl` support
+  `['strict']`, so their default is `strict`; a direct/custom target
+  declares its own (default `['strict']`). A requested mode the target does
+  not support is a `capability` DECLINE at option validation — never a
+  silent coercion.
 - **Result convention (JavaScript runner): a value whose imaginary part is
   EXACTLY zero comes back as a plain `number`; otherwise as `{re, im}`
   (`ComplexResult`) — and, as a GUARANTEE in both directions [field]: a
@@ -449,11 +489,11 @@ content is a one-line consumer test once the kernels own their dust.
 
 | Target                 | `strict`                                                               | `complex`                                                              | `auto`                                              |
 | ---------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------- |
-| `javascript`           | §2/§3, `ComplexResult` at the boundary                                 | §2/§3, `_SYS.cplx` at use, §5 result convention                        | real + promotion, escalate on `LaneMismatch`        |
-| `python`               | same rules; complex values are native Python `complex` in the emitted source (source-only: no runner, no `{re, im}`, no D3 entry check — the caller's Python runtime does what it does) | wide operands lifted with `complex(x)` at use; native results | as JS; escalation is a second source emission |
-| `interval-js`          | real only (intervals are real); a complex-shaped value anywhere DECLINES with the §4 payload | not offered: `mode: 'complex'` DECLINES with a message | real, no promotion; a `LaneMismatch` DECLINES (no escalation target) |
-| `glsl` / `wgsl`        | this IS the model: `vec2` for typed/provably-negative complex, `float` for wide, typed signatures check every call (`gpu-target.ts` unchanged in substance) | not offered in this design: DECLINES with a message (a `vec2`-everywhere shader mode is a possible follow-up, not promised) | real, no promotion (item-144 pins bind); a `LaneMismatch` DECLINES with the §4 payload |
-| direct / custom target | inherits the base compiler's rules; declares `supportedModes` (default `['strict']`) | offered only if the target ALSO provides the two hooks below; validated at declaration | as declared |
+| `javascript`           | §2/§3, `ComplexResult` at the boundary                                 | §2/§3, `_SYS.cplx` at use, §5 result convention                        | strict + promotion, escalate on `LaneMismatch`      |
+| `python`               | same rules; complex values are native Python `complex` in the emitted source (source-only on success: no runner, no `{re, im}`, no D3 entry check — the caller's Python runtime does what it does; a `fallback: true` DECLINE still gets the shared interpreter-backed `run`, D7) | wide operands lifted with `complex(x)` at use; native results | as JS; escalation is a second source emission |
+| `interval-js`          | real only (intervals are real); a complex-shaped value anywhere DECLINES with the §4 payload | not offered: `mode: 'complex'` DECLINES with a message | strict, no promotion; a `LaneMismatch` DECLINES (no escalation target) |
+| `glsl` / `wgsl`        | this IS the model: `vec2` for typed/provably-negative complex, `float` for wide, typed signatures check every call (`gpu-target.ts` unchanged in substance) | not offered in this design: DECLINES with a message (a `vec2`-everywhere shader mode is a possible follow-up, not promised) | strict, no promotion (item-144 pins bind); a `LaneMismatch` DECLINES with the §4 payload |
+| direct / custom target | inherits the base compiler's rules; declares `supportedModes` (default `['strict']`, which is then its effective default mode) | offered only if the target ALSO provides the two hooks below; validated at declaration | offered only with `'auto'` declared AND a `reset()` hook (§4 fresh-state retry); otherwise resolves to `strict` |
 
 A custom target that declares `'complex'` or `'auto'` must provide
 `complexLift(code)` (the idempotent number → complex lift, `_SYS.cplx`'s
@@ -481,9 +521,11 @@ consequence): **make lane selection DOCUMENT-scoped once promotion is
 active** — if any row of a document escalates (or is promoted), the whole
 document runs on the JS lane; a per-row semantic inconsistency becomes one
 per-document decision, explainable to a user in a sentence. What this design
-owes them for that to work is exactly §4: the decline/escalation payload
-carries WHICH row (expression) escalated and WHY, so the seam can act
-document-wide and explain an unrequested GPU→CPU fallback. Its cost — a
+owes them for that to work is exactly §4: `result.promoted` and
+`result.escalation` tell the seam, PER ROW IT COMPILED, that the row would
+not be real on the shader lane and why (a user-legible `binding`), so it can
+act document-wide and explain an unrequested GPU→CPU fallback; the seam
+supplies row identity itself. Its cost — a
 document with one promoted row loses GPU acceleration for all rows — is
 unmeasured; they will measure it on the corpus together with the
 provable-real fraction (§10) before committing.
@@ -526,7 +568,14 @@ compile-time cost is the second compile on escalation.
   is bound to a temporary ONCE, in interpreter order; a comparison yields
   `false` and an integer head yields `NaN` when any operand's imaginary part
   is non-zero (exact test — the kernels own their dust, §5); relational
-  chains keep their short-circuit order.
+  chains keep their short-circuit order. **Lazily-evaluated positions keep
+  their laziness:** for `If`/`Which`/`And`/`Or`/`Not`, the guard is emitted
+  WHERE the native lowering evaluates that operand (inside the branch or the
+  short-circuit arm), never hoisted ahead of it — `And(False, Random() <
+  z)` draws nothing, exactly as today; and a statically non-real operand in
+  an UNREACHED position (`Or(True, i < 2)`) is still the compile-time
+  decline (static analysis does not reason about reachability; the
+  interpreter's symbolic result has no compiled analog).
 - in strict mode nothing changes.
 Expected effect [field]: Tycho's ordering-comparison declines under
 promotion (`{y > \sqrt{x}}`-shaped restrictions; 15 measured on 0.112.0,
@@ -554,64 +603,89 @@ call.
 
 **D6 — heads with real-only lowerings** (`Erf`, `Gamma`, `Zeta`, the
 Bessel/Airy family — the list `compile-expression.ts` documents as failing
-closed on a complex operand): in strict mode unchanged; in complex/auto mode
-a wide or promoted operand takes the D2 runtime rule — bind once, run the
-real helper when the imaginary part is zero, `NaN` otherwise — so `Erf(x)`
-in a complex-mode document still compiles.
+closed on a complex operand): in strict mode unchanged (a typed-complex or
+provably-non-real operand fails closed as today); in complex/auto mode EVERY
+operand that may be complex in that mode — wide, promoted, or
+`complex`-TYPED — takes the D2 runtime rule (bind once, run the real helper
+when the imaginary part is zero, `NaN` otherwise), so `Erf(x)` compiles in a
+complex-mode document and answers `erf(0.5)` for a `complex`-typed `x`
+holding `0.5` and `NaN` at `x = i`; a STATICALLY non-real operand
+(`Erf(2i)`) is the compile-time D2 decline in every mode.
 
-**D8 — effects.** The compiler is already effect-aware, and the mode
-design changes none of it: `tryConstantFold` refuses an impure subtree
-(`Random(…)` keeps drawing at run time); the relational-chain lowering
-binds impure operands once, in argument order, so a shader draws once and
-in the right order (`bindExpr`); and an expression whose effect set
-includes `random` fails closed when a non-default kernel is installed
-(`docs/EFFECTS-MODEL.md`). Two consequences to state, both already implied
-above: (i) `auto`'s second compile is side-effect-free — compilation
-evaluates nothing impure (the fold gate sees to it), so escalating costs
-compile time only, never a repeated draw or a repeated write; (ii) D2's and
-D6's runtime realness tests, and complex mode's lift-at-use, are emitted
-over the ONE bound temporary of an operand, never over a re-evaluation of
-it — an impure operand under `√(Random()) < 2` draws exactly once, in
-every setting (a §9 witness). A body with effects (`Assign` to a captured
-symbol, an `object-store` write) is unaffected by the mode: shape is about
-values, and the effect discipline is orthogonal.
-
-**D7 — fallback (JavaScript runner only).** A strict-mode decline with
-`fallback: true` goes to the interpreter fallback as today, with two fixes:
-(input) `buildInterpreterFallback` declares each var from the RUNTIME SHAPE
-of the value it is handed (`complex` for a `{re, im}`, `number` for a
-number) instead of the hardcoded `'number'`; (output) the scalar result is
-normalized by the §5 convention instead of the unconditional `.N().re`.
-Under `auto` a `LaneMismatch` escalates BEFORE any fallback is consulted.
-Source-only targets (`python`, the shaders) have no runner: `fallback` is
-irrelevant to them and the decline is reported; `interval-js` keeps its
-non-throwing decline. Every §9 witness states its `fallback` setting.
+**D7 — fallback.** `BaseCompiler.buildInterpreterFallback` is ONE shared
+function, reached by `javascript-target.ts`, `python-target.ts`,
+`gpu-target.ts`, `interval-javascript-target.ts` and the direct route in
+`compile-expression.ts`: every target's `fallback: true` decline gets a
+JS-interpreter-backed `run` from it, source-only targets included. Its two
+fixes therefore land once and apply everywhere: (input) each var is declared
+from the RUNTIME SHAPE of the value it is handed (`complex` for a `{re,
+im}`, `number` for a number) instead of the hardcoded `'number'`; (output)
+the scalar result is normalized by the §5 convention (`number` when the
+imaginary part is exactly zero, `ComplexResult` otherwise, boolean stays)
+instead of the unconditional `.N().re`. Per target: `javascript` and the
+direct route return that runner as-is; `interval-js` keeps wrapping it in
+its own interval-shaped runner (as it does today); `python`, `glsl` and
+`wgsl` return it as-is too — a `fallback: true` decline on a source-only
+target has always returned a JS runner, and it now returns a correct value
+(possibly a `ComplexResult`) where it returned a projected number; the
+successful-compile contract of those targets (no runner, native complex in
+the source) is untouched. Under `auto` a `LaneMismatch` escalates BEFORE any
+fallback is consulted. Every §9 witness states its `fallback` setting.
 
 ## 9. Migration and regression suite
 
-Migration order:
-1. `mode` end to end (options → target → `BaseCompiler` static, read once);
-   the deprecated mappings and warnings of §5; `LaneMismatchError` and the
-   single retry site (§4); result `mode`/`escalation` fields; D7 input and
-   output fixes; kernel-owned dust chop and exact boundary test (§5);
-   internal `realOnly` callers migrated. Emitted code unchanged.
-2. Strict mode: the §3 DECLINES where JS lacks them (parameter, value
-   position, multi-clause, protocol, block re-binding, callback element,
-   accumulator), the D3 entry check both directions. Behavior change: shapes
-   that were silently `NaN` now decline loudly — each becomes an `auto`
-   escalation in step 4.
-3. Complex mode: `isComplexValued` answers `true` for a wide numeric value;
-   `_SYS.cplx` at every wide numeric use; single-lane user-function emission
-   with the boundary lift; D2/D6 runtime rules. Remove, in this order, each
-   mechanism §1 lists as patching the guess, running the complex test files
-   after each removal (`compile-complex.test.ts`,
-   `compile-complex-element-access.test.ts`, `compile-complex-result.test.ts`,
-   `fractals.test.ts`, the item 57–65/190 blocks, `list-parameter-indexing.test.ts`,
-   `multi-clause-compile.test.ts`, `protocol-dispatch-compile.test.ts`). A
-   test that pinned an emitted NAME (`_fn_K$z01`, `_fn_b$z1`) is rewritten to
-   pin the VALUE.
-4. `auto` = real + promotion, escalate on `LaneMismatch`.
-5. GPU route: the accumulator decline row (the only §3 row it lacks — see
+Migration order — four separately stageable units, each with its own gate
+and a stated observable change; nothing in an earlier step depends on a
+later one being present:
+
+1. **Plumbing, no behavior change.** `mode` accepted end to end (options →
+   target → `BaseCompiler` static, read once) with the effective-mode
+   resolution of §5; `LaneMismatchError` and `CompileDiagnostic` types;
+   `mode`/`promoted`/`escalation`/`diagnostic` result fields (`mode` reports
+   `'strict'`, `promoted: false`, until later steps); the D7 input/output
+   fixes in `buildInterpreterFallback`; the transcendental `_SYS` kernels
+   chop their own dust and the boundary tests `im !== 0` exactly (§5);
+   internal `realOnly` callers migrated to a local numeric projection. In
+   this step `mode: 'complex'` and `mode: 'auto'` are ACCEPTED but behave as
+   `strict` (no promotion, no retry), and `complexPromotion`/`realOnly` are
+   still honored exactly as today (their deprecation mapping arrives in step
+   4). Emitted arithmetic is unchanged; the runtime helper preamble and the
+   runner's result normalization ARE changed (kernel chop, D7), which is the
+   step's whole observable surface. Gate: the "Options" witnesses that apply
+   to step 1 (accepted values, effective-mode resolution, unsupported-mode
+   decline), the D7 witnesses, the "Result convention" witnesses
+   (`arcsin(0.5)` a number; `1 + 1e-12i` an object), plus the full
+   `compile-complex*.test.ts` and `fractals.test.ts` files unchanged.
+2. **Strict discipline.** The §3 DECLINES where JS/Python lack them
+   (user-function parameter, value position, multi-clause, protocol, block
+   re-binding, callback element) with `LaneMismatchError` payloads, and the
+   D3 entry checks both directions. Observable change: shapes that were
+   silently `NaN` now decline loudly under every mode (nothing escalates
+   yet). Gate: the "Strict mode declines" witnesses, D3, and the
+   "Strict mode keeps today's typed-complex programs" witnesses.
+3. **Complex discipline.** `isComplexValued` answers `true` for a wide
+   numeric value under `mode: 'complex'`; `_SYS.cplx` at every wide numeric
+   use; single-lane user-function emission with the boundary lift; D2/D6
+   runtime rules. Remove, in this order, each mechanism §1 lists as
+   patching the guess, running the complex test files after each removal
+   (`compile-complex.test.ts`, `compile-complex-element-access.test.ts`,
+   `compile-complex-result.test.ts`, `fractals.test.ts`, the item 57–65/190
+   blocks, `list-parameter-indexing.test.ts`, `multi-clause-compile.test.ts`,
+   `protocol-dispatch-compile.test.ts`). A test that pinned an emitted NAME
+   (`_fn_K$z01`, `_fn_b$z1`) is rewritten to pin the VALUE. Observable
+   change: `mode: 'complex'` now computes. Gate: the "Complex mode result
+   convention", D2, D6, D8 and "Non-numeric wide bindings" witnesses.
+4. **`auto` and the option surface.** `auto` = strict + promotion (the §2
+   promotable set lowered through the complex kernels, `promoted: true`),
+   escalating on `LaneMismatch` through the single retry site on fresh
+   state (§4); `complexPromotion` → `mode: 'complex'` alias with warning;
+   `realOnly` → transitional projection with warning; `auto` becomes the
+   effective default on targets that support it. Observable change: the
+   default now promotes unknown-sign radicals and escalates the step-2
+   declines. Gate: the "`auto` — three outcomes" witnesses, the D2 corpus
+   block, and the remaining "Options" witnesses.
+5. GPU route: an accumulator-lane decline (`combinerPlan` has no GPU
+   equivalent; the multi-clause and protocol rows do not exist there — see
    §6); `mode: 'complex'` declines with a message; `interval-js` likewise.
 6. D1 measurement BEFORE/AFTER; split-scalar emission audit.
 7. Docs (`doc/13-guide-compile.md`: "Real-Only Mode" → result convention; a
@@ -630,28 +704,38 @@ noted):
 - **Strict mode keeps today's typed-complex programs, on JS and GLSL:**
   `fractals.test.ts` with digit parity and unchanged code (assert on emitted
   code, not timing); the item 57–60 tests; the wide-typed pass-through arm
-  `K2`; `id(x) := x` over a complex argument in complex mode.
-- **Strict mode declines, loudly, with the §4 payload naming the boundary:**
-  `b(w)`, `b(t + w)`, `h(w, 2)`, `h(2, w)`, `b(L)` and `Map(b, L)` for `L:
-  list<complex>`, `Reduce(L, h, 0)` and `Reduce(L, (a, x) ↦ a + 2x, 0)`,
-  `Scan(L, h, 0)`, the multi-clause and protocol-member cases, the block
-  re-binding case — on `javascript` AND `glsl` (same payload class).
+  `K2`; `id(x) := x` over a complex argument in complex mode; and the
+  `Reduce`/`Scan` accumulator shapes (`Reduce(L, h, 0)` → `2 + 6i`,
+  `Reduce(L, (a, x) ↦ a + 2x, 0)`, `Reduce(L, h, 1+i)` → `3 + 7i`,
+  seedless `Scan(L, h)` → `[1+2i, 1+4i]`, `Scan(L, Add, 0)`) — correct in
+  EVERY mode with `mode: 'strict'`, no `escalation`, `promoted: false`
+  (`combinerPlan`, already shipped).
+- **Strict mode declines, loudly, with the §4 payload naming the boundary
+  — target-specific:** on `javascript` and `python`: `b(w)`, `b(t + w)`,
+  `h(w, 2)`, `h(2, w)`, `b(L)` and `Map(b, L)` for `L: list<complex>`, the
+  multi-clause and protocol-member complex-parameter cases, the block
+  re-binding case; on `glsl`: `b(w)`, `h(w, 2)`, `b(L)` (the boundaries the
+  GPU route reaches — same payload class), while a multi-clause or protocol
+  call on `glsl` keeps its existing "unsupported" diagnostic (`kind:
+  'capability'`), and the accumulator shape declines there per step 5.
 - **`auto` — three outcomes, each observable on `result.mode` /
-  `result.escalation`:** (i) ESCALATES exactly the decline witnesses above
-  (`result.mode === 'complex'`, `escalation.boundary` set) and matches the
-  interpreter — `b(w)` → `2 + 4i`, `Reduce(L, h, 0)` → `2 + 6i`, `Scan` →
-  `[2+4i, 2+6i]`, the block-shadow case → `7`, and `|b(a(t))/2 − 1|` at
-  `t = 0.3` → `1.3038404810405297` (a PROMOTED value reaching `b`'s wide
-  parameter is a lane mismatch); (ii) PROMOTES without escalating
-  (`result.mode === 'strict'`, no `escalation`): `|√(t−1)|` → the number
-  `0.83666…`, `Re(√(t−1))` → `0`, `(√(t−1))²` → `−0.7`, `m(t) := n(t) + 1`
-  with `n(t) := √(t−1)` → `1 + 0.8366…i` (typed flow through a function
-  RESULT is not a wide binding), and Tycho's `|w(t)[1]/2 − 1|` with `w(t) :=
-  [√(t−1), …]` → a real number; (iii) neither, for a document with no
-  promotable head and no complex value: byte-identical code to today's
-  default. Note for the guide: `auto` differs from today's DEFAULT exactly
-  on unknown-sign radicals — `Sqrt(x)` at `x = −1` is `NaN` under `mode:
-  'strict'` and `{re: 0, im: 1}` under `auto`.
+  `result.promoted` / `result.escalation`:** (i) ESCALATES exactly the
+  strict-decline witnesses above (`mode: 'complex'`, `escalation.boundary`
+  and a user-legible `escalation.binding` set, `escalation.kind ===
+  'correctness'`) and matches the interpreter — `b(w)` → `2 + 4i`, the
+  block-shadow case → `7`, and `|b(a(t))/2 − 1|` at `t = 0.3` →
+  `1.3038404810405297` (a PROMOTED value reaching `b`'s wide parameter is a
+  lane mismatch); (ii) PROMOTES without escalating (`mode: 'strict'`,
+  `promoted: true`, no `escalation`): `|√(t−1)|` → the number `0.83666…`,
+  `Re(√(t−1))` → `0`, `(√(t−1))²` → `−0.7`, `m(t) := n(t) + 1` with `n(t)
+  := √(t−1)` → `1 + 0.8366…i` (typed flow through a function RESULT is not
+  a wide binding), and Tycho's `|w(t)[1]/2 − 1|` with `w(t) := [√(t−1),
+  …]` → a real number; (iii) neither (`mode: 'strict'`, `promoted: false`)
+  for a document with no promotable head and no complex value:
+  byte-identical code to today's default. Note for the guide: `auto`
+  differs from today's DEFAULT exactly on unknown-sign radicals — `Sqrt(x)`
+  at `x = −1` is `NaN` under `mode: 'strict'` and `{re: 0, im: 1}` under
+  `auto`.
 - **Result convention:** `arcsin(0.5)` → the number `0.5235…`; `1 + 1e-12i`
   → `{re: 1, im: 1e-12}`; `x < 3` → `true` in every mode.
 - **D2 corpus block [field]** — Tycho's band census on 0.113.0
@@ -677,7 +761,10 @@ noted):
   `Less(z, 2)` for `z: complex` compiles and yields `true` at `z = 1`,
   `false` at `z = i`; `y > √x` compiles under `auto` and yields `false`
   where `x < 0`; a chain with `Random` at the FIRST and at the LAST position
-  draws once each (counter witness); `Mod(z, 3)` → `NaN` at `z = i`.
+  draws once each (counter witness); `Mod(z, 3)` → `NaN` at `z = i`;
+  `And(False, Random() < z)` draws nothing (counter witness) and `Or(True,
+  i < 2)` still declines at compile time; every compile-time D2 decline
+  carries `diagnostic.kind === 'capability'`.
 - **D3:** strict mode `run({x: {re: 1, im: 1}})` for an unknown-typed `x`
   throws naming `x`; `run({z: 2})` for `z: complex` lifts and computes.
 - **D8:** `√(Random()) < 2` under `auto` and `complex` draws once per
@@ -690,9 +777,14 @@ noted):
 - **Non-numeric wide bindings in complex mode:** `id("abc")`, a callback over
   a `list<string>`, a boolean pass-through — unchanged.
 - **Options:** `{complexPromotion: true}` → complex + warning; `{mode:
-  'strict', complexPromotion: true}` → real + warning; `{realOnly: true,
-  mode: 'complex'}` → old projection + warning; a custom target declaring
-  `'complex'` without the two hooks is rejected.
+  'strict', complexPromotion: true}` → strict + warning; `{realOnly: true,
+  mode: 'complex'}` → old projection + warning; effective-mode resolution:
+  no option and no target mode on `javascript` → `auto`, on `glsl` →
+  `strict`; `{mode: 'auto'}` on `glsl` → `capability` decline at option
+  validation; a custom target declaring `'complex'` without the two hooks,
+  or `'auto'` without `reset()`, is rejected; a direct reusable custom
+  target that escalates after emitting a helper produces no duplicate or
+  stale output on the retry.
 
 ## 10. What is asked of the Tycho team (via CE-POC)
 
