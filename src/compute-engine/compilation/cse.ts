@@ -1074,6 +1074,13 @@ class Harvester {
     if (isSymbol(node)) return !this.isStringVar(node.symbol);
     if (!isFunction(node)) return true;
 
+    // An `Error` node is a diagnostic, not a computation: it never emits, so
+    // hoisting a subtree that contains one would mint a candidate whose body
+    // the emission gate is bound to refuse. Refusing it here keeps a harvest
+    // over an invalid tree (a statically rejected callback, say) empty rather
+    // than a set of unemittable candidates.
+    if (node.operator === 'Error') return false;
+
     if (this.isOverriddenOperator(node.operator)) return false;
     // A CALLER-supplied per-operator `compile` handler is the definition-level
     // twin of a `functions` entry: `BaseCompiler.compileExpr` consults it

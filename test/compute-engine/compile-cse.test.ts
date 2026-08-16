@@ -480,6 +480,11 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     expect(() => compile(bad, { fallback: false })).toThrow(
       /invalid expression/
     );
+    // …and the harvest of that INVALID tree is empty too: an `Error` node is
+    // a diagnostic, not a computation, so no subtree containing one becomes a
+    // candidate the emission gate would only refuse.
+    const badHarvest = harvestCse(bad, { admitPureUserFunctions: true });
+    expect(badHarvest.candidates).toHaveLength(0);
   });
 
   it('keeps a `vars`-MAPPED built-in name opaque', () => {

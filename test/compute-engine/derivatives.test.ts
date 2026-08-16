@@ -61,6 +61,26 @@ describe('D', () => {
 });
 
 describe('Derivative', () => {
+  it('declines a function literal whose parameter is a tuple PATTERN', () => {
+    // `((p, q)) => p + q` names no single variable to differentiate with
+    // respect to, so the derivative stays symbolic instead of being taken
+    // against a placeholder the body never mentions.
+    const ce = new ComputeEngine();
+    const d = ce.box([
+      'Derivative',
+      ['Function', ['Add', 'p', 'q'], ['Tuple', 'p', 'q']],
+      1,
+    ]);
+    expect(d.evaluate().toString()).toBe('Derivative(((p, q)) => p + q, 1)');
+    // The plain-parameter twin still differentiates.
+    expect(
+      ce
+        .box(['Derivative', ['Function', ['Power', 'x', 2], 'x'], 1])
+        .evaluate()
+        .toString()
+    ).toBe('(x) => 2x');
+  });
+
   it('should compute the derivative of a function', () => {
     const expr = engine.expr(['Derivative', 'Sin']);
     const result = expr.evaluate();

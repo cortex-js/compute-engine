@@ -10,7 +10,10 @@ import {
   isString,
   sym,
 } from '../boxed-expression/type-guards.js';
-import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  functionLiteralParameterName,
+  isDestructuringParameter,
+} from '../boxed-expression/function-literal.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import {
   angularChainFactor,
@@ -426,6 +429,11 @@ export function derivative(
   }
   if (isFunction(fn, 'Function')) {
     // We have, e.g. fn = ['Function', ['Sin', 'x'], 'x']
+    // A destructuring parameter (`((p, q)) => …`) names no single variable
+    // to differentiate with respect to: decline rather than differentiate
+    // with respect to a placeholder the body never mentions.
+    if (fn.ops[1] !== undefined && isDestructuringParameter(fn.ops[1]))
+      return undefined;
     v = functionLiteralParameterName(fn.ops[1]) || '_';
     fn = fn.ops[0];
   }
