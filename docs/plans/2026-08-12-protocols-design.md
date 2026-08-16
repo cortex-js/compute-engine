@@ -1,5 +1,22 @@
 # Protocols — Design and Implementation Plan
 
+> **SUPERSEDED 2026-08-16 (Appendix B, B10).** P2, P25, P38's
+> non-variable-root clause, P39's "assignment is v1-out" clause and P41 in
+> full all describe the property REBINDING sugar, which retired with work
+> package 2C. P41 is DELETED rather than restated: its cross-protocol fallback
+> existed because the sugar baked a winning protocol into the node at
+> canonicalization while the receiver was re-read at evaluation, and nothing
+> bakes a protocol name any more — a qualified write now resolves only through
+> the protocol named, exactly as the qualified read does (ruled 2026-08-16).
+> The rest: `p.name = v` is a STORE into a mutable object, it evaluates to
+> the value assigned, the target need not be a variable, a non-object receiver
+> is `immutable-value-assignment`, `property-assignment-target-invalid` no
+> longer exists, and a `set` handler's result is discarded (so nothing
+> constrains it). `p.(P.name) = v` is now the same store restricted to the
+> named protocol. The current rules live in `docs/TYPE_SYSTEM_ROADMAP.md`,
+> Appendix A "Properties" and Appendix B "Assigning to a property"; the
+> record here is kept as the history of what was ruled in August 2026.
+
 Status: **ratified 2026-08-12** (user ratified roadmap §7 item 6 in full).
 Surface specification: `docs/TYPE_SYSTEM_ROADMAP.md` Appendix A (revised
 2026-08-12 after dual review) — that appendix is the authoritative user-facing

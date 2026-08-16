@@ -192,6 +192,24 @@ The center of gravity. Sub-steps in dependency order.
 > > Until then the sugar ships alongside the store: the store claims a
 > > name in the object's own layout, the sugar serves the rest, and the
 > > dispatch guard in `library/core.ts` keeps them from fighting.
+> >
+> > > **1D CLOSED 2026-08-16.** The sugar is gone (work package 2C
+> > > commit 2, immediately after the B1 gate landed in commit 1).
+> > > `protocolPropertyAssignment()` and its `'rebind'` verdict are
+> > > deleted from `src/compute-engine/engine-protocols.ts`, together
+> > > with `property-assignment-target-invalid` and the registration
+> > > check that forced a `set` handler's result to fit the receiver;
+> > > `protocolPropertyStore()` replaces them, invoked from the third
+> > > rung of `Assign`'s evaluate ladder in `library/core.ts`. A
+> > > property assignment now stores on every route, evaluates to the
+> > > value assigned, and refuses a non-object receiver with
+> > > `immutable-value-assignment` at whichever of the two timings
+> > > settles the target's type. The compiled lowering fails closed
+> > > (D6) instead of emitting a rebinding. Pinned by
+> > > `test/compute-engine/property-store-retirement.test.ts` (the two
+> > > timings, both spellings) plus migrations in
+> > > `protocol-properties`, `object-store`, `protocol-property-effects`,
+> > > `protocol-field-backed` and `protocol-dispatch-compile`.
 > **1E** — evaluation-order audit (B8) and the appendix's own examples
 > as verbatim tests. Independent of B1 — nothing in it touches
 > conformance — so it is Phase 1's remaining work whichever way the

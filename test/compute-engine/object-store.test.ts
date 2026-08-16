@@ -170,10 +170,8 @@ d.id`)
   });
 
   test('a store through a LIST element reaches the same object', () => {
-    // The target no longer has to be a variable: any expression that
-    // evaluates to an object can be stored into. This is the case Appendix A's
-    // rebinding sugar could not express at all (`property-assignment-target-
-    // invalid`), because there was no binding to rebind.
+    // The target does not have to be a variable: any expression that evaluates
+    // to an object can be stored into.
     expect(
       value(`type P = object{name: string}
 let a = P(name: "x")
@@ -198,10 +196,8 @@ inner.n`)
 describe("PRECEDENCE — the object's own layout beats a protocol property", () => {
   // An object's stored fields belong to the object. When a `readwrite`
   // protocol happens to declare a property of the same name, the STORE still
-  // wins: the protocol route would lower `p.name = v` to `p = «set name»(p, v)`
-  // and rebind the receiver to a NEW value built by the setter, leaving every
-  // other reference to the object holding the old contents. That silently
-  // breaks "References, not copies".
+  // wins: the slot is written directly rather than through an accessor that may
+  // do anything at all with the value it is handed.
   //
   // The rule this pins — a name the layout declares is a store, any other name
   // goes to the protocol route — is the DISPATCH-level statement of what
@@ -278,11 +274,10 @@ type P is Nameable {
     // The store route must DECLINE such a name rather than reporting
     // `unknown-field`, so the protocol's `set` accessor runs.
     //
-    // Boxed before `p` exists, which is what forces the deferred route: with
-    // the receiver typed at canonicalization the protocol lowering already
-    // claims the assignment, so only this shape reaches the evaluate-time
-    // dispatch where the bug lived. The `Field` READ handler has always
-    // consulted the protocol route before erroring; the store now matches it.
+    // Boxed before `p` exists, so the receiver is untyped at canonicalization
+    // and the assignment defers to evaluation — the route where a real receiver
+    // is in hand. The `Field` READ handler has always consulted the protocol
+    // route before erroring; the store now matches it.
     const engine = new ComputeEngine();
     const assign = engine.box([
       'Assign',
@@ -295,12 +290,13 @@ type P is Nameable {
 type P = object{n: string}
 type P is Labelled {
   get label(self: Self) -> string { self.n }
-  set label(self: Self, v: string) -> P { P(n: v) }
+  set label(self: Self, v: string) -> P { self.n = v
+    self }
 }
 let p = P(n: "Bob")`,
       engine
     );
-    expect(errorCode(assign.evaluate().toString())).toBeUndefined();
+    expect(assign.evaluate().toString()).toBe('"Steve"');
     expect(value('p.label', engine)).toBe('"Steve"');
   });
 
@@ -325,31 +321,34 @@ let p = P(n: "Bob")`,
     expect(r).toContain('n');
   });
 
-  test('a protocol property that is NOT a stored field still rebinds', () => {
+  test('a protocol property that is NOT a stored field reaches its setter', () => {
     // The precedence rule is narrow: it claims only names the receiver's own
     // layout declares. `name` is a COMPUTED property — no slot of `Person`
-    // carries it — so the layout has nothing to say and the protocol answers,
-    // through the rebinding sugar it has always had.
+    // carries it — so the layout has nothing to say and the protocol's `set`
+    // accessor answers.
     //
     // The receiver is an OBJECT type because the B1 mutability gate
     // (Appendix B, "Which types can conform") admits only object types to a
-    // protocol with a `readwrite` property. The setter here deliberately
-    // REBUILDS rather than storing, which is what keeps this a test of the
-    // sugar's rebinding lowering; the mutating variant is covered in
-    // `protocol-properties.test.ts`.
+    // protocol with a `readwrite` property. A setter that REBUILDS instead of
+    // storing changes nothing: its result is discarded, so `r` keeps the name
+    // it was built with — pinned below, because that is what the retired
+    // rebinding sugar used to make work.
     const engine = new ComputeEngine();
-    value(
-      `protocol Nameable { readwrite name: string }
+    const conformance = (setterBody: string) => `protocol Nameable { readwrite name: string }
 type Person = object{n: string, age: integer}
 type Person is Nameable {
   get name(self: Self) -> string { self.n }
-  set name(self: Self, v: string) -> Person { Person(n: v, age: self.age) }
+  set name(self: Self, v: string) -> Person { ${setterBody} }
 }
-let r = Person(n: "Bob", age: 42)`,
-      engine
-    );
-    value('r.name = "Steve"', engine);
+let r = Person(n: "Bob", age: 42)`;
+    value(conformance('self.n = v\n    self'), engine);
+    expect(value('r.name = "Steve"', engine)).toBe('"Steve"');
     expect(value('r', engine)).toBe('Person(n: "Steve", age: 42)');
+
+    const rebuilding = new ComputeEngine();
+    value(conformance('Person(n: v, age: self.age)'), rebuilding);
+    expect(value('r.name = "Steve"', rebuilding)).toBe('"Steve"');
+    expect(value('r', rebuilding)).toBe('Person(n: "Bob", age: 42)');
   });
 });
 
@@ -514,20 +513,19 @@ function rename(x: M) { x.id = "XXXX" }`,
     ).toBe('incompatible-type');
   });
 
-  test('the property sugar\u2019s BINDING write stays confinable — no `scope` leak', () => {
+  test('a computed property SET on an object is EXACTLY `state` — no `scope`', () => {
     // The canary for the blunt fix that was tried and rejected (denying the
     // confinement exemption to every `Field` target broke six shipped tests):
-    // the sugar writes the local binding `p`, which is confinable, so `scope`
-    // must NOT appear.
+    // a property store writes no binding at all, so `scope` must NOT appear.
     //
     // `state` DOES appear, and is correct: the B1 mutability gate makes the
     // receiver an object type, and a property SET on an object is a heap store
-    // whatever the selected setter does — the rule the `ProtocolProperty` arm
-    // of `effects-inference.ts` applies unconditionally. (The setter below
-    // rebuilds rather than storing; the verdict deliberately does not consult
-    // the registry to find that out, because an inference walk runs before,
-    // and independently of, conformance registration.) What this test pins is
-    // that the set is EXACTLY `state`, with no `scope` beside it.
+    // whatever the selected setter does — the rule `Walker.isFieldStore` in
+    // `effects-inference.ts` applies unconditionally. (The setter below rebuilds
+    // rather than storing, so the write in fact changes nothing; the verdict
+    // deliberately does not consult the registry to find that out, because an
+    // inference walk runs before, and independently of, conformance
+    // registration.)
     const engine = new ComputeEngine();
     value(
       `protocol Nameable { readwrite name: string }

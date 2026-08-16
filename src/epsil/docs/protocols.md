@@ -237,15 +237,26 @@ whatever conformers exist, so a record may conform to a bare-function
 protocol with a pure implementation — and an explicit `pure` member never
 gates either, since the empty effect set is not `state`.
 
-Assigning to a property currently goes through the variable it is read
-from, so the left-hand side must be an assignable variable: assigning
-through a `const` binding is the ordinary cannot-assign-a-constant error,
-and a target that is not a variable at all (`xs[1].name = …`) is
-`property-assignment-target-invalid`. Providing a `set` for a `readonly`
-property is `protocol-property-readonly-set`.
+Assigning to a property is a **store**, and the assignment evaluates to
+the value assigned. The target does not have to be a variable: any
+expression that evaluates to an object can be stored into, so
+`xs[1].name = "Ada"` works when the list holds objects, and a `const`
+binding is no obstacle either — the store writes the object, never the
+binding. On a record, a tuple or any other immutable value it is
+`immutable-value-assignment`, which names the two ways forward: build an
+updated copy, or declare the type as `object{…}`. Providing a `set`
+implementation for a `readonly` property is
+`protocol-property-readonly-set`, and so is a write through the read-only
+protocol view — the qualified `p.(Named.name) = v`, or the unqualified
+`p.name = v` when `name` is a computed property. A `readonly` requirement
+that a stored FIELD satisfies is a different matter: `readonly` constrains
+that protocol's view of the field, not the object, so a holder of the object
+can still write the field directly. That asymmetry is deliberate for now and
+is under review (see the `readonly` entry in `ROADMAP.md`).
 
 If two protocols declare a property with the same name, the qualified
-form disambiguates: `person.(Nameable.name)`.
+form disambiguates, for reads and for writes alike:
+`person.(Nameable.name)` and `person.(Nameable.name) = "Ada"`.
 
 ## Conditional conformance
 
@@ -363,4 +374,4 @@ grouped by when they fire:
   conditional conformance).
 - **Calling**: `protocol-call-ambiguous`, `protocol-property-ambiguous`,
   `protocol-constraint-unsatisfied`, `protocol-in-type-position`,
-  `property-assignment-target-invalid`.
+  `immutable-value-assignment` (a property store on a value).

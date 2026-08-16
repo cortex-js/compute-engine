@@ -466,9 +466,20 @@ export function serializeEpsil(
     //
     // Qualified protocol property: `["ProtocolProperty", "P", "name", base]`
     // → `base.(P.name)` — the parenthesized field production the protocols
-    // design adds to the D16 grammar (P6). The four-operand SET form has no
-    // surface spelling (it is the `Assign` sugar's lowering, P2), so it falls
-    // back to the generic call form.
+    // design adds to the D16 grammar (P6).
+    //
+    // A FOUR-operand node is the property STORE, and it keeps the generic call
+    // form deliberately. The surface spelling `base.(P.name) = value` parses to
+    // `Assign(ProtocolProperty(P, name, base), value)` and stays that shape
+    // through canonicalization, so the `Assign` serializer — which is
+    // precedence-aware — is what renders a store the author wrote. The
+    // four-operand node is the form the evaluator folds that `Assign` into, and
+    // it can appear in any position, including nested ones a store can never
+    // occupy: assignment is statement-only in Epsil, so emitting
+    // `base.(P.name) = value` for `1 + «store»` would print
+    // `1 + p.(P.n) = 3`, which re-parses as a COMPARISON — and parenthesizing
+    // does not help, since `(x = 3)` is a comparison too. The generic call form
+    // is faithful in every position.
     //
     ProtocolProperty: (expr: MathJsonExpression): FormattingBlock => {
       if (nops(expr) !== 3) return serializeGenericFunction(expr);

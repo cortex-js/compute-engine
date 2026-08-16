@@ -1379,11 +1379,11 @@ function fieldGetter(name: string): FieldBackedImplementation {
  * The synthesized setter of a field-backed `readwrite` property: it stores the
  * value into the slot and returns the RECEIVER.
  *
- * Returning the receiver is what makes the write an in-place modification
- * rather than a rebinding: `ProtocolProperty`'s set half types the application
- * as the receiver and rebinds the target to the handler's result, so handing
- * back the very same object leaves every other reference to it seeing the new
- * contents.
+ * Returning the receiver is a convention rather than a requirement — a store
+ * discards whatever a `set` handler returns — but it is the useful one: an
+ * authored setter that hands the receiver back can be called directly, and it
+ * reads as what the write is, a modification of the object every other
+ * reference to it also sees.
  *
  * The value is re-checked against the field's DECLARED type as pinned on the
  * instance. The caller has already checked it against the property's declared
@@ -2351,10 +2351,9 @@ function implementationProblem(
       const self = { name: 'self', type: parseType(SELF_TYPE_NAME, at) };
       // The `set` handler's result rides as `any` here and is skipped by
       // `checkResult: false`: it is not the property's type, so the ordinary
-      // covariant result check has nothing to say about it. What it MUST fit —
-      // the receiver, which the write rebinds — is checked separately, and only
-      // when the handler declares a result (P25 amendment; P28 keeps an
-      // unannotated one trusted).
+      // covariant result check has nothing to say about it — and nothing else
+      // constrains it either, because the store DISCARDS it (see the note where
+      // the result check used to be, further down this function).
       return accessor === 'get'
         ? { kind: 'signature', args: [self], result: propertyType }
         : {
@@ -2549,18 +2548,13 @@ function implementationProblem(
         };
     }
 
-    // P25 amendment — a setter's result is not the PROPERTY's type: it REBINDS
-    // the receiver (P2's assignment sugar), and `ProtocolProperty` types the
-    // write as the receiver. An ANNOTATED result must therefore fit the
-    // receiver; an unannotated one stays trusted (P28), exactly as every other
-    // undeclared result does. Under a conditional conformance the receiver is
-    // the head PATTERN, for the same covariance reason as the result above.
-    if (accessor === 'set' && declared?.result !== undefined)
-      if (!isSubtype(patternResult ?? declared.result, patternTarget))
-        return {
-          code: 'protocol-signature-mismatch',
-          message: `the result of \`${describeMember(accessor, member)}\` is \`${typeToString(patternResult ?? declared.result)}\`; a \`set\` handler rebinds the receiver, so it must be \`${selfName}\` or a subtype`,
-        };
+    // A `set` handler's RESULT is unchecked, whether or not it is annotated.
+    // The property store discards it: `p.name = v` stores through the handler
+    // and evaluates to `v` (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B,
+    // "Assigning to a property"). It used to be checked against the receiver,
+    // because the assignment REBOUND the target to whatever the handler
+    // returned; that lowering retired with Appendix A's rebinding sugar, and an
+    // undeclared result is trusted here exactly as every other one is (P28).
   }
 
   // Completeness, last: a member is missing when the block provides no key for
@@ -3898,9 +3892,9 @@ type PropertyResolution =
  *
  * Exported so a caller can ask the CHEAP half of the question — "could any
  * protocol claim this name at all?" — without paying for the full resolution
- * in {@link protocolPropertyAssignment}, which canonicalizes the value it is
- * given in order to type-check it. `Assign` uses it to refuse a hopeless field
- * target before evaluating the right-hand side. */
+ * in {@link protocolPropertyStore}, which needs the evaluated right-hand side
+ * in order to type-check it. `Assign` uses it to refuse a hopeless field target
+ * before evaluating that right-hand side. */
 export function protocolsWithProperty(
   ce: IComputeEngine,
   name: string,
@@ -4036,7 +4030,12 @@ export function evaluateProtocolProperty(
   if (!base.isValid) return undefined;
   const receiver = base.type.type;
   const resolved = resolveProtocolProperty(ce, receiver, name, only);
+  // The ONLY decline: no protocol claims this name for this receiver, so the
+  // caller's remaining rungs own the verdict (`unknown-field` on an object).
   if (resolved.status === 'none') return undefined;
+  // Not reachable for an object receiver — a nominal object type is a decided
+  // type — but the "cannot decide" posture is to stay symbolic, never to
+  // report a defect.
   if (resolved.status === 'undecided') return undefined; // stay symbolic
   if (resolved.status === 'ambiguous')
     return ambiguousPropertyError(ce, name, receiver, resolved.through);
@@ -4062,8 +4061,9 @@ export function evaluateProtocolProperty(
 //
 // `person.(Nameable.name)` lowers to `ProtocolProperty("Nameable", "name",
 // person)` — the qualified READ, restricted to the named protocol. A fourth
-// operand is the setter invocation the `Assign` sugar builds (P2); it has no
-// surface spelling (qualified property ASSIGNMENT is v1-out).
+// operand makes it the qualified WRITE: `person.(Nameable.name) = v` lowers to
+// `ProtocolProperty("Nameable", "name", person, v)`, the same store the
+// unqualified `person.name = v` performs, restricted to the named protocol.
 //
 
 /** The parts of a `ProtocolProperty(P, name, base, value?)` application. */
@@ -4090,14 +4090,21 @@ export function protocolPropertyResultType(
   if (parts === null) return undefined;
   const record = ce._protocolRegistry[parts.protocol];
   if (record === undefined) return 'error';
-  // A SET invocation returns whatever the handler returns; its result is
-  // deliberately unchecked (P25), and the value it rebinds is the receiver.
-  if (parts.value !== undefined) return parts.base.type.type;
+  // A SET evaluates to the value ASSIGNED, not to whatever the `set` handler
+  // returns (which is discarded) and not to the receiver — the same answer
+  // `objectFieldStore()` in `library/collections.ts` gives for a stored field.
+  // So its type is the VALUE's own type, exactly as `Assign`'s type handler
+  // reports the type of its right-hand side: `p.(P.value) = 1` types `integer`,
+  // not the `number` the property is declared as. (The value still has to FIT
+  // the property, but that check belongs to evaluation, and widening the static
+  // type to the declared one would throw away what the operand actually is.)
+  if (parts.value !== undefined) return parts.value.type.type;
   return protocolPropertyType(ce, parts.base, parts.name, record) ?? 'error';
 }
 
-/** `ProtocolProperty`'s `evaluate` handler: the qualified read, or the setter
- * invocation the `Assign` sugar lowers to. */
+/** `ProtocolProperty`'s `evaluate` handler: the qualified property READ
+ * (`p.(P.name)`), or — with a fourth operand — the qualified property STORE
+ * (`p.(P.name) = v`). */
 export function evaluateProtocolPropertyOperator(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>,
@@ -4141,38 +4148,68 @@ export function evaluateProtocolPropertyOperator(
     return missingPropertyError(ce, parts.base, parts.name, record);
   }
 
-  // The SET half. `readonly` is refused at canonicalization (P2), so reaching
-  // here with one means the registry changed under a canonicalized program.
-  if (requirement.kind === 'readonly')
-    return ce.error([
-      'protocol-property-readonly-set',
-      `the property \`${record.name}.${parts.name}\` is \`readonly\``,
-    ]);
+  // The SET half — a property STORE, written through the protocol view.
   const base = parts.base;
   if (!base.isValid) return undefined;
   const receiver = base.type.type;
-  if (!isDecidedReceiverType(receiver)) return undefined;
-  // P41 — the protocol name here was BAKED at canonicalization (P2's rebinding
-  // sugar resolved the winner off the receiver's type THEN), while the receiver
-  // is read again at every evaluation. A canonical `Assign` re-run after its
-  // root was rebound to a type conforming through a DIFFERENT protocol would
-  // otherwise keep targeting the stale one and report a missing implementation.
-  // So a baked protocol with no applicable edge falls back to full resolution
-  // across every protocol declaring the property — the dynamic read path's own
-  // rule, ambiguity included.
-  let best = bestCandidates(
+  // A receiver whose TYPE is `error` — a binding whose initializer failed —
+  // has a real diagnostic of its own, and calling it "not an object type" would
+  // report a second, wrong defect on top of it. Stay symbolic, the same posture
+  // `fieldAssignmentVerdict` (`library/collections.ts`) takes for it.
+  if (receiver === 'error') return undefined;
+  const decided = isDecidedReceiverType(receiver);
+  // Assigning to a property is a MODIFICATION, and only a mutable object can be
+  // modified (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Assigning to a
+  // property"). A value receiver is nonetheless reachable here — this operator
+  // is applied directly by the box route, and the receiver is re-read at every
+  // evaluation — so it is REFUSED rather than assumed away, with the refusal
+  // `Assign` makes for the same target (`immutableValueAssignmentError()` in
+  // `library/collections.ts`).
+  //
+  // Asked BEFORE `readonly`, so that the two spellings of the same write agree:
+  // the unqualified `x.name = v` reports the target's type without ever
+  // consulting a protocol, and a reader who reaches for the qualified form must
+  // not be told the property is read-only when the real obstacle is that
+  // nothing about `x` can be written.
+  if (decided && !isObjectType(receiver))
+    return immutableValueAssignmentError(ce, parts.name, receiver);
+  // `readonly` is a property of the REQUIREMENT, not of the receiver, so it is
+  // answered whatever the receiver's type turns out to be — including an
+  // undecided one, which the dispatch below has to leave symbolic.
+  if (requirement.kind === 'readonly')
+    return readonlyPropertyError(ce, record.name, parts.name);
+  if (!decided) return undefined;
+  // A store needs an actual object to store INTO, and the receiver's static
+  // type does not promise one: a nominal object type is a decided type, so a
+  // declared-but-unassigned binding, or a call that stayed symbolic, arrives
+  // here typed `Person` while its value is still a symbol. Invoking an authored
+  // setter on that would run the handler against a symbol and then answer as if
+  // the store had happened. Stay SYMBOLIC instead — exactly what the READ path
+  // does for the same receiver (see {@link evaluateProtocolProperty}).
+  if (!isObject(base)) return undefined;
+  // Resolution is restricted to the protocol NAMED, exactly as the qualified
+  // read is: `p.(Nameable.name) = v` means "write the `Nameable` view of `p`",
+  // and a receiver that does not conform to `Nameable` is a missing
+  // implementation of THAT protocol, never a silent redirection to some other
+  // protocol that happens to declare a property of the same name.
+  //
+  // It did once fall back across every protocol declaring the property (ruling
+  // P41, 2026-08-12). That existed for the retired rebinding sugar, which
+  // resolved a winner off the receiver's type at CANONICALIZATION and baked its
+  // name into this node, while the receiver was re-read at every evaluation: a
+  // canonical `Assign` re-run after its root was rebound to a type conforming
+  // through a different protocol would otherwise have kept targeting the stale
+  // one. Nothing bakes a protocol name any more — the unqualified `p.name = v`
+  // keeps its `Field` target and resolves from the receiver at every
+  // evaluation (`protocolPropertyStore`) — so the only remaining source of a
+  // name here is an author who wrote one, and honouring it is the whole point
+  // of writing it. Ruling: 2026-08-16, with the sugar's retirement.
+  const best = bestCandidates(
     ce,
     [record],
     `${SET_PREFIX}${parts.name}`,
     receiver
   );
-  if (best.length === 0)
-    best = bestCandidates(
-      ce,
-      protocolsWithProperty(ce, parts.name),
-      `${SET_PREFIX}${parts.name}`,
-      receiver
-    );
   if (best.length === 0)
     return missingPropertyError(ce, base, parts.name, record);
   if (best.length > 1)
@@ -4185,15 +4222,8 @@ export function evaluateProtocolPropertyOperator(
   // The value the setter is handed must fit the PROPERTY's declared type at
   // `Self` = the receiver: the handler is written against that type (and a host
   // setter is trusted with whatever it is given), so an out-of-contract write is
-  // refused here rather than passed on. Read off the WINNING record, which the
-  // P41 fallback above may have changed.
+  // refused here rather than passed on.
   const winner = best[0]!;
-  // The write half of the field-backed slot rule the READ path applies (see
-  // {@link evaluateProtocolProperty}): a slot store needs an actual object,
-  // and the receiver's static type does not promise one. A receiver that did
-  // not evaluate to an object leaves the write SYMBOLIC rather than reporting
-  // a missing implementation for a conformance that is in fact complete.
-  if (isFieldBacked(winner.impl) && !isObject(base)) return undefined;
   const declared = winner.record.members[parts.name];
   const refused =
     declared === undefined || declared.kind === 'function'
@@ -4208,17 +4238,39 @@ export function evaluateProtocolPropertyOperator(
     options
   );
 
-  // P25 amendment — the setter's result REBINDS the receiver (P2's sugar), and
-  // `protocolPropertyResultType` types this application as the receiver, so a
-  // result of an unrelated type would silently retype the binding behind the
-  // static claim. A refuted result is the ordinary `incompatible-type` value
-  // instead. Only a DECIDED result type refutes: a symbolic or unknown one is
-  // no more of an answer here than it is anywhere else.
-  if (result === undefined || !result.isValid) return result;
-  const resultType = result.type.type;
-  if (isDecidedReceiverType(resultType) && !isSubtype(resultType, receiver))
-    return ce.typeError(receiver, result.type, base);
-  return result;
+  // The handler's result is DISCARDED: a store evaluates to the value assigned,
+  // exactly as `objectFieldStore()` (`library/collections.ts`) answers for a
+  // stored field, and `protocolPropertyResultType` types this application that
+  // way. Two results are not discarded: a FAILED handler still has something to
+  // say, and an implementation that DECLINED (`undefined` — an expression
+  // implementation that could not be applied) never performed the store, so
+  // this application stays symbolic rather than claiming a write happened.
+  if (result === undefined) return undefined;
+  if (!result.isValid) return result;
+  return parts.value;
+}
+
+/**
+ * `immutable-value-assignment` — a property store into something that cannot
+ * hold one.
+ *
+ * The message names both ways out that Appendix B names, because the fix
+ * depends on what the author meant: a record is a value (build an updated
+ * copy), and an object is the shape that supports stores (declare the type as
+ * one). `immutableTargetError()` in `library/collections.ts` phrases the same
+ * refusal for the `Assign` route and delegates to this builder, so the two
+ * routes cannot drift; the builder lives HERE because that module already
+ * imports this one and the reverse import would close a dependency cycle.
+ */
+export function immutableValueAssignmentError(
+  ce: IComputeEngine,
+  name: string,
+  t: Type
+): Expression {
+  return ce.error([
+    'immutable-value-assignment',
+    `\`${typeToString(t)}\` is not an object type, and only an object's fields can be assigned. Build an updated copy with the new \`${name}\`, or declare the type as \`object{…}\``,
+  ]);
 }
 
 /**
@@ -4267,179 +4319,159 @@ function missingPropertyError(
 }
 
 //
-// ── Property ASSIGNMENT (P2) ─────────────────────────────────────────────────
+// ── Property STORE ───────────────────────────────────────────────────────────
 //
 
-/** What `Assign`'s canonical handler should do with a `Field`/`ProtocolProperty`
- * left-hand side. `undefined` = not a protocol property; the caller keeps its
- * existing behavior. */
-export type PropertyAssignment =
-  /** Rebind `symbol` to the setter invocation (P2's sugar). */
-  | { kind: 'rebind'; symbol: string; setter: Expression }
-  /** An error VALUE to return in place of the assignment. */
-  | { kind: 'error'; error: Expression }
-  /** The name IS a protocol property somewhere, but the target's type is not
-   * settled yet — the Epsil static pre-pass canonicalizes a whole batch
-   * before anything runs, so `p` is routinely still untyped at `p.name = v`.
-   * The caller keeps the `Field` target RAW and asks again from `evaluate`,
-   * where the type is known. */
-  | { kind: 'defer' };
-
 /**
- * P2 — `p.name = v` ⇝ `p = «set name»(p, v)`.
+ * Perform `p.name = v` through a protocol's `set` accessor, from `Assign`'s
+ * EVALUATE handler — the route where a real receiver is in hand.
  *
- * `lhs` is the RAW (unbound, uncanonicalized) left operand of `Assign`, so the
- * receiver's type is read off its DEFINITION rather than off a canonicalized
- * copy: canonicalizing a bare symbol here would fold a single-letter target
- * into the constant of that name, which is exactly why `Assign` keeps its
- * left operand raw.
+ * Only an OBJECT receiver is served. Assignment to a property is a
+ * modification, and a modification is meaningful on nothing but a mutable
+ * object (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Assigning to a
+ * property"); the conformance registry cannot even hold a `readwrite` property
+ * on a value type, since registration refuses one (`protocol-requires-object`).
+ * A non-object receiver therefore DECLINES here rather than refusing, and the
+ * caller's last rung — `fieldStoreRefusal()` in `library/collections.ts` —
+ * makes the `immutable-value-assignment` refusal, so that the answer is the
+ * same whether the target's type was settled at canonicalization or only at
+ * evaluation.
  *
- * Three verdicts, in the order the design fixes them:
- * - a `readwrite` property on a bare-symbol root → the rebinding;
- * - a `readonly` one → `protocol-property-readonly-set`;
- * - a protocol property reached through anything BUT a bare symbol (a
- *   `Field`/`At` chain, a qualified `p.(P.name)`) →
- *   `property-assignment-target-invalid`. A NON-protocol field assignment is
- *   left alone: it keeps the `incompatible-type` it has always produced.
+ * `rhs` is the ALREADY EVALUATED right-hand side: the setter receives the
+ * evaluated value, exactly as a stored field does (Appendix B, "A store writes
+ * the evaluated value").
+ *
+ * The handler's own result is DISCARDED. It used to rebind the receiver, and
+ * that is what retired: the assignment stores, and its value is the value
+ * assigned — the same answer `objectFieldStore()` gives for a stored field.
+ *
+ * `undefined` means "no protocol property answers here"; every other outcome
+ * is the expression the assignment evaluates to.
  */
-export function protocolPropertyAssignment(
+/** `protocol-property-readonly-set` — the shared wording for a write to a
+ * property the protocol declares `readonly`. One builder, so the three routes
+ * that can reach the refusal (the qualified operator, the store, and the
+ * value-independent pre-check `Assign` runs) cannot phrase it differently. */
+function readonlyPropertyError(
   ce: IComputeEngine,
-  lhs: Expression,
-  value: Expression
-): PropertyAssignment | undefined {
-  // The qualified form is a valid READ and never a valid target (v1).
-  if (isFunction(lhs, 'ProtocolProperty')) {
-    const parts = protocolPropertyOperandsOf(lhs.ops);
-    if (parts === null) return undefined;
-    return {
-      kind: 'error',
-      error: invalidTargetError(ce, `${parts.protocol}.${parts.name}`),
-    };
-  }
-
-  if (!isFunction(lhs, 'Field')) return undefined;
-  const name = isString(lhs.ops[1]) ? lhs.ops[1].string : undefined;
-  if (name === undefined) return undefined;
-  const root = lhs.ops[0];
-  if (root === undefined) return undefined;
-  // A name no protocol declares as a property is not ours at all — checked
-  // FIRST so an ordinary `Field` assignment (the overwhelming majority, and
-  // every one of them on an engine with no protocols) pays nothing and, in
-  // particular, does not canonicalize its root here.
-  if (protocolsWithProperty(ce, name).length === 0) return undefined;
-
-  const rootName = sym(root);
-  if (rootName === undefined) {
-    // A non-variable target. Only claim it when the property COULD be a
-    // protocol property of the (canonicalized) root's type — otherwise the
-    // ordinary `Field`-assignment error must stand. The predicate is
-    // deliberately lax here: no implementation is selected, so an absence
-    // marker (`xs[i]` types `missing | string`) must not make the verdict
-    // silently revert to `incompatible-type`.
-    let rootType: Type;
-    try {
-      rootType = root.canonical.type.type;
-    } catch {
-      return undefined;
-    }
-    if (!couldBeProtocolProperty(ce, rootType, name)) return undefined;
-    return { kind: 'error', error: invalidTargetError(ce, name) };
-  }
-
-  const def = ce.lookupDefinition(rootName);
-  const rootType: Type | undefined = isValueDef(def)
-    ? def.value.type.type
-    : undefined;
-
-  // A root with no binding YET is the ordinary pre-pass shape (`let p = …`
-  // declares nothing until it runs), so it is deferred, not refused — but only
-  // when the name is a protocol property somewhere. Otherwise the existing
-  // `Field`-assignment error must stand.
-  const resolved =
-    rootType === undefined
-      ? ({ status: 'undecided' } as const)
-      : resolveProtocolProperty(ce, rootType, name);
-  if (resolved.status === 'none') return undefined;
-  if (resolved.status === 'undecided')
-    return protocolsWithProperty(ce, name).length > 0
-      ? { kind: 'defer' }
-      : undefined;
-  if (resolved.status === 'ambiguous')
-    return {
-      kind: 'error',
-      error: ambiguousPropertyError(
-        ce,
-        name,
-        rootType ?? 'unknown',
-        resolved.through
-      ),
-    };
-  if (resolved.kind === 'readonly')
-    return {
-      kind: 'error',
-      error: ce.error([
-        'protocol-property-readonly-set',
-        `the property \`${resolved.record.name}.${name}\` is \`readonly\`; it cannot be assigned`,
-      ]),
-    };
-
-  // The value must fit the property's declared type at `Self` = the receiver:
-  // the lowering hands it straight to the setter, so a mistyped write is
-  // refused here — a STATIC diagnostic, like every other argument mismatch —
-  // rather than reaching the handler at evaluation.
-  const refused = propertyValueError(
-    ce,
-    rootType!,
-    resolved.declared,
-    value.canonical
-  );
-  if (refused !== null) return { kind: 'error', error: refused };
-
-  // The winner is resolved HERE, at canonicalization: the assignment lowers to
-  // a qualified setter invocation naming the protocol it selected.
-  return {
-    kind: 'rebind',
-    symbol: rootName,
-    setter: ce.function('ProtocolProperty', [
-      ce.string(resolved.record.name),
-      ce.string(name),
-      ce.symbol(rootName),
-      value,
-    ]),
-  };
-}
-
-/**
- * COULD `name` be a protocol property of a value of type `t`?
- *
- * The lax counterpart of {@link resolveProtocolProperty}, used only for the
- * `property-assignment-target-invalid` verdict — where no implementation is
- * selected and the question is merely "is this a protocol property at all".
- * Applicability is two-way (Appendix A's wording, P35), and a UNION is tried
- * arm by arm: `xs[i]` types `missing | string`, which the strict receiver gate
- * (P32) declines outright.
- */
-function couldBeProtocolProperty(
-  ce: IComputeEngine,
-  t: Type,
+  protocol: string,
   name: string
-): boolean {
-  const records = protocolsWithProperty(ce, name);
-  if (records.length === 0) return false;
-  const arms = typeof t === 'object' && t.kind === 'union' ? t.types : [t];
-  return records.some((r) =>
-    r.conformances.some((edge) =>
-      arms.some((arm) => edgeCouldApply(ce, edge, arm))
-    )
-  );
+): Expression {
+  return ce.error([
+    'protocol-property-readonly-set',
+    `the property \`${protocol}.${name}\` is \`readonly\`; it cannot be assigned`,
+  ]);
 }
 
-/** `property-assignment-target-invalid` — P2's non-variable-root verdict. */
-function invalidTargetError(ce: IComputeEngine, name: string): Expression {
-  return ce.error([
-    'property-assignment-target-invalid',
-    `the protocol property \`${name}\` can only be assigned through a variable: \`p.${name.split('.').pop()} = …\` rebinds \`p\`, and only a binding can be rebound`,
-  ]);
+/**
+ * The refusal a QUALIFIED property write earns from the NAME alone: the
+ * protocol does not exist, or it declares no property by that name.
+ *
+ * Asked by `Assign` before it evaluates the right-hand side, for the same
+ * reason as {@link protocolPropertyWriteRefusal} — neither verdict can change
+ * once the value is known, so neither may cost the value its effects. The two
+ * checks mirror the ones the `ProtocolProperty` operator makes first.
+ */
+export function protocolNamedPropertyRefusal(
+  ce: IComputeEngine,
+  protocol: string,
+  name: string
+): Expression | undefined {
+  const record = ce._protocolRegistry[protocol];
+  if (record === undefined)
+    return ce.error([
+      'protocol-unknown',
+      `the protocol \`${protocol}\` is unknown`,
+    ]);
+  const requirement = record.members[name];
+  if (requirement === undefined || requirement.kind === 'function')
+    return ce.error(['unknown-field', name], record.name);
+  return undefined;
+}
+
+/**
+ * The refusal a property write earns from the RECEIVER and the requirement
+ * alone, before any value is in hand.
+ *
+ * Asked by `Assign` BEFORE it evaluates the right-hand side, on both spellings
+ * of the write: a refusal that does not depend on the value must not fire the
+ * value's effects, so `b.name = bump()` on a `readonly` property reports the
+ * refusal and never calls `bump()`.
+ *
+ * Two refusals qualify. A receiver whose type is DECIDED and is not an object
+ * cannot be written at all, whichever property is named. And a `readonly`
+ * property is read-only whatever value is offered — `only` restricts that
+ * question to one protocol, which is what the qualified spelling
+ * `p.(P.name) = v` means. AMBIGUITY is deliberately NOT reported here: it is
+ * value-independent too, but it is the unqualified route's error and reporting
+ * it before the store route has had its turn would pre-empt an object whose own
+ * layout owns the name (a slot store never consults a protocol at all).
+ *
+ * `undefined` means "nothing refuses it here", which includes every case that
+ * is not this check's to answer: a receiver that is not an object VALUE yet
+ * (its type may still promise one — the write stays symbolic), a name no
+ * protocol declares, an ambiguous one.
+ */
+export function protocolPropertyWriteRefusal(
+  ce: IComputeEngine,
+  receiver: Expression,
+  name: string,
+  only?: ProtocolRecord
+): Expression | undefined {
+  if (!receiver.isValid) return undefined;
+  const t = receiver.type.type;
+  // A receiver whose type is `error` has a real diagnostic of its own; calling
+  // it "not an object type" would bury it under a second, wrong one.
+  if (t !== 'error' && isDecidedReceiverType(t) && !isObjectType(t))
+    return immutableValueAssignmentError(ce, name, t);
+  if (!isObject(receiver)) return undefined;
+  const resolved = resolveProtocolProperty(ce, t, name, only);
+  if (resolved.status !== 'found' || resolved.kind !== 'readonly')
+    return undefined;
+  return readonlyPropertyError(ce, resolved.record.name, name);
+}
+
+export function protocolPropertyStore(
+  ce: IComputeEngine,
+  receiver: Expression,
+  name: string,
+  rhs: Expression,
+  options: { numericApproximation?: boolean }
+): Expression | undefined {
+  if (!receiver.isValid || !isObject(receiver)) return undefined;
+  const type = receiver.type.type;
+  const resolved = resolveProtocolProperty(ce, type, name);
+  if (resolved.status === 'none') return undefined;
+  if (resolved.status === 'undecided') return undefined;
+  if (resolved.status === 'ambiguous')
+    return ambiguousPropertyError(ce, name, type, resolved.through);
+  if (resolved.kind === 'readonly')
+    return readonlyPropertyError(ce, resolved.record.name, name);
+
+  // The value the setter is handed must fit the PROPERTY's declared type at
+  // `Self` = the receiver: the handler is written against that type (and a host
+  // setter is trusted with whatever it is given), so an out-of-contract write is
+  // refused before the handler runs.
+  const refused = propertyValueError(ce, type, resolved.declared, rhs);
+  if (refused !== null) return refused;
+
+  // Past this point a protocol DOES claim the name, so declining would send the
+  // caller's last rung (`fieldStoreRefusal`) to report `unknown-field` — which
+  // would be false: the object has the property, its implementation is what
+  // could not be applied. That is a missed dispatch, and it gets the property
+  // analog of one. Only `status === 'none'` above declines, and only that case
+  // is genuinely "this object has no such name".
+  const setter = resolved.edge.impl?.[`${SET_PREFIX}${name}`];
+  if (setter === undefined)
+    return missingPropertyError(ce, receiver, name, resolved.record);
+  const result = invokeImplementation(ce, setter, [receiver, rhs], options);
+  // A handler that FAILED still has something to say; one that DECLINED
+  // (`undefined` — an expression implementation that could not be applied)
+  // performed no store.
+  if (result === undefined)
+    return missingPropertyError(ce, receiver, name, resolved.record);
+  if (!result.isValid) return result;
+  return rhs;
 }
 
 //

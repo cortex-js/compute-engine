@@ -148,7 +148,9 @@ import {
   evaluateProtocolPropertyOperator,
   isProtocolDispatcher,
   protocolMemberResultType,
-  protocolPropertyAssignment,
+  protocolNamedPropertyRefusal,
+  protocolPropertyStore,
+  protocolPropertyWriteRefusal,
   protocolsWithProperty,
   protocolPropertyResultType,
 } from '../engine-protocols.js';
@@ -2967,6 +2969,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return ce._fn('Assign', [lhs, args[1]]);
         }
 
+        // The QUALIFIED property write — `p.(Nameable.name) = v`, which the
+        // Epsil parser lowers to `Assign(ProtocolProperty(P, name, p), v)` —
+        // keeps that shape here and is performed by the evaluate handler. It is
+        // deliberately NOT folded into the four-operand `ProtocolProperty` node
+        // at canonicalization: that operator is not lazy, so its operands would
+        // evaluate before it could refuse, and `p.(P.name) = bump()` on a
+        // `readonly` property would fire `bump()` before reporting the refusal.
+        // The evaluate handler runs the value-independent refusals first, the
+        // same order the unqualified spelling uses.
+        if (isFunction(lhs, 'ProtocolProperty')) return ce._fn('Assign', args);
+
         // A PROPERTY STORE — `p.age = 43`. Assignment through a `Field` target
         // is a store into a mutable object and is legal on nothing else
         // (Appendix B, "Assigning to a property"), so a `Field` LHS never
@@ -2974,42 +2987,23 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // defers to `evaluate`, where a real receiver settles it, or carries
         // the one refusal that cannot change at runtime.
         //
-        // The one question asked BEFORE the protocol route: does the receiver's
-        // own object layout declare this field? If so it is a store, even when
-        // a `readwrite` protocol declares a property of the same name. Letting
-        // the protocol lowering win there does not merely pick a different
-        // mechanism — it rebinds the receiver to a NEW value built by the
-        // setter, so every other reference to the object keeps the old contents
-        // and Appendix B's "References, not copies" breaks silently. Handing it
-        // to `evaluate` lets the instance's own pinned layout decide.
+        // The question asked FIRST: does the receiver's own object layout
+        // declare this field? If so it is a slot store, even when a `readwrite`
+        // protocol declares a property of the same name — and the answer is
+        // settled at evaluation, by the instance's own pinned layout, so a
+        // layout-owned name simply defers without asking anything else.
         const layoutOwned = objectLayoutOwnsField(ce, lhs);
 
-        // P2 — protocol-property assignment is REBINDING SUGAR: `p.name = v`
-        // canonicalizes to `p = «set name»(p, v)`. Runs BEFORE the symbol
-        // check below, which would otherwise reject the `Field` target as
-        // `incompatible-type`. A `Field` that names no protocol property is
-        // left to that existing path; one whose target is not yet TYPED (the
-        // Epsil pre-pass canonicalizes the batch before anything runs) keeps
-        // its raw `Field` LHS and is resolved again from `evaluate`.
-        const property = layoutOwned
-          ? undefined
-          : protocolPropertyAssignment(ce, lhs, args[1]);
-        if (property?.kind === 'error') return property.error;
-        if (property?.kind === 'rebind')
-          return ce._fn('Assign', [
-            ce.symbol(property.symbol),
-            property.setter,
-          ]);
-
-        // The static refusal is only reached once the protocol route has
-        // DECLINED outright. A `defer` from that route means the name is some
-        // protocol's property and the receiver's type is not settled here — a
-        // protocol setter may well perform this write — and refusing it as
-        // immutable would report a defect where there is none.
-        const store =
-          property === undefined && !layoutOwned
-            ? fieldAssignmentVerdict(ce, lhs)
-            : ('defer' as const);
+        // Everything else asks the one static question whose answer cannot
+        // change at runtime: is the receiver's type settled, and settled as
+        // something that is not an object? Object types have no subtypes and no
+        // value of another type is ever an object, so that refusal is safe to
+        // make here — and it is the diagnostic a reader of `d.id = "456"` on a
+        // record needs. Anything less settled defers to `evaluate`, which asks
+        // the object layout and then the protocol properties.
+        const store = layoutOwned
+          ? ('defer' as const)
+          : fieldAssignmentVerdict(ce, lhs);
         if (store !== undefined && store !== 'defer') return store;
         const deferStore = layoutOwned || store === 'defer';
 
@@ -3019,12 +3013,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // single-letter target into the constant of that name (`(i, j) := …`
         // would write `ImaginaryUnit`).
         let symbol = lhs;
-        if (
-          property === undefined &&
-          !deferStore &&
-          !isSymbol(symbol) &&
-          !isFunction(symbol, 'Tuple')
-        ) {
+        if (!deferStore && !isSymbol(symbol) && !isFunction(symbol, 'Tuple')) {
           // If the argument was not a symbol literal, see if we can evaluate it to a symbol
           symbol = checkType(ce, lhs, 'symbol');
         }
@@ -3123,7 +3112,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         return result;
       },
-      evaluate: ([op1, op2], { engine: ce }) => {
+      evaluate: ([op1, op2], { engine: ce, numericApproximation }) => {
         //
         // Check for Subscript LHS (sequence definition)
         // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1
@@ -3380,9 +3369,51 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
 
         //
-        // A `Field` LHS that reached evaluation: a PROPERTY STORE, a deferred
-        // protocol-property rebinding, or a refusal.
+        // A `Field` LHS that reached evaluation: a store into the object's own
+        // layout, a store through a protocol's `set` accessor, or a refusal.
         //
+        //
+        // A `ProtocolProperty` LHS: the QUALIFIED property write
+        // `p.(Nameable.name) = v`, a store restricted to the protocol named.
+        //
+        if (isFunction(op1, 'ProtocolProperty') && op1.ops.length === 3) {
+          const parts = qualifiedWriteOperands(op1);
+          if (parts === undefined) return undefined;
+          // The receiver is evaluated exactly once, and BEFORE the value:
+          // ruling B8's left-to-right order, and the guarantee that a receiver
+          // carrying effects fires them once however the write resolves.
+          const receiver = parts.base.evaluate();
+          if (!receiver.isValid) return receiver;
+          // Everything that can refuse the write WITHOUT looking at the value
+          // is asked here, so a refused write costs the right-hand side
+          // nothing: `p.(P.name) = bump()` on a `readonly` property, or on a
+          // receiver nothing can be stored into, never calls `bump()`.
+          const refused =
+            protocolNamedPropertyRefusal(ce, parts.protocol, parts.name) ??
+            protocolPropertyWriteRefusal(
+              ce,
+              receiver,
+              parts.name,
+              ce._protocolRegistry[parts.protocol]
+            );
+          if (refused !== undefined) return refused;
+          const rhs = op2.evaluate();
+          if (!rhs.isValid) return rhs;
+          // The write itself is the four-operand operator, applied to operands
+          // that are already evaluated — so nothing fires twice — and it owns
+          // every remaining verdict (a missing implementation, ambiguity, the
+          // value-fit check, and staying symbolic for a receiver whose value is
+          // not an object yet).
+          return ce
+            .function('ProtocolProperty', [
+              ce.string(parts.protocol),
+              ce.string(parts.name),
+              receiver,
+              rhs,
+            ])
+            .evaluate({ numericApproximation });
+        }
+
         if (isFunction(op1, 'Field')) {
           // The RECEIVER is evaluated exactly once, here, and the same value is
           // handed to every route tried below. A receiver is an arbitrary
@@ -3421,41 +3452,45 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           )
             return fieldStoreRefusal(ce, op1, receiver);
 
-          // Evaluate the VALUE first: this is the runtime route, so the
-          // value-fit check inside `protocolPropertyAssignment` must see the
-          // CONCRETE value. The static type of a raw RHS is often wider than
-          // the property's declared type (`10 * i` in a loop body types
-          // `finite_number` against an `integer` property), and the false
-          // refusal it produced was DISCARDED in statement position — a
-          // silent no-op write, diverging from the compiled tier, which
-          // performs it. The `ProtocolProperty` operator is not lazy, so
-          // this evaluates the RHS exactly once, same as every other route.
+          // The COMPUTED property route: a name the object's layout has no slot
+          // for, answered by a protocol's `set` accessor.
+          //
+          // A refusal that does NOT depend on the value comes first, so it
+          // keeps the promise the store route makes above — a target no route
+          // can serve costs the right-hand side nothing. Writing a `readonly`
+          // property is that refusal: `b.name = bump()` must report it without
+          // firing `bump()`.
+          if (fieldName !== undefined && receiver !== undefined) {
+            const refused = protocolPropertyWriteRefusal(
+              ce,
+              receiver,
+              fieldName
+            );
+            if (refused !== undefined) return refused;
+          }
+
+          // Now the value, because the value-fit check inside
+          // `protocolPropertyStore` must see the CONCRETE value. The static type
+          // of a raw RHS is often wider than the property's declared type
+          // (`10 * i` in a loop body types `finite_number` against an `integer`
+          // property), and the false refusal it produced was DISCARDED in
+          // statement position — a silent no-op write, diverging from the
+          // compiled tier, which performs it.
           const rhs = op2.evaluate();
           if (!rhs.isValid) return rhs;
-          const property = protocolPropertyAssignment(ce, op1, rhs);
-          if (property?.kind === 'error') return property.error;
-          if (property === undefined) {
-            // Every route has declined: the receiver did not evaluate to an
-            // object, and no protocol claims the name either. The target
-            // cannot be stored into, and that is the value of the statement —
-            // falling through would evaluate the `Field` and return
-            // `undefined`, swallowing the refusal entirely.
-            return fieldStoreRefusal(ce, op1, receiver);
+          if (fieldName !== undefined && receiver !== undefined) {
+            const set = protocolPropertyStore(ce, receiver, fieldName, rhs, {
+              numericApproximation,
+            });
+            if (set !== undefined) return set;
           }
-          if (property?.kind === 'rebind') {
-            const val = property.setter.evaluate();
-            if (!val.isValid) return val;
-            try {
-              ce.assign(property.symbol, val);
-            } catch (e) {
-              if (isEffectContractError(e))
-                return effectContractErrorValue(ce, e);
-              if (isTypeCompatibilityError(e))
-                return typeCompatibilityErrorValue(ce, e);
-              throw e;
-            }
-            return val;
-          }
+
+          // Every route has declined: the receiver did not evaluate to an
+          // object, or it did and no protocol property of that name applies to
+          // it. The target cannot be stored into, and that is the value of the
+          // statement — falling through would evaluate the `Field` and return
+          // `undefined`, swallowing the refusal entirely.
+          return fieldStoreRefusal(ce, op1, receiver);
         }
 
         // Regular symbol assignment
@@ -3483,11 +3518,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 op2
               )
             : undefined) ?? op2.evaluate();
-        // P2's rebinding sugar, canonicalized form: `p.name = v` lowered to
-        // `p = «set name»(p, v)`. A REFUSED write — a setter result that does
-        // not fit the receiver (P25 amendment), a missing implementation —
-        // must not be stored: the error is the value of the statement, exactly
-        // as on the deferred route above.
+        // A property write in VALUE position — `x = ProtocolProperty(P, "n",
+        // p, v)`, which a hand-built expression can spell — that was REFUSED
+        // (a readonly property, a non-object receiver, a missing
+        // implementation) must not be stored under `x`: the error is the value
+        // of the statement, exactly as on the field-target route above.
         if (!val.isValid && isFunction(op2, 'ProtocolProperty')) return val;
         // A violated definition-annotation contract (an explicit effect
         // annotation the body's inferred effects do not fit) is not installed
@@ -4116,12 +4151,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'lowering of the qualified field form `person.(Nameable.name)` ' +
         '(protocols design P6, amending the D16 field grammar). The first ' +
         'two operands name the protocol and the property; the third is the ' +
-        'receiver. A fourth operand makes it a SET invocation — the ' +
-        'rebinding sugar `p.name = v` lowers to `p = ProtocolProperty(P, ' +
-        '"name", p, v)` (P2) — which has no surface spelling of its own: ' +
-        'qualified property ASSIGNMENT is not supported. Dispatch is dynamic ' +
-        'and restricted to the named protocol: the most specific conformance ' +
-        'implementation for the runtime type of the receiver is invoked.',
+        'receiver. A fourth operand makes it a property STORE — the qualified ' +
+        'write `person.(Nameable.name) = v` — which invokes the `set` ' +
+        'accessor against the receiver, discards what it returns, and ' +
+        'evaluates to the value assigned; a receiver that is not an object is ' +
+        '`immutable-value-assignment`. Dispatch is dynamic and restricted to ' +
+        'the named protocol: the most specific conformance implementation for ' +
+        'the runtime type of the receiver is invoked.',
       signature:
         '(protocol: string, property: string, receiver: any, value: any?) -> unknown',
       type: (ops, { engine: ce }) => protocolPropertyResultType(ce, ops),
@@ -5873,4 +5909,28 @@ function roundToSignificantDigits(value: Expression, p: number): Expression {
   // `ce.bignum(re)` covers the machine-float case where there is no `bignumRe`.
   const bd = value.bignumRe ?? ce.bignum(re);
   return ce.number(bd.toPrecision(p));
+}
+
+/**
+ * The three operands of the `ProtocolProperty` left-hand side of a QUALIFIED
+ * property write — `p.(Nameable.name) = v`, which the Epsil parser lowers to
+ * `Assign(ProtocolProperty("Nameable", "name", p), v)`.
+ *
+ * The protocol and property names ride as string literals, or as bare symbols
+ * after a round trip through a serializer that printed them unquoted.
+ * `undefined` when the node is not that shape.
+ */
+function qualifiedWriteOperands(
+  lhs: Expression & { ops: ReadonlyArray<Expression> }
+): { protocol: string; name: string; base: Expression } | undefined {
+  const nameOf = (op: Expression | undefined): string | undefined => {
+    if (op === undefined) return undefined;
+    return isString(op) ? op.string : sym(op);
+  };
+  const protocol = nameOf(lhs.ops[0]);
+  const name = nameOf(lhs.ops[1]);
+  const base = lhs.ops[2];
+  if (protocol === undefined || name === undefined || base === undefined)
+    return undefined;
+  return { protocol, name, base };
 }

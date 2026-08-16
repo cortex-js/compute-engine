@@ -5488,7 +5488,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). The first two operands name the protocol and the property; the third is the receiver. A fourth operand makes it a SET invocation — the rebinding sugar `p.name = v` lowers to `p = ProtocolProperty(P, \"name\", p, v)` (P2) — which has no surface spelling of its own: qualified property ASSIGNMENT is not supported. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the receiver is invoked."
+      "description": "Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). The first two operands name the protocol and the property; the third is the receiver. A fourth operand makes it a property STORE — the qualified write `person.(Nameable.name) = v` — which invokes the `set` accessor against the receiver, discards what it returns, and evaluates to the value assigned; a receiver that is not an object is `immutable-value-assignment`. Dispatch is dynamic and restricted to the named protocol: the most specific conformance implementation for the runtime type of the receiver is invoked."
     },
     {
       "name": "PseudoInverse",

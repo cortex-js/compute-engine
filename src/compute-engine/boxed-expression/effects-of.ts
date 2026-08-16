@@ -13,7 +13,10 @@ import {
   signatureArms,
   signatureEffects,
 } from '../../common/type/utils.js';
-import { objectLayoutOfType } from '../../common/type/subtype.js';
+import {
+  isObjectType,
+  objectLayoutOfType,
+} from '../../common/type/subtype.js';
 import { couldBeUnkeyedCollectionOperand } from '../collection-utils.js';
 import { overloadArms, resolveOverload } from './overload.js';
 
@@ -503,12 +506,14 @@ function ownEffects(
  * conformance edge and forces each stored literal's `.type`, which on a cold
  * memo runs the inference walk described above.
  *
- * Every protocol declaring `name` as a property contributes, not just the one
- * the call site names. The protocol operand was BAKED at canonicalization while
- * the receiver is re-read at every evaluation, so a set whose baked protocol has
- * no applicable edge falls back to resolution across every protocol declaring
- * the property (ruling P41, in `evaluateProtocolPropertyOperator`) — the union
- * has to cover what that fallback can select.
+ * With no `protocol`, every protocol declaring `name` as a property
+ * contributes: that is the UNQUALIFIED spelling `p.name = v`, which names no
+ * protocol and selects one from the receiver's runtime type at every evaluation
+ * (`protocolPropertyStore`, `engine-protocols.ts`), so the union has to cover
+ * every accessor that selection can reach. A QUALIFIED site passes its
+ * protocol, and the union narrows to it — dispatch there cannot reach any
+ * other, so inheriting an unrelated protocol's setter effects would be a claim
+ * about code that never runs. The protocol is part of the memo key.
  *
  * A HOST callback contributes the empty set: it carries no signature the engine
  * can read, and is trusted exactly as a host operator handler is. That includes
@@ -525,9 +530,13 @@ function ownEffects(
 export function protocolAccessorEffects(
   ce: ComputeEngine,
   name: string,
-  accessor: 'get' | 'set'
+  accessor: 'get' | 'set',
+  protocol?: string
 ): EffectSet | undefined {
-  const memoKey = `${accessor}\u0000${name}`;
+  // The protocol rides in the memo key (and in the in-flight key) because it
+  // selects a DIFFERENT union: a qualified site sees one protocol's accessors,
+  // an unqualified one sees every protocol declaring the name.
+  const memoKey = `${accessor}\u0000${protocol ?? ''}\u0000${name}`;
   if (accessorEffectsInFlight.has(memoKey)) return undefined;
 
   let perEngine = accessorEffectsMemo.get(ce);
@@ -549,7 +558,8 @@ export function protocolAccessorEffects(
     union = accessorEffectsUnion(
       ce,
       `${accessor === 'get' ? '__get__' : '__set__'}${name}`,
-      name
+      name,
+      protocol
     );
   } finally {
     accessorEffectsInFlight.delete(memoKey);
@@ -591,10 +601,20 @@ const accessorEffectsMemo = new WeakMap<
 function accessorEffectsUnion(
   ce: ComputeEngine,
   key: string,
-  name: string
+  name: string,
+  protocol?: string
 ): EffectSet | undefined {
   let union: EffectSet | undefined = undefined;
-  for (const record of Object.values(ce._protocolRegistry)) {
+  // A QUALIFIED site names its protocol, and dispatch is restricted to it, so
+  // the union is too: an unrelated protocol that happens to declare a property
+  // of the same name can never be selected there.
+  const records =
+    protocol === undefined
+      ? Object.values(ce._protocolRegistry)
+      : ce._protocolRegistry[protocol] === undefined
+        ? []
+        : [ce._protocolRegistry[protocol]!];
+  for (const record of records) {
     const member = record.members[name];
     if (member === undefined || member.kind === 'function') continue;
     for (const edge of record.conformances) {
@@ -616,6 +636,114 @@ function accessorEffectsUnion(
 }
 
 /**
+ * The parts of an `Assign` that is a property STORE, or `undefined` when it is
+ * not one.
+ *
+ * Two target shapes spell the same write. `Field(receiver, "name")` is the
+ * unqualified `p.name = v`, whose protocol is chosen from the receiver at
+ * evaluation; `ProtocolProperty(P, "name", receiver)` is the qualified
+ * `p.(P.name) = v`, which names one. Both keep their shape through
+ * canonicalization, so both reach the effect channels as an `Assign`, and
+ * neither writes a binding — reading either as a `scope` write is what made a
+ * qualified store trip the default-`!scope` ceiling.
+ */
+function propertyStoreTarget(
+  expr: Expression & FunctionInterface
+): { receiver: Expression; name: string; protocol?: string } | undefined {
+  if (expr.operator !== 'Assign') return undefined;
+  const target = expr.ops[0];
+  if (isFunction(target, 'ProtocolProperty') && target.ops.length === 3) {
+    const name = target.ops[1];
+    const receiver = target.ops[2];
+    if (!isString(name) || receiver === undefined) return undefined;
+    const protocol = target.ops[0];
+    return {
+      receiver,
+      name: name.string,
+      protocol: isString(protocol) ? protocol.string : sym(protocol),
+    };
+  }
+  if (!isObjectFieldStore(target)) return undefined;
+  const name = (target as Expression & FunctionInterface).ops[1];
+  const receiver = (target as Expression & FunctionInterface).ops[0];
+  if (!isString(name) || receiver === undefined) return undefined;
+  return { receiver, name: name.string };
+}
+
+/**
+ * Does the RECEIVER's own object layout declare `name` as a stored field?
+ *
+ * When it does, the assignment is a slot store and no protocol accessor can
+ * run: the layout wins the precedence (`objectLayoutOwnsField()` in
+ * `library/collections.ts`, which decides the same question for
+ * canonicalization and states why). Answers `false` whenever the layout cannot
+ * be read, which keeps the accessor union — the conservative direction.
+ *
+ * The receiver is resolved by the same two rules as {@link isObjectFieldStore}:
+ * a bare symbol off its DEFINITION (never by canonicalizing it, which would
+ * fold a single-letter name into the library constant of that name), anything
+ * else off its canonical type.
+ */
+function layoutDeclaresField(
+  receiver: Expression | undefined,
+  name: string
+): boolean {
+  if (receiver === undefined) return false;
+  const layoutOf = (t: Type | undefined): boolean =>
+    t !== undefined && objectLayoutOfType(t)?.elements[name] !== undefined;
+  const root = sym(receiver);
+  if (root !== undefined) {
+    const def = receiver.engine.lookupDefinition(root);
+    if (def === undefined || !('value' in def)) return false;
+    return layoutOf(def.value.type.type);
+  }
+  try {
+    const canonical = receiver.canonical;
+    return canonical.isValid && layoutOf(canonical.type.type);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Could a `Field` assignment whose receiver has static type `t` be a STORE into
+ * a mutable object?
+ *
+ * The one rule BOTH effect channels apply, exported so they cannot drift: this
+ * module decides the runtime channel ({@link isObjectFieldStore}) and
+ * `Walker.isFieldStore` in `effects-inference.ts` decides the static one, on
+ * different evidence about the same question.
+ *
+ * `true` for an object type, and for everything that DECIDES NOTHING — no type
+ * in hand, `unknown`, `any`. After the property rebinding sugar retired,
+ * assignment through a `Field` target is a store and never a binding write, so
+ * a receiver nothing is known about is either a heap store or a runtime error;
+ * `state` is the sound over-approximation of both, and it is what stops
+ * `function k(x) pure { x.id = "Z" }` from being accepted and mutating its
+ * caller's object.
+ *
+ * A UNION counts when ANY arm is an object type. Two shapes reach here that
+ * way: an INDEXED receiver carries the absence marker (`xs[i]` types
+ * `(Inner) | missing`, because an out-of-range index has no element), and an
+ * optional parameter is written `M | nothing`. The store is still a store — it
+ * either writes the element's slot or faults, and neither outcome is the
+ * binding write `scope` describes.
+ *
+ * `false` only for a type that is DECIDED and is not an object: `p.name = v` on
+ * a record or a tuple is `immutable-value-assignment`, which changes nothing
+ * and needs no label.
+ */
+export function mayStoreIntoReceiverOfType(t: Type | undefined): boolean {
+  if (t === undefined || t === 'unknown' || t === 'any') return true;
+  if (isObjectType(t)) return true;
+  return (
+    typeof t === 'object' &&
+    t.kind === 'union' &&
+    t.types.some((arm) => mayStoreIntoReceiverOfType(arm))
+  );
+}
+
+/**
  * The per-call-site correction to a definition's declared effect set, for the
  * two operators that spell more than one operation and therefore cannot state
  * their effect on a single arrow.
@@ -627,19 +755,17 @@ function accessorEffectsUnion(
  * sees, so its label is `state` ("Changing a field is an effect",
  * `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B). The store is recognised by the
  * same evidence the static walk uses (`Walker.isFieldStore` in
- * `effects-inference.ts`): a `Field` target whose receiver's static type
- * resolves to an `object{…}` layout carrying that field name. Every other
- * assignment — a plain symbol, a destructuring target, a `Field` on a record,
- * and the property REBINDING sugar `p.name = v` on a value type (which lowers
- * to `Assign(p, ProtocolProperty(…))`, a symbol target) — keeps `scope`
- * exactly as before.
+ * `effects-inference.ts`): a `Field` target whose receiver's static type is an
+ * object type. Every other assignment — a plain symbol, a destructuring target,
+ * a `Field` on a record or other immutable value (which is an error rather than
+ * a write) — keeps `scope` exactly as before.
  *
  * **`ProtocolProperty`** with FOUR operands is the setter invocation
  * (`ProtocolProperty(P, "name", receiver, value)`); with three it is the
  * qualified read. A writable property is meaningful only on a mutable object
- * (Appendix B, "Which types can conform", ruled 2026-08-15), so a set is a
- * heap store and carries `state` — whatever the selected handler turns out to
- * do, and whether or not any conformance has registered yet. On top of that
+ * (Appendix B, "Which types can conform"), so a set is a heap store and carries
+ * `state` — whatever the selected handler turns out to do, and whether or not
+ * any conformance has registered yet. On top of that
  * fixed contribution BOTH halves union in what the authored accessor bodies do
  * ({@link protocolAccessorEffects}), so a computed getter that draws reports
  * `random` at the call site; a field-backed accessor is a host callback and
@@ -655,24 +781,73 @@ function mutationEffects(
     const name = expr.ops[1];
     const isSet = expr.ops.length >= 4;
     let effects = isSet ? unionComputedEffects(declared, ['state']) : declared;
+    // The protocol operand restricts dispatch, so it restricts the union too.
+    const protocol = expr.ops[0];
     if (isString(name))
       effects = unionComputedEffects(
         effects,
-        protocolAccessorEffects(expr.engine, name.string, isSet ? 'set' : 'get')
+        protocolAccessorEffects(
+          expr.engine,
+          name.string,
+          isSet ? 'set' : 'get',
+          isString(protocol) ? protocol.string : sym(protocol)
+        )
       );
     return effects;
   }
-  if (expr.operator !== 'Assign' || !isObjectFieldStore(expr.ops[0]))
-    return declared;
+  const store = propertyStoreTarget(expr);
+  if (store === undefined) return declared;
   // A store is not a binding write, so `scope` is REPLACED rather than joined:
   // reporting both would claim the statement also wrote a binding.
-  return unionComputedEffects(subtractEffects(declared, ['scope']), ['state']);
+  let effects = unionComputedEffects(
+    subtractEffects(declared, ['scope']),
+    ['state']
+  );
+  // …plus whatever an AUTHORED `set` accessor's body does, for the same reason
+  // the `ProtocolProperty` arm above unions it: the unqualified `p.name = v`
+  // keeps its `Field` target, so a computed property's setter is reached
+  // through THIS arm and its own draws and outer-binding writes would otherwise
+  // vanish at the write site.
+  //
+  // Skipped when the receiver's own LAYOUT declares the name: dispatch is
+  // settled there, the slot store wins, and no accessor runs at all
+  // (`objectLayoutOwnsField()` in `library/collections.ts` states that
+  // precedence). Unioning an unrelated setter's effects into a plain slot write
+  // would attribute code that cannot execute.
+  // A QUALIFIED store names its protocol and the union narrows to it; an
+  // unqualified one takes the layout skip above (a qualified write never does:
+  // it goes through the protocol view, whose accessor runs even for a
+  // field-backed property).
+  if (
+    store.protocol !== undefined ||
+    !layoutDeclaresField(store.receiver, store.name)
+  )
+    effects = unionComputedEffects(
+      effects,
+      protocolAccessorEffects(expr.engine, store.name, 'set', store.protocol)
+    );
+  return effects;
 }
 
 /**
- * Whether `target` is the left-hand side of a store into a mutable object's
- * own layout field — `Field(receiver, "age")` where the receiver's static type
- * resolves to an `object{…}` layout declaring `age`.
+ * Whether `target` is, or may be, the left-hand side of a store into a mutable
+ * object — `Field(receiver, "age")` where the receiver's static type is an
+ * object type, or where nothing settles what that type is.
+ *
+ * The UNDECIDED case answers `true`, and that is the load-bearing half: after
+ * the property rebinding sugar retired, assignment through a `Field` target is
+ * a store and never a binding write, so a receiver nothing is known about is
+ * either a heap store or a runtime error. `state` is the sound
+ * over-approximation of both; `scope` would be a positive claim that a binding
+ * was written, about a receiver no one has looked at.
+ *
+ * The FIELD NAME is not consulted. Assignment through a `Field` target is a
+ * store and never a binding write (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B,
+ * "Assigning to a property"), so on an object receiver every such assignment
+ * either writes a slot, runs a protocol property's `set` accessor — which
+ * exists only on objects, so it too is a heap write — or faults on a name the
+ * object has neither way. `state` is the sound label for all three; `scope`
+ * would be false for all three.
  *
  * A bare-symbol receiver is read off its DEFINITION, never by canonicalizing
  * it: `Assign` keeps its left operand RAW so that a single-letter target is not
@@ -684,11 +859,10 @@ function mutationEffects(
  * labelling only the bare case would let a nested store pass as a `scope`
  * write.
  *
- * Anything the evidence does not positively establish answers `false`: an
- * unbound name, a receiver whose canonical form is invalid, a record or tuple
- * type, a field no layout in the receiver's type declares. Those keep the
- * `scope` label the `Assign` definition declares, which is the sound
- * over-approximation.
+ * A receiver whose type IS decided and is not an object — a record, a tuple, a
+ * number — answers `false`: `p.name = v` on one of those is
+ * `immutable-value-assignment`, which changes nothing and needs no label, so
+ * the `scope` the `Assign` definition declares stands.
  *
  * `objectLayoutOwnsField()` in `library/collections.ts` resolves the receiver
  * by the same two rules (bare symbol off its definition, anything else off its
@@ -709,38 +883,17 @@ function mutationEffects(
  * Keep the receiver-resolution rules in step; the union arm below is the one
  * place they are meant to differ.
  *
- * The LAYOUT field is the only NAME this predicate has to catch. A store
- * through a COMPUTED property of an object type (`q.age = 5` where `age` is
- * not in `Q`'s layout but a protocol declares it `readwrite`) has already been
- * rewritten by canonicalization into `Assign(q, ProtocolProperty("A", "age",
- * q, 5))` — the receiver's type is settled by then — so it arrives here as a
- * symbol target with a four-operand `ProtocolProperty` operand, and the arm
- * above is what labels it. The static walk faces the opposite situation and
- * needs a property arm of its own: inside an unentered `Function` literal the
- * receiver's type is not settled, so that rewrite defers and the walk sees the
- * `Field` form (see `Walker.isFieldStore` in `effects-inference.ts`).
+ * `Walker.isFieldStore` in `effects-inference.ts` decides the same question for
+ * the static channel, by the same rule, on the evidence available there: inside
+ * an unentered `Function` literal nothing can be canonicalized, so it resolves
+ * the receiver structurally from the declared parameter types instead.
  */
 function isObjectFieldStore(target: Expression | undefined): boolean {
   if (!isFunction(target, 'Field')) return false;
-  const name = target.ops[1];
-  if (!isString(name)) return false;
+  if (!isString(target.ops[1])) return false;
   const receiver = target.ops[0];
   if (receiver === undefined) return false;
-  const declares = (t: Type): boolean =>
-    objectLayoutOfType(t)?.elements[name.string] !== undefined;
-  const owns = (t: Type | undefined): boolean => {
-    if (t === undefined) return false;
-    if (declares(t)) return true;
-    // An INDEXED receiver carries the absence marker: `xs[i]` types
-    // `(Inner) | missing`, because an out-of-range index has no element. The
-    // union is not itself an object layout, so the plain test above declines
-    // it — yet the store is still a store: it either writes the element's slot
-    // or faults, and neither outcome is the binding write `scope` describes.
-    // An arm that declares the field is therefore enough.
-    return (
-      typeof t === 'object' && t.kind === 'union' && t.types.some(declares)
-    );
-  };
+  const owns = mayStoreIntoReceiverOfType;
 
   const root = sym(receiver);
   if (root !== undefined) {
@@ -752,15 +905,18 @@ function isObjectFieldStore(target: Expression | undefined): boolean {
     // effects-of.ts`, which `npx madge --circular` rejects. The predicate is
     // one property test, and `releasedContent()` below already spells it the
     // same way.
-    if (def === undefined || !('value' in def)) return false;
+    // An unbound name, or one whose definition is not a value, establishes
+    // nothing about the receiver — the undecided case, which is a store.
+    if (def === undefined || !('value' in def)) return true;
     return owns(def.value.type.type);
   }
 
   try {
     const canonical = receiver.canonical;
-    return canonical.isValid && owns(canonical.type.type);
+    // A receiver whose canonical form is invalid decides nothing either.
+    return !canonical.isValid || owns(canonical.type.type);
   } catch {
-    return false;
+    return true;
   }
 }
 

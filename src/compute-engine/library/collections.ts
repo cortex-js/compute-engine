@@ -34,9 +34,9 @@ import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // (collections → compile-expression → base-compiler → library/utils → collections)
 import { kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
-import { typeToString } from '../../common/type/serialize.js';
 import { reduceType } from '../../common/type/reduce.js';
 import {
+  isObjectType,
   isSubtype,
   objectLayoutOfType,
   provablyDisjoint,
@@ -100,6 +100,7 @@ import { isRingConstant } from './ring-constructions.js';
 import { adjoinType } from './type-handlers.js';
 import {
   evaluateProtocolProperty,
+  immutableValueAssignmentError,
   protocolMemberSignature,
   protocolMemberValue,
   protocolOfSymbol,
@@ -971,14 +972,12 @@ function fieldBearingType(
  * `readwrite` protocol happens to declare a property of the same name, the
  * store still wins.
  *
- * Getting the precedence wrong is not a cosmetic ordering preference — it
- * silently breaks aliasing. The protocol route lowers `p.name = v` to
- * `p = «set name»(p, v)`, and a setter returns a NEW value which is then
- * rebound; every other reference to the original object keeps seeing the old
- * contents, which is exactly what Appendix B's "References, not copies"
- * forbids. Worse, the divergence is route-dependent: the protocol lowering
- * only fires when the receiver's type is settled at canonicalization, so the
- * same program behaved differently in one Epsil batch than across two.
+ * A `true` here means "this is certainly a store, do not refuse it statically",
+ * and it earns its place by reading a bare-symbol receiver off its DEFINITION:
+ * {@link fieldAssignmentVerdict} canonicalizes the receiver instead, which
+ * folds a single-letter target into the library constant of that name (`i`
+ * becomes `ImaginaryUnit`) and would report a settled non-object type for a
+ * binding that in fact holds an object.
  *
  * Answers `false` whenever the layout cannot be read — an unsettled receiver,
  * a bare `object` annotation (which promises fields without naming them), a
@@ -1004,13 +1003,9 @@ export function objectLayoutOwnsField(
   if (base === undefined) return false;
 
   // A bare-symbol receiver is read off its DEFINITION, never by canonicalizing
-  // it. Two reasons, both load-bearing: canonicalizing a single-letter target
-  // folds it into the constant of that name (`i` becomes `ImaginaryUnit`),
-  // which is why `Assign` keeps its left operand raw at all; and
-  // canonicalization INFERS types as it walks, so doing it here — ahead of
-  // `protocolPropertyAssignment`, which documents that it needs the raw
-  // operand — changed what that route then saw and made a `readonly` property
-  // SET compile instead of failing closed.
+  // it: canonicalizing a single-letter target folds it into the constant of
+  // that name (`i` becomes `ImaginaryUnit`), which is why `Assign` keeps its
+  // left operand raw at all.
   const rootName = sym(base);
   if (rootName !== undefined) {
     const def = ce.lookupDefinition(rootName);
@@ -1023,7 +1018,7 @@ export function objectLayoutOwnsField(
 
   // A computed receiver (`xs[i].name`, `p.inner.name`) has no binding to read,
   // so its type comes from canonicalizing it — the same thing
-  // `protocolPropertyAssignment` does on its own non-variable branch.
+  // {@link fieldAssignmentVerdict} does for every receiver.
   try {
     const canonical = base.canonical;
     if (!canonical.isValid) return false;
@@ -1076,6 +1071,17 @@ export function fieldAssignmentVerdict(
     // `error` as "not an object type" would bury it under a second, wrong
     // one. Defer: the runtime route propagates the receiver's own error.
     if (!canonical.isValid) return 'defer';
+    // A bare-symbol receiver that canonicalized into a DIFFERENT symbol was
+    // folded into the library constant of its name (`e` becomes
+    // `ExponentialE`, `i` becomes `ImaginaryUnit`) — which is why `Assign`
+    // keeps its left operand raw in the first place. Euler's number is not what
+    // the author is writing to: the fold happens while `let e = Person(…)` has
+    // not run yet, and refusing here would report `immutable-value-assignment`
+    // about a constant for a binding that holds an object by the time the write
+    // runs. Defer, and let the runtime route ask the real receiver. (A store
+    // into a genuine constant is still refused there, with the same code.)
+    const rootName = sym(base);
+    if (rootName !== undefined && sym(canonical) !== rootName) return 'defer';
     t = canonical.type.type;
     // Likewise for a receiver whose TYPE is `error` — a binding whose
     // initializer failed. The binding itself is a valid symbol, so the check
@@ -1094,26 +1100,7 @@ export function fieldAssignmentVerdict(
   if (rt === undefined) return 'defer';
   if (rt !== 'none' && rt.kind === 'object') return 'defer';
 
-  return immutableTargetError(ce, name, t);
-}
-
-/**
- * `immutable-value-assignment` — a store into something that cannot hold one.
- *
- * The message names both ways out that Appendix B names, because the fix
- * depends on what the author meant: a record is a value (build an updated
- * copy), and an object is the shape that supports stores (declare the type as
- * one).
- */
-function immutableTargetError(
-  ce: ComputeEngine,
-  name: string,
-  t: Type
-): Expression {
-  return ce.error([
-    'immutable-value-assignment',
-    `\`${typeToString(t)}\` is not an object type, and only an object's fields can be assigned. Build an updated copy with the new \`${name}\`, or declare the type as \`object{…}\``,
-  ]);
+  return immutableValueAssignmentError(ce, name, t);
 }
 
 /**
@@ -1123,23 +1110,36 @@ function immutableTargetError(
  * into. Called from `Assign`'s evaluate handler, which owns that ordering.
  *
  * Separate from the refusals inside {@link objectFieldStore} because it can
- * only be made once the protocol route has had its turn: a value whose type
- * this function would call immutable may still have a `readwrite` property,
- * and that is a store the protocol machinery performs.
+ * only be made once the protocol route has had its turn: a name the object's
+ * layout has no slot for may still be a COMPUTED property, whose `set`
+ * accessor performs the write, and this function would report it as an
+ * unknown field.
  *
  * `base` is the receiver ALREADY EVALUATED by the caller, never re-derived
  * from `lhs` here. A receiver is an arbitrary expression and may carry effects
  * (`nextItem().field = v`), so evaluating it a second time to format an error
  * would fire them twice — which is what this function used to do.
+ *
+ * `undefined` means "do not refuse at all, stay SYMBOLIC": the receiver's type
+ * promises an object while its VALUE is not one yet.
  */
 export function fieldStoreRefusal(
   ce: ComputeEngine,
   lhs: Expression,
   base: Expression | undefined
-): Expression {
-  if (!isFunction(lhs, 'Field')) return immutableTargetError(ce, '', 'unknown');
+): Expression | undefined {
+  if (!isFunction(lhs, 'Field'))
+    return immutableValueAssignmentError(ce, '', 'unknown');
   const name = isString(lhs.ops[1]) ? lhs.ops[1].string : '';
   if (base !== undefined && !base.isValid) return base;
+  // A receiver whose TYPE is an object type but whose VALUE is not an object —
+  // a declared-but-unassigned binding (`let q: Q`), a call that stayed symbolic
+  // — is not an immutable target, and saying so would be flatly false. Nothing
+  // is wrong with the write either; there is simply nothing to store into yet.
+  // Stay symbolic, exactly as a property READ does for the same receiver
+  // (`evaluateProtocolProperty`, `engine-protocols.ts`).
+  if (base !== undefined && !isObject(base) && isObjectType(base.type.type))
+    return undefined;
   // An OBJECT receiver is mutable — the target is fine, the NAME is not. Saying
   // "not an object type" here would be flatly false and would send the reader
   // looking for the wrong problem, so this reports the same `unknown-field`
@@ -1149,7 +1149,7 @@ export function fieldStoreRefusal(
       ['unknown-field', name, [...base._slots.keys()].join(', ')],
       base.typeName
     );
-  return immutableTargetError(ce, name, base?.type.type ?? 'unknown');
+  return immutableValueAssignmentError(ce, name, base?.type.type ?? 'unknown');
 }
 
 /**
@@ -4041,19 +4041,45 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // to a lambda; otherwise fall through to the interpreted path below
         // (previously this returned `undefined`, leaving Reduce unevaluated).
         if (compiled && compiled.calling === 'lambda' && compiled.run) {
+          // The interpreted reducer, needed by the fast path too (below).
+          const fInterp = applicable(fn);
+          const stepInterp = (acc: Expression, x: Expression): Expression =>
+            fInterp([acc, x]) ?? absenceMarker(ce, collection);
           return run(
             (function* () {
               // With an explicit initial value, fold it in from the start; do
               // not overwrite it with the first element (that is only the seed
               // when no initial value was supplied).
-              let accumulator = hasInitial ? seed.re : NaN;
+              //
+              // The accumulator is a JS number while the fast path holds, and
+              // becomes a boxed expression the moment the compiled reducer
+              // returns anything else. The gate above checks the SEED and the
+              // ELEMENTS are real, but not the reducer's RESULT: `(z, k) ↦ z²
+              // + c` with a complex `c` (declared or a literal) compiles to a
+              // lambda that returns a `{re, im}` object, and the body was
+              // compiled with `z` analyzed real — feeding that object back in
+              // computes `z * z` on an object (`re: null`), and boxing the
+              // result at the end raised `unexpected-mathjson` from `.N()`
+              // while `.evaluate()` was correct (reported by Tycho against
+              // 0.112.0/0.113.0). The FIRST non-number result is trustworthy
+              // (every input to that call was a number), so that step is
+              // redone through the interpreted reducer from the previous,
+              // still-numeric accumulator, and the fold stays interpreted
+              // from there. The static result type cannot decide this
+              // upstream: such a body types the wide `number`.
+              let accumulator: number | Expression = hasInitial ? seed.re : NaN;
               let first = true;
               let empty = true;
               for (const item of collection.each()) {
                 empty = false;
                 if (first && !hasInitial) accumulator = item.re;
-                else
-                  accumulator = compiled.run!(accumulator, item.re) as number;
+                else if (typeof accumulator === 'number') {
+                  const next: unknown = compiled.run!(accumulator, item.re);
+                  accumulator =
+                    typeof next === 'number'
+                      ? next
+                      : stepInterp(ce.number(accumulator), item);
+                } else accumulator = stepInterp(accumulator, item);
                 first = false;
                 yield;
               }
@@ -4062,7 +4088,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               // A seedless fold of an empty collection has nothing to seed
               // from — `Nothing`, as the interpreted path answers.
               if (empty && !hasInitial) return ce.Nothing;
-              return ce.expr(accumulator);
+              return typeof accumulator === 'number'
+                ? ce.expr(accumulator)
+                : accumulator;
             })(),
             ce._timeRemaining,
             ce._deadlineFrame

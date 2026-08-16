@@ -1208,3 +1208,125 @@ describe('Symbolic derivative size guard (Tycho item 140)', () => {
     expect(D('\\sin(x^2)', 'x').evaluate().latex).toEqual('2x\\cos(x^2)');
   }, 60_000);
 });
+
+describe('|v| over a TUPLE is a NORM, not a scalar absolute value', () => {
+  // `DERIVATIVES_TABLE` carries the scalar rule `d|x|/dx = sign(x)`, which is
+  // wrong for the Euclidean norm `Abs` denotes over a tuple. Applied through
+  // the chain rule it produced `Sign((cos t, 1)) · (−sin t, 0)` — a tuple
+  // times a tuple — surfacing as a nonsense value or an `incompatible-type`
+  // tuple/number error depending on what enclosed it. The norm's derivative
+  // is the projection of the component velocities onto the unit vector,
+  // `d|v|/dt = (Σᵢ vᵢ·vᵢ′)/|v|`.
+  //
+  // Every case below is checked against a CENTRAL DIFFERENCE rather than a
+  // recalled closed form: a plausible-but-wrong identity typechecks and
+  // passes a symbolic comparison against itself.
+  const central = (f: (t: number) => number, t: number): number =>
+    (f(t + 1e-6) - f(t - 1e-6)) / 2e-6;
+
+  const CASES: [string, string, (t: number) => number][] = [
+    [
+      'a constant norm differentiates to 0',
+      '\\vert(\\cos(t), -\\sin(t), 1)\\vert',
+      (t) => Math.hypot(Math.cos(t), -Math.sin(t), 1),
+    ],
+    [
+      'a non-constant norm',
+      '\\vert(\\cos(t), t^2, 1)\\vert',
+      (t) => Math.hypot(Math.cos(t), t * t, 1),
+    ],
+    [
+      'a norm homogeneous in t (sign-dependent)',
+      '\\vert(t, 2t)\\vert',
+      (t) => Math.hypot(t, 2 * t),
+    ],
+    [
+      'a norm inside a product',
+      '\\cos(t)\\cdot\\vert(\\cos(t), -\\sin(t), 1)\\vert',
+      (t) => Math.cos(t) * Math.hypot(Math.cos(t), -Math.sin(t), 1),
+    ],
+  ];
+
+  for (const [name, latex, f] of CASES) {
+    test(name, () => {
+      const ce = new ComputeEngine();
+      const d = ce.box(['D', ce.parse(latex).json, 't']).evaluate();
+      // Not inert, and not the scalar rule's `Sign` of a tuple.
+      expect(d.operator).not.toBe('D');
+      expect(d.toString()).not.toContain('Sign((');
+      for (const t0 of [0.25, 1.3, -0.7]) {
+        const sym = d.subs({ t: t0 }).N().re;
+        expect(sym).toBeDefined();
+        expect(sym!).toBeCloseTo(central(f, t0), 5);
+      }
+    });
+  }
+
+  test('a DECLARED head agrees with an undeclared one (Tycho item 197)', () => {
+    // The reported witness. Declaring the head before binding it installs a
+    // VALUE definition rather than an operator definition, which reaches the
+    // derivative through a path that does not fold the constant norm away
+    // first — so the scalar rule fired where the undeclared route had been
+    // masked by the fold. The two routes must agree; the consumer's manager
+    // is declare-then-assign by design, so only the declared route is
+    // exercised in production.
+    const body = '\\cos(t)\\cdot\\vert(\\cos(t), -\\sin(t), 1)\\vert';
+    const results = [false, true].map((declareFirst) => {
+      const ce = new ComputeEngine();
+      if (declareFirst) ce.declare('G', 'function');
+      ce.assign('G', ce.parse(`t \\mapsto ${body}`));
+      return ce
+        .box(['Apply', ['Derivative', 'G', 1], 0.25])
+        .evaluate()
+        .N().re;
+    });
+    expect(results[0]).toBeCloseTo(-0.34988203456, 8);
+    expect(results[1]).toBeCloseTo(results[0]!, 12);
+  });
+
+  test('an OPAQUE operand that does not mention the variable is 0', () => {
+    // A norm that does not mention `t` is constant in `t` whatever its
+    // components are. This must NOT decline: before the norm rule existed
+    // the scalar rule composed with `D(V, t) = 0` and gave `Sign(V)·0 = 0`,
+    // so declining here would regress a correct answer to an inert one.
+    const ce = new ComputeEngine();
+    ce.declare('V', 'list<number>');
+    expect(ce.box(['D', ['Abs', 'V'], 't']).evaluate().re).toBe(0);
+    // The scalar case has always answered 0, and is the control.
+    ce.declare('S', 'real');
+    expect(ce.box(['D', ['Abs', 'S'], 't']).evaluate().re).toBe(0);
+  });
+
+  test('an EMPTY tuple norm differentiates to 0', () => {
+    // `|()|` evaluates to 0 (the norm of an empty vector is 0 for every norm
+    // type), so its derivative is 0 rather than a decline.
+    const ce = new ComputeEngine();
+    expect(ce.box(['Abs', ['Tuple']]).evaluate().re).toBe(0);
+    expect(ce.box(['D', ['Abs', ['Tuple']], 't']).evaluate().re).toBe(0);
+  });
+
+  test('a COMPLEX component gives a real derivative', () => {
+    // The numerator is `Real(Conjugate(vᵢ)·vᵢ′)`, not the bare product: the
+    // real Euclidean form answers `0.667 + 0.333i` for `|(t+i, 2)|` at t = 2
+    // where the derivative is the real `0.667` — right real part, spurious
+    // imaginary one. `isReal` cannot gate this (a symbolic `cos(t)` over a
+    // free `t` reports `isReal === false`, meaning "not provably real"), so
+    // the Hermitian form is emitted unconditionally.
+    const ce = new ComputeEngine();
+    const d = ce
+      .box(['D', ['Abs', ['Tuple', ['Add', 't', 'ImaginaryUnit'], 2]], 't'])
+      .evaluate();
+    const f = (t: number) => Math.hypot(Math.hypot(t, 1), 2);
+    for (const t0 of [2, 0.5]) {
+      const got = d.subs({ t: t0 }).N();
+      expect(got.re!).toBeCloseTo((f(t0 + 1e-6) - f(t0 - 1e-6)) / 2e-6, 5);
+      expect(got.im ?? 0).toBeCloseTo(0, 12);
+    }
+  });
+
+  test('a SCALAR |x| still uses the sign rule', () => {
+    const ce = new ComputeEngine();
+    const d = ce.box(['D', ['Abs', 'x'], 'x']).evaluate();
+    expect(d.toString()).toContain('Sign');
+  });
+});

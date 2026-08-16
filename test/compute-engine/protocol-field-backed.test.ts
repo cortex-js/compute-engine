@@ -346,8 +346,10 @@ let q = p`
       ] as never)
       .evaluate();
 
-    // The setter hands back the RECEIVER, not a rebuilt copy…
-    expect(written).toBe(before);
+    // The write evaluates to the VALUE assigned — the setter's own result is
+    // discarded — and it wrote the receiver's slot rather than rebuilding it…
+    expect(String(written)).toBe('43');
+    expect(objectAt('p')).toBe(before);
     // …so the alias sees the new value, and the version counter moved.
     expect(value('p.age')).toBe('43');
     expect(value('q.age')).toBe('43');
@@ -641,7 +643,7 @@ let p = P(seen: "-")
         ['Apply', 'once'],
       ] as never)
       .evaluate();
-    expect(written).toBe(objectAt('p'));
+    expect(String(written)).toBe('"x"');
     expect(value('(p.seen, calls)')).toBe('("x", 1)');
   });
 });

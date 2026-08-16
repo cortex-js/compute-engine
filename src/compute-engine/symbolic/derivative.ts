@@ -1128,6 +1128,84 @@ function differentiateNode(
     return simplifyDerivative(add(...terms));
   }
 
+  // `Abs` of a NON-NUMBER operand is the Euclidean norm, not a scalar
+  // absolute value: `|(x, y, z)| = √(|x|² + |y|² + |z|²)`. The table's entry
+  // (`Abs: ['Sign', '_']`) is the scalar rule and is wrong for that operand —
+  // applied through the chain rule below it produced
+  // `Sign((cos t, 1)) · (−sin t, 0)`, a tuple multiplied by a tuple, which
+  // surfaced either as a nonsense value or as an `incompatible-type`
+  // tuple/number error depending on what enclosed it. The norm's derivative
+  // is the projection of the component velocities onto the unit vector:
+  //
+  //     d|v|/dt = (Σᵢ vᵢ · vᵢ′) / |v|
+  //
+  // That is the REAL Euclidean form. The norm also accepts COMPLEX
+  // components, where the correct numerator is `Re(Σ conj(vᵢ)·vᵢ′)` — for
+  // `|(t + i, 2)|` the real form answers `0.667 + 0.333i` at t = 2 where the
+  // derivative is the real `0.667`, a right real part with a spurious
+  // imaginary one. So a component that is provably NON-real declines here
+  // rather than taking the real form. (The Hermitian numerator is not emitted
+  // instead because neither `Re` nor `Conjugate` folds away for a
+  // provably-real argument: emitting them would leave
+  // `Re(-(sin t · Conjugate(cos t)))` in ordinary real output and evaluate to
+  // NaN. Supporting complex components properly needs those two to reduce
+  // first, which is a separate piece of work.) A component whose realness is
+  // merely UNKNOWN — `cos(t)` for a free `t` — takes the real form, the same
+  // assumption the scalar rules in the table make.
+  //
+  // Undefined at `v = 0`, exactly as the scalar rule is undefined at 0.
+  // Verified numerically against a central difference, including a complex
+  // component, before landing.
+  if (expr.operator === 'Abs' && expr.nops === 1 && expr.op1.isNumber !== true) {
+    // A norm that does not mention `v` is constant in `v`, whatever its
+    // components are — including an opaque operand this rule cannot take
+    // apart. Answering `0` here matters because it is what the code did
+    // BEFORE this branch existed: the scalar rule composed with `D(V, v) = 0`
+    // gave `Sign(V)·0 = 0`, so declining instead would REGRESS
+    // `D(|V|, t)` for a `V: list<number>` from `0` to inert.
+    if (!expr.has(v)) return ce.Zero;
+
+    const vec = expr.op1;
+    const comps = isFunction(vec, 'Tuple') ? vec.ops : null;
+    // The norm of an empty vector is `0` for every norm type (see `Norm` in
+    // `library/linear-algebra.ts`), and `|()|` already evaluates to `0`, so
+    // its derivative is `0` rather than a decline.
+    if (comps?.length === 0) return ce.Zero;
+    // Beyond that, only a tuple has statically-known components to
+    // differentiate. Any other non-number operand that DOES mention `v` (an
+    // opaque collection, a symbol typed `list<…>` with a `v`-dependent
+    // binding) declines, leaving `D` inert rather than guessing — a decline
+    // is a correct answer there, a scalar rule is not.
+    if (!comps) return undefined;
+
+    // `Real(Conjugate(vᵢ) · vᵢ′)` rather than the bare product: the operand's
+    // components may be complex. The two forms agree for a real component,
+    // and `isReal` cannot separate the cases here — a symbolic `cos(t)` over
+    // a free `t` reports `isReal === false`, meaning "not PROVABLY real"
+    // rather than "provably complex" — so the Hermitian form is emitted
+    // unconditionally and the simplifier removes it where it is inert.
+    const hermitian = (c: Expression, cPrime: Expression): Expression =>
+      ce.function('Real', [
+        ce.function('Multiply', [ce.function('Conjugate', [c]), cPrime]),
+      ]);
+
+    const terms: Expression[] = [];
+    for (const c of comps) {
+      const cPrime = differentiate(c, v, depth + 1, trace);
+      if (cPrime === undefined) return undefined;
+      terms.push(hermitian(c, cPrime));
+    }
+    recordD(trace, expr, v, 'derivative.tuple-norm', () =>
+      ce.function('Divide', [
+        add(...comps.map((c) => hermitian(c, dPlaceholder(c, v)))),
+        expr,
+      ])
+    );
+    return simplifyDerivative(
+      ce.function('Divide', [add(...terms), expr]) as Expression
+    );
+  }
+
   const h = DERIVATIVES_TABLE[
     expr.operator as keyof typeof DERIVATIVES_TABLE
   ] as ExpressionInput | undefined;

@@ -585,7 +585,10 @@ with three rulings needed in order (see §7).
    (a) dispatch on the first `Self` argument, with `Self` bound
    statically from that argument (the join-across-arguments rule is
    withdrawn); (b) property assignment as rebinding sugar, non-variable
-   LHS rejected in v1; (c) pending-conformance lifecycle — end-of-batch
+   LHS rejected in v1 — **superseded 2026-08-16 by B10**: assignment is
+   a store into a mutable object, legal on nothing else, and any
+   expression evaluating to an object is a valid target (Appendix A,
+   "Properties"); (c) pending-conformance lifecycle — end-of-batch
    warning, not error; (d) overlap predicate = inhabited meet, with
    incomparable overlap rejected; (e) statement-replace on Epsil re-run
    vs host-API throw for protocol/implementation re-declaration; (f)
@@ -987,6 +990,13 @@ effect labels are part of every signature and participate in subtyping
 (`docs/EFFECTS-MODEL.md`). Parameter names are not significant, except that
 the first parameter is the dispatch position.
 
+The effect half of that check is **opt-in** (Appendix B, "Changing a field
+is an effect"): it applies only to a requirement that *declares* an effect
+specifier, which is then a ceiling its conformers may not exceed. A bare
+requirement imposes no effect bound at all — the dispatcher's effects are
+derived from the conformers registered at the time, and a conformer that
+mutates is admitted.
+
 v1 restrictions: same arity (no optional or variadic parameters in protocol
 members), no generic protocol members, and exactly one implementation
 function per requirement (no overload arms). A mismatch emits
@@ -1030,10 +1040,11 @@ type `Self`, and a result type that matches the type of the property.
 
 The signature of the `set` handler of a property has two arguments, the
 first of type `Self` and the second of a type that matches the type of the
-property. The result of the `set` handler is conventionally the type of the
-property, and the return value is the value the property was set to (which
-may be different than the input value, but which should be identical to
-invoking the `get` handler).
+property. Its RESULT is unconstrained and unchecked, whether or not it is
+annotated: a property store discards it and evaluates to the value
+assigned (Appendix B, "Assigning to a property"). Returning the receiver
+is the useful convention — it makes the handler callable directly, and it
+reads as what the write is — but nothing depends on it.
 
 If the signatures of the `get` or `set` handlers are invalid,
 `protocol-signature-mismatch` is emitted. If a `set` handler is provided
@@ -1309,28 +1320,40 @@ const name = person.name
 // -> invokes the `get name(person)` handler
 
 person.name = "Steve"
-// -> rebinding sugar (ruling): `person = «set name»(person, "Steve")`
+// -> invokes the `set name(person, "Steve")` handler, which stores;
+//    the assignment evaluates to "Steve"
 ```
 
-Property assignment is **rebinding sugar** over the immutable value model
-(nominal values are opaque, immutable tag+payload — nominal-types design
-§4.2, and `Field`/`At` assignment is otherwise rejected for exactly this
-reason): the `set` handler returns the updated value and the assignment
-rebinds the left-hand variable to it. The left-hand side's root must
-therefore be an assignable binding; a non-variable target
-(`xs[i].name = v`) emits `property-assignment-target-invalid` in v1.
+Property assignment is a **store** (Appendix B, "Assigning to a
+property"): the `set` handler is invoked against the object the receiver
+refers to, whatever it returns is discarded, and the assignment evaluates
+to the value assigned — the same semantics a stored field has. Because it
+modifies rather than rebinds, the left-hand side does not have to be a
+variable: any expression that evaluates to an object can be stored into
+(`xs[i].name = v`), and a `const` binding is no obstacle, since the store
+writes the object and never the binding. It is legal only on objects; on a
+record, a tuple or any other immutable value it emits
+`immutable-value-assignment`.
 
-Appendix B proposes superseding this sugar with true mutable objects:
-assignment would then modify the object in place, be legal only on
-object-backed types, and be rejected on records. Until that proposal is
-ratified, the sugar above is the shipped behavior.
+(This supersedes the **rebinding sugar** originally specified here, under
+which the `set` handler returned an updated value and the assignment
+rebound the left-hand variable to it — the only meaning available before
+the language had mutable values. It required the target's root to be an
+assignable binding, and refused everything else with
+`property-assignment-target-invalid`; both that restriction and that
+diagnostic are retired. The mutability gate — a protocol with a
+`readwrite` property admits object conformers only — is what makes the
+store the only remaining case.)
 
 If there are conflicting properties from protocols with overlapping
 property names, the property name can be prefixed with the protocol name to
-disambiguate, enclosed in parentheses:
+disambiguate, enclosed in parentheses. The qualified form is both a read
+and a write; a write means the same store, restricted to the protocol
+named:
 
 ```epsil
 person.(Nameable.name)
+person.(Nameable.name) = "Steve"
 ```
 
 (This form requires amending the shipped field-access grammar —
@@ -1426,9 +1449,10 @@ const p: Person = getUser()
 p.age = p.age + 1
 ```
 
-Appendix A makes property assignment work through rebinding sugar — the
-setter returns an updated copy and the variable `p` is rebound to it.
-That reading has hard limits: it fails on this very example (`p` is
+Appendix A originally made property assignment work through rebinding
+sugar — the setter returned an updated copy and the variable `p` was
+rebound to it (retired 2026-08-16, superseded by this appendix).
+That reading had hard limits: it fails on this very example (`p` is
 `const`, and rebinding a `const` variable is an error); it cannot work at
 all when the value lives inside a list or another structure (there is no
 variable to rebind); and a "change" made this way is invisible to anyone
@@ -2624,7 +2648,7 @@ deferral by design.)
 
 ### Changes to shipped documents when this lands
 
-To Appendix A:
+To Appendix A (items 1–5 APPLIED 2026-08-16, with the store):
 
 1. **"Properties"** — the property-assignment paragraph (rebinding
    sugar, `property-assignment-target-invalid`) is replaced: assignment
@@ -2954,15 +2978,14 @@ proposed by Appendix B and are not implemented.
 | `type-redefinition` | second `type` declaration of one name within one Epsil program, including a sum statement's variant names (across programs, replacement — same ruling) |
 | `protocol-member-unknown` | implementation defines a member not in the protocol |
 | `protocol-signature-mismatch` | implementation signature not a subtype of the requirement |
-| `protocol-property-readonly-set` | `set` handler provided for a `readonly` property |
+| `protocol-property-readonly-set` | `set` handler provided for a `readonly` property, or a write through the read-only protocol view (a stored field that satisfies the requirement can still be written directly — see the `readonly` entry in `ROADMAP.md`) |
 | `protocol-conditional-member-effects` | an effect specifier on a member of a CONDITIONAL conformance; refused at the declaration, since a conditional `Self` is a head pattern and a specifier has to be recorded against a concrete receiver |
 | `protocol-constraint-unsatisfied` | solved type variable fails an `is` constraint |
 | `protocol-in-type-position` | protocol name used where a type is expected |
 | `protocol-call-ambiguous` | bare call resolves to several applicable protocols |
 | `protocol-property-ambiguous` | property name resolves to several protocols |
-| `property-assignment-target-invalid` | property assignment whose LHS root is not an assignable binding (retired by Appendix B when it lands) |
 | `protocol-requires-object` | a protocol with settable properties (or a member with a declared `state` effect) conformed to by a non-object type |
-| `immutable-value-assignment` † | property assignment on a record or other immutable value |
+| `immutable-value-assignment` | property assignment on a record or other immutable value |
 | `object-serialization-unsupported` † | an object position serialized under `toMathJSON({ objects: 'reject' })` — B5's strict opt-in (the default converts instead) |
 | `argument-name-unknown` | a named argument names a parameter the function does not declare (Appendix C) |
 | `argument-order-invalid` | a positional argument follows a named argument (Appendix C) |

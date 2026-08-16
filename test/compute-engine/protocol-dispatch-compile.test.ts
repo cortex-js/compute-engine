@@ -440,8 +440,73 @@ function readAny(p) -> unknown { p.name }`);
     expect(compile(ce.box('readAny')).success).toBe(false);
   });
 
-  test('a readonly property SET fails closed, not silently', () => {
-    const ce = engineFor(`protocol Tagged {
+  test('a property SET fails closed, not silently', () => {
+    // A property store writes a mutable object, and objects have no compiled
+    // representation yet, so there is nothing to lower to. Before this tier the
+    // compiler emitted the silent no-op `_ = v`, leaving the target at its old
+    // value behind `success: true`.
+    //
+    // The receiver is an OBJECT with no `age` slot, so the assignment survives
+    // canonicalization as `Assign(Field(p, "age"), 1)` — the shape the lowering
+    // has to refuse — and reaches the compiler.
+    const ce = engineFor(`protocol Aged {
+  readwrite age: integer
+}
+type P = object{n: integer}
+type P is Aged {
+  get age(self: Self) -> integer { self.n }
+  set age(self: Self, v: integer) -> Self { self.n = v
+    self }
+}
+function bump(p: P) -> integer {
+  p.age = 1
+  p.age
+}`);
+    const result = compile(ce.box('bump'));
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toContain('Fail closed (D6)');
+    expect(String(result.error)).toContain(
+      'objects have no compiled representation'
+    );
+  });
+
+  test('the QUALIFIED spelling of the same store fails closed too', () => {
+    // `p.(Aged.age) = v` canonicalizes to a four-operand `ProtocolProperty`,
+    // which is a store and not a call. Lowering it as a call — the dispatch
+    // planner's default for that head — would both bypass the refusal above and
+    // evaluate to the SETTER's result where the interpreter evaluates to the
+    // value assigned: a silent divergence behind `success: true`.
+    const ce = engineFor(`protocol Aged {
+  readwrite age: integer
+}
+type P = object{n: integer}
+type P is Aged {
+  get age(self: Self) -> integer { self.n }
+  set age(self: Self, v: integer) -> Self { self.n = v
+    self }
+}
+function bumpQualified(p: P) -> integer {
+  p.(Aged.age) = 1
+  p.age
+}`);
+    const result = compile(ce.box('bumpQualified'));
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toContain('Fail closed (D6)');
+    expect(String(result.error)).toContain(
+      'objects have no compiled representation'
+    );
+  });
+
+  test('a SET on a value receiver never reaches the compiler at all', () => {
+    // It is refused where it is written: assignment through a `Field` target is
+    // a store, a store needs a mutable object, and a tuple is not one — so the
+    // whole `function` statement evaluates to that error and no definition is
+    // installed. (A `readonly` property is the only kind a value type can carry
+    // at all, after the B1 mutability gate.)
+    const ce = new ComputeEngine();
+    const result = executeEpsil(
+      ce,
+      `protocol Tagged {
   readonly tag: string
 }
 type Person = tuple<n: string, age: integer>
@@ -451,11 +516,9 @@ type Person is Tagged {
 function retag(p: Person, v: string) -> Person {
   p.tag = v
   p
-}`);
-    // The interpreter answers `protocol-property-readonly-set`; before this
-    // tier the compiler emitted the silent no-op `_ = v`.
-    const result = compile(ce.box('retag'));
-    expect(result.success).toBe(false);
+}`
+    );
+    expect(String(result.value)).toContain('immutable-value-assignment');
   });
 
   test('a typed local declared in a LOOP BODY resolves the static tier', () => {

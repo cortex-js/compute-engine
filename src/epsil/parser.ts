@@ -7967,10 +7967,12 @@ function symbolNameOf(expr: MathJsonExpression): string | null {
  *
  * This is the test that makes a bare `=` positional — with a binding target on
  * the left of a statement it assigns, otherwise it compares. `Field`/`At` are
- * included deliberately: both already reject at evaluation (Epsil collections
- * and records are immutable), so reading them as comparisons instead would
- * trade a real diagnostic for a silent `False`. When immutable-update
- * expressions land they become meaningful in the same position.
+ * included deliberately, and for two different reasons now: a `Field` chain
+ * rooted at an OBJECT is a real property store (`p.name = v`,
+ * `xs[1].name = v`), and everything else — a record, a tuple, an `At` target —
+ * reports `immutable-value-assignment` at evaluation. Reading either as a
+ * comparison instead would trade a store, or a real diagnostic, for a silent
+ * `False`.
  */
 function isBindingTarget(expr: MathJsonExpression): boolean {
   return bindingTargetRoot(expr) !== null;
@@ -8008,10 +8010,10 @@ function bindingTargetRoot(
   const ops = fnOps(expr);
   if (ops === null || ops.length < 2) return null;
   // A QUALIFIED protocol property (`p.(P.name)`, protocols design P6) carries
-  // its receiver third. It is a binding-target SHAPE — so a bare `=` against
-  // one reads as the assignment it looks like, and the engine answers with
-  // `property-assignment-target-invalid` — rather than silently becoming a
-  // comparison whose result is discarded.
+  // its receiver third. It is a binding-target SHAPE, so a bare `=` against one
+  // reads as the assignment it looks like — a property STORE through the named
+  // protocol's `set` accessor — rather than silently becoming a comparison
+  // whose result is discarded.
   if (ops[0] === 'ProtocolProperty')
     return ops.length >= 4 ? bindingTargetRoot(ops[3]) : null;
   if (ops[0] !== 'Field' && ops[0] !== 'At') return null;

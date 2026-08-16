@@ -665,3 +665,54 @@ describe('Quantity — n-ary fold on the FIRST .N() (Tycho item 101 sibling)', (
     expect(r.op1.re).toBeCloseTo(5, 12);
   });
 });
+
+describe('`.abs()` on a Negate head — |−x| = |x|, not −x', () => {
+  // Found by sweeping for a third instance of the "a construct that answers
+  // to a scalar shortcut while being something else" family (the other two
+  // were `Abs` over a TUPLE: the norm propagating a non-number's `isFinite`,
+  // and the norm taking the scalar derivative).
+  //
+  // `abs()` short-circuited on both an `Abs` head and a `Negate` head with
+  // `return this`. Idempotence makes that right for `Abs` (‖x‖ = |x|) and
+  // simply wrong for `Negate`.
+
+  test('a symbolic negation is made non-negative', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('-x').abs().toString()).toBe('|x|');
+    // The value, not just the spelling: this returned −3 before.
+    expect(ce.parse('-x').abs().subs({ x: 3 }).evaluate().re).toBe(3);
+    expect(ce.parse('-x').abs().subs({ x: -3 }).evaluate().re).toBe(3);
+  });
+
+  test('a double negation collapses too', () => {
+    // Built STRUCTURALLY: a canonical `Negate(Negate(x))` collapses to the
+    // bare symbol `x` at box time, so `.abs()` would dispatch to
+    // `BoxedSymbol.abs()` and never reach the branch under test — the
+    // assertion would pass against the unfixed code and prove nothing.
+    const ce = new ComputeEngine();
+    const inner = ce.function('Negate', ['x'], { form: 'structural' });
+    const outer = ce.function('Negate', [inner], { form: 'structural' });
+    expect(outer.operator).toBe('Negate');
+    expect(outer.abs().toString()).toBe('|x|');
+  });
+
+  test('an Abs head is still idempotent', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Abs', 'x']).abs().toString()).toBe('|x|');
+    // Including the tuple norm, which is an `Abs` head as well.
+    expect(ce.box(['Abs', ['Tuple', 1, 2]]).abs().toString()).toBe('|(1, 2)|');
+  });
+
+  test('a `PlusMinus` error term is normalized (the reachable witness)', () => {
+    // `PlusMinus`/`Measurement` canonicalization calls `.abs()` on the error
+    // term, so the defect surfaced as a stored NEGATIVE uncertainty.
+    const ce = new ComputeEngine();
+    ce.declare('e', 'real');
+    expect(ce.box(['PlusMinus', 5, ['Negate', 'e']]).toString()).toBe(
+      'PlusMinus(5, |e|)'
+    );
+    // A numeric negative was always normalized — the literal path never
+    // reaches the short-circuit — which is why this survived.
+    expect(ce.box(['PlusMinus', 5, -3]).toString()).toBe('PlusMinus(5, 3)');
+  });
+});

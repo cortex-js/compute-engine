@@ -1484,7 +1484,16 @@ export class BoxedFunction
   abs(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
-    if (this.operator === 'Abs' || this.operator === 'Negate') return this;
+    // `||x|| = |x|` — idempotent, so an `Abs` head is already the answer.
+    if (this.operator === 'Abs') return this;
+    // `|−x| = |x|`, NOT `−x`. This arm used to return `this`, so
+    // `ce.parse('-x').abs()` answered `-x` and evaluated to −3 at x = 3 — a
+    // wrong value from a public method. It reached `PlusMinus`/`Measurement`,
+    // whose canonical forms call `.abs()` on the error term: `PlusMinus(5,
+    // -e)` kept `-e` as its error and serialized `5 ± -e`. A NUMERIC negative
+    // was unaffected (`PlusMinus(5, -3)` normalized to `3`) because the
+    // literal path never reaches here, which is why it survived.
+    if (this.operator === 'Negate') return this.op1.abs();
     if (this.isNonNegative) return this;
     if (this.isNonPositive) return this.neg();
     return this.engine._fn('Abs', [this]);

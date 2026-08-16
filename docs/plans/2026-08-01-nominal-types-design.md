@@ -671,6 +671,13 @@ qualified property assignment (`person.(P.name) = v`) is
 `property-assignment-target-invalid` in v1. The unqualified `.name` spelling,
 and every ruling above about it, is unchanged.
 
+> **SUPERSEDED 2026-08-16.** The qualified form is now a WRITE as well as a
+> read: `person.(P.name) = v` lowers to a four-operand `ProtocolProperty` and
+> performs the same store the unqualified spelling does, restricted to the
+> protocol named; `property-assignment-target-invalid` is retired. See
+> `docs/TYPE_SYSTEM_ROADMAP.md`, Appendix A "Properties" and Appendix B
+> "Assigning to a property".
+
 #### Addendum test additions (extends §9)
 
 - Recognition: constructor installs on all three routes (Cortex

@@ -3692,49 +3692,43 @@ export class BaseCompiler {
             `position (a block's non-final statement, or a loop body). ` +
             `Fail closed (D6).`
         );
-      // A protocol property assignment — `p.name = v`, P2's REBINDING sugar
-      // (`p = «set name»(p, v)`). The engine may keep the canonical form as
-      // `Assign(Field(p, "name"), v)` (the rebind decision re-resolves at
-      // evaluation), which the generic lowering below would compile to the
-      // silent no-op `_ = v`. Rebind through the compiled setter instead;
-      // when the property IS protocol-declared but the setter cannot be
-      // compiled (readonly, ambiguous, undecided receiver, …), fail closed
-      // rather than emit the no-op.
-      if (isFunction(args[0], 'Field') && isString(args[0].ops[1])) {
-        const propertyName = args[0].ops[1].string;
-        if (
-          protocolDispatchCandidates(engine, `__set__${propertyName}`) !== null
-        ) {
-          const root = args[0].ops[0];
-          if (isSymbol(root)) {
-            // STATIC tier only, like the bare-`Field` GET: an undecided
-            // receiver may be an ordinary record/dictionary at runtime,
-            // whose keys beat protocol properties (P46) — a guard chain
-            // over the conformance targets would throw on such a value
-            // where the interpreter performs the ordinary field update.
-            const setter = BaseCompiler.tryCompileProtocolDispatch(
-              engine,
-              {
-                implKey: `__set__${propertyName}`,
-                member: propertyName,
-                args: [root, args[1]],
-                staticOnly: true,
-              },
-              target
-            );
-            if (setter !== undefined) return `${root.symbol} = ${setter}`;
-          }
-          throw new Error(
-            `${propertyName}: this protocol property assignment has no ` +
-              `lowering on target '${target.language ?? 'javascript'}' ` +
-              `(the setter could not be compiled${
-                isSymbol(args[0].ops[0])
-                  ? ''
-                  : '; only a variable can be rebound'
-              }). Fail closed (D6).`
-          );
-        }
-      }
+      // A protocol property assignment — `p.name = v` where some protocol
+      // declares `name` a property. The engine keeps the canonical form as
+      // `Assign(Field(p, "name"), v)` (the receiver decides at evaluation
+      // whether the slot or a `set` accessor takes the write), which the
+      // generic lowering below would compile to the silent no-op `_ = v`.
+      //
+      // There is no lowering to emit in its place. Assigning to a property is a
+      // store into a mutable object, and only an object can carry a settable
+      // property at all (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Which
+      // types can conform"), so every legal receiver here is an object — and
+      // objects have no compiled representation yet. Fail closed (D6) rather
+      // than emit the no-op; the ROADMAP.md entry for the mutability gate
+      // schedules the compiled store with the object work.
+      const storeTarget = args[0];
+      const storedProperty = isFunction(storeTarget, 'Field')
+        ? isString(storeTarget.ops[1]) &&
+          protocolDispatchCandidates(
+            engine,
+            `__set__${storeTarget.ops[1].string}`
+          ) !== null
+          ? storeTarget.ops[1].string
+          : undefined
+        : // The QUALIFIED spelling `p.(P.name) = v` keeps its
+          // `Assign(ProtocolProperty(P, name, p), v)` shape through
+          // canonicalization — the fold to the four-operand operator happens at
+          // evaluation, so this is the form the compiler sees.
+          isFunction(storeTarget, 'ProtocolProperty') &&
+            isString(storeTarget.ops[1])
+          ? storeTarget.ops[1].string
+          : undefined;
+      if (storedProperty !== undefined)
+        throw new Error(
+          `${storedProperty}: this protocol property assignment has no ` +
+            `lowering on target '${target.language ?? 'javascript'}' ` +
+            `(a property store writes a mutable object, and objects have no ` +
+            `compiled representation). Fail closed (D6).`
+        );
       // Any other non-symbol target (a `Subscript` sequence definition, a
       // `Field` naming no protocol property, …) has no lowering: emitting
       // `_ = v` would silently leave the target at its old value (and, in
@@ -4187,6 +4181,20 @@ export class BaseCompiler {
     // Handle function calls
     const fn = target.functions?.(h);
     if (!fn) {
+      // A four-operand `ProtocolProperty` is a property STORE, not a call — the
+      // shape a hand-built expression spells, and what `p.(P.name) = v` folds
+      // to at evaluation. Refused with the same message as the `Assign`
+      // spellings of the same write: a store writes a mutable object, and
+      // objects have no compiled representation yet.
+      if (h === 'ProtocolProperty' && args.length === 4)
+        throw new Error(
+          `${isString(args[1]) ? args[1].string : 'property'}: this protocol ` +
+            `property assignment has no lowering on target ` +
+            `'${target.language ?? 'javascript'}' (a property store writes a ` +
+            `mutable object, and objects have no compiled representation). ` +
+            `Fail closed (D6).`
+        );
+
       // A protocol call — a bare dispatcher head (`compare(x, y)`), the
       // `ProtocolMember`/`ProtocolProperty` operators, or a `Field` read that
       // only a protocol property can answer. Compiled as a direct call
@@ -10817,8 +10825,9 @@ export class BaseCompiler {
       // whatever they are emitted as.
       boundVars: BaseCompiler.withBoundNames(root, declared),
       // The parameters' DECLARED types, for the lowerings that read a raw
-      // (never-bound) symbol — the protocol-property SET rebinding, whose
-      // `Assign` LHS root types `unknown` in the canonical body. Fresh per
+      // (never-bound) symbol — the bare-`Field` protocol property GET tier,
+      // whose receiver types `unknown` in the canonical body because nothing
+      // has bound the parameter yet. Fresh per
       // definition (module-level semantics: the requester's map must not
       // leak in), replacing whatever the spread copied from `root`.
       declaredVarTypes: BaseCompiler.literalDeclaredParamTypes(literal),
@@ -11108,7 +11117,8 @@ export class BaseCompiler {
    *   installed `_protocolDispatcher` operator — a user shadow of the name
    *   drops the marker and wins, matching the interpreter);
    * - the `ProtocolMember` operator (`(protocol, member, receiver, …args)`);
-   * - the `ProtocolProperty` operator — 3 operands GET, 4 operands SET;
+   * - the `ProtocolProperty` operator — 3 operands GET; 4 operands is a
+   *   property STORE and is NOT a dispatchable call (see below);
    * - a bare `Field` read that the ordinary field routes already declined
    *   (this runs in the `!fn` branch, AFTER `Field`'s own `compile` handler
    *   declined). The bare-`Field` form is STATIC-tier only: an undecided
@@ -11207,13 +11217,12 @@ export class BaseCompiler {
           protocol,
           args: args.slice(2),
         };
-      if (args.length === 4)
-        return {
-          implKey: `__set__${member}`,
-          member,
-          protocol,
-          args: args.slice(2),
-        };
+      // FOUR operands is a property STORE, not a call: it writes a mutable
+      // object, and objects have no compiled representation yet. Declining here
+      // sends it to the fail-closed throw in the value path rather than
+      // lowering it to `setterImpl(receiver, value)` — which would both bypass
+      // that refusal and evaluate to the SETTER's result where the interpreter
+      // evaluates to the value assigned.
       return undefined;
     }
 
@@ -11681,31 +11690,33 @@ export class BaseCompiler {
           return;
         }
       }
-      // Property SET: `Assign(Field(root, "name"), v)` where some protocol
-      // declares the property. STATIC tier only (P46), like the compile
-      // path; a non-static site fails closed there, so `Field` stays listed.
+      // A property STORE, in either of its two spellings:
+      // `Assign(Field(root, "name"), v)` — the unqualified `p.name = v`, which
+      // keeps its `Field` target through canonicalization — and the
+      // four-operand `ProtocolProperty(P, "name", root, v)` the qualified
+      // `p.(P.name) = v` lowers to. Neither is lowerable: a store writes a
+      // mutable object, and objects have no compiled representation yet. Both
+      // are reported UNSUPPORTED here, in step with the value path, which fails
+      // closed (D6) on the same two shapes.
+      //
+      // The `Assign` arm claims EVERY `Field` target, not only names some
+      // protocol declares as a property: an ordinary layout store has no
+      // lowering either, and the value path refuses it identically.
       if (
         h === 'Assign' &&
-        isFunction(ops[0], 'Field') &&
-        isString(ops[0].ops[1]) &&
-        protocolDispatchCandidates(engine, `__set__${ops[0].ops[1].string}`) !==
-          null
+        (isFunction(ops[0], 'Field') ||
+          isFunction(ops[0], 'ProtocolProperty'))
       ) {
-        const name = ops[0].ops[1].string;
-        const root = ops[0].ops[0];
-        const plan =
-          jsProtocolTarget() && isSymbol(root)
-            ? planProtocolDispatch(engine, {
-                implKey: `__set__${name}`,
-                argc: 2,
-                receiverType: probeReceiverType(root),
-              })
-            : undefined;
-        if (plan !== undefined && plan.tier === 'static')
-          visitProtocolPlan(`:__set__${name}`, plan, bound);
-        else unsupported.add('Field');
-        visit(root, bound);
+        unsupported.add(ops[0].operator);
+        // The receiver is the LAST operand of either target shape.
+        const root = ops[0].ops[ops[0].ops.length - 1];
+        if (root !== undefined) visit(root, bound);
         if (ops[1] !== undefined) visit(ops[1], bound);
+        return;
+      }
+      if (h === 'ProtocolProperty' && ops.length === 4) {
+        unsupported.add('ProtocolProperty');
+        for (const op of ops.slice(2)) visit(op, bound);
         return;
       }
 

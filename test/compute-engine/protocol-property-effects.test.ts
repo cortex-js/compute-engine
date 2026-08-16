@@ -122,34 +122,26 @@ let b = Badge(name: "a")`);
     expect(read.isPure).toBe(true);
   });
 
-  test('a store through a COMPUTED property lowers to the setter and is `state`', () => {
-    // The receiver's type is settled at canonicalization here, so `q.age = 5`
-    // is rewritten to `q = ProtocolProperty("Aged", "age", q, 5)`. The `scope`
-    // is the rebinding the sugar performs; the `state` is the store the setter
-    // does.
+  test('a store through a COMPUTED property keeps its `Field` target and is `state`', () => {
+    // Nothing is rewritten at canonicalization: which route serves `q.age = 5`
+    // — the object's own slot or a protocol's `set` accessor — is settled at
+    // evaluation, by the instance's pinned layout. The label does not depend on
+    // that outcome: the receiver is an object, so the assignment is a heap
+    // store either way and never a binding write, hence `state` alone.
     const { ce } = run(COMPUTED);
     const store = ce.box([
       'Assign',
       ['Field', 'q', { str: 'age' }],
       5,
     ] as never);
-    expect(store.json).toEqual([
-      'Assign',
-      'q',
-      ['ProtocolProperty', "'Aged'", "'age'", 'q', 5],
-    ]);
-    expect(store.effects).toEqual(['scope', 'state']);
+    expect(store.json).toEqual(['Assign', ['Field', 'q', "'age'"], 5]);
+    expect(store.effects).toEqual(['state']);
   });
 
-  test('a value type can no longer reach the setter at all (B1)', () => {
-    // The Appendix A rebinding sugar — `d.name = v` on a tuple, which rebinds
-    // `d` through the protocol's setter rather than mutating anything — used to
-    // lower to the same four-operand `ProtocolProperty` as a real store, and
-    // was therefore labelled `state` by the shape-based rule above. That
-    // over-label is now unreachable: the B1 mutability gate refuses the
-    // conformance itself, so no value type has a settable property to assign
-    // through. Pinned here because it is what licenses the rule to read a
-    // four-operand set as a heap store with no further evidence.
+  test('a value type cannot reach a setter at all (B1)', () => {
+    // What licenses the rule above to read a four-operand set as a heap store
+    // with no further evidence: the B1 mutability gate refuses the conformance
+    // itself, so no value type has a settable property to assign through.
     const { value } = run(`protocol Nameable { readwrite name: string }
 type Person = tuple<n: string, age: integer>
 type Person is Nameable {
@@ -193,24 +185,163 @@ function bump() scope -> integer { counter = counter + 1
   test('a node read BEFORE its receiver was typed re-reports afterwards', () => {
     // The store correction lives inside the `_effects` memo and consults
     // something the memo's key does not name — the receiver's declared type.
-    // That is safe only because every route which gives a symbol an object
-    // type advances the callable axis the memo is stamped on. This pins it:
-    // narrowing that selector must fail here rather than freeze a `scope`
+    // That is safe only because every route which gives a symbol a type
+    // advances the callable axis the memo is stamped on. This pins it:
+    // narrowing that selector must fail here rather than freeze the first
     // label on this node, and on every ancestor that projected through it.
+    //
+    // The observable change runs from `state` to `scope`, not the other way:
+    // an UNDECIDED receiver is assumed to be a store (a `Field` target is never
+    // a binding write, so the alternative is a runtime error), and it is
+    // learning that `p` is a RECORD — decided, and not an object — that
+    // demotes the node to the plain binding-write label.
     const ce = new ComputeEngine();
-    run('type P = object{age: integer}', ce);
+    run('type R = record{age: integer}', ce);
     const stmt = ['Assign', ['Field', 'p', { str: 'age' }], 43];
     const node = ce.box(stmt as never);
     const block = ce.box(['Block', stmt] as never);
-    expect(node.effects).toEqual(['scope']);
-    expect(block.effects).toEqual(['scope']);
+    expect(node.effects).toEqual(['state']);
+    expect(block.effects).toEqual(['state']);
 
-    run('let p = P(age: 1)', ce);
+    run('let p: R = {"age" -> 1}', ce);
 
     // The SAME node objects, not fresh ones — a fresh box would miss the memo
     // and pass whatever the axis does.
-    expect(node.effects).toEqual(['state']);
-    expect(block.effects).toEqual(['state']);
+    expect(node.effects).toEqual(['scope']);
+    expect(block.effects).toEqual(['scope']);
+  });
+
+  test('an authored SETTER’s own effects reach the UNQUALIFIED write site', () => {
+    // `q.age = 5` keeps its `Field` target through canonicalization — nothing
+    // rewrites it to `ProtocolProperty` any more — so this arm, not the
+    // operator's, is where the accessor's body has to be accounted for. The
+    // setter below writes an outer binding, which is `scope`; the store itself
+    // is `state`. Losing the union would report the write as `state` alone and
+    // hide the binding write from every caller.
+    const { ce } = run(`let log = 0
+protocol Aged { readwrite age: integer }
+type Q = object{n: integer} is Aged {
+  get age(self: Self) -> integer { self.n }
+  set age(self: Self, v: integer) -> Self { log = log + 1
+    self.n = v
+    self }
+}
+let q = Q(n: 1)`);
+    const store = ce.box([
+      'Assign',
+      ['Field', 'q', { str: 'age' }],
+      5,
+    ] as never);
+    expect(store.effects).toEqual(['scope', 'state']);
+  });
+
+  test('…and boxed AFTER the `let`, it still reports `state` — and why', () => {
+    // The non-vacuous companion to the memo test above, and a warning about
+    // reading too much into it. `let p: R = {"age" -> 1}` leaves the BINDING's
+    // value type `unknown` — the dictionary literal does not narrow to `R` on
+    // its own — so a statement boxed after it still finds nothing that decides
+    // the receiver and takes the conservative `state`.
+    //
+    // The `scope` the test above observes is therefore not "records are always
+    // `scope`": it is what the node reports once the type has actually been
+    // settled, which the earlier boxing itself does by canonicalizing the
+    // receiver. The carve-out for a decided non-object applies exactly when the
+    // type IS settled.
+    const ce = new ComputeEngine();
+    run('type R = record{age: integer}', ce);
+    run('let p: R = {"age" -> 1}', ce);
+    const def = ce.lookupDefinition('p') as never as {
+      value?: { type?: unknown };
+    };
+    expect(String(def.value?.type)).toBe('unknown');
+    expect(
+      ce.box(['Assign', ['Field', 'p', { str: 'age' }], 43] as never).effects
+    ).toEqual(['state']);
+  });
+
+  test('a store through a UNION-typed receiver is `state`', () => {
+    // `M | nothing` is not itself an object type, so an objecthood test that
+    // did not look inside the union answered `false` and the write fell to the
+    // `scope` path — where confinement exempted it, and
+    // `function k(x: M | nothing) pure { x.id = "Z" }` was ACCEPTED and mutated
+    // its caller's object. An arm that is an object is enough: the store either
+    // writes that arm's slot or faults.
+    const { value } = run(`type M = object{id: string}
+function k(x: M | nothing) pure { x.id = "Z" }`);
+    expect(value).toContain('incompatible-type');
+    expect(value).toContain('state effects');
+    expect(
+      run(`type M = object{id: string}
+function k2(x: M | nothing) { x.id = "Z" }
+Type(k2)`).value
+    ).toContain('state');
+  });
+
+  test('a QUALIFIED write inherits only the NAMED protocol’s setter effects', () => {
+    // Two protocols declare `age`; only `Loud`'s setter writes an outer
+    // binding. A write qualified with `Quiet` cannot reach `Loud`'s accessor —
+    // dispatch is restricted to the protocol named — so it must not inherit
+    // that `scope`.
+    const { ce } = run(`let log = 0
+protocol Quiet { readwrite age: integer }
+protocol Loud { readwrite age: integer }
+type Q = object{n: integer} is Quiet {
+  get age(self: Self) -> integer { self.n }
+  set age(self: Self, v: integer) -> Self { self.n = v
+    self }
+}
+type L = object{n: integer} is Loud {
+  get age(self: Self) -> integer { self.n }
+  set age(self: Self, v: integer) -> Self { log = log + 1
+    self.n = v
+    self }
+}
+let q = Q(n: 1)`);
+    const qualified = ce.box([
+      'ProtocolProperty',
+      { str: 'Quiet' },
+      { str: 'age' },
+      'q',
+      5,
+    ] as never);
+    expect(qualified.effects).toEqual(['state']);
+    // The unqualified spelling names no protocol, so it keeps the union over
+    // every protocol declaring `age` — `Loud`'s setter included.
+    const unqualified = ce.box([
+      'Assign',
+      ['Field', 'q', { str: 'age' }],
+      5,
+    ] as never);
+    expect(unqualified.effects).toEqual(['scope', 'state']);
+  });
+
+  test('a LAYOUT-owned name skips the accessor union entirely', () => {
+    // The slot store wins the precedence and no accessor runs, so an unrelated
+    // protocol's setter effects must not ride along. `age` IS `P`'s stored
+    // field; `Loud` declares a property of the same name whose setter writes an
+    // outer binding.
+    const { ce } = run(`let log = 0
+protocol Loud { readwrite age: integer }
+type P = object{age: integer}
+type L = object{n: integer} is Loud {
+  get age(self: Self) -> integer { self.n }
+  set age(self: Self, v: integer) -> Self { log = log + 1
+    self.n = v
+    self }
+}
+let p = P(age: 1)`);
+    expect(
+      ce.box(['Assign', ['Field', 'p', { str: 'age' }], 5] as never).effects
+    ).toEqual(['state']);
+  });
+
+  test('…and the object direction is unchanged: a typed object receiver is `state`', () => {
+    const ce = new ComputeEngine();
+    run('type P = object{age: integer}', ce);
+    run('let p = P(age: 1)', ce);
+    expect(
+      ce.box(['Assign', ['Field', 'p', { str: 'age' }], 43] as never).effects
+    ).toEqual(['state']);
   });
 
   test('a self-referential accessor terminates', () => {
@@ -408,14 +539,66 @@ Type(f)`).value
     ).toBe('"(xs: list<Inner>) state -> number"');
   });
 
-  test('a verdict that consulted the REGISTRY re-derives when it changes', () => {
-    // The unsound direction of staleness. `age` is not in `Q`'s layout, so the
-    // store is recognised only because a protocol declares `age` a `readwrite`
-    // property — and in the first batch no protocol does. Freezing that
-    // negative verdict onto `f`'s arrow would leave a `pure`-eligible function
-    // that mutates its caller's object once the conformance lands. The walk
-    // records that it read the registry, so the definition installs a deriver
-    // and re-runs the inference instead.
+  test('an UNANNOTATED parameter is a store too — `pure` is refused', () => {
+    // The soundness case. Nothing establishes what `x` is, and a `Field` target
+    // is never a binding write, so the store is assumed: `k` cannot be `pure`.
+    // Before this rule the annotation was ACCEPTED and calling `k` mutated the
+    // caller's object behind it.
+    const { value } = run(`type M = object{id: string}
+function k(x) pure { x.id = "Z" }`);
+    expect(value).toContain('incompatible-type');
+    expect(value).toContain('state effects');
+  });
+
+  test('…and the BARE definition infers `state` and still works', () => {
+    // The other half: the label must not make an ordinary mutating helper
+    // unusable. `state` does not trip the default-`!scope` ceiling — which is
+    // why `scope` was the wrong answer here — so the definition installs and
+    // the call mutates.
+    const { ce, value } = run(`type M = object{id: string}
+function rename(x) { x.id = "X" }
+Type(rename)`);
+    expect(value).toBe('"(unknown) state -> string"');
+    expect(run('let m = M(id: "a")\nrename(m)\nm.id', ce).value).toBe('"X"');
+  });
+
+  test('a body-local object aliased from OUTSIDE is a store', () => {
+    // The confinement exemption is gone for a body-local whose value came from
+    // elsewhere: `r` names the caller-visible object `g`, so writing through it
+    // is observable and cannot be `pure`. (A local the body CONSTRUCTS is
+    // already `state` from the construction alone — Appendix B makes a
+    // constructor carry `state` — so nothing about that case changed.)
+    expect(
+      run(`type M = object{id: string}
+let g = M(id: "a")
+function touch() pure { let r = g
+  r.id = "b" }`).value
+    ).toContain('incompatible-type');
+    expect(
+      run(`type M = object{id: string}
+function make() -> M { let r = M(id: "a")
+  r.id = "b"
+  r }
+Type(make)`).value
+    ).toBe('"() state -> M"');
+  });
+
+  test('a DECIDED non-object parameter is not a store', () => {
+    // `r.a = 1` on a record is `immutable-value-assignment`: it changes
+    // nothing, so it earns no `state`. The refusal is the statement's value.
+    const { value } = run(`type R = record{a: integer}
+function g(r: R) { r.a = 1 }`);
+    expect(value).toContain('immutable-value-assignment');
+  });
+
+  test('the verdict does not depend on the conformance REGISTRY', () => {
+    // `age` is not in `Q`'s layout, and in the first batch no protocol declares
+    // it either — yet the store is recognised, because the receiver is an
+    // object and an assignment through a `Field` target on an object is a heap
+    // store or an error, never a binding write. That the answer needs no
+    // registry reading is what makes it stale-proof: it cannot be frozen at a
+    // moment when the conformance had not registered yet, which would leave a
+    // `pure`-eligible function that mutates its caller's object once it does.
     const ce = new ComputeEngine();
     expect(
       run(
@@ -424,9 +607,10 @@ function f(x: Q) { x.age = 3 }
 Type(f)`,
         ce
       ).value
-    ).toBe('"(x: Q) -> number"');
+    ).toBe('"(x: Q) state -> number"');
 
-    // A LATER batch declares the protocol and the conformance…
+    // A LATER batch declares the protocol and the conformance; the arrow is
+    // unchanged, because it never depended on them.
     run(
       `protocol Aged { readwrite age: integer }
 type Q is Aged {
@@ -436,27 +620,17 @@ type Q is Aged {
 }`,
       ce
     );
-
-    // …and `f`'s arrow now reports the store, without `f` being redefined.
     expect(run('Type(f)', ce).value).toBe('"(x: Q) state -> number"');
   });
 
-  test('…and a `pure` annotation cannot outrun the declaration either', () => {
-    // The same ordering, with the contract spelled: declaring the protocol
-    // afterwards is refused rather than silently widening `f` past its
-    // annotation.
-    const { value, diagnostics } = run(`type Q = object{n: integer}
-function f(x: Q) pure { x.age = 3 }
-protocol Aged { readwrite age: integer }
-type Q is Aged {
-  get age(self: Self) -> integer { self.n }
-  set age(self: Self, v: integer) -> Self { self.n = v
-    self }
-}`);
-    expect(value).toContain('conformance-widens-declared-contract');
-    expect(diagnostics.join('|')).toContain(
-      '`f` declares `pure` but would infer `state`'
-    );
+  test('…so a `pure` annotation is refused at the definition, not later', () => {
+    // The same ordering, with the contract spelled: `f` is refused where it is
+    // written, rather than accepted and then caught by
+    // `conformance-widens-declared-contract` when the protocol arrives.
+    const { value } = run(`type Q = object{n: integer}
+function f(x: Q) pure { x.age = 3 }`);
+    expect(value).toContain('incompatible-type');
+    expect(value).toContain('state effects');
   });
 
   test('a plain binding write in a body still infers `scope`', () => {
@@ -511,7 +685,8 @@ p.age`);
       43,
     ] as never);
     expect(set.effects).toEqual(['state']);
-    expect(String(set.evaluate())).toBe('P(age: 43)');
+    // A store evaluates to the value assigned, not to the receiver.
+    expect(String(set.evaluate())).toBe('43');
     expect(run('p.age', ce).value).toBe('43');
   });
 
@@ -548,7 +723,7 @@ type R = object{s: string}`,
       { str: 'z' },
     ] as never);
     expect(set.effects).toEqual(['state']);
-    expect(String(set.evaluate())).toBe('R(s: "z")');
+    expect(String(set.evaluate())).toBe('"z"');
     const read = ce.box([
       'ProtocolProperty',
       { str: 'Tagged' },

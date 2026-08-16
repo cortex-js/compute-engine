@@ -28,7 +28,11 @@ import type {
 } from '../global-types.js';
 
 import { isFunction, isString, isSymbol, sym } from './type-guards.js';
-import { effectiveDischarge, protocolAccessorEffects } from './effects-of.js';
+import {
+  effectiveDischarge,
+  mayStoreIntoReceiverOfType,
+  protocolAccessorEffects,
+} from './effects-of.js';
 import { typeAcceptsValue } from './value-membership.js';
 import {
   declaredTypeError,
@@ -1010,22 +1014,55 @@ class Walker {
     }
 
     if (head === 'Assign') {
-      // `Assign(Field(base, "name"), v)` spells two different operations. When
-      // `base` is a parameter declared to be a mutable object whose layout has
-      // a `"name"` field, it is a HEAP STORE: it overwrites a field of the
-      // record the caller handed in, so the mutation is observable to the
-      // caller and the function is not pure ("Changing a field is an effect",
-      // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B). It gets no confinement
-      // exemption — the confinement analysis proves that a write cannot
-      // outlive the call, which is never true of a store into someone else's
-      // record ("Confinement does not apply to `state`",
-      // `docs/EFFECTS-MODEL.md`). Everything else — including the property
-      // REBINDING sugar `p.name = v` on a value type, which rebinds the local
-      // `p` rather than mutating a heap cell — stays on the `scope` path,
-      // where `assignTargets` judges the write on the base symbol.
-      if (this.isFieldStore(expr))
+      // `Assign` spells two different operations. When the target is a `Field`
+      // whose receiver is declared to be a mutable object, it is a HEAP STORE:
+      // it overwrites a field of the object the caller handed in, so the
+      // mutation is observable to the caller and the function is not pure
+      // ("Changing a field is an effect", `docs/TYPE_SYSTEM_ROADMAP.md`
+      // Appendix B). It gets no confinement exemption — the confinement
+      // analysis proves that a write cannot outlive the call, which is never
+      // true of a store into someone else's object ("Confinement does not
+      // apply to `state`", `docs/EFFECTS-MODEL.md`). Everything else — a plain
+      // name, a destructuring target, a receiver whose declared type does not
+      // establish an object — stays on the `scope` path, where `assignTargets`
+      // judges the write on the base symbol.
+      const store = this.propertyStoreTarget(expr);
+      if (store !== undefined) {
         this.state.effects = unionEffectSets(this.state.effects, ['state']);
-      else this.scopeWrite(expr, ctx, /* confinable */ true);
+        // …plus whatever the AUTHORED `set` accessor's body does, when the name
+        // is answered by a computed property rather than a stored slot. The
+        // unqualified `p.name = v` keeps its `Field` target through
+        // canonicalization, so this arm — not the `ProtocolProperty` one — is
+        // where a setter that draws, or writes an outer binding, has to be
+        // accounted for. Union over every protocol declaring the name, since
+        // which one answers is a runtime question; a field-backed accessor is a
+        // host callback and adds nothing (`protocolAccessorEffects`,
+        // `effects-of.ts`). Registry-derived, hence `consultsRegistry`: the set
+        // widens as conformances register, and the definition being stamped
+        // must re-derive rather than freeze what the registry said here.
+        //
+        // Skipped when the receiver's DECLARED layout owns the name: the slot
+        // store wins that precedence and no accessor runs, so unioning one in
+        // would attribute code that cannot execute. A QUALIFIED store never
+        // skips — it goes through the protocol view, whose accessor runs even
+        // for a field-backed property — and narrows the union to the protocol
+        // it names.
+        if (
+          store.protocol !== undefined ||
+          !this.layoutOwns(store.receiver, store.name)
+        ) {
+          this.state.consultsRegistry = true;
+          this.state.effects = unionEffectSets(
+            this.state.effects,
+            protocolAccessorEffects(
+              this.ce,
+              store.name,
+              'set',
+              store.protocol
+            )
+          );
+        }
+      } else this.scopeWrite(expr, ctx, /* confinable */ true);
       for (const op of expr.ops.slice(1)) this.visit(op, ctx);
       return;
     }
@@ -1045,17 +1082,11 @@ class Walker {
       // ("Confinement does not apply to `state`", `docs/EFFECTS-MODEL.md`).
       //
       // The verdict deliberately does not consult the conformance registry to
-      // ask what the selected setter actually does. The rebinding sugar that
-      // still serves VALUE types (`p.name = v` on a record or tuple lowers to
-      // `p = ProtocolProperty(P, "name", p, v)`, which rebinds the local
-      // rather than mutating a cell) lowers to this very operator, so a
-      // registry-derived answer would report it pure and let a body annotated
-      // `pure` mutate a genuine object whenever the conformance was not
-      // registered yet — an inference walk runs before, and independently of,
-      // conformance registration. That sugar is a transitional mechanism which
-      // retires once the B1 mutability gate refuses a value type conforming to
-      // a `readwrite` requirement, at which point every set reaching here is
-      // unambiguously a store.
+      // ask what the selected setter actually does. A registry-derived answer
+      // would report the set pure whenever the conformance was not registered
+      // yet — an inference walk runs before, and independently of, conformance
+      // registration — and would let a body annotated `pure` mutate its
+      // caller's object.
       //
       // On top of that fixed contribution, BOTH halves union in what the
       // AUTHORED accessor bodies do (`protocolAccessorEffects`, `effects-of.ts`
@@ -1086,12 +1117,17 @@ class Walker {
       const property = expr.ops[1];
       if (isString(property)) {
         this.state.consultsRegistry = true;
+        // The protocol operand restricts dispatch, so it restricts the union
+        // too: an unrelated protocol declaring the same property name can never
+        // be selected here.
+        const protocol = expr.ops[0];
         this.state.effects = unionEffectSets(
           this.state.effects,
           protocolAccessorEffects(
             this.ce,
             property.string,
-            isSet ? 'set' : 'get'
+            isSet ? 'set' : 'get',
+            isString(protocol) ? protocol.string : sym(protocol)
           )
         );
       }
@@ -1439,62 +1475,107 @@ class Walker {
   }
 
   /**
-   * Whether this `Assign` is a store into a mutable object —
-   * `Assign(Field(receiver, "name"), v)` where the RECEIVER's static type
-   * resolves to an `object{…}` layout and `"name"` is either a field of that
-   * layout or a `readwrite` PROPERTY some protocol declares.
+   * The parts of this `Assign` if it is, or may be, a property STORE —
+   * `undefined` when it is not one.
+   *
+   * Two target shapes spell the same write: `Field(receiver, "name")` is the
+   * unqualified `p.name = v`, and `ProtocolProperty(P, "name", receiver)` is
+   * the qualified `p.(P.name) = v`. Both keep their shape through
+   * canonicalization, and neither writes a binding.
+   *
+   * For the unqualified shape the receiver's declared type decides: an object
+   * type, or a declaration that establishes nothing about it.
+   *
+   * The UNDECIDED case is a `state` too, and that is the load-bearing half.
+   * After the property rebinding sugar retired, assignment through a `Field`
+   * target is a store and never a binding write, so a receiver nothing is known
+   * about is either a heap store or a runtime error — `state` is the sound
+   * over-approximation of both, and a `scope` label (or none at all) is a claim
+   * about a receiver no one has looked at. Without it,
+   * `function k(x) pure { x.id = "Z" }` was ACCEPTED and mutated its caller's
+   * object behind the `pure` contract: an unannotated parameter yields no type,
+   * the write fell to the `scope` path, and `assignTargets` attributed it to the
+   * parameter `x`, which confinement then exempted.
+   *
+   * A receiver whose declared type IS decided and is not an object is not a
+   * store: `p.name = v` on a record or a tuple is `immutable-value-assignment`,
+   * which changes nothing and needs no label. (One over-approximation remains:
+   * a decided non-object in the MIDDLE of a chain — `r.a.b = v` where `r.a` is
+   * a record — is indistinguishable here from an undecided step, so it takes
+   * the `state` branch. The program faults either way.)
+   *
+   * The FIELD NAME is not consulted, and does not need to be. Assignment
+   * through a `Field` target is a store and never a binding write
+   * (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Assigning to a property"), so
+   * on an object receiver it either writes a slot, runs a protocol property's
+   * `set` accessor — which exists only on objects, so it too is a heap write —
+   * or faults on a name the object has neither way. `state` is the sound label
+   * for all three; `scope` would be false for all three.
    *
    * The receiver need not be a bare symbol: a field chain (`p.child.age = 3`)
    * and an indexed element (`xs[i].age = v`) store through to the same heap
    * cell, and {@link Walker.receiverType} resolves both structurally from the
    * declared parameter types.
    *
-   * Both spellings write through to the object the caller handed in, and they
-   * are not distinguishable here. The layout name is stored directly; the
-   * property name goes through a setter, whose whole purpose on a mutable
-   * object is to store. The property arm matters because that assignment is
-   * still an `Assign(Field(…))` node at inference time: `p.name = v` only
-   * lowers to `p = ProtocolProperty(P, "name", p, v)` when the receiver's type
-   * is already settled, and inside an unentered `Function` literal it never is,
-   * so the lowering DEFERS to evaluation and the walk sees the `Field` form.
-   * Without the arm, `function f(x: Q) pure { x.age = 3 }` — `age` a computed
-   * `readwrite` property of the object type `Q` — was accepted and mutated its
-   * caller's object.
+   * Those declared types are the only usable evidence here: inside a `Function`
+   * literal the body is not yet in a frame that binds the parameters, so
+   * canonicalizing the receiver and reading its type reports `unknown` and
+   * decides nothing. Everything the declaration does not positively establish —
+   * a parameter with no annotation, a step of the chain whose type is not an
+   * object — answers `false` and takes the conservative `scope` path.
    *
-   * The declared parameter types are the only usable evidence here: inside a
-   * `Function` literal the body is not yet in a frame that binds the
-   * parameters, so canonicalizing the receiver and reading its type reports
-   * `unknown` and decides nothing. Everything the declaration does not
-   * positively establish — a parameter with no annotation, a step of the chain
-   * whose type is not an object layout, a name that is neither a field of the
-   * final layout nor a writable property — answers `false` and takes the
-   * conservative `scope` path, which is also what the property rebinding sugar
-   * on a value type needs: that sugar's receiver is a record or tuple, never an
-   * object layout, so it never reaches either arm.
+   * `isObjectFieldStore()` in `effects-of.ts` decides the same question for the
+   * runtime channel, by the same rule on the evidence available there (a bare
+   * symbol off its definition, anything else off its canonical type). The two
+   * must not disagree about the same assignment.
    */
-  private isFieldStore(expr: Expression & FunctionInterface): boolean {
+  private propertyStoreTarget(
+    expr: Expression & FunctionInterface
+  ): { receiver: Expression; name: string; protocol?: string } | undefined {
     const target = expr.ops[0];
-    if (!isFunction(target, 'Field')) return false;
-    const declared = this.receiverType(target.ops[0]);
+    // The QUALIFIED spelling `p.(P.name) = v` keeps its
+    // `ProtocolProperty(P, "name", p)` target through canonicalization. It is
+    // unconditionally a store: a protocol that declares a settable property
+    // admits object conformers only, and the write goes to an accessor either
+    // way. No receiver evidence is needed, and none is available inside an
+    // unentered literal anyway.
+    if (isFunction(target, 'ProtocolProperty') && target.ops.length === 3) {
+      const name = target.ops[1];
+      const receiver = target.ops[2];
+      if (!isString(name) || receiver === undefined) return undefined;
+      const protocol = target.ops[0];
+      return {
+        receiver,
+        name: name.string,
+        protocol: isString(protocol) ? protocol.string : sym(protocol),
+      };
+    }
+    if (!isFunction(target, 'Field')) return undefined;
+    const name = target.ops[1];
+    const receiver = target.ops[0];
+    if (!isString(name) || receiver === undefined) return undefined;
+    // One predicate for both channels — see `mayStoreIntoReceiverOfType` in
+    // `effects-of.ts` for the rule and why an undecided type, and a union with
+    // an object arm, both count.
+    if (!mayStoreIntoReceiverOfType(this.receiverType(receiver)))
+      return undefined;
+    return { receiver, name: name.string };
+  }
+
+  /**
+   * Does the receiver's DECLARED layout own `name` as a stored field?
+   *
+   * The static counterpart of `layoutDeclaresField()` in `effects-of.ts`: when
+   * the layout declares the name, the assignment is a slot store and no
+   * protocol accessor can run (`objectLayoutOwnsField()` in
+   * `library/collections.ts` states that precedence). `false` whenever the
+   * declaration does not settle it, which keeps the accessor union — the
+   * conservative direction.
+   */
+  private layoutOwns(receiver: Expression | undefined, name: string): boolean {
+    const declared = this.receiverType(receiver);
     if (declared === undefined) return false;
-    const field = target.ops[1];
-    if (!isString(field)) return false;
-    const layout = objectLayoutOfType(declared);
-    if (layout === undefined) return false;
-    if (layout.elements[field.string] !== undefined) return true;
-    // Past the layout arm the answer comes from the conformance REGISTRY, and
-    // the reading has to be recorded before it is taken. The stale direction is
-    // the negative one: a body defined BEFORE the protocol and its conformance
-    // are declared sees no writable property, infers nothing, and — without
-    // this bit — has that verdict FROZEN onto its arrow, so `function f(x: Q)
-    // pure { x.age = 3 }` would keep a `pure` arrow after the declarations
-    // landed and mutate its caller's object. The bit makes the definition
-    // install a deriver that re-runs this inference against the current
-    // registry instead (`_makeLiteralEffectsDeriver`,
-    // `boxed-operator-definition.ts`), re-keyed on `_conformanceVersion` and
-    // `_callableVersion`.
-    this.state.consultsRegistry = true;
-    return isWritableProtocolProperty(this.ce, field.string);
+    return objectLayoutOfType(declared)?.elements[name] !== undefined;
   }
 
   /**
@@ -1580,34 +1661,6 @@ class Walker {
 }
 
 /**
- * Does any registered protocol declare `name` as a `readwrite` PROPERTY?
- *
- * Used by {@link Walker.isFieldStore} to recognise a store through a COMPUTED
- * property of an object type — `x.age = 3` where `age` is not in the object's
- * layout but a protocol declares it writable, so the assignment reaches a
- * setter instead of a slot.
- *
- * Deliberately does NOT check that the receiver's type actually conforms to
- * that protocol, and does not select an implementation: this is a walk over an
- * unentered `Function` literal, and conformance edges register independently of
- * (and often after) the walk, so a negative answer from a resolution attempt
- * would be evidence of nothing. Over-approximating costs a `state` label on an
- * assignment that would in any case be a runtime error — a store to a name the
- * receiver has neither as a field nor as a property — while under-approximating
- * would let a body annotated `pure` mutate its caller's object.
- *
- * The registry is read directly rather than through the `protocolsWithProperty`
- * helper of `engine-protocols.ts`: that module imports THIS one (it infers the
- * effects of conforming implementation literals), so importing it back would
- * close a dependency cycle, and the repository's budget for those is zero.
- */
-function isWritableProtocolProperty(ce: ComputeEngine, name: string): boolean {
-  for (const record of Object.values(ce._protocolRegistry))
-    if (record.members[name]?.kind === 'readwrite') return true;
-  return false;
-}
-
-/**
  * Whether `t` denotes a callable value: the bare `function` primitive, an
  * arrow, or a union/intersection containing one.
  *
@@ -1683,13 +1736,15 @@ function assignTargets(expr: Expression): (string | undefined)[] {
     isFunction(target, 'Sequence')
   )
     return target.ops.map((op) => sym(op));
-  // A `Field`-target write — `Assign(Field(p, "name"), v)`, the property
-  // rebinding sugar `p.name = v` — is judged on its BASE symbol: the
-  // property SET on a tuple-backed nominal type returns a new value that
-  // REBINDS the base (the setter contract `set name(self, v) -> Person`;
-  // the evaluate route's `property.kind === 'rebind'` ends in
-  // `ce.assign(base, newValue)`), so mutating `q.name` on a `let q` is
-  // exactly as confined as `q := …` itself. ONLY `Field` gets this:
+  // A `Field`-target write — `Assign(Field(p, "name"), v)` — is judged on its
+  // BASE symbol. This path is reached only for a receiver whose declared type
+  // is DECIDED and is not an object: `Walker.propertyStoreTarget` claims every
+  // other `Field` target as a `state` store before `scopeWrite` is called at
+  // all, including the ones nothing is known about. What is left writes
+  // nothing — `p.name = v` on a record or a tuple is
+  // `immutable-value-assignment` — so attributing it to the base binding costs
+  // nothing and keeps the ordinary confinement judgement. ONLY `Field` gets
+  // this:
   // `Assign(Subscript(L, i), v)` is a SEQUENCE DEFINITION (`L_0 := 1`
   // registers a base case in the engine-wide pending-sequence state — see
   // the Subscript branch of `Assign`'s evaluate in `library/core.ts`),
