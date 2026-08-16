@@ -9368,10 +9368,22 @@ export class BaseCompiler {
         lanes.push(false);
         continue;
       }
-      if (
-        !BaseCompiler.provablyScalarOrFramedScalar(a) ||
-        !BaseCompiler.isComplexValued(a)
-      ) {
+      let complex: boolean;
+      if (BaseCompiler.provablyScalarOrFramedScalar(a)) {
+        complex = BaseCompiler.isComplexValued(a);
+      } else if (BaseCompiler.userFunctionParamsAreScalar(engine, h)) {
+        // A collection argument to scalar parameters is BROADCAST at run
+        // time (`_SYS.bcastFn` in `emitUserFunctionCall`): the body then
+        // receives one ELEMENT per call, so the lane is the elements' — and
+        // only when every element is a complex SCALAR (a mixed list has no
+        // one lane; a nested list's elements are not scalars). Without this,
+        // `b(L)` with `L: list<complex>` broadcast complex objects into the
+        // real-lane `_fn_b` — `[NaN, NaN]` behind `success: true`.
+        complex = BaseCompiler.hasUniformComplexScalarElements(a);
+      } else {
+        complex = false;
+      }
+      if (!complex) {
         lanes.push(false);
         continue;
       }
@@ -9379,6 +9391,62 @@ export class BaseCompiler {
       lanes.push(!(pt !== undefined && isNonRealNumber(pt)));
     }
     return lanes;
+  }
+
+  /**
+   * Is every element of the collection `a` a complex SCALAR? Answered from
+   * the element TYPE when it is a non-real number type (`list<complex>`), or
+   * from the identifiable elements when they all agree
+   * (`uniformElementComplexness`, e.g. the literal `[w, 2w]`) and the element
+   * type is at least numeric (so a nested list is never mistaken for a
+   * scalar). `false` whenever it cannot be established.
+   */
+  static hasUniformComplexScalarElements(a: Expression): boolean {
+    const elt = BaseCompiler.collectionElementTypeOf(a);
+    if (elt === undefined) return false;
+    if (isNonRealNumber(elt)) return true;
+    if (!isSubtype(elt, 'number')) return false;
+    return BaseCompiler.uniformElementComplexness(a) === true;
+  }
+
+  /**
+   * The eta-expansion `(_x: <element type>) ↦ f(_x)` of a bare user-function
+   * symbol `callback` used as an ELEMENT callback over `source`, when the
+   * source's elements are complex scalars — `undefined` otherwise (the
+   * caller then compiles `callback` as before).
+   *
+   * A bare symbol callback (`Map(b, L)`) reaches `ensureUserFunctionEmitted`
+   * through the value-position route, which has no arguments and so no lane:
+   * it emits the real-lane `_fn_b`, and the collection's complex elements are
+   * then consumed as numbers (`[NaN, NaN]` for `L: list<complex>`), while the
+   * inline `Map(x ↦ 2x, L)` was already correct because element inference
+   * types its parameter. Compiling this literal instead routes the call
+   * `b(_x)` through the ordinary call site, where the typed parameter grants
+   * the complex lane (`_fn_b$z1`). Restricted to unary callbacks and to
+   * sources whose elements are provably complex scalars, so every other
+   * callback keeps its previous emission byte-identical.
+   */
+  static complexElementCallbackEta(
+    callback: Expression | undefined,
+    source: Expression | undefined
+  ): Expression | undefined {
+    if (callback === undefined || source === undefined) return undefined;
+    if (!isSymbol(callback)) return undefined;
+    const engine = callback.engine;
+    const literal = BaseCompiler.userFunctionLiteral(engine, callback.symbol);
+    if (literal === undefined || literal.ops.length !== 2) return undefined;
+    if (!BaseCompiler.hasUniformComplexScalarElements(source)) return undefined;
+    const elt = BaseCompiler.collectionElementTypeOf(source);
+    const paramType =
+      elt !== undefined && isNonRealNumber(elt) ? typeToString(elt) : 'complex';
+    // `_x` is a plain (non-`_`) parameter name; the lambda lowering renames a
+    // parameter that would collide with anything in scope, so the choice of
+    // spelling here is not load-bearing.
+    const x = engine.symbol('_x');
+    return engine.function('Function', [
+      engine.function(callback.symbol, [x]),
+      engine.function('Typed', [x, engine.box({ str: paramType })]),
+    ]);
   }
 
   /**

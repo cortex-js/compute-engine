@@ -1192,6 +1192,46 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
     expect(v.im).toBeCloseTo(interp.im, 10);
   });
 
+  it('a COLLECTION of complex scalars broadcast into a wide-typed parameter takes the complex lane', () => {
+    // `b(L)` broadcasts at run time (`_SYS.bcastFn`) — the body receives one
+    // ELEMENT per call, so the lane is the elements'. Before: `[NaN, NaN]`.
+    const e = fresh();
+    e.declare('L', 'list<complex>');
+    const L = [{ re: 1, im: 2 }, { re: 0, im: 1 }];
+    for (const src of ['b(L)', 'b([w, 2w])']) {
+      const r = compile(e.parse(src), { fallback: false });
+      expect(r.code).toContain('_fn_b$z1');
+      expect(r.run!({ L, w: W })).toEqual([
+        { re: 2, im: 4 },
+        src === 'b(L)' ? { re: 0, im: 2 } : { re: 4, im: 8 },
+      ]);
+    }
+    // A real collection keeps the real lane, byte for byte.
+    const real = compile(e.parse('b([1, 2])'), { fallback: false });
+    expect(real.code).not.toContain('$z');
+    expect(real.run!({})).toEqual([2, 4]);
+  });
+
+  it('a bare user-function CALLBACK over complex elements takes the complex lane (Map(b, L))', () => {
+    // Value position had no arguments and so no lane: `Map(b, L)` emitted the
+    // real-lane `_fn_b` while the inline `Map(x ↦ 2x, L)` was already right.
+    // The callback is now compiled through its eta-expansion `(_x: complex)
+    // ↦ b(_x)`, whose call site grants the lane.
+    const e = fresh();
+    e.declare('L', 'list<complex>');
+    const L = [{ re: 1, im: 2 }, { re: 0, im: 1 }];
+    const expected = [{ re: 2, im: 4 }, { re: 0, im: 2 }];
+    for (const src of ['\\mathrm{Map}(b, L)', '\\mathrm{Map}(x \\mapsto 2x, L)']) {
+      const r = compile(e.parse(src), { fallback: false });
+      expect(r.run!({ L })).toEqual(expected);
+    }
+    // A real source keeps the bare `_fn_b` reference.
+    e.declare('R', 'list<real>');
+    const real = compile(e.parse('\\mathrm{Map}(b, R)'), { fallback: false });
+    expect(real.code).toContain('(_fn_b)');
+    expect(real.run!({ R: [1, 2] })).toEqual([2, 4]);
+  });
+
   it('an emitted definition does not see the caller Block\'s local shapes (isolated frame)', () => {
     // `u(x) := x + k` reads the GLOBAL `k`; the calling block declares its
     // own complex local `k`. Before the emitted body compiled under an
