@@ -887,6 +887,45 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     expect(c).toBe(true);
   });
 
+  test('JS: a chain that short-circuits past a bound draw does not draw it', () => {
+    // Since 2026-08-15 the interpreter short-circuits a chain at the first
+    // `False` pair (`evaluateChainOperands`), so `Less(5, 1, Random(), c)`
+    // never draws. The bound temporary for the index-2 operand must therefore
+    // sit BEHIND the first pair, not around the whole chain: an outer binding
+    // (`((_tv1) => (5 < 1) && …)(draw())`) would draw unconditionally.
+    const json = ['Less', 5, 1, ['Random'], 0.9];
+    expect(jsCode(json)).toBe(
+      '(5 < 1) && ((_tv1) => (1 < _tv1) && (_tv1 < 0.9))' +
+        '(_SYS.drawNextRandomNumber())'
+    );
+    // Draw-count parity, observed through the seeded stream: a following
+    // draw sees index 0 in both engines when nothing was consumed before it.
+    const probe = ['Add', ['Boole', json], ['Random']];
+    const r = compiled(ce, probe);
+    const c = withRandomSeedFrame(ce, 7, () => r.run!({}));
+    const i = withRandomSeedFrame(ce, 7, () => ce.box(probe).evaluate().re);
+    expect(c).toBe(i);
+    expect(c).toBe(draw(7, 0));
+    // A binding for operand 0 or 1 still wraps the whole chain (both are
+    // always evaluated), and a bound middle at index ≥ 2 nests further in.
+    expect(
+      jsCode(['Less', 'a', ['Add', 'b', 1], 'c', ['Add', 'd', 1], 'x'])
+    ).toBe(
+      '((_tv1) => (_.a < _tv1) && (_tv1 < _.c) && ' +
+        '((_tv2) => (_.c < _tv2) && (_tv2 < _.x))(_.d + 1))(_.b + 1)'
+    );
+  });
+
+  test('GLSL: an impure operand at index ≥ 2 that must be hoisted DECLINES', () => {
+    // A shader can only bind by hoisting a statement, which runs
+    // unconditionally — it would draw even when `5 < 1` already decided the
+    // chain, diverging from the interpreter. Fail closed (D6).
+    expect(() => gpuCode(['Less', 5, 1, ['Random'], 0.9])).toThrow(/index ≥ 2/);
+    // The index-1 hoist is still fine: the interpreter always evaluates the
+    // first two operands.
+    expect(gpuDraws(['Less', 0.1, ['Random'], 0.9])).toBe(1);
+  });
+
   test('GLSL: the selection mask draws its operands in ARGUMENT order', () => {
     // Same defect on the element-wise (`Which`) path: only an impure MIDDLE
     // went through `gpuOperandOnce`, so an impure ENDPOINT stayed inline in

@@ -93,12 +93,16 @@ describe('Compilation fallback — lambda calling convention', () => {
   });
 });
 
-// Real-valued scalar↔list arithmetic now broadcasts element-wise on the
-// JavaScript target (via the `_SYS.bcast` runtime helper), matching the
-// interpreter. A *complex*-valued list still has no committed coverage and
-// fails closed (D6): the scalar closure the broadcast wraps cannot carry the
-// complex codegen, so it reports `success: false` and falls back to the
-// interpreter (which broadcasts correctly) rather than returning garbage.
+// Scalar↔list arithmetic broadcasts element-wise on the JavaScript target (via
+// the `_SYS.bcast` runtime helper), matching the interpreter. The broadcast
+// wraps ONE scalar closure and maps it over every position, so it needs a
+// single complex-vs-real convention for each operand: an all-real or an
+// all-complex list has one (each element parameter is declared accordingly and
+// the head's own scalar codegen picks the matching lowering), while a list
+// whose elements DISAGREE, or one whose elements the analysis cannot see at
+// all, has none and fails closed (D6) — `success: false`, and the interpreter
+// (which broadcasts correctly) answers instead of the compiled code returning
+// garbage.
 describe('Compilation of scalar↔list arithmetic (broadcast + complex fail-closed)', () => {
   let warn: jest.SpyInstance;
   beforeAll(() => {
@@ -127,16 +131,97 @@ describe('Compilation of scalar↔list arithmetic (broadcast + complex fail-clos
     expect(r.calling).toBe('expression');
   });
 
-  test('fallback:false surfaces the diagnostic as a throw (complex list)', () => {
+  test('fallback:false surfaces the diagnostic as a throw (mixed-element list)', () => {
+    // A list whose elements DISAGREE about being complex is what still fails
+    // closed. It is emitted element by element, so `[1+i, 2]` lowers to the
+    // heterogeneous `[{re, im}, 2]`, and the single scalar closure the
+    // broadcast wraps holds one convention for every position — a real closure
+    // reads `.re` off nothing and a complex one reads it off the plain `2`.
+    // Measured with a complex closure over this array: `[{re: 2, im: 2},
+    // {re: NaN, im: NaN}]` where the interpreter answers `[2+2i, 4]`.
     expect(() =>
-      compile(ce.box(['Multiply', 2, ['List', ['Complex', 1, 1]]]), {
+      compile(ce.box(['Multiply', 2, ['List', ['Complex', 1, 1], 2]]), {
         fallback: false,
-        // `constantFold: false`: both operands are literals, so the product
-        // would otherwise be folded to a literal list and the complex-valued
-        // decline under test would never fire.
+        // `constantFold: false`: every operand is a literal, so the product
+        // would otherwise be folded to a literal list and the decline under
+        // test would never fire.
         constantFold: false,
       })
     ).toThrow(/list-valued operand/);
+  });
+
+  test('a NESTED list is judged at its leaves, not at its sublists', () => {
+    // `_SYS.bcast` descends through every array it is handed and applies the
+    // closure at the LEAVES, so a nested element's convention is the one all
+    // of its leaves share. Reading a sublist with the whole-collection verdict
+    // instead is the same category error one level down: `[[1+i, 2], [3+i, 4]]`
+    // reports both sublists complex, and a complex closure then reads `.re` off
+    // the real leaves `2` and `4`. Measured before the leaf rule,
+    // `2·[[1+i, 2], [3+i, 4]]` ran to
+    // `[[{re: 2, im: 2}, {re: NaN, im: NaN}], [{re: 6, im: 2}, {re: NaN, im: NaN}]]`
+    // where the interpreter answers `[[2+2i, 4], [6+2i, 8]]`.
+    const mixedLeaves = [
+      'List',
+      ['List', ['Complex', 1, 1], 2],
+      ['List', ['Complex', 3, 1], 4],
+    ];
+    expect(
+      compile(ce.box(['Multiply', 2, mixedLeaves] as any), {
+        constantFold: false,
+      }).success
+    ).toBe(false);
+
+    // Leaves that DO agree still broadcast, at depth.
+    const allComplexLeaves = [
+      'List',
+      ['List', 'ImaginaryUnit', ['Multiply', 2, 'ImaginaryUnit']],
+      ['List', ['Multiply', 3, 'ImaginaryUnit'], ['Multiply', 4, 'ImaginaryUnit']],
+    ];
+    const r = compile(ce.box(['Multiply', 2, allComplexLeaves] as any), {
+      constantFold: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toEqual([
+      [
+        { re: 0, im: 2 },
+        { re: 0, im: 4 },
+      ],
+      [
+        { re: 0, im: 6 },
+        { re: 0, im: 8 },
+      ],
+    ]);
+
+    // …and an all-real nested list is untouched.
+    const real = compile(
+      ce.box(['Multiply', 2, ['List', ['List', 1, 2], ['List', 3, 4]]] as any),
+      { constantFold: false }
+    );
+    expect(real.success).toBe(true);
+    expect(real.run!({})).toEqual([
+      [2, 4],
+      [6, 8],
+    ]);
+  });
+
+  test('a list whose elements are UNIFORMLY complex broadcasts', () => {
+    // The closure carries one complex-vs-real convention, so a list all of
+    // whose elements are complex has one that fits: each element parameter is
+    // declared complex and the head's own scalar codegen emits the complex
+    // lowering. Verified against interpretation — `2·[1+i, 3+i]` is
+    // `[2+2i, 6+2i]`. Before the element parameters could carry complexness
+    // this declined with the same "list-valued operand" diagnostic as the
+    // mixed case above, which is what made enabling `complexPromotion` lose
+    // whole-collection arithmetic over a radical body (ROADMAP 2026-08-15).
+    const r = compile(
+      ce.box(['Multiply', 2, ['List', ['Complex', 1, 1], ['Complex', 3, 1]]]),
+      { constantFold: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toEqual([
+      { re: 2, im: 2 },
+      { re: 6, im: 2 },
+    ]);
   });
 
   test('unary broadcast over a list still compiles (Sin)', () => {

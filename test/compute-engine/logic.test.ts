@@ -941,6 +941,38 @@ describe('And/Or are SHORT-CIRCUIT forms (fixed 2026-08-15)', () => {
     expect(run(['And', 'False', ['scUndeclaredFn']])).toBe('False');
   });
 
+  it('Nand/Nor/Implies short-circuit the same way (ruled 2026-08-15)', () => {
+    // `Nand` = ¬And: stops at the first False (→ True); `Nor` = ¬Or: stops at
+    // the first True (→ False); `Implies`: a False antecedent decides (→ True)
+    // without evaluating the consequent. None is reordered.
+    expect(run(['Nand', ['scF'], ['scT']])).toBe('True');
+    expect(calls).toEqual(['F']);
+    expect(run(['Nand', ['scT'], ['scT']])).toBe('False');
+    expect(calls).toEqual(['T', 'T']);
+    expect(run(['Nor', ['scT'], ['scF']])).toBe('False');
+    expect(calls).toEqual(['T']);
+    expect(run(['Nor', ['scF'], ['scF']])).toBe('True');
+    expect(calls).toEqual(['F', 'F']);
+    expect(run(['Implies', ['scF'], ['scT']])).toBe('True');
+    expect(calls).toEqual(['F']);
+    expect(run(['Implies', ['scT'], ['scF']])).toBe('False');
+    expect(calls).toEqual(['T', 'F']);
+    expect(sc.expr(['Nor', 'q', 'p']).json).toEqual(['Nor', 'q', 'p']);
+    // Kleene over absence, as for And/Or: a decider wins, else Missing.
+    expect(run(['Nand', 'True', 'Missing'])).toBe('Missing');
+    expect(run(['Nand', 'Missing', 'False'])).toBe('True');
+    expect(run(['Nor', 'False', 'Missing'])).toBe('Missing');
+    expect(run(['Implies', 'True', 'Missing'])).toBe('Missing');
+    expect(run(['Implies', 'Missing', 'False'])).toBe('Missing');
+    expect(sc.expr(['Implies', 'Missing', 'True']).isValid).toBe(true);
+    // `Nand`/`Nor` are NOT associative, so nesting is kept, unlike And/Or.
+    expect(sc.expr(['Nand', ['Nand', 'a', 'b'], 'c']).json).toEqual([
+      'Nand',
+      ['Nand', 'a', 'b'],
+      'c',
+    ]);
+  });
+
   it('collection-valued operands still broadcast element-wise', () => {
     expect(
       run(['And', ['List', 'True', 'False'], ['List', 'True', 'True']])

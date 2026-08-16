@@ -1464,25 +1464,143 @@ export class BaseCompiler {
     collection: Expression,
     index: number
   ): boolean | undefined {
-    return BaseCompiler.withCollectionElements(collection, (elements) => {
-      // A NEGATIVE index counts back from the end — `At([10, 20, 30], -1)`
-      // compiles to `30`, so `-1` is the last element, not an invalid one.
-      // Treating it as invalid left it on the whole-collection verdict and
-      // reintroduced the exact over-claim this method exists to remove:
-      // `[i·t, 1][-1] + 1` ran to `{re: NaN}` where the interpreter answers `2`,
-      // because `-1` selects the REAL element.
-      const i = index < 0 ? elements.length + index : index - 1;
-      // Any index that selects nothing — zero, fractional, or past either end —
-      // lowers to the plain number `NaN` (measured: `_SYS.at([10, 20, 30], 1.5)`
-      // and `…, 0)` both yield `NaN`, not a complex object). That is a REAL
-      // value, so answer `false` rather than declining: declining would hand the
-      // node back to the whole-collection verdict, which reports complex for any
-      // collection holding one complex element and would read that `NaN` as
-      // `{re, im}`.
-      if (!Number.isInteger(index) || i < 0 || i >= elements.length)
-        return false;
-      return BaseCompiler.isComplexValued(elements[i]);
+    const elements = BaseCompiler.elementComplexness(collection);
+    if (elements === undefined) return undefined;
+    // A NEGATIVE index counts back from the end — `At([10, 20, 30], -1)`
+    // compiles to `30`, so `-1` is the last element, not an invalid one.
+    // Treating it as invalid left it on the whole-collection verdict and
+    // reintroduced the exact over-claim this method exists to remove:
+    // `[i·t, 1][-1] + 1` ran to `{re: NaN}` where the interpreter answers `2`,
+    // because `-1` selects the REAL element.
+    const i = index < 0 ? elements.length + index : index - 1;
+    // Any index that selects nothing — zero, fractional, or past either end —
+    // lowers to the plain number `NaN` (measured: `_SYS.at([10, 20, 30], 1.5)`
+    // and `…, 0)` both yield `NaN`, not a complex object). That is a REAL
+    // value, so answer `false` rather than declining: declining would hand the
+    // node back to the whole-collection verdict, which reports complex for any
+    // collection holding one complex element and would read that `NaN` as
+    // `{re, im}`.
+    if (!Number.isInteger(index) || i < 0 || i >= elements.length) return false;
+    return elements[i];
+  }
+
+  /**
+   * The complex-ness of each element the emitter will lower for the indexed
+   * collection `collection`, one verdict per element — or `undefined` when the
+   * elements cannot be identified and the caller must keep its previous,
+   * whole-collection answer.
+   *
+   * Two sources, and the second is what makes the analysis compose. A literal
+   * collection constructor, or a call to a user function whose body is one, has
+   * its elements read directly ({@link withCollectionElements}). An ELEMENT-WISE
+   * ARITHMETIC node over such a collection — `Multiply(2, w(t))` — has no
+   * elements of its own: the JavaScript target lowers it through a `_SYS.bcast`
+   * closure that applies the head to element k of every collection operand and
+   * to the scalar operands whole, so element k of the result is complex exactly
+   * when one of those is. Only the heads that PROPAGATE complex-ness from their
+   * operands qualify (`COMPLEX_PROPAGATING_HEADS`); a head whose emitter picks
+   * its lowering from the node TYPE instead (`Power`, `Root`, the inverse trigs)
+   * would not follow this rule and is left to decline.
+   *
+   * Reading arithmetic this way is what lets an enclosing form see the elements
+   * the closure actually produces. Under `complexPromotion` with
+   * `w(t) := [√(t−1), √(t−2)]`, `_fn_w` returns `[{re, im}, {re, im}]`, so
+   * `2·w(t)` is an array of complex objects; without this route an enclosing
+   * `(2·w(t))[1] + 1` would classify the whole `Multiply` from
+   * `isComplexValued` — a scalar verdict describing no element, which answers
+   * `false` here — and add `1` to an object.
+   */
+  private static elementComplexness(
+    collection: Expression
+  ): boolean[] | undefined {
+    const direct = BaseCompiler.withCollectionElements(collection, (elements) => {
+      const out: boolean[] = [];
+      for (const e of elements) {
+        const v = BaseCompiler.broadcastLeafComplexness(e);
+        // One element with no single answer leaves the whole collection with
+        // none: a broadcast maps ONE closure over every position.
+        if (v === undefined) return undefined;
+        out.push(v);
+      }
+      return out;
     });
+    if (direct !== undefined) return direct;
+
+    if (
+      !isFunction(collection) ||
+      !BaseCompiler.COMPLEX_PROPAGATING_HEADS.has(collection.operator)
+    )
+      return undefined;
+
+    let n: number | undefined = undefined;
+    const perOperand: (boolean | boolean[])[] = [];
+    for (const op of collection.ops) {
+      // The same operand predicate `tryCompileBroadcast` uses to decide which
+      // operands the closure sees element-wise; everything else is a scalar it
+      // sees whole.
+      if (
+        op.isCollection ||
+        op.type.matches('list') ||
+        op.type.matches('indexed_collection') ||
+        isBoundPossiblyCollectionTyped(op)
+      ) {
+        const elts = BaseCompiler.elementComplexness(op);
+        if (elts === undefined) return undefined;
+        // `_SYS.bcast` projects a LENGTH MISMATCH to NaN rather than zipping to
+        // the shortest operand, so mismatched lengths produce no elements at
+        // all and there is nothing here to describe.
+        if (n !== undefined && elts.length !== n) return undefined;
+        n = elts.length;
+        perOperand.push(elts);
+      } else perOperand.push(BaseCompiler.isComplexValued(op));
+    }
+    // No operand contributes elements: this is scalar arithmetic, not a
+    // collection, and the element question does not apply to it.
+    if (n === undefined) return undefined;
+
+    const out: boolean[] = [];
+    for (let i = 0; i < n; i++)
+      out.push(perOperand.some((p) => (Array.isArray(p) ? p[i] : p)));
+    return out;
+  }
+
+  /**
+   * The complex-ness of ONE element of a collection, as the broadcast closure
+   * will see it — or `undefined` when it has no single answer.
+   *
+   * A scalar element is what the closure's parameter holds, so its own verdict
+   * is the answer. A NESTED element is not: `_SYS.bcast` descends through every
+   * array it is handed and applies the closure at the LEAVES, so a nested
+   * element's convention is the one all of its leaves share, and it has none
+   * when they disagree.
+   *
+   * Answering a nested element with `isComplexValued` — the whole-collection
+   * verdict — is the same category error this analysis exists to remove, one
+   * level down. Measured on the DEFAULT path before this guard:
+   * `2·[[1+i, 2], [3+i, 4]]` reported both outer elements complex, installed a
+   * complex closure, and ran to
+   * `[[{re: 2, im: 2}, {re: NaN, im: NaN}], [{re: 6, im: 2}, {re: NaN, im: NaN}]]`
+   * where the interpreter answers `[[2+2i, 4], [6+2i, 8]]` — the real leaves
+   * `2` and `4` had `.re` read off them.
+   */
+  private static broadcastLeafComplexness(
+    element: Expression
+  ): boolean | undefined {
+    // Not a collection: the closure receives this value itself.
+    if (
+      !(
+        element.isCollection ||
+        element.type.matches('list') ||
+        element.type.matches('indexed_collection') ||
+        isPossiblyCollectionTyped(element)
+      )
+    )
+      return BaseCompiler.isComplexValued(element);
+    // A collection whose own elements cannot be identified has no leaf
+    // verdict to report, and its whole-collection one describes none of them.
+    const nested = BaseCompiler.elementComplexness(element);
+    if (nested === undefined || nested.length === 0) return undefined;
+    return nested.every((e) => e === nested[0]) ? nested[0] : undefined;
   }
 
   /**
@@ -1503,14 +1621,9 @@ export class BaseCompiler {
   private static uniformElementComplexness(
     collection: Expression
   ): boolean | undefined {
-    return BaseCompiler.withCollectionElements(collection, (elements) => {
-      if (elements.length === 0) return undefined;
-      const first = BaseCompiler.isComplexValued(elements[0]);
-      for (let i = 1; i < elements.length; i++)
-        if (BaseCompiler.isComplexValued(elements[i]) !== first)
-          return undefined;
-      return first;
-    });
+    const elements = BaseCompiler.elementComplexness(collection);
+    if (elements === undefined || elements.length === 0) return undefined;
+    return elements.every((e) => e === elements[0]) ? elements[0] : undefined;
   }
 
   /**
@@ -1539,11 +1652,7 @@ export class BaseCompiler {
   }
 
   private static hasAnyComplexElement(collection: Expression): boolean {
-    return (
-      BaseCompiler.withCollectionElements(collection, (elements) =>
-        elements.some((e) => BaseCompiler.isComplexValued(e))
-      ) ?? false
-    );
+    return BaseCompiler.elementComplexness(collection)?.some((e) => e) ?? false;
   }
 
   /**
@@ -1552,13 +1661,9 @@ export class BaseCompiler {
    * for a reason other than not being able to see the elements at all.
    */
   private static hasMixedElementComplexness(collection: Expression): boolean {
-    return (
-      BaseCompiler.withCollectionElements(collection, (elements) => {
-        if (elements.length < 2) return false;
-        const first = BaseCompiler.isComplexValued(elements[0]);
-        return elements.some((e) => BaseCompiler.isComplexValued(e) !== first);
-      }) ?? false
-    );
+    const elements = BaseCompiler.elementComplexness(collection);
+    if (elements === undefined || elements.length < 2) return false;
+    return elements.some((e) => e !== elements[0]);
   }
 
   /**
@@ -3177,16 +3282,32 @@ export class BaseCompiler {
               // `bindExpr`'s application form (JS `((a, b) => …)(x, y)`,
               // Python `(lambda a, b: …)(x, y)`) and the hoisted-statement sink
               // both evaluate left to right, so the draws then follow argument
-              // order. Probed: the interpreter draws EAGERLY even for an
-              // operand the chain short-circuits past (`Less(5, 1, Random())`
-              // consumes a draw), so binding an index-≥2 endpoint is exact
-              // parity. A chain with no impure operand is untouched.
+              // order. A chain with no impure operand is untouched.
+              //
+              // The interpreter SHORT-CIRCUITS a chain (since 2026-08-15,
+              // `evaluateChainOperands` in `library/relational-operator.ts`):
+              // `Less(5, 1, Random())` stops at `5 < 1` and never draws. A
+              // temporary bound AROUND the whole chain is evaluated before any
+              // pair, so an operand at index ≥ 2 must instead be bound BEHIND
+              // the pairs that precede it: `(a < b) && ((t) => (b < t) &&
+              // (t < c))(draw())`. Operands 0 and 1 are always evaluated by
+              // the interpreter (the first pair needs both), so their bindings
+              // may wrap the whole chain. A target without `bindExpr` (the GPU
+              // shaders) can only bind by hoisting a statement — which is
+              // unconditional — so an impure operand at index ≥ 2 that must be
+              // bound declines there (D6).
               const chainOp = target.chainOp ?? '&&';
-              const bindings: Array<[name: string, value: string]> = [];
               const impureMiddle = args.some(
                 (arg, i) =>
                   i >= 1 && i <= args.length - 2 && arg.isPure === false
               );
+              // Per operand: its code, or a temporary name plus the binding
+              // that introduces it.
+              const outerBindings: Array<[name: string, value: string]> = [];
+              const innerBindings = new Map<
+                number,
+                [name: string, value: string]
+              >();
               const codes = args.map((arg, i) => {
                 // Each comparison after the first is short-circuited by the
                 // chain operator, so operands from index 2 on are the lazy
@@ -3203,15 +3324,18 @@ export class BaseCompiler {
                     (impureMiddle && isImpure))
                 ) {
                   const name = BaseCompiler.tempVar(target);
-                  bindings.push([name, code]);
+                  if (i >= 2) innerBindings.set(i, [name, code]);
+                  else outerBindings.push([name, code]);
                   return name;
                 }
                 if (!target.bindExpr && impureMiddle && isImpure) {
-                  if (!BaseCompiler.canHoist(target))
+                  if (!BaseCompiler.canHoist(target) || i >= 2)
                     throw new Error(
                       `${h}: an impure (Random) operand cannot be bound to a ` +
                         'temporary at this position — a repeated draw would ' +
-                        'shift every later value in the shader. Fail closed (D6).'
+                        'shift every later value in the shader, and a hoisted ' +
+                        'draw at index ≥ 2 would fire even when an earlier ' +
+                        'comparison already decided the chain. Fail closed (D6).'
                     );
                   const name = BaseCompiler.tempVar(target);
                   const decl =
@@ -3223,12 +3347,28 @@ export class BaseCompiler {
                 }
                 return code;
               });
-              const pairs: string[] = [];
-              for (let i = 0; i < codes.length - 1; i++)
-                pairs.push(`${codes[i]} ${op[0]} ${codes[i + 1]}`);
-              const body = `(${pairs.join(`) ${chainOp} (`)})`;
-              if (bindings.length > 0 && target.bindExpr)
-                return target.bindExpr(bindings, body);
+              // The conjunction of the pairs from pair `k` (comparing operands
+              // `k` and `k+1`) to the last, flat — except that the pairs from
+              // the first one that reads a bound operand `i+1` (`i ≥ 1`) on
+              // are wrapped in that operand's binding, so the temporary is
+              // evaluated only once every earlier pair has held. A binding is
+              // consumed when wrapped so the recursion does not see it again.
+              const chainFrom = (k: number): string => {
+                const parts: string[] = [];
+                for (let i = k; i < codes.length - 1; i++) {
+                  const binding = innerBindings.get(i + 1);
+                  if (binding && target.bindExpr) {
+                    innerBindings.delete(i + 1);
+                    parts.push(target.bindExpr([binding], chainFrom(i)));
+                    break;
+                  }
+                  parts.push(`(${codes[i]} ${op[0]} ${codes[i + 1]})`);
+                }
+                return parts.join(` ${chainOp} `);
+              };
+              const body = chainFrom(0);
+              if (outerBindings.length > 0 && target.bindExpr)
+                return target.bindExpr(outerBindings, body);
               return body;
             }
 
@@ -3931,6 +4071,21 @@ export class BaseCompiler {
     }
 
     if (typeof fn === 'function') {
+      // The same real-only rule the string-mapped branch below applies, for
+      // the heads whose lowering is real-only but spelled as function codegen
+      // (`Math.floor`, `sign(x)·round(|x|)`, `Math.max`, `np.floor`, …). See
+      // `REAL_ONLY_CODEGEN_HEADS` for the three families and the NaN each one
+      // was measured producing behind `success: true`.
+      if (
+        BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(h) &&
+        target.language !== undefined &&
+        !target.language.startsWith('interval') &&
+        args.some((a) => BaseCompiler.isComplexValued(a))
+      )
+        throw new Error(
+          `${h}: the target's lowering for this head is real-only and cannot represent a complex-valued argument. Fail closed (D6).`
+        );
+
       // A `broadcastable` head over a single finite indexed collection:
       // apply the head's scalar element lowering across the collection. How
       // that is spelled is a property of the TARGET LANGUAGE, not of the base
@@ -4094,6 +4249,65 @@ export class BaseCompiler {
     new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power']);
 
   /**
+   * Heads whose target lowering is real-only but which are spelled as FUNCTION
+   * codegen rather than as a plain helper name, so the real-only gate on the
+   * string-mapped branch of `compileExpr` never reached them. The
+   * function-codegen branch applies the same rule through this set.
+   *
+   * Three families, and none of them has a complex extension to reach for:
+   *
+   *  - ROUNDING (`Floor`, `Ceiling`, `Round`, `Truncate`, `Fract`) — there is
+   *    no rounding of a complex number. They are function codegen for an
+   *    integer-operand shortcut or a half-away-from-zero reconstruction.
+   *  - ORDER SELECTION (`Max`, `Min`, `Clamp`) — the complex numbers carry no
+   *    total order, which is the same reason `Less`/`Greater` fail closed on a
+   *    complex operand.
+   *  - INTEGER DIVISION (`Mod`, `Remainder`, `GCD`, `LCM`).
+   *
+   * Measured on the DEFAULT path with `x` bound to `0`, so the operand
+   * `x + (1+i)` is complex but not a foldable literal. Every one of these
+   * compiled to `success: true` over code that ran to NaN:
+   *
+   * | shape                | compiled | interpreter          |
+   * | -------------------- | -------- | -------------------- |
+   * | `Floor(x + (1+i))`   | NaN      | `1 + i` (inert)      |
+   * | `Max(x + (1+i))`     | NaN      | `max(1 + i)` (inert) |
+   * | `Mod(x + (1+i), 2)`  | NaN      | `1`                  |
+   *
+   * `Sign`, `Erf`, `Gamma` and `Zeta` were already failing closed through the
+   * string gate, which is what shows this to be an omission rather than a
+   * policy.
+   *
+   * `Ceil` and `Ceiling` are DISTINCT heads and both belong here: `Ceil` is the
+   * one the library canonicalizes to and the JavaScript target lowers with
+   * function codegen (`Math.ceil`), so it needs this gate; `Ceiling` reaches
+   * its target lowering as a plain helper name and already fails closed on the
+   * string branch, and is listed so that a target which ever gives it function
+   * codegen inherits the rule. Likewise `ElementMax`/`ElementMin` are separate
+   * heads from `Max`/`Min` — they lower straight to `Math.max`/`Math.min` — and
+   * a set holding only the aggregate spelling left them emitting
+   * `Math.max({re, im})`.
+   */
+  private static readonly REAL_ONLY_CODEGEN_HEADS: ReadonlySet<string> =
+    new Set([
+      'Floor',
+      'Ceil',
+      'Ceiling',
+      'Round',
+      'Truncate',
+      'Fract',
+      'Max',
+      'Min',
+      'ElementMax',
+      'ElementMin',
+      'Clamp',
+      'Mod',
+      'Remainder',
+      'GCD',
+      'LCM',
+    ]);
+
+  /**
    * Heads that only PROPAGATE complexness from their operands: the value they
    * produce is complex exactly when one of their operands is. Read by
    * `isComplexValued` to answer from the OPERANDS rather than from a node type
@@ -4149,9 +4363,11 @@ export class BaseCompiler {
    * `broadcastOverIndexedCollections`.
    *
    * Returns `null` — deferring to the scalar / fail-closed path — when the head
-   * is not broadcastable, no operand is list-valued, the head has no function
-   * codegen, or any operand is complex-valued (the bare element parameters
-   * below cannot carry the complex scalar codegen).
+   * is not broadcastable, no operand is list-valued, or the head has no
+   * function codegen. Complex operands DO broadcast: each element parameter is
+   * declared complex or real in a local frame, so the head's own scalar codegen
+   * emits the matching lowering. Only an operand whose elements DISAGREE about
+   * being complex declines, because one closure is emitted for all of them.
    */
   private static tryCompileBroadcast(
     engine: ComputeEngine,
@@ -4449,13 +4665,67 @@ export class BaseCompiler {
       isBoundPossiblyCollectionTyped(a);
     if (!args.some(isArrayOperand)) return null;
 
-    // Complex-valued operands need complex scalar codegen, which the bare
-    // element parameters below can't carry — defer (scalar / fail-closed path).
-    // `hasComplexElement` (hoisted above) is the list-element complex test.
-    if (
-      args.some((a) => BaseCompiler.isComplexValued(a) || hasComplexElement(a))
-    )
-      return null;
+    // What the closure's element parameter for each operand holds at run time:
+    // `true` for a `{re, im}` object, `false` for a plain number. A SCALAR
+    // operand is passed whole, so its own complex-ness is the answer; an ARRAY
+    // operand contributes one element per position, so the answer is the
+    // complex-ness its elements SHARE. `undefined` means no single answer
+    // exists for that operand and the closure cannot be built.
+    const elementComplexnessOfOperand = (
+      a: Expression
+    ): boolean | undefined => {
+      // A scalar operand IS what the parameter holds, so its own verdict is
+      // the answer. For an ARRAY operand it is not: `isComplexValued` reports
+      // for the whole collection, and a list is emitted element by element, so
+      // that verdict describes no single element — `[1+i, 2]` types
+      // `vector<finite_complex^2>` and reads complex while its second element
+      // is the plain number `2`. Only the element analysis may answer here.
+      if (!isArrayOperand(a)) return BaseCompiler.isComplexValued(a);
+      // Elements that DISAGREE (`[√(t−1), 1]`) have no single closure: one
+      // position holds `{re, im}` and another a plain number, and the body
+      // below is emitted once for all of them. Declining hands the form to the
+      // fail-closed path, which is what it did for every complex element
+      // before this. Measured with a real closure over such an array,
+      // `2·[1+i, 2]` ran to `[{re: 2, im: 2}, {re: NaN, im: NaN}]` where the
+      // interpreter answers `[2+2i, 4]`.
+      // One walk, both verdicts: `uniformElementComplexness` and
+      // `hasMixedElementComplexness` would each re-derive this same array.
+      const elements = BaseCompiler.elementComplexness(a);
+      if (elements !== undefined && elements.length > 0)
+        return elements.every((e) => e === elements[0])
+          ? elements[0]
+          : undefined;
+      // The elements are not visible. Any remaining evidence of complexness —
+      // a `list<complex>` ELEMENT TYPE (`hasComplexElement`, hoisted above) or
+      // the whole-collection verdict — cannot be attributed to an individual
+      // element, so decline exactly as before this method carried complex at
+      // all.
+      return hasComplexElement(a) || BaseCompiler.isComplexValued(a)
+        ? undefined
+        : false;
+    };
+    const argIsComplex = args.map(elementComplexnessOfOperand);
+    if (argIsComplex.some((c) => c === undefined)) return null;
+    const anyComplex = argIsComplex.some((c) => c === true);
+
+    // A STRING-mapped head is a real-only scalar helper (`Math.sign`,
+    // `Math.hypot`, `_SYS.sinc`): it has no complex call form, so a complex
+    // element has nowhere to go. Fail closed rather than hand a `{re, im}`
+    // object to a real helper.
+    if (typeof fn !== 'function' && anyComplex) return null;
+
+    // …and the same rule for a head whose codegen is real-only despite being a
+    // FUNCTION (`REAL_ONLY_CODEGEN_HEADS`). `compileExpr` gates those on its
+    // scalar branch, which this method returns BEFORE reaching, so a broadcast
+    // would slip past it: the closure below is built from the head's own scalar
+    // codegen, and for these heads that codegen is `Math.floor`/`Math.max`/…
+    // whatever the element parameter's declared complex-ness. Measured with
+    // this decline absent: `Floor([1+i, 2+i])` emitted
+    // `_SYS.bcast((_tv1) => Math.floor(_tv1), [{re, im}, {re, im}])` and ran to
+    // `[NaN, NaN]` behind `success: true`, where the interpreter leaves the
+    // elements inert at `[1+i, 2+i]`. Returning null hands the form to the
+    // fail-closed D6 guard, which is where the scalar shape ends up too.
+    if (BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(h) && anyComplex) return null;
 
     // Bind one element parameter per operand and build the scalar body by
     // re-invoking the head's own scalar codegen with those parameters (shadow
@@ -4467,14 +4737,30 @@ export class BaseCompiler {
       var: (id: string) => (params.includes(id) ? id : target.var(id)),
       boundVars: BaseCompiler.withBoundNames(target, params),
     };
-    const scalarBody =
-      typeof fn === 'function'
-        ? fn(
-            params.map((p) => engine.expr(p)),
-            (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
-            innerTarget
-          )
-        : `${fn}(${params.join(', ')})`;
+    // The element parameters are bare symbols with no type of their own, so the
+    // head's scalar codegen would read every one of them as REAL and emit
+    // `_tv1 * _tv2` over a pair of `{re, im}` objects. Declaring their
+    // complex-ness in a local frame — the same mechanism a `Block` local uses
+    // (`_localComplex`) — makes that codegen pick the complex lowering, so the
+    // closure agrees with the array it will actually be mapped over. This is
+    // what lets an all-complex collection broadcast at all; before it, any
+    // complex operand declined here and fell through to the fail-closed guard.
+    const complexFrame = new Map<string, boolean>();
+    params.forEach((p, i) => complexFrame.set(p, argIsComplex[i] === true));
+    BaseCompiler._pushLocalComplex(complexFrame);
+    let scalarBody: string;
+    try {
+      scalarBody =
+        typeof fn === 'function'
+          ? fn(
+              params.map((p) => engine.expr(p)),
+              (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
+              innerTarget
+            )
+          : `${fn}(${params.join(', ')})`;
+    } finally {
+      BaseCompiler._popLocalComplex();
+    }
     const compiledArgs = args
       .map((a) => BaseCompiler.compile(a, target))
       .join(', ');

@@ -307,3 +307,159 @@ describe('complexPromotion over a collection-valued body (ROADMAP 2026-08-15)', 
     expect(r.success).toBe(true);
   });
 });
+
+/**
+ * Scalar arithmetic consuming a collection-valued call as a WHOLE operand,
+ * under the `complexPromotion` opt-in (ROADMAP 2026-08-15, reported by a
+ * consumer's enablement pricing: 9 of 25 compiled-band losses).
+ *
+ * With `w(t) := [√(t−1), √(t−2)]`, turning the opt-in on made `2·w(t)`,
+ * `w(t)+1` and `w(t)/2` DECLINE with "cannot compile scalar arithmetic over a
+ * list-valued operand", where with it off all three compiled — and compiled
+ * correctly, at both ends of the domain. The loss was in `tryCompileBroadcast`,
+ * not in the D6 guard the diagnostic comes from: promotion made every element
+ * of the body complex, and the broadcast declined outright on any complex
+ * element because its scalar closure took its element parameters as bare
+ * symbols, which the head's codegen reads as real. Declaring each parameter's
+ * complex-ness in a local frame lets the same closure carry the complex
+ * lowering, so the shape broadcasts instead of falling through to D6.
+ *
+ * The trigger was a CONJUNCTION — a collection-valued body, containing a
+ * radical, consumed whole — so both controls are pinned here alongside it, and
+ * so is the indexed case, which compiled throughout and must keep doing so.
+ */
+describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 2026-08-15)', () => {
+  const W = [
+    'List',
+    ['Sqrt', ['Subtract', 't', 1]],
+    ['Sqrt', ['Subtract', 't', 2]],
+  ];
+
+  /** In the real domain (t = 3) and outside it (t = 0.3). */
+  const IN = { t: 3 };
+  const OUT = { t: 0.3 };
+
+  const compiled = (body: unknown, mj: unknown, complexPromotion: boolean) => {
+    const ce = withFn('w', body);
+    return compile(ce.box(mj as any), { complexPromotion })!;
+  };
+
+  test.each([
+    ['2·w(t)', ['Multiply', 2, ['w', 't']]],
+    ['w(t)+1', ['Add', ['w', 't'], 1]],
+    ['w(t)/2', ['Divide', ['w', 't'], 2]],
+  ])('ON: %s compiles', (_label, mj) => {
+    expect(compiled(W, mj, true).success).toBe(true);
+    expect(compiled(W, mj, false).success).toBe(true);
+  });
+
+  test('ON: the values match the interpreter at both ends of the domain', () => {
+    // `w(3) = [√2, 1]`, so `2·w(3) = [2√2, 2]`; `w(0.3) = [√−0.7, √−1.7]`,
+    // which the opt-in promotes, so `2·w(0.3) = [1.673…i, 2.607…i]` — the
+    // interpreter's answer, now reproduced element by element.
+    const r = compiled(W, ['Multiply', 2, ['w', 't']], true);
+    expect(r.success).toBe(true);
+    expect(r.run!(IN as any)).toEqual([
+      { re: 2 * Math.SQRT2, im: 0 },
+      { re: 2, im: 0 },
+    ]);
+    const out = r.run!(OUT as any) as unknown as { re: number; im: number }[];
+    expect(out[0].re).toBe(0);
+    expect(out[0].im).toBeCloseTo(2 * Math.sqrt(0.7), 12);
+    expect(out[1].re).toBe(0);
+    expect(out[1].im).toBeCloseTo(2 * Math.sqrt(1.7), 12);
+  });
+
+  test('ON + realOnly: the out-of-domain value projects, exactly as with the opt-in off', () => {
+    const mj = ['Multiply', 2, ['w', 't']];
+    for (const complexPromotion of [true, false]) {
+      const ce = withFn('w', W);
+      const r = compile(ce.box(mj as any), {
+        realOnly: true,
+        complexPromotion,
+      })!;
+      expect(r.success).toBe(true);
+      expect(r.run!(IN as any)).toEqual([2 * Math.SQRT2, 2]);
+      expect(r.run!(OUT as any)).toEqual([NaN, NaN]);
+    }
+  });
+
+  test('ON: the default path is untouched — the OFF lowering is byte-identical', () => {
+    // The opt-in must not change what an unaffected shape compiles to. The
+    // no-radical control below is that shape: its elements never promote, so
+    // both flag states emit the same real `_SYS.bcast` closure.
+    const mj = ['Multiply', 2, ['w', 't']];
+    const P = ['List', ['Multiply', 2, 't'], ['Add', 't', 1]];
+    expect(compiled(P, mj, true).code).toBe(compiled(P, mj, false).code);
+  });
+
+  test('CONTROL: a collection body with NO radical compiles under both flag states', () => {
+    const P = ['List', ['Multiply', 2, 't'], ['Add', 't', 1]];
+    const mj = ['Multiply', 2, ['w', 't']];
+    for (const complexPromotion of [true, false]) {
+      const r = compiled(P, mj, complexPromotion);
+      expect(r.success).toBe(true);
+      expect(r.run!(IN as any)).toEqual([12, 8]);
+    }
+  });
+
+  test('CONTROL: a SCALAR radical body compiles under both flag states', () => {
+    const Z = ['Sqrt', ['Subtract', 't', 1]];
+    const mj = ['Multiply', 2, ['w', 't']];
+    expect(compiled(Z, mj, false).success).toBe(true);
+    const on = compiled(Z, mj, true);
+    expect(on.success).toBe(true);
+    expect(on.run!(OUT as any)).toEqual({
+      re: 0,
+      im: 2 * Math.sqrt(0.7),
+    });
+  });
+
+  test('CONTROL: the INDEXED read keeps compiling — it was never scalar-over-a-list', () => {
+    const mj = ['Multiply', 2, ['At', ['w', 't'], 1]];
+    expect(compiled(W, mj, false).success).toBe(true);
+    const on = compiled(W, mj, true);
+    expect(on.success).toBe(true);
+    expect(on.run!(OUT as any)).toEqual({ re: 0, im: 2 * Math.sqrt(0.7) });
+  });
+
+  test('an indexed read OF the broadcast result sees the complex elements', () => {
+    // The broadcast now produces an array of `{re, im}`, so every enclosing
+    // form has to classify it element-wise too. `isComplexValued` answers for
+    // the whole `Multiply` — a scalar verdict that describes no element and
+    // reads `false` here — so without the element route through the arithmetic
+    // head, `(2·w(t))[1] + 1` would add `1` to an object and concatenate.
+    const r = compiled(
+      W,
+      ['Add', ['At', ['Multiply', 2, ['w', 't']], 1], 1],
+      true
+    );
+    expect(r.success).toBe(true);
+    const v = r.run!(OUT as any) as unknown as { re: number; im: number };
+    expect(v.re).toBe(1);
+    expect(v.im).toBeCloseTo(2 * Math.sqrt(0.7), 12);
+  });
+
+  test('a broadcast wrapped around a broadcast stays element-wise', () => {
+    const r = compiled(W, ['Multiply', 2, ['Add', ['w', 't'], 1]], true);
+    expect(r.success).toBe(true);
+    const out = r.run!(OUT as any) as unknown as { re: number; im: number }[];
+    expect(out.map((e) => e.re)).toEqual([2, 2]);
+    expect(out[0].im).toBeCloseTo(2 * Math.sqrt(0.7), 12);
+    expect(out[1].im).toBeCloseTo(2 * Math.sqrt(1.7), 12);
+  });
+
+  test('a MIXED body still fails closed — one closure cannot fit both elements', () => {
+    // `[√(t−1), 1]` promotes only its first element, so the run-time array is
+    // `[{re, im}, 1]`. The broadcast wraps ONE scalar closure and maps it over
+    // both positions, so neither convention fits: a complex closure reads
+    // `.re` off the plain `1`. This is the shape that must keep declining.
+    const r = compiled(
+      ['List', ['Sqrt', ['Subtract', 't', 1]], 1],
+      ['Multiply', 2, ['w', 't']],
+      true
+    );
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/list-valued operand/);
+  });
+});

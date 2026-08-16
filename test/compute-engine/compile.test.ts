@@ -1139,6 +1139,113 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.erf');
   });
+
+  // The gate above only covers a head the target maps to a plain HELPER NAME.
+  // A head lowered by function codegen bypassed it, even where that codegen is
+  // just as real-only — `Math.floor`, `sign(x)·round(|x|)`, `Math.max`. Each of
+  // these compiled to `success: true` over source that ran to NaN. Measured
+  // with `x` bound to `0`, so `x + (1+i)` is complex but not a foldable
+  // literal: `Floor` → NaN where the interpreter leaves `1 + i` inert, `Max` →
+  // NaN where it leaves `max(1 + i)` inert, `Mod(…, 2)` → NaN where it answers
+  // `1`.
+  describe('a real-only FUNCTION-codegen head fails closed too', () => {
+    const Z = ['Add', ['Complex', 1, 1], 'x'];
+
+    test.each([
+      ['Floor', [Z]],
+      ['Round', [Z]],
+      ['Truncate', [Z]],
+      ['Fract', [Z]],
+      ['Max', [Z]],
+      ['Min', [Z]],
+      ['Clamp', [Z, 0, 2]],
+      ['Mod', [Z, 2]],
+      ['Remainder', [Z, 2]],
+      ['GCD', [Z, 2]],
+      ['LCM', [Z, 2]],
+    ])('%s over a complex operand throws', (h, args) => {
+      const engine = new ComputeEngine();
+      expect(() =>
+        compile(engine.box([h, ...args] as any), {
+          fallback: false,
+          // Every operand but `x` is a literal; without this the whole call
+          // could fold and the decline under test would never fire.
+          constantFold: false,
+        })
+      ).toThrow(/real-only/);
+    });
+
+    // `Ceil` and `ElementMax`/`ElementMin` are DISTINCT heads from `Ceiling`
+    // and `Max`/`Min` — `Ceil` is the one the library canonicalizes to — and a
+    // set holding only the other spelling left them emitting
+    // `Math.ceil({re, im})` / `Math.max({re, im})`.
+    test.each([
+      ['Ceil', [Z]],
+      ['ElementMax', [Z, 1]],
+      ['ElementMin', [Z, 1]],
+    ])('%s (the canonical head) over a complex operand throws', (h, args) => {
+      const engine = new ComputeEngine();
+      expect(() =>
+        compile(engine.box([h, ...args] as any), {
+          fallback: false,
+          constantFold: false,
+        })
+      ).toThrow(/real-only/);
+    });
+
+    // The gate above sits on `compileExpr`'s SCALAR branch, which the JavaScript
+    // broadcast path returns before reaching. A list operand therefore needs the
+    // same rule inside `tryCompileBroadcast`: the closure it builds comes from
+    // the head's own scalar codegen, which for these heads is `Math.floor` /
+    // `Math.max` / … whatever the element parameter is declared to hold.
+    // Measured without that second gate: `Floor([1+i, 2+i])` emitted
+    // `_SYS.bcast((_tv1) => Math.floor(_tv1), [{re, im}, {re, im}])` and ran to
+    // `[NaN, NaN]` behind `success: true`, where the interpreter leaves the
+    // elements inert at `[1+i, 2+i]`.
+    const COMPLEX_LIST = ['List', ['Complex', 1, 1], ['Complex', 2, 1]];
+    test.each([
+      ['Floor', [COMPLEX_LIST]],
+      ['Round', [COMPLEX_LIST]],
+      ['Truncate', [COMPLEX_LIST]],
+      ['Fract', [COMPLEX_LIST]],
+      ['Mod', [COMPLEX_LIST, 2]],
+      ['Remainder', [COMPLEX_LIST, 2]],
+      ['Clamp', [COMPLEX_LIST, 0, 2]],
+    ])('%s over a uniformly-complex LIST fails closed too', (h, args) => {
+      const engine = new ComputeEngine();
+      const r = compile(engine.box([h, ...args] as any), {
+        constantFold: false,
+      });
+      expect(r.success).toBe(false);
+    });
+
+    test.each([
+      ['Floor', ['x']],
+      ['Round', ['x']],
+      ['Max', ['x', 1]],
+      ['Mod', ['x', 2]],
+      ['GCD', ['x', 2]],
+    ])('%s over a REAL operand still compiles', (h, args) => {
+      const engine = new ComputeEngine();
+      const r = compile(engine.box([h, ...args] as any), { fallback: false });
+      expect(r.success).toBe(true);
+    });
+
+    it('a real LIST operand still broadcasts through these heads', () => {
+      // The gate keys on complex-ness, not on list-ness: the ordinary
+      // element-wise `Floor` must be untouched.
+      const r = compile(ce.box(['Floor', ['List', 1.7, 2.2]] as any), {
+        constantFold: false,
+      });
+      expect(r.success).toBe(true);
+      expect(r.run!({})).toEqual([1, 2]);
+    });
+
+    it('the real lowering is unchanged — Floor(x) is still Math.floor', () => {
+      const r = compile(ce.box(['Floor', 'x']), { fallback: false });
+      expect(r.code).toBe('Math.floor(_.x)');
+    });
+  });
 });
 
 // CO-P2-24: compiled-vs-interpreted divergences pinned to the interpreter.

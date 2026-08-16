@@ -979,6 +979,27 @@ export function isDeclaredScalarNumber(expr: Expression): boolean {
 }
 
 /**
+ * Is `x` an operand that makes an application ELEMENT-WISE, read from its
+ * TYPE rather than its value — so the answer is known before the operand is
+ * evaluated, and a `list<boolean>`-typed call, a symbol bound to a list, and a
+ * literal list all answer the same way (as does a declared but still
+ * valueless `list<T>` symbol). A tuple is atomic (a point, a pair), never
+ * mapped over — the same exclusion the driver's broadcast makes with
+ * `isTuple`. An `unknown`/`any`-typed operand (an undeclared function call)
+ * is NOT collection-shaped: `unknown` does not match `collection`.
+ *
+ * Used by the short-circuit operators (`And`/`Or`/`Nand`/`Nor`/`Implies` in
+ * `library/logic.ts`, the relational chains in
+ * `library/relational-operator.ts`) to decide, before evaluating anything,
+ * whether the application is element-wise — in which case every operand is
+ * evaluated once and the result is a list — or scalar, in which case
+ * evaluation stops at the first deciding operand.
+ */
+export function isCollectionShaped(x: Expression): boolean {
+  return x.type.matches('collection') && !x.type.matches('tuple');
+}
+
+/**
  * True when `expr` is a `tuple` — a point/vector in ℝⁿ *or* a Desmos-style
  * point-list (a tuple with a finite-collection component, e.g. `(-6, n)` with
  * `n` a list). Broader than `isNumericTuple`, which requires every element to

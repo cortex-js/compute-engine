@@ -7,9 +7,11 @@ import type {
 
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import {
+  isCollectionShaped,
   isFiniteIndexedCollection,
   isPossiblyCollectionTyped,
   isTuple,
+  isValuelessCollectionTyped,
 } from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { eq, eqIdentical } from '../boxed-expression/compare.js';
@@ -22,6 +24,7 @@ import {
   typeContainsMissing,
   numericMissingSlot,
 } from '../../common/type/utils.js';
+import type { Type } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
 import { toBigint } from '../boxed-expression/numerics.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
@@ -145,6 +148,80 @@ function compareFromAssumedBounds(
 //   // less-than: Q52834024 245
 
 /**
+ * Evaluate the operands of a relational CHAIN (`a < b < c`, `a = b = c`, …)
+ * left to right, stopping at the first adjacent pair that is decidably
+ * `False`. A chain is the conjunction of its adjacent pairs, and — like `And`
+ * (`library/logic.ts`, `evaluateShortCircuit`) — a conjunction is a
+ * short-circuit form: once `a < b` is `False`, `c` is never evaluated (no
+ * side effect, no error, no random draw), and the result is `False` whatever
+ * the later pairs would have said — including a later `Missing` or an
+ * undecided pair (Kleene: `False ∧ x = False`). An operand that evaluates to
+ * an error is as final as a `False` pair: it is returned as-is and the
+ * operands after it do not run.
+ *
+ * Returns `False` (or the error) when the walk decided the chain, and
+ * otherwise the evaluated operands, in order, for the caller's ordinary
+ * (all-operands) code path — each operand evaluated exactly once. Each
+ * adjacent pair is decided by `pairIsFalse`, which the caller builds from the
+ * SAME cheap primitives its own pairwise loop uses (`quantityCompare`,
+ * `isLess`/`isLessEqual`/`isEqual`/`eq`, `compareFromAssumedBounds`) — not by
+ * re-dispatching the operator, which would pay canonicalization and a full
+ * handler re-entry per pair. Anything but a definite `False` (`True`, an
+ * absent or undecided pair) lets the walk continue; the caller's loop then
+ * settles absence (`Missing`/`NaN`), inertness and the final verdict on the
+ * values, so a holding chain pays the cheap comparisons twice and nothing
+ * more.
+ *
+ * Not applied when the chain is binary (nothing to short-circuit) or when
+ * some operand is collection-shaped by type (`isCollectionShaped`): the
+ * comparison is then element-wise, every operand is evaluated once and the
+ * result is a list — the same exception the connectives make.
+ */
+function evaluateChainOperands(
+  ce: ComputeEngine,
+  rawOps: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined,
+  pairIsFalse: (lhs: Expression, rhs: Expression) => boolean
+): Expression[] | Expression {
+  const evalOptions = { numericApproximation };
+  if (rawOps.length <= 2 || rawOps.some(isCollectionShaped))
+    return rawOps.map((op) => op.evaluate(evalOptions));
+  const ops: Expression[] = [];
+  for (const raw of rawOps) {
+    const v = raw.evaluate(evalOptions);
+    if (!v.isValid) return v;
+    if (ops.length > 0 && pairIsFalse(ops[ops.length - 1], v)) return ce.False;
+    ops.push(v);
+  }
+  return ops;
+}
+
+/** The adjacent-pair deciders of `evaluateChainOperands`, one per chainable
+ * relation — each the `False` branch of the corresponding handler's own
+ * pairwise loop. */
+const CHAIN_PAIR_IS_FALSE = {
+  Equal: (ce: ComputeEngine) => (a: Expression, b: Expression) => {
+    const q = quantityCompare(a, b);
+    if (q !== null) return Math.abs(q) > ce.tolerance;
+    return eq(a, b) === false;
+  },
+  NotEqual: (_ce: ComputeEngine) => (a: Expression, b: Expression) =>
+    a.isEqual(b) === true,
+  Less: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
+    const q = quantityCompare(a, b);
+    if (q !== null) return q >= 0;
+    return (a.isLess(b) ?? compareFromAssumedBounds(a, b, true)) === false;
+  },
+  LessEqual: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
+    const q = quantityCompare(a, b);
+    if (q !== null) return q > 0;
+    return (
+      (a.isLessEqual(b) ?? compareFromAssumedBounds(a, b, false)) === false
+    );
+  },
+};
+
+/**
  * Keep an undecidable comparison inert — but over the *evaluated* operands
  * rather than the raw ones.
  *
@@ -245,7 +322,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // the arm), `boolean` otherwise.
     missingBehavior: 'handle',
 
-    type: (ops) => relationalAbsenceType(ops),
+    type: (ops) => comparisonResultType(ops),
 
     // Broadcast element-wise over a list operand (Desmos `L[d=4]` filtering).
     // Restricted to the list-vs-scalar case: `skipBroadcastForVectorOps` skips
@@ -356,8 +433,16 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // direction-intact operands for chain decomposition). `lazy` also skips
       // evaluating the arguments before this handler runs, so evaluate them
       // here — otherwise a compound operand like `R^2` (with `R = [1,2,3]`)
-      // never folds to the list `[1,4,9]`.
-      const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
+      // never folds to the list `[1,4,9]`. A chain (`a = b = c`) stops at
+      // the first adjacent pair that is `False` (`evaluateChainOperands`).
+      const chain = evaluateChainOperands(
+        ce,
+        rawOps,
+        numericApproximation,
+        CHAIN_PAIR_IS_FALSE.Equal(ce)
+      );
+      if (!Array.isArray(chain)) return chain;
+      const ops = chain;
       // Element-wise broadcast when an operand evaluated to a collection, so a
       // named list behaves like a literal one: `x^2+y^2 = R^2` broadcasts to a
       // list of `Equal`s, matching the inequality operators (which already
@@ -553,7 +638,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // stays off.
     missingBehavior: 'handle',
 
-    type: relationalAbsenceType,
+    type: comparisonResultType,
 
     // Broadcast element-wise over a list operand (list-vs-scalar only; see
     // `Equal` above and `skipBroadcastForVectorOps`).
@@ -595,7 +680,16 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     evaluate: (rawOps, { engine: ce, numericApproximation }) => {
       // `lazy` skips argument evaluation before this handler runs (see the
       // `Less` handler): evaluate the operands here so compound operands fold.
-      const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
+      // A chain stops at the first adjacent pair that is `False`
+      // (`evaluateChainOperands`).
+      const chain = evaluateChainOperands(
+        ce,
+        rawOps,
+        numericApproximation,
+        CHAIN_PAIR_IS_FALSE.NotEqual(ce)
+      );
+      if (!Array.isArray(chain)) return chain;
+      const ops = chain;
       if (ops.length < 2) return ce.False;
       // Broadcast over a list operand that only appeared after evaluation (e.g.
       // `R^2` with `R = [1,2,3]`), matching `Equal` and the literal-list form;
@@ -676,7 +770,16 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // direction-intact operands for chain decomposition). `lazy` also skips
       // evaluating the arguments before this handler runs, so evaluate them
       // here — otherwise a compound operand like `Im(𝑖)` never folds to `1`.
-      const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
+      // A chain (`a < b < c`) stops at the first adjacent pair that is `False`
+      // (`evaluateChainOperands`).
+      const chain = evaluateChainOperands(
+        ce,
+        rawOps,
+        numericApproximation,
+        CHAIN_PAIR_IS_FALSE.Less(ce)
+      );
+      if (!Array.isArray(chain)) return chain;
+      const ops = chain;
       // Element-wise broadcast when an operand evaluated to a collection (e.g.
       // `|[1...5]-2| > 0`, canonical `Less(0, Abs(…))`). See `broadcastComparison`.
       const bc = broadcastComparison(ce, 'Less', ops, numericApproximation);
@@ -773,7 +876,15 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     evaluate: (rawOps, { engine: ce, numericApproximation }) => {
       // `lazy` skips argument evaluation (see `Less` above): evaluate here.
-      const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
+      // A chain stops at the first `False` pair (`evaluateChainOperands`).
+      const chain = evaluateChainOperands(
+        ce,
+        rawOps,
+        numericApproximation,
+        CHAIN_PAIR_IS_FALSE.LessEqual(ce)
+      );
+      if (!Array.isArray(chain)) return chain;
+      const ops = chain;
       // Element-wise broadcast when an operand evaluated to a collection.
       const bc = broadcastComparison(
         ce,
@@ -1015,8 +1126,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 };
 
 /**
- * Result-type handler for the absence-aware relational operators (`NotEqual`,
- * `Less`, `LessEqual`; `Equal` inlines the same rule). Mirrors §3.D: a
+ * Result-type handler for the absence-aware relational operators
+ * (`IdenticallyEqual`, `Less`, `LessEqual`; `Equal` and `NotEqual` apply it
+ * first, through `comparisonResultType`). Mirrors §3.D: a
  * definitely-absent operand (`missing`) makes the result `missing`; a
  * possibly-absent operand (an operand type carrying a `missing` arm) makes it
  * `boolean | missing`; otherwise `boolean` (unchanged). A `NaN` operand is not
@@ -1041,6 +1153,56 @@ function relationalAbsenceType(ops: ReadonlyArray<Expression>) {
   if (definite) return 'missing';
   if (possible) return parseType('boolean | missing');
   return 'boolean';
+}
+
+/**
+ * Result-type handler for `Equal`/`NotEqual`.
+ *
+ * These two operators broadcast element-wise ONLY in the list-vs-scalar case:
+ * `Equal([1,2,3], 2)` is the mask `[False, True, False]`, while two collection
+ * operands are compared as a whole and yield a single boolean. (That rule is
+ * applied at evaluation by `broadcastableComparisonOperands` below and by its
+ * pre-evaluation twin `skipBroadcastForVectorOps` in
+ * `boxed-expression/boxed-function.ts`.)
+ *
+ * Which of the two outcomes applies is not always decidable statically. When
+ * one operand is DEFINITELY a collection and another is only POSSIBLY one —
+ * a top-typed application such as `At(U, 1)` where `U` is declared bare
+ * `indexed_collection`, or an operand already typed `broadcastable<…>` — the
+ * answer is only fixed once that operand evaluates: a scalar makes the result
+ * an element-wise `list<boolean>` mask, a collection makes it a scalar
+ * `boolean`. `broadcastable<boolean>` is exactly the type that admits both
+ * (it is the union `boolean | indexed_collection<boolean>`), and it is the
+ * spelling the engine already gives every other possibly-broadcast result.
+ *
+ * Answering the scalar `boolean` there was a type/value disagreement rather
+ * than a conservative approximation: a possibly-collection operand also makes
+ * the pre-evaluation broadcast gate skip, so nothing lifted the declared type,
+ * yet the evaluate handler went on to broadcast over the definite collection
+ * and produced a list. `\sum_i Which(C = U_i, i, 0)` with both symbols
+ * declared `indexed_collection` typed `number` while evaluating to `[1,2,1]`.
+ *
+ * Two-or-more DEFINITE collections stay the scalar `boolean`: that is the
+ * whole-collection compare, decided statically. With no possibly-collection
+ * operand at all the plain `boolean` also stands, and the generic broadcast
+ * typing in `boxed-function.ts` lifts it to `list<boolean>` when a definite
+ * collection is present.
+ */
+function comparisonResultType(ops: ReadonlyArray<Expression>): Type {
+  const absence = relationalAbsenceType(ops);
+  // An absent operand decides the result before broadcasting is even reached
+  // (`missing`/`boolean | missing` per §3.D), so leave those answers alone.
+  if (absence !== 'boolean') return absence;
+  if (!ops.some((op) => isPossiblyCollectionTyped(op))) return 'boolean';
+  // The DEFINITE half of the operand count `skipBroadcastForVectorOps` and
+  // `broadcastableComparisonOperands` share — an enumerable collection value,
+  // or a valueless operand whose declared type is definitely a collection —
+  // spelled with the same helpers so the three sites cannot drift apart.
+  const definiteCollections = ops.filter(
+    (op) => op.isCollection || isValuelessCollectionTyped(op)
+  ).length;
+  if (definiteCollections >= 2) return 'boolean';
+  return { kind: 'broadcastable', elements: 'boolean' };
 }
 
 /**

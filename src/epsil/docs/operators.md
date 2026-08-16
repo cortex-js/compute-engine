@@ -592,7 +592,10 @@ a < b <= c
 
 means `a < b && b <= c`. A mixed chain is rewritten into that pairwise
 conjunction before it is evaluated, so both kinds of chain have the usual
-mathematical chained-comparison semantics.
+mathematical chained-comparison semantics. Both kinds also short-circuit like
+`&&`: the operands are evaluated left to right and evaluation stops at the
+first adjacent pair that is false, so in `a < b < c` the operand `c` is not
+evaluated when `a < b` is false.
 
 ## Logic operators
 

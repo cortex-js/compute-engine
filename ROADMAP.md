@@ -96,6 +96,67 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### `And`/`Or` (`&&`/`||`) did not short-circuit and reordered their operands (FIXED 2026-08-15)
+
+Reported by the user against Epsil and confirmed at the engine level:
+`And(False, F())` still evaluated `F()`, and because `And`/`Or` were declared
+`commutative`, canonicalization SORTED the operands — `Or(F(), G())` boxed as
+`Or(G(), F())` and ran `G` first — so a guard such as `k <= n && xs[k] > 0`
+read `xs[k]` out of range and `false && (1 + "a" == 2)` still reported the
+dead operand's error. `docs/RANDOMNESS-MODEL.md` (draw order) and ruling B8 in
+`docs/TYPE_SYSTEM_ROADMAP.md` already promised short-circuit, left-to-right
+forms, and the JavaScript compilation target already emitted `&&`/`||`, so
+compiled and interpreted code disagreed on side effects and errors.
+
+Fix (`src/compute-engine/library/logic.ts`, `canonicalShortCircuit` /
+`evaluateShortCircuit`): `And`/`Or` are `lazy` with a `canonical` handler that
+canonicalizes and flattens the operands IN WRITTEN ORDER and runs
+`validateArguments` itself (a lazy operator's canonical handler bypasses the
+framework validation, and a lazy operator without one receives unbound
+operands), and an `evaluate` handler that evaluates operands left to right and
+stops at the first `False`/`True`; a collection-valued operand falls back to
+the element-wise broadcast. The `associative`/`commutative`/`idempotent` flags
+are dropped (they sort, and are incompatible with a `canonical` handler); the
+symbolic reducers `evaluateAnd`/`evaluateOr` (`symbolic/logic-utils.ts`) now
+flatten nested same-operator operands themselves, and `simplify` keeps
+recursing into `And`/`Or` operands although they are lazy (the lazy branch of
+`simplifyFunctionOperands` is an Add/Multiply special case). Pins:
+`test/compute-engine/evaluation-order.test.ts` (order witnesses, `&&`/`||`
+section), `logic.test.ts` (CNF/DNF unchanged), `relational-operators.test.ts`
+and `latex-syntax/logic.test.ts` (chains now serialize in written order —
+`5 < b ≤ 7` → `And(5 < b, b ≤ 7)`).
+
+Review round (same day) added the async twin (`evaluateAsync`), full option
+threading, an error-valued operand as a decider, `invokes: false`, and made
+the element-wise case coherent: whether an application is element-wise is
+decided by the operand TYPES before evaluation (`isElementwiseOperand`), so
+`And(False, L())` with `L : () -> list<boolean>` returns a list as its type
+says, whichever way the collection is spelled. **Ruled 2026-08-15: an
+element-wise `And`/`Or` evaluates every operand once — no per-cell
+short-circuit** (option (a); the alternative, per-cell laziness, would need
+`And`/`Or` excluded from the driver's generic broadcast and its zip /
+length-mismatch / lazy-`Map` handling re-implemented in the handler, for a
+benefit visible only with side-effecting operands inside a vectorized
+conjunction). Do not re-litigate.
+
+Extended the same day, for consistency (user-ruled): `Nand`, `Nor` and
+`Implies` are short-circuit forms too (same handlers, parametrized by a
+`Decider`; `Nand`/`Nor` are NOT flattened — they are not associative), and
+the relational CHAINS `Less`/`LessEqual`/`Equal`/`NotEqual` stop at the first
+adjacent pair that is `False` (`evaluateChainOperands` in
+`library/relational-operator.ts`, which re-dispatches the operator's own binary
+evaluation on the two values and never evaluates an operand twice). This
+also supersedes the "interpreter EAGERLY draws even a short-circuited chain
+operand" probe recorded under the compile-CSE round below: `Less(5, 1,
+Random())` no longer draws, and the compiled chain lowering
+(`compilation/base-compiler.ts`) now binds an index-≥2 operand behind the
+preceding pairs so compiled and interpreted draw counts agree (a shader
+target declines that shape, D6). The `simplify` recursion exception is
+derived from the signature (`holdsOnlyBooleanOperands`: every parameter
+`boolean`), not from a name list. `Xor`/`Equivalent` are unchanged (every
+operand affects the result). Pins: `logic.test.ts` (Nand/Nor/Implies),
+`relational-operators.test.ts` § "Chains SHORT-CIRCUIT".
+
 ### `defineFunctionClause` may write through to a builtin instead of shadowing it
 
 Flagged during the nested-`DefineFunction` block-local fix (2026-08-15):
@@ -1059,7 +1120,78 @@ replaces is not a working comparison — measured before the fix, that expressio
 compiled to a CONSTANT `false` (`{re, im} < 2` is never true), wrong at `t = 2`
 where the interpreter answers `True`. Ruled 2026-08-15: land it.
 
-### Enabling `complexPromotion` makes scalar arithmetic over a collection-valued call STOP COMPILING (OPEN, correctness — regression from the flag, reported by a consumer's pricing pass)
+### Four collection operators have no lowercase `\operatorname{}` LaTeX entry, so they parse as undeclared functions (OPEN, parse — found while investigating Tycho item 193)
+
+`\operatorname{unique}(C)`, `\operatorname{sort}(C)`, `\operatorname{total}(C)`
+and `\operatorname{reverse}(C)` do NOT resolve to `Unique`/`Sort`/`Total`/
+`Reverse`. They parse as an `InvisibleOperator` application of an undeclared
+head, which then AUTO-DECLARES — so there is no error, and the result carries a
+plausible-looking type (`list<unknown>`), which is exactly the shape that
+survives review.
+
+The gap is an inconsistency rather than a policy, which is what makes it a
+defect: eight sibling names in the same family DO resolve from their lowercase
+spelling. Measured with `form: 'raw'` on a bare engine:
+
+    RESOLVES     length, count, min, max, mean, median, join, shuffle
+    DOES NOT     unique, sort, total, reverse
+
+All four missing ones have CE operators; only the LaTeX dictionary entry is
+absent. `\operatorname{Unique}(C)` (capitalised) resolves correctly, so it is
+the lowercase spelling specifically.
+
+Why it matters beyond spelling: a consumer importing content that uses the
+lowercase forms gets a silently undeclared function rather than the operator,
+with no diagnostic at any point. It surfaced here as a red herring during Tycho
+item 193 — a type read off `\operatorname{unique}(C)` was reported as
+`collection`, which looked like a `Unique` type-handler widening bug and was in
+fact the type of an unresolved application. It cost a round trip to attribute.
+
+Fix: add the four lowercase entries alongside their siblings, and consider a
+test that asserts every collection operator with a lowercase sibling entry has
+one, so the set cannot drift again.
+
+**FIELD EVIDENCE (consumer, measured on the EMITTED document rather than read
+from importer source): fix `reverse` FIRST, despite it having zero usage.**
+Corpus incidence across 687 states is `total` 8 states / 127 occurrences,
+`sort` 3 / 6, `unique` 2 / 3, `reverse` 0 / 0 — but their importer already
+rewrites three of the four before CE ever sees them (`total` → `\sum`,
+`unique`/`sort` → `Unique`/`Sort`, all verified by zero survivals into the
+emitted document). **`reverse` is the one they do NOT rewrite and nothing in
+their import path handles**, so it is the only one of the four where neither
+side has a net: a future document using it gets a silently auto-declared head
+with a plausible `list<unknown>` type and no diagnostic anywhere. Usage counts
+therefore invert the priority here — the three with real incidence are already
+covered downstream, and the one with none is the live hazard.
+
+### The element type of a bare `collection`/`indexed_collection` is `any` in one place and `unknown` in another (OPEN, types — small, found while investigating Tycho item 193)
+
+`collectionElementType()` (`src/common/type/utils.ts`) answers **`any`** for the
+bare `collection` and `indexed_collection` types, while the operators that
+actually extract an element answer **`unknown`**:
+
+    collectionElementType(indexed_collection) = "any"      At(C, 1).type   = unknown
+    collectionElementType(collection)         = "any"      First(D).type   = unknown
+
+Those are not synonyms here. Under the ruling recorded for placeholder types
+(2026-08-15), **`any` is a CONTRACT** — the author has said "anything may go
+here" — while **`unknown` is a PLACEHOLDER** that refines per position as
+evidence arrives. So the two spellings disagree about whether an element of a
+bare collection is a settled `any` or an open `unknown`, and a caller's
+behaviour can turn on which it consulted.
+
+Which one is correct is the open question, and it should be decided rather
+than papered over: `any` matches the declared-element reading (a bare
+`indexed_collection` promises nothing about its members), while `unknown`
+matches what a reader of `At(C, 1)` can actually conclude. Fix by making the
+extraction operators and the helper agree, in whichever direction the ruling
+goes, and pin both spellings in the same test so they cannot drift again.
+
+Found while chasing Tycho item 193, but NOT its cause — 193 is understood
+(see the `Which`/`Sum` typing under bare operands) and this is upstream
+housekeeping rather than a contributor to it.
+
+### Enabling `complexPromotion` makes scalar arithmetic over a collection-valued call STOP COMPILING (FIXED 2026-08-15 — reported by a consumer's pricing pass)
 
 Turning the opt-in on causes `Multiply`/`Add`/`Divide` to decline with
 "cannot compile scalar arithmetic over a list-valued operand" for expressions
@@ -1089,21 +1221,149 @@ ends of the domain:
     t = 3.0   interpreter [2.8284271247461902, 2]   compiled OFF [2.8284271247461903, 2]
     t = 0.3   interpreter [1.673…i, 2.607…i]        compiled OFF [null, null]
 
-Right in the real domain, and correctly projected out by `realOnly` outside it.
-Enabling promotion replaces a correct compilation with a decline and an
-interpreter fallback, for an expression whose promotion is not even needed —
-whole-collection scalar arithmetic never reads an element as complex.
+Right in the real domain, and correctly projected out by `realOnly` outside it
+(the `null`s above are `JSON.stringify` rendering the projected NaNs).
+Enabling promotion replaced a correct compilation with a decline and an
+interpreter fallback.
 
-Likely mechanism (HYPOTHESIS, not measured): promotion widens the operand's
-type, and an existing scalar-arithmetic guard keyed on that type then answers
-differently. That would make it the same lens as items 184/188/189 — a
-type-level question answered about a collection that describes no individual
-element — except induced by the flag rather than by the operand.
+One clause of the original filing was itself wrong and the fix disproves it:
+"an expression whose promotion is not even needed — whole-collection scalar
+arithmetic never reads an element as complex." It does read every element, one
+per broadcast position, and under the opt-in each one genuinely is complex.
+That is why the fix carries the promotion through rather than suppressing it,
+and why `2·w(0.3)` now answers `[1.673…i, 2.607…i]` — the interpreter's value —
+where the OFF path answers NaN.
 
-Fix shape when picked up: the scalar-arithmetic guard should not tighten
-because promotion is enabled, when the operand is consumed whole. Note this is
-a cost of ENABLING, so it does not affect the default path; it does change the
-enablement calculus for a consumer, and it was priced by neither side.
+**The filed hypothesis was REFUTED.** It read: promotion widens the operand's
+type and a broadcast-eligibility test keyed on that type answers differently.
+Measured on the operand `w(t)`, the two flag states are:
+
+| probe                  | promotion OFF             | promotion ON              |
+| ---------------------- | ------------------------- | ------------------------- |
+| type                   | `vector<finite_number^2>` | `vector<finite_number^2>` |
+| `isComplexValued`      | `false`                   | `false`                   |
+| `hasAnyComplexElement` | `false`                   | `true`                    |
+
+Nothing about the TYPE changes, and the whole-operand complex verdict does not
+change either. What flips is the ELEMENT-level one, and it flips for the
+correct reason: promotion applies to each `√(t−k)` inside the body, so
+`_fn_w` really does return `[{re, im}, {re, im}]` under the opt-in.
+
+The decline came from `tryCompileBroadcast` (`compilation/base-compiler.ts`),
+which built its `_SYS.bcast` scalar closure by re-invoking the head's own
+codegen on bare element PARAMETERS. A bare symbol carries no complex-ness, so
+the codegen would have emitted `_tv1 * _tv2` over a pair of `{re, im}`
+objects — and rather than emit that, the method declined outright on any
+complex operand, falling through to the D6 scalar-arithmetic guard whose
+diagnostic the consumer saw. The guard itself was never the problem.
+
+**Fixed** by declaring each element parameter's complex-ness in a
+`_localComplex` frame — the same mechanism a `Block` local uses — so the
+head's scalar codegen picks the complex lowering and the closure agrees with
+the array it is mapped over. Two supporting pieces were needed:
+
+- Only a collection whose elements UNIFORMLY agree may broadcast. One closure
+  is emitted for every position, so a mixed list (`[√(t−1), 1]` under the
+  opt-in, `[1+i, 2]` on the default path) still fails closed. Reaching this
+  conclusion took a measured wrong answer: an intermediate version asked
+  `isComplexValued` first, which reports for the whole collection — `[1+i, 2]`
+  types `vector<finite_complex^2>` and reads complex — and compiled
+  `2·[1+i, 2]` to `[{re: 2, im: 2}, {re: NaN, im: NaN}]` against the
+  interpreter's `[2+2i, 4]`. For an array operand only the element analysis
+  may answer.
+- The element analysis now looks THROUGH element-wise arithmetic
+  (`elementComplexness`): element k of `Multiply(2, w(t))` is complex exactly
+  when element k of `w(t)` is, because the `_SYS.bcast` closure applies the
+  head per position. Without it, an enclosing `(2·w(t))[1] + 1` would classify
+  the whole `Multiply` from `isComplexValued` — a scalar verdict describing no
+  element — and concatenate `1` onto an object. Only the heads that propagate
+  complex-ness from their operands qualify.
+- An element that is ITSELF a collection is judged at its LEAVES, not as a
+  sublist (`broadcastLeafComplexness`). `_SYS.bcast` descends through every
+  array it is handed and applies the closure at the leaves, so a nested
+  element's convention is the one all its leaves share. Caught by the dual
+  review after the first version answered a sublist with the whole-collection
+  verdict — the same category error one level down. Measured then:
+  `2·[[1+i, 2], [3+i, 4]]` called both sublists complex and ran to
+  `[[{re: 2, im: 2}, {re: NaN, im: NaN}], [{re: 6, im: 2}, {re: NaN, im: NaN}]]`
+  where the interpreter answers `[[2+2i, 4], [6+2i, 8]]`. Leaves that agree
+  still broadcast at depth; leaves that disagree decline.
+
+Verified against the interpreter at both ends of the domain (`t = 3` inside,
+`t = 0.3` outside): all three shapes now match to the last double digit, and
+under `realOnly` the out-of-domain value projects to NaN element-wise, exactly
+as with the opt-in off. Both controls still hold, and the indexed case still
+compiles. Pinned in `test/compute-engine/compile-complex-element-access.test.ts`.
+
+**One default-path shape changed, deliberately.** An all-complex LITERAL
+collection under scalar arithmetic (`2·[1+i, 3+i]`) declined before and now
+broadcasts, matching the interpreter — the old decline was collateral from the
+same "bare parameters cannot carry complex codegen" limitation, not a
+soundness rule. Everything else is byte-identical (2523 compile tests and 4306
+snapshots unchanged). A `list<complex>`-typed SYMBOL still declines: its
+elements are not visible, so no per-element verdict exists, and the compiled
+artifact cannot constrain what the caller binds.
+
+### A real-only lowering spelled as FUNCTION codegen took a complex operand and ran to NaN (FIXED 2026-08-15 — found while fixing the item above)
+
+`compileExpr` has a real-only gate: a head the target maps to a plain HELPER
+NAME (`Erf` → `_SYS.erf`) fails closed (D6) on a complex-valued operand,
+because handing a `{re, im}` object to a real helper returns garbage rather
+than an error. The gate sits on the string-mapped branch only. A head lowered
+by FUNCTION codegen bypassed it — even where that codegen is just as
+real-only, which it is whenever the reason for the function form is an
+operand shortcut or an arithmetic reconstruction rather than complex support.
+
+Measured on the DEFAULT path, no compile option set, with `x` bound to `0` so
+that `x + (1+i)` is complex but not a foldable literal. Every one of these
+reported `success: true` over source that ran to NaN:
+
+    Floor(x + (1+i))       compiled NaN    interpreter 1 + i   (inert)
+    Round / Truncate       compiled NaN    interpreter 1 + i   (inert)
+    Fract(x + (1+i))       compiled NaN    interpreter 0
+    Max / Min(x + (1+i))   compiled NaN    interpreter max(1 + i)  (inert)
+    Clamp(x + (1+i), 0, 2) compiled NaN    interpreter inert
+    Mod(x + (1+i), 2)      compiled NaN    interpreter 1
+    Remainder(…, 2)        compiled NaN    interpreter −1
+    GCD / LCM(…, 2)        compiled NaN    interpreter inert
+
+Three families, none with a complex extension to reach for: rounding (no
+rounding of a complex number exists), order selection (the complex numbers
+carry no total order — the same reason `Less`/`Greater` already fail closed on
+a complex operand), and integer division. That `Ceiling`, `Sign`, `Erf`,
+`Gamma` and `Zeta` were already failing closed through the string gate is what
+identifies this as an omission rather than a policy.
+
+Fixed by applying the same rule on the function-codegen branch, through
+`REAL_ONLY_CODEGEN_HEADS` in `compilation/base-compiler.ts`. Real operands are
+untouched (`Floor(x)` is still `Math.floor(_.x)`); the interval targets are
+exempt, as they already are for the string gate. Pinned in
+`test/compute-engine/compile.test.ts` under the CO-P1-3 describe.
+
+The first version of that gate covered only HALF the shapes, and a dual review
+caught both halves it missed — both re-measured before fixing:
+
+- **The head set named the wrong spellings.** `Ceil` and `Ceiling` are distinct
+  heads; `Ceil` is the one the library canonicalizes to and the JavaScript
+  target lowers with function codegen, so gating `Ceiling` (which already
+  declined through the string gate) left `Ceil(x + (1+i))` emitting
+  `Math.ceil({re, im})`. `ElementMax`/`ElementMin` are likewise separate heads
+  from `Max`/`Min` and lower straight to `Math.max`/`Math.min`. All are now in
+  the set.
+- **The broadcast path returns before the gate.** `tryCompileBroadcast` runs
+  ahead of the scalar branch that carries the gate, and it builds its closure
+  from the head's own scalar codegen — so once the same round widened it to
+  carry complex elements, `Floor([1+i, 2+i])` emitted
+  `_SYS.bcast((_tv1) => Math.floor(_tv1), …)` and ran to `[NaN, NaN]`. The rule
+  is now applied inside `tryCompileBroadcast` too, returning `null` so the form
+  lands on the same D6 guard the scalar shape does. `GCD`/`LCM`/`Max`/`Min` were
+  never exposed this way — they are `broadcastable: false` and only ever reach
+  the scalar branch.
+
+Found by a sweep over every numeric head with a complex operand, run to check
+that the collection fix above had not introduced a lane disagreement. It had
+not; this was pre-existing on the scalar path and reached collections only
+because element-wise lowering mirrors the scalar one.
 
 ### `complexPromotion` loses a complex value passed as an ARGUMENT to a scalar-bodied user function (OPEN, correctness — promotion-only)
 
@@ -2594,13 +2854,25 @@ New residues recorded by that round:
 
   Known residuals, recorded not fixed: n-ary `NotEqual(a, R, b)` draws twice
   because canonicalization expands to `And` with two DISTINCT `Random()`
-  nodes — interpreter parity, not a splice. An impure VECTOR-shaped chain
+  nodes — interpreter parity, not a splice. (Since 2026-08-15 `And` is a
+  short-circuit form — see `library/logic.ts`, `canonicalShortCircuit` — so
+  the second node is drawn only when the first pair is not already `False`;
+  the JavaScript target's `&&` behaves the same way, so parity holds.) An impure VECTOR-shaped chain
   endpoint alongside an impure middle now declines (was: compiled with the
   wrong draw order) — correct D6, tiny surface reduction. B1 short-circuit
-  nuance RESOLVED by probe (2026-08-02): the interpreter EAGERLY draws even
-  a short-circuited chain operand (`Less(5, 1, Random())` consumes a draw),
-  so the unconditional hoist at index ≥ 2 is exact interpreter parity — no
-  decline needed, do not re-litigate.
+  nuance: RESOLVED by probe (2026-08-02) as "the interpreter EAGERLY draws
+  even a short-circuited chain operand (`Less(5, 1, Random())` consumes a
+  draw), so the unconditional hoist at index ≥ 2 is exact interpreter
+  parity" — SUPERSEDED 2026-08-15: relational chains now short-circuit at the
+  first `False` pair (see the `And`/`Or` entry under "Remaining work"), so
+  `Less(5, 1, Random())` no longer draws in the interpreter. The chain
+  lowering was updated the same day: a bound operand at index ≥ 2 is now
+  bound BEHIND the pairs that precede it (JS `(5 < 1) && ((_tv1) => (1 <
+  _tv1) && (_tv1 < c))(draw())`, Python likewise), and a shader target — whose
+  only binding form is an unconditional hoisted statement — DECLINES an
+  impure operand at index ≥ 2 that must be bound (D6). Pinned in
+  `random-compile.test.ts` ("short-circuits past a bound draw", "index ≥ 2 …
+  DECLINES").
 - **`Norm(matrix, "Infinity")` / `Norm(matrix, 1)` on Python: PROBED, faithful**
   (2026-07-31). The interpreter's rank-2 branch computes max row sum / max
   column sum — exactly numpy's matrix `ord=inf` / `ord=1`. The probe also

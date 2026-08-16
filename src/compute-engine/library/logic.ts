@@ -23,7 +23,11 @@ import { limitsIndexSites } from '../boxed-expression/binding-sites.js';
 import { validateArguments } from '../boxed-expression/validate.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
-import { isFiniteIndexedCollection, isTuple } from '../collection-utils.js';
+import {
+  isCollectionShaped,
+  isFiniteIndexedCollection,
+  isTuple,
+} from '../collection-utils.js';
 import {
   extractFiniteDomainWithReason,
   bodyContainsVariable,
@@ -119,15 +123,24 @@ function canonicalQuantifier(
  * strip-before-validate gate that `missingBehavior: 'handle'` enables.
  */
 function canonicalShortCircuit(
-  name: 'And' | 'Or'
+  name: ShortCircuitOperator,
+  /** Splice nested same-operator operands (`And(And(a, b), c)` →
+   * `And(a, b, c)`)? True only for the associative connectives `And`/`Or`;
+   * `Nand`/`Nor` are NOT associative (`Nand(Nand(a, b), c) ≠ Nand(a, b, c)`)
+   * and `Implies` is binary. */
+  flattenNested: boolean
 ): (
   ops: ReadonlyArray<Expression>,
   options: { engine: ComputeEngine; scope: Scope | undefined }
 ) => Expression {
   return (ops, { engine: ce }) => {
     // Canonicalize (value-safe: binds structure, does not substitute values)
-    // and flatten nested `And`/`Or`, preserving the written order.
-    let args: ReadonlyArray<Expression> = flatten(ops, name);
+    // and, for `And`/`Or`, flatten nested same-operator operands, preserving
+    // the written order.
+    let args: ReadonlyArray<Expression> = flatten(
+      ops,
+      flattenNested ? name : undefined
+    );
     const def = ce.lookupDefinition(name);
     if (def && isOperatorDef(def)) {
       const opDef = def.operator;
@@ -147,20 +160,6 @@ function canonicalShortCircuit(
     }
     return ce._fn(name, args);
   };
-}
-
-/**
- * Is `x` an operand that makes an `And`/`Or` application ELEMENT-WISE? Read
- * from the operand's TYPE, not its value, so the answer is known before any
- * operand is evaluated: a `list<boolean>`-typed call, a symbol bound to a
- * list, and a literal list all answer the same way, and so does a declared
- * but still valueless `list<boolean>` symbol. A tuple is atomic (a point, a
- * pair), never mapped over — the same exclusion the driver's broadcast makes.
- * An `unknown`/`any`-typed operand (an undeclared function call) is NOT
- * collection-shaped, so it does not defeat short-circuiting.
- */
-function isElementwiseOperand(x: Expression): boolean {
-  return x.type.matches('collection') && !x.type.matches('tuple');
 }
 
 /**
@@ -196,12 +195,9 @@ function isElementwiseOperand(x: Expression): boolean {
  * case the driver has already declined to broadcast and rebuilding would loop.
  */
 function evaluateShortCircuit(
-  name: 'And' | 'Or',
-  decider: 'True' | 'False',
-  reduce: (
-    args: ReadonlyArray<Expression>,
-    options: { engine: ComputeEngine }
-  ) => Expression | undefined
+  name: ShortCircuitOperator,
+  decide: Decider,
+  reduce: Reducer
 ): (
   ops: ReadonlyArray<Expression>,
   options: EvaluateHandlerOptions
@@ -209,11 +205,15 @@ function evaluateShortCircuit(
   return (ops, options) => {
     const ce = options.engine;
     const evalOptions = evaluateOptionsOf(options);
-    const elementwise = ops.some(isElementwiseOperand);
+    const elementwise = ops.some(isCollectionShaped);
     const values: Expression[] = [];
     for (let i = 0; i < ops.length; i++) {
       const v = ops[i].evaluate(evalOptions);
-      if (!elementwise && (sym(v) === decider || !v.isValid)) return v;
+      if (!elementwise) {
+        if (!v.isValid) return v;
+        const decided = decide(ce, v, i);
+        if (decided) return decided;
+      }
       values.push(v);
     }
     return finishShortCircuit(ce, name, ops, values, reduce, evalOptions);
@@ -222,12 +222,9 @@ function evaluateShortCircuit(
 
 /** The async twin of `evaluateShortCircuit` — see there. */
 function evaluateShortCircuitAsync(
-  name: 'And' | 'Or',
-  decider: 'True' | 'False',
-  reduce: (
-    args: ReadonlyArray<Expression>,
-    options: { engine: ComputeEngine }
-  ) => Expression | undefined
+  name: ShortCircuitOperator,
+  decide: Decider,
+  reduce: Reducer
 ): (
   ops: ReadonlyArray<Expression>,
   options: EvaluateHandlerOptions
@@ -235,16 +232,53 @@ function evaluateShortCircuitAsync(
   return async (ops, options) => {
     const ce = options.engine;
     const evalOptions = evaluateOptionsOf(options);
-    const elementwise = ops.some(isElementwiseOperand);
+    const elementwise = ops.some(isCollectionShaped);
     const values: Expression[] = [];
     for (let i = 0; i < ops.length; i++) {
       const v = await ops[i].evaluateAsync(evalOptions);
-      if (!elementwise && (sym(v) === decider || !v.isValid)) return v;
+      if (!elementwise) {
+        if (!v.isValid) return v;
+        const decided = decide(ce, v, i);
+        if (decided) return decided;
+      }
       values.push(v);
     }
     return finishShortCircuit(ce, name, ops, values, reduce, evalOptions);
   };
 }
+
+type ShortCircuitOperator = 'And' | 'Or' | 'Nand' | 'Nor' | 'Implies';
+
+/** Does the evaluated operand `v`, at position `i`, decide the result by
+ * itself? Returns the result if so, `undefined` otherwise. */
+type Decider = (
+  ce: ComputeEngine,
+  v: Expression,
+  i: number
+) => Expression | undefined;
+
+/** The order-independent symbolic reducer applied to the surviving values. */
+type Reducer = (
+  args: ReadonlyArray<Expression>,
+  options: { engine: ComputeEngine }
+) => Expression | undefined;
+
+/** `And` stops at the first `False` (result `False`). */
+const decideAnd: Decider = (ce, v) =>
+  sym(v) === 'False' ? ce.False : undefined;
+/** `Or` stops at the first `True` (result `True`). */
+const decideOr: Decider = (ce, v) => (sym(v) === 'True' ? ce.True : undefined);
+/** `Nand` = ¬`And`: stops at the first `False` (result `True`). */
+const decideNand: Decider = (ce, v) =>
+  sym(v) === 'False' ? ce.True : undefined;
+/** `Nor` = ¬`Or`: stops at the first `True` (result `False`). */
+const decideNor: Decider = (ce, v) =>
+  sym(v) === 'True' ? ce.False : undefined;
+/** `Implies(p, q)`: a `False` antecedent decides (`True`) without evaluating
+ * the consequent — `False ⇒ q` is `True` for every `q`. The consequent (the
+ * last operand) never decides early. */
+const decideImplies: Decider = (ce, v, i) =>
+  i === 0 && sym(v) === 'False' ? ce.True : undefined;
 
 /** The `EvaluateOptions` to hand to an operand: everything the caller passed
  * (`numericApproximation`, `materialization`, the cancellation `signal`) minus
@@ -266,13 +300,10 @@ function evaluateOptionsOf(
  */
 function finishShortCircuit(
   ce: ComputeEngine,
-  name: 'And' | 'Or',
+  name: ShortCircuitOperator,
   ops: ReadonlyArray<Expression>,
   values: ReadonlyArray<Expression>,
-  reduce: (
-    args: ReadonlyArray<Expression>,
-    options: { engine: ComputeEngine }
-  ) => Expression | undefined,
+  reduce: Reducer,
   evalOptions: Partial<EvaluateOptions>
 ): Expression | undefined {
   const isCollectionValue = (x: Expression) =>
@@ -328,9 +359,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     // invokes, so effects inference does not project a held operand's latent
     // effects through the conjunction.
     invokes: false,
-    canonical: canonicalShortCircuit('And'),
-    evaluate: evaluateShortCircuit('And', 'False', evaluateAnd),
-    evaluateAsync: evaluateShortCircuitAsync('And', 'False', evaluateAnd),
+    canonical: canonicalShortCircuit('And', true),
+    evaluate: evaluateShortCircuit('And', decideAnd, evaluateAnd),
+    evaluateAsync: evaluateShortCircuitAsync('And', decideAnd, evaluateAnd),
   },
   Or: {
     description:
@@ -347,9 +378,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     // `Missing` operand propagates.
     missingBehavior: 'handle',
     invokes: false,
-    canonical: canonicalShortCircuit('Or'),
-    evaluate: evaluateShortCircuit('Or', 'True', evaluateOr),
-    evaluateAsync: evaluateShortCircuitAsync('Or', 'True', evaluateOr),
+    canonical: canonicalShortCircuit('Or', true),
+    evaluate: evaluateShortCircuit('Or', decideOr, evaluateOr),
+    evaluateAsync: evaluateShortCircuitAsync('Or', decideOr, evaluateOr),
   },
   Not: {
     description: 'Logical negation (NOT).',
@@ -389,12 +420,27 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: evaluateEquivalent,
   },
   Implies: {
-    description: 'Logical implication (if–then).',
+    description:
+      'Logical implication: false only when the antecedent is true and the ' +
+      'consequent is false. Short-circuits: a `False` antecedent decides ' +
+      '(`True`) without evaluating the consequent.',
     wikidata: 'Q7881229',
     broadcastable: true,
+    // Kleene over absence, as for `And`/`Or`: a possibly-absent operand
+    // (`boolean | missing`) validates through the strip-before-validate gate,
+    // and a surviving `Missing` operand propagates (see the reducers).
+    missingBehavior: 'handle',
+    lazy: true,
+    invokes: false,
     complexity: 10200,
     signature: '(boolean, boolean) -> boolean',
-    evaluate: evaluateImplies,
+    canonical: canonicalShortCircuit('Implies', false),
+    evaluate: evaluateShortCircuit('Implies', decideImplies, evaluateImplies),
+    evaluateAsync: evaluateShortCircuitAsync(
+      'Implies',
+      decideImplies,
+      evaluateImplies
+    ),
   },
   Xor: {
     description: 'Exclusive or: true when an odd number of operands are true',
@@ -407,22 +453,42 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: evaluateXor,
   },
   Nand: {
-    description: 'Not-and: negation of conjunction',
+    description:
+      'Logical NAND: the negation of AND (n-ary). Short-circuits: operands ' +
+      'are evaluated left to right and evaluation stops at the first `False`.',
     wikidata: 'Q189550',
     broadcastable: true,
-    commutative: true,
+    // Not `commutative` — the flag sorts the operands, and a short-circuit
+    // form is defined over the WRITTEN order (see `canonicalShortCircuit`).
+    // Kleene over absence, as for `And`/`Or`: a possibly-absent operand
+    // (`boolean | missing`) validates through the strip-before-validate gate,
+    // and a surviving `Missing` operand propagates (see the reducers).
+    missingBehavior: 'handle',
+    lazy: true,
+    invokes: false,
     complexity: 10200,
     signature: '(boolean+) -> boolean',
-    evaluate: evaluateNand,
+    canonical: canonicalShortCircuit('Nand', false),
+    evaluate: evaluateShortCircuit('Nand', decideNand, evaluateNand),
+    evaluateAsync: evaluateShortCircuitAsync('Nand', decideNand, evaluateNand),
   },
   Nor: {
-    description: 'Not-or: negation of disjunction',
+    description:
+      'Logical NOR: the negation of OR (n-ary). Short-circuits: operands are ' +
+      'evaluated left to right and evaluation stops at the first `True`.',
     wikidata: 'Q189561',
     broadcastable: true,
-    commutative: true,
+    // Kleene over absence, as for `And`/`Or`: a possibly-absent operand
+    // (`boolean | missing`) validates through the strip-before-validate gate,
+    // and a surviving `Missing` operand propagates (see the reducers).
+    missingBehavior: 'handle',
+    lazy: true,
+    invokes: false,
     complexity: 10200,
     signature: '(boolean+) -> boolean',
-    evaluate: evaluateNor,
+    canonical: canonicalShortCircuit('Nor', false),
+    evaluate: evaluateShortCircuit('Nor', decideNor, evaluateNor),
+    evaluateAsync: evaluateShortCircuitAsync('Nor', decideNor, evaluateNor),
   },
   // Quantifiers return boolean values (they are propositions)
   // They support evaluation over finite domains (e.g., ForAll with Element condition)

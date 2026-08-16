@@ -721,3 +721,57 @@ describe('Same (Epsil `===`) — total structural identity', () => {
     expect(s(nan([0, 3]), 'PositiveInfinity')).toBe('False');
   });
 });
+
+describe('Chains SHORT-CIRCUIT: a chain is a conjunction of its adjacent pairs (ruled 2026-08-15)', () => {
+  // `a < b < c` stops at the first adjacent pair that is `False`, so `c` is
+  // never evaluated — the same rule as `And` (see `evaluateChainOperands` in
+  // `library/relational-operator.ts`). Each `N(k)` logs when it runs and
+  // returns `k`, so `calls` spells out which operands ran.
+  const { ComputeEngine } = require('../../src/compute-engine');
+  const sc = new ComputeEngine();
+  let calls: number[] = [];
+  sc.declare('chN', {
+    signature: '(number) -> number',
+    evaluate: ([x]: any[]) => {
+      calls.push(x.re);
+      return x;
+    },
+  });
+  const run = (json: any): any => {
+    calls = [];
+    return sc.expr(json).evaluate().json;
+  };
+  const N = (k: number) => ['chN', k];
+
+  it('Less / LessEqual stop at the first failing pair', () => {
+    expect(run(['Less', N(5), N(1), N(3)])).toBe('False');
+    expect(calls).toEqual([5, 1]);
+    expect(run(['Less', N(1), N(3), N(2)])).toBe('False');
+    expect(calls).toEqual([1, 3, 2]);
+    expect(run(['Less', N(1), N(2), N(3)])).toBe('True');
+    expect(calls).toEqual([1, 2, 3]);
+    expect(run(['LessEqual', N(5), N(1), N(3)])).toBe('False');
+    expect(calls).toEqual([5, 1]);
+  });
+
+  it('Equal stops at the first unequal pair', () => {
+    expect(run(['Equal', N(5), N(1), N(3)])).toBe('False');
+    expect(calls).toEqual([5, 1]);
+    expect(run(['Equal', N(1), N(1), N(1)])).toBe('True');
+    expect(calls).toEqual([1, 1, 1]);
+  });
+
+  it('a decided False wins over a later Missing or an undecided pair (Kleene)', () => {
+    expect(run(['Less', 5, 1, 'Missing'])).toBe('False');
+    expect(run(['Less', 5, 'Missing', 3])).toBe('Missing');
+    expect(run(['Less', 'x', 1, 0])).toBe('False');
+  });
+
+  it('a collection-shaped operand makes the chain element-wise (no short-circuit)', () => {
+    expect(run(['Less', 1, ['List', 2, 0], 3])).toEqual([
+      'List',
+      'True',
+      'False',
+    ]);
+  });
+});

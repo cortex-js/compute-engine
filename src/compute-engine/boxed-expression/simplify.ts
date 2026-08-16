@@ -16,7 +16,10 @@ import type {
   BoxedRuleSet,
   RuleStep,
   RuleSteps,
+  BoxedOperatorDefinition,
 } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import {
   isNumber,
   isSymbol,
@@ -767,13 +770,15 @@ function simplifyOperands(
   // Also simplify Power expressions with negative bases and fractional exponents
   // to ensure proper sign factoring (e.g., (-2x)^{3/5} -> -(2x)^{3/5}).
   //
-  // `And`/`Or` are lazy too, but only so that they SHORT-CIRCUIT at
-  // evaluation (`library/logic.ts`): their operands are ordinary boolean
-  // expressions with no held/control-flow meaning, and the logic rules
-  // (`A ∧ ¬A → False`, absorption, CNF/DNF cleanup) need every operand fully
-  // simplified first — so they take the ordinary recursive branch below, as
-  // they did before they became lazy.
-  if (def?.lazy && expr.operator !== 'And' && expr.operator !== 'Or') {
+  // The logical connectives (`And`, `Or`, `Nand`, `Nor`, `Implies`) are lazy
+  // too, but only so that they SHORT-CIRCUIT at evaluation
+  // (`library/logic.ts`): every parameter is `boolean`, so a held operand is
+  // an ordinary boolean expression — never a body, a callback or a binder —
+  // and the logic rules (`A ∧ ¬A → False`, absorption, CNF/DNF cleanup) need
+  // every operand fully simplified first. They take the ordinary recursive
+  // branch below, as they did before they became lazy. The property is read
+  // off the signature (`holdsOnlyBooleanOperands`), not off a list of names.
+  if (def?.lazy && !holdsOnlyBooleanOperands(def)) {
     const build = (o: Expression[]) => expr.engine.function(expr.operator, o);
     const simplifiedOps: Expression[] = [];
     const full = (x: Expression, i: number) =>
@@ -1072,4 +1077,23 @@ function simplifyNonCommutativeFunction(
 
   result.at(-1)!.value = last;
   return [...steps, ...result];
+}
+
+/**
+ * Does every parameter of this operator's signature accept only booleans?
+ * A lazy operator with that shape (the logical connectives) holds plain
+ * boolean expressions, never a body/callback/binder operand, so `simplify`
+ * may recurse into its operands as it does for a strict operator. See the
+ * `def.lazy` branch of `simplifyFunctionOperands`.
+ */
+function holdsOnlyBooleanOperands(def: BoxedOperatorDefinition): boolean {
+  const sig = def.signature.type;
+  if (typeof sig === 'string' || sig.kind !== 'signature') return false;
+  const params: Type[] = [
+    ...(sig.args?.map((x) => x.type) ?? []),
+    ...(sig.optArgs?.map((x) => x.type) ?? []),
+    ...(sig.variadicArg ? [sig.variadicArg.type] : []),
+  ];
+  if (params.length === 0) return false;
+  return params.every((t) => isSubtype(t, 'boolean'));
 }

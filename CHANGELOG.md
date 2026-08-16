@@ -178,6 +178,34 @@
 
 ### Issues Resolved
 
+- **Element-wise arithmetic over a collection of complex values now compiles.**
+  The JavaScript target broadcasts scalar arithmetic across a list operand
+  through its `_SYS.bcast` runtime helper, and that path used to decline the
+  moment any element was complex-valued, reporting `success: false` with
+  "cannot compile scalar arithmetic over a list-valued operand" and falling
+  back to interpretation. `2·[1+i, 3+i]` now compiles and produces the
+  interpreter's `[2+2i, 6+2i]`. This also removes a cost of enabling the
+  opt-in `complexPromotion` compile option: with `w(t) := [√(t−1), √(t−2)]`,
+  turning the option on made `2·w(t)`, `w(t)+1` and `w(t)/2` stop compiling,
+  because promotion makes every element of that body complex. All three
+  compile with the option on and match interpretation at both ends of the
+  domain. A collection whose elements DISAGREE about being complex
+  (`[1+i, 2]`, which is emitted as the heterogeneous `[{re, im}, 2]`) still
+  fails closed: one scalar closure is mapped over every position, so no single
+  real-or-complex convention fits it.
+
+- **A complex argument to a rounding, min/max or integer-division head no
+  longer compiles to NaN.** `Floor`, `Ceiling`, `Round`, `Truncate`, `Fract`,
+  `Max`, `Min`, `Clamp`, `Mod`, `Remainder`, `GCD` and `LCM` lower to real-only
+  target code — there is no rounding of a complex number, and the complex
+  numbers carry no total order — but unlike the special functions (`Erf`,
+  `Gamma`, `Zeta`), which already failed closed, these were spelled as function
+  codegen and slipped past that check. `Floor(x + (1+i))` compiled to
+  `Math.floor({re, im})` and returned NaN while reporting `success: true`;
+  `Mod(x + (1+i), 2)` returned NaN where the interpreter answers `1`. They now
+  fail closed and the interpreter answers. Real operands are unaffected —
+  `Floor(x)` still compiles to `Math.floor(_.x)`.
+
 - **`&&` and `||` (`And`/`Or`) now short-circuit.** The operands are evaluated
   left to right, in the order written, and evaluation stops at the first
   `false` (for `&&`) or the first `true` (for `||`); the remaining operands do
@@ -190,24 +218,37 @@
   operands of `And`/`Or` are no longer reordered at canonicalization
   (`["And", "q", "p"]` stays as written); nested `And`/`Or` are still
   flattened, and the symbolic simplifications (`A ∧ ¬A → False`, duplicate
-  removal, absorption, CNF/DNF) are unchanged.
+  removal, absorption, CNF/DNF) are unchanged. `Nand`, `Nor` and `Implies`
+  short-circuit the same way (`Nand` stops at the first `false`, `Nor` at the
+  first `true`, `Implies` skips its consequent when the antecedent is
+  `false`), and so do chained comparisons: `a < b < c`, `a = b = c` and their
+  `<=`/`!=` forms stop at the first adjacent pair that is false, so `c` is not
+  evaluated once `a < b` fails. `Xor` and `Equivalent` cannot short-circuit
+  (every operand affects the result) and are unchanged. When an operand is a
+  collection the operation is element-wise, every operand is evaluated once,
+  and the result is a list.
 
 - **A lazy collection's callback now runs exactly once per element per
-  consumption.** `Sum`, `Product`, `Reduce`, `Max`, `Min`, `GCD`/`LCM` and
-  `Length` used to run a probe enumeration before the real one — pulling a
-  first element to learn whether the collection declines to enumerate, or
-  asking whether it is empty before counting it — so `Sum(Map(f, xs))` ran
-  `f` N+1 times over N elements and `Max(Map(f, xs))` 2N+1 times. With
-  callbacks that write to a variable or a mutable object, the extra runs
-  were observable (Appendix B of `docs/TYPE_SYSTEM_ROADMAP.md`, ruling B8).
-  The verdict is now read off the walk each consumer already performs; the
-  computed values are unchanged.
+  consumption.** `Sum`, `Product`, `Reduce`, `Max`, `Min`, `GCD`/`LCM`,
+  `Length` and the statistics family (`Mean`, `Median`, `Variance`, …) used
+  to run one or more probe enumerations before the real one — pulling a
+  first element to learn whether the collection declines to enumerate,
+  asking whether it is empty before counting it, or scanning for an absent
+  datum and for symbolic data in separate passes — so `Sum(Map(f, xs))` ran
+  `f` N+1 times over N elements, `Max(Map(f, xs))` 2N+1 times and
+  `Mean(Map(f, xs))` 2N times. With callbacks that write to a variable or a
+  mutable object, the extra runs were observable (Appendix B of
+  `docs/TYPE_SYSTEM_ROADMAP.md`, ruling B8). Each consumer now reads every
+  verdict off the single walk it already performs; the computed values are
+  unchanged.
 
-- **`Max`/`Min` of a descending `Linspace` were inverted, and `Max`/`Min`/
-  `Mean` of a symbolic one returned `NaN`.** `Max(Linspace(5, 1, 3))` — the
-  elements `[5, 3, 1]` — returned `1` and `Min` returned `5`, because the
-  extremum was read off a fixed endpoint that is only right for an ascending
-  run; both endpoints are now compared. And a finite collection that
+- **`Max`/`Min` of a descending or single-sample `Linspace` were wrong, and
+  `Max`/`Min`/`Mean` of a symbolic one returned `NaN`.** `Max(Linspace(5, 1,
+  3))` — the elements `[5, 3, 1]` — returned `1` and `Min` returned `5`,
+  because the extremum was read off a fixed endpoint that is only right for
+  an ascending run; and `Max(Linspace(1, 5, 1))`, whose single sample is
+  `1`, returned `5`. The extremum is now taken over the samples that exist
+  (a symbolic count stays symbolic). And a finite collection that
   *declines* to enumerate (`Linspace(a, 1, 3)` with `a` unknown) was read as
   *empty* by the absent-datum gate, so `Max`, `Min`, `Mean` and the other
   aggregates answered `NaN`; they now stay symbolic (`max(Linspace(a, 1, 3))`),
@@ -262,6 +303,60 @@
   application: a bare function symbol (`xs |> Sum`), a string topic, a
   non-collection topic, and a parameter annotation claiming the whole collection
   (`xs |> (l: list<number>) => Length(l)`).
+
+- **A comparison that may or may not broadcast now says so in its type, and
+  `Which`/`Sum` carry that through.** `Equal` and `NotEqual` compare a
+  collection against a scalar element-wise (`[2, 3, 2] = 2` is
+  `[True, False, True]`) but compare two collections as a whole (a single
+  boolean). When one side is definitely a collection and the other is an
+  expression whose type is not yet known — `U_1` where `U` is declared bare
+  `indexed_collection`, so its elements could themselves be collections — which
+  of the two applies is only settled at evaluation. The declared type used to
+  claim the scalar `boolean` while the value broadcast to a list, and every
+  consumer inherited the disagreement. With `C` and `U` both declared
+  `indexed_collection` and assigned `C := [2, 3, 2]`, `U := [2, 3]`:
+
+  | expression                       | type was         | type now                        |
+  | -------------------------------- | ---------------- | ------------------------------- |
+  | `C = U_1`                        | `boolean`        | `broadcastable<boolean>`        |
+  | `{C = U_1: 1, 0}`                | `finite_integer` | `broadcastable<finite_integer>` |
+  | `\sum_{i=1}^{2} {C = U_i: i, 0}` | `number`         | `broadcastable<integer>`        |
+
+  All three evaluate to lists (`["True","False","True"]`, `[1,0,1]`, `[1,2,1]`),
+  which the new types admit — `broadcastable<T>` is the union
+  `T | indexed_collection<T>`. Declaring a concrete element type
+  (`U: list<number>`) still gives the sharper definite `list<…>` types, and the
+  two statically decidable outcomes are unchanged: two collections compare to a
+  scalar `boolean` (`C = U`), and a collection against a definitely-scalar
+  operand types `list<boolean>`. The ordering comparisons (`Less`, `Greater`,
+  `LessEqual`, `GreaterEqual`) broadcast in every collection case, so they have
+  no undecidable outcome and keep their definite `list<boolean>`.
+
+- **Scaling or shifting a collection by a non-integer scalar no longer claims
+  integer elements.** When a scalar broadcast over a collection — a `Range`, a
+  declared `list<integer>` symbol, a list literal — the declared element type
+  echoed the collection's own elements and ignored the scalar entirely, so
+  `\frac{1}{2}(1..4)` reported `list<integer>` while evaluating to
+  `[1/2, 1, 3/2, 2]`. The scalar's numeric tier is now combined into the
+  element type: `\frac{1}{2}(1..4)`, `(1..4)/2` and `(1..4)+\frac{1}{2}` report
+  `list<rational>`, `0.5(1..4)` and `0.5·L` (with `L: list<integer>`) report
+  `list<real>`, and `2(1..4)` still reports `list<integer>`. The most visible
+  consequence: a comprehension declares its binder from that element type, so
+  `x \operatorname{for} x = \frac{1}{2}(1..4)` used to fail with `Symbol "x":
+  the value "1/2" of type "finite_rational" is not compatible with the type
+  "integer"`; it now yields `[1/2, 1, 3/2, 2]`. `i·[i, 2i]` likewise reported
+  `vector<imaginary^2>` for a value of `[-1, -2]` and now reports
+  `vector<finite_complex^2>` — neither sums nor products are closed over the
+  imaginary numbers.
+
+- **A loop or comprehension binder no longer fails when the iterated
+  collection under-declares its elements.** A binder's index type is a GUESS
+  read off the collection's declared element type, but it was recorded as if
+  the user had declared it, so an element outside that type aborted the whole
+  iteration with an `incompatible-type` error instead of iterating. Such a
+  binder now widens its guess to cover the value, matching how every other
+  inferred type behaves on assignment. A binding site that genuinely declares
+  a type is unaffected and still holds its values to it.
 
 ## 0.111.0 _2026-08-15_
 

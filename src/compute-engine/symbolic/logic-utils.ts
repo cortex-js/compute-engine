@@ -290,6 +290,9 @@ export function evaluateImplies(
   )
     return ce.True;
   if (lhs === 'True' && rhs === 'False') return ce.False;
+  // Kleene over absence: `False ⇒ q` and `p ⇒ True` are decided above; every
+  // other implication with an absent side is itself absent.
+  if (lhs === 'Missing' || rhs === 'Missing') return ce.Missing;
   return undefined;
 }
 
@@ -353,6 +356,9 @@ export function evaluateNand(
   for (const arg of args) {
     if (sym(arg) === 'False') return ce.True;
   }
+  // Kleene over absence: no `False` decided it, so an absent operand makes
+  // the conjunction — and its negation — absent.
+  if (args.some((arg) => sym(arg) === 'Missing')) return ce.Missing;
 
   // Check if all are True
   let allTrue = true;
@@ -380,6 +386,9 @@ export function evaluateNor(
   for (const arg of args) {
     if (sym(arg) === 'True') return ce.False;
   }
+  // Kleene over absence: no `True` decided it, so an absent operand makes
+  // the disjunction — and its negation — absent.
+  if (args.some((arg) => sym(arg) === 'Missing')) return ce.Missing;
 
   // Check if all are False
   let allFalse = true;

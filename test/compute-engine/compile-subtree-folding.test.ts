@@ -241,11 +241,16 @@ describe('COMPILE constant folding - constant collections', () => {
     expect(compile(negRoots).code).toContain('Math.sqrt');
     expect(compile(negRoots).code).not.toContain('im');
 
-    // And a complex collection whose structural lowering fails closed keeps
-    // failing closed, rather than the fold quietly answering for it.
-    const cplx = compile(ce.box(['Multiply', 2, ['List', ['Complex', 1, 1]]]), {
-      fallback: true,
-    });
+    // And a collection whose structural lowering fails closed keeps failing
+    // closed, rather than the fold quietly answering for it. The witness is a
+    // MIXED list: its elements disagree about being complex, so the single
+    // scalar closure a broadcast wraps fits neither, and it is refused. (An
+    // all-complex list does broadcast — every element parameter is declared
+    // complex — so it is not a fail-closed witness.)
+    const cplx = compile(
+      ce.box(['Multiply', 2, ['List', ['Complex', 1, 1], 2]]),
+      { fallback: true }
+    );
     expect(cplx.success).toBe(false);
   });
 });
