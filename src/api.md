@@ -8616,6 +8616,7 @@ type ConformanceRecord = {
   targetKey: string;
   where: TypeParameter[];
   impl: Record<string, Expression | JSImplementation>;
+  _authored: Record<string, Expression | JSImplementation>;
   _implOrigin: {
      batch: number;
      block: Expression;

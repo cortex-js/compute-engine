@@ -3739,7 +3739,10 @@ function compileGPUSumProduct(
   const boundCode = (bound: Expression, which: 'lower' | 'upper'): string => {
     const declared = gpuDeclaredTypeOf(bound);
     const value = declared?.value;
-    if (declared === undefined || (value !== undefined && value.width === 1 && value.element === 'f')) {
+    if (
+      declared === undefined ||
+      (value !== undefined && value.width === 1 && value.element === 'f')
+    ) {
       const code = BaseCompiler.compile(bound, target);
       return isWGSL ? `i32(floor(${code}))` : `int(floor(${code}))`;
     }
@@ -7758,7 +7761,9 @@ type GPUDeclaredType = {
  * rediscover.
  */
 function gpuDeclaredIsIntegerScalar(v: GPUValueType | undefined): boolean {
-  return v !== undefined && v.width === 1 && (v.element === 'i' || v.element === 'u');
+  return (
+    v !== undefined && v.width === 1 && (v.element === 'i' || v.element === 'u')
+  );
 }
 
 /**
