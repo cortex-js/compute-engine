@@ -1449,13 +1449,26 @@ export class Parser {
 
   /**
    * Locate the `is` of a conformance declaration: a SYMBOL `is` at bracket
-   * depth 0, on the same line as the `type` head. Returns its token INDEX and
-   * whether a top-level `=` precedes it — the combined declare-and-conform
-   * form (`type Point = tuple<…> is Comparable`).
+   * depth 0, reached without crossing a statement boundary. Returns its token
+   * INDEX and whether a top-level `=` precedes it — the combined
+   * declare-and-conform form (`type Point = tuple<…> is Comparable`).
    *
-   * Scanned over TOKENS rather than the raw source so the angle characters of
-   * a target application (`type list<integer> is …`) — which the Epsil lexer
-   * maximal-munches into `OPERATOR` runs — do not need bracket tracking.
+   * A line break ENDS the scan only when it happens at depth 0, where it is a
+   * statement boundary: a `type` head and its `is` must start on the same
+   * line, so `is` written on the line AFTER a complete type body is not this
+   * statement's. Inside a bracketed group a line break is mere layout, so a
+   * multi-line body keeps its conformance clause:
+   *
+   * ```
+   * type Point = object{
+   *   x: number
+   * } is Comparable { … }
+   * ```
+   *
+   * Four kinds of group hold the depth open: parentheses, square brackets,
+   * braces (all three arrive as their own token types) and ANGLE brackets,
+   * which have no token type of their own and are counted by
+   * {@link angleDepthAfter}.
    *
    * `from` is the token index just past the `type` word.
    */
@@ -1464,11 +1477,14 @@ export class Parser {
     hasAssign: boolean;
   } | null {
     let depth = 0;
+    let angleDepth = 0;
     let hasAssign = false;
     for (let i = from; i < this.tokens.length; i++) {
       const t = this.tokens[i];
       if (t.type === 'EOF' || t.type === 'SEMICOLON') return null;
-      if (t.precededByLinebreak) return null;
+      // Tested BEFORE this token's own depth contribution, so the `}` or `>`
+      // that closes a multi-line group may itself open the line.
+      if (t.precededByLinebreak && depth === 0 && angleDepth === 0) return null;
       switch (t.type) {
         case 'OPEN_PAREN':
         case 'OPEN_BRACKET':
@@ -1482,14 +1498,60 @@ export class Parser {
           depth -= 1;
           break;
         case 'OPERATOR':
-          if (depth === 0 && t.text === '=') hasAssign = true;
+          angleDepth = this.angleDepthAfter(i, angleDepth);
+          if (depth === 0 && angleDepth === 0 && t.text === '=')
+            hasAssign = true;
           break;
         case 'SYMBOL':
-          if (depth === 0 && t.text === 'is') return { at: i, hasAssign };
+          if (depth === 0 && angleDepth === 0 && t.text === 'is')
+            return { at: i, hasAssign };
           break;
       }
     }
     return null;
+  }
+
+  /**
+   * The angle-bracket depth after reading the OPERATOR token at `index`, given
+   * the depth `angleDepth` in force before it. Shared by the two head scans
+   * that have to run past a multi-line type body —
+   * {@link scanConformanceIs} and {@link isMathFunctionDef} — because a
+   * generic type spelled across lines (`tuple<\n  a: integer\n>`) is only held
+   * open by its angles.
+   *
+   * Angle brackets are not tokens. The Epsil lexer maximal-munches a run of
+   * `+-*\/^=<>!&|~:?%.` characters into ONE `OPERATOR` token, which has two
+   * consequences. A genuine bracket run arrives fused (`list<list<integer>>`
+   * ends in a single `>>` token, worth two closes), and an angle character
+   * also arrives fused into tokens that are not brackets at all: `<=`, `>=`,
+   * `=>`, `<-`, `<>`. So only a token that is NOTHING BUT angle characters is
+   * read as a bracket run — after the function-type arrow `->` is removed, so
+   * that its `>` neither closes a group nor disqualifies the rest of the
+   * token (`->>` is an arrow followed by one close).
+   *
+   * A `<` opens a group only when its token is ATTACHED to the token before
+   * it, with no whitespace between them. That is how a generic application is
+   * written (`tuple<`, `list<`), whereas a comparison is spaced (`n < 3`).
+   * The test matters because an opened group is never force-closed: an
+   * unmatched `<` would hold the depth above zero for the rest of the file,
+   * disabling the depth-0 line-break test that both callers use as their
+   * statement boundary, and letting the scan pull an `is` — or an `=` — off
+   * some unrelated later line. A `>` needs no attachment test, since it only
+   * ever closes a group that is already open; an unmatched one is ignored, so
+   * a stray comparison `>` scans exactly as it did before angles were counted.
+   */
+  private angleDepthAfter(index: number, angleDepth: number): number {
+    const t = this.tokens[index];
+    const run = t.text.replaceAll('->', '');
+    if (run.length === 0 || /[^<>]/.test(run)) return angleDepth;
+    const attached = index > 0 && t.start === this.tokens[index - 1].end;
+    let result = angleDepth;
+    for (const ch of run) {
+      if (ch === '<') {
+        if (attached) result += 1;
+      } else if (ch === '>' && result > 0) result -= 1;
+    }
+    return result;
   }
 
   /** Is the token `n` ahead of the current one the `alias` word of a
@@ -4597,14 +4659,54 @@ export class Parser {
     if (k === i + 1 && after.type === 'OPERATOR' && after.text === '=')
       return true;
     // Optional return type `-> Type =`: past `->`, scan for the `=` that ends
-    // the (type) prefix, stopping at a statement boundary. Type spellings never
-    // contain `=`, so the first `=` on the line closes the definition head.
+    // the (type) prefix. Type spellings never contain a top-level `=`, so the
+    // first `=` at bracket depth 0 closes the definition head.
+    //
+    // A line break ENDS the scan only when it happens at depth 0, where it is
+    // a statement boundary: the head and its `=` must start on the same line,
+    // so an `=` written on the line AFTER a complete head is not this
+    // statement's. Inside a bracketed group a line break is mere layout, so a
+    // return type whose field or element list spans lines still finds its `=`:
+    //
+    // ```
+    // f(x) -> record{
+    //   a: integer
+    // } = {a -> x}
+    // ```
+    //
+    // Four kinds of group hold the depth open: parentheses, square brackets,
+    // braces (all three arrive as their own token types) and ANGLE brackets,
+    // which have no token type of their own and are counted by
+    // `angleDepthAfter` — whose rules are what keep a spaced comparison
+    // (`p(n) -> n < 3`) from opening a group that never closes and dragging
+    // the scan onto later lines.
     if (after.type === 'OPERATOR' && after.text === '->') {
+      let depth = 0;
+      let angleDepth = 0;
       for (let j = k + 1; j < this.tokens.length; j++) {
         const t = this.tokens[j];
         if (t.type === 'EOF' || t.type === 'SEMICOLON') return false;
-        if (t.precededByLinebreak) return false;
-        if (t.type === 'OPERATOR' && t.text === '=') return true;
+        // Tested BEFORE this token's own depth contribution, so the `}` or `>`
+        // that closes a multi-line group may itself open the line.
+        if (t.precededByLinebreak && depth === 0 && angleDepth === 0)
+          return false;
+        switch (t.type) {
+          case 'OPEN_PAREN':
+          case 'OPEN_BRACKET':
+          case 'OPEN_BRACE':
+            depth += 1;
+            break;
+          case 'CLOSE_PAREN':
+          case 'CLOSE_BRACKET':
+          case 'CLOSE_BRACE':
+            if (depth === 0) return false;
+            depth -= 1;
+            break;
+          case 'OPERATOR':
+            angleDepth = this.angleDepthAfter(j, angleDepth);
+            if (depth === 0 && angleDepth === 0 && t.text === '=') return true;
+            break;
+        }
       }
     }
     return false;

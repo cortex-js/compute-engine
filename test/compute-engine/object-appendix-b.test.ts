@@ -12,17 +12,17 @@
  *
  * Which examples are pinned:
  *
- * - "The idea" / "Objects and protocols" — the `Person` birthday flow. The
- *   appendix's full form declares `Person` with an `is Identifiable { get
- *   fullName … function birthday … }` conformance block; parsing accessor
- *   blocks inside `is … { }` is Phase 2 of the implementation plan
+ * - "The idea" / "Objects and protocols" — the `Person` birthday flow, in the
+ *   appendix's full form: `Person` declared `is Identifiable { get fullName …
+ *   function birthday … }`, with the four `readwrite` properties left to the
+ *   stored fields of the same name. That form runs as of Phase 2 of the
+ *   implementation plan
  *   (`docs/plans/2026-08-13-mutable-objects-implementation-plan.md`, "Phase 2
- *   — Protocol integration"), so that exact text does not run yet. What is
- *   pinned here is the flow's SEMANTIC content, which is Phase 1's: the
- *   `const` binding, `birthday` storing into `self` and returning it, and the
+ *   — Protocol integration"): field-backed satisfaction covers the properties
+ *   no accessor is written for. What the flow demonstrates is the `const`
+ *   binding, `birthday` storing into `self` and returning it, and the
  *   interpolated string reading the already-incremented `age` because its
- *   segments evaluate left to right. The full protocol form is left as a
- *   Phase 2 acceptance item.
+ *   segments evaluate left to right.
  * - "Assigning to a property" — `MutableData` store, and the record refusal.
  * - "References, not copies" — aliasing through a second name and through a
  *   function argument.
@@ -89,20 +89,34 @@ p.age`)
 });
 
 describe('"Objects and protocols" — the Person birthday flow', () => {
-  // The appendix's `Person` is declared `is Identifiable { … }` with a
-  // computed `fullName` accessor and a `birthday` member. The accessor-block
-  // syntax is Phase 2 (see the file header). This is the same flow with
-  // `birthday` as a free function and `fullName` spelled out, which is
-  // everything the example demonstrates that Phase 1 owns.
-  const PERSON = `type Person = object{
+  // The appendix's own declarations, copied verbatim: the `Identifiable`
+  // protocol, and `Person` conforming to it with a computed `get fullName`
+  // and a `function birthday`. The four `readwrite` properties carry no
+  // accessor — the stored fields of the same name and type satisfy them
+  // (field-backed satisfaction, Phase 2 of
+  // `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`).
+  const PERSON = `protocol Identifiable {
+  readwrite firstName: string
+  readwrite lastName: string
+  readonly fullName: string
+  readwrite age: integer
+  readwrite role: string
+  function birthday(self: Self) -> Self
+}
+type Person = object{
   firstName: string,
   lastName: string,
   age: integer,
   role: string
-}
-function birthday(self: Person) -> Person {
-  self.age = self.age + 1
-  self   // the protocol promises that birthday returns Self
+} is Identifiable {
+  // fullName is not a stored field: it is computed on demand.
+  get fullName(self: Person) -> string {
+    "\\(self.firstName) \\(self.lastName)"
+  }
+  function birthday(self: Person) -> Person {
+    self.age = self.age + 1
+    self   // the protocol promises that birthday returns Self
+  }
 }
 const p = Person(firstName: "Alan", lastName: "Turing",
                  age: 42, role: "scientist")`;
@@ -130,14 +144,12 @@ const p = Person(role: "scientist", age: 42,
 
   test('"Happy birthday, Alan Turing! You are 43." — the pieces evaluate left to right', () => {
     // `p.age` reads 43: `birthday(p)` in the first segment changed the
-    // object before the second segment read it (ruling B8). This is the
-    // appendix's line, with `fullName` as a plain function instead of the
-    // Phase 2 computed property.
+    // object before the second segment read it (ruling B8). The appendix's
+    // line, verbatim.
     expect(
       value(
         `${PERSON}
-function fullName(self: Person) -> string { "\\(self.firstName) \\(self.lastName)" }
-"Happy birthday, \\(fullName(birthday(p)))! You are \\(p.age)."`
+"Happy birthday, \\(birthday(p).fullName)! You are \\(p.age)."`
       )
     ).toBe('"Happy birthday, Alan Turing! You are 43."');
   });

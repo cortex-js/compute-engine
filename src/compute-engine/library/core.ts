@@ -3909,6 +3909,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         evaluateProtocolMember(options.engine, ops, options),
     },
 
+    // Deliberately NOT `lazy`: the operands are evaluated before the handler
+    // runs, which is what guarantees a `set` handler — an author's, or one the
+    // engine synthesized for a field-backed property — receives the EVALUATED
+    // value rather than the unevaluated right-hand side. A store must write
+    // what its right-hand side evaluates to, exactly as assignment to an
+    // identifier does, and holding the operands would break that on every
+    // route that reaches a setter through this operator.
+    // (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "A store writes the
+    // evaluated value".)
+    //
+    // KNOWN GAP: a set through this operator can MUTATE an object — an
+    // author's `set` handler storing into a field, or the accessor the engine
+    // synthesizes for a field-backed property — and neither this definition
+    // nor a synthesized host setter carries the `state` effect that describes
+    // it, so such a write reads as pure to the effect walker. Labelling it is
+    // the next bullet of "Phase 2 — Protocol integration" in
+    // `docs/plans/2026-08-13-mutable-objects-implementation-plan.md` ("a
+    // `readwrite` requirement implies `state` on its setter").
     ProtocolProperty: {
       description:
         'Read (or write) a protocol PROPERTY through a NAMED protocol — the ' +

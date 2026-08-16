@@ -308,6 +308,31 @@ Spec: "Objects and protocols", "Which types can conform".
   `unexpected-symbol is`; `object-appendix-b.test.ts` pins the flow with
   free functions until then, and should be switched to the verbatim
   text here).
+
+  > **STATUS 2026-08-15 — DONE.** Field-backed satisfaction and the
+  > conflict error are implemented in
+  > `src/compute-engine/engine-protocols.ts`: `fieldBackedProperties()`
+  > decides which property requirements a target's stored fields answer
+  > (and which names an author declared twice),
+  > `settleFieldBacking()` installs the synthesized accessors on the
+  > conformance edge under the ordinary `__get__x`/`__set__x` keys, so
+  > the INTERPRETED tiers — dispatch selection, property reads, property
+  > writes — need no special case. The COMPILED tier declines: a
+  > synthesized accessor is a host callback and the planner refuses host
+  > candidates, so a compiled qualified read or write on a field-backed
+  > type falls back to interpretation. That fails closed and is the
+  > right answer until Phase 4 lowers object field access; see the note
+  > added to the Phase 4 bullet. `implementationProblem()` gained
+  > the `object-property-conflict` verdict and skips a field-backed
+  > property in its completeness check. The `is … { }` accessor-block
+  > parsing landed separately. The acceptance example runs verbatim and
+  > is pinned in both `object-appendix-b.test.ts` (as the appendix's own
+  > program) and `protocol-field-backed.test.ts` (which also covers the
+  > exact-type rule in both directions, the conflict on all three
+  > routes, in-place writes through the synthesized setter, and
+  > re-settling across a protocol replacement). The remaining Phase 2
+  > bullets — the mutability gate B1, and `state` on an implicit setter
+  > — are untouched by it.
 - The mutability gate (B1): `readwrite` property or *declared*
   `state` member ⇒ object-only conformance
   (`protocol-requires-object`); bare requirements never gate; records
@@ -315,7 +340,13 @@ Spec: "Objects and protocols", "Which types can conform".
 - `readwrite` requirement implies `state` on its setter (no spelled
   label); implicit setters carry `state` by construction.
 - Protocol replacement: layouts never migrate; replacement re-runs
-  conformance against the fixed layout.
+  conformance against the fixed layout — and a cross-batch redefinition
+  of the object TYPE must re-run conformance for its edges the same
+  way. Only the protocol half is implemented: `settleFieldBacking()`
+  reads the layout from the type registry at settle time, and nothing
+  re-settles an edge when the TYPE is redefined, so accessors
+  synthesized for a field the new layout dropped survive. Open, tracked
+  under the mutable-objects entry of `ROADMAP.md`.
 - Appendix A doc amendments land with this phase (items 1–5 of
   "Changes to shipped documents", including the "Properties"
   must-be-implemented sentence).
@@ -365,6 +396,15 @@ Spec: "The rest of the system", B9.
   order preserved or decline (B8). Verify on `glsl`/`python` — the
   four statement-list lowering paths (see
   `compile-statement-lowering-paths` memory note).
+- Field-backed protocol accessors (Phase 2) are HOST callbacks today,
+  and the planner refuses host candidates
+  (`compilation/protocol-dispatch.ts`), so a compiled qualified read or
+  write on a field-backed type declines. Phase 4 must lower them to a
+  field load / store — the same lowering object field access itself
+  needs — or the planner keeps declining. One consequence to keep in
+  view: one field-backed object edge can also de-plan DYNAMIC dispatch
+  of that key for other conformers whose targets overlap an
+  `unknown`/`any` receiver.
 
 Acceptance: per-target decline tests; JS param-in flow. Effort: M.
 

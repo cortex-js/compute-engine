@@ -697,10 +697,15 @@ protocol Comparable {
 A protocol can also define readwrite or readonly properties, prefixed with
 `readwrite` or `readonly` accordingly.
 
-Properties are mapped to getter and setter functions, which must be
-implemented by the conforming type. An appropriate mangling scheme is used —
-for example `__get__hash` for the `hash` property getter — but it is an
-implementation detail, not part of the public surface:
+Properties are mapped to getter and setter functions, which the conforming
+type must provide. Providing them can be implicit: when the conforming type is
+an `object{…}` type with a stored field of the property's name, that field
+satisfies the requirement and the engine synthesizes the accessors — see
+Appendix B, "Objects and protocols", for the exact-type rule this depends on
+and for `object-property-conflict`, which refuses a field and an explicit
+accessor for one name. An appropriate mangling scheme is used — for example
+`__get__hash` for the `hash` property getter — but it is an implementation
+detail, not part of the public surface:
 
 ```epsil
 protocol Hashable {
@@ -1035,6 +1040,14 @@ If the signatures of the `get` or `set` handlers are invalid,
 for a `readonly` property, `protocol-property-readonly-set` is emitted. If
 a `get` handler is missing for a property,
 `protocol-implementation-missing` is emitted.
+
+A stored field of an `object{…}` conforming type stands in for the handlers
+entirely: it satisfies the requirement with no `get`/`set` written, and the
+completeness check above then reports no hole for that property. Writing an
+accessor for a name the layout already declares is `object-property-conflict`
+— a property is field-backed or computed, never both. Appendix B, "Objects
+and protocols", states the type rules (exact type for `readwrite`, the
+property's type or a subtype for `readonly`).
 
 To provide an implementation of a semantic protocol, the conformance
 declaration is sufficient; an empty block is also accepted:
@@ -1502,7 +1515,7 @@ type Person = object{
 } is Identifiable {
   // fullName is not a stored field: it is computed on demand.
   get fullName(self: Person) -> string {
-    "\(self.firstName\) \(self.lastName\)"
+    "\(self.firstName) \(self.lastName)"
   }
   function birthday(self: Person) -> Person {
     self.age = self.age + 1
@@ -1531,6 +1544,18 @@ Three rules make this work:
   error (`object-property-conflict`) — a name is field-backed or
   computed, never both.
 
+Field backing takes part in ordinary conformance selection, so an object
+type's own stored field beats an accessor it would otherwise inherit from
+a conformance of a *supertype*: with `object` conforming to `Identifiable`
+through written accessors, `type Widget = object{firstName: string} is
+Identifiable` reads `firstName` off the stored field, because the `Widget`
+edge is the more specific one — while `Widget` still inherits the
+supertype's implementations of every member its own fields do not answer.
+This is the "most specific implementation wins" rule of Appendix A
+("Lattice inheritance and overlap") meeting "satisfied automatically by a
+stored field"; both point the same way, and a field is what the type
+itself says the property is.
+
 When a protocol is *replaced* (statement re-run, Appendix A "Scope and
 lifecycle"), an object type's layout does not change: the stored fields
 are fixed at declaration. The replacement re-runs conformance checking
@@ -1544,7 +1569,7 @@ Using it:
 ```epsil
 const p = Person(firstName: "Alan", lastName: "Turing",
                  age: 42, role: "scientist")
-"Happy birthday, \(birthday(p).fullName\)! You are \(p.age\)."
+"Happy birthday, \(birthday(p).fullName)! You are \(p.age)."
 // ➔ Happy birthday, Alan Turing! You are 43.
 ```
 
@@ -2943,7 +2968,7 @@ proposed by Appendix B and are not implemented.
 | `argument-name-duplicate` | the same parameter supplied more than once (Appendix C) |
 | `argument-names-unavailable` | a named argument used with a callee whose parameter names cannot be read: no visible declaration (forward reference, bare `function`-typed value), unnamed or inferred parameters, an `Apply`-routed callee, or surviving overload arms whose name orders disagree (Appendix C) |
 | `argument-optional-skipped` | a named optional supplied while an optional declared before it is not — the no-optional-holes rule (Appendix C) |
-| `object-property-conflict` † | both a stored field and an explicit accessor declared for the same property name (Appendix B) |
+| `object-property-conflict` | both a stored field and an explicit accessor declared for the same property name (Appendix B) |
 | `conformance-widens-declared-contract` † | a conformance whose implementation effects widen a dispatcher union past a dependent's declared effect contract; names every violated dependent and the exceeding labels (Appendix B, "Changing a field is an effect") |
 | `object-type-not-inline` | `object{…}` used anywhere other than as the definition of a named type — inline in an annotation, or nested inside a declaration body (Appendix B) |
 | `argument-names-required` | a call to an operator whose arguments must each be written with their parameter's name (an object-type constructor, ruling B11) passed one positionally |

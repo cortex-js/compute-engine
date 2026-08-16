@@ -134,10 +134,73 @@ export class Lexer {
     return this.pos >= this.input.length;
   }
 
-  private skipWhitespace(): void {
-    while (!this.isEOF() && /\s/.test(this.peek())) {
-      this.advance();
+  /**
+   * Consume the trivia the type grammar ignores: whitespace, line comments
+   * (from `//` to the end of the line) and block comments (from a slash-star
+   * to the matching star-slash).
+   *
+   * Comments are skipped here rather than stripped by the callers because a
+   * type string is not always written by hand in isolation: the Epsil parser
+   * hands this lexer a slice of program source (a `type Name = object{…}`
+   * body, an annotation), so a comment written inside a multi-line field list
+   * reaches the type grammar verbatim. Without this, the `/` of the comment is
+   * an unexpected character, the field list is cut short, and its braces are
+   * left over as errors in the enclosing language.
+   *
+   * A `/` that begins neither comment form is left untouched: no rule of the
+   * type grammar consumes one, so it still reaches `nextToken`'s final
+   * "Unexpected character" error (or, in tolerant mode, ends the prefix
+   * parse). Block comments NEST, matching the Epsil lexer's `skipBlockComment`
+   * and the raw-source scanners in the Epsil parser, so the three agree on
+   * where a comment ends.
+   */
+  private skipTrivia(): void {
+    while (!this.isEOF()) {
+      if (/\s/.test(this.peek())) {
+        this.advance();
+        continue;
+      }
+      if (this.peek() === '/' && this.peek(1) === '/') {
+        // Line comment: consume to (but not past) the line break, which the
+        // next turn of the loop skips as ordinary whitespace.
+        while (!this.isEOF() && !/[\n\r\u2028\u2029]/.test(this.peek()))
+          this.advance();
+        continue;
+      }
+      if (this.peek() === '/' && this.peek(1) === '*') {
+        this.skipBlockComment();
+        continue;
+      }
+      break;
     }
+  }
+
+  /**
+   * Consume a nested block comment whose opening slash-star is at the
+   * current position.
+   *
+   * An unterminated comment consumes the rest of the input. In tolerant
+   * (prefix) mode that simply ends the type — the caller is parsing a type
+   * from the start of a longer source it will diagnose itself — but a
+   * whole-string parse reports it, so a truncated type string fails loudly
+   * instead of silently parsing as whatever preceded the comment.
+   */
+  private skipBlockComment(): void {
+    this.advance(); // consume '/'
+    this.advance(); // consume '*'
+    let level = 1;
+    while (level > 0 && !this.isEOF()) {
+      if (this.peek() === '/' && this.peek(1) === '*') {
+        level++;
+        this.advance();
+        this.advance();
+      } else if (this.peek() === '*' && this.peek(1) === '/') {
+        level--;
+        this.advance();
+        this.advance();
+      } else this.advance();
+    }
+    if (level > 0 && !this.tolerant) this.error('Unterminated comment');
   }
 
   private readIdentifier(): string {
@@ -256,7 +319,7 @@ export class Lexer {
   }
 
   private nextToken(): Token | null {
-    this.skipWhitespace();
+    this.skipTrivia();
 
     if (this.isEOF()) {
       return this.createToken('EOF', '');

@@ -205,31 +205,26 @@ describe("PRECEDENCE — the object's own layout beats a protocol property", () 
   //
   // The rule this pins — a name the layout declares is a store, any other name
   // goes to the protocol route — is the DISPATCH-level statement of what
-  // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B ("Declaring an object type", the
+  // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B ("Objects and protocols", the
   // three field-backed-satisfaction rules) says about declarations: a stored
   // field satisfies a `readwrite` requirement on its own, a computed property
   // has accessors and NO stored field, and a name is "field-backed or
   // computed, never both".
   //
-  // Which makes the fixture below deliberately illegal-in-waiting: it declares
-  // a stored `name` AND `get`/`set name` accessors, the combination Appendix B
-  // rejects as `object-property-conflict`. That check is Phase 2 work and does
-  // not exist yet, so today the declaration is accepted and both routes claim
-  // the assignment — which is exactly the ambiguity these tests exercise. When
-  // the conflict check lands, this fixture starts erroring at declaration and
-  // these two tests should be re-pointed at that error; the dispatch guard
-  // they cover stays worth having as the second line of defence, since a
-  // computed property on an object still has to reach the protocol route —
-  // covered by "a COMPUTED protocol property on an object reaches its setter"
-  // below, which uses an object with no stored field of that name (the shape
-  // Appendix B calls computed, and the one that stays legal under the
-  // conflict check).
+  // The fixture below is the LEGAL way for a name to be both a stored field
+  // and a protocol property: field-backed satisfaction. `P` writes no
+  // accessors at all, and the engine synthesizes them from the stored `name`,
+  // so both routes could claim `p.name = v`. The two tests that follow pin
+  // that the STORE route wins in both timing shapes — receiver typed at
+  // canonicalization, and receiver untyped so the decision is remade at
+  // evaluation — which is what this block is about. They do not exercise the
+  // synthesized setter; that handler, and the fact that it agrees (an
+  // in-place store into the one object), is covered by
+  // `protocol-field-backed.test.ts`. Writing the accessors out BESIDE the
+  // stored field, which this fixture used to do, is now refused at
+  // declaration; that refusal is pinned by the last test of this block.
   const OVERLAP = `protocol Nameable { readwrite name: string }
-type P = object{name: string}
-type P is Nameable {
-  get name(self: Self) -> string { self.name }
-  set name(self: Self, v: string) -> P { P(name: v) }
-}
+type P = object{name: string} is Nameable
 let p = P(name: "Bob")
 let q = p`;
 
@@ -255,6 +250,25 @@ let q = p`;
     value(`${OVERLAP}\np.name = "Steve"`, engine);
     expect(value('p.name', engine)).toBe('"Steve"');
     expect(value('q.name', engine)).toBe('"Steve"');
+  });
+
+  test('writing accessors BESIDE the stored field is `object-property-conflict`', () => {
+    // The shape this block's fixture used to have, before field-backed
+    // satisfaction made it unnecessary and Appendix B's conflict rule made it
+    // illegal: a name is field-backed or computed, never both. Refused at
+    // declaration, so the ambiguity never reaches dispatch at all.
+    const engine = new ComputeEngine();
+    expect(
+      result(
+        `protocol Nameable { readwrite name: string }
+type P = object{name: string}
+type P is Nameable {
+  get name(self: Self) -> string { self.name }
+  set name(self: Self, v: string) -> P { P(name: v) }
+}`,
+        engine
+      )
+    ).toContain('object-property-conflict');
   });
 
   test('a COMPUTED protocol property on an object reaches its setter', () => {
@@ -323,13 +337,16 @@ let p = P(n: "Bob")`,
     // `protocol-requires-object` and the rebinding sugar has no legal targets
     // left, which is what makes the sugar retirable at all.
     const engine = new ComputeEngine();
-    value(`protocol Nameable { readwrite name: string }
+    value(
+      `protocol Nameable { readwrite name: string }
 type Person = tuple<n: string, age: integer>
 type Person is Nameable {
   get name(self: Self) -> string { self.n }
   set name(self: Self, v: string) -> Person { Person(v, self.age) }
 }
-let r = Person("Bob", 42)`, engine);
+let r = Person("Bob", 42)`,
+      engine
+    );
     value('r.name = "Steve"', engine);
     expect(value('r', engine)).toBe('Person("Steve", 42)');
   });
@@ -490,7 +507,9 @@ function rename(x: M) { x.id = "XXXX" }`,
     const engine = new ComputeEngine();
     value('type M = object{id: string}', engine);
     expect(
-      errorCode(result('function k(x: M) pure -> nothing { x.id = "Z" }', engine))
+      errorCode(
+        result('function k(x: M) pure -> nothing { x.id = "Z" }', engine)
+      )
     ).toBe('incompatible-type');
   });
 
@@ -627,9 +646,9 @@ describe('THE STATE EVENT — a store reports, and advances nothing', () => {
     const engine = new ComputeEngine();
     const seen: string[] = [];
     const original = engine._noteStateEvent.bind(engine);
-    (engine as unknown as { _noteStateEvent: unknown })._noteStateEvent = (
-      e: { kind: string }
-    ) => {
+    (engine as unknown as { _noteStateEvent: unknown })._noteStateEvent = (e: {
+      kind: string;
+    }) => {
       seen.push(e.kind);
       return original(e as never);
     };
@@ -649,9 +668,9 @@ let p = P(n: 1)`,
     const engine = new ComputeEngine();
     const seen: string[] = [];
     const original = engine._noteStateEvent.bind(engine);
-    (engine as unknown as { _noteStateEvent: unknown })._noteStateEvent = (
-      e: { kind: string }
-    ) => {
+    (engine as unknown as { _noteStateEvent: unknown })._noteStateEvent = (e: {
+      kind: string;
+    }) => {
       seen.push(e.kind);
       return original(e as never);
     };

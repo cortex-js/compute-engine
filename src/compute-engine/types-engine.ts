@@ -268,8 +268,26 @@ export type ConformanceRecord = {
   /** Member name → implementation: an Epsil function literal, or a
    * {@link JSImplementation} wrapper for a host callback. Property handlers
    * ride under the mangled keys `__get__<name>` / `__set__<name>`. Validated
-   * against the protocol's requirements before it is stored (P17). */
+   * against the protocol's requirements before it is stored (P17).
+   *
+   * This is the MERGED map dispatch reads: it holds the author's entries
+   * ({@link ConformanceRecord._authored}) plus any accessors the engine
+   * synthesized for property requirements the target's stored fields satisfy
+   * (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Objects and protocols"). */
   impl?: Record<string, Expression | JSImplementation>;
+  /** The implementation block as the AUTHOR wrote it — the statement's `is P
+   * { … }` block, or the host API's three flattened buckets — before the
+   * engine merged its synthesized field-backed accessors into
+   * {@link ConformanceRecord.impl}.
+   *
+   * Stored rather than derived from `impl`, because the two questions the
+   * engine asks of it cannot be answered by inspecting the merged map: an
+   * author's EMPTY block (`type P is Nameable { }`) and no block at all both
+   * leave the merged map holding nothing but synthesized accessors, yet an
+   * empty block still claims the edge — a second implementation of it is
+   * `protocol-implementation-duplicate`, and it does not inherit a
+   * supertype's implementation, while a block-less edge does both. */
+  _authored?: Record<string, Expression | JSImplementation>;
   /** Where {@link ConformanceRecord.impl} came from, when it was installed
    * from INSIDE an Epsil batch (ruling P47): the batch id
    * ({@link IComputeEngine._epsilBatchId}) and the identity of the

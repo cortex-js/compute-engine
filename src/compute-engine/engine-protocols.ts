@@ -10,7 +10,11 @@ import type {
 import { checkSameUnitRedefinition } from './declaration-origin.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
-import { isSubtype, widen } from '../common/type/subtype.js';
+import {
+  isSubtype,
+  objectLayoutOfType,
+  widen,
+} from '../common/type/subtype.js';
 import { reduceType, typesOverlap } from '../common/type/reduce.js';
 import {
   conditionalTargetInstance,
@@ -55,6 +59,7 @@ import type { Scope } from './types-evaluation.js';
 import {
   isExpression,
   isFunction,
+  isObject,
   isString,
   sym,
 } from './boxed-expression/type-guards.js';
@@ -269,22 +274,33 @@ export function declareProtocolImpl(
     // matches leaves its conformance PENDING — the edge survives (conformance
     // is monotone) but is not fulfilled, so the end-of-batch warning fires
     // until the implementation is edited to match.
-    for (const c of existing.conformances)
-      if (c.impl !== undefined)
-        c.pending =
-          implementationProblem(
-            ce,
-            existing,
-            c.target,
-            c.targetKey,
-            c.impl,
-            c.where
-          ) !== null;
+    // The validator is handed the AUTHOR's block only: the edge's map may also
+    // carry accessors the engine synthesized for field-backed properties, and
+    // those would read as an author writing an accessor beside a stored field
+    // (`object-property-conflict`). They are re-derived right after, against
+    // the new requirement set and the target's unchanged layout.
+    for (const c of existing.conformances) {
+      const authored = c._authored;
+      if (authored === undefined) continue;
+      const failure = implementationProblem(
+        ce,
+        existing,
+        c.target,
+        c.targetKey,
+        authored,
+        c.where
+      );
+      // Both halves run: a block that no longer validates still has to have
+      // its stale synthesized accessors re-derived, or accessors for a
+      // requirement the replacement dropped would keep answering.
+      const covered = settleFieldBacking(ce, existing, c);
+      c.pending = failure !== null || !covered;
+    }
     // …and the implementation-LESS edges are recomputed from what the
     // implementations now cover: an edge that inherited a supertype's
     // implementation goes back to pending when that implementation stops
     // matching the new requirements, and vice versa.
-    refreshInheritedPending(existing);
+    refreshInheritedPending(ce, existing);
     // A replacement is a `config`-class state event, exactly like a type
     // redefinition: cached decisions taken against the old requirement set
     // must not be left stale (P16).
@@ -729,15 +745,20 @@ export function declareConformance(
       // requirements.
       if (impl !== undefined) {
         mutated = true;
+        existing._authored = impl;
         existing.impl = impl;
         // The stamp rides with the implementation: an install from outside a
         // batch (the box route, P47) leaves it UNSTAMPED and replaces freely.
         if (batch === undefined) delete existing._implOrigin;
         else existing._implOrigin = { batch, block: options?.block };
-        existing.pending = !implCoversRequirements(record.members, impl);
+        // Field backing is settled against the edge as it now stands: the
+        // block just installed replaces whatever accessors the engine had
+        // synthesized, and a property the block does not implement may be
+        // covered by a stored field of the same name (Appendix B).
+        existing.pending = !settleFieldBacking(ce, record, existing);
         // The new implementation may also fulfil the impl-less edges of the
         // target's SUBTYPES, which inherit it.
-        refreshInheritedPending(record);
+        refreshInheritedPending(ce, record);
         ce._noteStateEvent({ kind: 'config' });
         ce._noteConformanceRegistryChange();
       }
@@ -746,20 +767,26 @@ export function declareConformance(
     const conformance: ConformanceRecord = {
       target,
       targetKey,
-      pending: !implCoversRequirements(record.members, impl),
+      // Settled below, once the edge exists: field backing is derived from the
+      // edge (its target's layout and its own block), and an edge with no
+      // block at all is settled by `refreshInheritedPending`.
+      pending: true,
       declaredByStatement: true,
     };
     if (params !== undefined) conformance.where = params;
     if (impl !== undefined) {
+      conformance._authored = impl;
       conformance.impl = impl;
       if (batch !== undefined)
         conformance._implOrigin = { batch, block: options?.block };
     }
     record.conformances.push(conformance);
+    if (impl !== undefined)
+      conformance.pending = !settleFieldBacking(ce, record, conformance);
     mutated = true;
     // The new edge may INHERIT an implementation registered for a supertype,
     // and (with a block of its own) may fulfil impl-less subtype edges.
-    refreshInheritedPending(record);
+    refreshInheritedPending(ce, record);
     // P16 — a conformance ADDITION must invalidate cached static-dispatch
     // decisions, so it is a `config` event (all axes), not a `declare`.
     ce._noteStateEvent({ kind: 'config' });
@@ -980,6 +1007,284 @@ function implCoversRequirements(
   return true;
 }
 
+//
+// ── Field-backed property satisfaction (Appendix B, "Objects and protocols") ─
+//
+// A property requirement of a protocol is satisfied, with no `get`/`set`
+// written, by a STORED FIELD of the same name on a conforming OBJECT type:
+// `readwrite` when the field's type is exactly the property's type (the getter
+// direction would admit a narrower field and the setter direction a wider one,
+// so the only type satisfying both is the property's own), `readonly` when the
+// field's type is the property's type or a subtype (only the getter direction
+// exists, so the ordinary covariant rule applies).
+//
+// Satisfaction is implemented by SYNTHESIZING the accessors and registering
+// them in the conformance edge's implementation map under the same mangled
+// keys an authored block would use, so the INTERPRETED tiers — dispatch
+// selection, property reads, property writes — need no special case: they
+// find a handler where they always look.
+//
+// The COMPILED tier is the exception, and it fails closed. A synthesized
+// accessor is a host callback, and the compile planner refuses host
+// candidates (`compilation/protocol-dispatch.ts`), so a compiled qualified
+// read or write on a field-backed type declines and the expression stays
+// interpreted. That is the right answer until objects themselves compile:
+// lowering object field access is Phase 4 of
+// `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`, and until
+// it lands there is nothing for the planner to emit.
+//
+
+/** An accessor the ENGINE synthesized for a field-backed property, as opposed
+ * to one the author wrote. The marker carries the field's name, and is what
+ * lets a later re-derivation (a protocol replacement, a new implementation
+ * block) tell the engine's own entries from the author's and strip them. */
+type FieldBackedImplementation = JSImplementation & { _fieldBacked: string };
+
+function isFieldBacked(
+  value: Expression | JSImplementation
+): value is FieldBackedImplementation {
+  return typeof (value as FieldBackedImplementation)._fieldBacked === 'string';
+}
+
+/**
+ * Which property requirements of `record` the stored fields of `target`
+ * satisfy, and which names are declared BOTH as a stored field and as an
+ * explicit accessor in `impl`.
+ *
+ * Field backing applies to OBJECT types only. A record, a primitive, the bare
+ * `object` type (which promises that fields exist without naming them, so no
+ * field type can be read off it) and a CONDITIONAL conformance all get none:
+ * Appendix B states the rule for object types, and a conditional conformance's
+ * target is a head PATTERN rather than a ground layout, so there is no single
+ * set of stored fields to match a requirement against.
+ *
+ * A requirement whose type does not parse at `Self = target` is skipped rather
+ * than reported here: the signature-mismatch path in
+ * {@link implementationProblem} owns that diagnostic.
+ */
+function fieldBackedProperties(
+  ce: IComputeEngine,
+  record: ProtocolRecord,
+  target: Type,
+  impl: Record<string, Expression | JSImplementation> | undefined,
+  params?: readonly TypeParameter[]
+): { satisfied: Set<string>; conflicts: string[] } {
+  const satisfied = new Set<string>();
+  const conflicts: string[] = [];
+  if (params !== undefined) return { satisfied, conflicts };
+  const layout = objectLayoutOfType(target);
+  if (layout === undefined) return { satisfied, conflicts };
+
+  const resolver = selfSubstitutingResolver(
+    ce._typeResolver,
+    target,
+    typeToString(target)
+  );
+  const owns = (host: object, key: string): boolean =>
+    Object.prototype.hasOwnProperty.call(host, key);
+
+  for (const [name, member] of Object.entries(record.members)) {
+    if (member.kind === 'function') continue;
+    if (!owns(layout.elements, name)) continue;
+    const field = layout.elements[name]!;
+    if (
+      impl !== undefined &&
+      (owns(impl, `${GET_PREFIX}${name}`) || owns(impl, `${SET_PREFIX}${name}`))
+    ) {
+      conflicts.push(name);
+      continue;
+    }
+    let declared: Type;
+    try {
+      declared = parseType(member.type, resolver);
+    } catch {
+      continue;
+    }
+    if (member.kind === 'readwrite') {
+      if (isSubtype(field, declared) && isSubtype(declared, field))
+        satisfied.add(name);
+    } else if (isSubtype(field, declared)) satisfied.add(name);
+  }
+  return { satisfied, conflicts };
+}
+
+/**
+ * The synthesized getter of a field-backed property: a pure load of the stored
+ * slot, which runs no user code.
+ *
+ * On the interpreted route the read path recognizes the `_fieldBacked` marker
+ * and loads the slot itself (see {@link evaluateProtocolProperty}), so this
+ * callback is the fallback for any other invoker; it answers `undefined` for a
+ * receiver that is not an object, which the boxing layer turns into `Nothing`.
+ *
+ * Being a HOST callback also means the compile planner refuses it as a
+ * candidate and the compiled tier declines — see the section comment above:
+ * lowering a field-backed accessor to a slot load is Phase 4 work, alongside
+ * objects themselves.
+ */
+function fieldGetter(name: string): FieldBackedImplementation {
+  return {
+    host: (self: Expression) =>
+      isObject(self) ? self._field(name) : undefined,
+    _fieldBacked: name,
+  };
+}
+
+/**
+ * The synthesized setter of a field-backed `readwrite` property: it stores the
+ * value into the slot and returns the RECEIVER.
+ *
+ * Returning the receiver is what makes the write an in-place modification
+ * rather than a rebinding: `ProtocolProperty`'s set half types the application
+ * as the receiver and rebinds the target to the handler's result, so handing
+ * back the very same object leaves every other reference to it seeing the new
+ * contents.
+ *
+ * The value is re-checked against the field's DECLARED type as pinned on the
+ * instance. The caller has already checked it against the property's declared
+ * type, and for a `readwrite` requirement the two are the same type by
+ * construction — this is the second line of defence for the case where the
+ * layout and the requirement drift apart (a protocol replaced after the object
+ * was constructed), and it is the only check an invoker that reaches this
+ * callback directly passes through.
+ *
+ * Like the getter, this is a HOST callback, so the compile planner refuses it
+ * as a candidate and the compiled tier declines — see the section comment
+ * above.
+ */
+function fieldSetter(
+  ce: IComputeEngine,
+  name: string
+): FieldBackedImplementation {
+  return {
+    host: (self: Expression, value: Expression) => {
+      if (!isObject(self) || value === undefined) return undefined;
+      const expected = self._fieldType(name);
+      if (expected !== undefined) {
+        const checked = checkType(ce, value, expected);
+        if (!checked.isValid) return checked;
+      }
+      self._store(name, value);
+      return self;
+    },
+    _fieldBacked: name,
+  };
+}
+
+/**
+ * Re-derive this edge's field-backed accessors and register them, returning
+ * whether the edge's implementation now COVERS the protocol's requirements.
+ *
+ * Idempotent by construction: the merged map is rebuilt from the author's
+ * block ({@link ConformanceRecord._authored}) and the target's layout, so a
+ * protocol replacement — which may have retyped or dropped a requirement —
+ * re-settles with no accessor left over from the old requirement set. The
+ * rebuild also PRESERVES the map when nothing about it changed (same keys,
+ * same author entries, same field-backed names): the registry's rollback thunk
+ * compares `impl` by reference to decide whether it restored anything, so a
+ * fresh-but-equal object on every conformance registration would emit spurious
+ * `config` state events and invalidate caches that are still valid.
+ *
+ * Settling a BLOCK-LESS edge is what lets an object type's stored field beat
+ * an accessor it would otherwise inherit: the edge now carries an
+ * implementation of that key, and its target is the more specific one, so
+ * ordinary selection prefers it over a supertype's written accessor — while
+ * every member the fields do not answer is still inherited. Appendix A's "most
+ * specific implementation wins" and Appendix B's "satisfied automatically by a
+ * stored field" agree here, and the field is what the type itself says the
+ * property is.
+ *
+ * The layout is read from the type REGISTRY as it stands at settle time, while
+ * an object INSTANCE carries the layout it was constructed with. A protocol
+ * replacement re-settles every edge, so a requirement change is picked up; a
+ * cross-batch redefinition of the object TYPE itself does NOT — nothing
+ * re-runs conformance for the edges of a redefined type, so accessors
+ * synthesized for a field the new layout dropped survive until something else
+ * re-settles the edge. Recorded as open work under the mutable-objects entry
+ * of `ROADMAP.md` and scheduled with the Phase 2 "Protocol replacement"
+ * bullet of `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`.
+ */
+function settleFieldBacking(
+  ce: IComputeEngine,
+  record: ProtocolRecord,
+  edge: ConformanceRecord
+): boolean {
+  const authored = edge._authored;
+  const { satisfied } = fieldBackedProperties(
+    ce,
+    record,
+    edge.target,
+    authored,
+    edge.where
+  );
+
+  if (satisfied.size === 0) {
+    // No accessor of the engine's belongs on this edge — the overwhelmingly
+    // common case, since only an OBJECT target can be field-backed at all.
+    // The merged map is then exactly the author's block, and an edge with
+    // neither is implementation-LESS, which is what makes it eligible to
+    // inherit a supertype's implementation.
+    if (authored === undefined) delete edge.impl;
+    else edge.impl = authored;
+    return implCoversRequirements(record.members, edge.impl);
+  }
+
+  /** The mangled key of each accessor the engine owes this edge → the field
+   * it loads. A `readwrite` property needs both halves; a `readonly` one has
+   * only the getter direction. */
+  const owed = new Map<string, string>();
+  for (const name of satisfied) {
+    owed.set(`${GET_PREFIX}${name}`, name);
+    if (record.members[name]!.kind === 'readwrite')
+      owed.set(`${SET_PREFIX}${name}`, name);
+  }
+
+  const current = edge.impl;
+  if (current !== undefined && mergedMapMatches(current, authored, owed))
+    return implCoversRequirements(record.members, current);
+
+  const next: Record<string, Expression | JSImplementation> =
+    Object.create(null);
+  if (authored !== undefined)
+    for (const [k, v] of Object.entries(authored)) next[k] = v;
+  for (const [key, name] of owed) {
+    // An accessor already standing for this very field is reused, so a rebuild
+    // forced by one changed key does not hand every other consumer a new
+    // closure for a handler that did not change.
+    const existing = current?.[key];
+    next[key] =
+      existing !== undefined &&
+      isFieldBacked(existing) &&
+      existing._fieldBacked === name
+        ? existing
+        : key.startsWith(GET_PREFIX)
+          ? fieldGetter(name)
+          : fieldSetter(ce, name);
+  }
+  edge.impl = next;
+  return implCoversRequirements(record.members, next);
+}
+
+/** Is `merged` already exactly the author's block plus the accessors `owed`
+ * describes? Answering yes lets {@link settleFieldBacking} keep the existing
+ * map, and with it the object identity the rollback thunk compares on. */
+function mergedMapMatches(
+  merged: Record<string, Expression | JSImplementation>,
+  authored: Record<string, Expression | JSImplementation> | undefined,
+  owed: ReadonlyMap<string, string>
+): boolean {
+  const authoredKeys = authored === undefined ? [] : Object.keys(authored);
+  if (Object.keys(merged).length !== authoredKeys.length + owed.size)
+    return false;
+  for (const k of authoredKeys) if (merged[k] !== authored![k]) return false;
+  for (const [key, name] of owed) {
+    const entry = merged[key];
+    if (entry === undefined || !isFieldBacked(entry)) return false;
+    if (entry._fieldBacked !== name) return false;
+  }
+  return true;
+}
+
 /**
  * Recompute the `pending` flag of every implementation-LESS conformance edge
  * of `record`.
@@ -996,14 +1301,36 @@ function implCoversRequirements(
  * fixed point (inheritance is transitive: an `integer` edge may inherit from a
  * `number` edge that itself inherits) — starting from `true` keeps a pair of
  * mutually-comparable targets from holding each other non-pending.
+ *
+ * "Reset to pending" is a PER-EDGE question rather than one record-wide
+ * verdict, because an edge onto an OBJECT type may be complete on its own
+ * stored fields (Appendix B's field-backed satisfaction, see
+ * {@link settleFieldBacking}) while another edge of the same protocol, onto a
+ * type with no such layout, is not.
  */
-function refreshInheritedPending(record: ProtocolRecord): void {
-  // A SEMANTIC protocol (no requirements) is covered by the empty block, so
-  // none of its edges is ever pending.
-  const pendingByDefault = !implCoversRequirements(record.members, undefined);
-  const inherited = record.conformances.filter((c) => c.impl === undefined);
-  for (const c of inherited) c.pending = pendingByDefault;
-  if (!pendingByDefault) return;
+function refreshInheritedPending(
+  ce: IComputeEngine,
+  record: ProtocolRecord
+): void {
+  // "No implementation of its own" is asked of the AUTHORED block, not of the
+  // merged map: an edge whose map holds nothing but engine-synthesized
+  // accessors still takes part here, because its author wrote nothing and it
+  // may therefore inherit — while an author's EMPTY block claims the edge and
+  // keeps it out.
+  const inherited = record.conformances.filter(
+    (c) => c._authored === undefined
+  );
+  // Each such edge is pending unless what it carries of its own — nothing at
+  // all for most, the synthesized accessors of its stored fields for an object
+  // type — already covers the requirements. A SEMANTIC protocol (no
+  // requirements) is covered by nothing at all, so none of its edges is ever
+  // pending and the inheritance pass below is skipped outright.
+  let anyPending = false;
+  for (const c of inherited) {
+    c.pending = !settleFieldBacking(ce, record, c);
+    if (c.pending) anyPending = true;
+  }
+  if (!anyPending) return;
 
   let changed = true;
   while (changed) {
@@ -1453,11 +1780,16 @@ function unknownMemberProblem(
  * `Self = target`. Returns the FIRST problem, or `null` when the block is a
  * complete and well-typed implementation.
  *
- * Order of verdicts (Appendix A's example emits them in this order): every key
- * the block provides is checked first — unknown member, then `set` on a
- * `readonly` property, then the signature — and the completeness check comes
- * last, so a misspelled member reports the misspelling rather than the hole it
- * leaves.
+ * Order of verdicts. `object-property-conflict` comes FIRST, because it is a
+ * verdict on the DECLARATION rather than on any one key: writing an accessor
+ * beside a stored field of the same name is refused whatever that accessor
+ * says, so it outranks even the per-key checks — a `set` accessor for a
+ * `readonly` property that is also a stored field reports the conflict, not
+ * `protocol-property-readonly-set`. Then every key the block provides is
+ * checked (Appendix A's example emits these in this order): unknown member,
+ * then `set` on a `readonly` property, then the signature. The completeness
+ * check comes last, so a misspelled member reports the misspelling rather than
+ * the hole it leaves.
  *
  * A HOST callback ({@link JSImplementation}) carries no signature the engine
  * can read and is TRUSTED, like a host-declared operator handler: it takes
@@ -1473,6 +1805,25 @@ function implementationProblem(
 ): ImplementationProblem | null {
   const members = record.members;
   const memberNames = Object.keys(members);
+  // Which property requirements the target's stored fields answer on their own
+  // (Appendix B), read BEFORE the conditional widening below rewrites
+  // `target`. Two verdicts come out of it: a name declared as both a stored
+  // field and an explicit accessor is refused outright, and a name the fields
+  // satisfy is not a hole for the completeness check at the end.
+  const fieldBacked = fieldBackedProperties(ce, record, target, impl, params);
+  if (fieldBacked.conflicts.length > 0) {
+    const name = fieldBacked.conflicts[0]!;
+    const accessor = Object.prototype.hasOwnProperty.call(
+      impl,
+      `${GET_PREFIX}${name}`
+    )
+      ? 'get'
+      : 'set';
+    return {
+      code: 'object-property-conflict',
+      message: `\`${name}\` is a stored field of \`${typeToString(target)}\` and also has an explicit \`${accessor}\` accessor in this implementation of \`${record.name}\`. A property is field-backed or computed, never both — drop the accessor, or rename the stored field.`,
+    };
+  }
   // How `Self` is SPELLED in this block's diagnostics: the target's own key, or
   // — for a conditional conformance — its head pattern alone (the key also
   // carries the clause, which is not part of the type).
@@ -1709,6 +2060,9 @@ function implementationProblem(
       if (!has(member)) missing.push(member);
       continue;
     }
+    // A property a stored field of the target answers needs no accessor at
+    // all: the engine synthesizes both halves for it.
+    if (fieldBacked.satisfied.has(member)) continue;
     if (!has(`${GET_PREFIX}${member}`)) missing.push(`get ${member}`);
     if (kind === 'readwrite' && !has(`${SET_PREFIX}${member}`))
       missing.push(`set ${member}`);
@@ -1803,7 +2157,11 @@ export function declareProtocolImplementationImpl(
       ? typeToString(target)
       : `${typeToString(target)} where ${clauseToString(params)}`;
   const existing = record.conformances.find((c) => c.targetKey === targetKey);
-  if (existing?.impl !== undefined)
+  // What P5 refuses to replace is an implementation somebody WROTE — an
+  // AUTHORED block, empty or not. An edge carrying nothing but the accessors
+  // the engine synthesized for its stored fields (Appendix B) has no author to
+  // displace, so a host implementation may still land on it.
+  if (existing?._authored !== undefined)
     throw Error(
       `protocol-implementation-duplicate: the type \`${targetKey}\` already has an implementation of the \`${protocolName}\` protocol`
     );
@@ -1861,22 +2219,28 @@ export function declareProtocolImplementationImpl(
   const restore = ce._protocolRegistryRollbackPoint();
 
   if (existing !== undefined) {
+    existing._authored = members;
     existing.impl = members;
-    existing.pending = false;
+    // The block was validated as complete above, but a property requirement it
+    // leaves to a stored field still needs its synthesized accessors installed
+    // before anything can dispatch to it (Appendix B).
+    existing.pending = !settleFieldBacking(ce, record, existing);
   } else {
     const edge: ConformanceRecord = {
       target,
       targetKey,
+      _authored: members,
       impl: members,
       pending: false,
       declaredByStatement: false,
     };
     if (params !== undefined) edge.where = params;
     record.conformances.push(edge);
+    edge.pending = !settleFieldBacking(ce, record, edge);
   }
   // The implementation may fulfil the impl-less edges of the target's
   // SUBTYPES, which inherit it.
-  refreshInheritedPending(record);
+  refreshInheritedPending(ce, record);
   // P16 — a conformance addition (and an implementation) invalidates cached
   // static-dispatch decisions: a `config` event, all axes.
   ce._noteStateEvent({ kind: 'config' });
@@ -3069,6 +3433,27 @@ function resolveProtocolProperty(
   };
 }
 
+/**
+ * Is the property `name`, on a receiver of type `receiver`, answered by an
+ * accessor the ENGINE synthesized from a stored field rather than by one an
+ * author wrote?
+ *
+ * Consulted only when a read has already declined, to tell "this conformance
+ * has no implementation" from "this field-backed property had no slot to
+ * load" — the two need opposite answers, an error and staying symbolic.
+ */
+function isFieldBackedProperty(
+  ce: IComputeEngine,
+  receiver: Type,
+  name: string,
+  only?: ProtocolRecord
+): boolean {
+  const resolved = resolveProtocolProperty(ce, receiver, name, only);
+  if (resolved.status !== 'found') return false;
+  const getter = resolved.edge.impl?.[`${GET_PREFIX}${name}`];
+  return getter !== undefined && isFieldBacked(getter);
+}
+
 /** `protocol-property-ambiguous`, the shared error value. */
 function ambiguousPropertyError(
   ce: IComputeEngine,
@@ -3138,6 +3523,17 @@ export function evaluateProtocolProperty(
 
   const getter = resolved.edge.impl?.[`${GET_PREFIX}${name}`];
   if (getter === undefined) return undefined;
+  // A FIELD-BACKED property is a slot load, and only an actual object value
+  // has slots. The receiver's static type is not enough to promise one: a
+  // nominal object type is a DECIDED type, so a declared-but-unassigned
+  // binding, or a call that stayed symbolic, reaches here typed `Person` while
+  // its value is a symbol. Loading the slot directly — rather than through the
+  // host callback, whose `undefined` the boxing layer would turn into
+  // `Nothing` — lets both that case and a name the instance has no slot for
+  // stay SYMBOLIC, which is what every other undecided receiver does. The load
+  // records the per-object cache dependency, exactly as a `Field` read does.
+  if (isFieldBacked(getter))
+    return isObject(base) ? base._field(getter._fieldBacked) : undefined;
   return invokeImplementation(ce, getter, [base], options);
 }
 
@@ -3205,10 +3601,24 @@ export function evaluateProtocolPropertyOperator(
     // receiver with no implementation is the missing-implementation error.
     if (!parts.base.isValid) return undefined;
     if (!isDecidedReceiverType(parts.base.type.type)) return undefined;
-    return (
-      evaluateProtocolProperty(ce, parts.base, parts.name, options, record) ??
-      missingPropertyError(ce, parts.base, parts.name, record)
+    const read = evaluateProtocolProperty(
+      ce,
+      parts.base,
+      parts.name,
+      options,
+      record
     );
+    if (read !== undefined) return read;
+    // The read declined. For a FIELD-BACKED property that means the receiver
+    // never produced the slot to load — its static type is the object type
+    // (decided, so resolution committed) while its VALUE is still a symbol, or
+    // the instance carries no such slot. Nothing is wrong with the conformance
+    // in either case, so the call stays SYMBOLIC, exactly as an undecided
+    // receiver does above; reporting a missing implementation would be a
+    // verdict on a conformance that is in fact complete.
+    if (isFieldBackedProperty(ce, parts.base.type.type, parts.name, record))
+      return undefined;
+    return missingPropertyError(ce, parts.base, parts.name, record);
   }
 
   // The SET half. `readonly` is refused at canonicalization (P2), so reaching
@@ -3258,6 +3668,12 @@ export function evaluateProtocolPropertyOperator(
   // refused here rather than passed on. Read off the WINNING record, which the
   // P41 fallback above may have changed.
   const winner = best[0]!;
+  // The write half of the field-backed slot rule the READ path applies (see
+  // {@link evaluateProtocolProperty}): a slot store needs an actual object,
+  // and the receiver's static type does not promise one. A receiver that did
+  // not evaluate to an object leaves the write SYMBOLIC rather than reporting
+  // a missing implementation for a conformance that is in fact complete.
+  if (isFieldBacked(winner.impl) && !isObject(base)) return undefined;
   const declared = winner.record.members[parts.name];
   const refused =
     declared === undefined || declared.kind === 'function'
