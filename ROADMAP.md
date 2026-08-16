@@ -243,7 +243,7 @@ bound EXPRESSION reads `int(floor(float(K) + -1.0))`. Known limit, documented
 at `gpuDeclaredIsIntegerScalar`: the conversion loses precision above 2^24.
 Pins: `test/compute-engine/tycho-item-191-gpu-loop-bound-typing.test.ts`.
 
-### `defineFunctionClause` may write through to a builtin instead of shadowing it
+### `defineFunctionClause` may write through to a builtin instead of shadowing it (REFUTED 2026-08-16 — probed, does not reproduce)
 
 Flagged during the nested-`DefineFunction` block-local fix (2026-08-15):
 in `src/compute-engine/multi-clause.ts`, when the existing binding is a
@@ -257,6 +257,36 @@ builtin-name single-clause case; needs a probe (define one clause named
 after a builtin, check the system scope's binding is untouched) and, if
 it reproduces, the same shadowing-declare treatment the dispatcher path
 uses.
+
+**REFUTED 2026-08-16.** The probe was written and it does not reproduce.
+Defining a one-clause function named after a builtin — at top level and
+block-locally, over operator-bound builtins (`Sin`, `Abs`, `Length`) and
+value-bound ones (`Pi`, `ExponentialE`) — leaves the system scope's definition
+record the very same object, and the builtin still answers correctly outside
+the block while the clause answers inside it.
+
+**Why, measured rather than reasoned:** by the time `defineFunctionClause`
+runs, the current scope ALREADY holds its own binding for the name, and
+`existing` is never the system-scope definition. So `ce.assign` never has the
+builtin in reach, and the `isBuiltin` branch that clears `existing` is not the
+operative protection on this route at all — the concern assumed a resolution
+order that does not occur.
+
+The protection is LAYERED, which is the part worth recording: the
+unconditional `DefineFunction` hoist (`control-structures.ts`), the
+recursion-knot pre-shadow shell (`core.ts`), and `assign`'s own
+`shadowBuiltin` test (`engine-declarations.ts`) each independently put a
+current-scope binding in the way. Disabling any ONE of the three leaves the
+builtin intact, verified by disabling each in turn.
+
+The contrast with the protocol dispatcher — which genuinely did need
+`declareShadowingFunction` — also resolves: a dispatcher lives in the GLOBAL
+scope, so none of the builtin-specific layers apply to it.
+
+Pinned in `test/compute-engine/block-scope-shadowing.test.ts`. That test is an
+END-TO-END behavior pin, NOT a guard pin: because the layers are redundant it
+does not fail when a single one is removed, and it should not be read as
+evidence that any particular layer is load-bearing.
 
 ### Quadrature-dependent compile tests can be silently vacated by a smarter fold
 
