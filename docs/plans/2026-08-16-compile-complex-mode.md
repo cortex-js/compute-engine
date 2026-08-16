@@ -1,7 +1,8 @@
 # Compile-time complex arithmetic as a MODE, not a per-node guess
 
-Status: DESIGN, revision 4 (2026-08-16). Not started. This is the draft
-intended for the Tycho team (via CE-POC); §10 lists what is asked of them.
+Status: DESIGN, revision 5 (2026-08-16). Not started. Rev 4 was read by
+the Tycho team (via CE-POC); rev 5 folds their three requirements and one
+design limit (marked **[field]**); §10 lists what is still asked of them.
 Review history: `docs/scratch/2026-08-16-compile-complex-mode_SPEC_REVIEW.md`
 (two dual-review rounds, 28 findings, all folded in). Field data from Tycho
 against the released 0.113.0 (relayed by CE-POC 2026-08-16) is folded in
@@ -20,10 +21,13 @@ refuses).
 Retires the `complexPromotion` and `realOnly` options and closes the class
 behind Tycho items 57, 58, 60, 65, 148, 190, the heterogeneous-`At` element
 analysis, the complex-ARGUMENT lane specialization (`_fn_b$z1`), the
-emitted-body frame leak, and these still-open ROADMAP entries: "A combiner
-callback (`Reduce`/`Scan`) whose ACCUMULATOR turns complex mid-fold compiles
-silently wrong" (compiled route; its `.N()` surface was fixed 2026-08-16),
-"A MULTI-CLAUSE function with a declared `complex` parameter compiles
+emitted-body frame leak, and these ROADMAP entries: "A combiner callback (`Reduce`/`Scan`)
+whose ACCUMULATOR turns complex mid-fold compiles silently wrong" — FIXED
+2026-08-16 ahead of this design by `combinerPlan` (one-step widening of the
+accumulator lane, seed lift, typed eta for a bare combiner, complex-lane
+builtin combiners), which is the §3 accumulator row implemented on the
+current per-node compiler and carries over unchanged — "A MULTI-CLAUSE
+function with a declared `complex` parameter compiles
 silently wrong", "A protocol MEMBER whose parameter is declared `complex` is
 handed the argument unwrapped", "Complex values in compiled scalar
 comparisons (deferred 2026-07-22)". Every one is the same defect shape (§1).
@@ -56,10 +60,29 @@ is a new silent-wrong until someone finds it; four are open today. This is
 one design property, not a series of bugs.
 
 **[field] The consumer's view of the same problem is unpredictability, not
-wrong numbers per se.** Tycho reports 14 ordering-comparison declines across
-their corpus once `complexPromotion` is enabled, and reads them as "14 places
-where a user cannot tell from reading their own formula whether it will
-compile — that's the disease, not the price of the cure". A user-visible
+wrong numbers per se.** Tycho's corpus census, with `complexPromotion`
+enabled, counts ordering-comparison declines — **14 on 0.111.0 (the pricing
+run filed with us), 15 on the 0.112.0 re-run (14 `LessEqual` + 1 `Less`);
+0.113.0 is unmeasured** — and reads them as "places where a user cannot tell
+from reading their own formula whether it will compile — that's the disease,
+not the price of the cure". The class is independently reproduced on a bare
+engine (`2·w(t)`, `w(t)+1`, `w(t)/2` decline under promotion while the
+indexed read compiles; the default path is verified correct at both domain
+ends). The expressions themselves arrive with the corpus re-run (§10).
+
+**Two kinds of decline, which the same census also shows [field].** The
+0.112.0 re-run reports 28 losses: the 15 ordering comparisons, 4 list-valued
+operands (a residue of 9 fixed in 0.112.0), and 9 NEW fail-closed declines —
+`Floor` ×5, `Ceil` ×2, `Mod` ×1, `Max` ×1 — that WITHDRAW a compiled `NaN`.
+Those nine are the good kind: a wrong value retracted, not a capability
+lost. So a raw decline count is not a cost figure, and this design must keep
+the two apart everywhere it reports one: a **capability decline** is a
+compilable thing that stops compiling (the ordering comparisons — what D2
+fixes); a **correctness decline** is a wrong value withdrawn (the `Floor`
+nine today; every `LaneMismatch` in `strict` mode). `strict` mode produces
+both kinds by design; `auto` turns the correctness ones into escalations and
+D2 removes the capability ones. A reader who prices the second kind as
+regression has priced the fix as a bug. A user-visible
 contract that says WHEN a formula compiles and what shape it computes in is
 the deliverable; the comparison story (D2) is therefore primary, not a side
 condition.
@@ -215,7 +238,7 @@ are grounded, not sketched. The `auto` column also shows `result.mode`.
 | `b(a)`           | `_fn_b(_.a)`, `_fn_b = (x) => 2 * x`  | same                                              | same — `mode: 'strict'`                                                       | `_fn_b(_.a)`, `_fn_b = (x) => cmul(2, cplx(x))`       | `−4` (complex mode: `number` at the boundary) |
 | `b(√a)`          | `_fn_b(Math.sqrt(_.a))` (`NaN` for negative `a`) | same (`NaN`; no promotion, no mismatch)   | promoted `√a` meets wide `x` → `LaneMismatch` → ESCALATES — `mode: 'complex'`, `escalation.boundary = 'user-function parameter'` | `_fn_b(_SYS.csqrt(cplx(_.a)))`, complex-lane `_fn_b` | real: `NaN`; auto/complex: `{re: 0, im: 2.828…}` |
 | `b(z)`           | `_fn_b$z1(_.z)` (the 2026-08-15 lane specialization) | `LaneMismatch` DECLINE — "complex-shaped `z` bound to wide parameter `x` of `b`; declare `x` complex or compile with `mode: 'complex'`" (GLSL declines the same call today) | ESCALATES — `mode: 'complex'` | `_fn_b(_.z)`, complex-lane `_fn_b`          | real: declined; auto/complex: `{re: 2, im: 4}` |
-| `√a < 2`         | `Math.sqrt(_.a) < 2`                  | same (`false` for negative `a`: `NaN < 2`)        | promoted operand → D2 runtime rule: `(_t = csqrt(…), _t.im === 0 && _t.re < 2)` — `mode: 'strict'`; today's `complexPromotion` DECLINES this (Tycho's 14) | same runtime rule                          | real: `false`; auto/complex: `false` — and `true` at `a = 1` in all |
+| `√a < 2`         | `Math.sqrt(_.a) < 2`                  | same (`false` for negative `a`: `NaN < 2`)        | promoted operand → D2 runtime rule: `(_t = csqrt(…), _t.im === 0 && _t.re < 2)` — `mode: 'strict'`; today's `complexPromotion` DECLINES this (Tycho's ordering-decline class) | same runtime rule                          | real: `false`; auto/complex: `false` — and `true` at `a = 1` in all |
 | `i < 2`          | declines                              | declines (statically non-real, D2)                | declines                                                                   | declines                                              | —                                           |
 | `a < 3`          | `_.a < 3`                             | same                                              | same                                                                       | `_t = cplx(_.a); _t.im === 0 && _t.re < 3` (D2)       | `true`                                      |
 | `Reduce(L, (p, x) ↦ p + 2x, 0)` | compiled `p + 2x` real-lane: `"[object Object]0"` (open defect) | seed `0` real, combiner RESULT complex-shaped → `LaneMismatch` DECLINE at the accumulator | ESCALATES — `mode: 'complex'` | accumulator complex; correct                | auto/complex: `2 + 6i` for `L = [1+2i, i]`  |
@@ -256,6 +279,50 @@ knows:
   accumulator — each is a place where a complex-shaped value can arrive and
   the compiler cannot know it statically. Those are exactly the §3 rows.
 
+**The lever has a floor, and it is not laziness [field] — scoped, on
+Tycho's own investigation, to FUNCTION PARAMETERS.** Their seam declares
+parameter shadows as `any` on purpose (`paramShadowType`): a shadow declared
+`unknown` gets usage-narrowed by the engine (`b` reads `matrix` in
+`(b−c)/distance(c,b)³`), whereas an `any` shadow stays `any` — the
+free-symbol CONTRACT spelling, a classification-phase concern. Compilation is
+separable from it: a type-only declaration made in a pushed scope (box and
+compile inside, `popScope` in `finally`) provably does not leak back — they
+measured it, and already do it in two places. So DOCUMENT VARIABLES —
+sliders, point-controller components, solver pseudo-definitions, each a JS
+number at run time and none `assign`ed on the engine — are narrowable to
+`real`, which is exactly their runtime contract; what is NOT narrowable is a
+lambda / user-function parameter (where `paramShadowType` genuinely binds)
+and a list's element type (none exists at their plot-compile seam). A
+type-only declaration leaves `.unknowns` and `freeSymbols` byte-identical
+(only a value-binding declaration removes the name — the reason they had
+left variables undeclared was a stale comment, refuted by measurement), so
+the change is cheap to land and cheap to revert, and its payoff today is
+exactly zero: undeclared, `any`, `unknown`, `real` and `number` all compile
+identically now. The whole value is forward-looking against `auto`'s
+wide-binding escalation, which is the honest way to frame the ask. A corpus
+count of wide bindings must still separate "a declaration would have
+narrowed this" (document variables — actionable) from "deliberately wide"
+(parameters — a real cost of `auto` that the design accepts and §4's
+observability explains); `strict`'s refusal and `auto`'s escalation on a
+deliberately-wide binding are correct behavior, not misconfiguration.
+
+**Two cautions for the guide's recommendation [field]:**
+- **Narrowing does not monotonically reduce complex-shapedness.** `√a`
+  types `finite_number` for `a` undeclared, `number`, `any` or `unknown`,
+  and `finite_complex` for `a: real` — narrowing moved the REASON the value
+  may be complex from "unknown operand" to "known-real operand of unknown
+  sign", it did not remove it. That is exactly §2's rule (a radical of an
+  unknown-sign real promotes under `auto`), but a reader of "declare the
+  narrowest type you can" will expect narrowing to reduce promotion, and
+  for the promotable heads it does not — it reduces MISMATCHES and lifts,
+  never promotions. Say so plainly.
+- **Never narrow a name that shadows an outer `assign` or a registered
+  definition head.** Their measurement: declaring such a name returns
+  `success: true` with the name in `freeSymbols` and `run()` yielding `NaN`
+  — no error channel on either side. The narrowed set must exclude every
+  assigned name and every definition head; the recommendation carries that
+  exclusion.
+
 So the practical guidance for the guide (`doc/13-guide-compile.md`) is:
 under `strict`, narrow types turn refusals into compiles; under `auto`,
 narrow types turn escalations (a whole-compilation switch to the complex
@@ -286,7 +353,7 @@ includes promoted heads); "wide" means a numeric binding not typed complex;
 | recursive self-call                                             | falls out of the parameter rule                                       | falls out                                                | falls out                                     |
 | `Block` local (`Declare`/`Assign`, later mutation)              | a local's shape is its FIRST binding's shape (`noteLocalComplex`); a later complex-shaped assignment to a real-shaped local DECLINES | `Declare(z, complex, 2)` and a later real assignment to a complex local lift | lift at use |
 | callback element parameter (`Map`/`Filter`/…)                   | element type complex → parameter complex (today's element inference); a wide parameter over a complex-typed source DECLINES | a real element of a typed-complex collection lifts at the read | lift at use |
-| `Reduce`/`Scan` accumulator                                     | accumulator shape = seed shape; a complex-shaped combiner RESULT into a real-shaped accumulator DECLINES (closes the open ROADMAP entry) | a real seed to a complex-typed accumulator lifts | lift at use            |
+| `Reduce`/`Scan` accumulator                                     | IMPLEMENTED 2026-08-16 (`combinerPlan`): the accumulator lane is the seed's, widened once by the body's result; the combiner is compiled under that lane, and a real seed into a complex lane is lifted — so this row never mismatches: it is the one boundary that already computes both lanes correctly | a real seed to a complex accumulator lane lifts (`_SYS.cplx`) | as implemented |
 | collection element (`List`/`Tuple` literal, `At`)               | element-by-element as today; an `At` whose element shapes DISAGREE declines as today (`assertNoAmbiguousComplexElementRead`) | a real element read as complex lifts | every wide element lifts at use               |
 | `Which`/`If` arms                                               | today's arm coercion (item 60): a provably-real arm beside a complex one is lifted; unchanged | unchanged                             | unchanged                                     |
 | result of the compiled unit                                     | typed/promoted complex → `{re, im}`; boolean → boolean; number → number | —                                                       | §5 convention                                 |
@@ -307,6 +374,20 @@ includes promoted heads); "wide" means a numeric binding not typed complex;
 - **Observability [field requirement]:** `CompilationResult` gains
   `mode: 'strict' | 'complex'` (the mode actually used) and, when `auto`
   escalated, `escalation: { boundary, binding, value }` — the payload above.
+  **`binding` is USER-LEGIBLE by contract [field]:** it names an AUTHORED
+  identifier (the parameter `x` of `b`, the local `k`, the symbol `w`), or,
+  where the binding has no authored name, an honest description of an
+  unnamed one ("an unnamed parameter of `b`", "the accumulator of the
+  `Reduce`", "element 2 of the list") — never a compiler-internal spelling
+  (`_t3`, `_tv1`, `_fn_b`). The consumer's seam calls `compile` per row, so
+  it already knows WHICH row; what it cannot reconstruct is a name a user
+  recognizes, and "your document moved to the CPU because of `_t3`" is
+  worse than saying nothing. Row identity is therefore NOT part of the
+  payload. Every decline this design emits — `LaneMismatch`, the D2
+  compile-time decline for a statically non-real operand, and the existing
+  fail-closed declines it keeps — also carries `kind: 'capability' |
+  'correctness'` (§1's distinction), so a consumer's census can count the
+  two apart without re-cutting a taxonomy after the fact.
   A decline that is NOT escalated (strict mode forced; a target that offers no
   complex mode) surfaces the same payload in `result.error`. A consumer can
   say "this went the slow way, and here is why", and — for a consumer whose
@@ -324,7 +405,14 @@ includes promoted heads); "wide" means a numeric binding not typed complex;
   compilations through that target.
 - **Result convention (JavaScript runner): a value whose imaginary part is
   EXACTLY zero comes back as a plain `number`; otherwise as `{re, im}`
-  (`ComplexResult`).** No chop at the boundary — ARCHITECTURE.md's rule
+  (`ComplexResult`) — and, as a GUARANTEE in both directions [field]: a
+  returned `ComplexResult` always has `im !== 0`, and a real value is never
+  returned as `{re, im: 0}`, so a consumer's per-sample test is the single
+  `typeof v === 'number'` and never a two-shape check.** (Accepted by Tycho
+  as the replacement for `realOnly: true`, and preferred: today `realOnly`
+  returns `NaN` for an out-of-domain sample; the object with a non-zero
+  imaginary part lets a sampler tell "outside the real domain" from
+  "genuinely `NaN`", which it cannot today.) No chop at the boundary — ARCHITECTURE.md's rule
   ("never chop in ring arithmetic or constructors": `1 + 1e-12i` is
   legitimate) — so the roundoff dust of the transcendental kernels is
   removed WHERE IT IS CREATED: the `_SYS` complex kernels (`casin`, `cacos`,
@@ -402,7 +490,13 @@ provable-real fraction (§10) before committing.
 
 ## 8. Decisions
 
-**D1 — cost.** [field] The 4.7% "documents declaring complex" figure is
+**D1 — cost.** [field] A caveat on Tycho's complex-usage figures when they
+arrive: in `skz0syspxp`, `S_n(x, n_0) = ∏_{i=1}^{n_0}(…) + (1 − i/n_0) + …`
+has trailing `i` terms that Desmos scopes to the product and CE does not,
+so they box as the imaginary unit — a big-operator scoping divergence in
+their seam, not a user writing complex arithmetic. Such sightings must be
+subtracted before a raw complex-sighting count is read as demand for the
+mode. The 4.7% "documents declaring complex" figure is
 withdrawn: the mode is not keyed on the switch, so the cost potentially
 applies to every document; what bounds it is the fraction of chains `auto`
 can keep in strict mode (no promotable head, no mismatch). Recorded numbers:
@@ -434,8 +528,11 @@ compile-time cost is the second compile on escalation.
   is non-zero (exact test — the kernels own their dust, §5); relational
   chains keep their short-circuit order.
 - in strict mode nothing changes.
-Expected effect [field]: Tycho's 14 ordering declines under promotion
-(`{y > \sqrt{x}}`-shaped restrictions) → 0, to be verified on the corpus.
+Expected effect [field]: Tycho's ordering-comparison declines under
+promotion (`{y > \sqrt{x}}`-shaped restrictions; 15 measured on 0.112.0,
+0.113.0 unmeasured) → 0, to be verified on the extracted set — the verification is "the runtime
+rule covers every one of them", which does not depend on knowing the count
+in advance.
 Rationale, corrected: the loud compile-time failure is kept where the
 expression is CERTAINLY meaningless. The interpreter does not throw on `i <
 2` — it returns the comparison unevaluated; compiled code has no symbolic
@@ -557,6 +654,25 @@ noted):
   'strict'` and `{re: 0, im: 1}` under `auto`.
 - **Result convention:** `arcsin(0.5)` → the number `0.5235…`; `1 + 1e-12i`
   → `{re: 1, im: 1e-12}`; `x < 3` → `true` in every mode.
+- **D2 corpus block [field]** — Tycho's band census on 0.113.0
+  (`docs/scratch/2026-08-16-band-census-0113.json` in the Tycho repo, 8,282
+  slots / 687 states, per-slot LaTeX + reason + state ID; the 15/9/4 split
+  reproduces 0.112.0 exactly): 15 capability declines collapsing to ~9
+  DISTINCT forms (`r ≥ √(1+9cos²1.1θ)` and `r ≤ 1/√(1−|cosθ|sinθ)` recur
+  across three states) — the regression block is built on the distinct
+  forms with the state IDs as provenance, from the file's exact strings.
+  Two forms are the ones that test D2's generality and are stated here as
+  explicit requirements: (i) `y·ln(y) − y ≥ −x²` (`gujemeosra`) — a `Ln`
+  promotion, not a radical: the runtime rule keys on the operand's
+  complex-shapedness through `isComplexValued`, which is head-general, and
+  the D2 witness list must include a `Ln` form; (ii) `mod((√(x²+y²) −
+  √(9.81k)·t)·k, 2π) ≤ 1` (`dzrqmexxik`) — the promoted value is NESTED
+  below the comparison, under `Mod`: D2 is satisfied because `Mod`'s own
+  D2 rule makes its result real-or-`NaN`, so the comparison's operand is
+  real; the requirement is that the rule apply to every head on the path,
+  never only to the comparison's immediate operand ("the operand may be
+  complex" and "the operand may CONTAIN a promoted value" are different
+  predicates, and the second is the one that holds).
 - **D2:** `Less(i, 2)`, `Floor(2i)` decline at compile time in every mode;
   `Less(z, 2)` for `z: complex` compiles and yields `true` at `z = 1`,
   `false` at `z = i`; `y > √x` compiles under `auto` and yields `false`
@@ -581,7 +697,10 @@ noted):
 ## 10. What is asked of the Tycho team (via CE-POC)
 
 Two measurements on the real 687-document corpus, which they have offered
-to run once this draft is stable — this is that draft:
+to run once this draft is stable — this is that draft. **The corpus window
+is the critical path** if this workstream lands in the held release: it
+gates the D2 corpus block (5), the provable-real fraction (1) and §7's cost
+(2), all three.
 1. **The fraction of chains `auto` keeps in strict mode** (no promotable head,
    no lane mismatch), and separately the fraction that PROMOTES without
    escalating and the fraction that ESCALATES. This bounds D1 and decides
@@ -590,19 +709,20 @@ to run once this draft is stable — this is that draft:
    mixes a promoted/escalated row with GLSL-heavy rows.
 
 And three questions:
-3. Is the §4 payload (`mode`, `escalation.{boundary, binding, value}`)
-   sufficient for the seam to act document-wide and to explain the fallback
-   to a user?
-4. Is the §5 result convention (`number` when the imaginary part is exactly
-   zero, `{re, im}` otherwise, dust removed in the kernels) an acceptable
-   replacement for `realOnly: true`?
-5. Does D2's runtime rule cover every one of the 14 declines (send the 14
-   expressions; they become the regression suite's D2 corpus block)?
-6. §2.2 is a lever on their side that improves every setting: which
-   identifiers does the seam already know the type of at declaration time
-   (sliders and free variables are real; the complex-mode seed is complex;
-   list-valued definitions have an element type)? Every one declared
-   narrowly is one less wide binding — fewer escalations under `auto`, fewer
-   refusals under `strict`, more real-kernel code under `complex`. If the
-   corpus pass can also count "wide bindings that a declaration would have
-   narrowed", that number is the cheapest performance win available.
+3. ANSWERED (rev 4 read): the payload is sufficient to ACT provided
+   `binding` is user-legible (now a §4 contract); row identity is not
+   needed.
+4. ANSWERED: the result convention is accepted, with the two-direction
+   guarantee now stated in §5.
+5. IN PROGRESS: the ordering-comparison decline expressions arrive as a
+   block once the census is re-run with its new per-slot `--out` dump (full
+   LaTeX and reason per loss/gain/move, state IDs attached) in the corpus
+   window;
+   they become the regression suite's D2 corpus block, sized by what
+   arrives, and the verification "the runtime rule covers every one" is
+   done on our side. No cardinality is claimed until then.
+6. PARTLY ANSWERED: sliders and free variables are real, the complex-mode
+   seed is complex, list-valued definitions have an element type — real
+   wins; parameter shadows are DELIBERATELY `any` (§2.2's floor). The
+   corpus pass will count actionable wide bindings separately from
+   deliberate ones; only the first number is a lever.

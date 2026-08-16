@@ -223,8 +223,7 @@ export class BoxedString extends _BoxedExpression implements StringInterface {
     // cannot be an element of a string. A multi-cluster needle is not a
     // cluster of this string, so `includes` on the cluster array correctly
     // returns false (this is membership, not `StringContains`).
-    const needle =
-      isCharacter(rhs) || isString(rhs) ? rhs.string : undefined;
+    const needle = isCharacter(rhs) || isString(rhs) ? rhs.string : undefined;
     if (needle === undefined) return false;
     return this.graphemes.includes(needle);
   }

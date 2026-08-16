@@ -1156,7 +1156,11 @@ function differentiateNode(
   // Undefined at `v = 0`, exactly as the scalar rule is undefined at 0.
   // Verified numerically against a central difference, including a complex
   // component, before landing.
-  if (expr.operator === 'Abs' && expr.nops === 1 && expr.op1.isNumber !== true) {
+  if (
+    expr.operator === 'Abs' &&
+    expr.nops === 1 &&
+    expr.op1.isNumber !== true
+  ) {
     // A norm that does not mention `v` is constant in `v`, whatever its
     // components are — including an opaque operand this rule cannot take
     // apart. Answering `0` here matters because it is what the code did

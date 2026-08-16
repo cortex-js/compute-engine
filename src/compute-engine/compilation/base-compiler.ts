@@ -7636,6 +7636,22 @@ export class BaseCompiler {
     // unknown-sign `√(t−1)` types `finite_number`, which is neither non-real
     // (so the `isNonRealNumber` arm never fires) nor `real`. See
     // `promotesRadicalToComplex`.
+    // A fold's value is its ACCUMULATOR lane (`combinerPlan`): the parent
+    // must agree with what the emitted `reduce` hands back, or `Reduce(L, h,
+    // 0) + 1` adds a number to the `{re, im}` the fold produced (`"[object
+    // Object]1"`). A `Scan`'s elements are all in that lane, so the
+    // whole-list verdict is the same answer. A builtin combiner (`Add`, …)
+    // folds in the elements' lane, widened by a complex seed.
+    if (
+      (expr.operator === 'Reduce' || expr.operator === 'Scan') &&
+      expr.ops.length >= 2
+    ) {
+      const [coll, op, init] = expr.ops;
+      const plan = BaseCompiler.combinerPlan(coll, op, init);
+      if (plan !== undefined) return plan.accComplex;
+      if (isSymbol(op) && BaseCompiler.BUILTIN_FOLD_HEADS.has(op.symbol))
+        return BaseCompiler.foldLaneIsComplex(coll, init);
+    }
     if (BaseCompiler._complexPromotion) {
       if (BaseCompiler.promotesRadicalToComplex(expr.operator, expr.ops))
         return true;
@@ -10406,64 +10422,180 @@ export class BaseCompiler {
   }
 
   /**
-   * Would this fold's ACCUMULATOR have to widen to complex part-way through,
-   * while its seed is real? That is the shape the combiner lowering compiles
-   * silently wrong, and the interim fail-closed gate (ruled 2026-08-16) keys
-   * on it.
+   * The compile plan for a CUSTOM `(accumulator, element)` combiner of a
+   * `Reduce`/`Scan`: which lanes its two parameters run in, whether the seed
+   * must be lifted, and the combiner expression to compile.
    *
-   * Two lanes flow through a combiner: the ELEMENT lane and the ACCUMULATOR
-   * lane. Only the first is reasoned about. When the seed is real and the
-   * body's result is complex, the emitted `reduce` seeds a number and then
-   * adds `{re, im}` objects to it, so the accumulator is a number on the first
-   * step and an object afterwards — `Reduce(L, (a,x) ↦ a + 2x, 0)` over
-   * `[1+2i, i]` answered `{re: "[object Object]0", im: 2}` behind
-   * `success: true`, where the interpreter gives `2+6i`.
+   * Two lanes flow through a combiner. The ELEMENT lane is the source's: a
+   * `list<complex>` (or a literal list of complex scalars) hands the body a
+   * `{re, im}` per step. The ACCUMULATOR lane is the fold's own: it is the
+   * SEED's shape on the first step (or the first element's, for a seedless
+   * `Scan`), and it WIDENS to complex the moment the body yields a complex
+   * value. Before this plan existed only the element lane was reasoned about
+   * (by the type system's element inference on an inline lambda, and not at
+   * all for a bare function symbol), so every accumulator shape compiled the
+   * accumulator as a plain number — `Reduce([1+2i, i], (a,x) ↦ a + 2x, 0)`
+   * answered `{re: "[object Object]0", im: 2}` (`a + {re, im}` concatenates)
+   * where the interpreter gives `2 + 6i`; a COMPLEX seed `1+i` was no better
+   * (`3 + 7i` expected); a seedless `Scan` over complex elements the same;
+   * and a bare `h(a,x) := a + 2x` as combiner reached the real-lane `_fn_h`
+   * and answered `NaN`. An interim fail-closed gate covered only the first
+   * shape; ruled 2026-08-16 (Arno) to land the real fix instead.
    *
-   * The test is the BODY's complexness under the fold's own lanes, never the
-   * element type alone: `Reduce(L, (a,x) ↦ a + |x|, 0)` over the same complex
-   * `L` is CORRECT and must keep compiling, because `|x|` is real and the
-   * accumulator never widens. So the body is analyzed with the element
-   * parameter bound complex and the accumulator parameter left real — exactly
-   * the lanes the emitted fold would run — and only a complex RESULT declines.
+   * The plan:
+   * - `eltComplex`: every element is a complex scalar
+   *   (`hasUniformComplexScalarElements`).
+   * - `accComplex`: the accumulator lane, by ONE-STEP WIDENING — complex when
+   *   the accumulator parameter is DECLARED complex, or the seed is
+   *   complex-shaped, or the fold is seedless over complex elements, or the
+   *   body's result is complex when analyzed with the element in its lane and
+   *   the accumulator real (the state of the first step). Widening is
+   *   monotone, so one re-analysis settles it.
+   * - `coerceSeed`: a real seed into a complex accumulator lane is lifted to
+   *   `{re, im: 0}` (the call-boundary convention `coerceToComplex` applies
+   *   to a real argument bound to a complex-typed parameter).
+   * - `op`: the combiner to compile. An inline lambda is compiled under a
+   *   local shape frame binding its two parameters to their lanes; a bare
+   *   user-function symbol whose lanes are complex is replaced by its
+   *   eta-expansion `(_a: complex?, _x: complex?) ↦ h(_a, _x)`, whose call
+   *   site then takes the function's complex-lane emission (`_fn_h$z11`) —
+   *   the same route `complexElementCallbackEta` uses for `Map`. A bare
+   *   symbol with both lanes real is returned unchanged.
    *
-   * Scope is deliberately the INLINE lambda, matching the ruling. A bare
-   * function SYMBOL combiner reaches the same defect (measured: it compiles
-   * and answers NaN behind `success: true`, contrary to the premise the ruling
-   * was given), but widening how much compilation is refused is a product call
-   * — see the ROADMAP entry. Extending this to that shape is a matter of
-   * accepting a non-literal `op` here.
+   * `undefined` when `op` is not a two-parameter combiner this analysis can
+   * see (a builtin, an infix operator symbol, a multi-clause function): the
+   * caller keeps its previous lowering for those.
    */
-  static reduceAccumulatorWidens(
+  /** The builtin combiners the JavaScript target folds with natively
+   * (`builtinCombiner` in `javascript-target.ts`); their fold runs in the
+   * elements' lane, widened by a complex seed. */
+  static readonly BUILTIN_FOLD_HEADS: ReadonlySet<string> = new Set([
+    'Add',
+    'Multiply',
+    'Min',
+    'Max',
+  ]);
+
+  /** Whether a BUILTIN fold over `coll` seeded with `init` runs in the complex
+   * lane: its elements are complex scalars, or its seed is complex-shaped. */
+  static foldLaneIsComplex(
+    coll: Expression,
+    init: Expression | undefined | null
+  ): boolean {
+    return (
+      BaseCompiler.hasUniformComplexScalarElements(coll) ||
+      (init !== undefined &&
+        init !== null &&
+        BaseCompiler.isComplexValued(init))
+    );
+  }
+
+  static combinerPlan(
     coll: Expression,
     op: Expression,
     init: Expression | undefined | null
-  ): boolean {
-    // A seedless fold takes its first ELEMENT as the seed, so the accumulator
-    // starts in the element's own lane and never widens mid-fold.
-    if (init === undefined || init === null) return false;
-    if (!BaseCompiler.isProvablyRealValued(init)) return false;
+  ):
+    | {
+        op: Expression;
+        accComplex: boolean;
+        eltComplex: boolean;
+        coerceSeed: boolean;
+      }
+    | undefined {
+    const literal = isSymbol(op)
+      ? BaseCompiler.userFunctionLiteral(op.engine, op.symbol)
+      : op;
+    if (literal === undefined) return undefined;
+    if (!isFunction(literal, 'Function') || literal.nops !== 3)
+      return undefined;
+    // A parameter spelled `_` (or a destructuring pattern) has no name to
+    // enter in a frame — `functionLiteralParameterName` answers `''` — but the
+    // OTHER lane still needs planning: `(a, _) ↦ a + i` widens its accumulator
+    // without ever naming the element. So an unnamed parameter is simply not
+    // framed; it is never a reason to abandon the plan.
+    const accName = functionLiteralParameterName(literal.ops[1]);
+    const eltName = functionLiteralParameterName(literal.ops[2]);
 
-    const elt = BaseCompiler.collectionElementTypeOf(coll);
-    if (elt === undefined || !isNonRealNumber(elt)) return false;
+    const eltComplex = BaseCompiler.hasUniformComplexScalarElements(coll);
+    const seedless = init === undefined || init === null;
+    const seedComplex = !seedless && BaseCompiler.isComplexValued(init);
+    const declared = accName
+      ? BaseCompiler.literalDeclaredParamTypes(literal)[accName]
+      : undefined;
+    const accTyped = declared !== undefined && isNonRealNumber(declared);
 
-    if (!isFunction(op, 'Function') || op.nops !== 3) return false;
-    const body = op.op1;
-    const accName = functionLiteralParameterName(op.ops[1]);
-    const eltName = functionLiteralParameterName(op.ops[2]);
-    if (!accName || !eltName) return false;
+    let accComplex = accTyped || seedComplex || (seedless && eltComplex);
+    if (!accComplex) {
+      // First-step state: element in its lane, accumulator real. A complex
+      // RESULT widens the accumulator from the second step on.
+      const complex = new Map<string, boolean>();
+      const vector = new Map<string, number>();
+      if (eltName) vector.set(eltName, BaseCompiler.LOCAL_SCALAR);
+      if (accName) vector.set(accName, BaseCompiler.LOCAL_SCALAR);
+      if (eltComplex && eltName) complex.set(eltName, true);
+      accComplex = BaseCompiler.withLocalShapeFrame(
+        complex,
+        vector,
+        () => BaseCompiler.isComplexValued(literal.op1),
+        true
+      );
+    }
+    const coerceSeed = accComplex && !seedless && !seedComplex;
 
-    // The element parameter is complex, the accumulator is not — the state the
-    // emitted fold is actually in on its first step.
-    const complex = new Map<string, boolean>([[eltName, true]]);
-    const vector = new Map<string, number>([
-      [eltName, BaseCompiler.LOCAL_SCALAR],
-      [accName, BaseCompiler.LOCAL_SCALAR],
-    ]);
-    return BaseCompiler.withLocalShapeFrame(
-      complex,
-      vector,
-      () => BaseCompiler.isComplexValued(body),
-      true
+    if (isSymbol(op)) {
+      if (!accComplex && !eltComplex)
+        return { op, accComplex, eltComplex, coerceSeed };
+      const engine = op.engine;
+      const eltType = BaseCompiler.collectionElementTypeOf(coll);
+      const eltTypeText =
+        eltType !== undefined && isNonRealNumber(eltType)
+          ? typeToString(eltType)
+          : 'complex';
+      const a = engine.symbol('_a');
+      const x = engine.symbol('_x');
+      const eta = engine.function('Function', [
+        engine.function(op.symbol, [a, x]),
+        accComplex
+          ? engine.function('Typed', [a, engine.box({ str: 'complex' })])
+          : a,
+        eltComplex
+          ? engine.function('Typed', [x, engine.box({ str: eltTypeText })])
+          : x,
+      ]);
+      return { op: eta, accComplex, eltComplex, coerceSeed };
+    }
+    return { op, accComplex, eltComplex, coerceSeed };
+  }
+
+  /**
+   * Compile an INLINE combiner lambda under the lanes `combinerPlan` chose:
+   * its accumulator and element parameters are entered in a local shape
+   * frame (complex where the lane is complex, scalar in either case), so the
+   * body's operand analysis — and therefore its emitted arithmetic — treats
+   * them as the values the fold actually passes. The frame STACKS on the
+   * enclosing ones (the lambda is lexically inside the fold's expression).
+   */
+  static compileCombinerLiteral(
+    plan: { op: Expression; accComplex: boolean; eltComplex: boolean },
+    compile: (e: Expression) => string
+  ): string {
+    const literal = plan.op;
+    if (!isFunction(literal, 'Function') || literal.nops !== 3)
+      return compile(literal);
+    const accName = functionLiteralParameterName(literal.ops[1]);
+    const eltName = functionLiteralParameterName(literal.ops[2]);
+    const complex = new Map<string, boolean>();
+    const vector = new Map<string, number>();
+    if (accName) {
+      vector.set(accName, BaseCompiler.LOCAL_SCALAR);
+      if (plan.accComplex) complex.set(accName, true);
+    }
+    if (eltName) {
+      vector.set(eltName, BaseCompiler.LOCAL_SCALAR);
+      if (plan.eltComplex) complex.set(eltName, true);
+    }
+    return BaseCompiler.withLocalShapeFrame(complex, vector, () =>
+      compile(literal)
     );
   }
 
@@ -11704,8 +11836,7 @@ export class BaseCompiler {
       // lowering either, and the value path refuses it identically.
       if (
         h === 'Assign' &&
-        (isFunction(ops[0], 'Field') ||
-          isFunction(ops[0], 'ProtocolProperty'))
+        (isFunction(ops[0], 'Field') || isFunction(ops[0], 'ProtocolProperty'))
       ) {
         unsupported.add(ops[0].operator);
         // The receiver is the LAST operand of either target shape.

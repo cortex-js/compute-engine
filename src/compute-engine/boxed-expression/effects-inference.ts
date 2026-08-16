@@ -1054,12 +1054,7 @@ class Walker {
           this.state.consultsRegistry = true;
           this.state.effects = unionEffectSets(
             this.state.effects,
-            protocolAccessorEffects(
-              this.ce,
-              store.name,
-              'set',
-              store.protocol
-            )
+            protocolAccessorEffects(this.ce, store.name, 'set', store.protocol)
           );
         }
       } else this.scopeWrite(expr, ctx, /* confinable */ true);

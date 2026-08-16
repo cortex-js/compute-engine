@@ -1913,7 +1913,7 @@ and child disagreeing on value SHAPE is the invariant compiled correctness
 rests on. This half is a short redo; it must land together with the emission
 half, never before it.
 
-### A combiner callback (`Reduce`/`Scan`) whose ACCUMULATOR turns complex mid-fold compiles silently wrong (INTERIM FAIL-CLOSED SHIPPED 2026-08-16; the real fix is the OPEN package below)
+### A combiner callback (`Reduce`/`Scan`) whose ACCUMULATOR turns complex mid-fold compiled silently wrong (FIXED 2026-08-16 — accumulator lane by one-step widening; the interim fail-closed gate is retired)
 
 Found while closing the "complex ARGUMENT to a user function" entry above.
 Two independent lanes flow through a combiner: the ELEMENT lane (the same
@@ -1943,21 +1943,13 @@ corrupts from the SECOND element on — `[{re:2,im:4}, {re:"[object Object]0",
 im:2}]` where the interpreter gives `[2+4i, 2+6i]` — the first element being
 right only because the seed has not yet met a complex value.
 
-**⚠️ THE BARE-SYMBOL ROW ABOVE IS NOT FAIL-CLOSED, contrary to the premise the
-ruling was given.** Re-measured at HEAD: `h(a,x) := a + 2x; Reduce(L, h, 0)`
-compiles with `success: true` and answers NaN — a silent miscompile of the same
-class, not a decline. The interim gate deliberately does NOT cover it, because
-widening how much compilation is refused is a product decision and the ruling
-enumerated its scope; extending the gate is a matter of accepting a
-non-literal combiner in `reduceAccumulatorWidens`. **This shape still ships
-silently wrong and needs a ruling.**
+**The bare-symbol row is covered by the resolution above** (it was measured
+at HEAD as `NaN` behind `success: true`, contrary to the premise the interim
+ruling was given, and the eta-expansion is what closes it).
 
-**STILL OPEN — the real fix**, unchanged by the interim: accumulator-lane
-widening, seed coercion, and callback lane binding, so these folds compile
-correctly instead of declining. Pinned meanwhile in
-`test/compute-engine/compile-complex.test.ts` ("a fold whose ACCUMULATOR would
-widen mid-fold"), including the shapes that must KEEP compiling — the
-over-broad-gate direction is what those assertions catch.
+(The "real fix" this paragraph used to defer — accumulator-lane widening,
+seed coercion, callback lane binding — is the resolution above; nothing of
+this entry remains open.)
     Reduce(L, n, 0)   n(a,x) := a + |x|  bare    -> NaN                       interp 1+√5
     Reduce(L, (a,x) ↦ a + |x|, 0)        inline  -> 3.236…  CORRECT (real accumulator)
     Scan(L, h, 0)                        bare    -> [NaN, NaN]                interp [2+4i, 2+6i]
@@ -1967,6 +1959,47 @@ inline form is right); every other row is the accumulator: the seed `0` is
 real, the combiner's RESULT is complex, so from the second step the
 accumulator holds `{re, im}` while the body was compiled with `a` real —
 `a + {re,im}` concatenates in JavaScript, which is the string in row 2.
+
+**RESOLUTION 2026-08-16 (ruled by Arno, "real fix now" over widening the
+interim gate).** `BaseCompiler.combinerPlan` (`compilation/base-compiler.ts`)
+computes both lanes of a custom combiner: the ELEMENT lane from the source
+(`hasUniformComplexScalarElements`), the ACCUMULATOR lane by ONE-STEP WIDENING
+— complex when the accumulator parameter is declared complex, the seed is
+complex-shaped, the fold is seedless over complex elements, or the body's
+result is complex when analyzed with the element in its lane and the
+accumulator real. An inline lambda is compiled under a local shape frame
+binding its two parameters to those lanes (`compileCombinerLiteral`); a bare
+user-function symbol is compiled through its typed eta-expansion
+`(_a: complex?, _x: complex?) ↦ h(_a, _x)` so its call site takes the
+function's complex-lane emission (`_fn_h$z11`); a real seed into a complex
+accumulator lane is lifted with `_SYS.cplx`; `isComplexValued` answers the
+fold's accumulator lane so a parent agrees; the builtin `Add`/`Multiply`
+combiners use the complex kernels over a complex lane and `Min`/`Max` fail
+closed there; and the `Reduce`/`Scan` `type:` handlers resolve a bare
+combiner symbol through its definition (`callbackOperandType`,
+`library/collections.ts`) — a bare-symbol fold typed `unknown`, which the
+JS scalar-arithmetic guard treated as "possibly a collection" and declined.
+Every row of the table below now matches the interpreter on both binding
+routes (LaTeX `:=` operator definition and `ce.assign` value definition):
+`Reduce(L, h, 0)` → `2+6i`, `Scan(L, h, 0)` → `[2+4i, 2+6i]`,
+`Reduce(L, h, 1+i)` → `3+7i`, seedless `Scan(L, h)` → `[1+2i, 1+4i]`,
+`Reduce(L, n, 0)` → `1+√5`, a wide seed `t` → `2.5+6i` at `t = 0.5`,
+`Reduce(L, h, 0) + 1` → `3+6i`, `Scan(L, Add, 0)` → `[1+2i, 1+3i]`. Pinned
+in `test/compute-engine/compile-complex.test.ts` ("Reduce/Scan ACCUMULATOR
+lane (combinerPlan)"), which also pins the shapes that must NOT be lifted
+(a real accumulator over a complex source keeps the real kernel; a real
+source and builtin folds over real data are byte-identical).
+
+(The dual review of this fix closed its one residue too: a BUILTIN fold
+over a complex source typed `unknown`, so `Reduce(L, Add, 0) + 1` still
+declined as "possibly a collection"; `foldResultType` now types a builtin
+fold from the source's element type widened by the seed — `finite_complex`
+over a `list<complex>`, `finite_integer` for `Reduce([1,2], Add, 0)` — and
+the parent compiles. It also added the operand LIFT in the emitted wrapper,
+which the first cut lacked: a `list<complex>` lowers its elements verbatim
+and may hold a real entry, and a seedless `Scan` over a REAL source whose
+body widens starts from the raw first element — `Scan([1,2], (a,x) ↦ a +
+i·x)` answered `[1, {re: null}]` before the lift.)
 
 **Interpreter surface of the same defect, FIXED 2026-08-16:** `Reduce`'s
 compiled fast path under `.N()` (`library/collections.ts`) fed the compiled

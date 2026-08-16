@@ -13,10 +13,7 @@ import {
   signatureArms,
   signatureEffects,
 } from '../../common/type/utils.js';
-import {
-  isObjectType,
-  objectLayoutOfType,
-} from '../../common/type/subtype.js';
+import { isObjectType, objectLayoutOfType } from '../../common/type/subtype.js';
 import { couldBeUnkeyedCollectionOperand } from '../collection-utils.js';
 import { overloadArms, resolveOverload } from './overload.js';
 
@@ -799,10 +796,9 @@ function mutationEffects(
   if (store === undefined) return declared;
   // A store is not a binding write, so `scope` is REPLACED rather than joined:
   // reporting both would claim the statement also wrote a binding.
-  let effects = unionComputedEffects(
-    subtractEffects(declared, ['scope']),
-    ['state']
-  );
+  let effects = unionComputedEffects(subtractEffects(declared, ['scope']), [
+    'state',
+  ]);
   // …plus whatever an AUTHORED `set` accessor's body does, for the same reason
   // the `ProtocolProperty` arm above unions it: the unqualified `p.name = v`
   // keeps its `Field` target, so a computed property's setter is reached

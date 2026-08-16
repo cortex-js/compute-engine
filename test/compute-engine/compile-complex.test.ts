@@ -1421,22 +1421,24 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
   });
 });
 
-describe('COMPILE COMPLEX - a fold whose ACCUMULATOR would widen mid-fold', () => {
-  // INTERIM FAIL-CLOSED, ruled 2026-08-16. Two lanes flow through a combiner —
-  // the ELEMENT lane and the ACCUMULATOR lane — and only the first is modelled.
-  // A real seed folded by a body that yields complex seeds a number and then
-  // adds `{re, im}` objects to it:
+describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => {
+  // Two lanes flow through a combiner: the ELEMENT lane (the source's) and the
+  // ACCUMULATOR lane (the seed's, widened by the body's own result). Only the
+  // first was modelled, so every accumulator compiled as a plain number:
   //
-  //   Reduce([1+2i, i], (a,x) => a + 2x, 0)
-  //     was  { re: '[object Object]0', im: 2 }   success: true
-  //     interpreter                              2 + 6i
+  //   Reduce([1+2i, i], (a,x) ↦ a + 2x, 0)     { re: '[object Object]0', im: 2 }
+  //   Reduce([1+2i, i], (a,x) ↦ a + 2x, 1+i)   same garbage (complex seed)
+  //   Scan([1+2i, i], (a,x) ↦ a + 2x)          same, seedless (acc = element 1)
+  //   Reduce([1+2i, i], h, 0)  h bare symbol   NaN (real-lane `_fn_h`)
   //
-  // Declining is the interim; the real fix (accumulator-lane widening, seed
-  // coercion, callback lane binding) is its own work package in ROADMAP.md.
-  //
-  // The discriminator is the BODY's complexness under the fold's own lanes,
-  // never the element type alone — which is what keeps the correct fold
-  // compiling, and is the assertion that would catch an over-broad gate.
+  // all behind `success: true`. An interim fail-closed gate covered the first
+  // shape only; ruled 2026-08-16 to land the real fix: `combinerPlan` binds
+  // the accumulator complex whenever its lane is (seed complex, seedless over
+  // complex elements, or the body's result widens it — one-step widening),
+  // lifts a real seed to `{re, im: 0}`, and eta-expands a bare combiner with
+  // typed parameters; `isComplexValued` answers the fold's accumulator lane
+  // so a parent (`Reduce(…) + 1`) agrees. Folds whose accumulator stays real
+  // keep the real kernel — the over-lifting direction those assertions catch.
   const makeEngine = () => {
     const { ComputeEngine } =
       require('../../src/compute-engine') as typeof import('../../src/compute-engine');
@@ -1446,68 +1448,198 @@ describe('COMPILE COMPLEX - a fold whose ACCUMULATOR would widen mid-fold', () =
       'L',
       engine.box(['List', ['Complex', 1, 2], ['Complex', 0, 1]])
     );
+    engine.declare('t', 'real');
     return engine;
   };
   /** `(a, x) => a + 2x` — widens a real accumulator to complex. */
   const WIDENS = ['Function', ['Add', 'a', ['Multiply', 2, 'x']], 'a', 'x'];
   /** `(a, x) => a + |x|` — `|x|` is real, so the accumulator never widens. */
   const STAYS_REAL = ['Function', ['Add', 'a', ['Abs', 'x']], 'a', 'x'];
+  const cx = (re: number, im: number) => ({ re, im });
+  const opts = { constantFold: false, fallback: false } as const;
 
   test.each([['Reduce'], ['Scan']])(
-    '%s declines a real seed with a complex-yielding body',
+    '%s: a real seed whose body widens the accumulator computes complex',
     (head) => {
       const engine = makeEngine();
-      const r = compile(engine.box([head, 'L', WIDENS, 0]), {
-        constantFold: false,
-      });
-      expect(r.success).toBe(false);
-    }
-  );
-
-  test.each([['Reduce'], ['Scan']])(
-    '%s still compiles when the accumulator stays real',
-    (head) => {
-      const engine = makeEngine();
-      const r = compile(engine.box([head, 'L', STAYS_REAL, 0]), {
-        constantFold: false,
-      });
+      const r = compile(engine.box([head, 'L', WIDENS, 0]), opts);
       expect(r.success).toBe(true);
+      expect(r.run!({})).toEqual(
+        head === 'Reduce' ? cx(2, 6) : [cx(2, 4), cx(2, 6)]
+      );
     }
   );
 
-  test('a COMPLEX seed compiles: nothing widens', () => {
-    // The accumulator starts in the complex lane, so the shape the gate is
-    // about never arises.
+  test.each([['Reduce'], ['Scan']])(
+    '%s: a COMPLEX seed binds the accumulator complex from the first step',
+    (head) => {
+      const engine = makeEngine();
+      const r = compile(
+        engine.box([head, 'L', WIDENS, ['Complex', 1, 1]]),
+        opts
+      );
+      expect(r.run!({})).toEqual(
+        head === 'Reduce' ? cx(3, 7) : [cx(3, 5), cx(3, 7)]
+      );
+    }
+  );
+
+  test('Scan: seedless over complex elements — the accumulator IS element 1', () => {
     const engine = makeEngine();
-    const r = compile(engine.box(['Reduce', 'L', WIDENS, ['Complex', 0, 1]]), {
-      constantFold: false,
-    });
-    expect(r.success).toBe(true);
+    const r = compile(engine.box(['Scan', 'L', WIDENS]), opts);
+    expect(r.run!({})).toEqual([cx(1, 2), cx(1, 4)]);
   });
 
-  test('a REAL source is untouched by the gate', () => {
+  test('a WIDE (runtime) seed into a complex accumulator lane is lifted', () => {
+    const engine = makeEngine();
+    const r = compile(engine.box(['Reduce', 'L', WIDENS, 't']), opts);
+    expect(r.code).toContain('_SYS.cplx(');
+    expect(r.run!({ t: 0.5 })).toEqual(cx(2.5, 6));
+  });
+
+  test.each([['Reduce'], ['Scan']])(
+    '%s: an accumulator that stays real keeps the real kernel',
+    (head) => {
+      const engine = makeEngine();
+      const r = compile(engine.box([head, 'L', STAYS_REAL, 0]), opts);
+      // The ELEMENT is lifted (it is complex); the ACCUMULATOR is not — the
+      // seed compiles as-is and `_a` is passed bare.
+      expect(r.code).toContain('_f(_a, _SYS.cplx(_b))');
+      expect(r.code).not.toContain('_SYS.cplx(_a)');
+      const v = r.run!({});
+      if (head === 'Reduce') expect(v).toBeCloseTo(1 + Math.sqrt(5), 12);
+      else {
+        expect((v as number[])[0]).toBeCloseTo(Math.sqrt(5), 12);
+        expect((v as number[])[1]).toBeCloseTo(1 + Math.sqrt(5), 12);
+      }
+    }
+  );
+
+  describe.each([
+    ['LaTeX `:=` (operator definition)', (e: any) => {
+      e.parse('h(a, x) := a + 2x').evaluate();
+      e.parse('n(a, x) := a + |x|').evaluate();
+    }],
+    ['ce.assign of a lambda (value definition)', (e: any) => {
+      e.assign('h', e.parse('(a, x) \\mapsto a + 2x'));
+      e.assign('n', e.parse('(a, x) \\mapsto a + |x|'));
+    }],
+  ])('a BARE user-function combiner bound via %s', (_label, define) => {
+    test('Reduce/Scan with the widening combiner `h` compute complex', () => {
+      const engine = makeEngine();
+      define(engine);
+      expect(compile(engine.box(['Reduce', 'L', 'h', 0]), opts).run!({})).toEqual(cx(2, 6));
+      expect(compile(engine.box(['Scan', 'L', 'h', 0]), opts).run!({})).toEqual([cx(2, 4), cx(2, 6)]);
+      expect(compile(engine.box(['Reduce', 'L', 'h', ['Complex', 1, 1]]), opts).run!({})).toEqual(cx(3, 7));
+      expect(compile(engine.box(['Scan', 'L', 'h']), opts).run!({})).toEqual([cx(1, 2), cx(1, 4)]);
+    });
+    test('the real-accumulator combiner `n` takes the element lane and stays real', () => {
+      const engine = makeEngine();
+      define(engine);
+      const r = compile(engine.box(['Reduce', 'L', 'n', 0]), opts);
+      expect(r.run!({})).toBeCloseTo(1 + Math.sqrt(5), 12);
+    });
+    test('over a REAL source the bare combiner is emitted as before (`_fn_h`)', () => {
+      const engine = makeEngine();
+      define(engine);
+      engine.assign('R', engine.box(['List', 1, 2, 3]));
+      const r = compile(engine.box(['Reduce', 'R', 'h', 0]), opts);
+      expect(r.code).toContain('_fn_h)');
+      expect(r.run!({})).toBe(12);
+    });
+    test('the fold types from the combiner and its PARENT agrees on the lane', () => {
+      const engine = makeEngine();
+      define(engine);
+      expect(engine.box(['Reduce', 'L', 'h', 0]).type.toString()).toBe('number');
+      expect(compile(engine.box(['Add', ['Reduce', 'L', 'h', 0], 1]), opts).run!({})).toEqual(cx(3, 6));
+      expect(compile(engine.box(['Add', ['At', ['Scan', 'L', 'h', 0], 2], 1]), opts).run!({})).toEqual(cx(3, 6));
+    });
+  });
+
+  test('a REAL source is untouched', () => {
     const { ComputeEngine } =
       require('../../src/compute-engine') as typeof import('../../src/compute-engine');
     const engine = new ComputeEngine();
     engine.assign('R', engine.box(['List', 1, 2, 3]));
     const r = compile(
-      engine.box([
-        'Reduce',
-        'R',
-        ['Function', ['Add', 'a', 'x'], 'a', 'x'],
-        0,
-      ]),
-      { constantFold: false }
+      engine.box(['Reduce', 'R', ['Function', ['Add', 'a', 'x'], 'a', 'x'], 0]),
+      opts
     );
-    expect(r.success).toBe(true);
+    expect(r.code).not.toContain('_SYS.cplx(');
     expect(r.run!({})).toBe(6);
   });
 
-  test('a builtin combiner is untouched by the gate', () => {
+  test('a seedless Scan over a REAL source whose body widens lifts the raw first accumulator', () => {
+    // The first accumulator IS element 1, a plain number; the body was
+    // compiled with `a` complex (its result widens), so the wrapper lifts
+    // `_a` — without it: `[1, {re: null, im: null}]`.
+    const { ComputeEngine } =
+      require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    const engine = new ComputeEngine();
+    const r = compile(
+      engine.box([
+        'Scan',
+        ['List', 1, 2],
+        ['Function', ['Add', 'a', ['Multiply', ['Complex', 0, 1], 'x']], 'a', 'x'],
+      ]),
+      opts
+    );
+    expect(r.run!({})).toEqual([1, cx(1, 2)]);
+  });
+
+  test('an unnamed (`_`) element parameter does not abandon the accumulator plan', () => {
     const engine = makeEngine();
-    const r = compile(engine.box(['Scan', 'L', 'Add', 0]), {
-      constantFold: false,
-    });
+    const r = compile(
+      engine.box(['Reduce', 'L', ['Function', ['Add', 'a', ['Complex', 0, 1]], 'a', '_'], 0]),
+      opts
+    );
+    expect(r.run!({})).toEqual(cx(0, 2));
+  });
+
+  test('an accumulator ANNOTATED complex is admitted and a real seed is lifted for it', () => {
+    const engine = makeEngine();
+    const typed = [
+      'Function',
+      ['Add', 'a', ['Multiply', 2, 'x']],
+      ['Typed', 'a', { str: 'complex' }],
+      'x',
+    ];
+    expect(compile(engine.box(['Reduce', 'L', typed, 0]), opts).run!({})).toEqual(cx(2, 6));
+    expect(compile(engine.box(['Reduce', 'L', typed, ['Complex', 1, 1]]), opts).run!({})).toEqual(cx(3, 7));
+  });
+
+  test('builtin combiners fold in the complex lane over complex data, and the fold types from the source', () => {
+    const engine = makeEngine();
+    engine.declare('R', 'list<real>');
+    expect(compile(engine.box(['Scan', 'L', 'Add', 0]), opts).run!({})).toEqual([cx(1, 2), cx(1, 3)]);
+    expect(compile(engine.box(['Reduce', 'L', 'Multiply', 1]), opts).run!({})).toEqual(cx(-2, 1));
+    // A complex SEED over a real source widens the builtin fold too.
+    expect(compile(engine.box(['Reduce', 'R', 'Add', ['Complex', 0, 1]]), opts).run!({ R: [1, 2] })).toEqual(cx(3, 1));
+    // Typed from the source (was `unknown`, which declined the parent as
+    // "possibly a collection"): the parent now compiles and agrees.
+    expect(engine.box(['Reduce', 'L', 'Add', 0]).type.toString()).toBe('finite_complex');
+    expect(engine.box(['Reduce', ['List', 1, 2], 'Add', 0]).type.toString()).toBe('finite_integer');
+    expect(compile(engine.box(['Add', ['Reduce', 'L', 'Add', 0], 1]), opts).run!({})).toEqual(cx(2, 3));
+    // No ordering on complex values: Min/Max fold over complex fails closed.
+    expect(compile(engine.box(['Reduce', 'L', 'Max', 0]), { ...opts, fallback: true }).success).toBe(false);
+    // Real data keeps the native fold.
+    const real = compile(engine.box(['Reduce', 'R', 'Add', 0]), opts);
+    expect(real.code).toContain('_a + _b');
+    expect(real.run!({ R: [1, 2] })).toBe(3);
+  });
+
+  test('the shared isComplexValued fold verdict is honored by the Python target', () => {
+    // `isComplexValued(Reduce…)` is a BaseCompiler verdict every target reads;
+    // Python's `Ln` picks `cmath.log` from it. Python's native `complex`
+    // auto-promotes under `+`/`*`, so the fold itself needs no lane binding
+    // there — but the parent's kernel choice must follow the verdict.
+    const engine = makeEngine();
+    engine.declare('M', 'list<complex>');
+    const r = compile(
+      engine.box(['Ln', ['Reduce', 'M', ['Function', ['Add', 'a', ['Multiply', 2, 'x']], 'a', 'x'], 0]]),
+      { ...opts, to: 'python' }
+    );
     expect(r.success).toBe(true);
+    expect(r.code).toContain('cmath.log(');
   });
 });

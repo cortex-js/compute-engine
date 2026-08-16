@@ -1911,7 +1911,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Reduce: cannot compile — first operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
       );
-    let combiner = builtinCombiner(op);
+    let combiner = builtinCombiner(
+      op,
+      BaseCompiler.foldLaneIsComplex(coll, init)
+    );
+    // The seed's code when the accumulator lane is complex and the seed is
+    // real (`combinerPlan.coerceSeed`); `undefined` = compile `init` as-is.
+    let seed: string | undefined;
     // The four builtin folds are ARITHMETIC, and the interpreter refuses to
     // apply them to characters: `Reduce("abc", Add)` is an
     // `incompatible-type` error there (probed), whereas the emitted
@@ -1935,32 +1941,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `Reduce: a custom combiner compiles only with an explicit ` +
             `initial value. Fail closed (D6).`
         );
-      // The combiner is `(accumulator, element)`: the accumulator's type is
-      // not provable here (it is the fold's own result), so an annotation on
-      // that position always declines.
+      // The combiner is `(accumulator, element)`. The accumulator's type is
+      // the fold's own result, which `combinerPlan` decides: an accumulator
+      // annotated `complex` is satisfied when the plan puts the accumulator
+      // in the complex lane (a real seed is then lifted), and declines
+      // otherwise; any other annotation on that position declines.
+      const plan = BaseCompiler.combinerPlan(coll, op, init);
       BaseCompiler.assertCallbackAnnotations('Reduce', op, [
-        undefined,
+        plan?.accComplex ? 'complex' : undefined,
         BaseCompiler.collectionElementTypeOf(coll),
       ]);
-      // INTERIM FAIL-CLOSED (ruled 2026-08-16). Only the ELEMENT lane is
-      // reasoned about in this lowering; the ACCUMULATOR lane is not, so a
-      // real seed folded by a body that yields complex seeds a number and then
-      // adds `{re, im}` objects to it — `Reduce(L, (a,x) => a + 2x, 0)` over
-      // `[1+2i, i]` answered `{re: "[object Object]0", im: 2}` behind
-      // `success: true` where the interpreter gives `2+6i`. Declining is the
-      // interim: the real fix is accumulator-lane widening plus seed coercion,
-      // tracked in ROADMAP.md as its own work package. A fold whose
-      // accumulator stays real (`a + |x|` over the same complex source) is
-      // correct and keeps compiling — see `reduceAccumulatorWidens`.
-      if (BaseCompiler.reduceAccumulatorWidens(coll, op, init))
-        throw new Error(
-          `Reduce: the accumulator would have to become complex part-way ` +
-            `through the fold, which this lowering does not support — it ` +
-            `would seed a real accumulator and then add complex values to ` +
-            `it, silently. Fail closed (D6). Evaluate instead, or seed the ` +
-            `fold with a complex initial value.`
-        );
-      combiner = customCombiner(op, compile, target);
+      // ACCUMULATOR and ELEMENT lanes (`combinerPlan`): the combiner is
+      // compiled with its two parameters bound to the lanes the fold actually
+      // runs — the element's from the source, the accumulator's from the seed
+      // widened by the body's own result — and a real seed into a complex
+      // accumulator lane is lifted to `{re, im: 0}`. Before this, only the
+      // element lane was modelled and every accumulator was a plain number:
+      // `Reduce(L, (a,x) => a + 2x, 0)` over `[1+2i, i]` answered
+      // `{re: "[object Object]0", im: 2}` behind `success: true` where the
+      // interpreter gives `2+6i`; a complex seed, a seedless `Scan`, and a
+      // bare user-function combiner were wrong the same way.
+      combiner = customCombinerWithLanes(op, plan, compile, target);
+      seed = plan?.coerceSeed ? `_SYS.cplx(${compile(init)})` : undefined;
     }
     if (combiner === undefined)
       throw new Error(
@@ -1976,7 +1978,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // interpreter returns `Nothing` (numeric projection NaN) — so guard the
     // empty case to yield NaN instead of throwing at runtime.
     if (init !== undefined && init !== null)
-      return `(${collCode}).reduce(${combiner}, ${compile(init)})`;
+      return `(${collCode}).reduce(${combiner}, ${seed ?? compile(init)})`;
     return `((_l) => _l.length === 0 ? NaN : _l.reduce(${combiner}))(${collCode})`;
   },
   // --- List-shaped collection operators ---------------------------------
@@ -2699,33 +2701,31 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Scan: cannot compile — first operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
       );
-    const builtin = builtinCombiner(op);
-    // As `Reduce`: the combiner is `(accumulator, element)` and only the
-    // element's type is provable, so an annotated accumulator declines.
+    const builtin = builtinCombiner(
+      op,
+      BaseCompiler.foldLaneIsComplex(coll, init)
+    );
+    // As `Reduce`: the accumulator's annotation is judged against the lane
+    // `combinerPlan` chose.
+    const plan =
+      builtin === undefined
+        ? BaseCompiler.combinerPlan(coll, op, init)
+        : undefined;
     if (builtin === undefined)
       BaseCompiler.assertCallbackAnnotations('Scan', op, [
-        undefined,
+        plan?.accComplex ? 'complex' : undefined,
         BaseCompiler.collectionElementTypeOf(coll),
       ]);
-    // Same interim fail-closed as `Reduce` above, and for the same reason: a
-    // real seed folded by a complex-yielding body widens the accumulator
-    // mid-fold, which this lowering does not model. `Scan` corrupts from the
-    // SECOND element on — over `[1+2i, i]` it answered
-    // `[{re:2,im:4}, {re:"[object Object]0",im:2}]` behind `success: true`,
-    // where the interpreter gives `[2+4i, 2+6i]`; the first element is right
-    // because the seed has not yet been added to a complex value.
-    if (builtin === undefined && BaseCompiler.reduceAccumulatorWidens(coll, op, init))
-      throw new Error(
-        `Scan: the accumulator would have to become complex part-way ` +
-          `through the fold, which this lowering does not support — it ` +
-          `would seed a real accumulator and then add complex values to ` +
-          `it, silently. Fail closed (D6). Evaluate instead, or seed the ` +
-          `fold with a complex initial value.`
-      );
+    // Accumulator and element lanes as for `Reduce` above (`combinerPlan`).
+    // `Scan` was wrong the same way from the SECOND element on — over
+    // `[1+2i, i]` it answered `[{re:2,im:4}, {re:"[object Object]0",im:2}]`
+    // where the interpreter gives `[2+4i, 2+6i]` — and a seedless `Scan`
+    // over complex elements from the first: its accumulator IS the first
+    // element, so its lane is the element's.
     const combiner =
       builtin ??
       (isFunction(op, 'Function') || isSymbol(op)
-        ? customCombiner(op, compile, target)
+        ? customCombinerWithLanes(op, plan, compile, target)
         : undefined);
     if (combiner === undefined)
       throw new Error(
@@ -2734,8 +2734,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `functions compile on the JavaScript target. Fail closed (D6).`
       );
     const collCode = compile(coll);
-    if (init !== undefined && init !== null)
-      return `((_f, _l, _a) => _l.map((_x) => (_a = _f(_a, _x))))(${combiner}, ${collCode}, ${compile(init)})`;
+    if (init !== undefined && init !== null) {
+      const seed = plan?.coerceSeed
+        ? `_SYS.cplx(${compile(init)})`
+        : compile(init);
+      return `((_f, _l, _a) => _l.map((_x) => (_a = _f(_a, _x))))(${combiner}, ${collCode}, ${seed})`;
+    }
     return `((_f, _l) => { let _a; return _l.map((_x, _i) => (_a = _i === 0 ? _x : _f(_a, _x))); })(${combiner}, ${collCode})`;
   },
   // --- Core scalar operators ---------------------------------------------
@@ -7068,16 +7072,40 @@ function randomDomain(
  * compile without an initial value (their seedless native fold agrees with
  * the interpreter).
  */
-function builtinCombiner(op: Expression): string | undefined {
+function builtinCombiner(
+  op: Expression,
+  /**
+   * The fold runs in the COMPLEX lane — its elements are complex scalars, or
+   * its seed is complex-shaped. `Add`/`Multiply` then combine through the
+   * complex kernels (each operand lifted by the idempotent `_SYS.cplx`, so a
+   * real seed or a real element mixes correctly); before this, `Scan(L, Add,
+   * 0)` over `[1+2i, i]` concatenated `"0[object Object]"` behind
+   * `success: true`. `Min`/`Max` have no meaning over complex values — the
+   * interpreter declines them — so they fail closed here.
+   */
+  complexLane = false
+): string | undefined {
   if (!isSymbol(op)) return undefined;
   switch (op.symbol) {
     case 'Add':
-      return '(_a, _b) => _a + _b';
+      return complexLane
+        ? '(_a, _b) => { const _p = _SYS.cplx(_a), _q = _SYS.cplx(_b); return { re: _p.re + _q.re, im: _p.im + _q.im }; }'
+        : '(_a, _b) => _a + _b';
     case 'Multiply':
-      return '(_a, _b) => _a * _b';
+      return complexLane
+        ? '(_a, _b) => { const _p = _SYS.cplx(_a), _q = _SYS.cplx(_b); return { re: _p.re * _q.re - _p.im * _q.im, im: _p.re * _q.im + _p.im * _q.re }; }'
+        : '(_a, _b) => _a * _b';
     case 'Min':
+      if (complexLane)
+        throw new Error(
+          `Min: a fold over complex values has no ordering. Fail closed (D6).`
+        );
       return '(_a, _b) => Math.min(_a, _b)';
     case 'Max':
+      if (complexLane)
+        throw new Error(
+          `Max: a fold over complex values has no ordering. Fail closed (D6).`
+        );
       return '(_a, _b) => Math.max(_a, _b)';
   }
   return undefined;
@@ -7120,6 +7148,38 @@ function customCombiner(
   }
   if (!callable) return undefined;
   return `((_f) => (_a, _b) => _f(_a, _b))(${compile(op)})`;
+}
+
+/**
+ * `customCombiner`, with the combiner compiled under the accumulator and
+ * element LANES of `plan` (`BaseCompiler.combinerPlan`, computed ONCE by the
+ * caller and shared with its seed decision): an inline lambda under a local
+ * shape frame binding its parameters to the lanes, a bare user-function
+ * symbol through its typed eta-expansion when a lane is complex. Combiners
+ * the plan cannot see (`plan === undefined`: an infix operator symbol) keep
+ * the plain `customCombiner` route.
+ *
+ * The emitted wrapper LIFTS each operand whose lane is complex through the
+ * idempotent `_SYS.cplx`, so the body always receives the shape it was
+ * compiled for even when the value that arrives is a plain number: a
+ * `list<complex>` lowers its elements verbatim and may hold a real entry, and
+ * a seedless `Scan` whose accumulator widens starts from the RAW first
+ * element (`Scan([1, 2], (a, x) ↦ a + i·x)` answered `[1, {re: null}]`
+ * without the lift).
+ */
+function customCombinerWithLanes(
+  op: Expression,
+  plan: ReturnType<typeof BaseCompiler.combinerPlan>,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (plan === undefined) return customCombiner(op, compile, target);
+  const fn = isSymbol(plan.op)
+    ? compile(plan.op)
+    : BaseCompiler.compileCombinerLiteral(plan, compile);
+  const a = plan.accComplex ? '_SYS.cplx(_a)' : '_a';
+  const b = plan.eltComplex ? '_SYS.cplx(_b)' : '_b';
+  return `((_f) => (_a, _b) => _f(${a}, ${b}))(${fn})`;
 }
 
 /**

@@ -254,22 +254,29 @@
   while an undeclared `\eta_1` on a list `eta` still indexes. Applies to
   the `\eta` command and to the Unicode `η` spelling alike.
 
-- **A `Reduce`/`Scan` whose accumulator would turn complex mid-fold now
-  declines instead of miscompiling.** Only the element lane was modelled, so a
-  fold with a real initial value and a combiner yielding complex values seeded
-  a real accumulator and then added complex values to it — answering
-  `{ re: '[object Object]0', im: 2 }` behind `success: true` where the
-  interpreter gives `2 + 6i`. Such a fold now fails closed and falls back to
-  the interpreter, which returns the correct value.
-
-  **This can turn a compile that used to succeed into a fallback**, so an
-  iteration over complex data seeded with a real value (a fractal-style
-  accumulation, for example) may run interpreted where it previously compiled.
-  That is deliberate and interim: the correct answer replaces a silently wrong
-  one. Folds whose accumulator stays real keep compiling, as do those seeded
-  with a complex value, builtin combiners, and every fold over a real source.
-  Accumulator-lane widening — which will let these compile correctly again —
-  is tracked as follow-up work.
+- **`Reduce`/`Scan` now compile correctly when the accumulator is or becomes
+  complex.** Two lanes flow through a fold's combiner — the element's and the
+  accumulator's — and only the first was modelled, so every accumulator was
+  compiled as a plain number: `Reduce([1+2i, i], (a,x) ↦ a + 2x, 0)` answered
+  `{ re: '[object Object]0', im: 2 }` behind `success: true` (interpreter
+  `2 + 6i`); a COMPLEX seed (`1+i`) and a seedless `Scan` over complex
+  elements were wrong the same way; a bare user-function combiner
+  (`h(a,x) := a + 2x; Reduce(L, h, 0)`) answered `NaN`; and the builtin
+  combiners concatenated (`Scan(L, Add, 0)` → `"0[object Object]"`). The
+  combiner is now compiled with its parameters bound to the lanes the fold
+  actually runs — the element's from the source, the accumulator's from the
+  seed widened by the body's own result — a real seed into a complex
+  accumulator is lifted to `{ re, im: 0 }`, a bare user-function combiner is
+  compiled through a typed eta-expansion, `Add`/`Multiply` combine through
+  the complex kernels over a complex lane (`Min`/`Max` fail closed there — no
+  ordering), the fold's static type follows the combiner — a bare
+  user function's declared result, or for a builtin combiner the source's
+  element type widened by the seed (both were `unknown`, which made
+  `Reduce(L, h, 0) + 1` and `Reduce(L, Add, 0) + 1` fail closed as
+  "possibly a collection"), and the fold's parent agrees on the value shape
+  (`Reduce(L, h, 0) + 1` → `3 + 6i`). Folds whose accumulator
+  stays real, folds over a real source, and builtin folds over real data are
+  emitted exactly as before. Reported by Tycho against 0.112.0/0.113.0.
 
 - **An effect annotation on a member of a protocol implementation block no
   longer makes that member uncallable, and is now checked against the body.**

@@ -597,6 +597,50 @@ function canonicalCallbackOperand(
 }
 
 /**
+ * The RESULT type of a `Reduce`/`Scan` fold, for their `type:` handlers.
+ *
+ * A CUSTOM combiner contributes its result type through `callbackResultType`
+ * — which resolves a bare symbol through its DEFINITION, so `Reduce(L, h, 0)`
+ * with `h(a, x) := a + 2x` types `number` like the inline lambda does (a
+ * held, unbound symbol reports `unknown`, and an unknown-typed fold then
+ * failed closed under scalar arithmetic on the JavaScript target as
+ * "possibly a collection").
+ *
+ * A BUILTIN combiner (`Add`, `Multiply`, `Min`, `Max`) is typed from the
+ * SOURCE, not from the operator's own signature: `Add: (value+) -> value`,
+ * and typing the fold `value` made `Add` itself reject `Reduce(L, Add, 0)`
+ * as incompatible with `number`. The fold's value is an element combined
+ * with the seed, so its type is the widening of the element type and the
+ * seed's type — `finite_integer` for a sum of integers seeded with `0`,
+ * `complex` over a `list<complex>` — or `unknown` when the element type is
+ * not numeric.
+ */
+function foldResultType(
+  coll: Expression | undefined,
+  op: Expression | undefined,
+  init: Expression | undefined
+): Type | undefined {
+  if (op === undefined) return undefined;
+  if (isSymbol(op) && BUILTIN_FOLD_HEADS.has(op.symbol)) {
+    const elt = coll ? collectionElementType(coll.type.type) : undefined;
+    if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
+    if (init === undefined) return elt;
+    const seed = init.type.type;
+    return isSubtype(seed, 'number') ? widen(elt, seed) : undefined;
+  }
+  return callbackResultType(op);
+}
+
+/** The builtin combiners `Reduce`/`Scan` fold with natively (the JavaScript
+ * target lowers exactly these — `builtinCombiner` in `javascript-target.ts`). */
+const BUILTIN_FOLD_HEADS: ReadonlySet<string> = new Set([
+  'Add',
+  'Multiply',
+  'Min',
+  'Max',
+]);
+
+/**
  * Canonical handler for an EAGER operator with a `function` parameter slot at
  * `index`: desugar a shorthand function operand (see
  * `shorthandFunctionOperand`), then run the same flatten + signature
@@ -3996,7 +4040,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('Reduce', [collection, fn]);
     },
 
-    type: (ops) => parseType(functionResult(ops[1].type.type) ?? 'unknown'),
+    type: (ops) =>
+      parseType(foldResultType(ops[0], ops[1], ops[2]) ?? 'unknown'),
 
     evaluate: (
       [collection, fn, initial],
@@ -4208,7 +4253,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Same shape/indexed-ness as the source, but elements are the fold's
     // result type (mirrors Map).
     type: (ops) => {
-      const resultType = functionResult(ops[1].type.type);
+      const resultType = foldResultType(ops[0], ops[1], ops[2]);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
         return ops[0].type;
       return mapResultType(ops[0].type.type, resultType);

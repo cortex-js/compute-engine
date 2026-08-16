@@ -307,8 +307,7 @@ function finishShortCircuit(
   reduce: Reducer,
   evalOptions: Partial<EvaluateOptions>
 ): Expression | undefined {
-  const isCollectionValue = (x: Expression) =>
-    isFiniteBroadcastParticipant(x);
+  const isCollectionValue = (x: Expression) => isFiniteBroadcastParticipant(x);
   if (!ops.some(isCollectionValue) && values.some(isCollectionValue))
     return ce.function(name, values).evaluate(evalOptions);
   return reduce(values, { engine: ce });
