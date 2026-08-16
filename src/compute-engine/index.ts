@@ -697,6 +697,11 @@ export class ComputeEngine implements IComputeEngine {
         edges: r.conformances.map((c) => ({
           c,
           impl: c.impl,
+          // The author's block rides with the merged map it was merged into:
+          // it is what tells an author's EMPTY block from no block at all,
+          // and restoring one without the other would leave the edge claiming
+          // an implementation nobody wrote (or disowning one somebody did).
+          authored: c._authored,
           // The batch stamp rides with the implementation it describes (P47):
           // the pre-pass installs a block, this thunk removes it again, and
           // the evaluation loop's install must not then see the pre-pass's
@@ -744,6 +749,11 @@ export class ComputeEngine implements IComputeEngine {
           if (e.c.impl !== e.impl) changed = true;
           if (e.impl === undefined) delete e.c.impl;
           else e.c.impl = e.impl;
+          // Silent, like the `_implOrigin` restore below: the authored block
+          // selects nothing a boxed expression could have read, so restoring
+          // it does not on its own make the registry look changed.
+          if (e.authored === undefined) delete e.c._authored;
+          else e.c._authored = e.authored;
           if (e.origin === undefined) delete e.c._implOrigin;
           else e.c._implOrigin = e.origin;
           if (e.c.pending !== e.pending) changed = true;
@@ -2866,7 +2876,18 @@ export class ComputeEngine implements IComputeEngine {
             if (
               incumbent !== undefined &&
               'value' in incumbent &&
-              incumbent.value.inferredType
+              !incumbent.value.isConstant &&
+              // A DECLARED `unknown` is narrowable too, so it needs the shadow
+              // just as much as an inferred type does. `unknown` is a
+              // placeholder that refines per use, not a contract (unlike `any`
+              // and unlike a concrete declared type, which a use cannot move),
+              // so `ce.declare('u', 'unknown')` followed by a SPECULATIVE
+              // parse of `u+1` persistently narrowed `u` to `number` — a
+              // trace, which is the one thing `speculative` promises not to
+              // leave. The same pairing spells "not a binding contract"
+              // wherever else it is needed (see `assignValue` in
+              // `engine-declarations.ts`).
+              (incumbent.value.inferredType || incumbent.value.type.isUnknown)
             )
               this.declare(
                 name,
