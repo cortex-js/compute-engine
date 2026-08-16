@@ -67,6 +67,90 @@ describe('speculative parse', () => {
     expect(ce.parse('\\pi', { speculative: true }).symbol).toBe('Pi');
   });
 
+  test('a narrowing use does not move a DECLARED `unknown` either', () => {
+    // `unknown` is a placeholder that refines per use, not a contract, so a
+    // symbol declared `unknown` is exactly as narrowable as an inferred one
+    // and needs the shadow just as much. The shadow condition originally
+    // tested `inferredType` alone, so `ce.declare('u', 'unknown')` followed
+    // by a speculative parse of `u + 1` persistently narrowed `u` to
+    // `number` — a trace, which is the one thing `speculative` promises not
+    // to leave. (A DECLARED concrete type needs no shadow: a use cannot move
+    // it. See the control below.)
+    const ce = new ComputeEngine();
+    ce.declare('u_d', 'unknown');
+    const e = ce.parse('u_{d} + 1', { speculative: true });
+    expect(ce.lookupDefinition('u_d')!['value'].type.toString()).toBe(
+      'unknown'
+    );
+    // The result still reports the narrowed type — the shadow is what moved,
+    // and reading the derived type is the whole point of the option.
+    expect(e.type.toString()).toBe('number');
+    // Control: the same parse without `speculative` DOES move it.
+    ce.parse('u_{d} + 1');
+    expect(ce.lookupDefinition('u_d')!['value'].type.toString()).toBe('number');
+  });
+
+  test('a declared CONCRETE type is unmoved with or without the option', () => {
+    // The control for the test above: this is why the shadow is limited to
+    // the narrowable cases rather than applied to every symbol. Shadowing a
+    // declared concrete type would be inert here, and shadowing a constant or
+    // an operator would change how the string parses.
+    const ce = new ComputeEngine();
+    ce.declare('n_d', 'number');
+    ce.parse('\\operatorname{Fibonacci}(n_{d})', { speculative: true });
+    expect(ce.lookupDefinition('n_d')!['value'].type.toString()).toBe('number');
+    ce.parse('\\operatorname{Fibonacci}(n_{d})');
+    expect(ce.lookupDefinition('n_d')!['value'].type.toString()).toBe('number');
+  });
+
+  test('shadowing an `unknown` symbol does not hide its VALUE', () => {
+    // A symbol declared `unknown` can still hold a value — the declaration
+    // pins no contract, so `assign` neither rejects the value nor replaces
+    // the type. The shadow is declared type-only, so the check that matters
+    // is that the ambient value survives the parse and the derived type is
+    // still the one a normal parse produces.
+    const ce = new ComputeEngine();
+    ce.declare('v_d', 'unknown');
+    ce.assign('v_d', 5);
+    const e = ce.parse('v_{d} + 1', { speculative: true });
+    expect(e.type.toString()).toBe('number');
+    const def = ce.lookupDefinition('v_d')!['value'];
+    expect(def.type.toString()).toBe('unknown');
+    expect(def.value?.re).toBe(5);
+    // Control: the plain parse derives the same type and DOES narrow.
+    expect(ce.parse('v_{d} + 1').type.toString()).toBe('number');
+    expect(ce.lookupDefinition('v_d')!['value'].type.toString()).toBe('number');
+  });
+
+  test('an operator-valued symbol is never shadowed', () => {
+    // The shadow applies to VALUE definitions only. An assigned function
+    // literal installs an operator definition, which must keep steering the
+    // parse (`g(2)` is an application, not a multiplication).
+    const ce = new ComputeEngine();
+    ce.declare('g_d', 'unknown');
+    ce.assign('g_d', ce.parse('x \\mapsto x + 1'));
+    expect(ce.parse('g_{d}(2)', { speculative: true }).toString()).toBe(
+      ce.parse('g_{d}(2)').toString()
+    );
+  });
+
+  test('a type RESTORED to `unknown` is not narrowed', () => {
+    // The path a consumer hit: narrow a symbol by use, put it back with the
+    // `type` setter, then parse speculatively. This one was already confined
+    // — the restore leaves `inferredType` set, so the shadow applied — while
+    // the freshly-declared `unknown` above was not. The two differ only in
+    // history, never in whether a use can narrow them, so they must agree.
+    const ce = new ComputeEngine();
+    ce.declare('r_d', 'unknown');
+    ce.parse('r_{d} + 1');
+    expect(ce.lookupDefinition('r_d')!['value'].type.toString()).toBe('number');
+    ce.box('r_d').type = 'unknown';
+    ce.parse('r_{d} + 1', { speculative: true });
+    expect(ce.lookupDefinition('r_d')!['value'].type.toString()).toBe(
+      'unknown'
+    );
+  });
+
   test('speculative and scope are mutually exclusive', () => {
     const ce = new ComputeEngine();
     const scope = ce.createScope();

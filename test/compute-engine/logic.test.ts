@@ -830,6 +830,16 @@ describe('And/Or are SHORT-CIRCUIT forms (fixed 2026-08-15)', () => {
       'a',
       'c',
     ]);
+    // Every operator that short-circuits keeps its written order, for the
+    // same reason: the `commutative` flag sorts the operands, and the
+    // short-circuit is defined over the order as written.
+    expect(sc.expr(['Nand', 'q', 'p']).json).toEqual(['Nand', 'q', 'p']);
+    expect(sc.expr(['Nor', 'q', 'p']).json).toEqual(['Nor', 'q', 'p']);
+    // `Xor` cannot short-circuit — every operand affects the result — so it
+    // keeps the flag and still sorts. This is the contrast that makes the
+    // rule above a consequence of short-circuiting rather than a blanket
+    // change to the logical operators.
+    expect(sc.expr(['Xor', 'q', 'p']).json).toEqual(['Xor', 'p', 'q']);
   });
 
   it('And stops at the first False; the rest never runs', () => {

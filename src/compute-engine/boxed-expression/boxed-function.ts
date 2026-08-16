@@ -1239,10 +1239,31 @@ export class BoxedFunction
       x.isPositive === true || x.isNegative === true;
     switch (this.operator) {
       case 'Abs':
-        // |x| is finite iff x is finite (real or complex).
+        // |x| is finite iff x is finite (real or complex) — but only when the
+        // operand IS a number. `Abs` also accepts a non-numeric operand: over
+        // a tuple it is the Euclidean norm, so `|(1, 2)| = √5` is a number
+        // whose operand is not. For any non-number, `isFinite` answers `false`
+        // by the convention at the top of this getter — meaning "not a finite
+        // NUMBER", not "infinite" — and propagating that `false` claimed the
+        // norm was infinite. `multiplyType` reads `isFinite === false` as a
+        // provably non-finite factor, so `3·|(1, 2)|` typed
+        // `non_finite_number`, and `Divide` then folded `1/(3·|(1, 2)|)` to a
+        // literal `0`: a silently wrong value, not an error (the correct
+        // answer is √5/15). A non-number operand leaves finiteness undecided,
+        // which is what the sibling `Norm(Tuple(1, 2))` already reports.
+        if (this.op1.isNumber !== true) return undefined;
         return this.op1.isFinite;
       case 'Sqrt':
-        // √x is finite iff x is finite (real or complex).
+        // √x is finite iff x is finite (real or complex), and — as for `Abs`
+        // above — only a NUMBER's `isFinite` says anything about finiteness.
+        // `Sqrt(Tuple(1, 2))` types `number` rather than being rejected, so
+        // the operand can be a non-number here too; its `isFinite === false`
+        // means "not a finite number" and must not be read as "infinite".
+        // Unlike the `Abs` case this one folds nothing today (the product
+        // type additionally requires every factor to be provably real, which
+        // a bare `number` is not), so the guard is closing the same unsound
+        // claim before something else reads it.
+        if (this.op1.isNumber !== true) return undefined;
         return this.op1.isFinite;
       case 'Root': {
         // ⁿ√x is finite iff x is finite and the index n is finite & nonzero.

@@ -366,4 +366,101 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Divide', 1, ['Ln', 0]])).toBe('finite_integer');
     });
   });
+
+  describe('a NON-NUMBER operand does not prove its result non-finite', () => {
+    // `isFinite` answers `false` for anything that is not a number at all —
+    // a tuple, a list, a string. That `false` means "not a finite NUMBER",
+    // and the heads that propagate an operand's finiteness structurally
+    // (`Abs`, `Sqrt`) must not read it as "infinite". `Abs` is where this
+    // bites, because over a tuple it is the Euclidean norm: the result is a
+    // number whose OPERAND is not.
+    //
+    // Consequence when it was read as "infinite": `|(1, 2)|` claimed to be
+    // non-finite, so `3·|(1, 2)|` typed `non_finite_number`, and `Divide`
+    // applied the sound `1/±∞ = 0` fold to it. `1/(3·|(1, 2)|)` canonicalized
+    // to a literal `0` — not an error and not a NaN, a silently wrong value
+    // where the answer is √5/15. Reported from a consumer's field use, where
+    // it turned a unit-tangent field into the zero vector.
+    //
+    // Each shape gets a FRESH engine: this collapse was originally mapped on
+    // one shared engine and the accumulated declarations changed which shapes
+    // reproduced, yielding a precondition that was wrong in both directions.
+    const freshType = (expr: any): string =>
+      new ComputeEngine().box(expr).type.toString();
+    const freshJson = (expr: any): any => new ComputeEngine().box(expr).json;
+
+    test('the norm of a tuple is not claimed non-finite', () => {
+      const engine = new ComputeEngine();
+      const norm = engine.box(['Abs', ['Tuple', 1, 2]]);
+      expect(norm.type.toString()).toBe('finite_real');
+      // Undecided, not `false`. Deciding it `true` would mean walking the
+      // components; `Norm(Tuple(1, 2))`, the sibling that never had the bug,
+      // reports `undefined` here as well.
+      expect(norm.isFinite).toBe(undefined);
+      expect(engine.box(['Norm', ['Tuple', 1, 2]]).isFinite).toBe(undefined);
+    });
+
+    test('a scaled tuple norm keeps a finite type', () => {
+      expect(freshType(['Multiply', 3, ['Abs', ['Tuple', 1, 2]]])).toBe(
+        'finite_real'
+      );
+    });
+
+    test('dividing by a scaled tuple norm does not fold to zero', () => {
+      // The reported witness, plus the three neighbours that separate the
+      // precondition: any numeric coefficient triggers it, the numerator is
+      // irrelevant, and a non-literal member does not protect it.
+      for (const expr of [
+        ['Divide', 1, ['Multiply', 3, ['Abs', ['Tuple', 1, 2]]]],
+        ['Divide', 1, ['Multiply', ['Rational', 1, 2], ['Abs', ['Tuple', 1, 2]]]],
+        ['Divide', 'x', ['Multiply', 3, ['Abs', ['Tuple', 1, 2]]]],
+        ['Divide', 1, ['Multiply', 3, ['Abs', ['Tuple', ['Cos', 't'], 2]]]],
+      ])
+        expect(freshJson(expr)).not.toEqual(0);
+
+      const engine = new ComputeEngine();
+      const witness = engine.box([
+        'Divide',
+        1,
+        ['Multiply', 3, ['Abs', ['Tuple', 1, 2]]],
+      ]);
+      expect(witness.evaluate().toString()).toBe('sqrt(5)/15');
+      expect(witness.N().re).toBeCloseTo(Math.sqrt(5) / 15, 12);
+    });
+
+    test('the LaTeX route agrees', () => {
+      const engine = new ComputeEngine();
+      expect(engine.parse('\\frac{1}{3\\vert(1,2)\\vert}').N().re).toBeCloseTo(
+        Math.sqrt(5) / 15,
+        12
+      );
+    });
+
+    test('a genuinely infinite operand still folds (control)', () => {
+      // The `1/±∞ = 0` fold is correct and must survive: the fix removes an
+      // unsound CLAIM of non-finiteness, not the fold that acts on a sound
+      // one. `Abs(∞)` proves non-finite through its type, not through this
+      // structural propagation.
+      const engine = new ComputeEngine();
+      expect(engine.box(['Abs', 'PositiveInfinity']).isFinite).toBe(false);
+      expect(
+        engine.box(['Divide', 1, ['Multiply', 3, ['Abs', 'PositiveInfinity']]])
+          .json
+      ).toEqual(0);
+      expect(freshJson(['Divide', 1, ['Multiply', 3, ['Ln', 0]]])).toEqual(0);
+    });
+
+    test('Sqrt of a non-number is undecided, not non-finite', () => {
+      // `Sqrt(Tuple(1, 2))` is admitted with type `number` rather than
+      // rejected, so the same propagation applies. It folds nothing today —
+      // the product type also requires every factor to be provably real —
+      // so this pins the claim itself rather than a downstream value.
+      const engine = new ComputeEngine();
+      expect(engine.box(['Sqrt', ['Tuple', 1, 2]]).isFinite).toBe(undefined);
+      expect(engine.box(['Sqrt', ['Tuple', 1, 2]]).isNumber).toBe(true);
+      // Numeric operands are untouched.
+      expect(engine.box(['Sqrt', 5]).isFinite).toBe(true);
+      expect(engine.box(['Abs', -5]).isFinite).toBe(true);
+    });
+  });
 });
