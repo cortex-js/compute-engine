@@ -678,8 +678,12 @@ describe('COMPILE COMPLEX - literal square fast path and recursive lambdas', () 
       e.box(['K', 10, ['Add', 'x', ['Multiply', ['Complex', 0, 1], 'y']]]),
       { fallback: false }
     );
-    // True recursion: the emitted call references the named local.
-    expect(res.code).toContain('_fn_K(');
+    // True recursion: the emitted call references the named local. K's `z`
+    // slot is wide-typed and receives the complex `x + iy`, so the call site
+    // is the complex LANE of `K` — emitted as the `_fn_K$z01` specialization
+    // (`userFunctionName`: parameter 2 complex) — and the recursive self-call
+    // `K(n-1, z)` inside it resolves, by name, to that same specialization.
+    expect(res.code).toContain('_fn_K$z01(');
     const v = res.run!({ x: 0.13, y: 0.21 }) as { re: number; im: number };
     const interp = e.box(['K', 10, ['Complex', 0.13, 0.21]]).N();
     expect(v.re).toBeCloseTo(interp.re, 12);
@@ -1047,5 +1051,165 @@ describe('realOnly leaves an unused complex operand alone', () => {
     });
     expect(r.success).toBe(true);
     expect(r.run({ t: 0.5 })).toEqual(expected);
+  });
+});
+
+// A complex value passed as an ARGUMENT to a scalar-bodied user function.
+// Before the per-lane emission the call site's verdict was discarded at the
+// user-call boundary: `b(x) := 2x` was analyzed with `x` masked real and
+// emitted once, in the real lane, so `_fn_b({re, im})` computed `2 * {re, im}`
+// = NaN behind `success: true`. It was filed against the `complexPromotion`
+// opt-in (`b(a(t))` with `a(t) := √(t−1)`) but was never specific to it — a
+// declared-complex `w` took the same path on the default route. Now each call
+// site's lane pattern (`userCallComplexLanes`) selects a specialization
+// (`_fn_b$z1`) whose body compiles with the parameter bound complex, and the
+// real lane keeps its bare name and byte-identical body.
+describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function parameter (per-lane emission)', () => {
+  const fresh = () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.parse('a(t) := \\sqrt{t-1}').evaluate();
+    e.parse('b(x) := 2x').evaluate();
+    e.parse('f(x) := x').evaluate();
+    e.parse('h(x, y) := xy').evaluate();
+    e.parse('c(x) := b(x) + 1').evaluate();
+    e.declare('w', 'complex');
+    return e;
+  };
+  const W = { re: 1, im: 2 };
+
+  it('ON: the ROADMAP witness |b(a(t))/2 − 1| matches the interpreter', () => {
+    const e = fresh();
+    const r = compile(e.parse('|b(a(t))/2 - 1|'), { complexPromotion: true });
+    expect(r.success).toBe(true);
+    // Interpreter: |2·√(0.3−1)/2 − 1| = |i·0.83666 − 1| = 1.30384…
+    expect(r.run!({ t: 0.3 })).toBeCloseTo(1.3038404810405297, 12);
+  });
+
+  it('ON: b(a(t)) is classified complex at the call site and returns {re, im}', () => {
+    const e = fresh();
+    expect(BaseCompiler.isComplexValued(e.parse('a(t)'))).toBe(false); // opt-in off here
+    const r = compile(e.parse('t \\mapsto b(a(t))'), { complexPromotion: true });
+    expect(r.code).toContain('_fn_b$z1');
+    const v = r.run!(0.3) as { re: number; im: number };
+    expect(v.re).toBeCloseTo(0, 12);
+    expect(v.im).toBeCloseTo(1.6733200530681511, 12);
+  });
+
+  it('ON: an identity body (pass-through) keeps working through the lane', () => {
+    const e = fresh();
+    const r = compile(e.parse('t \\mapsto f(a(t))'), { complexPromotion: true });
+    const v = r.run!(0.3) as { re: number; im: number };
+    expect(v.re).toBeCloseTo(0, 12);
+    expect(v.im).toBeCloseTo(0.8366600265340756, 12);
+  });
+
+  it('DEFAULT path: a declared-complex argument to b(x) := 2x computes 2w', () => {
+    const e = fresh();
+    for (const [src, expected] of [
+      ['b(w)', { re: 2, im: 4 }],
+      ['b(w) + 1', { re: 3, im: 4 }],
+      ['b(t + w)', { re: 6, im: 4 }], // t = 2: 2·(3 + 2i)
+      ['b(b(w))', { re: 4, im: 8 }],
+      ['c(w)', { re: 3, im: 4 }], // nested: the lane parameter passed on to b
+      ['h(w, 2)', { re: 2, im: 4 }],
+      ['h(2, w)', { re: 2, im: 4 }],
+      ['h(w, w)', { re: -3, im: 4 }],
+    ] as const) {
+      const r = compile(e.parse(src), { fallback: false });
+      expect(r.success).toBe(true);
+      const v = r.run!({ w: W, t: 2 }) as { re: number; im: number };
+      expect([src, v.re, v.im]).toEqual([src, expected.re, expected.im]);
+    }
+  });
+
+  it('a real-valued body over a complex lane parameter stays a plain number', () => {
+    const e = fresh();
+    e.parse('r(x) := |x|').evaluate();
+    const r = compile(e.parse('r(w) + 1'), { fallback: false });
+    expect(r.run!({ w: { re: 3, im: 4 } })).toBe(6);
+  });
+
+  it('the real lane is unchanged: bare name, plain body, no specialization', () => {
+    const e = fresh();
+    for (const src of ['b(3)', 'b(t)', 'h(3, 4)']) {
+      const r = compile(e.parse(src), { fallback: false });
+      expect(r.code).not.toContain('$z');
+    }
+    const r = compile(e.parse('t \\mapsto b(t)'), { fallback: false });
+    expect(r.code).toContain('const _fn_b = (x) => 2 * x;');
+    expect(r.run!(0.3)).toBeCloseTo(0.6, 12);
+  });
+
+  it('both lanes of one function coexist in a single compilation', () => {
+    const e = fresh();
+    const r = compile(e.parse('t \\mapsto b(a(t)) + b(t)'), {
+      complexPromotion: true,
+    });
+    expect(r.code).toContain('const _fn_b = (x) => 2 * x;');
+    expect(r.code).toContain('const _fn_b$z1 = (x) =>');
+    const v = r.run!(0.3) as { re: number; im: number };
+    expect(v.re).toBeCloseTo(0.6, 12);
+    expect(v.im).toBeCloseTo(1.6733200530681511, 12);
+  });
+
+  it('a recursive self-call inside the complex lane resolves to the SAME specialization', () => {
+    // K's `z` slot is wide-typed. Inside `_fn_K$z01` the parameter `z` is
+    // framed as a scalar complex object, so the self-call `K(n-1, z)` grants
+    // the same lane and emits `_fn_K$z01` — never a real-lane `_fn_K` that
+    // would receive the complex object.
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.assign(
+      'K',
+      e.box([
+        'Function',
+        [
+          'Typed',
+          [
+            'Which',
+            ['LessEqual', 'n', 0],
+            'z',
+            'True',
+            [
+              'Add',
+              ['Power', ['K', ['Subtract', 'n', 1], 'z'], 2],
+              ['Complex', 0.35, 0.4],
+            ],
+          ],
+          { str: 'complex' },
+        ],
+        ['Typed', 'n', { str: 'integer' }],
+        'z',
+      ])
+    );
+    const r = compile(e.parse('t \\mapsto K(3, t + 2i)'), { fallback: false });
+    expect(r.code).toContain('_fn_K$z01(');
+    expect(r.code).not.toContain('_fn_K(');
+    const v = r.run!(0.1) as { re: number; im: number };
+    const interp = e.box(['K', 3, ['Complex', 0.1, 2]]).N();
+    expect(v.re).toBeCloseTo(interp.re, 10);
+    expect(v.im).toBeCloseTo(interp.im, 10);
+  });
+
+  it('an emitted definition does not see the caller Block\'s local shapes (isolated frame)', () => {
+    // `u(x) := x + k` reads the GLOBAL `k`; the calling block declares its
+    // own complex local `k`. Before the emitted body compiled under an
+    // isolated frame, the block's `k → complex` entry leaked into `u`'s body,
+    // which then lowered the plain global as `{re, im}` — `{re: null}` where
+    // the interpreter answers 7.
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.declare('k', 'real');
+    e.parse('u(x) := x + k').evaluate();
+    const blk = e.box([
+      'Block',
+      ['Declare', 'k', 'complex'],
+      ['Assign', 'k', ['Complex', 1, 1]],
+      ['u', 2],
+    ]);
+    const r = compile(blk, { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ k: 5 })).toBe(7);
   });
 });

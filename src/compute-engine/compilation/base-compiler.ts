@@ -1276,22 +1276,29 @@ export class BaseCompiler {
   }
 
   /**
-   * Under `complexPromotion`, whether a call to a USER-defined function
-   * produces a complex value — decided by looking through to its body.
+   * Whether a call to a USER-defined function produces a complex value —
+   * decided by looking through to its body, analyzed with the parameters
+   * bound to the call site's complex LANES (`userCallComplexLanes`).
    *
-   * Needed because the promotion happens INSIDE the emitted `_fn_…`: with
-   * `z(t) := √(t−1)`, the body promotes and `_fn_z` returns `{re, im}`, while
-   * the call site `z(t)` types the wide `finite_number` and would otherwise be
-   * read as a plain number — `Math.abs(0.5 * {re,im} + -1)`, i.e. `NaN`
-   * everywhere, which is item 190's exact witness.
+   * Two things happen inside the emitted `_fn_…` that the call site's type
+   * does not describe. Under `complexPromotion`, the body itself promotes:
+   * with `z(t) := √(t−1)`, `_fn_z` returns `{re, im}` while the call `z(t)`
+   * types the wide `finite_number` and would otherwise be read as a plain
+   * number — `Math.abs(0.5 * {re,im} + -1)`, i.e. `NaN` everywhere, item
+   * 190's exact witness. And on ANY path, a complex argument bound to a
+   * wide-typed parameter makes the emitted specialization (`_fn_b$z1`)
+   * compute in the complex lane, whatever the declared result type says.
    *
-   * Not consulted without the opt-in: the default carve-out keeps such a body
-   * on the real kernel, so the ordinary operand recursion already agrees, and
-   * gating here keeps the default emission byte-identical.
+   * Without the opt-in this answers only when some lane IS complex, and
+   * declines (`undefined`) otherwise: the default carve-out keeps a merely
+   * promotable body on the real kernel, so for every other default-path call
+   * the ordinary type-based answer already agrees with the emission, and the
+   * decline keeps that emission byte-identical.
    *
    * The parameters are shielded during the body analysis, exactly as for a
-   * `Function` literal operand (`binderParts`), and `visited` declines self-
-   * and mutual recursion rather than looping.
+   * `Function` literal operand (`binderParts`) — with the complex-lane ones
+   * additionally bound complex — and `visited` declines self- and mutual
+   * recursion rather than looping.
    */
   private static isComplexValuedUserCall(
     expr: Expression & { ops: ReadonlyArray<Expression> },
@@ -1322,21 +1329,55 @@ export class BaseCompiler {
     // `broadcastable<T>` or top-typed body, for which the former is false.
     if (body.type.matches('collection') || isPossiblyCollectionTyped(body))
       return undefined;
-    const params = literal.ops
-      .slice(1)
-      .map((p) => (isSymbol(p) ? p.symbol : undefined))
-      .filter((p): p is string => p !== undefined);
+    // The parameters are bound to the call site's complex LANES
+    // (`userCallComplexLanes`) — the same binding the emitted specialization
+    // compiles under — so this verdict describes the value the call actually
+    // returns. Without the opt-in the look-through is consulted only when
+    // some lane IS complex (the caller checks `expr.ops` first), which is
+    // exactly the set of call sites whose emission changed; every other
+    // default-path call keeps its previous, type-based answer.
+    const lanes = BaseCompiler.userCallComplexLanes(
+      expr.engine,
+      op,
+      literal,
+      expr.ops
+    );
+    if (!BaseCompiler._complexPromotion && !lanes.some((c) => c))
+      return undefined;
+    const mask = BaseCompiler.userCallMask(literal, lanes);
     const nextVisited = new Set(visited);
     nextVisited.add(op);
     const prevVisited = BaseCompiler._userCallVisited;
     BaseCompiler._userCallVisited = nextVisited;
     try {
-      return BaseCompiler.withBinderMask({ real: [], shielded: params }, () =>
+      return BaseCompiler.withBinderMask(mask, () =>
         BaseCompiler.isComplexValued(body)
       );
     } finally {
       BaseCompiler._userCallVisited = prevVisited;
     }
+  }
+
+  /**
+   * The binder mask under which a user function's body is ANALYZED for a call
+   * site with lanes `lanes`: every parameter shielded (a parameter is not a
+   * free engine symbol, so the engine-value fallback must not read through
+   * it — but its declared type stays in play, since a typed parameter can
+   * legitimately be complex), and the complex-lane parameters bound complex.
+   */
+  private static userCallMask(
+    literal: Expression & FunctionInterface,
+    lanes: ReadonlyArray<boolean>
+  ): { real: string[]; shielded: string[]; complex: string[] } {
+    const shielded: string[] = [];
+    const complex: string[] = [];
+    literal.ops.slice(1).forEach((p, i) => {
+      const name = functionLiteralParameterName(p);
+      if (!name) return;
+      shielded.push(name);
+      if (lanes[i]) complex.push(name);
+    });
+    return { real: [], shielded, complex };
   }
 
   /** Heads already being looked through by `isComplexValuedUserCall`. */
@@ -1414,18 +1455,24 @@ export class BaseCompiler {
     if (literal === undefined) return undefined;
     const body = BaseCompiler.collectionConstructorBody(literal.ops[0]);
     if (body === undefined) return undefined;
-    const params = literal.ops
-      .slice(1)
-      .map((p) => (isSymbol(p) ? p.symbol : undefined))
-      .filter((p): p is string => p !== undefined);
+    // Same lane binding as `isComplexValuedUserCall`: the elements mention the
+    // parameters, and the emitted specialization lowers them under the call
+    // site's lanes.
+    const mask = BaseCompiler.userCallMask(
+      literal,
+      BaseCompiler.userCallComplexLanes(
+        collection.engine,
+        op,
+        literal,
+        collection.ops
+      )
+    );
     const nextVisited = new Set(BaseCompiler._userCallVisited);
     nextVisited.add(op);
     const prevVisited = BaseCompiler._userCallVisited;
     BaseCompiler._userCallVisited = nextVisited;
     try {
-      return BaseCompiler.withBinderMask({ real: [], shielded: params }, () =>
-        fn(body.ops)
-      );
+      return BaseCompiler.withBinderMask(mask, () => fn(body.ops));
     } finally {
       BaseCompiler._userCallVisited = prevVisited;
     }
@@ -7266,18 +7313,36 @@ export class BaseCompiler {
    * caller would consume a `{re, im}` object as a number (NaN everywhere).
    */
   private static withBinderMask<T>(
-    binder: { real: ReadonlyArray<string>; shielded: ReadonlyArray<string> },
+    binder: {
+      real: ReadonlyArray<string>;
+      shielded: ReadonlyArray<string>;
+      /** Names bound COMPLEX for the duration (a complex-lane parameter). */
+      complex?: ReadonlyArray<string>;
+    },
     fn: () => T
   ): T {
     const frame = new Map<string, boolean>();
     for (const n of binder.real) frame.set(n, false);
+    // A complex-lane name is a scalar complex object (the lane is granted
+    // only for a provably scalar argument): record the SCALAR fact in the
+    // vector frame as well, so a nested user call inside the analyzed body
+    // grants the same lane the emitter will (`provablyScalarOrFramedScalar`).
+    // The vector frame is pushed only when there is something to enter, so
+    // every pre-existing mask leaves `_localVector` untouched.
+    const vector = new Map<string, number>();
+    for (const n of binder.complex ?? []) {
+      frame.set(n, true);
+      vector.set(n, BaseCompiler.LOCAL_SCALAR);
+    }
     BaseCompiler._localComplex.push(frame);
+    if (vector.size > 0) BaseCompiler._localVector.push(vector);
     BaseCompiler._binderShield.push(new Set(binder.shielded));
     BaseCompiler._pushComplexMemoLayer();
     try {
       return fn();
     } finally {
       BaseCompiler._binderShield.pop();
+      if (vector.size > 0) BaseCompiler._localVector.pop();
       BaseCompiler._localComplex.pop();
       BaseCompiler._popComplexMemoLayer();
     }
@@ -7412,9 +7477,19 @@ export class BaseCompiler {
     if (BaseCompiler._complexPromotion) {
       if (BaseCompiler.promotesRadicalToComplex(expr.operator, expr.ops))
         return true;
-      // …and a call to a user function follows its BODY, which is where the
-      // promotion above actually happens (item 190's witness puts the radical
-      // inside `z(t) := √(t−1)`).
+    }
+    // A call to a user function follows its BODY, analyzed with the
+    // parameters bound to the call site's complex lanes. Under the opt-in
+    // this is where the promotion above actually happens (item 190's witness
+    // puts the radical inside `z(t) := √(t−1)`); on the DEFAULT path the
+    // look-through answers only when some lane IS complex (it declines
+    // otherwise, see `isComplexValuedUserCall`), because that is the one case
+    // where the emitted definition is a lane specialization whose result
+    // shape the type-based answer below does not describe (`b(x) := 2x`
+    // called on a declared-complex `w`). Every other default-path call keeps
+    // its previous answer; a non-user-function head costs a definition
+    // lookup here and nothing more.
+    {
       const viaBody = BaseCompiler.isComplexValuedUserCall(
         expr,
         BaseCompiler._userCallVisited
@@ -9223,9 +9298,148 @@ export class BaseCompiler {
    * avoid colliding with the vars object (`_.<name>`) and with target helpers;
    * non-identifier characters are folded to `_` so the emitted declaration is a
    * valid target identifier.
+   *
+   * `lanes` is the call site's per-parameter COMPLEX LANE (see
+   * `userCallComplexLanes`). A user function is emitted once PER LANE PATTERN:
+   * the body of `b(x) := 2x` compiles to `2 * x` when `x` holds a plain
+   * number and to a `{re, im}` product when it holds a complex object, and one
+   * emitted definition cannot serve both, so a call site that binds a complex
+   * value to a wide-typed parameter names a distinct specialization —
+   * `_fn_b$z1` for "parameter 1 complex" — while the real lane keeps the bare
+   * `_fn_b` (so the default emission is byte-identical to before lanes
+   * existed). `$` cannot appear in a MathJSON symbol, so the suffix can never
+   * collide with the emitted name of another user function, and the `$z`
+   * marker keeps it apart from the `$c<n>` multi-clause helper names.
    */
-  private static userFunctionName(id: string): string {
-    return `_fn_${id.replace(/[^\w$]/g, '_')}`;
+  private static userFunctionName(
+    id: string,
+    lanes?: ReadonlyArray<boolean>
+  ): string {
+    const base = `_fn_${id.replace(/[^\w$]/g, '_')}`;
+    if (lanes === undefined || !lanes.some((c) => c)) return base;
+    return `${base}$z${lanes.map((c) => (c ? '1' : '0')).join('')}`;
+  }
+
+  /**
+   * The COMPLEX LANE of each parameter of user function `h` at a call site
+   * with arguments `args`: `true` where the argument is a complex-valued
+   * SCALAR bound to a parameter that is NOT declared complex.
+   *
+   * This is the verdict that used to be discarded at the user-call boundary
+   * (ROADMAP: "`complexPromotion` loses a complex value passed as an ARGUMENT
+   * to a scalar-bodied user function"). The analysis knew `a(t)` was complex
+   * and still classified `b(a(t))` real, because the body was analyzed with
+   * the parameters masked real, and the emitter compiled `_fn_b` once, in the
+   * real lane — `2 * {re, im}` is `NaN` at every point, behind `success:
+   * true`. It was never specific to the promotion opt-in: a declared-complex
+   * `w` passed to `b(x) := 2x` took the same path. Both the analysis
+   * (`isComplexValuedUserCall`, `withCollectionElements`) and the emission
+   * (`emitFunctionLiteralDefinition`) now bind the parameters to these lanes,
+   * so parent and child agree on the value SHAPE — the invariant compiled
+   * correctness rests on — and the analysis half must never land without the
+   * emission half (that was tried: the analysis then reported complex while
+   * the emitted body was still real-lane, which is strictly worse).
+   *
+   * Three deliberate exclusions, each keeping today's behavior for its shape:
+   *
+   * - A parameter DECLARED complex (`(number, complex) -> complex`) is not a
+   *   lane: the body's own typing already lowers it complex, and a real
+   *   argument to it is coerced at the call site (`coerceToComplex` in
+   *   `tryCompileUserFunction`), so the two mechanisms stay disjoint and the
+   *   emitted name of such a function does not change.
+   * - An argument that is not PROVABLY a scalar is not a lane: a list is
+   *   analyzed complex when ANY element is (`ops.some`), but the runtime
+   *   broadcast (`_SYS.bcastFn`) hands the body one element at a time, and a
+   *   real element in a mixed list would then be consumed as `{re, im}`.
+   * - Positions with no argument (a bare function-VALUE reference, `Map(b,
+   *   xs)`) have no lane; the value route takes the real emission as before.
+   */
+  private static userCallComplexLanes(
+    engine: ComputeEngine,
+    h: string,
+    literal: Expression & FunctionInterface,
+    args: ReadonlyArray<Expression>
+  ): boolean[] {
+    const nParams = literal.ops.length - 1;
+    const lanes: boolean[] = [];
+    for (let i = 0; i < nParams; i++) {
+      const a = args[i];
+      if (a === undefined) {
+        lanes.push(false);
+        continue;
+      }
+      if (
+        !BaseCompiler.provablyScalarOrFramedScalar(a) ||
+        !BaseCompiler.isComplexValued(a)
+      ) {
+        lanes.push(false);
+        continue;
+      }
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      lanes.push(!(pt !== undefined && isNonRealNumber(pt)));
+    }
+    return lanes;
+  }
+
+  /**
+   * `provablyScalarArg`, extended to a symbol the innermost local shape frame
+   * records as a SCALAR (`LOCAL_SCALAR`). A complex-lane parameter is entered
+   * that way (`laneFrames`): its declared type is wide (`unknown`), which
+   * `provablyScalarArg` must treat as possibly-a-collection, but the lane was
+   * granted only for a provably scalar argument, so inside the body the
+   * parameter is known to hold exactly one complex object — and a nested
+   * call passing it on (`c(x) := b(x) + 1`, or the recursive `K(n-1, z)`)
+   * must take the complex lane too, or the specialization would hand its
+   * complex object to a real-lane callee.
+   */
+  private static provablyScalarOrFramedScalar(a: Expression): boolean {
+    if (BaseCompiler.provablyScalarArg(a)) return true;
+    if (!isSymbol(a)) return false;
+    return (
+      BaseCompiler.localShapeFrameOf(a.symbol)?.get(a.symbol) ===
+      BaseCompiler.LOCAL_SCALAR
+    );
+  }
+
+  /**
+   * `userCallComplexLanes` for a head that may not be a single-literal user
+   * function: `undefined` when `h` has no `Function` literal (a multi-clause
+   * function dispatches at run time over its clause guards and is emitted
+   * whole, in the real lane, as before).
+   */
+  private static userCallComplexLanesOf(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): boolean[] | undefined {
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return undefined;
+    return BaseCompiler.userCallComplexLanes(engine, h, literal, args);
+  }
+
+  /**
+   * The local shape frames that bind the parameters of `literal` to their
+   * call-site lanes: only the complex-lane parameters are entered — `true` in
+   * the `_localComplex` frame, `LOCAL_SCALAR` in the `_localVector` frame (a
+   * lane is granted only for a provably scalar argument, and that fact must
+   * survive into the body: see `provablyScalarOrFramedScalar`). A real-lane
+   * parameter is left to the ordinary symbol analysis (bound name → not read
+   * through the engine → its declared type), exactly as before lanes existed.
+   */
+  private static laneFrames(
+    literal: Expression & FunctionInterface,
+    lanes: ReadonlyArray<boolean>
+  ): { complex: Map<string, boolean>; vector: Map<string, number> } {
+    const complex = new Map<string, boolean>();
+    const vector = new Map<string, number>();
+    literal.ops.slice(1).forEach((p, i) => {
+      if (!lanes[i]) return;
+      const name = functionLiteralParameterName(p);
+      if (!name) return;
+      complex.set(name, true);
+      vector.set(name, BaseCompiler.LOCAL_SCALAR);
+    });
+    return { complex, vector };
   }
 
   /**
@@ -9267,7 +9481,21 @@ export class BaseCompiler {
       BaseCompiler.provablyScalarArg
     );
 
-    const name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
+    // The complex lanes are a JavaScript-convention matter (`{re, im}`
+    // objects flowing through parameters). A target with its own definition
+    // lowering (the shader targets) synthesizes a STATIC signature from the
+    // declared parameter types and checks the call's argument shapes against
+    // it, so a complex argument to a real-typed parameter fails closed there
+    // rather than needing a specialization; hand those targets the real lane.
+    const lanes = target.userFunctions?.lowering
+      ? undefined
+      : BaseCompiler.userCallComplexLanesOf(engine, h, args);
+    const name = BaseCompiler.ensureUserFunctionEmitted(
+      engine,
+      h,
+      target,
+      lanes
+    );
     if (name === undefined) return undefined;
 
     // A target with its own call-site lowering (the shader targets, which must
@@ -9830,11 +10058,17 @@ export class BaseCompiler {
    * of user functions (no registry — GPU / raw direct targets, where recursion
    * therefore stays fail-closed). A re-entrant name (in `registry.compiling`)
    * is a recursive reference and compiles to a call by name.
+   *
+   * `lanes` is the call site's per-parameter complex lane
+   * (`userCallComplexLanes`); the value-position route passes none and takes
+   * the real emission. Each distinct lane pattern is emitted once, under its
+   * own name (`userFunctionName`).
    */
   static ensureUserFunctionEmitted(
     engine: ComputeEngine,
     h: string,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    lanes?: ReadonlyArray<boolean>
   ): string | undefined {
     const registry = target.userFunctions;
     if (!registry) return undefined;
@@ -9865,7 +10099,8 @@ export class BaseCompiler {
       h,
       literal,
       target,
-      registry
+      registry,
+      lanes
     );
   }
 
@@ -9884,9 +10119,10 @@ export class BaseCompiler {
     h: string,
     literal: Expression & FunctionInterface,
     target: CompileTarget<Expression>,
-    registry: NonNullable<CompileTarget<Expression>['userFunctions']>
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    lanes?: ReadonlyArray<boolean>
   ): string | undefined {
-    const name = BaseCompiler.userFunctionName(h);
+    const name = BaseCompiler.userFunctionName(h, lanes);
 
     if (!registry.defs.has(name)) {
       // Re-entrant reference: `h`'s definition is on the in-flight compile
@@ -9990,10 +10226,35 @@ export class BaseCompiler {
         // is not part of the root tree — but the same naming counter, so temp
         // names never collide across the artifact. Duplication inside a called
         // definition is therefore recovered once, in the emitted function.
-        const body = BaseCompiler.withEnforcedParams(literal, () =>
-          BaseCompiler.withNestedCseHarvest(bodyExpr, bodyTarget, params, () =>
-            BaseCompiler.compile(bodyExpr, bodyTarget)
-          )
+        // The body compiles under a frame binding each complex-lane parameter
+        // to `true`, so every operand analysis inside it — and so the emitted
+        // arithmetic — treats that parameter as the `{re, im}` object the
+        // call site actually passes. The frame is ISOLATED (it replaces the
+        // enclosing `_localComplex` frames instead of stacking on them): an
+        // emitted definition is a module-level function, so when this
+        // emission is triggered from inside a `Block` or another definition's
+        // body, the caller's local shapes must not reach this body — a
+        // global read here that happens to share a name with a caller's
+        // complex local would otherwise be lowered complex over its plain
+        // numeric value. This is the same discipline the GPU definition
+        // lowering applies to its own parameter frame.
+        const frames =
+          lanes === undefined
+            ? { complex: new Map<string, boolean>(), vector: new Map() }
+            : BaseCompiler.laneFrames(literal, lanes);
+        const body = BaseCompiler.withLocalShapeFrame(
+          frames.complex,
+          frames.vector,
+          () =>
+            BaseCompiler.withEnforcedParams(literal, () =>
+              BaseCompiler.withNestedCseHarvest(
+                bodyExpr,
+                bodyTarget,
+                params,
+                () => BaseCompiler.compile(bodyExpr, bodyTarget)
+              )
+            ),
+          true
         );
         registry.defs.set(
           name,
