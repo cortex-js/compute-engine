@@ -324,16 +324,16 @@ exports[`explain: higher-order derivatives (options.order) second-derivative gol
 
 exports[`explain: solve Or (alternatives) Or(x^2=1, x=3): per-case steps + merged roots, parity 1`] = `
 {
-  "initial": "x == 3 || x^2 == 1",
-  "result": "[3,1,-1]",
+  "initial": "x^2 == 1 || x == 3",
+  "result": "[1,-1,3]",
   "steps": [
-    "solve.case: x == 3",
-    "solve.move-terms: x - 3 == 0",
-    "solve.linear: x == 3",
     "solve.case: x^2 == 1",
     "solve.move-terms: x^2 - 1 == 0",
     "solve.quadratic-formula: [x == 1,x == -1]",
-    "solve.roots: [x == 3,x == 1,x == -1]",
+    "solve.case: x == 3",
+    "solve.move-terms: x - 3 == 0",
+    "solve.linear: x == 3",
+    "solve.roots: [x == 1,x == -1,x == 3]",
   ],
 }
 `;

@@ -323,13 +323,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           const inner = expr.op1.canonical;
           const innerCond = expr.op2.canonical;
           // Build the merged condition through canonical `And`, not `_fn`:
-          // `And` is commutative, so its canonical form flattens, folds and
-          // ORDERS its operands. Skipping that left the conjunction in
+          // canonical `And` flattens and validates its operands (in written
+          // order — since 2026-08-15 `And` is a short-circuit form and no
+          // longer sorts; see `canonicalShortCircuit` in `logic.ts`).
+          // Building with `_fn` skipped canonicalization altogether, which
+          // at the time (when `And` still sorted) left the conjunction in
           // authored order while `.json` (which goes through `structural`)
-          // sorts — so `x{a}{b}` and `x{b}{a}` serialized to identical
+          // sorted — so `x{a}{b}` and `x{b}{a}` serialized to identical
           // MathJSON while `isSame`/`hash` disagreed, and `ce.box(e.json)`
           // was not `isSame` to `e` (Tycho item-153 seed, the 11
-          // `differs-json-equal` rows).
+          // `differs-json-equal` rows). Every view of the tree must come
+          // from the same canonical construction.
           return ce._fn('When', [
             inner,
             ce.function('And', [innerCond, cond.canonical]),

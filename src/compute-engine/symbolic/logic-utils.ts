@@ -65,11 +65,37 @@ function isTautologyCheck(args: ReadonlyArray<Expression>): boolean {
   return false;
 }
 
+/**
+ * Splice nested same-operator operands into the operand list, preserving
+ * order: `And(a, And(b, c), d)` → `[a, b, c, d]`. `And`/`Or` are NOT
+ * declared `associative` (the flag would sort the operands at
+ * canonicalization, which is incompatible with their short-circuit,
+ * left-to-right semantics — see `canonicalShortCircuit` in
+ * `library/logic.ts`), so the framework no longer flattens them: the
+ * reducers below do it, so that a tautology/contradiction/duplicate hidden
+ * one level down (`Or(¬A, Or(A, ¬C))`, as `toCNF`'s distribution builds
+ * them with `_fn`) is still seen.
+ */
+function flattenSame(
+  args: ReadonlyArray<Expression>,
+  operator: string
+): ReadonlyArray<Expression> {
+  if (!args.some((x) => x.operator === operator)) return args;
+  const result: Expression[] = [];
+  for (const x of args) {
+    if (x.operator === operator && isFunction(x))
+      result.push(...flattenSame(x.ops, operator));
+    else result.push(x);
+  }
+  return result;
+}
+
 export function evaluateAnd(
   args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
   if (args.length === 0) return ce.True;
+  args = flattenSame(args, 'And');
   const ops: Expression[] = [];
   for (let arg of args) {
     // Check if an Or operand is a tautology (contains A and Not(A))
@@ -147,6 +173,7 @@ export function evaluateOr(
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
   if (args.length === 0) return ce.True;
+  args = flattenSame(args, 'Or');
   const ops: Expression[] = [];
   for (let arg of args) {
     // Check if an And operand is a contradiction (contains A and Not(A))

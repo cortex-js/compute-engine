@@ -246,16 +246,16 @@ describe('Logic', () => {
         Or,
         [
           Equal,
-          y,
-          2,
-        ],
-        [
-          Equal,
           [
             Not,
             x,
           ],
           1,
+        ],
+        [
+          Equal,
+          y,
+          2,
         ],
       ]
     `);

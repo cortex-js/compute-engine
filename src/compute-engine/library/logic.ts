@@ -3,6 +3,8 @@ import type {
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
   Scope,
+  EvaluateHandlerOptions,
+  EvaluateOptions,
 } from '../global-types.js';
 import {
   evaluateAnd,
@@ -18,6 +20,10 @@ import {
 } from '../symbolic/logic-utils.js';
 import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards.js';
 import { limitsIndexSites } from '../boxed-expression/binding-sites.js';
+import { validateArguments } from '../boxed-expression/validate.js';
+import { flatten } from '../boxed-expression/flatten.js';
+import { isOperatorDef } from '../boxed-expression/utils.js';
+import { isFiniteIndexedCollection, isTuple } from '../collection-utils.js';
 import {
   extractFiniteDomainWithReason,
   bodyContainsVariable,
@@ -77,6 +83,205 @@ function canonicalQuantifier(
     );
 }
 
+/**
+ * `And` and `Or` are SHORT-CIRCUIT operators: their operands are evaluated
+ * left to right, in the order written, and evaluation stops at the first
+ * operand that decides the result (`False` for `And`, `True` for `Or`). The
+ * remaining operands are never evaluated — no side effect, no error, no
+ * random draw is produced by them. This is what the Epsil `&&`/`||`
+ * operators lower to, what the JavaScript compilation target emits, and what
+ * `docs/RANDOMNESS-MODEL.md` (draw order) and the left-to-right ruling of
+ * `docs/TYPE_SYSTEM_ROADMAP.md` (ruling B8) promise.
+ *
+ * Two definition choices follow from this, both load-bearing:
+ *
+ * - The operators are `lazy`, so the driver hands the handler its operands
+ *   UNEVALUATED and the handler evaluates them one at a time. Before this
+ *   they were strict — every operand was evaluated before `evaluateAnd` saw a
+ *   `False` — so `false && f()` still ran `f()`, and `i <= n && xs[i] > 0`
+ *   still read `xs[i]` out of range.
+ * - The operators are NOT declared `commutative`/`associative`: those flags
+ *   sort the operands at canonicalization (`And(q, p)` boxed as
+ *   `And(p, q)`), which destroys the written order that short-circuiting is
+ *   defined over. Nested same-operator operands are still flattened
+ *   (`And(And(a, b), c)` → `And(a, b, c)`, which preserves the order) by the
+ *   canonical handler below, and the symbolic reducers in
+ *   `symbolic/logic-utils.ts` (duplicate removal, `A ∧ ¬A → False`,
+ *   absorption) are order-independent, so nothing symbolic is lost.
+ *
+ * The lazy route needs a `canonical` handler (a lazy operator without one
+ * receives RAW, unbound operands — see the "inert on box/parse" trap in
+ * CLAUDE.md), and a canonical handler bypasses the framework's signature
+ * validation, so the handler runs `validateArguments` itself: `And(1, 2)`
+ * still reports `incompatible-type`, an unknown symbol operand is still
+ * inferred `boolean`, and a possibly-absent operand (`boolean | missing`,
+ * e.g. a comparison on an indexed read) is still admitted through the
+ * strip-before-validate gate that `missingBehavior: 'handle'` enables.
+ */
+function canonicalShortCircuit(
+  name: 'And' | 'Or'
+): (
+  ops: ReadonlyArray<Expression>,
+  options: { engine: ComputeEngine; scope: Scope | undefined }
+) => Expression {
+  return (ops, { engine: ce }) => {
+    // Canonicalize (value-safe: binds structure, does not substitute values)
+    // and flatten nested `And`/`Or`, preserving the written order.
+    let args: ReadonlyArray<Expression> = flatten(ops, name);
+    const def = ce.lookupDefinition(name);
+    if (def && isOperatorDef(def)) {
+      const opDef = def.operator;
+      const adjusted = validateArguments(
+        ce,
+        args,
+        opDef.signature.type,
+        false,
+        // `broadcastable: true` — every position threads element-wise.
+        true,
+        ce._inferenceTxDepth > 0
+          ? (ce._freshlyInferred ?? new Set())
+          : undefined,
+        (i) => opDef.stripsMissingAt(i)
+      );
+      if (adjusted) args = adjusted;
+    }
+    return ce._fn(name, args);
+  };
+}
+
+/**
+ * Is `x` an operand that makes an `And`/`Or` application ELEMENT-WISE? Read
+ * from the operand's TYPE, not its value, so the answer is known before any
+ * operand is evaluated: a `list<boolean>`-typed call, a symbol bound to a
+ * list, and a literal list all answer the same way, and so does a declared
+ * but still valueless `list<boolean>` symbol. A tuple is atomic (a point, a
+ * pair), never mapped over — the same exclusion the driver's broadcast makes.
+ * An `unknown`/`any`-typed operand (an undeclared function call) is NOT
+ * collection-shaped, so it does not defeat short-circuiting.
+ */
+function isElementwiseOperand(x: Expression): boolean {
+  return x.type.matches('collection') && !x.type.matches('tuple');
+}
+
+/**
+ * The evaluate handler of a short-circuit operator (see
+ * `canonicalShortCircuit`), and its async twin (`evaluateShortCircuitAsync`,
+ * which mirrors it step for step so that an operand with only an
+ * `evaluateAsync` handler is awaited rather than left inert, and a
+ * cancellation `signal` reaches the operands).
+ *
+ * SCALAR application (no operand is collection-shaped, see
+ * `isElementwiseOperand`): evaluate the operands left to right and stop at
+ * the first `decider` (`False` for `And`, `True` for `Or`) — or at the first
+ * operand that evaluates to an error, which is returned as-is: an error is
+ * as final as a decider, and evaluating past it would run operands the failed
+ * one was guarding. The survivors are then handed to the order-independent
+ * symbolic reducer (`reduce`: `evaluateAnd`/`evaluateOr`), which folds
+ * `True`/`False`, duplicates, contradictions and absorptions, and keeps the
+ * rest symbolic.
+ *
+ * ELEMENT-WISE application (some operand is collection-shaped): the result is
+ * a list, cell by cell, and EVERY operand is evaluated once, left to right —
+ * there is no per-cell short-circuit. This is the documented exception to the
+ * short-circuit rule: the shape of the result is decided by the operand types
+ * (`And(False, L())` with `L : () -> list<boolean>` is typed `list<boolean>`,
+ * so it must return a list, which requires `L()`), and it is what every other
+ * broadcastable operator, and the driver's own pre-evaluation broadcast (step
+ * 2 of `_computeValue`, which intercepts a LITERAL or symbol-bound collection
+ * before this handler runs and evaluates each lifted operand once), already
+ * do. Only when the collection is produced by evaluation (a call) does this
+ * handler see it: it then rebuilds the call over the evaluated values so the
+ * driver zips them. The rebuild is guarded against re-entry — it only fires
+ * when NO operand was already a literal collection on entry, since in that
+ * case the driver has already declined to broadcast and rebuilding would loop.
+ */
+function evaluateShortCircuit(
+  name: 'And' | 'Or',
+  decider: 'True' | 'False',
+  reduce: (
+    args: ReadonlyArray<Expression>,
+    options: { engine: ComputeEngine }
+  ) => Expression | undefined
+): (
+  ops: ReadonlyArray<Expression>,
+  options: EvaluateHandlerOptions
+) => Expression | undefined {
+  return (ops, options) => {
+    const ce = options.engine;
+    const evalOptions = evaluateOptionsOf(options);
+    const elementwise = ops.some(isElementwiseOperand);
+    const values: Expression[] = [];
+    for (let i = 0; i < ops.length; i++) {
+      const v = ops[i].evaluate(evalOptions);
+      if (!elementwise && (sym(v) === decider || !v.isValid)) return v;
+      values.push(v);
+    }
+    return finishShortCircuit(ce, name, ops, values, reduce, evalOptions);
+  };
+}
+
+/** The async twin of `evaluateShortCircuit` — see there. */
+function evaluateShortCircuitAsync(
+  name: 'And' | 'Or',
+  decider: 'True' | 'False',
+  reduce: (
+    args: ReadonlyArray<Expression>,
+    options: { engine: ComputeEngine }
+  ) => Expression | undefined
+): (
+  ops: ReadonlyArray<Expression>,
+  options: EvaluateHandlerOptions
+) => Promise<Expression | undefined> {
+  return async (ops, options) => {
+    const ce = options.engine;
+    const evalOptions = evaluateOptionsOf(options);
+    const elementwise = ops.some(isElementwiseOperand);
+    const values: Expression[] = [];
+    for (let i = 0; i < ops.length; i++) {
+      const v = await ops[i].evaluateAsync(evalOptions);
+      if (!elementwise && (sym(v) === decider || !v.isValid)) return v;
+      values.push(v);
+    }
+    return finishShortCircuit(ce, name, ops, values, reduce, evalOptions);
+  };
+}
+
+/** The `EvaluateOptions` to hand to an operand: everything the caller passed
+ * (`numericApproximation`, `materialization`, the cancellation `signal`) minus
+ * the handler-only fields (`engine`, `expression`). */
+function evaluateOptionsOf(
+  options: EvaluateHandlerOptions
+): Partial<EvaluateOptions> {
+  const { numericApproximation, materialization, signal } = options;
+  return { numericApproximation, materialization, signal };
+}
+
+/**
+ * Shared tail of the sync/async short-circuit handlers, once every surviving
+ * operand has been evaluated into `values` (a decider or an error has already
+ * returned early on the scalar path). A collection produced by evaluation is
+ * handed back to the driver's broadcast by rebuilding the call over the
+ * values (see the element-wise paragraph of `evaluateShortCircuit`); anything
+ * else goes to the symbolic reducer.
+ */
+function finishShortCircuit(
+  ce: ComputeEngine,
+  name: 'And' | 'Or',
+  ops: ReadonlyArray<Expression>,
+  values: ReadonlyArray<Expression>,
+  reduce: (
+    args: ReadonlyArray<Expression>,
+    options: { engine: ComputeEngine }
+  ) => Expression | undefined,
+  evalOptions: Partial<EvaluateOptions>
+): Expression | undefined {
+  const isCollectionValue = (x: Expression) =>
+    isFiniteIndexedCollection(x) && !isTuple(x);
+  if (!ops.some(isCollectionValue) && values.some(isCollectionValue))
+    return ce.function(name, values).evaluate(evalOptions);
+  return reduce(values, { engine: ce });
+}
+
 export const LOGIC_LIBRARY: SymbolDefinitions = {
   True: {
     description: 'The boolean truth value true.',
@@ -98,12 +303,17 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   // logic rules for simplify)
   // See also: https://en.wikipedia.org/wiki/Prenex_normal_form
   And: {
-    description: 'Logical conjunction (AND): true when all operands are true.',
+    description:
+      'Logical conjunction (AND): true when all operands are true. ' +
+      'Short-circuits: operands are evaluated left to right and evaluation ' +
+      'stops at the first `False`.',
     wikidata: 'Q191081',
     broadcastable: true,
-    associative: true,
-    commutative: true,
-    idempotent: true,
+    // Not `associative`/`commutative`/`idempotent`: see
+    // `canonicalShortCircuit` — those flags would sort the operands and are
+    // incompatible with a `canonical` handler; flattening and the symbolic
+    // folds are done by the handlers instead.
+    lazy: true,
     complexity: 10000,
     signature: '(boolean+) -> boolean',
     // A possibly-absent operand (`boolean | missing`, e.g. a comparison on an
@@ -113,22 +323,33 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     // guarded loop condition `j <= n && cs[j] == "a"` was REJECTED at
     // canonicalization with `incompatible-type`.
     missingBehavior: 'handle',
-    evaluate: evaluateAnd,
+    // The operands are boolean values, never applied as functions: like the
+    // other held-operand selectors (`If`, `Which`, `Block`), no position
+    // invokes, so effects inference does not project a held operand's latent
+    // effects through the conjunction.
+    invokes: false,
+    canonical: canonicalShortCircuit('And'),
+    evaluate: evaluateShortCircuit('And', 'False', evaluateAnd),
+    evaluateAsync: evaluateShortCircuitAsync('And', 'False', evaluateAnd),
   },
   Or: {
     description:
-      'Logical disjunction (OR): true when at least one operand is true.',
+      'Logical disjunction (OR): true when at least one operand is true. ' +
+      'Short-circuits: operands are evaluated left to right and evaluation ' +
+      'stops at the first `True`.',
     wikidata: 'Q1651704',
     broadcastable: true,
-    associative: true,
-    commutative: true,
-    idempotent: true,
+    // See `And` above.
+    lazy: true,
     complexity: 10000,
     signature: '(boolean+) -> boolean',
     // Kleene over absence, mirroring `And`: `True` dominates, a surviving
     // `Missing` operand propagates.
     missingBehavior: 'handle',
-    evaluate: evaluateOr,
+    invokes: false,
+    canonical: canonicalShortCircuit('Or'),
+    evaluate: evaluateShortCircuit('Or', 'True', evaluateOr),
+    evaluateAsync: evaluateShortCircuitAsync('Or', 'True', evaluateOr),
   },
   Not: {
     description: 'Logical negation (NOT).',

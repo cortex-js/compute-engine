@@ -132,9 +132,7 @@ describe('Logic', () => {
     // Distinct operands are preserved
     expect(box(['Xor', 'A', 'B'])).toMatchInlineSnapshot(`Xor(A, B)`);
     // Multiple pairs cancel, distinct survivors remain
-    expect(box(['Xor', 'A', 'B', 'B', 'C'])).toMatchInlineSnapshot(
-      `Xor(A, C)`
-    );
+    expect(box(['Xor', 'A', 'B', 'B', 'C'])).toMatchInlineSnapshot(`Xor(A, C)`);
     expect(box(['Xor', 'A', 'A', 'B', 'B'])).toMatchInlineSnapshot(`"False"`);
     // Cancellation composes with a True operand: Xor(True, A, A) = True
     expect(box(['Xor', 'True', 'A', 'A'])).toMatchInlineSnapshot(`"True"`);
@@ -785,5 +783,191 @@ describe('KroneckerDelta / Boole stay symbolic when undetermined (REVIEW.md B19)
     );
     expect(box(['Boole', 'True'])).toBe('1');
     expect(box(['Boole', 'False'])).toBe('0');
+  });
+});
+
+describe('And/Or are SHORT-CIRCUIT forms (fixed 2026-08-15)', () => {
+  // `And`/`Or` evaluate their operands left to right, in the order written,
+  // and stop at the first operand that decides the result. Before this they
+  // were declared eager and commutative: every operand was evaluated, and
+  // canonicalization SORTED them, so `Or(F(), G())` could run `G` first.
+  // Each witness below is a function that logs its own name when it runs, so
+  // `calls` spells out which operands ran and in what order.
+  const { ComputeEngine } = require('../../src/compute-engine');
+  const sc = new ComputeEngine();
+  let calls: string[] = [];
+  sc.declare('scT', {
+    signature: '() -> boolean',
+    evaluate: () => {
+      calls.push('T');
+      return sc.True;
+    },
+  });
+  sc.declare('scF', {
+    signature: '() -> boolean',
+    evaluate: () => {
+      calls.push('F');
+      return sc.False;
+    },
+  });
+  const run = (json: any): any => {
+    calls = [];
+    return sc.expr(json).evaluate().json;
+  };
+
+  it('operands are NOT reordered at canonicalization', () => {
+    expect(sc.expr(['And', 'q', 'p', 'a']).json).toEqual([
+      'And',
+      'q',
+      'p',
+      'a',
+    ]);
+    expect(sc.expr(['Or', 'q', 'p']).json).toEqual(['Or', 'q', 'p']);
+    // Nested same-operator operands are still flattened, in written order.
+    expect(sc.expr(['And', ['And', 'b', 'a'], 'c']).json).toEqual([
+      'And',
+      'b',
+      'a',
+      'c',
+    ]);
+  });
+
+  it('And stops at the first False; the rest never runs', () => {
+    expect(run(['And', 'False', ['scT']])).toBe('False');
+    expect(calls).toEqual([]);
+    expect(run(['And', ['scF'], ['scT']])).toBe('False');
+    expect(calls).toEqual(['F']);
+    expect(run(['And', ['scT'], ['scF'], ['scT']])).toBe('False');
+    expect(calls).toEqual(['T', 'F']);
+    // No decider: every operand runs, left to right.
+    expect(run(['And', ['scT'], ['scT']])).toBe('True');
+    expect(calls).toEqual(['T', 'T']);
+  });
+
+  it('Or stops at the first True; the rest never runs', () => {
+    expect(run(['Or', 'True', ['scF']])).toBe('True');
+    expect(calls).toEqual([]);
+    expect(run(['Or', ['scT'], ['scF']])).toBe('True');
+    expect(calls).toEqual(['T']);
+    expect(run(['Or', ['scF'], ['scT'], ['scF']])).toBe('True');
+    expect(calls).toEqual(['F', 'T']);
+    expect(run(['Or', ['scF'], ['scF']])).toBe('False');
+    expect(calls).toEqual(['F', 'F']);
+  });
+
+  it('a guarded read is never evaluated when the guard fails', () => {
+    sc.assign('scXs', sc.expr(['List', 1, 2, 3]));
+    sc.assign('scK', 5);
+    expect(
+      run([
+        'And',
+        ['LessEqual', 'scK', 3],
+        ['Greater', ['At', 'scXs', 'scK'], 0],
+      ])
+    ).toBe('False');
+    sc.assign('scK', 2);
+    expect(
+      run([
+        'And',
+        ['LessEqual', 'scK', 3],
+        ['Greater', ['At', 'scXs', 'scK'], 0],
+      ])
+    ).toBe('True');
+  });
+
+  it('operand types are still validated at canonicalization', () => {
+    // The lazy route bypasses the framework validation; the canonical handler
+    // runs it itself.
+    expect(sc.expr(['And', 1, 2]).isValid).toBe(false);
+    expect(sc.expr(['Or', 'True', 'False']).isValid).toBe(true);
+  });
+
+  it('an operand that evaluates to an error stops the walk, like a decider', () => {
+    // `Error` is as final as `False`: evaluating past it would run the
+    // operands the failed one was guarding.
+    const r = run(['And', 'True', ['Error', "'x'"], ['scT']]);
+    expect(r[0]).toBe('Error');
+    expect(calls).toEqual([]);
+  });
+
+  it('the async route awaits async-only operands and short-circuits too', async () => {
+    sc.declare('scAT', {
+      signature: '() -> boolean',
+      evaluateAsync: async () => {
+        calls.push('AT');
+        return sc.True;
+      },
+    });
+    calls = [];
+    expect(
+      (await sc.expr(['And', ['scAT'], ['scF'], ['scAT']]).evaluateAsync()).json
+    ).toBe('False');
+    expect(calls).toEqual(['AT', 'F']);
+    calls = [];
+    expect(
+      (await sc.expr(['Or', ['scF'], ['scAT'], ['scF']]).evaluateAsync()).json
+    ).toBe('True');
+    expect(calls).toEqual(['F', 'AT']);
+  });
+
+  it('an element-wise application evaluates every operand: the shape follows the TYPES', () => {
+    // A collection-shaped operand (by type) makes the application element-wise
+    // and the result a list — so it cannot short-circuit past the collection,
+    // whichever way the collection is spelled: literal, symbol-bound, or the
+    // value of a call. Every operand runs once, left to right.
+    sc.declare('scL', {
+      signature: '() -> list<boolean>',
+      evaluate: () => {
+        calls.push('L');
+        return sc.expr(['List', 'True', 'False']);
+      },
+    });
+    sc.assign('scXs', sc.expr(['List', 'True', 'False']));
+    expect(run(['And', 'False', ['List', 'True', 'False']])).toEqual([
+      'List',
+      'False',
+      'False',
+    ]);
+    expect(run(['And', 'False', 'scXs'])).toEqual(['List', 'False', 'False']);
+    expect(run(['And', 'False', ['scL']])).toEqual(['List', 'False', 'False']);
+    expect(calls).toEqual(['L']);
+    expect(sc.expr(['And', 'False', ['scL']]).type.toString()).toBe(
+      'list<boolean>'
+    );
+    expect(run(['Or', ['scT'], ['scL']])).toEqual(['List', 'True', 'True']);
+    expect(calls).toEqual(['T', 'L']);
+    // A tuple is atomic, not a broadcast source; an `unknown`-typed operand
+    // is not collection-shaped and does not defeat short-circuiting.
+    expect(run(['And', 'False', ['scUndeclaredFn']])).toBe('False');
+  });
+
+  it('collection-valued operands still broadcast element-wise', () => {
+    expect(
+      run(['And', ['List', 'True', 'False'], ['List', 'True', 'True']])
+    ).toEqual(['List', 'True', 'False']);
+    sc.assign('scBs', sc.expr(['List', 'True', 'False']));
+    // The collection only appears once the symbol is evaluated.
+    expect(run(['And', 'scBs', 'True'])).toEqual(['List', 'True', 'False']);
+    expect(run(['Or', 'scBs', ['List', 'False', 'False']])).toEqual([
+      'List',
+      'True',
+      'False',
+    ]);
+  });
+
+  it('Kleene over absence is unchanged: a deciding operand wins, Missing propagates', () => {
+    expect(run(['And', 'Missing', 'False'])).toBe('False');
+    expect(run(['And', 'True', 'Missing'])).toBe('Missing');
+    expect(run(['Or', 'Missing', 'True'])).toBe('True');
+    expect(run(['Or', 'False', 'Missing'])).toBe('Missing');
+  });
+
+  it('symbolic simplifications are order-independent and still fire', () => {
+    expect(run(['And', 'p', ['Not', 'p']])).toBe('False');
+    expect(run(['Or', ['Not', 'p'], 'p'])).toBe('True');
+    expect(run(['Or', 'p', ['And', 'p', 'q']])).toBe('p');
+    expect(run(['And', 'p', ['Or', 'q', 'p']])).toBe('p');
+    // Hidden one level down (as `toCNF`'s distribution builds them).
+    expect(run(['Or', ['Not', 'A'], ['Or', 'A', ['Not', 'C']]])).toBe('True');
   });
 });

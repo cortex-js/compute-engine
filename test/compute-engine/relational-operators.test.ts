@@ -298,8 +298,8 @@ describe('Mixed chained inequalities (playground 5≤b<7)', () => {
   it('keeps the middle term: a < b ≤ c', () => {
     expect(ce.parse('5 \\lt b \\le 7').json).toEqual([
       'And',
-      ['LessEqual', 'b', 7],
       ['Less', 5, 'b'],
+      ['LessEqual', 'b', 7],
     ]);
   });
 
@@ -344,8 +344,8 @@ describe('Mixed-DIRECTION chained inequalities', () => {
   it('1 = 2 > 0 → And(1 = 2, 2 > 0)', () => {
     expect(ce.parse('1 = 2 > 0').json).toEqual([
       'And',
-      ['Less', 0, 2],
       ['Equal', 1, 2],
+      ['Less', 0, 2],
     ]);
   });
 
@@ -395,8 +395,8 @@ describe('Chained NotEqual (pairwise, not all-distinct)', () => {
   it('mixes with directional links: a < b ≠ c → And(a < b, b ≠ c)', () => {
     expect(ce.parse('a < b \\ne c').json).toEqual([
       'And',
-      ['NotEqual', 'b', 'c'],
       ['Less', 'a', 'b'],
+      ['NotEqual', 'b', 'c'],
     ]);
   });
 });

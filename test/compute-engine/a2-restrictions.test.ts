@@ -36,7 +36,9 @@ describe('A2 — Interval extraction from When expressions', () => {
   test('extracts from When with And of comparisons', () => {
     const ce = new ComputeEngine();
     // Two stacked restrictions canonicalize to When(e, And(c1, c2))
-    const expr = ce.parse('f(x)\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}');
+    const expr = ce.parse(
+      'f(x)\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}'
+    );
     const interval = expr.getInterval('x');
     expect(interval).toBeDefined();
     expect(interval?.lower?.re).toEqual(0);
@@ -83,7 +85,7 @@ describe('A2 — Compact piecewise parsing', () => {
     expect(expr.operator).toEqual('Which');
     const ops = expr.ops!;
     expect(ops.length).toEqual(6);
-    expect(ops[0].operator).toEqual('Less');  // x > 0 canonicalizes to 0 < x → Less(0, x)
+    expect(ops[0].operator).toEqual('Less'); // x > 0 canonicalizes to 0 < x → Less(0, x)
     expect(ops[1].re).toEqual(1);
     expect(ops[2].operator).toEqual('Less');
     expect(ops[3].re).toEqual(-1);
@@ -95,7 +97,7 @@ describe('A2 — Compact piecewise parsing', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse('\\left\\{x > 0 : 1, 0\\right\\}');
     expect(expr.operator).toEqual('Which');
-    expect(expr.ops!.length).toEqual(4);  // cond1, val1, True, default
+    expect(expr.ops!.length).toEqual(4); // cond1, val1, True, default
   });
 
   test('{cond:val} (no default) parses to Which with implicit default', () => {
@@ -103,17 +105,23 @@ describe('A2 — Compact piecewise parsing', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse('\\left\\{x > 0 : 1\\right\\}');
     expect(expr.operator).toEqual('Which');
-    expect(expr.ops!.length).toEqual(2);  // cond1, val1
+    expect(expr.ops!.length).toEqual(2); // cond1, val1
   });
 
   test('compact piecewise evaluates correctly', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 3);
-    expect(ce.parse('\\left\\{x > 0 : 1, x < 0 : -1, 0\\right\\}').evaluate().re).toEqual(1);
+    expect(
+      ce.parse('\\left\\{x > 0 : 1, x < 0 : -1, 0\\right\\}').evaluate().re
+    ).toEqual(1);
     ce.assign('x', -3);
-    expect(ce.parse('\\left\\{x > 0 : 1, x < 0 : -1, 0\\right\\}').evaluate().re).toEqual(-1);
+    expect(
+      ce.parse('\\left\\{x > 0 : 1, x < 0 : -1, 0\\right\\}').evaluate().re
+    ).toEqual(-1);
     ce.assign('x', 0);
-    expect(ce.parse('\\left\\{x > 0 : 1, x < 0 : -1, 0\\right\\}').evaluate().re).toEqual(0);
+    expect(
+      ce.parse('\\left\\{x > 0 : 1, x < 0 : -1, 0\\right\\}').evaluate().re
+    ).toEqual(0);
   });
 
   test('non-piecewise set literals still parse as Set', () => {
@@ -135,7 +143,9 @@ describe('A2 — Compact piecewise parsing', () => {
 describe('A2 — Multi-restriction GLSL verification', () => {
   test('stacked restrictions canonicalize to When(e, And(c1, c2))', () => {
     const ce = new ComputeEngine();
-    const expr = ce.parse('f(x)\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}');
+    const expr = ce.parse(
+      'f(x)\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}'
+    );
     // The When may be wrapped in Multiply (per A2.1 finding).
     // Find the When in the AST.
     let when = expr.operator === 'When' ? expr : undefined;
@@ -151,7 +161,9 @@ describe('A2 — Multi-restriction GLSL verification', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const target = new GLSLTarget();
-    const expr = ce.parse('x^2\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}');
+    const expr = ce.parse(
+      'x^2\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}'
+    );
     const result = target.compile(expr);
     expect(result.success).toBe(true);
     // One ternary, not nested.
@@ -161,7 +173,9 @@ describe('A2 — Multi-restriction GLSL verification', () => {
 
   test('stacked restrictions evaluate correctly', () => {
     const ce = new ComputeEngine();
-    const expr = ce.parse('x^2\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}');
+    const expr = ce.parse(
+      'x^2\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}'
+    );
     ce.assign('x', 3);
     const v1 = expr.evaluate();
     expect(v1.re).toEqual(9);
@@ -198,19 +212,39 @@ describe('A2 — When(e, False) masking rule', () => {
 
 describe('A2 — stacked restrictions merge through canonical `And`', () => {
   // The `When(When(e, c1), c2) → When(e, And(c1, c2))` merge used to build the
-  // conjunction with `_fn`, which skips canonical `And`'s operand ordering.
-  // `.json` goes through `structural`, which DOES sort, so the two spellings
-  // serialized identically while `isSame`/`hash` disagreed.
+  // conjunction with `_fn`, which skipped canonical `And`'s operand handling,
+  // so `.json` (which went through `structural`) and `isSame`/`hash` could
+  // disagree about the operand order. Since 2026-08-15 `And` is a
+  // short-circuit form that keeps its operands in WRITTEN order everywhere
+  // (no path sorts them), so the two spellings are two different — but
+  // equal-valued — trees, and every view of one tree agrees with the others.
   const A = 'x\\left\\{\\vert z\\vert\\lt5\\right\\}\\left\\{0\\lt y\\right\\}';
   const B = 'x\\left\\{0\\lt y\\right\\}\\left\\{\\vert z\\vert\\lt5\\right\\}';
 
-  test('restriction order does not change the canonical tree', () => {
+  test('restrictions are conjoined in the order written', () => {
     const ce = new ComputeEngine();
     const a = ce.parse(A);
     const b = ce.parse(B);
-    expect(JSON.stringify(a.json)).toEqual(JSON.stringify(b.json));
-    expect(a.isSame(b)).toBe(true);
-    expect(a.hash).toEqual(b.hash);
+    expect(a.json).toEqual([
+      'When',
+      'x',
+      ['And', ['Less', ['Abs', 'z'], 5], ['Less', 0, 'y']],
+    ]);
+    expect(b.json).toEqual([
+      'When',
+      'x',
+      ['And', ['Less', 0, 'y'], ['Less', ['Abs', 'z'], 5]],
+    ]);
+    // Different trees, the same value at every point.
+    expect(a.isSame(b)).toBe(false);
+    for (const [y, z] of [
+      [1, 1],
+      [-1, 1],
+      [1, 7],
+    ]) {
+      const env = { y: ce.number(y), z: ce.number(z), x: ce.number(42) };
+      expect(a.subs(env).evaluate().json).toEqual(b.subs(env).evaluate().json);
+    }
   });
 
   test('`.json` agrees with the boxed operand order', () => {

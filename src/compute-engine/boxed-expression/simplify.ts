@@ -766,7 +766,14 @@ function simplifyOperands(
   // so that (x^3)^2 * (y^2)^2 becomes x^6 * y^4.
   // Also simplify Power expressions with negative bases and fractional exponents
   // to ensure proper sign factoring (e.g., (-2x)^{3/5} -> -(2x)^{3/5}).
-  if (def?.lazy) {
+  //
+  // `And`/`Or` are lazy too, but only so that they SHORT-CIRCUIT at
+  // evaluation (`library/logic.ts`): their operands are ordinary boolean
+  // expressions with no held/control-flow meaning, and the logic rules
+  // (`A ∧ ¬A → False`, absorption, CNF/DNF cleanup) need every operand fully
+  // simplified first — so they take the ordinary recursive branch below, as
+  // they did before they became lazy.
+  if (def?.lazy && expr.operator !== 'And' && expr.operator !== 'Or') {
     const build = (o: Expression[]) => expr.engine.function(expr.operator, o);
     const simplifiedOps: Expression[] = [];
     const full = (x: Expression, i: number) =>
