@@ -211,6 +211,46 @@ type Badge = record{name: string} is Nameable`)
   });
 });
 
+describe('`readonly` constrains the PROTOCOL view, not the object', () => {
+  // OPEN RULING, recorded in `ROADMAP.md` under "`readonly` in a protocol does
+  // not stop a holder of the OBJECT from writing the field". Declaring a
+  // property `readonly` says what the PROTOCOL promises about it; the object's
+  // own field is a slot either way, and a holder of the object writes it
+  // without `Named` being consulted. Both halves are pinned so that whichever
+  // way the question is ruled — a layout-level `const` field modifier, or
+  // requiring a non-writable field to satisfy `readonly` — the change shows up
+  // here rather than passing silently.
+  const NAMED = `protocol Named { readonly name: string }
+type P = object{name: string} is Named
+let p = P(name: "Ada")
+`;
+
+  test('a direct field write STORES, even though the property is `readonly`', () => {
+    expect(value(`${NAMED}p.name = "Grace"\np.name`)).toBe('"Grace"');
+  });
+
+  test('the protocol VIEW of the same write is refused', () => {
+    // `["ProtocolProperty", protocol, name, receiver, value]` is the setter
+    // INVOCATION — the four-operand shape. This is the route that consults the
+    // requirement's kind, and the only one that reports the `readonly`.
+    executeEpsil(ce, NAMED);
+    const written = ce
+      .box([
+        'ProtocolProperty',
+        { str: 'Named' },
+        { str: 'name' },
+        'p',
+        { str: 'Grace' },
+      ] as never)
+      .evaluate();
+    expect(String(written)).toContain('protocol-property-readonly-set');
+    // …and the object is untouched, so the two routes really do disagree.
+    expect(
+      String(ce.box(['Field', 'p', { str: 'name' }] as never).evaluate())
+    ).toBe('"Ada"');
+  });
+});
+
 describe('`object-property-conflict` — field and accessor for one name', () => {
   const CONFLICT_PREFIX = `protocol Nameable { readwrite name: string }
 type T = object{name: string}

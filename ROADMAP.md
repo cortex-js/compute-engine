@@ -2454,6 +2454,53 @@ the sugar serves everything else, and the dispatch guard in `library/core.ts`
 keeps them from fighting — but it is two mechanisms for one syntax, and Phase
 1D does not formally close until the sugar is gone.
 
+### `readonly` in a protocol does not stop a holder of the OBJECT from writing the field (found 2026-08-16, OPEN — needs a product ruling)
+
+Declaring a property `readonly` in a protocol constrains the PROTOCOL view of
+it, not the object. With
+
+```
+protocol Named { readonly name: string }
+type P = object{name: string} is Named
+let p = P(name: "Ada")
+```
+
+the PROTOCOL view of the write is refused — `["ProtocolProperty", "Named",
+"name", p, "Grace"]` answers `protocol-property-readonly-set` and `p.name` still
+reads `"Ada"`. But `p.name = "Grace"` stores straight through the object's
+layout and succeeds: it never consults `Named` at all.
+
+Measured while pinning this, and part of the same surface problem: the Epsil
+spelling `p.(Named.name) = "Grace"` does not reach that readonly refusal at all.
+It is rejected earlier by `property-assignment-target-invalid`, identically for
+a `readwrite` protocol, with a message — "the protocol property `Named.name` can
+only be assigned through a variable: `p.name = …` rebinds `p`, and only a
+binding can be rebound" — that talks about REBINDING, which is not what an
+object receiver does, and that steers the author to `p.name = …`: the exact
+write that bypasses `readonly`.
+
+Kept for now, and the reasons are real. Two protocols may legitimately see one
+field with different mutability — a type can conform to a `readonly Named` and
+a `readwrite Renameable` over the same `name` field — so `readonly` cannot mean
+"this field is immutable" without breaking that. And refusing the direct write
+would mean that ADDING a read-only conformance to an existing type silently
+breaks every existing writer of that field, which is a bad property for a
+declaration that is supposed to be additive.
+
+Arno finds it surprising and misleading nonetheless, and wants the alternatives
+thought through before Phase 2 closes:
+
+- a LAYOUT-level field modifier, so immutability is stated where the field is
+  (`object{ const id: string }`), leaving `readonly` to mean only what the
+  protocol view promises; or
+- requiring a non-writable field to satisfy a `readonly` requirement, so
+  field-backed satisfaction of a `readonly` property implies the field itself
+  cannot be written.
+
+Current behaviour is pinned (both halves) by
+`test/compute-engine/protocol-field-backed.test.ts`, so whichever way this is
+ruled the change is visible.
+
 ### A field store's EXPRESSION-level effect is still `scope`, not `state` (found 2026-08-15 in review; the inference half FIXED same day, the expression half FIXED 2026-08-16 — CLOSED)
 
 Appendix B rules that changing a field carries the `state` effect. That held on
@@ -2555,17 +2602,35 @@ Covered by `test/compute-engine/protocol-property-effects.test.ts` ("an accessor
 body's own effects ARE propagated") and
 `test/compute-engine/protocol-annotated-members.test.ts`.
 
-REMAINING, narrower: a CONDITIONAL conformance (`type list<T> is P where T:
-number { … }`) is left unsubstituted. Its `Self` is a head PATTERN, whose only
-ground stand-in is the widest instantiation (`list<number>`), and P17 checks the
-implementation's COVARIANT positions against the pattern instead — so a stored
-literal ground to the widest instantiation fails that check (a member declaring
-`-> Self` would read as `-> list<number>` and be rejected against `-> list<T>`;
-verified by running `test/compute-engine/protocol-conditional.test.ts` against
-that variant). Closing it needs somewhere to keep the author's text apart from
-what dispatch reads. `implementationLiteralAt` declines a conditional edge for
-the same reason. Pinned by the `KNOWN GAP` block of
-`test/compute-engine/protocol-annotated-members.test.ts`.
+CONDITIONAL conformances now FAIL CLOSED at the declaration (ruled 2026-08-16).
+A conditional conformance (`type list<T> is P where T: number { … }`) is left
+unsubstituted: its `Self` is a head PATTERN, whose only ground stand-in is the
+widest instantiation (`list<number>`), and P17 checks the implementation's
+COVARIANT positions against the pattern instead — so a stored literal ground to
+the widest instantiation fails that check (a member declaring `-> Self` would
+read as `-> list<number>` and be rejected against `-> list<T>`; verified by
+running `test/compute-engine/protocol-conditional.test.ts` against that
+variant). `implementationLiteralAt` declines a conditional edge for the same
+reason.
+
+So rather than accept such a block and die at the call with
+`Function body must be a scoped Block expression`, an effect specifier on a
+member of a conditional conformance is REFUSED when the conformance is
+declared, with `protocol-conditional-member-effects` — a message that names the
+specifier and the member and says the effects are inferred instead. Nothing is
+registered. A conformance to a ground type is unaffected. Pinned on both routes
+by `test/compute-engine/protocol-annotated-members.test.ts` and documented in
+`src/epsil/docs/protocols.md` ("No effect specifiers on a conditional member").
+
+Lifting the restriction needs the author's RAW block kept apart from a GROUNDED
+dispatch view: P17 must keep reading the author's text (so the covariant check
+still runs against the head pattern), while dispatch, the effect walk and the
+literal's `.type` arrow read a receiver ground at the widest instantiation. The
+obstacle is bookkeeping, not semantics — `_authored` would hold the raw block
+and `impl` the grounded one, but `settleFieldBacking` rebuilds `impl` from
+`_authored` and `mergedMapMatches` compares the two by REFERENCE, so the
+grounded view has to be identity-stable or every registration rebuilds the
+merged map and emits spurious `config` state events.
 
 ### An effect annotation on a protocol implementation member makes it uncallable (found 2026-08-16, FIXED 2026-08-16)
 

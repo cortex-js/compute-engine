@@ -198,6 +198,17 @@
 
 ### Issues Resolved
 
+- **A declared subscripted symbol spelled with a Greek (dictionary) base is
+  no longer captured as an index once the base becomes a collection.** With
+  `\eta_w = 1.33` and `\eta` bound to a list, `\eta_w` parsed as
+  `At(eta, w)` — the existing symbol `eta_w` was shadowed by element access
+  and its own serialization `\eta_{w}` did not re-parse to itself. The
+  declared-joined-name rule that already governed ASCII bases (`x_w` with
+  `x_w` declared) now applies to dictionary-spelled bases too: a joined name
+  that resolves in scope wins over index capture, so `\eta_w` is `eta_w`
+  while an undeclared `\eta_1` on a list `eta` still indexes. Applies to
+  the `\eta` command and to the Unicode `η` spelling alike.
+
 - **A `Reduce`/`Scan` whose accumulator would turn complex mid-fold now
   declines instead of miscompiling.** Only the element lane was modelled, so a
   fold with a real initial value and a combiner yielding complex values seeded
@@ -240,7 +251,11 @@
   side-effect of the same substitution: an authored accessor's own effects are
   now visible at all — a setter whose body writes `self.n = v` infers `state`,
   where it previously inferred nothing because its receiver was typed
-  `unknown`.
+  `unknown`. A CONDITIONAL conformance (`type list<T> is P where T: number
+  { … }`) cannot record a specifier against its head pattern, so one written
+  there is now refused when the conformance is declared, with
+  `protocol-conditional-member-effects`, instead of registering and failing at
+  the call.
 
 - **A compiled user function with a declared `complex` parameter no longer
   returns a corrupt value.** The emitted body read the parameter in the real

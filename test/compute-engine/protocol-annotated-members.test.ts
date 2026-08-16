@@ -460,39 +460,95 @@ describe('the host route: a JS callback implementation', () => {
   });
 });
 
-describe('KNOWN GAP: a CONDITIONAL conformance’s annotated member', () => {
-  test('an effect specifier on a conditional conformance’s member is still uncallable', () => {
-    // Pinned as a gap, not as a contract. `Self` is substituted on the stored
-    // literal only for a GROUND conformance target. A conditional target is a
-    // head PATTERN (`list<T>`), whose only ground stand-in is the widest
-    // instantiation (`list<number>`) — and P17 checks the implementation's
-    // COVARIANT positions against the pattern instead, so a stored literal
-    // ground to the widest instantiation fails that check (a member declaring
-    // `-> Self` would be read as `-> list<number>` and rejected against
-    // `-> list<T>`). Closing this needs a place to keep the author's text
-    // apart from what dispatch reads; `implementationLiteralAt` declines a
-    // conditional edge for the same reason.
-    //
-    // Expected console noise: the uncallable literal reaches `makeLambda`,
-    // whose `console.assert(body.isScoped)` prints an ASSERTION FAILURE banner
-    // for this file on every run. The banner IS the pinned gap; it disappears
-    // when the gap closes. (`console.*` is stripped in production builds.)
-    const { value } =
-      run(`protocol Sized { function size(self: Self) -> integer }
+describe('a CONDITIONAL conformance refuses an effect specifier', () => {
+  // Ruled 2026-08-16: FAIL CLOSED at the declaration rather than accept the
+  // block and die at the call. The substitution that makes an annotated member
+  // callable needs a ground receiver, and a conditional target's `Self` is a
+  // head pattern (`list<T>`) with no ground stand-in that P17's covariant
+  // head-pattern check would also accept. Documented in
+  // `src/epsil/docs/protocols.md` ("No effect specifiers on a conditional
+  // member"); the remaining work is described in `ROADMAP.md`.
+  const CONDITIONAL = (specifier: string): string =>
+    `protocol Sized { function size(self: Self) -> integer }
 type list<T> is Sized where T: number {
-  function size(self: Self) pure -> integer { Length(self) }
-}
-size([1, 2, 3])`);
-    expect(value).toContain('Function body must be a scoped Block expression');
+  function size(self: Self)${specifier} -> integer { Length(self) }
+}`;
+
+  test('the statement route refuses it when the conformance is DECLARED', () => {
+    const { value, diagnostics } = run(`${CONDITIONAL(' pure')}
+1`);
+    // Refused as a declaration, so the program itself still runs.
+    expect(value).toBe('1');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toContain('protocol-conditional-member-effects');
+    expect(diagnostics[0]).toContain(
+      'a member of a conditional conformance cannot carry an effect specifier (`pure` on `size`)'
+    );
+    // The internal failure this refusal exists to pre-empt must never surface.
+    expect(diagnostics[0]).not.toContain('scoped Block expression');
   });
 
-  test('the same conditional conformance works UNANNOTATED', () => {
-    const { value } =
-      run(`protocol Sized { function size(self: Self) -> integer }
-type list<T> is Sized where T: number {
-  function size(self: Self) -> integer { Length(self) }
-}
+  test('nothing is registered, and the call reports a missing implementation', () => {
+    const { value } = run(`${CONDITIONAL(' pure')}
+size([1, 2, 3])`);
+    expect(value).toContain('protocol-implementation-missing');
+    expect(value).not.toContain('scoped Block expression');
+  });
+
+  test('`random` and `state` are refused on the same terms', () => {
+    for (const specifier of [' random', ' state']) {
+      const { diagnostics } = run(`${CONDITIONAL(specifier)}
+1`);
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]).toContain('protocol-conditional-member-effects');
+    }
+  });
+
+  test('the box route returns the same error value', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'DeclareProtocol',
+      { str: 'Sized' },
+      [
+        'Dictionary',
+        [
+          'KeyValuePair',
+          { str: 'size' },
+          ['Pair', { str: 'function' }, { str: '(self: Self) -> integer' }],
+        ],
+      ],
+    ] as never).evaluate();
+    const declared = ce
+      .box([
+        'DeclareConformance',
+        { str: 'list<T>' },
+        ['List', 'Sized'],
+        { str: 'where T: number' },
+        [
+          'Dictionary',
+          [
+            'KeyValuePair',
+            { str: 'size' },
+            [
+              'Function',
+              [
+                'Typed',
+                ['Block', ['Length', 'self']],
+                { str: '(self: Self) pure -> integer' },
+              ],
+              ['Typed', 'self', { str: 'Self' }],
+            ],
+          ],
+        ],
+      ] as never)
+      .evaluate();
+    expect(String(declared)).toContain('protocol-conditional-member-effects');
+  });
+
+  test('a BARE member of the same conditional conformance still registers and dispatches', () => {
+    const { value, diagnostics } = run(`${CONDITIONAL('')}
 size([1, 2, 3])`);
     expect(value).toBe('3');
+    expect(diagnostics).toEqual([]);
   });
 });

@@ -31,7 +31,11 @@ import {
 import type { ParseDiagnostic } from '../types-kernel-serialization.js';
 import { tokenize, tokensToString } from './tokenizer.js';
 import type { DiscardedComment } from './tokenizer.js';
-import { parseSymbol, parseInvalidSymbol } from './parse-symbol.js';
+import {
+  parseSymbol,
+  parseInvalidSymbol,
+  absorbSubscripts,
+} from './parse-symbol.js';
 import type {
   IndexedLatexDictionary,
   IndexedLatexDictionaryEntry,
@@ -2498,10 +2502,27 @@ export class _Parser implements Parser {
     for (const [def, tokenCount] of this.peekDefinitions('symbol')) {
       this.index = start + tokenCount;
       // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling resolveSymbol() or something like it). Maybe not during parsing, but canonicalization
-      if (typeof def.parse === 'function') {
-        const result = def.parse(this, until);
-        if (result !== null) return result;
-      } else return def.name!;
+      const result =
+        typeof def.parse === 'function' ? def.parse(this, until) : def.name!;
+      if (result === null) continue;
+      // A dictionary-spelled symbol (`\eta`, `\alpha`, …) followed by `_`:
+      // if the joined name (`eta_w`) is itself declared, it wins over the
+      // postfix `_` parselet's reading of the subscript. Without this, a base
+      // that is (or later becomes) an indexed collection turns every mention
+      // of an EXISTING symbol `eta_w` into `At(eta, w)`, and the serializer's
+      // own spelling of `eta_w` (`\eta_{w}`) no longer round-trips. Same rule
+      // as the single-letter and trigger-spelled branches of `parseSymbol()`
+      // in `parse-symbol.ts`: only a resolvable joined name is absorbed, so an
+      // undeclared `\eta_w` keeps its default reading (a `Subscript`, joined
+      // to a symbol at canonicalization, or `At` on a collection base). A base
+      // with `subscriptEvaluate` owns its subscripts and never absorbs them.
+      if (
+        typeof result === 'string' &&
+        this.peek === '_' &&
+        !this.resolveSymbol(result)?.subscriptEvaluate
+      )
+        return absorbSubscripts(this, result, true);
+      return result;
     }
 
     // No custom parser worked. Backtrack.

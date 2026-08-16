@@ -272,6 +272,43 @@ unless `string` is made `Summable` too. The conformance is recursive for
 free — `list<list<integer>>` conforms because `list<integer>` does, as the
 second call shows.
 
+### No effect specifiers on a conditional member
+
+A member of a **conditional** conformance may not carry an
+[effect specifier](/epsil/control-flow/#effect-specifiers). Its effects are
+inferred from its body instead:
+
+```epsil
+protocol Summable { function total(self: Self) -> number }
+
+type list<T> is Summable where T: number {
+  function total(self: Self) pure -> number { Sum(self) }
+}
+```
+
+That is refused when the conformance is declared, with
+`protocol-conditional-member-effects`. Drop the `pure` and the same block
+works — and `total([1, 2, 3])` answers `6`.
+
+The restriction is specific to the conditional form. A conformance to a
+ground type accepts specifiers on every member:
+
+```epsil-live
+protocol Summable { function total(self: Self) -> number }
+
+type Box = object{n: integer} is Summable {
+  function total(self: Self) pure -> number { self.n }
+}
+
+total(Box(n: 5))
+// ➔ 5
+```
+
+The reason is that a conditional conformance's `Self` stands for a whole
+family of types (`list<T>`, not one type), and a specifier has to be recorded
+against a concrete receiver. The restriction is expected to lift; until then
+the failure is reported at the declaration rather than at the call.
+
 ## Requiring conformance in a signature
 
 A generic function can require its type variable to conform, with the `is`
@@ -321,7 +358,9 @@ grouped by when they fire:
   `protocol-implementation-pending` (a warning).
 - **Implementing**: `protocol-implementation-missing`,
   `protocol-implementation-duplicate`, `protocol-member-unknown`,
-  `protocol-signature-mismatch`, `protocol-property-readonly-set`.
+  `protocol-signature-mismatch`, `protocol-property-readonly-set`,
+  `protocol-conditional-member-effects` (an effect specifier on a member of a
+  conditional conformance).
 - **Calling**: `protocol-call-ambiguous`, `protocol-property-ambiguous`,
   `protocol-constraint-unsatisfied`, `protocol-in-type-position`,
   `property-assignment-target-invalid`.

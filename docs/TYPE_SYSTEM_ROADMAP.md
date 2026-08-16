@@ -2955,6 +2955,7 @@ proposed by Appendix B and are not implemented.
 | `protocol-member-unknown` | implementation defines a member not in the protocol |
 | `protocol-signature-mismatch` | implementation signature not a subtype of the requirement |
 | `protocol-property-readonly-set` | `set` handler provided for a `readonly` property |
+| `protocol-conditional-member-effects` | an effect specifier on a member of a CONDITIONAL conformance; refused at the declaration, since a conditional `Self` is a head pattern and a specifier has to be recorded against a concrete receiver |
 | `protocol-constraint-unsatisfied` | solved type variable fails an `is` constraint |
 | `protocol-in-type-position` | protocol name used where a type is expected |
 | `protocol-call-ambiguous` | bare call resolves to several applicable protocols |

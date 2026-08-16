@@ -2422,6 +2422,32 @@ function implementationProblem(
         message: `the signature of \`${describeMember(accessor, member)}\` does not parse at \`Self = ${selfName}\`: ${messageOf(e)}`,
       };
     }
+    // A CONDITIONAL conformance refuses an effect specifier outright, at
+    // DECLARATION time (ruled 2026-08-16: fail closed at registration rather
+    // than accept the block and fail at the call).
+    //
+    // The mechanism it would need is the one thing a conditional edge cannot
+    // have. An effect specifier lowers to a full marker signature stamped on
+    // the literal's body, and that signature mentions `Self` — which
+    // `canonicalFunctionLiteral` cannot parse, so it replaces the body with an
+    // error and every dispatch dies with "Function body must be a scoped Block
+    // expression". `declareConformance` fixes that for a GROUND target by
+    // substituting `Self` on the stored literal
+    // ({@link groundedImplementationBlock}); a conditional target has no ground
+    // substitution to make — its `Self` is a head pattern (`list<T>`), and the
+    // widest instantiation P17 would have to use for it (`list<number>`) is
+    // exactly what the covariant head-pattern check below must NOT see.
+    //
+    // Refusing here, before anything is stored, is what keeps that internal
+    // failure off the author's screen.
+    if (params !== undefined && declared?.effects !== undefined)
+      return {
+        code: 'protocol-conditional-member-effects',
+        message: `a member of a conditional conformance cannot carry an effect specifier (\`${describeEffects(
+          declared.effects
+        )}\` on \`${describeMember(accessor, member)}\`); remove it — the member's effects are inferred. A conformance to a ground type (\`type Box = object{…} is ${record.name} { … }\`) accepts specifiers.`,
+      };
+
     const detail =
       declared === null
         ? 'it is not a function literal'

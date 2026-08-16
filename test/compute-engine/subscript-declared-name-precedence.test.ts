@@ -283,3 +283,52 @@ describe('SUBSCRIPT: trigger-spelled base with a declared joined name', () => {
     });
   });
 });
+
+describe('SUBSCRIPT: trigger-spelled COLLECTION base with a declared non-function joined name (Tycho item 196)', () => {
+  // A dictionary-spelled base (`\eta`) is claimed by its `symbol` dictionary
+  // entry before the free `parseSymbol()` runs, so the joined-name absorption
+  // used to be reachable only through the function-head path (`\alpha_1(x)`).
+  // A declared NON-function `eta_w` on a collection base `eta` therefore read
+  // as `At(eta, w)`, and the serializer's own spelling `\eta_{w}` did not
+  // round-trip. Same rule as the ASCII branch: a declared joined name wins.
+  const json = (ce: ComputeEngine, latex: string) =>
+    JSON.stringify(ce.parse(latex, { canonical: false }).json);
+
+  test('declared joined name wins over index capture on a collection base', () => {
+    const ce = new ComputeEngine();
+    ce.declare('eta', 'list<number>');
+    ce.declare('eta_w', 'real');
+    expect(json(ce, '\\eta_w')).toBe('"eta_w"');
+    expect(json(ce, '\\eta_{w}')).toBe('"eta_w"');
+    // An undeclared sibling is still an index
+    expect(json(ce, '\\eta_1')).toBe('["At","eta",1]');
+    expect(json(ce, '\\eta_{g}')).toBe('["At","eta","g"]');
+  });
+
+  test('the Desmos document order: `eta_w` assigned FIRST, then `eta` bound to a list', () => {
+    const ce = new ComputeEngine();
+    ce.assign('eta_w', 1.33);
+    ce.assign('eta', ce.parse('\\frac{[0...20]}{20}').evaluate());
+    expect(json(ce, '\\eta_w')).toBe('"eta_w"');
+    expect(json(ce, '\\eta_{w}')).toBe('"eta_w"');
+    expect(ce.parse('\\eta_w').evaluate().re).toBe(1.33);
+    // 1-based: `eta_1` is 0/20, `eta_2` is 1/20
+    expect(ce.parse('\\eta_w+\\eta_2').evaluate().re).toBeCloseTo(1.33 + 1 / 20);
+  });
+
+  test('round-trip: the serializer spelling of `eta_w` re-parses to itself', () => {
+    const ce = new ComputeEngine();
+    ce.assign('eta_w', 1.33);
+    ce.assign('eta', ce.parse('\\frac{[0...20]}{20}').evaluate());
+    const latex = ce.expr('eta_w').latex;
+    expect(latex).toBe('\\eta_{w}');
+    expect(json(ce, latex)).toBe('"eta_w"');
+  });
+
+  test('nothing declared: a collection base still captures the index', () => {
+    const ce = new ComputeEngine();
+    ce.declare('eta', 'list<number>');
+    expect(json(ce, '\\eta_w')).toBe('["At","eta","w"]');
+    expect(json(ce, '\\eta_{w}')).toBe('["At","eta","w"]');
+  });
+});
