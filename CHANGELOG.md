@@ -1,5 +1,85 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Collection operators no longer promise to return their operand's own
+  kind; the static result type is now honest per kind.** `Reverse`,
+  `RotateLeft` and `RotateRight` were declared `(T) -> T where T:
+  indexed_collection`, and `Rest`/`Most` as `(indexed_collection) ->
+  indexed_collection`. The first promised kind-preservation for EVERY indexed
+  kind, which the runtime cannot deliver: a `tuple` type carries its arity and
+  per-position element types (`["Reverse", ["Tuple", 1, "'a'"]]` claimed
+  `tuple<finite_integer, string>` for the value `("a", 1)` — the element types
+  in the wrong order), and a `range` admits only ascending spans (a reversed or
+  rotated span is not one). The second lost the element type altogether.
+
+  The rule now is per kind: a `list` operand keeps its full type, shape
+  included (`vector<3>` reversed or rotated is still a `vector<3>`); every
+  other indexed kind — tuple, range, an opaque `indexed_collection<T>` — results
+  in `list<T>`, and the length-changing `Rest`/`Most` result in `list<T>` for
+  every kind (a `list` type carries no length). `Filter`'s result follows the
+  same rule: it echoed the source's type, so a filtered 3-vector claimed
+  `vector<3>`, a filtered tuple claimed the tuple's arity, and a filtered span
+  claimed `range`; an indexed source now yields `list<T>` (a set source keeps
+  its type). Concretely, `["Reverse", ["Tuple", 1, "'a'"]]` types as
+  `list<finite_integer | string>`, `["Reverse", ["Range", 1, 10]]` and
+  `["Rest", ["Range", 1, 10]]` as `list<integer>`, and `["Rest", ["List", 1,
+  2, 3]]` as `list<finite_integer>` (was bare `indexed_collection`). Values
+  are unchanged — these operators are lazy views either way — and `Take`,
+  `Drop`, `Slice`, `Sort` and `Unique` already returned `list<T>`. Code that
+  matched on the old declared signature strings (`(T) -> T where T:
+  indexed_collection`) must be updated; `Reverse`, `RotateLeft` and
+  `RotateRight` are now overload sets, `((T) -> T where T: list) &
+  ((indexed_collection<T>) -> list<T> where T)`. (Phase 0b of
+  `docs/STRING_ROADMAP.md`.)
+
+### New Features
+
+- **`Slice` accepts an index span.** `["Slice", xs, r]`, where `r` is a
+  `range` (an ascending, step-1 span of 1-based indexes such as
+  `["Range", 2, 4]`), returns the elements at those indexes:
+  `["Slice", xs, r]` is `["Slice", xs, ["First", r], ["Last", r]]`, with the
+  positional form's clamping (an end past the end of `xs` is clamped, a start
+  past the end yields `[]`). The parameter is typed `range` deliberately: a
+  descending or stepped `Range` (`["Range", 4, 2]`, `["Range", 1, 9, 2]`) is
+  not a `range` and is rejected as a type error, because unpacking it into
+  `(start, end)` bounds would contradict its own meaning (`["Slice", xs, 4,
+  2]` is empty; the collection `4..2` is the pair `[4, 2]`). To gather elements
+  at arbitrary indexes use `["At", xs, indexes]`. `Slice` is now an overload
+  set — `((indexed_collection<T>, range) -> list<T>) &
+  ((indexed_collection<T>, start: number, end: number) -> list<T>)` — and the
+  span form compiles to JavaScript as a native `slice`. This is the
+  `Slice(xs, range)` form the upcoming `RangeOf` sequence search consumes
+  (`Slice(xs, RangeOf(xs, needle))` is `needle`; `docs/STRING_ROADMAP.md`,
+  Phase 0c).
+
+### Issues Resolved
+
+- **`\operatorname{unique}`, `\operatorname{sort}`, `\operatorname{reverse}`
+  and `\operatorname{total}` now parse to their operators.** The lowercase
+  spellings had no LaTeX dictionary entry while eight siblings in the same
+  family (`length`, `count`, `min`, `max`, `mean`, `median`, `join`,
+  `shuffle`) did, so they parsed as an application of an undeclared head —
+  which then auto-declares. There was no diagnostic at any point, and the
+  result carried a plausible `list<unknown>` type, so importing content that
+  used these spellings silently produced a symbolic non-answer. The
+  capitalized forms always worked; this was the lowercase spelling only.
+
+  `total(C)` is the sum of a collection and lowers to `Sum` — there is no
+  `Total` operator in the engine. A table test now pins every lowercase
+  spelling to the head it must resolve to, covering the previously-working
+  eight as well, so the set cannot drift again.
+
+- **A no-match diagnostic on an overload set no longer shows a generic
+  parameter as `…<unknown>`.** When no arm of an overload set accepted a call,
+  the reported "expected" type was the near-miss arm's instantiation, in which
+  a type variable that got no call-site binding reads `unknown` — so
+  `["Slice", "x", 2, 3]` blamed `x` for not being an
+  `indexed_collection<unknown>`, an impossible-looking requirement. The message
+  now shows the declared skeleton (`indexed_collection`), the same wording a
+  plain (non-overloaded) signature already used. Display only; typing is
+  unchanged.
+
 ## 0.112.0 _2026-08-15_
 
 ### Breaking Changes
@@ -175,6 +255,13 @@
   of a data set (that is `Min`/`Max`). There is deliberately no empty span:
   `["Range", 1, 0]` already means the descending pair `[1, 0]`.
 
+  One representational note for code that switches on the shape of a type:
+  `range` is a PRIMITIVE type name, so in the type AST it is the bare string
+  `"range"`, not an object with a `kind` (the way `list` and
+  `indexed_collection` are). A classifier written as a switch over `kind` will
+  fall through on it even though it is a collection type; match the primitive
+  name, or test with `type.matches('indexed_collection<integer>')`.
+
 ### Issues Resolved
 
 - **A `Sum` or `Product` with a symbolic bound now compiles to a shader that
@@ -270,9 +357,23 @@
   `k <= n && xs[k] > 0` still read `xs[k]` out of range), and canonicalization
   sorted the operands, so `g() && f()` could even run `f()` first — while the
   JavaScript compilation target already emitted a short-circuiting `&&`, so
-  compiled and interpreted code disagreed on side effects and errors. The
-  operands of `And`/`Or` are no longer reordered at canonicalization
-  (`["And", "q", "p"]` stays as written); nested `And`/`Or` are still flattened,
+  compiled and interpreted code disagreed on side effects and errors.
+
+  **A consequence worth calling out separately, because it is the one part of
+  this change that fails silently: the operands of `And`, `Or`, `Nand` and
+  `Nor` are no longer reordered at canonicalization.** `["And", "q", "p"]`
+  stays as written, where before it came back sorted as `["And", "p", "q"]`.
+  Sorting is what the `commutative` flag did, and it is incompatible with
+  short-circuiting: once evaluation order is part of the meaning, reordering
+  the operands changes which ones run. Everything else in this entry announces
+  itself by running less code or raising where it used to succeed; this one
+  does not signal at all — code that assumed a canonical conjunction was
+  sorted (comparing two conjunctions structurally, keying a cache or a snapshot
+  on the serialized form, or pinning the order in a test) now just sees a
+  different order, with no error. `Xor` still sorts its operands, and `Add`,
+  `Multiply` and the other commutative operators are untouched.
+
+  Nested `And`/`Or` are still flattened,
   and the symbolic simplifications (`A ∧ ¬A → False`, duplicate removal,
   absorption, CNF/DNF) are unchanged. `Nand`, `Nor` and `Implies` short-circuit
   the same way (`Nand` stops at the first `false`, `Nor` at the first `true`,

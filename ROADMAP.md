@@ -1206,7 +1206,7 @@ replaces is not a working comparison — measured before the fix, that expressio
 compiled to a CONSTANT `false` (`{re, im} < 2` is never true), wrong at `t = 2`
 where the interpreter answers `True`. Ruled 2026-08-15: land it.
 
-### Four collection operators have no lowercase `\operatorname{}` LaTeX entry, so they parse as undeclared functions (OPEN, parse — found while investigating Tycho item 193)
+### Four collection operators have no lowercase `\operatorname{}` LaTeX entry, so they parse as undeclared functions (FIXED 2026-08-15)
 
 `\operatorname{unique}(C)`, `\operatorname{sort}(C)`, `\operatorname{total}(C)`
 and `\operatorname{reverse}(C)` do NOT resolve to `Unique`/`Sort`/`Total`/
@@ -1236,6 +1236,27 @@ fact the type of an unresolved application. It cost a round trip to attribute.
 Fix: add the four lowercase entries alongside their siblings, and consider a
 test that asserts every collection operator with a lowercase sibling entry has
 one, so the set cannot drift again.
+
+**FIXED 2026-08-15.** The four entries are in `definitions-other.ts`, in the
+same lowercase-alias block as their eight siblings, and all twelve now resolve.
+
+One claim above was WRONG and is corrected here: *"All four missing ones have
+CE operators"* holds for `unique`/`sort`/`reverse` but NOT for `total` —
+there is no `Total` operator anywhere in the engine, and asking for one
+(`Signature(Total)`) answers `Nothing`. `total(C)` is the SUM of a collection,
+so its entry lowers to `Sum`, which already folds a collection operand. That
+is also the lowering the consumer's importer performs when it rewrites `total`
+to `\sum`, so the two paths agree rather than diverging.
+
+The drift guard the entry asked for is a `test.each` table in
+`test/compute-engine/function-style-operators.test.ts` naming each lowercase
+spelling and the operator head it must resolve to, read with `form: 'raw'`.
+It covers the previously-working eight as well as the four added, because
+either half can drift; a deleted dictionary entry now fails a test instead of
+silently returning to an auto-declared head. A blanket "every collection
+operator must have a lowercase alias" assertion was deliberately NOT written:
+not every operator should have one, so the table is the record of which set is
+intended.
 
 **FIELD EVIDENCE (consumer, measured on the EMITTED document rather than read
 from importer source): fix `reverse` FIRST, despite it having zero usage.**
@@ -1499,7 +1520,13 @@ contract. It is also deliberately a RUNTIME test rather than a static one — a
 bare symbol can be bound to a number or to an array at call time, so the
 emission site cannot decide. Pinned in `test/compute-engine/compile.test.ts`.
 
-### `complexPromotion` loses a complex value passed as an ARGUMENT to a scalar-bodied user function (OPEN, correctness — promotion-only)
+### `complexPromotion` loses a complex value passed as an ARGUMENT to a scalar-bodied user function (OPEN, correctness — promotion-only; RE-INVESTIGATED 2026-08-15, three claims below corrected)
+
+**Read the re-investigation at the end of this entry before acting on the
+original text.** It reproduces the defect, corrects two statements of the
+mechanism, refutes the interim fix that had been left on the table, and sizes
+the real one. The original text is kept because its witnesses and its priority
+caveat are still valid.
 
 Found while fixing the entry above, and distinct from it: the user-call
 look-through analyzes a body with the function's PARAMETERS shielded, i.e.
@@ -1552,6 +1579,87 @@ lost capability. Only the measured ~1.6× cost on affected chains survives
 unchanged. So re-check whether the flag is actually being enabled before
 treating this as unwatched; a "declined, settled" line is exactly what a later
 session inherits without re-deriving.
+
+#### RE-INVESTIGATION 2026-08-15 (after 0.112.0) — two corrections, one refutation, and the fix sized
+
+**Correction 1: the argument's complexness is NOT unseen. It is DISCARDED.**
+The text above says a complex value arriving through an argument "is not
+seen". Measured on a bare engine with `a(t) := √(t−1)`, `b(x) := 2x`, under the
+opt-in:
+
+    isComplexValued(a(t))      true      <- the ARGUMENT is known complex
+    isComplexValued(b(a(t)))   false     <- the CALL is classified real
+
+The verdict exists at the call site and is thrown away crossing the user-call
+boundary: `isComplexValuedUserCall` analyzes the body with the parameters
+masked REAL, so `2x` reports real and the call inherits that. This matters for
+the fix, because it means no new analysis is needed — only that an existing
+verdict stop being discarded.
+
+**Correction 2: the trigger is not ARGUMENT POSITION, it is REAL-LANE
+ARITHMETIC on a parameter holding a complex value.** An identity body works
+today; an arithmetic body does not:
+
+    id(x) := x  ;  id(a(t))    ->  {re: 0, im: 0.8366600265340756}   MATCHES interpreter
+    b(x)  := 2x ;  b(a(t))     ->  NaN                               interpreter 1.6733…i
+
+Pass-through survives because nothing consumes the object as a number; `2 * {re,
+im}` is NaN. Any fix keyed on "argument position" would therefore withdraw the
+`id` shape, which is correct today.
+
+**Refutation: the interim fail-closed guard is UNSAFE, not merely deferred.**
+The obvious guard — decline when a complex argument is bound to a parameter
+that is not complex-TYPED — was implemented and measured before being
+discarded. It breaks three currently-passing tests in
+`test/compute-engine/compile-complex.test.ts`:
+
+  - "a recursive complex lambda (iterated Julia map, typed return) compiles
+    with digit parity"
+  - "box-then-assign recursive lambda compiles regardless of function name"
+  - "a wide-typed pass-through arm is NOT wrapped (carries the object bare)"
+
+The third is a deliberately pinned convention (the Tycho item-60 class), and it
+is the same shape as `id` above. **Parameter TYPE is the wrong discriminator: a
+wide-typed parameter legitimately carries a complex object.** Do not re-propose
+this guard; it prices a working capability as a defect, which is the same
+mistake the ordering-comparison analysis made earlier in this entry's history.
+
+**The real fix, sized.** The text above calls it "a per-call-site
+monomorphization the emitter does not do today", which is accurate but leaves
+the work unscoped. The mechanism already exists — it is the `_localComplex`
+frame that `tryCompileBroadcast` uses to declare its `_SYS.bcast` element
+parameters complex. Concretely:
+
+  - `userFunctionName(id)` (`compilation/base-compiler.ts`) gains a LANE
+    suffix, so `_fn_b` and its complex specialization are distinct names.
+  - Thread the lane through `ensureUserFunctionEmitted` (two call sites — the
+    call route in `tryCompileUserFunction`, and the bare function-VALUE
+    reference, which has no arguments and so takes the real lane) into
+    `emitFunctionLiteralDefinition` and `prepareUserFunctionBody`.
+  - Compile the body under a `_localComplex` frame binding each parameter to
+    its argument's verdict, so analysis and emission agree on value shape.
+
+Three hazards, identified but NOT solved, each of which can produce a silently
+wrong lane if missed:
+
+  1. `registry.compiling`/`registry.defs` are keyed by the emitted name, so
+     lane-keying the name is what makes a RECURSIVE self-call resolve to its
+     own lane. The iterated Julia map is the test that exercises this.
+  2. The shader targets take `registry.lowering.define` and never reach the JS
+     arrow form, so they need their own decision rather than inheriting this
+     one.
+  3. `coerceToComplex` in `tryCompileUserFunction` already wraps a REAL
+     argument bound to a complex-typed parameter. Any lane decision has to
+     compose with it rather than duplicate it.
+
+**Attempted and reverted in the same session:** the analysis half alone (binding
+parameter complex-ness to the argument's verdict) was implemented and verified
+to work — `b(a(t))` classifies complex, `b(3)` stays real — then REVERTED,
+because on its own it makes the defect worse rather than better: the analysis
+then reports complex while the emitted `_fn_b` is still real-lane, and parent
+and child disagreeing on value SHAPE is the invariant compiled correctness
+rests on. This half is a short redo; it must land together with the emission
+half, never before it.
 
 ### The constant fold's own 2000 ms stall guard can still swap a folded value for a lowered one (OPEN, correctness — narrow residual; the AMBIENT-deadline path is already correct)
 
@@ -1636,18 +1744,6 @@ the wall-clock constant-fold budget, since replaced by the deterministic
 `foldCostEstimate`), so this is hygiene rather than a known-live defect — but a
 leaked global precision is exactly the kind of state that makes a parallel
 run's failures unattributable.
-
-### `Reverse` of a tuple: static type lies about element order (found 2026-08-14, string-spec review round 2)
-
-`Reverse`'s signature is `(T) -> T where T: indexed_collection`, and
-`tuple` matches `indexed_collection` — so `Reverse((1, "a"))` STATICALLY
-claims `tuple<finite_integer, string>` while evaluating to `("a", 1)`,
-whose true type is `tuple<string, finite_integer>` (verified empirically).
-Any consumer reading the claimed element types gets them in the wrong
-order. The fix is entangled with the Phase 0 tuple decision in
-`docs/STRING_ROADMAP.md` ("Signature refinement" — whether arity-typed
-tuples are excluded from the `(T) -> T` bounds or get their own result
-typing); resolve them together.
 
 ### `BoxedDictionary` construction throws raw JS errors
 

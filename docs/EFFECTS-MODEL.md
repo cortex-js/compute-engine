@@ -2495,21 +2495,42 @@ with random(seed) {
 }
 ```
 
-How a label declares itself a valid head of this unnamed form is
-**reopened (2026-08-15)** — an earlier draft's rule ("the grammar
-recognizes builtin frame-kind labels directly") was judged ad hoc; a
-clean *declaration* mechanism for ambient effects is wanted. Candidates
-on the table: (i) the grammar rule as drafted — frame-kind labels are
-unnamed-form heads, bypassing the `resource` path entirely; (ii) a
-**well-known identifier** — the unnamed form desugars to a binding of a
-conventional symbol that frame-participating operators consult; (iii)
-the delimiter's definition **performs the binding itself** — declaring
-an ambient effect means declaring what it assigns on frame entry.
-Whichever wins, the semantic constraints stand: no `Resource`
+How a label declares itself a valid head of this unnamed form was
+reopened 2026-08-15; the current **lean** (second round, same day,
+pending ratification) is the **declared-ambient-symbol desugaring**:
+
+- An ambient effect's **delimiter definition declares its ambient
+  symbol** (say, `ambientSymbol` metadata on `random`'s definition;
+  the symbol's spelling is open — a `#` sigil would collide with the
+  parse-time pragma namespace of `#env()`/`#navigator()`).
+- `with random(seed) { … }` desugars to the **named form over that
+  symbol** — `with ⟨current-random⟩ = random(seed) { … }` — so the
+  assignment is performed by the `with` machinery against the declared
+  symbol, never by user code receiving a raw binding site.
+- Frame-participating operators resolve the well-known symbol up the
+  scope chain — the same "current frame is a chain walk" clause as
+  "The mechanism". One lookup path serves both forms: named `with`
+  binds the symbol the user wrote; ambient `with` binds the symbol the
+  effect declared.
+
+A `Resource.assign(symbol, any+)` protocol member was considered for
+this (2026-08-15) and set aside for four reasons, recorded so the shape
+is not re-proposed cold: ambient effects do not conform to `Resource`
+(no `finish`), so a `Resource` member cannot reach them; routing the
+*named* form through it would re-litigate ruling (b) while erasing the
+constructor's typing (`any+` at the requirement level) for a default
+implementation that is trivially derivable; the requirement has no
+`Self` position, so conformance dispatch has nothing to key on, and a
+raw symbol in user code is the improvised-binding trap the `scoped:`
+binding-site framework exists to prevent; and it only fits
+initializers that are syntactically constructor calls. The declared
+symbol keeps the proposal's substance — declaration-performed
+binding — inside the framework.
+
+The standing semantic constraints hold regardless: no `Resource`
 conformance, no `finish`, delimiting semantics from the frame kind's
-own obligation protocol, "the current frame" resolved against the
-scope chain ("The mechanism"), and the existing ambient behavior
-preserved exactly. An explicit handle (`rnd.next`) would turn the
+own obligation protocol, and the existing ambient behavior preserved
+exactly. An explicit handle (`rnd.next`) would turn the
 frame into a first-class capability value — capability threading,
 itself escapable, and a second way to draw with distinct replay
 accounting — so the lean is: **ambient effects stay ambient; only
@@ -2527,9 +2548,9 @@ genuine resources get named handles.**
   and the abnormal paths — error-value propagation, timeout abort,
   async cancellation (imitate the registry's
   try/finally-including-async discipline).
-- The ambient-form declaration mechanism ("Ambient form", reopened
-  2026-08-15): grammar recognition vs well-known identifier vs
-  delimiter-performed binding.
+- Ratify the ambient-form lean ("Ambient form"): the
+  declared-ambient-symbol desugaring — and pick the well-known
+  symbol's spelling (a `#` sigil collides with the pragma namespace).
 - A per-resource-type deny/mock surface — or ratify
   constructor-shadowing plus underlying-capability denial as the
   answer ("The mechanism", third bullet).

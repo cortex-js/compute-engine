@@ -346,7 +346,9 @@ The live `Reverse`-on-tuple defect is fixed here, not deferred.
 
 The costs, accepted: two breaking rounds instead of one (Phase 0 changes
 static result types — `Reverse((1, "a"))` newly types as
-`tuple<string, finite_integer>`, and operators that silently promised
+`list<finite_integer | string>` (the per-kind rule's `list<T>` for a
+tuple operand; the value is a materialized `List`, not a tuple), and
+operators that silently promised
 `(T) -> T` for exotic kinds now say `list<T>` — plus runtime value kinds
 where laziness is added; each round gets its own CHANGELOG migration
 note), and Phase 1 must add the string arm for every operator in the set
@@ -971,6 +973,27 @@ operator to land on.
       perf property, independent of the static type (see the decoupling
       note in "Signature refinement").
 
+      Shipped 2026-08-15. Spelling: `Reverse`, `RotateLeft`, `RotateRight`
+      (length-preserving) are overload sets `((T, …) -> T where T: list) &
+      ((indexed_collection<T>, …) -> list<T> where T)` — the `list` arm
+      keeps the shape, most-specific-wins picks it for a list operand;
+      `Rest`/`Most` (length-changing) are `(indexed_collection<T>) ->
+      list<T> where T` for every kind, since a `list` type carries no
+      length; `Filter`'s `type` handler yields `list<T>` for an indexed
+      source (it echoed the source type — `vector<3>`, `tuple<…>`,
+      `range` — all length lies) and the source type for a set. `Take`,
+      `Drop`, `Slice`, `Unique`, `Sort` already returned `list<T>` and
+      were left alone: `list<T>` IS the `list -> list` case, and the
+      arity split of `Sort` matters only once a `string -> string` arm
+      exists, so it lands with Phase 1. The tuple result is `list<T>`
+      (the join of the position types), per the mechanism, not the
+      reversed tuple type the Breaking note below once anticipated: the
+      lazy view materializes to a `List`. `Reverse`'s `range` case, which
+      shipped early with step (a) as a `type` handler widening to
+      `indexed_collection<integer>`, is subsumed by the generic arm
+      (`list<integer>`). Tests: `type-variables-collections.test.ts`
+      ("the per-kind result rule"), `range-type.test.ts`.
+
    c. **The `Slice(xs, r: range)` overload** the `RangeOf` law consumes.
       `Slice` today takes only positional bounds (`(xs, start, end)`,
       1-based inclusive, clamping out-of-bounds, negatives counting from
@@ -987,11 +1010,28 @@ operator to land on.
       kind-preserving for list/string; `At` = gather, list-out,
       element-exact.
 
+      Shipped 2026-08-15 as an overload set —
+      `((indexed_collection<T>, span: range) -> list<T> where T) &
+      ((indexed_collection<T>, start: number, end: number) -> list<T>
+      where T)`. Both arms share the one lazy facet set (`sliceBounds`
+      reads the span through `spanBounds`, which re-checks contiguity at
+      runtime so a `range`-declared symbol with a non-span value declines
+      instead of being reinterpreted); the JavaScript target lowers the
+      span arm to a native `slice`, gated on the operand's STATIC type so
+      a `range` symbol compiles too. Landing it surfaced one defect in the
+      overload machinery, fixed alongside: `diagnoseNoMatch` displayed an
+      unbound type variable as `unknown` (`indexed_collection<unknown>`),
+      where the single-signature path already showed the declared
+      skeleton. Tests: `collections.test.ts` ("SLICE (range)"),
+      `compile.test.ts`.
+
    Breaking: static result types change (`Reverse((1, "a"))` newly types
-   as `tuple<string, finite_integer>`; operators that silently promised
+   as `list<finite_integer | string>`; operators that silently promised
    `(T) -> T` for exotic kinds now say `list<T>`; qualifying `Range`
    calls newly type as `range`) — CHANGELOG migration note. Ships
-   before, and independently of, everything below.
+   before, and independently of, everything below. **Phase 0 shipped in
+   full 2026-08-15** (a: `range` type; b: per-kind rule; c: `Slice(xs,
+   range)`).
 1. **`character` type + collection facets.** The `character` scalar type in
    the lattice with its full value model (representation, `CharacterFrom`,
    equality/ordering/hashing, serialization); `string <:
