@@ -38,7 +38,17 @@ An ordinary call may supply fewer arguments than a function declares: "f(1)" on 
 
 If the elements are pairs (or tuples) and the callback meant to take one apart, write the parameter as a tuple pattern: "Map(((p, q)) => p + q, pairs)" — the extra parentheses make it ONE parameter that is destructured, not two parameters.
 
-A few operators read the callback's arity as a choice between two modes and accept either: "Sort" takes a unary sort key or a binary comparator, and "Iterate" takes "f(previous)" or "f(index, previous)". Those report this error only when the callback matches neither.`,
+A few operators read the callback's arity as a choice between two modes and accept either: "Sort" takes a unary sort key or a binary comparator, and "Iterate" takes "f(previous)" or "f(index, previous)". Those report this error only when the callback matches neither.
+
+A pipe stage is checked on the same grounds but reports "pipe-stage-arity", because the remedy there is different.`,
+
+  'pipe-stage-arity': `A pipe stage declares a number of parameters it can never be called with — "[100, 200] |> (x, y, z) => x + y + z". A pipe passes its stage exactly one value, so only a stage that accepts one argument can be applied.
+
+As with a callback slot, an ordinary call may supply fewer arguments than a function declares — "f(1)" on a two-parameter "f" is partial application — but a pipe is not an ordinary call: the piped value is the whole argument list, so a leftover function is never the result the pipeline was written to produce.
+
+A stage that genuinely takes several arguments is written as a CALL, with "_" marking the slot the piped value fills: "xs |> Fold(f, 0, _)". The "_" may be left out when the call is missing exactly one required argument, so "xs |> Take(10)" means "xs |> Take(_, 10)".
+
+If the piped value is a collection whose elements are tuples and the stage meant to take one apart, write the parameter as a tuple pattern — "pairs |> ((p, q)) => p + q" — where the extra parentheses make it ONE parameter that is destructured.`,
 
   'argument-name-unknown': `A call passed an argument by name ("f(rate: 0.05)"), but the called function declares no parameter with that name; the message lists the names it does declare, and a "did you mean" points at the closest one.
 

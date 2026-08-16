@@ -156,7 +156,7 @@ import {
   range,
   rangeLast,
   hasSymbolicRangeBounds,
-  enumerationDeclined,
+  enumerationDeclinedAfterWalk,
 } from './collections.js';
 import {
   run,
@@ -3661,18 +3661,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // collection whose iterator declines (symbolic elements) would
           // silently fold to 0 — stay symbolic too.
           if (first.isFiniteCollection !== true) return undefined;
-          if (enumerationDeclined(first)) return undefined;
+          // The decline is read off the fold's OWN walk (below) rather than
+          // probed first: probing starts a second enumeration, which re-runs
+          // the element callback of a lazy `Map`/`Filter` once more than there
+          // are elements.
+          let walked = 0;
           const result = run(
-            reduceCollection(first, engine.Zero, (acc, x) =>
-              sumAccumulate(
+            reduceCollection(first, engine.Zero, (acc, x) => {
+              walked += 1;
+              return sumAccumulate(
                 acc,
                 x.evaluate({ numericApproximation }),
                 numericApproximation
-              )
-            ),
+              );
+            }),
             engine._timeRemaining,
             engine._deadlineFrame
           );
+          if (enumerationDeclinedAfterWalk(first, walked)) return undefined;
           return result?.evaluate({ numericApproximation }) ?? engine.NaN;
         }
 
@@ -3752,19 +3758,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Arity-1 collection-reducer form: Sum(L).
         if (rest.length === 0 && first?.isCollection) {
           if (first.isFiniteCollection !== true) return undefined;
-          if (enumerationDeclined(first)) return undefined;
+          // Decline read off the fold's own walk — see the sync handler.
+          let walked = 0;
           const result = await runAsync(
-            reduceCollection(first, engine.Zero, (acc, x) =>
-              sumAccumulate(
+            reduceCollection(first, engine.Zero, (acc, x) => {
+              walked += 1;
+              return sumAccumulate(
                 acc,
                 x.evaluate({ numericApproximation }),
                 numericApproximation
-              )
-            ),
+              );
+            }),
             engine._timeRemaining,
             signal,
             engine._deadlineFrame
           );
+          if (enumerationDeclinedAfterWalk(first, walked)) return undefined;
           return result?.evaluate({ numericApproximation }) ?? engine.NaN;
         }
 
@@ -4272,10 +4281,35 @@ function processMinMaxItem(
   }
 
   if (isFunction(item, 'Linspace')) {
-    if (item.nops === 1) item = upper ? item.op1 : ce.One;
-    else if (upper) item = item.op2;
-    else item = item.op1;
-    return [item, []];
+    // `Linspace(start, end, count)` spreads its elements from one endpoint to
+    // the other inclusive, and the run may DESCEND: `Linspace(5, 1, 3)` is
+    // [5, 3, 1]. So the extremum is the larger/smaller OF THE TWO ENDPOINTS,
+    // not a fixed one of them — taking `end` for the maximum answered 1 for
+    // that collection, whose largest element is 5 (and `start` for the
+    // minimum answered 5, its smallest being 1). The one-operand form
+    // `Linspace(n)` runs from 1 to `n`.
+    // A count that is not statically known (`Linspace(1, 5, m)`) leaves the
+    // sample set unknown, and with it the extremum.
+    if (item.isFiniteCollection !== true) return [undefined, [item]];
+    const start = item.nops === 1 ? ce.One : item.op1;
+    const end = item.nops === 1 ? item.op1 : item.op2;
+    const count = item.count;
+    // The COUNT decides which endpoints are actually sampled. A single-sample
+    // `Linspace` sits at `start` and never reaches `end` (`Linspace(1, 5, 1)`
+    // is [1], the NumPy convention the `at`/`iterator` handlers implement), so
+    // reading the extremum off both endpoints would answer 5 for a collection
+    // whose only element is 1. A zero-sample `Linspace` has no extremum at
+    // all; it is an empty collection, which the absent-datum gate answers as
+    // `NaN` before this runs — declining here too is consistent either way.
+    if (count === 0) return [undefined, [item]];
+    if (count === 1) return [start, []];
+    // Two or more samples span both endpoints inclusive, so the extremum is
+    // the larger/smaller OF THE TWO — endpoints that cannot be ordered (a
+    // symbolic one, as in `Linspace(a, 1, 3)`) leave it unknown, and the
+    // operand stays symbolic rather than guess an endpoint.
+    const endpoint = scalarExtremum(start, end, upper, false);
+    if (endpoint === undefined) return [undefined, [item]];
+    return [endpoint, []];
   }
 
   if (item.isCollection) {
@@ -4287,11 +4321,15 @@ function processMinMaxItem(
     // returned 5. Keep the operand symbolic instead. (A genuinely empty
     // lazy collection — Filter over a finite source with no matches — has
     // isEmptyCollection === true, is not "declined", and still folds away.)
-    if (item.isFiniteCollection !== true || enumerationDeclined(item))
-      return [undefined, [item]];
+    // The decline is read off the fold's OWN walk (below) rather than probed
+    // first: probing starts a second enumeration, which re-runs the element
+    // callback of a lazy `Map`/`Filter`.
+    if (item.isFiniteCollection !== true) return [undefined, [item]];
     let result: Expression | undefined = undefined;
     const rest: Expression[] = [];
+    let walked = 0;
     for (const op of item.each()) {
+      walked += 1;
       const [val, others] = processMinMaxItem(op, mode);
       if (val) {
         // NaN absorbs, mirroring the top-level convention: an indeterminate
@@ -4313,6 +4351,7 @@ function processMinMaxItem(
       }
       rest.push(...others);
     }
+    if (enumerationDeclinedAfterWalk(item, walked)) return [undefined, [item]];
     return [result, rest];
   }
 
@@ -4416,7 +4455,15 @@ function evaluateMinMax(
 
   if (rest.length > 0)
     return ce.expr(result ? [mode, result, ...rest] : [mode, ...rest]);
-  return result ?? (upper ? ce.NegativeInfinity : ce.PositiveInfinity);
+  // No orderable value and nothing left symbolic: every operand contributed no
+  // data at all, i.e. the input was EMPTY. That is an absent result (`NaN`)
+  // under the §3.C aggregate rule, not an identity element — `Max([])` is not
+  // `-Infinity`. The absent-datum gate above answers this case whenever it can
+  // decide emptiness itself; it DECLINES for a collection whose emptiness only
+  // a walk can settle (a lazy `Filter`), which is why the verdict is repeated
+  // here off the walk this function just performed.
+  if (result === undefined) return ce.NaN;
+  return result;
 }
 
 function evaluateGcdLcm(
@@ -4444,11 +4491,21 @@ function evaluateGcdLcm(
       const expanded: Expression[] = [];
       for (const op of current) {
         if (op.isCollection) {
-          if (op.isFiniteCollection !== true || enumerationDeclined(op)) {
+          if (op.isFiniteCollection !== true) {
             ok = false;
             break;
           }
-          for (const el of op.each()) expanded.push(el);
+          // Decline read off this walk, not probed before it: a probe starts a
+          // second enumeration and re-runs a lazy element callback.
+          let walked = 0;
+          for (const el of op.each()) {
+            walked += 1;
+            expanded.push(el);
+          }
+          if (enumerationDeclinedAfterWalk(op, walked)) {
+            ok = false;
+            break;
+          }
         } else expanded.push(op);
       }
       if (ok) current = expanded;

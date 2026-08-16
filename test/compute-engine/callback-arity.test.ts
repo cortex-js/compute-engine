@@ -43,9 +43,24 @@ const TERNARY: MathJsonExpression = [
   'c',
 ];
 
+/** `[(1, 2), (3, 4)]` — a source whose elements ARE pairs, so the
+ * tuple-pattern hint applies to it (unlike the scalar `LIST`). */
+const PAIRS: MathJsonExpression = [
+  'List',
+  ['Tuple', 1, 2],
+  ['Tuple', 3, 4],
+];
+
 /** True when `expr` carries the `callback-arity` diagnostic. */
 function hasArityError(expr: { toString(): string }): boolean {
   return expr.toString().includes('callback-arity');
+}
+
+/** True when `expr` carries the pipe's own `pipe-stage-arity` diagnostic —
+ * a DIFFERENT code from `callback-arity`, since a pipe stage is not a
+ * callback slot and its remedy is the call form, not a tuple pattern. */
+function hasPipeArityError(expr: { toString(): string }): boolean {
+  return expr.toString().includes('pipe-stage-arity');
 }
 
 describe('CALLBACK ARITY — the per-element family (1 argument supplied)', () => {
@@ -109,7 +124,7 @@ describe('CALLBACK ARITY — the per-element family (1 argument supplied)', () =
     // element to arrive already taken apart. The language spells that with a
     // tuple pattern parameter, which is ONE parameter.
     const ce = new ComputeEngine();
-    expect(ce.box(['Map', BINARY, LIST]).toString()).toContain(
+    expect(ce.box(['Map', BINARY, PAIRS]).toString()).toContain(
       'To take a pair apart, use a tuple pattern parameter: ((p, q)) => …'
     );
     // …and nowhere else: `Tabulate`'s single argument is an integer index,
@@ -117,6 +132,85 @@ describe('CALLBACK ARITY — the per-element family (1 argument supplied)', () =
     const tabulate = ce.box(['Tabulate', BINARY, 3]);
     expect(hasArityError(tabulate)).toBe(true);
     expect(tabulate.toString()).not.toContain('tuple pattern');
+  });
+
+  test('the hint is gated on the ELEMENT TYPE, not on the shape alone', () => {
+    // A hint that names a rewrite which cannot work is worse than no hint.
+    // The arity error itself is a fact about the callback and always stands;
+    // only the suggested fix depends on what the elements actually are.
+    const ce = new ComputeEngine();
+
+    // Elements are NUMBERS — there is nothing to take apart, so no hint.
+    const scalars = ce.box(['Map', BINARY, LIST]);
+    expect(hasArityError(scalars)).toBe(true);
+    expect(scalars.toString()).not.toContain('tuple pattern');
+
+    // Elements are pairs but the callback declares THREE parameters, so
+    // `((a, b, c)) => …` would not fit them either.
+    const wrongWidth = ce.box(['Map', TERNARY, PAIRS]);
+    expect(hasArityError(wrongWidth)).toBe(true);
+    expect(wrongWidth.toString()).not.toContain('tuple pattern');
+
+    // An element type that is not statically known is not a guess to make —
+    // and the error itself still fires, which is what makes this a real
+    // assertion about the hint rather than about the check declining.
+    ce.declare('unknownXs', 'collection');
+    const opaque = ce.box(['Map', BINARY, 'unknownXs']);
+    expect(hasArityError(opaque)).toBe(true);
+    expect(opaque.toString()).not.toContain('tuple pattern');
+  });
+
+  // The gate reads the SOURCE's element type, so every operator must hand it a
+  // source that HAS one. A `lazy: true` operator's operands arrive unbound,
+  // where the type reads `unknown`, so passing the raw `ops[i]` silently cost
+  // the hint — `MaxBy`/`MinBy`/`ArgMax`/`ArgMin` lost it even for an inline
+  // literal, while `Filter` happened to keep it because its generic
+  // `collection<T>` signature had already bound the operand. The handlers pass
+  // the canonicalized collection instead. This sweeps the whole family so a
+  // new operator wired to `PER_ELEMENT_SUPPLY` cannot quietly repeat it.
+  test.each([
+    'Any',
+    'All',
+    'Count',
+    'CountIf',
+    'Filter',
+    'TakeWhile',
+    'DropWhile',
+    'FlatMap',
+    'Find',
+    'IndexWhere',
+    'Position',
+    'MaxBy',
+    'MinBy',
+    'ArgMax',
+    'ArgMin',
+    'GroupBy',
+    'ChunkBy',
+    'Partition',
+  ])('%s offers the hint over a tuple-element source', (op) => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box([op, PAIRS, BINARY] as MathJsonExpression).toString()
+    ).toContain('use a tuple pattern parameter: ((p, q)) => …');
+  });
+
+  test('the hint survives a SYMBOL source with a declared tuple element type', () => {
+    // The everyday spelling is a variable, not an inline literal. A lazy
+    // operator holds that symbol unbound, so this is the case the raw-operand
+    // bug above hid behind: the declared element type is right there, and the
+    // hint must reach it.
+    const ce = new ComputeEngine();
+    ce.declare('pairsXs', 'list<tuple<integer, integer>>');
+    for (const expr of [
+      ce.box(['Map', BINARY, 'pairsXs']),
+      ce.box(['Filter', 'pairsXs', BINARY]),
+      ce.box(['MaxBy', 'pairsXs', BINARY]),
+    ]) {
+      expect(hasArityError(expr)).toBe(true);
+      expect(expr.toString()).toContain(
+        'use a tuple pattern parameter: ((p, q)) => …'
+      );
+    }
   });
 
   test('the hint is actionable — the suggested rewrite works', () => {
@@ -411,18 +505,14 @@ describe('CALLBACK ARITY — the check DECLINES when the arity is not readable',
     );
   });
 
-  test('an OPTIONAL parameter before a `+` tail counts toward the minimum', () => {
+  test('a signature mixing an OPTIONAL parameter with a `+` tail is not declarable', () => {
     const ce = new ComputeEngine();
-    // `validateArguments` fills every optional slot before it feeds the
-    // variadic parameter, so `(number, number?, number+)` cannot be applied to
-    // fewer than three arguments — reading the minimum as 2 (the required
-    // parameter plus the variadic minimum, skipping the optional slot) let
-    // this through as a binary reducer.
-    //
-    // The signature is declared as a type OBJECT because the type-string
-    // grammar refuses to mix `?` with a variadic tail (`parser.ts`: "Variadic
-    // arguments cannot be used with optional arguments"), while the object
-    // route into `declare()` has no such guard.
+    // `(number, number?, number+)` has no meaning to give: argument validation
+    // fills every optional slot before it feeds the variadic parameter, so the
+    // optional slot is not optional at all. The type-string grammar has always
+    // refused the combination; since 2026-08-15 the type-OBJECT route refuses
+    // it too, on the same rule, so a type that serializes to a string the
+    // parser cannot read back can no longer be declared.
     const PLUS_TAIL: Type = {
       kind: 'signature',
       args: [{ type: 'number' }],
@@ -431,13 +521,12 @@ describe('CALLBACK ARITY — the check DECLINES when the arity is not readable',
       variadicMin: 1,
       result: 'number',
     };
-    ce.declare('q', PLUS_TAIL);
-    expect(ce.box(['Reduce', LIST, 'q', 0]).toString()).toContain(
-      '`q` requires at least 3 parameters'
+    expect(() => ce.declare('q', PLUS_TAIL)).toThrow(
+      'Variadic arguments cannot be used with optional arguments'
     );
-    expect(ce.box(['Fold', 'q', 0, LIST]).toString()).toContain(
-      '`q` requires at least 3 parameters'
-    );
+    expect(() =>
+      ce.declare('q2', '(number, number?, number+) -> number')
+    ).toThrow('Variadic arguments cannot be used with optional arguments');
 
     // A `*` tail imposes no minimum of its own, so one required parameter is
     // the whole minimum and `Reduce`'s two arguments fit.
@@ -472,6 +561,122 @@ describe('CALLBACK ARITY — the check DECLINES when the arity is not readable',
     expect(hasArityError(curried)).toBe(false);
     // The same callback at a callback slot is refused.
     expect(hasArityError(ce.box(['Filter', LIST, 'add']))).toBe(true);
+  });
+});
+
+describe('CALLBACK ARITY — the pipe stage (1 argument supplied)', () => {
+  // `x |> f` hands its stage exactly one value, so the same reasoning that
+  // wires the collection operators covers it: a stage declaring more
+  // parameters than that can never be applied. Before this, `Pipe` fell
+  // through to `apply()` and silently CURRIED — the pipe answered a residual
+  // closure with no diagnostic at all, which is never what the author meant
+  // in a pipeline. The documented spelling for a multi-argument stage is a
+  // CALL with `_` in the piped value's slot (`src/epsil/docs/operators.md`).
+  const PIPE_MESSAGE = 'A pipe passes its stage exactly 1 value';
+  /** The remedy a pipe points at — the CALL form, not a tuple pattern. */
+  const PIPE_REMEDY =
+    "A stage that takes several arguments is written as a call, with `_` in the piped value's slot";
+
+  const epsil = (source: string) => {
+    const ce = new ComputeEngine();
+    return executeEpsil(ce, source, {
+      parseLatex: (latex: string) => ce.parse(latex).json,
+    });
+  };
+
+  test('a multi-parameter lambda stage is refused, not curried', () => {
+    const ce = new ComputeEngine();
+    const bad = ce.box(['Pipe', LIST, BINARY]);
+    expect(bad.toString()).toContain(
+      `${PIPE_MESSAGE}; \`(p, q) => p + q\` declares 2 parameters`
+    );
+    expect(bad.evaluate().type.toString()).toBe('error');
+
+    const worse = ce.box(['Pipe', LIST, TERNARY]);
+    expect(worse.toString()).toContain('declares 3 parameters');
+
+    // The unary stage still maps, and the nullary constant is never an error
+    // (it ignores every argument — the `callbackArity` exception).
+    expect(hasPipeArityError(ce.box(['Pipe', LIST, UNARY]))).toBe(false);
+    expect(ce.box(['Pipe', LIST, UNARY]).evaluate().toString()).toBe(
+      '["False","True","True"]'
+    );
+    expect(hasPipeArityError(ce.box(['Pipe', LIST, ['Function', 5]]))).toBe(
+      false
+    );
+  });
+
+  test('it is NOT the callback-arity error — different code, different remedy', () => {
+    // A pipe stage is not an operator-owned callback slot: `x |> f` is an
+    // application whose argument is written to the left. Calling it a
+    // "callback" describes a mechanism the language does not have at this
+    // spelling, and the fix is the call form rather than a tuple pattern —
+    // which the canonical handler could not honestly suggest anyway, since
+    // the topic is a HELD operand whose element type it cannot read.
+    const ce = new ComputeEngine();
+    const bad = ce.box(['Pipe', LIST, BINARY]);
+    expect(hasPipeArityError(bad)).toBe(true);
+    expect(hasArityError(bad)).toBe(false);
+    expect(bad.toString()).toContain(PIPE_REMEDY);
+    expect(bad.toString()).not.toContain('tuple pattern');
+
+    // Even over a collection of pairs, where a tuple pattern WOULD work, the
+    // pipe points at the call form and leaves the rewrite to the explanation.
+    const overPairs = ce.box(['Pipe', PAIRS, BINARY]);
+    expect(hasPipeArityError(overPairs)).toBe(true);
+    expect(overPairs.toString()).not.toContain('tuple pattern');
+  });
+
+  test('the Epsil route reports it, and the tuple-pattern rewrite still works', () => {
+    const table = '[(True, True), (True, False), (False, True), (False, False)]';
+    const bad = epsil(`${table} |> (p, q) => p && q`);
+    const messages = bad.diagnostics.map((d) =>
+      Array.isArray(d.message) ? d.message.join(' | ') : String(d.message)
+    );
+    expect(messages.some((m) => m.includes(PIPE_MESSAGE))).toBe(true);
+    expect(messages.some((m) => m.includes('pipe-stage-arity'))).toBe(true);
+
+    // The rewrite the explanation names is the working spelling of the intent.
+    const fixed = epsil(`${table} |> ((p, q)) => p && q`);
+    expect(fixed.diagnostics).toEqual([]);
+    expect(fixed.value.toString()).toBe('["True","False","False","False"]');
+  });
+
+  test('a NAMED multi-parameter stage is refused too', () => {
+    // `5 |> add` on a binary `add` produced a partial application. A named
+    // stage "always receives the whole value" per the pipe documentation, so
+    // there is no arity for it to curry into here either.
+    const ce = new ComputeEngine();
+    ce.declare('add2', '(number, number) -> number');
+    expect(hasPipeArityError(ce.box(['Pipe', 5, 'add2']))).toBe(true);
+    // A stage that ACCEPTS one argument is untouched, whatever else it takes:
+    // an optional or `*`-variadic tail still admits a single-argument call.
+    ce.declare('opt', '(number, number?) -> number');
+    ce.declare('vararg', '(number*) -> number');
+    expect(hasPipeArityError(ce.box(['Pipe', 5, 'opt']))).toBe(false);
+    expect(hasPipeArityError(ce.box(['Pipe', 5, 'vararg']))).toBe(false);
+  });
+
+  test('the pipe stage forms that must NOT be touched still work', () => {
+    // Each of these is a documented pipe spelling; none may be refused.
+    expect(epsil('[3, 1, 2] |> Sort |> Reverse').value.toString()).toBe(
+      '[3,2,1]'
+    );
+    // A CALL stage — the documented way to write a multi-argument stage —
+    // is not a callback operand and is never arity-checked here.
+    expect(
+      epsil(
+        '1..10 |> Filter(_, n => n % 2 == 1) |> Map(n => n^2, _) |> Sum'
+      ).value.toString()
+    ).toBe('165');
+    expect(epsil('[1,2,3] |> Take(2)').value.toString()).toBe('[1,2]');
+    expect(epsil('[1,2,3] |> Map(n => n^2)').value.toString()).toBe('[1,4,9]');
+    // The placeholder shorthand is a nullary literal until canonicalization
+    // supplies its parameter, so the check must not read it as arity 0-that-errors.
+    expect(epsil('[1,2,3] |> _^2').value.toString()).toBe('[1,4,9]');
+    // An undeclared stage still defers to a definition that may yet arrive.
+    const ce = new ComputeEngine();
+    expect(hasPipeArityError(ce.box(['Pipe', 5, 'notYetDefined']))).toBe(false);
   });
 });
 

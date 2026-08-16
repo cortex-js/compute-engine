@@ -192,6 +192,27 @@
   flattened, and the symbolic simplifications (`A ∧ ¬A → False`, duplicate
   removal, absorption, CNF/DNF) are unchanged.
 
+- **A lazy collection's callback now runs exactly once per element per
+  consumption.** `Sum`, `Product`, `Reduce`, `Max`, `Min`, `GCD`/`LCM` and
+  `Length` used to run a probe enumeration before the real one — pulling a
+  first element to learn whether the collection declines to enumerate, or
+  asking whether it is empty before counting it — so `Sum(Map(f, xs))` ran
+  `f` N+1 times over N elements and `Max(Map(f, xs))` 2N+1 times. With
+  callbacks that write to a variable or a mutable object, the extra runs
+  were observable (Appendix B of `docs/TYPE_SYSTEM_ROADMAP.md`, ruling B8).
+  The verdict is now read off the walk each consumer already performs; the
+  computed values are unchanged.
+
+- **`Max`/`Min` of a descending `Linspace` were inverted, and `Max`/`Min`/
+  `Mean` of a symbolic one returned `NaN`.** `Max(Linspace(5, 1, 3))` — the
+  elements `[5, 3, 1]` — returned `1` and `Min` returned `5`, because the
+  extremum was read off a fixed endpoint that is only right for an ascending
+  run; both endpoints are now compared. And a finite collection that
+  *declines* to enumerate (`Linspace(a, 1, 3)` with `a` unknown) was read as
+  *empty* by the absent-datum gate, so `Max`, `Min`, `Mean` and the other
+  aggregates answered `NaN`; they now stay symbolic (`max(Linspace(a, 1, 3))`),
+  as `Sum` already did. `Max([])` and `Max(Missing)` are still `NaN`.
+
 - **`for` and `while` loops round-trip through the Epsil serializer.** A
   `Loop` used to serialize only in the call spelling `Loop(do {…}, x in xs)`
   — re-parseable, but not what the author wrote. It now prints as

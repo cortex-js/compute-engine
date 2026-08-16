@@ -1557,6 +1557,31 @@ statements, collection callbacks, and including short-circuit forms
 and lazy materialization. Compiled targets must preserve the order or
 decline (ruling B8).
 
+Two qualifications, ruled 2026-08-15 when the interpreted routes were
+audited (`test/compute-engine/evaluation-order.test.ts` is the
+inventory, one order-witness test per route):
+
+- **Commutative operators evaluate in canonical order, which is
+  unspecified.** Canonicalization sorts the operands of `Add`,
+  `Multiply`, and the other commutative operators, and evaluation
+  walks the sorted list — so in `t1() + t2()` the engine may run `t2`
+  first, and does so whichever way round the source wrote them. This
+  is the one place B8 does not promise source order: canonical
+  ordering is a foundation the whole engine rests on, and the source
+  order is gone by the time the sum evaluates. When the order of
+  effects inside a sum matters, sequence them as statements
+  (`let a = t1()`, `let b = t2()`, `a + b`). Non-commutative
+  arithmetic (`-` aside, which canonicalizes to a sum), comparisons,
+  and every other route named above are source-ordered. `And`/`Or`
+  are **not** in this bucket: they are short-circuit forms — left to
+  right, the right operand unevaluated when the left one decides —
+  and their earlier declaration as commutative-and-eager was found by
+  the audit and ruled a defect.
+- **Named arguments evaluate in the callee's declaration order.**
+  `O(b: t2(), a: t1())` runs `t1` first: named arguments are matched
+  to parameters before evaluation, and "their order does not matter"
+  (above) extends to when they run.
+
 ### Which types can conform (the mutability gate)
 
 **Why this rule exists** (user-ruled 2026-08-15, recorded because the
@@ -1617,12 +1642,18 @@ that names the two ways out:
 
 ```epsil
 type Data = record{id: string, value: string}
+function Data(id: string, value: string) { {id -> id, value -> value} }
 let d = Data(id: "1234", value: "foo")
 d.id = "456"
-// -> immutable-value-assignment: `d` is a record, and records cannot be
-//    modified. Build an updated copy, or declare `Data` as an object
-//    type.
+// -> immutable-value-assignment: `Data` is not an object type, and only
+//    an object's fields can be assigned. Build an updated copy with the
+//    new `id`, or declare the type as `object{…}`.
 ```
+
+(A `record{…}` definition auto-declares no constructor — its fields are
+named, so a positional constructor would silently depend on field
+order — hence the one-line constructor function above; an `object{…}`
+type, by contrast, gets its named-argument constructor for free.)
 
 ```epsil
 type MutableData = object{id: string, value: string}
@@ -2552,7 +2583,9 @@ deferral by design.)
   stored field); see "Declaring an object type".
 - **B8 — evaluation order.** Pinned; see the note under "Objects and
   protocols" (left-to-right wherever operands evaluate; compiled
-  targets preserve or decline).
+  targets preserve or decline). Audited 2026-08-15 with two ruled
+  qualifications, recorded there: commutative operators evaluate in
+  canonical (unspecified) order; named arguments in declaration order.
 - **B9 — compile boundary.** Ruled (parameters in, results decline,
   GPU declines); see "The rest of the system".
 - **B10 — the Appendix A amendments.** See "Changes to shipped

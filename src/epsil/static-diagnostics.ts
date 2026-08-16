@@ -121,6 +121,11 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   // operators mint it from their canonical handlers, so — like the
   // named-argument codes above — it is settled before anything runs.
   'callback-arity',
+  // The same mismatch at a pipe STAGE (`xs |> (p, q) => p + q`), which is a
+  // separate code because a pipe is not a callback slot and its remedy is the
+  // call form rather than a tuple pattern. Minted by `Pipe`'s canonical
+  // handler, so it is settled before anything runs too.
+  'pipe-stage-arity',
   'incompatible-type',
   'incompatible-dimensions',
   'invalid-axis',
@@ -1163,6 +1168,12 @@ export function describeError(error: MathJsonExpression): string {
       // callback, and the report's caret points at the call.
       return payload.length === 0
         ? 'the callback takes the wrong number of parameters'
+        : payload.join(' ');
+    case 'pipe-stage-arity':
+      // As `callback-arity`: a complete sentence quoting the stage, with the
+      // caret on it.
+      return payload.length === 0
+        ? 'the pipe stage takes the wrong number of parameters'
         : payload.join(' ');
     case 'invalid-symbol':
       detail =

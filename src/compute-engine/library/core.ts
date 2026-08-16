@@ -1,5 +1,6 @@
 import { joinLatex } from '../latex-syntax/tokenizer.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
+import { callbackArity, declaresPhrase } from './callback-arity.js';
 import {
   effectsContractStateOf,
   recordEffectsTransition,
@@ -354,6 +355,52 @@ const PIPE_IMPLICIT_MAP_TYPE = new WeakMap<
   Expression,
   { generation: number; topic: Expression; type: Type | undefined }
 >();
+
+/**
+ * The arity check on a pipe STAGE: a pipe hands its stage exactly one value,
+ * always, so a stage whose parameter count is statically readable and never 1
+ * can never be applied. Returns the `Error` to put in the stage's place, or
+ * `undefined` when the arity fits or cannot be decided.
+ *
+ * This is the same reasoning that wires the collection operators into
+ * `callbackArityError`, and it reuses that module's reading of an operand's
+ * arity — but it is deliberately NOT that error:
+ *
+ * - a pipe stage is not a "callback". Nothing here is an operator-owned slot
+ *   taking a helper function; `x |> f` is an application whose argument
+ *   happens to be written to the left. `callback-arity`'s wording ("`Pipe`
+ *   calls its callback with 1 argument") describes a mechanism the language
+ *   does not have at this spelling, so the code is `pipe-stage-arity` and the
+ *   sentence is about the pipe.
+ * - the REMEDY differs, which is the practical half. A collection operator
+ *   points at a tuple pattern, because its callback receives an element that
+ *   may need taking apart. A pipe points at the CALL form — `xs |> Fold(f, 0,
+ *   _)` — because that is how the language spells a stage with more than one
+ *   argument (`src/epsil/docs/operators.md`, "Pipe"). Offering the
+ *   tuple-pattern rewrite here would be wrong whenever the topic is not a
+ *   collection of tuples, and the canonical handler cannot tell: the topic is
+ *   a held, unbound operand at this point.
+ *
+ * The check reads the RAW stage, which is what `callbackArity` is built for:
+ * a function literal is counted structurally and a symbol through
+ * `lookupDefinition`, neither of which needs the held operand bound.
+ */
+function pipeStageArityError(stage: Expression): Expression | undefined {
+  const arity = callbackArity(stage);
+  if (arity === undefined) return undefined;
+  if (arity.required <= 1 && arity.max >= 1) return undefined;
+
+  // A symbol is quoted by NAME: `toString()` is the ASCII-math spelling, which
+  // double-quotes a multi-character symbol and would read as a string inside
+  // the sentence. (Same reasoning as `callbackArityError`.)
+  const spelled = isSymbol(stage) ? stage.symbol : stage.toString();
+  return stage.engine.error([
+    'pipe-stage-arity',
+    `A pipe passes its stage exactly 1 value; \`${spelled}\` ${declaresPhrase(
+      arity
+    )}. A stage that takes several arguments is written as a call, with \`_\` in the piped value's slot: \`xs |> Fold(f, 0, _)\``,
+  ]);
+}
 
 /**
  * The static type of a `Pipe` whose stage implicitly MAPS — the collection
@@ -2326,6 +2373,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             ops[0],
             ce.typeError('function', ops[1].type, ops[1].toString()),
           ]);
+        // A stage that cannot take exactly one value is refused here rather
+        // than left to `apply()`, whose currying is a designed feature of an
+        // ordinary positional call but in a pipeline silently answered a
+        // residual closure: `xs |> (p, q) => p && q` evaluated to `(_) => …`
+        // and reported nothing. See `pipeStageArityError` for the wording and
+        // for why this is not the `callback-arity` error.
+        const arityError = pipeStageArityError(ops[1]);
+        if (arityError !== undefined)
+          return ce._fn('Pipe', [ops[0], arityError]);
         return ce._fn('Pipe', ops);
       },
       evaluate: (ops, { engine: ce, numericApproximation }) => {

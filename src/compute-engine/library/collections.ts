@@ -504,12 +504,17 @@ const FILL_SUPPLY: CallbackSupply = {
  * ({@link callbackArityError}): a callback that needs more parameters than the
  * operator supplies is rejected here rather than silently currying. Passing it
  * is what wires an operator into that check.
+ *
+ * `arity.source` is the collection the callback runs over. It feeds the
+ * tuple-pattern hint ONLY — never the arity verdict — so an operator that
+ * omits it still reports the mismatch, just without the suggested rewrite.
  */
 function canonicalCallbackOperand(
   op: Expression | undefined,
   arity?: {
     operator: string;
     supply: CallbackSupply | ReadonlyArray<CallbackSupply>;
+    source?: Expression;
   }
 ): Expression | undefined {
   if (op === undefined) return undefined;
@@ -519,7 +524,7 @@ function canonicalCallbackOperand(
   const accept = (fn: Expression): Expression =>
     arity === undefined
       ? fn
-      : (callbackArityError(fn, arity.operator, arity.supply) ?? fn);
+      : (callbackArityError(fn, arity.operator, arity.supply, arity.source) ?? fn);
   const fn = canonicalFunctionLiteral(op);
   // The operand a canonical handler REJECTS is replaced by the error, which is
   // how such a handler reports one, so the diagnostic matches the eager
@@ -601,10 +606,19 @@ function canonicalFunctionSlot(
     : undefined;
 
   const final = adjusted ?? args;
+  // The source feeds the tuple-pattern hint only. Every operator on this route
+  // is binary in the shape that matters — one collection and one callback — so
+  // the source is simply the OTHER of the two operands, which spares each call
+  // site from restating a position it already fixed by passing `index`.
   const arityError =
     supply === undefined || final[index] === undefined
       ? undefined
-      : callbackArityError(final[index], operator, supply);
+      : callbackArityError(
+          final[index],
+          operator,
+          supply,
+          final[index === 0 ? 1 : 0]
+        );
 
   return ce._fn(
     operator,
@@ -1940,10 +1954,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs], { engine }) => {
       // Guard non-collection inputs (e.g. Length(5), Length(x+y)).
       if (!xs.isCollection) return undefined;
-      if (xs.isEmptyCollection) return engine.Zero;
+      // `count` is asked FIRST and `isEmptyCollection` only as its fallback.
+      // Both facets walk a lazy collection — `Filter.count` to the end,
+      // `Filter.isEmpty` to the first match — so asking emptiness first ran
+      // the predicate callback once more than there are elements, which
+      // mutation makes observable. `count` alone already answers 0 for an
+      // empty collection; emptiness is consulted only for a collection that
+      // knows it is empty without knowing its size.
       const n = xs.count;
       // Guard infinite collections (e.g. Length(Repeat(5))).
-      if (n === undefined || !isFinite(n)) return undefined;
+      if (n === undefined || !isFinite(n))
+        return xs.isEmptyCollection ? engine.Zero : undefined;
       return engine.number(n);
     },
   },
@@ -3016,6 +3037,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const fn = canonicalCallbackOperand(ops[1], {
           operator: 'Count',
           supply: PER_ELEMENT_SUPPLY,
+          source: ops[0],
         });
         if (fn) ops = [ops[0], fn];
       } else if (ops.length === 2) {
@@ -3028,7 +3050,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const arityError = callbackArityError(
           ops[1],
           'Count',
-          PER_ELEMENT_SUPPLY
+          PER_ELEMENT_SUPPLY,
+          ops[0]
         );
         if (arityError) ops = [ops[0], arityError];
       }
@@ -3143,6 +3166,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'Any',
         supply: PER_ELEMENT_SUPPLY,
+        source: collection,
       });
       if (!fn) return null;
       return engine._fn('Any', [collection, fn]);
@@ -3171,6 +3195,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'All',
         supply: PER_ELEMENT_SUPPLY,
+        source: collection,
       });
       if (!fn) return null;
       return engine._fn('All', [collection, fn]);
@@ -3271,6 +3296,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // With NO source there is nothing to map and the call declines below;
       // the arity check would otherwise report a nonsensical "0 arguments".
       const sourceCount = ops.length - 1;
+      // The sources are checked BEFORE the callback so the arity check can be
+      // handed a bound one. `Map` is `lazy`, so `ops` arrive unbound and a raw
+      // source answers `unknown` for its type — which would silently cost the
+      // tuple-pattern hint. `checkCollectionOperand` canonicalizes, so
+      // `collections[0]` is the source with a readable element type.
+      const collections = ops
+        .slice(1)
+        .map((c) => checkCollectionOperand(engine, c));
       const fn = canonicalCallbackOperand(
         ops[0],
         sourceCount === 0
@@ -3284,11 +3317,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                       count: sourceCount,
                       describes: `one element from each of the ${sourceCount} collections`,
                     },
+              // `Map` is callback-FIRST, so the single source of the unary
+              // form is the first of these. The zipWith form supplies one
+              // element from each source rather than one destructurable
+              // element, so its supply is not `destructurable` and the source
+              // goes unread.
+              source: collections[0],
             }
       );
-      const collections = ops
-        .slice(1)
-        .map((c) => checkCollectionOperand(engine, c));
       if (
         !fn ||
         collections.length === 0 ||
@@ -3589,6 +3625,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'Filter',
         supply: PER_ELEMENT_SUPPLY,
+        source: collection,
       });
       if (!collection.isValid || !fn) return null;
 
@@ -3871,7 +3908,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // elements have no numeric value, so its iterator returns undefined
       // and each() yields nothing). Folding that would silently produce the
       // initial value (Sum → 0): stay inert instead.
-      if (enumerationDeclined(collection)) return undefined;
+      //
+      // Each of the three folds below reads that verdict off its OWN walk
+      // (`enumerationDeclinedAfterWalk`) rather than probing for it here:
+      // probing starts a second enumeration, which re-runs the element
+      // callback of a lazy `Map`/`Filter` once more than there are elements.
       const hasInitial = initial !== undefined;
       const seed = initial ?? ce.Nothing;
 
@@ -3916,6 +3957,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 first = false;
                 yield;
               }
+              if (enumerationDeclinedAfterWalk(collection, empty ? 0 : 1))
+                return undefined;
               // A seedless fold of an empty collection has nothing to seed
               // from — `Nothing`, as the interpreted path answers.
               if (empty && !hasInitial) return ce.Nothing;
@@ -3955,6 +3998,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               acc = acc === undefined ? x : step(acc, x);
               yield acc;
             }
+            if (
+              enumerationDeclinedAfterWalk(
+                collection,
+                acc === undefined ? 0 : 1
+              )
+            )
+              return undefined;
             // Nothing to seed from: an empty seedless fold has no value.
             return acc ?? ce.Nothing;
           })(),
@@ -3963,14 +4013,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         );
       }
 
-      return run(
-        reduceCollection<Expression>(collection, step, seed) as Generator<
-          Expression | undefined,
-          Expression | undefined
-        >,
+      let walked = 0;
+      const folded = run(
+        reduceCollection<Expression>(
+          collection,
+          (acc, x) => {
+            walked += 1;
+            return step(acc, x);
+          },
+          seed
+        ) as Generator<Expression | undefined, Expression | undefined>,
         ce._timeRemaining,
         ce._deadlineFrame
       );
+      if (enumerationDeclinedAfterWalk(collection, walked)) return undefined;
+      return folded;
     },
   },
 
@@ -4188,6 +4245,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'TakeWhile',
         supply: PER_ELEMENT_SUPPLY,
+        source: collection,
       });
       if (!collection.isValid || !fn) return null;
       return engine._fn('TakeWhile', [collection, fn]);
@@ -4330,6 +4388,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'DropWhile',
         supply: PER_ELEMENT_SUPPLY,
+        source: collection,
       });
       if (!collection.isValid || !fn) return null;
       return engine._fn('DropWhile', [collection, fn]);
@@ -4432,6 +4491,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'FlatMap',
         supply: PER_ELEMENT_SUPPLY,
+        source: collection,
       });
       if (!collection.isValid || !fn) return null;
       return engine._fn('FlatMap', [collection, fn]);
@@ -6736,6 +6796,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'MaxBy',
         supply: PER_ELEMENT_SUPPLY,
+        source: collection,
       });
       if (!collection.isValid || !fn) return null;
       return engine._fn('MaxBy', [collection, fn]);
@@ -6763,6 +6824,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'MinBy',
         supply: PER_ELEMENT_SUPPLY,
+        source: collection,
       });
       if (!collection.isValid || !fn) return null;
       return engine._fn('MinBy', [collection, fn]);
@@ -6811,6 +6873,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'ArgMax',
         supply: PER_ELEMENT_SUPPLY,
+        source: collection,
       });
       if (!fn) return null;
       return engine._fn('ArgMax', [collection, fn]);
@@ -6850,6 +6913,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'ArgMin',
         supply: PER_ELEMENT_SUPPLY,
+        source: collection,
       });
       if (!fn) return null;
       return engine._fn('ArgMin', [collection, fn]);
@@ -8972,19 +9036,41 @@ function tally(collection: Expression): [ReadonlyArray<Expression>, number[]] {
 }
 
 /**
- * True when a collection claims to have elements (`isEmptyCollection` is
- * not `true`) yet its iterator declines to enumerate them — e.g.
- * `Linspace(a, 1, 3)` with a symbolic endpoint: the size (3) is known, but
- * the elements have no computable value, so `each()` yields nothing.
- * Folding such a collection would silently produce the fold's initial
- * value (`Sum → 0`); callers should stay inert instead.
+ * Did an enumeration DECLINE, judged from a walk the caller has ALREADY
+ * performed? `walked` is the number of elements that walk produced.
+ *
+ * A collection can report a definite size and still be unable to produce its
+ * elements: `Linspace(a, 1, 3)` with a symbolic endpoint has three elements,
+ * but none of them has a computable value, so `each()` yields nothing. That is
+ * a DECLINE, and it must not be mistaken for an empty collection — folding it
+ * would silently answer the fold's initial value (`Sum` → 0), which reads
+ * exactly like a correct sum over no elements. A genuinely empty collection
+ * (a `Filter` whose predicate matched nothing) reports `isEmptyCollection ===
+ * true` and is not a decline; its consumers should fold it away as usual.
+ *
+ * The verdict is taken from the caller's own walk rather than from a probe
+ * enumeration, and that is the whole point of this function: probing means
+ * calling `each()` a second time, which re-runs the element callback of a lazy
+ * `Map`/`Filter` and throws the result away. Because the language has
+ * mutation, the number of times an effectful callback runs is observable, so
+ * the extra run is a visible wrong answer — `Sum(Map(f, xs))` ran `f` once per
+ * element plus once more. Ruling B8 ("pinned everywhere operands evaluate",
+ * `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B) requires lazy materialization not
+ * to duplicate evaluations. The counts are pinned in
+ * `test/compute-engine/lazy-callback-count.test.ts`.
+ *
+ * `isEmptyCollection` is consulted ONLY when the walk produced nothing,
+ * because reading that facet is itself a walk for some collections
+ * (`Filter.isEmpty` enumerates its source up to the first match). A walk that
+ * produced elements settles the question on its own.
  */
-export function enumerationDeclined(collection: Expression): boolean {
+export function enumerationDeclinedAfterWalk(
+  collection: Expression,
+  walked: number
+): boolean {
+  if (walked > 0) return false;
   if (collection.isEmptyCollection === true) return false;
-  // A collection that reports itself non-enumerable is decided structurally —
-  // no walk, and in particular no evaluation of an eager or impure source.
-  if (collection.isEnumerableCollection === false) return true;
-  return collection.each().next().done === true;
+  return true;
 }
 
 /**

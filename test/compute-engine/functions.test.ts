@@ -115,7 +115,7 @@ describe('Anonymous function with missing param', () => {
 describe('Anonymous function with too many params', () => {
   test('Too many params: Function', () =>
     expect(() => evaluate(['f1', 10, 20])).toThrowErrorMatchingInlineSnapshot(
-      `Too many arguments for function "(q) |-> q + 1": expected 1, got 2`
+      `Too many arguments for function "(q) => q + 1": expected 1, got 2`
     ));
 
   test('Too many params: Expression', () =>
@@ -554,6 +554,76 @@ describe('Pipe — stage sugar (box route)', () => {
     ).toBe('16');
   });
 
+  // The implicit `Map` changes the pipe's TYPE, not just its value: the stage
+  // returns a scalar but the pipe is a collection of those scalars. Reading
+  // the stage's declared result type alone (what `Pipe` did before) described
+  // the element, so the whole pipe fell back to `unknown` and every consumer
+  // downstream — arithmetic broadcast in particular — saw a scalar. These
+  // pins read `.type` on the UNEVALUATED pipe, then check it against the
+  // evaluated value's type: the static answer must be the collection type,
+  // and must be the one the expression actually reduces to.
+  test('a mapping stage types the pipe as the mapped COLLECTION', () => {
+    const ce = new ComputeEngine();
+    const pipe = ce.box([
+      'Pipe',
+      ['List', 1, 2, 3],
+      ['Function', ['Power', 'x', 2], 'x'],
+    ]);
+    expect(pipe.type.toString()).toBe('vector<3>');
+    expect(pipe.type.toString()).toBe(pipe.evaluate().type.toString());
+
+    // Element type, not just shape: a list of boolean pairs mapped through a
+    // conjunction of its components types as a list of booleans.
+    const table = ce.box([
+      'Pipe',
+      [
+        'List',
+        ['Tuple', 'True', 'True'],
+        ['Tuple', 'True', 'False'],
+        ['Tuple', 'False', 'False'],
+      ],
+      [
+        'Function',
+        ['And', ['At', 'p', 1], ['At', 'p', 2]],
+        'p',
+      ],
+    ]);
+    expect(table.type.toString()).toBe('list<broadcastable<boolean>^3>');
+    expect(table.type.toString()).toBe(table.evaluate().type.toString());
+
+    // A chain types through: the inner pipe is the outer one's collection
+    // topic, so the outer gate needs the inner pipe's own mapped type.
+    const chained = ce.box([
+      'Pipe',
+      ['Pipe', ['List', 1, 2, 3], ['Function', ['Power', 'x', 2], 'x']],
+      ['Function', ['Add', 'y', 1], 'y'],
+    ]);
+    expect(chained.type.toString()).toBe('vector<3>');
+    expect(chained.type.toString()).toBe(chained.evaluate().type.toString());
+  });
+
+  test('a stage that does NOT map keeps the applied (scalar) typing', () => {
+    const ce = new ComputeEngine();
+    // Each of these is an escape from the implicit `Map` — a non-collection
+    // topic, a string topic, a bare function symbol, and a parameter
+    // annotation claiming the whole collection — so none may be reported as a
+    // collection. They type from the stage's declared result as before,
+    // which for an unannotated lambda is `unknown`; what this pins is that
+    // the mapping path did NOT fire, so no collection type appears.
+    const scalars = [
+      ce.box(['Pipe', 4, ['Function', ['Power', '_', 2]]]),
+      ce.box(['Pipe', "'abc'", ['Function', 's', 's']]),
+      ce.box(['Pipe', ['List', 1, 2, 3], 'Sum']),
+      ce.box([
+        'Pipe',
+        ['List', 1, 2, 3],
+        ['Function', ['Length', 'l'], ['Typed', 'l', "'list<number>'"]],
+      ]),
+    ];
+    for (const s of scalars)
+      expect(s.type.matches('collection')).toBe(false);
+  });
+
   test('a BARE placeholder expression keeps the topic reading (divergence)', () => {
     const ce = new ComputeEngine();
     // On the box route there is no call-vs-operator surface distinction, so
@@ -696,7 +766,7 @@ describe('N() through user-defined function application', () => {
     expect(r.re).toBeCloseTo((2 / 3) * 2);
   });
 
-  test('lambda case N((x |-> x/3)(2))', () =>
+  test('lambda case N((x => x/3)(2))', () =>
     expect(
       ce.box(['Apply', ['Function', ['Divide', 'x', 3], 'x'], 2]).N().isExact
     ).toBe(false));

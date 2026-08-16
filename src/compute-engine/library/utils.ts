@@ -17,7 +17,10 @@ import { checkDeadline } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
-import { reduceCollection, enumerationDeclined } from './collections.js';
+import {
+  reduceCollection,
+  enumerationDeclinedAfterWalk,
+} from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { isTuple, isValuelessCollectionTyped } from '../collection-utils.js';
 
@@ -2070,6 +2073,37 @@ export function assignLoopIndex(
 }
 
 /**
+ * Fold `collection` with `fn`, reporting `NON_ENUMERABLE_DOMAIN` when the
+ * collection's iterator DECLINED — it claims to have elements but produced
+ * none, so the fold would silently answer the bare initial value (`Sum → 0`).
+ *
+ * The decline is read off THIS walk rather than probed before it. Probing
+ * means enumerating the collection a second time to look for a first element,
+ * which re-runs the element callback of a lazy `Map`/`Filter` once more than
+ * there are elements; with mutation in the language, that extra run is
+ * observable. `enumerationDeclinedAfterWalk` (`library/collections.ts`) turns
+ * the element count into the verdict.
+ */
+function* reduceCollectionOrDecline<T>(
+  collection: Expression,
+  fn: (acc: T, x: Expression) => T | null,
+  initial: T
+): Generator<T | undefined, T | typeof NON_ENUMERABLE_DOMAIN | undefined> {
+  let walked = 0;
+  const result = yield* reduceCollection(
+    collection,
+    (acc: T, x: Expression) => {
+      walked += 1;
+      return fn(acc, x);
+    },
+    initial
+  );
+  if (enumerationDeclinedAfterWalk(collection, walked))
+    return NON_ENUMERABLE_DOMAIN;
+  return result;
+}
+
+/**
  * Process an expression of the form
  * - ['Operator', body, ['Tuple', index1, lower, upper]]
  * - ['Operator', body, ['Tuple', index1, lower, upper], ['Tuple', index2, lower, upper], ...]
@@ -2107,8 +2141,7 @@ export function* reduceBigOp<T>(
     const collection = body.evaluate();
     // A collection whose iterator declines (e.g. symbolic elements or
     // bounds) would fold to the bare initial value: keep it symbolic.
-    if (enumerationDeclined(collection)) return NON_ENUMERABLE_DOMAIN;
-    return yield* reduceCollection(collection, fn, initial);
+    return yield* reduceCollectionOrDecline(collection, fn, initial);
   }
 
   // If there are no indexes, the summation is a constant
@@ -2122,8 +2155,7 @@ export function* reduceBigOp<T>(
     const value = body.evaluate();
     if (value.isCollection) {
       if (value.isFiniteCollection !== true) return NON_ENUMERABLE_DOMAIN;
-      if (enumerationDeclined(value)) return NON_ENUMERABLE_DOMAIN;
-      return yield* reduceCollection(value, fn, initial);
+      return yield* reduceCollectionOrDecline(value, fn, initial);
     }
     // A body that is DEFINITELY collection-typed but carries no value — a
     // symbol declared `list<number>`, or a call whose head returns one — is

@@ -196,6 +196,38 @@ The center of gravity. Sub-steps in dependency order.
 > as verbatim tests. Independent of B1 — nothing in it touches
 > conformance — so it is Phase 1's remaining work whichever way the
 > sequencing goes.
+>
+> > **1E STATUS 2026-08-15 — DONE.** The audit
+> > (`test/compute-engine/evaluation-order.test.ts`, one order-witness
+> > per interpreted route) found four routes that were not left to
+> > right, and each was ruled the same day: (1) commutative operators
+> > (`+`, `*`, …) evaluate in CANONICAL order because canonicalization
+> > sorts their operands — accepted and documented as B8's one
+> > unspecified-order exception; (2) `And`/`Or` were declared
+> > commutative and non-lazy, so `&&`/`||` neither short-circuited nor
+> > ran left to right — ruled a defect, fixed separately (lazy,
+> > non-commutative, short-circuit); (3) named arguments evaluate in the
+> > callee's DECLARATION order — ruled and documented; (4) some
+> > consumers of LAZY collections ran an effectful element callback more
+> > times than there are elements (`Sum`/`Reduce`/`Max` over a lazy
+> > `Map`, `Length` over a `Filter`) — a probe enumeration ran before
+> > the real one; fixed at the shared roots (the decline verdict is now
+> > read off the consumer's own walk, `Length` counts before asking
+> > emptiness, the absent-datum gate skips collections whose element
+> > type rules absence out) and pinned by exact count in
+> > `test/compute-engine/lazy-callback-count.test.ts`. That dig also
+> > surfaced and fixed two unrelated value bugs: `Max`/`Min` of a
+> > DESCENDING `Linspace` were inverted, and `Max`/`Min`/`Mean` of a
+> > `Linspace` with a symbolic endpoint returned `NaN` because a
+> > collection that declines to enumerate was read as empty. The appendix's
+> > examples are pinned verbatim in
+> > `test/compute-engine/object-appendix-b.test.ts`; two mismatches
+> > surfaced: the record example needed a constructor function (a
+> > `record{…}` type auto-declares none — appendix amended), and the
+> > `Person` flow's `is Identifiable { get fullName … }` conformance
+> > block is Phase 2 parser work, so the flow is pinned with `birthday`
+> > and `fullName` as free functions and the full form is a Phase 2
+> > acceptance item.
 
 1. **Representation decision (first design task, before code).** An
    object value = identity + mutable slot table + per-object version
@@ -268,7 +300,14 @@ Spec: "Objects and protocols", "Which types can conform".
   accessor+field conflict is `object-property-conflict`; computed
   properties (`get`/`set` blocks) run per access, setter receives the
   evaluated value; Epsil parser work for accessor blocks in `is …
-  { }` implementation blocks.
+  { }` implementation blocks. Acceptance: the appendix's full `Person`
+  example — `type Person = object{…} is Identifiable { get fullName …
+  function birthday … }` followed by `"Happy birthday,
+  \(birthday(p).fullName)! You are \(p.age)."` ➔ `"Happy birthday,
+  Alan Turing! You are 43."` — runs verbatim (today it stops at
+  `unexpected-symbol is`; `object-appendix-b.test.ts` pins the flow with
+  free functions until then, and should be switched to the verbatim
+  text here).
 - The mutability gate (B1): `readwrite` property or *declared*
   `state` member ⇒ object-only conformance
   (`protocol-requires-object`); bare requirements never gate; records

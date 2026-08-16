@@ -22,6 +22,7 @@ import {
   windowedCollectionOps,
 } from '../collection-utils.js';
 import { aggregateAbsence } from './missing-data.js';
+import { enumerationDeclinedAfterWalk } from './collections.js';
 import {
   bigCorrelation,
   bigCovariance,
@@ -301,17 +302,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
         // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `hasSymbolicDatum`.
-        if (hasSymbolicDatum(ops)) return undefined;
+        // `NaN` — see `collectData`. One walk feeds both paths below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals) return exactMean(engine, vals);
         }
-        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
-            ? bigMean(flattenBigScalars(xs))
-            : mean(flattenScalars(xs))
+            ? bigMean(bigScalarsOf(xs))
+            : mean(scalarsOf(xs))
         );
       },
     },
@@ -328,17 +329,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
         // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `hasSymbolicDatum`.
-        if (hasSymbolicDatum(ops)) return undefined;
+        // `NaN` — see `collectData`. One walk feeds both paths below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals) return exactMedianOf(engine, sortExact(vals));
         }
-        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
-            ? bigMedian(flattenBigScalars(xs))
-            : median(flattenScalars(xs))
+            ? bigMedian(bigScalarsOf(xs))
+            : median(scalarsOf(xs))
         );
       },
     },
@@ -358,17 +359,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
         // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `hasSymbolicDatum`.
-        if (hasSymbolicDatum(ops)) return undefined;
+        // `NaN` — see `collectData`. One walk feeds both paths below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, false);
         }
-        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
-            ? bigVariance(flattenBigScalars(xs))
-            : variance(flattenScalars(xs))
+            ? bigVariance(bigScalarsOf(xs))
+            : variance(scalarsOf(xs))
         );
       },
     },
@@ -384,17 +385,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
         // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `hasSymbolicDatum`.
-        if (hasSymbolicDatum(ops)) return undefined;
+        // `NaN` — see `collectData`. One walk feeds both paths below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, true);
         }
-        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
-            ? bigPopulationVariance(flattenBigScalars(xs))
-            : populationVariance(flattenScalars(xs))
+            ? bigPopulationVariance(bigScalarsOf(xs))
+            : populationVariance(scalarsOf(xs))
         );
       },
     },
@@ -415,20 +416,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
         // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `hasSymbolicDatum`.
-        if (hasSymbolicDatum(ops)) return undefined;
+        // `NaN` — see `collectData`. One walk feeds both paths below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals)
             return engine
               .function('Sqrt', [exactVariance(engine, vals, false)])
               .evaluate();
         }
-        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
-            ? bigVariance(flattenBigScalars(xs)).sqrt()
-            : Math.sqrt(variance(flattenScalars(xs)))
+            ? bigVariance(bigScalarsOf(xs)).sqrt()
+            : Math.sqrt(variance(scalarsOf(xs)))
         );
       },
     },
@@ -444,20 +445,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
         // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `hasSymbolicDatum`.
-        if (hasSymbolicDatum(ops)) return undefined;
+        // `NaN` — see `collectData`. One walk feeds both paths below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals)
             return engine
               .function('Sqrt', [exactVariance(engine, vals, true)])
               .evaluate();
         }
-        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
-            ? bigPopulationVariance(flattenBigScalars(xs)).sqrt()
-            : Math.sqrt(populationVariance(flattenScalars(xs)))
+            ? bigPopulationVariance(bigScalarsOf(xs)).sqrt()
+            : Math.sqrt(populationVariance(scalarsOf(xs)))
         );
       },
     },
@@ -473,17 +474,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
         // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `hasSymbolicDatum`.
-        if (hasSymbolicDatum(ops)) return undefined;
+        // `NaN` — see `collectData`. One walk feeds both paths below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals) return exactKurtosis(engine, vals);
         }
-        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
-            ? bigKurtosis(flattenBigScalars(xs))
-            : kurtosis(flattenScalars(xs))
+            ? bigKurtosis(bigScalarsOf(xs))
+            : kurtosis(scalarsOf(xs))
         );
       },
     },
@@ -499,17 +500,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
         // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `hasSymbolicDatum`.
-        if (hasSymbolicDatum(ops)) return undefined;
+        // `NaN` — see `collectData`. One walk feeds both paths below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals) return exactSkewness(engine, vals);
         }
-        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
-            ? bigSkewness(flattenBigScalars(xs))
-            : skewness(flattenScalars(xs))
+            ? bigSkewness(bigScalarsOf(xs))
+            : skewness(scalarsOf(xs))
         );
       },
     },
@@ -525,17 +526,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
         // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `hasSymbolicDatum`.
-        if (hasSymbolicDatum(ops)) return undefined;
+        // `NaN` — see `collectData`. One walk feeds both paths below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals) return exactMode(engine, vals);
         }
-        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
-            ? bigMode(flattenBigScalars(xs))
-            : mode(flattenScalars(xs))
+            ? bigMode(bigScalarsOf(xs))
+            : mode(scalarsOf(xs))
         );
       },
     },
@@ -568,24 +569,25 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // Absent datum or empty input ⇒ `(NaN, NaN, NaN)` (§3.C).
         if (aggregateAbsence(engine, ops))
           return engine.tuple(engine.NaN, engine.NaN, engine.NaN);
+        // SYMBOLIC data (a valueless symbol, an unresolved expression) has no
+        // numeric reading: stay inert rather than sort NaN placeholders into
+        // the quantile split and bake a definite `(…, NaN, …)` tuple that a
+        // later assignment contradicts. See `collectData`, which is the rule
+        // the whole aggregate family shares — and whose single walk feeds both
+        // the exact and the float path below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals) {
             const [q1, q2, q3] = exactQuartiles(engine, vals);
             return engine.tuple(q1, q2, q3);
           }
         }
-        // SYMBOLIC data (a valueless symbol, an unresolved expression) has no
-        // numeric reading: stay inert rather than sort NaN placeholders into
-        // the quantile split and bake a definite `(…, NaN, …)` tuple that a
-        // later assignment contradicts. See `hasSymbolicDatum`, which is the
-        // rule the whole aggregate family now shares.
-        if (hasSymbolicDatum(ops)) return undefined;
-        const xs = ops;
         const [mid, lower, upper] = (
           bignumPreferred(engine)
-            ? bigQuartiles(flattenBigScalars(xs))
-            : quartiles(flattenScalars(xs))
+            ? bigQuartiles(bigScalarsOf(xs))
+            : quartiles(scalarsOf(xs))
         ).map((v) => engine.number(v));
         return engine.tuple(mid, lower, upper);
       },
@@ -603,20 +605,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const absent = aggregateAbsence(engine, ops);
         if (absent) return absent;
         // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `hasSymbolicDatum`.
-        if (hasSymbolicDatum(ops)) return undefined;
+        // `NaN` — see `collectData`. One walk feeds both paths below.
+        const xs = collectData(ops);
+        if (xs === null) return undefined;
         if (!numericApproximation) {
-          const vals = exactData(ops);
+          const vals = exactData(xs);
           if (vals) {
             const [q1, , q3] = exactQuartiles(engine, vals);
             return subtract(engine, q3, q1);
           }
         }
-        const xs = ops;
         return engine.number(
           bignumPreferred(engine)
-            ? bigInterquartileRange(flattenBigScalars(xs))
-            : interquartileRange(flattenScalars(xs))
+            ? bigInterquartileRange(bigScalarsOf(xs))
+            : interquartileRange(scalarsOf(xs))
         );
       },
     },
@@ -893,47 +895,62 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 ];
 
 /**
- * Does this aggregate's input contain a datum with no numeric reading?
+ * The data an aggregate consumes, flattened ONCE: each operand contributes
+ * either its elements (a finite collection) or itself (a scalar).
  *
- * A valueless symbol — whether declared scalar (`y`) or declared
- * `list<number>` and not yet assigned — flattens to itself, and every numeric
- * kernel below reads it as `NaN` via `.re`. Folding that produces a definite
- * `NaN` that the SAME expression contradicts once the symbol is assigned
- * (`Mean(L)` answered `NaN`, and `2` once `L := [1,2,3]`), so the aggregate
- * stays inert instead and answers when the data arrives.
+ * Returns `null` when some datum has no numeric reading, in which case the
+ * aggregate must stay INERT rather than fold. Two shapes qualify:
  *
- * A NaN LITERAL is a number and still flows through, which is what keeps
+ * - A valueless symbol — declared scalar (`y`), or declared `list<number>` and
+ *   not yet assigned — flattens to itself, and every numeric kernel reads it as
+ *   `NaN` via `.re`. Folding that produces a definite `NaN` that the same
+ *   expression contradicts once the symbol is assigned (`Mean(L)` answered
+ *   `NaN`, and `2` once `L := [1,2,3]`).
+ * - A collection that reports a definite size yet produces NO elements
+ *   DECLINED to enumerate: `Linspace(a, 1, 3)` has three elements, but with a
+ *   symbolic endpoint none of them has a numeric reading. The kernels fold that
+ *   empty flatten to a definite `NaN` too (`Mean(Linspace(a, 1, 3))` answered
+ *   `NaN`). A genuinely EMPTY collection is not "declined" and is left to the
+ *   caller, which folds it to `NaN` by the absent-datum rule.
+ *
+ * A `NaN` LITERAL is a number and still flows through, which is what keeps
  * absent-datum semantics (§3.C) intact: `aggregateAbsence` runs first and owns
- * the `Missing`/`NaN`/empty-input cases, and this guard only sees what it let
- * past.
+ * the `Missing`/`NaN`/empty-input cases, and this only sees what it let past.
  *
- * `Quartiles` and `InterquartileRange` have applied this rule since they were
- * written; the rest of the family reached the kernels unguarded until
- * 2026-08-15. Sharing one predicate is what keeps them from drifting apart
- * again.
+ * Collecting the data ONCE is load-bearing, not a tidiness measure. The
+ * validation walk, the exact-path walk and the float-path walk used to be
+ * three separate enumerations of the same operand, so `Mean(Map(f, xs))` ran
+ * `f` twice per element on top of the gate's own walk. With mutation in the
+ * language the number of callback runs is observable — ruling B8 ("pinned
+ * everywhere operands evaluate", `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B)
+ * requires lazy materialization not to duplicate evaluations. Counts are
+ * pinned in `test/compute-engine/lazy-callback-count.test.ts`.
  */
-function hasSymbolicDatum(ops: ReadonlyArray<Expression>): boolean {
-  for (const v of flattenArguments(ops)) if (!isNumber(v)) return true;
-  return false;
-}
-
-function* flattenArguments(
-  args: ReadonlyArray<Expression>
-): Generator<Expression> {
-  // Go over each argument and yield it if a scalar, otherwise yield its elements
-  for (const arg of args) {
-    if (arg.isFiniteCollection) yield* arg.each();
-    else yield arg;
+function collectData(ops: ReadonlyArray<Expression>): Expression[] | null {
+  const data: Expression[] = [];
+  for (const op of ops) {
+    if (op.isFiniteCollection) {
+      let walked = 0;
+      for (const v of op.each()) {
+        walked += 1;
+        if (!isNumber(v)) return null;
+        data.push(v);
+      }
+      if (enumerationDeclinedAfterWalk(op, walked)) return null;
+    } else {
+      if (!isNumber(op)) return null;
+      data.push(op);
+    }
   }
+  return data;
 }
 
-function* flattenScalars(args: ReadonlyArray<Expression>) {
-  for (const op of flattenArguments(args)) yield op.re;
+function* scalarsOf(data: ReadonlyArray<Expression>) {
+  for (const op of data) yield op.re;
 }
 
-function* flattenBigScalars(args: ReadonlyArray<Expression>) {
-  for (const op of flattenArguments(args))
-    yield op.bignumRe ?? op.engine.bignum(op.re);
+function* bigScalarsOf(data: ReadonlyArray<Expression>) {
+  for (const op of data) yield op.bignumRe ?? op.engine.bignum(op.re);
 }
 
 //
@@ -946,17 +963,15 @@ function* flattenBigScalars(args: ReadonlyArray<Expression>) {
 //
 
 /**
- * If every value flattened from `ops` is an exact, finite real number, return
- * them as boxed expressions; otherwise `null` (caller falls back to the float
- * path).
+ * If every already-collected datum is an exact, finite real number, return them
+ * as boxed expressions; otherwise `null` (caller falls back to the float path).
  */
-function exactData(ops: ReadonlyArray<Expression>): Expression[] | null {
-  const vals = [...flattenArguments(ops)];
-  if (vals.length === 0) return null;
-  for (const v of vals)
+function exactData(data: ReadonlyArray<Expression>): Expression[] | null {
+  if (data.length === 0) return null;
+  for (const v of data)
     if (!isNumber(v) || v.isExact !== true || v.im !== 0 || v.isFinite !== true)
       return null;
-  return vals;
+  return [...data];
 }
 
 const add = (ce: ComputeEngine, xs: Expression[]): Expression =>

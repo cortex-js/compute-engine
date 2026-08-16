@@ -1,5 +1,6 @@
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import {
+  collectionElementType,
   isWildcardFunctionType,
   signatureArms,
 } from '../../common/type/utils.js';
@@ -16,9 +17,12 @@ import type { Expression } from '../global-types.js';
  * of the collection", "the accumulator and the current element".
  *
  * `destructurable` marks a single argument that is an ELEMENT of the source,
- * and so may itself be a tuple the author meant to take apart. Only those get
- * the tuple-pattern hint: suggesting one for `Tabulate`, whose single argument
- * is an integer index, would be nonsense.
+ * and so MAY itself be a tuple the author meant to take apart. Only those are
+ * eligible for the tuple-pattern hint: suggesting one for `Tabulate`, whose
+ * single argument is an integer index, would be nonsense. Eligibility is not
+ * sufficient — the hint additionally requires the source's elements to be
+ * provably tuples of the right size (see `tupleElementCount`), which is why
+ * the caller passes the source alongside.
  */
 export type CallbackSupply = {
   count: number;
@@ -68,7 +72,7 @@ type CallbackArity = { required: number; max: number };
  * reports `unknown`, and `.canonical` would DECLARE an undeclared name as a
  * side effect of the read.
  */
-function callbackArity(fn: Expression): CallbackArity | undefined {
+export function callbackArity(fn: Expression): CallbackArity | undefined {
   if (isFunction(fn, 'Function')) {
     const n = fn.nops - 1;
     if (n === 0) return { required: 0, max: Infinity };
@@ -122,7 +126,7 @@ function supplyPhrase(supply: CallbackSupply): string {
 
 /** "declares 2 parameters" / "requires at least 2 parameters" / "takes 1 to 2
  * parameters" — the operand side of the diagnostic. */
-function declaresPhrase(arity: CallbackArity): string {
+export function declaresPhrase(arity: CallbackArity): string {
   const plural = (n: number) => `${n} parameter${n === 1 ? '' : 's'}`;
   if (arity.required === arity.max) return `declares ${plural(arity.required)}`;
   if (arity.max === Infinity)
@@ -144,6 +148,31 @@ function literalParameterNames(fn: Expression): string[] | undefined {
     names.push(param.symbol);
   }
   return names.length > 0 ? names : undefined;
+}
+
+/**
+ * How many components the elements of `source` have, when they are provably a
+ * TUPLE — the gate on the tuple-pattern hint.
+ *
+ * The hint is only ever right when there is something to take apart. Offered
+ * on the shape of the mismatch alone it fired on sources whose elements are
+ * scalars, where it names a rewrite that cannot work:
+ * `Map((p, q) => p + q, [1, 2, 3])` suggested `((p, q)) => …` for a list of
+ * NUMBERS. So the source's element type decides, and it must be a tuple whose
+ * component count equals what the callback declared — elements that are pairs
+ * do not make `((a, b, c)) => …` a fix for a 3-parameter callback either.
+ *
+ * `undefined` — no hint — whenever the element type is not statically a tuple,
+ * INCLUDING when it is unknown. A hint is a claim about the author's data, and
+ * guessing one is what this is fixing; the arity error itself still stands on
+ * its own, since it is a fact about the callback alone.
+ */
+function tupleElementCount(source: Expression | undefined): number | undefined {
+  if (source === undefined) return undefined;
+  const elements = collectionElementType(source.type.type);
+  if (elements === undefined) return undefined;
+  if (typeof elements !== 'object' || elements.kind !== 'tuple') return undefined;
+  return elements.elements?.length;
 }
 
 /**
@@ -169,6 +198,10 @@ function literalParameterNames(fn: Expression): string[] | undefined {
  * key or a binary comparator; `Iterate`: `f(acc)` or `f(index, acc)`). Such an
  * operator errors only when the callback fits none of its modes.
  *
+ * `source` is the collection the callback will be applied over. It is used for
+ * the tuple-pattern hint only — never for the arity verdict, which is a fact
+ * about the callback alone — so omitting it costs nothing but the hint.
+ *
  * The result is returned as the SLOT's operand by the caller — the documented
  * way a canonical handler reports a rejected operand (returning `null` would
  * leave the application silently inert instead).
@@ -176,7 +209,8 @@ function literalParameterNames(fn: Expression): string[] | undefined {
 export function callbackArityError(
   fn: Expression,
   operator: string,
-  supply: CallbackSupply | ReadonlyArray<CallbackSupply>
+  supply: CallbackSupply | ReadonlyArray<CallbackSupply>,
+  source?: Expression
 ): Expression | undefined {
   const arity = callbackArity(fn);
   if (arity === undefined) return undefined;
@@ -201,13 +235,17 @@ export function callbackArityError(
   // The commonest way to reach this error is writing a callback that expects
   // the element to arrive already taken apart — `Map((p, q) => p + q, pairs)`
   // over a collection of pairs. The language spells that with a tuple pattern
-  // parameter, which is one parameter, so point at it.
+  // parameter, which is one parameter, so point at it — but ONLY when the
+  // source's elements really are tuples of exactly that many components
+  // (`tupleElementCount`), since a hint naming a rewrite that cannot work is
+  // worse than no hint.
   const names =
     supplies.length === 1 &&
     supplies[0].count === 1 &&
     supplies[0].destructurable === true &&
     arity.required === arity.max &&
-    arity.required >= 2
+    arity.required >= 2 &&
+    tupleElementCount(source) === arity.required
       ? literalParameterNames(fn)
       : undefined;
   if (names !== undefined)

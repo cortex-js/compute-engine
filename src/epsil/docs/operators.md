@@ -170,6 +170,29 @@ the whole value — `xs |> Sum` sums the collection, it does not map — as does
 a lambda whose annotated parameter accepts it
 (`xs |> (l: list<number>) => Length(l)`).
 
+A pipe hands its stage exactly **one** value, so a stage that declares more
+than one parameter is a `pipe-stage-arity` error rather than a partial
+application — a leftover function is never what a pipeline was written to
+produce:
+
+```epsil
+[100, 200] |> (x, y, z) => x + y + z
+// ✘ A pipe passes its stage exactly 1 value; `(x, y, z) => …` declares 3
+```
+
+The fix is the **call** form above, with `_` marking the piped value's slot
+(`xs |> Fold(f, 0, _)`). The same applies to a named stage: `xs |> add` on a
+two-parameter `add` is this error, not a partially applied `add`.
+
+When the piped value is a collection whose elements are tuples and you want to
+name their components, use a **tuple pattern** parameter — the extra
+parentheses are what make it one parameter taking a pair:
+
+```epsil-live
+[(1, 2), (3, 4)] |> ((p, q)) => p + q
+// ➔ [3, 7]
+```
+
 `|>` and `~>` are aliases for `Pipe` and sit at the **loosest** precedence
 tier, right below `Assign` — looser than arithmetic, relational, and boolean
 operators (Elixir-style). It is left-associative, so `a |> f |> g` is `g(f(a))`:
@@ -576,6 +599,15 @@ mathematical chained-comparison semantics.
 - `&&` (`And`), `||` (`Or`), `!` (`Not`), with the fancy Unicode forms `⋀`,
   `⋁`, `¬`.
 - `&&` binds tighter than `||`, matching the tiers above.
+- Both **short-circuit**: the operands are evaluated left to right and
+  evaluation stops at the first operand that decides the result — the first
+  `false` for `&&`, the first `true` for `||`. The remaining operands do not
+  run, so `k <= n && xs[k] > 0` never reads `xs[k]` when `k` is out of range,
+  and `false && f()` never calls `f()`. Because the written order is
+  meaningful, `&&`/`||` operands are never reordered by canonicalization. The
+  exception is an element-wise application — an operand that is a list of
+  booleans (`[true, false] && xs`) makes the result a list, cell by cell, and
+  every operand is then evaluated once.
 
 The word forms `and`, `or`, and `not`, and the equivalence infix operator
 `<=>`, are reserved but not implemented. The token `=>` is not available as
