@@ -15731,6 +15731,7 @@ type PrimitiveType =
   | "collection"
   | "indexed_collection"
   | "list"
+  | "range"
   | "set"
   | "dictionary"
   | "record"
@@ -15778,7 +15779,7 @@ A primitive type is a simple type that represents a concrete value.
    - `collection`
       - `set`: a collection of unique expressions, e.g. `set<string>`.
       - `record`: a collection of specific key-value pairs,
-         e.g. `record<x: number, y: boolean>`.
+         e.g. `record{x: number, y: boolean}`.
       - `dictionary`: a collection of arbitrary key-value pairs
          e.g. `dictionary<string, number>`.
       - `indexed_collection`: collections whose elements can be accessed
@@ -16132,10 +16133,10 @@ same way (an ordered map from field name to field type), but they behave in
 opposite ways, and the difference is deliberate:
 
 - An object type is **nominal**. This shape is only ever the definition
-  (`def`) of a declared [TypeReference](#typereference): `type Person = object<…>`.
+  (`def`) of a declared [TypeReference](#typereference): `type Person = object{…}`.
   Two object types with identical layouts are unrelated, because a store
   through one view would break the other's declared field types (write
-  `1.5` into an `object<count: integer>` viewed as `object<count: number>`).
+  `1.5` into an `object{count: integer}` viewed as `object{count: number}`).
   The nominal reference is what supplies that opacity; this shape only
   carries the layout.
 - Every field is a read/write position, so a field type is **invariant**:
