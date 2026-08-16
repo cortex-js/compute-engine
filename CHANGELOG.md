@@ -99,6 +99,33 @@
   absent statement. A parameterized type still reports exactly what it was
   given.
 
+- **Assigning to a symbol declared `unknown` now types it from the value.**
+  `ce.declare('v', 'unknown')` followed by `ce.assign('v', 5)` left `v` typed
+  `unknown`, while the same assignment with no prior declaration settled on
+  `integer` — so a declaration that says nothing was SUPPRESSING inference
+  rather than deferring it. `unknown` is a placeholder that refines per use,
+  not a contract (`any` is the contract spelling), so the declaration
+  withholds type evidence and the assignment is the first evidence there is.
+  The assignment now settles the type exactly as the no-declaration route
+  does — including the literal promotion, so the result is `integer` rather
+  than the value's raw `finite_integer` — and marks it inferred, so later
+  evidence can still refine it and a second assignment is not held to the
+  first one's type. This also recovers precision that was being lost: with
+  the assignment inert, the type came from a later USE instead, and a use
+  knows less than the value does (`v + 1` yielded `number` where the value
+  proves `integer`). A declared CONCRETE type is unaffected, and `any` stays
+  `any`: neither is a placeholder, and a value that does not fit a concrete
+  declared type is still rejected.
+
+  Two consequences worth knowing, both of which make an error arrive earlier
+  rather than change what is an error. A 2-tuple assigned to an `unknown`
+  symbol is now statically known, so `PointZ(u)` reports its dimension error
+  at boxing instead of at evaluation. And a collection assigned to an
+  `unknown` symbol now has a known element type, so a `Map` over it stamps
+  the mapping parameter (`Typed(w, 'finite_integer')`) instead of leaving it
+  bare. Code that used a declared `unknown` plus an assignment specifically
+  to obtain a loosely-typed symbol should declare `any` instead.
+
 - **A speculative parse no longer narrows a symbol declared `unknown`.**
   `ce.parse(latex, { speculative: true })` promises to leave no trace in the
   engine's type state, and it confines a narrowing use by shadowing the

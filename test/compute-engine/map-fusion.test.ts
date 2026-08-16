@@ -1061,9 +1061,12 @@ describe('Map fusion: Error elements bubble, they are not laundered', () => {
     const src = errors.evaluate();
     expect(src.toString()).toContain('incompatible-type');
 
-    // A source declared `unknown` leaves the mapping parameter BARE (there is
-    // no element type to stamp it with).
-    ce.declare('us', 'unknown');
+    // A source declared `any` leaves the mapping parameter BARE (there is no
+    // element type to stamp it with). `any` is a CONTRACT, so the assignment
+    // below does not retype the symbol; `unknown` is a placeholder and WOULD
+    // take the source's type, stamping the parameter — covered by the
+    // companion test after this one, which is the stricter case anyway.
+    ce.declare('us', 'any');
     ce.assign('us', src);
     const fused = ce.box([
       'Map',
@@ -1087,6 +1090,49 @@ describe('Map fusion: Error elements bubble, they are not laundered', () => {
     expect(drained[1]).not.toContain('NaN');
     expect(drained).toEqual([...general.each()].map((x: any) => x.toString()));
     expect(fused.at(2)!.toString()).toBe(general.at(2)!.toString());
+  });
+
+  test('a STAMPED parameter passes an error element through unchanged too', () => {
+    // The stricter half of the test above. A symbol declared `unknown` takes
+    // its type from the assigned value, so the source's element type IS known
+    // and the fused parameter is stamped `Typed(w, 'finite_integer')` — even
+    // though one element is an Error, since the type describes the list as
+    // materialized. A stamped parameter is exactly where laundering could
+    // happen: the annotation says `finite_integer` and the element is not
+    // one. It must still arrive verbatim, never coerced to NaN.
+    const ce = new ComputeEngine();
+    ce.assign('cs2', ce.box(['List', 1, 2, 3] as any));
+    const errors = ce
+      .box([
+        'Map',
+        ['Function', ['Multiply', 'z', 2], 'z'],
+        ['Map', ['Function', ['Add', 'y', 1], 'y'], 'cs2'],
+      ] as any)
+      .evaluate();
+    ce.assign('cs2', ce.box(['List', 1, 2.5, 3] as any));
+    const src = errors.evaluate();
+
+    ce.declare('us2', 'unknown');
+    ce.assign('us2', src);
+    const fused = ce.box([
+      'Map',
+      ['Function', ['Multiply', 'w', 3], 'w'],
+      'us2',
+    ] as any);
+    expect(fused.ops[0].json).toEqual([
+      'Function',
+      ['Block', ['Multiply', 3, 'w']],
+      ['Typed', 'w', "'finite_integer'"],
+    ]);
+    const general = ce.box([
+      'Map',
+      ['Function', ['Block', 0, ['Multiply', 'w', 3]], 'w'],
+      'us2',
+    ] as any);
+    const drained = [...fused.each()].map((x: any) => x.toString());
+    expect(drained[1]).toContain('incompatible-type');
+    expect(drained[1]).not.toContain('NaN');
+    expect(drained).toEqual([...general.each()].map((x: any) => x.toString()));
   });
 });
 

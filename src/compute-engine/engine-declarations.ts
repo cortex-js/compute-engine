@@ -2499,7 +2499,23 @@ export function assignFn(
     assertAssignableValueDef(ce, id, def.value, value);
 
     // We have a value definition, update the inferred type...
-    if (def.value.inferredType) {
+    //
+    // A symbol DECLARED `unknown` takes this path too, even though its type
+    // is not marked inferred. `unknown` is a placeholder that refines per
+    // use, not a contract (`any` is the contract spelling), so the
+    // declaration withheld type evidence rather than supplying it, and the
+    // assignment is the first evidence there is. Without this,
+    // `ce.declare('v', 'unknown')` followed by `ce.assign('v', 5)` left `v`
+    // typed `unknown` while the same assignment with no prior declaration
+    // settled on `integer` — so a declaration that says nothing was
+    // SUPPRESSING inference rather than deferring it, and a later use had to
+    // supply the type instead (arriving at the wider `number`, since a use
+    // knows less than the value does). The type is marked inferred once it
+    // moves, matching the no-declaration route exactly: nothing downstream
+    // can then tell the two orders apart.
+    const placeholderIncumbent =
+      !def.value.inferredType && def.value.type.isUnknown;
+    if (def.value.inferredType || placeholderIncumbent) {
       const current = def.value.type.type;
       const vt = value.type.type;
       // Normally widen the inferred type to cover the assigned value (an
@@ -2597,6 +2613,13 @@ export function assignFn(
         });
       const previousType = def.value.type;
       def.value.type = ce.type(adopted);
+      // A placeholder that has now taken a type from its value is in exactly
+      // the state the no-declaration route produces, so it must carry the
+      // same marker: later uses may refine it, and `assertAssignableValueDef`
+      // must keep treating it as a guess rather than a contract to hold the
+      // next assignment to.
+      if (placeholderIncumbent && !def.value.type.isUnknown)
+        def.value.inferredType = true;
       // Provenance: an assignment-driven type update (widen, D11 adopt, or
       // the narrowing above) records kind 'value-derived' with the assigned
       // value as cause — activating the kind reserved for exactly this in

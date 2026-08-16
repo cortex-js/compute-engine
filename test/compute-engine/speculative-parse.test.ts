@@ -105,21 +105,29 @@ describe('speculative parse', () => {
 
   test('shadowing an `unknown` symbol does not hide its VALUE', () => {
     // A symbol declared `unknown` can still hold a value — the declaration
-    // pins no contract, so `assign` neither rejects the value nor replaces
-    // the type. The shadow is declared type-only, so the check that matters
-    // is that the ambient value survives the parse and the derived type is
-    // still the one a normal parse produces.
+    // pins no contract, so `assign` neither rejects the value nor refuses to
+    // type from it. The shadow is declared type-only, so what must hold is
+    // that the ambient value survives and the speculative parse derives
+    // exactly what a normal parse of the same string derives.
+    //
+    // Deliberately no "does not move" control here, unlike its siblings: the
+    // assignment has already settled the type (`integer`, inferred), and a
+    // use can only narrow, so no probe on this symbol moves the ambient type
+    // with or without the option. That is the point rather than a gap — for
+    // a symbol whose value is known there is no narrowing left to leak.
     const ce = new ComputeEngine();
     ce.declare('v_d', 'unknown');
     ce.assign('v_d', 5);
-    const e = ce.parse('v_{d} + 1', { speculative: true });
-    expect(e.type.toString()).toBe('number');
+    expect(ce.lookupDefinition('v_d')!['value'].type.toString()).toBe(
+      'integer'
+    );
+    const speculative = ce.parse('v_{d} + 1', { speculative: true });
+    const normal = ce.parse('v_{d} + 1');
+    expect(speculative.type.toString()).toBe(normal.type.toString());
+    expect(JSON.stringify(speculative.json)).toBe(JSON.stringify(normal.json));
     const def = ce.lookupDefinition('v_d')!['value'];
-    expect(def.type.toString()).toBe('unknown');
+    expect(def.type.toString()).toBe('integer');
     expect(def.value?.re).toBe(5);
-    // Control: the plain parse derives the same type and DOES narrow.
-    expect(ce.parse('v_{d} + 1').type.toString()).toBe('number');
-    expect(ce.lookupDefinition('v_d')!['value'].type.toString()).toBe('number');
   });
 
   test('an operator-valued symbol is never shadowed', () => {

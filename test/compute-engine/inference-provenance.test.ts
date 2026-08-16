@@ -250,6 +250,91 @@ describe('INFERENCE PROVENANCE — the history cap', () => {
   });
 });
 
+describe('ASSIGNMENT TO A DECLARED `unknown` — the placeholder takes the value’s type', () => {
+  // `unknown` is a placeholder that refines per use, not a contract (`any` is
+  // the contract spelling). So `ce.declare('u', 'unknown')` withholds type
+  // evidence rather than supplying it, and an assignment is the first
+  // evidence there is — the assignment path treats it exactly as it treats an
+  // auto-declare's `unknown`. Before this, the whole type-update block was
+  // gated on `inferredType`, which an EXPLICIT `unknown` declaration does not
+  // set, so the declaration suppressed inference instead of deferring it.
+
+  test('the settled type matches the no-declaration route exactly', () => {
+    const declared = new ComputeEngine();
+    declared.declare('u', 'unknown');
+    declared.assign('u', 5);
+    const bare = new ComputeEngine();
+    bare.assign('u', 5);
+    // `integer`, not the value's raw `finite_integer`: the same literal
+    // promotion a fresh `u := 5` declaration applies.
+    expect(declared.box('u').type.toString()).toBe('integer');
+    expect(declared.box('u').type.toString()).toBe(
+      bare.box('u').type.toString()
+    );
+  });
+
+  test('the type is MARKED inferred, so later evidence still refines it', () => {
+    // The marker is what keeps the settled type a guess rather than a
+    // contract: without it the next assignment would be held to `integer`.
+    const ce = new ComputeEngine();
+    ce.declare('u', 'unknown');
+    ce.assign('u', 5);
+    const def = ce.lookupDefinition('u')!;
+    expect(isValueDef(def) && def.value.inferredType).toBe(true);
+    ce.assign('u', 2.5);
+    expect(ce.box('u').type.toString()).toBe('real');
+  });
+
+  test('a use no longer has to supply the type — and supplies a worse one', () => {
+    // The concrete cost of the old behaviour: with the assignment inert, the
+    // type came from the USE instead, and a use knows less than the value
+    // does — `u + 1` yields `number` where the value proves `integer`.
+    const ce = new ComputeEngine();
+    ce.declare('u', 'unknown');
+    ce.assign('u', 5);
+    ce.parse('u + 1');
+    expect(ce.box('u').type.toString()).toBe('integer');
+    // Control: with no value to type from, the use is still what decides.
+    const ce2 = new ComputeEngine();
+    ce2.declare('u', 'unknown');
+    ce2.parse('u + 1');
+    expect(ce2.box('u').type.toString()).toBe('number');
+  });
+
+  test('the move is recorded as value-derived', () => {
+    const ce = new ComputeEngine();
+    ce.declare('u', 'unknown');
+    ce.assign('u', 5);
+    expect(historyOf(ce, 'u')).toEqual([['value-derived', 'integer', '5']]);
+  });
+
+  test('a CONTRACT is untouched — `any` and a concrete type both hold', () => {
+    // The whole change turns on `unknown` being a placeholder. `any` is the
+    // contract spelling of "anything goes" and must NOT take the value's
+    // type; a concrete declared type keeps rejecting values that do not fit.
+    const ce = new ComputeEngine();
+    ce.declare('a_c', 'any');
+    ce.assign('a_c', 5);
+    expect(ce.box('a_c').type.toString()).toBe('any');
+    const def = ce.lookupDefinition('a_c')!;
+    expect(isValueDef(def) && def.value.inferredType).toBe(false);
+
+    ce.declare('n_c', 'number');
+    ce.assign('n_c', 5);
+    expect(ce.box('n_c').type.toString()).toBe('number');
+
+    ce.declare('i_c', 'integer');
+    expect(() => ce.assign('i_c', 2.5)).toThrow();
+  });
+
+  test('a non-numeric value settles the placeholder too', () => {
+    const ce = new ComputeEngine();
+    ce.declare('s_u', 'unknown');
+    ce.assign('s_u', ce.string('hi'));
+    expect(ce.box('s_u').type.toString()).toBe('string');
+  });
+});
+
 describe('INFERENCE PROVENANCE — parameter bindings', () => {
   test('a function-literal parameter records creation and body-use inference', () => {
     const ce = new ComputeEngine();

@@ -388,13 +388,34 @@ describe('POINTZ on a 2-D point is a dimension error (item 138 part 3)', () => {
 
   test('EVALUATE: a loosely-typed operand holding a 2-tuple errors on evaluation', () => {
     const e = new ComputeEngine();
-    e.declare('u', 'unknown');
+    // `any` is the spelling that stays loose through an assignment: it is a
+    // CONTRACT ("anything goes"), so the value does not retype the symbol.
+    // `unknown` is a placeholder and would take the value's type — see the
+    // companion test below, where that makes the same error static.
+    e.declare('u', 'any');
     e.assign('u', e.box(['Tuple', 1, 2]));
     const boxed = e.box(['PointZ', 'u']);
     // The declared type proves nothing, so type-check stays INERT…
     expect(boxed.isValid).toBe(true);
     // …and the concrete value is what errors.
     expect(boxed.evaluate().toString()).toMatch(/incompatible-dimensions/);
+  });
+
+  test('STATIC: assigning a 2-tuple to an `unknown` symbol errors at boxing', () => {
+    // A symbol declared `unknown` takes its type from the assigned value, so
+    // by the time `PointZ` is boxed the operand IS statically known to be a
+    // 2-tuple — the same position the declared `tuple<number, number>` test
+    // above is in, reached by assignment instead of declaration. Same error
+    // class as the `any` case, raised earlier.
+    const e = new ComputeEngine();
+    e.declare('u', 'unknown');
+    e.assign('u', e.box(['Tuple', 1, 2]));
+    expect(e.box('u').type.toString()).toBe(
+      'tuple<finite_integer, finite_integer>'
+    );
+    const boxed = e.box(['PointZ', 'u']);
+    expect(boxed.isValid).toBe(false);
+    expect(boxed.toString()).toMatch(/incompatible-dimensions/);
   });
 
   test('EVALUATE: a `list<tuple>` of 2-tuples errors ONCE, not per point', () => {
