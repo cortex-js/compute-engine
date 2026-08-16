@@ -47,6 +47,7 @@ operators all keep their names; `{k, 1, n}` iterator triples work in `Sum`,
 | `expr // N` | `expr \|> N` (or `~>`) |
 | `N[expr]`, `N[expr, 25]` | `N(expr)`, `N(expr, 25)` |
 | `Hold[expr]` | `HoldValues(expr)` — evaluate with assigned symbols kept symbolic |
+| `SetAttributes[f, HoldAll]; f[e_] := …` | `hold f(e) = …` — the whole definition holds its arguments; there is no per-argument `HoldFirst`/`HoldRest` (read an argument once into a `let` to evaluate it) |
 | `Print[x]` | *(no printing)* — the program's value is its **last statement** |
 | `%`, `Out[3]` | *(no history)* — bind with `let` |
 | `(* comment *)` | `// comment` or `/* comment */` |

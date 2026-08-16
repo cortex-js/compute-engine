@@ -19,6 +19,36 @@
 
 ### New Features
 
+- **Definition attributes: `bind` parameters, algebraic properties, and doc
+  comments.** Three additions ride on the `DefineFunction` attributes operand
+  introduced with `hold` in 0.114.0:
+  - **`bind`** marks a bound-variable parameter of a `hold` function — the
+    user-defined counterpart of `Sum`'s index: `hold mySum(body, bind i, n)
+    = Sum(body, (i, 1, n))`, then `mySum(k^2, k, 3)` is `14`. The caller
+    passes a symbol at a `bind` position (else `bind-symbol-expected`); the
+    parameter is substituted by that symbol in the body, binder positions
+    included, and the definition is installed as a binder (`scoped:
+    operandSites(…)`), so the call declares the symbol in its own scope and a
+    global `k` does not leak in. `bind` requires `hold`
+    (`bind-requires-hold`) and is contextual (`f(bind) = …` is an ordinary
+    parameter). MathJSON: `{hold: True, bind: ["i"]}`.
+  - **`commutative`, `associative`, `idempotent`, `involution`** in the
+    specifier slot of a definition (`function op(a, b) commutative
+    associative -> number {…}`, `conj(z) involution -> number = -z`) set the
+    operator flags of the same names, so calls are sorted, flattened and
+    folded (`conj(conj(w))` → `w`) at canonicalization. An associative
+    function is binary and a flattened n-ary call is folded from the left.
+    Arity is checked; not combinable with `hold`; every clause of a
+    multi-clause definition must state the same words. MathJSON:
+    `{commutative: True, …}`.
+  - **A doc comment** (`///` lines or a `/** … */` block) written immediately
+    before a function definition becomes its `description`: `About(f)`
+    prints it, the VS Code hover shows it below the quoted header, and it
+    survives a serialization round trip (re-emitted as `///` lines).
+    MathJSON: `{description: "…"}`. `About(f)` also now describes a
+    user-defined or library FUNCTION (signature, flags, description) instead
+    of falling through to "symbol / value".
+
 - **`compile()` accepts a `mode` option — `'strict'`, `'complex'` or
   `'auto'`** — the arithmetic discipline a compilation runs under (what a
   wide-typed numeric binding is shaped as, and what happens when a

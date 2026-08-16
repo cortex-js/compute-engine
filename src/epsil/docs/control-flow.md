@@ -200,6 +200,78 @@ a `lazy` operator, and `DefineFunction` carries it as the attribute
 the prefix of a function definition, and stays a legal identifier everywhere
 else (`let hold = 5`, `hold(2)`). Anonymous functions have no hold form.
 
+### Bound-variable parameters: `bind`
+
+A hold function can define its own **binder** — an operator like `Sum` or
+`D` that takes a variable to bind. Mark the parameter that receives the
+variable with `bind`:
+
+```epsil
+hold mySum(body, bind i, n) = Sum(body, (i, 1, n))
+mySum(k^2, k, 3)
+// ➔ 14
+```
+
+The caller passes a **symbol** at a `bind` position (anything else is a
+`bind-symbol-expected` error), and the function's parameter is *substituted*
+by that symbol throughout the body — including where the body's own binder
+uses it, so `Sum(body, (i, 1, n))` becomes `Sum(k^2, (k, 1, 3))` and the
+sum runs over the caller's `k`. The call declares that symbol in its own
+scope, exactly as `Sum` does with its index: a `let k = 5` outside the call
+does not leak in, and `mySum(k * j, j, 3)` with `k = 5` is `30`. `bind` is
+contextual (`f(bind) = …` declares an ordinary parameter named `bind`) and
+requires `hold` (`bind-requires-hold`): a bound variable can only be received
+unevaluated. Every parameter of the function is held; `bind` says which of
+them names a variable.
+
+The substitution is by **name**, and deliberately reaches inside the body's
+own binders (that is what ties `Sum`'s index to the caller's variable), so it
+also reaches any *other* use of that name in the body: do not reuse a `bind`
+parameter's name for an unrelated local or index inside the same function.
+
+### Algebraic properties
+
+A user-defined operator can declare the algebraic properties the engine
+uses when it canonicalizes a call, in the same slot as the effect specifier:
+
+```epsil
+function op(a, b) commutative associative -> number { a + b + 1 }
+op(2, op(1, 3))     // ➔ 8 — sorted, flattened to op(1, 2, 3), folded pairwise
+conj(z) involution -> number = -z
+conj(conj(w))       // ➔ w
+```
+
+- **`commutative`** — the operands of a call are sorted into canonical order.
+- **`associative`** — nested calls flatten (`op(a, op(b, c))` is `op(a, b,
+  c)`); the function is written binary and a longer call is folded from the
+  left, `op(op(a, b), c)`.
+- **`idempotent`** — `f(f(x))` is `f(x)`.
+- **`involution`** — `f(f(x))` is `x`.
+
+The words are contracts, not checks: declaring `commutative` on a body that
+is not commutative gives whatever the canonical order produces. In the math
+form the slot must be followed by a return arrow (`op(a, b) commutative ->
+number = …`), like an effect specifier. `commutative`/`associative` need at
+least two parameters (`associative` exactly two), `idempotent`/`involution`
+exactly one; a `hold` function cannot carry them (its calls are neither
+reordered nor flattened); every clause of a multi-clause function must state
+the same ones. `About(op)` lists them.
+
+### Documenting a function
+
+A **doc comment** — `///` lines or a `/** … */` block — written immediately
+before a definition becomes the function's *description*: it is shown by
+`About(f)`, by an editor hover, and it is the one comment that survives a
+serialization round trip (it comes back as `///` lines). Ordinary `//`
+comments are not attached.
+
+```epsil
+/// Doubles its argument.
+/// Accepts anything `*` accepts.
+twice(x) = 2x
+About(twice)
+```
+
 ### Anonymous functions
 
 An anonymous function uses the ASCII mapsto arrow `=>` (`⇒` in fancy-symbol

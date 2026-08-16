@@ -1088,8 +1088,15 @@ export function serializeEpsil(
         operator(rhs) === 'Function' &&
         paramsAreSpellable(operands(rhs).slice(1))
       ) {
-        const def = serializeNamedDef(name, rhs);
-        return attrs?.hold ? fmt.line('hold ', def) : def;
+        const def = serializeNamedDef(name, rhs, attrs ?? {});
+        // The doc comment is re-emitted as `///` lines above the definition
+        // — the one comment the reader can write that survives a round trip.
+        if (attrs?.description !== undefined)
+          return fmt.stack(
+            ...attrs.description.split('\n').map((l) => fmt.text(`/// ${l}`)),
+            def
+          );
+        return def;
       }
       return serializeGenericFunction(expr);
     },
@@ -1422,7 +1429,8 @@ export function serializeEpsil(
 
   const serializeParam = (
     p: MathJsonExpression,
-    markerType?: Type
+    markerType?: Type,
+    bind?: ReadonlySet<string>
   ): FormattingBlock => {
     // A DESTRUCTURING parameter — `((p, q)) => …`, one parameter that binds a
     // pattern of names. `serializeParamList` supplies the surrounding
@@ -1458,18 +1466,26 @@ export function serializeEpsil(
       return fmt.text(EPSIL_VALUE_SPELLING[t] ?? t);
     }
     const nameStr = nameSym !== null ? escapeSymbol(nameSym) : '';
-    return fmt.text(t !== null ? `${nameStr}: ${t}` : nameStr);
+    // A BOUND-VARIABLE parameter of a `hold` definition (`bind i`).
+    const marker =
+      nameSym !== null && bind !== undefined && bind.has(nameSym)
+        ? 'bind '
+        : '';
+    return fmt.text(
+      t !== null ? `${marker}${nameStr}: ${t}` : `${marker}${nameStr}`
+    );
   };
 
   const serializeParamList = (
     params: MathJsonExpression[],
-    markerTypes: readonly Type[] = []
+    markerTypes: readonly Type[] = [],
+    bind?: ReadonlySet<string>
   ): FormattingBlock =>
     fmt.fencedList(
       '(',
       fmt.separator(','),
       ')',
-      params.map((p, i) => serializeParam(p, markerTypes[i]))
+      params.map((p, i) => serializeParam(p, markerTypes[i], bind))
     );
 
   /** The body of the `Function` entry in `FUNCTIONS` — an ANONYMOUS function
@@ -1579,30 +1595,41 @@ export function serializeEpsil(
   // is omitted, along with its space, when the literal declares no effects.
   const serializeNamedDef = (
     name: MathJsonExpression,
-    fn: MathJsonExpression
+    fn: MathJsonExpression,
+    attrs: DefinitionAttributes = {}
   ): FormattingBlock =>
     // A named definition's body — braced (`function f(x) { … }`) or math
     // form (`f(x) = …`) — is a `break`/`continue` boundary: the parser
     // resets the loop context for both spellings.
-    inLoopContext(0, () => serializeNamedDefBody(name, fn));
+    inLoopContext(0, () => serializeNamedDefBody(name, fn, attrs));
 
   const serializeNamedDefBody = (
     name: MathJsonExpression,
-    fn: MathJsonExpression
+    fn: MathJsonExpression,
+    attrs: DefinitionAttributes
   ): FormattingBlock => {
     const nameSym = symbol(name);
     const nameStr = nameSym !== null ? escapeSymbol(nameSym) : '';
     const params = operands(fn).slice(1);
     const { bodyExpr, retType, specifier, typeParams, argTypes } =
       fnLiteralParts(fn);
-    const specPart = specifier !== null ? ` ${specifier}` : '';
+    // The specifier slot: the effect words the ascription carries, then the
+    // algebraic words of the definition's attributes.
+    const specWords = [
+      ...(specifier !== null ? [specifier] : []),
+      ...(attrs.algebraic ?? []),
+    ];
+    const specifierText = specWords.length > 0 ? specWords.join(' ') : null;
+    const specPart = specifierText !== null ? ` ${specifierText}` : '';
     const retPart = retType !== null ? ` -> ${retType}` : '';
+    const bind = attrs.bind !== undefined ? new Set(attrs.bind) : undefined;
+    const holdPrefix = attrs.hold ? 'hold ' : '';
     // The M2 type-parameter clause sits between the name and the `(`.
     const clausePart = typeParams !== null ? `<${typeParams}>` : '';
     if (operator(bodyExpr) === 'Block') {
       return fmt.line(
-        `function ${nameStr}${clausePart}`,
-        serializeParamList(params, argTypes),
+        `${holdPrefix}function ${nameStr}${clausePart}`,
+        serializeParamList(params, argTypes, bind),
         `${specPart}${retPart} `,
         fmt.fencedList(
           '{',
@@ -1621,44 +1648,99 @@ export function serializeEpsil(
     // `function` block form, wrapping a non-`Block` body in braces.
     if (typeParams !== null) {
       return fmt.line(
-        `function ${nameStr}${clausePart}`,
-        serializeParamList(params, argTypes),
+        `${holdPrefix}function ${nameStr}${clausePart}`,
+        serializeParamList(params, argTypes, bind),
         `${specPart}${retPart} `,
         fmt.fencedList('{', fmt.separator(';'), '}', [
           serializeExpression(bodyExpr),
         ])
       );
     }
+    // The math form claims a specifier — effect OR algebraic words — only
+    // WITH the arrow (`f(x) random = 5` is an expression), hence `-> unknown`.
     const mathRetPart =
-      retType !== null ? retPart : specifier !== null ? ' -> unknown' : '';
+      retType !== null ? retPart : specifierText !== null ? ' -> unknown' : '';
     return fmt.line(
-      nameStr,
-      serializeParamList(params),
+      `${holdPrefix}${nameStr}`,
+      serializeParamList(params, undefined, bind),
       `${specPart}${mathRetPart} = `,
       serializeExpression(bodyExpr)
     );
   };
 
+  /** The decoded attributes of a definition — see {@link definitionAttributes}. */
+  type DefinitionAttributes = {
+    hold?: boolean;
+    bind?: string[];
+    algebraic?: string[];
+    description?: string;
+  };
+
   /**
    * The attributes dictionary of a `DefineFunction` node, decoded — `null`
    * when the operand is not an attribute bag or holds a key this serializer
-   * has no spelling for. Read in both encodings, exactly as `DeclareType`'s
-   * `alias` is: the `{dict: …}` shorthand boxes an unquoted `True` as a
-   * STRING, the operator `Dictionary` form the parser emits carries the SYMBOL.
+   * has no spelling for. Booleans are read in both encodings, exactly as
+   * `DeclareType`'s `alias` is: the `{dict: …}` shorthand boxes an unquoted
+   * `True` as a STRING, the operator `Dictionary` form the parser emits
+   * carries the SYMBOL. `bind` is a list of parameter names (strings in the
+   * shorthand, `{str}`/`{sym}` nodes in the operator form); `description` is
+   * a string.
    */
   function definitionAttributes(
     attrs: MathJsonExpression | null
-  ): { hold: boolean } | null {
+  ): DefinitionAttributes | null {
     if (attrs === null) return null;
     const entries = attributeEntries(attrs);
     if (entries === null) return null;
-    const keys = Object.keys(entries);
-    if (keys.some((k) => k !== 'hold')) return null;
-    const holdOp = entries['hold'] ?? null;
-    if (holdOp === null) return { hold: false };
-    return (symbol(holdOp) ?? stringValue(holdOp)) === 'True'
-      ? { hold: true }
-      : null;
+    const out: DefinitionAttributes = {};
+    const isTrue = (v: MathJsonExpression) =>
+      (symbol(v) ?? stringValue(v)) === 'True';
+    for (const key of Object.keys(entries)) {
+      const v = entries[key];
+      if (v === undefined || v === null) continue;
+      switch (key) {
+        case 'hold':
+          if (!isTrue(v)) return null;
+          out.hold = true;
+          break;
+        case 'commutative':
+        case 'associative':
+        case 'idempotent':
+        case 'involution':
+          if (!isTrue(v)) return null;
+          (out.algebraic ??= []).push(key);
+          break;
+        case 'bind': {
+          // The operator form carries `["List", …]`; the `{dict: …}` shorthand
+          // carries a plain array of names — which, read as MathJSON, would be
+          // the CALL `["i"]`; a bind value can only be a list, so an array here
+          // is its element list.
+          const items =
+            operator(v) === 'List'
+              ? operands(v)
+              : Array.isArray(v)
+                ? (v as MathJsonExpression[])
+                : [v];
+          const names: string[] = [];
+          for (const item of items) {
+            const n = stringValue(item) ?? symbol(item);
+            if (n === null) return null;
+            names.push(n);
+          }
+          out.bind = names;
+          break;
+        }
+        case 'description': {
+          const text = stringValue(v);
+          if (text === null) return null;
+          out.description = text;
+          break;
+        }
+        default:
+          return null;
+      }
+    }
+    return out;
   }
 
   function serializeFunction(expr: MathJsonExpression): FormattingBlock | null {

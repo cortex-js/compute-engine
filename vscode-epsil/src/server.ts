@@ -409,11 +409,18 @@ function declarationHover(name: string, text: string): string | undefined {
     .trim();
   if (quoted === '') return undefined;
 
-  return codeBlock(
-    quoted.length > HOVER_DECLARATION_LENGTH
-      ? `${quoted.slice(0, HOVER_DECLARATION_LENGTH - 1)}…`
-      : quoted
-  );
+  const sections = [
+    codeBlock(
+      quoted.length > HOVER_DECLARATION_LENGTH
+        ? `${quoted.slice(0, HOVER_DECLARATION_LENGTH - 1)}…`
+        : quoted
+    ),
+  ];
+  // The doc comment written before the definition (`///` lines or a
+  // `/** … *\/` block) — markdown, shown below the quoted header exactly as
+  // the library's description is shown below its signature.
+  if (site.description !== undefined) sections.push(site.description);
+  return sections.join('\n\n');
 }
 
 /**

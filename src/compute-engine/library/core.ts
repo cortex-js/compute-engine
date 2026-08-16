@@ -127,6 +127,7 @@ import {
   isGenericTarget,
   noteCanonInstallSkipped,
   loosenForClauseDefinition,
+  type ClauseAttributes,
 } from '../multi-clause.js';
 import {
   ascribeDeclaredParameterTypes,
@@ -1622,19 +1623,44 @@ function declareConformanceStatement(
 }
 
 /**
- * The `hold` attribute of a `DefineFunction` statement, read from its optional
- * attributes dictionary (`["DefineFunction", "f", ‹literal›, {hold: True}]`).
- * The `{dict: …}` shorthand boxes an unquoted `True` as a STRING and the
- * operator `Dictionary` encoding as the SYMBOL — read both, exactly as
- * `DeclareType` reads its `alias` attribute.
+ * The attributes of a `DefineFunction` statement, decoded from its optional
+ * third operand — a dictionary such as `{hold: True, bind: ["i"],
+ * commutative: True, description: "…"}` (see `ClauseAttributes` in
+ * `multi-clause.ts` for what each one means). Booleans are read in both
+ * dictionary encodings, exactly as `DeclareType` reads its `alias` attribute:
+ * the `{dict: …}` shorthand boxes an unquoted `True` as a STRING, the
+ * operator `Dictionary` encoding as the SYMBOL. `bind` is a list of parameter
+ * names (strings or symbols); `description` is a string.
  */
-function definitionHoldAttribute(attrs: Expression | undefined): boolean {
-  if (attrs === undefined) return false;
+function definitionAttributes(attrs: Expression | undefined): ClauseAttributes {
+  if (attrs === undefined) return {};
   const dict = attrs.canonical;
-  if (!isDictionary(dict)) return false;
-  const v = dict.get('hold');
-  if (v === undefined) return false;
-  return (isString(v) ? v.string : sym(v)) === 'True';
+  if (!isDictionary(dict)) return {};
+  const flag = (key: string): boolean => {
+    const v = dict.get(key);
+    return v !== undefined && (isString(v) ? v.string : sym(v)) === 'True';
+  };
+  const out: ClauseAttributes = {};
+  if (flag('hold')) out.hold = true;
+  for (const f of [
+    'commutative',
+    'associative',
+    'idempotent',
+    'involution',
+  ] as const)
+    if (flag(f)) out[f] = true;
+  const bind = dict.get('bind');
+  if (bind !== undefined) {
+    const items = isFunction(bind, 'List') ? bind.ops : [bind];
+    const names = items
+      .map((x) => (isString(x) ? x.string : sym(x)))
+      .filter((x): x is string => x !== undefined);
+    if (names.length > 0) out.bind = names;
+  }
+  const description = dict.get('description');
+  if (description !== undefined && isString(description))
+    out.description = description.string;
+  return out;
 }
 
 /**
@@ -2245,6 +2271,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               s.push('hold function (arguments are bound unevaluated)');
             else s.push(`multi-clause function (${clauses.length} clauses)`);
             s.push(...clauses);
+            if (fnDef !== undefined && isOperatorDef(fnDef)) {
+              const op = fnDef.operator;
+              const flags = (
+                [
+                  'commutative',
+                  'associative',
+                  'idempotent',
+                  'involution',
+                ] as const
+              ).filter((f) => op[f] === true);
+              if (flags.length > 0) s.push(flags.join(' '));
+              // The doc-comment description; the auto-generated clause-storage
+              // description ("Multi-clause function (…)", "Hold function (…)")
+              // is already conveyed by the header line above.
+              const d = op.description;
+              if (
+                typeof d === 'string' &&
+                !d.startsWith('Multi-clause function') &&
+                !d.startsWith('Hold function')
+              )
+                s.push(d);
+            }
           } else if (x.valueDefinition) {
             const def = x.valueDefinition;
 
@@ -2256,8 +2304,33 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             if (def.wikidata) s.push(`WikiData: ${def.wikidata}`);
             if (def.url) s.push(`Read More: ${def.url}`);
           } else {
-            s.push('symbol');
-            s.push(`value: ${x.evaluate().toString()}`);
+            // A held operand is unbound, so a FUNCTION name has no
+            // `valueDefinition` here: look the name up. A user-defined
+            // function (or a library operator) reports its signature, its
+            // description — for a user function, the doc comment written
+            // before the definition — and its algebraic attributes.
+            const fnDef = ce.lookupDefinition(x.symbol);
+            if (fnDef !== undefined && isOperatorDef(fnDef)) {
+              const op = fnDef.operator;
+              s.push(`function: ${op.signature.toString()}`);
+              const flags = (
+                [
+                  'commutative',
+                  'associative',
+                  'idempotent',
+                  'involution',
+                ] as const
+              ).filter((f) => op[f] === true);
+              if (flags.length > 0) s.push(flags.join(' '));
+              if (typeof op.description === 'string') s.push(op.description);
+              else if (Array.isArray(op.description))
+                s.push(op.description.join('\n'));
+              if (op.wikidata) s.push(`WikiData: ${op.wikidata}`);
+              if (op.url) s.push(`Read More: ${op.url}`);
+            } else {
+              s.push('symbol');
+              s.push(`value: ${x.evaluate().toString()}`);
+            }
           }
         } else if (isNumber(x)) s.push(x.type.toString());
         else if (isFunction(x)) {
@@ -2612,7 +2685,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // since both routes install the clause. Passed through unchanged so
         // the two routes and the serializer see the same node.
         const attrs = args[2] !== undefined ? [args[2].canonical] : [];
-        const hold = definitionHoldAttribute(args[2]);
+        const attributes = definitionAttributes(args[2]);
         // The clause operand must be an explicit `Function` literal — the
         // shorthand lift (`canonicalFunctionLiteral(5)` → constant lambda)
         // must NOT apply here, or any value would silently become a clause.
@@ -2892,7 +2965,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([op1, op2, op3], { engine: ce }) => {
         const name = sym(op1);
-        const hold = definitionHoldAttribute(op3);
+        const attributes = definitionAttributes(op3);
         if (name === undefined)
           return ce._fn('Error', [
             ce.string('invalid-clause-definition'),

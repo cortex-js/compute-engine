@@ -38,7 +38,8 @@ import type {
   OperatorDefinition,
 } from './global-types.js';
 
-import { isFunction } from './boxed-expression/type-guards.js';
+import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
+import { operandSites } from './boxed-expression/binding-sites.js';
 import {
   armAdmission,
   isMoreSpecific,
@@ -113,6 +114,65 @@ export interface FunctionClause {
    * (never the plain `_lambdaLiteral` representation) and refuses a second
    * clause, hold or not. */
   hold?: boolean;
+  /** The definition ATTRIBUTES this clause was installed with, beyond
+   * `hold`: the bound-variable parameters (`bind`), the algebraic flags and
+   * the doc-comment description. Kept on the clause so a same-domain
+   * REDEFINITION (which replaces the clause) carries its own attributes and
+   * `installClauseList` rebuilds the definition from the surviving clause. */
+  attributes?: ClauseAttributes;
+}
+
+/**
+ * The attributes of a function DEFINITION statement — the optional third
+ * operand of `DefineFunction`, a dictionary (`["DefineFunction", "f",
+ * ‹literal›, {hold: True, bind: ["i"], commutative: True, description: "…"}]`),
+ * decoded. Every field is optional; an absent bag is an ordinary definition.
+ *
+ * - `hold` — the arguments are bound to the parameters unevaluated
+ *   (`FunctionClause.hold`).
+ * - `bind` — the NAMES of the parameters that are BOUND VARIABLES: `hold
+ *   mySum(body, bind i, n) = Sum(body, i, 1, n)`. Each such parameter must
+ *   receive a symbol; at the call the parameter is SUBSTITUTED by that symbol
+ *   in the body (so `Sum` re-canonicalizes with the caller's symbol as its
+ *   index), and the installed definition is a BINDER (`scoped:
+ *   operandSites(…)`), so the call node declares the symbol in its own scope
+ *   exactly as `Sum` does. Requires `hold`.
+ * - `commutative` / `associative` / `idempotent` / `involution` — the
+ *   algebraic flags of an operator definition, applied by the engine when a
+ *   CALL is canonicalized (operand sorting, flattening, `f(f(x))` folds). An
+ *   associative user function is binary; a flattened n-ary call is folded
+ *   left by the clause selector. Incompatible with `hold` (the engine's
+ *   `lazy` flag is).
+ * - `description` — the doc comment (`///` / `/** … *​/`) written before
+ *   the definition, surfaced as the definition's `description` (`About`,
+ *   editor hovers).
+ */
+export type ClauseAttributes = {
+  hold?: boolean;
+  bind?: readonly string[];
+  commutative?: boolean;
+  associative?: boolean;
+  idempotent?: boolean;
+  involution?: boolean;
+  description?: string;
+};
+
+const ALGEBRAIC_FLAGS = [
+  'commutative',
+  'associative',
+  'idempotent',
+  'involution',
+] as const;
+
+/** True when the bag carries anything that only CLAUSE STORAGE can install:
+ * `hold`, `bind`, or an algebraic flag. A bare `description` does not — the
+ * plain single-clause representation takes it as a field. */
+function needsClauseStorage(attrs: ClauseAttributes): boolean {
+  return (
+    attrs.hold === true ||
+    (attrs.bind !== undefined && attrs.bind.length > 0) ||
+    ALGEBRAIC_FLAGS.some((f) => attrs[f] === true)
+  );
 }
 
 /** Symbol-level effect-row state (D5): `explicit` is the author-established
@@ -174,7 +234,16 @@ export class ClauseDefinitionError extends Error {
       // a hold function never has. The parser diagnoses the Epsil spelling
       // (`hold-literal-parameter`); this is the same rule on the MathJSON /
       // host route, where the attribute is written directly.
-      | 'hold-literal-parameter',
+      | 'hold-literal-parameter'
+      // A `bind` parameter naming a parameter the literal does not have; an
+      // algebraic flag on a `hold` definition (the engine's `lazy` flag is
+      // incompatible with them), on a constructor or a generic function, or
+      // with the wrong arity; clauses disagreeing on their flags.
+      | 'invalid-definition-attribute'
+      // A `bind` parameter on a definition that is not `hold` — the same
+      // rule the Epsil parser reports under this code, so the MathJSON route
+      // and the statement route agree.
+      | 'bind-requires-hold',
     message: string
   ) {
     super(message);
@@ -466,8 +535,11 @@ export function defineFunctionClause(
   id: string,
   literal: Expression,
   origin?: DeclarationOrigin,
-  hold = false
+  attributes: ClauseAttributes = {}
 ): void {
+  const hold = attributes.hold === true;
+  const bind = attributes.bind ?? [];
+  const algebraic = ALGEBRAIC_FLAGS.filter((f) => attributes[f] === true);
   if (!isFunction(literal, 'Function') || !literal.isCanonical)
     throw new ClauseDefinitionError(
       'invalid-clause-definition',
@@ -492,6 +564,11 @@ export function defineFunctionClause(
       throw new ClauseDefinitionError(
         'hold-unsupported',
         `"${id}" is the constructor of a declared type; a type's constructor cannot be a hold function`
+      );
+    if (algebraic.length > 0)
+      throw new ClauseDefinitionError(
+        'invalid-definition-attribute',
+        `"${id}" is the constructor of a declared type; a type's constructor cannot carry an algebraic attribute`
       );
     ce.assign(id, literal);
     return;
@@ -574,6 +651,51 @@ export function defineFunctionClause(
       `"${id}" is a generic function; a generic function cannot be a hold function`
     );
 
+  // Attribute consistency (see `ClauseAttributes`).
+  const paramNames = functionLiteralParameters(literal).map((p) => p.name);
+  if (bind.length > 0 && !hold)
+    throw new ClauseDefinitionError(
+      'bind-requires-hold',
+      `"${id}" has a bound-variable (bind) parameter, so it must be a hold function`
+    );
+  for (const b of bind)
+    if (!paramNames.includes(b))
+      throw new ClauseDefinitionError(
+        'invalid-definition-attribute',
+        `"${id}" has no parameter named "${b}" to bind`
+      );
+  if (algebraic.length > 0 && hold)
+    throw new ClauseDefinitionError(
+      'invalid-definition-attribute',
+      `"${id}" cannot be both a hold function and ${algebraic.join('/')}: a hold function's arguments are not evaluated, so its calls are not reordered or flattened`
+    );
+  if (algebraic.length > 0 && isGenericClauseLiteral(literal))
+    throw new ClauseDefinitionError(
+      'invalid-definition-attribute',
+      `"${id}" is a generic function; a generic function cannot carry an algebraic attribute`
+    );
+  if (
+    (attributes.associative === true || attributes.commutative === true) &&
+    paramNames.length < 2
+  )
+    throw new ClauseDefinitionError(
+      'invalid-definition-attribute',
+      `"${id}" is ${attributes.associative ? 'associative' : 'commutative'} but takes fewer than two parameters`
+    );
+  if (attributes.associative === true && paramNames.length !== 2)
+    throw new ClauseDefinitionError(
+      'invalid-definition-attribute',
+      `"${id}" is associative, so it must be binary (a call with more arguments is folded pairwise)`
+    );
+  if (
+    (attributes.idempotent === true || attributes.involution === true) &&
+    paramNames.length !== 1
+  )
+    throw new ClauseDefinitionError(
+      'invalid-definition-attribute',
+      `"${id}" is ${attributes.idempotent ? 'idempotent' : 'an involution'}, so it must take exactly one parameter`
+    );
+
   if (isGenericClauseLiteral(literal) && hasLiteralPatternParam(literal))
     throw new ClauseDefinitionError(
       'generic-clause-unsupported',
@@ -629,6 +751,7 @@ export function defineFunctionClause(
     literal,
     ...(origin !== undefined ? { origin } : {}),
     ...(hold ? { hold: true } : {}),
+    ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
   };
   if (declared !== undefined)
     assertClauseFitsDeclared(id, incoming.signature, declared, bareParams);
@@ -697,6 +820,19 @@ export function defineFunctionClause(
       'hold-single-clause',
       `A hold function is single-clause: "${id}" cannot combine a hold definition with another clause`
     );
+  // The algebraic flags describe the OPERATOR, so every clause of a
+  // definition must state the same ones (the flags are read at call
+  // canonicalization, before any clause is selected).
+  if (clauses.length > 1) {
+    const flagsOf = (c: FunctionClause) =>
+      ALGEBRAIC_FLAGS.filter((f) => c.attributes?.[f] === true).join(',');
+    const first = flagsOf(clauses[0]);
+    if (clauses.some((c) => flagsOf(c) !== first))
+      throw new ClauseDefinitionError(
+        'invalid-definition-attribute',
+        `The clauses of "${id}" disagree on its algebraic attributes (commutative/associative/idempotent/involution); every clause must state the same ones`
+      );
+  }
 
   // §4.2: a SINGLE clause keeps today's single-function representation —
   // no behavior change until a second clause exists. Assignment installs
@@ -719,7 +855,7 @@ export function defineFunctionClause(
   // representation whose dispatch (`selectAndApply`) can hand the literal its
   // arguments unevaluated.
   if (
-    !hold &&
+    !needsClauseStorage(attributes) &&
     clauses.length === 1 &&
     multiClauseState(existing) === undefined &&
     (declared === undefined ||
@@ -727,6 +863,14 @@ export function defineFunctionClause(
   ) {
     if (shadowsDispatcher) declareShadowingFunction(ce, id, literal);
     else ce.assign(id, literal);
+    // The doc-comment description rides on the plain representation as a
+    // field: written directly rather than through `update()`, which would
+    // rebuild the definition's evaluate handler for a one-string change.
+    if (attributes.description !== undefined) {
+      const plain = lookupInScope(ce, id);
+      if (plain !== undefined && isOperatorDef(plain))
+        plain.operator.description = attributes.description;
+    }
     // Stamp the installed record so a SECOND definition of this same lone
     // clause, later in the same program, can see whose it was — the shape the
     // redefinition ruling targets. Read back by `convertToClauseState`.
@@ -834,12 +978,21 @@ function convertToClauseState(
   // recorded on the side (`noteSingleClauseOrigin`), so a second definition of
   // the same lone clause within one program is seen as the redefinition it is.
   const origin = singleClauseOrigin(def);
+  // A plain single-clause install keeps a doc-comment description on the
+  // operator definition itself (`defineFunctionClause`, the shortcut path);
+  // carry it onto the reconstructed clause so converting to clause storage —
+  // a second overload arriving — does not lose it.
+  const description =
+    isOperatorDef(def) && typeof def.operator.description === 'string'
+      ? def.operator.description
+      : undefined;
   return {
     clauses: [
       {
         signature: clauseSignatureOf(canonical),
         literal: canonical,
         ...(origin !== undefined ? { origin } : {}),
+        ...(description !== undefined ? { attributes: { description } } : {}),
       },
     ],
     effectRow: { explicit: functionLiteralDeclaredEffects(canonical) },
@@ -976,11 +1129,28 @@ function installClauseList(
       undefined
     );
 
-  const arms: FunctionSignature[] = clauses.map((c) =>
-    row === undefined || isPureEffectSet(row)
-      ? c.signature
-      : { ...c.signature, effects: row }
-  );
+  const attrs0 = clauses[0].attributes ?? {};
+  const arms: FunctionSignature[] = clauses.map((c) => {
+    let sig: FunctionSignature =
+      row === undefined || isPureEffectSet(row)
+        ? c.signature
+        : { ...c.signature, effects: row };
+    // An ASSOCIATIVE function is written binary, but call canonicalization
+    // flattens nested calls (`op(a, op(b, c))` → `op(a, b, c)`), so its
+    // signature must admit any number of further operands of the second
+    // parameter's type; `selectAndApply` folds them pairwise.
+    if (
+      attrs0.associative === true &&
+      sig.args !== undefined &&
+      sig.args.length === 2
+    )
+      sig = {
+        ...sig,
+        variadicArg: { type: sig.args[1].type },
+        variadicMin: 0,
+      };
+    return sig;
+  });
   const signature: Type =
     declared ??
     (arms.length === 1 ? arms[0] : { kind: 'intersection', types: arms });
@@ -988,31 +1158,62 @@ function installClauseList(
   const frozen = [...clauses];
   // A hold definition is `lazy` — its operands reach `evaluate` unevaluated
   // (and, from the box or parse route, unbound) — and single-clause, so the
-  // whole set is hold or none of it is.
+  // whole set is hold or none of it is; its attributes are the lone
+  // clause's. The algebraic flags are uniform across clauses (checked
+  // above), so the first clause's are the definition's.
   const hold = clauses.some((c) => c.hold === true);
+  const attrs = attrs0;
+  const bindPositions = (attrs.bind ?? []).map((name) =>
+    functionLiteralParameters(clauses[0].literal).findIndex(
+      (p) => p.name === name
+    )
+  );
+  const flags = Object.fromEntries(
+    ALGEBRAIC_FLAGS.filter((f) => attrs[f] === true).map((f) => [f, true])
+  );
+  // The description is the MOST RECENT documented clause's — a doc comment on
+  // a later overload updates it — independently of the flags, which are the
+  // first clause's (uniform across the set).
+  const documented = [...clauses]
+    .reverse()
+    .find((c) => c.attributes?.description !== undefined);
   const def: OperatorDefinition = {
-    description: hold
-      ? 'Hold function (arguments are bound unevaluated)'
-      : `Multi-clause function (${clauses.length} clause${clauses.length === 1 ? '' : 's'})`,
+    description:
+      documented?.attributes?.description ??
+      (hold
+        ? 'Hold function (arguments are bound unevaluated)'
+        : `Multi-clause function (${clauses.length} clause${clauses.length === 1 ? '' : 's'})`),
     ...(row !== undefined && !isPureEffectSet(row)
       ? { effects: row }
       : { pure: true }),
     lazy: hold,
+    // A `bind` parameter makes the definition a BINDER: the call node
+    // declares the symbol passed at that position in its own scope (the
+    // same mechanism `Sum`/`D` use), so route parity and shadowing are the
+    // framework's, not improvised here.
+    ...(bindPositions.length > 0
+      ? { scoped: operandSites(...bindPositions) }
+      : {}),
+    ...flags,
     signature,
     evaluate: (ops, options) =>
-      selectAndApply(ce, id, frozen, ops, options, hold),
+      selectAndApply(ce, id, frozen, ops, options, hold, attrs),
   };
 
   if (existing !== undefined) updateDef(ce, id, existing, def);
   else ce.declare(id, def);
 
   const installed = lookupInScope(ce, id);
-  if (installed !== undefined && isOperatorDef(installed))
+  if (installed !== undefined && isOperatorDef(installed)) {
     (installed.operator as unknown as MultiClauseMarker)[MULTI_CLAUSE] = {
       clauses,
       effectRow,
       declared,
     };
+    // Lets the call-time broadcast arms treat this definition as user code
+    // (see `_BoxedOperatorDefinition._isMultiClause`).
+    (installed.operator as { _isMultiClause?: boolean })._isMultiClause = true;
+  }
   // A multi-clause install mutates an operator definition in place.
   ce._noteStateEvent({
     kind: 'redefine',
@@ -1044,29 +1245,64 @@ function selectAndApply(
   clauses: ReadonlyArray<FunctionClause>,
   ops: ReadonlyArray<Expression>,
   options: { numericApproximation?: boolean },
-  hold = false
+  hold = false,
+  attrs: ClauseAttributes = {}
 ): Expression | undefined {
-  // A hold definition is `lazy`, so its operands arrive as written — and from
-  // the box or parse route still UNBOUND. `.canonical` binds their structure
-  // (a value-safe step: no assigned symbol value is substituted) so that
-  // admission reads real types and the literal binds real expressions.
-  if (hold) {
-    ops = ops.map((op) => op.canonical);
-    // A hold function is single-clause, so there is nothing to SELECT — only
-    // an arity/type check against its one signature. `triStateSelect`'s
-    // tri-state verdict is not used here on purpose: it keeps a call INERT
-    // ("blocked") when an operand's type is `unknown`, which is the right
-    // caution when several clauses compete on evaluated values, but a hold
-    // function's operands are unevaluated expressions — a bare symbol, a
-    // symbolic term — whose type is very often `unknown`, and inertness would
-    // defeat the one thing the function exists to do. Only a REFUTED operand
-    // (wrong arity, or a type provably outside the parameter's) declines;
-    // an undecidable one is applied and checked, in strict mode, by the
-    // literal's own argument validation.
+  // An ASSOCIATIVE user function is binary, but call canonicalization
+  // flattens `op(a, op(b, c))` to `op(a, b, c)`: fold such a call pairwise
+  // from the left, `op(op(a, b), c)`, so the literal always sees two
+  // arguments. Each step re-enters the definition through the ordinary call
+  // route, so the fold composes with the clause selection below.
+  if (attrs.associative === true && ops.length > 2) {
+    let acc = ce.function(id, [ops[0], ops[1]]).evaluate(options);
+    for (let i = 2; i < ops.length; i++)
+      acc = ce.function(id, [acc, ops[i]]).evaluate(options);
+    return acc;
+  }
+
+  // A definition that is in clause storage ONLY because of its attributes —
+  // hold, bind, or an algebraic flag on a lone clause — has nothing to
+  // select between and is applied like the plain single-function
+  // representation would apply it: unless an operand is REFUTED (wrong
+  // arity, a type provably outside the parameter's), the literal runs, and
+  // strict mode's own argument validation inside it does the rest.
+  // `triStateSelect`'s tri-state verdict is not used here on purpose: it
+  // keeps a call INERT ("blocked") when an operand's type is `unknown` —
+  // the right caution when several clauses compete on evaluated values, and
+  // for a lone clause that NARROWS a declared signature (which stays on the
+  // selecting path below) — but for these definitions it would make
+  // `op(x, y)` inert where `f(x, y)` without the flag evaluates, and for a
+  // hold function, whose operands are unevaluated expressions and very often
+  // `unknown`-typed, it would defeat the one thing the function exists to do.
+  const permissive =
+    hold || (clauses.length === 1 && needsClauseStorage(attrs));
+  if (permissive) {
+    // A hold definition is `lazy`, so its operands arrive as written — and
+    // from the box or parse route still UNBOUND. `.canonical` binds their
+    // structure (a value-safe step: no assigned symbol value is substituted)
+    // so that admission reads real types and the literal binds real
+    // expressions.
+    if (hold) ops = ops.map((op) => op.canonical);
+    // A `bind` parameter must receive a SYMBOL — it is the bound variable
+    // the caller names (`mySum(k^2, k, 3)`); anything else is an error
+    // value, exactly as `Sum(k^2, 3, 1, 3)` is.
+    const bindNames = attrs.bind ?? [];
+    if (bindNames.length > 0) {
+      const params = functionLiteralParameters(clauses[0].literal);
+      for (let i = 0; i < ops.length && i < params.length; i++)
+        if (bindNames.includes(params[i].name) && !isSymbol(ops[i]))
+          return ce._fn('Error', [
+            ce.string('bind-symbol-expected'),
+            ce.function(id, [...ops], { form: 'raw' }),
+          ]);
+    }
     if (armAdmission(ops, clauses[0].signature) !== 'refute')
       return apply(clauses[0].literal, ops, {
         numericApproximation: options.numericApproximation,
-        holdArguments: true,
+        ...(hold ? { holdArguments: true } : {}),
+        ...(hold && attrs.bind !== undefined && attrs.bind.length > 0
+          ? { bindParameters: attrs.bind }
+          : {}),
       });
     return ce._fn('Error', [
       ce.string('no-matching-clause'),

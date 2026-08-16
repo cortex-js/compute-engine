@@ -53,6 +53,10 @@ function g(n) {           // function definition, block style
   let t = n + 1           // blocks are lexically scoped
   t * 2                   // a block's value is its last expression
 }
+hold h(e) = Head(e)       // hold: arguments arrive UNEVALUATED (h(x + 1) ➔ Add)
+hold mySum(body, bind i, n) = Sum(body, (i, 1, n))  // bind: a bound-variable slot; mySum(k^2, k, 3) ➔ 14
+function op(a, b) commutative associative -> number { a + b }  // algebraic words in the specifier slot
+/// A doc comment right before a definition is its description (About, hover)
 let parity = "even" if x % 2 == 0 else "odd"  // conditional expression; if is also an expression: if c { a } else { b }
 g(x) + f(2)
 // ➔ 22
@@ -282,6 +286,12 @@ Sort([3, 1, 4, 1, 5], (a, b) => a > b)
   lists) preview-elide above 10 elements (`[1,2,3,4,5,...,]`); the value is
   complete — the CLI's `--json` output materializes the full elements (up to
   10,000). Literals print in full.
+- **Arguments are evaluated before a call** — `f(a + 1)` receives the value
+  — except for a `hold` function (`hold f(e) = …`), which receives the
+  expression as written and evaluates it wherever the body reads it
+  (call-by-name: `hold twice(e) = e + e` evaluates `e` twice; `let v = e`
+  once). Every parameter of a hold function is held; there is no
+  per-parameter form.
 - **Binder variables stay symbolic**: `D(expr, x)` and `Integrate(expr, x)`
   treat `x` symbolically even if `x` has an assigned value; the *result*
   then evaluates with the value. So `let x = 2` followed by

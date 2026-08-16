@@ -33,6 +33,9 @@ const HOVER_SOURCE = [
   '// remember to call Length here',
   'const s = "call Length first"',
   'const total = Length([1, 2, 3]) + Pi',
+  '/// Doubles its argument.',
+  '/// Second **line**.',
+  'twice(x) = 2 * x',
 ].join('\n');
 
 await scenario('hover', undefined, async (c) => {
@@ -67,6 +70,16 @@ await scenario('hover', undefined, async (c) => {
       'function foo(x: string, n: integer)'
     ) === true && !foo.contents.value.includes('{'),
     JSON.stringify(foo)
+  );
+
+  const documented = await c.hover(URI, 6, 1);
+  check(
+    'a documented function shows its doc comment below the header',
+    documented?.contents.value.includes('twice(x)') === true &&
+      documented.contents.value.includes('Doubles its argument.') &&
+      documented.contents.value.includes('Second **line**.') &&
+      !documented.contents.value.includes('///'),
+    JSON.stringify(documented)
   );
 
   const declared = await c.hover(URI, 3, 6);

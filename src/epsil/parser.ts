@@ -78,13 +78,42 @@ const EFFECT_SPECIFIER_WORDS: ReadonlySet<string> = new Set<string>([
   'pure',
 ]);
 
+/** The ALGEBRAIC words a definition's specifier slot also accepts, alongside
+ * the effect words: `function op(a, b) commutative associative -> number {…}`.
+ * They are definition ATTRIBUTES (the operator flags the engine applies when a
+ * call is canonicalized — operand sorting, flattening, `f(f(x))` folds), not
+ * part of the signature, so they leave the slot as
+ * `["DefineFunction", …, {commutative: True, …}]` rather than riding on the
+ * ascribed type. */
+const ALGEBRAIC_SPECIFIER_WORDS: ReadonlySet<string> = new Set<string>([
+  'commutative',
+  'associative',
+  'idempotent',
+  'involution',
+]);
+
+/** Every word the specifier slot consumes — what the math-form lookahead
+ * (`isMathFunctionDef`) skips between the parameter list and `->`. */
+const SPECIFIER_WORDS: ReadonlySet<string> = new Set<string>([
+  ...EFFECT_SPECIFIER_WORDS,
+  ...ALGEBRAIC_SPECIFIER_WORDS,
+]);
+
 /** A plain identifier — the names that can be spelled in a signature's named
  * argument list (`(n: integer)`). */
 const PLAIN_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** The effect words of a definition's specifier slot, with their source span
- * (used to place a diagnostic on an invalid specifier). */
-type EffectSpecifier = { words: string[]; start: number; end: number };
+ * (used to place a diagnostic on an invalid specifier). `algebraic` holds the
+ * algebraic words of the same slot (`ALGEBRAIC_SPECIFIER_WORDS`), which are
+ * definition attributes rather than signature effects; `words` may be empty
+ * when only algebraic words were written. */
+type EffectSpecifier = {
+  words: string[];
+  algebraic: string[];
+  start: number;
+  end: number;
+};
 
 /** One declaration of a definition's **type-parameter clause** —
  * `function f<T, U: number>(…)` (the M2 sugared generic form). The bound is
@@ -558,6 +587,20 @@ export class Parser {
    * the type parser itself reporting which identifiers it took as type
    * references — where a text scan would have to guess about `list<T>`,
    * `(T) -> real`, clause-name shadowing, and names like `Tx`. */
+  /** The `bind`-marked parameters of the parameter list most recently
+   * parsed (`parseParameterList`). Reset at every parameter list, so the
+   * consumer must take them (`takeBindParams`) IMMEDIATELY after its own
+   * parameter list — before parsing a body, whose nested definitions parse
+   * parameter lists of their own. */
+  private pendingBindParams: { name: string; tok: Token }[] = [];
+
+  /** Take (and clear) the `bind` markers of the parameter list just parsed. */
+  private takeBindParams(): { name: string; tok: Token }[] {
+    const taken = this.pendingBindParams;
+    this.pendingBindParams = [];
+    return taken;
+  }
+
   private typeParamHits: Set<string> | null = null;
 
   constructor(
@@ -2401,7 +2444,25 @@ export class Parser {
     const params = this.parseParameterList(
       clause !== undefined ? quantified : undefined
     );
-    const spec = this.parseEffectSpecifier();
+    // A protocol member is a REQUIREMENT, not an operator: neither a `bind`
+    // marker nor an algebraic attribute has any meaning on it. Both are
+    // diagnosed and dropped (the marker is consumed here so it cannot leak
+    // into an enclosing definition's attributes).
+    const memberBind = this.takeBindParams();
+    if (memberBind.length > 0)
+      this.error(
+        ['unexpected-definition-attribute', 'bind'],
+        memberBind[0].tok.start,
+        memberBind[0].tok.end
+      );
+    const rawSpec = this.parseEffectSpecifier();
+    if (rawSpec !== null && rawSpec.algebraic.length > 0)
+      this.error(
+        ['unexpected-definition-attribute', rawSpec.algebraic[0]],
+        rawSpec.start,
+        rawSpec.end
+      );
+    const spec = this.effectHalf(rawSpec);
     let returnType: MathJsonExpression | null = null;
     if (this.check('OPERATOR') && this.current.text === '->') {
       this.advance();
@@ -3993,10 +4054,15 @@ export class Parser {
     const params = this.parseParameterList(
       seedNames.length > 0 ? quantified : undefined
     );
+    // Taken NOW, before the body is parsed: a nested definition inside the
+    // body parses its own parameter list, which resets the shared field.
+    const bindParams = this.takeBindParams();
 
     // Optional effect specifier `random`, `scope`, `pure`, … (bare words
     // between the parameter list and `->`).
-    const spec = this.parseEffectSpecifier();
+    const rawSpec = this.parseEffectSpecifier();
+    const spec = this.effectHalf(rawSpec);
+    const algebraic = rawSpec?.algebraic ?? [];
 
     // Optional return type `-> Type` (ascribed onto the body below).
     let returnType: MathJsonExpression | null = null;
@@ -4141,7 +4207,12 @@ export class Parser {
         'DefineFunction',
         nameNode,
         fnNode,
-        ...this.definitionAttributes(holdTok, name, params, kw.start, end),
+        ...this.definitionAttributes(holdTok, name, params, kw.start, end, {
+          algebraic,
+          specSpan: rawSpec !== null ? [rawSpec.start, rawSpec.end] : undefined,
+          docTok: holdTok ?? kw,
+          bind: bindParams,
+        }),
       ] as MathJsonExpression[],
       holdTok?.start ?? kw.start,
       end
@@ -4149,42 +4220,108 @@ export class Parser {
   }
 
   /**
-   * The optional ATTRIBUTES operand of a `DefineFunction` node — today only
-   * the `hold` prefix, lowered as `{hold: True}` (a `Dictionary`, the same
-   * carrier `DeclareType` uses for `alias`). Returns an empty list when the
-   * definition has no attribute, so the node keeps its two-operand shape.
+   * The optional ATTRIBUTES operand of a `DefineFunction` node, lowered as a
+   * `Dictionary` (the same carrier `DeclareType` uses for `alias`):
    *
-   * A hold definition with a literal parameter is refused here: the literal
-   * would select the clause by the argument's VALUE, and a hold function never
-   * evaluates its arguments. The diagnostic lands on the prefix and the
-   * definition parses on as an ordinary one.
+   * - `hold: True` — the `hold` prefix;
+   * - `bind: ["i", …]` — the `bind`-marked parameters (a list of strings);
+   * - `commutative`/`associative`/`idempotent`/`involution: True` — the
+   *   algebraic words of the specifier slot;
+   * - `description: "…"` — the doc comment (`///` lines or a `/** … *\/`
+   *   block) written immediately before the definition, markers stripped.
+   *
+   * Returns an empty list when the definition has none, so the node keeps its
+   * two-operand shape.
+   *
+   * Consistency is diagnosed here and the offending piece dropped, so the
+   * definition parses on: a hold definition with a literal parameter
+   * (`hold-literal-parameter` — the literal would select the clause by an
+   * argument's VALUE, which a hold function never has); `bind` without `hold`
+   * (`bind-requires-hold`); an algebraic word on a `hold` definition
+   * (`unexpected-definition-attribute` — a hold function's calls are neither
+   * reordered nor flattened). The engine re-checks all of these on the
+   * MathJSON route.
    */
   private definitionAttributes(
     holdTok: Token | undefined,
     name: string,
     params: readonly MathJsonExpression[],
     start: number,
-    end: number
+    end: number,
+    extra: {
+      algebraic?: readonly string[];
+      specSpan?: [number, number];
+      docTok?: Token;
+      /** The `bind`-marked parameters, taken by the caller right after ITS
+       * parameter list was parsed (`takeBindParams`). */
+      bind?: readonly { name: string; tok: Token }[];
+    } = {}
   ): MathJsonExpression[] {
-    if (holdTok === undefined) return [];
-    if (params.some(isLiteralParamNode)) {
-      this.error(['hold-literal-parameter', name], holdTok.start, holdTok.end);
-      return [];
+    const entries: MathJsonExpression[] = [];
+    const flag = (key: string, s: number, e: number) =>
+      entries.push(this.kvPair(key, this.wrap({ sym: 'True' }, s, e), s, e));
+
+    let hold = holdTok !== undefined;
+    if (hold && params.some(isLiteralParamNode)) {
+      this.error(
+        ['hold-literal-parameter', name],
+        holdTok!.start,
+        holdTok!.end
+      );
+      hold = false;
     }
-    return [
-      this.wrap(
-        [
-          'Dictionary',
+    if (hold) flag('hold', holdTok!.start, holdTok!.end);
+
+    const bind = extra.bind ?? [];
+    if (bind.length > 0) {
+      if (!hold) {
+        const t = bind[0].tok;
+        this.error(['bind-requires-hold', name], t.start, t.end);
+      } else {
+        const first = bind[0].tok;
+        const last = bind[bind.length - 1].tok;
+        entries.push(
           this.kvPair(
-            'hold',
-            this.wrap({ sym: 'True' }, holdTok.start, holdTok.end),
-            holdTok.start,
-            holdTok.end
-          ),
-        ] as MathJsonExpression[],
-        start,
-        end
-      ),
+            'bind',
+            this.wrap(
+              [
+                'List',
+                ...bind.map((b) =>
+                  this.wrap({ str: b.name }, b.tok.start, b.tok.end)
+                ),
+              ] as MathJsonExpression[],
+              first.start,
+              last.end
+            ),
+            first.start,
+            last.end
+          )
+        );
+      }
+    }
+
+    const algebraic = extra.algebraic ?? [];
+    if (algebraic.length > 0) {
+      const [s0, e0] = extra.specSpan ?? [start, end];
+      if (hold)
+        this.error(['unexpected-definition-attribute', algebraic[0]], s0, e0);
+      else for (const word of algebraic) flag(word, s0, e0);
+    }
+
+    const doc = docCommentText(extra.docTok);
+    if (doc !== undefined)
+      entries.push(
+        this.kvPair(
+          'description',
+          this.wrap({ str: doc }, start, end),
+          start,
+          end
+        )
+      );
+
+    if (entries.length === 0) return [];
+    return [
+      this.wrap(['Dictionary', ...entries] as MathJsonExpression[], start, end),
     ];
   }
 
@@ -4724,7 +4861,7 @@ export class Parser {
     while (
       this.tokens[k] !== undefined &&
       this.tokens[k].type === 'SYMBOL' &&
-      EFFECT_SPECIFIER_WORDS.has(this.tokens[k].text)
+      SPECIFIER_WORDS.has(this.tokens[k].text)
     )
       k += 1;
     const after = this.tokens[k];
@@ -4834,10 +4971,15 @@ export class Parser {
     const params = this.parseParameterList(
       seedNames.length > 0 ? quantified : undefined
     );
+    // Taken NOW, before the right-hand side is parsed (it may hold a nested
+    // definition, which resets the shared field).
+    const bindParams = this.takeBindParams();
 
     // Optional effect specifier — supported here only WITH the arrow (the
     // lookahead does not claim `f(x) random = 5`).
-    const spec = this.parseEffectSpecifier();
+    const rawSpec = this.parseEffectSpecifier();
+    const spec = this.effectHalf(rawSpec);
+    const algebraic = rawSpec?.algebraic ?? [];
 
     // Optional return type `-> Type` (ascribed onto the body below).
     let returnType: MathJsonExpression | null = null;
@@ -4941,7 +5083,14 @@ export class Parser {
           nameTok.text,
           params,
           nameTok.start,
-          end
+          end,
+          {
+            algebraic,
+            specSpan:
+              rawSpec !== null ? [rawSpec.start, rawSpec.end] : undefined,
+            docTok: holdTok ?? nameTok,
+            bind: bindParams,
+          }
         ),
       ] as MathJsonExpression[],
       holdTok?.start ?? nameTok.start,
@@ -4962,22 +5111,39 @@ export class Parser {
   private parseEffectSpecifier(): EffectSpecifier | null {
     if (
       this.current.type !== 'SYMBOL' ||
-      !EFFECT_SPECIFIER_WORDS.has(this.current.text)
+      !SPECIFIER_WORDS.has(this.current.text)
     )
       return null;
 
     const start = this.current.start;
     const words: string[] = [];
+    const algebraic: string[] = [];
     let end = start;
     while (
       this.current.type === 'SYMBOL' &&
-      EFFECT_SPECIFIER_WORDS.has(this.current.text)
+      SPECIFIER_WORDS.has(this.current.text)
     ) {
-      words.push(this.current.text);
+      const word = this.current.text;
+      if (ALGEBRAIC_SPECIFIER_WORDS.has(word)) {
+        if (algebraic.includes(word))
+          this.error(
+            ['duplicate-definition-attribute', word],
+            this.current.start,
+            this.current.end
+          );
+        else algebraic.push(word);
+      } else words.push(word);
       end = this.current.end;
       this.advance();
     }
-    return { words, start, end };
+    return { words, algebraic, start, end };
+  }
+
+  /** The EFFECT half of a parsed specifier — what `definitionAscription`
+   * consumes — or `null` when the slot held only algebraic words (or nothing),
+   * so the ascription logic sees "no effect specifier" exactly as before. */
+  private effectHalf(spec: EffectSpecifier | null): EffectSpecifier | null {
+    return spec !== null && spec.words.length > 0 ? spec : null;
   }
 
   /**
@@ -5159,6 +5325,7 @@ export class Parser {
   private parseParameterList(quantified?: boolean[]): MathJsonExpression[] {
     const open = this.advance(); // '('
     this.brackets.push(open);
+    this.pendingBindParams = [];
 
     const params: MathJsonExpression[] = [];
     if (!this.check('CLOSE_PAREN')) {
@@ -5176,22 +5343,44 @@ export class Parser {
           if (this.check('CLOSE_PAREN')) break; // trailing comma
           continue;
         }
-        if (tok.type !== 'SYMBOL' && tok.type !== 'VERBATIM_SYMBOL') {
-          this.error(['symbol-expected'], tok.start, tok.end);
+        // `bind NAME` — a BOUND-VARIABLE parameter of a `hold` definition
+        // (`hold mySum(body, bind i, n) = …`). `bind` is contextual: it is the
+        // marker only when a plain symbol follows it inside a parameter list;
+        // `f(bind)` and `f(bind: integer)` are ordinary parameters named
+        // `bind`. The marked names are handed to the enclosing definition
+        // through `pendingBindParams` (`takeBindParams`); a protocol member
+        // takes them too, to diagnose them — it has no attributes.
+        let bound = false;
+        if (
+          tok.type === 'SYMBOL' &&
+          tok.text === 'bind' &&
+          (this.peek(1).type === 'SYMBOL' ||
+            this.peek(1).type === 'VERBATIM_SYMBOL') &&
+          !this.peek(1).precededByLinebreak
+        ) {
+          this.advance(); // 'bind'
+          bound = true;
+        }
+        const nameTok = this.current;
+        if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
+          this.error(['symbol-expected'], nameTok.start, nameTok.end);
           this.recoverInBracket();
           break;
         }
         this.advance();
-        this.harvest(tok);
+        this.harvest(nameTok);
         const pname =
-          tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
+          nameTok.type === 'VERBATIM_SYMBOL'
+            ? (nameTok.value ?? '')
+            : nameTok.text;
+        if (bound) this.pendingBindParams.push({ name: pname, tok });
         // The generated literal-parameter namespace is RESERVED: a
         // user-written parameter of that shape would be indistinguishable
         // from a generated one, and serialization/diagnostics would drop
         // its name.
         if (isLiteralParamName(pname))
-          this.error(['reserved-word', pname], tok.start, tok.end);
-        const symNode = this.wrap({ sym: pname }, tok.start, tok.end);
+          this.error(['reserved-word', pname], nameTok.start, nameTok.end);
+        const symNode = this.wrap({ sym: pname }, nameTok.start, nameTok.end);
 
         // Optional `: Type` — an annotated param is a typed function-literal
         // parameter `["Typed", sym, {str: type}]`. Comma-delimited, so
@@ -8035,6 +8224,38 @@ function isLiteralNode(expr: MathJsonExpression): boolean {
  * `["Typed", "literalParam_<n>", {str: "<value>"}]` form `parseLiteralParam`
  * builds for `function f(0) { … }`. Literal parameters are multi-clause
  * territory, so a type-parameter clause alongside one is rejected (G2). */
+/**
+ * The text of the doc comments attached to `tok` (the trivia the lexer
+ * recorded immediately before it — `///` lines and `/** … *\/` blocks), with
+ * the comment markers and the common leading ` * ` of a block's inner lines
+ * stripped, paragraphs joined by newlines. `undefined` when there is none.
+ * The result is markdown, surfaced as the definition's `description`.
+ */
+function docCommentText(tok: Token | undefined): string | undefined {
+  const comments = tok?.docComments;
+  if (comments === undefined || comments.length === 0) return undefined;
+  const lines: string[] = [];
+  for (const c of comments) {
+    const text = c.text;
+    if (text.startsWith('///')) {
+      lines.push(text.slice(3).replace(/^ /, '').trimEnd());
+    } else {
+      // `/** … */`
+      const inner = text.replace(/^\/\*\*/, '').replace(/\*\/$/, '');
+      for (const raw of inner.split(/\r?\n/)) {
+        // Strip the conventional ` * ` gutter of an inner line, and the
+        // single space after `/**` on the first.
+        const line = raw.replace(/^\s*(\*(?!\/) ?| )?/, '').trimEnd();
+        lines.push(line);
+      }
+    }
+  }
+  // Trim leading/trailing blank lines.
+  while (lines.length > 0 && lines[0].trim() === '') lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+  return lines.length === 0 ? undefined : lines.join('\n');
+}
+
 function isLiteralParamNode(p: MathJsonExpression): boolean {
   if (operator(p) !== 'Typed') return false;
   const name = symbol(operand(p, 1));

@@ -218,13 +218,23 @@ _type-parameter-clause_ → **`<`** (_type-parameter_)#**`,`** **`>`**
 names are rejected; the names scope over the definition's HEAD only (its
 parameters, effect specifier, and return type), not over its body
 
-_function-definition_ → _symbol_ _parameters_
+_function-definition_ → \[**`hold`**\] _symbol_ _parameters_
 \[_math-function-signature_\] **`=`** _expression_ |
-**`function`** _symbol_ \[_type-parameter-clause_\] _parameters_
+\[**`hold`**\] **`function`** _symbol_ \[_type-parameter-clause_\] _parameters_
 \[_effect-specifier_\] \[**`->`** _type_\] _block_
 &nbsp;&nbsp;&nbsp;&nbsp;— the `<…>` clause is claimed only by the
 **`function`** form: `f<T>(x) = x` is genuinely ambiguous with a relational
-expression, so the math form does not take it
+expression, so the math form does not take it; the **`hold`** prefix
+(a contextual keyword — `hold` is an ordinary identifier elsewhere) makes a
+definition whose arguments are bound unevaluated, see
+[Hold functions](/epsil/control-flow/#hold-functions); it does not combine
+with a type-parameter clause or a literal parameter. A parameter of a `hold`
+definition may be marked **`bind`** (`hold mySum(body, bind i, n)`): it
+receives a symbol, the bound variable. The _effect-specifier_ slot also
+accepts the algebraic words **`commutative`**, **`associative`**,
+**`idempotent`**, **`involution`** (definition attributes, not effects). A
+doc comment (`///` lines or `/** … */`) immediately before a definition is
+its description
 
 _type-declaration_ → **`type`** **`alias`** _symbol_
 \[_type-parameter-clause_\] **`=`** _type_ |

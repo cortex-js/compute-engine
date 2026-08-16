@@ -159,6 +159,27 @@ const c = 1
 c = 2
 ```
 
+## Arguments are values — unless the function holds them
+
+A call evaluates its arguments first and hands the function their values:
+with `let a = 3`, `f(a + 1)` receives `4`. A function declared with the
+`hold` prefix instead receives each argument **as written** — canonicalized
+and bound in the caller's scope, but not evaluated — and evaluates it only
+where its body reads it, so it can inspect the expression (`Head(e)`),
+transform it, or decide whether to evaluate it at all:
+
+```epsil
+let a = 3
+hold f(e) = Head(e)
+f(a + 1)
+// ➔ Add
+```
+
+Every parameter of a `hold` function is held (there is no per-parameter
+form), and a parameter read twice is evaluated twice — read it once into a
+`let` when that matters. See
+[Hold functions](/epsil/control-flow/#hold-functions).
+
 ## Collections: literals are values, pipelines are generators
 
 A collection **literal** — a list `[…]`, set `{…}`, tuple `(…)`, or

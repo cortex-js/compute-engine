@@ -1639,6 +1639,17 @@ function isQualifiedProtocolMember(e: Expression): boolean {
  */
 export type ApplyOptions = Partial<EvaluateOptions> & {
   holdArguments?: boolean;
+  /**
+   * The names of the literal's BOUND-VARIABLE parameters (an Epsil `hold
+   * mySum(body, bind i, n)`; `ClauseAttributes.bind` in `multi-clause.ts`).
+   * Each must be applied to a SYMBOL — the variable the caller names — and is
+   * SUBSTITUTED into the body rather than bound to a value: `Sum(body, i, 1,
+   * n)` becomes `Sum(body, k, 1, n)` for `mySum(k^2, k, 3)`, so the binder
+   * inside the body re-canonicalizes with the caller's symbol as its index
+   * and its rebinding of that symbol in the other (held) arguments is the
+   * binder's own. Only meaningful with `holdArguments`.
+   */
+  bindParameters?: readonly string[];
 };
 
 /**
@@ -2413,10 +2424,69 @@ function makeLambda(
     ? lastStatement.op2
     : undefined;
 
+  const invokeWithBoundVariables = (
+    args: ReadonlyArray<Expression>,
+    options: ApplyOptions
+  ): Expression | undefined => {
+    const bound = new Set(options.bindParameters);
+    const substitutions: Record<string, Expression> = {};
+    const keptParams: Expression[] = [];
+    const keptArgs: Expression[] = [];
+    for (let i = 0; i < params.length; i++) {
+      const name = functionLiteralParameterName(params[i]);
+      const arg = args[i];
+      if (name !== undefined && bound.has(name)) {
+        // No argument at a bound position (partial application) leaves the
+        // parameter in place — nothing to substitute yet.
+        if (arg === undefined) {
+          keptParams.push(params[i]);
+          continue;
+        }
+        substitutions[name] = arg;
+        continue;
+      }
+      keptParams.push(params[i]);
+      if (arg !== undefined) keptArgs.push(arg);
+    }
+    if (Object.keys(substitutions).length === 0)
+      return invoke(args, { ...options, bindParameters: undefined });
+    // Substitute the caller's symbols for the bound parameters in the body —
+    // EVERY occurrence of the name, binder positions and shadowed occurrences
+    // included: `bind i` means "the name the body uses as a bound variable",
+    // and in `Sum(body, i, 1, n)` that `i` is Sum's own index (Sum's binder
+    // claims it at definition time, shadowing the parameter), which is
+    // precisely the occurrence that must become the caller's `k`. Then
+    // rebuild the literal without those parameters; canonicalizing it in the
+    // CALLER's context (the current one) is where the body's binder
+    // (`Sum(body, k, 1, n)`) declares the caller's `k`.
+    const newBody = rewriteWithBinders(
+      body,
+      (sym) => substitutions[sym.symbol] ?? sym
+    );
+    const reduced = ce.function('Function', [newBody, ...keptParams]);
+    return apply(reduced, keptArgs, {
+      ...options,
+      bindParameters: undefined,
+    });
+  };
+
   const invoke = (
     args: ReadonlyArray<Expression>,
     options?: ApplyOptions
   ): Expression | undefined => {
+    // BOUND-VARIABLE parameters (`bindParameters`) are eliminated first, by
+    // substitution: the parameter is replaced in the body by the symbol the
+    // caller passed (every occurrence of the name, inner binders included —
+    // see `invokeWithBoundVariables`), and the reduced literal — without that
+    // parameter — is applied to the remaining arguments under the same
+    // options. The caller (`selectAndApply`) has already checked that each
+    // such argument is a symbol.
+    if (
+      options?.bindParameters !== undefined &&
+      options.bindParameters.length > 0
+    )
+      return invokeWithBoundVariables(args, options);
+
     // The scope the literal was defined in — the parent of every call frame
     // (step 5), and the chain a held argument's symbols must be resolvable
     // through (`inlineFrameLocals`).
