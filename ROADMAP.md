@@ -1520,7 +1520,50 @@ contract. It is also deliberately a RUNTIME test rather than a static one — a
 bare symbol can be bound to a number or to an array at call time, so the
 emission site cannot decide. Pinned in `test/compute-engine/compile.test.ts`.
 
-### `complexPromotion` loses a complex value passed as an ARGUMENT to a scalar-bodied user function (OPEN, correctness — promotion-only; RE-INVESTIGATED 2026-08-15, three claims below corrected)
+### A complex value passed as an ARGUMENT to a scalar-bodied user function was lost (FIXED 2026-08-15 — per-lane emission of user functions; NOT promotion-only)
+
+**Resolution first; the history below is kept for its witnesses.** The
+defect was filed against the `complexPromotion` opt-in and re-investigated
+as promotion-only. The fix session refuted that premise as well: on the
+DEFAULT path, with `w` declared `complex` and `b(x) := 2x`, `compile(b(w))`
+emitted `_fn_b(_.w)` over `const _fn_b = (x) => 2 * x` — `NaN` behind
+`success: true` — and so did `b(t + w)`, `h(w, 2)`, `h(2, w)`. The opt-in
+merely made the witness reachable from a promoted radical.
+
+The fix (`compilation/base-compiler.ts`): a user function is now emitted
+once PER LANE PATTERN. `userCallComplexLanes` computes, per call site,
+which parameters receive a complex SCALAR while not being declared complex;
+`userFunctionName(id, lanes)` names that specialization `_fn_b$z1` (the
+`$` convention the multi-clause helpers already use, so it cannot collide
+with a user id, and `$z` keeps it apart from `$c<n>`); the body compiles
+under a `_localComplex` frame binding those parameters complex — and under
+a `_localVector` `LOCAL_SCALAR` entry, so a nested call passing the
+parameter on (`c(x) := b(x) + 1`, or the recursive `K(n-1, z)`) grants the
+same lane; and the analysis (`isComplexValuedUserCall`,
+`withCollectionElements`) binds the very same lanes, so parent and emitted
+body agree on the value shape. Both halves landed together, as the note at
+the end of this entry demanded. Deliberately unchanged: the real lane (bare
+`_fn_b`, byte-identical body), a parameter DECLARED complex (the existing
+`coerceToComplex` call-site coercion, disjoint by construction), arguments
+not provably scalar (still the runtime `_SYS.bcastFn` broadcast — a mixed
+list would otherwise hand a real element to a complex body), multi-clause
+functions (run-time guard dispatch, real lane), and the shader targets
+(their static signatures fail closed on such a call; verified `b(w)` on
+`glsl` declines). Every witness below now matches the interpreter:
+`|b(a(t))/2 − 1|` at `t = 0.3` → `1.3038404810405297`; `b(a(t))` →
+`1.6733…i`; `id(a(t))` still passes through; `m(t)` (body nesting) still
+`1 + 0.8366…i`. The Julia-map test's pin moved from `_fn_K(` to
+`_fn_K$z01(` — its `z` slot is wide-typed and receives `x + iy`, so it IS
+the complex lane, and the self-call resolves to the same specialization.
+Regression suite: `test/compute-engine/compile-complex.test.ts`, "complex
+ARGUMENT to a wide-typed user-function parameter".
+
+Found and fixed alongside: an emitted user-function body on the JavaScript
+route compiled under the CALLER's `Block` local-shape frames (the GPU
+definition lowering already isolated its own). `u(x) := x + k` reading a
+global `k`, called from a block that declared its own complex local `k`,
+lowered the plain global as `{re, im}` — `{re: null}` where the interpreter
+answers `7`. The body now compiles under an isolated frame; same test file.
 
 **Read the re-investigation at the end of this entry before acting on the
 original text.** It reproduces the defect, corrects two statements of the
@@ -2041,6 +2084,27 @@ bullet. Phase 2 wins: field-backed satisfaction (a stored field satisfies a
 `readwrite` requirement with no accessor written) and `object-property-conflict`
 are what a migrated conformance is re-pointed AT, and without them "what does
 an explicit `set` accessor on an object mean" has no implemented answer.
+
+Those two companions SHIPPED on 2026-08-15 (work package 2A:
+`fieldBackedProperties` / `settleFieldBacking` in
+`src/compute-engine/engine-protocols.ts`, pinned by
+`test/compute-engine/protocol-field-backed.test.ts`), so the prerequisite is
+discharged and B1 itself is what remains of this entry.
+
+**OPEN, found in the 2A review: redefining an object TYPE does not re-settle
+its conformance edges.** `settleFieldBacking()` reads the target's stored-field
+layout from the type registry as it stands when it runs, and a protocol
+replacement re-settles every edge — so a changed REQUIREMENT is picked up. A
+cross-batch redefinition of the object type itself (`type P = object{…}` run
+again with different fields, which the notebook pattern allows) re-registers
+nothing: no edge is re-settled, so an accessor synthesized for a field the new
+layout no longer declares keeps answering, and a field the new layout ADDS
+gets none. Objects constructed earlier keep their own pinned layout either way
+(Appendix B, "layouts never migrate"), so this is a registry-vs-instance
+divergence rather than data loss. Fix: re-run conformance for a redefined
+type's edges, the way `declareProtocolImpl` already does for a replaced
+protocol. Scheduled with the Phase 2 "Protocol replacement" bullet of
+`docs/plans/2026-08-13-mutable-objects-implementation-plan.md`.
 
 **Migration cost, measured 2026-08-15** (the implementation was landed,
 measured and reverted pending this ruling): **32 protocol tests** across

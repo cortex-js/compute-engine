@@ -35,6 +35,34 @@
 
 ### New Features
 
+- **A stored field of an object type now satisfies a protocol property
+  requirement of the same name, with no `get`/`set` written.** A `readwrite`
+  requirement is satisfied when the field's type is exactly the property's
+  type (the getter direction would admit a narrower field and the setter
+  direction a wider one, so only the property's own type satisfies both); a
+  `readonly` requirement is satisfied when the field's type is the property's
+  type or a subtype. The engine synthesizes the accessors, so the interpreted
+  tiers — dispatch selection, property reads and property writes — find a
+  handler where they already look, and a write through the synthesized setter
+  stores into the object in place, returning the very same object rather than
+  a rebuilt copy. Compiling such an access is not yet supported: a synthesized
+  accessor is a host callback, which the compile planner refuses, so a
+  compiled qualified read or write on a field-backed type declines and the
+  expression stays interpreted — the same answer object field access itself
+  gives until it is lowered. Declaring both a
+  stored field and an explicit accessor for one property name is now the error
+  `object-property-conflict`: a property is field-backed or computed, never
+  both. Field backing applies to object types only — records, primitives, the
+  bare `object` type and conditional (`where`-clause) conformances get none.
+
+  With this, the `Person`/`Identifiable` example of
+  `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B ("Objects and protocols") runs as
+  written: `firstName`, `lastName`, `age` and `role` are covered by the stored
+  fields, the implementation block supplies only the computed `get fullName`
+  and `function birthday`, and
+  `"Happy birthday, \(birthday(p).fullName)! You are \(p.age)."` evaluates to
+  `"Happy birthday, Alan Turing! You are 43."`.
+
 - **`Slice` accepts an index span.** `["Slice", xs, r]`, where `r` is a
   `range` (an ascending, step-1 span of 1-based indexes such as
   `["Range", 2, 4]`), returns the elements at those indexes:
@@ -54,6 +82,73 @@
   Phase 0c).
 
 ### Issues Resolved
+
+- **A speculative parse no longer narrows a symbol declared `unknown`.**
+  `ce.parse(latex, { speculative: true })` promises to leave no trace in the
+  engine's type state, and it confines a narrowing use by shadowing the
+  ambient symbol inside the transient scope. The shadow was applied only to
+  symbols whose type was INFERRED, on the reasoning that a declared type
+  cannot be moved by a use — true of a declared concrete type, but not of
+  `unknown`, which is a placeholder that refines per use rather than a
+  contract. So `ce.declare('u', 'unknown')` followed by a speculative parse
+  of `u + 1` persistently narrowed `u` to `number`. The parse result still
+  reports the derived type (`number` here); only the ambient definition is
+  left alone. This also removes an inconsistency visible from outside: a
+  symbol whose type had been narrowed by an earlier use and then put back
+  with the `type` setter WAS confined, because the restore leaves the
+  inferred flag set, while the same symbol freshly declared `unknown` was
+  not — two symbols identical in every respect except history behaved
+  differently.
+
+- **Dividing by a scaled vector norm no longer collapses to a literal
+  `0`.** `1/(3·|(1, 2)|)` — `["Divide", 1, ["Multiply", 3, ["Abs", ["Tuple",
+  1, 2]]]]`, and the LaTeX `\frac{1}{3\vert(1,2)\vert}` that boxes through it
+  — canonicalized to the number `0`, not to an error or a `NaN`, where the
+  answer is `√5/15`. Over a tuple, `Abs` is the Euclidean norm: the result is
+  a number whose OPERAND is not one. `isFinite` answers `false` for anything
+  that is not a number at all, meaning "not a finite number" rather than
+  "infinite", and `Abs` propagated that `false` from its operand as a proof
+  that the norm itself was infinite. The product type handler reads a
+  provably non-finite factor, so `3·|(1, 2)|` typed `non_finite_number`, and
+  `Divide` then applied the sound `1/±∞ = 0` fold to it. The fold and the
+  `1/±∞` typing are unchanged; what is fixed is the false claim feeding them,
+  so a genuinely infinite operand (`1/(3·Abs(∞))`, `1/(3·Ln(0))`) still folds
+  to `0`. `Sqrt` propagated finiteness the same way and is guarded too — it
+  folded nothing, because the product type also requires every factor to be
+  provably real, so this closes the unsound claim before something else reads
+  it. A bare symbol anywhere in the product masked the collapse, which is why
+  it survived: `1/(3·|(x, 2)|)` and `1/(c·|(1, 2)|)` were always correct.
+
+- **A complex value passed as an ARGUMENT to a user-defined function with a
+  wide-typed parameter now compiles correctly.** With `b(x) := 2x` and a
+  declared-complex `w`, `compile(b(w))` emitted the one real-lane definition
+  `const _fn_b = (x) => 2 * x` and called it on the `{re, im}` object, so the
+  result was `NaN` at every point behind `success: true`; the same happened for
+  `b(t + w)`, `h(w, 2)`, and — under the `complexPromotion` opt-in — for the
+  filed witness `|b(a(t))/2 − 1|` with `a(t) := √(t−1)` (compiled `NaN`,
+  interpreter `1.30384…`). The call site's own verdict ("the argument is
+  complex") was known and then discarded at the user-call boundary: the body
+  was analyzed with its parameters masked real, and the emitter compiled every
+  user function exactly once.
+
+  A user function is now emitted once PER LANE PATTERN. A call site that
+  binds a complex scalar to a parameter not declared complex names a
+  specialization (`_fn_b$z1`, "parameter 1 complex") whose body compiles with
+  that parameter bound complex; the analysis binds the same lanes, so the
+  parent and the emitted body agree on the value shape; and a recursive
+  self-call inside the complex lane resolves to that same specialization.
+  Every real-lane call keeps its bare `_fn_b` name and byte-identical body,
+  a parameter DECLARED complex keeps the existing call-site coercion, and
+  arguments that are not provably scalar keep the previous runtime broadcast.
+  Shader targets are unchanged (their statically typed signatures fail
+  closed on such a call).
+
+  Found alongside it: an emitted user-function body compiled under the
+  CALLER's `Block` local-shape frames, so a body reading a global `k` while
+  the calling block declared its own complex local `k` lowered the plain
+  global as `{re, im}` (`{re: null}` where the interpreter answers `7`). The
+  body now compiles under an isolated frame — the module-level discipline the
+  GPU definition lowering already applied.
 
 - **`\operatorname{unique}`, `\operatorname{sort}`, `\operatorname{reverse}`
   and `\operatorname{total}` now parse to their operators.** The lowercase

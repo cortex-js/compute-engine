@@ -825,6 +825,19 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   { latexTrigger: '\\operatorname{repeat}', kind: 'function', parse: 'Repeat' },
   { latexTrigger: '\\operatorname{join}', kind: 'function', parse: 'Join' },
   { latexTrigger: '\\operatorname{range}', kind: 'function', parse: 'Range' },
+  { latexTrigger: '\\operatorname{unique}', kind: 'function', parse: 'Unique' },
+  { latexTrigger: '\\operatorname{sort}', kind: 'function', parse: 'Sort' },
+  {
+    latexTrigger: '\\operatorname{reverse}',
+    kind: 'function',
+    parse: 'Reverse',
+  },
+  // `total(C)` is the SUM of a collection. There is no `Total` operator to
+  // alias to — the name exists only in the notations that spell it this way —
+  // so it lowers to `Sum`, which already folds a collection operand
+  // (`Sum([1,2,3])` is 6). This is the same lowering a consumer's importer
+  // performs when it rewrites `total` to `\sum` before the engine sees it.
+  { latexTrigger: '\\operatorname{total}', kind: 'function', parse: 'Sum' },
   {
     latexTrigger: '\\operatorname{histogram}',
     kind: 'function',

@@ -33,6 +33,68 @@ describe('Function-style aliases for existing operators', () => {
     expect(expr.operator).toBe('Repeat');
   });
 
+  // These four had no lowercase entry while eight siblings in the same family
+  // did. Without one they parsed as an `InvisibleOperator` application of an
+  // undeclared head, which then AUTO-DECLARES: no error anywhere, and a
+  // plausible `list<unknown>` type on the result — the shape that survives
+  // review. Each is asserted by VALUE as well as head, so an alias pointing at
+  // the wrong operator fails here rather than looking merely resolved.
+  test('\\operatorname{unique}(L) parses to Unique', () => {
+    const expr = ce.parse('\\operatorname{unique}([3, 1, 3, 2])');
+    expect(expr.operator).toBe('Unique');
+    expect(expr.evaluate().toString()).toBe('[3,1,2]');
+  });
+
+  test('\\operatorname{sort}(L) parses to Sort', () => {
+    const expr = ce.parse('\\operatorname{sort}([3, 1, 2])');
+    expect(expr.operator).toBe('Sort');
+    expect(expr.evaluate().toString()).toBe('[1,2,3]');
+  });
+
+  test('\\operatorname{reverse}(L) parses to Reverse', () => {
+    const expr = ce.parse('\\operatorname{reverse}([1, 2, 3])');
+    expect(expr.operator).toBe('Reverse');
+    expect(expr.evaluate().toString()).toBe('[3,2,1]');
+  });
+
+  // `total` is the odd one out: it is the SUM of a collection, and there is no
+  // `Total` operator in the engine to alias to (the name exists only in the
+  // notations that spell it this way), so it lowers to `Sum`.
+  test('\\operatorname{total}(L) parses to Sum', () => {
+    const expr = ce.parse('\\operatorname{total}([1, 2, 3])');
+    expect(expr.operator).toBe('Sum');
+    expect(expr.evaluate().re).toBe(6);
+  });
+
+  // DRIFT GUARD. The gap above was an inconsistency rather than a policy —
+  // some lowercase collection names resolved and some did not, with nothing
+  // recording which set was intended. This table IS that record: every name
+  // here must resolve to a real operator head, so deleting an entry from the
+  // LaTeX dictionary fails a test instead of silently returning to an
+  // auto-declared head. It deliberately covers the previously-working eight as
+  // well as the four added, since either half can drift.
+  //
+  // `form: 'raw'` is what makes it a parse assertion: canonicalization would
+  // rewrite some of these heads, and an unresolved name shows up as
+  // `InvisibleOperator` rather than the operator it should have been.
+  test.each([
+    ['length', 'Length'],
+    ['count', 'Length'],
+    ['min', 'Min'],
+    ['max', 'Max'],
+    ['mean', 'Mean'],
+    ['median', 'Median'],
+    ['join', 'Join'],
+    ['shuffle', 'RandomShuffle'],
+    ['unique', 'Unique'],
+    ['sort', 'Sort'],
+    ['reverse', 'Reverse'],
+    ['total', 'Sum'],
+  ])('lowercase \\operatorname{%s} resolves to %s', (spelling, operator) => {
+    const raw = ce.parse(`\\operatorname{${spelling}}(C)`, { form: 'raw' });
+    expect(raw.json[0]).toBe(operator);
+  });
+
   test('\\operatorname{random}() parses to Random', () => {
     const expr = ce.parse('\\operatorname{random}()');
     expect(expr.operator).toBe('Random');
