@@ -1,4 +1,4 @@
-import type { EffectLabel, Type } from '../../common/type/types.js';
+import type { EffectLabel, EffectSet, Type } from '../../common/type/types.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import {
   hasDeclaredEffectLabel,
@@ -6,12 +6,14 @@ import {
   sameEffectSet,
   subtractEffects,
   unionComputedEffects,
+  unionEffectSets,
 } from '../../common/type/effects.js';
 import {
   functionResult,
   signatureArms,
   signatureEffects,
 } from '../../common/type/utils.js';
+import { objectLayoutOfType } from '../../common/type/subtype.js';
 import { couldBeUnkeyedCollectionOperand } from '../collection-utils.js';
 import { overloadArms, resolveOverload } from './overload.js';
 
@@ -23,7 +25,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 
-import { isFunction, sym } from './type-guards.js';
+import { isFunction, isString, sym } from './type-guards.js';
 
 /**
  * # The runtime effect channel (`docs/EFFECTS-MODEL.md`, "Runtime counterpart")
@@ -171,7 +173,36 @@ export function applicationEffects(expr: Expression): ComputedEffects {
   // `Declare`, `Assume`) that is `{scope}`, contributed UNCONDITIONALLY —
   // confinement analysis is inference-only, and the runtime channel stays a
   // sound over-approximation ("Scope writes", v5 finding 3).
-  let effects: ComputedEffects = ownEffects(expr.engine, expr.ops, def);
+  //
+  // The store correction applies to THIS contribution and nowhere else. It is
+  // emphatically not a correction of the total: the `Assign` arm REPLACES
+  // `scope` with `state`, and the total also carries whatever the operands
+  // contribute, so subtracting there would erase a right-hand side's own
+  // binding write (`p.age = f()` with `f` declared `scope` must report both)
+  // and would turn an operand's unknown `'any'` into the co-finite ¬{scope} —
+  // a positive claim about an operand nobody has looked inside. Confining it to
+  // `ownEffects` also keeps the two channels aligned: the static walk's `Assign`
+  // arm likewise skips only its OWN `scopeWrite()` and still visits the
+  // right-hand side.
+  //
+  // The correction is inside the memo, and it consults something the memo's key
+  // does not name: the DECLARED TYPE of the symbol a `Field` target is rooted
+  // at. `_effects` is stamped on `ce._callableVersion`, which
+  // `callableAxisSelects` advances for events that change what a name resolves
+  // to as a CALLABLE — so on paper a receiver acquiring an object type could
+  // leave this node, and every ancestor that cached a projection through it,
+  // reporting `scope` forever. Measured, it cannot: every route that gives a
+  // symbol an object type advances that axis anyway. A `type` statement is a
+  // `config` event and an inference write is an `inference` event, both of
+  // which the selector takes unconditionally, and even the narrowest host
+  // `ce.declare('p', 'P')` advances it. The coupling is real but currently
+  // discharged, and `protocol-property-effects.test.ts` pins it directly
+  // ("a node read BEFORE its receiver was typed re-reports afterwards") so that
+  // narrowing the selector fails a test instead of silently freezing a label.
+  let effects: ComputedEffects = mutationEffects(
+    expr,
+    ownEffects(expr.engine, expr.ops, def)
+  );
 
   // A quote/store position is never evaluated by the operator, so nothing
   // beneath it contributes: `effectsOf(Hold(Random()))` is ∅.
@@ -375,7 +406,14 @@ export function shallowApplicationEffects(expr: Expression): ComputedEffects {
     return effects;
   }
 
-  let effects: ComputedEffects = ownEffects(expr.engine, expr.ops, def);
+  // The same per-call-site correction {@link effectsOf} applies, for parity:
+  // this variant answers "what does THIS node do", and a store is part of what
+  // it does. Today's only consumer keys on `random`, so nothing observes the
+  // difference — which is exactly why the two must not be allowed to drift.
+  let effects: ComputedEffects = mutationEffects(
+    expr,
+    ownEffects(expr.engine, expr.ops, def)
+  );
   if (def.holdClass === 'quote' || def.invokesNone) return effects;
 
   const ops = expr.ops;
@@ -423,6 +461,307 @@ function ownEffects(
     stripMissing: (i) => def.stripsMissingAt(i),
   });
   return selected === undefined ? def.effects : selected.effects;
+}
+
+/**
+ * The effects of the AUTHORED accessor bodies a protocol property could
+ * dispatch to — the union, over every registered conformance, of what the
+ * `get`/`set` implementations of `name` do.
+ *
+ * The counterpart, for PROPERTY members, of what `derivedDispatcherEffects()`
+ * (`engine-protocols.ts`) computes for FUNCTION members. It exists separately
+ * because property members get no dispatcher to hang a deriver on
+ * (`protocolsWithMember()` filters them out), and because this module may not
+ * import `engine-protocols.ts` — that module imports `effects-inference.ts`,
+ * which imports this one, so the import would close a dependency cycle.
+ *
+ * The effects are read off the stored literal's ARROW rather than by re-walking
+ * its body, so a `get age(self: Self) { self.n + Random() }` reads
+ * `(unknown) random -> unknown`. That arrow is computed ON DEMAND, not stamped
+ * eagerly: a cold `.type` memo runs `functionLiteralSignatureType()`, which
+ * runs the full `inferFunctionLiteralEffects()` walk — and that walk's
+ * `ProtocolProperty` arm calls back into this function. An accessor whose body
+ * reads or writes a property of the same protocol
+ * (`get age(self: Self) -> integer { self.(A.age) }`) therefore recurses, and
+ * the walk's own `MAX_LITERAL_DEPTH` does not catch it because each re-entry
+ * starts a fresh walk at depth 0. {@link accessorEffectsInFlight} breaks the
+ * cycle: a re-entrant request for a key already being resolved contributes
+ * NOTHING rather than `'any'`. Same rule, and same soundness argument, as the
+ * in-flight case of `makeDispatcherDeriver` (`engine-protocols.ts`) — an
+ * accessor that reaches back through its own property contributes the union
+ * under construction, and each of its other contributions has been unioned in
+ * by the time the cycle closes. `'any'` would be the conservative reading, but
+ * it would poison every computed-getter read on the cycle with unknown effects,
+ * which is exactly the caching damage this design set out to avoid.
+ *
+ * Memoized per `(name, accessor)` on the two counters that can change the
+ * answer, mirroring `makeDispatcherDeriver`: `ce._conformanceVersion` (a new
+ * conformer enters the union) and `ce._callableVersion` (a conformer's body
+ * calls a global that was reassigned). Without it this runs on every
+ * `.effects`/`.isPure` read of a `ProtocolProperty` node — and it is not the
+ * cheap lookup that phrasing suggests: it scans every protocol times every
+ * conformance edge and forces each stored literal's `.type`, which on a cold
+ * memo runs the inference walk described above.
+ *
+ * Every protocol declaring `name` as a property contributes, not just the one
+ * the call site names. The protocol operand was BAKED at canonicalization while
+ * the receiver is re-read at every evaluation, so a set whose baked protocol has
+ * no applicable edge falls back to resolution across every protocol declaring
+ * the property (ruling P41, in `evaluateProtocolPropertyOperator`) — the union
+ * has to cover what that fallback can select.
+ *
+ * A HOST callback contributes the empty set: it carries no signature the engine
+ * can read, and is trusted exactly as a host operator handler is. That includes
+ * the accessors the engine synthesizes for a field-backed property, whose store
+ * is already described by the `state` the call site contributes.
+ *
+ * KNOWN LIMITATION, and the reason a `set` body's own store is still invisible:
+ * the stored literal declares its receiver as `Self`, which reaches the effect
+ * walk typed `unknown`, so `self.n = v` inside a setter is not recognised as a
+ * store and contributes nothing here. What does propagate is everything the
+ * walk can see without resolving `Self` — a `Random()` draw, a write to an
+ * outer binding, a call to an effectful function.
+ */
+export function protocolAccessorEffects(
+  ce: ComputeEngine,
+  name: string,
+  accessor: 'get' | 'set'
+): EffectSet | undefined {
+  const memoKey = `${accessor}\u0000${name}`;
+  if (accessorEffectsInFlight.has(memoKey)) return undefined;
+
+  let perEngine = accessorEffectsMemo.get(ce);
+  if (perEngine === undefined) {
+    perEngine = new Map();
+    accessorEffectsMemo.set(ce, perEngine);
+  }
+  const cached = perEngine.get(memoKey);
+  if (
+    cached !== undefined &&
+    cached.conformance === ce._conformanceVersion &&
+    cached.callable === ce._callableVersion
+  )
+    return cached.value;
+
+  accessorEffectsInFlight.add(memoKey);
+  let union: EffectSet | undefined;
+  try {
+    union = accessorEffectsUnion(
+      ce,
+      `${accessor === 'get' ? '__get__' : '__set__'}${name}`,
+      name
+    );
+  } finally {
+    accessorEffectsInFlight.delete(memoKey);
+  }
+  // A value computed while an outer resolution was in flight saw a partial
+  // union — a cyclic accessor's union is a fixed point and cutting the cycle
+  // truncates it — so it is returned but not stored, and the next read
+  // recomputes against a warm arrow and converges. Same discipline
+  // `BoxedFunction._effectsOf` applies to a provisional read. The consequence
+  // to know: for a SELF-REFERENTIAL accessor the exact set can differ between
+  // the first read and later ones.
+  if (accessorEffectsInFlight.size === 0)
+    perEngine.set(memoKey, {
+      conformance: ce._conformanceVersion,
+      callable: ce._callableVersion,
+      value: union,
+    });
+  return union;
+}
+
+/** Keys (`accessor\0name`) whose union is currently being computed — the
+ * cycle breaker described on {@link protocolAccessorEffects}. Module-level
+ * rather than per-engine because the recursion it guards is a single
+ * synchronous call stack. */
+const accessorEffectsInFlight = new Set<string>();
+
+/** The {@link protocolAccessorEffects} memo, per engine and per
+ * `(accessor, name)`, stamped on the conformance and callable versions. */
+const accessorEffectsMemo = new WeakMap<
+  ComputeEngine,
+  Map<
+    string,
+    { conformance: number; callable: number; value: EffectSet | undefined }
+  >
+>();
+
+/** The registry scan behind {@link protocolAccessorEffects}, with no memo and
+ * no cycle guard of its own. */
+function accessorEffectsUnion(
+  ce: ComputeEngine,
+  key: string,
+  name: string
+): EffectSet | undefined {
+  let union: EffectSet | undefined = undefined;
+  for (const record of Object.values(ce._protocolRegistry)) {
+    const member = record.members[name];
+    if (member === undefined || member.kind === 'function') continue;
+    for (const edge of record.conformances) {
+      // A PENDING edge is not a dispatch candidate, so its implementation is
+      // never invoked and must not widen the union — the same exclusion
+      // `derivedDispatcherEffects()` makes.
+      if (edge.pending) continue;
+      const impl = edge.impl?.[key];
+      if (impl === undefined) continue;
+      if (typeof (impl as { host?: unknown }).host === 'function') continue;
+      union = unionEffectSets(
+        union,
+        signatureEffects((impl as Expression).type.type)
+      );
+      if (union === 'any') return 'any';
+    }
+  }
+  return union;
+}
+
+/**
+ * The per-call-site correction to a definition's declared effect set, for the
+ * two operators that spell more than one operation and therefore cannot state
+ * their effect on a single arrow.
+ *
+ * **`Assign`** spells a binding write (`x = 5`) and a HEAP STORE (`p.age =
+ * 43`), and its declared arrow — `(symbol | expression, any) scope -> any` —
+ * says `scope`, which describes only the first. A store into a field of a
+ * mutable object overwrites a cell that every other reference to that object
+ * sees, so its label is `state` ("Changing a field is an effect",
+ * `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B). The store is recognised by the
+ * same evidence the static walk uses (`Walker.isFieldStore` in
+ * `effects-inference.ts`): a `Field` target whose receiver's static type
+ * resolves to an `object{…}` layout carrying that field name. Every other
+ * assignment — a plain symbol, a destructuring target, a `Field` on a record,
+ * and the property REBINDING sugar `p.name = v` on a value type (which lowers
+ * to `Assign(p, ProtocolProperty(…))`, a symbol target) — keeps `scope`
+ * exactly as before.
+ *
+ * **`ProtocolProperty`** with FOUR operands is the setter invocation
+ * (`ProtocolProperty(P, "name", receiver, value)`); with three it is the
+ * qualified read. A writable property is meaningful only on a mutable object
+ * (Appendix B, "Which types can conform", ruled 2026-08-15), so a set is a
+ * heap store and carries `state` — whatever the selected handler turns out to
+ * do, and whether or not any conformance has registered yet. On top of that
+ * fixed contribution BOTH halves union in what the authored accessor bodies do
+ * ({@link protocolAccessorEffects}), so a computed getter that draws reports
+ * `random` at the call site; a field-backed accessor is a host callback and
+ * adds nothing. The `ProtocolProperty` arm of `effects-inference.ts` decides
+ * the static channel by these same two rules, reading the same two sources, so
+ * the channels cannot drift.
+ */
+function mutationEffects(
+  expr: Expression & FunctionInterface,
+  declared: ComputedEffects
+): ComputedEffects {
+  if (expr.operator === 'ProtocolProperty') {
+    const name = expr.ops[1];
+    const isSet = expr.ops.length >= 4;
+    let effects = isSet ? unionComputedEffects(declared, ['state']) : declared;
+    if (isString(name))
+      effects = unionComputedEffects(
+        effects,
+        protocolAccessorEffects(expr.engine, name.string, isSet ? 'set' : 'get')
+      );
+    return effects;
+  }
+  if (expr.operator !== 'Assign' || !isObjectFieldStore(expr.ops[0]))
+    return declared;
+  // A store is not a binding write, so `scope` is REPLACED rather than joined:
+  // reporting both would claim the statement also wrote a binding.
+  return unionComputedEffects(subtractEffects(declared, ['scope']), ['state']);
+}
+
+/**
+ * Whether `target` is the left-hand side of a store into a mutable object's
+ * own layout field — `Field(receiver, "age")` where the receiver's static type
+ * resolves to an `object{…}` layout declaring `age`.
+ *
+ * A bare-symbol receiver is read off its DEFINITION, never by canonicalizing
+ * it: `Assign` keeps its left operand RAW so that a single-letter target is not
+ * folded into the library constant of that name (`i` would become
+ * `ImaginaryUnit`), so the raw node's own type is `unknown` and decides
+ * nothing. A COMPUTED receiver (`p.inner.age = v`, `xs[i].age = v`) has no
+ * binding to read, so its type comes from canonicalizing it — the evaluator
+ * stores through those targets exactly as it does through a bare one, and
+ * labelling only the bare case would let a nested store pass as a `scope`
+ * write.
+ *
+ * Anything the evidence does not positively establish answers `false`: an
+ * unbound name, a receiver whose canonical form is invalid, a record or tuple
+ * type, a field no layout in the receiver's type declares. Those keep the
+ * `scope` label the `Assign` definition declares, which is the sound
+ * over-approximation.
+ *
+ * `objectLayoutOwnsField()` in `library/collections.ts` resolves the receiver
+ * by the same two rules (bare symbol off its definition, anything else off its
+ * canonical type). The logic is duplicated rather than shared because this
+ * module may not import `library/` — the library imports the boxed-expression
+ * layer, and the repository's budget for dependency cycles is zero.
+ *
+ * The two answer DIFFERENT questions, and they diverge on exactly one input: a
+ * UNION receiver type, which is what an indexed receiver produces (`xs[i]`
+ * types `(Inner) | missing`, the absence marker joined onto the element type).
+ * That function asks "can the PRECEDENCE between a layout store and a protocol
+ * property be settled statically", and a union cannot settle it, so it answers
+ * `false` and its caller DEFERS to evaluation, where the instance's own pinned
+ * layout decides — its doc comment names the union case as a deliberate
+ * decline. Deferring is not available here: a label has to be produced now,
+ * and the store does happen (`xs[i].age = 9` writes the element, on a literal
+ * and on a variable index alike), so the sound direction is to claim `state`.
+ * Keep the receiver-resolution rules in step; the union arm below is the one
+ * place they are meant to differ.
+ *
+ * The LAYOUT field is the only NAME this predicate has to catch. A store
+ * through a COMPUTED property of an object type (`q.age = 5` where `age` is
+ * not in `Q`'s layout but a protocol declares it `readwrite`) has already been
+ * rewritten by canonicalization into `Assign(q, ProtocolProperty("A", "age",
+ * q, 5))` — the receiver's type is settled by then — so it arrives here as a
+ * symbol target with a four-operand `ProtocolProperty` operand, and the arm
+ * above is what labels it. The static walk faces the opposite situation and
+ * needs a property arm of its own: inside an unentered `Function` literal the
+ * receiver's type is not settled, so that rewrite defers and the walk sees the
+ * `Field` form (see `Walker.isFieldStore` in `effects-inference.ts`).
+ */
+function isObjectFieldStore(target: Expression | undefined): boolean {
+  if (!isFunction(target, 'Field')) return false;
+  const name = target.ops[1];
+  if (!isString(name)) return false;
+  const receiver = target.ops[0];
+  if (receiver === undefined) return false;
+  const declares = (t: Type): boolean =>
+    objectLayoutOfType(t)?.elements[name.string] !== undefined;
+  const owns = (t: Type | undefined): boolean => {
+    if (t === undefined) return false;
+    if (declares(t)) return true;
+    // An INDEXED receiver carries the absence marker: `xs[i]` types
+    // `(Inner) | missing`, because an out-of-range index has no element. The
+    // union is not itself an object layout, so the plain test above declines
+    // it — yet the store is still a store: it either writes the element's slot
+    // or faults, and neither outcome is the binding write `scope` describes.
+    // An arm that declares the field is therefore enough.
+    return (
+      typeof t === 'object' && t.kind === 'union' && t.types.some(declares)
+    );
+  };
+
+  const root = sym(receiver);
+  if (root !== undefined) {
+    const def = target.engine.lookupDefinition(root);
+    // The value-definition test is spelled inline rather than through
+    // `isValueDef()` (`boxed-expression/utils.ts`) for the same layering reason
+    // as the note above: importing that module here closes the cycle
+    // `utils.ts → boxed-operator-definition.ts → effects-inference.ts →
+    // effects-of.ts`, which `npx madge --circular` rejects. The predicate is
+    // one property test, and `releasedContent()` below already spells it the
+    // same way.
+    if (def === undefined || !('value' in def)) return false;
+    return owns(def.value.type.type);
+  }
+
+  try {
+    const canonical = receiver.canonical;
+    return canonical.isValid && owns(canonical.type.type);
+  } catch {
+    return false;
+  }
 }
 
 /**

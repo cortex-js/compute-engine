@@ -2960,7 +2960,7 @@ proposed by Appendix B and are not implemented.
 | `protocol-call-ambiguous` | bare call resolves to several applicable protocols |
 | `protocol-property-ambiguous` | property name resolves to several protocols |
 | `property-assignment-target-invalid` | property assignment whose LHS root is not an assignable binding (retired by Appendix B when it lands) |
-| `protocol-requires-object` † | a protocol with settable properties (or a member with a declared `state` effect) conformed to by a non-object type |
+| `protocol-requires-object` | a protocol with settable properties (or a member with a declared `state` effect) conformed to by a non-object type |
 | `immutable-value-assignment` † | property assignment on a record or other immutable value |
 | `object-serialization-unsupported` † | an object position serialized under `toMathJSON({ objects: 'reject' })` — B5's strict opt-in (the default converts instead) |
 | `argument-name-unknown` | a named argument names a parameter the function does not declare (Appendix C) |

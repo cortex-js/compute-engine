@@ -1169,7 +1169,14 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // function's scope frame (see makeLambda), never by re-evaluating
       // the result in the caller's dynamic context — which would break
       // lexical scoping.
-      evaluate = (xs, options) => fn(xs, options);
+      //
+      // A `lazy` definition backed by a literal (a host `ce.declare('f', {
+      // lazy: true, evaluate: ‹Function literal› })`) receives its operands
+      // unevaluated; the literal must then bind them as written rather than
+      // evaluate them itself, or the flag would be silently undone one level
+      // down. Read at call time, so a later `update({ lazy })` is honored.
+      evaluate = (xs, options) =>
+        fn(xs, this.lazy ? { ...options, holdArguments: true } : options);
       Object.defineProperty(evaluate, 'toString', {
         value: () => boxedFn.toString(),
       }); // For debugging/_printScope

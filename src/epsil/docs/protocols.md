@@ -194,28 +194,53 @@ x.sign
 ```
 
 A `get` implementation takes `self` and returns the property's type. A
-`set` implementation takes `self` and the new value, and **returns the
-updated value** — Epsil values are immutable, so assigning to a property is
-sugar for rebinding the variable to what the setter returns:
+`set` implementation takes `self` and the new value, stores it, and
+**returns the receiver**:
 
 ```epsil-live
 protocol Nameable { readwrite name: string }
 
-type Person = tuple<first: string, last: string> is Nameable {
+type Person = object{first: string, last: string} is Nameable {
   get name(self) -> string { "\(self.first) \(self.last)" }
-  set name(self, value: string) -> Person { Person(value, self.last) }
+  set name(self, value: string) -> Person {
+    self.first = value
+    self
+  }
 }
 
-let p = Person("Ada", "Lovelace")
-p.name = "Augusta"        // rebinds p to the Person the setter returned
+let p = Person(first: "Ada", last: "Lovelace")
+p.name = "Augusta"        // stores into p — every reference to it sees the change
 p.name
 // ➔ "Augusta Lovelace"
 ```
 
-Because the assignment rebinds, the left-hand side must be an assignable
-variable: assigning through a `const` binding is the ordinary
-cannot-assign-a-constant error, and a target that is not a variable at
-all (`xs[1].name = …` — there is no binding to rebind) is
+### The mutability gate
+
+`Person` above is an **object** type, and that is required rather than
+incidental: a writable property is meaningful only on a mutable object,
+so a protocol that can modify state — one with at least one `readwrite`
+property, or a function member whose declared effects include `state` —
+can be conformed to only by object types. A protocol with only
+`readonly` properties and no declared `state` can be conformed to by any
+type, as `Signed` is by `number` above.
+
+```epsil
+protocol Identifiable { readwrite id: string }
+type Badge = record{id: string} is Identifiable
+// ➔ protocol-requires-object: the `Identifiable` protocol has settable
+//   properties. `Badge` is a record, and records are immutable; declare
+//   `Badge` as an object type to conform.
+```
+
+A **bare** requirement never gates — its effects are derived from
+whatever conformers exist, so a record may conform to a bare-function
+protocol with a pure implementation — and an explicit `pure` member never
+gates either, since the empty effect set is not `state`.
+
+Assigning to a property currently goes through the variable it is read
+from, so the left-hand side must be an assignable variable: assigning
+through a `const` binding is the ordinary cannot-assign-a-constant error,
+and a target that is not a variable at all (`xs[1].name = …`) is
 `property-assignment-target-invalid`. Providing a `set` for a `readonly`
 property is `protocol-property-readonly-set`.
 
@@ -291,6 +316,8 @@ grouped by when they fire:
   `protocol-target-unknown`, `protocol-conformance-overlap`,
   `protocol-implementation-split` (an implementation block on a
   multi-protocol `is A & B` — provide one block per protocol),
+  `protocol-requires-object` (the mutability gate: a protocol that can
+  modify state, conformed to by a non-object type),
   `protocol-implementation-pending` (a warning).
 - **Implementing**: `protocol-implementation-missing`,
   `protocol-implementation-duplicate`, `protocol-member-unknown`,

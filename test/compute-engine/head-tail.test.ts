@@ -40,9 +40,9 @@ describe('Head/Tail on a symbol operand', () => {
       'b',
     ]);
     // Parse route (held operand arrives unbound — must still resolve)
-    expect(ce.parse('\\operatorname{Head}(\\mathrm{hdBound})').evaluate().json).toBe(
-      'Multiply'
-    );
+    expect(
+      ce.parse('\\operatorname{Head}(\\mathrm{hdBound})').evaluate().json
+    ).toBe('Multiply');
   });
 
   test('a user function body Head(e) is not frozen at definition time', () => {
@@ -53,5 +53,32 @@ describe('Head/Tail on a symbol operand', () => {
     expect(run('f(y)')).toBe('Symbol');
     expect(run('let x = y + 1; Head(x)')).toBe('Add');
     expect(run('Tail(x)')).toEqual(['Sequence', 'y', 1]);
+  });
+
+  test('the binding is looked up, not evaluated', () => {
+    const ce2 = new ComputeEngine();
+    const run = (src: string) => executeEpsil(ce2, src).value?.json;
+    // `x` is bound to the EXPRESSION `y + 1`; giving `y` a value afterwards
+    // does not change what `x` is bound to, so its head is still `Add`
+    // (evaluating would answer `Integer`).
+    expect(run('let x = y + 1; y = 3; Head(x)')).toBe('Add');
+    expect(run('Tail(x)')).toEqual(['Sequence', 'y', 1]);
+    // A store evaluates its right-hand side, so `z` is bound to `4`.
+    expect(run('let z = x; Head(z)')).toBe('Integer');
+    // Constants and operator names are not chased.
+    expect(run('Head(Pi)')).toBe('Symbol');
+    expect(run('Head(Sin)')).toBe('Symbol');
+    // A self-referential binding reads as unbound.
+    expect(run('let w = w + 1; Head(w)')).toBe('Symbol');
+  });
+
+  test('a symbol-to-symbol cycle stops where it closes', () => {
+    const ce2 = new ComputeEngine();
+    // Bindings created on the scope directly (no evaluate-collapsing setter):
+    // `u` is bound to the symbol `v`, and `v` to the symbol `u`.
+    ce2.declare('cu', { value: ce2.symbol('cv'), inferred: true });
+    ce2.declare('cv', { value: ce2.symbol('cu'), inferred: true });
+    expect(ce2.box(['Head', 'cu']).evaluate().json).toBe('Symbol');
+    expect(ce2.box(['Tail', 'cu']).evaluate().json).toBe('Nothing');
   });
 });

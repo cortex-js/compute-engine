@@ -1625,6 +1625,23 @@ function isQualifiedProtocolMember(e: Expression): boolean {
 }
 
 /**
+ * Options accepted by {@link apply} and the lambda {@link makeLambda} builds.
+ *
+ * `holdArguments` is how a `hold` function (an Epsil `hold f(e) = …`, i.e. a
+ * user-defined function whose operator definition is `lazy`) reaches its
+ * body: the arguments are bound to the parameters AS WRITTEN — canonical and
+ * bound in the caller's scope, but not evaluated — instead of being evaluated
+ * first. Reading such a parameter in the body then evaluates the argument
+ * expression there (call-by-name); a structural operator such as `Head` sees
+ * the expression itself. The flag is set by the multi-clause selector for a
+ * `hold` definition (`selectAndApply`, multi-clause.ts) and by nothing else:
+ * an ordinary application always evaluates its arguments first.
+ */
+export type ApplyOptions = Partial<EvaluateOptions> & {
+  holdArguments?: boolean;
+};
+
+/**
  * Apply arguments to an expression which is either:
  * - a `["Function"]` expression
  * - the symbol for a function, e.g. `Sin`.
@@ -1632,7 +1649,7 @@ function isQualifiedProtocolMember(e: Expression): boolean {
 export function apply(
   fn: Expression,
   args: ReadonlyArray<Expression>,
-  options?: Partial<EvaluateOptions>,
+  options?: ApplyOptions,
   errorPolicy: ErrorArgPolicy = 'bubble'
 ): Expression {
   // Rung 2: applying something that IS an error bubbles it (`err(x)`), as does
@@ -2142,11 +2159,11 @@ function wrapRecursion(
   ce: ComputeEngine,
   fn: (
     params: ReadonlyArray<Expression>,
-    options?: Partial<EvaluateOptions>
+    options?: ApplyOptions
   ) => Expression | undefined
 ): (
   params: ReadonlyArray<Expression>,
-  options?: Partial<EvaluateOptions>
+  options?: ApplyOptions
 ) => Expression | undefined {
   return (params, options) => {
     ce._enterRecursion();
@@ -2158,13 +2175,69 @@ function wrapRecursion(
   };
 }
 
+/**
+ * Substitute, in a HELD argument, every symbol bound in the CALLER's frames
+ * that the callee cannot reach: a symbol whose live binding is found on the
+ * current (caller's) scope chain but not on `captured` — the callee's
+ * defining scope chain, which is what its call frame will chain to. The
+ * substituted expression is that binding's value: for a hold parameter of the
+ * calling function, the expression IT was handed (inlined recursively, so a
+ * chain of forwarding hold functions collapses to the original argument); for
+ * a `let` local, its stored value. A binding without a value (a valueless
+ * declaration) is left as the symbol.
+ *
+ * Symbols shadowed by a binder inside the argument (`Sum(x^2, x, 1, n)`'s
+ * `x`) are never touched — `rewriteWithBinders` reports them — and a symbol
+ * whose binding is reachable from `captured` stays symbolic: that is the
+ * ordinary case (`hold f(e) = e; f(a + 1)` keeps `a + 1`), and it is why this
+ * is a substitution of FRAME-LOCALS only, not an evaluation. The recursion
+ * is bounded by a visited set on the definitions already inlined, so a
+ * frame-local whose value mentions itself cannot loop.
+ */
+function inlineFrameLocals(
+  ce: ComputeEngine,
+  expr: Expression,
+  captured: Scope | null | undefined,
+  visited: Set<BoxedValueDefinition> = new Set()
+): Expression {
+  const reachableFrom = (
+    start: Scope | null | undefined,
+    name: string,
+    own: BoxedValueDefinition
+  ): BoxedValueDefinition | undefined => {
+    for (let s = start; s; s = s.parent) {
+      const found = s.bindings.get(name);
+      if (
+        found !== undefined &&
+        'value' in found &&
+        sameBindingDef(found.value, own)
+      )
+        return found.value;
+    }
+    return undefined;
+  };
+  return rewriteWithBinders(expr, (sym, shadowed) => {
+    const name = sym.symbol;
+    if (shadowed?.has(name)) return sym;
+    const own = sym.valueDefinition;
+    if (own === undefined) return sym;
+    if (reachableFrom(captured, name, own) !== undefined) return sym;
+    const live = reachableFrom(ce.context.lexicalScope, name, own);
+    if (live === undefined || visited.has(live)) return sym;
+    const value = live.value;
+    if (value === undefined) return sym;
+    visited.add(live);
+    return inlineFrameLocals(ce, value, captured, visited);
+  });
+}
+
 function makeLambda(
   expr: Expression,
   errorPolicy: ErrorArgPolicy = 'bubble'
 ):
   | ((
       params: ReadonlyArray<Expression>,
-      options?: Partial<EvaluateOptions>
+      options?: ApplyOptions
     ) => Expression | undefined)
   | undefined {
   const ce = expr.engine;
@@ -2342,8 +2415,36 @@ function makeLambda(
 
   const invoke = (
     args: ReadonlyArray<Expression>,
-    options?: Partial<EvaluateOptions>
+    options?: ApplyOptions
   ): Expression | undefined => {
+    // The scope the literal was defined in — the parent of every call frame
+    // (step 5), and the chain a held argument's symbols must be resolvable
+    // through (`inlineFrameLocals`).
+    const capturedScope = bodyFn.localScope!.parent ?? ce.context.lexicalScope;
+
+    // A `hold` application binds each argument as WRITTEN. `.canonical` is
+    // value-safe — it binds structure (a held operand reaching here from the
+    // box or parse route is still unbound) but does not substitute assigned
+    // symbol values — so the parameter ends up bound to the caller's
+    // expression, and reading it in the body evaluates it there.
+    //
+    // One class of symbol IS substituted: a CALLER-FRAME binding — a hold
+    // parameter of the calling function, or a `let` local of its body — that
+    // the callee could not otherwise resolve, because a call frame chains to
+    // the callee's DEFINING scope, never to the caller's (step 5 below). With
+    // `hold p1(e) = Head(e); hold p3(x) = p1(x)`, the argument `x` names
+    // p3's frame binding; left as the symbol, p1 would read it in a chain
+    // that has no `x` (`Head(e)` → `Symbol`, and evaluation only half
+    // resolves). Inlining that binding's value — the expression p3 itself
+    // was handed — makes forwarding a held argument mean the same expression,
+    // which is what call-by-name promises. Bindings the callee CAN reach
+    // through its own chain (a top-level `let a`, or a frame binding of an
+    // enclosing function the callee was defined inside) stay symbolic, so
+    // `hold f(e) = e; f(a + 1)` still binds `e` to `a + 1`, not to `4`.
+    const argValue = (a: Expression): Expression =>
+      options?.holdArguments
+        ? inlineFrameLocals(ce, a.canonical, capturedScope)
+        : a.evaluate();
     //
     // 1/ If there are more arguments than expected, exit
     //
@@ -2434,7 +2535,7 @@ function makeLambda(
       }
 
       // Evaluate body with known args in a fresh scope
-      let evaluatedKnownArgs = args.map((a) => a.evaluate());
+      let evaluatedKnownArgs = args.map(argValue);
 
       // An argument that only became an error when EVALUATED (`f(g(1))` with
       // `g(1)` failing) bubbles like a literal one — see step 2.
@@ -2578,7 +2679,7 @@ function makeLambda(
     //
     // 4/ Evaluate arguments in the calling scope before switching context
     //
-    let evaluatedArgs = args.map((a) => a.evaluate());
+    let evaluatedArgs = args.map(argValue);
 
     // An argument that only became an error when EVALUATED (`f(g(1))` with
     // `g(1)` failing) bubbles like a literal one — see step 2.
@@ -2616,9 +2717,10 @@ function makeLambda(
     //    bodyFn.localScope.parent is the scope where the Function was defined.
     //    This gives true lexical scoping: the fresh scope chain is
     //    [fresh scope (params)] -> [defining scope] -> ...
-    //    The calling scope is never in the chain.
+    //    The calling scope is never in the chain. (`capturedScope` is
+    //    computed at the top of `invoke`: the hold-argument inlining above
+    //    needs it before any argument is bound.)
     //
-    const capturedScope = bodyFn.localScope!.parent ?? ce.context.lexicalScope;
     const freshScope: Scope = {
       parent: capturedScope,
       bindings: new Map(),
@@ -2787,7 +2889,7 @@ export function applicable(
   fn: Expression
 ): (
   xs: ReadonlyArray<Expression>,
-  options?: Partial<EvaluateOptions>
+  options?: ApplyOptions
 ) => Expression | undefined {
   return (
     makeLambda(fn) ??

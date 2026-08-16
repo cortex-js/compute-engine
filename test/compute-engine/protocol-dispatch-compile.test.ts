@@ -345,13 +345,34 @@ type node is Nested {
 });
 
 describe('properties', () => {
+  // A READONLY property on a value type: the B1 mutability gate
+  // (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Which types can conform")
+  // admits any type to a protocol with no settable member, so the compiled
+  // GET tier is exercised on the erased tuple representation it targets.
   const PERSON = `protocol Nameable {
-  readwrite name: string
+  readonly name: string
 }
 type Person = tuple<n: string, age: integer>
 type Person is Nameable {
   get name(self: Self) -> string { self.n }
-  set name(self: Self, v: string) -> Person { Person(v, self.age) }
+}`;
+
+  // A SETTABLE property, and therefore — by the same gate — an OBJECT
+  // receiver. Objects have no compiled representation yet (Phase 4 of
+  // `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`), so every
+  // compiled SET below declines. The SET lowering in `base-compiler.ts` is
+  // reachable again once objects compile; the interpreted behaviour it
+  // mirrors is pinned in `protocol-properties.test.ts`.
+  const CELL = `protocol Renameable {
+  readwrite name: string
+}
+type Cell = object{n: string, age: integer}
+type Cell is Renameable {
+  get name(self: Self) -> string { self.n }
+  set name(self: Self, v: string) -> Self {
+    self.n = v
+    self
+  }
 }`;
 
   test('a property GET on a decided receiver compiles to a direct getter call', () => {
@@ -368,52 +389,55 @@ function readName(p: Person) -> string { p.name }`);
     ).toBe('"alice"');
   });
 
-  test('a property SET (`p.name = v` rebinding sugar) compiles through the setter', () => {
-    const ce = engineFor(`${PERSON}
-function rename(p: Person, v: string) -> Person {
+  test('a property SET declines: its receiver is an object, which has no compiled form yet', () => {
+    // The interpreter performs the write (`protocol-properties.test.ts`); the
+    // compiled tier fails closed, which is the D6 posture for a receiver whose
+    // representation it cannot emit.
+    const ce = engineFor(`${CELL}
+function rename(p: Cell, v: string) -> Cell {
   p.name = v
   p
 }`);
-    const result = compile(ce.box('rename'));
-    expect(result.success).toBe(true);
-    // The reference analysis mirrors the SET intercept: nothing unsupported.
-    expect(result.unsupported).toEqual([]);
-    // The erased Person is a plain JS tuple-array.
-    expect(result.run?.()(['alice', 30], 'bob')).toEqual(['bob', 30]);
+    expect(compile(ce.box('rename')).success).toBe(false);
     expect(
-      ce
-        .box(['rename', ['Person', { str: 'alice' }, 30], { str: 'bob' }] as any)
-        .evaluate()
-        .toString()
-    ).toBe('Person("bob", 30)');
+      String(
+        executeEpsil(ce, 'rename(Cell(n: "alice", age: 30), "bob")').value
+      )
+    ).toBe('Cell(n: "bob", age: 30)');
   });
 
-  test('a SET on a TYPED BLOCK LOCAL compiles too', () => {
-    const ce = engineFor(`${PERSON}
-function relabel(v: string) -> Person {
-  let q: Person = Person("seed", 1)
+  test('a SET on a TYPED BLOCK LOCAL declines for the same reason', () => {
+    const ce = engineFor(`${CELL}
+function relabel(v: string) -> Cell {
+  let q: Cell = Cell(n: "seed", age: 1)
   q.name = v
   q
 }`);
-    const result = compile(ce.box('relabel'));
-    expect(result.success).toBe(true);
-    expect(result.run?.()('bob')).toEqual(['bob', 1]);
+    expect(compile(ce.box('relabel')).success).toBe(false);
     expect(
       ce.box(['relabel', { str: 'bob' }] as any).evaluate().toString()
-    ).toBe('Person("bob", 1)');
+    ).toBe('Cell(n: "bob", age: 1)');
   });
 
-  test('a SET on an UNDECIDED receiver fails closed (P46: it could be a dictionary at runtime)', () => {
+  test('an UNDECIDED receiver fails closed (P46: it could be a dictionary at runtime)', () => {
     // A guard chain over the conformance targets would throw on a record
-    // value whose `name` is an ordinary key the interpreter would update.
-    // SET is static-tier only, like bare-`Field` GET.
+    // value whose `name` is an ordinary key the interpreter would update, so
+    // property access is STATIC-TIER ONLY: the receiver's type has to be
+    // decided at compile time.
+    //
+    // Pinned on a READONLY property of a value type, because that is the only
+    // property shape where the two halves still differ. The decided receiver
+    // must COMPILE — without that half the test would pass with the
+    // undecided-receiver logic deleted, since a `readwrite` property's
+    // receiver is now necessarily an object (the B1 gate) and every compiled
+    // property SET declines for that reason alone. The SET counterpart of this
+    // pin is therefore uncovered until objects compile; see the B1 entry in
+    // `ROADMAP.md`, which schedules the compiler re-point as Phase 4 work.
     const ce = engineFor(`${PERSON}
-function setIt(p, v) -> unknown {
-  p.name = v
-  p
-}`);
-    const result = compile(ce.box('setIt'));
-    expect(result.success).toBe(false);
+function readName(p: Person) -> string { p.name }
+function readAny(p) -> unknown { p.name }`);
+    expect(compile(ce.box('readName')).success).toBe(true);
+    expect(compile(ce.box('readAny')).success).toBe(false);
   });
 
   test('a readonly property SET fails closed, not silently', () => {
@@ -436,30 +460,41 @@ function retag(p: Person, v: string) -> Person {
 
   test('a typed local declared in a LOOP BODY resolves the static tier', () => {
     // A loop body rides `compileLoopBody`, not `compileBlock` — the
-    // declared-type merge (`statementListDeclaredVarTypes`) has to run on
-    // that path too, or the SET below fails closed. Also pins the
-    // interpreter agreeing (its deferred write used to refuse `10 * i`
-    // against the RAW RHS's static type and silently drop the write).
+    // declared-type merge (`statementListDeclaredVarTypes`) has to run on that
+    // path too, or the dispatch below fails closed. The member is a FUNCTION
+    // rather than a settable property because the B1 mutability gate would
+    // make a `readwrite` one object-only, and objects do not compile yet; the
+    // mechanism under test — reading a loop-body local's DECLARED type — is
+    // the same either way. The interpreted `readwrite` counterpart, whose
+    // deferred write used to refuse `10 * i` against the RAW RHS's static type
+    // and silently drop it, is pinned in `protocol-properties.test.ts`.
+    //
+    // What this conversion does NOT preserve: the compiled SET lowering the
+    // original guarded is now uncovered on every compiled path, because the
+    // gate leaves object types as its only legal receivers and those have no
+    // compiled representation. The B1 entry in `ROADMAP.md` records that
+    // under "One consequence has NO migration" and schedules the re-point
+    // with Phase 4.
     const ce = engineFor(`protocol Scored {
-  readwrite score: integer
+  function score(self: Self) -> integer
 }
 type Person = tuple<n: string, age: integer>
 type Person is Scored {
-  get score(self: Self) -> integer { self.age }
-  set score(self: Self, v: integer) -> Self { Person(self.n, v) }
+  function score(self: Self) -> integer { self.age }
 }
 function tally() -> integer {
   let acc = 0
   for i in 1..3 {
-    let q: Person = Person("bob", 1)
-    q.score = 10 * i
-    acc = acc + q.score
+    let q: Person = Person("bob", 10 * i)
+    acc = acc + score(q)
   }
   acc
 }`);
     const result = compile(ce.box('tally'));
     expect(result.success).toBe(true);
     expect(result.unsupported ?? []).toEqual([]);
+    // Statically resolved: no runtime guard chain over the conformers.
+    expect(result.code ?? '').not.toContain('typeof');
     expect(result.run?.()()).toBe(60);
     expect(ce.box(['tally'] as any).evaluate().toString()).toBe('60');
   });

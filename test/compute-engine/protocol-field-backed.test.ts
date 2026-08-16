@@ -184,13 +184,28 @@ let u = U(id: "a", tag: "b")
     expect(value(source, new ComputeEngine())).toBe('("a", "b")');
   });
 
-  test('a RECORD type gets no field backing', () => {
-    // Appendix B states the rule for OBJECT types. A record's fields are not
-    // slots a setter could write, so nothing is synthesized for them and the
-    // conformance stays pending. (The mutability gate B1, which would refuse
-    // this conformance outright, is separate work.)
+  test('a RECORD type is refused outright by the mutability gate', () => {
+    // Appendix B states the field-backing rule for OBJECT types, and the B1
+    // mutability gate is why no other kind of type ever gets that far: a
+    // record's fields are not slots a setter could write, so a protocol with a
+    // `readwrite` property cannot be conformed to by one at all. This is the
+    // Badge example from Appendix B, "Which types can conform", verbatim.
     expect(
-      diagnosticCodes(`protocol Nameable { readwrite name: string }
+      result(`protocol Identifiable { readwrite id: string }
+type Badge = record{id: string} is Identifiable`)
+    ).toBe(
+      'Error(ErrorCode("protocol-requires-object", "the `Identifiable` ' +
+        'protocol has settable properties. `Badge` is a record, and records ' +
+        'are immutable; declare `Badge` as an object type to conform."))'
+    );
+  });
+
+  test('a READONLY-only protocol still gets no field backing on a record', () => {
+    // With nothing settable the gate does not fire, so the original question
+    // is still asked — and answered the same way: a record's fields are not
+    // slots, so nothing is synthesized and the conformance stays pending.
+    expect(
+      diagnosticCodes(`protocol Nameable { readonly name: string }
 type Badge = record{name: string} is Nameable`)
     ).toEqual(['protocol-implementation-pending']);
   });

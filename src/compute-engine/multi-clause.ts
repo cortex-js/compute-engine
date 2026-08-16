@@ -102,6 +102,17 @@ export interface FunctionClause {
    * routes freely replaceable. Consulted only when a later clause would
    * REPLACE this one — see `checkSameUnitClauseRedefinition`. */
   origin?: DeclarationOrigin;
+  /** `true` for the clause of a **hold** function (Epsil `hold f(e) = …`):
+   * the arguments are bound to the parameters as WRITTEN — canonical, bound
+   * in the caller's scope, unevaluated — and evaluate where the body reads
+   * them (call-by-name). This is the user-function spelling of an operator
+   * definition's `lazy` flag: the installed definition is `lazy`, and the
+   * selector applies the literal with `holdArguments`. A hold function is
+   * SINGLE-CLAUSE — a literal-parameter clause admits on evaluated values,
+   * which a hold definition never has — so it always lives in clause storage
+   * (never the plain `_lambdaLiteral` representation) and refuses a second
+   * clause, hold or not. */
+  hold?: boolean;
 }
 
 /** Symbol-level effect-row state (D5): `explicit` is the author-established
@@ -147,7 +158,23 @@ export class ClauseDefinitionError extends Error {
     readonly code:
       | 'invalid-clause-definition'
       | 'incompatible-clause-effects'
-      | 'generic-clause-unsupported',
+      | 'generic-clause-unsupported'
+      // A `hold` definition (Epsil `hold f(e) = …`) is single-clause; a
+      // second clause — hold or ordinary — at a DIFFERENT parameter domain
+      // is refused (same domain is a redefinition and replaces).
+      | 'hold-single-clause'
+      // A `hold` definition where the mechanism has no meaning: a declared
+      // type's constructor (applied to values), or a GENERIC literal (a
+      // generic definition installs through the plain single-clause path,
+      // which a hold definition cannot take — see the `!hold` gate on the
+      // single-clause shortcut in `defineFunctionClause`).
+      | 'hold-unsupported'
+      // A `hold` definition with a value-typed (literal) parameter — `hold
+      // f(0) = …` — which would select the clause by an argument's VALUE that
+      // a hold function never has. The parser diagnoses the Epsil spelling
+      // (`hold-literal-parameter`); this is the same rule on the MathJSON /
+      // host route, where the attribute is written directly.
+      | 'hold-literal-parameter',
     message: string
   ) {
     super(message);
@@ -250,6 +277,19 @@ export function isGenericClauseLiteral(literal: Expression): boolean {
 function hasLiteralPatternParam(literal: Expression): boolean {
   return functionLiteralParameters(literal).some((p) =>
     isLiteralParamName(p.name)
+  );
+}
+
+/** True when a clause has a VALUE-typed parameter — one whose declared type
+ * has a value component (a literal type such as `0`, or a bounded numeric),
+ * so admission depends on the argument's VALUE. Read from the TYPE, not the
+ * name: on the MathJSON / host route a value-typed parameter is written as an
+ * ordinary annotated one (`["Typed", "z", {str: "0"}]`) and carries no
+ * generated `literalParam_` name. */
+function hasValueParam(literal: Expression): boolean {
+  return (
+    clauseSignatureOf(literal).args?.some((a) => hasValueComponent(a.type)) ??
+    false
   );
 }
 
@@ -425,7 +465,8 @@ export function defineFunctionClause(
   ce: IComputeEngine,
   id: string,
   literal: Expression,
-  origin?: DeclarationOrigin
+  origin?: DeclarationOrigin,
+  hold = false
 ): void {
   if (!isFunction(literal, 'Function') || !literal.isCanonical)
     throw new ClauseDefinitionError(
@@ -445,6 +486,13 @@ export function defineFunctionClause(
   // so it falls through to normal clause accumulation below.
   const sameScopeType = ce._typeRegistry[id];
   if (sameScopeType?.def !== undefined && sameScopeType.alias !== true) {
+    // A constructor is applied to VALUES (its arguments become the fields of
+    // the instance), so it has no held form.
+    if (hold)
+      throw new ClauseDefinitionError(
+        'hold-unsupported',
+        `"${id}" is the constructor of a declared type; a type's constructor cannot be a hold function`
+      );
     ce.assign(id, literal);
     return;
   }
@@ -510,6 +558,22 @@ export function defineFunctionClause(
   // hands the literal to `ce.assign` unchecked, and erasure has already dropped
   // the value annotation at a quantified marker position — the value guard
   // would silently vanish.
+  // A hold definition is refused where hold has no meaning or no
+  // implementation: a value-typed (literal) parameter admits on an evaluated
+  // VALUE, which a hold function never has; and a generic literal installs
+  // only through the plain single-clause path (the G2 rule below), which a
+  // hold definition cannot take (see the `!hold` gate on that shortcut).
+  if (hold && (hasLiteralPatternParam(literal) || hasValueParam(literal)))
+    throw new ClauseDefinitionError(
+      'hold-literal-parameter',
+      `"${id}" is a hold function; a hold function cannot have a literal parameter (it never evaluates its arguments)`
+    );
+  if (hold && isGenericClauseLiteral(literal))
+    throw new ClauseDefinitionError(
+      'hold-unsupported',
+      `"${id}" is a generic function; a generic function cannot be a hold function`
+    );
+
   if (isGenericClauseLiteral(literal) && hasLiteralPatternParam(literal))
     throw new ClauseDefinitionError(
       'generic-clause-unsupported',
@@ -564,6 +628,7 @@ export function defineFunctionClause(
     signature: clauseSignatureOf(literal),
     literal,
     ...(origin !== undefined ? { origin } : {}),
+    ...(hold ? { hold: true } : {}),
   };
   if (declared !== undefined)
     assertClauseFitsDeclared(id, incoming.signature, declared, bareParams);
@@ -623,6 +688,16 @@ export function defineFunctionClause(
     clauses[at] = incoming;
   } else clauses.push(incoming);
 
+  // A hold function is single-clause (see `FunctionClause.hold`): a hold
+  // clause cannot join an existing clause set, and an ordinary clause cannot
+  // join a hold definition. Replacing the lone clause in place — the same
+  // parameter domain — is a redefinition and passes, in either direction.
+  if (clauses.length > 1 && clauses.some((c) => c.hold === true))
+    throw new ClauseDefinitionError(
+      'hold-single-clause',
+      `A hold function is single-clause: "${id}" cannot combine a hold definition with another clause`
+    );
+
   // §4.2: a SINGLE clause keeps today's single-function representation —
   // no behavior change until a second clause exists. Assignment installs
   // the ordinary user-function definition (operator slot, `_lambdaLiteral`),
@@ -636,7 +711,15 @@ export function defineFunctionClause(
   // storage right away and a call outside its domain is the D7
   // `no-matching-clause` error. A clause covering the declared domain
   // exactly is the ordinary declare-then-assign shape and keeps it.
+  //
+  // A HOLD clause never takes the shortcut: the plain representation applies
+  // the literal to EVALUATED arguments (its operator definition is not
+  // `lazy`), and the declare-then-assign spelling stores the literal as a
+  // VALUE, where no `lazy` flag exists at all. Clause storage is the one
+  // representation whose dispatch (`selectAndApply`) can hand the literal its
+  // arguments unevaluated.
   if (
+    !hold &&
     clauses.length === 1 &&
     multiClauseState(existing) === undefined &&
     (declared === undefined ||
@@ -903,14 +986,21 @@ function installClauseList(
     (arms.length === 1 ? arms[0] : { kind: 'intersection', types: arms });
 
   const frozen = [...clauses];
+  // A hold definition is `lazy` — its operands reach `evaluate` unevaluated
+  // (and, from the box or parse route, unbound) — and single-clause, so the
+  // whole set is hold or none of it is.
+  const hold = clauses.some((c) => c.hold === true);
   const def: OperatorDefinition = {
-    description: `Multi-clause function (${clauses.length} clause${clauses.length === 1 ? '' : 's'})`,
+    description: hold
+      ? 'Hold function (arguments are bound unevaluated)'
+      : `Multi-clause function (${clauses.length} clause${clauses.length === 1 ? '' : 's'})`,
     ...(row !== undefined && !isPureEffectSet(row)
       ? { effects: row }
       : { pure: true }),
-    lazy: false,
+    lazy: hold,
     signature,
-    evaluate: (ops, options) => selectAndApply(ce, id, frozen, ops, options),
+    evaluate: (ops, options) =>
+      selectAndApply(ce, id, frozen, ops, options, hold),
   };
 
   if (existing !== undefined) updateDef(ce, id, existing, def);
@@ -953,8 +1043,37 @@ function selectAndApply(
   id: string,
   clauses: ReadonlyArray<FunctionClause>,
   ops: ReadonlyArray<Expression>,
-  options: { numericApproximation?: boolean }
+  options: { numericApproximation?: boolean },
+  hold = false
 ): Expression | undefined {
+  // A hold definition is `lazy`, so its operands arrive as written — and from
+  // the box or parse route still UNBOUND. `.canonical` binds their structure
+  // (a value-safe step: no assigned symbol value is substituted) so that
+  // admission reads real types and the literal binds real expressions.
+  if (hold) {
+    ops = ops.map((op) => op.canonical);
+    // A hold function is single-clause, so there is nothing to SELECT — only
+    // an arity/type check against its one signature. `triStateSelect`'s
+    // tri-state verdict is not used here on purpose: it keeps a call INERT
+    // ("blocked") when an operand's type is `unknown`, which is the right
+    // caution when several clauses compete on evaluated values, but a hold
+    // function's operands are unevaluated expressions — a bare symbol, a
+    // symbolic term — whose type is very often `unknown`, and inertness would
+    // defeat the one thing the function exists to do. Only a REFUTED operand
+    // (wrong arity, or a type provably outside the parameter's) declines;
+    // an undecidable one is applied and checked, in strict mode, by the
+    // literal's own argument validation.
+    if (armAdmission(ops, clauses[0].signature) !== 'refute')
+      return apply(clauses[0].literal, ops, {
+        numericApproximation: options.numericApproximation,
+        holdArguments: true,
+      });
+    return ce._fn('Error', [
+      ce.string('no-matching-clause'),
+      ce.function(id, [...ops], { form: 'raw' }),
+    ]);
+  }
+
   const verdict = triStateSelect(
     ops,
     clauses.map((c) => c.signature)

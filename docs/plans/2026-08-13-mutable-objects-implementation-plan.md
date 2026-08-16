@@ -337,8 +337,57 @@ Spec: "Objects and protocols", "Which types can conform".
   `state` member ⇒ object-only conformance
   (`protocol-requires-object`); bare requirements never gate; records
   may conform purely to bare-function protocols.
+  > **STATUS 2026-08-16: SHIPPED** (work package 2C, commit 1). One
+  > predicate — `mutabilityGateProblem()`, over the memoized
+  > `mutabilityGate()`
+  > — in `src/compute-engine/engine-protocols.ts`, consulted on every
+  > registration route: `declareConformance()` covers the Epsil statement
+  > and MathJSON box routes (inside the per-protocol pre-pass, so a
+  > multi-protocol `is A & B` with one gating arm registers nothing),
+  > `declareProtocolImplementationImpl()` covers the host API (which
+  > throws where the others return an error value), and
+  > `settleFieldBacking()` covers protocol REPLACEMENT. A replacement is
+  > never rejected and never removes an edge — conformance is monotone —
+  > so a value-type edge the replacement made inadmissible reports as
+  > uncovered and goes PENDING, which also stops it inheriting a
+  > supertype's implementation; replacing the protocol back re-fulfils it.
+  > Whether a function member gates is read from `signatureEffects()`:
+  > `undefined` is exactly "bare" and `[]` is exactly `pure`, the same
+  > discipline the effect ceiling in `signatureMismatch()` uses. A
+  > CONDITIONAL conformance is judged on its head (`Box<T>` over an
+  > `object{…}` body conforms; `list<T>` does not). Pinned by
+  > `test/compute-engine/protocol-mutability-gate.test.ts`.
+  >
+  > NOT in this commit: retiring the rebinding sugar, which is what the
+  > gate makes possible but does not itself perform — see the B1 entry in
+  > `ROADMAP.md` for what remains.
 - `readwrite` requirement implies `state` on its setter (no spelled
   label); implicit setters carry `state` by construction.
+  > **STATUS 2026-08-16: SHIPPED.** The label is applied per call site,
+  > not spelled on an arrow: `ProtocolProperty` with FOUR operands is a
+  > setter invocation and contributes `state` on both channels — the
+  > `ProtocolProperty` arm of `effects-inference.ts` (inference) and
+  > `mutationEffects()` in `effects-of.ts` (runtime). Three operands are
+  > a read and contribute nothing. The same hook closes the companion
+  > `ROADMAP.md` item "A field store's EXPRESSION-level effect is still
+  > `scope`, not `state`": an `Assign` whose target is a `Field` whose
+  > receiver's static type is an `object{…}` layout declaring that field
+  > now reports `state` in place of `scope`, nested and indexed
+  > receivers included (`o.child.age = 9`, `xs[i].age = 9`). Whether the
+  > SET is a store is read from the shape of the call, not from the
+  > registry: an inference walk runs before conformances register, so a
+  > registry-derived answer would report a genuine store pure. The one
+  > case that over-labels — the value-type rebinding sugar, which
+  > rebinds and mutates nothing — is unreachable now that B1 refuses a
+  > value type conforming to a settable property. On top of the fixed
+  > contribution both halves union in what the AUTHORED accessor bodies
+  > do, read off the stored literal's stamped arrow
+  > (`protocolAccessorEffects`, `effects-of.ts`), so a computed getter
+  > that draws makes the qualified read `random`. Pinned by
+  > `test/compute-engine/protocol-property-effects.test.ts`. RESIDUAL: a
+  > setter body's own `self.n = v` store is still invisible, because the
+  > stored literal declares its receiver as `Self` and the effect walk
+  > sees that parameter typed `unknown`; tracked in `ROADMAP.md`.
 - Protocol replacement: layouts never migrate; replacement re-runs
   conformance against the fixed layout — and a cross-batch redefinition
   of the object TYPE must re-run conformance for its edges the same

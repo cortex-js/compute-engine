@@ -700,11 +700,16 @@ describe('DeclareConformance', () => {
       readonly: { hash: 'string' },
       readwrite: { name: 'string' },
     });
+    // An OBJECT target: `Named` has a `readwrite` property, and the B1
+    // mutability gate admits only object types to such a protocol. Its stored
+    // field is `v`, not `hash`/`name`, so no requirement is field-backed and
+    // the block below is what clears `pending`.
+    ce.declareType('Holder', 'object{v: string}');
     const conformWith = (...members: string[]) =>
       ce
         .box([
           'DeclareConformance',
-          { str: 'string' },
+          { str: 'Holder' },
           ['List', 'Named'],
           [
             'Dictionary',
@@ -1179,24 +1184,33 @@ describe('implementation validation (P17)', () => {
   });
 
   describe('property handlers', () => {
+    // `Named` has a `readwrite` property, so the B1 mutability gate
+    // (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Which types can conform")
+    // admits only OBJECT types as conformers — a writable property is
+    // meaningful only on a mutable object. `Holder`'s stored field is `v`,
+    // deliberately not `hash` or `name`: a stored field of the property's own
+    // name would satisfy the requirement by itself (Appendix B's field
+    // backing), and these tests are about the hand-written accessors.
+    const HOLDER = 'Holder';
     const withNamed = (): ComputeEngine => {
       const ce = new ComputeEngine();
       ce.declareProtocol('Named', {
         readonly: { hash: 'string' },
         readwrite: { name: 'string' },
       });
+      ce.declareType(HOLDER, 'object{v: string}');
       return ce;
     };
     const full = (over: Record<string, any> = {}) => ({
       __get__hash: fnLiteral('string', ['self', 'Self']),
       __get__name: fnLiteral('string', ['self', 'Self']),
-      __set__name: fnLiteral('string', ['self', 'Self'], ['v', 'string']),
+      __set__name: fnLiteral('Self', ['self', 'Self'], ['v', 'string']),
       ...over,
     });
 
     test('the canonical shapes register', () => {
       const ce = withNamed();
-      expect(implement(ce, 'string', 'Named', full()).json).toBe('Nothing');
+      expect(implement(ce, HOLDER, 'Named', full()).json).toBe('Nothing');
       expect(Object.keys(ce._protocolRegistry.Named.conformances[0].impl!)) //
         .toEqual(['__get__hash', '__get__name', '__set__name']);
     });
@@ -1205,7 +1219,7 @@ describe('implementation validation (P17)', () => {
       const ce = withNamed();
       const r = implement(
         ce,
-        'string',
+        HOLDER,
         'Named',
         full({
           __get__hash: fnLiteral('string', ['self', 'Self'], ['x', 'string']),
@@ -1220,7 +1234,7 @@ describe('implementation validation (P17)', () => {
       const ce = withNamed();
       const r = implement(
         ce,
-        'string',
+        HOLDER,
         'Named',
         full({ __get__hash: fnLiteral('integer', ['self', 'Self']) })
       );
@@ -1232,10 +1246,10 @@ describe('implementation validation (P17)', () => {
       const ce = withNamed();
       const r = implement(
         ce,
-        'string',
+        HOLDER,
         'Named',
         full({
-          __set__name: fnLiteral('string', ['self', 'Self'], ['v', 'integer']),
+          __set__name: fnLiteral('Self', ['self', 'Self'], ['v', 'integer']),
         })
       );
       expect(r.toString()).toContain('protocol-signature-mismatch');
@@ -1244,10 +1258,10 @@ describe('implementation validation (P17)', () => {
       expect(
         implement(
           ce,
-          'string',
+          HOLDER,
           'Named',
           full({
-            __set__name: fnLiteral('string', ['self', 'Self'], ['v', 'any']),
+            __set__name: fnLiteral('Self', ['self', 'Self'], ['v', 'any']),
           })
         ).json
       ).toBe('Nothing');
@@ -1257,10 +1271,10 @@ describe('implementation validation (P17)', () => {
       const ce = withNamed();
       const r = implement(
         ce,
-        'string',
+        HOLDER,
         'Named',
         full({
-          __set__hash: fnLiteral('string', ['self', 'Self'], ['v', 'string']),
+          __set__hash: fnLiteral('Self', ['self', 'Self'], ['v', 'string']),
         })
       );
       expect(r.toString()).toContain('protocol-property-readonly-set');
@@ -1268,9 +1282,9 @@ describe('implementation validation (P17)', () => {
 
     test('a READWRITE property with a `set` but no `get` misses the getter', () => {
       const ce = withNamed();
-      const r = implement(ce, 'string', 'Named', {
+      const r = implement(ce, HOLDER, 'Named', {
         __get__hash: fnLiteral('string', ['self', 'Self']),
-        __set__name: fnLiteral('string', ['self', 'Self'], ['v', 'string']),
+        __set__name: fnLiteral('Self', ['self', 'Self'], ['v', 'string']),
       });
       expect(r.toString()).toContain('protocol-implementation-missing');
       expect(r.toString()).toContain('get name');
@@ -1287,7 +1301,7 @@ describe('implementation validation (P17)', () => {
 
     test('a `function` member naming a PROPERTY steers to `get`', () => {
       const ce = withNamed();
-      const r = implement(ce, 'string', 'Named', {
+      const r = implement(ce, HOLDER, 'Named', {
         hash: fnLiteral('string', ['self', 'Self']),
       });
       expect(r.toString()).toContain('protocol-member-unknown');
@@ -1325,9 +1339,12 @@ describe('ce.declareProtocolImplementation (host route)', () => {
       readonly: { hash: 'string' },
       readwrite: { name: 'string' },
     });
-    ce.declareProtocolImplementation('string', 'Named', {
+    // An OBJECT target — the B1 mutability gate applies to the host channel
+    // too, since a host implementation IS a conformance declaration.
+    ce.declareType('Holder', 'object{v: string}');
+    ce.declareProtocolImplementation('Holder', 'Named', {
       getters: { hash: () => 'h', name: () => 'n' },
-      setters: { name: () => 'n' },
+      setters: { name: (self: any) => self },
     });
     expect(
       Object.keys(ce._protocolRegistry.Named.conformances[0].impl!)

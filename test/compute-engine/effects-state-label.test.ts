@@ -90,19 +90,18 @@ describe('`state` is an ordinary label to inference and contracts', () => {
   });
 });
 
-// NOTE — Phase-2 pin flip expected: these ceiling tests conform `string` (a
-// non-object type) to a protocol whose requirement DECLARES `state`. Today
-// that is legal — the declared specifier is only an effect ceiling — but the
-// B1 mutability gate (Phase 2 of the implementation plan: a protocol with a
-// declared `state` member is object-only) will reject such conformances with
-// `protocol-requires-object`. When Phase 2 lands, retarget these tests at an
-// object type and add the `string` rejection alongside; they pin the interim
-// ceiling arithmetic, not the conformance's long-term legality.
+// The conformance target is an OBJECT type throughout: the B1 mutability gate
+// (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Which types can conform") makes a
+// protocol whose requirement DECLARES `state` conformable only by object types
+// — declaring the effect is one of the gate's two switches, which is what keeps
+// the assertion coherent: it restricts the conformer pool to exactly the types
+// that can discharge it. The last test here pins the refusal for a value type.
 describe('`state` participates in the 0a protocol ceilings', () => {
   const declareTouchable = (ce: ComputeEngine): void => {
     ce.declareProtocol('Touchable', {
       functions: { touch: '(self: Self) state -> string' },
     });
+    ce.declareType('Cell', 'object{v: string}');
   };
 
   const implWith = (marker: string): unknown => [
@@ -111,11 +110,11 @@ describe('`state` participates in the 0a protocol ceilings', () => {
     ['Typed', 'self', { str: 'Self' }],
   ];
 
-  const implement = (ce: ComputeEngine, impl: unknown) =>
+  const implement = (ce: ComputeEngine, impl: unknown, target = 'Cell') =>
     ce
       .box([
         'DeclareConformance',
-        { str: 'string' },
+        { str: target },
         ['List', 'Touchable'],
         ['Dictionary', ['KeyValuePair', 'touch', impl]],
       ] as any)
@@ -148,5 +147,18 @@ describe('`state` participates in the 0a protocol ceilings', () => {
     expect(r).toContain('protocol-signature-mismatch');
     expect(r).toContain('random');
     expect(r).toContain('Touchable.touch');
+  });
+
+  test('a VALUE type cannot conform at all — the B1 mutability gate', () => {
+    // The declared `state` is the gate's second switch (the first is a
+    // `readwrite` property): a protocol that says `state` is thereby
+    // object-only, so the effect can never be promised on behalf of a type
+    // that has no state to change.
+    const ce = new ComputeEngine();
+    declareTouchable(ce);
+    const r = implement(ce, implWith('state'), 'string').toString();
+    expect(r).toContain('protocol-requires-object');
+    expect(r).toContain('declares the `state` effect on `touch`');
+    expect(ce._protocolRegistry.Touchable.conformances).toEqual([]);
   });
 });

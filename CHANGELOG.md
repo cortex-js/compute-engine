@@ -1,6 +1,69 @@
 ## [Unreleased]
 
+### New Features
+
+- **`hold` functions — user-defined functions whose arguments are not
+  evaluated.** A definition prefixed with `hold` (`hold f(e) = Head(e)`,
+  `hold function f(e) { … }`) binds each argument to its parameter as
+  written: canonicalized and bound in the caller's scope, but unevaluated.
+  Reading the parameter in the body evaluates the argument there
+  (call-by-name — `hold twice(e) = e + e` evaluates `e` twice; read it once
+  into a `let` to evaluate once), while a structural operator sees the
+  expression itself: with `let a = 3`, `f(a + 1)` is `Add` where an ordinary
+  function receives `4` and answers `Integer`. This is the user-function
+  counterpart of an operator definition's `lazy` flag, and it is spelled at
+  the definition, not per parameter: every parameter is held. In MathJSON the
+  prefix is `DefineFunction`'s new optional third operand, an attributes
+  dictionary — `["DefineFunction", "f", ‹literal›, {hold: True}]` — which
+  installs a `lazy` operator definition. A hold function is single-clause: a
+  literal parameter (`hold f(0) = …`, diagnosed `hold-literal-parameter`)
+  and a second clause (`hold-single-clause`) are refused; a same-domain
+  redefinition replaces as usual. `hold` is a contextual keyword, like
+  `type`, and stays an ordinary identifier elsewhere. `About(f)` labels a
+  hold function. A host `ce.declare('f', { lazy: true, evaluate: ‹Function
+  literal› })` now also binds its arguments as written instead of the literal
+  quietly evaluating them one level down. See the "Hold functions" section
+  of the Epsil control-flow guide.
+
 ### Issues Resolved
+
+- **A compiled user function with a declared `complex` parameter no longer
+  returns a corrupt value.** The emitted body read the parameter in the real
+  lane while the call site handed it a `{ re, im }` object, so the body's
+  arithmetic ran on the object itself — `Q(z) = z + i` declared
+  `(complex) -> complex` answered `{ re: '[object Object]0', im: 1 }` behind
+  `success: true`, where the interpreter answers `1`. A silently wrong number
+  rather than a decline.
+
+  Three of the four argument shapes were affected (a statically complex
+  argument, a statically real one, and an untyped symbol handed a complex
+  value at `run()` time); only an untyped symbol handed a plain number
+  happened to work. All four are now correct. A parameter declared complex is
+  compiled in the complex lane for every call site, and each call delivers an
+  object: a complex literal passes through, a provably real argument is
+  wrapped statically at no runtime cost, and anything else — where the same
+  artifact may legitimately receive either a number or a complex object —
+  goes through a new idempotent runtime coercion.
+
+  JavaScript only; the `{ re, im }` convention does not exist on the other
+  targets, which are unaffected.
+
+- **A write through a mutable object now carries the `state` effect on every
+  route.** Three writes previously read as purer than they are. A bare store
+  statement `p.age = 43` reported the `scope` effect — the label of a binding
+  write, read straight off `Assign`'s declared signature — where it stores into
+  a heap cell every other reference to `p` sees; a set through a `readwrite`
+  protocol property reported no effect at all; and a function storing through a
+  COMPUTED property (`function f(x: Q) { x.age = 3 }`, where `age` is a
+  property of the object type `Q` rather than a field of its layout) inferred
+  nothing, so annotating it `pure` was accepted while calling it mutated the
+  caller's object. All three now report `state`, and a `pure` annotation on any
+  of them is refused with `incompatible-type: expected pure effects, got state
+  effects`. Assignment to a plain symbol is unchanged (`scope`), as is a
+  qualified property READ (pure). The label is decided per call site, because
+  `Assign` spells both a binding write and a store and `ProtocolProperty`
+  spells both a read (three operands) and a set (four), and one declared arrow
+  cannot say both.
 
 - **`Head` and `Tail` are no longer value-blind on a symbol operand.** Both
   are lazy (structural) operators, and their canonical fold treated a symbol
@@ -9,9 +72,11 @@
   evaluated to `Nothing`. This also froze a user function `f(e) = Head(e)`
   to the constant `Symbol` at definition time (`f(3 + y)` returned `Symbol`).
   A symbol operand now stays symbolic at canonicalization and is resolved
-  through its binding at evaluation: with `x := a + 1`, `Head(x)` is `Add`
-  and `Tail(x)` is `Sequence(a, 1)`; an unbound symbol still has head
-  `Symbol` and no tail. Compound operands fold structurally as before
+  through its binding at evaluation — a lookup of the expression the symbol
+  is bound to, not an evaluation of it: with `x := a + 1`, `Head(x)` is `Add`
+  and `Tail(x)` is `Sequence(a, 1)` whether or not `a` has a value; an
+  unbound symbol, a numeric constant (`Pi`) and an operator name (`Sin`)
+  still have head `Symbol` and no tail. Compound operands fold structurally as before
   (`Head(a + 1)` is `Add` even when `a` has a value).
 
 ## 0.113.0 _2026-08-16_

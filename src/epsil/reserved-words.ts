@@ -20,8 +20,9 @@
 //
 // A word moves from the first tier to the second exactly when its construct
 // lands — unless the construct is recognized contextually (as `type`,
-// `alias`, `is`, and the trailing `where` clause are), in which case the
-// word leaves the tables entirely and stays an ordinary identifier.
+// `alias`, `is`, the `hold` definition prefix, and the trailing `where`
+// clause are), in which case the word leaves the tables entirely and stays
+// an ordinary identifier.
 // Everything else — `set`, `with`, `label`, `to`, `each`, … — is usable as
 // an identifier in every position: a binding name, a bare assignment
 // target, a mapsto parameter, and a call's callee.

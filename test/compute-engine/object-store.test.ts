@@ -327,28 +327,29 @@ let p = P(n: "Bob")`,
 
   test('a protocol property that is NOT a stored field still rebinds', () => {
     // The precedence rule is narrow: it claims only names the receiver's own
-    // layout declares. A protocol property of a value type is untouched by it,
-    // and keeps the rebinding sugar it has always had.
+    // layout declares. `name` is a COMPUTED property — no slot of `Person`
+    // carries it — so the layout has nothing to say and the protocol answers,
+    // through the rebinding sugar it has always had.
     //
-    // A tuple conforming to a `readwrite` protocol is legal only because
-    // Appendix B's mutability gate (ruling B1: such protocols admit object
-    // conformers only) is NOT implemented — it was measured and reverted,
-    // see the B1 entry in `ROADMAP.md`. Once B1 lands this fixture becomes
-    // `protocol-requires-object` and the rebinding sugar has no legal targets
-    // left, which is what makes the sugar retirable at all.
+    // The receiver is an OBJECT type because the B1 mutability gate
+    // (Appendix B, "Which types can conform") admits only object types to a
+    // protocol with a `readwrite` property. The setter here deliberately
+    // REBUILDS rather than storing, which is what keeps this a test of the
+    // sugar's rebinding lowering; the mutating variant is covered in
+    // `protocol-properties.test.ts`.
     const engine = new ComputeEngine();
     value(
       `protocol Nameable { readwrite name: string }
-type Person = tuple<n: string, age: integer>
+type Person = object{n: string, age: integer}
 type Person is Nameable {
   get name(self: Self) -> string { self.n }
-  set name(self: Self, v: string) -> Person { Person(v, self.age) }
+  set name(self: Self, v: string) -> Person { Person(n: v, age: self.age) }
 }
-let r = Person("Bob", 42)`,
+let r = Person(n: "Bob", age: 42)`,
       engine
     );
     value('r.name = "Steve"', engine);
-    expect(value('r', engine)).toBe('Person("Steve", 42)');
+    expect(value('r', engine)).toBe('Person(n: "Steve", age: 42)');
   });
 });
 
@@ -513,18 +514,27 @@ function rename(x: M) { x.id = "XXXX" }`,
     ).toBe('incompatible-type');
   });
 
-  test('the property REBINDING sugar is unaffected — it stays a scope write', () => {
-    // The store label must not leak onto the rebinding sugar, whose write is
-    // to the BINDING and is legitimately confinable. This is the canary for
-    // the blunt fix that was tried and rejected (denying the confinement
-    // exemption to every `Field` target broke six shipped tests).
+  test('the property sugar\u2019s BINDING write stays confinable — no `scope` leak', () => {
+    // The canary for the blunt fix that was tried and rejected (denying the
+    // confinement exemption to every `Field` target broke six shipped tests):
+    // the sugar writes the local binding `p`, which is confinable, so `scope`
+    // must NOT appear.
+    //
+    // `state` DOES appear, and is correct: the B1 mutability gate makes the
+    // receiver an object type, and a property SET on an object is a heap store
+    // whatever the selected setter does — the rule the `ProtocolProperty` arm
+    // of `effects-inference.ts` applies unconditionally. (The setter below
+    // rebuilds rather than storing; the verdict deliberately does not consult
+    // the registry to find that out, because an inference walk runs before,
+    // and independently of, conformance registration.) What this test pins is
+    // that the set is EXACTLY `state`, with no `scope` beside it.
     const engine = new ComputeEngine();
     value(
       `protocol Nameable { readwrite name: string }
-type Person = tuple<n: string, age: integer>
+type Person = object{n: string, age: integer}
 type Person is Nameable {
   get name(self: Self) -> string { self.n }
-  set name(self: Self, v: string) -> Person { Person(v, self.age) }
+  set name(self: Self, v: string) -> Person { Person(n: v, age: self.age) }
 }
 function relabel(p: Person) -> Person { p.name = "Zed"
   p }`,
@@ -533,7 +543,7 @@ function relabel(p: Person) -> Person { p.name = "Zed"
     const def = engine.lookupDefinition('relabel') as never as {
       operator?: { effects?: unknown };
     };
-    expect(def.operator?.effects).toBeUndefined();
+    expect(def.operator?.effects).toEqual(['state']);
   });
 });
 

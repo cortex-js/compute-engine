@@ -70,8 +70,8 @@ keywords and word operators `break`, `const`, `continue`, `do`, `else`, `for`,
 Every other reserved word listed below is an ordinary identifier today: it can
 name a binding, be assigned to, be a `=>` parameter, and be called. The words
 are listed because the language reserves the right to claim them later, and
-because a future construct that can be recognized contextually — as `type` and
-`alias` already are — will not need to claim them at all. Prefer not to use
+because a future construct that can be recognized contextually — as `type`,
+`alias` and `hold` already are — will not need to claim them at all. Prefer not to use
 them as names.
 
 **Reserved words** are: `abstract`, `at`, `and`, `as`, `async`, `assert`,

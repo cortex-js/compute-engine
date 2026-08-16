@@ -820,6 +820,25 @@ export class Parser {
           // it claims the statement unconditionally — a malformed declaration
           // is diagnosed rather than silently read as an expression.
           return this.parseProtocolStatement();
+        case 'hold': {
+          // `hold` is a CONTEXTUAL keyword, like `type`: it stays a legal
+          // identifier everywhere (`hold = 5`, `hold(x)`, `let hold = …`), and
+          // claims the statement only as the PREFIX of a function definition
+          // — `hold function f(e) { … }` or the math style `hold f(e) = …`.
+          // The definition's arguments are then bound to its parameters
+          // unevaluated (see `parseFunctionDefinition`).
+          const next = this.peek(1);
+          if (next.type === 'SYMBOL' && next.text === 'function') {
+            const holdTok = this.advance();
+            return this.parseFunctionDefinition(holdTok);
+          }
+          const save = this.pos;
+          const holdTok = this.advance();
+          if (this.isMathFunctionDef())
+            return this.parseMathFunctionDef(holdTok);
+          this.pos = save;
+          break;
+        }
       }
     }
 
@@ -3899,8 +3918,19 @@ export class Parser {
    * the ascription into a `where`-quantified full signature and ERASES the
    * annotations of the parameters it quantifies (they lower to bare symbols;
    * the signature is the single source of truth for their types). See
-   * {@link parseTypeParamClause}. */
-  private parseFunctionDefinition(): MathJsonExpression | null {
+   * {@link parseTypeParamClause}.
+   *
+   * A **`hold` prefix** (`hold function f(e) { … }`, `holdTok` is its token)
+   * marks a definition whose arguments are bound to its parameters AS
+   * WRITTEN — unevaluated — and evaluate where the body reads them; a
+   * structural operator such as `Head(e)` sees the argument expression
+   * itself. It lowers to the definition's attributes dictionary,
+   * `["DefineFunction", "f", ‹literal›, {hold: True}]`, which the engine turns
+   * into a `lazy` operator definition. A hold definition is single-clause, so
+   * a literal parameter (`hold f(0) = …`, which would select the clause by an
+   * argument's VALUE) is diagnosed (`hold-literal-parameter`) and the prefix
+   * dropped. */
+  private parseFunctionDefinition(holdTok?: Token): MathJsonExpression | null {
     const kw = this.advance(); // 'function'
     const nameTok = this.current;
     if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
@@ -4107,10 +4137,55 @@ export class Parser {
       end
     );
     return this.wrap(
-      ['DefineFunction', nameNode, fnNode] as MathJsonExpression[],
-      kw.start,
+      [
+        'DefineFunction',
+        nameNode,
+        fnNode,
+        ...this.definitionAttributes(holdTok, name, params, kw.start, end),
+      ] as MathJsonExpression[],
+      holdTok?.start ?? kw.start,
       end
     );
+  }
+
+  /**
+   * The optional ATTRIBUTES operand of a `DefineFunction` node — today only
+   * the `hold` prefix, lowered as `{hold: True}` (a `Dictionary`, the same
+   * carrier `DeclareType` uses for `alias`). Returns an empty list when the
+   * definition has no attribute, so the node keeps its two-operand shape.
+   *
+   * A hold definition with a literal parameter is refused here: the literal
+   * would select the clause by the argument's VALUE, and a hold function never
+   * evaluates its arguments. The diagnostic lands on the prefix and the
+   * definition parses on as an ordinary one.
+   */
+  private definitionAttributes(
+    holdTok: Token | undefined,
+    name: string,
+    params: readonly MathJsonExpression[],
+    start: number,
+    end: number
+  ): MathJsonExpression[] {
+    if (holdTok === undefined) return [];
+    if (params.some(isLiteralParamNode)) {
+      this.error(['hold-literal-parameter', name], holdTok.start, holdTok.end);
+      return [];
+    }
+    return [
+      this.wrap(
+        [
+          'Dictionary',
+          this.kvPair(
+            'hold',
+            this.wrap({ sym: 'True' }, holdTok.start, holdTok.end),
+            holdTok.start,
+            holdTok.end
+          ),
+        ] as MathJsonExpression[],
+        start,
+        end
+      ),
+    ];
   }
 
   /**
@@ -4726,7 +4801,7 @@ export class Parser {
    * (`f(x) random -> integer = …`); the ascription then carries the FULL
    * signature instead of the bare return type — see
    * {@link definitionAscription}. */
-  private parseMathFunctionDef(): MathJsonExpression | null {
+  private parseMathFunctionDef(holdTok?: Token): MathJsonExpression | null {
     const nameTok = this.advance(); // SYMBOL
     this.harvest(nameTok);
     // A literal word cannot name a function (`Infinity(x) = …`); the
@@ -4857,8 +4932,19 @@ export class Parser {
       end
     );
     return this.wrap(
-      ['DefineFunction', nameNode, fnNode] as MathJsonExpression[],
-      nameTok.start,
+      [
+        'DefineFunction',
+        nameNode,
+        fnNode,
+        ...this.definitionAttributes(
+          holdTok,
+          nameTok.text,
+          params,
+          nameTok.start,
+          end
+        ),
+      ] as MathJsonExpression[],
+      holdTok?.start ?? nameTok.start,
       end
     );
   }

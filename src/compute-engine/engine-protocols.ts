@@ -11,8 +11,10 @@ import { checkSameUnitRedefinition } from './declaration-origin.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
 import {
+  isObjectType,
   isSubtype,
   objectLayoutOfType,
+  resolveTypeReference,
   widen,
 } from '../common/type/subtype.js';
 import { reduceType, typesOverlap } from '../common/type/reduce.js';
@@ -293,6 +295,12 @@ export function declareProtocolImpl(
       // Both halves run: a block that no longer validates still has to have
       // its stale synthesized accessors re-derived, or accessors for a
       // requirement the replacement dropped would keep answering.
+      // A replacement that made the protocol object-only (it gained a
+      // `readwrite` property, or a member declaring `state`) leaves every
+      // value-type edge PENDING rather than removing it — conformance is
+      // monotone, and the replacement itself is not rejected. That verdict
+      // comes from `settleFieldBacking`, which reports a gated edge as
+      // uncovered, so it reaches the block-less edges below by the same route.
       const covered = settleFieldBacking(ce, existing, c);
       c.pending = failure !== null || !covered;
     }
@@ -440,6 +448,221 @@ function conformanceTargetProblem(
       // literal value type — all named-and-ground.
       return null;
   }
+}
+
+//
+// ── The mutability gate (B1) ─────────────────────────────────────────────────
+//
+// A writable property is meaningful only on a MUTABLE OBJECT (user-ruled
+// 2026-08-15; `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Which types can
+// conform (the mutability gate)"). A protocol that can MODIFY object state —
+// because it declares at least one `readwrite` property, or a function member
+// whose DECLARED effects include the `state` label — is therefore conformable
+// only by OBJECT types. A protocol with only `readonly` properties and no
+// declared `state` is conformable by any type, exactly as before, and so is a
+// SEMANTIC protocol with no members at all.
+//
+// Two non-obvious boundaries, both from the ruling:
+//
+//   * A BARE function requirement never gates. Its effects are DERIVED from
+//     whatever conformers exist, so reading `state` off it would make the gate
+//     depend on the conformer set rather than on the protocol's declaration
+//     alone — and a record may legitimately conform to a bare-function
+//     protocol with a pure implementation while object conformers of the same
+//     protocol mutate.
+//   * An explicit `pure` never gates. It parses to the STATED EMPTY set, which
+//     is a real (and the strongest) ceiling, not an absence — the same
+//     `undefined`-means-bare / `[]`-means-pure discipline the effect ceiling in
+//     `signatureMismatch` uses.
+//
+
+/** Why a protocol is object-only: the kind of member that gated, and the
+ * member names of that kind, in declaration order. A `readwrite` property
+ * outranks a declared-`state` function when both are present — a settable
+ * property is the more concrete thing to point the author at. */
+type MutabilityGate = {
+  kind: 'readwrite' | 'state';
+  members: string[];
+};
+
+/**
+ * Memo of {@link mutabilityGate}, keyed on a protocol's MEMBERS object.
+ *
+ * Deriving the verdict parses every function requirement's signature, and the
+ * verdict is asked for on every conformance edge, on every registration, and
+ * on every pass of {@link refreshInheritedPending} — so it is worth computing
+ * once per requirement set.
+ *
+ * The key is `record.members`, NOT the record: a protocol record mutates IN
+ * PLACE when the protocol is re-declared (`declareProtocolImpl` assigns
+ * `existing.members = validated`, keeping the record identity so captured
+ * references see the update), so a memo keyed on the record would survive a
+ * replacement and answer for the OLD requirement set — precisely the case the
+ * gate exists to notice, since a replacement is how a protocol acquires a
+ * `readwrite` property in the first place. The members object is freshly
+ * allocated by every declaration, so keying on it invalidates by construction,
+ * with no hook to keep in sync.
+ */
+const MUTABILITY_GATE_MEMO = new WeakMap<
+  Record<string, ProtocolMember>,
+  MutabilityGate | null
+>();
+
+/**
+ * The members that make `record` conformable only by object types, or `null`
+ * when the protocol does not gate at all — the gate's PREDICATE half, with no
+ * message built and no target consulted.
+ *
+ * A function requirement whose signature fails to parse contributes nothing:
+ * the signature-mismatch path owns that diagnostic, and a gate derived from an
+ * unparseable requirement would report the wrong problem.
+ */
+function mutabilityGate(
+  ce: IComputeEngine,
+  record: ProtocolRecord
+): MutabilityGate | null {
+  const memoized = MUTABILITY_GATE_MEMO.get(record.members);
+  if (memoized !== undefined) return memoized;
+  const gate = deriveMutabilityGate(ce, record);
+  MUTABILITY_GATE_MEMO.set(record.members, gate);
+  return gate;
+}
+
+function deriveMutabilityGate(
+  ce: IComputeEngine,
+  record: ProtocolRecord
+): MutabilityGate | null {
+  const settable: string[] = [];
+  const stateful: string[] = [];
+  for (const [name, member] of Object.entries(record.members)) {
+    if (member.kind === 'readwrite') {
+      settable.push(name);
+      continue;
+    }
+    if (member.kind !== 'function') continue;
+    const sig = requirementShape(ce, record, name);
+    if (sig === null) continue;
+    const declared = signatureEffects(sig);
+    // `undefined` is exactly "bare" (nothing spelled) and `[]` is exactly
+    // `pure`; `isEffectSubset` reads both as the empty set, and also admits the
+    // top `any`, which permits `state` and so gates.
+    if (declared !== undefined && isEffectSubset(['state'], declared))
+      stateful.push(name);
+  }
+  if (settable.length > 0) return { kind: 'readwrite', members: settable };
+  if (stateful.length > 0) return { kind: 'state', members: stateful };
+  return null;
+}
+
+/**
+ * How the gate's diagnostic names `target`: the indefinite-article phrase
+ * ("a record", "a tuple", "a builtin type") and whether the author can
+ * re-declare the type as an `object{…}`.
+ *
+ * Only a NOMINAL type is re-declarable. A builtin (`string`), a ground
+ * application of a builtin constructor (`list<integer>`) and a conditional
+ * head (`list<T>`) all name something the author does not own, so the advice
+ * for them is that no re-spelling exists, not that they should edit a
+ * declaration they never wrote.
+ */
+function targetKindPhrase(target: Type): {
+  article: string;
+  plural: string;
+  redeclarable: boolean;
+  admitsObject: boolean;
+} {
+  const redeclarable =
+    typeof target === 'object' && target.kind === 'reference';
+  // A nominal is described by the body it wraps: `Badge`, declared as
+  // `record{id: string}`, is "a record". An unresolvable chain falls through to
+  // the generic wording rather than guessing.
+  const body = resolveTypeReference(target) ?? target;
+  // A type that is not an object type but that an OBJECT nonetheless inhabits
+  // — `any`, `unknown`, `expression`, `value`, and any nominal declared as one
+  // of them. `conformanceTargetProblem` admits a bare primitive name, so
+  // `type any is P` and `ce.declareProtocolImplementation('any', …)` both
+  // reach the gate. The verdict is unchanged (such a type is not an object
+  // type, and admitting one would let a value conform through a target that
+  // decides nothing), but the ordinary wording — "has no state to change" —
+  // would be a false statement about it: a value of type `any` may well be an
+  // object. Read off the subtype lattice rather than a hardcoded list of
+  // names, so a new top type is described correctly without an edit here, and
+  // off the RESOLVED body, since a nominal is opaque to `isSubtype` and
+  // `type T = any` deserves the same answer as `any`.
+  const admitsObject = isSubtype('object', body);
+  const kind = typeof body === 'string' ? 'builtin' : body.kind;
+  const phrase = (article: string, plural: string) => ({
+    article,
+    plural,
+    redeclarable,
+    admitsObject,
+  });
+  switch (kind) {
+    case 'record':
+      return phrase('a record', 'records');
+    case 'tuple':
+      return phrase('a tuple', 'tuples');
+    case 'list':
+      return phrase('a list', 'lists');
+    case 'set':
+      return phrase('a set', 'sets');
+    case 'dictionary':
+      return phrase('a dictionary', 'dictionaries');
+    case 'collection':
+    case 'indexed_collection':
+      return phrase('a collection', 'collections');
+    case 'signature':
+    case 'callback':
+      return phrase('a function type', 'function types');
+    default:
+      // A builtin primitive reached directly is "a builtin type"; the same
+      // shape reached THROUGH a nominal (`type Nom = integer`) is a value type
+      // the author declared, so it is named as one.
+      return redeclarable
+        ? phrase('a nominal value type', 'nominal value types')
+        : phrase('a builtin type', 'builtin types');
+  }
+}
+
+/**
+ * The `protocol-requires-object` message for conforming `target` (spelled
+ * `source` in the author's text) to `record`, or `null` when the conformance
+ * is admissible — either because the protocol does not gate, or because the
+ * target is an object type.
+ *
+ * A CONDITIONAL conformance is judged on its HEAD, which is the type this
+ * function is handed: `Box<T>` resolving to an `object{…}` body is admitted,
+ * `list<T>` is refused. That is the same input `fieldBackedProperties` refuses
+ * to field-back a conditional edge on — a head is a pattern, not a layout —
+ * but the two answer different questions: field backing asks which stored
+ * slots satisfy a requirement, while the gate asks only whether the head's
+ * constructor produces objects at all, which the head does settle.
+ */
+function mutabilityGateProblem(
+  ce: IComputeEngine,
+  record: ProtocolRecord,
+  target: Type,
+  source: string
+): string | null {
+  const gate = mutabilityGate(ce, record);
+  if (gate === null) return null;
+  if (isObjectType(target)) return null;
+
+  const { article, plural, redeclarable, admitsObject } =
+    targetKindPhrase(target);
+  const cause =
+    gate.kind === 'readwrite'
+      ? `the \`${record.name}\` protocol has settable properties`
+      : `the \`${record.name}\` protocol declares the \`state\` effect on \`${gate.members.join('`, `')}\``;
+  // A type an object INHABITS is refused for a different reason than an
+  // immutable one, so it is told a different thing: not that it has no state,
+  // but that it does not commit to having any.
+  if (admitsObject)
+    return `${cause}. \`${source}\` is not an object type — a value of that type may or may not be an object — so only an object type can conform.`;
+  const remedy = redeclarable
+    ? `and ${plural} are immutable; declare \`${source}\` as an object type to conform`
+    : `which has no state to change; only an object type can conform`;
+  return `${cause}. \`${source}\` is ${article}, ${remedy}.`;
 }
 
 //
@@ -679,6 +902,13 @@ export function declareConformance(
         'protocol-conformance-overlap',
         `\`${targetKey}\` overlaps \`${conflict.other}\` (meet \`${conflict.meet}\`) for the protocol \`${record.name}\`, and neither contains the other. Conform the common supertype, or disjoint refinements, instead.`,
       ]);
+    // The B1 mutability gate: a protocol that can modify object state is
+    // conformable only by object types. Checked here, in the per-protocol
+    // pre-pass, so a multi-protocol `is A & B` whose second arm gates
+    // registers nothing at all — and BEFORE `implementationProblem`, because
+    // the verdict is on the (type, protocol) pair whatever the block contains.
+    const gated = mutabilityGateProblem(ce, record, target, targetSource);
+    if (gated !== null) return ce.error(['protocol-requires-object', gated]);
   }
 
   // P47 — a SECOND implementation block for the same (type, protocol) pair
@@ -1203,12 +1433,31 @@ function fieldSetter(
  * re-settles the edge. Recorded as open work under the mutable-objects entry
  * of `ROADMAP.md` and scheduled with the Phase 2 "Protocol replacement"
  * bullet of `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`.
+ *
+ * An edge the B1 mutability gate would now refuse is never "covered", whatever
+ * it carries. Such an edge can only exist because the protocol was REPLACED
+ * into a gating one after the edge was registered: conformance is monotone, so
+ * the edge survives, but it is left pending rather than removed, and reporting
+ * it as uncovered here is also what stops it inheriting a supertype's
+ * implementation (see {@link refreshInheritedPending}, whose whole input is
+ * this verdict).
  */
 function settleFieldBacking(
   ce: IComputeEngine,
   record: ProtocolRecord,
   edge: ConformanceRecord
 ): boolean {
+  /** Would the B1 mutability gate refuse this edge today? Such an edge is
+   * never covered, whatever it carries — but the re-derivation below still
+   * runs, so a gated edge is left with the accessors its target's layout
+   * warrants rather than with stale ones.
+   *
+   * The PREDICATE half only: this runs on every edge of every registration and
+   * on every pass of {@link refreshInheritedPending}, and the message it would
+   * otherwise build is discarded. The memoized protocol half is asked first,
+   * so the target is only inspected for a protocol that actually gates. */
+  const gated =
+    mutabilityGate(ce, record) !== null && !isObjectType(edge.target);
   const authored = edge._authored;
   const { satisfied } = fieldBackedProperties(
     ce,
@@ -1226,7 +1475,7 @@ function settleFieldBacking(
     // inherit a supertype's implementation.
     if (authored === undefined) delete edge.impl;
     else edge.impl = authored;
-    return implCoversRequirements(record.members, edge.impl);
+    return !gated && implCoversRequirements(record.members, edge.impl);
   }
 
   /** The mangled key of each accessor the engine owes this edge → the field
@@ -1241,7 +1490,7 @@ function settleFieldBacking(
 
   const current = edge.impl;
   if (current !== undefined && mergedMapMatches(current, authored, owed))
-    return implCoversRequirements(record.members, current);
+    return !gated && implCoversRequirements(record.members, current);
 
   const next: Record<string, Expression | JSImplementation> =
     Object.create(null);
@@ -1262,7 +1511,7 @@ function settleFieldBacking(
           : fieldSetter(ce, name);
   }
   edge.impl = next;
-  return implCoversRequirements(record.members, next);
+  return !gated && implCoversRequirements(record.members, next);
 }
 
 /** Is `merged` already exactly the author's block plus the accessors `owed`
@@ -2151,6 +2400,11 @@ export function declareProtocolImplementationImpl(
   );
   if (problem !== null)
     throw Error(`protocol-conformance-target-invalid: ${problem}`);
+
+  // The B1 mutability gate applies to the host channel on the same terms as
+  // the statement route — a host implementation IS a conformance declaration.
+  const gated = mutabilityGateProblem(ce, record, target, targetSource);
+  if (gated !== null) throw Error(`protocol-requires-object: ${gated}`);
 
   const targetKey =
     params === undefined

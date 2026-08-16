@@ -1046,18 +1046,28 @@ export function serializeEpsil(
     // the Epsil definition syntax it lowered from: `f(0) = 1` for an
     // expression body, `function f(x: integer) { … }` for a `Block` body.
     // Any other shape falls back to the generic call form.
+    //
+    // An optional third operand carries the definition's ATTRIBUTES as a
+    // dictionary. The only one today is `hold` (`{hold -> True}`), which is
+    // the `hold` prefix: `hold f(e) = …` / `hold function f(e) { … }`. Any
+    // other attribute has no surface spelling and falls back to the generic
+    // call form, so nothing is silently dropped.
     DefineFunction: (expr: MathJsonExpression): FormattingBlock => {
       const name = operand(expr, 1);
       const rhs = operand(expr, 2);
+      const attrs =
+        nops(expr) === 3 ? definitionAttributes(operand(expr, 3)) : null;
       if (
-        nops(expr) === 2 &&
+        (nops(expr) === 2 || attrs !== null) &&
         name !== null &&
         symbol(name) !== null &&
         rhs !== null &&
         operator(rhs) === 'Function' &&
         paramsAreSpellable(operands(rhs).slice(1))
-      )
-        return serializeNamedDef(name, rhs);
+      ) {
+        const def = serializeNamedDef(name, rhs);
+        return attrs?.hold ? fmt.line('hold ', def) : def;
+      }
       return serializeGenericFunction(expr);
     },
 
@@ -1605,6 +1615,28 @@ export function serializeEpsil(
       serializeExpression(bodyExpr)
     );
   };
+
+  /**
+   * The attributes dictionary of a `DefineFunction` node, decoded — `null`
+   * when the operand is not an attribute bag or holds a key this serializer
+   * has no spelling for. Read in both encodings, exactly as `DeclareType`'s
+   * `alias` is: the `{dict: …}` shorthand boxes an unquoted `True` as a
+   * STRING, the operator `Dictionary` form the parser emits carries the SYMBOL.
+   */
+  function definitionAttributes(
+    attrs: MathJsonExpression | null
+  ): { hold: boolean } | null {
+    if (attrs === null) return null;
+    const entries = attributeEntries(attrs);
+    if (entries === null) return null;
+    const keys = Object.keys(entries);
+    if (keys.some((k) => k !== 'hold')) return null;
+    const holdOp = entries['hold'] ?? null;
+    if (holdOp === null) return { hold: false };
+    return (symbol(holdOp) ?? stringValue(holdOp)) === 'True'
+      ? { hold: true }
+      : null;
+  }
 
   function serializeFunction(expr: MathJsonExpression): FormattingBlock | null {
     return FUNCTIONS[operator(expr)]?.(expr) ?? null;

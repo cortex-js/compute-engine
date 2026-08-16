@@ -22,14 +22,44 @@ import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 // Protocols are engine-global, so every block uses a fresh engine.
 //
 
-/** A `Person` nominal conforming to a `readwrite name` protocol. */
+/**
+ * A `Person` nominal conforming to a `readwrite name` protocol.
+ *
+ * `Person` is an OBJECT type because the B1 mutability gate
+ * (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Which types can conform") admits
+ * only object types to a protocol with a `readwrite` property: a writable
+ * property is meaningful only on a mutable object. `name` is a COMPUTED
+ * property over the stored field `n` — the field is deliberately named
+ * differently, because a stored field of the property's own name would satisfy
+ * the requirement by itself (Appendix B's field backing) and the hand-written
+ * accessors under test here would never be reached.
+ */
 const PERSON = `protocol Nameable {
   readwrite name: string
 }
-type Person = tuple<n: string, age: integer>
+type Person = object{n: string, age: integer}
 type Person is Nameable {
   get name(self: Self) -> string { self.n }
-  set name(self: Self, v: string) -> Person { Person(v, self.age) }
+  set name(self: Self, v: string) -> Person {
+    self.n = v
+    self
+  }
+}`;
+
+/**
+ * A `readwrite tag` protocol with an OBJECT conformer — the smallest fixture
+ * the B1 mutability gate admits. Like {@link PERSON}, the stored field (`t`)
+ * is named differently from the property (`tag`) so that the hand-written
+ * accessors are the ones exercised rather than Appendix B's field backing.
+ */
+const TAGGED_BOX = `protocol Tagged { readwrite tag: string }
+type Box = object{t: string}
+type Box is Tagged {
+  get tag(self: Self) -> string { self.t }
+  set tag(self: Self, v: string) -> Self {
+    self.t = v
+    self
+  }
 }`;
 
 /** Run an Epsil program on `ce`, returning the diagnostic codes. */
@@ -58,7 +88,7 @@ function errorCode(s: string): string | undefined {
 
 describe('P18: reading a property', () => {
   test('a NOMINAL target: `type:` and `evaluate:` both answer', () => {
-    const ce = engineFor(`${PERSON}\nlet p = Person("Bob", 42)`);
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     const field = ce.box(['Field', 'p', { str: 'name' }] as any);
     expect(field.type.toString()).toBe('string');
     expect(field.evaluate().toString()).toBe('"Bob"');
@@ -104,13 +134,13 @@ let x = 3.5`);
   test('an ORDINARY field is untouched by the protocol branch', () => {
     // The nominal's own named-tuple field still resolves through the type
     // definition — the property branch only runs when that comes up empty.
-    const ce = engineFor(`${PERSON}\nlet p = Person("Bob", 42)`);
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     expect(value(ce, 'p.age')).toBe('42');
     expect(value(ce, 'p.n')).toBe('"Bob"');
   });
 
   test('a name NO protocol declares keeps `unknown-field`', () => {
-    const ce = engineFor(`${PERSON}\nlet p = Person("Bob", 42)`);
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     expect(errorCode(value(ce, 'p.zz'))).toBe('unknown-field');
   });
 
@@ -148,22 +178,29 @@ type string is Tagged { get tag(self: Self) -> string { "s" } }`);
 });
 
 describe('P18: HOST-declared getters and setters', () => {
+  // The target is an OBJECT type: the B1 mutability gate admits only object
+  // types to a protocol with a `readwrite` property, on the host channel
+  // exactly as on the statement one. A host setter therefore stores into the
+  // receiver (`_store`) and hands it back, rather than building a new value.
   function hostEngine(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declareProtocol('Nameable', { readwrite: { name: 'string' } });
-    ce.declareType('Person', 'tuple<n: string, age: integer>');
+    ce.declareType('Person', 'object{n: string, age: integer}');
     ce.declareProtocolImplementation('Person', 'Nameable', {
-      getters: { name: (self: any) => self.ops[0] },
+      getters: { name: (self: any) => self._field('n') },
       setters: {
-        name: (self: any, v: any) => ce.function('Person', [v, self.ops[1]]),
+        name: (self: any, v: any) => {
+          self._store('n', v);
+          return self;
+        },
       },
     });
+    expect(run(ce, 'let p = Person(n: "Bob", age: 42)')).toEqual([]);
     return ce;
   }
 
   test('a host getter answers `person.name`', () => {
     const ce = hostEngine();
-    ce.assign('p', ce.function('Person', [ce.string('Bob'), ce.number(42)]));
     expect(value(ce, 'p.name')).toBe('"Bob"');
     expect(ce.box(['Field', 'p', { str: 'name' }] as any).type.toString()).toBe(
       'string'
@@ -172,19 +209,29 @@ describe('P18: HOST-declared getters and setters', () => {
 
   test('a host setter drives the rebinding sugar', () => {
     const ce = hostEngine();
-    ce.assign('p', ce.function('Person', [ce.string('Bob'), ce.number(42)]));
     expect(value(ce, 'p.name = "Steve"\np.name')).toBe('"Steve"');
   });
 });
 
 describe('P2: assignment is rebinding sugar', () => {
-  test('`p.name = v` rebinds `p` — the whole value changes', () => {
-    const ce = engineFor(`${PERSON}\nlet p = Person("Bob", 42)`);
+  test('`p.name = v` reaches the setter — the SAME object, field changed', () => {
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     expect(run(ce, 'p.name = "Steve"')).toEqual([]);
-    // The REBINDING is what is observable: `p` itself is a new value.
-    expect(value(ce, 'p')).toBe('Person("Steve", 42)');
+    expect(value(ce, 'p')).toBe('Person(n: "Steve", age: 42)');
     expect(value(ce, 'p.name')).toBe('"Steve"');
     expect(value(ce, 'p.age')).toBe('42');
+  });
+
+  test('the write is a MODIFICATION: every alias of `p` sees it', () => {
+    // `Person` is now an object type (the B1 gate), and its setter stores into
+    // the receiver and hands the receiver back. The sugar still rebinds `p`,
+    // but to the very same object, so an alias taken beforehand observes the
+    // change — which is the whole point of the gate: a settable property means
+    // a modification, not a quiet rebuild-and-rebind.
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
+    expect(run(ce, 'let q = p')).toEqual([]);
+    expect(run(ce, 'p.name = "Steve"')).toEqual([]);
+    expect(value(ce, 'q')).toBe('Person(n: "Steve", age: 42)');
   });
 
   test('…in ONE batch too (the pre-pass defers the untyped target)', () => {
@@ -193,7 +240,7 @@ describe('P2: assignment is rebinding sugar', () => {
     // kept raw and resolved again from `evaluate`. No spurious diagnostic.
     const ce = new ComputeEngine();
     const source = `${PERSON}
-let p = Person("Bob", 42)
+let p = Person(n: "Bob", age: 42)
 p.name = "Steve"
 p.name`;
     expect(run(ce, source)).toEqual([]);
@@ -201,9 +248,9 @@ p.name`;
   });
 
   test('`:=` takes the same route', () => {
-    const ce = engineFor(`${PERSON}\nlet p = Person("Bob", 42)`);
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     expect(run(ce, 'p.name := "Ada"')).toEqual([]);
-    expect(value(ce, 'p')).toBe('Person("Ada", 42)');
+    expect(value(ce, 'p')).toBe('Person(n: "Ada", age: 42)');
   });
 
   test('a READONLY property is `protocol-property-readonly-set`', () => {
@@ -216,12 +263,11 @@ let x = "hi"`);
   });
 
   test('a NON-variable root is `property-assignment-target-invalid`', () => {
-    const ce = engineFor(`protocol Tagged { readwrite tag: string }
-type string is Tagged {
-  get tag(self: Self) -> string { "s" }
-  set tag(self: Self, v: string) -> string { v }
-}
-let xs = ["a", "b"]`);
+    // The receiver is an OBJECT type because the protocol has a `readwrite`
+    // property (the B1 mutability gate), so what is refused here is purely the
+    // sugar's variable-root restriction, not the target's type.
+    const ce = engineFor(`${TAGGED_BOX}
+let xs = [Box(t: "a"), Box(t: "b")]`);
     expect(errorCode(value(ce, 'xs[1].tag = "z"'))).toBe(
       'property-assignment-target-invalid'
     );
@@ -249,14 +295,14 @@ let xs = ["a", "b"]`);
   });
 
   test('the box route rewrites the same way', () => {
-    const ce = engineFor(`${PERSON}\nlet p = Person("Bob", 42)`);
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     expect(
       ce
         .box(['Assign', ['Field', 'p', { str: 'name' }], { str: 'Zed' }] as any)
         .evaluate()
         .toString()
-    ).toBe('Person("Zed", 42)');
-    expect(ce.box('p').evaluate().toString()).toBe('Person("Zed", 42)');
+    ).toBe('Person(n: "Zed", age: 42)');
+    expect(ce.box('p').evaluate().toString()).toBe('Person(n: "Zed", age: 42)');
   });
 });
 
@@ -291,7 +337,7 @@ let x = "z"`);
   });
 
   test('the box route reaches the same dispatch', () => {
-    const ce = engineFor(`${PERSON}\nlet p = Person("Bob", 42)`);
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     const expr = ce.box([
       'ProtocolProperty',
       { str: 'Nameable' },
@@ -303,7 +349,7 @@ let x = "z"`);
   });
 
   test('an unknown protocol is `protocol-unknown`', () => {
-    const ce = engineFor(`${PERSON}\nlet p = Person("Bob", 42)`);
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     expect(errorCode(value(ce, 'p.(Nowhere.name)'))).toBe('protocol-unknown');
   });
 
@@ -321,7 +367,7 @@ let x = "z"`);
   });
 
   test('qualified ASSIGNMENT is `property-assignment-target-invalid`', () => {
-    const ce = engineFor(`${PERSON}\nlet p = Person("Bob", 42)`);
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     expect(errorCode(value(ce, 'p.(Nameable.name) = "x"'))).toBe(
       'property-assignment-target-invalid'
     );
@@ -352,17 +398,28 @@ describe('P41: a BAKED protocol re-resolves when it no longer applies', () => {
   // again at every evaluation. Re-running the same canonical `Assign` after its
   // root was rebound to a type conforming through a DIFFERENT protocol must
   // dispatch to that one instead of reporting a missing implementation.
+  // Two OBJECT types, one per protocol (the B1 mutability gate: a `readwrite`
+  // property is object-only), so that rebinding `x` from one to the other
+  // changes which protocol answers.
   const TWO_PROTOCOLS = `protocol Plain { readwrite name: string }
 protocol Fancy { readwrite name: string }
-type string is Plain {
+type Plainly = object{v: string}
+type Fancily = object{v: string}
+type Plainly is Plain {
   get name(self: Self) -> string { "s" }
-  set name(self: Self, v: string) -> string { v }
+  set name(self: Self, v: string) -> Self {
+    self.v = v
+    self
+  }
 }
-type integer is Fancy {
+type Fancily is Fancy {
   get name(self: Self) -> string { "i" }
-  set name(self: Self, v: string) -> integer { 99 }
+  set name(self: Self, v: string) -> Self {
+    self.v = "99"
+    self
+  }
 }
-let x = "a"`;
+let x = Plainly(v: "a")`;
 
   test('the write follows the receiver, not the baked name', () => {
     const ce = engineFor(TWO_PROTOCOLS);
@@ -374,12 +431,12 @@ let x = "a"`;
     expect(assign.toString()).toBe(
       'Assign(x, ProtocolProperty("Plain", "name", x, "z"))'
     );
-    expect(assign.evaluate().toString()).toBe('"z"');
+    expect(assign.evaluate().toString()).toBe('Plainly(v: "z")');
 
-    // …now `x` holds an integer, which conforms through `Fancy`.
-    ce.assign('x', ce.number(7));
-    expect(assign.evaluate().toString()).toBe('99');
-    expect(ce.box('x').evaluate().toString()).toBe('99');
+    // …now `x` holds a `Fancily`, which conforms through `Fancy`.
+    ce.assign('x', executeEpsil(ce, 'Fancily(v: "b")').value as any);
+    expect(assign.evaluate().toString()).toBe('Fancily(v: "99")');
+    expect(ce.box('x').evaluate().toString()).toBe('Fancily(v: "99")');
   });
 
   test('a receiver no protocol answers for keeps the missing-implementation error', () => {
@@ -389,7 +446,7 @@ let x = "a"`;
       ['Field', 'x', { str: 'name' }],
       { str: 'z' },
     ] as any);
-    expect(assign.evaluate().toString()).toBe('"z"');
+    expect(assign.evaluate().toString()).toBe('Plainly(v: "z")');
     ce.assign('x', ce.box(['List', 1, 2] as any));
     expect(errorCode(assign.evaluate().toString())).toBe(
       'protocol-implementation-missing'
@@ -401,12 +458,12 @@ describe('P25 amendment: a `set` handler’s result rebinds the receiver', () =>
   const person = (setter: string) => `protocol Nameable {
   readwrite name: string
 }
-type Person = tuple<n: string, age: integer>
+type Person = object{n: string, age: integer}
 type Person is Nameable {
   get name(self: Self) -> string { self.n }
   ${setter}
 }
-let p = Person("Bob", 42)`;
+let p = Person(n: "Bob", age: 42)`;
 
   test('an ANNOTATED result that is not the receiver is refused at registration', () => {
     const ce = new ComputeEngine();
@@ -416,7 +473,7 @@ let p = Person("Bob", 42)`;
         `protocol Nameable {
   readwrite name: string
 }
-type Person = tuple<n: string, age: integer>`
+type Person = object{n: string, age: integer}`
       )
     ).toEqual([]);
     const result = executeEpsil(
@@ -436,10 +493,10 @@ type Person = tuple<n: string, age: integer>`
   test('an annotated result that FITS the receiver is accepted', () => {
     const ce = engineFor(
       person(
-        'set name(self: Self, v: string) -> Person { Person(v, self.age) }'
+        'set name(self: Self, v: string) -> Person {\n    self.n = v\n    self\n  }'
       )
     );
-    expect(value(ce, 'p.name = "Ada"')).toBe('Person("Ada", 42)');
+    expect(value(ce, 'p.name = "Ada"')).toBe('Person(n: "Ada", age: 42)');
   });
 
   test('an UNANNOTATED handler stays trusted at registration (P28)', () => {
@@ -448,7 +505,7 @@ type Person = tuple<n: string, age: integer>`
     const ce = engineFor(person('set name(self: Self, v: string) { v }'));
     expect(errorCode(value(ce, 'p.name = "Ada"'))).toBe('incompatible-type');
     // The refused write left the binding alone.
-    expect(value(ce, 'p')).toBe('Person("Bob", 42)');
+    expect(value(ce, 'p')).toBe('Person(n: "Bob", age: 42)');
   });
 });
 
@@ -457,22 +514,25 @@ describe('a WRITE checks the value against the property’s type', () => {
   // Epsil handler catches a mistyped value on its own parameter, but a HOST
   // callback is trusted with whatever it is handed (P10), so the check belongs
   // to the write — on BOTH routes to it.
-  /** A `Person` whose accessors are host callbacks that record their calls. */
+  /** A `Person` whose accessors are host callbacks that record their calls.
+   * An OBJECT type, as the B1 mutability gate requires of a `readwrite`
+   * property's conformer. */
   function hostEngine(): [ComputeEngine, unknown[][]] {
     const ce = new ComputeEngine();
     const invoked: unknown[][] = [];
     ce.declareProtocol('Nameable', { readwrite: { name: 'string' } });
-    ce.declareType('Person', 'tuple<n: string, age: integer>');
+    ce.declareType('Person', 'object{n: string, age: integer}');
     ce.declareProtocolImplementation('Person', 'Nameable', {
-      getters: { name: (self: any) => self.ops[0] },
+      getters: { name: (self: any) => self._field('n') },
       setters: {
         name: (...args: any[]) => {
           invoked.push(args);
-          return ce.function('Person', [args[1], args[0].ops[1]]);
+          args[0]._store('n', args[1]);
+          return args[0];
         },
       },
     });
-    ce.assign('p', ce.function('Person', [ce.string('Bob'), ce.number(42)]));
+    expect(run(ce, 'let p = Person(n: "Bob", age: 42)')).toEqual([]);
     return [ce, invoked];
   }
 
@@ -481,9 +541,9 @@ describe('a WRITE checks the value against the property’s type', () => {
     expect(errorCode(value(ce, 'p.name = 42'))).toBe('incompatible-type');
     expect(invoked).toHaveLength(0);
     // The refused write left the binding alone…
-    expect(value(ce, 'p')).toBe('Person("Bob", 42)');
+    expect(value(ce, 'p')).toBe('Person(n: "Bob", age: 42)');
     // …and a well-typed one still reaches the handler.
-    expect(value(ce, 'p.name = "Ada"')).toBe('Person("Ada", 42)');
+    expect(value(ce, 'p.name = "Ada"')).toBe('Person(n: "Ada", age: 42)');
     expect(invoked).toHaveLength(1);
   });
 
@@ -505,15 +565,15 @@ describe('a WRITE checks the value against the property’s type', () => {
         .toString();
     expect(errorCode(write(42))).toBe('incompatible-type');
     expect(invoked).toHaveLength(0);
-    expect(write({ str: 'Zed' })).toBe('Person("Zed", 42)');
+    expect(write({ str: 'Zed' })).toBe('Person(n: "Zed", age: 42)');
     expect(invoked).toHaveLength(1);
   });
 
   test('an EPSIL setter refuses it as well', () => {
-    const ce = engineFor(`${PERSON}\nlet p = Person("Bob", 42)`);
+    const ce = engineFor(`${PERSON}\nlet p = Person(n: "Bob", age: 42)`);
     expect(errorCode(value(ce, 'p.name = 42'))).toBe('incompatible-type');
-    expect(value(ce, 'p')).toBe('Person("Bob", 42)');
-    expect(value(ce, 'p.name = "Steve"')).toBe('Person("Steve", 42)');
+    expect(value(ce, 'p')).toBe('Person(n: "Bob", age: 42)');
+    expect(value(ce, 'p.name = "Steve"')).toBe('Person(n: "Steve", age: 42)');
   });
 });
 
@@ -521,10 +581,13 @@ describe('a DEFERRED write checks the EVALUATED value, not the raw RHS', () => {
   const SCORED = `protocol Scored {
   readwrite score: integer
 }
-type Person = tuple<n: string, age: integer>
+type Person = object{n: string, age: integer}
 type Person is Scored {
   get score(self: Self) -> integer { self.age }
-  set score(self: Self, v: integer) -> Self { Person(self.n, v) }
+  set score(self: Self, v: integer) -> Self {
+    self.age = v
+    self
+  }
 }`;
 
   test('a loop-body SET whose value reads the loop index takes effect', () => {
@@ -538,7 +601,7 @@ type Person is Scored {
 function f() -> integer {
   let acc = 0
   for i in 1..3 {
-    let q: Person = Person("bob", 1)
+    let q: Person = Person(n: "bob", age: 1)
     q.score = 10 * i
     acc = acc + q.score
   }
@@ -559,9 +622,9 @@ function f() -> integer {
       { str: 'nope' },
     ] as any);
     expect(assign.toString()).toBe('Assign(Field(d, "score"), "nope")');
-    expect(run(ce, 'let d = Person("bob", 1)')).toEqual([]);
+    expect(run(ce, 'let d = Person(n: "bob", age: 1)')).toEqual([]);
     expect(errorCode(assign.evaluate().toString())).toBe('incompatible-type');
-    expect(value(ce, 'd')).toBe('Person("bob", 1)');
+    expect(value(ce, 'd')).toBe('Person(n: "bob", age: 1)');
   });
 });
 
@@ -576,11 +639,7 @@ describe('P38: a DEFERRED target that is not a protocol property after all', () 
     // `immutable-value-assignment` with the property store: every route has
     // declined, so the target is an immutable value being stored into
     // (Appendix B, "Assigning to a property").
-    const ce = engineFor(`protocol Tagged { readwrite tag: string }
-type string is Tagged {
-  get tag(self: Self) -> string { "s" }
-  set tag(self: Self, v: string) -> string { v }
-}`);
+    const ce = engineFor(TAGGED_BOX);
     const assign = ce.box(['Assign', ['Field', 'd', { str: 'tag' }], 5] as any);
     expect(assign.toString()).toBe('Assign(Field(d, "tag"), 5)');
 

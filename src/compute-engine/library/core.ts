@@ -99,6 +99,7 @@ import { canonical } from '../boxed-expression/canonical-utils.js';
 import {
   isDictionary,
   isValueDef,
+  isOperatorDef,
   assignedVariableNames,
   withValueShield,
   withRandomSeedFrame,
@@ -1563,6 +1564,60 @@ function declareConformanceStatement(
   }
 }
 
+/**
+ * The `hold` attribute of a `DefineFunction` statement, read from its optional
+ * attributes dictionary (`["DefineFunction", "f", ‹literal›, {hold: True}]`).
+ * The `{dict: …}` shorthand boxes an unquoted `True` as a STRING and the
+ * operator `Dictionary` encoding as the SYMBOL — read both, exactly as
+ * `DeclareType` reads its `alias` attribute.
+ */
+function definitionHoldAttribute(attrs: Expression | undefined): boolean {
+  if (attrs === undefined) return false;
+  const dict = attrs.canonical;
+  if (!isDictionary(dict)) return false;
+  const v = dict.get('hold');
+  if (v === undefined) return false;
+  return (isString(v) ? v.string : sym(v)) === 'True';
+}
+
+/**
+ * The expression a held operand of `Head`/`Tail` stands for.
+ *
+ * Both operators are structural, but they are NOT value-blind: a symbol
+ * operand is resolved through its BINDING — the expression the symbol is
+ * bound to, chased through symbol-to-symbol bindings — without EVALUATING
+ * that expression. With `x := a + 1`, `Head(x)` is `Add` whether or not `a`
+ * has a value, exactly as `Head(a + 1)` written directly is `Add`. This is
+ * what makes `Head(e)`/`Tail(e)` inside a `hold` function report what the
+ * caller wrote (`hold f(e) = Head(e); f(a + 1)` → `Add`), and it is why the
+ * resolution is a lookup and not `.evaluate()` (which would answer `Integer`
+ * once `a` is `3`, as Mathematica does).
+ *
+ * Only a symbol whose value substitutes at `evaluate` time is chased: a
+ * numeric constant such as `Pi` (`holdUntil: 'N'`) and an operator name
+ * (`Sin`) stay symbols with head `Symbol`. A self-referential binding
+ * (`a := a + 1`) already reads as unbound through `BoxedSymbol.value`; a
+ * symbol-to-symbol cycle created on a scope directly (`a := b; b := a`) is
+ * caught by the visited set, and the chase then stops at the symbol where
+ * the cycle closes — no arbitrary depth cap, so a long but honest chain is
+ * never truncated to an intermediate answer.
+ */
+function boundExpression(x: Expression): Expression {
+  let cur = x.canonical;
+  const visited = new Set<string>();
+  for (;;) {
+    if (!isSymbol(cur)) return cur;
+    const def = cur.valueDefinition;
+    if (def === undefined || def.holdUntil !== 'evaluate') return cur;
+    if (visited.has(cur.symbol)) return cur;
+    visited.add(cur.symbol);
+    const v = cur.value;
+    if (v === undefined) return cur;
+    cur = v;
+  }
+}
+
+
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
     // The sole member of the unit type, `nothing`
@@ -2121,8 +2176,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const clauses = clauseListing(ce, x.symbol);
           if (clauses !== undefined) {
             // ≥2 clauses by construction (§4.2): a single clause installs
-            // as an ordinary function and has no clause listing.
-            s.push(`multi-clause function (${clauses.length} clauses)`);
+            // as an ordinary function and has no clause listing — EXCEPT a
+            // `hold` function, which always lives in clause storage as its
+            // lone clause (see `FunctionClause.hold`, multi-clause.ts).
+            const fnDef = ce.lookupDefinition(x.symbol);
+            if (
+              clauses.length === 1 &&
+              fnDef !== undefined &&
+              isOperatorDef(fnDef) &&
+              fnDef.operator.lazy === true
+            )
+              s.push('hold function (arguments are bound unevaluated)');
+            else s.push(`multi-clause function (${clauses.length} clauses)`);
             s.push(...clauses);
           } else if (x.valueDefinition) {
             const def = x.valueDefinition;
@@ -2166,10 +2231,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { engine: ce }) => {
         if (x === undefined) return ce.symbol('Undefined');
-        // Held (lazy) operand: a symbol is resolved through its binding, so
-        // `Head(x)` sees the value of `x`, not the symbol itself.
-        if (isSymbol(x)) x = x.canonical.evaluate();
-        return ce.symbol(x.operator);
+        return ce.symbol(boundExpression(x).operator);
       },
     },
 
@@ -2186,9 +2248,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       // **IMPORTANT** Tail should work on non-canonical expressions
       evaluate: ([x], { engine: ce }) => {
-        // Held (lazy) operand: a symbol is resolved through its binding, so
-        // `Tail(x)` with `x := a + 1` yields `Sequence(a, 1)` (see `Head`).
-        if (isSymbol(x)) x = x.canonical.evaluate();
+        x = boundExpression(x);
         return isFunction(x) ? ce._fn('Sequence', x.ops) : ce.Nothing;
       },
     },
@@ -2482,18 +2542,30 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'earlier clause in place, any other clause is appended, and calls ' +
         'dispatch to the most specific clause admitting the arguments.',
       lazy: true,
-      signature: '(symbol, function) scope -> nothing',
+      signature: '(symbol, function, dictionary?) scope -> nothing',
       invokes: false,
       canonical: (args, { engine: ce }) => {
-        if (args.length !== 2) return null;
+        if (args.length !== 2 && args.length !== 3) return null;
         const symbol = isSymbol(args[0])
           ? args[0]
           : checkType(ce, args[0], 'symbol');
+        // The optional third operand carries the definition's ATTRIBUTES as a
+        // dictionary — today the single key `hold` (`{hold: True}`, the Epsil
+        // `hold f(e) = …` prefix): the function's arguments are bound to its
+        // parameters unevaluated. Read here and on the evaluate route alike,
+        // since both routes install the clause. Passed through unchanged so
+        // the two routes and the serializer see the same node.
+        const attrs = args[2] !== undefined ? [args[2].canonical] : [];
+        const hold = definitionHoldAttribute(args[2]);
         // The clause operand must be an explicit `Function` literal — the
         // shorthand lift (`canonicalFunctionLiteral(5)` → constant lambda)
         // must NOT apply here, or any value would silently become a clause.
         if (!isFunction(args[1], 'Function'))
-          return ce._fn('DefineFunction', [symbol, args[1].canonical]);
+          return ce._fn('DefineFunction', [
+            symbol,
+            args[1].canonical,
+            ...attrs,
+          ]);
         // Constructor precedence (function-polymorphism §4.7): a same-scope
         // NOMINAL type declaration owns the name — the definition statement
         // is a smart-CONSTRUCTOR definition (nominal-types v2), handled
@@ -2731,7 +2803,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                   ce,
                   symbolName,
                   canonFn,
-                  statementOrigin(ce, args[0], route)
+                  statementOrigin(ce, args[0], route),
+                  hold
                 )
               );
             } catch (e) {
@@ -2759,10 +2832,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             }
           }
         }
-        return ce._fn('DefineFunction', [symbol, canonFn]);
+        return ce._fn('DefineFunction', [symbol, canonFn, ...attrs]);
       },
-      evaluate: ([op1, op2], { engine: ce }) => {
+      evaluate: ([op1, op2, op3], { engine: ce }) => {
         const name = sym(op1);
+        const hold = definitionHoldAttribute(op3);
         if (name === undefined)
           return ce._fn('Error', [
             ce.string('invalid-clause-definition'),
@@ -2778,7 +2852,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // Same anchor and same route discipline as the canonical handler
           // above — `op1` is the raw name operand it threaded through.
           withStatementRoute(ce, (route) =>
-            defineFunctionClause(ce, name, op2, statementOrigin(ce, op1, route))
+            defineFunctionClause(
+              ce,
+              name,
+              op2,
+              statementOrigin(ce, op1, route),
+              hold
+            )
           );
         } catch (e) {
           if (e instanceof RedefinitionError)

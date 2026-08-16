@@ -142,6 +142,64 @@ clauses that overlap an earlier one of equal specificity as well as clauses
 made unreachable by more specific ones covering their whole (finite)
 domain.
 
+### Hold functions
+
+By default a call **evaluates its arguments first**, and the function sees
+their values: with `let a = 3`, `f(a + 1)` receives `4`. A function that
+needs to see what the caller *wrote* — the expression `a + 1`, to inspect it,
+transform it, serialize it, or decide whether to evaluate it at all — is
+declared with the `hold` prefix, in either form:
+
+```epsil
+hold f(e) = Head(e)
+hold function twice(e) { let v = e; v + v }
+```
+
+In a hold function every parameter is bound to its argument **as written**
+(canonicalized and bound in the caller's scope, but not evaluated — so
+`f(1 + 1)` receives the canonical `2`, while `f(a + 1)` receives `a + 1`).
+Reading
+the parameter in an ordinary position evaluates the argument *there*, so
+`hold twice(e) = e + e` computes `e` on each read (call-by-name); read it
+once into a local — `let v = e` — to evaluate once. A structural operator sees
+the expression itself:
+
+```epsil
+let a = 3
+hold f(e) = Head(e)
+f(a + 1)
+// ➔ Add          (an ordinary function would answer Integer: it receives 4)
+```
+
+Because the argument is never evaluated by the call, a hold function can
+decide whether it runs at all — here `Random()` draws only when the
+condition is false:
+
+```epsil
+hold unless(cond, body) = if !cond { body } else { Nothing }
+unless(a > 5, Random())
+```
+
+`hold` applies to the **whole definition** — every parameter is held — and
+it maps to the engine's `lazy` operator flag: the definition is installed as
+a `lazy` operator, and `DefineFunction` carries it as the attribute
+`{hold: True}`. Three consequences:
+
+- A hold function is **single-clause**: a literal parameter selects a clause
+  by an argument's *value*, which a hold function never has, so
+  `hold f(0) = …` is refused (`hold-literal-parameter`), and a second clause
+  of a hold function — hold or not — at a different parameter list is refused
+  (`hold-single-clause`). Redefining the lone clause replaces it as usual.
+- Parameter types are checked against the **argument expression's** type
+  (`hold k(e: integer) = …` admits `k(n + 1)` and refuses `k("s")`).
+- The effects of an argument are the caller's business: they contribute to
+  the call exactly as they would under an ordinary function, since the body
+  may evaluate the argument.
+
+`hold` is a contextual keyword, like `type`: it claims a statement only as
+the prefix of a function definition, and stays a legal identifier everywhere
+else (`let hold = 5`, `hold(2)`). Anonymous functions have no hold form.
+
 ### Anonymous functions
 
 An anonymous function uses the ASCII mapsto arrow `=>` (`⇒` in fancy-symbol

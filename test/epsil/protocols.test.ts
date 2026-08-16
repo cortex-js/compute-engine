@@ -1011,13 +1011,20 @@ describe('EPSIL PROTOCOL IMPLEMENTATIONS', () => {
   });
 
   test('PROPERTY handlers: shapes, readonly `set`, and a missing `get`', () => {
+    // `Named` has a `readwrite` property, so the B1 mutability gate
+    // (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Which types can conform")
+    // admits only OBJECT types as conformers. `Holder`'s stored field is `v`,
+    // deliberately not `hash` or `name`: a stored field of the property's own
+    // name would satisfy the requirement by itself (Appendix B's field
+    // backing), and these are tests of the hand-written accessors.
     const NAMED =
-      'protocol Named {\n  readonly hash: string\n  readwrite name: string\n}';
+      'protocol Named {\n  readonly hash: string\n  readwrite name: string\n}\n' +
+      'type Holder = object{v: string}';
     const block = (...members: string[]) =>
-      `type string is Named {\n  ${members.join('\n  ')}\n}`;
+      `type Holder is Named {\n  ${members.join('\n  ')}\n}`;
     const GET_HASH = 'get hash(self: Self) -> string { "h" }';
     const GET_NAME = 'get name(self: Self) -> string { "n" }';
-    const SET_NAME = 'set name(self: Self, v: string) -> string { v }';
+    const SET_NAME = 'set name(self: Self, v: string) -> Self { self }';
 
     const ce = new ComputeEngine();
     executeEpsil(ce, NAMED);
@@ -1036,7 +1043,7 @@ describe('EPSIL PROTOCOL IMPLEMENTATIONS', () => {
         bad,
         block(
           GET_HASH,
-          'set hash(self: Self, v: string) -> string { v }',
+          'set hash(self: Self, v: string) -> Self { self }',
           GET_NAME,
           SET_NAME
         )
