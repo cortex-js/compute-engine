@@ -873,6 +873,30 @@ string(s, metadata?): Expression
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~character()~~
+
+```ts
+character(s, metadata?): Expression
+```
+
+Create a boxed character — one user-perceived character.
+
+`s` must be exactly one grapheme cluster after NFC normalization; use the
+`CharacterFrom` operator when the content is not known to satisfy that, as
+it reports a diagnostic instead.
+
+####### s
+
+`string`
+
+####### metadata?
+
+[`Metadata`](#metadata-1)
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~error()~~
 
 ```ts
@@ -2436,6 +2460,42 @@ readonly unicodeScalars: number[];
 ```
 
 The Unicode scalar values (code points) of the string.
+
+</MemberCard>
+
+### CharacterInterface
+
+Narrowed interface for a character expression — one NFC-normalized grapheme
+cluster (UAX #29).
+
+Obtained via `isCharacter()`.
+
+`string` holds the cluster's content and is deliberately spelled the same as
+`StringInterface.string`, so a consumer that only needs the text (the
+`String` interpolation join, `StringJoin`) can read either kind through one
+property without first deciding which it has.
+
+<MemberCard>
+
+##### CharacterInterface.string
+
+```ts
+readonly string: string;
+```
+
+The content of the character: exactly one grapheme cluster.
+
+</MemberCard>
+
+<MemberCard>
+
+##### CharacterInterface.unicodeScalars
+
+```ts
+readonly unicodeScalars: number[];
+```
+
+The Unicode scalar values (code points) of the cluster.
 
 </MemberCard>
 
@@ -9508,6 +9568,30 @@ string(s, metadata?): Expression
 
 <MemberCard>
 
+##### IComputeEngine.character()
+
+```ts
+character(s, metadata?): Expression
+```
+
+Create a boxed character — one user-perceived character.
+
+`s` must be exactly one grapheme cluster after NFC normalization; use the
+`CharacterFrom` operator when the content is not known to satisfy that, as
+it reports a diagnostic instead.
+
+####### s
+
+`string`
+
+####### metadata?
+
+[`Metadata`](#metadata-1)
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.error()
 
 ```ts
@@ -15093,6 +15177,16 @@ static string: BoxedType;
 
 <MemberCard>
 
+##### BoxedType.character
+
+```ts
+static character: BoxedType;
+```
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedType.dictionary
 
 ```ts
@@ -15744,6 +15838,7 @@ type PrimitiveType =
   | "symbol"
   | "boolean"
   | "string"
+  | "character"
   | "color"
   | "expression"
   | "unknown"
@@ -15776,7 +15871,7 @@ A primitive type is a simple type that represents a concrete value.
    - `scalar`
      - `<number>`
      - `boolean`: a boolean value: `True` or `False`.
-     - `string`: a string of characters.
+     - `character`: exactly one user-perceived character (grapheme cluster).
    - `collection`
       - `set`: a collection of unique expressions, e.g. `set<string>`.
       - `record`: a collection of specific key-value pairs,
@@ -15791,6 +15886,8 @@ A primitive type is a simple type that represents a concrete value.
              tensor when the type of its elements is a number
           - `tuple`: a fixed-size collection of named or unnamed elements,
              e.g. `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
+          - `string`: a string of characters, i.e. an indexed collection of
+             `character`. A sibling of `list<character>`, not a subtype.
 
 </MemberCard>
 
