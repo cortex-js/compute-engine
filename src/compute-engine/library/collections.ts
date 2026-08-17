@@ -35,7 +35,7 @@ import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
 // (collections → compile-expression → base-compiler → library/utils → collections)
-import { kleeneOr } from '../../common/kleene.js';
+import { kleeneAnd, kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType } from '../../common/type/reduce.js';
 import {
@@ -2263,14 +2263,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(any*) -> tuple',
     type: (ops) => tupleTypeOf(ops),
-    // `Nothing` is an ERASURE marker: it is spliced out of a collection
-    // literal, exactly as for `List` and `Set`. Splicing changes the ARITY of
-    // the tuple — `(1, Nothing, 3)` is the 2-tuple `(1, 3)`, typed
-    // accordingly. Use `Missing` for an absent-but-positioned coordinate.
-    // (`engine.tuple` already filters `Nothing`; the explicit filter documents
-    // the intent at the operator boundary.)
-    canonical: (ops, { engine }) =>
-      engine.tuple(...ops.filter((op) => !isSymbol(op, 'Nothing'))),
+    // Run the framework's default flatten step, which a custom `canonical`
+    // handler would otherwise short-circuit. It does two things here, and
+    // both change the ARITY (and therefore the type) of the tuple:
+    //
+    // - `Sequence` is SPLICED into the operand list: `(1, Sequence(2, 3), 4)`
+    //   is the 4-tuple `(1, 2, 3, 4)`, not a 3-tuple holding a pair. A
+    //   `Sequence` is the engine-wide "these operands, inlined here" marker,
+    //   so a collection literal must never store one as an element.
+    // - `Nothing` is ERASED: `(1, Nothing, 3)` is the 2-tuple `(1, 3)`. Use
+    //   `Missing` for an absent-but-positioned coordinate.
+    //
+    // `engine.tuple` filters `Nothing` on its own but does NOT splice
+    // `Sequence`, so the flatten call is load-bearing, not decorative.
+    canonical: (ops, { engine }) => engine.tuple(...flatten(ops)),
     // A `Tuple` is inert data: it evaluates its operands but never transposes a
     // collection component into a list of points. The Desmos point-list idiom
     // (zip a tuple-with-collection into a `List` of point-tuples) lives in the
@@ -3670,12 +3676,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // unwalkable source stops the whole walk — mirror `isEmpty`/`count`,
       // which read the same `ops.slice(1)` (the first operand is the
       // mapping function, not a source).
+      // Read through `mapSource`, as `count`/`isEmpty`/`isFinite`/`at`/
+      // `iterator` all do: an EAGER collection producer (`SetFrom(…)`,
+      // `Characters(…)`) has no collection handlers until it is evaluated and
+      // reports its enumerability as unknown, while `mapSource` resolves it.
+      // Reading the raw operand instead made this facet disagree with every
+      // sibling — `Map(f, SetFrom([1, 2]))` walked fine and counted fine
+      // until the set-kind path started gating its walk on this answer, and
+      // then reported `count` as unknown for a two-element set.
       isEnumerable: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (expr.nops <= 2) return expr.op2.isEnumerableCollection;
+        if (expr.nops <= 2) return mapSource(expr.op2).isEnumerableCollection;
         let unknown = false;
         for (const x of expr.ops.slice(1)) {
-          const e = x.isEnumerableCollection;
+          const e = mapSource(x).isEnumerableCollection;
           if (e === false) return false;
           if (e === undefined) unknown = true;
         }
@@ -3685,9 +3699,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       elementMemo: true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (expr.nops > 2)
-          return minCount(expr.ops.slice(1).map((c) => mapSource(c).count));
-        return mapSource(expr.op2).count;
+        const sourceCount =
+          expr.nops > 2
+            ? minCount(expr.ops.slice(1).map((c) => mapSource(c).count))
+            : mapSource(expr.op2).count;
+        // A set-kind result counts DISTINCT results: the source's length is
+        // only an upper bound once the callback can map two elements onto one
+        // value (see the `iterator` handler).
+        if (sourceCount === undefined || !producesSet(expr)) return sourceCount;
+        return Number.isFinite(sourceCount)
+          ? distinctCount(expr, sourceCount)
+          : undefined;
       },
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -3703,8 +3725,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         return mapSource(expr.op2).isEmptyCollection;
       },
+      // A set-kind result deduplicates, and deduplication can only SHRINK, so
+      // an infinite source can yield a FINITE set — `Map(x -> 1, Integers)`
+      // holds exactly one element. Unlike `Join`/`Append`, an infinite SET
+      // source settles nothing here either: those pass their elements through
+      // unchanged, while a callback may collapse infinitely many distinct
+      // elements onto one value. So a non-finite source under set semantics
+      // is UNKNOWN, never a definite `false`.
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
+        const isSet = producesSet(expr);
         if (expr.nops > 2) {
           // Finite as soon as *any* source is finite (mirrors Zip).
           let anyUnknown = false;
@@ -3713,124 +3743,46 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (f === true) return true;
             if (f === undefined) anyUnknown = true;
           }
-          return anyUnknown ? undefined : false;
+          if (anyUnknown) return undefined;
+          return isSet ? undefined : false;
         }
-        return mapSource(expr.op2).isFiniteCollection;
+        const finite = mapSource(expr.op2).isFiniteCollection;
+        if (finite === false && isSet) return undefined;
+        return finite;
       },
+      // `Map` preserves the SET kind of its source (`mapResultType`), but a
+      // callback can COLLAPSE two distinct elements onto one value —
+      // `Map(x -> x^2, Set(-1, 1, 2))` maps three distinct elements to the
+      // two values 1 and 4. The enumeration therefore has to deduplicate, or
+      // the lazy node disagrees with what materializing the SAME node
+      // answers: materialization rebuilds through `ce.function('Set', …)`,
+      // which deduplicates in `canonicalSet`. (The image of a set under a
+      // function is a set, so the deduplicated answer is the correct one.)
       iterator: (expr) => {
-        if (!isFunction(expr))
-          return { next: () => ({ value: undefined, done: true }) };
-
-        // Broadcast-chain lowering (see `map-lowering.ts`): a stack of
-        // broadcast-shaped lazy `Map`s is served from ONE loop that applies
-        // each level's operator directly, bypassing the per-level
-        // `makeLambda` invoke. Purely structural, memoized per instance; a
-        // `Map` that doesn't match falls through to the general path below,
-        // byte-identically.
-        const spine = lowerMapSpine(expr);
-        if (spine) {
-          const ce = expr.engine;
-          // A level that fails yields THAT level's position-preserving marker
-          // as an ordinary element value, which flows through the remaining
-          // levels — exactly what the nested general iterators do.
-          const run = makeSpineRunner(ce, spine, (levelExpr) =>
-            absenceMarker(ce, levelExpr)
-          );
-          if (spine.bases.length > 1) {
-            // Variadic bottom level: advance every base lockstep, ending as
-            // soon as any source ends (mirrors the zipWith form below).
-            const sources = spine.bases.map((c) => c.each());
-            return {
-              next: () => {
-                const items: Expression[] = [];
-                for (const source of sources) {
-                  const { value, done } = source.next();
-                  if (done || value === undefined)
-                    return { value: undefined, done: true };
-                  items.push(value);
-                }
-                // A level that produced no value is a COMPUTATION FAILURE,
-                // not an erasure: the runner already substituted the marker,
-                // so this fallback is unreachable (kept for type totality).
-                const v = run(items) ?? absenceMarker(ce, expr);
-                return { value: v, done: false };
-              },
-            };
-          }
-          const source = spine.bases[0].each();
-          return {
-            next: () => {
-              const { value, done } = source.next();
-              if (done) return { value: undefined, done: true };
-              // See above: a failed mapping is the marker, not an erasure.
-              // The runner substitutes it; this fallback is unreachable.
-              const v = run([value]) ?? absenceMarker(ce, expr);
-              return { value: v, done: false };
-            },
-          };
-        }
-
-        // Auto-compile trigger (see `map-auto-compile.ts`): when the element
-        // lambda carries the numeric `Block(N(body))` marker and the engine
-        // is at machine precision, elements are served by a cached compiled
-        // function, with silent per-element interpreter fallback. A new
-        // iterator is a new drain (resets the once-per-drain attempt bound).
-        const auto = mapAutoCompileRunner(expr, { drainStart: true });
-
-        if (expr.nops > 2) {
-          // Multi-collection (zipWith): apply the mapping function to the
-          // element-wise tuple of the sources, bounded by the shortest
-          // input. Driven by each source's iterator — not by up-front
-          // counts — so a source with an unknown count (or an infinite one
-          // zipped with a finite one) still iterates; the zip ends as soon
-          // as any source ends.
-          const f = applicable(expr.op1);
-          if (!f) return { next: () => ({ value: undefined, done: true }) };
-          const sources = expr.ops.slice(1).map((c) => c.each());
-          return {
-            next: () => {
-              const items: Expression[] = [];
-              for (const source of sources) {
-                const { value, done } = source.next();
-                if (done || value === undefined)
-                  return { value: undefined, done: true };
-                items.push(value);
-              }
-              const compiled = auto?.(items);
-              if (compiled !== undefined)
-                return { value: compiled, done: false };
-              // A mapping function that produced no value is a COMPUTATION
-              // FAILURE, not an erasure: emit the position-preserving marker
-              // (`Nothing` here would silently shorten the result).
-              const v = f(items) ?? absenceMarker(expr.engine, expr);
-              return { value: v, done: false };
-            },
-          };
-        }
-
-        const f = applicable(expr.op1);
-        if (!f) return { next: () => ({ value: undefined, done: true }) };
-
-        const source = expr.op2.each();
-
-        return {
-          next: () => {
-            while (true) {
-              const { value, done } = source.next();
-              if (done) return { value: undefined, done: true };
-              const compiled = auto?.([value]);
-              if (compiled !== undefined)
-                return { value: compiled, done: false };
-              // See above: a failed mapping is the marker, not an erasure.
-              const v = f([value]) ?? absenceMarker(expr.engine, expr);
-              return { value: v, done: false };
-            }
-          },
-        };
+        const base = mapIterator(expr);
+        return isFunction(expr) && producesSet(expr)
+          ? deduplicatingIterator(
+              base,
+              expr.engine.iterationLimit,
+              expr.operator
+            )
+          : base;
       },
       at: (expr: Expression, index: number | string) => {
         if (!isFunction(expr)) return undefined;
         if (typeof index !== 'number') return undefined;
+
+        // A set-kind result is indexed through the DEDUPLICATED enumeration,
+        // so that `at`, `each` and `count` agree; the positional paths below
+        // index the source, which counts elements the callback collapsed.
+        if (producesSet(expr))
+          return distinctAt(expr, index, () => {
+            const n =
+              expr.nops > 2
+                ? minCount(expr.ops.slice(1).map((c) => mapSource(c).count))
+                : mapSource(expr.op2).count;
+            return n !== undefined && Number.isFinite(n) ? n : undefined;
+          });
 
         // Random access re-derives the element through the memoized lowered
         // chain (R5). Each `at()` remains its own auto-compile micro-drain.
@@ -5054,8 +5006,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isEnumerable: enumerableFromAllSources,
       isLazy: (_expr) => true,
+      // A set-kind result is indexed by walking the deduplicated enumeration
+      // from the start (`distinctAt`), so sequential indexing would be
+      // quadratic without a cache. `Join`'s elements are exactly its
+      // operands' elements, so they are as pure as those — the same premise
+      // `Map` relies on for its own `elementMemo`.
+      elementMemo: true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
+        const isSet = producesSet(expr);
         let total = 0;
         for (const op of expr.ops) {
           if (isAtomicJoinOperand(op)) {
@@ -5064,10 +5023,67 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           }
           const count = op.count;
           if (count === undefined) return undefined;
-          if (!Number.isFinite(count)) return Infinity;
+          if (!Number.isFinite(count)) {
+            // A concatenation containing an infinite operand is infinite
+            // whatever follows it, so answer now rather than scanning on —
+            // a LATER operand with an unknown count would otherwise mask a
+            // length we already know.
+            //
+            // Under set semantics that holds only when the infinite operand
+            // is ITSELF a set: its elements are already distinct, and `Join`
+            // passes them through unchanged, so deduplication cannot collapse
+            // infinitely many of them into finitely many. Any other infinite
+            // operand may repeat one value forever, so the number of DISTINCT
+            // elements is not decidable by a walk that terminates.
+            if (!isSet) return Infinity;
+            return op.type.matches('set') ? Infinity : undefined;
+          }
           total += count;
         }
-        return total;
+        // A set-kind result counts DISTINCT elements: the operands may repeat
+        // each other (`Join(Set(1, 2), Set(2, 3))` concatenates 4 elements but
+        // IS a 3-element set), so the concatenated length is only an upper
+        // bound.
+        return isSet ? distinctCount(expr, total) : total;
+      },
+      // `isEmpty` and `isFinite` are declared explicitly rather than left to
+      // the defaults, which derive both from `count`. A set-kind `count` can
+      // answer `undefined` — its deduplicating walk is bounded — and routing
+      // these through it would drag decidable answers down with it, including
+      // `materialize()`, which bails outright when `isEmptyCollection` is
+      // `undefined`, so the value would stop previewing too.
+      //
+      // Emptiness is dedup-invariant outright: deduplication cannot empty a
+      // non-empty collection, nor fill an empty one.
+      isEmpty: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.nops === 0) return true;
+        // An atomic (tuple) operand IS one element, so it is never empty.
+        return kleeneAnd(
+          expr.ops.map((op) =>
+            isAtomicJoinOperand(op) ? false : op.isEmptyCollection
+          )
+        );
+      },
+      // Finiteness is NOT dedup-invariant, and the implication runs the
+      // opposite way from the one it is tempting to write down: deduplication
+      // can only SHRINK a collection, so it can turn an infinite enumeration
+      // into a finite set — `Join(Set(1), Repeat(1))` enumerates forever and
+      // holds exactly one element. So an infinite operand settles finiteness
+      // only when it is ITSELF a set (already distinct, and `Join` passes its
+      // elements through unchanged); otherwise the answer is UNKNOWN, which
+      // is the convention `Dedup` already follows for the same reason.
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const isSet = producesSet(expr);
+        return kleeneAnd(
+          expr.ops.map((op) => {
+            if (isAtomicJoinOperand(op)) return true;
+            const finite = op.isFiniteCollection;
+            if (finite !== false || !isSet) return finite;
+            return op.type.matches('set') ? false : undefined;
+          })
+        );
       },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
@@ -5086,7 +5102,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           isAtomicJoinOperand(op) ? op : op.each()
         );
         let index = 0;
-        return {
+        const concatenation: Iterator<Expression> = {
           next: () => {
             while (true) {
               if (index >= sources.length)
@@ -5103,6 +5119,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             }
           },
         };
+        // A set-kind result enumerates each element ONCE, however often the
+        // operands repeat it.
+        return producesSet(expr)
+          ? deduplicatingIterator(
+              concatenation,
+              expr.engine.iterationLimit,
+              expr.operator
+            )
+          : concatenation;
       },
       at: (
         expr: Expression,
@@ -5112,6 +5137,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
         const countOf = (op: Expression): number | undefined =>
           isAtomicJoinOperand(op) ? 1 : op.count;
+
+        // A set-kind result has to be indexed through the DEDUPLICATED
+        // enumeration, so that `at`, `each` and `count` agree; the per-operand
+        // arithmetic below counts repeats and would skip past elements. The
+        // concatenated length is computed only if a negative index asks for
+        // it (see `distinctAt`).
+        if (producesSet(expr)) {
+          return distinctAt(expr, index, () => {
+            let total = 0;
+            for (const op of expr.ops) {
+              const count = countOf(op);
+              if (count === undefined || !Number.isFinite(count))
+                return undefined;
+              total += count;
+            }
+            return total;
+          });
+        }
 
         // A negative index counts from the end of the joined collection
         if (index < 0) {
@@ -5195,21 +5238,44 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
+      // See `Join`: a set-kind result indexes by walking, so cache elements.
+      elementMemo: true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         const count = expr.op1.count;
         if (count === undefined) return undefined;
+        // A set-kind result counts DISTINCT elements: an appended value the
+        // source already holds adds nothing (`Append(Set(1, 2), 2)` is still
+        // a 2-element set), so the concatenated length is only an upper bound.
+        if (producesSet(expr)) {
+          if (!Number.isFinite(count)) {
+            // An infinite SOURCE keeps infinitely many distinct elements when
+            // it is itself a set (already distinct, and `Append` passes its
+            // elements through unchanged); appending finitely many values
+            // cannot collapse that. Any other infinite source may repeat one
+            // value forever — undecidable. See `Join`'s `count`.
+            return expr.op1.type.matches('set') ? Infinity : undefined;
+          }
+          return distinctCount(expr, count + expr.nops - 1);
+        }
         if (!Number.isFinite(count)) return Infinity;
         return count + expr.nops - 1;
       },
+      // See `Join`'s `isFinite`: deduplication can only SHRINK, so it can turn
+      // an infinite enumeration into a finite set. An infinite source settles
+      // finiteness only when it is itself a set (already distinct).
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        return expr.op1.isFiniteCollection;
+        const finite = expr.op1.isFiniteCollection;
+        if (finite !== false || !producesSet(expr)) return finite;
+        return expr.op1.type.matches('set') ? false : undefined;
       },
       // With at least one appended value the result is never empty. The 1-ary
       // identity form (`Append(c)`, valid in non-strict mode) has exactly the
       // source's elements, so delegate — as `count`/`isFinite` do — rather
       // than claiming non-empty for an empty source.
+      // (Deduplication cannot empty a non-empty collection, so the set-kind
+      // result needs no special case here.)
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.nops >= 2) return false;
@@ -5230,7 +5296,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Index into the trailing (appended) operands, yielded one at a time
         // once the source is exhausted.
         let appended = 1;
-        return {
+        const concatenation: Iterator<Expression> = {
           next: () => {
             const { value, done } = source.next();
             if (!done) return { value, done: false };
@@ -5240,6 +5306,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             return { value: undefined, done: true };
           },
         };
+        // A set-kind result enumerates each element ONCE, so an appended value
+        // the source already holds is not yielded again.
+        return producesSet(expr)
+          ? deduplicatingIterator(
+              concatenation,
+              expr.engine.iterationLimit,
+              expr.operator
+            )
+          : concatenation;
       },
       at: (
         expr: Expression,
@@ -5249,6 +5324,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const count = expr.op1.count;
         if (count === undefined || !Number.isFinite(count)) return undefined;
         const total = count + expr.nops - 1;
+        // A set-kind result has to be indexed through the DEDUPLICATED
+        // enumeration, so that `at`, `each` and `count` agree; the positional
+        // arithmetic below counts repeats and would skip past elements.
+        // (`total` is already known finite here — the guard above returned.)
+        if (producesSet(expr)) return distinctAt(expr, index, () => total);
         // A negative index counts from the end of the appended collection.
         if (index < 0) index = total + index + 1;
         if (index < 1) return undefined;
@@ -9602,17 +9682,21 @@ function canonicalList(
   if (ops.some((op) => isFunction(op, 'Spread') && op.nops === 1)) {
     const segments: Expression[] = []; // `Join` operands
     let run: Expression[] = []; // current run of ordinary elements
+    // The ordinary elements of a run are accumulated as written and flattened
+    // ONCE, when the run is flushed — the same `Sequence`-splice and
+    // `Nothing`-erasure the no-spread path below applies to the whole operand
+    // list. Flattening per element would allocate a throwaway array apiece,
+    // and would make this path look like it needed a different rule than that
+    // one, which it does not.
     const flushRun = () => {
       if (run.length > 0) {
-        segments.push(ce._fn('List', run));
+        segments.push(ce._fn('List', flatten(run)));
         run = [];
       }
     };
     for (const op of ops) {
       if (!isFunction(op, 'Spread') || op.nops !== 1) {
-        const e = element(op);
-        // `Nothing` erasure, as in the no-spread path below.
-        if (!isSymbol(e, 'Nothing')) run.push(e);
+        run.push(element(op));
         continue;
       }
       // The RAW spread operand, canonicalized value-safely — deliberately
@@ -9649,20 +9733,21 @@ function canonicalList(
       }
     }
     // Every spread spliced eagerly (or errored): an ordinary literal.
-    if (segments.length === 0) return ce._fn('List', run);
+    if (segments.length === 0) return ce._fn('List', flatten(run));
     flushRun();
     // `Join` — unary for a lone spread: `[...xs]` is `Join(xs)`, the
     // list materialization of a non-tuple collection.
     return ce._fn('Join', segments);
   }
 
-  const canonicalOps = ops
-    .map(element)
-    // `Nothing` is an ERASURE marker: it is spliced out of a collection
-    // literal (`[12, Nothing, 34]` is a 2-element list). Use `Missing` for
-    // an absent-but-positioned value.
-    .filter((op) => !isSymbol(op, 'Nothing'));
-  return ce._fn('List', canonicalOps);
+  // The framework's default flatten step, which this custom `canonical`
+  // handler would otherwise short-circuit. It splices `Sequence` operands
+  // (`[1, Sequence(2, 3), 4]` is the 4-element list `[1, 2, 3, 4]` — a
+  // `Sequence` is the engine-wide "these operands, inlined here" marker and
+  // must never be STORED as an element) and erases `Nothing`, the erasure
+  // marker (`[12, Nothing, 34]` is a 2-element list; use `Missing` for an
+  // absent-but-positioned value).
+  return ce._fn('List', flatten(ops.map(element)));
 }
 
 function canonicalSet(
@@ -9684,14 +9769,16 @@ function canonicalSet(
     let run: Expression[] = [];
     const flushRun = () => {
       if (run.length > 0) {
-        segments.push(engine._fn('List', run));
+        segments.push(engine._fn('List', flatten(run)));
         run = [];
       }
     };
     for (const op of ops) {
       if (!isFunction(op, 'Spread') || op.nops !== 1) {
-        const e = op.canonical;
-        if (!isSymbol(e, 'Nothing')) run.push(e);
+        // Accumulated as written; the `Sequence` splice and `Nothing` erasure
+        // run once, in `flushRun` above (or in the `canonicalSet` recursion
+        // below when there turned out to be no spread segment at all).
+        run.push(op);
         continue;
       }
       const x = op.ops[0].canonical;
@@ -9711,21 +9798,26 @@ function canonicalSet(
   }
 
   // Since the `Set` operator is `lazy`, the canonical handler receives raw
-  // operands: canonicalize them first
-  ops = ops.map((op) => op.canonical);
+  // operands: canonicalize them first. `flatten` does that AND runs the
+  // framework's default flatten step, which this custom `canonical` handler
+  // would otherwise short-circuit: it splices `Sequence` operands
+  // (`{1, Sequence(2, 3), 4}` is the 4-element set `{1, 2, 3, 4}` — a
+  // `Sequence` is the engine-wide "these operands, inlined here" marker and
+  // must never be STORED as an element) and erases `Nothing`, the erasure
+  // marker (`{12, Nothing, 34}` is a 2-element set; use `Missing` for an
+  // absent-but-positioned element).
+  ops = flatten(ops);
 
   // A set-builder (comprehension) is not a literal set: do not deduplicate
   // its syntactic operands (body + indexing set)
   if (parseSetComprehension(ops) !== null) return engine._fn('Set', [...ops]);
 
-  // Check that each element is only present once. `Nothing` is an ERASURE
-  // marker: it is spliced out of a collection literal (`{12, Nothing, 34}` is
-  // a 2-element set), exactly as for `List` and `Tuple`. Use `Missing` for an
-  // absent-but-positioned element.
+  // Check that each element is only present once. (`Nothing` was already
+  // erased by the `flatten` call above.)
   const set: Expression[] = [];
   const has = (x: Expression) => set.some((y) => y.isSame(x));
 
-  for (const op of ops) if (!isSymbol(op, 'Nothing') && !has(op)) set.push(op);
+  for (const op of ops) if (!has(op)) set.push(op);
 
   return engine._fn('Set', set);
 }
@@ -10114,8 +10206,317 @@ function isAtomicJoinOperand(op: Expression): boolean {
   return op.type.matches('tuple');
 }
 
+/** The undeduplicated element enumeration of a `Map` node.
+ *
+ * Extracted from the `iterator` handler so the set-kind wrap (see there) has
+ * a single place to apply: this body has four element-producing forms (the two
+ * broadcast-spine forms, the zipWith form and the general form), each with
+ * its own return, and wrapping them individually would have to be kept in
+ * step by hand. */
+function mapIterator(expr: Expression): Iterator<Expression> {
+  if (!isFunction(expr))
+    return { next: () => ({ value: undefined, done: true }) };
+
+  // Broadcast-chain lowering (see `map-lowering.ts`): a stack of
+  // broadcast-shaped lazy `Map`s is served from ONE loop that applies
+  // each level's operator directly, bypassing the per-level
+  // `makeLambda` invoke. Purely structural, memoized per instance; a
+  // `Map` that doesn't match falls through to the general path below,
+  // byte-identically.
+  const spine = lowerMapSpine(expr);
+  if (spine) {
+    const ce = expr.engine;
+    // A level that fails yields THAT level's position-preserving marker
+    // as an ordinary element value, which flows through the remaining
+    // levels — exactly what the nested general iterators do.
+    const run = makeSpineRunner(ce, spine, (levelExpr) =>
+      absenceMarker(ce, levelExpr)
+    );
+    if (spine.bases.length > 1) {
+      // Variadic bottom level: advance every base lockstep, ending as
+      // soon as any source ends (mirrors the zipWith form below).
+      const sources = spine.bases.map((c) => c.each());
+      return {
+        next: () => {
+          const items: Expression[] = [];
+          for (const source of sources) {
+            const { value, done } = source.next();
+            if (done || value === undefined)
+              return { value: undefined, done: true };
+            items.push(value);
+          }
+          // A level that produced no value is a COMPUTATION FAILURE,
+          // not an erasure: the runner already substituted the marker,
+          // so this fallback is unreachable (kept for type totality).
+          const v = run(items) ?? absenceMarker(ce, expr);
+          return { value: v, done: false };
+        },
+      };
+    }
+    const source = spine.bases[0].each();
+    return {
+      next: () => {
+        const { value, done } = source.next();
+        if (done) return { value: undefined, done: true };
+        // See above: a failed mapping is the marker, not an erasure.
+        // The runner substitutes it; this fallback is unreachable.
+        const v = run([value]) ?? absenceMarker(ce, expr);
+        return { value: v, done: false };
+      },
+    };
+  }
+
+  // Auto-compile trigger (see `map-auto-compile.ts`): when the element
+  // lambda carries the numeric `Block(N(body))` marker and the engine
+  // is at machine precision, elements are served by a cached compiled
+  // function, with silent per-element interpreter fallback. A new
+  // iterator is a new drain (resets the once-per-drain attempt bound).
+  const auto = mapAutoCompileRunner(expr, { drainStart: true });
+
+  if (expr.nops > 2) {
+    // Multi-collection (zipWith): apply the mapping function to the
+    // element-wise tuple of the sources, bounded by the shortest
+    // input. Driven by each source's iterator — not by up-front
+    // counts — so a source with an unknown count (or an infinite one
+    // zipped with a finite one) still iterates; the zip ends as soon
+    // as any source ends.
+    const f = applicable(expr.op1);
+    if (!f) return { next: () => ({ value: undefined, done: true }) };
+    const sources = expr.ops.slice(1).map((c) => c.each());
+    return {
+      next: () => {
+        const items: Expression[] = [];
+        for (const source of sources) {
+          const { value, done } = source.next();
+          if (done || value === undefined)
+            return { value: undefined, done: true };
+          items.push(value);
+        }
+        const compiled = auto?.(items);
+        if (compiled !== undefined) return { value: compiled, done: false };
+        // A mapping function that produced no value is a COMPUTATION
+        // FAILURE, not an erasure: emit the position-preserving marker
+        // (`Nothing` here would silently shorten the result).
+        const v = f(items) ?? absenceMarker(expr.engine, expr);
+        return { value: v, done: false };
+      },
+    };
+  }
+
+  const f = applicable(expr.op1);
+  if (!f) return { next: () => ({ value: undefined, done: true }) };
+
+  const source = expr.op2.each();
+
+  return {
+    next: () => {
+      while (true) {
+        const { value, done } = source.next();
+        if (done) return { value: undefined, done: true };
+        const compiled = auto?.([value]);
+        if (compiled !== undefined) return { value: compiled, done: false };
+        // See above: a failed mapping is the marker, not an erasure.
+        const v = f([value]) ?? absenceMarker(expr.engine, expr);
+        return { value: v, done: false };
+      }
+    },
+  };
+}
+
 function isIterator(x: unknown): x is Iterator<Expression> {
   return typeof (x as Iterator<Expression>)?.next === 'function';
+}
+
+/** Does this node promise a SET?
+ *
+ * Three operators reach here, by two different mechanisms: `Join` and
+ * `Append` ADOPT the set kind from a set operand (`joinResultType`,
+ * `appendResultType`), while `Map` PRESERVES its source's kind
+ * (`mapResultType`). Either way the answer is read off the node's OWN type
+ * rather than re-derived from the operands, so the two mechanisms need no
+ * distinction here.
+ *
+ * The distinction does matter to the callers, and in one place: `Join`/
+ * `Append` pass their operands' elements through UNCHANGED, so an infinite
+ * SET operand keeps infinitely many distinct elements, whereas `Map` applies
+ * a callback that may collapse them all onto one value. See the infinite-
+ * operand branches of their `count`/`isFinite` handlers. */
+function producesSet(expr: Expression): boolean {
+  return expr.type.matches('set');
+}
+
+/** Wrap `source` so it yields only the FIRST occurrence of each value.
+ *
+ * `Join` and `Append` are LAZY: they wrap their operands instead of
+ * materializing, so when they adopt the `set` kind nothing else in the
+ * pipeline enforces the distinctness a set promises. Without this,
+ * `Join(Set(1, 2), Set(2, 3))` reported `count` 4 and enumerated `2` twice,
+ * while forcing the SAME node through materialization answered the correct
+ * 3-element `Set(1, 2, 3)` — materialization rebuilds through
+ * `ce.function('Set', …)`, which deduplicates in `canonicalSet`. The lazy
+ * facets have to agree with that; a collection whose `each()` disagrees with
+ * its own materialization is the bug, not either answer alone.
+ *
+ * Distinctness is `isSame` — the same relation `canonicalSet` deduplicates
+ * with — so a lazy set and a materialized one never disagree about their
+ * elements. Candidates are bucketed by `hash`, whose documented invariant is
+ * that equal values hash equal (`types-expression.ts`), so a bucket miss is a
+ * definitive "not seen" and only same-hash candidates are compared. That
+ * keeps the scan near-linear instead of comparing every element against every
+ * one already kept. */
+function deduplicatingIterator(
+  source: Iterator<Expression>,
+  limit: number,
+  operator: string
+): Iterator<Expression> {
+  const seen = new Map<number, Expression[]>();
+  // Cap the SOURCE walk at `ce.iterationLimit`, mirroring `Dedup`'s iterator:
+  // this loop advances only on a DISTINCT element, so a source that repeats
+  // one value forever spins here without ever emitting —
+  // `Join(Set(1), Repeat(1))` yields `1` and then never returns from the next
+  // pull. That is strictly worse than not deduplicating at all: an
+  // undeduplicated `each()` at least RETURNS from every `next()`, letting the
+  // consumer's own deadline checks fire, whereas a wedged `next()` is
+  // uninterruptible.
+  //
+  // Counted since the last EMISSION, not in total: only an unbroken run of
+  // duplicates is a walk that cannot finish. A dedup that keeps emitting is
+  // bounded by whatever consumes it. `iteration-limit-exceeded` is swallowed
+  // to `undefined` by the terminal consumers (`count`, `at`); any other
+  // cancellation (deadline/timeout) propagates.
+  let sinceEmit = 0;
+  return {
+    next: () => {
+      for (;;) {
+        const { value, done } = source.next();
+        if (done || value === undefined)
+          return { value: undefined, done: true };
+        const bucket = seen.get(value.hash);
+        if (bucket !== undefined && bucket.some((x) => x.isSame(value))) {
+          // A DUPLICATE — the only pull that counts toward the cap.
+          if (++sinceEmit > limit)
+            throw new CancellationError({
+              cause: 'iteration-limit-exceeded',
+              message: `Iteration limit of ${limit} exceeded while evaluating ${operator}()`,
+            });
+          continue;
+        }
+        if (bucket === undefined) seen.set(value.hash, [value]);
+        else bucket.push(value);
+        sinceEmit = 0;
+        return { value, done: false };
+      }
+    },
+  };
+}
+
+/** The number of DISTINCT elements of a set-kind lazy collection, by walking
+ * its (deduplicating) `each()`.
+ *
+ * `undefined` — "unknown" — in three cases, each for its own reason:
+ *
+ * - The concatenated length is unknown or infinite. An infinite source may
+ *   repeat one value forever, so its distinct count is not decidable by a
+ *   walk that terminates; answering `Infinity` would be a guess, and a wrong
+ *   one for an endless repetition.
+ * - An operand cannot be ENUMERATED. Finiteness is not enumerability: a
+ *   `Linspace` with symbolic endpoints reports a count while its iterator
+ *   declines, and `Take(xs, 2)` over a valueless `xs` is finite (capped at 2)
+ *   with nothing to walk. Without this gate the empty walk would be reported
+ *   as an exact distinct count of 0.
+ * - The walk exceeds `ce.maxCollectionSize`, either here or by the iterator's
+ *   own duplicate-run guard (whose `iteration-limit-exceeded` is caught).
+ *   Any other cancellation (deadline/timeout) propagates.
+ *
+ * The bound is `maxCollectionSize` — the size of collection the engine is
+ * already willing to build — and NOT `iterationLimit`. The walk is provably
+ * finite here: `rawTotal` is known and finite (the guard above), so it
+ * terminates in at most `rawTotal` steps whatever the elements are. The
+ * unbounded case this once guarded against is a run of duplicates that never
+ * emits, and that is the ITERATOR's guard, not this one. Bounding by
+ * `iterationLimit` (1024) instead cost `Join(Set(1, 2), Range(1, 5000))` its
+ * count for no safety gained.
+ *
+ * `rawTotal` is the caller's already-computed concatenated length, so taking
+ * finiteness from it also avoids recomputing every operand's count — and
+ * `op.count` on a lazy operand can itself be a walk. */
+function distinctCount(expr: Expression, rawTotal: number): number | undefined {
+  if (!Number.isFinite(rawTotal)) return undefined;
+  if (expr.isEnumerableCollection !== true) return undefined;
+  const limit = Math.min(rawTotal, expr.engine.maxCollectionSize);
+  try {
+    let n = 0;
+    for (const _ of expr.each()) if (++n > limit) return undefined;
+    return n;
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
+}
+
+/** The 1-based `index`-th DISTINCT element of a set-kind lazy collection.
+ *
+ * Walks the same deduplicating `each()` that `count` counts, so `at`, `each`
+ * and `count` cannot disagree — the invariant whose breach is the whole
+ * reason these helpers exist.
+ *
+ * `rawTotalOf` is a THUNK, not a number, because only a NEGATIVE index needs
+ * the concatenated length: counting back from the end requires knowing where
+ * the end is. A positive index just walks forward, and must keep working when
+ * the length is unknown — computing the total eagerly made
+ * `Join(Set(1, 2), xs).at(1)` answer `undefined` for an `xs` of unknown
+ * count, even though `each()` yields its first element immediately, which
+ * breaks the very agreement this helper exists to keep. The thunk also avoids
+ * the cost: `op.count` on a lazy operand can itself be a full walk. */
+function distinctAt(
+  expr: Expression,
+  index: number,
+  rawTotalOf: () => number | undefined
+): Expression | undefined {
+  // The positional `at` paths this pre-empts all opened with a finite-index
+  // guard, and dropping it was not survivable: `NaN < 1` and `NaN > limit`
+  // are BOTH false, so a `NaN` index fell straight through to an unbounded
+  // walk with no termination condition of its own. `at(index: number)` is
+  // public API, so a `NaN` is a caller's mistake that must cost `undefined`,
+  // not the process.
+  if (!Number.isInteger(index)) return undefined;
+  if (index < 0) {
+    const rawTotal = rawTotalOf();
+    if (rawTotal === undefined) return undefined;
+    const total = distinctCount(expr, rawTotal);
+    if (total === undefined) return undefined;
+    index = total + index + 1;
+  }
+  // Bounded by the size of collection the engine will build, matching
+  // `distinctCount` — see the note there on why this is not `iterationLimit`.
+  if (index < 1 || index > expr.engine.maxCollectionSize) return undefined;
+  // An operand that cannot be ENUMERATED silently yields nothing, which would
+  // not merely truncate the walk — it would shift every later element into
+  // its place. `Join(xs, Set(1, 2))` for a valueless `xs` enumerates as
+  // `1, 2`, so a walk would answer `1` for index 1 when the real first
+  // element is whatever `xs` holds. Refusing is the only safe answer; an
+  // enumerable operand of UNKNOWN length is fine and is handled by the walk
+  // (that is what the lazy `rawTotalOf` above buys).
+  if (expr.isEnumerableCollection !== true) return undefined;
+  try {
+    let i = 0;
+    for (const element of expr.each()) {
+      i += 1;
+      if (i === index) return element;
+    }
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
+  return undefined;
 }
 
 function joinResultType(ops: ReadonlyArray<Expression>): Type {

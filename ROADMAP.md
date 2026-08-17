@@ -96,63 +96,251 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
-### `Extract` and `Exclude` are documented but do not exist (OPEN, product decision — found 2026-08-16 auditing `doc/`)
+### `Extract` and `Exclude` were documented but never existed (RESOLVED 2026-08-17 — the doc sections were deleted; found 2026-08-16 auditing `doc/`)
 
-`doc/82-reference-collections.md` carries two full `<FunctionDefinition>`
-sections (~L1432–1544), an entry in the operator index (~L320) and a
-cross-reference from `Reverse` (~L1427) for `Extract(xs, …)` and
-`Exclude(xs, …)`. Neither name exists anywhere in `src/compute-engine/`:
-`ce.box(['Extract', ['List',5,2,10,18], 2])` evaluates to itself, and
-`ce.box('Extract').type` is `unknown` (auto-declared by the lookup). Eleven
-documented examples describe an API a caller cannot invoke.
+`doc/82-reference-collections.md` carried two full `<FunctionDefinition>`
+sections, eleven examples, an operator-index entry and a cross-reference from
+`Reverse`, for `Extract(xs, …)` and `Exclude(xs, …)`. Neither name has ever
+existed in `src/compute-engine/`: `git log -S` over all refs finds no commit
+that added or removed either, so this was documentation for an API that was
+never built, not a regression.
 
-Three ways out, and the choice is a product one: implement both (the
-gather-by-indices half is already `At(xs, indices)`, so `Extract` may be a
-synonym worth having, and `Exclude` is its complement); delete the sections;
-or mark them "not yet implemented" in place. `Ordering`'s "use `Extract`"
-pointer was already re-pointed at the working `At(xs, Ordering(xs))`.
+Deleted rather than implemented, because the documented `Extract` contradicts
+a shipped operator. Its range arm read a 2-element `Tuple` as an inclusive
+SPAN — `["Extract", ["List",5,2,10,18], ["Tuple",2,4]]` was documented as
+`[2,10,18]` — while `At`, which ships, reads the same `Tuple` as a GATHER of
+the elements at indices 2 and 4 (a `Tuple` is an `indexed_collection`, so it
+takes `At`'s collection-of-indexes arm) and answers `[2,18]`. Implementing
+`Extract` as written would have put two incompatible readings of
+`Tuple(a, b)`-as-index into the same library. Everything the sections
+described is already reachable: `At(xs, i)` and `At(xs, [i, j, k])` gather,
+`Slice(xs, a..b)` spans, `Reverse(xs)` reverses, `DeleteAt(xs, i)` drops. The
+operator index now points at `Slice`/`DeleteAt`/`Insert`/`ReplaceAt`, none of
+which had been listed there at all.
 
-### `Sequence` does not splice into `List`/`Set`/`Tuple` (OPEN, correctness — found 2026-08-16 auditing `doc/`)
+ONE capability in the deleted text has no equivalent today: dropping elements
+at SEVERAL indices in one call (`Exclude(xs, 3, 3, 1)`, with a repeated index
+dropping its element only once). `DeleteAt` takes a single `integer` index,
+and iterating it is not the same operation — each deletion renumbers the
+elements after it, so the caller has to sort the indices descending first.
+Whether to add a collection-of-indexes arm to `DeleteAt` (matching `At`'s
+convention, which is the only index-set convention the library should now
+grow) is an open product question, not a defect: no shipped code depends on
+it.
 
-`Sequence`'s own doc comment (`library/core.ts`, the `Sequence` definition)
-says it "is automatically flattened and hoisted to the top level of the
-argument list", and the associative heads do exactly that
-(`Add(1, Sequence(2,3), 4)` is `10`). The collection constructors do not:
+### `Sequence` did not splice into `List`/`Set`/`Tuple` (FIXED 2026-08-17 — found 2026-08-16 auditing `doc/`)
+
+A `Sequence` is the engine-wide "these operands, inlined here" marker, and
+`doc/82`'s `Sequence` section documents `["List", 1, ["Sequence", 2, 3], 4]`
+as the 4-element `[1, 2, 3, 4]`. The associative heads did splice
+(`Add(1, Sequence(2,3), 4)` is `10`), but the collection constructors STORED
+the marker as an element, so that list came out with 3 elements typed
+`list<finite_integer | tuple<finite_integer, finite_integer>>`, and `Set` and
+`Tuple` did the same.
+
+Root cause: the framework's default flatten step (`Sequence`-splice +
+`Nothing`-drop) is short-circuited by a custom `canonical` handler.
+`Join`/`Append` already called `flatten(ops)` explicitly to compensate, and
+`checkArity` calls it too — which is why `Triple(1, Sequence(2,3))` spliced
+correctly while `Tuple(1, Sequence(2,3), 4)` did not. `canonicalList`,
+`canonicalSet` and `Tuple`'s handler now call `flatten` as well.
+
+`List` needed a second fix: `box.ts` has a construction FAST PATH for `List`
+that bypasses `canonicalList` entirely and had re-implemented the `Nothing`
+rule inline, so fixing the canonical handler alone left the box route
+unchanged. Both sites now run the same `flatten` and say so in a comment.
+
+The empty `Sequence` (`Nothing`) was always erased, which is what made the
+gap easy to miss. `test/compute-engine/missing-value.test.ts` looks like it
+pins the splice, but `['Sequence','Nothing',2]` collapses to `2` through the
+arity-1 branch of `Sequence`'s canonical handler, so no multi-element splice
+was ever exercised; `test/compute-engine/collection-kind-contracts.test.ts`
+now covers it on every literal and both routes.
+
+### `Join`/`Append`/`Map` of a set could yield a set with a duplicate element (FIXED 2026-08-17 — found 2026-08-16 auditing `doc/`; `Map` found 2026-08-17 in review)
+
+`Join` and `Append` ADOPT the set kind from any set operand
+(`joinResultType`/`appendResultType`) but are LAZY — they wrap their operands
+instead of materializing — and their `count`/`each`/`at` reported the raw
+concatenation. `Join(Set(5,2,10,18), Set(1,2,3))` had `count` 7 and
+enumerated `2` twice, and `Append(Set(1,2), 2)` had `count` 3.
+
+The tell was that the SAME node materialized correctly: materialization
+rebuilds through `ce.function('Set', …)`, which deduplicates in
+`canonicalSet`. A collection whose `each()` disagrees with its own
+materialization is the defect. The lazy facets now deduplicate when the
+node's type is a set, with `isSame` (the relation `canonicalSet` uses, so the
+two can never disagree) and `hash` bucketing to keep the scan near-linear.
+`at` walks the deduplicated enumeration so that `count`, `each` and `at`
+agree; past `MAX_SET_DEDUP_WALK` elements, or for an infinite operand (which
+may repeat one value forever), `count`/`at` answer `undefined` rather than
+report a concatenated length that is not the number of distinct elements.
+
+`Map` had the same defect with a sharper edge, and was fixed with the same
+mechanism: `mapResultType` preserves the `set` kind, and a callback can
+COLLAPSE distinct elements rather than merely repeat them, so
+`Map(x -> x^2, Set(-1, 1, 2))` claimed three elements and enumerated
+`1, 1, 4` while materializing the same node gave the 2-element `Set(1, 4)`.
+The image of a set under a function is a set, so the deduplicated answer is
+the correct one. `Map`'s `iterator` was extracted to a module-level
+`mapIterator()` so the set-kind wrap has ONE place to apply — the handler has
+four return points (two broadcast-spine forms, zipWith, general) that would
+otherwise each need it. `Scan` reaches `mapResultType` too but types
+`unknown` over a set in practice, so it has no live case;
+`Filter`/`Take`/`Drop`/`Reverse` preserve the kind but only ever DROP
+elements, so they cannot introduce duplicates and were left alone.
+
+Bounded, not free: the deduplicating walk is capped by `ce.iterationLimit`
+(as `Dedup`'s is), so a set-kind `count` past that bound answers `undefined`
+rather than a concatenated length that is not the number of distinct
+elements. `Join` therefore declares `isEmpty`/`isFinite` explicitly instead of
+letting them default to being derived from `count` — deduplication changes
+neither answer, and routing them through a bounded `count` would have cost
+`Join(Set(1,2), Range(1,5000))` its finiteness, its emptiness, and its
+preview.
+
+### Any intersection on the right rejects EVERY bare-named type on the left, including `number` (OPEN, correctness — found 2026-08-17; characterization corrected twice the same day)
+
+`T <: (A & B)` must hold exactly when `T <: A` and `T <: B`. It does not, for
+any `T` that is a bare type NAME. This is a defect in the core subtype
+relation, not in any collection code, and not in negation handling:
 
 ```
-["List",  1, ["Sequence", 2, 3], 4]  ->  [1, 2 3, 4]     (3 elements; the
-      middle one is a `tuple<finite_integer, finite_integer>`)
-["Set",   1, ["Sequence", 2, 3], 4]  ->  Set(1, 2 3, 4)
-["Tuple", 1, ["Sequence", 2, 3], 4]  ->  (1, 2 3, 4)
+ce.type('number').matches('number')           // true
+ce.type('number').matches('number & number')  // false
 ```
 
-so the element type comes out `list<finite_integer | tuple<finite_integer,
-finite_integer>>`. The empty `Sequence` (`Nothing`) IS erased from a `List`,
-which is what makes the gap easy to miss. `test/compute-engine/missing-value.test.ts`
-(~L84) looks like it pins the splice, but `['Sequence','Nothing',2]`
-collapses to `2` through the arity-1 branch of `Sequence`'s canonical
-handler, so no multi-element splice into `List` is actually exercised.
-Decide whether the constructors should splice (and fix `List`/`Set`/`Tuple`
-canonicalization) or whether the `Sequence` doc comment overpromises and
-should be narrowed to the associative heads. `doc/82-reference-collections.md:378`
-documents the splicing behavior and was deliberately left uncorrected
-pending this ruling.
+`number`, `integer`, `boolean`, `symbol`, `expression`, `value`, `function`,
+`tuple`, `collection`, `indexed_collection`, `list`, `set`, `dictionary` and
+`record` all fail their own reflexive intersection. The raw `isSubtype()` in
+`common/type/subtype.ts` fails identically, so this is not an artifact of the
+`matches()` wrapper.
 
-### `Join` of two sets can yield a set with a duplicate element (OPEN, correctness — found 2026-08-16 auditing `doc/`)
+**The rule, in one line:** a left-hand type fails whenever it reaches the
+comparison as a bare string in the type AST. Structured (object-shaped) types
+pass — `list<number> <: collection & collection` and
+`(number) -> number <: function & function` are both true.
+
+That also explains the anomaly two earlier versions of this entry chased.
+`reduceType` normalizes an `<any>` parameter AWAY for some kinds but not
+others, so the survivors are exactly the structured ones:
 
 ```
-const j = ce.box(['Join', ['Set',5,2,10,18], ['Set',1,2,3]]).evaluate();
-j.type    // set
-j.count   // 7
-[...j.each()]   // 5, 2, 10, 18, 1, 2, 3     <- `2` twice
+'set<any>' -> 'set'                             fails
+'dictionary<any>' -> 'dictionary'               fails
+'indexed_collection<any>' -> 'indexed_collection'  fails
+'collection<any>' -> 'collection'               fails
+'list<any>' -> 'list<any>'                      PASSES  (does not normalize away)
+'tuple<any>' -> 'tuple<any>'                    PASSES
 ```
 
-`Join` concatenates its operands' elements and keeps the first operand's
-kind, but a `set` result has to be deduplicated — `Set(…)` itself dedupes on
-construction, so only the `Join` path produces this. The documented answer
-(`doc/82-reference-collections.md:2742`, left uncorrected pending the fix) is
-`["Set", 5, 2, 10, 18, 1, 3]`. Either dedupe in `Join` when the result kind
-is `set`, or rebuild the result through the `Set` constructor.
+So bare-vs-parameterized DOES separate the groups, once normalization is
+applied first: `set<any>` was never a counterexample, it is a bare `set`
+wearing a parameter that gets stripped. (Two earlier framings — "an
+interaction with negation" and "bare-vs-`<any>` doesn't separate the cases" —
+were both wrong; recorded so nobody re-derives them. The CE-POC session found
+the `collection & collection` and `number & number` repros.)
+
+`string` is the one conditional case, and it is diagnostic: it passes
+`collection & collection`, `indexed_collection & …` and `collection & !number`
+because `subtype.ts` (~L1244) expands it to `STRING_STRUCTURAL_TYPE` before
+comparing, so it never arrives bare — but it still fails `string & string` and
+`string & collection`, where no expansion applies.
+
+**This reaches real dispatch, not just the predicate: a function declared with
+an intersection parameter type is UNCALLABLE, with every argument, and says so
+with a user-visible type error.** The argument does not need to be a
+bare-declared symbol — a plain integer literal is rejected, because its own
+type `finite_integer` is a bare name:
+
+```
+ce.declare('f', { signature: '(number) -> number',
+                  evaluate: ops => ops[0].mul(2) });
+   f(7)  // 14
+
+ce.declare('f', { signature: '(number & number) -> number',
+                  evaluate: ops => ops[0].mul(2) });
+   f(7)  // Error(ErrorCode("incompatible-type", "number & number", "finite_integer"), 7)
+   f(n)  // Error(ErrorCode("incompatible-type", "number & number", "number"), n)
+```
+
+The function needs a BODY for this to be visible, and that is a trap worth
+recording. An earlier version of this entry used a declared-but-undefined `f`
+applied to a valueless symbol and read the surviving `f(n)` as "the argument
+was rejected". It fails its control: a declared-but-undefined function applied
+to a valueless symbol stays symbolic with a PLAIN `(number) -> number`
+signature too, so that probe is equally consistent with nothing being wrong.
+Give the operator an `evaluate` handler and the two signatures separate
+immediately.
+
+Blast radius inside the engine is NOT yet audited. Intersections are
+load-bearing in several places — `multi-clause.ts` builds one for multi-clause
+arms, `overload.ts` and `boxed-function.ts` dispatch on
+`kind === 'intersection'`, `assume.ts` constructs them, and `collections.ts`
+ships `Join`'s real intersection signature
+(`((T+) -> T where T: string) & ((collection*) -> collection)`). Function-typed
+left-hand sides pass, and `Join` resolves correctly on both arms
+(`Join("a","b")` = `"ab"`, `Join([1],[2])` = `[1,2]`), so overload resolution
+is probably unaffected — but "probably" is doing real work in that sentence
+and nobody has traced whether a bare-named type is ever tested against a
+multi-clause arm.
+
+Load-bearing OUTSIDE this repo as of 2026-08-17: the Tycho consumer ships
+`LIST_LIKE_COLLECTION = "collection & !string"` gating ~15
+classification/materialization sites. Concrete values classify correctly,
+which is why this has not bitten them — but a symbol DECLARED with a bare
+`list`/`set`/`dictionary`/`record` is silently classified as NOT list-like.
+
+Not fixed in the round that found it: this is core subtyping with an
+unaudited internal blast radius, and it deserves its own suite gate.
+
+### `Join`/`Append` of a dictionary or record duplicates KEYS, and materializes to the wrong head (OPEN, correctness + a merge-rule ruling — found 2026-08-17 reviewing the set-kind fix)
+
+The set-kind half of this family was fixed (entry above). The
+record/dictionary half was not, and it is worse. `joinResultType` adopts
+`record`, then `dictionary`, then `set`, from any operand
+(`appendResultType` does the same from its source), but nothing merges keys:
+
+```
+Join(Dictionary(a:1, b:2), Dictionary(b:3, c:4))
+  type   record
+  count  4
+  each   ("a",1) ; ("b",2) ; ("b",3) ; ("c",4)      <- `b` twice
+```
+
+A literal `Dictionary` with a repeated key already settles the rule by
+example — `Dictionary(a:1, a:2)` is `{a: 2}`, count 1, so the convention is
+LAST-WINS — but the lazy `Join` neither merges nor deduplicates.
+
+Second, independent bug in the same expression: `Join` declares no `elttype`
+handler, so `materialize()`'s key-value branch (which routes a
+`tuple<string, any>` element type to a `Dictionary`) never fires. The node is
+not indexed, so materialization falls through to `engine.function('Set', …)`
+and the dictionary comes back as a **`Set` of entry tuples** — the HEAD
+changes, not just the element count.
+
+Also note the adoption ORDER: `Join(Set(1,2), Dictionary(…))` types
+`dictionary`, so the set-kind gate does not apply and the set operand's
+distinctness is silently dropped.
+
+Two things to decide before this can be fixed, and only the first is a real
+question. (a) The merge rule: last-wins matches the `Dictionary` constructor,
+but a forward lazy iterator cannot know the last value for a key until it has
+walked everything, so last-wins costs a full walk up front (first-wins is
+free). (b) Whether `Append`'s source-only adoption should follow the same
+rule — it should, for the same reason. The `elttype` handler is not a
+decision, just work.
+
+### A truncated collection preview could drop an element and show no `...` (FIXED 2026-08-17 — found while fixing the `Join` set-kind defect)
+
+`materialize()`'s head-only branch — the one every NON-indexed collection
+takes, so every set — filled the preview to `DEFAULT_MATERIALIZATION`'s head
+of 5 and then tested `iter.next()` to decide whether to append a
+`ContinuationPlaceholder`. That asked about the element AFTER the one it was
+about to discard, so a collection of exactly 6 elements previewed as 5 with
+NO continuation marker: one element vanished silently and the preview claimed
+to be complete. Reaching a further element with the head already full is
+itself proof the collection continues, so the extra probe is gone.
 
 ### `Limit` at ∞ declines on a SUM whose addends it resolves individually, when one needs `Erf(∞)` and another needs the ∞·0 resolution (FIXED 2026-08-16 — a COMPILER shape bug, not a limit bug; found 2026-08-16)
 

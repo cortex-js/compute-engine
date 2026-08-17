@@ -1542,11 +1542,26 @@ function makeCanonicalFunctionCore(
   //
   if (name === 'List' && !named && !ops.some(isSpreadOperand)) {
     const boxedOps = boxOperands(ce, ops, RAW_OPERAND);
-    // `Nothing` is an ERASURE marker (an empty-sequence splice): it is elided
-    // from a collection literal, so `[12, Nothing, 34]` is a 2-element list.
-    // Use `Missing` for an absent-but-positioned value.
-    const canonicalOps = canonical(ce, boxedOps, scope).filter(
-      (x) => !isSymbol(x, 'Nothing')
+    // `flatten` applies the two operand-list rules a collection literal owes
+    // its elements, and must stay in step with `canonicalList`
+    // (library/collections.ts), which this fast path bypasses:
+    // - `Sequence` is SPLICED — `[1, Sequence(2, 3), 4]` is the 4-element
+    //   list `[1, 2, 3, 4]`. A `Sequence` is the engine-wide "these operands,
+    //   inlined here" marker and must never be STORED as an element; leaving
+    //   it in place produced a 3-element list whose middle element was a
+    //   `tuple<…>`.
+    // - `Nothing` is ERASED — `[12, Nothing, 34]` is a 2-element list. Use
+    //   `Missing` for an absent-but-positioned value.
+    //
+    // `canonicalize: false` (the third argument): the operands were just made
+    // canonical in `scope`, and `flatten` would otherwise re-canonicalize the
+    // whole list in the AMBIENT scope the moment any one of them came back
+    // non-canonical (an error node, a declined handler). `flatten` is wanted
+    // here only for the splice-and-erase step.
+    const canonicalOps = flatten(
+      canonical(ce, boxedOps, scope),
+      undefined,
+      false
     );
     return new BoxedFunction(ce, 'List', canonicalOps, {
       metadata,

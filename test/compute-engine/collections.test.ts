@@ -2210,6 +2210,12 @@ describe('CONTINUATION PLACEHOLDER', () => {
   });
 
   test('infinite set', () => {
+    // `Integers` enumerates 0, 1, -1, 2, -2, …, so squaring it produces
+    // 0, 1, 1, 4, 4, … — a SET whose enumeration repeats. The previews below
+    // show as many DISTINCT values as the requested head, because a set-kind
+    // `Map` deduplicates as it walks (2026-08-17). They used to show fewer:
+    // the walk spent head slots on duplicates and the `Set` constructor then
+    // collapsed them, so a head of 5 yielded only 0, 1, 4.
     const infinite_set = engine.expr(['Map', ['Square', '_'], 'Integers']);
     expect(
       infinite_set.evaluate({ materialization: false })
@@ -2218,7 +2224,9 @@ describe('CONTINUATION PLACEHOLDER', () => {
     );
     expect(
       infinite_set.evaluate({ materialization: true })
-    ).toMatchInlineSnapshot(`["Set", 0, 1, 4, "ContinuationPlaceholder"]`);
+    ).toMatchInlineSnapshot(
+      `["Set", 0, 1, 4, 9, 16, "ContinuationPlaceholder"]`
+    );
     expect(infinite_set.evaluate({ materialization: 2 })).toMatchInlineSnapshot(
       `["Set", 0, 1, "ContinuationPlaceholder"]`
     );
@@ -2240,6 +2248,15 @@ describe('CONTINUATION PLACEHOLDER', () => {
         64,
         81,
         100,
+        121,
+        144,
+        169,
+        196,
+        225,
+        256,
+        289,
+        324,
+        361,
         "ContinuationPlaceholder"
       ]
     `);
@@ -2258,6 +2275,15 @@ describe('CONTINUATION PLACEHOLDER', () => {
         64,
         81,
         100,
+        121,
+        144,
+        169,
+        196,
+        225,
+        256,
+        289,
+        324,
+        361,
         "ContinuationPlaceholder"
       ]
     `);

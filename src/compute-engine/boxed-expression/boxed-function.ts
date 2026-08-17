@@ -166,6 +166,7 @@ import { applicationEffects, publicEffects } from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
 import {
+  CancellationError,
   checkDeadline,
   iterationLimitCancellationCount,
 } from '../../common/interruptible.js';
@@ -5918,14 +5919,39 @@ function materialize(
           ? materialization
           : materialization[0];
       const iter = expr.each();
-      for (const x of iter) {
-        if (xs.length === last) {
-          // If we have more elements, add a ContinuationPlaceholder
-          if (!iter.next().done)
+      try {
+        for (const x of iter) {
+          if (xs.length === last) {
+            // Reaching another element with the head already full means the
+            // collection continues past the preview, so mark the tail. `x`
+            // ITSELF is that element — testing `iter.next()` instead asked
+            // about the element AFTER `x`, so a collection of exactly
+            // `last + 1` elements dropped its final one and reported no
+            // continuation at all (a 6-element lazy set previewed as 5
+            // elements with no `...`).
             xs.push(expr.engine.symbol('ContinuationPlaceholder'));
-          break;
+            break;
+          }
+          xs.push(x.evaluate(options));
         }
-        xs.push(x.evaluate(options));
+      } catch (e) {
+        // A deduplicating enumeration gives up on an unbroken run of
+        // duplicates (`Join(Set(1), Repeat(1))`, `Map(x -> 1, Integers)`) by
+        // throwing `iteration-limit-exceeded`. A walk that cannot get past
+        // such a run IS a continuation, which is exactly what the placeholder
+        // means, so the preview ends with `...` rather than propagating the
+        // cancellation. Letting it escape made `evaluate()` THROW and
+        // `toString()` render an error string for expressions that had
+        // previewed fine — and reaching this walk at all is new, because the
+        // explicit `isEmpty`/`isFinite` handlers these operators now declare
+        // stopped `materialize()` bailing early on an undefined emptiness.
+        // Any other cancellation (deadline/timeout) still propagates.
+        if (
+          !(e instanceof CancellationError) ||
+          e.cause !== 'iteration-limit-exceeded'
+        )
+          throw e;
+        xs.push(expr.engine.symbol('ContinuationPlaceholder'));
       }
     } else {
       //

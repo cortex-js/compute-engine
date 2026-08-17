@@ -1,5 +1,49 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **A `Sequence` operand is now spliced into a `List`, `Set` or `Tuple`
+  literal.** `["List", 1, ["Sequence", 2, 3], 4]` is the 4-element
+  `[1, 2, 3, 4]`, as documented, where it used to be a 3-element list whose
+  middle element was a `tuple<finite_integer, finite_integer>` (element type
+  `list<finite_integer | tuple<…>>`). `Set` and `Tuple` behaved the same way;
+  a spliced `Tuple` changes arity and type accordingly, and a spliced repeat
+  in a `Set` is deduplicated. The associative heads (`Add`, `Multiply`, …)
+  already spliced, so this makes the collection constructors agree with them.
+  The empty sequence (`Nothing`) was already erased, which is what made the
+  gap easy to miss.
+- **A set produced lazily by `Join` or `Append` no longer reports duplicate
+  elements.** `Join(Set(5,2,10,18), Set(1,2,3))` had `count` 7 and enumerated
+  `2` twice; it is now the 6-element set the documentation describes.
+  `Append(Set(1, 2), 2)` had `count` 3 and is now 2. `Join` adopts the set
+  kind from ANY set operand — `Join(Set(1,2), List(2,3))` is a set — while
+  `Append` adopts the kind of its SOURCE, so `Append(List(1,2), Set(3,4))`
+  stays a list with the set as one appended element. In both, `count`, `each`
+  and `at` now agree with each other and with the value the same node produces
+  when materialized. A set-kind result whose operands cannot be enumerated, or
+  whose deduplication would exceed `ce.iterationLimit`, reports its `count` as
+  unknown rather than guessing.
+- **`Map` over a set no longer reports results its callback collapsed.**
+  `Map(x -> x^2, Set(-1, 1, 2))` claimed three elements and enumerated
+  `1, 1, 4`; it is now the 2-element `Set(1, 4)` that materializing the same
+  node already produced. The image of a set under a function is a set.
+  `Map` over a list, and `Filter`/`Take`/`Drop`/`Reverse` over a set (which
+  only ever drop elements, never duplicate them), are unaffected.
+- **A truncated collection preview no longer drops an element silently.** A
+  non-indexed collection (any set) of exactly six elements previewed as five
+  with no `...` continuation marker, claiming to be complete; it now shows
+  `Set(1, 2, 3, 4, 5, ...)`.
+
+### Documentation
+
+- The `Extract` and `Exclude` sections have been removed from the collections
+  reference. Neither operator has ever existed in the engine, and the
+  documented `Extract` read a 2-element `Tuple` index as an inclusive span
+  where the shipped `At` reads it as a gather of two indices. Use `At` (single
+  index, or a collection of indices), `Slice` (a contiguous span), `Reverse`,
+  and `DeleteAt`. `Slice`, `DeleteAt`, `Insert` and `ReplaceAt` are now listed
+  in the operator index, where none of them appeared before.
+
 ## 0.115.0 _2026-08-17_
 
 ### Breaking Changes

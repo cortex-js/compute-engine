@@ -2095,12 +2095,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (isFunction(body, 'Sequence'))
           return ce._fn(
             'Tuple',
-            // `Nothing` is an ERASURE marker: it is spliced out of a tuple
-            // literal, so `(1, Nothing, 3)` is the 2-tuple `(1, 3)`. This
-            // mirrors the filter in the `Tuple` canonical handler — the
-            // `Delimiter` route builds the `Tuple` directly and would
-            // otherwise bypass it.
-            canonical(ce, body.ops).filter((x) => !isSymbol(x, 'Nothing'))
+            // This site builds the `Tuple` DIRECTLY (`_fn` does not run
+            // `Tuple`'s canonical handler), so it has to apply the same two
+            // operand-list rules that handler applies, or the two routes to a
+            // tuple disagree: a `Sequence` operand is SPLICED (it is the
+            // engine-wide "these operands, inlined here" marker and must
+            // never be stored as an element) and `Nothing` is ERASED, so
+            // `(1, Nothing, 3)` is the 2-tuple `(1, 3)`. Both are what
+            // `flatten` does. In practice the enclosing `Sequence` has
+            // already flattened recursively by the time it gets here, so the
+            // splice half is defensive; the erasure half is load-bearing.
+            flatten(canonical(ce, body.ops))
           );
 
         body = body.canonical;
