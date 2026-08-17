@@ -242,10 +242,28 @@ is exactly why `C = U[1]` types scalar. That narrowness is documented and
 justified in the same file (see the `isValuelessCollectionTyped` comment):
 widening it "would also catch a top-typed (`unknown`/`any`) operand …
 reclassifies every undeclared symbol and is a different, much larger change".
-The helper has **44 references** across `arithmetic.ts`, `collections.ts`,
-`relational-operator.ts` and `boxed-function.ts`, and is part of the public
-surface (`src/api.md`). So this needs a RULING on how far to widen, not a
-one-line edit — see the disposition note at the end of this entry.
+The helper has **11 call sites** across `arithmetic.ts`, `arithmetic-add.ts`,
+`collections.ts`, `relational-operator.ts` and `boxed-function.ts`, plus its
+own compiled twin in `base-compiler.ts`, and it is part of the public surface
+(`src/api.md`). (An earlier revision of this entry said "44 references" — that
+counted imports and prose as well as calls.) So this needs a RULING on how far
+to widen, not a one-line edit — see the disposition note at the end.
+
+**The sites do NOT behave uniformly, because some operators narrow their
+operand on the way past and others do not:**
+
+```
+x + 1  (x declared unknown)  -> expr number         x ends up number    NARROWED by the use
+2x     (x declared unknown)  -> expr finite_number  x stays  unknown    not narrowed
+x = 1  (x declared unknown)  -> expr boolean        x stays  unknown    not narrowed
+```
+
+So `Add` rarely sees a bare `unknown` at all (widening there buys little),
+`Multiply` does (widening there would retype every scalar multiplication by an
+undeclared symbol — engine-wide, needs its own measured radius), and the
+comparisons are where the defect actually lives. The `Add`/`Multiply`
+asymmetry above is itself unexplained and may be a second latent
+inconsistency.
 
 **The over-narrow commit also blocks USAGE-NARROWING, which is the second and
 more damaging half.** A declared *concrete* type is deliberately not moved by
@@ -310,19 +328,58 @@ to widen.** The fix belongs at the relation, not at `Sum`/`Which`: the
 "collection-ness not yet known" rather than as scalar. Three candidate
 scopes, cheapest first:
 
-1. **Comparison operators only** — `comparisonResultType` stops delegating
-   the top-typed case to `isPossiblyCollectionTyped` and admits a bare
-   `unknown` symbol itself. Smallest blast radius, fixes the measured hole,
-   leaves `Add`/`Multiply` inconsistent with it.
-2. **Widen `isPossiblyCollectionTyped`** to admit bare top-typed symbols.
-   One consistent convention across all 44 call sites — and precisely the
-   change its own comment declines as "much larger", because it reclassifies
-   every undeclared symbol in every comparison and every element-wise
-   arithmetic operator. Snapshot blast radius must be MEASURED before this is
-   chosen, not estimated.
-3. **Neither — declare the unsoundness acceptable** and instead stop the
-   assign inference from committing a type derived through a top-typed
-   operand, leaving such symbols open as 0.112 did.
+1. ~~**Comparison operators only**~~ — **ATTEMPTED 2026-08-16 AND REVERTED.
+   See the trial below: it works, and it breaks a real consumer.**
+2. **Widen `isPossiblyCollectionTyped`** to admit bare top-typed symbols, AND
+   fix the consumers that require a plain `boolean`. One consistent convention
+   — and precisely the change its own comment declines as "much larger". Its
+   comparison half is now measured (see the trial); its `Multiply` half is not.
+3. **Neither — leave comparison typing alone** and instead stop the assign
+   inference from committing a type derived through a top-typed operand,
+   leaving such symbols open as 0.112 did. Nothing in the trial below arises
+   under this option. **Recommended after the trial.**
+
+**⚠ TRIAL OF OPTION 1, 2026-08-16 — reverted, but its results decide the
+ruling. Do not re-attempt without reading this.**
+
+Widening `comparisonResultType` alone (a local helper admitting a bare
+top-typed operand; the evaluation gates deliberately untouched) **fixed the
+entire chain**: `C_0` typed `broadcastable<integer>`, the reader stayed
+symbolic instead of failing closed, and after `C` refined,
+`value <: declared` was **true** — the soundness hole gone. Targeted battery
+157/157 including `relational-broadcast-recursion.test.ts`, so the paired-guard
+stack overflow did not fire.
+
+**It also broke a real consumer.** Full suite: 29,345 passed, **one snapshot
+changed of 4,312** — and not cosmetically:
+
+```
+- ["Sum", "K", ["Element", "d", "D", ["NotEqual", "d", "V"]]]
++ ["Sum", "K", ["Element", "d", "D", ["Error", ["ErrorCode", "incompatible-type", …]]]]
+```
+
+`d != V` between two bare undeclared symbols became `broadcastable<boolean>`,
+and `Sum`'s `Element` constraint slot requires a plain `boolean`.
+
+**And the obvious narrowing is REFUTED: requiring another operand to be a
+DEFINITE collection kills the fix.** In `C = U[1]` there is no collection
+operand at all — `U[1]` is a scalar ELEMENT, and the only broadcast
+possibility comes from `C` being open. The defect case (`C = U[1]`) and the
+regression case (`d != V`) are therefore the same shape at the type level:
+one or more open operands, no definite collection anywhere. **No
+operand-evidence discriminator separates them.** Anyone widening comparison
+typing must accept `d != V` widening too, and fix the consumers — which is
+why option 1 is struck out and option 2 now carries "AND fix the consumers".
+
+**A latent second defect sits behind this one.** With comparison typing
+widened, `Which` throws `Condition must evaluate to "True" or "False"` on a
+`broadcastable<boolean>` condition, although
+`isBooleanishCondition` (`library/control-structures.ts`) documents undecided
+conditions as held rather than thrown — it recognises plain `boolean` and a
+definite boolean collection, but not the `broadcastable` union between them.
+Currently UNREACHABLE (the wrong scalar type fails closed first), so nothing
+was landed for it; it becomes live the moment option 2 is taken and must ship
+with it.
 
 Whichever is chosen, add a regression asserting the four-row table above; the
 diagnostic property is that **the LESS-informed setup must not be MORE honest

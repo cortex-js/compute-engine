@@ -8105,16 +8105,14 @@ function fnArg(
     ...extraArgTypes,
     BaseCompiler.collectionElementTypeOf(source),
   ]);
-  // A bare user-function symbol over complex ELEMENTS is compiled through its
-  // eta-expansion, so the call inside takes the complex lane of the function
-  // (`_fn_b$z1`) instead of the value-position real lane. Unary callbacks
-  // only: a combiner-shaped callback (an accumulator prefix) has more than
-  // one lane to decide and keeps its previous emission.
-  const eta =
-    extraArgTypes.length === 0
-      ? BaseCompiler.complexElementCallbackEta(callback, source)
-      : undefined;
-  return compile(eta ?? callback!);
+  // STRICT shapes: a bare user-function symbol with a WIDE parameter over
+  // complex ELEMENTS is a lane mismatch (the one emission of the function is
+  // real-shaped) — a decline under `strict`, an escalation to complex mode
+  // under `auto`. Unary callbacks only: a combiner-shaped callback (an
+  // accumulator prefix) is planned by `combinerPlan`.
+  if (extraArgTypes.length === 0)
+    BaseCompiler.assertCallbackLaneMatch(callback, source);
+  return compile(callback!);
 }
 
 //

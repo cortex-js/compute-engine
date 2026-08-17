@@ -845,12 +845,23 @@ later one being present:
    only when its elements are real by construction (`collectionFoldsReal`,
    shared by the analysis and the JS emitter — `Map(Ln, xs)` types
    `list<real>` while its eta-expanded callback promotes), else with the
-   shape-agnostic `_SYS.sadd`/`smul` wrapped in the complex lift. NOT yet
-   done in this step: the REMOVAL of the lane specialization
-   (`userCallComplexLanes`, `$z` names, `laneFrames`) and the eta — they are
-   now unreachable under every mode (strict/auto raise the mismatch,
-   complex has no lanes) and come out in a follow-up pass once the pins are
-   settled; `result.escalation` is not set when the retry itself declines.
+   shape-agnostic `_SYS.sadd`/`smul` wrapped in the complex lift. The
+   lane specialization (`userCallComplexLanes`, `$z` names, `laneFrames`,
+   `userCallComplexLanesOf`) and the bare-callback eta were REMOVED in a
+   follow-up pass the same day (they had become unreachable under every
+   mode): the strict check is now `laneMismatchAt` (the same per-argument
+   rule the lanes computed — a complex-valued scalar, or a
+   uniformly-complex collection broadcast into scalar parameters, bound to a
+   parameter not declared complex), and the value-position check is
+   `assertCallbackLaneMatch`. One consequence to know: a BARE wide-parameter
+   combiner over a complex list — `Reduce(L, h, 0)` with `h(a, x) := a + 2x`
+   and `L: list<complex>` — is a `LaneMismatch` under `strict` (the eta
+   `combinerPlan` builds binds a complex-typed argument to `h`'s wide
+   parameter; its `value` is the eta placeholder `_a`, not an authored name)
+   and escalates under `auto` to `2 + 6i`; the earlier "correct in every
+   mode with `mode: 'strict'`" wording for that witness assumed the lanes
+   would remain. `result.escalation` is not set when the retry itself
+   declines.
    Also decide here (user-ruled
    2026-08-16 to wait for this step, from the step-1 review): whether the
    DEFAULT `R` of `CompiledRunner`/`CompilationResult` — today `number |
