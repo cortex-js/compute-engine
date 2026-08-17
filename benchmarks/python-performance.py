@@ -76,7 +76,7 @@ def distance_formula(x_1, y_1, x_2, y_2):
 import numpy as np
 def quadratic_formula(a, b, c):
     r"""Quadratic Formula: \frac{-b + \sqrt{b^2 - 4ac}}{2a}"""
-    return (-b + np.sqrt(b ** 2 + -4 * a * c)) / (2 * a)
+    return (-b + np.emath.sqrt(b ** 2 + -4 * a * c)) / (2 * a)
 
 
 import numpy as np
