@@ -5006,6 +5006,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isEnumerable: enumerableFromAllSources,
       isLazy: (_expr) => true,
+      // Without this, `materialize()` never reaches its key-value branch (it
+      // tests `elttype` against `tuple<string, any>`), the node is not
+      // indexed, and a dictionary-kind `Join` fell through to
+      // `engine.function('Set', …)` — coming back as a SET OF ENTRY TUPLES.
+      // The HEAD changed, not just the element count.
+      elttype: (expr) =>
+        producesKeyed(expr) ? parseType('tuple<string, any>') : undefined,
       // A set-kind result is indexed by walking the deduplicated enumeration
       // from the start (`distinctAt`), so sequential indexing would be
       // quadratic without a cache. `Join`'s elements are exactly its
@@ -5015,6 +5022,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         const isSet = producesSet(expr);
+        // A keyed result must read every entry before it can merge, so an
+        // infinite operand makes it unanswerable outright.
+        if (producesKeyed(expr) && expr.ops.some((op) => op.count === Infinity))
+          return undefined;
         let total = 0;
         for (const op of expr.ops) {
           if (isAtomicJoinOperand(op)) {
@@ -5040,11 +5051,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           }
           total += count;
         }
-        // A set-kind result counts DISTINCT elements: the operands may repeat
-        // each other (`Join(Set(1, 2), Set(2, 3))` concatenates 4 elements but
-        // IS a 3-element set), so the concatenated length is only an upper
-        // bound.
-        return isSet ? distinctCount(expr, total) : total;
+        // A set-kind result counts DISTINCT elements and a keyed one counts
+        // distinct KEYS: the operands may repeat each other
+        // (`Join(Set(1, 2), Set(2, 3))` concatenates 4 elements but IS a
+        // 3-element set), so the concatenated length is only an upper bound.
+        // Both are counted by walking the rewritten enumeration the
+        // `iterator` handler already produces.
+        return producesMergedView(expr) ? distinctCount(expr, total) : total;
       },
       // `isEmpty` and `isFinite` are declared explicitly rather than left to
       // the defaults, which derive both from `count`. A set-kind `count` can
@@ -5087,6 +5100,33 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
+        // A keyed result answers from the MERGED entries: an entry whose key
+        // was overwritten by a later one is no longer a member, so asking the
+        // operands directly would report `("b", 2)` present in a dictionary
+        // whose `b` is now 3.
+        if (producesKeyed(expr)) {
+          // An operand that cannot be ENUMERATED yields nothing, and a walk
+          // over nothing is indistinguishable from a walk that found nothing:
+          // without this gate a keyed result over a valueless (but
+          // dictionary-typed) operand reports a definite `false` for a member
+          // it simply cannot see. `distinctCount` and `distinctAt` gate on the
+          // same predicate, for the same reason.
+          if (expr.isEnumerableCollection !== true) return undefined;
+          // The merged walk can decline (see `keyedMergeIterator`), and an
+          // undecidable membership is `undefined`, not `false`.
+          try {
+            for (const entry of expr.each())
+              if (entry.isSame(target)) return true;
+            return false;
+          } catch (e) {
+            if (
+              e instanceof CancellationError &&
+              e.cause === 'iteration-limit-exceeded'
+            )
+              return undefined;
+            throw e;
+          }
+        }
         // Three-valued: an operand that cannot decide membership leaves the
         // whole query undecided (`.some()` would report a definite `false`).
         return kleeneOr(
@@ -5119,8 +5159,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             }
           },
         };
-        // A set-kind result enumerates each element ONCE, however often the
-        // operands repeat it.
+        // A keyed result merges its entries by key (last value wins), and a
+        // set-kind one enumerates each element ONCE however often the operands
+        // repeat it. A keyed merge cannot stream, so it declines rather than
+        // yielding a wrong prefix — see `mergeKeyedEntries`, and
+        // `keyedMergeIterator` for why that decline is thrown.
+        if (producesKeyed(expr))
+          return keyedMergeIterator(
+            concatenation,
+            expr.engine.maxCollectionSize,
+            'Join'
+          );
         return producesSet(expr)
           ? deduplicatingIterator(
               concatenation,
@@ -5139,11 +5188,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           isAtomicJoinOperand(op) ? 1 : op.count;
 
         // A set-kind result has to be indexed through the DEDUPLICATED
-        // enumeration, so that `at`, `each` and `count` agree; the per-operand
-        // arithmetic below counts repeats and would skip past elements. The
-        // concatenated length is computed only if a negative index asks for
-        // it (see `distinctAt`).
-        if (producesSet(expr)) {
+        // enumeration, and a keyed one through the MERGED entries, so that
+        // `at`, `each` and `count` agree; the per-operand arithmetic below
+        // counts repeats and would skip past elements. The concatenated
+        // length is computed only if a negative index asks for it (see
+        // `distinctAt`).
+        if (producesMergedView(expr)) {
           return distinctAt(expr, index, () => {
             let total = 0;
             for (const op of expr.ops) {
@@ -5238,6 +5288,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
+      // Without this, `materialize()` never reaches its key-value branch (it
+      // tests `elttype` against `tuple<string, any>`), the node is not
+      // indexed, and a dictionary-kind `Append` fell through to
+      // `engine.function('Set', …)` — coming back as a SET OF ENTRY TUPLES.
+      // The HEAD changed, not just the element count.
+      elttype: (expr) =>
+        producesKeyed(expr) ? parseType('tuple<string, any>') : undefined,
       // See `Join`: a set-kind result indexes by walking, so cache elements.
       elementMemo: true,
       count: (expr) => {
@@ -5247,7 +5304,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // A set-kind result counts DISTINCT elements: an appended value the
         // source already holds adds nothing (`Append(Set(1, 2), 2)` is still
         // a 2-element set), so the concatenated length is only an upper bound.
-        if (producesSet(expr)) {
+        if (producesKeyed(expr) && !Number.isFinite(count)) return undefined;
+        if (producesMergedView(expr)) {
           if (!Number.isFinite(count)) {
             // An infinite SOURCE keeps infinitely many distinct elements when
             // it is itself a set (already distinct, and `Append` passes its
@@ -5283,6 +5341,31 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
+        // A keyed result answers from the MERGED entries: an appended entry
+        // OVERWRITES a same-key entry of the source, so that source entry is
+        // no longer a member and asking `expr.op1` directly would report
+        // `("b", 2)` present in `Append(Dictionary(a: 1, b: 2), ("b", 3))`.
+        // The merged walk can decline (see `keyedMergeIterator`), and an
+        // undecidable membership is `undefined`, not `false`.
+        if (producesKeyed(expr)) {
+          // An operand that cannot be ENUMERATED yields nothing, and a walk
+          // over nothing is indistinguishable from a walk that found nothing —
+          // see the matching gate in `Join`'s keyed branch, and in
+          // `distinctCount`/`distinctAt`.
+          if (expr.isEnumerableCollection !== true) return undefined;
+          try {
+            for (const entry of expr.each())
+              if (entry.isSame(target)) return true;
+            return false;
+          } catch (e) {
+            if (
+              e instanceof CancellationError &&
+              e.cause === 'iteration-limit-exceeded'
+            )
+              return undefined;
+            throw e;
+          }
+        }
         // An appended operand that matches settles the query; otherwise defer
         // to the source, propagating its UNDECIDED answer (`||` turned an
         // `undefined` source verdict into a definite `false`).
@@ -5306,6 +5389,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             return { value: undefined, done: true };
           },
         };
+        // A keyed result merges its entries by key (last value wins), so an
+        // appended entry OVERWRITES a same-key one from the source. The merge
+        // cannot stream, so it declines rather than yielding a wrong prefix —
+        // see `keyedMergeIterator` for why that decline is thrown.
+        if (producesKeyed(expr))
+          return keyedMergeIterator(
+            concatenation,
+            expr.engine.maxCollectionSize,
+            'Append'
+          );
         // A set-kind result enumerates each element ONCE, so an appended value
         // the source already holds is not yielded again.
         return producesSet(expr)
@@ -5324,11 +5417,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const count = expr.op1.count;
         if (count === undefined || !Number.isFinite(count)) return undefined;
         const total = count + expr.nops - 1;
-        // A set-kind result has to be indexed through the DEDUPLICATED
-        // enumeration, so that `at`, `each` and `count` agree; the positional
-        // arithmetic below counts repeats and would skip past elements.
-        // (`total` is already known finite here — the guard above returned.)
-        if (producesSet(expr)) return distinctAt(expr, index, () => total);
+        // A set-kind result is indexed through the DEDUPLICATED enumeration
+        // and a keyed one through the MERGED entries, so that `at`, `each` and
+        // `count` agree; the positional arithmetic below counts repeats and
+        // would skip past elements. (`total` is already known finite here —
+        // the guard above returned.)
+        if (producesMergedView(expr))
+          return distinctAt(expr, index, () => total);
         // A negative index counts from the end of the appended collection.
         if (index < 0) index = total + index + 1;
         if (index < 1) return undefined;
@@ -10343,6 +10438,122 @@ function isIterator(x: unknown): x is Iterator<Expression> {
  * operand branches of their `count`/`isFinite` handlers. */
 function producesSet(expr: Expression): boolean {
   return expr.type.matches('set');
+}
+
+/** Does this node promise a KEYED collection — a `record` or a `dictionary`?
+ *
+ * `Join` and `Append` adopt those kinds from an operand exactly as they adopt
+ * `set` (`joinResultType`, `appendResultType`), and a keyed collection owes
+ * its keys the same distinctness a set owes its elements. */
+function producesKeyed(expr: Expression): boolean {
+  return expr.type.matches('record') || expr.type.matches('dictionary');
+}
+
+/** Does this node's enumeration need rewriting before anyone reads it —
+ * deduplicated (set) or key-merged (record/dictionary)? */
+function producesMergedView(expr: Expression): boolean {
+  return producesSet(expr) || producesKeyed(expr);
+}
+
+/** The key of a key-value entry, or `undefined` if this is not one.
+ *
+ * Entries enumerate as `Tuple(key, value)` with a string key — the shape
+ * `materialize()` tests for when it decides to rebuild a `Dictionary`. */
+function entryKeyOf(entry: Expression): string | undefined {
+  if (!isFunction(entry, 'Tuple') || entry.nops !== 2) return undefined;
+  const key = entry.op1;
+  return isString(key) ? key.string : undefined;
+}
+
+/** The merged entries of a keyed lazy result: one per distinct key, in
+ * FIRST-SEEN order, carrying the LAST value seen for that key.
+ *
+ * That is the literal constructor's rule, and the reason this exists —
+ * `Dictionary(a: 1, b: 2, a: 3)` is `{a: 3, b: 2}`, so `a` keeps its POSITION
+ * and takes the LATER value. `Join`/`Append` adopt the keyed kind but
+ * concatenate, so without this `Join(Dictionary(a: 1, b: 2), Dictionary(b: 3,
+ * c: 4))` enumerated `b` twice and counted 4 entries for a 3-key dictionary.
+ *
+ * Unlike deduplication, last-wins CANNOT be streamed: the winning value for
+ * the FIRST key may come from the LAST entry, so the whole enumeration has to
+ * be read before any entry can be emitted. That is why this returns an array
+ * rather than wrapping the iterator, and why it declines (`undefined`) when
+ * the walk is unavailable — a source longer than `ce.maxCollectionSize`, or
+ * an entry that is not a key-value pair at all. An infinite keyed source is
+ * refused by the callers' `rawTotal` gate before reaching here. */
+function mergeKeyedEntries(
+  source: Iterator<Expression>,
+  limit: number
+): Expression[] | undefined {
+  const order: string[] = [];
+  const byKey = new Map<string, Expression>();
+  let n = 0;
+  for (;;) {
+    const { value, done } = source.next();
+    if (done || value === undefined) break;
+    if (++n > limit) return undefined;
+    const key = entryKeyOf(value);
+    if (key === undefined) return undefined;
+    if (!byKey.has(key)) order.push(key);
+    byKey.set(key, value); // LAST wins
+  }
+  return order.map((k) => byKey.get(k)!);
+}
+
+/** An iterator over an already-computed element array. */
+function arrayIterator(xs: ReadonlyArray<Expression>): Iterator<Expression> {
+  let i = 0;
+  return {
+    next: () =>
+      i >= xs.length
+        ? { value: undefined, done: true as const }
+        : { value: xs[i++], done: false as const },
+  };
+}
+
+/** Wrap `source` so it yields the MERGED entries of a keyed lazy result,
+ * deferring the merge itself to the first pull.
+ *
+ * `mergeKeyedEntries()` declines (returns `undefined`) when the merge cannot
+ * be performed — the source is longer than `ce.maxCollectionSize`, or one of
+ * its elements is not a `Tuple(string, any)` key-value entry. That decline is
+ * signalled here by THROWING, never by returning a falsy iterator, because a
+ * falsy result from a collection `iterator` handler is indistinguishable from
+ * having no handler at all: `BoxedFunction.each()` (in
+ * `boxed-expression/boxed-function.ts`) falls back to evaluating the
+ * expression, and a lazy node that evaluates to itself then ends up returning
+ * an EMPTY generator. A decline would therefore be read as "this collection
+ * has no elements" — `count` would answer an exact 0 and `contains` a
+ * definite `false`, both silently wrong. Throwing a `CancellationError` with
+ * cause `iteration-limit-exceeded` is the convention `deduplicatingIterator`
+ * below already follows, and the terminal consumers (`distinctCount`,
+ * `distinctAt`, and the keyed `contains` handlers) catch exactly that cause
+ * and answer `undefined` — "unknown" — instead.
+ *
+ * The merge is deferred to the first `next()` call for the same reason
+ * `deduplicatingIterator` signals mid-iteration rather than at handler-call
+ * time: the handler's contract is to return an iterator, so the decline has
+ * to surface where a caller is walking, and prepared to catch. */
+function keyedMergeIterator(
+  source: Iterator<Expression>,
+  limit: number,
+  operator: string
+): Iterator<Expression> {
+  let merged: Iterator<Expression> | undefined = undefined;
+  return {
+    next: () => {
+      if (merged === undefined) {
+        const entries = mergeKeyedEntries(source, limit);
+        if (entries === undefined)
+          throw new CancellationError({
+            cause: 'iteration-limit-exceeded',
+            message: `Cannot merge the keyed entries of ${operator}(): the source exceeds the maximum collection size of ${limit}, or holds an element that is not a key-value entry`,
+          });
+        merged = arrayIterator(entries);
+      }
+      return merged.next();
+    },
+  };
 }
 
 /** Wrap `source` so it yields only the FIRST occurrence of each value.

@@ -209,7 +209,13 @@ export class TypeBuilder implements ASTVisitor<Type> {
       return { kind: 'list', elements, dimensions: [node.size] };
     }
 
-    return { kind: 'list', elements };
+    // An UNSIZED vector is rank-1 with an open length, and `-1` is how this
+    // system spells an open dimension. Recording it is what separates
+    // `vector<T>` from a bare `list<T>`, whose rank is unconstrained: without
+    // the dimension the two built the identical type and the rank-1 promise
+    // was silently dropped at parse time. `visitMatrixType` below already
+    // defaults the same way, to `[-1, -1]`.
+    return { kind: 'list', elements, dimensions: [-1] };
   }
 
   visitMatrixType(node: MatrixTypeNode): Type {
@@ -226,6 +232,12 @@ export class TypeBuilder implements ASTVisitor<Type> {
 
   visitTensorType(node: TensorTypeNode): Type {
     const elements = this.buildType(node.elementType);
+
+    // A `tensor<any>` carries no dimensions. Preserve its existing
+    // constructor-specific alias normalization to the bare primitive `list`;
+    // unlike `list<any>`, the tensor spelling does not survive as its own kind.
+    if (this.isAnyType(elements)) return 'list';
+
     return { kind: 'list', elements };
   }
 
@@ -272,11 +284,6 @@ export class TypeBuilder implements ASTVisitor<Type> {
 
   visitSetType(node: SetTypeNode): Type {
     const elements = this.buildType(node.elementType);
-
-    if (this.isAnyType(elements)) {
-      return 'set';
-    }
-
     return { kind: 'set', elements };
   }
 

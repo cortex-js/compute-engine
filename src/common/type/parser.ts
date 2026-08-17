@@ -1316,13 +1316,18 @@ export class Parser {
             this.advance();
             return this.parseVectorType();
           }
-          // Handle bare 'vector' as default list of numbers
+          // Bare `vector` is a rank-1 list of numbers with an open length.
+          // Build it as a VECTOR node rather than a plain list so it picks up
+          // the open-length dimension `[-1]` that `visitVectorType` supplies:
+          // a list node with no dimensions is rank-UNCONSTRAINED, which is a
+          // different (weaker) type, and bare `matrix` already defaults to
+          // `[-1, -1]` the same way.
           this.advance();
-          return this.createNode<ListTypeNode>('list', {
+          return this.createNode<VectorTypeNode>('vector', {
             elementType: this.createNode<PrimitiveTypeNode>('primitive', {
               name: 'number',
             }),
-            dimensions: undefined,
+            size: undefined,
           });
         case 'matrix':
           if (isGeneric) {
@@ -1870,6 +1875,11 @@ export class Parser {
 
   private parseSetType(): SetTypeNode | undefined {
     if (this.current.type === 'IDENTIFIER' && this.current.value === 'set') {
+      // As with `list`, leave a bare constructor to the primitive parser. This
+      // preserves the distinction between omitted and explicit element types:
+      // `set` is bare, while `set<any>` retains the stated `any` contract.
+      if (this.lexer.peekToken().type !== '<') return undefined;
+
       this.advance();
 
       let elementType: TypeNode = this.createNode<PrimitiveTypeNode>(

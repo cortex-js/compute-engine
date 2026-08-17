@@ -187,7 +187,23 @@ export function typeToString(type: Type, precedence = 0): string {
       }
       if (!result) {
         const dims = type.dimensions;
-        if (dims !== undefined && dims.some((d) => d < 0)) {
+        if (
+          dims !== undefined &&
+          dims.length <= 2 &&
+          dims.every((d) => d < 0)
+        ) {
+          // An all-open rank of 1 or 2 has a NAMED head — `vector<T>` and
+          // `matrix<T>` — and must use it, because the nesting below cannot
+          // express either one faithfully. At rank 1 the nested form is
+          // `list<T>`, which parses back with no dimensions at all, i.e.
+          // rank-UNCONSTRAINED: strictly weaker than the rank-1 type being
+          // serialized. The named heads carry their rank explicitly and avoid
+          // making rank preservation depend on how a nested element type is
+          // normalized. (The numeric branch above already reaches for these
+          // spellings; this extends them to every element type.)
+          const head = dims.length === 1 ? 'vector' : 'matrix';
+          result = `${head}<${typeToString(type.elements)}>`;
+        } else if (dims !== undefined && dims.some((d) => d < 0)) {
           // A wildcard dimension (`-1`, the open-length sentinel `matrix`/
           // `vector` parse to) has no literal spelling — `^(-1x-1)` neither
           // parses back nor means a negative length (Tycho item 164 note).

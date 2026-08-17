@@ -29,6 +29,14 @@
   node already produced. The image of a set under a function is a set.
   `Map` over a list, and `Filter`/`Take`/`Drop`/`Reverse` over a set (which
   only ever drop elements, never duplicate them), are unaffected.
+- **`Join`/`Append` of a dictionary or record now merges keys, last value
+  winning.** `Join(Dictionary(a:1, b:2), Dictionary(b:3, c:4))` reported 4
+  entries and enumerated `b` twice; it is now the 3-key dictionary
+  `{a:1, b:3, c:4}`. The rule matches the literal constructor — a repeated key
+  keeps its first position and takes the last value, exactly as
+  `Dictionary(a:1, b:2, a:3)` is `{a:3, b:2}`. Such a result also materializes
+  as a `Dictionary` again; it previously came back as a `Set` of entry tuples,
+  changing the head as well as the entry count.
 - **A truncated collection preview no longer drops an element silently.** A
   non-indexed collection (any set) of exactly six elements previewed as five
   with no `...` continuation marker, claiming to be complete; it now shows

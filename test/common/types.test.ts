@@ -1380,7 +1380,7 @@ describe('reduceType Tests', () => {
   });
 
   it('should handle lists of anything', () => {
-    expect(reduce('list<any>')).toMatchInlineSnapshot(`"list"`);
+    expect(reduce('list<any>')).toMatchInlineSnapshot(`"list<any>"`);
   });
 
   it('should handle lists of nothing', () => {
@@ -1388,7 +1388,7 @@ describe('reduceType Tests', () => {
   });
 
   it('should handle sets of anything', () => {
-    expect(reduce('set<any>')).toMatchInlineSnapshot(`"set"`);
+    expect(reduce('set<any>')).toMatchInlineSnapshot(`"set<any>"`);
   });
 
   it('should handle sets of nothing', () => {

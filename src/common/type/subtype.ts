@@ -1219,6 +1219,16 @@ export function isSubtype(
     }
   }
 
+  // A type is a subtype of an intersection exactly when it is a subtype of
+  // EVERY arm. This must precede the primitive-lhs fall-through below:
+  // intersections are object-shaped in the type AST, so returning `false`
+  // for a string lhs first would make every bare primitive fail even a
+  // reflexive intersection (`number ⪯ number & number`). Recursing through
+  // this entry point preserves all arm-specific rules (aliases, negations,
+  // unions, and the structural readings of `string` and `range`).
+  if (rhs.kind === 'intersection')
+    return rhs.types.every((rhsType) => isSubtype(lhs, rhsType));
+
   // `range` is the only primitive with a structural reading: an index span is
   // an indexed collection of finite positive integers, so it must satisfy a
   // PARAMETERIZED collection rhs (`range <: indexed_collection<integer>`,
@@ -1259,12 +1269,6 @@ export function isSubtype(
   // failed the primitive `number` (all-branch). Tycho item 92.
   if (lhs.kind === 'union') return lhs.types.every((t) => isSubtype(t, rhs));
 
-  if (lhs.kind === 'intersection' && rhs.kind === 'intersection') {
-    return rhs.types.every((rhsType) =>
-      lhs.types.some((lhsType) => isSubtype(lhsType, rhsType))
-    );
-  }
-
   // Handle intersection types with other types
   if (lhs.kind === 'intersection') {
     // lhs is an intersection, rhs is not an intersection.
@@ -1277,11 +1281,6 @@ export function isSubtype(
     // `boxed-operator-definition.ts`. Matches the primitive-rhs branch above,
     // which already uses `some`.
     return lhs.types.some((lhsType) => isSubtype(lhsType, rhs));
-  }
-
-  if (rhs.kind === 'intersection') {
-    // lhs is not necessarily an intersection, rhs is an intersection
-    return rhs.types.every((rhsType) => isSubtype(lhs, rhsType));
   }
 
   //

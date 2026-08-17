@@ -199,7 +199,7 @@ neither answer, and routing them through a bounded `count` would have cost
 `Join(Set(1,2), Range(1,5000))` its finiteness, its emptiness, and its
 preview.
 
-### Any intersection on the right rejects EVERY bare-named type on the left, including `number` (OPEN, correctness — found 2026-08-17; characterization corrected twice the same day)
+### Any intersection on the right rejects EVERY bare-named type on the left, including `number` (FIXED 2026-08-17 — found 2026-08-17; characterization corrected twice the same day)
 
 `T <: (A & B)` must hold exactly when `T <: A` and `T <: B`. It does not, for
 any `T` that is a bare type NAME. This is a defect in the core subtype
@@ -221,9 +221,12 @@ comparison as a bare string in the type AST. Structured (object-shaped) types
 pass — `list<number> <: collection & collection` and
 `(number) -> number <: function & function` are both true.
 
-That also explains the anomaly two earlier versions of this entry chased.
-`reduceType` normalizes an `<any>` parameter AWAY for some kinds but not
-others, so the survivors are exactly the structured ones:
+That also explains the anomaly two earlier versions of this entry chased. At
+the time it was found, the type AST builder normalized an `<any>` parameter
+AWAY for some kinds but not others, and `BoxedType` kept that parsed shape
+without calling `reduceType()`, so the survivors on the public `ce.type()` path
+were exactly the structured ones. (`reduceType()` itself already correctly
+canonicalized BOTH `list<any>` to `list` and `set<any>` to `set`.)
 
 ```
 'set<any>' -> 'set'                             fails
@@ -234,9 +237,9 @@ others, so the survivors are exactly the structured ones:
 'tuple<any>' -> 'tuple<any>'                    PASSES
 ```
 
-So bare-vs-parameterized DOES separate the groups, once normalization is
-applied first: `set<any>` was never a counterexample, it is a bare `set`
-wearing a parameter that gets stripped. (Two earlier framings — "an
+So bare-vs-parameterized DOES separate the groups, once constructor-specific
+parse normalization is accounted for: `set<any>` was never a counterexample,
+because the AST builder strips its parameter. (Two earlier framings — "an
 interaction with negation" and "bare-vs-`<any>` doesn't separate the cases" —
 were both wrong; recorded so nobody re-derives them. The CE-POC session found
 the `collection & collection` and `number & number` repros.)
@@ -291,8 +294,16 @@ classification/materialization sites. Concrete values classify correctly,
 which is why this has not bitten them — but a symbol DECLARED with a bare
 `list`/`set`/`dictionary`/`record` is silently classified as NOT list-like.
 
-Not fixed in the round that found it: this is core subtyping with an
-unaudited internal blast radius, and it deserves its own suite gate.
+Fixed by moving the existing right-intersection conjunction rule above the
+primitive-left/composite-right rejection in `isSubtype()`. The rule itself was
+correct; bare type names simply returned before reaching it. The suite gate in
+`intersection-right-subtyping.test.ts` covers every primitive type name, union
+and structural-expansion paths, `list<any>`/`set<any>` before and after
+reduction, successful literal/symbol dispatch through an intersection
+parameter, and rejection when one arm does not match. The follow-up
+normalization fix makes the AST builder canonicalize an unshaped `list<any>` to
+bare `list`, matching `reduceType()` and the existing `set<any>` behavior,
+while retaining dimensioned forms such as `list<any^2x3>`.
 
 ### `Join`/`Append` of a dictionary or record duplicates KEYS, and materializes to the wrong head (OPEN, correctness + a merge-rule ruling — found 2026-08-17 reviewing the set-kind fix)
 

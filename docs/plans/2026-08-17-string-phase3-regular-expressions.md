@@ -13,7 +13,9 @@ string operations) are shipped and committed
 (`docs/plans/2026-08-16-string-phase1-character-type.md`,
 `docs/plans/2026-08-16-string-phase2-join-search-ops.md`).
 
-**This plan has a BLOCKING ruling (D2).** The spec itself gates the phase on
+**D2 was RULED on 2026-08-17 (native regex, no caps, no limitations); the phase is unblocked.** The paragraph below is kept as the record of what was decided and why.
+
+**~~This plan has a BLOCKING ruling (D2).~~** The spec itself gates the phase on
 it: "Before Phase 3 lands, pick one". D2 decides the regex dialect and the
 resource-safety story together, because they are the same decision, and it
 determines how large the phase is — from roughly a week's work to roughly
@@ -99,9 +101,35 @@ Release-note obligation (checklist items 7–8): `regexp` is a PRIMITIVE, a bare
 string in the type AST with no `.kind`, and consumers that switch on `.kind`
 must be told by name.
 
-### D2. Dialect and resource safety — **BLOCKING RULING, see below**
+### D2. Dialect and resource safety — **RULED 2026-08-17: native regex, no caps, no dialect restrictions**
 
-Deferred to the ruling section. Everything in D6–D12 is conditional on it.
+The user's ruling: use the host's regular-expression engine directly, with no
+input-size cap, no pattern-complexity cap, and no feature subset. Option (a)
+from the ruling section below, minus the caps I had recommended alongside it.
+
+What that settles:
+
+- **Dialect is JavaScript's**, documented as such. Backreferences, lookahead
+  and lookbehind all work. Compiled JavaScript emits the host `RegExp`, so the
+  interpreter and compiled code agree by construction — the parity trap is
+  closed for free, which is the main thing this buys.
+- **Python stays fail-closed** (D7), now for a second reason: `re` diverges
+  from JS on `v`-mode set operations and some lookbehind, so a lowering would
+  silently change semantics.
+- **Catastrophic backtracking is a documented property, not a guarded one.**
+  `RegExp(#"(a+)+$"#)` against a 30-character non-matching subject explores on
+  the order of 2³⁰ paths, and the engine cannot interrupt it: deadlines are
+  cooperative polling between evaluation steps (`docs/TIMEOUT-MODEL.md`) and
+  one `RegExp.exec()` is a single step. There is no timeout, abort signal or
+  span that bounds it. This is a property of the ruling and belongs in the
+  user-facing docs next to `RegExp`, stated plainly, so a caller writing a
+  pattern against untrusted input knows what they are choosing.
+
+I recommended the caps and was overruled; recording that here so the reasoning
+is not re-litigated later, and so the docs obligation above is not mistaken
+for a leftover concern. The one thing this changes downstream: D6 (grapheme-
+cluster offsets) now costs a per-match translation on every call, since a host
+regex indexes by code unit.
 
 ### D3. `RegExp(pattern, flags?)` is the only constructor
 
@@ -380,7 +408,8 @@ Full suite with the box lock, snapshot blast radius measured and reported.
   equally; serialization round-trips (D9).
 - Python and GLSL/WGSL compilation of every new operator fails closed with the
   `noLoweringMessage` text (D7).
-- Whatever D2 selects, the resource-safety behavior it promises is pinned by a
-  test: under (a)/(b) the input caps reject oversized subjects; under (c) the
-  `(a+)+$` case answers in bounded time and a `withTimeLimit` span interrupts
-  a long match with a describable error.
+- Per the D2 ruling there is no resource cap to pin. Instead the DOCS carry
+  the catastrophic-backtracking property explicitly (D2), and a test pins that
+  a pattern using a backreference or lookbehind — the features the rejected
+  option (c) could not express — actually works, since the ruling is what buys
+  them.

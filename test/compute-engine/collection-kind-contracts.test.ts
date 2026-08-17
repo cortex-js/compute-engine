@@ -187,6 +187,85 @@ describe('a set-kind lazy collection holds distinct elements', () => {
   });
 });
 
+describe('a keyed lazy collection merges its keys, last value winning', () => {
+  const kv = (k: string, v: number) => ['KeyValuePair', { str: k }, v];
+
+  test('`Join` of two dictionaries merges a shared key', () => {
+    const j = ce
+      .box([
+        'Join',
+        ['Dictionary', kv('a', 1), kv('b', 2)],
+        ['Dictionary', kv('b', 3), kv('c', 4)],
+      ])
+      .evaluate();
+    // `b` appeared twice and counted 4 before: a dictionary owes its KEYS the
+    // distinctness a set owes its elements.
+    expect(elementsOf(j)).toEqual(['("a", 1)', '("b", 3)', '("c", 4)']);
+    expect(j.count).toBe(3);
+  });
+
+  test('the merge follows the literal constructor: first POSITION, last VALUE', () => {
+    // `Dictionary(a: 1, b: 2, a: 3)` is `{a: 3, b: 2}` — `a` keeps its place
+    // and takes the later value. The lazy merge must agree exactly.
+    const literal = ce
+      .box(['Dictionary', kv('a', 1), kv('b', 2), kv('a', 3)])
+      .evaluate();
+    const joined = ce
+      .box([
+        'Join',
+        ['Dictionary', kv('a', 1), kv('b', 2)],
+        ['Dictionary', kv('a', 3)],
+      ])
+      .evaluate();
+    expect(elementsOf(joined)).toEqual(elementsOf(literal));
+    expect(joined.evaluate({ materialization: true }).json).toEqual(
+      literal.json
+    );
+  });
+
+  test('a keyed result materializes as a Dictionary, not a Set of entries', () => {
+    // Without an `elttype` handler, `materialize()` never reached its
+    // key-value branch and rebuilt through `function('Set', …)` — the HEAD
+    // changed, not just the element count.
+    const m = ce
+      .box([
+        'Join',
+        ['Dictionary', kv('a', 1), kv('b', 2)],
+        ['Dictionary', kv('b', 3), kv('c', 4)],
+      ])
+      .evaluate()
+      .evaluate({ materialization: true });
+    expect(m.operator).toBe('Dictionary');
+    expect(m.json).toEqual({ dict: { a: 1, b: 3, c: 4 } });
+  });
+
+  test('`Append` of an entry overwrites a same-key entry of the source', () => {
+    const a = ce
+      .box([
+        'Append',
+        ['Dictionary', kv('a', 1), kv('b', 2)],
+        ['Tuple', { str: 'b' }, 9],
+      ])
+      .evaluate();
+    expect(elementsOf(a)).toEqual(['("a", 1)', '("b", 9)']);
+    expect(a.count).toBe(2);
+  });
+
+  test('`contains` answers from the merged entries', () => {
+    // An entry whose key was overwritten is no longer a member; asking the
+    // operands directly would still report it present.
+    const j = ce
+      .box([
+        'Join',
+        ['Dictionary', kv('a', 1), kv('b', 2)],
+        ['Dictionary', kv('b', 3)],
+      ])
+      .evaluate();
+    expect(j.contains(ce.box(['Tuple', { str: 'b' }, 2]))).toBe(false);
+    expect(j.contains(ce.box(['Tuple', { str: 'b' }, 3]))).toBe(true);
+  });
+});
+
 describe('deduplication cannot wedge the iterator', () => {
   test('an endless run of duplicates is bounded, not a hang', () => {
     // Deduplicating advances only on a DISTINCT element, so a source that

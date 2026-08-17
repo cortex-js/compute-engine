@@ -32,7 +32,7 @@ import { normalizeStatedEffectSet } from './effects.js';
  *
  * For example:
  * - `number | integer` -> `number`
- * - `set<any>` -> `set`
+ * - `set<integer | integer>` -> `set<integer>`
  *
  * @param type
  * @returns
@@ -572,9 +572,6 @@ function reduceListType(type: ListType): Type {
   if (reducedType === 'nothing')
     return decorate({ kind: 'list', elements: 'nothing' });
 
-  // A list of `any` is a list
-  if (reducedType === 'any') return 'list';
-
   let dimensions = type.dimensions;
   if (dimensions) {
     // `-1` means "any size" — a valid, non-degenerate dimension (e.g. a bare
@@ -600,9 +597,6 @@ function reduceSetType(type: SetType): Type {
   // A set of `nothing` is an empty set
   if (reducedType === 'nothing')
     return decorate({ kind: 'set', elements: 'nothing' });
-
-  // A set of `any` is a set
-  if (reducedType === 'any') return 'set';
 
   return decorate({
     ...type,
@@ -698,8 +692,13 @@ function reduceDictionaryType(type: DictionaryType): Type {
   const reducedValues = reduceType(type.values);
   if (reducedValues === 'error') return 'error';
   if (reducedValues === 'nothing') return 'error';
-  if (reducedValues === 'any' || reducedValues === 'unknown') return 'any';
 
+  // An unconstrained VALUE type says nothing about the dictionary itself, so
+  // it must not widen the whole type: returning the top type `any` here made a
+  // `dictionary<unknown>` accept — and be accepted by — every other type, and
+  // it poisoned any union containing one (`number | dictionary<unknown>`
+  // reduced to `any`, after which `string` was a subtype of it). The element
+  // type is preserved exactly as `list<any>` and `set<any>` preserve theirs.
   return decorate({ kind: 'dictionary', values: reducedValues });
 }
 
