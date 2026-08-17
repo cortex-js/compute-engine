@@ -96,6 +96,239 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### `Limit` at ∞ declines on a SUM whose addends it resolves individually, when one needs `Erf(∞)` and another needs the ∞·0 resolution (OPEN, correctness — found 2026-08-16)
+
+Each addend's limit is computed correctly; their sum is not. Measured at
+HEAD, `y → +∞`:
+
+```
+3√2·Erf(√2/2·√y)·√π              ->  3√2·√π      (Erf(∞) = 1)
+−6·e^(−y/2)·√y                   ->  0           (∞·0: decay beats growth)
+−2·e^(−y/2)·y^(3/2)              ->  0           (same)
+
+−6·e^(−y/2)·√y  +  −2·e^(−y/2)·y^(3/2)      ->  0          both ∞·0: fine
+3√2·Erf(…)·√π   +  −6·e^(−y/2)·√y           ->  DECLINES
+3√2·Erf(…)·√π   +  −2·e^(−y/2)·y^(3/2)      ->  DECLINES
+all three (the real antiderivative)          ->  DECLINES
+```
+
+**It is not a general failure to distribute over `Add`** — that works, including
+with an `Erf` addend, so long as the other addend is not an ∞·0 form:
+
+```
+1/y + e^(−y)            -> 0     Erf(√y) + e^(−y)   -> 1
+3 + 1/y                 -> 3     Erf(√y) + 3        -> 4
+```
+
+The decline is specific to **mixing an `Erf(∞)` special-value addend with an
+addend requiring the ∞·0 (exponential-decay × polynomial-growth)
+resolution.** Each mechanism works alone and on like-with-like sums; only the
+mixture fails.
+
+**Consequence:** it blocks the definite-integral evaluator's "re-resolve an ∞
+endpoint as `lim F(y)`" step, so improper integrals whose Rubi antiderivative
+carries both an `Erf` term and a `poly × exp` term stay unevaluated —
+`∫ₓ^∞ y^(3/2)·e^(−y/2) dy` is left as an `Integrate` (test
+`integration-rules.test.ts` › "improper-integral endpoint at ∞ (poly × exp
+decay)"). Numerics are unaffected: `.N()` gives 6.3854728701 against a
+reference 6.385472870122, so this is symbolic-only. The integer-power sibling
+`∫ₓ^∞ y²·e^(−y) dy` closes, because its antiderivative has no `Erf` term.
+
+**Reproduce with the Rubi rules LOADED** — `loadIntegrationRules(ce)` from
+`src/integration-rules`. On a bare engine the integral fails to close for an
+entirely different reason (no rules), and the integer-power controls still
+pass, so a bare-engine probe looks identical to this bug while measuring
+something else.
+
+Found by the string-roadmap session's post-commit suite; mechanism narrowed
+here. Not attributed to a commit: none of the three candidates in the window
+touches the integration, limit or Rubi lane, so whether it is a committed or
+working-tree regression is unestablished and needs a clean-tree run.
+
+### An `unknown`-typed symbol compared to a SCALAR types the relation scalar, so adding evidence about the OTHER operand makes the answer worse (OPEN, correctness — found 2026-08-16 running down Tycho item 198)
+
+`Equal` answers `broadcastable<boolean>` when neither operand's
+collection-ness is known, which is the honest "cannot tell" the 192/193/194
+round introduced. But once the OTHER operand pins down to a scalar, the
+`unknown` operand is treated as a scalar too, and the relation commits to
+`boolean`. Measured at HEAD, one fresh engine per row:
+
+```
+U := [10,20,30]                      // U is a known list
+
+C undeclared          C = U[1]  ->  boolean                 // WRONG: C may be a list
+C declared `unknown`  C = U[1]  ->  boolean                 // WRONG, same
+C assigned [10,30]    C = U[1]  ->  list<boolean^2>         // right
+nothing declared      C = U[1]  ->  broadcastable<boolean>  // right — the honest answer
+```
+
+**Adding information made the type wrong.** With no evidence at all the
+engine says `broadcastable<boolean>`; supplying a value for `U` — evidence
+about the operand that was never in doubt — collapses the answer to
+`boolean`. `unknown` is a placeholder that refines per use, not a proof of
+scalar-ness, so it must not satisfy the scalar arm of the broadcast decision.
+The comparison should stay `broadcastable<boolean>` while EITHER side could
+still turn out to be a collection.
+
+It propagates through the shape the consumer actually writes — `Which` over
+the relation, then `Sum` over that:
+
+```
+Sum(Which(C = U[i], i, 0), i, 1, Length(U))
+  U list + C unknown  ->  type `number`,  evaluates to a LIST
+  U list + C a list   ->  type `vector<integer^2>`, evaluates `[1,3]`   // agree
+```
+
+so the mistyped case is a type/value disagreement of exactly the kind item
+193 records.
+
+**The mistyping is NOT new — it is identical on 0.112.0** (verified by the
+consumer on a scratch 0.112 overlay of the same probe file: the relation
+types scalar `boolean` and the `Sum` types `number` on both versions). What
+0.113.0's assign inference changed is only whether the wrong type is
+COMMITTED to the symbol:
+
+```
+0.112   C_0.type = dictionary | indexed_collection   (stays OPEN)
+0.113   C_0.type = number                            (COMMITTED)
+```
+
+**This commitment is UNSOUND — the symbol's recorded type does not contain
+its own value**, and that is the sharpest statement of the bug because it
+reproduces in one engine with no document and no version comparison:
+
+```
+U := [10,20,30];  declare C_0 unknown;  C_0 := Sum(Which(C = U[i], i, 0), …)
+then refine C := [10,30]
+  C_0.type            -> number                      (still)
+  C_0.evaluate().type -> vector<finite_integer^2>
+  actual.matches(declared) -> FALSE                  // UNSOUND
+  C_0[2]              -> 3                           // the READ works anyway
+```
+
+A type is a promise about the value; here the promise is false and persisted.
+
+**The unsoundness is a CONSEQUENCE of the relation defect, not a separate
+bug — fix the relation and it cannot arise.** At assign time the committed
+type is *true* (`declared=number`, `actual=finite_integer`, matches); it goes
+false only once `C` refines and the value becomes a vector. That looks like
+staleness and invites an expensive fix (a refresh path that recomputes a
+symbol's type when a dependency refines). It is not: the type went stale only
+because it was NARROWER than the evidence justified. Had the relation
+answered `broadcastable<boolean>` — which it already does when neither side
+is known — the `Sum` would type `broadcastable<integer>`, and that promise
+survives the refinement:
+
+```
+vector<finite_integer^2> <: number                          false   ← today
+vector<finite_integer^2> <: broadcastable<integer>          TRUE    ← honest type
+vector<finite_integer^2> <: dictionary | indexed_collection TRUE    ← 0.112's open type
+```
+
+The third row is why 0.112 was sound without any refresh mechanism: its open
+type still contains the later vector. **So do NOT build a type-invalidation
+path for this** — the honest type is the fix, not a refresh mechanism.
+
+**⚠ But the fix is NOT localized, and the narrow behaviour is DELIBERATE.**
+The gate is `isPossiblyCollectionTyped` (`collection-utils.ts:917`):
+
+```ts
+if (t === 'unknown' || t === 'any' || t === 'value') return isFunction(expr);
+```
+
+A top-typed operand counts as possibly-collection **only when it is a
+function application**; a bare SYMBOL typed `unknown` returns `false`, which
+is exactly why `C = U[1]` types scalar. That narrowness is documented and
+justified in the same file (see the `isValuelessCollectionTyped` comment):
+widening it "would also catch a top-typed (`unknown`/`any`) operand …
+reclassifies every undeclared symbol and is a different, much larger change".
+The helper has **44 references** across `arithmetic.ts`, `collections.ts`,
+`relational-operator.ts` and `boxed-function.ts`, and is part of the public
+surface (`src/api.md`). So this needs a RULING on how far to widen, not a
+one-line edit — see the disposition note at the end of this entry.
+
+**The over-narrow commit also blocks USAGE-NARROWING, which is the second and
+more damaging half.** A declared *concrete* type is deliberately not moved by
+a use (that is the documented rule); `unknown` is a placeholder and moves.
+Committing a concrete `number` therefore converts a movable placeholder into
+an immovable wrong answer. Measured at HEAD, both arms in one script with the
+parse-order confound controlled — the no-use rows prove the movement is
+caused by the use and not by parse order:
+
+```
+COMMITTED `number` + use C_0[2]   number  -> number                          read: Error(incompatible-type)
+OPEN `unknown`     + use C_0[2]   unknown -> dictionary | indexed_collection read: At("C_0", 2)   resolves
+COMMITTED, no use                 number  -> number    (control, no movement)
+OPEN, no use                      unknown -> unknown   (control, no movement)
+```
+
+Note both arms are reachable at HEAD, so **no 0.112 install is needed to
+study this**: the OPEN arm *is* the pre-commit state.
+
+**The proposed fix was tested against both failure modes and survives** —
+this is the experiment that would have refuted it:
+
+```
+declared `number`                  C_0[2] -> Error(incompatible-type)   ← today
+declared `broadcastable<integer>`  C_0[2] -> At("C_0", 2)               ← the fix: resolves
+declared `dictionary | indexed_collection`  C_0[2] -> At("C_0", 2)
+declared `unknown`                 C_0[2] -> At("C_0", 2)
+```
+
+So an honest `broadcastable<integer>` is both SOUND against the refined value
+and INDEXABLE by a later reader. Full chain: relation types `unknown` as
+scalar → over-narrow commit → (a) unsound once the value refines and (b)
+immovable by use, so readers fail closed. Cutting it at the relation cuts
+both.
+
+**The witness is the bare-engine repro above — deliberately NOT a consumer
+document.** Every table in this entry runs in one fresh engine, at HEAD, with
+no version comparison and no importer; that is the whole evidence base and it
+is sufficient. Reproduce with:
+
+```
+U := [10,20,30];  declare C_0 unknown;  C_0 := Sum(Which(C = U[i], i, 0), i, 1, Length(U))
+```
+
+This entry was FOUND while running down a consumer filing (their item 198,
+`frqpa78i6s`). **That filing was subsequently WITHDRAWN — the clean arm
+(`HEAD@0.112` vs `HEAD@0.113`, consumer code constant, engine the only
+variable) measured 7 members on BOTH, i.e. zero CE delta; the apparent
+26 → 1 came from a confounded tree and a consumer-side regression.** Three
+intermediate causal stories were refuted along the way. **None of that
+touches this entry**, which is why it is written the way it is: every table
+above runs in one fresh engine at HEAD, so the defect never depended on the
+filing that led to it. Do not treat 198's withdrawal as evidence against this
+— the relation defect, the unsound commitment, and the immovable-by-use
+behaviour are independently measured and stand on their own. Equally, do not
+resurrect the 26 → 1 figure from any stale reference; it does not describe a
+CE change.
+
+**Disposition — NOT FIXED, awaiting a ruling, and the ruling is about how far
+to widen.** The fix belongs at the relation, not at `Sum`/`Which`: the
+`Equal`/`NotEqual` result type must treat an `unknown`-typed operand as
+"collection-ness not yet known" rather than as scalar. Three candidate
+scopes, cheapest first:
+
+1. **Comparison operators only** — `comparisonResultType` stops delegating
+   the top-typed case to `isPossiblyCollectionTyped` and admits a bare
+   `unknown` symbol itself. Smallest blast radius, fixes the measured hole,
+   leaves `Add`/`Multiply` inconsistent with it.
+2. **Widen `isPossiblyCollectionTyped`** to admit bare top-typed symbols.
+   One consistent convention across all 44 call sites — and precisely the
+   change its own comment declines as "much larger", because it reclassifies
+   every undeclared symbol in every comparison and every element-wise
+   arithmetic operator. Snapshot blast radius must be MEASURED before this is
+   chosen, not estimated.
+3. **Neither — declare the unsoundness acceptable** and instead stop the
+   assign inference from committing a type derived through a top-typed
+   operand, leaving such symbols open as 0.112 did.
+
+Whichever is chosen, add a regression asserting the four-row table above; the
+diagnostic property is that **the LESS-informed setup must not be MORE honest
+than the better-informed one**. Also check the sibling handlers listed in the
+192/193/194 entry below for the same assumption.
+
 ### Tycho items 192/193/194 — residue after the 2026-08-15 fixes (OPEN)
 
 The three items were fixed the same day (`PointList` takes the elementwise
@@ -2484,20 +2717,31 @@ Those two companions SHIPPED on 2026-08-15 (work package 2A:
 `test/compute-engine/protocol-field-backed.test.ts`), so the prerequisite is
 discharged and B1 itself is what remains of this entry.
 
-**OPEN, found in the 2A review: redefining an object TYPE does not re-settle
+**FIXED 2026-08-16 (work package 2D): redefining an object TYPE now re-settles
 its conformance edges.** `settleFieldBacking()` reads the target's stored-field
 layout from the type registry as it stands when it runs, and a protocol
-replacement re-settles every edge — so a changed REQUIREMENT is picked up. A
-cross-batch redefinition of the object type itself (`type P = object{…}` run
-again with different fields, which the notebook pattern allows) re-registers
-nothing: no edge is re-settled, so an accessor synthesized for a field the new
-layout no longer declares keeps answering, and a field the new layout ADDS
-gets none. Objects constructed earlier keep their own pinned layout either way
-(Appendix B, "layouts never migrate"), so this is a registry-vs-instance
-divergence rather than data loss. Fix: re-run conformance for a redefined
-type's edges, the way `declareProtocolImpl` already does for a replaced
-protocol. Scheduled with the Phase 2 "Protocol replacement" bullet of
-`docs/plans/2026-08-13-mutable-objects-implementation-plan.md`.
+replacement re-settles every edge — so a changed REQUIREMENT was always picked
+up. A cross-batch redefinition of the object type itself (`type P = object{…}`
+run again with different fields, which the notebook pattern allows) used to
+re-register nothing: no edge was re-settled, so an accessor synthesized for a
+field the new layout no longer declared kept answering, a field the new layout
+ADDED got none, and a RETYPED field left a value of the new type behind a
+requirement statically typed as the old one. `declareType` now calls
+`resettleTypeConformances()` (`src/compute-engine/engine-protocols.ts`) on
+every replacement, which re-runs `implementationProblem` + `settleFieldBacking`
++ `refreshInheritedPending` exactly as the protocol-replacement loop does, and
+emits its `config` event and conformance-version bump only when a verdict
+actually moved. Because objects keep their own pinned layout (Appendix B,
+"layouts never migrate"), the field-backed READ and WRITE paths additionally
+re-check the RECEIVER's pinned layout, so an instance built before a
+redefinition is refused with `protocol-implementation-missing` for a property
+its own layout cannot satisfy instead of answering symbolically or, worse,
+answering with a value of the wrong type. A re-settled edge records WHY it went
+pending (`ConformanceRecord._pendingReason`), which the end-of-batch
+`protocol-implementation-pending` warning now carries. Pinned by
+`test/compute-engine/protocol-type-redefinition.test.ts`, with the protocol
+half's replacement quartet added to
+`test/compute-engine/protocol-field-backed.test.ts`.
 
 **Migration cost, MEASURED on landing (2026-08-16): 45 tests** across
 `protocol-properties.test.ts` (23), `protocols.test.ts` (9),
@@ -4545,32 +4789,27 @@ the reason it is a judgement call rather than a forced consequence.
   `Type(RandomShuffle("abc"))` is `"string"` and `DeleteAt("abcdef", 2)` is
   `"acdef"`. The static-result-type break has its own CHANGELOG note.
 
-- **Inner strings for the chunking family:** `Chunk`, `Partition`, `ChunkBy`
-  and `SlidingWindow`. The outer result is a list either way; what is open is
-  whether each inner chunk — a contiguous run of the source's own characters
-  — is a `string` or a `list<character>`. Today it is `list<character>`:
-  `Chunk("abcdef", 2)` is `[["a","b","c"], ["d","e","f"]]`. The same question
-  applies to `Permutations` and `Combinations`, whose inner elements are
-  reorderings and subsets of the source's characters.
-  **Recommendation: `list<string>`** — each inner element is a contiguous run
-  (or a reordering) of the source's own characters, which is exactly the
-  condition under which every other operator preserves the string kind, so
-  `Chunk("abcdef", 2)` would be `["abc", "def"]`. Deliberately still OPEN
-  because it is a static-result-type break on six operators at once and needs
-  a ruling, not a default. If nothing is decided, the inner elements stay
-  `list<character>` and the library is inconsistent with the
-  preservation rule the rest of Phase 1/2 follows.
+- ~~**Inner strings for the chunking family**~~ — CLOSED 2026-08-16, ruled
+  **(b)**: over a string source `Chunk`, `Partition`, `ChunkBy`,
+  `SlidingWindow`, `Permutations` and `Combinations` return `list<string>`,
+  each inner element being a contiguous run (or a reordering, or a subset) of
+  the source's own characters — exactly the condition under which every other
+  operator preserves the string kind. `Chunk("abcdef", 2)` is now
+  `["abc","def"]` rather than `[["a","b","c"],["d","e","f"]]`, and
+  `Permutations("ab")` is `["ab","ba"]`. Five of the six carry a leading
+  `((S, …) -> list<string> where S: string)` overload arm; `Partition` uses a
+  `type` handler instead, because a second arm would make its contextual
+  `callback<S>` slot ambiguous and silently disable the Design D stamp that
+  annotates an inline predicate's parameter. `Tally` was ruled the other way
+  in the same decision and keeps `character` values (below). The
+  static-result-type break has its own CHANGELOG note.
 
-- **`Tally`'s values half.** `Tally(s)` returns
-  `tuple<list<character>, list<integer>>`. Whether the distinct values should
-  come back as characters (as now) or as one-character strings is the same
-  open choice as the chunking family's, and should be decided with it so the
-  library is consistent.
-  **Recommendation: keep `character`** — the distinct values are the
-  collection's *elements*, not runs of them, so the preservation rule does
-  not apply and the element type is the honest answer. This is the "no
-  change" option; deciding it together with the chunking family is what keeps
-  the two from drifting apart.
+- ~~**`Tally`'s values half**~~ — CLOSED 2026-08-16 as part of the same
+  ruling: `Tally(s)` keeps `tuple<list<character>, list<integer>>`. The
+  distinct values it returns are the collection's *elements*, each paired with
+  a count, not runs of them, so the string-preservation rule does not apply
+  and the element type is the honest answer. `Tally("banana")` is
+  `(["b","a","n"], [1,3,2])`.
 
 - **`RandomChoice`.** It draws *with* replacement, so its result is a
   multiset over the source's own elements — arguably element-preserving,
