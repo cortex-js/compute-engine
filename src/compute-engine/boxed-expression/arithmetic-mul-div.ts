@@ -17,7 +17,6 @@ import {
   isNumericTuple,
   isTuple,
   hasAccessibleComponents,
-  isFiniteIndexedCollection,
   isFiniteBroadcastParticipant,
   isBroadcastableCollection,
   isUnknownLengthBroadcast,

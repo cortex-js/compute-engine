@@ -29,7 +29,6 @@ import {
   numericTupleArity,
   hasAccessibleComponents,
   isDeclaredScalarNumber,
-  isFiniteIndexedCollection,
   isFiniteBroadcastParticipant,
   isBroadcastableCollection,
   isUnknownLengthBroadcast,

@@ -7261,7 +7261,7 @@ function wrapRealOnly(
   const realRun = ((...args: unknown[]) =>
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     BaseCompiler.projectRealOnly(
-      (origRun as Function)(...args)
+      (origRun as (...args: unknown[]) => unknown)(...args)
     )) as unknown as CompiledRunner<number>;
   return {
     ...result,

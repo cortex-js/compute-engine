@@ -25,9 +25,7 @@ import { flatten } from '../boxed-expression/flatten.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import {
   isCollectionShaped,
-  isFiniteIndexedCollection,
   isFiniteBroadcastParticipant,
-  isTuple,
 } from '../collection-utils.js';
 import {
   extractFiniteDomainWithReason,
