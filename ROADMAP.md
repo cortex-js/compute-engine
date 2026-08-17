@@ -2743,6 +2743,47 @@ pending (`ConformanceRecord._pendingReason`), which the end-of-batch
 half's replacement quartet added to
 `test/compute-engine/protocol-field-backed.test.ts`.
 
+**RULED 2026-08-16 — a re-settlement that would falsify a declared effect
+contract refuses the EDGE, not the `type` statement.** Re-settling can move a
+conformance edge from pending back to satisfied, and that can widen a
+dispatcher's derived effect union (the union skips pending edges) after a
+function was already accepted as `pure` for calling through it. The three
+conformance-REGISTRATION routes reject the offending statement outright.
+`declareType` deliberately does not, for two reasons: by the time
+`resettleTypeConformances()` runs the type declaration is complete, and
+unwinding it would have to reach back through the constructor
+`mintTypeConstructor` bound, whose restore is local to its own failure path;
+and a type declaration should not fail because of somebody else's `pure`
+annotation somewhere across the program. So the type stands, the offending
+edge is put back to the settlement it had before the sweep, and it records the
+`conformance-widens-declared-contract` message as its `_pendingReason` — which
+is where the author is told.
+
+The refusal is per EDGE and re-checked after each one, so an unrelated
+conformance the same re-declaration satisfies is untouched, and a violation
+that was already there before the sweep costs no re-activation anything. It is
+also STICKY (`ConformanceRecord._reactivationRefused`): without that, every
+later `type` statement — for any type — would re-offer the edge, re-run the
+global widening walk, refuse it again, and bump the conformance version twice
+for a world that did not move. The stamp clears when the author edits that
+conformance, or when a re-settlement finds the edge uncovered on its own
+merits.
+
+**KNOWN, not scheduled: pinned layouts are SHALLOW.** `detachDefinitionBody`
+(`boxed-expression/boxed-object.ts`) copies an object body one level deep and
+shares the field TYPES, so a field typed through a transparent alias — or
+through another nominal object type — still holds the reference the registry
+holds, and re-declaring that alias moves the pinned layout with it. Deep-
+resolving aliases at pin time was considered and not done: it needs a new
+identity-preserving type walker, it changes the printed type of every such
+field (`p.a` would read `string` where the author wrote `A`), it defeats the
+identity fast path in `pinnedLayoutRefusal` for every alias-typed field, and
+it still would not cover the nominal case. Instead the read path validates the
+STORED VALUE against the requirement, which closes the whole class: whatever
+route the layouts drifted by, a read may not deliver a value the property's
+declared type does not admit. Pinned by the alias case in
+`test/compute-engine/protocol-type-redefinition.test.ts`.
+
 **Migration cost, MEASURED on landing (2026-08-16): 45 tests** across
 `protocol-properties.test.ts` (23), `protocols.test.ts` (9),
 `protocol-dispatch-compile.test.ts` (5), `effects-state-label.test.ts` (3),
@@ -4211,7 +4252,21 @@ _importance_.
   [`docs/plans/2026-07-28-compile-cse-design.md`](./docs/plans/2026-07-28-compile-cse-design.md)
   §10.
 
-### Complex values in compiled scalar comparisons (deferred 2026-07-22)
+### Complex values in compiled scalar comparisons (RESOLVED 2026-08-16 — the D2 runtime rule under `auto`/`complex`)
+
+Resolved by step 4 of `docs/plans/2026-08-16-compile-complex-mode.md`: under
+the default `auto` mode and under `complex`, an ordering comparison (and the
+integer-only heads) over an operand that MAY be complex — a `complex`-typed
+symbol, a promoted radical, a wide binding in complex mode — binds the operand
+once and answers `false` (`NaN` for a numeric head) when its imaginary part is
+not exactly zero, the real comparison otherwise (`BaseCompiler.
+realOperandGuard`/`realOperandChain`, `_SYS.cisreal`/`_SYS.creal`). The
+"cheaper discrimination" this entry wanted is exactly that: only operands the
+analysis calls maybe-complex pay the guard; an `unknown`-typed plot variable
+under strict shapes is real and keeps the raw `<`. A statically non-real
+operand (`i < 2`) is a compile-time `non-real-operand` decline; `mode:
+'strict'` keeps the previous fail-closed behavior. Original entry follows.
+
 
 A compiled scalar comparison whose operand is merely `number`- or
 `unknown`-typed lowers to a raw JS `<`. If that operand holds a complex
