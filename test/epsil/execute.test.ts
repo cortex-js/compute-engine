@@ -952,6 +952,25 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
     );
   });
 
+  test('the topic takes the TRAILING fitting slot, and displaced arguments must still fit', () => {
+    // `Fold(reducer, initial, collection)`: the list fits `initial: value`
+    // too, but the trailing collection slot displaces nothing — and putting
+    // the list at slot 1 would push `10` into the collection slot.
+    expect(run('[1,2,3] |> Fold((a, b) => a + b, 10)').value.re).toBe(16);
+    // A string is a collection, so `"H;"` "fits" the collection slot it
+    // would be pushed into; the trailing-slot rule keeps it as the initial.
+    expect(
+      run('let header = "H;"\n["a", "b", "c"] |> Fold(Join, header)').value
+        .string
+    ).toBe('H;abc');
+    expect(run('1..3 |> n => "\\(n);" |> Fold(Join, "")').value.string).toBe(
+      '1;2;3;'
+    );
+    // …while a topic that belongs FIRST still shifts the written arguments.
+    expect(run('1..10 |> Take(3)').value.toString()).toBe('[1,2,3]');
+    expect(run('1..10 |> Filter(n => n % 2 == 1) |> Sum').value.re).toBe(25);
+  });
+
   test('a complete call stage keeps its existing meaning', () => {
     // Max(3) is a valid call: the topic is applied to its value (Apply's
     // constant-nullary shorthand), exactly as before the sugar.

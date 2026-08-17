@@ -592,11 +592,13 @@ let x = 2^11 - 1
 
 **A formatted table.** `\t` and `\n` escapes in a string literal are real
 control characters. Build a table of `n`, `n²`, `n³` — one interpolated row
-per value, folded onto the header with `StringJoin` in a pipeline:
+per value, folded onto the header with `Join` in a pipeline (`Join` is the
+two-string concatenation; `StringJoin` joins one collection and would read the
+accumulator as its characters):
 
 ```epsil
 let header = "n\tn^2\tn^3\n"
-1..5 |> n => "\(n)\t\(n^2)\t\(n^3)\n" |> Fold(StringJoin, header)
+1..5 |> n => "\(n)\t\(n^2)\t\(n^3)\n" |> Fold(Join, header)
 ```
 
 produces (tabs aligned, newline-separated rows):

@@ -270,7 +270,13 @@ Surface forms that look like Wolfram but behave differently.
 | `Total`, `Select`, `Cases`, `MemberQ`, `Accumulate`, `Nest` | Unknown names: the call stays **symbolic and inert**, with a did-you-mean warning naming the Epsil operator | `Sum`, `Filter`, `Filter`, `Contains(xs, v)`, `Scan`, `Iterate` |
 | `Ceiling`, `Quotient`, `IntegerPart` | Inert (with a did-you-mean warning) | `Ceil`, `Floor(a/b)`, `Floor` |
 | `StringLength` | `Length(s)` — a string is a collection of its characters | |
-| `ToUpperCase` | Inert — no case operations yet | decompose and rebuild |
+| `ToUpperCase`, `ToLowerCase` | Same names, same meaning | *(nothing to change)* |
+| `StringReplace[s, t -> r]` | `StringReplace` takes positional arguments, not rules | `StringReplace(s, t, r)` |
+| `StringJoin["ab", "cd"]` | **Silently different.** `StringJoin` takes ONE collection plus an optional separator, and a string is a collection of its characters — so this reads as "join `"ab"`'s characters with the separator `"cd"`" and gives `"acdb"` | `Join("ab", "cd")`, or `"\(a)\(b)"` |
+| `StringRiffle[parts, sep]` | Unknown name: the call stays **symbolic and inert**. The collection-plus-separator form is `StringJoin`'s second argument | `StringJoin(parts, sep)` |
+| `StringPosition`, `StringContainsQ`, `StringStartsQ`, `StringEndsQ` | Unknown names: **inert**. The Epsil family is generic over indexed collections and character-wise on strings, and `RangeOf` answers one *span* (or `Nothing`), not a list of spans | `RangeOf(s, t)`, `ContainsSequence`, `StartsWith`, `EndsWith` |
+| `StringTrim`, `StringPadLeft`, `StringPadRight` | Unknown names: **inert** (`StringTrim` gets a did-you-mean warning) | `Trim`/`TrimStart`/`TrimEnd`, `PadStart`, `PadEnd` |
+| `ToExpression["3.14"]` | Unknown name: **inert**. Parsing a numeral is its own operator, and answers an error value (never `NaN`) on text that is not one | `NumberFrom("3.14")` |
 | `RandomReal[]`, `RandomInteger[n]` | Inert (with a did-you-mean warning) | `Random()`, `Random(1..n)` |
 | `SameQ[1, 1.]` | `1 === 1.0` is `True` — the lexer folds `1.0` to `1` | *(nothing — but don't read `===` as type-aware)* |
 | `3!^2` | Diagnostic — the lexer reads `!^` as one token | `3! ^ 2` |

@@ -13,6 +13,7 @@ import { apply, shouldNumericize } from '../boxed-expression/apply.js';
 import {
   isFunction,
   isNumber,
+  isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import {
@@ -22,7 +23,7 @@ import {
   windowedCollectionOps,
 } from '../collection-utils.js';
 import { aggregateAbsence } from './missing-data.js';
-import { enumerationDeclinedAfterWalk } from './collections.js';
+import { enumerationDeclinedAfterWalk, joinCharacters } from './collections.js';
 import {
   bigCorrelation,
   bigCovariance,
@@ -825,7 +826,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'RandomSample(xs, k): a list of k elements drawn from the indexed ' +
         'collection `xs`, without replacement. "Without replacement" is over ' +
         'POSITIONS, not values: on a multiset, repeats are expected — ' +
-        'RandomSample([1, 1, 2], 2) can return [1, 1]. Wrap the call in ' +
+        'RandomSample([1, 1, 2], 2) can return [1, 1]. Sampling a string ' +
+        'yields a string. Wrap the call in ' +
         '`WithRandomSeed(seed, ...)` to make it deterministic.',
       complexity: 8200,
       // Carries `random` for the same reason as `RandomShuffle`: it draws from
@@ -836,7 +838,22 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // The domain gate is `indexed_collection` — an `Interval` and a `Set`
       // are invalid, while a lazy indexed view (`Filter` over a `Range`)
       // passes.
-      signature: '(indexed_collection, number) random -> list',
+      // The LEADING arm is the string-preservation rule: a sample drawn from a
+      // string's own characters is a string (`docs/STRING_ROADMAP.md`, "String
+      // preservation rule"; promoted in Phase 2 as an ELEMENT-PRESERVING
+      // list-out operator). `RandomSample` is eager and has no lazy collection
+      // handlers, so the join happens in the `evaluate` handler below.
+      // Re-segmentation caveat: rejoining the sampled characters can merge or
+      // split grapheme clusters, so the result may hold a different number of
+      // characters than `k` — a sampled combining mark attaches to whichever
+      // character now precedes it.
+      // Spelled as a BOUNDED type variable (`T where T: string`), never the
+      // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+      // arm, so a ground `string` parameter would win most-specific-wins on
+      // every untyped operand and claim `string` for a call that usually
+      // returns a list. A bounded variable with no call-site binding does not.
+      signature:
+        '((T, number) random -> T where T: string) & ((indexed_collection, number) random -> list)',
       // IMPURE producer: decline-only from the source facet — zero draws,
       // never `true` (see `RandomShuffle`/`RandomChoice`).
       canEnumerate: (expr) => {
@@ -861,7 +878,16 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // are only `n` positions to draw without replacement.
         if (k > n)
           return ce.error(['out-of-range', `a count in 0..${n}`, k.toString()]);
-        if (k === 0) return ce.function('List', []);
+        // The string arm, here and at the return below: a sample of a string's
+        // characters is a string (`docs/STRING_ROADMAP.md`, "String
+        // preservation rule"). `RandomSample` is eager and has no lazy
+        // collection handlers, so the join happens here rather than in
+        // `evaluateStringPreservingCollection`. Re-segmentation caveat:
+        // rejoining the sampled characters can merge or split grapheme
+        // clusters, so the result may hold a different number of characters
+        // than `k`.
+        if (k === 0)
+          return isString(xs) ? ce.string('') : ce.function('List', []);
 
         // SPARSE Fisher-Yates over the INDEX space: `k` partial steps,
         // holding only the touched positions (an absent key is the identity
@@ -887,6 +913,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             if (element === undefined) return undefined;
             out.push(element);
           }
+          if (isString(xs)) return joinCharacters(ce, out);
           return ce.function('List', out);
         });
       },

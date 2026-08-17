@@ -17,8 +17,68 @@
   `realOnly: true` still projects as before. Step 1 of the compile-mode
   migration (`docs/plans/2026-08-16-compile-complex-mode.md`).
 
+- **`StringJoin` is no longer variadic, and a two-string call now means
+  something else — silently.** The signature narrows to
+  `(collection<string | character>, separator: string?) -> string`: one
+  collection to join, plus an optional separator between elements. There is
+  no compatibility spelling.
+
+  This is the entry to read carefully, because the old spelling still
+  evaluates. `StringJoin("ab", "cd")` used to be `"abcd"`; a string is now a
+  collection of its characters, so the same call is read as "join the
+  characters of `"ab"` with the separator `"cd"`" and evaluates to `"acdb"`.
+  No error, a different answer. Audit every multi-argument `StringJoin` call.
+
+  ```epsil
+  StringJoin(["a", "b", "c"], ", ")   // ➔ "a, b, c"
+  StringJoin("abc", "-")              // ➔ "a-b-c"   (Python's sep.join(s))
+  StringJoin("ab", "cd")              // ➔ "acdb"    (was "abcd")
+  ```
+
+  Migration: for concatenating a fixed number of strings use `Join(a, b)`
+  (the new string arm below) or Epsil interpolation `"\(a)\(b)"`. Keep
+  `StringJoin` only where the subject really is a collection to be joined.
+
+  Two smaller consequences of the narrowing: a `character` is not a
+  collection, so `StringJoin(CharacterFrom("a"))` is now an
+  `incompatible-type` error (wrap it — `String(c)`, or put it in a list), and
+  an element that is neither a string nor a character is reported as an
+  `incompatible-type` error at the operand wherever the operand's own type
+  shows it, rather than only leaving the call unevaluated.
+
+- **`RandomShuffle`, `RandomSample` and `DeleteAt` return a `string` for a
+  string source**, both as the static type and as the runtime value. All
+  three produce a permutation or a subset of the source's own characters, so
+  by the string-preservation rule they belong with `Reverse` and `Take`;
+  until now they returned `list<character>`. `Type(RandomShuffle("abc"))` is
+  `"string"`, and `DeleteAt("abcdef", 2)` is `"acdef"`, not
+  `["a", "c", "d", "e", "f"]`. Code that consumed the list result must either
+  accept the string or re-project it with `Characters(...)`. This closes the
+  last of the Phase-1 string-arm deferrals.
+
 ### New Features
 
+- **`mode: 'strict'` is now in force at every binding boundary.** Under the
+  strict discipline a complex-shaped value reaching a binding the compilation
+  shaped real — a wide (unannotated) user-function parameter, whether called
+  directly (`b(z)`, `b(L)` for a `list<complex>`) or passed by name
+  (`Map(b, L)`), a wide multi-clause clause parameter, a wide protocol member
+  parameter, a `Block` local first bound real and later assigned a complex
+  value (top-level or inside a conditional) — is a `LaneMismatch` decline:
+  `success: false`, `diagnostic.code === 'lane-mismatch'`, `kind:
+  'correctness'`, with a user-legible `binding` ("the parameter `x` of `b`")
+  and the offending `value`, instead of a silently wrong `NaN` /
+  `"[object Object]"` result. `auto` (the default) and `complex` keep today's
+  emission in this release; step 4 of the migration makes `auto` escalate.
+- **D3 entry check on the compiled JavaScript runner.** `run(vars)` and a
+  compiled lambda's arguments are checked against the shape the compilation
+  analyzed each binding as: a `{re, im}` bound to a free symbol or unannotated
+  lambda parameter analyzed real throws a `TypeError` naming it (it used to
+  compute garbage), and a plain number bound to a `complex`-typed symbol or
+  parameter is lifted to `{re, im: 0}` (`z^2 + z` with `run({z: 2})` used to
+  return `NaN`). One `typeof` per binding per call. Engine-initiated
+  (implicit) compilations opt out with the new `entryChecks: false` option;
+  their callers own the argument contract.
 - **Definition attributes: `bind` parameters, algebraic properties, and doc
   comments.** Three additions ride on the `DefineFunction` attributes operand
   introduced with `hold` in 0.114.0:
@@ -70,8 +130,178 @@
   this release). `LaneMismatchError` / `CompileDeclineError` and the
   `CompileMode` / `CompileDiagnostic` types are exported.
 
+- **`Join` concatenates strings.** When every argument is a string, `Join`
+  answers a `string` — this is the variadic string concatenation, and the
+  counterpart of `StringJoin`'s one-collection form:
+
+  ```epsil
+  Join("ab", "cd")            // ➔ "abcd"          (typed string)
+  Join("ab", "cd", "ef")      // ➔ "abcdef"
+  Join("ab", Characters("cd"))// ➔ ["a","b","c","d"]  (list<character>)
+  ```
+
+  The arm is chosen by the arguments, not by the declared types: as soon as
+  one argument is not a string the generic collection arm applies and a
+  string operand contributes its characters. Concatenation joins and
+  re-segments, so `Join("e", "́")` is the single character `"é"`.
+
+- **Substring search: `RangeOf`, `ContainsSequence`, `StartsWith` and
+  `EndsWith`.** These are contiguous-**subsequence** operators, generic over
+  indexed collections, and character-wise on strings. They are the answer to
+  the "substring search is a separate operation" note from the previous
+  release: `Contains`/`IndexOf` search for one **element**, this family
+  searches for a **sequence** of them.
+
+  ```epsil
+  RangeOf([9, 7, 5, 3], [7, 5])       // ➔ [2,3]    — the range 2..3
+  RangeOf("hello world", "o w")       // ➔ [5,6,7]  — the range 5..7
+  RangeOf("abc", "z")                 // ➔ Nothing
+  ContainsSequence("abc", "ab")       // ➔ True   (Contains("abc","ab") is False)
+  StartsWith("hello", "he")           // ➔ True
+  EndsWith("hello", "lo")             // ➔ True
+  ```
+
+  `RangeOf` answers a **span** — a 1-based inclusive `range` — rather than a
+  start index, so it feeds `Slice` and replacement directly, and its optional
+  third argument is the index to start searching at, with the span always
+  reported in the original subject's indexes: find-next is
+  `RangeOf(xs, needle, Last(r) + 1)`, and find-all is that loop run until it
+  answers `Nothing`. A `from` past the end is `Nothing`, never an error, so
+  the loop terminates cleanly; a `from` below 1 or non-integer is an error
+  value, as is an **empty** needle (an empty span is not representable —
+  `Range(1, 0)` is the descending range `[1, 0]`). The three booleans answer
+  `True` for an empty needle instead. An infinite or unknown-length subject
+  or needle leaves the expression symbolic, and `EndsWith` additionally needs
+  a known length.
+
+  Matching whole elements is what makes the string cases grapheme-safe
+  without a separate rule — a needle can never match across a cluster
+  boundary:
+
+  ```epsil
+  RangeOf("x́y", "x")   // ➔ Nothing  (the characters are [x́, y])
+  RangeOf("👨‍👩‍👧", "👩")        // ➔ Nothing  (the subject is ONE character)
+  RangeOf("ée", "e")   // ➔ [2]      — the range 2..2, the FINAL e
+  ```
+
+- **`Slice` accepts a `nothing` span and passes it through**, so a `RangeOf`
+  result can be sliced without a test in between:
+  `Slice(xs, RangeOf(xs, needle))` is the matched run, or `Nothing` when the
+  needle is absent. Sliced with a found span the result has the needle's
+  element sequence — the defining law of `RangeOf`, stated element-wise
+  because `Slice` is kind-preserving (a `list<character>` needle over a
+  string subject gives a `string` back, equal element by element but never
+  `==`, since the two types are disjoint siblings).
+
+- **String operations: `StringReplace`, `Trim`/`TrimStart`/`TrimEnd`,
+  `StringRepeat`, `PadStart`/`PadEnd`.**
+
+  ```epsil
+  StringReplace("a-b-c", "-", "+")     // ➔ "a+b+c"
+  StringReplace("a-b-c", "-", "+", 1)  // ➔ "a+b-c"   (count limits from the left)
+  Trim("  hi  ")                       // ➔ "hi"
+  Trim("abcba", "ab")                  // ➔ "c"       (chars is a SET, not an affix)
+  StringRepeat("ab", 3)                // ➔ "ababab"
+  PadStart("7", 3, "0")                // ➔ "007"
+  PadEnd("ab", 7, "123")               // ➔ "ab12312"
+  ```
+
+  `StringReplace` finds occurrences with the same character-wise matching
+  `RangeOf` uses, non-overlapping, left to right, walking the **original**
+  subject and skipping past each match — so a replacement's own content is
+  never re-matched (`StringReplace("aa", "a", "aa")` is `"aaaa"`, not an
+  infinite expansion). An empty `target` is an error value: the host
+  `replaceAll("", x)` insert-at-every-boundary behavior is deliberately not
+  inherited. An empty `replacement` means deletion. `count` must be a
+  positive integer.
+
+  `Trim`'s optional argument is a **set** of characters to strip (a string
+  argument means "the set of this string's characters"), defaulting to the
+  Unicode `White_Space` set `StringSplit` already uses. `PadStart`/`PadEnd`
+  count characters, not display columns; a multi-character pad repeats and
+  the final copy is truncated on a character boundary; an empty pad is an
+  error value, and `n` must be a non-negative integer.
+
+- **Case operations: `ToUpperCase`, `ToLowerCase`, `CaseFold`.** Unicode
+  default (locale-independent) mappings, applied to the whole string rather
+  than character by character, because case mapping is contextual:
+
+  ```epsil
+  ToUpperCase("straße")        // ➔ "STRASSE"  — Length 7, from a 6-character input
+  ToLowerCase("ΟΔΟΣ")          // ➔ "οδος"     — final sigma, chosen by position
+  CaseFold("Straße")           // ➔ "strasse"
+  CaseFold("ΟΔΟΣ") == CaseFold("οδοσ")   // ➔ True
+  ```
+
+  `CaseFold` is the primitive for case-insensitive comparison — compare
+  folded forms, not `ToLowerCase` results, which disagree on the Greek final
+  sigma. There is no locale argument in v1, so the Turkish dotless-i mapping
+  is not available. The fold is a documented v1 approximation: the host
+  offers no case-folding primitive, so it is uppercase-then-lowercase with
+  the Greek final sigma restored to medial, which agrees with Unicode full
+  case folding on Latin, Greek and Cyrillic text and deviates for a few
+  characters `CaseFolding.txt` maps specially (Cherokee, some Turkic and
+  Lithuanian sequences).
+
+- **`StringCompare(a, b)`** answers `-1`, `0` or `1` for the **code-point**
+  order of two strings, compared position by position over their NFC scalar
+  sequences. This is not the order `<` gives: the relational operators on two
+  multi-character strings compare UTF-16 **code units**, which sorts the
+  astral characters (U+10000 and up, encoded from U+D800) below the range
+  U+E000–U+FFFF. The two orders agree on everything below U+D800 — all of
+  Latin, Greek, Cyrillic, CJK. `<` is unchanged; use `StringCompare` when the
+  ordering must be by code point. The order is deliberately never
+  locale-aware; a collation, if it ships, arrives as an explicit argument.
+
+- **`NumberFrom(s, base?)`** parses a numeral, filling the gap `DigitsFrom`
+  (integer-only) left. The accepted grammar is fixed so hosts cannot drift:
+  optional surrounding Unicode whitespace, an optional sign, then either a
+  decimal numeral (ASCII digits, optional `.` fraction, optional `e`/`E`
+  exponent) or one of the exact spellings `oo`, `+oo`, `-oo`, `NaN`.
+
+  ```epsil
+  NumberFrom("42")        // ➔ 42        (exact integer)
+  NumberFrom("3.14")      // ➔ 3.14      (exact decimal; .N() to numericize)
+  NumberFrom("-1.5e2")    // ➔ -150
+  NumberFrom(".5")        // ➔ 0.5
+  NumberFrom("5.")        // ➔ Error(invalid-number)
+  NumberFrom("12abc")     // ➔ Error(invalid-number)   — never 12
+  NumberFrom("")          // ➔ Error(invalid-number)
+  NumberFrom("ff", 16)    // ➔ 255       (base 2–36, integer numerals only)
+  ```
+
+  Failure is always an error value, never `NaN` — `NaN` is a legitimate parse
+  *result* for the literal `"NaN"`, so it cannot double as the failure
+  signal. Non-ASCII decimal digits are rejected, so homoglyph digits cannot
+  slip through. Exactness follows the evaluate/`N` contract: an integer
+  numeral is an exact integer, a fractional or exponent numeral an exact
+  decimal.
+
+  See the [Strings reference](/compute-engine/reference/strings/) and the
+  sequence-search family in the
+  [Collections reference](/compute-engine/reference/collections/).
+
 ### Bug Fixes
 
+- **A pipe stage missing its trailing argument now receives the piped value
+  there.** `xs |> Fold(f, 10)` put the list in the FIRST slot whose type it
+  fit — `initial: value` (a list is a value) — pushing `10` into the
+  collection slot and leaving an inert `Fold(f, xs, 10)`; likewise `xs |>
+  Fold(Join, header)` (a string is a collection, so `header` "fit" the slot it
+  was pushed into). The placement now also requires the written arguments to
+  fit the slots they are displaced into, and among the fitting slots takes
+  the TRAILING one — the one that displaces the fewest written arguments.
+  `xs |> Take(10)`, `xs |> Map(f)` and `xs |> Filter(p)` place as before.
+
+- **A multi-clause function with a declared `complex` parameter, and a
+  protocol member with a declared `complex` parameter, are now handed the
+  argument in the shape their body expects.** `S(0) -> complex {0}; S(z:
+  complex) -> complex {z + 1}` compiled as `S(w)` returned `{re: null}` at
+  `w = 2` (now `3`); `scale(2, w)` for `scale(self, k: complex)` returned
+  `{re: null}` at `w = 3` (now `4`). The multi-clause and protocol dispatchers
+  also decide dispatch on the normalized value — an exactly-real `{re, im:
+  0}` dispatches as the real number it is — so a value clause or a
+  `real`-typed clause selects as the interpreter selects.
 - **The interpreter-backed compile fallback honors the runner contract in
   both directions.** A `{re, im}` value passed in `vars` is declared as a
   complex number (it was declared `number`, so `run()` threw an
@@ -79,6 +309,22 @@
   complex-valued result comes back as a boolean / `{re, im}` instead of the
   unconditional `.re` (`NaN` for a boolean, the real part of a genuinely
   complex value). Shared by every target's `fallback: true` decline.
+- **A multi-clause function applied to a collection now maps over it, like a
+  function literal does.** `fib(0) = 0; fib(1) = 1; fib(n) = fib(n - 1) +
+  fib(n - 2)` then `5..10 |> fib |> Sum` bound the whole range to `n` — no
+  base clause ever matched, and the call died with "Maximum call stack size
+  exceeded". It now evaluates to `136` (`fib(5..10)` is `[5, 8, 13, 21, 34,
+  55]`). Same rules as for `x ↦ …`: every clause's parameters must be scalar
+  (a clause taking a `list<…>` binds the collection whole), and hold/binder
+  definitions are exempt. Two typing defects surfaced alongside and are
+  fixed: `g(x)` with an untyped `x` no longer narrows `x` to a literal clause's
+  type (`g(0) = 0; g(n) = n^2; g(x)` evaluated to `0`; it now stays `g(x)`);
+  and a user function's call is no longer re-typed by the "integer arguments
+  ⇒ integer result" heuristic that operators without a type handler get
+  (`k(n) = n / 3` typed `k(4)` as `finite_integer` for the value `4/3`; the
+  body's own inferred `finite_number` now stands). An intersection signature
+  is also read arm by arm for scalar-ness, so a `(matrix) & (collection)`
+  overload set no longer admits a list at the `matrix` slot unchecked.
 
 ## 0.114.0 _2026-08-16_
 

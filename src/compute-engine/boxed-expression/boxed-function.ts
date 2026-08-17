@@ -2803,8 +2803,23 @@ export class BoxedFunction
       // result by building its iterator here (not via `evaluated.each()`),
       // so this branch is never re-entered — no recursion.
       const evaluated = this.evaluate();
-      if (evaluated !== this)
+      if (evaluated !== this) {
         iter = evaluated.operatorDefinition?.collection?.iterator?.(evaluated);
+
+        // An eager producer can materialize to a collection VALUE that is not
+        // a function expression at all, and therefore has no operator
+        // definition to read an `iterator` handler from: `StringJoin(xs)` and
+        // `Sort("cb")` both evaluate to a `BoxedString`, whose grapheme
+        // clusters live behind the value's own `each()`. Without this, such a
+        // node enumerated NOTHING while still reporting a non-zero `count`
+        // from its `elementCount` handler, and every consumer that walks
+        // instead of indexing silently dropped its elements —
+        // `Join("a", Sort("cb"))` answered `"a"` rather than `"abc"`.
+        // Delegating to `each()` is safe precisely BECAUSE the value is not a
+        // function: only `BoxedFunction.each()` can reach this branch, so the
+        // no-recursion property the comment above relies on still holds.
+        if (!iter && !isFunction(evaluated)) iter = evaluated.each();
+      }
 
       // Return an empty generator if no iterator is defined
       if (!iter) return (function* () {})();
@@ -3223,8 +3238,7 @@ export class BoxedFunction
       // (a point/vector), bound whole to the parameter, never mapped over.
       //
       if (
-        def instanceof _BoxedOperatorDefinition &&
-        def._isLambda &&
+        isUserFunctionDef(def) &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
         paramsAreScalar(def)
       ) {
@@ -3415,10 +3429,7 @@ export class BoxedFunction
       // a collection-typed parameter makes `paramsAreScalar` false so the
       // argument binds whole.
       //
-      const lambdaBroadcast =
-        def instanceof _BoxedOperatorDefinition &&
-        def._isLambda &&
-        paramsAreScalar(def);
+      const lambdaBroadcast = isUserFunctionDef(def) && paramsAreScalar(def);
       // For a LAZY operator the `tail` may still hold RAW operands whose
       // finiteness is unresolved (`Equal(Characters(s), Reverse(Characters(s)))`):
       // those must fold whole-collection, so the gate stays on the strict
@@ -3588,6 +3599,13 @@ export class BoxedFunction
           ? this
           : this.engine.function(this._operator, tail));
 
+      // 6a/ String preservation, re-checked on the RESULT. Step 2d could only
+      // see the node as authored, whose type may be a union that resolves to
+      // `string` only once the operands are evaluated (see
+      // `evaluateStringPreservingResult`). Declines leave `result` untouched.
+      const preservedResult = evaluateStringPreservingResult(result);
+      if (preservedResult !== result) return preservedResult;
+
       // 6b/ Pole-aware numeric evaluation: at a known pole, N() yields
       // ComplexInfinity rather than NaN/garbage (analytic-property store).
       if (numericApproximation)
@@ -3700,8 +3718,7 @@ export class BoxedFunction
       // Mirrors the sync path in `_computeValue`.
       //
       if (
-        def instanceof _BoxedOperatorDefinition &&
-        def._isLambda &&
+        isUserFunctionDef(def) &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
         paramsAreScalar(def)
       ) {
@@ -3865,10 +3882,7 @@ export class BoxedFunction
       // post-evaluation lambda broadcast for scalar-parameter function
       // literals whose argument only becomes a collection after evaluation).
       //
-      const lambdaBroadcast =
-        def instanceof _BoxedOperatorDefinition &&
-        def._isLambda &&
-        paramsAreScalar(def);
+      const lambdaBroadcast = isUserFunctionDef(def) && paramsAreScalar(def);
       // Same post-eval finiteness refinement as the sync path (finding 3):
       // a lazy operator keeps the strict gate; a non-lazy one also admits an
       // unresolved-finiteness source (symbolic-length `Range`).
@@ -4049,6 +4063,15 @@ export class BoxedFunction
         tail.every((x, i) => x === this._ops[i])
           ? this
           : engine.function(this._operator, tail));
+
+      // 5a/ String preservation, re-checked on the RESULT. The step that ran
+      // before evaluation could only see the node as authored, whose type may
+      // be a union that resolves to `string` only once the operands are
+      // evaluated (see `evaluateStringPreservingResult`). Declines leave
+      // `result` untouched. Twin of step 6a in the sync path.
+      const preservedResult = evaluateStringPreservingResult(result);
+      if (preservedResult !== result) return preservedResult;
+
       // 5b/ Pole-aware numeric evaluation (see the sync path).
       if (numericApproximation)
         return applyPoleOverride(engine, this._operator, tail, result);
@@ -4551,7 +4574,12 @@ function type(expr: BoxedFunction): Type {
       }
     } else if (
       expr.ops.length > 0 &&
-      (sigResult === 'number' || sigResult === 'finite_number')
+      (sigResult === 'number' || sigResult === 'finite_number') &&
+      // USER code is exempt: a function literal or multi-clause definition
+      // gets its result type from its BODY (`k(n) = n / 3` infers `-> number`
+      // because the body divides), and the closure assumption below would
+      // re-narrow `k(4)` to `finite_integer` while its value is `4/3`.
+      !isUserFunctionDef(def)
     ) {
       // No explicit type handler and signature result is a broad numeric
       // type: try to narrow based on argument types.
@@ -5225,6 +5253,13 @@ export function paramsAreScalar(
     ? source.signature?.type
     : source;
   if (!sigType || typeof sigType === 'string') return true;
+  // A multi-clause definition's signature is the INTERSECTION of its clause
+  // arms (`((0) -> integer) & ((n: unknown) -> number)`). Its parameters are
+  // scalar only if EVERY arm's are: one clause declaring a collection
+  // parameter (`f(xs: list<number>) = …`) consumes the whole collection, so
+  // no call may broadcast over it and hand that clause an element instead.
+  if (sigType.kind === 'intersection')
+    return sigType.types.every((t) => paramsAreScalar(t));
   if (sigType.kind !== 'signature') return true;
   const args = [
     ...(sigType.args ?? []),
@@ -5635,6 +5670,26 @@ function isLambdaDef(def: BoxedOperatorDefinition | undefined): boolean {
   return def instanceof _BoxedOperatorDefinition && def._isLambda;
 }
 
+/** True when this operator definition is USER code that a collection argument
+ * auto-broadcasts through (steps 2b/4b, and the matching type-handler arm): a
+ * function literal (`ce.assign('f', x ↦ …)`) or a multi-clause definition
+ * (`fib(0) = 0; fib(1) = 1; fib(n) = …`), whose call `fib(5..10)` must map
+ * `fib` over the range rather than bind the whole range to `n` — for a
+ * recursive body that would never reach a base clause. Excluded: a HOLD
+ * definition (`lazy`), whose operands are unevaluated expressions, and a
+ * BINDER (`scoped`), whose operands include a bound symbol; neither takes
+ * elements to map over. `paramsAreScalar` remains the second half of every
+ * gate: a clause whose parameter is declared as a collection binds it whole.
+ * @internal
+ */
+function isUserFunctionDef(
+  def: BoxedOperatorDefinition | undefined
+): def is _BoxedOperatorDefinition {
+  if (!(def instanceof _BoxedOperatorDefinition)) return false;
+  if (def._isLambda) return true;
+  return def._isMultiClause && def.lazy !== true && !def.scoped;
+}
+
 function isOperatorDefinition(
   source: BoxedOperatorDefinition | Type
 ): source is BoxedOperatorDefinition {
@@ -5685,12 +5740,66 @@ function evaluateStringPreservingCollection(
   if (def.collection?.iterator === undefined) return undefined;
   if (!expr.isLazyCollection) return undefined;
   if (!expr.type.matches('string')) return undefined;
-  // A collection that cannot state a finite element count (a symbolic bound,
-  // an unwalkable source) must stay inert: an empty walk there would answer
-  // `""` for a string the operator never actually computed.
-  if (expr.isFiniteCollection !== true) return undefined;
+  // The walk must be known to terminate, or an unwalkable source (a symbolic
+  // bound, an operand that cannot be enumerated) would silently answer `""`
+  // for a string the operator never actually computed. Two independent proofs
+  // are accepted, either one sufficient:
+  //
+  // 1. The node states a finite element count. This is the ordinary case: the
+  //    source is a literal string, list or range, and every operator in the
+  //    family reports a count derived from it.
+  //
+  // 2. Failing that, every operand is `string`-TYPED and each one carries
+  //    POSITIVE evidence that its characters can be walked. Every value of
+  //    type `string` is a finite sequence of grapheme clusters, and the
+  //    operators this step serves only ever re-emit elements drawn from their
+  //    operands, so a walk over walkable string operands cannot diverge. This
+  //    proof is what lets `Join("a", StringJoin(["b"]))` materialize: an
+  //    unevaluated EAGER producer cannot state an element count without
+  //    evaluating (its `elementCount` handler is required to be
+  //    evaluation-free), so the enclosing `Join` reports no count and no
+  //    finiteness even though both operands are finite. Without it the node
+  //    evaluated to a `Join` expression that printed as `"ab"` but was not a
+  //    string value at all (`.string` was `undefined`).
+  //
+  //    Evidence must be affirmative; "has not said no" is not evidence. A
+  //    string-TYPED operand whose characters are out of reach walks to
+  //    nothing, and the type proof alone would then answer `""` for
+  //    `Reverse(s)` and drop the operand from `Join(s, "a")`. Two such
+  //    operands leave enumerability UNDECIDED rather than `false`: a producer
+  //    over a declared-but-unassigned symbol (`StringJoin(xs)` with
+  //    `xs: string` unassigned) and a producer over an infinite source
+  //    (`StringJoin(<infinite Map>)`). Both stay unevaluated, both yield
+  //    nothing from `each()`, and admitting them made `Join("a",
+  //    StringJoin(xs))` answer `"a"`. So an operand is accepted only if it IS
+  //    a string value, or reports itself enumerable or finite, or EVALUATES to
+  //    something that does.
+  //
+  // A node whose finiteness is definitively `false` is refused under either
+  // proof.
+  if (expr.isFiniteCollection === false) return undefined;
   const count = expr.count;
-  if (count === undefined || !Number.isFinite(count)) return undefined;
+  const hasFiniteCount =
+    expr.isFiniteCollection === true &&
+    count !== undefined &&
+    Number.isFinite(count);
+  const isWalkableNow = (op: Expression) =>
+    isString(op) ||
+    op.isEnumerableCollection === true ||
+    op.isFiniteCollection === true;
+  const operandsAreWalkableStrings =
+    expr.ops.length > 0 &&
+    expr.ops.every((op) => {
+      if (!op.type.matches('string')) return false;
+      if (isWalkableNow(op)) return true;
+      // An unevaluated eager producer answers no enumerability question
+      // without being run, so it is run once. `StringJoin(["b"])` answers with
+      // the string; `StringJoin(xs)` over an unassigned symbol, and a
+      // `StringJoin` over an infinite source, answer with themselves and are
+      // refused.
+      return isWalkableNow(op.evaluate());
+    });
+  if (!hasFiniteCount && !operandsAreWalkableStrings) return undefined;
 
   const parts: string[] = [];
   for (const c of expr.each()) {
@@ -5698,6 +5807,42 @@ function evaluateStringPreservingCollection(
     parts.push(c.string);
   }
   return expr.engine.string(parts.join(''));
+}
+
+/**
+ * Post-evaluation twin of the string-preservation step (step 2d of
+ * `_computeValue`), applied to the node that evaluation actually produced.
+ *
+ * Step 2d runs on the node as authored, and it requires the node's type to
+ * MATCH `string` exactly. A `type` handler that reads a raw operand's STATIC
+ * type can only report a union there: `Slice(xs, RangeOf(xs, needle))` types
+ * as `nothing | string`, because `RangeOf` is honestly typed `range | nothing`
+ * (the needle may be absent) and a slice over an absent span is `Nothing`.
+ * `nothing | string` does not match `string`, so step 2d declines. Once the
+ * operands have been evaluated the span is a concrete `2..3`, and the node
+ * rebuilt from them types exactly `string` — but step 2d has already run by
+ * then, and the evaluation result is memoized, so it would never see the
+ * resolved node. Re-checking here is what makes
+ * `Slice("abcd", RangeOf("abcd", "bc"))` evaluate to the string value `"bc"`
+ * rather than to a lazy view that merely PRINTS as one (its `.string` was
+ * `undefined`).
+ *
+ * Widening step 2d's gate to accept unions would NOT be an equivalent fix: a
+ * `nothing | string` node whose span really is absent must evaluate to
+ * `Nothing`, which the ordinary evaluation path already produces. Only a node
+ * that has resolved to `string` may be materialized into one.
+ *
+ * Returns the original result unchanged when the check does not apply or
+ * declines, so a lazy view stays lazy.
+ */
+function evaluateStringPreservingResult(result: Expression): Expression {
+  if (!(result instanceof BoxedFunction)) return result;
+  const def = result.operatorDefinition;
+  if (!def) return result;
+  // `evaluateStringPreservingCollection` applies its own gates: an `iterator`
+  // collection handler (which also rules out re-entrancy through `each()`),
+  // laziness, an exact `string` type, and a proof that the walk terminates.
+  return evaluateStringPreservingCollection(result, def) ?? result;
 }
 
 /**  Eagerly evaluate xs by iterating over its elements.

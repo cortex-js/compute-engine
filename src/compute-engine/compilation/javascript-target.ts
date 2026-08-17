@@ -25,6 +25,7 @@ import {
 } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
+import { parseType } from '../../common/type/parse.js';
 
 /**
  * The type a compile-time **representation** question about `expr` is answered
@@ -2066,8 +2067,26 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(${coll}).slice().sort((_a, _b) => _a - _b)`;
   },
   // Flat concatenation of the (top-level) elements of each collection operand.
+  //
+  // The STRING-PRESERVING arm comes first: when every operand is provably a
+  // string, `Join` is THE variadic concatenation and answers a `string`, not a
+  // `list<character>` (`Join("ab", "cd")` is `"abcd"`, probed). Spreading the
+  // operands into an array would answer `["a","b","c","d"]` instead, and would
+  // spread UTF-16 code units at that. Each operand goes through the
+  // interpreter's ingress conditioning (`_SYS.ct`) and the concatenation is
+  // NFC-normalized, since `engine.string()` stores every string in NFC.
+  // A MIXED call (`Join("ab", ["c"])`) takes the generic arm in the
+  // interpreter and answers a `list<character | string>`; here it keeps
+  // failing closed, because `collArg` refuses a string operand — a string does
+  // not lower to a JS array.
+  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decisions D1
+  // and D8.)
   Join: (args, compile) => {
     if (args.length === 0) return '[]';
+    if (args.every(isProvablyStringOperand))
+      return `([${args
+        .map((a) => `_SYS.ct(${compile(a)})`)
+        .join(', ')}].join("").normalize())`;
     return `[${args
       .map((a, i) => `...(${collArg('Join', a, compile, i + 1)})`)
       .join(', ')}]`;
@@ -2085,66 +2104,94 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Shipped synonym of `Characters` (v0.30), same interpreter handler.
   GraphemeClusters: (args, compile) =>
     compileJSCharacters('GraphemeClusters', args, compile),
-  // String concatenation. Two interpreter shapes compile (probed):
-  //  - VARIADIC, every operand a scalar piece of TEXT — a string or a
-  //    character, which the interpreter accepts interchangeably
-  //    (`StringJoin("a", "b")` → `"ab"`, `StringJoin(CharacterFrom("a"), "b")`
-  //    → `"ab"`), and the nullary form is the empty string;
-  //  - a SINGLE indexed collection of text — `StringJoin(Characters(s))`.
+  // `StringJoin(xs, sep?)` — join ONE collection of strings/characters, with
+  // `sep` between consecutive elements. The variadic concatenation form was
+  // REMOVED in Phase 2 of the strings work: once a string is itself a
+  // collection of characters, "a collection and a separator" and "two strings
+  // to concatenate" are the same shape and cannot both be supported. So a
+  // two-string call now means the SEPARATOR form, exactly as Python's
+  // `"-".join("abc")` is `"a-b-c"` — variadic concatenation is `Join(a, b, …)`.
+  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decisions D2 and
+  // D8.)
+  //
+  // Two subject shapes compile:
+  //  - a provably STRING subject, whose elements are its grapheme clusters, so
+  //    it is segmented with `_SYS.chars` first — indexing the JS string
+  //    directly would join UTF-16 code units and cut a ZWJ family apart;
+  //  - an indexed collection whose elements are provably strings or characters
+  //    (`list<string>`, `list<character>`), which lowers to a JS array of
+  //    one-cluster-or-longer strings.
+  //
   // Everything else fails closed, because the interpreter leaves it
-  // UNEVALUATED rather than coercing: a non-text operand (`StringJoin("a", 1)`
-  // is an `incompatible-type` error, not `"a1"` — that is `String`, a different
-  // operator) and, notably, the MIXED arity form `StringJoin("a", ["b","c"])`,
-  // which stays inert even though every leaf is a string.
+  // UNEVALUATED or reports a type error rather than coercing: a non-text
+  // ELEMENT (`StringJoin([1, 2])` is inert — coercion is `String`, a different
+  // operator), a non-string separator, and a SCALAR `character` subject, which
+  // is an `incompatible-type` error against the `collection<string |
+  // character>` parameter (a character is one element, not a collection of
+  // them).
   //
-  // A SCALAR character operand takes the variadic branch, never the
-  // single-collection one: a character lowers to the one-cluster JS string it
-  // denotes, so it concatenates like a string, whereas the collection branch
-  // would demand an indexed collection of it and fail.
-  //
-  // The result is `.normalize()`d because the interpreter's `engine.string()`
+  // The elements and the separator go through the interpreter's ingress
+  // conditioning (`_SYS.ct`: NFC normalization then the lone-surrogate
+  // replacement) because the interpreter joins the content of ALREADY-BOXED
+  // strings; only a raw host string bound to a compiled parameter differs.
+  // Everything `_SYS.chars` produces is conditioned already, so that branch
+  // needs no `map`. The result is `.normalize()`d because `engine.string()`
   // stores every string in Unicode NFC: joining `"e"` and `U+0301` yields the
-  // single precomposed `"é"` there, and a raw `+` would not.
+  // single precomposed `"é"` there, and a raw concatenation would not.
   StringJoin: (args, compile) => {
-    if (args.length === 0) return '""';
-    if (args.length === 1 && !isProvablyTextOperand(args[0])) {
-      const coll = args[0];
-      const elt = collectionElementType(jsType(coll));
+    if (args.length < 1 || args.length > 2)
+      throw new Error(
+        `StringJoin: cannot compile — the operator takes a collection and an ` +
+          `optional separator (\`StringJoin(xs, sep)\`); the variadic ` +
+          `concatenation form was removed in Phase 2 (use \`Join(a, b, …)\`). ` +
+          `Fail closed (D6) — the interpreter evaluates it.`
+      );
+    let separator = '""';
+    if (args.length === 2) {
+      if (!isProvablyStringOperand(args[1]))
+        throw new Error(
+          `StringJoin: cannot compile — the separator must be provably a ` +
+            `string; the interpreter leaves the expression unevaluated on any ` +
+            `other operand. Fail closed (D6) — the interpreter evaluates it.`
+        );
+      separator = `_SYS.ct(${compile(args[1])})`;
+    }
+    const subject = args[0];
+    let elements: string;
+    if (isProvablyStringOperand(subject))
+      elements = `_SYS.chars(${compile(subject)})`;
+    else {
+      const elt = collectionElementType(jsType(subject));
       // `never` is the element type of the EMPTY literal `[]`: no element can
-      // fail to be a string, and `[].join("")` is the interpreter's `""`.
+      // fail to be a string, and `[].join(sep)` is the interpreter's `""`.
       // `character` elements are admitted alongside `string` ones: a character
       // is exactly one grapheme cluster and lowers to a one-cluster JS string,
-      // so joining an array of them is the same `join("")`. This is the
-      // element type `Characters(s)` now reports, and the interpreter's
-      // `StringJoin` accepts either kind.
+      // so joining an array of them is the same `join`. That is the element
+      // type `Characters(s)` reports, and the interpreter's `StringJoin`
+      // accepts either kind.
       if (
-        !isIndexedCollectionOperand(coll) ||
+        !isIndexedCollectionOperand(subject) ||
         elt === undefined ||
         (elt !== 'never' &&
           !isSubtype(elt, 'string') &&
           !isSubtype(elt, 'character'))
       )
         throw new Error(
-          `StringJoin: cannot compile — the single-operand form requires an ` +
+          `StringJoin: cannot compile — the subject must be a string or an ` +
             `indexed collection whose elements are provably strings or ` +
             `characters (\`list<string>\`, \`list<character>\`); a ` +
-            `non-string operand or element leaves the interpreter's ` +
-            `\`StringJoin\` unevaluated. ` +
+            `non-collection or non-text operand leaves the interpreter's ` +
+            `\`StringJoin\` unevaluated or reports a type error. ` +
             `Fail closed (D6) — the interpreter evaluates it.`
         );
-      return `((${compile(coll)}).join("").normalize())`;
+      // Through `collArg`, not `compile`, so the two refusals it owns still
+      // apply: an operand whose type merely ADMITS text (`string |
+      // list<string>`) would reach this array lowering as a JS string, and an
+      // INFINITE pipeline (`Map(Range(1, oo), n -> "a")`) cannot materialize to
+      // an array at all — the interpreter declines both.
+      elements = `(${collArg('StringJoin', subject, compile)}).map(_SYS.ct)`;
     }
-    if (!args.every(isProvablyTextOperand))
-      throw new Error(
-        `StringJoin: cannot compile — every operand of the variadic form must ` +
-          `be provably a string or a character. The interpreter leaves the ` +
-          `expression UNEVALUATED on a non-text operand, and a collection ` +
-          `operand alongside another operand ` +
-          `(\`StringJoin("a", ["b", "c"])\`) stays inert too. ` +
-          `Fail closed (D6) — the interpreter evaluates it.`
-      );
-    const parts = args.map((a) => `(${compile(a)})`).join(' + ');
-    return `((${parts}).normalize())`;
+    return `((${elements}).join(${separator}).normalize())`;
   },
   // Textual rendering. Only the TEXT-IN shape compiles: every operand provably
   // a string or a character, which the interpreter concatenates verbatim
@@ -2180,6 +2227,270 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // must compose, exactly as `StringJoin` does it.
     return `((${args.map((a) => `(${compile(a)})`).join(' + ')}).normalize())`;
   },
+
+  // ── The SEQUENCE-SEARCH family ────────────────────────────────────────────
+  //
+  // Contiguous-subsequence search over an indexed collection, character-wise on
+  // a string. Both operands are lowered to their ELEMENT arrays by
+  // `elementsArg` — a string is segmented with `_SYS.chars`, so no comparison
+  // can straddle a grapheme-cluster boundary and a `list<character>` needle
+  // matches a string subject — and the element test is `_SYS.eqt` inside
+  // `_SYS.seqat`/`_SYS.seqidx`, the interpreter's tolerance-free `.isSame()`.
+  // A subject or needle whose type merely ADMITS a string (`string |
+  // list<number>`) is refused by `collArg`, since the list lowering would walk
+  // UTF-16 code units.
+  //
+  // `_SYS.eqt` compares text with conditioned equality and everything else with
+  // `===`, which is REFERENCE identity for a compound element: a nested list
+  // lowers to a JS array and a complex number to an object, so two structurally
+  // equal elements would compare unequal and the search would answer `false`
+  // where the interpreter's `.isSame()` answers `True`. Both operands therefore
+  // go through `requirePrimitiveElements`, which admits only real/boolean/
+  // string/character elements (and rejects complex CONTENT in a collection that
+  // merely reports the generic `number` element type).
+  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.)
+
+  // The 1-based inclusive index SPAN of the first occurrence, or the
+  // interpreter's `Nothing`. `Range(a, b)` lowers to the JS array
+  // `[a, …, b]`, so the span is built as that array; absence is `undefined`,
+  // the projection an OBJECT-domain `Nothing` already takes on this target
+  // (see the `At` handler's out-of-band mapping).
+  RangeOf: (args, compile) => {
+    if (args.length < 2 || args.length > 3)
+      throw new Error(
+        `RangeOf: cannot compile — expected \`RangeOf(xs, needle, from?)\`. ` +
+          `Fail closed (D6).`
+      );
+    requirePrimitiveElements('RangeOf', args[0]);
+    requirePrimitiveElements('RangeOf', args[1]);
+    const subject = elementsArg('RangeOf', args[0], compile, 1);
+    // An EMPTY needle is an interpreter ERROR value here, not a span: an empty
+    // span is not representable, because `Range(1, 0)` is the DESCENDING range
+    // [1, 0] rather than an empty one. A compiled artifact has no error value
+    // to return, so the needle must be PROVABLY non-empty at compile time; a
+    // needle whose emptiness is only known at run time declines.
+    if (args[1].isEmptyCollection !== false)
+      throw new Error(
+        `RangeOf: cannot compile — the needle is not provably non-empty, and ` +
+          `an empty needle is an error value in the interpreter (an empty ` +
+          `span has no \`Range\` representation), which a compiled artifact ` +
+          `cannot return. Fail closed (D6) — the interpreter evaluates it.`
+      );
+    const needle = elementsArg('RangeOf', args[1], compile, 2);
+    let start = 0;
+    if (args.length === 3) {
+      const from = literalInteger(args[2]);
+      if (from === undefined)
+        throw new Error(
+          `RangeOf: cannot compile — \`from\` must be an integer LITERAL. A ` +
+            `\`from\` below 1 is an \`out-of-range\` error value in the ` +
+            `interpreter, which a compiled artifact cannot return, so a ` +
+            `run-time \`from\` cannot be admitted. Fail closed (D6).`
+        );
+      if (from < 1)
+        throw new Error(
+          `RangeOf: cannot compile — \`from\` is ${from}; the interpreter ` +
+            `answers an \`out-of-range\` error for an index below 1, which a ` +
+            `compiled artifact cannot return. Fail closed (D6).`
+        );
+      start = from - 1;
+    }
+    return (
+      `((_s, _p) => { const _i = _SYS.seqidx(_s, _p, ${start}); ` +
+      `return _i < 0 ? undefined : ` +
+      `Array.from({length: _p.length}, (_e, _k) => _i + 1 + _k); })` +
+      `(${subject}, ${needle})`
+    );
+  },
+  // `True` when the needle occurs as a contiguous subsequence. An EMPTY needle
+  // answers `True` — the empty sequence is a subsequence of everything —
+  // which `_SYS.seqidx` yields for free by finding it at offset 0. That is the
+  // deliberate divergence from `RangeOf`, which must reject an empty needle
+  // because it has no representable span; a boolean needs no span.
+  ContainsSequence: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        `ContainsSequence: cannot compile — expected ` +
+          `\`ContainsSequence(xs, needle)\`. Fail closed (D6).`
+      );
+    requirePrimitiveElements('ContainsSequence', args[0]);
+    requirePrimitiveElements('ContainsSequence', args[1]);
+    const subject = elementsArg('ContainsSequence', args[0], compile, 1);
+    const needle = elementsArg('ContainsSequence', args[1], compile, 2);
+    return `(_SYS.seqidx(${subject}, ${needle}, 0) >= 0)`;
+  },
+  // Anchored at the START. A prefix longer than the subject is `False`, and an
+  // empty prefix matches everything (following `ContainsSequence`'s rule).
+  StartsWith: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        `StartsWith: cannot compile — expected \`StartsWith(xs, prefix)\`. ` +
+          `Fail closed (D6).`
+      );
+    requirePrimitiveElements('StartsWith', args[0]);
+    requirePrimitiveElements('StartsWith', args[1]);
+    const subject = elementsArg('StartsWith', args[0], compile, 1);
+    const prefix = elementsArg('StartsWith', args[1], compile, 2);
+    return (
+      `((_s, _p) => _p.length <= _s.length && _SYS.seqat(_s, _p, 0))` +
+      `(${subject}, ${prefix})`
+    );
+  },
+  // Anchored at the END — the member that needs the subject's LENGTH, which
+  // the materialized element array supplies.
+  EndsWith: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        `EndsWith: cannot compile — expected \`EndsWith(xs, suffix)\`. ` +
+          `Fail closed (D6).`
+      );
+    requirePrimitiveElements('EndsWith', args[0]);
+    requirePrimitiveElements('EndsWith', args[1]);
+    const subject = elementsArg('EndsWith', args[0], compile, 1);
+    const suffix = elementsArg('EndsWith', args[1], compile, 2);
+    return (
+      `((_s, _p) => _p.length <= _s.length && ` +
+      `_SYS.seqat(_s, _p, _s.length - _p.length))(${subject}, ${suffix})`
+    );
+  },
+
+  // ── String-specific operations ────────────────────────────────────────────
+  //
+  // Each runs on GRAPHEME CLUSTERS and re-joins once, exactly as the
+  // interpreter does (`library/core.ts`), so a combining sequence, a ZWJ emoji
+  // family or a regional-indicator flag is never cut in half. The operands
+  // whose value decides between a result and an interpreter ERROR VALUE — an
+  // empty replace target, an empty pad, a negative count — must be LITERALS
+  // here: a compiled artifact has no representation for an error value, so an
+  // invalid literal declines with its reason named and a non-literal declines
+  // because its run-time value could be either.
+  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.)
+
+  StringReplace: (args, compile) => {
+    if (args.length < 3 || args.length > 4)
+      throw new Error(
+        `StringReplace: cannot compile — expected ` +
+          `\`StringReplace(s, target, replacement, count?)\`. Fail closed (D6).`
+      );
+    const subject = stringArg('StringReplace', args[0], compile, 'the subject');
+    const target = literalStringContent(args[1]);
+    if (target === undefined)
+      throw new Error(
+        `StringReplace: cannot compile — the target must be a string ` +
+          `LITERAL. An EMPTY target is an error value in the interpreter (the ` +
+          `"insert at every boundary" behaviour is deliberately not ` +
+          `inherited), which a compiled artifact cannot return, so a run-time ` +
+          `target cannot be admitted. Fail closed (D6).`
+      );
+    if (target === '')
+      throw new Error(
+        `StringReplace: cannot compile — the target is empty, which the ` +
+          `interpreter answers with an error value. Fail closed (D6).`
+      );
+    const needle = stringArg('StringReplace', args[1], compile, 'the target');
+    const replacement = stringArg(
+      'StringReplace',
+      args[2],
+      compile,
+      'the replacement'
+    );
+    let limit = 'Infinity';
+    if (args.length === 4) {
+      const count = literalInteger(args[3]);
+      if (count === undefined || count < 1)
+        throw new Error(
+          `StringReplace: cannot compile — \`count\` must be an integer ` +
+            `LITERAL of 1 or more; anything else is an error value in the ` +
+            `interpreter, which a compiled artifact cannot return. ` +
+            `Fail closed (D6).`
+        );
+      limit = count.toString();
+    }
+    return `_SYS.srep(${subject}, ${needle}, ${replacement}, ${limit})`;
+  },
+  Trim: (args, compile) => compileJSTrim('Trim', args, compile, true, true),
+  TrimStart: (args, compile) =>
+    compileJSTrim('TrimStart', args, compile, true, false),
+  TrimEnd: (args, compile) =>
+    compileJSTrim('TrimEnd', args, compile, false, true),
+  // `n` copies, concatenated and re-segmented once — so a string whose last
+  // character combines with its first can yield fewer characters than
+  // `n · Length(s)`. That is inherent to joining text, and the interpreter
+  // re-segments the same way.
+  StringRepeat: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        `StringRepeat: cannot compile — expected \`StringRepeat(s, n)\`. ` +
+          `Fail closed (D6).`
+      );
+    const subject = stringArg('StringRepeat', args[0], compile, 'the subject');
+    const n = literalInteger(args[1]);
+    if (n === undefined || n < 0)
+      throw new Error(
+        `StringRepeat: cannot compile — \`n\` must be a non-negative integer ` +
+          `LITERAL; a negative or non-integer \`n\` is an error value in the ` +
+          `interpreter, which a compiled artifact cannot return. ` +
+          `Fail closed (D6).`
+      );
+    return `(_SYS.ct(${subject}).repeat(${n}).normalize())`;
+  },
+  PadStart: (args, compile) => compileJSPad('PadStart', args, compile, true),
+  PadEnd: (args, compile) => compileJSPad('PadEnd', args, compile, false),
+
+  // ── Case mapping and comparison ───────────────────────────────────────────
+  //
+  // `ToUpperCase`/`ToLowerCase` are the interpreter's own JS calls on the same
+  // conditioned input, NFC-normalized afterwards as `engine.string()` does —
+  // faithful by construction, contextual behaviour (final sigma) and
+  // count-changing mappings (`"ß"` → `"SS"`) included. `CaseFold` is
+  // `_SYS.cfold`, the same upper→lower round trip with the final sigma
+  // restored to medial.
+  ToUpperCase: (args, compile) => {
+    if (args.length !== 1)
+      throw new Error(
+        `ToUpperCase: cannot compile — expected \`ToUpperCase(s)\`. ` +
+          `Fail closed (D6).`
+      );
+    const s = stringArg('ToUpperCase', args[0], compile, 'the operand');
+    return `(_SYS.ct(${s}).toUpperCase().normalize())`;
+  },
+  ToLowerCase: (args, compile) => {
+    if (args.length !== 1)
+      throw new Error(
+        `ToLowerCase: cannot compile — expected \`ToLowerCase(s)\`. ` +
+          `Fail closed (D6).`
+      );
+    const s = stringArg('ToLowerCase', args[0], compile, 'the operand');
+    return `(_SYS.ct(${s}).toLowerCase().normalize())`;
+  },
+  CaseFold: (args, compile) => {
+    if (args.length !== 1)
+      throw new Error(
+        `CaseFold: cannot compile — expected \`CaseFold(s)\`. Fail closed (D6).`
+      );
+    return `_SYS.cfold(${stringArg('CaseFold', args[0], compile, 'the operand')})`;
+  },
+  // `-1 | 0 | 1` for the two strings' NFC Unicode SCALAR sequences, compared
+  // code point by code point. `_SYS.cmpc` is exactly that comparator — the one
+  // the character orderings already use — and it returns the same exact
+  // integers the interpreter does. NOT `<` on JS strings, which compares UTF-16
+  // code UNITS and sorts every astral character below U+E000–U+FFFF.
+  StringCompare: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        `StringCompare: cannot compile — expected \`StringCompare(a, b)\`. ` +
+          `Fail closed (D6).`
+      );
+    const a = stringArg('StringCompare', args[0], compile, 'the first operand');
+    const b = stringArg(
+      'StringCompare',
+      args[1],
+      compile,
+      'the second operand'
+    );
+    return `_SYS.cmpc(${a}, ${b})`;
+  },
+
   // 1-based index of the first element equal to `value`, or 0 if not found.
   // The element test is EXACT, matching the interpreter's `.isSame()`, which
   // has no numeric tolerance (`IndexOf([0], 5e-11)` and
@@ -2641,13 +2952,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // A permutation needs every element, so materializing the source is inherent
   // here (it is in the interpreter too) — unlike the sampling operators, whose
   // domains stay descriptors.
+  //
+  // A STRING source is segmented into its characters, shuffled and re-joined:
+  // a permutation of a string's own characters is a string (the
+  // string-preservation rule, promoted in Phase 2 as an ELEMENT-PRESERVING
+  // list-out operator — `docs/plans/2026-08-16-string-phase2-join-search-ops.md`
+  // item 8). Re-segmentation caveat, shared with the interpreter: rejoining the
+  // permuted characters can merge or split clusters, so the result may hold a
+  // different number of characters than the source.
   RandomShuffle: (args, compile) => {
-    const coll = collArg('RandomShuffle', args[0], compile);
+    const coll = elementsArg('RandomShuffle', args[0], compile);
     if (args.length > 1)
       throw new Error(
         `RandomShuffle: expected exactly one argument. Fail closed (D6).`
       );
-    return `_SYS.shuffle(${coll})`;
+    return joinIfString(args[0], `_SYS.shuffle(${coll})`);
   },
   // True if the predicate holds for at least one / every element (vacuously
   // False / True on an empty collection, like `.some`/`.every`). Only the
@@ -3361,10 +3680,24 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // interpreter (`library/statistics.ts`): `k` draws, one per step, in the
   // same order. The domain gate is `indexed_collection`, so an `Interval`
   // fails closed.
+  //
+  // A STRING domain is segmented into its characters, sampled and re-joined: a
+  // sample drawn from a string's own characters is a string (the
+  // string-preservation rule, promoted in Phase 2 alongside `RandomShuffle` —
+  // `docs/plans/2026-08-16-string-phase2-join-search-ops.md` item 8). The
+  // domain descriptor is built here rather than by `randomDomain`, whose
+  // `collArg` funnel is shared with `Random`/`RandomChoice` and refuses a
+  // string on purpose.
   RandomSample: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
         `RandomSample: expected exactly two arguments. Fail closed (D6).`
+      );
+    if (args[0] !== undefined && isProvablyStringOperand(args[0]))
+      return joinIfString(
+        args[0],
+        `_SYS.randomSample(_SYS.domainList("RandomSample", ` +
+          `_SYS.chars(${compile(args[0])})), ${compile(args[1])})`
       );
     const domain = randomDomain('RandomSample', args[0], compile, false);
     return `_SYS.randomSample(${domain}, ${compile(args[1])})`;
@@ -5127,6 +5460,201 @@ function uniqueText(l: unknown[]): unknown[] {
 }
 
 /**
+ * True when two ELEMENTS of a sequence-search operand are the same value, by
+ * the interpreter's own element test.
+ *
+ * The interpreter compares elements with `.isSame()` — the exact structural
+ * check, with no numeric tolerance (`matchesSequenceAt` in
+ * `library/collections.ts`). {@link eqText} reproduces it for every sort a
+ * compiled artifact can hold: strict `===` for a number, a boolean or an array
+ * reference, and conditioned (NFC, well-formed) content equality for a text
+ * pair — which is what a string subject segmented by `_SYS.chars` yields, and
+ * what bridges a `list<character>` needle against a string subject (a
+ * character and a one-cluster string with the same content are the same value
+ * to `.isSame()`). NaN needs the extra disjunct because `NaN === NaN` is false
+ * while `.isSame()` answers true; `IndexOf`'s emitted element test already
+ * carries the identical disjunct.
+ */
+function sameSequenceElement(a: unknown, b: unknown): boolean {
+  return (a !== a && b !== b) || eqText(a, b);
+}
+
+/**
+ * True when `p` occurs in `xs` starting at the 0-based offset `off` — the
+ * anchored test behind `StartsWith` and `EndsWith`, mirroring
+ * `matchesSequenceAt` (`library/collections.ts`). The caller has already
+ * checked that the window fits. An EMPTY `p` matches at any offset, which is
+ * what makes the boolean members of the family answer `True` on an empty
+ * needle.
+ */
+function matchesSequenceAtJS(
+  xs: unknown[],
+  p: unknown[],
+  off: number
+): boolean {
+  for (let k = 0; k < p.length; k++)
+    if (!sameSequenceElement(xs[off + k], p[k])) return false;
+  return true;
+}
+
+/**
+ * The 0-based index of the first occurrence of `p` in `xs` at or after `from`,
+ * or `-1` when there is none.
+ *
+ * The naive O(n·m) scan is the interpreter's own (`RangeOf` /
+ * `ContainsSequence` in `library/collections.ts`; accepted for v1 by decision
+ * D3 of `docs/plans/2026-08-16-string-phase2-join-search-ops.md`). An empty `p`
+ * is found at `from`, which is `ContainsSequence`'s empty-needle `True`.
+ * `RangeOf` — whose empty needle is an ERROR value, not a span — never reaches
+ * here with one: its lowering admits only a provably non-empty needle.
+ */
+function findSequenceJS(xs: unknown[], p: unknown[], from: number): number {
+  for (let i = Math.max(0, from); i + p.length <= xs.length; i++)
+    if (matchesSequenceAtJS(xs, p, i)) return i;
+  return -1;
+}
+
+/**
+ * The Unicode White_Space property as a single-character test — the set
+ * `Trim`/`TrimStart`/`TrimEnd` strip when no `chars` operand is given.
+ *
+ * The code points are spelled out (U+0009..U+000D, U+0020, U+0085, U+00A0,
+ * U+1680, U+2000..U+200A, U+2028, U+2029, U+202F, U+205F, U+3000) rather than
+ * written `\s`, so a compiled artifact's notion of whitespace does not depend
+ * on the host regex engine. This duplicates `UNICODE_WHITESPACE` in
+ * `library/core.ts` — the operator library is deliberately not imported by the
+ * compilation layer, and the two must be kept in step (the parity tests in
+ * `test/compute-engine/compile-string-operations.test.ts` compare compiled and
+ * interpreted trims on the non-ASCII members of the set).
+ */
+const JS_UNICODE_WHITESPACE_CHARACTER =
+  /^[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/;
+
+/**
+ * `StringReplace(s, target, replacement, count)` over GRAPHEME CLUSTERS, the
+ * interpreter's algorithm verbatim (`library/core.ts`): the scan walks the
+ * ORIGINAL subject's cluster sequence and skips past each match's span, so a
+ * replacement's own content is never re-matched (`StringReplace("aa", "a",
+ * "aa")` is `"aaaa"`, not an infinite expansion), matches are non-overlapping
+ * and taken left to right, and re-segmentation happens ONCE when the pieces are
+ * joined.
+ *
+ * `limit` is `Infinity` for the count-less form. An EMPTY `target` would make
+ * the scan advance by zero and never terminate; the interpreter answers an
+ * error value for it and the lowering refuses to emit this call unless the
+ * target is a literal that is provably non-empty, so it cannot arrive here.
+ */
+function replaceText(
+  s: unknown,
+  target: unknown,
+  replacement: unknown,
+  limit: number
+): string {
+  const subject = SYS_HELPERS.chars(s);
+  const needle = SYS_HELPERS.chars(target);
+  const rep = conditionText(replacement);
+  const out: string[] = [];
+  let i = 0;
+  let done = 0;
+  while (i < subject.length) {
+    if (
+      done < limit &&
+      i + needle.length <= subject.length &&
+      needle.every((c, k) => subject[i + k] === c)
+    ) {
+      out.push(rep);
+      i += needle.length;
+      done += 1;
+    } else {
+      out.push(subject[i]);
+      i += 1;
+    }
+  }
+  return out.join('').normalize();
+}
+
+/**
+ * `Trim`/`TrimStart`/`TrimEnd` — `s` with the leading (`start`) and/or trailing
+ * (`end`) characters that belong to `chars` removed, walking GRAPHEME CLUSTERS
+ * so a cluster is never cut in half (`trimClusters`, `library/core.ts`).
+ *
+ * `chars === undefined` selects the default Unicode White_Space set. Otherwise
+ * `chars` is a SET of characters, never a literal substring: a string operand
+ * contributes each of ITS characters, and a collection operand contributes each
+ * of its elements' characters — so `Trim("xyhiyx", "xy")` strips any mix of the
+ * two.
+ */
+function trimText(
+  s: unknown,
+  chars: unknown,
+  start: boolean,
+  end: boolean
+): string {
+  const cs = SYS_HELPERS.chars(s);
+  let strip: (c: string) => boolean;
+  if (chars === undefined)
+    strip = (c) => JS_UNICODE_WHITESPACE_CHARACTER.test(c);
+  else {
+    const set = new Set<string>();
+    const add = (t: unknown): void => {
+      for (const g of SYS_HELPERS.chars(t)) set.add(g);
+    };
+    if (Array.isArray(chars)) for (const c of chars) add(c);
+    else add(chars);
+    strip = (c) => set.has(c);
+  }
+  let i = 0;
+  let j = cs.length;
+  if (start) while (i < j && strip(cs[i])) i += 1;
+  if (end) while (j > i && strip(cs[j - 1])) j -= 1;
+  return cs.slice(i, j).join('').normalize();
+}
+
+/**
+ * `PadStart`/`PadEnd` — `s` padded to `n` CHARACTERS by repeating `pad`, with
+ * the padding placed at the start (`atStart`) or the end (`padClusters`,
+ * `library/core.ts`).
+ *
+ * The padding is built from `pad`'s own grapheme clusters, cycled, so the final
+ * copy is truncated ON A CHARACTER BOUNDARY (`PadStart("a", 4, "xy")` is
+ * `"xyxa"`). A string that already has `n` or more characters comes back
+ * unchanged. The caller's compile-time gate has already rejected an empty `pad`
+ * and a negative `n`, both of which are error values in the interpreter.
+ */
+function padText(
+  s: unknown,
+  n: number,
+  pad: unknown,
+  atStart: boolean
+): string {
+  const text = conditionText(s);
+  const cs = SYS_HELPERS.chars(text);
+  if (cs.length >= n) return text;
+  const ps = SYS_HELPERS.chars(pad);
+  const fill: string[] = [];
+  for (let i = 0; i < n - cs.length; i += 1) fill.push(ps[i % ps.length]);
+  return (atStart ? fill.join('') + text : text + fill.join('')).normalize();
+}
+
+/**
+ * `CaseFold(s)` — the interpreter's v1 approximation of Unicode full case
+ * folding, byte for byte (`library/core.ts`): `toUpperCase()` then
+ * `toLowerCase()` (the round trip through upper case is what collapses the
+ * pairs a single `toLowerCase()` leaves apart, `"ß"` → `"SS"` → `"ss"`), with
+ * the Greek FINAL sigma U+03C2 mapped back to the medial U+03C3 so that
+ * `CaseFold("ΟΔΟΣ") == CaseFold("οδοσ")` holds. Faithful by construction: the
+ * same JS calls run on the same conditioned input, then NFC-normalized as
+ * `engine.string()` does.
+ */
+function caseFoldText(s: unknown): string {
+  return conditionText(s)
+    .toUpperCase()
+    .toLowerCase()
+    .replace(/ς/g, 'σ')
+    .normalize();
+}
+
+/**
  * Runtime helpers injected as `_SYS` into compiled JavaScript functions.
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
  */
@@ -5170,6 +5698,20 @@ const SYS_HELPERS = {
   // dust (`toRI`).
   cisreal: (x: unknown): boolean =>
     typeof x === 'number' || (x as { im: number }).im === 0,
+  // The exactly-real complex object `{re, im: 0}` AS the real number `re`;
+  // any other value passes through. Used by the emitted DISPATCHERS
+  // (multi-clause guard chains, protocol receiver guards) to test their
+  // guards on the value the interpreter would see — a `complex`-typed symbol
+  // is lifted to `{re, im: 0}` at `run()` entry (D3), and a value-literal
+  // guard (`_$a[0] === 0`) or a `real` guard must still select the clause the
+  // interpreter selects for the real number `0`.
+  creal: (x: unknown): unknown =>
+    typeof x === 'object' &&
+    x !== null &&
+    (x as { im: unknown }).im === 0 &&
+    typeof (x as { re: unknown }).re === 'number'
+      ? (x as { re: number }).re
+      : x,
   // Element-wise addition, mirroring the interpreter's `Add` broadcast
   // (`addTensors`/`broadcastOverIndexedCollections`): scalar+scalar is ordinary
   // addition; over (possibly nested) arrays it recurses element-wise. Used as
@@ -5278,6 +5820,21 @@ const SYS_HELPERS = {
       if (sa[i] !== sb[i]) return sa[i] < sb[i] ? -1 : 1;
     return sa.length === sb.length ? 0 : sa.length < sb.length ? -1 : 1;
   },
+  // --- Sequence search and string operations ----------------------------
+  // The kernels behind `StartsWith`/`EndsWith` (`seqat`, the anchored test),
+  // `ContainsSequence`/`RangeOf` (`seqidx`, the scan) and the string-specific
+  // operators. Each is the interpreter's own algorithm over the same element
+  // sequence: a string operand reaches them already segmented into grapheme
+  // clusters by `chars`, so no comparison can straddle a cluster boundary.
+  // See `matchesSequenceAtJS`, `findSequenceJS`, `replaceText`, `trimText`,
+  // `padText` and `caseFoldText`.
+  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.)
+  seqat: matchesSequenceAtJS,
+  seqidx: findSequenceJS,
+  srep: replaceText,
+  strim: trimText,
+  spad: padText,
+  cfold: caseFoldText,
   // --- Lazy infinite-collection streams ---------------------------------
   // A STATICALLY infinite collection (`Range(1, ∞)` and the Map/Filter/Drop/
   // Rest pipeline over it) has no array representation, so it compiles to a
@@ -6033,6 +6590,72 @@ function makeSysHelpers(ce: ComputeEngine): SysHelpers {
  * JavaScript-specific function extension that provides system functions
  */
 /**
+ * The D3 ENTRY CHECK of a compiled JavaScript runner (design §8 D3,
+ * `docs/plans/2026-08-16-compile-complex-mode.md`): the one runtime input the
+ * static analysis cannot see is the value a caller binds at `run()` time, so
+ * each free symbol (expression route) or positional parameter (lambda route)
+ * is checked against the SHAPE the compilation analyzed it as:
+ *
+ * - analyzed REAL: a `{re, im}` object THROWS a `TypeError` naming the symbol
+ *   — the compiled code reads it as a number, and every arithmetic on it
+ *   would be silently wrong (`NaN`, or `"[object Object]1"` under `+`);
+ * - analyzed COMPLEX (a `complex`-typed symbol or annotated parameter): a
+ *   plain number is LIFTED to `{re, im: 0}` — a real IS a complex, and the
+ *   compiled code reads `.re`/`.im` off it;
+ * - anything else (a string, a boolean, an array, `undefined`) is left to
+ *   today's behavior.
+ *
+ * One `typeof` per checked binding per call. The vars object is never mutated
+ * (a lifted copy is built only when a lift is needed).
+ */
+type EntryPlan =
+  | { kind: 'vars'; real: string[]; complex: string[] }
+  | { kind: 'args'; real: number[]; complex: number[] };
+
+const isComplexObject = (v: unknown): v is ComplexResult =>
+  typeof v === 'object' &&
+  v !== null &&
+  typeof (v as ComplexResult).re === 'number' &&
+  typeof (v as ComplexResult).im === 'number';
+
+function entryCheckError(binding: string): TypeError {
+  return new TypeError(
+    `${binding} was compiled as a real number but received a complex {re, im} value. Declare it complex, or compile with \`mode: 'complex'\`.`
+  );
+}
+
+function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
+  if (plan.kind === 'vars') {
+    const vars = argumentsList[0];
+    if (typeof vars !== 'object' || vars === null) return argumentsList;
+    const v = vars as Record<string, unknown>;
+    for (const id of plan.real)
+      if (isComplexObject(v[id])) throw entryCheckError(`"${id}"`);
+    let lifted: Record<string, unknown> | undefined;
+    for (const id of plan.complex) {
+      const x = v[id];
+      if (typeof x === 'number') {
+        lifted ??= { ...v };
+        lifted[id] = { re: x, im: 0 };
+      }
+    }
+    return lifted === undefined ? argumentsList : [lifted];
+  }
+  for (const i of plan.real)
+    if (isComplexObject(argumentsList[i]))
+      throw entryCheckError(`argument ${i + 1}`);
+  let lifted: unknown[] | undefined;
+  for (const i of plan.complex) {
+    const x = argumentsList[i];
+    if (typeof x === 'number') {
+      lifted ??= [...argumentsList];
+      lifted[i] = { re: x, im: 0 };
+    }
+  }
+  return lifted ?? argumentsList;
+}
+
+/**
  * The compiled JavaScript runner's RESULT CONVENTION (design §5,
  * `docs/plans/2026-08-16-compile-complex-mode.md`), applied at the boundary
  * of every `run()` call: a value whose imaginary part is EXACTLY zero comes
@@ -6066,7 +6689,12 @@ function normalizeRunResult(r: unknown): unknown {
 export class ComputeEngineFunction extends Function {
   SYS: SysHelpers;
 
-  constructor(ce: ComputeEngine, body: string, preamble = '') {
+  constructor(
+    ce: ComputeEngine,
+    body: string,
+    preamble = '',
+    entry?: EntryPlan
+  ) {
     super(
       '_SYS',
       '_',
@@ -6075,7 +6703,12 @@ export class ComputeEngineFunction extends Function {
     this.SYS = makeSysHelpers(ce);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
-        normalizeRunResult(super.apply(thisArg, [this.SYS, ...argumentsList])),
+        normalizeRunResult(
+          super.apply(thisArg, [
+            this.SYS,
+            ...(entry ? checkEntry(entry, argumentsList) : argumentsList),
+          ])
+        ),
       get: (target, prop) => {
         if (prop === 'toString') return (): string => body;
         if (prop === 'isCompiled') return true;
@@ -6091,7 +6724,13 @@ export class ComputeEngineFunction extends Function {
 export class ComputeEngineFunctionLiteral extends Function {
   SYS: SysHelpers;
 
-  constructor(ce: ComputeEngine, body: string, args: string[], preamble = '') {
+  constructor(
+    ce: ComputeEngine,
+    body: string,
+    args: string[],
+    preamble = '',
+    entry?: EntryPlan
+  ) {
     super(
       '_SYS',
       ...args,
@@ -6100,7 +6739,12 @@ export class ComputeEngineFunctionLiteral extends Function {
     this.SYS = makeSysHelpers(ce);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
-        normalizeRunResult(super.apply(thisArg, [this.SYS, ...argumentsList])),
+        normalizeRunResult(
+          super.apply(thisArg, [
+            this.SYS,
+            ...(entry ? checkEntry(entry, argumentsList) : argumentsList),
+          ])
+        ),
       get: (target, prop) => {
         if (prop === 'toString')
           return (): string =>
@@ -6444,7 +7088,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
 
-    const result = compileToTarget(expr, target, realOnly);
+    const result = compileToTarget(
+      expr,
+      target,
+      realOnly,
+      options.entryChecks !== false
+    );
     return BaseCompiler.withReferences(
       result,
       expr,
@@ -6477,10 +7126,60 @@ function wrapRealOnly(
   } as CompilationResult<'javascript', number>;
 }
 
+/**
+ * The D3 entry plan of the LAMBDA route: parameter `i` is complex-shaped
+ * when its annotation is a non-real number type, real-shaped otherwise (an
+ * unannotated parameter is wide, which the analysis shapes real).
+ */
+function lambdaEntryPlan(literalParams: ReadonlyArray<Expression>): EntryPlan {
+  const real: number[] = [];
+  const complex: number[] = [];
+  literalParams.forEach((p, i) => {
+    let t: Type | undefined;
+    if (isFunction(p, 'Typed')) {
+      const src = p.ops[1];
+      const text = isString(src)
+        ? src.string
+        : isSymbol(src)
+          ? src.symbol
+          : undefined;
+      if (text !== undefined) {
+        try {
+          t = parseType(text);
+        } catch {
+          t = undefined;
+        }
+      }
+    }
+    (t !== undefined && isNonRealNumber(t) ? complex : real).push(i);
+  });
+  return { kind: 'args', real, complex };
+}
+
+/**
+ * The D3 entry plan of the EXPRESSION route: each free symbol emitted as a
+ * vars-object lookup (`target.varsObjectRefs`) is complex-shaped when the
+ * analysis says so — from its declared type — and real-shaped otherwise.
+ * (A `vars`-option splice binds source text, never passes through `run()`,
+ * and is not in the set: it is the caller's responsibility by contract.)
+ */
+function varsEntryPlan(
+  engine: ComputeEngine,
+  refs: ReadonlySet<string> | undefined
+): EntryPlan | undefined {
+  if (refs === undefined || refs.size === 0) return undefined;
+  const real: string[] = [];
+  const complex: string[] = [];
+  for (const id of refs)
+    (BaseCompiler.isComplexValued(engine.symbol(id)) ? complex : real).push(id);
+  return { kind: 'vars', real, complex };
+}
+
 function compileToTarget(
   expr: Expression,
   target: CompileTarget<Expression>,
-  realOnly?: boolean
+  realOnly?: boolean,
+  entryChecks = true
 ): CompilationResult<'javascript'> {
   // A provably complex tuple/list COMPONENT used to be refused here (Tycho
   // item 62). Retired 2026-07-30: `wrapRealOnly`'s `coerceComponents`
@@ -6539,7 +7238,8 @@ function compileToTarget(
       expr.engine,
       body,
       params,
-      userDefs
+      userDefs,
+      entryChecks ? lambdaEntryPlan(args.slice(1)) : undefined
     );
     const result = {
       target: 'javascript' as const,
@@ -6582,7 +7282,14 @@ function compileToTarget(
       ? `${target.preamble}\n${userDefs}`
       : userDefs
     : target.preamble;
-  const fn = new ComputeEngineFunction(expr.engine, js, preamble);
+  const fn = new ComputeEngineFunction(
+    expr.engine,
+    js,
+    preamble,
+    entryChecks
+      ? varsEntryPlan(expr.engine as ComputeEngine, target.varsObjectRefs)
+      : undefined
+  );
   const result = {
     target: 'javascript' as const,
     success: true,
@@ -6964,6 +7671,165 @@ function elementsArg(
 function joinIfString(source: Expression | undefined, code: string): string {
   if (source === undefined || !isProvablyStringOperand(source)) return code;
   return `(${code}).join("").normalize()`;
+}
+
+/**
+ * Compile a STRING operand of a string-specific operator, failing closed (D6)
+ * when it is not provably a `string`.
+ *
+ * `character` is deliberately NOT admitted even though it lowers to a
+ * one-cluster JS string: every operator using this funnel declares a `string`
+ * parameter, so a character operand is an `incompatible-type` error in the
+ * interpreter, and compiling it would answer a value where interpretation
+ * answers an error. `position` labels the operand in the diagnostic.
+ */
+function stringArg(
+  kind: string,
+  arg: Expression | undefined,
+  compile: (expr: Expression) => string,
+  position: string
+): string {
+  if (arg === undefined || !isProvablyStringOperand(arg))
+    throw new Error(
+      `${kind}: cannot compile — ${position} is not provably a string ` +
+        `(type \`${arg === undefined ? 'missing' : arg.type.toString()}\`). ` +
+        `Fail closed (D6) — the interpreter evaluates it.`
+    );
+  return compile(arg);
+}
+
+/**
+ * The value of an operand that is a NUMBER LITERAL holding an integer, or
+ * `undefined` for anything else (a computed expression, a free symbol, a
+ * non-integer).
+ *
+ * Used by the string operators whose out-of-domain counts produce an interpreter
+ * ERROR VALUE rather than a number — `StringRepeat(s, -1)`, `PadStart(s, -1)`,
+ * `StringReplace(s, t, r, 0)`, `RangeOf(xs, needle, 0)`. A compiled artifact has
+ * no representation for such an error value (`Nothing` projects to `undefined`
+ * or `NaN`, but an error is neither), so the count operand must be decidable at
+ * COMPILE time: a valid literal compiles, an invalid literal declines with its
+ * reason named, and a non-literal declines because its run-time value could be
+ * either. That is the conservative reading of decision D8 — never a wrong value
+ * behind `success: true`.
+ */
+function literalInteger(x: Expression | undefined): number | undefined {
+  if (x === undefined || !isNumber(x) || x.im !== 0) return undefined;
+  const n = x.re;
+  return Number.isInteger(n) ? n : undefined;
+}
+
+/**
+ * The content of an operand that is a string LITERAL, or `undefined` for
+ * anything else. Companion to {@link literalInteger} for the operands whose
+ * EMPTINESS decides between a value and an interpreter error value — the
+ * `target` of `StringReplace` and the `pad` of `PadStart`/`PadEnd`.
+ */
+function literalStringContent(x: Expression | undefined): string | undefined {
+  if (x === undefined || !isString(x)) return undefined;
+  return x.string;
+}
+
+/**
+ * `Trim` / `TrimStart` / `TrimEnd` — strip the characters of a SET from the
+ * start (`start`) and/or the end (`end`) of a string, over grapheme clusters.
+ *
+ * The optional second operand is a SET of characters, never a literal
+ * substring: a string operand contributes each of ITS characters, and a
+ * collection operand each of its elements'. Absent, the default is the Unicode
+ * White_Space set (`JS_UNICODE_WHITESPACE_CHARACTER`). Any other operand shape
+ * leaves the interpreter's handler unevaluated (`trimCharacterSet` answers
+ * `undefined`), so it fails closed here.
+ */
+function compileJSTrim(
+  kind: string,
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  start: boolean,
+  end: boolean
+): string {
+  if (args.length < 1 || args.length > 2)
+    throw new Error(
+      `${kind}: cannot compile — expected \`${kind}(s, chars?)\`. ` +
+        `Fail closed (D6).`
+    );
+  const subject = stringArg(kind, args[0], compile, 'the subject');
+  let chars = 'undefined';
+  if (args.length === 2) {
+    const set = args[1];
+    if (isProvablyStringOperand(set)) chars = compile(set);
+    else {
+      const elt = collectionElementType(jsType(set));
+      if (
+        !isIndexedCollectionOperand(set) ||
+        elt === undefined ||
+        (elt !== 'never' &&
+          !isSubtype(elt, 'string') &&
+          !isSubtype(elt, 'character'))
+      )
+        throw new Error(
+          `${kind}: cannot compile — \`chars\` must be a string or an indexed ` +
+            `collection whose elements are provably strings or characters; ` +
+            `the interpreter leaves the expression unevaluated on anything ` +
+            `else. Fail closed (D6) — the interpreter evaluates it.`
+        );
+      // Through `collArg`, not `compile`: it refuses an operand whose type
+      // merely ADMITS text (it would arrive as a JS string, not an array) and
+      // an INFINITE collection (which cannot materialize to an array). The
+      // interpreter declines both.
+      chars = collArg(kind, set, compile);
+    }
+  }
+  return `_SYS.strim(${subject}, ${chars}, ${start}, ${end})`;
+}
+
+/**
+ * `PadStart` / `PadEnd` — pad a string to `n` CHARACTERS (not code units, not
+ * display columns) by repeating `pad`, whose final copy is truncated on a
+ * character boundary.
+ *
+ * `n` and `pad` must be literals: a negative `n` and an empty `pad` are both
+ * interpreter ERROR VALUES, which a compiled artifact cannot return (see
+ * {@link literalInteger}).
+ */
+function compileJSPad(
+  kind: string,
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  atStart: boolean
+): string {
+  if (args.length < 2 || args.length > 3)
+    throw new Error(
+      `${kind}: cannot compile — expected \`${kind}(s, n, pad?)\`. ` +
+        `Fail closed (D6).`
+    );
+  const subject = stringArg(kind, args[0], compile, 'the subject');
+  const width = literalInteger(args[1]);
+  if (width === undefined || width < 0)
+    throw new Error(
+      `${kind}: cannot compile — \`n\` must be a non-negative integer ` +
+        `LITERAL; a negative or non-integer \`n\` is an error value in the ` +
+        `interpreter, which a compiled artifact cannot return. ` +
+        `Fail closed (D6).`
+    );
+  let pad = '" "';
+  if (args.length === 3) {
+    const literal = literalStringContent(args[2]);
+    if (literal === undefined)
+      throw new Error(
+        `${kind}: cannot compile — \`pad\` must be a string LITERAL. An EMPTY ` +
+          `pad is an error value in the interpreter, which a compiled ` +
+          `artifact cannot return, so a run-time pad cannot be admitted. ` +
+          `Fail closed (D6).`
+      );
+    if (literal === '')
+      throw new Error(
+        `${kind}: cannot compile — \`pad\` is empty, which the interpreter ` +
+          `answers with an error value. Fail closed (D6).`
+      );
+    pad = stringArg(kind, args[2], compile, 'the padding');
+  }
+  return `_SYS.spad(${subject}, ${width}, ${pad}, ${atStart})`;
 }
 
 /**

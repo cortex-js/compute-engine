@@ -123,7 +123,7 @@ actually happens → write instead:**
 | `print(x)` | Inert unknown call; nothing prints | The program's value is its **last statement** |
 | `len(xs)` | Inert + did-you-mean | `Length(xs)` |
 | `s[0]` / `len(s)` on a string | Works — a string is a collection of its characters (grapheme clusters), 1-based | `s[1]`, `Length(s)` |
-| `"a" + "b"` | Error values inside an `Add` | `"\(a) and \(b)"` interpolation, or `StringJoin(a, b)` |
+| `"a" + "b"` | Error values inside an `Add` | `"\(a) and \(b)"` interpolation, or `Join(a, b)` |
 | `xs[2] = 9` | Runtime error value — no element assignment; collections are immutable values | Rebuild: `Map`, `Join(xs, [v])`, `Append(xs, v)` |
 | `and` / `or` / `not` | Parse diagnostics (reserved words) | `&&`, `\|\|`, `!` |
 | `x**0.5` habits: `x^1/2` | Parses as `(x^1)/2` — precedence, not a root | `Sqrt(x)` or `x^(1/2)` |
@@ -253,8 +253,17 @@ Verified operator names, so you don't have to guess (search for more with
   `Sum`, `Mean`, `StandardDeviation` (sample, n−1), `Map`, `Filter`,
   `Count(xs)` / `Count(xs, v)` / `Count(xs, pred)`,
   `Reduce(list, f, init)`, `Range(a, b)` inclusive, `Range(a, b, step)`.
-- **Strings**: `Characters`, `StringJoin`, `StringSplit(s)` (splits on
-  whitespace by default), `String(x)`.
+- **Strings**: `Characters`, `StringSplit(s)` (splits on whitespace by
+  default), `String(x)`, `Join(a, b)` to concatenate strings,
+  `StringJoin(xs, sep?)` to join ONE collection with an optional separator
+  (a string subject means its characters, so `StringJoin("ab", "cd")` is
+  `"acdb"`, not `"abcd"` — use `Join` or `"\(a)\(b)"` to concatenate).
+  Substring search is `RangeOf(s, needle)` (a span, or `Nothing`),
+  `ContainsSequence`, `StartsWith`, `EndsWith` — `c in s` is *character*
+  membership. Also `StringReplace(s, target, replacement, count?)`,
+  `Trim`/`TrimStart`/`TrimEnd`, `StringRepeat`, `PadStart`/`PadEnd`,
+  `ToUpperCase`/`ToLowerCase`/`CaseFold`, `StringCompare(a, b)` (`-1/0/1`,
+  code-point order) and `NumberFrom(s, base?)`.
 - **Dictionaries**: `Keys`, `Values`.
 - **Absence**: `Missing` preserves a missing position; `Nothing` is omitted
   from arguments and collections; `IsMissing`, `Coalesce`.

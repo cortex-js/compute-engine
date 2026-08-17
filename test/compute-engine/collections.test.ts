@@ -911,6 +911,11 @@ describe('SLICE (range)', () => {
     // Each of these types as `indexed_collection<integer|number>`, not
     // `range`, so the range arm rejects it at validation — the expression is
     // never evaluated as a (start, end) window.
+    // The expected type in the message reads `nothing | range` since Strings
+    // Phase 2 gave the span slot a `range | nothing` twin so that
+    // `Slice(xs, RangeOf(xs, needle))` composes (an absent span slices to
+    // `Nothing`). A descending or stepped `Range` satisfies neither half, so
+    // the rejection is unchanged — only the type named in the message widened.
     for (const r of [
       ['Range', 3, 2],
       ['Range', 1, 7, 2],
@@ -923,7 +928,7 @@ describe('SLICE (range)', () => {
       expect(e.op2.op1.json).toEqual([
         'ErrorCode',
         "'incompatible-type'",
-        "'range'",
+        "'nothing | range'",
         expect.any(String),
       ]);
     }

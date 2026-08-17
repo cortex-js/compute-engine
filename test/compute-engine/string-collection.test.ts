@@ -14,6 +14,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 let ce: ComputeEngine;
 beforeEach(() => {
@@ -389,6 +390,11 @@ describe('string-preserving operators', () => {
     ['TakeWhile', ['TakeWhile', str('aabba'), isA], 'aa'],
     ['DropWhile', ['DropWhile', str('aabba'), isA], 'bba'],
     ['Dedup', ['Dedup', str('aabbca')], 'abca'],
+    // Promoted in Phase 2 (`docs/plans/2026-08-16-string-phase2-join-search-
+    // ops.md`, item 8): what is left after removing one of a string's own
+    // characters is a string.
+    ['DeleteAt', ['DeleteAt', str('abcd'), 2], 'acd'],
+    ['DeleteAt (negative index)', ['DeleteAt', str('abcd'), -1], 'abc'],
   ];
 
   for (const [label, expr, expected] of cases) {
@@ -401,6 +407,54 @@ describe('string-preserving operators', () => {
       expect(v.type.toString()).toBe('string');
     });
   }
+
+  test('the RANDOM promotions answer a string that is a permutation/subset of the source', () => {
+    // `RandomShuffle` and `RandomSample` were promoted in Phase 2 alongside
+    // `DeleteAt`: each result is a permutation (shuffle) or a subset (sample)
+    // of the source's OWN characters, so each is string-preserving. Both are
+    // impure, so the assertion is on the character MULTISET, never on a
+    // particular ordering.
+    const sorted = (s: string) => [...s].sort().join('');
+
+    const shuffled = ce.box(['RandomShuffle', str('abcdef')]);
+    expect(shuffled.type.toString()).toBe('string');
+    const sv = shuffled.evaluate();
+    expect(sv.type.toString()).toBe('string');
+    expect(sorted(sv.string!)).toBe('abcdef');
+
+    const sampled = ce.box(['RandomSample', str('abcdef'), 3]);
+    expect(sampled.type.toString()).toBe('string');
+    const pv = sampled.evaluate();
+    expect(pv.type.toString()).toBe('string');
+    expect(pv.string!).toHaveLength(3);
+    // Drawn WITHOUT replacement, so the three characters are distinct and each
+    // comes from the source.
+    expect(new Set(pv.string!).size).toBe(3);
+    for (const c of pv.string!) expect('abcdef').toContain(c);
+
+    // An empty sample of a string is the empty STRING, not an empty list.
+    const empty = ce.box(['RandomSample', str('abc'), 0]).evaluate();
+    expect(empty.type.toString()).toBe('string');
+    expect(empty.string).toBe('');
+  });
+
+  test('the promotions leave their LIST arms alone', () => {
+    expect(ce.box(['DeleteAt', ['List', 1, 2, 3], 1]).type.toString()).toBe(
+      'list<finite_integer>'
+    );
+    expect(
+      ce
+        .box(['DeleteAt', ['List', 1, 2, 3], 1])
+        .evaluate()
+        .toString()
+    ).toBe('[2,3]');
+    expect(ce.box(['RandomShuffle', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'list<finite_integer>'
+    );
+    expect(ce.box(['RandomSample', ['List', 1, 2, 3], 2]).type.toString()).toBe(
+      'list'
+    );
+  });
 
   test('a LIST source keeps its Phase-0 list result', () => {
     // The string arm must not swallow the general arm: most-specific-wins
@@ -726,12 +780,15 @@ describe('strings are atomic where the lattice would otherwise shred them', () =
     expect(ce.string('ab').isSame(asList)).toBe(false);
   });
 
-  test('the Phase-2 candidates are correct AS LISTS on a string source', () => {
-    // These keep their `list<…>` signatures for now (a promotion to a string
-    // result is Phase 2). What matters here is that none of them crashes or
-    // answers a wrong value on a string source.
+  test('the operators still awaiting a ruling are correct AS LISTS on a string source', () => {
+    // These keep their `list<…>` signatures: whether a chunk/window/subset of
+    // a string should itself be a string (`Chunk("abcdef", 2)` →
+    // `["ab","cd","ef"]` rather than `[["a","b"],…]`) is an open ruling, filed
+    // in `ROADMAP.md`. `DeleteAt`, `RandomShuffle` and `RandomSample` were
+    // promoted to string results in Phase 2 and are pinned in the
+    // string-preservation block above, not here. What matters here is that
+    // none of these crashes or answers a wrong value on a string source.
     const asList = (expr: any) => ce.box(expr).evaluate().toString();
-    expect(asList(['DeleteAt', str('abc'), 1])).toBe('["b","c"]');
     expect(asList(['Partition', str('abcd'), 2])).toBe('[["a","b"],["c","d"]]');
     expect(asList(['Chunk', str('abcd'), 2])).toBe('[["a","b"],["c","d"]]');
     expect(asList(['SlidingWindow', str('abcd'), 2])).toBe(
@@ -741,8 +798,9 @@ describe('strings are atomic where the lattice would otherwise shred them', () =
       '[["a","b"],["a","c"],["b","c"]]'
     );
     expect(ce.box(['Permutations', str('abc')]).evaluate().count).toBe(6);
-    expect(ce.box(['RandomShuffle', str('abc')]).evaluate().count).toBe(3);
-    expect(ce.box(['RandomSample', str('abc'), 2]).evaluate().count).toBe(2);
+    // `RandomChoice` draws WITH replacement, so its result is not a subset of
+    // the source's own characters (`RandomChoice("ab", 3)` can repeat one) —
+    // it is not an element-preserving operator and was not promoted.
     expect(ce.box(['RandomChoice', str('abc'), 2]).evaluate().count).toBe(2);
     expect(asList(['Tally', str('abc')])).toBe('(["a","b","c"], [1,1,1])');
     // `Cycle` declares a `list` parameter, so a string is a clean type error.
@@ -752,6 +810,186 @@ describe('strings are atomic where the lattice would otherwise shred them', () =
         .evaluate()
         .toString()
     ).toContain('incompatible-type');
+  });
+});
+
+describe('`Join` is the variadic string concatenation', () => {
+  // Strings Phase 2 (`docs/STRING_ROADMAP.md`, "`Join` vs. `StringJoin`"):
+  // `Join` gained a string-preserving arm whose trigger is EVERY operand being
+  // a string. There is no `evaluate` handler behind it — the declared result
+  // type `string` is what makes the framework walk the lazy `Join` view once
+  // and join its characters (`evaluateStringPreservingCollection` in
+  // `boxed-expression/boxed-function.ts`).
+
+  test('all-string operands concatenate to a `string`', () => {
+    const e = ce.box(['Join', str('ab'), str('cd')]);
+    expect(e.type.toString()).toBe('string');
+    const v = e.evaluate();
+    expect(v.type.toString()).toBe('string');
+    expect(v.string).toBe('abcd');
+  });
+
+  test('the variadic and unary forms', () => {
+    expect(
+      ce.box(['Join', str('a'), str('b'), str('c'), str('d')]).evaluate().string
+    ).toBe('abcd');
+    // `Join(xs)` is the concatenation of ONE collection — i.e. `xs` itself.
+    expect(ce.box(['Join', str('ab')]).evaluate().string).toBe('ab');
+    expect(ce.box(['Join', str('')]).evaluate().string).toBe('');
+    expect(ce.box(['Join', str('ab'), str('')]).evaluate().string).toBe('ab');
+  });
+
+  test('a MIXED call falls back to the generic arm and yields a list', () => {
+    // A string and a `list<character>` are SIBLINGS under
+    // `indexed_collection<character>`, so the call is well-typed — but the
+    // result kind must stay readable from the operand kinds, with no
+    // "majority wins" subtlety, so anything but all-strings is a list.
+    const e = ce.box(['Join', str('ab'), ['Characters', str('cd')]]);
+    expect(e.type.toString()).toBe('list<character>');
+    expect(e.evaluate().toString()).toBe('["a","b","c","d"]');
+    // A literal list of one-cluster strings types `list<string^2>` (a string
+    // literal narrows to `character` only where a `character` is expected), so
+    // this is a mixed call too.
+    const f = ce.box(['Join', str('ab'), ['List', str('c'), str('d')]]);
+    expect(f.type.matches('string')).toBe(false);
+    expect(f.evaluate().toString()).toBe('["a","b","c","d"]');
+  });
+
+  test('a CHARACTER operand makes the call mixed', () => {
+    // `character` is a SIBLING of `string` in the lattice, not a subtype, so
+    // it does not satisfy the all-strings trigger.
+    const c = ce.box(['At', ['Characters', str('cd')], 1]);
+    expect(c.type.matches('string')).toBe(false);
+    expect(
+      ce.function('Join', [ce.string('ab'), c]).type.matches('string')
+    ).toBe(false);
+  });
+
+  test('a non-string collection call is untouched', () => {
+    expect(
+      ce
+        .box(['Join', ['List', 1, 2], ['List', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,3,4]');
+    // An `unknown`-typed operand refutes no arm; the bounded `T: string`
+    // variable must not win most-specific-wins on it.
+    ce.declare('joinSrc', 'unknown');
+    expect(ce.box(['Join', 'joinSrc', 'joinSrc']).type.matches('string')).toBe(
+      false
+    );
+  });
+
+  test('RE-SEGMENTATION: joined characters can merge into one cluster', () => {
+    // `Length(Join(a, b))` is not in general `Length(a) + Length(b)`: joining
+    // "x" and a lone COMBINING ACUTE ACCENT (U+0301) makes ONE cluster,
+    // because the mark attaches to the `x` that now precedes it. Inherent to
+    // Unicode grapheme segmentation (design constraint 3), not a defect.
+    const joined = ce.box(['Join', str('x'), str('́')]).evaluate();
+    expect(joined.type.toString()).toBe('string');
+    expect(joined.count).toBe(1);
+    expect(ce.box(['Length', str('x')]).evaluate().re).toBe(1);
+    expect(ce.box(['Length', str('́')]).evaluate().re).toBe(1);
+  });
+
+  test('an UNEVALUATED string-producing operand still materializes to a string', () => {
+    // Regression: the result was a `Join` EXPRESSION that printed as `"ab"`
+    // but was not a string value at all (`.string` was `undefined`). Two
+    // defects stacked up, both now fixed in
+    // `boxed-expression/boxed-function.ts`:
+    //
+    // 1. An eager producer that materializes to a `BoxedString` — which has no
+    //    operator definition, so no `iterator` handler to read — enumerated
+    //    NOTHING from `BoxedFunction.each()`, while still reporting a non-zero
+    //    `count` from its `elementCount` handler. `Join("a", Sort("cb"))`
+    //    therefore answered `"a"` instead of `"abc"`.
+    // 2. The join step required a finite element COUNT, and an unevaluated
+    //    eager producer cannot state one (its `elementCount` handler must be
+    //    evaluation-free), so the enclosing `Join` had no count and the step
+    //    declined. It now also accepts the proof that every operand is
+    //    `string`-typed, since every string is finite.
+    const cases: Array<[label: string, operand: any, expected: string]> = [
+      [
+        'StringJoin (eager, no count)',
+        ['StringJoin', ['List', str('b')]],
+        'ab',
+      ],
+      ['Sort (eager, count known)', ['Sort', str('cb')], 'abc'],
+      ['Reverse (lazy)', ['Reverse', str('cb')], 'abc'],
+      ['a literal string', str('b'), 'ab'],
+    ];
+    for (const [label, operand, expected] of cases) {
+      const e = ce.box(['Join', str('a'), operand]);
+      expect([label, e.type.toString()]).toEqual([label, 'string']);
+      const v = e.evaluate();
+      // A `BoxedString` VALUE, not an expression that merely prints like one.
+      expect([label, v.string]).toEqual([label, expected]);
+      expect([label, v.type.toString()]).toEqual([label, 'string']);
+    }
+    // The operand in leading position too.
+    expect(
+      ce.box(['Join', ['StringJoin', ['List', str('b')]], str('a')]).evaluate()
+        .string
+    ).toBe('ba');
+  });
+
+  test('an operand that will NEVER yield characters keeps the call unevaluated', () => {
+    // The `string`-typed-operands proof requires POSITIVE evidence that each
+    // operand can be walked. These two producers state nothing either way —
+    // their enumerability is `undefined`, not `false` — yet both stay
+    // unevaluated and yield nothing from `each()`. Admitting them on the
+    // absence of a refusal silently DROPPED the operand: `Join("a",
+    // StringJoin(xs))` answered `"a"`.
+    ce.declare('unassignedStr', 'string');
+    const overUnassigned = ce
+      .box(['Join', str('a'), ['StringJoin', 'unassignedStr']])
+      .evaluate();
+    expect(overUnassigned.operator).toBe('Join');
+    expect(overUnassigned.string).toBeUndefined();
+
+    // Same for a `StringJoin` over an INFINITE source: its `evaluate` handler
+    // refuses a non-finite collection, so the call never becomes a string.
+    const overInfinite = ce
+      .box([
+        'Join',
+        str('x'),
+        [
+          'StringJoin',
+          [
+            'Map',
+            ['Function', str('y'), 'c'],
+            ['Range', 1, { num: '+Infinity' }],
+          ],
+        ],
+      ])
+      .evaluate();
+    expect(overInfinite.operator).toBe('Join');
+    expect(overInfinite.string).toBeUndefined();
+
+    // The walkable neighbours are unaffected.
+    expect(
+      ce.box(['Join', str('a'), ['StringJoin', ['List', str('b')]]]).evaluate()
+        .string
+    ).toBe('ab');
+    expect(
+      ce.box(['Join', str('a'), ['Sort', str('cb')]]).evaluate().string
+    ).toBe('abc');
+  });
+
+  test('every route agrees', () => {
+    expect(ce.box(['Join', str('ab'), str('cd')]).evaluate().string).toBe(
+      'abcd'
+    );
+    expect(
+      ce.function('Join', [ce.string('ab'), ce.string('cd')]).evaluate().string
+    ).toBe('abcd');
+    // `\text{xy}`, not `\text{cd}`: `cd` is the candela unit symbol, so
+    // `\text{cd}` parses as that symbol rather than as a string literal — a
+    // property of the LaTeX text handler, unrelated to `Join`.
+    expect(
+      ce.parse('\\operatorname{Join}(\\text{ab}, \\text{xy})').evaluate().string
+    ).toBe('abxy');
+    expect(executeEpsil(ce, 'Join("ab", "cd")').value.string).toBe('abcd');
   });
 });
 

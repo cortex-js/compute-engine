@@ -232,12 +232,13 @@ Arithmetic broadcasts over a list elementwise, without anything like NumPy:
 | Python | Epsil |
 |:--|:--|
 | `f"x is {x}"` | `"x is \(x)"` — works in any string literal |
-| `"a" + "b"` | `StringJoin("a", "b")` — `+` on strings is a **type error** |
+| `"a" + "b"` | `Join("a", "b")` — `+` on strings is a **type error** |
 | `len(s)` | `Length(s)` — a string is a collection of its characters (grapheme clusters, not code points) |
 | `s[0]` | `s[1]` — 1-based; each element is a `character` |
 | `c in s` | `c in s` — character membership; substring search is a separate operation |
+| `"ab" in s` | `ContainsSequence(s, "ab")` — `in` never means substring |
 | `s.split()` / `s.split(",")` | `StringSplit(s)` / `StringSplit(s, ",")` |
-| `"".join(parts)` | `StringJoin(…)`, or `Fold` over the parts |
+| `"".join(parts)` / `sep.join(parts)` | `StringJoin(parts)` / `StringJoin(parts, sep)` |
 | `str(x)` | `String(x)` |
 | `"""…"""` | `"""…"""` — multi-line strings, same delimiter |
 | `r"raw\string"` | `#"raw\string"#` — extended string literal |
@@ -245,16 +246,32 @@ Arithmetic broadcasts over a list elementwise, without anything like NumPy:
 ```epsil
 let name = "world"
 let parts = StringSplit("a b c")
-("hello \(name)", StringJoin("a", "b"), Length(name), parts[2])
+("hello \(name)", Join("a", "b"), Length(name), parts[2])
 // ➔ ("hello world", "ab", 5, "b")
 ```
 
-There is no `.upper()`, `.replace()`, `.find()` or `.strip()` yet. A string
-is an indexed collection of `character` values, so the generic collection
-operators apply directly (`Length`, `Reverse`, `Filter`, `Sort`, `Contains`,
-`IndexOf`, `Map` — the element-preserving ones return a string, `Map` returns
-a list; rejoin with `String(...)`). For a specific decomposition use
-`Characters`, `UnicodeScalars`, `Utf8`/`Utf16`; `StringSplit`, `StringJoin`,
+`.upper()`, `.lower()`, `.replace()` and `.strip()` are `ToUpperCase`,
+`ToLowerCase`, `StringReplace(s, target, replacement)` and
+`Trim`/`TrimStart`/`TrimEnd`; `.zfill()`/`.rjust()` are `PadStart`/`PadEnd`,
+`s * n` is `StringRepeat(s, n)` and `float(s)`/`int(s)` are `NumberFrom(s)`
+(which answers an error value, never NaN, on text that is not a numeral).
+`.find()`/`.index()` is `RangeOf(s, needle)`, which answers the *span* of the
+first occurrence (a `range`) or `Nothing` — feed it straight to `Slice`;
+`needle in s` (substring) is `ContainsSequence(s, needle)`, and
+`.startswith()`/`.endswith()` are `StartsWith`/`EndsWith`. Note that Epsil's
+`c in s` is **character** membership, not substring search.
+
+`.casefold()` is `CaseFold(s)`, and `StringCompare(a, b)` gives the `-1/0/1`
+code-point ordering that `<` on two multi-character strings does not (it
+compares UTF-16 code units, which sorts the astral characters below
+U+E000–U+FFFF).
+
+A string is an indexed collection of `character`
+values, so the generic collection operators apply directly (`Length`,
+`Reverse`, `Filter`, `Sort`, `Contains`, `IndexOf`, `Map` — the
+element-preserving ones return a string, `Map` returns a list; rejoin with
+`String(...)`). For a specific decomposition use `Characters`,
+`UnicodeScalars`, `Utf8`/`Utf16`; `StringSplit`, `StringJoin`, `Join`,
 `StringFrom` and `String` round out the library.
 
 ## Errors

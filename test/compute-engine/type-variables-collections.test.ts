@@ -81,11 +81,19 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // `docs/STRING_ROADMAP.md`); every arm carries the `where` clause. Strings
     // Phase 1 gave each of the two spans a leading string-preserving twin: a
     // contiguous run of a string's characters is a string.
+    // Strings Phase 2 added the `range | nothing` twins, so that
+    // `Slice(xs, RangeOf(xs, needle))` composes directly and an absent span
+    // slices to `Nothing`. The exact `span: range` arms stay ahead of them:
+    // the string-preservation step needs the node's type to MATCH `string`,
+    // which `string | nothing` would not.
     expect(sig(ce, 'Slice')).toBe(
-      '((value: T, span: range) -> T where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)'
+      '((value: T, span: range) -> T where T: string) & ((value: T, span: nothing | range) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, span: nothing | range) -> list<T> | nothing where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)'
     );
+    // Strings Phase 2 promoted `DeleteAt` to the string-preservation rule:
+    // what is left after removing one of a string's own characters is a
+    // string, so it gained a leading string-preserving arm.
     expect(sig(ce, 'DeleteAt')).toBe(
-      '(indexed_collection<T>, integer) -> list<T> where T'
+      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T)'
     );
     // UNBOUNDED (the D4 audit's spelling). A bound on `T` would also
     // constrain the SOURCE collection's elements, since the same variable
@@ -108,8 +116,11 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     expect(sig(ce, 'Unique')).toBe(
       '((T) -> T where T: string) & ((collection<T>) -> list<T> where T)'
     );
+    // Promoted with `DeleteAt` in Strings Phase 2: a permutation of a
+    // string's own characters is a string. The `random` effect label sits on
+    // each arm.
     expect(sig(ce, 'RandomShuffle')).toBe(
-      '(indexed_collection<T>) random -> list<T> where T'
+      '((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T)'
     );
     expect(sig(ce, 'Tally')).toBe(
       '(collection<T>) -> tuple<list<T>, list<integer>> where T'

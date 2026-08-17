@@ -289,10 +289,13 @@ let x = 2^11 - 1
   test('a formatted table with StringJoin, interpolation and escapes', () => {
     // The header is a plain string literal whose `\t`/`\n` escapes are real
     // control characters; each body row splices computed numbers with `\(…)`.
+    // `StringJoin(xs, sep?)` takes ONE collection (its variadic form was
+    // removed — see `docs/STRING_ROADMAP.md`, "`Join` vs. `StringJoin`"), so
+    // the header is prepended by interpolation, the concatenation idiom.
     const { value, diagnostics } = run(`
 let header = "n\\tn^2\\tn^3\\n"
 let lines = Map(n => "\\(n)\\t\\(n^2)\\t\\(n^3)\\n", Range(1, 5))
-StringJoin(header, Fold((acc, line) => StringJoin(acc, line), "", lines))`);
+"\\(header)\\(StringJoin(lines))"`);
     expect(diagnostics).toEqual([]);
     expect(value.string).toBe(
       'n\tn^2\tn^3\n1\t1\t1\n2\t4\t8\n3\t9\t27\n4\t16\t64\n5\t25\t125\n'

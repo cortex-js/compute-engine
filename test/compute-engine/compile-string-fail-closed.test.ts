@@ -1603,25 +1603,41 @@ describe('tier 2: Characters / GraphemeClusters', () => {
 });
 
 describe('tier 2: StringJoin', () => {
-  // Probed interpreter semantics: VARIADIC over strings (nullary → `""`), or a
-  // SINGLE finite collection of strings. A non-string operand is an
-  // `incompatible-type` error, and the MIXED arity form
-  // `StringJoin("a", ["b","c"])` stays INERT — the interpreter never coerces
-  // (that is `String`, a different operator).
+  // Probed interpreter semantics, NARROWED in Phase 2 of the strings work
+  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D2):
+  // `StringJoin(xs, sep?)` joins ONE collection of strings/characters, with
+  // `sep` between consecutive elements. The variadic concatenation form was
+  // REMOVED — once a string is itself a collection of characters, "a collection
+  // and a separator" and "two strings to concatenate" are the same shape and
+  // cannot both be supported — so a two-string call is the SEPARATOR form and
+  // `StringJoin("abc", "-")` is `"a-b-c"`, exactly as Python's `"-".join("abc")`
+  // is. Variadic concatenation is `Join(a, b, …)`.
 
   test.each([
-    ['nullary', ['StringJoin'], ''],
-    ['one string', ['StringJoin', { str: 'a' }], 'a'],
-    ['two strings', ['StringJoin', { str: 'a' }, { str: 'b' }], 'ab'],
+    // The user-ruled Python semantics: a STRING subject is the collection of
+    // its own characters.
     [
-      'three strings',
-      ['StringJoin', { str: 'a' }, { str: 'b' }, { str: 'c' }],
-      'abc',
+      'a string subject and a separator',
+      ['StringJoin', { str: 'abc' }, { str: '-' }],
+      'a-b-c',
+    ],
+    ['a string subject, no separator', ['StringJoin', { str: 'abc' }], 'abc'],
+    // A one-character subject has no interior boundary, so the separator never
+    // appears — this is what a two-string call means now.
+    [
+      'two strings — the SEPARATOR form',
+      ['StringJoin', { str: 'a' }, { str: 'b' }],
+      'a',
     ],
     [
       'a string list',
       ['StringJoin', ['List', { str: 'a' }, { str: 'b' }]],
       'ab',
+    ],
+    [
+      'a string list with a separator',
+      ['StringJoin', ['List', { str: 'a' }, { str: 'b' }], { str: ', ' }],
+      'a, b',
     ],
     ['an empty list', ['StringJoin', ['List']], ''],
     [
@@ -1646,25 +1662,57 @@ describe('tier 2: StringJoin', () => {
   );
 
   test('the result is NFC-normalized, as `engine.string()` is', () => {
-    // Joining a base letter and a combining mark yields the PRECOMPOSED
-    // character in the interpreter; a raw `+` would not.
-    const expr = ce.box(['StringJoin', { str: 'e' }, { str: '\u0301' }]);
+    // Joining a base letter and a combining mark (U+0301 COMBINING ACUTE
+    // ACCENT) yields the PRECOMPOSED U+00E9 in the interpreter; a raw
+    // concatenation would leave the two code points apart.
+    const expr = ce.box([
+      'StringJoin',
+      ['List', { str: 'e' }, { str: '\u0301' }],
+    ]);
     expect(expr.evaluate().string).toBe('\u00e9');
     expect(compile(expr, { fallback: false }).run!()).toBe('\u00e9');
   });
 
+  test('a combining-mark SEPARATOR composes with each preceding character', () => {
+    // `"abc"` joined by U+0301: the mark composes with the character in front
+    // of it at NFC time, so the result is `"á"` + `"b́"` + `"c"` — U+00E1, then
+    // `b` + U+0301 (which has no precomposed form), then `c`. A compiled result
+    // that skipped `.normalize()` would hold `a` + U+0301 instead of U+00E1.
+    const expr = ce.box(['StringJoin', { str: 'abc' }, { str: '\u0301' }]);
+    expect(expr.evaluate().string).toBe('\u00e1b\u0301c');
+    expect(compile(expr, { fallback: false }).run!()).toBe('\u00e1b\u0301c');
+  });
+
   test.each([
-    // These two never reach the lowering: the signature check (`(string |
-    // collection<string>)*`) makes them `Error` nodes, which the compiler
-    // refuses outright — the interpreter reports `incompatible-type`.
-    ['a non-string operand', ['StringJoin', { str: 'a' }, 1], false],
+    // These never reach the lowering: the signature check
+    // (`(collection<string | character>, separator: string?)`) makes them
+    // `Error` nodes, which the compiler refuses outright — the interpreter
+    // reports `incompatible-type` or `unexpected-argument`.
+    ['a non-string separator', ['StringJoin', { str: 'a' }, 1], false],
     ['a numeric list', ['StringJoin', ['List', 1, 2]], false],
-    // These type-check, so the lowering's own gate is what closes them.
-    ['an unknown-typed operand', ['StringJoin', { str: 'a' }, 'uq'], true],
-    // The interpreter leaves this INERT even though every leaf is a string.
     [
-      'a string plus a string LIST',
+      'a LIST separator',
       ['StringJoin', { str: 'a' }, ['List', { str: 'b' }]],
+      false,
+    ],
+    // A scalar `character` is one element, not a collection of them.
+    [
+      'a scalar character subject',
+      ['StringJoin', ['CharacterFrom', { str: 'a' }]],
+      false,
+    ],
+    // The removed variadic form is now an arity error.
+    [
+      'the removed VARIADIC form',
+      ['StringJoin', { str: 'a' }, { str: 'b' }, { str: 'c' }],
+      false,
+    ],
+    // This type-checks (a `Set` IS a `collection<string>`, and the interpreter
+    // joins it), so the lowering's own gate is what closes it: a set does not
+    // lower to an indexed JS array.
+    [
+      'a non-indexed collection subject',
+      ['StringJoin', ['Set', { str: 'a' }, { str: 'b' }]],
       true,
     ],
   ] as const)('%s fails closed', (_label, json, ownGate) => {
@@ -1673,9 +1721,14 @@ describe('tier 2: StringJoin', () => {
     if (ownGate) expect(r.error).toMatch(/StringJoin: cannot compile/);
   });
 
-  test('the mixed arity form is INERT in the interpreter (the fallback answer)', () => {
-    const expr = ce.box(['StringJoin', { str: 'a' }, ['List', { str: 'b' }]]);
-    expect(expr.evaluate().operator).toBe('StringJoin');
+  test('the removed variadic form is a signature ERROR in the interpreter (the fallback answer)', () => {
+    const expr = ce.box([
+      'StringJoin',
+      { str: 'a' },
+      { str: 'b' },
+      { str: 'c' },
+    ]);
+    expect(expr.evaluate().operator).toBe('Error');
   });
 });
 

@@ -419,7 +419,19 @@ PARAMETER"): the three wrap forms, the value position over a real source and
 over a complex one, and the no-shim case. Verified non-vacuous — each fails
 with the corresponding half reverted.
 
-### A MULTI-CLAUSE function with a declared `complex` parameter compiles silently wrong (OPEN, correctness — found 2026-08-16 by review, PRE-EXISTING)
+### A MULTI-CLAUSE function with a declared `complex` parameter compiles silently wrong (FIXED 2026-08-16 — the dispatcher lifts per clause)
+
+Fixed as part of step 2 of `docs/plans/2026-08-16-compile-complex-mode.md`:
+the emitted dispatcher now hands each clause helper its arguments in the shape
+that clause's body was compiled for — `_SYS.cplx(_$a[k])` for a parameter
+declared a non-real number type, the normalized value otherwise — AFTER
+dispatch has been decided on the normalized arguments (`_SYS.creal`: an
+exactly-real `{re, im: 0}` dispatches as the real number it is, so a value
+clause `S(0)` and a `real`-typed clause select as the interpreter selects).
+`S(w)` at `w = 2` now answers `3`. Under `mode: 'strict'` a complex-shaped
+argument to a WIDE clause parameter is a `LaneMismatch` decline. Test:
+`test/compute-engine/compile-mode-strict.test.ts`. Original report follows.
+
 
 Surfaced while reviewing the declared-complex-parameter fix above, and
 explicitly measured NOT to be caused by it: identical before and after, with
@@ -446,7 +458,19 @@ the review's stated mechanism for this entry ("the call site NOW wraps every
 argument where before the gate limited the damage") does NOT hold — the call
 site wraps on neither side; the defect is independent of the argument gate.
 
-### A protocol MEMBER whose parameter is declared `complex` is handed the argument unwrapped (OPEN, correctness — found 2026-08-16 by review, PRE-EXISTING)
+### A protocol MEMBER whose parameter is declared `complex` is handed the argument unwrapped (FIXED 2026-08-16 — same wrap forms as the single-literal call)
+
+Fixed as part of step 2 of `docs/plans/2026-08-16-compile-complex-mode.md`:
+the `isProvablyRealValued(a)` precondition is gone; the coercion is gated on
+the PARAMETER's declared type alone (unanimous across candidates) and the wrap
+form is the shared `complexWrapCode` (literal complex passes through, provably
+real wraps statically, anything else takes the idempotent `_SYS.cplx`). The
+dynamic dispatcher tests its receiver guards on the normalized receiver
+(`_SYS.creal`). `scale(2, w)` at `w = 3` now answers `4`. Under `mode:
+'strict'` a complex-shaped argument to a WIDE candidate parameter is a
+`LaneMismatch` decline. Test: `test/compute-engine/compile-mode-strict.test.ts`.
+Original report follows.
+
 
 The third `coerceToComplex` computation — the multi-candidate member dispatch
 in `userFunctionsPreamble` (`base-compiler.ts`, ~11203) — still opens with
@@ -4512,27 +4536,41 @@ string-preserving arm for the operators the preservation rule makes
 mandatory; the entries below are the ones deliberately left out, each with
 the reason it is a judgement call rather than a forced consequence.
 
-- **String arms for `RandomShuffle`, `RandomSample` and `DeleteAt`.** All
-  three produce a permutation or a subset of the source's own elements, so by
-  the preservation rule ("subset or reordering of the input's own characters
-  ⇒ string in, string out") they belong with `Reverse` and `Take`. They were
-  not in the Phase-0 per-kind set, so nothing in their declared signature
-  forced the arm in Phase 1 and they still return `list<character>`. Adding
-  them is a static-result-type break, so it wants its own release note.
+- ~~**String arms for `RandomShuffle`, `RandomSample` and `DeleteAt`**~~ —
+  CLOSED 2026-08-16 (Phase 2). All three produce a permutation or a subset of
+  the source's own elements, so by the preservation rule ("subset or
+  reordering of the input's own characters ⇒ string in, string out") they
+  belong with `Reverse` and `Take`. Each now carries a
+  `(T) -> T where T: string` arm ahead of its generic one:
+  `Type(RandomShuffle("abc"))` is `"string"` and `DeleteAt("abcdef", 2)` is
+  `"acdef"`. The static-result-type break has its own CHANGELOG note.
 
 - **Inner strings for the chunking family:** `Chunk`, `Partition`, `ChunkBy`
   and `SlidingWindow`. The outer result is a list either way; what is open is
   whether each inner chunk — a contiguous run of the source's own characters
-  — is a `string` or a `list<character>`. Today it is `list<character>`.
-  `list<string>` is defensible and arguably more useful, and the same
-  question applies to `Permutations` and `Combinations`, whose inner elements
-  are reorderings and subsets of the source's characters.
+  — is a `string` or a `list<character>`. Today it is `list<character>`:
+  `Chunk("abcdef", 2)` is `[["a","b","c"], ["d","e","f"]]`. The same question
+  applies to `Permutations` and `Combinations`, whose inner elements are
+  reorderings and subsets of the source's characters.
+  **Recommendation: `list<string>`** — each inner element is a contiguous run
+  (or a reordering) of the source's own characters, which is exactly the
+  condition under which every other operator preserves the string kind, so
+  `Chunk("abcdef", 2)` would be `["abc", "def"]`. Deliberately still OPEN
+  because it is a static-result-type break on six operators at once and needs
+  a ruling, not a default. If nothing is decided, the inner elements stay
+  `list<character>` and the library is inconsistent with the
+  preservation rule the rest of Phase 1/2 follows.
 
 - **`Tally`'s values half.** `Tally(s)` returns
   `tuple<list<character>, list<integer>>`. Whether the distinct values should
   come back as characters (as now) or as one-character strings is the same
   open choice as the chunking family's, and should be decided with it so the
   library is consistent.
+  **Recommendation: keep `character`** — the distinct values are the
+  collection's *elements*, not runs of them, so the preservation rule does
+  not apply and the element type is the honest answer. This is the "no
+  change" option; deciding it together with the chunking family is what keeps
+  the two from drifting apart.
 
 - **`RandomChoice`.** It draws *with* replacement, so its result is a
   multiset over the source's own elements — arguably element-preserving,

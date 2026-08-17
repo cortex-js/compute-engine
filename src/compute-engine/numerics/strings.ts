@@ -232,7 +232,10 @@ export function fromDigits(
       'x': 33,
       'y': 34,
       'z': 35,
-    }[s[i]];
+      // Letter digits are case-insensitive: `"FF"` and `"ff"` both denote 255
+      // in base 16 (uppercase hex is the more common spelling in the wild),
+      // so the lookup lowercases the character rather than doubling the table.
+    }[s[i].toLowerCase()];
     if (k !== -1) {
       if (k === undefined) return [value, s.substring(i)];
       if (k >= base) return [value, s.substring(i)];

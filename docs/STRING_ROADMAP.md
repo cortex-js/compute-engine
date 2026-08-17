@@ -1115,6 +1115,46 @@ operator to land on.
    shape rules (subjects first, tail free; order slots typed to admit a
    future `collation` value). Update `doc/97-reference-strings.md` again
    with the new operators.
+
+   **Shipped 2026-08-16** (implementation plan:
+   `docs/plans/2026-08-16-string-phase2-join-search-ops.md`). Deviations
+   from and resolutions of the text above, all user-ruled the same day:
+   - `StringJoin("ab", "cd")` is NOT a signature error: with strings as
+     collections, `"ab"` satisfies the subject slot and `"cd"` the
+     separator, so a string subject means ITS CHARACTERS joined with the
+     separator (`StringJoin("abc", "-")` = `"a-b-c"`, the Python
+     `sep.join(str)` precedent). An un-migrated two-string call therefore
+     silently changes meaning (`"acdb"`); the CHANGELOG says so loudly and
+     gives the migration (`Join(a, b)` / interpolation). A bare `character`
+     subject is a type error (not a collection).
+   - `Slice` gained `range | nothing` arms: `Slice(xs, Nothing)` evaluates
+     to `Nothing`, so the law `Slice(xs, RangeOf(xs, needle))` typechecks
+     when nested directly and absence propagates. Known imprecision: for a
+     `range | nothing`-typed span operand the overload resolver still
+     reports `string`/`list<T>` rather than the `| nothing` union (the
+     union arm makes the call validate; narrowing the reported type is a
+     resolver change, filed).
+   - `NumberFrom(".5")` is accepted (0.5, exact); `"5."` stays rejected.
+   - `Join`'s string arm is spelled with a bounded variable
+     (`(T+) -> T where T: string`); the runtime is Phase 1's type-driven
+     join step, which needed a second finiteness proof and a `each()`
+     delegation fix (an eager producer materializing to a `BoxedString`
+     previously enumerated nothing — `Join("a", Sort("cb"))` was `"a"`).
+   - Compile targets: JavaScript lowers every Phase-2 operator
+     grapheme-correctly except `NumberFrom` (fails closed) and `DeleteAt`
+     (no list lowering exists); operands whose VALUE decides between a
+     result and an error value (`from`, `count`, `n`, `pad`, an empty
+     `target`) must be literals or the call declines; Python/GLSL/WGSL fail
+     closed by the target-capability default, now pinned per operator.
+   - Promotions shipped: `RandomShuffle`, `RandomSample`, `DeleteAt` return
+     `string` for a string source. Still awaiting a ruling (ROADMAP): inner
+     strings for `Chunk`/`Partition`/`ChunkBy`/`SlidingWindow`/
+     `Permutations`/`Combinations`; `Tally`'s values half.
+   - Two Phase-1-induced regressions surfaced and were fixed by their
+     owners in the same round: the Epsil pipe stage `xs |> Fold(Join,
+     header)` placed the piped value in the wrong slot once a string fit a
+     collection slot (epsil-syntax), and `Join`/`Sort` string
+     materialization above.
 3. **Regular expressions.** Independent of the collection change.
 
 ## Regular Expressions (Phase 3 sketch)

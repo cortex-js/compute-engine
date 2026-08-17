@@ -597,18 +597,26 @@ describe('D13: the `character` scalar row', () => {
     }
   });
 
-  test('`StringJoin` takes a SCALAR character operand, in either arity', () => {
-    // The interpreter accepts a character wherever it accepts a string
-    // (probed: both of these are `"a"` / `"ab"`). A scalar character must take
-    // the variadic branch — the single-operand branch demands an indexed
-    // collection and would decline `StringJoin(CharacterFrom("a"))`.
-    agreesWithInterpreter(ce.box(['StringJoin', char('a')]));
-    agreesWithInterpreter(ce.box(['StringJoin', char('a'), { str: 'b' }]));
-    agreesWithInterpreter(ce.box(['StringJoin', { str: 'b' }, char('a')]));
-    agreesWithInterpreter(ce.box(['StringJoin', char('a'), char('b')]));
-    // A multi-code-point cluster joins as its whole cluster.
+  test('`StringJoin` refuses a SCALAR character subject, and joins a character COLLECTION', () => {
+    // Phase 2 narrowed `StringJoin` to `(collection<string | character>,
+    // separator: string?)` and removed the variadic concatenation form
+    // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D2).
+    // A scalar `character` is ONE element, not a collection of them, so it is
+    // now an `incompatible-type` error against the first parameter — and the
+    // compiler refuses the resulting `Error` node.
+    failsClosed(ce.box(['StringJoin', char('a')]));
+    failsClosed(ce.box(['StringJoin', char('a'), { str: 'b' }]));
+    // What DOES compile is a collection of characters, with or without a
+    // separator. A multi-code-point cluster joins as its whole cluster.
     agreesWithInterpreter(
-      ce.box(['StringJoin', char(ZWJ_FAMILY), char(FLAG_FR)])
+      ce.box(['StringJoin', ['List', char('a'), char('b')]])
+    );
+    agreesWithInterpreter(
+      ce.box([
+        'StringJoin',
+        ['List', char(ZWJ_FAMILY), char(FLAG_FR)],
+        { str: '-' },
+      ])
     );
   });
 

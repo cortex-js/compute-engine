@@ -48,19 +48,22 @@ describe('String operator joins values, not serialized forms', () => {
   });
 });
 
-describe('StringJoin concatenates strings', () => {
-  test('n-ary concatenation', () => {
+describe('StringJoin joins a collection of strings', () => {
+  // `StringJoin`'s VARIADIC form was removed in Phase 2 of the strings work
+  // (`docs/STRING_ROADMAP.md`, "`Join` vs. `StringJoin`"): its signature is
+  // now `(collection<string | character>, separator: string?) -> string`, and
+  // variadic concatenation is `Join(a, b, …)` or `"\(a)\(b)"` interpolation.
+  test('n-ary concatenation is now Join', () => {
     const ce = new ComputeEngine();
     expect(
-      ce
-        .box(['StringJoin', { str: 'foo' }, { str: 'bar' }, { str: '!' }])
-        .evaluate().string
+      ce.box(['Join', { str: 'foo' }, { str: 'bar' }, { str: '!' }]).evaluate()
+        .string
     ).toBe('foobar!');
   });
 
-  test('empty StringJoin() is the empty string', () => {
+  test('an empty collection joins to the empty string', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['StringJoin']).evaluate().string).toBe('');
+    expect(ce.box(['StringJoin', ['List']]).evaluate().string).toBe('');
   });
 
   test('a non-string operand is NOT coerced (it reports the type error)', () => {
@@ -69,7 +72,9 @@ describe('StringJoin concatenates strings', () => {
     // string, so the expression never reduces to a string value. Rung 3 of
     // the error-propagation design keeps the non-coercion and changes only
     // the SHAPE of the refusal: the validation error bubbles out of the
-    // frozen `StringJoin(…Error…)` tree as a bare error value.
+    // frozen `StringJoin(…Error…)` tree as a bare error value. (Under the
+    // narrowed signature `3` is read as the SEPARATOR, which must be a
+    // string — the refusal is the same shape either way.)
     const result = ce.box(['StringJoin', { str: 'a' }, 3]).evaluate();
     expect(result.operator).toBe('Error');
     expect(result.string).toBeUndefined();

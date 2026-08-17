@@ -156,7 +156,7 @@ function integerParam(op: Expression | undefined): number | undefined | null {
  * inherent to Unicode grapheme segmentation, not a defect
  * (`docs/STRING_ROADMAP.md`, design constraint 3).
  */
-function joinCharacters(
+export function joinCharacters(
   ce: ComputeEngine,
   elements: Iterable<Expression>
 ): Expression | undefined {
@@ -166,6 +166,58 @@ function joinCharacters(
     else return undefined;
   }
   return ce.string(parts.join(''));
+}
+
+/**
+ * The subject's and the needle's element sequences, for the sequence-search
+ * family (`RangeOf`, `ContainsSequence`, `StartsWith`, `EndsWith`), or
+ * `undefined` when the call must stay SYMBOLIC.
+ *
+ * Both operands must be FINITE collections. Searching an infinite subject for
+ * an absent needle would not terminate, and the anchored tests additionally
+ * need the subject's length; a collection whose finiteness is merely UNKNOWN
+ * (a valueless symbol, a lazy view over a symbolic bound) is not searched
+ * either — the house pattern is to leave the expression unevaluated rather
+ * than guess, as `Sort` and `StringJoin` already do
+ * (`docs/STRING_ROADMAP.md`, "Sequence-search operations").
+ *
+ * A string contributes its GRAPHEME CLUSTERS, since that is what its `each()`
+ * yields. Comparing whole characters is what makes the grapheme-boundary
+ * guarantee structural rather than an extra rule: no comparison can ever
+ * straddle a cluster boundary.
+ */
+function sequenceSearchOperands(
+  xs: Expression,
+  needle: Expression
+): [subject: Expression[], pattern: Expression[]] | undefined {
+  if (xs.isFiniteCollection !== true) return undefined;
+  if (needle.isFiniteCollection !== true) return undefined;
+  return [
+    Array.from(xs.each()) as Expression[],
+    Array.from(needle.each()) as Expression[],
+  ];
+}
+
+/**
+ * True when `pattern` occurs in `subject` starting at the 0-based `offset`.
+ * The caller has already checked that the window fits.
+ *
+ * Elements are compared with `isSame` — the exact structural check, which is
+ * what an element identity test wants here (a search must not evaluate its
+ * elements or apply a numeric tolerance, matching `IndexOf`). It also spans
+ * the character/one-cluster-string bridge — a character and a one-cluster
+ * string holding the same content are the same VALUE — so a `list<character>`
+ * needle matches a string subject (the `BoxedString`/`BoxedCharacter` arm of
+ * `same()` in `boxed-expression/compare.ts`).
+ */
+function matchesSequenceAt(
+  subject: ReadonlyArray<Expression>,
+  pattern: ReadonlyArray<Expression>,
+  offset: number
+): boolean {
+  for (let k = 0; k < pattern.length; k++)
+    if (!subject[offset + k].isSame(pattern[k])) return false;
+  return true;
 }
 
 /**
@@ -329,7 +381,29 @@ const LENGTH_SIGNATURE = parseType('(any) -> integer');
 const COUNT_SIGNATURE = parseType('(collection, any?) -> integer');
 const ISEMPTY_SIGNATURE = parseType('(collection) -> boolean');
 const CONTAINS_SIGNATURE = parseType('(collection, element: any) -> boolean');
+// Only the GENERIC arm of `Join`'s overload set, and deliberately so: this
+// type is used by the custom `canonical` handler to validate the operands,
+// and the string-preserving arm (`(T+) -> T where T: string`) admits a strict
+// SUBSET of what this arm admits — every string is a collection — so
+// validating against the generic arm alone never rejects a call the overload
+// set accepts. The RESULT type is not read here; the `type:` handler
+// (`joinResultType`) owns it.
 const JOIN_SIGNATURE = parseType('(collection*) -> collection');
+// The full overload set of `Slice`, written ONCE. Two places need it and they
+// must not drift apart: the definition's `signature:` field (what the engine
+// registers, and what result typing resolves an arm from) and the parsed
+// `SLICE_SIGNATURE` below, which the custom `canonical` handler validates its
+// operands against. The handler intercepts an absent (`Nothing`) span before
+// the default `flatten` step can drop it, and must then do the argument
+// validation the default path would have done — against the SAME contract the
+// engine registered, or a call the definition accepts could be rejected at
+// canonicalization (or the reverse). A single constant is what enforces that;
+// nothing else checks the two for equality.
+const SLICE_SIGNATURE_TEXT =
+  '((value: T, span: range) -> T where T: string) & ((value: T, span: range | nothing) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, span: range | nothing) -> list<T> | nothing where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)';
+// Parsed once, so the `canonical` handler does not re-parse the signature on
+// every canonicalization.
+const SLICE_SIGNATURE = parseType(SLICE_SIGNATURE_TEXT);
 const APPEND_SIGNATURE = parseType('(collection, value+) -> collection');
 
 // Validate the collection operand of a LAZY collection operator's canonical
@@ -4798,9 +4872,33 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: [
       'Join the elements of some collections into a flat collection.',
       'A tuple operand is appended as a single element, not spliced.',
+      'When every operand is a string, the result is their concatenation as a string: `Join` is the variadic string concatenation.',
     ],
     complexity: 8200,
-    signature: '(collection*) -> collection',
+    // The LEADING arm is the string-preservation rule: concatenating strings
+    // yields a string, which makes `Join` THE variadic string concatenation
+    // (`docs/STRING_ROADMAP.md`, "`Join` vs. `StringJoin`"). The trigger is
+    // EVERY operand being a `string`; a mixed call such as
+    // `Join("ab", ["c", "d"])` falls back to the generic arm and yields a
+    // `list<character>`, so the result kind is readable from the operand
+    // kinds with no "majority wins" subtlety. `character` is a SIBLING of
+    // `string` in the lattice rather than a subtype, so a character operand
+    // makes the call mixed too.
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
+    // The concrete answer is computed by the `type:` handler
+    // (`joinResultType`), which owns the all-string case; the arm is what
+    // makes the promise readable in the signature.
+    // RE-SEGMENTATION CAVEAT: concatenation can MERGE adjacent grapheme
+    // clusters or split one apart, so `Length(Join(a, b))` is not in general
+    // `Length(a) + Length(b)` — joining `"x"` and a lone COMBINING ACUTE
+    // ACCENT produces ONE character, not two. That is inherent to Unicode
+    // grapheme segmentation, not a defect (`docs/STRING_ROADMAP.md`, design
+    // constraint 3).
+    signature: '((T+) -> T where T: string) & ((collection*) -> collection)',
     // Same-head flatten: `Join(Join(…inner), …outer)` → `Join(…inner, …outer)`
     // (Change 2 of `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`).
     // Exact by construction — the head is unchanged, so every operand keeps
@@ -6274,9 +6372,81 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
-    signature:
-      '((value: T, span: range) -> T where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)',
+    // The `range | nothing` twins are what make `Slice(xs, RangeOf(xs, n))`
+    // compose directly. `RangeOf` is honestly typed `range | nothing` — the
+    // needle may be absent — and a caller should not have to narrow the union
+    // by hand before slicing. Absence PROPAGATES: `Slice(xs, Nothing)` is
+    // `Nothing`, so the honest static answer for a possibly-absent span is
+    // `T | nothing` (USER-RULED 2026-08-16). The exact `span: range` arms are
+    // kept AHEAD of them so a span that is known to exist keeps the precise
+    // `T` / `list<T>` result it has always had; that precision is
+    // load-bearing, not cosmetic — the string-preservation step requires the
+    // node's type to MATCH `string` exactly
+    // (`evaluateStringPreservingCollection` in
+    // `boxed-expression/boxed-function.ts`), and a `string | nothing` result
+    // would stop `Slice("abc", 2..3)` evaluating to a string value at all.
+    // The overload RESOLVER cannot make that split on its own, which is why
+    // the `type` handler below exists: for an operand typed `range | nothing`
+    // the resolver still selects the exact `span: range` arm and would report
+    // `string` / `list<T>`, not the `| nothing` union. The union arm is what
+    // makes the call VALIDATE (without it the operand is rejected
+    // `incompatible-type`), but overload selection admits an overlapping
+    // operand on trial and prefers the more specific arm, in either textual
+    // order — so before the handler, `Slice(xs, RangeOf(xs, n))` typed
+    // `string` while evaluating to `Nothing`. The handler re-reads the span
+    // operand's static type and adds the `| nothing` arm exactly when that
+    // type admits `Nothing`; a span that statically excludes it (a literal
+    // `2..3`, a `range`-declared symbol) is left to the resolver, so the
+    // precise result — and with it string preservation — is untouched.
+    signature: SLICE_SIGNATURE_TEXT,
+    // Restore the honesty the resolver drops (see above): a possibly-absent
+    // span makes the result possibly-`Nothing`. Returning `undefined` leaves
+    // the resolver's arm in place, which is the whole mechanism for keeping
+    // `Slice("abc", 2..3)` typed exactly `string`.
+    type: (ops, { operandTypes }) => sliceResultType(ops, operandTypes),
+    // `Slice(xs, Nothing)` folds to `Nothing`, which is why this handler
+    // exists at all: the framework's DEFAULT canonicalization runs `flatten`
+    // first, and `flatten` DROPS a `Nothing` operand outright — it is the
+    // "omitted argument" marker everywhere else in the engine. Without the
+    // interception the call would collapse to a one-operand `Slice` and report
+    // a missing-argument error, which is exactly what a failed `RangeOf`
+    // search produces when its result is fed straight back in.
+    // Everything else is the default path, spelled out: `flatten` (Sequence
+    // splice), then `validateArguments` against the declared overload set.
+    // `Slice` is neither commutative, involutive, idempotent nor
+    // `broadcastable`, and none of its parameters is numeric-only, so the
+    // remaining steps the default path would run (operand sorting, the
+    // involution/idempotent rewrites, the missing-arm strip) are all no-ops
+    // for it. The one thing NOT reproduced is the attachment of the validated
+    // overload resolution to the constructed call (`_resolvedOverload`); the
+    // result type then comes from the cold re-derivation in `resolvedArm`
+    // (`boxed-expression/boxed-function.ts`), which recomputes the same
+    // policies from the definition. The `Slice` type pins in
+    // `test/compute-engine/type-variables-collections.test.ts` and
+    // `test/compute-engine/collections.test.ts` cover that path.
+    canonical: (ops, { engine: ce }) => {
+      // The absence test runs BEFORE `flatten`, which is the whole point:
+      // `flatten` is what drops the `Nothing`.
+      if (ops.length === 2 && isSymbol(ops[1], 'Nothing')) return ce.Nothing;
+      const args = flatten(ops);
+      return ce._fn(
+        'Slice',
+        validateArguments(ce, args, SLICE_SIGNATURE, false, false) ?? args
+      );
+    },
     collection: {
+      // Collection-ness is decided PER INSTANCE, because the `range | nothing`
+      // arms let the result be `Nothing`: a `Slice` over an absent span is not
+      // a collection at all. Declaring this is also what tells the definition
+      // validator not to insist that the whole signature's result type be a
+      // collection — without it, registering the `| nothing` arms throws
+      // ("a collection handler is defined, but the signature is not a
+      // collection type"). A canonical `Slice(xs, Nothing)` folds to `Nothing`
+      // outright, so only a structurally constructed node reaches this as
+      // `false`.
+      isCollection: (expr) =>
+        !(isFunction(expr) && expr.ops.length === 2) ||
+        !isSymbol(expr.op2, 'Nothing'),
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -6541,9 +6711,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: [
       'Return a copy of the indexed collection with the element at the 1-based `index` removed.',
       'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
+      'Deleting from a string yields a string.',
     ],
     complexity: 8200,
-    signature: '(indexed_collection<T>, integer) -> list<T> where T',
+    // The LEADING arm is the string-preservation rule: what is left after
+    // removing one of a string's own characters is a string
+    // (`docs/STRING_ROADMAP.md`, "String preservation rule"; promoted in
+    // Phase 2 as an ELEMENT-PRESERVING list-out operator). A node that
+    // resolves to it evaluates to that string through
+    // `evaluateStringPreservingCollection` in
+    // `boxed-expression/boxed-function.ts`, which walks this operator's own
+    // lazy `iterator` handler and joins the characters — that step runs
+    // BEFORE the `evaluate` handler below, so both the eager small-source
+    // path and the lazy large-source path answer a string.
+    // Re-segmentation caveat: rejoining the surviving characters can merge or
+    // split grapheme clusters, so the result may hold a different number of
+    // characters than `Length(xs) - 1` — deleting a base character leaves its
+    // combining mark to attach to whatever now precedes it.
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
+    signature:
+      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T)',
     evaluate: ([xs, idx], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
@@ -6925,6 +7116,158 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, value], { engine: ce }) => {
       const index = xs.indexWhere((x) => x.isSame(value)) ?? undefined;
       return ce.number(index ?? 0);
+    },
+  },
+
+  // The SEQUENCE-SEARCH family (`docs/STRING_ROADMAP.md`, "Sequence-search
+  // operations"). Substring search generalized to contiguous-subsequence
+  // search over any indexed collection: one generic operator per question,
+  // with strings as the motivating instance. The needle is ALWAYS read as a
+  // SEQUENCE of elements, never as one element — that is what keeps these
+  // distinct from `IndexOf`/`Contains` (element search) and what makes
+  // `RangeOf([[1,2],[3,4]], [3,4])` unambiguous.
+  RangeOf: {
+    description: [
+      'Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Nothing` when it does not occur.',
+      "The search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Nothing`.",
+      'On a string the needle is matched character by character, so a match never begins or ends inside a grapheme cluster.',
+    ],
+    complexity: 8200,
+    // The span is returned rather than a start index because it feeds slicing
+    // and replacement directly: `Slice(xs, RangeOf(xs, needle))` yields the
+    // same element sequence as `needle`. The law is stated element-wise, not
+    // as `== needle`, because the needle may be a sibling KIND of the subject —
+    // searching a string with a `list<character>` needle is well-typed, and
+    // `Slice` is kind-preserving, so the two sides can be a `string` and a
+    // `list<character>`, which are never `==` (`docs/STRING_ROADMAP.md`,
+    // design constraint 2).
+    // Absence is `Nothing`, not `IndexOf`'s `0`: `0` is an index sentinel and
+    // is not a range.
+    signature:
+      '(indexed_collection<T>, indexed_collection<T>, from: integer?) -> range | nothing where T',
+    // Provable declines only. `true` is never claimed: even with both
+    // operands finite, a needle that is ABSENT evaluates to `Nothing`, which
+    // is not a collection at all, so evaluation cannot promise one.
+    canEnumerate: (expr) => {
+      if (!isFunction(expr)) return undefined;
+      if (expr.op1.isFiniteCollection === false) return false;
+      if (expr.op2.isFiniteCollection === false) return false;
+      return undefined;
+    },
+    evaluate: ([xs, needle, fromOp], { engine: ce }) => {
+      const operands = sequenceSearchOperands(xs, needle);
+      if (operands === undefined) return undefined;
+      const [subject, pattern] = operands;
+      const from = integerParam(fromOp);
+      // A `from` that is PRESENT but does not resolve to an integer right now
+      // (a free symbol) is indeterminate, never the default: substituting 1
+      // would answer a span for a search the caller did not ask for. A
+      // FRACTIONAL `from` never reaches here — the `integer` parameter type
+      // rejects it at canonicalization with `incompatible-type`.
+      if (from === null) return undefined;
+      const start = from ?? 1;
+      // `from` must be at least 1; index 0 and negative indices have no
+      // meaning for a search reporting 1-based spans. Past the END is
+      // deliberately NOT an error, just `Nothing`: the natural find-all loop
+      // legitimately produces `Length(xs) + 1` after a match at the very end.
+      if (start < 1)
+        return ce.error([
+          'out-of-range',
+          'an index of 1 or more',
+          start.toString(),
+        ]);
+      // An EMPTY needle is an error value here, while the boolean members of
+      // the family answer `True`. The asymmetry is forced, not a taste call:
+      // an empty span is not representable, because `Range(1, 0)` is the
+      // DESCENDING range [1, 0] rather than an empty one.
+      if (pattern.length === 0)
+        return ce.error([
+          'out-of-range',
+          'a non-empty needle',
+          needle.toString(),
+        ]);
+      for (let i = start - 1; i + pattern.length <= subject.length; i++) {
+        if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+        if (matchesSequenceAt(subject, pattern, i))
+          return ce.function('Range', [
+            ce.number(i + 1),
+            ce.number(i + pattern.length),
+          ]);
+      }
+      return ce.Nothing;
+    },
+  },
+
+  ContainsSequence: {
+    description: [
+      'Return `True` when `needle` occurs as a contiguous subsequence of the indexed collection.',
+      'Unlike `Contains`, which tests membership of a single element, the needle is read as a sequence: `ContainsSequence("abc", "ab")` is `True` while `Contains("abc", "ab")` is `False`.',
+    ],
+    complexity: 8200,
+    signature:
+      '(indexed_collection<T>, indexed_collection<T>) -> boolean where T',
+    evaluate: ([xs, needle], { engine: ce }) => {
+      const operands = sequenceSearchOperands(xs, needle);
+      if (operands === undefined) return undefined;
+      const [subject, pattern] = operands;
+      // An empty needle is `True` by definition: the empty sequence is a
+      // subsequence of everything. Diverges from `RangeOf`, which must reject
+      // an empty needle because it has no representable span to return; a
+      // boolean needs no span.
+      if (pattern.length === 0) return ce.True;
+      for (let i = 0; i + pattern.length <= subject.length; i++) {
+        if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+        if (matchesSequenceAt(subject, pattern, i)) return ce.True;
+      }
+      return ce.False;
+    },
+  },
+
+  StartsWith: {
+    description: [
+      'Return `True` when the indexed collection begins with `prefix` as a contiguous subsequence.',
+      'On a string the prefix is matched character by character, so a prefix that would end inside a grapheme cluster does not match. An empty prefix matches everything.',
+    ],
+    complexity: 8200,
+    signature:
+      '(indexed_collection<T>, prefix: indexed_collection<T>) -> boolean where T',
+    evaluate: ([xs, prefix], { engine: ce }) => {
+      const operands = sequenceSearchOperands(xs, prefix);
+      if (operands === undefined) return undefined;
+      const [subject, pattern] = operands;
+      // An empty prefix matches everything, following `ContainsSequence`'s
+      // rule rather than `RangeOf`'s: this returns a boolean, so the
+      // unrepresentable-empty-span problem does not arise.
+      if (pattern.length === 0) return ce.True;
+      if (pattern.length > subject.length) return ce.False;
+      return matchesSequenceAt(subject, pattern, 0) ? ce.True : ce.False;
+    },
+  },
+
+  EndsWith: {
+    description: [
+      'Return `True` when the indexed collection ends with `suffix` as a contiguous subsequence.',
+      'On a string the suffix is matched character by character, so a suffix that would begin inside a grapheme cluster does not match. An empty suffix matches everything.',
+    ],
+    complexity: 8200,
+    signature:
+      '(indexed_collection<T>, suffix: indexed_collection<T>) -> boolean where T',
+    evaluate: ([xs, suffix], { engine: ce }) => {
+      // This is the member that needs the subject's LENGTH, since it inspects
+      // the tail. `sequenceSearchOperands` supplies it: it admits only finite
+      // collections, and walking one to the end is what yields its length.
+      const operands = sequenceSearchOperands(xs, suffix);
+      if (operands === undefined) return undefined;
+      const [subject, pattern] = operands;
+      if (pattern.length === 0) return ce.True;
+      if (pattern.length > subject.length) return ce.False;
+      return matchesSequenceAt(
+        subject,
+        pattern,
+        subject.length - pattern.length
+      )
+        ? ce.True
+        : ce.False;
     },
   },
 
@@ -7320,6 +7663,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   RandomShuffle: {
     description:
       'Randomize the order of the elements in the collection. ' +
+      'Shuffling a string yields a string. ' +
       'Wrap the call in `WithRandomSeed(seed, ...)` to make it deterministic.',
     complexity: 8200,
     // `RandomShuffle(xs)` draws from the engine stream, so the operator must
@@ -7327,9 +7671,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Without it, `isPure` — and therefore `isConstant` — is true for a
     // shuffle of a literal list, and the impurity backstop in
     // `map-auto-compile.ts` does not gate it.
-    // The result always rebuilds as a `List` (see `evaluate`), so the result
-    // type is `list<T>`, not the source's (possibly indexed/Range) type.
-    signature: '(indexed_collection<T>) random -> list<T> where T',
+    // Apart from the string arm the result always rebuilds as a `List` (see
+    // `evaluate`), so the result type is `list<T>`, not the source's (possibly
+    // indexed/Range) type.
+    // The LEADING arm is the string-preservation rule: a permutation of a
+    // string's own characters is a string (`docs/STRING_ROADMAP.md`, "String
+    // preservation rule"; promoted in Phase 2 as an ELEMENT-PRESERVING
+    // list-out operator). `RandomShuffle` is eager and has no lazy collection
+    // handlers, so the join happens in the `evaluate` handler below rather
+    // than in `evaluateStringPreservingCollection`.
+    // Re-segmentation caveat: rejoining the permuted characters can merge or
+    // split grapheme clusters, so the result may hold a different number of
+    // characters than the input — a combining mark can land next to a
+    // different base character.
+    // Spelled as a BOUNDED type variable (`T where T: string`), never the
+    // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+    // arm, so a ground `string` parameter would win most-specific-wins on
+    // every untyped operand and claim `string` for a call that usually
+    // returns a list. A bounded variable with no call-site binding does not.
+    signature:
+      '((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T)',
     // Provable declines only, answered from the SOURCE's facets alone — an
     // IMPURE producer must never claim `true` (the `at()` materialize
     // fallback is pure-only, so a `true` would promise a walk the indexed
@@ -7379,6 +7740,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         [data[i], data[j]] = [data[j], data[i]];
       }
 
+      // The string arm: a shuffled string is a string. `RandomShuffle` is
+      // eager and has no lazy collection handlers, so the join happens here
+      // rather than in `evaluateStringPreservingCollection`. Re-segmentation
+      // caveat: rejoining the permuted characters can merge or split grapheme
+      // clusters, so the result may hold a different number of characters than
+      // the input.
+      if (isString(xs)) return joinCharacters(ce, data);
       // Eager collection results rebuild as `List`, never the source's head
       // (a `Range`/`Linspace` head would reinterpret the shuffled elements as
       // lo/hi/step).
@@ -9545,6 +9913,20 @@ function isIterator(x: unknown): x is Iterator<Expression> {
 }
 
 function joinResultType(ops: ReadonlyArray<Expression>): Type {
+  // The string-preservation arm (`docs/STRING_ROADMAP.md`, "`Join` vs.
+  // `StringJoin`"): when EVERY operand is a string, the concatenation is a
+  // string, and `Join` is the variadic string concatenation. The runtime
+  // follows from this type alone — a lazy collection whose declared result
+  // type is `string` is walked once and its characters joined
+  // (`evaluateStringPreservingCollection` in
+  // `boxed-expression/boxed-function.ts`), so there is no `evaluate` handler
+  // to keep in step.
+  // Requiring EVERY operand to be a string is what keeps the rule readable
+  // from the operand kinds; a mixed call falls through to the element-widening
+  // path below and yields a `list<character>`. `character` is a SIBLING of
+  // `string`, not a subtype, so a character operand makes the call mixed.
+  if (ops.length > 0 && ops.every((op) => op.type.matches('string')))
+    return 'string';
   if (ops.some((op) => op.type.matches('record'))) return 'record';
   if (ops.some((op) => op.type.matches('dictionary'))) return 'dictionary';
   if (ops.some((op) => op.type.matches('set'))) return 'set';
@@ -9568,6 +9950,59 @@ function joinResultType(ops: ReadonlyArray<Expression>): Type {
   }
   if (eltTypes.length === 0) return 'list';
   return { kind: 'list', elements: widen(...eltTypes) };
+}
+
+/** Does this static type admit the value `Nothing`?
+ *
+ * `nothing` is a UNIT type here, not a bottom type, so it is admitted only
+ * where it literally appears: the type IS `nothing`, or it is a union with a
+ * `nothing` arm (`RangeOf` is declared `range | nothing`). Testing the whole
+ * union with a subtype check answers `false` — `range | nothing` is not a
+ * subtype of `nothing` — so the arms have to be walked individually, which is
+ * what this does. A nested union is walked recursively; nothing else (a bare
+ * `any`, an `unknown`) counts, because admitting those would attach a
+ * `| nothing` arm to every untyped operand. */
+function typeIsNothingOrAdmitsNothing(t: Type): boolean {
+  if (typeof t === 'string') return t === 'nothing';
+  if (t.kind === 'union')
+    return t.types.some((arm) => typeIsNothingOrAdmitsNothing(arm));
+  return false;
+}
+
+/** The result type of `Slice(value, span)` when — and only when — the span
+ * may be absent; `undefined` otherwise, leaving the declared overload set's
+ * resolved arm in place.
+ *
+ * `Slice(xs, Nothing)` is `Nothing`, so a span whose static type admits
+ * `Nothing` (`RangeOf`'s `range | nothing`) makes the whole call possibly
+ * absent, and the honest result is `T | nothing`. The overload resolver will
+ * not say so on its own: it admits the overlapping operand on trial and picks
+ * the more specific `span: range` arm, reporting the bare `T`.
+ *
+ * Returning `undefined` for a span that statically EXCLUDES `nothing` is
+ * deliberate and load-bearing, not just an optimization: the
+ * string-preservation step requires the node's type to MATCH `string` exactly
+ * (`evaluateStringPreservingCollection` in
+ * `boxed-expression/boxed-function.ts`), so `Slice("abc", 2..3)` must keep
+ * reporting `string`, never `string | nothing`, to evaluate to a string
+ * VALUE. The positional `(value, start, end)` form always selects a window
+ * and is left alone for the same reason. */
+function sliceResultType(
+  ops: ReadonlyArray<Expression>,
+  operandTypes: ReadonlyArray<Type | undefined> | undefined
+): Type | undefined {
+  if (ops.length !== 2) return undefined;
+  const spanType = operandTypes?.[1] ?? ops[1].type.type;
+  if (!typeIsNothingOrAdmitsNothing(spanType)) return undefined;
+
+  // Mirror the two families of arms in the signature: a string operand keeps
+  // the string (`Slice` is kind-preserving), anything else yields a list of
+  // the source's element type.
+  const valueType = operandTypes?.[0] ?? ops[0].type.type;
+  const base: Type = isSubtype(valueType, 'string')
+    ? 'string'
+    : { kind: 'list', elements: collectionElementType(valueType) ?? 'any' };
+  return reduceType({ kind: 'union', types: [base, 'nothing'] });
 }
 
 /**
@@ -9807,6 +10242,30 @@ function spanBounds(
   op: Expression | undefined
 ): [number, number] | null | undefined {
   if (op === undefined) return undefined;
+  // An UNEVALUATED span. `Slice(xs, RangeOf(xs, needle))` reaches the facets
+  // with its second operand still a `RangeOf` CALL, and an eager producer has
+  // no collection handlers of its own, so there are no bounds to read from it
+  // and the window never resolves — the node kept printing as a string while
+  // evaluating to a lazy `Slice` view rather than a string VALUE. Evaluate it
+  // once so the span behind it becomes readable. Gated on the operand being a
+  // function expression whose type does not RULE OUT a span, so a numeric
+  // `(start, end)` operand is never evaluated here (the positional arm reads
+  // it through `integerParam`, which does its own resolution).
+  if (
+    isFunction(op) &&
+    !op.isCollection &&
+    !provablyDisjoint(op.type.type, 'range')
+  )
+    op = op.evaluate();
+  // `Nothing` is an ABSENT span — what `RangeOf` answers when the needle does
+  // not occur — and must never be read as an omitted argument. Falling through
+  // to the positional `(start, end)` arm would default both bounds and answer
+  // the WHOLE collection for a search that found nothing. A canonical
+  // `Slice(xs, Nothing)` folds to `Nothing` outright, so this covers the
+  // operand that only BECAME `Nothing` on the evaluation just above, plus any
+  // structurally constructed node that skipped canonicalization; `null` — "is
+  // a span, bounds unresolvable" — leaves every facet declining.
+  if (isSymbol(op, 'Nothing')) return null;
   if (!op.isCollection) return undefined;
   const n = op.count;
   if (n === undefined || !Number.isFinite(n) || n < 1) return null;
@@ -9846,6 +10305,42 @@ function exactInteger(e: Expression | undefined): number | null {
  * "through the end" reading — yielding an infinite tail whose `count` is
  * `Infinity` and whose iterator streams unboundedly. */
 function sliceBounds(
+  expr: Expression
+): { start: number; end: number } | undefined {
+  // Resolve ONCE per node. Every `Slice` facet reads these bounds, and `at()`
+  // and the iterator read them per ELEMENT, while resolving them can be
+  // arbitrarily expensive: `spanBounds` EVALUATES an unevaluated span operand,
+  // so `Slice(xs, RangeOf(xs, needle))` re-ran the whole subsequence search on
+  // every element access — quadratic in the slice length, and multiplied by
+  // the needle length. Caching also makes the reads COHERENT: an impure span
+  // would otherwise be re-drawn between two element reads of the same view,
+  // and the window would shift mid-iteration.
+  //
+  // Keyed by `_worldVersion`, the same validity signal the collection-facet
+  // memo in `boxed-expression/boxed-function.ts` uses: it moves on assume /
+  // forget, redefinition and configuration changes — everything that can
+  // change what the source collection or the span resolves to. That memo is
+  // private to `BoxedFunction` and covers only the nullary `count`/`isEmpty`/
+  // `isFinite` facets, so it is not reachable for this; a WeakMap keyed by the
+  // node holds the entry for exactly as long as the node itself lives.
+  const cached = SLICE_BOUNDS_MEMO.get(expr);
+  if (cached !== undefined && cached.worldVersion === expr.engine._worldVersion)
+    return cached.bounds;
+  const bounds = computeSliceBounds(expr);
+  SLICE_BOUNDS_MEMO.set(expr, {
+    worldVersion: expr.engine._worldVersion,
+    bounds,
+  });
+  return bounds;
+}
+
+const SLICE_BOUNDS_MEMO = new WeakMap<
+  Expression,
+  { worldVersion: number; bounds: { start: number; end: number } | undefined }
+>();
+
+/** The uncached body of `sliceBounds()`; call `sliceBounds()`, never this. */
+function computeSliceBounds(
   expr: Expression
 ): { start: number; end: number } | undefined {
   if (!isFunction(expr)) return undefined;

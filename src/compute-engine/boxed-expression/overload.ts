@@ -1192,6 +1192,14 @@ export function joinParamAt(
     // bind cannot be constrained at all (the others accept anything there by
     // not having a slot), so decline to infer.
     if (p === undefined) return undefined;
+    // An arm whose parameter is `unknown` (an unannotated multi-clause
+    // parameter, `g(0) = 0; g(n) = n^2` — the second arm is `(unknown) ->
+    // number`) accepts anything at this position too, so the join is
+    // unconstrained. `widen` cannot express that: it treats `unknown` as
+    // "no information" and DROPS it (`widen(0, unknown)` is `0`), which
+    // narrowed a bare `x` in `g(x)` to the literal type `0` and made the
+    // call evaluate to `0` by selecting the `g(0)` clause.
+    if (p === 'unknown') return undefined;
     params.push(p);
   }
   if (params.length === 0) return undefined;

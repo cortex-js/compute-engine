@@ -278,12 +278,19 @@ function isRefutablePipeTarget(f: Expression): boolean {
  *   call is incomplete however it is read) — and the completed count must
  *   fit some arm's arity.
  *
- * The placeholder fills the FIRST parameter slot whose declared type the
- * topic provably satisfies (shifting the written arguments right from that
- * slot): a collection piped into `Take(10)` goes first (`Take(_, 10)`),
- * while one piped into the callback-first `Map(f)` goes second
- * (`Map(f, _)`). When no slot provably fits — an unknown-typed topic — it
- * defaults to first.
+ * The placeholder fills a slot that qualifies twice over: its declared type
+ * is one the topic provably satisfies, AND the written arguments still fit
+ * the slots they are displaced into (those before the slot stay put, those
+ * from it on shift one right). Among the qualifying slots the LAST one wins
+ * — the one that displaces the fewest written arguments, since a stage
+ * missing an argument is most naturally missing its trailing one. So a
+ * collection piped into `Take(10)` goes first (`Take(_, 10)`: slot 1 is
+ * `n: integer`, and `10` fits its shifted slot), one piped into the
+ * callback-first `Map(f)` goes second (`Map(f, _)`), and one piped into
+ * `Fold(f, 10)` goes third (`Fold(f, 10, _)`: the list also fits `initial:
+ * value`, but `10` cannot fit the collection slot it would be pushed into).
+ * When no slot qualifies — an unknown-typed topic that satisfies nothing
+ * provably — it defaults to first.
  *
  * A complete call keeps its existing meaning — `5 |> Max(3)` still applies
  * the value of `Max(3)` — so this sugar only gives meaning to stages that
@@ -336,6 +343,33 @@ function pipeStageWithImplicitTopic(
     }
     return topic.type.matches(p);
   };
+  // …AND whose written arguments still fit the slots they are displaced
+  // into. Without the second half, `xs |> Fold(f, 10)` put the list at slot 1
+  // (`initial: value` — a list is a value) and pushed `10` into the
+  // collection slot, an inert `Fold(f, xs, 10)`; the third slot is the one
+  // where everything fits. A written argument whose type cannot be read yet
+  // (a held, unbound operand reads `unknown`) is taken to fit — the question
+  // is placement, not validation, which the canonical call performs after.
+  const argAccepts = (arg: Expression, param: Type): boolean => {
+    if (arg.type.isUnknown) return true;
+    let p = deepEraseCallbackTypes(param);
+    const vars = freeTypeVariables(p);
+    if (vars.size > 0) {
+      const bindings: Record<string, Type> = Object.create(null);
+      for (const v of vars) bindings[v] = 'any';
+      p = substituteTypeVariables(p, bindings);
+    }
+    return arg.type.matches(p);
+  };
+  //
+  // Among the slots that fit, the LAST one wins — the one that displaces the
+  // fewest written arguments. The natural reading of a stage that is missing
+  // an argument is that the missing one is the TRAILING one; shifting the
+  // written arguments right is only for a topic that belongs first
+  // (`xs |> Take(10)`, where slot 1 is `n: integer` and cannot take a
+  // list). Under the first-fit rule `xs |> Fold(Join, "H;")` chose slot 1
+  // (a string is a collection, so `"H;"` "fit" the collection slot it was
+  // pushed into) and produced an inert `Fold(Join, xs, "H;")`.
   let at = 0;
   placement: for (const a of arms) {
     const params = [
@@ -343,11 +377,25 @@ function pipeStageWithImplicitTopic(
       ...(a.optArgs ?? []).map((p) => p.type),
       ...(a.variadicArg !== undefined ? [a.variadicArg.type] : []),
     ];
-    for (let i = 0; i < params.length && i <= n; i++)
-      if (slotAccepts(params[i])) {
-        at = i;
-        break placement;
-      }
+    for (let i = Math.min(params.length - 1, n); i >= 0; i--) {
+      if (!slotAccepts(params[i])) continue;
+      // The written arguments before `i` stay put; those from `i` on shift
+      // one slot right (a variadic tail absorbs any overflow).
+      const last = params.length - 1;
+      const displacedFit = rhs.ops.every((arg, k) => {
+        const slot = k < i ? k : k + 1;
+        const param =
+          slot <= last
+            ? params[slot]
+            : a.variadicArg !== undefined
+              ? a.variadicArg.type
+              : undefined;
+        return param !== undefined && argAccepts(arg, param);
+      });
+      if (!displacedFit) continue;
+      at = i;
+      break placement;
+    }
   }
 
   const args = [...rhs.ops];
@@ -724,6 +772,163 @@ function binderClauseOperands(
 // U+3000 (ideographic space).
 const UNICODE_WHITESPACE =
   /[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
+
+// True when the whole of `c` — one user-perceived character (grapheme
+// cluster) — is Unicode White_Space. `UNICODE_WHITESPACE` above matches RUNS
+// of whitespace because it is used as a `String.split` separator; the trim
+// operators need the same set as a per-character test, so the code points are
+// shared by construction rather than repeated.
+const UNICODE_WHITESPACE_CHARACTER = new RegExp(
+  `^(?:${UNICODE_WHITESPACE.source})$`
+);
+
+/**
+ * The set of characters that `Trim`/`TrimStart`/`TrimEnd` strip, decoded from
+ * the optional second operand.
+ *
+ * - `null`: no operand was given — the caller uses the default Unicode
+ *   White_Space set (`UNICODE_WHITESPACE_CHARACTER`).
+ * - a `Set`: the characters to strip. A STRING operand means the SET OF ITS
+ *   CHARACTERS, never a literal substring (`Trim("xxhixx", "x")` and
+ *   `Trim("xyhiyx", "xy")` both strip any mix of those characters); a
+ *   collection operand contributes each of its elements' characters.
+ * - `undefined`: the operand is neither text nor a finite collection of text,
+ *   so the caller leaves the expression unevaluated (the house rule for a
+ *   non-string operand of a string operator).
+ */
+function trimCharacterSet(
+  chars: Expression | undefined
+): Set<string> | null | undefined {
+  if (chars === undefined) return null;
+  if (isString(chars) || isCharacter(chars))
+    return new Set(splitGraphemeClusters(chars.string));
+  if (!chars.isCollection || chars.isFiniteCollection !== true)
+    return undefined;
+  const set = new Set<string>();
+  for (const c of chars.each()) {
+    if (!isString(c) && !isCharacter(c)) return undefined;
+    for (const g of splitGraphemeClusters(c.string)) set.add(g);
+  }
+  return set;
+}
+
+/**
+ * `s` with the leading (`start`) and/or trailing (`end`) characters that
+ * belong to `set` removed. Trimming walks GRAPHEME CLUSTERS, so it can never
+ * cut a cluster in half; `set === null` selects the default Unicode
+ * White_Space set.
+ */
+function trimClusters(
+  s: string,
+  set: Set<string> | null,
+  start: boolean,
+  end: boolean
+): string {
+  const cs = splitGraphemeClusters(s);
+  const strip = (c: string): boolean =>
+    set === null ? UNICODE_WHITESPACE_CHARACTER.test(c) : set.has(c);
+  let i = 0;
+  let j = cs.length;
+  if (start) while (i < j && strip(cs[i])) i += 1;
+  if (end) while (j > i && strip(cs[j - 1])) j -= 1;
+  return cs.slice(i, j).join('');
+}
+
+/**
+ * `s` padded to `n` characters by repeating `pad`, with the padding placed at
+ * the start (`atStart`) or the end. The padding is built from `pad`'s own
+ * grapheme clusters, cycled, so the final copy is truncated ON A CHARACTER
+ * BOUNDARY (`PadStart("a", 4, "xy")` is `"xyxa"`). The caller has already
+ * rejected an empty `pad` and a negative or non-integer `n`.
+ *
+ * Note the re-segmentation caveat (design constraint 3 of
+ * `docs/STRING_ROADMAP.md`): the pieces are concatenated once and the RESULT
+ * is segmented afresh, so a pad whose last character combines with `s`'s
+ * first character can yield fewer than `n` characters. That is inherent to
+ * joining text, not a defect.
+ */
+function padClusters(
+  s: string,
+  n: number,
+  pad: string,
+  atStart: boolean
+): string {
+  const cs = splitGraphemeClusters(s);
+  if (cs.length >= n) return s;
+  const ps = splitGraphemeClusters(pad);
+  const fill: string[] = [];
+  for (let i = 0; i < n - cs.length; i += 1) fill.push(ps[i % ps.length]);
+  return atStart ? fill.join('') + s : s + fill.join('');
+}
+
+/**
+ * `a` compared to `b` as NFC Unicode SCALAR sequences, code point by code
+ * point: `-1`, `0` or `1`. This is the character order of
+ * `docs/plans/2026-08-16-string-phase1-character-type.md` (decision D8),
+ * lifted to whole strings, and NOT JS `<` on strings: `<` compares UTF-16
+ * code UNITS, which sorts every astral character (U+10000 and above, encoded
+ * as a surrogate pair starting at U+D800) BELOW U+E000–U+FFFF. The two orders
+ * therefore differ only for an astral character against one in
+ * U+E000–U+FFFF; `<` is left as it is, and `StringCompare` is the operator
+ * that answers the scalar order.
+ */
+function compareScalarSequences(a: number[], b: number[]): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i += 1) {
+    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) return 1;
+  }
+  if (a.length === b.length) return 0;
+  return a.length < b.length ? -1 : 1;
+}
+
+// The grammar `NumberFrom(s)` accepts for a base-10 numeral, per
+// `docs/STRING_ROADMAP.md` ("Missing operations (proposed)" → "Conversions"):
+// an optional sign, then ASCII digits with an optional `.` fraction and an
+// optional `e`/`E` exponent. ASCII digits ONLY — other Unicode decimal digits
+// are rejected, since silently accepting them invites homoglyph confusion.
+//
+// The two sides of the `.` are governed by different rules (user ruling
+// 2026-08-16). The INTEGER part is optional when a fraction is present, so
+// `".5"`, `"-.5"` and `".5e2"` are accepted and mean 0.5, -0.5 and 50 — the
+// leading-zero-less spelling is common in hand-entered data and denotes
+// exactly one number. A TRAILING dot with no fraction digits (`"5."`) is
+// REJECTED: it carries no information the bare `"5"` does not, and accepting
+// it would mean accepting a numeral whose last character is a separator with
+// nothing after it, which is far more often a truncation than an intent.
+//
+// Anchored, so a numeric PREFIX such as `"12abc"` is a rejection, never a
+// partial parse the way `parseFloat` would read it.
+const NUMBER_FROM_DECIMAL =
+  /^[+-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
+
+// An integer numeral for `NumberFrom(s, base)`: an optional sign then
+// alphanumeric digits. Whether each digit belongs to the requested base is
+// decided by `fromDigits`, which reports the first one that does not.
+//
+// A leading `0x`/`0b` is REJECTED (the negative lookahead). `fromDigits`
+// treats those two spellings as a radix PREFIX that OVERRIDES the base it was
+// handed — `fromDigits("0x10", 10)` is 16, not 0 — and here the `base`
+// operand is the only authority on the radix, so a numeral that looks like a
+// prefix cannot be read at all. This also matches the base-less form, which
+// rejects `"0x1f"` outright. The cost is that a numeral such as `"0b1"`,
+// legitimate in base 12 and above, is refused rather than misread; there is
+// no spelling that reads it correctly today, so refusing is the honest
+// answer. Both cases are excluded, since `"0X10"` reads as a prefix to a
+// human even though `fromDigits` only special-cases the lowercase spelling.
+const NUMBER_FROM_BASE_INTEGER = /^[+-]?(?!0[xXbB])[0-9a-zA-Z]+$/;
+
+// The `base` operand of `NumberFrom`/`DigitsFrom` may be written as a STRING
+// (`NumberFrom("101", "2")`). That string is a numeral for the base itself,
+// so it must be read WHOLE: `Number.parseInt` accepts a numeric PREFIX and
+// would silently read `"16abc"` as base 16. Text that is not entirely ASCII
+// digits yields `NaN` here, which is what makes the caller's
+// `unexpected-base` error fire.
+function baseFromString(s: string): number {
+  const text = s.trim();
+  if (!/^[0-9]+$/.test(text)) return NaN;
+  return Number.parseInt(text, 10);
+}
 
 //
 // ─── Random domains ─────────────────────────────────────────────────────────
@@ -2246,7 +2451,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any) -> string',
       evaluate: ([x], { engine: ce }) => {
-        const s = [x.toString()];
+        // A held symbol operand is unbound: name it directly rather than
+        // through its (quoted, raw) serialization.
+        const s = [isSymbol(x) ? x.symbol : x.toString()];
         s.push(''); // Add a newline
 
         if (isString(x)) s.push('string');
@@ -2933,7 +3140,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                   symbolName,
                   canonFn,
                   statementOrigin(ce, args[0], route),
-                  hold
+                  attributes
                 )
               );
             } catch (e) {
@@ -2986,7 +3193,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               name,
               op2,
               statementOrigin(ce, op1, route),
-              hold
+              attributes
             )
           );
         } catch (e) {
@@ -5406,48 +5613,63 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    // N-ary string concatenation. Unlike `String` (which coerces any operand
-    // to its default string representation), `StringJoin` requires every
-    // argument to already be a string — a non-string operand leaves the
-    // expression unevaluated. This mirrors Mathematica's `StringJoin`, which
-    // stays symbolic on non-string arguments. As a convenience, a single
-    // finite collection of strings may be passed instead of the strings as
-    // separate arguments (e.g. `StringJoin(Reverse(Characters(s)))`).
+    // Join the elements of ONE collection of strings/characters into a
+    // string, with `separator` between consecutive elements. This is the
+    // inverse of `StringSplit`: `StringJoin(StringSplit(s, sep), sep) == s`
+    // whenever `sep` occurs in `s` only as a separator. Precedents: Python's
+    // `sep.join(xs)` and Mathematica's `StringRiffle`.
+    //
+    // The VARIADIC form (`StringJoin("ab", "cd")` for `"abcd"`) was REMOVED
+    // in Phase 2 of the strings work: once a string is itself a collection of
+    // characters, "a collection and a separator" and "two strings to
+    // concatenate" are the same shape and cannot both be supported. Variadic
+    // concatenation is `Join(a, b, …)`, or `"\(a)\(b)"` interpolation in
+    // Epsil. A two-string call is therefore still well-typed and means the
+    // separator form: `StringJoin("abc", "-")` is `"a-b-c"`, exactly as
+    // Python's `"-".join("abc")` is.
+    //
+    // Unlike `String` (which coerces any operand to its default string
+    // representation), `StringJoin` is strict: a non-string, non-character
+    // ELEMENT leaves the expression unevaluated, as does a non-finite
+    // collection (there is nothing to join). See `docs/STRING_ROADMAP.md`,
+    // "`Join` vs. `StringJoin`".
     StringJoin: {
       description: [
-        'Concatenate strings. Pass the strings as separate arguments, or a ' +
-          'single finite collection of strings. A non-string argument (or ' +
-          'collection element) leaves the expression unevaluated.',
+        'StringJoin(xs): join the elements of the finite collection `xs` ' +
+          '(strings or characters) into a string.',
+        'StringJoin(xs, sep): the same, with `sep` between consecutive ' +
+          'elements. The inverse of StringSplit. An empty collection joins ' +
+          'to "", a one-element collection to that element. A non-text ' +
+          'element, or a non-finite collection, leaves the expression ' +
+          'unevaluated. For variadic concatenation use Join(a, b, …) or ' +
+          'string interpolation.',
       ],
       // The element type admits `character` as well as `string`: the elements
-      // of a string, and of `Characters(s)`, are characters, so
-      // `StringJoin(Characters(s))` must type-check. (The variadic form is
-      // unchanged; `Join` takes over variadic concatenation in Phase 2.)
+      // of a string, and of `Characters(s)`, are characters, so both
+      // `StringJoin(Characters(s))` and `StringJoin(s)` must type-check.
       signature:
-        '((string | character | collection<string | character>)*) -> string',
-      evaluate: (ops, { engine }) => {
-        // A single collection argument (e.g. `StringJoin(Reverse(Characters(s)))`):
-        // join its elements. A lazy collection (e.g. a `Map` result) is
-        // materialized via `.each()`; a non-finite collection stays symbolic.
-        let items = ops;
-        if (
-          ops.length === 1 &&
-          !isString(ops[0]) &&
-          !isCharacter(ops[0]) &&
-          ops[0].isCollection
-        ) {
-          if (ops[0].isFiniteCollection !== true) return undefined;
-          items = [...ops[0].each()];
+        '(collection<string | character>, separator: string?) -> string',
+      evaluate: ([xs, separator], { engine }) => {
+        if (xs === undefined) return undefined;
+        let sep = '';
+        if (separator !== undefined) {
+          if (!isString(separator)) return undefined;
+          sep = separator.string;
         }
+        // A lazy collection (e.g. a `Map` result) is materialized via
+        // `.each()`; a non-finite one stays symbolic. A string subject is a
+        // collection of its own characters, so it needs no special case.
+        if (!xs.isCollection || xs.isFiniteCollection !== true)
+          return undefined;
         const parts: string[] = [];
-        for (const op of items) {
+        for (const op of xs.each()) {
           // A CHARACTER contributes its content just as a string does — the
           // elements of a string, and of `Characters(s)`, are characters, so
           // `StringJoin(Characters(s))` must round-trip.
           if (!isString(op) && !isCharacter(op)) return undefined;
           parts.push(op.string);
         }
-        return engine.string(parts.join(''));
+        return engine.string(parts.join(sep));
       },
     },
 
@@ -5581,6 +5803,313 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    // Replace occurrences of `target` in `s` with `replacement`. Occurrences
+    // are found by CHARACTER-WISE matching over grapheme clusters — the same
+    // semantics as sequence search — so a match can never start or end inside
+    // a cluster. The scan walks the ORIGINAL subject's character sequence and
+    // skips past each match's span, so a replacement's own content is never
+    // re-matched: `StringReplace("aa", "a", "aa")` is `"aaaa"`, not an
+    // infinite expansion. Matches are non-overlapping, taken left to right.
+    // Re-segmentation happens ONCE, when the pieces are joined to build the
+    // result (design constraint 3 of `docs/STRING_ROADMAP.md`), so a
+    // replacement whose edge combines with a neighbouring character yields
+    // one merged cluster.
+    //
+    // Deliberately string-only: splicing forces join + re-segmentation, which
+    // is where strings genuinely diverge from lists. A non-string operand
+    // leaves the expression unevaluated, like every other operand here.
+    StringReplace: {
+      description: [
+        'StringReplace(s, target, replacement): replace every ' +
+          'non-overlapping occurrence of `target` in `s`, scanning left to ' +
+          'right over whole characters.',
+        'StringReplace(s, target, replacement, count): replace at most ' +
+          '`count` occurrences, from the left. An empty `target` is an ' +
+          'error (the "insert at every boundary" behavior is deliberately ' +
+          'not inherited); an empty `replacement` means deletion. `count` ' +
+          'must be a positive integer.',
+      ],
+      signature: '(string, string, string, count: integer?) -> string',
+      evaluate: ([s, target, replacement, count], { engine: ce }) => {
+        if (!isString(s) || !isString(target) || !isString(replacement))
+          return undefined;
+        if (target.string === '')
+          return ce.error(
+            'unexpected-argument',
+            'StringReplace: the target must not be empty'
+          );
+        let limit = Infinity;
+        if (count !== undefined) {
+          const n = asSmallInteger(count);
+          if (n === null || n < 1)
+            return ce.error(
+              'unexpected-argument',
+              'StringReplace: count must be a positive integer'
+            );
+          limit = n;
+        }
+        const subject = splitGraphemeClusters(s.string);
+        const needle = splitGraphemeClusters(target.string);
+        const out: string[] = [];
+        let i = 0;
+        let done = 0;
+        while (i < subject.length) {
+          if (
+            done < limit &&
+            i + needle.length <= subject.length &&
+            needle.every((c, k) => subject[i + k] === c)
+          ) {
+            out.push(replacement.string);
+            i += needle.length;
+            done += 1;
+          } else {
+            out.push(subject[i]);
+            i += 1;
+          }
+        }
+        return ce.string(out.join(''));
+      },
+    },
+
+    // Strip characters from both ends of a string. The default set is the
+    // same Unicode White_Space set `StringSplit` uses (`UNICODE_WHITESPACE`),
+    // so "whitespace" means the same thing across the string operators. The
+    // optional `chars` argument is a SET of characters to strip, never a
+    // literal substring: a string argument contributes each of ITS
+    // characters. Stripping walks grapheme clusters, so it can never cut a
+    // cluster in half.
+    Trim: {
+      description: [
+        'Trim(s): remove leading and trailing whitespace (the Unicode ' +
+          'White_Space characters).',
+        'Trim(s, chars): remove leading and trailing characters that belong ' +
+          'to `chars` — a SET of characters, given as a character, a string ' +
+          "(meaning the set of that string's characters) or a collection " +
+          'whose elements each contribute their own characters.',
+      ],
+      signature:
+        '(string, chars: (string | character | collection<string | character>)?) -> string',
+      evaluate: ([s, chars], { engine }) => {
+        if (!isString(s)) return undefined;
+        const set = trimCharacterSet(chars);
+        if (set === undefined) return undefined;
+        return engine.string(trimClusters(s.string, set, true, true));
+      },
+    },
+
+    TrimStart: {
+      description: [
+        'TrimStart(s): remove leading whitespace (the Unicode White_Space ' +
+          'characters).',
+        'TrimStart(s, chars): remove leading characters that belong to ' +
+          '`chars` — a SET of characters, as for Trim.',
+      ],
+      signature:
+        '(string, chars: (string | character | collection<string | character>)?) -> string',
+      evaluate: ([s, chars], { engine }) => {
+        if (!isString(s)) return undefined;
+        const set = trimCharacterSet(chars);
+        if (set === undefined) return undefined;
+        return engine.string(trimClusters(s.string, set, true, false));
+      },
+    },
+
+    TrimEnd: {
+      description: [
+        'TrimEnd(s): remove trailing whitespace (the Unicode White_Space ' +
+          'characters).',
+        'TrimEnd(s, chars): remove trailing characters that belong to ' +
+          '`chars` — a SET of characters, as for Trim.',
+      ],
+      signature:
+        '(string, chars: (string | character | collection<string | character>)?) -> string',
+      evaluate: ([s, chars], { engine }) => {
+        if (!isString(s)) return undefined;
+        const set = trimCharacterSet(chars);
+        if (set === undefined) return undefined;
+        return engine.string(trimClusters(s.string, set, false, true));
+      },
+    },
+
+    // `n` copies of `s`, concatenated and re-segmented once (design
+    // constraint 3 of `docs/STRING_ROADMAP.md`), so a string whose last
+    // character combines with its first can yield fewer characters than
+    // `n * Length(s)`. The name is `StringRepeat` because `Repeat` is taken:
+    // that is the infinite lazy collection constructor.
+    StringRepeat: {
+      description: [
+        'StringRepeat(s, n): `n` copies of the string `s`, concatenated. ' +
+          'StringRepeat(s, 0) is "". A negative or non-integer `n` is an ' +
+          'error.',
+      ],
+      signature: '(string, n: integer) -> string',
+      evaluate: ([s, n], { engine: ce }) => {
+        if (!isString(s)) return undefined;
+        const count = asSmallInteger(n);
+        if (count === null || count < 0)
+          return ce.error(
+            'unexpected-argument',
+            'StringRepeat: n must be a non-negative integer'
+          );
+        return ce.string(s.string.repeat(count));
+      },
+    },
+
+    // Pad a string to `n` CHARACTERS (not code units, not display columns —
+    // aligning to terminal width is an explicit non-goal). A string that
+    // already has `n` or more characters is returned unchanged. A
+    // multi-character `pad` repeats and its final copy is truncated on a
+    // character boundary, so `PadStart("a", 4, "xy")` is `"xyxa"` — JS
+    // `padStart` semantics lifted from code units to characters.
+    PadStart: {
+      description: [
+        'PadStart(s, n, pad=" "): `s` padded at the START to `n` ' +
+          'characters by repeating `pad` (its final copy truncated on a ' +
+          'character boundary). Returned unchanged when `s` already has `n` ' +
+          'or more characters. `n` must be a non-negative integer; an empty ' +
+          '`pad` is an error; a non-string `pad` leaves the expression ' +
+          'unevaluated.',
+      ],
+      signature: '(string, n: integer, pad: string?) -> string',
+      evaluate: ([s, n, pad], { engine: ce }) => {
+        if (!isString(s)) return undefined;
+        const width = asSmallInteger(n);
+        if (width === null || width < 0)
+          return ce.error(
+            'unexpected-argument',
+            'PadStart: n must be a non-negative integer'
+          );
+        if (pad !== undefined && !isString(pad)) return undefined;
+        const fill = pad === undefined ? ' ' : pad.string;
+        if (fill === '')
+          return ce.error(
+            'unexpected-argument',
+            'PadStart: the padding must not be empty'
+          );
+        return ce.string(padClusters(s.string, width, fill, true));
+      },
+    },
+
+    PadEnd: {
+      description: [
+        'PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by ' +
+          'repeating `pad` (its final copy truncated on a character ' +
+          'boundary). Returned unchanged when `s` already has `n` or more ' +
+          'characters. `n` must be a non-negative integer; an empty `pad` ' +
+          'is an error; a non-string `pad` leaves the expression ' +
+          'unevaluated.',
+      ],
+      signature: '(string, n: integer, pad: string?) -> string',
+      evaluate: ([s, n, pad], { engine: ce }) => {
+        if (!isString(s)) return undefined;
+        const width = asSmallInteger(n);
+        if (width === null || width < 0)
+          return ce.error(
+            'unexpected-argument',
+            'PadEnd: n must be a non-negative integer'
+          );
+        if (pad !== undefined && !isString(pad)) return undefined;
+        const fill = pad === undefined ? ' ' : pad.string;
+        if (fill === '')
+          return ce.error(
+            'unexpected-argument',
+            'PadEnd: the padding must not be empty'
+          );
+        return ce.string(padClusters(s.string, width, fill, false));
+      },
+    },
+
+    // Unicode default (locale-independent) case mapping of the WHOLE string.
+    // These are not per-character maps: full-string case mapping is
+    // contextual (a final Greek sigma uppercases and lowercases differently
+    // from a medial one) and can change the character count (`"ß"`
+    // uppercases to `"SS"`). No locale parameter in v1 — the Turkish
+    // dotless-i problem is documented, not solved — and the argument tail is
+    // deliberately left free so a future `locale` appends without breaking
+    // any call (`docs/STRING_ROADMAP.md`, "Shape rules adopted now", rule 1).
+    ToUpperCase: {
+      description: [
+        'ToUpperCase(s): the string `s` mapped to upper case using the ' +
+          'Unicode default (locale-independent) mappings. The character ' +
+          'count can change ("ß" uppercases to "SS").',
+      ],
+      signature: '(string) -> string',
+      evaluate: ([s], { engine }) => {
+        if (!isString(s)) return undefined;
+        return engine.string(s.string.toUpperCase());
+      },
+    },
+
+    ToLowerCase: {
+      description: [
+        'ToLowerCase(s): the string `s` mapped to lower case using the ' +
+          'Unicode default (locale-independent) mappings.',
+      ],
+      signature: '(string) -> string',
+      evaluate: ([s], { engine }) => {
+        if (!isString(s)) return undefined;
+        return engine.string(s.string.toLowerCase());
+      },
+    },
+
+    // Case folding — the correct primitive for case-insensitive comparison
+    // (`CaseFold(a) == CaseFold(b)`), rather than comparing `ToLowerCase`
+    // results.
+    //
+    // V1 APPROXIMATION, and what it deviates from. JS exposes no case-folding
+    // API, so this is `toUpperCase()` then `toLowerCase()`: the round trip
+    // through upper case is what collapses the pairs a single `toLowerCase()`
+    // leaves apart (`"ß"` → `"SS"` → `"ss"`, matching a literal `"ss"`).
+    // Lower-casing `"Σ"` in final position yields the final sigma `"ς"`
+    // (U+03C2), which is a DIFFERENT code point from the medial `"σ"`
+    // (U+03C3), so the final sigma is mapped back to the medial form — that
+    // is exactly what makes `CaseFold("ΟΔΟΣ") == CaseFold("οδοσ")` hold.
+    // Against UAX #44 `CaseFolding.txt` this still differs for the Cherokee
+    // block (whose full folding is to UPPER case, not lower) and for the
+    // Turkic and Lithuanian special cases (which are locale-tailored
+    // foldings the default mappings do not apply). Those deviations are
+    // accepted for v1; a full folding table would be the fix.
+    CaseFold: {
+      description: [
+        'CaseFold(s): a case-folded form of `s`, for case-insensitive ' +
+          'comparison — `CaseFold(a) == CaseFold(b)` tests equality ' +
+          'ignoring case. An approximation of Unicode full case folding.',
+      ],
+      signature: '(string) -> string',
+      evaluate: ([s], { engine }) => {
+        if (!isString(s)) return undefined;
+        return engine.string(
+          s.string
+            .toUpperCase()
+            .toLowerCase()
+            // GREEK SMALL LETTER FINAL SIGMA → GREEK SMALL LETTER SIGMA.
+            .replace(/ς/g, 'σ')
+        );
+      },
+    },
+
+    // Three-valued comparison of two strings under the engine's default
+    // order: their NFC Unicode SCALAR sequences, compared code point by code
+    // point (see `compareScalarSequences`). This is a comparator primitive
+    // for user-written sorts, and the natural future home of an optional
+    // `collation` argument — which is why the argument tail is left free
+    // (`docs/STRING_ROADMAP.md`, "Shape rules adopted now", rule 1). The
+    // results are exact integers.
+    StringCompare: {
+      description: [
+        'StringCompare(a, b): -1 when `a` sorts before `b`, 0 when they are ' +
+          'equal, 1 when `a` sorts after `b`. The order compares Unicode ' +
+          'scalar sequences code point by code point (NOT UTF-16 code ' +
+          'units, which would sort astral characters below U+E000..U+FFFF).',
+      ],
+      signature: '(string, string) -> integer',
+      evaluate: ([a, b], { engine }) => {
+        if (!isString(a) || !isString(b)) return undefined;
+        return engine.number(
+          compareScalarSequences(a.unicodeScalars, b.unicodeScalars)
+        );
+      },
+    },
     // Converts arguments interpreted in a specified format to a string.
     StringFrom: {
       description:
@@ -5780,7 +6309,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // integer operand — so `DigitsFrom("101", 2)` parsed "101" in base TEN
         // and answered 101 instead of 5.
         const base = isString(op2)
-          ? Number.parseInt(op2.string.trim(), 10)
+          ? baseFromString(op2.string)
           : (asSmallInteger(op2) ?? NaN);
         if (!Number.isInteger(base) || base < 2 || base > 36) {
           // An operand that resolves to no number at all (a free symbol) is
@@ -5794,6 +6323,95 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (rest) return ce.error(['unexpected-digit', rest[0]], rest);
 
         return ce.number(value);
+      },
+    },
+
+    // Parse a string as a number, following the house `XFrom` conversion
+    // convention (`DigitsFrom`, `CharacterFrom`, …). `DigitsFrom` is
+    // integer-only; this is the general one.
+    //
+    // The accepted grammar is fixed by `docs/STRING_ROADMAP.md`
+    // ("Conversions") so implementations cannot drift: optional leading and
+    // trailing Unicode White_Space, an optional sign, then either a decimal
+    // numeral (ASCII digits with an optional `.` fraction and an optional
+    // `e`/`E` exponent; the integer part may be omitted when a fraction is
+    // present, so `".5"` reads as 0.5, but a trailing dot with no fraction
+    // digits — `"5."` — is a reject; see `NUMBER_FROM_DECIMAL`) or one of the
+    // exact spellings `oo`, `+oo`, `-oo`, `NaN`. Anything else, INCLUDING the empty
+    // string, is an ERROR value and never NaN: `NaN` is a legitimate parse
+    // RESULT for the literal `"NaN"`, so it cannot double as the failure
+    // signal. `"1/3"` is not accepted (use `DigitsFrom` or arithmetic).
+    //
+    // Exactness follows the engine's evaluate/N contract. A numeral is boxed
+    // through the MathJSON number-string route (`{ num: … }`) — the same
+    // route the LaTeX parser's numbers take — so `NumberFrom(t)` and the
+    // literal `t` are the identical value: an integer numeral becomes an
+    // exact integer of arbitrary size, and a fractional or exponent numeral
+    // becomes a decimal that keeps every digit the engine's precision can
+    // hold. Never `parseFloat`, which accepts a numeric PREFIX and would read
+    // `"12abc"` as 12.
+    NumberFrom: {
+      description: [
+        'NumberFrom(s): the number the string `s` denotes — optional ' +
+          'surrounding whitespace, an optional sign, then ASCII digits with ' +
+          'an optional "." fraction and an optional e/E exponent, or one of ' +
+          '"oo", "+oo", "-oo", "NaN". The integer part may be omitted before ' +
+          'a fraction (".5" is 0.5); a trailing "." with no fraction digits ' +
+          '("5.") is not accepted. Any other text, including "", is an ' +
+          'error value (never NaN).',
+        'NumberFrom(s, base): the integer `s` denotes in `base` (2 to 36); ' +
+          'only integer numerals are accepted.',
+      ],
+      signature: '(string, base: (string|integer)?) -> number',
+      evaluate: ([s, baseArg], { engine: ce }) => {
+        if (!isString(s)) return undefined;
+        const invalid = (): Expression =>
+          ce.error(['invalid-number', s.string], s.toString());
+
+        // Unicode White_Space is allowed around the numeral, but nowhere
+        // inside it — hence anchored trimming with the shared set rather than
+        // `String.trim()`, whose notion of whitespace is the host's.
+        const text = trimClusters(s.string, null, true, true);
+
+        // Base other than 10: integer numerals only, `DigitsFrom` semantics.
+        if (baseArg !== undefined && sym(baseArg) !== 'Nothing') {
+          const base = isString(baseArg)
+            ? baseFromString(baseArg.string)
+            : (asSmallInteger(baseArg) ?? NaN);
+          if (!Number.isInteger(base) || base < 2 || base > 36) {
+            // An operand that resolves to no number at all (a free symbol) is
+            // reported as written, since `NaN` names nothing the reader gave.
+            const shown = Number.isNaN(base) ? baseArg.toString() : `${base}`;
+            return ce.error(['unexpected-base', shown], baseArg.toString());
+          }
+          if (!NUMBER_FROM_BASE_INTEGER.test(text)) return invalid();
+          const [, rest] = fromDigits(text, base);
+          // `fromDigits` reports the unconsumed tail; the same code
+          // `DigitsFrom` uses names the offending digit.
+          if (rest) return ce.error(['unexpected-digit', rest[0]], rest);
+          // The VALUE `fromDigits` returns is discarded: it accumulates in a
+          // float (`value = value * base + k`), so a numeral longer than 53
+          // bits comes back rounded, which contradicts the exactness this
+          // operator documents. An empty tail proves every character is a
+          // digit of `base`, so the numeral is re-read here as a BigInt.
+          // `parseInt(c, 36)` is the digit value of a single already-validated
+          // character. (`fromDigits` itself is left alone — `DigitsFrom` keeps
+          // its `-> integer` machine-number behavior.)
+          const negative = text.startsWith('-');
+          const digits = /^[+-]/.test(text) ? text.slice(1) : text;
+          const radix = BigInt(base);
+          let magnitude = 0n;
+          for (const c of digits)
+            magnitude = magnitude * radix + BigInt(Number.parseInt(c, 36));
+          return ce.number(negative ? -magnitude : magnitude);
+        }
+
+        if (text === 'NaN') return ce.NaN;
+        if (text === 'oo' || text === '+oo') return ce.PositiveInfinity;
+        if (text === '-oo') return ce.NegativeInfinity;
+
+        if (!NUMBER_FROM_DECIMAL.test(text)) return invalid();
+        return ce.box({ num: text });
       },
     },
 
