@@ -56,6 +56,38 @@
   accept the string or re-project it with `Characters(...)`. This closes the
   last of the Phase-1 string-arm deferrals.
 
+- **The chunking and combinatorics operators return INNER STRINGS for a string
+  source**, both as the static type and as the runtime value: `Chunk`,
+  `Partition` (chunk, sliding-window and predicate forms), `ChunkBy`,
+  `SlidingWindow`, `Permutations` and `Combinations` now report
+  `list<string>` instead of `list<list<character>>`. Each inner element is a
+  contiguous run — or a reordering, or a subset — of the source's own
+  characters, which is the same condition under which `Reverse`, `Take` and
+  `RandomShuffle` already preserve the string kind.
+
+  ```epsil
+  Chunk("abcdef", 2)          // ➔ ["abc", "def"]     (was [["a","b","c"], …])
+  Partition("abcd", 2)        // ➔ ["ab", "cd"]
+  SlidingWindow("abcd", 2)    // ➔ ["ab", "bc", "cd"]
+  Permutations("ab")          // ➔ ["ab", "ba"]
+  Combinations("abc", 2)      // ➔ ["ab", "ac", "bc"]
+  ```
+
+  A group that comes out empty is an empty STRING, so `Chunk` — which always
+  reshapes to exactly `k` groups — answers `Chunk("abc", 5)` with
+  `["a", "b", "c", "", ""]`. `Partition`'s DISPLAYED signature is unchanged
+  (`list<list<T>>`): its string result comes from a `type` handler rather than
+  a leading string arm, because its second parameter is a contextual
+  `callback` slot and a second arm carrying that slot would make the Design-D
+  parameter stamp ambiguous, costing `Partition(xs, n => n < 3)` the `integer`
+  annotation on `n`.
+
+  Code that consumed the inner lists must either accept the strings or
+  re-project them with `Characters(...)`. `Tally` is deliberately UNCHANGED
+  and still yields `character` values: its first component holds the source's
+  distinct *elements*, each paired with a count, not runs of them, so
+  `Tally("banana")` stays `(["b","a","n"], [1,3,2])`.
+
 ### New Features
 
 - **`mode: 'strict'` is now in force at every binding boundary.** Under the
@@ -538,6 +570,23 @@
   level down. See the "Hold functions" section of the Epsil control-flow guide.
 
 ### Issues Resolved
+
+- **Re-declaring a conforming object type in a later cell now re-runs its
+  conformances.** A protocol property can be satisfied by a stored field of the
+  same name on a conforming object type, and that verdict was taken against the
+  layout the type had when the conformance was registered. Re-running
+  `type P = object{…}` with different fields — which the notebook pattern
+  allows — left every such verdict standing: an accessor synthesized for a field
+  the new declaration dropped kept answering, a field it added got none, and a
+  RETYPED field delivered a value of the new type through a property still
+  statically typed as the old one (`readonly a: integer` reading `"s"`). A
+  redefinition now re-settles every conformance edge exactly as replacing a
+  protocol already did, and leaves an unsatisfiable edge pending with a warning
+  that says what moved. Objects constructed earlier are unaffected — they keep
+  the layout they were built with, so their own fields still read and write —
+  but asking one for a protocol property its pinned layout cannot satisfy is now
+  refused with `protocol-implementation-missing` instead of quietly evaluating
+  to the unevaluated call.
 
 - **`Reduce` under `.N()` no longer errors when the reducer's accumulator turns
   complex mid-fold.** `["Reduce", [1, 2, 3], ["Function", z² + c, z, k], 0]`

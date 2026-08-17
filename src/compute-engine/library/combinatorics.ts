@@ -14,6 +14,7 @@ import {
   enumerableFromAllSources,
   enumerableFromSource,
 } from '../collection-utils.js';
+import { innerRun, resolveTextSource } from './collections.js';
 
 /**
  * Above this many decimal digits, an exact combinatorial result (Fibonacci,
@@ -429,7 +430,16 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return all permutations of length k (default full length) of a collection.',
       keywords: ['nPr'],
-      signature: '(collection, integer?) -> list<list>',
+      // The LEADING arm is the string rule: an arrangement of a string's own
+      // characters is itself a string, so `Permutations("ab")` is
+      // `["ab","ba"]` rather than `[["a","b"],["b","a"]]` (ruling D9(b),
+      // 2026-08-16; see `innerRun` in `library/collections.ts`). Spelled as a
+      // BOUNDED type variable (`S where S: string`), never the ground type
+      // `string`: an `unknown`- or `any`-typed operand refutes no arm, so a
+      // ground `string` parameter would win most-specific-wins on every
+      // untyped operand.
+      signature:
+        '((S, integer?) -> list<string> where S: string) & ((collection, integer?) -> list<list>)',
       // A lazy indexed collection (like `CartesianProduct`/`PowerSet`): the
       // result has `P(n, k)` elements — factorially many — so it is NEVER
       // materialized up front. `.count` is the closed form `n·(n-1)···(n-k+1)`
@@ -469,7 +479,15 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Combinations: {
       description: 'Return all k-element combinations of a collection.',
       wikidata: 'Q193606',
-      signature: '(collection, integer) -> list<list>',
+      // The LEADING arm is the string rule: a combination of a string's own
+      // characters is itself a string, so `Combinations("abc", 2)` is
+      // `["ab","ac","bc"]` (ruling D9(b), 2026-08-16; see `innerRun` in
+      // `library/collections.ts`). Spelled as a BOUNDED type variable (`S
+      // where S: string`), never the ground type `string`: an `unknown`- or
+      // `any`-typed operand refutes no arm, so a ground `string` parameter
+      // would win most-specific-wins on every untyped operand.
+      signature:
+        '((S, integer) -> list<string> where S: string) & ((collection, integer) -> list<list>)',
       // Lazy indexed collection: `C(n, k)` elements, never materialized up
       // front. `.count` is the closed form `P(n, k) / k!`; elements stream from
       // `iterator`, and `at(i)` yields only the first `i` combinations (after
@@ -727,13 +745,24 @@ function combinationsCount(expr: Expression): number | undefined {
   return Number(c);
 }
 
-/** Stream the length-`k` permutations of a (finite) collection as `List`s, in
- * the same lexicographic-by-removal order as the former eager evaluator. */
+/** Stream the length-`k` permutations of a (finite) collection, in the same
+ * lexicographic-by-removal order as the former eager evaluator. Each
+ * arrangement is emitted through `innerRun`, so it is a `List` for a general
+ * collection but a STRING over a string source (`Permutations("ab")` is
+ * `["ab","ba"]`, ruling D9(b), 2026-08-16). Rejoining an arrangement's grapheme
+ * clusters re-runs segmentation and two adjacent clusters can merge, but only
+ * when the source itself contained a lone combining mark — the only way a
+ * cluster can begin with a character that attaches to what precedes it
+ * (`docs/STRING_ROADMAP.md`, design constraint 3). */
 function* permutationsIterator(
   expr: Expression
 ): Generator<Expression, undefined, any> {
   if (!isFunction(expr)) return;
-  const xs = expr.op1;
+  // `Permutations` is lazy-only, so this iterator sees the RAW operand: a
+  // symbol holding a string, or a string-valued application, is not a string
+  // literal and `innerRun` would emit LISTS of characters. Resolve once, here
+  // (see `resolveTextSource` in `library/collections.ts`).
+  const xs = resolveTextSource(expr.op1);
   const ce = expr.engine;
   const kExpr = expr.ops[1];
   // P(n, 0) = 1: the single empty arrangement — yield it without touching the
@@ -743,7 +772,7 @@ function* permutationsIterator(
     const k0 = toIntegerOperand(kExpr);
     if (k0 === null || k0 < 0) return;
     if (k0 === 0) {
-      yield ce.function('List', []);
+      yield innerRun(ce, xs, []);
       return;
     }
   }
@@ -766,16 +795,26 @@ function* permutationsIterator(
       yield* permute([...prefix, item], next);
     }
   }
-  for (const perm of permute([], all)) yield ce.function('List', perm);
+  for (const perm of permute([], all)) yield innerRun(ce, xs, perm);
 }
 
-/** Stream the `k`-element combinations of a (finite) collection as `List`s, in
- * ascending-index order (same as the former eager evaluator). */
+/** Stream the `k`-element combinations of a (finite) collection, in
+ * ascending-index order (same as the former eager evaluator). Each combination
+ * is emitted through `innerRun`, so it is a `List` for a general collection but
+ * a STRING over a string source (`Combinations("abc", 2)` is
+ * `["ab","ac","bc"]`, ruling D9(b), 2026-08-16). Rejoining a combination's
+ * grapheme clusters re-runs segmentation and two adjacent clusters can merge,
+ * but only when the source itself contained a lone combining mark — the only
+ * way a cluster can begin with a character that attaches to what precedes it
+ * (`docs/STRING_ROADMAP.md`, design constraint 3). */
 function* combinationsIterator(
   expr: Expression
 ): Generator<Expression, undefined, any> {
   if (!isFunction(expr)) return;
-  const xs = expr.op1;
+  // `Combinations` is lazy-only, so this iterator sees the RAW operand; resolve
+  // it once so a `string`-holding symbol or a string-valued application emits
+  // inner STRINGS (see `resolveTextSource` in `library/collections.ts`).
+  const xs = resolveTextSource(expr.op1);
   const ce = expr.engine;
   const kExpr = expr.ops[1];
   // C(n, 0) = 1: the single empty combination — yield it without touching the
@@ -783,7 +822,7 @@ function* combinationsIterator(
   const k0 = kExpr ? toIntegerOperand(kExpr) : null;
   if (k0 === null || k0 < 0) return;
   if (k0 === 0) {
-    yield ce.function('List', []);
+    yield innerRun(ce, xs, []);
     return;
   }
   if (!xs.isFiniteCollection) return;
@@ -803,7 +842,7 @@ function* combinationsIterator(
       yield* combine(i + 1, [...combo, all[i]]);
     }
   }
-  for (const combo of combine(0, [])) yield ce.function('List', combo);
+  for (const combo of combine(0, [])) yield innerRun(ce, xs, combo);
 }
 
 /**

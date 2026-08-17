@@ -21,12 +21,15 @@ import {
   isEnumerableSource,
   isFiniteBroadcastParticipant,
   isPossiblyCollectionTyped,
+  isTextAtom,
   isTuple,
   lazyBroadcastMap,
   MAX_SIZE_EAGER_COLLECTION,
   typeCouldBeCollection,
   windowedCollectionOps,
+  type WindowedParams,
 } from '../collection-utils.js';
+import type { CollectionHandlers } from '../types-definitions.js';
 import { callbackArityError, type CallbackSupply } from './callback-arity.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
@@ -166,6 +169,125 @@ export function joinCharacters(
     else return undefined;
   }
   return ce.string(parts.join(''));
+}
+
+/**
+ * The source operand as an actual string node when it is text, otherwise the
+ * operand unchanged — the form {@link innerRun} needs.
+ *
+ * EAGER handlers never need this: `evaluate` receives operands already
+ * evaluated, so a string source arrives as a `BoxedString`. The LAZY handlers
+ * (`collection.at`, `collection.iterator`) receive the RAW operand instead, and
+ * a symbol holding a string (`s := "abcd"`) or a string-valued application
+ * (`Join("ab","cd")`) is not a `BoxedString` node — so a bare `isString` test
+ * fails there and the same operator emits inner LISTS on the lazy route while
+ * emitting inner STRINGS on the eager one. Since the eager/lazy split is
+ * decided by the source's LENGTH (`MAX_SIZE_EAGER_COLLECTION`), that made the
+ * element kind depend on how long the string was.
+ *
+ * `isTextAtom` decides text-ness from the static type and the symbol's value
+ * binding, so the `evaluate()` hop only runs for a source that is text but not
+ * yet a literal; a general collection is returned untouched and never
+ * evaluated. Resolve ONCE per lazy view and reuse the result — do not call this
+ * per emitted element.
+ */
+export function resolveTextSource(source: Expression): Expression {
+  if (isString(source) || !isTextAtom(source)) return source;
+  const value = source.evaluate();
+  return isString(value) ? value : source;
+}
+
+/**
+ * Wrap ONE inner run of source elements — a chunk, a window, a group, a
+ * permutation, a combination — as a single element of the result.
+ *
+ * For a general collection that element is a `List`. For a STRING source it is
+ * a STRING: a run of a string's characters is itself a string, so
+ * `Partition("abcdef", 2)` is `["ab","cd","ef"]` rather than `[["a","b"],…]`
+ * (ruling D9(b), 2026-08-16; `docs/plans/2026-08-16-string-phase2-join-search-ops.md`).
+ * Every operator that uses this declares a matching leading string arm in its
+ * signature, so the declared result type and the emitted elements agree.
+ *
+ * RE-SEGMENTATION CAVEAT: joining whole grapheme clusters back into a string
+ * re-runs segmentation, and two adjacent clusters can merge into one — but
+ * only when the SOURCE itself contained a LONE COMBINING MARK, since that is
+ * the only way a cluster can begin with a character that attaches to whatever
+ * precedes it. For a well-formed source the character count of each inner run
+ * is preserved (`docs/STRING_ROADMAP.md`, design constraint 3).
+ *
+ * Falls back to a `List` if the run holds anything that is not text, so a
+ * handler never fabricates a string out of elements it did not understand;
+ * that cannot happen for a string source, whose elements are all characters.
+ */
+export function innerRun(
+  ce: ComputeEngine,
+  source: Expression,
+  run: readonly Expression[]
+): Expression {
+  if (isString(source)) {
+    const joined = joinCharacters(ce, run);
+    if (joined !== undefined) return joined;
+  }
+  return ce.function('List', run as Expression[]);
+}
+
+/**
+ * {@link windowedCollectionOps} with the string rule applied to the emitted
+ * windows: over a STRING source each window comes back as a string rather than
+ * as a `List` of characters, matching the leading string arm the windowing
+ * operators (`Partition`, `SlidingWindow`) declare (ruling D9(b), 2026-08-16;
+ * see `innerRun`).
+ *
+ * Only `at` and `iterator` differ — every geometric facet (`count`,
+ * `isFinite`, `isEmpty`, `isEnumerable`) counts windows, not characters, and is
+ * identical either way. The base handlers build each window as a `List`, so the
+ * wrapper unpacks that `List` and rejoins it; the double pass is negligible
+ * beside the source walk that produced it. For the same reason the wrapper
+ * calls `getParams` a second time (the base handler already called it once):
+ * extracting the geometry is a couple of operand reads, while the base `at`
+ * just walked `size` elements of the source to build the window.
+ */
+export function stringAwareWindowedCollectionOps(
+  getParams: (collection: Expression) => WindowedParams | undefined
+): CollectionHandlers {
+  const base = windowedCollectionOps(getParams);
+  // The source as a string node, or `undefined` when it is not text. A form
+  // with no lazy view (`getParams` declines) never reaches an emission site.
+  // `p.src` is the RAW operand, so it may be a symbol holding a string or a
+  // string-valued application rather than a `BoxedString`; see
+  // `resolveTextSource`.
+  const sourceString = (expr: Expression): Expression | undefined => {
+    const p = getParams(expr);
+    if (p === undefined) return undefined;
+    const src = resolveTextSource(p.src);
+    return isString(src) ? src : undefined;
+  };
+  return {
+    ...base,
+    at: (expr, index) => {
+      const window = base.at?.(expr, index);
+      const src = window === undefined ? undefined : sourceString(expr);
+      if (src === undefined) return window;
+      return innerRun(expr.engine, src, [...window!.each()] as Expression[]);
+    },
+    iterator: (expr) => {
+      const it = base.iterator?.(expr);
+      if (it === undefined) return undefined;
+      const src = sourceString(expr);
+      if (src === undefined) return it;
+      const ce = expr.engine;
+      return {
+        next: () => {
+          const r = it.next();
+          if (r.done || r.value === undefined) return r;
+          return {
+            value: innerRun(ce, src, [...r.value.each()] as Expression[]),
+            done: false,
+          };
+        },
+      };
+    },
+  };
 }
 
 /**
@@ -8130,6 +8252,35 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the SIZE arm is untouched — as it was under the metadata.
     signature:
       '(collection<T>, integer | callback<(T) -> boolean>, integer?) -> list<list<T>> where T',
+    // The string rule, and it covers BOTH forms: a chunk, a window and a
+    // predicate group are each made of the source's own characters, so each is
+    // itself a string and `Partition("abcd", 2)` is `["ab","cd"]` (ruling
+    // D9(b), 2026-08-16; see `innerRun`). The predicate form's two groups come
+    // back as a two-element `list<string>`, keeping the generic signature's
+    // list-of-two shape rather than becoming a tuple.
+    //
+    // Its sibling operators (`Chunk`, `ChunkBy`, `SlidingWindow`,
+    // `Permutations`, `Combinations`) spell this rule as a LEADING OVERLOAD
+    // ARM instead. `Partition` cannot: its second parameter is a contextual
+    // `callback<S>` slot, and the Design D stamp that annotates an inline
+    // predicate's parameter with the source's element type runs only when
+    // exactly ONE arity-viable arm declares such a slot
+    // (`resolveContextualArm` in `boxed-expression/overload.ts`). A second arm
+    // carrying the same union makes the choice ambiguous, the stamp declines,
+    // and `Partition(xs, n => n < 3)` loses the `integer` annotation on `n`. A
+    // `type` handler reaches the same result type without touching arm
+    // resolution — and does it better, since the surviving single arm still
+    // stamps a string source's predicate parameter as `character`.
+    //
+    // Tested with `isTextAtom`, not a bare `isString`: the siblings' string
+    // arm is matched on the operand's static TYPE, so `Partition` must be too,
+    // or the two spellings disagree. A `string`-declared symbol source, or a
+    // string-valued application (`Partition(Join("ab","cd"), 2)`), is not a
+    // `BoxedString` node, and a value-only test reported `list<list<character>>`
+    // for it while the evaluated result held strings.
+    //
+    // Declining (returning `undefined`) falls back to the declared signature.
+    type: (ops) => (isTextAtom(ops[0]) ? 'list<string>' : undefined),
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Partition', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
@@ -8146,8 +8297,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const size = xs.count;
         if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
           return undefined;
-        const all = Array.from(xs.each());
+        const all = Array.from(xs.each()) as Expression[];
         const result: Expression[] = [];
+
+        // Every inner run below is emitted through `innerRun`, which makes it a
+        // STRING when the source is a string. Joining a run's grapheme clusters
+        // re-runs segmentation, and two adjacent clusters can merge — but only
+        // when the source itself contained a lone combining mark, the only way
+        // a cluster can begin with a character that attaches to what precedes
+        // it (`docs/STRING_ROADMAP.md`, design constraint 3).
 
         // Partition(collection, n, step) → sliding windows of length `n`
         // whose starts are `step` apart; only COMPLETE windows are emitted.
@@ -8155,14 +8313,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           const step = toInteger(stepArg);
           if (step === null || step <= 0) return undefined;
           for (let i = 0; i + n <= all.length; i += step)
-            result.push(ce.function('List', all.slice(i, i + n)));
+            result.push(innerRun(ce, xs, all.slice(i, i + n)));
           return ce.function('List', result);
         }
 
         // Partition(collection, n) → consecutive chunks EACH of size `n`; the
         // trailing chunk may be shorter when `n` does not divide the length.
         for (let i = 0; i < all.length; i += n)
-          result.push(ce.function('List', all.slice(i, i + n)));
+          result.push(innerRun(ce, xs, all.slice(i, i + n)));
 
         return ce.function('List', result);
       }
@@ -8210,16 +8368,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
       }
 
+      // The two predicate groups are inner runs like any other: for a string
+      // source each comes back as a string, so `Partition("a1b2", isDigit)` is
+      // `["12", "ab"]`. A group is a SUBSEQUENCE rather than a contiguous run,
+      // but the re-segmentation caveat is the same — clusters can only merge
+      // when the source contained a lone combining mark
+      // (`docs/STRING_ROADMAP.md`, design constraint 3).
       return ce.function('List', [
-        ce.function('List', trueGroup),
-        ce.function('List', falseGroup),
+        innerRun(ce, xs, trueGroup),
+        innerRun(ce, xs, falseGroup),
       ]);
     },
     // Lazy view for the chunk/window forms past the eager threshold. The
     // predicate form has no lazy view (it needs totality over the source), so
     // `partitionWindowParams` returns `undefined` for it and every facet stays
     // inert — `Count(Partition(<inf>, <pred>))` remains symbolic.
-    collection: windowedCollectionOps((expr) => {
+    collection: stringAwareWindowedCollectionOps((expr) => {
       if (!isFunction(expr)) return undefined;
       const n = toIntegerOperand(expr.op2);
       if (n === null || n <= 0) return undefined; // predicate form or invalid
@@ -8238,7 +8402,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Split the collection into `k` nearly equal-sized groups. See `Partition` for splitting into fixed-size chunks.',
     complexity: 8200,
-    signature: '(collection, integer) -> list<list>',
+    // The LEADING arm is the string rule: each group is a contiguous run of
+    // the source's own characters, so it is itself a string and
+    // `Chunk("abcdef", 2)` is `["abc","def"]` — `Chunk` splits into `k` GROUPS,
+    // not into chunks of size `k`, so it is `Partition("abcdef", 2)` (or
+    // `Chunk("abcdef", 3)`) that yields `["ab","cd","ef"]` (ruling D9(b),
+    // 2026-08-16; see `innerRun`). Spelled as a BOUNDED type variable
+    // (`S where S: string`), never the ground type `string`: an `unknown`- or
+    // `any`-typed operand refutes no arm, so a ground `string` parameter would
+    // win most-specific-wins on every untyped operand and claim `list<string>`
+    // for a call that usually returns a list of lists. A bounded variable with
+    // no call-site binding does not.
+    signature:
+      '((S, integer) -> list<string> where S: string) & ((collection, integer) -> list<list>)',
     // Provable declines only (a finite, walkable source and a positive
     // integer `k` are required); success is not cheaply decidable, so never
     // `true` — see `canEnumerateFiniteSource`.
@@ -8268,13 +8444,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const k = toInteger(n);
       if (!xs.isFiniteCollection || k === null || k <= 0) return undefined;
 
-      const all = Array.from(xs.each());
+      const all = Array.from(xs.each()) as Expression[];
       const result: Expression[] = [];
       const chunkSize = Math.ceil(all.length / k);
 
+      // Each group is emitted through `innerRun`, which makes it a STRING when
+      // the source is a string. Joining a group's grapheme clusters re-runs
+      // segmentation, and two adjacent clusters can merge — but only when the
+      // source itself contained a lone combining mark, the only way a cluster
+      // can begin with a character that attaches to what precedes it
+      // (`docs/STRING_ROADMAP.md`, design constraint 3).
       for (let i = 0; i < k; i++) {
         const chunk = all.slice(i * chunkSize, (i + 1) * chunkSize);
-        result.push(ce.function('List', chunk));
+        result.push(innerRun(ce, xs, chunk));
       }
 
       return ce.function('List', result);
@@ -8293,7 +8475,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Element types flow through from the source: `list<list<T>>`. The `key`
     // slot stays the PRIMITIVE `function` (a function-typed symbol operand
     // must be admitted there).
-    signature: '(collection<T>, key: function) -> list<list<T>> where T',
+    //
+    // The LEADING arm is the string rule: each run is a contiguous stretch of
+    // the source's own characters, so it is itself a string and
+    // `ChunkBy("aabb", f)` is `["aa","bb"]` (ruling D9(b), 2026-08-16; see
+    // `innerRun`). Spelled as a BOUNDED type variable (`S where S: string`),
+    // never the ground type `string`: an `unknown`- or `any`-typed operand
+    // refutes no arm, so a ground `string` parameter would win
+    // most-specific-wins on every untyped operand.
+    signature:
+      '((S, key: function) -> list<string> where S: string) & ((collection<T>, key: function) -> list<list<T>> where T)',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -8330,9 +8521,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       if (current.length > 0) runs.push(current);
 
+      // Each run is emitted through `innerRun`, which makes it a STRING when
+      // the source is a string. Joining a run's grapheme clusters re-runs
+      // segmentation, and two adjacent clusters can merge — but only when the
+      // source itself contained a lone combining mark, the only way a cluster
+      // can begin with a character that attaches to what precedes it
+      // (`docs/STRING_ROADMAP.md`, design constraint 3).
       return ce.function(
         'List',
-        runs.map((r) => ce.function('List', r))
+        runs.map((r) => innerRun(ce, xs, r))
       );
     },
     // Lazy view (Dedup-shape streaming). Runs of an infinite source are
@@ -8369,7 +8566,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const f = applicable(expr.op2);
         if (!f) return { next: () => ({ value: undefined, done: true }) };
         const ce = expr.engine;
-        const source = expr.op1.each();
+        // Resolved ONCE per iterator: the raw operand may be a symbol holding a
+        // string or a string-valued application, which `innerRun`'s literal
+        // test would miss (see `resolveTextSource`).
+        const src = resolveTextSource(expr.op1);
+        const source = src.each();
         // The first element of the next run, read ahead (and its key), so a run
         // boundary can be detected before the run is emitted.
         let pending: Expression | undefined = undefined;
@@ -8412,7 +8613,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 break;
               }
             }
-            return { value: ce.function('List', run), done: false };
+            // `innerRun` makes the run a STRING when the source is a string,
+            // matching the leading string arm in the signature. Rejoining
+            // grapheme clusters re-runs segmentation and two adjacent clusters
+            // can merge, but only when the source itself contained a lone
+            // combining mark (`docs/STRING_ROADMAP.md`, design constraint 3).
+            return { value: innerRun(ce, src, run), done: false };
           },
         };
       },

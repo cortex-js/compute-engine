@@ -145,8 +145,17 @@ D8. **Compile targets (JS grapheme-correct where cheap; else fail closed;
     on every target — that is the default the matrix relies on; add one
     test locking it.
 
-D9. **Rulings requested, not implemented here** (recommendation in
-    brackets): (a) inner strings for `Chunk`/`Partition`/`ChunkBy`/
+D9. **RULED 2026-08-16 (b) and implemented the same day** — recorded here
+    after the fact; the paragraph below is the original request. Outcome:
+    for a STRING source `Chunk`/`Partition`/`ChunkBy`/`SlidingWindow`/
+    `Permutations`/`Combinations` return inner STRINGS (`list<string>`;
+    e.g. `Chunk("abcdef", 3)` = `["ab","cd","ef"]` — `Chunk(xs, n)` makes
+    n nearly-equal groups); `Tally("banana")` keeps `character` values.
+    Mechanism: `innerRun` in `library/collections.ts` (a `List` normally, a
+    joined string for a string source), string overload arms spelled with a
+    bounded variable, and a `type` handler on `Partition` (a second
+    callback-bearing arm would break the Design-D parameter stamp). Original
+    request (recommendation in brackets): (a) inner strings for `Chunk`/`Partition`/`ChunkBy`/
     `SlidingWindow` on a string source — `Chunk("abcdef", 2)` →
     `["ab","cd","ef"]` vs `[["a","b"],…]` [recommend `list<string>`: each
     chunk is a contiguous run of the source's own characters];

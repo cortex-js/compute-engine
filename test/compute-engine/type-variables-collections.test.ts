@@ -131,14 +131,27 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // which by contract clause 5 keeps `callback<S>`; what a user SEES is the
     // ground projection, and that is byte-identical to the line below it was
     // before (`design-d-callback-contract.test.ts`, R-D5).
+    //
+    // `Partition`'s signature is UNCHANGED by the Strings Phase 2 string rule
+    // (ruling D9(b), 2026-08-16), unlike its sibling `ChunkBy` below: a second
+    // arm would make the contextual-callback slot ambiguous and silently
+    // disable the Design D stamp on an inline predicate's parameter, so the
+    // string result type comes from a `type` handler instead. See the comment
+    // on the definition in `library/collections.ts`.
     expect(sig(ce, 'Partition')).toBe(
       '(collection<T>, callback<(T) -> boolean> | integer, integer?) -> list<list<T>> where T'
     );
     expect(ce.box('Partition').type.toString()).toBe(
       '(collection<T>, function | integer, integer?) -> list<list<T>> where T'
     );
+    // `ChunkBy`'s `key` slot is the PRIMITIVE `function`, not a contextual
+    // callback, so it takes the leading string arm: a maximal run of a
+    // string's characters is itself a string. The arm's subject is a BOUNDED
+    // variable (`S where S: string`) rather than the ground type, because an
+    // `unknown`-typed operand refutes no arm and a ground `string` parameter
+    // would therefore claim the arm on every untyped call.
     expect(sig(ce, 'ChunkBy')).toBe(
-      '(collection<T>, key: function) -> list<list<T>> where T'
+      '((S, key: function) -> list<string> where S: string) & ((collection<T>, key: function) -> list<list<T>> where T)'
     );
   });
 });

@@ -20,10 +20,14 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
   canEnumerateFiniteSource,
   groundEnumerationOperand,
-  windowedCollectionOps,
 } from '../collection-utils.js';
 import { aggregateAbsence } from './missing-data.js';
-import { enumerationDeclinedAfterWalk, joinCharacters } from './collections.js';
+import {
+  enumerationDeclinedAfterWalk,
+  innerRun,
+  joinCharacters,
+  stringAwareWindowedCollectionOps,
+} from './collections.js';
 import {
   bigCorrelation,
   bigCovariance,
@@ -679,9 +683,19 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return overlapping sliding windows of fixed size over the collection.',
       complexity: 8200,
-      signature: '(collection, integer, integer?) -> list<list>',
+      // The LEADING arm is the string rule: each window is a contiguous run of
+      // the source's own characters, so it is itself a string and
+      // `SlidingWindow("abcd", 2)` is `["ab","bc","cd"]` (ruling D9(b),
+      // 2026-08-16; see `innerRun` in `library/collections.ts`). Spelled as a
+      // BOUNDED type variable (`S where S: string`), never the ground type
+      // `string`: an `unknown`- or `any`-typed operand refutes no arm, so a
+      // ground `string` parameter would win most-specific-wins on every
+      // untyped operand.
+      signature:
+        '((S, integer, integer?) -> list<string> where S: string) & ((collection, integer, integer?) -> list<list>)',
       examples: [
         'SlidingWindow([1, 2, 3, 4], 2)  // Returns [[1,2], [2,3], [3,4]]',
+        'SlidingWindow("abcd", 2)  // Returns ["ab", "bc", "cd"]',
       ],
       evaluate: ([xs, winArg, stepArg], { engine: ce }) => {
         if (!xs.isFiniteCollection) return undefined;
@@ -704,8 +718,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const data = Array.from(xs.each()) as Expression[];
         const result: Expression[] = [];
 
+        // Each window is emitted through `innerRun`, which makes it a STRING
+        // when the source is a string. Joining a window's grapheme clusters
+        // re-runs segmentation, and two adjacent clusters can merge — but only
+        // when the source itself contained a lone combining mark, the only way
+        // a cluster can begin with a character that attaches to what precedes
+        // it (`docs/STRING_ROADMAP.md`, design constraint 3).
         for (let i = 0; i <= data.length - windowSize; i += stepSize) {
-          result.push(ce.function('List', data.slice(i, i + windowSize)));
+          result.push(innerRun(ce, xs, data.slice(i, i + windowSize)));
         }
 
         return ce.function('List', result);
@@ -713,7 +733,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // Lazy view: complete windows only (`keepPartial = false`), default
       // step 1. Invalid params (`size <= 0`, `step <= 0`, non-integer) make
       // `getParams` return `undefined`, leaving every facet inert.
-      collection: windowedCollectionOps((expr) => {
+      collection: stringAwareWindowedCollectionOps((expr) => {
         if (!isFunction(expr)) return undefined;
         const winSize = toInteger(expr.op2);
         if (winSize === null || winSize <= 0) return undefined;

@@ -780,29 +780,25 @@ describe('strings are atomic where the lattice would otherwise shred them', () =
     expect(ce.string('ab').isSame(asList)).toBe(false);
   });
 
-  test('the operators still awaiting a ruling are correct AS LISTS on a string source', () => {
-    // These keep their `list<…>` signatures: whether a chunk/window/subset of
-    // a string should itself be a string (`Chunk("abcdef", 2)` →
-    // `["ab","cd","ef"]` rather than `[["a","b"],…]`) is an open ruling, filed
-    // in `ROADMAP.md`. `DeleteAt`, `RandomShuffle` and `RandomSample` were
-    // promoted to string results in Phase 2 and are pinned in the
-    // string-preservation block above, not here. What matters here is that
-    // none of these crashes or answers a wrong value on a string source.
-    const asList = (expr: any) => ce.box(expr).evaluate().toString();
-    expect(asList(['Partition', str('abcd'), 2])).toBe('[["a","b"],["c","d"]]');
-    expect(asList(['Chunk', str('abcd'), 2])).toBe('[["a","b"],["c","d"]]');
-    expect(asList(['SlidingWindow', str('abcd'), 2])).toBe(
-      '[["a","b"],["b","c"],["c","d"]]'
+  test('`Tally` keeps CHARACTER values, and the non-preserving operators stay lists', () => {
+    // `Tally` is the one operator of the Phase-1 candidate set that was NOT
+    // promoted to string results (ruling D9(b), 2026-08-16): its first
+    // component holds the source's distinct ELEMENTS, each paired with a
+    // count, so a character is exactly the right value there — collapsing
+    // them into one string would destroy the pairing.
+    expect(
+      ce
+        .box(['Tally', str('banana')])
+        .evaluate()
+        .toString()
+    ).toBe('(["b","a","n"], [1,3,2])');
+    expect(ce.box(['Tally', str('banana')]).type.toString()).toBe(
+      'tuple<list<character>, list<integer>>'
     );
-    expect(asList(['Combinations', str('abc'), 2])).toBe(
-      '[["a","b"],["a","c"],["b","c"]]'
-    );
-    expect(ce.box(['Permutations', str('abc')]).evaluate().count).toBe(6);
     // `RandomChoice` draws WITH replacement, so its result is not a subset of
     // the source's own characters (`RandomChoice("ab", 3)` can repeat one) —
     // it is not an element-preserving operator and was not promoted.
     expect(ce.box(['RandomChoice', str('abc'), 2]).evaluate().count).toBe(2);
-    expect(asList(['Tally', str('abc')])).toBe('(["a","b","c"], [1,1,1])');
     // `Cycle` declares a `list` parameter, so a string is a clean type error.
     expect(
       ce
@@ -810,6 +806,288 @@ describe('strings are atomic where the lattice would otherwise shred them', () =
         .evaluate()
         .toString()
     ).toContain('incompatible-type');
+  });
+});
+
+describe('chunking and combinatorics over a string yield INNER STRINGS', () => {
+  // Ruling D9(b), 2026-08-16 (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`,
+  // D9): every one of these operators cuts its result elements out of the
+  // SOURCE'S OWN characters, so over a string source each inner element is
+  // itself a string — `Partition("abcdef", 2)` is `["ab","cd","ef"]`, not
+  // `[["a","b"],…]`. Each operator declares a leading string arm returning
+  // `list<string>`, and its handler emits inner runs through `innerRun`
+  // (`src/compute-engine/library/collections.ts`).
+  //
+  // `Tally` was deliberately NOT promoted — see the test above.
+  //
+  // Every non-ASCII pin uses ZWJ_FAMILY (MAN + ZWJ + WOMAN + ZWJ + GIRL): five
+  // code points, ONE grapheme cluster. The assumption under test is that the
+  // cluster is never split across a chunk/window boundary, and that rejoining
+  // clusters into an inner string leaves it intact.
+
+  test('`Chunk` splits a string into `k` string groups', () => {
+    const e = ce.box(['Chunk', str('abcdef'), 3]);
+    expect(e.type.toString()).toBe('list<string>');
+    expect(e.evaluate().toString()).toBe('["ab","cd","ef"]');
+    // A list source is untouched by the new arm.
+    expect(ce.box(['Chunk', ['List', 1, 2, 3, 4], 2]).type.toString()).toBe(
+      'list<list>'
+    );
+    expect(
+      ce
+        .box(['Chunk', ['List', 1, 2, 3, 4], 2])
+        .evaluate()
+        .toString()
+    ).toBe('[[1,2],[3,4]]');
+    // The family emoji is one character, so it lands whole in the first group.
+    expect(
+      ce
+        .box(['Chunk', str(`a${ZWJ_FAMILY}bc`), 2])
+        .evaluate()
+        .toString()
+    ).toBe(`["a${ZWJ_FAMILY}","bc"]`);
+  });
+
+  test('`Partition` returns string chunks, string windows and string groups', () => {
+    const chunks = ce.box(['Partition', str('abcd'), 2]);
+    expect(chunks.type.toString()).toBe('list<string>');
+    expect(chunks.evaluate().toString()).toBe('["ab","cd"]');
+    // Sliding-window form (explicit step): complete windows only.
+    expect(
+      ce
+        .box(['Partition', str('abcde'), 2, 2])
+        .evaluate()
+        .toString()
+    ).toBe('["ab","cd"]');
+    // Predicate form: the two groups are subsequences of the source's
+    // characters, so each is a string too. The result keeps the generic arm's
+    // list-of-two shape, now `list<string>`.
+    const groups = ce.box([
+      'Partition',
+      str('abab'),
+      ['Function', ['Equal', 'x', str('a')], 'x'],
+    ]);
+    expect(groups.type.toString()).toBe('list<string>');
+    expect(groups.evaluate().toString()).toBe('["aa","bb"]');
+    // A list source keeps its element type through the generic arm.
+    expect(
+      ce.box(['Partition', ['List', 1, 2, 3, 4], 2]).type.toString()
+    ).toBe('list<list<finite_integer>>');
+    // The family emoji is one character: it fills a chunk on its own.
+    expect(
+      ce
+        .box(['Partition', str(`${ZWJ_FAMILY}ab`), 2])
+        .evaluate()
+        .toString()
+    ).toBe(`["${ZWJ_FAMILY}a","b"]`);
+  });
+
+  test('`ChunkBy` returns the maximal runs as strings', () => {
+    const e = ce.box(['ChunkBy', str('aabbc'), ['Function', 'x', 'x']]);
+    expect(e.type.toString()).toBe('list<string>');
+    expect(e.evaluate().toString()).toBe('["aa","bb","c"]');
+    // A list source keeps `list<list<T>>`.
+    expect(
+      ce
+        .box(['ChunkBy', ['List', 1, 1, 2], ['Function', 'x', 'x']])
+        .type.toString()
+    ).toBe('list<list<finite_integer>>');
+    // Two consecutive family emoji are ONE run of two equal characters, and
+    // the run rejoins to exactly those two clusters.
+    expect(
+      ce
+        .box([
+          'ChunkBy',
+          str(`${ZWJ_FAMILY}${ZWJ_FAMILY}a`),
+          ['Function', 'x', 'x'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe(`["${ZWJ_FAMILY}${ZWJ_FAMILY}","a"]`);
+  });
+
+  test('`SlidingWindow` returns string windows', () => {
+    const e = ce.box(['SlidingWindow', str('abcd'), 2]);
+    expect(e.type.toString()).toBe('list<string>');
+    expect(e.evaluate().toString()).toBe('["ab","bc","cd"]');
+    expect(
+      ce.box(['SlidingWindow', ['List', 1, 2, 3], 2]).type.toString()
+    ).toBe('list<list>');
+    // The family emoji is one character, so it appears whole in every window
+    // that covers it.
+    expect(
+      ce
+        .box(['SlidingWindow', str(`${ZWJ_FAMILY}ab`), 2])
+        .evaluate()
+        .toString()
+    ).toBe(`["${ZWJ_FAMILY}a","ab"]`);
+  });
+
+  test('`Permutations` returns string arrangements', () => {
+    const e = ce.box(['Permutations', str('ab')]);
+    expect(e.type.toString()).toBe('list<string>');
+    expect(e.evaluate().toString()).toBe('["ab","ba"]');
+    // `Permutations(s, 0)` is the single EMPTY arrangement — the empty string
+    // over a string source, `[]` over a list.
+    expect(
+      ce
+        .box(['Permutations', str('abc'), 0])
+        .evaluate()
+        .toString()
+    ).toBe('[""]');
+    expect(ce.box(['Permutations', ['List', 1, 2]]).type.toString()).toBe(
+      'list<list>'
+    );
+    // The family emoji is one character: it moves as a unit, never split.
+    expect(
+      ce
+        .box(['Permutations', str(`${ZWJ_FAMILY}a`)])
+        .evaluate()
+        .toString()
+    ).toBe(`["${ZWJ_FAMILY}a","a${ZWJ_FAMILY}"]`);
+  });
+
+  test('`Combinations` returns string subsets', () => {
+    const e = ce.box(['Combinations', str('abc'), 2]);
+    expect(e.type.toString()).toBe('list<string>');
+    expect(e.evaluate().toString()).toBe('["ab","ac","bc"]');
+    expect(ce.box(['Combinations', ['List', 1, 2, 3], 2]).type.toString()).toBe(
+      'list<list>'
+    );
+    // The family emoji is one character, so it is one member of a combination.
+    expect(
+      ce
+        .box(['Combinations', str(`${ZWJ_FAMILY}ab`), 2])
+        .evaluate()
+        .toString()
+    ).toBe(`["${ZWJ_FAMILY}a","${ZWJ_FAMILY}b","ab"]`);
+  });
+
+  test('the LAZY view of a long string source also yields inner strings', () => {
+    // Past `MAX_SIZE_EAGER_COLLECTION` (100 elements) the windowing operators
+    // decline to materialize and serve their elements from the lazy
+    // `collection` handlers instead. Those handlers must obey the same string
+    // rule as the eager path, or the declared `list<string>` would be a lie
+    // for exactly the long sources nobody tests by eye.
+    const long = 'ab'.repeat(80); // 160 characters
+    const chunks = ce.box(['Partition', str(long), 2]);
+    expect(chunks.type.toString()).toBe('list<string>');
+    expect(chunks.count).toBe(80);
+    expect(chunks.at(1)?.type.toString()).toBe('string');
+    expect(chunks.at(1)?.string).toBe('ab');
+    expect([...chunks.each()].slice(0, 2).map((x) => x.string)).toEqual([
+      'ab',
+      'ab',
+    ]);
+    const windows = ce.box(['SlidingWindow', str(long), 3]);
+    expect(windows.at(2)?.string).toBe('bab');
+    const runs = ce.box(['ChunkBy', str(long), ['Function', 'x', 'x']]);
+    expect(runs.at(1)?.string).toBe('a');
+  });
+
+  test('a NON-LITERAL string source yields inner strings on the LAZY route', () => {
+    // The lazy `collection` handlers see the RAW operand, which for a
+    // `string`-declared symbol or a string-valued application is not a
+    // `BoxedString` node. A value-level `isString` test therefore failed there
+    // and the very same operator emitted inner LISTS lazily where it emitted
+    // inner STRINGS eagerly — and since the eager/lazy split is decided by the
+    // source's LENGTH, the element kind depended on how long the string was.
+    // `Permutations`/`Combinations` are lazy-ONLY, so for them there was no
+    // eager route to fall back on at any length.
+    ce.declare('s', 'string');
+    ce.assign('s', ce.string('abcd'));
+
+    expect(ce.box(['SlidingWindow', 's', 2]).at(1)?.string).toBe('ab');
+    expect(
+      [...ce.box(['SlidingWindow', 's', 2]).each()].map((x) => x.string)
+    ).toEqual(['ab', 'bc', 'cd']);
+    expect(ce.box(['Permutations', 's']).at(1)?.string).toBe('abcd');
+    expect(ce.box(['Combinations', 's', 2]).at(1)?.string).toBe('ab');
+    expect(ce.box(['ChunkBy', 's', ['Function', 'x', 'x']]).at(1)?.string).toBe(
+      'a'
+    );
+
+    // A string-valued APPLICATION is the same case without a symbol involved.
+    const joined = ['Join', str('ab'), str('cd')];
+    expect(ce.box(['SlidingWindow', joined, 2]).at(1)?.string).toBe('ab');
+    expect(
+      ce.box(['Permutations', ['Join', str('a'), str('b')]]).at(1)?.string
+    ).toBe('ab');
+
+    // The declared TYPE must agree with what the handlers emit. `Partition`
+    // reaches `list<string>` through a `type` handler rather than a leading
+    // signature arm, so it needs its own pins for both non-literal sources.
+    expect(ce.box(['Partition', 's', 2]).type.toString()).toBe('list<string>');
+    expect(ce.box(['Partition', joined, 2]).type.toString()).toBe(
+      'list<string>'
+    );
+    expect(ce.box(['Partition', 's', 2]).evaluate().toString()).toBe(
+      '["ab","cd"]'
+    );
+  });
+
+  test('degenerate sizes and empty sources keep the string shape', () => {
+    // `k = 0`: the single EMPTY combination, which over a string source is the
+    // empty STRING (matching `Permutations(s, 0)` above).
+    expect(
+      ce
+        .box(['Combinations', str('abc'), 0])
+        .evaluate()
+        .toString()
+    ).toBe('[""]');
+
+    // A window/combination LARGER than the source produces nothing at all.
+    // `SlidingWindow` has an eager path and returns the empty list; the
+    // lazy-only `Combinations` stays symbolic under `evaluate()` and answers
+    // with an empty WALK instead.
+    expect(
+      ce
+        .box(['SlidingWindow', str('ab'), 5])
+        .evaluate()
+        .toString()
+    ).toBe('[]');
+    expect([...ce.box(['Combinations', str('ab'), 3]).each()]).toEqual([]);
+
+    // An EMPTY string source: `Partition` has no chunks to cut, while `Chunk`
+    // RESHAPES to exactly `k` groups whatever the length, so it answers `k`
+    // empty strings rather than an empty list.
+    expect(
+      ce
+        .box(['Partition', str(''), 2])
+        .evaluate()
+        .toString()
+    ).toBe('[]');
+    expect(
+      ce
+        .box(['Chunk', str(''), 3])
+        .evaluate()
+        .toString()
+    ).toBe('["","",""]');
+    // Same reshaping rule with a non-empty source too short for `k` groups:
+    // the surplus groups are empty STRINGS, not empty lists.
+    expect(
+      ce
+        .box(['Chunk', str('abc'), 5])
+        .evaluate()
+        .toString()
+    ).toBe('["a","b","c","",""]');
+
+    // `Chunk(xs, k)` is `k` GROUPS, not chunks of size `k` — the distinction
+    // that `Partition` inverts.
+    expect(
+      ce
+        .box(['Chunk', str('abcdef'), 2])
+        .evaluate()
+        .toString()
+    ).toBe('["abc","def"]');
+
+    // An explicit step skips characters between windows.
+    expect(
+      ce
+        .box(['SlidingWindow', str('abcde'), 2, 2])
+        .evaluate()
+        .toString()
+    ).toBe('["ab","cd"]');
   });
 });
 
