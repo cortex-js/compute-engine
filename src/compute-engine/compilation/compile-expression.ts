@@ -23,6 +23,7 @@ type CompileExpressionOptions<T extends string = string> = {
   realOnly?: boolean;
   complexPromotion?: boolean;
   mode?: CompileMode;
+  entryChecks?: boolean;
   iterationBudget?: number;
   quadrature?: 'adaptive' | 'monte-carlo';
   symbolDeps?: Set<MathJsonSymbol>;
@@ -191,6 +192,7 @@ export function compile<T extends string = 'javascript'>(
       realOnly: options?.realOnly,
       complexPromotion: options?.complexPromotion,
       mode: options?.mode,
+      entryChecks: options?.entryChecks,
       iterationBudget: options?.iterationBudget,
       quadrature: options?.quadrature,
       symbolDeps: options?.symbolDeps,

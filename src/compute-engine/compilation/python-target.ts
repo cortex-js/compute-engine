@@ -859,6 +859,20 @@ function pyStaticRank(e: Expression): number | undefined {
  * `base-compiler` therefore FAILS CLOSED (D6) on that shape — the engine falls
  * back to the interpreter — rather than emitting binding-dependent output.
  */
+/**
+ * The complex-discipline helpers (`CompileTarget.complexLift` /
+ * `complexIsReal` / `complexReal`): the idempotent number → complex lift that
+ * leaves a non-number (a bool, a string, a list held by a wide binding)
+ * untouched, the exact realness test, and the real projection. A Python
+ * `bool` is a subclass of `int`, so it is excluded explicitly.
+ */
+const PYTHON_COMPLEX_HELPERS = `def _ce_cplx(_v):
+    return complex(_v) if isinstance(_v, (int, float)) and not isinstance(_v, bool) else _v
+def _ce_cisreal(_v):
+    return _v.imag == 0 if isinstance(_v, complex) else True
+def _ce_creal(_v):
+    return _v.real if isinstance(_v, complex) else _v`;
+
 const PYTHON_BCAST_HELPER = `def _ce_bcast_apply(_op, _arrs):
     if _op == 'clip':
         return np.clip(_arrs[0], _arrs[1], _arrs[2])
@@ -1079,6 +1093,12 @@ const PYTHON_ORD_HELPER = `def _ce_ord(_f, _a, _b):
  * is harmless in Python. */
 function withPythonHelpers(code: string): string {
   let out = code;
+  if (
+    out.includes('_ce_cplx(') ||
+    out.includes('_ce_cisreal(') ||
+    out.includes('_ce_creal(')
+  )
+    out = `${PYTHON_COMPLEX_HELPERS}\n${out}`;
   if (out.includes('_ce_rref(')) out = `${PYTHON_RREF_HELPER}\n${out}`;
   if (out.includes('_ce_bcast(')) out = `${PYTHON_BCAST_HELPER}\n${out}`;
   if (out.includes('_ce_eqcoll(')) out = `${PYTHON_EQCOLL_HELPER}\n${out}`;
@@ -2703,8 +2723,19 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // own `complex()` is the idempotent lift, and `.imag == 0` the exact
       // realness test. See `CompileTarget.supportedModes`.
       supportedModes: PYTHON_SUPPORTED_MODES,
-      complexLift: (code) => `complex(${code})`,
-      complexIsReal: (code) => `(complex(${code}).imag == 0)`,
+      // The three helpers are Python functions declared by `withPythonHelpers`
+      // when referenced: a bare `complex(x)` would RAISE on a list or a string
+      // and numericize a boolean, where the discipline requires a non-number
+      // held by a wide binding to pass through untouched.
+      complexLift: (code) => `_ce_cplx(${code})`,
+      complexIsReal: (code) => `_ce_cisreal(${code})`,
+      complexReal: (code) => `_ce_creal(${code})`,
+      realGuard: (guards, body, kind) =>
+        guards.length === 0
+          ? `(${body})`
+          : `((${body}) if (${guards.join(' and ')}) else ${
+              kind === 'boolean' ? 'False' : "float('nan')"
+            })`,
       // Chained relations join with Python's `and`, not `&&`.
       chainOp: 'and',
       // Evaluate a shared middle operand of a chained relation exactly once

@@ -218,7 +218,29 @@ eta-expansions that patched it (§3 table).
 
 **Known limits, stated once:** (i) `auto`'s promotion set is the list above;
 a real-valued excursion through ℂ that arises some other way is not
-promoted (none is known; report one and it joins the list). (ii) The
+promoted (none is known; report one and it joins the list). (i′) **A
+constant-folded `ComplexInfinity` is a complex-shaped VALUE, on every
+target and in every mode** — not a promotion, a typing fact: `1/0` folds to
+`~oo`, which is `complex`-typed, so `x + 1/0` compiles to `{re: x + ∞, im:
+∞}` on JavaScript and `vec2(x + _gpu_inf(), _gpu_inf())` on GLSL, exactly as
+the interpreter evaluates it (`~oo`), while the unfoldable `x + 1/y` at `y =
+0` stays on the real lane (`Infinity`). Same mathematics, two lanes,
+decided by whether the denominator is a literal; pinned as intentional
+(`compile-gpu-non-finite.test.ts`, "ComplexInfinity uses the complex
+vec2(re, im) convention" — the type-agreement rule that a complex-typed
+fold must emit `vec2` or be broadcast to `vec2(NaN, NaN)`), consistent
+with the strict discipline (shape follows static type), and a lane source a
+user can introduce without writing anything complex-looking. `auto` does
+not change it. **Bounded [field]:** across the 687-document corpus a
+NONZERO-numerator literal `/0` (→ `ComplexInfinity`, complex-shaped) occurs
+in 2 rows of 1 document (`s8ishknvhe` rows 5–6, `\frac{1}{0}` as an
+"undefined" sentinel in the otherwise-branch of a piecewise — which types
+the whole piecewise complex; both rows decline for reasons the census will
+settle), while `0/0` (→ `NaN`, stays REAL) occurs in 21 rows — a syntactic
+floor, not a total (a denominator that FOLDS to zero is not counted). The
+ergonomic point for the guide: `0/0` and `1/0` look interchangeable to an
+author writing "undefined" and are not — one stays real, the other makes
+the enclosing expression complex-shaped. (ii) The
 compile-time `options.vars: Record<symbol, JSSource>` splice binds a symbol
 to caller-supplied SOURCE TEXT that never passes through `run()`; it is not
 type-checked and not entry-checked — an advanced escape hatch whose shape is
@@ -515,7 +537,9 @@ the unpredictability the mode exists to remove. Neither "strict mode
 everywhere" (their witness stays black) nor "promotion on the JS lane only"
 (per-row semantics) is acceptable to them.
 
-Their proposal, which this design supports and which is **Arno's ruling to
+**Measured 2026-08-16 (§10 M3):** the shared-lane constraint binds in 26
+(strict) / 32 (loose) of 687 documents — under 5% — so document-scoped lane
+selection costs GPU acceleration on very few documents. Their proposal, which this design supports and which is **Arno's ruling to
 make, not theirs or ours** (a Tycho architecture change with a performance
 consequence): **make lane selection DOCUMENT-scoped once promotion is
 active** — if any row of a document escalates (or is promoted), the whole
@@ -670,14 +694,65 @@ later one being present:
    decline), the D7 witnesses, the "Result convention" witnesses
    (`arcsin(0.5)` a number; `1 + 1e-12i` an object), plus the full
    `compile-complex*.test.ts` and `fractals.test.ts` files unchanged.
-2. **Strict discipline.** The §3 DECLINES where JS/Python lack them
+2. **Strict discipline.** — **IMPLEMENTED 2026-08-16** (test file
+   `test/compute-engine/compile-mode-strict.test.ts`; gate
+   `BaseCompiler.strictLanes`, helper `laneMismatch`; boundaries in
+   `tryCompileUserFunction` (single-literal + multi-clause via
+   `multiClauseLaneMismatchAt`), `complexElementCallbackEta` (value position),
+   the protocol member dispatch in `userFunctionsPreamble`,
+   `noteLocalComplex` + `checkNestedComplexRebinding` (block local); D3 in
+   `javascript-target.ts` `checkEntry`/`EntryPlan`, both routes, both
+   directions; the multi-clause/protocol ROADMAP entries closed by per-clause
+   `_SYS.cplx` and dispatch on `_SYS.creal`-normalized values). **One
+   deliberate deviation from the text below:** the declines are in force
+   for `mode: 'strict'` ONLY in this step, not "under every mode" — under
+   `auto` (the default) and `complex`, which still emit today's code, the
+   per-call-site lane specialization and the block-local promotion stay in
+   place, so no default-mode program changes between this step and step 4
+   (where `auto` = strict attempt + escalation and the gate widens). D3 is in
+   force in every mode. D3 consequence to know: an UNANNOTATED lambda
+   parameter handed a `{re, im}` at `run()` now throws even when the body
+   only forwards it into a `complex`-declared parameter (two
+   `multi-clause-compile.test.ts` pins were changed to annotate the
+   parameter `complex`); the shape-agnostic FORM-3 `_SYS.cplx` coercion is
+   unchanged and still serves a symbol INFERRED complex. Implicit
+   (engine-initiated) compilations pass `entryChecks: false` because their
+   NaN/ABI self-healing fallback would otherwise become an evaluation error.
+   The §3 DECLINES where JS/Python lack them
    (user-function parameter, value position, multi-clause, protocol, block
    re-binding, callback element) with `LaneMismatchError` payloads, and the
    D3 entry checks both directions. Observable change: shapes that were
    silently `NaN` now decline loudly under every mode (nothing escalates
    yet). Gate: the "Strict mode declines" witnesses, D3, and the
    "Strict mode keeps today's typed-complex programs" witnesses.
-3. **Complex discipline.** `isComplexValued` answers `true` for a wide
+3. **Complex discipline.** — **IMPLEMENTED 2026-08-16** (test file
+   `test/compute-engine/compile-mode-complex.test.ts`; gate
+   `BaseCompiler.complexDiscipline` = `mode === 'complex'`; the wide rule is
+   `wideIsComplex`/`wideNumericType` in the symbol arm, the function-arm
+   fallback and the block-local frame default (`localComplexDefault`; a
+   `Declare` of a real-only type keeps the real kernel); the lift at use is
+   `liftWideReference` at symbol emission (a symbol complex by TYPE is not
+   lifted — coerced at entry/call); one emission per user function
+   (`userCallComplexLanesOf` returns no lanes, the eta is skipped);
+   promotion of the `PROMOTABLE_RADICAL_HEADS` in complex mode
+   (`promotesRadicalToComplex`); the D2/D6 runtime rule is
+   `realOperandGuard` — bind once via `target.bindExpr`, guard
+   `complexIsReal`, real projection through the new third hook
+   `complexReal` (`_SYS.creal` / `complex(x).real`), overrides keyed by node
+   in `_codeOverrides` and read at the top of `compile()` — applied at the
+   ordering gate, the `REAL_ONLY_CODEGEN_HEADS` gate and the string-mapped
+   helper gate, with the compile-time `non-real-operand` capability decline
+   for `isProvablyNonReal` operands; the D3 entry plans apply the wide rule
+   for complex mode). **Deviations/readings:** the runtime rule is in force
+   for `mode: 'complex'` ONLY in this step (D2 "in strict mode nothing
+   changes"; `auto` gets it in step 4), so the CO-P1-3 / ordering fail-closed
+   pins under the default mode are unchanged; the mechanisms §1 lists as
+   patching the guess are BYPASSED in complex mode, not yet removed — they
+   still serve `auto` until step 4, which is where their removal belongs;
+   `result.promoted` is still the constant `false` (step 4 computes it). A
+   `{re, im}` handed to a wide binding is accepted in complex mode (D3
+   lifts a number, passes an object).
+   `isComplexValued` answers `true` for a wide
    numeric value under `mode: 'complex'`; `_SYS.cplx` at every wide numeric
    use; single-lane user-function emission with the boundary lift; D2/D6
    runtime rules. Remove, in this order, each mechanism §1 lists as
@@ -806,6 +881,101 @@ noted):
   stale output on the retry.
 
 ## 10. What is asked of the Tycho team (via CE-POC)
+
+**Measurements 2–4 RECEIVED 2026-08-16** (artifact
+`/Users/arno/dev/tycho/docs/scratch/2026-08-16-compile-mode-audit.json`,
+per-document JSONL beside it; CE 0.113.0; 687/687 documents, 0 failures,
+6617 rows; figures verified against the artifact by CE-POC and re-read from
+it here). **Label that travels with the numbers:** `provably-real`,
+`promotes-no-escalation` and `actionableWideBindings` are MEASURED;
+`escalates` is **MODELLED from §3 — CE had not implemented escalation when
+the instrument ran** (the artifact carries this in its `labels` block).
+
+- **M2 — provable-real fraction** (compiling denominator 5489 = 6617 − 1104
+  did-not-compile − 24 budget-exceeded): provably-real 4896 = 74.0% of all
+  rows, **89.2% of compiling rows**; promotes-without-escalation 573 = 8.7% /
+  **10.4%**; escalates (MODELLED) 20 = 0.3% / 0.36% (15 via a promoted value,
+  5 via a typed complex value only; the per-model-row tally E1 29 + E3 1 = 30
+  disagrees with the class count — Tycho is chasing the instrument's
+  definition; even at 30 it is 0.55% of compiling rows, and nothing below
+  rests on it). Also `complexTypedNoPromotion` 47, `extendedPromotableOnly`
+  229; GLSL lane rows 847, of which **386 classified-but-declined**.
+- **M3 — cross-lane definition consumption (§7's number):** strict 26,
+  loose 32 of 687 documents → **3.8% / 4.7%** (26 "shares promoting
+  definition X with row(s) …" + 6 "closure includes … (loose only)"). The
+  shared-lane constraint binds in under 5% of documents: document-scoped
+  lane selection is a small cost, per-row selection viable.
+- **M4 — narrowing lever split:** 13345 wide bindings — actionable **1382
+  (10.4%)**, deliberate 11938 (89.5%), unknown-element 25. Every actionable
+  site is one rule (a slider / free document variable declarable `real`);
+  by boundary: user-function-parameter 9424, lambda-parameter 2457 (both
+  deliberate — typed at registration, §2.2's floor), document-variable
+  1382, block-local 57, list-element 25; by width: any/unknown 4200,
+  number-typed 9145. So the ONLY narrowable seam is document variables →
+  `real`, worth 1382 sites; the 11881 parameter bindings are contract, not
+  slack.
+- **Two more counters:** `entryCheckSites: 0` across the corpus — the D3
+  entry check (step 2) has NO measured field exposure; before more is spent
+  on it, ask Tycho what construct the instrument looks for (a `{re, im}`
+  handed through `vars`/lambda args to a real-analyzed binding is what D3
+  guards; if the seam never does that, D3 is a safety net with a zero
+  corpus hit-rate — kept, since its per-call cost is one `typeof`, but not
+  a lever). `shadowedImaginaryUnit: 25` — 25 sites bind `i` themselves;
+  under any complex-by-default reading, whether `i` is the imaginary unit
+  or the user's variable is load-bearing → **the spec states it**: the
+  compiler follows the ENGINE's binding of `i` — a binder-bound `i` (a `Sum`
+  index, a lambda parameter) and a DECLARED document variable `i` are that
+  binding, never the constant, exactly as the interpreter reads them; a
+  declaration ALONE suffices (`declare('i', 'real')` with no value flips
+  `2i` from `Complex(0, 2)` to the real product `2·i` — the state a slider
+  sits in before it is set, so it is the case to know). Verified 2026-08-16
+  on both routes (binder: `Sum(i·t, i=1..3)` → `1t + 2t + 3t`, `(i) ↦ 2i` →
+  `2 * i`; document variable: CE-POC probe A/B/C). Operational note for the
+  seam, not a CE change: a bare `assign('i', 5)` WITHOUT a prior declare
+  throws (`i` is a library constant; bare assignment to a constant is
+  refused by design), while `assign('j', 5)` succeeds — a seam that
+  bare-assigns document variables throws on exactly those 25 sites; declare-
+  then-assign shadows correctly. CE-POC has asked Tycho which spelling their
+  seam uses. `ambiguousElementReads: 75`
+  (the `At`-over-disagreeing-elements decline class) — sized, unchanged.
+
+**Sizing conclusion (data-supported): `auto`, and not narrowly.** 89% of
+compiling rows are provably real and need no promotion; 10% promote without
+escalating; `complex` mode would move the whole corpus off the real lane to
+serve that 10% and would cost the GPU lane hardest (847 GLSL rows, 386
+already declining). Cross-lane sharing under 5% keeps §7's document-scoped
+fallback cheap. **What this spec does NOT solve, stated once:**
+`did-not-compile` is 1104 rows as classified, but that bucket is CONFLATED
+(Tycho retracted the framing, not the count, 2026-08-16): 529 of the 1104
+have no series type at all, of which 279 are DEFINITION rows (`H(i) = 10^4
+sin(10^3 i) mod 1` and friends — not render targets, nobody asked to render
+them) and ~250 are non-definition rows where the dump cannot tell a CE
+decline from a Tycho classifier that never asked. **The defensible refusal
+figure is somewhere between ~575 and 1104, currently unknown** — do not
+size against 16.7%. Together with the 386 classified-but-declined GLSL rows
+these are refusal questions, not mode questions (Arno's "death by a
+thousand cuts … or outright refusal to compile"). What the dump already
+shows for free: the refusals CLUSTER — at the 575 floor, `primitives3d` 243
+(42%: triangle / PointList 3D primitives) and `line` 119 (21%) are 63% of
+it, and the GLSL 386 is 68% two types (parametric 139, implicit 123) — so
+the follow-on work is enumerable, a handful of operator clusters, not a
+long tail. (One witness to keep: polygon decline `0rpoke7ti2` carries
+`\frac{0}{0}`, a deliberate Desmos idiom for "skip this vertex". NOT a
+known CE gap: on the JS lane interpreter and compiler agree, scalar and in a
+collection — `PointList(0/0, 0)` runs to `[NaN, 0]`, a genuine `NaN` that
+stays distinguishable; on the GLSL lane `PointList(0/0, 0)` compiles to
+`vec2(_gpu_nan(), 0.0)`, so the NaN survives there too. Its decline reason
+is pending the reason-capture census; the semantic ("skip this vertex") is
+the seam's to honor.) The reason-capture census runs
+lock-gated after Tycho's sweep. If any of Tycho's GLSL declines are a lane expecting `float` and receiving
+`vec2`, one mechanism that produces exactly that is a folded literal
+`ComplexInfinity` (§2 known limit (i′): `x + 1/0` → `vec2`) — `auto` would
+not change it. Also under scope review by Arno (raised by CE-POC): `Polygon`
+declines on every target (JS too — it evaluates to type `expression`);
+CE-POC's read is that a polygon is a rendering primitive and its lowering is
+the seam's; if ruled ours it is a real piece of work outside this spec.
+This spec answers the LANE question; the
+refusal census is the next workstream's input.
 
 Two measurements on the real 687-document corpus, which they have offered
 to run once this draft is stable — this is that draft. **The corpus window

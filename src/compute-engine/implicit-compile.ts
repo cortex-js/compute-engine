@@ -32,7 +32,13 @@ export function implicitCompile(
 ): ReturnType<IComputeEngine['_compile']> | undefined {
   if (ce.jit === 'off') return undefined;
   try {
-    return ce._compile(expr, { ...options, fallback: false });
+    // `entryChecks: false`: an implicit caller owns its argument contract and
+    // validates the runner's result itself (see `CompilationOptions.entryChecks`).
+    return ce._compile(expr, {
+      ...options,
+      fallback: false,
+      entryChecks: false,
+    });
   } catch (e) {
     if (e instanceof EvalError) {
       ce.jit = 'off';

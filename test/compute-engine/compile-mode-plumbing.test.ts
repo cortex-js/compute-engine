@@ -77,12 +77,13 @@ describe('compile mode — option surface (step 1)', () => {
     }
   });
 
-  it('every mode compiles the same code in step 1', () => {
+  it('strict and auto compile the same code (auto escalation is step 4)', () => {
     const expr = ce.parse('\\sqrt{x} + 2x');
     const strict = compile(expr, { mode: 'strict' }).code;
-    expect(compile(expr, { mode: 'complex' }).code).toBe(strict);
     expect(compile(expr, { mode: 'auto' }).code).toBe(strict);
     expect(compile(expr).code).toBe(strict);
+    // Complex mode (step 3) promotes the radical and lifts the wide `x`.
+    expect(compile(expr, { mode: 'complex' }).code).toContain('_SYS.csqrt');
   });
 
   it('rejects an invalid mode value at option validation (thrown, not a fallback)', () => {

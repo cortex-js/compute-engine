@@ -6855,6 +6855,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       supportedModes: JS_SUPPORTED_MODES,
       complexLift: (code) => `_SYS.cplx(${code})`,
       complexIsReal: (code) => `_SYS.cisreal(${code})`,
+      complexReal: (code) => `_SYS.creal(${code})`,
+      realGuard: (guards, body, kind) =>
+        guards.length === 0
+          ? `(${body})`
+          : `((${guards.join(' && ')}) ? (${body}) : ${kind === 'boolean' ? 'false' : 'NaN'})`,
       // Per-compilation naming state for generated temporaries. Created here —
       // `createTarget()` is called once per compilation — so `tempVar()` numbers
       // `_tv1, _tv2, …` deterministically and two compiles of one expression
@@ -7131,7 +7136,10 @@ function wrapRealOnly(
  * when its annotation is a non-real number type, real-shaped otherwise (an
  * unannotated parameter is wide, which the analysis shapes real).
  */
-function lambdaEntryPlan(literalParams: ReadonlyArray<Expression>): EntryPlan {
+function lambdaEntryPlan(
+  literalParams: ReadonlyArray<Expression>,
+  mode: CompileMode
+): EntryPlan {
   const real: number[] = [];
   const complex: number[] = [];
   literalParams.forEach((p, i) => {
@@ -7151,7 +7159,14 @@ function lambdaEntryPlan(literalParams: ReadonlyArray<Expression>): EntryPlan {
         }
       }
     }
-    (t !== undefined && isNonRealNumber(t) ? complex : real).push(i);
+    // Under the complex discipline an unannotated (wide) parameter is
+    // complex-shaped too — a number is lifted at entry, an object accepted.
+    const isComplex =
+      t !== undefined
+        ? isNonRealNumber(t) ||
+          (mode === 'complex' && BaseCompiler.wideNumericType(t))
+        : mode === 'complex';
+    (isComplex ? complex : real).push(i);
   });
   return { kind: 'args', real, complex };
 }
@@ -7165,13 +7180,21 @@ function lambdaEntryPlan(literalParams: ReadonlyArray<Expression>): EntryPlan {
  */
 function varsEntryPlan(
   engine: ComputeEngine,
-  refs: ReadonlySet<string> | undefined
+  refs: ReadonlySet<string> | undefined,
+  mode: CompileMode
 ): EntryPlan | undefined {
   if (refs === undefined || refs.size === 0) return undefined;
   const real: string[] = [];
   const complex: string[] = [];
-  for (const id of refs)
-    (BaseCompiler.isComplexValued(engine.symbol(id)) ? complex : real).push(id);
+  for (const id of refs) {
+    const sym = engine.symbol(id);
+    // Built OUTSIDE the compilation (the mode latch has been restored), so
+    // the complex discipline's wide rule is applied here explicitly.
+    const isComplex =
+      BaseCompiler.isComplexValued(sym) ||
+      (mode === 'complex' && BaseCompiler.wideNumericType(sym.type?.type));
+    (isComplex ? complex : real).push(id);
+  }
   return { kind: 'vars', real, complex };
 }
 
@@ -7181,6 +7204,9 @@ function compileToTarget(
   realOnly?: boolean,
   entryChecks = true
 ): CompilationResult<'javascript'> {
+  // The discipline this compilation runs under, for the D3 entry plans built
+  // after the compilation proper (when `BaseCompiler.mode` is restored).
+  const mode = BaseCompiler.resolveCompileMode(target);
   // A provably complex tuple/list COMPONENT used to be refused here (Tycho
   // item 62). Retired 2026-07-30: `wrapRealOnly`'s `coerceComponents`
   // recurses into array results, so `(1, i)` now runs to `[1, NaN]` — the
@@ -7239,7 +7265,7 @@ function compileToTarget(
       body,
       params,
       userDefs,
-      entryChecks ? lambdaEntryPlan(args.slice(1)) : undefined
+      entryChecks ? lambdaEntryPlan(args.slice(1), mode) : undefined
     );
     const result = {
       target: 'javascript' as const,
@@ -7287,7 +7313,7 @@ function compileToTarget(
     js,
     preamble,
     entryChecks
-      ? varsEntryPlan(expr.engine as ComputeEngine, target.varsObjectRefs)
+      ? varsEntryPlan(expr.engine as ComputeEngine, target.varsObjectRefs, mode)
       : undefined
   );
   const result = {

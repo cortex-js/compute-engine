@@ -250,7 +250,11 @@ describe('COMPILE CSE — conditionality', () => {
       'True',
       0,
     ]);
-    const result = compile(expr, { fallback: false });
+    // `entryChecks: false`: the D3 entry check of the runner reads every free
+    // symbol once per call (`typeof`), which would fire the counting getter
+    // below independently of the emitted code — the getter is this test's
+    // instrument for what the CODE evaluates, so the check is switched off.
+    const result = compile(expr, { fallback: false, entryChecks: false });
 
     expect(occurrences(result.code, 'Math.sin')).toBe(1);
     // The binding is inside the selected branch: it appears AFTER the `?`.
@@ -1800,7 +1804,11 @@ describe('COMPILE CSE — guard edge (§7.4)', () => {
     const expr = ce.parse(
       'x \\ne 0 \\land \\sin(6u/x)^2 + \\sin(6u/x) + \\sin(6u/x) > 0'
     );
-    const result = compile(expr, { fallback: false });
+    // `entryChecks: false`: the D3 entry check of the runner reads every free
+    // symbol once per call (`typeof`), which would fire the counting getter
+    // below independently of the emitted code — the getter is this test's
+    // instrument for what the CODE evaluates, so the check is switched off.
+    const result = compile(expr, { fallback: false, entryChecks: false });
 
     // The binding is INSIDE the guarded operand.
     expect(result.code).toContain('const _cse1 = Math.sin((6 * _.u) / _.x)');
@@ -2224,7 +2232,11 @@ describe('COMPILE CSE — conditionality, per lazy-operand entry', () => {
       ['Coalesce', ce.box(['Coalesce', 'x', probe3('u')]), { x: 1 }],
     ];
     for (const [name, expr, base] of cases) {
-      const run = compile(expr, { fallback: false }).run as (v: any) => unknown;
+      // `entryChecks: false` — see the conditionality test above: the D3
+      // entry check reads every free symbol once, which the counting getter
+      // must not see.
+      const run = compile(expr, { fallback: false, entryChecks: false })
+        .run as (v: any) => unknown;
       let reads = 0;
       run({
         ...base,

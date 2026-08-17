@@ -98,7 +98,7 @@ import type {
   OperandCompiler,
   TargetSource,
 } from './types.js';
-import { CompileDeclineError } from './diagnostics.js';
+import { CompileDeclineError, LaneMismatchError } from './diagnostics.js';
 import { chop, ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
 import { candidateAt, childRegionAt, harvestCse } from './cse.js';
 import type { CseHarvest, CseHarvestOptions, CseRegion } from './cse.js';
@@ -1111,6 +1111,11 @@ export class BaseCompiler {
     prec = 0
   ): TargetSource {
     if (expr === undefined) return '';
+    // A node whose emission the D2/D6 runtime rule has BOUND to a temporary
+    // (`realOperandGuard`): the real lowering re-emits its head with the
+    // operand's code replaced by the temporary's real projection.
+    const override = BaseCompiler._codeOverrides.get(expr);
+    if (override !== undefined) return override;
     if (!expr.isValid) {
       throw new Error(
         `Cannot compile invalid expression: "${expr.toString()}"`
@@ -1298,6 +1303,350 @@ export class BaseCompiler {
   }
 
   /**
+   * Whether the compilation in progress runs under the STRICT discipline's
+   * binding-boundary rule: a complex-shaped value reaching a binding the
+   * compilation shaped real is a `LaneMismatch` decline (design §3,
+   * `docs/plans/2026-08-16-compile-complex-mode.md`), never a specialization
+   * or a silent real-lane emission.
+   *
+   * Migration step 2 (2026-08-16): the rule is in force for `mode: 'strict'`
+   * ONLY. Under `'auto'` (the default) and `'complex'` — which in this step
+   * still emit today's code — the pre-existing mechanisms stay in place: the
+   * per-call-site lane specialization (`userCallComplexLanes`, `_fn_b$z1`),
+   * the bare-callback eta expansion, the block-local promotion on a later
+   * complex assignment. That keeps every default-mode program byte-identical
+   * until step 4, where `auto` becomes "strict attempt, escalate to complex
+   * on a lane mismatch" and this gate widens to that first attempt.
+   */
+  static get strictLanes(): boolean {
+    return BaseCompiler._mode === 'strict';
+  }
+
+  /**
+   * Whether the compilation in progress runs under the COMPLEX discipline
+   * (design §2, `docs/plans/2026-08-16-compile-complex-mode.md`): a numeric
+   * binding whose static type is WIDE (`unknown`, `number`, `finite_number`,
+   * an unannotated parameter, a block local not declared real) is
+   * complex-shaped, and every wide value is lifted at its use through the
+   * target's idempotent `complexLift` (`_SYS.cplx`) — a number becomes `{re,
+   * im: 0}`, an object passes through, and a non-number (a string, a
+   * boolean, a collection held by a wide binding) passes through untouched.
+   * Sound because over-approximating complex is only slower. Typed-real
+   * values keep the real kernel; the type-based realness proofs survive as an
+   * optimization.
+   *
+   * Migration step 3 (2026-08-16): in force for `mode: 'complex'`; `auto`
+   * still compiles as strict-with-lanes until step 4.
+   */
+  static get complexDiscipline(): boolean {
+    return BaseCompiler._mode === 'complex';
+  }
+
+  /**
+   * The complex discipline's answer for a numeric binding of static type `t`
+   * that the strict analysis shapes REAL by default: complex when the type
+   * is WIDE — it admits a complex value (`unknown`, `any`, `number`,
+   * `finite_number`, a union containing them) — real when it is a real-only
+   * type or not a number type at all. `false` outside complex mode, which is
+   * the strict default this replaces.
+   */
+  static wideIsComplex(t: Type | undefined): boolean {
+    if (!BaseCompiler.complexDiscipline) return false;
+    return BaseCompiler.wideNumericType(t);
+  }
+
+  /**
+   * Is `t` a WIDE numeric type — one that admits a complex value without
+   * being a real-only type: `unknown`, `any`, `number`, `finite_number`, a
+   * non-real number type, a union containing one? (Mode-independent; the
+   * complex discipline's binding rule is `wideIsComplex`.)
+   */
+  static wideNumericType(t: Type | undefined): boolean {
+    if (t === undefined) return false;
+    if (isNonRealNumber(t)) return true;
+    if (isSubtype(t, 'real')) return false;
+    // Admits a complex value: `complex` (hence any complex number) is a
+    // subtype of the binding's type, or the type is a top type.
+    return isSubtype('complex', t);
+  }
+
+  /**
+   * Nodes whose emission is currently OVERRIDDEN by a temporary's real
+   * projection — the D2/D6 runtime rule (`realOperandGuard`). Consulted at
+   * the top of `compile()`; keyed by node identity, scoped to the emission of
+   * the guarded head.
+   */
+  private static readonly _codeOverrides = new Map<Expression, string>();
+
+  /**
+   * Is `expr` STATICALLY a non-real number — a value that certainly has a
+   * non-zero imaginary part? `ImaginaryUnit`, a number literal with a
+   * non-zero imaginary part, a symbol typed `imaginary`, or a symbol whose
+   * assigned value is one of those. A `complex`-TYPED symbol is NOT
+   * statically non-real (a real IS a complex; `z: complex` may hold `2`), nor
+   * is a promoted radical or a wide binding — those take the D2 runtime rule.
+   */
+  static isProvablyNonReal(expr: Expression): boolean {
+    if (isNumber(expr)) return expr.im !== 0 && expr.isNumberLiteral === true;
+    if (isSymbol(expr)) {
+      if (expr.symbol === 'ImaginaryUnit') return true;
+      const t = expr.type;
+      if (t !== undefined && isSubtype(t.type, 'imaginary')) return true;
+      if (
+        BaseCompiler._boundVarsCtx?.has(expr.symbol) ||
+        BaseCompiler._binderShield.some((f) => f.has(expr.symbol))
+      )
+        return false;
+      const v = expr.engine._getSymbolValue(expr.symbol);
+      return v !== undefined && BaseCompiler.isProvablyNonReal(v);
+    }
+    if (isFunction(expr)) {
+      const t = expr.type;
+      return t !== undefined && isSubtype(t.type, 'imaginary');
+    }
+    return false;
+  }
+
+  /**
+   * The D2/D6 RUNTIME RULE (design §8, `docs/plans/2026-08-16-compile-complex-mode.md`)
+   * around a head `h` whose lowering is real-only — an ordering comparison,
+   * an integer-only head (`Floor`, `Mod`, …), a real-only library helper
+   * (`Erf`, …): when some SCALAR operand may be complex at run time (a
+   * `complex`-typed symbol, a wide binding under the complex discipline, a
+   * promoted radical), every such operand is bound ONCE to a temporary, in
+   * argument order (draw order is preserved: `√(Random()) < 2` draws once),
+   * and the head's real lowering is emitted with each bound operand's code
+   * replaced by the temporary's real projection (`complexReal`), under the
+   * guard that every temporary's imaginary part is exactly zero
+   * (`complexIsReal`); otherwise the value is `elseCode` (`'false'` for a
+   * comparison, `'NaN'` for a numeric head). Because the guard is emitted
+   * WHERE the head is lowered, a head inside a conditional arm or a
+   * short-circuited operand keeps its laziness.
+   *
+   * A STATICALLY non-real operand (`isProvablyNonReal`: `i`, `2i`, an
+   * `imaginary`-typed symbol) is the compile-time DECLINE — `Less(i, 2)` has
+   * no compiled value, exactly as the interpreter leaves it unevaluated —
+   * raised here as a `capability` diagnostic (`code: 'non-real-operand'`).
+   *
+   * Returns `undefined` — the caller then applies its pre-existing
+   * fail-closed decline — when no operand may be complex, when a maybe-
+   * complex operand is definitely a collection (a list of maybe-complex
+   * elements has no per-element rule here), or when the target lacks the
+   * hooks the rule is emitted through (`bindExpr`, `complexIsReal`,
+   * `complexReal`: the shader targets, a custom target without them).
+   *
+   * `emit` re-emits the head with the overrides active; the gate that called
+   * this must skip an operand present in `_codeOverrides` on re-entry.
+   */
+  private static realOperandGuard(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    emit: () => TargetSource,
+    elseCode: string
+  ): TargetSource | undefined {
+    // The rule belongs to the COMPLEX discipline (and, from migration step 4,
+    // to `auto`); in strict mode nothing changes — a typed-complex or
+    // provably non-real operand of a real-only head fails closed as before
+    // (design D2/D6: "in strict mode nothing changes").
+    if (!BaseCompiler.complexDiscipline) return undefined;
+    // Deduplicated by node identity: the same operand INSTANCE in two
+    // positions (`Max(e, e)`) is bound once, and an impure one is evaluated
+    // once.
+    const maybe = [
+      ...new Set(
+        args.filter(
+          (a) =>
+            BaseCompiler.isComplexValued(a) &&
+            !BaseCompiler._codeOverrides.has(a)
+        )
+      ),
+    ];
+    if (maybe.length === 0) return undefined;
+    const nonReal = maybe.find((a) => BaseCompiler.isProvablyNonReal(a));
+    if (nonReal !== undefined)
+      throw new CompileDeclineError({
+        code: 'non-real-operand',
+        kind: 'capability',
+        message:
+          `${h}: cannot compile over the non-real operand \`${nonReal.toString()}\` — ` +
+          `the value is certainly not a real number, so the head has no ` +
+          `compiled value (the interpreter leaves it unevaluated). Fail closed (D6).`,
+      });
+    // A DEFINITELY-collection operand (a `list<complex>` literal or symbol)
+    // has no per-element rule here and keeps the caller's decline; a wide
+    // operand (`unknown`, `number`) is what the rule exists for.
+    if (
+      !target.bindExpr ||
+      !target.complexIsReal ||
+      !target.complexReal ||
+      !target.realGuard ||
+      maybe.some((a) => a.type.matches('collection'))
+    )
+      return undefined;
+    const bindings: Array<[string, string]> = [];
+    const guards: string[] = [];
+    const bound: Expression[] = [];
+    try {
+      for (const a of maybe) {
+        const t = BaseCompiler.tempVar(target);
+        bindings.push([t, BaseCompiler.compileValueOperand(a, target)]);
+        guards.push(target.complexIsReal(t));
+        BaseCompiler._codeOverrides.set(a, target.complexReal(t));
+        bound.push(a);
+      }
+      const body = emit();
+      // The conditional and its "else" literal are the TARGET's spelling
+      // (`realGuard`): JavaScript `((g) ? (body) : NaN)`, Python
+      // `((body) if (g) else float('nan'))`.
+      return target.bindExpr(
+        bindings,
+        target.realGuard(
+          guards,
+          body,
+          elseCode === 'false' ? 'boolean' : 'number'
+        )
+      );
+    } finally {
+      for (const a of bound) BaseCompiler._codeOverrides.delete(a);
+    }
+  }
+
+  /**
+   * The D2 runtime rule for a CHAINED ordering (`Less(a, b, c, …)` — `a < b <
+   * c`): each operand is bound ONCE, at the FIRST edge that reads it, and the
+   * edges are conjoined left to right, so a later operand is not evaluated
+   * (and an impure one not drawn) once an earlier edge has failed — the
+   * interpreter's short-circuit order. Each edge compares the real projections
+   * under the guard that its operands are real; otherwise it is `false`.
+   *
+   * Emitted as nested `bindExpr` scopes: `((t0) => guard0 ? ((t1) => guard1 ?
+   * (t0 < t1) && ((t2) => …)(c) : false)(b) : false)(a)`. Operands that are
+   * NOT maybe-complex are still bound (they must be evaluated exactly once,
+   * and the temporaries keep the edges uniform); their guard is omitted. The
+   * comparison is the raw operator over real projections: a chain reaches
+   * here only when some operand may be complex, i.e. every operand is
+   * numeric. Same preconditions and `undefined` contract as
+   * `realOperandGuard`.
+   */
+  private static realOperandChain(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    if (!BaseCompiler.complexDiscipline) return undefined;
+    const isMaybe = (a: Expression): boolean =>
+      BaseCompiler.isComplexValued(a) && !BaseCompiler._codeOverrides.has(a);
+    if (!args.some(isMaybe)) return undefined;
+    const nonReal = args.find(
+      (a) => isMaybe(a) && BaseCompiler.isProvablyNonReal(a)
+    );
+    if (nonReal !== undefined)
+      throw new CompileDeclineError({
+        code: 'non-real-operand',
+        kind: 'capability',
+        message:
+          `${h}: cannot compile over the non-real operand \`${nonReal.toString()}\` — ` +
+          `the value is certainly not a real number, so the head has no ` +
+          `compiled value (the interpreter leaves it unevaluated). Fail closed (D6).`,
+      });
+    const bind = target.bindExpr;
+    const isReal = target.complexIsReal;
+    const real = target.complexReal;
+    const guard = target.realGuard;
+    if (
+      !bind ||
+      !isReal ||
+      !real ||
+      !guard ||
+      args.some((a) => a.type.matches('collection'))
+    )
+      return undefined;
+    const op = { Less: '<', LessEqual: '<=', Greater: '>', GreaterEqual: '>=' }[
+      h
+    ];
+    if (op === undefined) return undefined;
+    const temps = args.map(() => BaseCompiler.tempVar(target));
+    const codes = args.map((a) => BaseCompiler.compileValueOperand(a, target));
+    const guardOf = (i: number): string[] =>
+      isMaybe(args[i]) ? [isReal(temps[i])] : [];
+    const valueOf = (i: number): string =>
+      isMaybe(args[i]) ? real(temps[i]) : temps[i];
+    // Scope i binds operand i (guarded), then — for i ≥ 1 — compares it with
+    // operand i−1 (bound by the enclosing scope) and continues the chain.
+    const scope = (i: number): string => {
+      const cmp = i === 0 ? '' : `(${valueOf(i - 1)} ${op} ${valueOf(i)})`;
+      const rest = i + 1 < args.length ? scope(i + 1) : '';
+      const body = cmp === '' ? rest : rest === '' ? cmp : `${cmp} && ${rest}`;
+      return bind([[temps[i], codes[i]]], guard(guardOf(i), body, 'boolean'));
+    };
+    return scope(0);
+  }
+
+  /**
+   * COMPLEX discipline, the LIFT AT USE (design §2): the emitted reference
+   * `code` of a symbol whose analysis says complex ONLY because its type is
+   * wide is wrapped in the target's idempotent `complexLift` (`_SYS.cplx`) —
+   * the binding may hold a plain number at run time (a caller's `vars`, a
+   * real argument to a wide parameter, a real first assignment to a local),
+   * and every consumer that reads it as complex must find `{re, im}`. A
+   * symbol complex by TYPE (`z: complex`, coerced at every entry) or by
+   * frame (a lane parameter, a local bound to a complex value) is left as
+   * emitted. Outside the complex discipline, or on a target without the
+   * hook, the reference is unchanged.
+   */
+  private static liftWideReference(
+    sym: Expression,
+    code: TargetSource,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    if (!BaseCompiler.complexDiscipline || !target.complexLift) return code;
+    if (!isSymbol(sym) || sym.symbol === 'ImaginaryUnit') return code;
+    if (!BaseCompiler.isComplexValued(sym)) return code;
+    const t = sym.type?.type;
+    if (t !== undefined && isNonRealNumber(t)) return code;
+    return target.complexLift(code);
+  }
+
+  /**
+   * Throw the strict-mode `LaneMismatch` decline for a complex-shaped `value`
+   * reaching the real-shaped binding `binding` at the §3 boundary `boundary`.
+   * `binding` must be USER-LEGIBLE (an authored identifier or an honest
+   * description — never an emitted temporary), per the `LaneMismatchError`
+   * contract; `value` is rendered as LaTeX when the engine can serialize it.
+   */
+  private static laneMismatch(
+    boundary: string,
+    binding: string,
+    value: Expression
+  ): never {
+    let rendered: string;
+    try {
+      rendered = value.latex;
+    } catch {
+      rendered = value.toString();
+    }
+    throw new LaneMismatchError({ boundary, binding, value: rendered });
+  }
+
+  /**
+   * A user-legible name for parameter `i` of user function `h` whose literal
+   * is `literal`: the authored identifier when the parameter has one, else an
+   * honest positional description.
+   */
+  private static userParamBinding(
+    h: string,
+    literal: (Expression & FunctionInterface) | undefined,
+    i: number
+  ): string {
+    const p = literal?.ops[i + 1];
+    const name = p !== undefined ? functionLiteralParameterName(p) : undefined;
+    return name
+      ? `the parameter \`${name}\` of \`${h}\``
+      : `parameter ${i + 1} of \`${h}\` (unnamed)`;
+  }
+
+  /**
    * The effective compile mode for `target`: its requested `mode` when set
    * and offered by its `supportedModes` (default `['strict']`), else the
    * target's default — `'auto'` when offered, otherwise `'strict'`.
@@ -1373,7 +1722,11 @@ export class BaseCompiler {
     head: MathJsonSymbol,
     args: ReadonlyArray<Expression>
   ): boolean {
-    if (!BaseCompiler._complexPromotion) return false;
+    // The `complexPromotion` opt-in, or the COMPLEX discipline (design §2:
+    // "unknown-sign radicals/logarithms promote" — the interpreter's
+    // promotions `√(−1)`, `ln(−2)` fall out of complex mode).
+    if (!BaseCompiler._complexPromotion && !BaseCompiler.complexDiscipline)
+      return false;
     if (!BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(head)) return false;
     // `Log(x, b)`: a negative BASE makes the quotient complex too, so every
     // operand has to clear the bar. An omitted operand cannot be cleared.
@@ -1441,12 +1794,10 @@ export class BaseCompiler {
     // some lane IS complex (the caller checks `expr.ops` first), which is
     // exactly the set of call sites whose emission changed; every other
     // default-path call keeps its previous, type-based answer.
-    const lanes = BaseCompiler.userCallComplexLanes(
-      expr.engine,
-      op,
-      literal,
-      expr.ops
-    );
+    // No lanes under the complex discipline (see `userCallComplexLanesOf`).
+    const lanes = BaseCompiler.complexDiscipline
+      ? literal.ops.slice(1).map(() => false)
+      : BaseCompiler.userCallComplexLanes(expr.engine, op, literal, expr.ops);
     if (!BaseCompiler._complexPromotion && !lanes.some((c) => c))
       return undefined;
     const mask = BaseCompiler.userCallMask(literal, lanes);
@@ -2871,7 +3222,8 @@ export class BaseCompiler {
         if (isRefusableBuiltinCallback(expr.engine, s))
           throw new Error(BaseCompiler.builtinCallbackRefusal(s));
       }
-      if (resolved !== undefined) return resolved;
+      if (resolved !== undefined)
+        return BaseCompiler.liftWideReference(expr, resolved, target);
       // The target did not resolve the symbol (no `vars` mapping, constant, or
       // free-symbol plumbing). Before falling back to a bare reference — which
       // is a dangling identifier for a symbol the engine actually knows — fold
@@ -2883,7 +3235,11 @@ export class BaseCompiler {
       // Genuinely free symbol: emit its bare identifier. Give the target a
       // chance to mangle it or fail closed (D6) — e.g. a GLSL/WGSL reserved
       // keyword used as a variable name would emit invalid shader source.
-      return target.mangleId ? target.mangleId(s) : s;
+      return BaseCompiler.liftWideReference(
+        expr,
+        target.mangleId ? target.mangleId(s) : s,
+        target
+      );
     }
 
     // Is it a number?
@@ -2942,17 +3298,63 @@ export class BaseCompiler {
     const prevCseParent = BaseCompiler._cseParent;
     BaseCompiler._cseParent = expr;
     try {
-      return BaseCompiler.compileExpr(
-        expr.engine,
-        expr.operator,
-        expr.ops,
-        prec,
-        target,
-        expr
+      return BaseCompiler.liftWideResult(
+        expr,
+        BaseCompiler.compileExpr(
+          expr.engine,
+          expr.operator,
+          expr.ops,
+          prec,
+          target,
+          expr
+        ),
+        target
       );
     } finally {
       BaseCompiler._cseParent = prevCseParent;
     }
+  }
+
+  /**
+   * COMPLEX discipline, the lift at use for a FUNCTION node's VALUE (design
+   * §2): a node the analysis calls complex only because its TYPE is wide —
+   * an element read of a `list<number>` (`At`), a user-function call whose
+   * declared result is `number`/`unknown`, an `If` over wide arms — is
+   * emitted by a lowering that hands back whatever it holds, a plain number
+   * as often as not, while every complex-lane consumer reads `.re`/`.im` off
+   * it. So the emitted value is wrapped in the target's idempotent
+   * `complexLift` (an object passes through) exactly like a wide SYMBOL
+   * reference (`liftWideReference`), and parent and child agree on the SHAPE.
+   *
+   * Skipped where the wrap is provably redundant: a node typed non-real (its
+   * emission is complex-shaped by contract), and the arithmetic heads whose
+   * complex-lane emission always builds a `{re, im}` object
+   * (`COMPLEX_PROPAGATING_HEADS`, `Sqrt`/`Ln`/`Log`/`Power`) — every other
+   * head pays the idempotent wrap in complex mode rather than a per-head
+   * audit of its lowering. Outside the complex discipline: unchanged.
+   */
+  private static liftWideResult(
+    node: Expression & { ops: ReadonlyArray<Expression> },
+    code: TargetSource,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    if (!BaseCompiler.complexDiscipline || !target.complexLift) return code;
+    const h = node.operator;
+    // A control-flow head may lower to STATEMENTS (a `Block` or `If` in a
+    // function body, a `Loop`, an `Assign`) — not an expression a call can
+    // wrap. Their VALUE positions lift their own arms and locals.
+    if (BaseCompiler.CONTROL_FLOW_HEADS.has(h)) return code;
+    if (
+      BaseCompiler.COMPLEX_PROPAGATING_HEADS.has(h) ||
+      BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(h) ||
+      h === 'Power'
+    )
+      return code;
+    const t = node.type?.type;
+    if (t === undefined || isNonRealNumber(t)) return code;
+    if (!BaseCompiler.wideNumericType(t)) return code;
+    if (!BaseCompiler.isComplexValued(node)) return code;
+    return target.complexLift(code);
   }
 
   /**
@@ -3314,7 +3716,31 @@ export class BaseCompiler {
     // merely UNKNOWN sign over a real kernel (`Sqrt(x)`) is not complex-valued
     // by `isComplexValued`'s carve-out, so `Less(Sqrt(x), 2)` still compiles.
     if (BaseCompiler.ORDERING_HEADS.has(h)) {
-      const complexOperand = args.find((a) => BaseCompiler.isComplexValued(a));
+      // D2 (design §8, `docs/plans/2026-08-16-compile-complex-mode.md`): an
+      // operand that MAY be complex — a `complex`-typed symbol, a wide binding
+      // under the complex discipline, a promoted radical — takes the RUNTIME
+      // rule (bind once, compare the real parts when every imaginary part is
+      // exactly zero, `false` otherwise); only a STATICALLY non-real operand
+      // is the compile-time decline, raised inside `realOperandGuard`.
+      // A CHAIN (`a < b < c`) binds each operand at its own edge so a later
+      // operand is never evaluated when an earlier edge already failed — the
+      // interpreter's short-circuit order (`realOperandChain`).
+      const guarded =
+        args.length > 2
+          ? BaseCompiler.realOperandChain(h, args, target)
+          : BaseCompiler.realOperandGuard(
+              h,
+              args,
+              target,
+              () =>
+                BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+              'false'
+            );
+      if (guarded !== undefined) return guarded;
+      const complexOperand = args.find(
+        (a) =>
+          BaseCompiler.isComplexValued(a) && !BaseCompiler._codeOverrides.has(a)
+      );
       if (complexOperand !== undefined)
         throw new Error(
           `${h}: cannot compile an ordering comparison over the ` +
@@ -3328,8 +3754,13 @@ export class BaseCompiler {
     const op = target.operators?.(h);
 
     if (op !== undefined) {
-      // Skip infix operators for complex operands — fall through to function dispatch
-      const hasComplex = args.some((a) => BaseCompiler.isComplexValued(a));
+      // Skip infix operators for complex operands — fall through to function
+      // dispatch. An operand the D2 runtime rule has bound to a real
+      // projection (`_codeOverrides`) is real here.
+      const hasComplex = args.some(
+        (a) =>
+          BaseCompiler.isComplexValued(a) && !BaseCompiler._codeOverrides.has(a)
+      );
       if (!hasComplex) {
         // Check if this looks like a function name rather than an operator.
         // Function names are alphanumeric identifiers, operators are symbols.
@@ -4334,11 +4765,27 @@ export class BaseCompiler {
         BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(h) &&
         target.language !== undefined &&
         !target.language.startsWith('interval') &&
-        args.some((a) => BaseCompiler.isComplexValued(a))
-      )
+        args.some(
+          (a) =>
+            BaseCompiler.isComplexValued(a) &&
+            !BaseCompiler._codeOverrides.has(a)
+        )
+      ) {
+        // D2/D6 runtime rule (see `realOperandGuard`): a maybe-complex scalar
+        // operand is bound once and the real lowering runs on its real part
+        // when every imaginary part is exactly zero, `NaN` otherwise.
+        const guarded = BaseCompiler.realOperandGuard(
+          h,
+          args,
+          target,
+          () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+          'NaN'
+        );
+        if (guarded !== undefined) return guarded;
         throw new Error(
           `${h}: the target's lowering for this head is real-only and cannot represent a complex-valued argument. Fail closed (D6).`
         );
+      }
 
       // A `broadcastable` head over a single finite indexed collection:
       // apply the head's scalar element lowering across the collection. How
@@ -4395,8 +4842,23 @@ export class BaseCompiler {
       target.language !== undefined &&
       !target.language.startsWith('interval') &&
       !BaseCompiler.COMPLEX_TRANSPARENT_HEADS.has(h) &&
-      args.some((a) => BaseCompiler.isComplexValued(a))
+      args.some(
+        (a) =>
+          BaseCompiler.isComplexValued(a) && !BaseCompiler._codeOverrides.has(a)
+      )
     ) {
+      // D6 runtime rule (design §8): `Erf(x)` for a maybe-complex `x` runs
+      // the real helper on the real part when the imaginary part is exactly
+      // zero and answers `NaN` otherwise; a statically non-real operand is
+      // the compile-time decline (inside `realOperandGuard`).
+      const guarded = BaseCompiler.realOperandGuard(
+        h,
+        args,
+        target,
+        () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+        'NaN'
+      );
+      if (guarded !== undefined) return guarded;
       throw new Error(
         `${h}: real-only target helper "${fn}" cannot represent a complex-valued argument. Fail closed (D6).`
       );
@@ -6252,7 +6714,10 @@ export class BaseCompiler {
         );
     };
     for (const local of locals) {
-      complexFrame.set(local, false);
+      // Under the complex discipline a local not declared real is
+      // complex-shaped from its declaration (`localComplexDefault`); the
+      // strict default is real until a complex first binding.
+      complexFrame.set(local, BaseCompiler.localComplexDefault());
       vectorFrame.set(local, BaseCompiler.LOCAL_UNSET);
     }
     BaseCompiler._pushLocalComplex(complexFrame);
@@ -6901,7 +7366,7 @@ export class BaseCompiler {
       const complexFrame = new Map<string, boolean>();
       for (const s of withDecls)
         if (isFunction(s, 'Declare') && isSymbol(s.ops[0]))
-          complexFrame.set(s.ops[0].symbol, false);
+          complexFrame.set(s.ops[0].symbol, BaseCompiler.localComplexDefault());
       BaseCompiler._pushLocalComplex(complexFrame);
       try {
         for (const s of withDecls)
@@ -7461,14 +7926,136 @@ export class BaseCompiler {
       const name = arg.ops[0].symbol;
       if (isSymbol(arg.ops[1], 'complex'))
         BaseCompiler._setLocalComplex(frame, name, true);
+      else if (
+        BaseCompiler.complexDiscipline &&
+        BaseCompiler.declaredTypeIsReal(arg.ops[1])
+      )
+        // Complex discipline: a local DECLARED a real-only type keeps the
+        // real kernel (the type-based realness proof survives as an
+        // optimization, design §2).
+        BaseCompiler._setLocalComplex(frame, name, false);
       const value = BaseCompiler.declareValueOperand(arg.ops);
-      if (value !== undefined && BaseCompiler.isComplexValued(value))
-        BaseCompiler._setLocalComplex(frame, name, true);
+      if (value !== undefined) {
+        if (BaseCompiler.isComplexValued(value))
+          BaseCompiler._setLocalComplex(frame, name, true);
+        BaseCompiler.markLocalBound(frame, name);
+      }
     } else if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0])) {
       const name = arg.ops[0].symbol;
-      if (frame.get(name) === false && BaseCompiler.isComplexValued(arg.ops[1]))
+      if (
+        frame.get(name) === false &&
+        BaseCompiler.isComplexValued(arg.ops[1])
+      ) {
+        // STRICT discipline (design §3, "Block local" row): a local's shape
+        // is its FIRST binding's shape, and a later complex-shaped assignment
+        // to a local bound real is a LaneMismatch DECLINE — the statements
+        // between the two bindings were compiled reading a number. Under the
+        // other modes (step 2) the local is promoted as before, which is
+        // itself the silent-wrong shape (`k := 1; k := k + 2i` reads `.re`
+        // off the number `1`) that step 3's complex discipline removes.
+        if (BaseCompiler.strictLanes && BaseCompiler.localIsBound(frame, name))
+          BaseCompiler.laneMismatch(
+            'Block local',
+            `the local \`${name}\``,
+            arg.ops[1]
+          );
         BaseCompiler._setLocalComplex(frame, name, true);
+      }
+      if (frame.has(name)) BaseCompiler.markLocalBound(frame, name);
+    } else if (BaseCompiler.strictLanes) {
+      // A complex-shaped assignment to a real-bound local NESTED in a
+      // conditional or loop statement (`if (t < 0) { k := i·k }`) is the same
+      // mismatch: the local stays real-shaped for the rest of the block (only
+      // top-level statements shape it), so the value it holds after the
+      // branch is consumed as a number. Walked here for the strict decline
+      // only; a nested `Function`/`Block` scope of its own is not entered.
+      BaseCompiler.checkNestedComplexRebinding(arg, frame);
     }
+  }
+
+  /**
+   * The complex-frame DEFAULT for a block local at its declaration: `true`
+   * under the complex discipline (a local not declared real is wide, hence
+   * complex-shaped, and every reference to it is lifted at use), `false`
+   * otherwise (real until a complex first binding, the strict default).
+   */
+  private static localComplexDefault(): boolean {
+    return BaseCompiler.complexDiscipline;
+  }
+
+  /** Does the `Declare` type operand `t` name a real-only number type? */
+  private static declaredTypeIsReal(t: Expression | undefined): boolean {
+    if (t === undefined) return false;
+    const text = isString(t) ? t.string : isSymbol(t) ? t.symbol : undefined;
+    if (text === undefined) return false;
+    try {
+      return isSubtype(parseType(text), 'real');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The locals of a block frame that have received a first binding (a
+   * `Declare` with a value, or an `Assign`), keyed by frame — the "bound
+   * real" half of the strict-mode block-local rule (`noteLocalComplex`): a
+   * local with `frame.get(name) === false` and no first binding is merely
+   * DECLARED real by default and may still be shaped by its first `Assign`.
+   */
+  private static readonly _boundLocals = new WeakMap<
+    Map<string, boolean>,
+    Set<string>
+  >();
+
+  private static markLocalBound(frame: Map<string, boolean>, name: string) {
+    let bound = BaseCompiler._boundLocals.get(frame);
+    if (bound === undefined) {
+      bound = new Set();
+      BaseCompiler._boundLocals.set(frame, bound);
+    }
+    bound.add(name);
+  }
+
+  private static localIsBound(
+    frame: Map<string, boolean>,
+    name: string
+  ): boolean {
+    return BaseCompiler._boundLocals.get(frame)?.has(name) === true;
+  }
+
+  /**
+   * Walk the statement forms nested in `stmt` (`If`/`Which` arms, `Loop`
+   * bodies, statement lists) for an `Assign` of a real-bound local of `frame`
+   * to a complex-shaped value, and raise the strict-mode block-local
+   * `LaneMismatch` for the first one. Never enters a `Function` literal or a
+   * nested `Block` (each is a scope of its own; a nested block's assignment to
+   * an OUTER local is left to that block's own frame handling, as today).
+   */
+  private static checkNestedComplexRebinding(
+    stmt: Expression,
+    frame: Map<string, boolean>
+  ): void {
+    if (!isFunction(stmt)) return;
+    const h = stmt.operator;
+    if (h === 'Function' || h === 'Block') return;
+    if (h === 'Assign' && isSymbol(stmt.ops[0])) {
+      const name = stmt.ops[0].symbol;
+      if (
+        frame.get(name) === false &&
+        BaseCompiler.localIsBound(frame, name) &&
+        stmt.ops[1] !== undefined &&
+        BaseCompiler.isComplexValued(stmt.ops[1])
+      )
+        BaseCompiler.laneMismatch(
+          'Block local',
+          `the local \`${name}\``,
+          stmt.ops[1]
+        );
+      return;
+    }
+    if (h !== 'If' && h !== 'Which' && h !== 'Loop') return;
+    for (const op of stmt.ops)
+      BaseCompiler.checkNestedComplexRebinding(op, frame);
   }
 
   /**
@@ -7621,14 +8208,16 @@ export class BaseCompiler {
       // fold, or the target emits structurally wrong arithmetic
       // (`number + {re, im}` → NaN at every point; Tycho item 57). Does NOT
       // apply to compile-bound variables, which shadow the engine.
-      if (BaseCompiler._boundVarsCtx?.has(expr.symbol)) return false;
+      if (BaseCompiler._boundVarsCtx?.has(expr.symbol))
+        return BaseCompiler.wideIsComplex(t.type);
       // Same rule for a name bound by a binder form we are analyzing rather
       // than compiling (Tycho item 65).
       for (let i = BaseCompiler._binderShield.length - 1; i >= 0; i--)
-        if (BaseCompiler._binderShield[i].has(expr.symbol)) return false;
+        if (BaseCompiler._binderShield[i].has(expr.symbol))
+          return BaseCompiler.wideIsComplex(t.type);
       const v = expr.engine._getSymbolValue(expr.symbol);
       if (v !== undefined) return BaseCompiler.isComplexValued(v);
-      return false;
+      return BaseCompiler.wideIsComplex(t.type);
     }
 
     if (isFunction(expr)) {
@@ -7675,6 +8264,28 @@ export class BaseCompiler {
     // `Real(±∞)` can type `non_finite_number` (so the `isNonRealNumber`
     // branch would too) — yet every target emits a real scalar for both.
     if (BaseCompiler.REAL_BY_DEFINITION_HEADS.has(expr.operator)) return false;
+    // A head whose lowering is REAL-ONLY (`Floor`, `Mod`, `Max`, the
+    // statistics family) yields a real value by construction: under the
+    // complex discipline its maybe-complex operands take the D2/D6 runtime
+    // rule (`realOperandGuard`: the real lowering, or `NaN`), and in strict
+    // mode a complex operand fails closed — either way the emitted value is
+    // never a `{re, im}` object, so a wide RESULT type (`Max(a, b)` over
+    // wide `a`, `b`) must not report complex.
+    if (BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(expr.operator)) return false;
+    // A SELECTION answers from its value ARMS, never from the node's type:
+    // the emitters coerce every arm to `{re, im}` as soon as one arm is
+    // complex-valued (`branchComplexCoercion`, Tycho item 60), so the value
+    // the parent receives is complex-shaped whenever an arm is — even when
+    // the type system joined the arms to a real type (`Which(c, a, True, 5)`
+    // over a wide `a` types `finite_integer`; under the complex discipline
+    // `a` is complex-shaped and both arms are lifted, and a parent reading
+    // the node's type would consume the object as a number).
+    if (expr.operator === 'If')
+      return expr.ops.slice(1).some((a) => BaseCompiler.isComplexValued(a));
+    if (expr.operator === 'Which')
+      return expr.ops.some(
+        (a, i) => i % 2 === 1 && BaseCompiler.isComplexValued(a)
+      );
     // An indexed read answers for the ELEMENT it selects, not for the whole
     // collection: a list is emitted element by element, so its run-time array is
     // heterogeneous and the generic `ops.some(…)` recursion at the bottom of
@@ -7724,7 +8335,7 @@ export class BaseCompiler {
       if (isSymbol(op) && BaseCompiler.BUILTIN_FOLD_HEADS.has(op.symbol))
         return BaseCompiler.foldLaneIsComplex(coll, init);
     }
-    if (BaseCompiler._complexPromotion) {
+    if (BaseCompiler._complexPromotion || BaseCompiler.complexDiscipline) {
       if (BaseCompiler.promotesRadicalToComplex(expr.operator, expr.ops))
         return true;
     }
@@ -7822,7 +8433,12 @@ export class BaseCompiler {
     if (expr.operator === 'Block')
       return BaseCompiler.isBlockValueComplexValued(expr);
 
-    return expr.ops.some((arg) => BaseCompiler.isComplexValued(arg));
+    if (expr.ops.some((arg) => BaseCompiler.isComplexValued(arg))) return true;
+    // COMPLEX discipline: a wide-typed result whose operands are all real can
+    // still be a complex value at run time (a user function returning its
+    // parameter, an element read of a `list<number>`), and the value it
+    // yields is lifted at the parent's use (`complexDiscipline`).
+    return BaseCompiler.wideIsComplex(t.type);
   }
 
   /**
@@ -7846,7 +8462,7 @@ export class BaseCompiler {
     const frame = new Map<string, boolean>();
     for (const arg of args)
       if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0]))
-        frame.set(arg.ops[0].symbol, false);
+        frame.set(arg.ops[0].symbol, BaseCompiler.localComplexDefault());
     const scope = expr.localScope;
     if (scope)
       for (const arg of args)
@@ -7857,7 +8473,7 @@ export class BaseCompiler {
             scope.bindings.has(name) &&
             !BaseCompiler._boundVarsCtx?.has(name)
           )
-            frame.set(name, false);
+            frame.set(name, BaseCompiler.localComplexDefault());
         }
 
     BaseCompiler._pushLocalComplex(frame);
@@ -9685,7 +10301,25 @@ export class BaseCompiler {
     const engine = callback.engine;
     const literal = BaseCompiler.userFunctionLiteral(engine, callback.symbol);
     if (literal === undefined || literal.ops.length !== 2) return undefined;
+    // COMPLEX discipline: the single emission of `b` already lifts its wide
+    // parameter at use, so the bare value reference serves complex elements.
+    if (BaseCompiler.complexDiscipline) return undefined;
     if (!BaseCompiler.hasUniformComplexScalarElements(source)) return undefined;
+    // STRICT discipline (design §3, "user-function VALUE position" row): the
+    // source's elements are complex-shaped and the callback's parameter is
+    // WIDE — the eta expansion below would route it to the complex-lane
+    // specialization, which strict mode does not have. Decline, naming the
+    // parameter to declare complex. (A parameter DECLARED complex is not a
+    // mismatch: the eta'd call coerces into it as any call does.)
+    if (BaseCompiler.strictLanes) {
+      const pt = BaseCompiler.userFunctionParamType(engine, callback.symbol, 0);
+      if (pt === undefined || !isNonRealNumber(pt))
+        BaseCompiler.laneMismatch(
+          'user-function value position',
+          BaseCompiler.userParamBinding(callback.symbol, literal, 0),
+          source
+        );
+    }
     const elt = BaseCompiler.collectionElementTypeOf(source);
     const paramType =
       elt !== undefined && isNonRealNumber(elt) ? typeToString(elt) : 'complex';
@@ -9732,6 +10366,12 @@ export class BaseCompiler {
   ): boolean[] | undefined {
     const literal = BaseCompiler.userFunctionLiteral(engine, h);
     if (literal === undefined) return undefined;
+    // COMPLEX discipline: ONE emission per function — every wide parameter is
+    // complex-shaped and lifted at its use inside the body — so no call site
+    // has a lane to grant (design §3, "one emission per function; lift at
+    // use").
+    if (BaseCompiler.complexDiscipline)
+      return literal.ops.slice(1).map(() => false);
     return BaseCompiler.userCallComplexLanes(engine, h, literal, args);
   }
 
@@ -9842,6 +10482,43 @@ export class BaseCompiler {
     const lanes = target.userFunctions?.lowering
       ? undefined
       : BaseCompiler.userCallComplexLanesOf(engine, h, args);
+    // STRICT discipline (design §3, "user-function parameter" row): a
+    // complex-shaped scalar argument bound to a parameter the function does
+    // not declare complex is a LaneMismatch DECLINE — the body was shaped
+    // real for that parameter, and neither a per-call-site specialization
+    // (`auto`/`complex` today) nor a real-lane emission is the strict answer.
+    // Checked before emission, like the broadcast gate above: whether the
+    // callee can be emitted is irrelevant to whether this call is sound.
+    if (BaseCompiler.strictLanes && !target.userFunctions?.lowering) {
+      if (lanes !== undefined) {
+        const i = lanes.findIndex((c) => c);
+        if (i >= 0)
+          BaseCompiler.laneMismatch(
+            'user-function parameter',
+            BaseCompiler.userParamBinding(
+              h,
+              BaseCompiler.userFunctionLiteral(engine, h),
+              i
+            ),
+            args[i]
+          );
+      } else {
+        // A multi-clause function (no single literal): each clause's
+        // parameter is a binding of its own. A complex-shaped scalar argument
+        // at a position where some clause's parameter is WIDE — a type that
+        // admits the value at dispatch (its JS guard accepts a `{re, im}`)
+        // while its body was shaped real — is the same mismatch. A clause
+        // parameter typed real-only rejects the value at dispatch (faithful),
+        // and one typed complex is coerced per clause in the dispatcher.
+        const i = BaseCompiler.multiClauseLaneMismatchAt(engine, h, args);
+        if (i >= 0)
+          BaseCompiler.laneMismatch(
+            'multi-clause clause parameter',
+            `parameter ${i + 1} of the multi-clause function \`${h}\``,
+            args[i]
+          );
+      }
+    }
     const name = BaseCompiler.ensureUserFunctionEmitted(
       engine,
       h,
@@ -10018,6 +10695,45 @@ export class BaseCompiler {
   }
 
   /**
+   * The `{ re, im }` delivery of argument `arg` (compiled as `code`) to a
+   * declared-complex parameter, in whichever of three forms the argument's
+   * static shape already settles:
+   *
+   *  - provably COMPLEX: the emitted code is already an object, so it is
+   *    passed through untouched — no wrap, no runtime test. Only a complex
+   *    NUMBER LITERAL qualifies, and only because this compiler emits it as
+   *    the `{ re, im }` object itself, so the wrap would be pure redundancy.
+   *    Neither looser test works: `isComplexValued` answers "could be
+   *    complex" and is true for an untyped symbol, and the TYPE is no better
+   *    — `Q(w)` INFERS `w: complex` from the declared parameter, yet `run({
+   *    w: 2 })` may still supply a plain number, since a real is a complex.
+   *    Both dropped the wrap from the very case that needs it;
+   *  - provably REAL: wrapped statically, the shape being known;
+   *  - neither (an untyped free symbol bound at `run()` time — the common
+   *    case): the caller may hand over a plain number OR an already-complex
+   *    object and only a runtime test can tell, so `_SYS.cplx` decides. It
+   *    is idempotent, so an object passes through instead of nesting.
+   *
+   * Shared by the single-literal call site (`emitUserFunctionCall`) and the
+   * protocol member dispatch (`userFunctionsPreamble`), so the two agree.
+   */
+  private static complexWrapCode(
+    code: string,
+    arg: Expression | undefined
+  ): string {
+    if (
+      arg !== undefined &&
+      isNumber(arg) &&
+      arg.isNumberLiteral === true &&
+      isNonRealNumber(arg.type.type)
+    )
+      return code;
+    if (arg !== undefined && BaseCompiler.isProvablyRealValued(arg))
+      return `({ re: ${code}, im: 0 })`;
+    return `_SYS.cplx(${code})`;
+  }
+
+  /**
    * The call site of an already-emitted user function `name`: either a direct
    * scalar call or the runtime broadcast dispatch, per the rules below.
    *
@@ -10051,26 +10767,7 @@ export class BaseCompiler {
     //    case): the caller may hand over a plain number OR an already-complex
     //    object and only a runtime test can tell, so `_SYS.cplx` decides. It
     //    is idempotent, so an object passes through instead of nesting.
-    const complexWrap = (code: string, arg: Expression | undefined): string => {
-      // Only a complex NUMBER LITERAL is skipped, and only because this
-      // compiler emits it as the `{ re, im }` object itself, so the wrap would
-      // be pure redundancy. Neither looser test works: `isComplexValued`
-      // answers "could be complex" and is true for an untyped symbol, and the
-      // TYPE is no better — `Q(w)` INFERS `w: complex` from the declared
-      // parameter, yet `run({ w: 2 })` may still supply a plain number, since
-      // a real is a complex. Both dropped the wrap from the very case that
-      // needs it.
-      if (
-        arg !== undefined &&
-        isNumber(arg) &&
-        arg.isNumberLiteral === true &&
-        isNonRealNumber(arg.type.type)
-      )
-        return code;
-      if (arg !== undefined && BaseCompiler.isProvablyRealValued(arg))
-        return `({ re: ${code}, im: 0 })`;
-      return `_SYS.cplx(${code})`;
-    };
+    const complexWrap = BaseCompiler.complexWrapCode;
 
     // The interpreter BROADCASTS a user function over a collection argument
     // (`applyFunctionLiteral` / the step-2b lambda broadcast): `q(L)` with
@@ -10414,6 +11111,42 @@ export class BaseCompiler {
       if (params === undefined || i >= params.length) return false;
       return isNonRealNumber(params[i].type);
     });
+  }
+
+  /**
+   * The first argument position at which a call of the multi-clause function
+   * `h` with `args` is a strict-mode lane mismatch, or `-1`: the argument is
+   * a complex-shaped SCALAR and some clause declares, at that position, a
+   * parameter whose type is WIDE — not a non-real number type (those bodies
+   * are complex-shaped and the dispatcher coerces into them) and not a
+   * real-only type (whose JS guard rejects a `{re, im}` at dispatch, so the
+   * value never reaches that body). A wide clause parameter accepts the
+   * object at dispatch and its body was compiled real-lane: the mismatch.
+   */
+  private static multiClauseLaneMismatchAt(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): number {
+    const state = multiClauseState(engine.lookupDefinition(h));
+    if (state === undefined || state.clauses.length === 0) return -1;
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (
+        !BaseCompiler.provablyScalarOrFramedScalar(a) ||
+        !BaseCompiler.isComplexValued(a)
+      )
+        continue;
+      const wide = state.clauses.some((c) => {
+        if (isPolymorphicType(c.signature)) return true;
+        const pt = c.signature.args?.[i]?.type;
+        if (pt === undefined) return false;
+        if (isNonRealNumber(pt)) return false;
+        return !isSubtype(pt, 'real');
+      });
+      if (wide) return i;
+    }
+    return -1;
   }
 
   /** Does `h` resolve to a generic (polytype-signed) user function? Reads
@@ -11124,7 +11857,7 @@ export class BaseCompiler {
       for (let i = 0; i < arity; i++) {
         const g = BaseCompiler.jsClauseParamGuard(
           sig.args![i].type,
-          `_$a[${i}]`
+          `_$n[${i}]`
         );
         if (g === undefined) return undefined;
         guards.push(g);
@@ -11197,18 +11930,43 @@ export class BaseCompiler {
         );
       }
 
+      // The guards test the NORMALIZED arguments `_$n`: a `{re, im: 0}`
+      // object — the shape a `complex`-typed free symbol is lifted to at
+      // `run()` entry (D3), or that a caller hands over directly — IS the
+      // real number `re`, and must dispatch as the interpreter dispatches
+      // that real (`S(0)` selects the value clause; a `real`-typed clause
+      // parameter admits it). Each helper receives its arguments in the
+      // shape ITS clause body was compiled for: the normalized value for a
+      // parameter not declared complex (that body reads a number), the
+      // `_SYS.cplx`-lifted raw value for one that is.
       const branches = order.map((i) => {
-        const { arity, guards } = plans[i];
+        const { arity, guards, clause } = plans[i];
         const tests = [
           `_$a.length === ${arity}`,
           ...guards.filter((g): g is string => g !== null),
         ];
-        const args = Array.from({ length: arity }, (_, k) => `_$a[${k}]`);
+        // A clause parameter DECLARED a non-real number type is consumed by
+        // its body through complex slots (the body is compiled with the
+        // parameter typed complex), so the dispatcher hands it a `{re, im}`:
+        // a plain number that passed the `complex` guard — a real IS a
+        // complex — is lifted here, PER CLAUSE, after dispatch has been
+        // decided on the raw argument (lifting before dispatch would change
+        // which clause a real argument selects). Without this,
+        // `S(0) -> complex {0}; S(z: complex) -> complex {z + 1}` called as
+        // `S(2)` read `.re` off the number `2` (`{re: null}` behind
+        // `success: true`; ROADMAP "A MULTI-CLAUSE function with a declared
+        // `complex` parameter compiles silently wrong", 2026-08-16).
+        const args = Array.from({ length: arity }, (_, k) => {
+          const pt = clause.signature.args?.[k]?.type;
+          return pt !== undefined && isNonRealNumber(pt)
+            ? `_SYS.cplx(_$a[${k}])`
+            : `_$n[${k}]`;
+        });
         return `if (${tests.join(' && ')}) return ${helperNames[i]}(${args.join(', ')});`;
       });
       registry.defs.set(
         name,
-        `const ${name} = (..._$a) => { ${branches.join(' ')} throw new Error(${JSON.stringify(`no-matching-clause: ${h}`)}); };`
+        `const ${name} = (..._$a) => { const _$n = _$a.map(_SYS.creal); ${branches.join(' ')} throw new Error(${JSON.stringify(`no-matching-clause: ${h}`)}); };`
       );
     } finally {
       registry.compiling.delete(name);
@@ -11549,8 +12307,11 @@ export class BaseCompiler {
     let guardSrcs: (string | null)[] | undefined;
     if (plan.tier === 'dynamic') {
       guardSrcs = [];
+      // Guarded on the NORMALIZED receiver `_$n0` (see the multi-clause
+      // dispatcher): a `{re, im: 0}` receiver is the real number `re` and
+      // dispatches as such; the helper still receives the raw `_$p0`.
       for (const c of plan.candidates) {
-        const g = BaseCompiler.renderReceiverGuard(c.guard!, '_$p0');
+        const g = BaseCompiler.renderReceiverGuard(c.guard!, '_$n0');
         if (g === undefined) return undefined;
         guardSrcs.push(g);
       }
@@ -11565,13 +12326,46 @@ export class BaseCompiler {
         ? t.args?.map((a) => a.type)
         : undefined;
     });
-    const coerceToComplex = call.args.map((a, i) => {
-      if (!BaseCompiler.isProvablyRealValued(a)) return false;
-      return sigParams.every((params) => {
+    // Gated on the PARAMETER's declared type alone, never on the argument's
+    // — the same rule as the single-literal call site (`tryCompileUserFunction`):
+    // every candidate body consumes such a parameter through complex slots,
+    // so every call owes it a `{re, im}`, whatever the call site passes. The
+    // former precondition `isProvablyRealValued(a)` left a symbol DECLARED
+    // complex but holding a plain number at run time unwrapped (`{re: null}`
+    // behind `success: true`; ROADMAP "A protocol MEMBER whose parameter is
+    // declared `complex` is handed the argument unwrapped", 2026-08-16). The
+    // wrap form itself is chosen per argument below (`protocolComplexWrap`).
+    const coerceToComplex = call.args.map((_a, i) =>
+      sigParams.every((params) => {
         const pt = params?.[i];
         return pt !== undefined && isNonRealNumber(pt);
+      })
+    );
+    // STRICT discipline (design §3, "protocol member parameters" row): a
+    // complex-shaped scalar argument at a position where some candidate's
+    // parameter is WIDE (admits the value, body shaped real) is a
+    // LaneMismatch DECLINE. Real-only candidate parameters reject a complex
+    // value by validation before this point; complex-typed ones coerce.
+    if (BaseCompiler.strictLanes)
+      call.args.forEach((a, i) => {
+        if (
+          !BaseCompiler.provablyScalarOrFramedScalar(a) ||
+          !BaseCompiler.isComplexValued(a)
+        )
+          return;
+        const wide = sigParams.some((params) => {
+          const pt = params?.[i];
+          if (pt === undefined) return true;
+          if (isNonRealNumber(pt)) return false;
+          return !isSubtype(pt, 'real');
+        });
+        if (wide)
+          BaseCompiler.laneMismatch(
+            'protocol member parameter',
+            `parameter ${i + 1} of the protocol member \`${call.member}\``,
+            a
+          );
       });
-    });
 
     // The generated code bakes the member's current conformance set: record
     // the dependency (see `CompileTarget.symbolDeps`).
@@ -11621,7 +12415,7 @@ export class BaseCompiler {
 
     const compiledArgs = call.args.map((a, i) => {
       const code = BaseCompiler.compileValueOperand(a, target);
-      return coerceToComplex[i] ? `({ re: ${code}, im: 0 })` : code;
+      return coerceToComplex[i] ? BaseCompiler.complexWrapCode(code, a) : code;
     });
 
     if (plan.tier === 'static')
@@ -11644,7 +12438,7 @@ export class BaseCompiler {
       });
       registry.defs.set(
         dName,
-        `const ${dName} = (${params.join(', ')}) => { ${branches.join(' ')} ` +
+        `const ${dName} = (${params.join(', ')}) => { const _$n0 = _SYS.creal(_$p0); ${branches.join(' ')} ` +
           `throw new Error(${JSON.stringify(
             `protocol-implementation-missing: ${call.member}`
           )}); };`

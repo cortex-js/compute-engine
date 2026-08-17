@@ -666,6 +666,36 @@ export interface CompileTarget<Expr = unknown> {
   complexIsReal?: (code: TargetSource) => TargetSource;
 
   /**
+   * The real projection of a value that may be complex, as target source:
+   * given code for a value that is a plain number or a `{re, im}` object,
+   * return code yielding the number itself or the object's real part
+   * (`_SYS.creal(x)` on JavaScript, `complex(x).real` on Python). Used with
+   * `complexIsReal` by the D2/D6 runtime rule: under the guard that the
+   * imaginary part is exactly zero, the real lowering runs on this
+   * projection. Optional; a target without it keeps the compile-time
+   * fail-closed decline for a maybe-complex operand of a real-only head.
+   */
+  complexReal?: (code: TargetSource) => TargetSource;
+
+  /**
+   * The conditional the D2/D6 runtime rule is emitted through, in the
+   * target's own syntax: `guards` are boolean source expressions (each a
+   * `complexIsReal` test; possibly empty — then the body is unconditional),
+   * `body` the real lowering, and `kind` the shape of the value when a guard
+   * fails: `'boolean'` → the target's `false`, `'number'` → its NaN.
+   * JavaScript emits `((g1 && g2) ? (body) : NaN)`, Python `((body) if (g1
+   * and g2) else float('nan'))`. Required, with the three hooks above, for a
+   * target that offers `'complex'` or `'auto'`; a target without it keeps the
+   * compile-time fail-closed decline for a maybe-complex operand of a
+   * real-only head.
+   */
+  realGuard?: (
+    guards: ReadonlyArray<TargetSource>,
+    body: TargetSource,
+    kind: 'boolean' | 'number'
+  ) => TargetSource;
+
+  /**
    * Drop everything a failed compilation attempt wrote to this target
    * (helper preamble, emitted user-function definitions, temporaries, bound
    * frames). Required of a DIRECT (caller-owned, reusable) target for
@@ -1212,6 +1242,24 @@ export interface CompilationOptions<Expr = unknown> {
    * honored exactly as before). See `CompileMode` for the disciplines.
    */
   mode?: CompileMode;
+
+  /**
+   * Whether the JavaScript runner performs the D3 ENTRY CHECK on each call
+   * (default `true`): a `{re, im}` value bound to a free symbol or lambda
+   * parameter the compilation shaped REAL throws a `TypeError` naming it, and
+   * a plain number bound to a `complex`-typed one is lifted to `{re, im: 0}`.
+   * One `typeof` per checked binding per call — which is one READ of each
+   * checked free symbol on the vars object, whether or not the compiled code
+   * would read it on that call (a getter-backed vars object sees the read).
+   *
+   * `false` is for ENGINE-INITIATED (implicit) compilations — the auto-
+   * compiled `Map` drains, the numeric kernels, the compiled `Reduce` fast
+   * path — whose callers own their argument contract and validate the result
+   * themselves (a `NaN` or malformed result re-runs the element through the
+   * interpreter); a thrown entry check would turn that self-healing fallback
+   * into an evaluation error. `implicitCompile` passes it.
+   */
+  entryChecks?: boolean;
 
   /**
    * When true, complex results (`{ re, im }`) are converted to real numbers:

@@ -49,10 +49,12 @@ describe('MULTI-CLAUSE COMPILE — guard chain (spec §8)', () => {
     expect(r?.code).toContain('_fn_f$c1');
     expect(r?.code).toContain('_fn_f$c2');
     expect(r?.code).toContain('no-matching-clause: f');
-    // The value guard tests before the integer guard.
+    // The value guard tests before the integer guard. Guards test the
+    // NORMALIZED arguments `_$n` (an exactly-real `{re, im: 0}` dispatches as
+    // the real number it is); the helpers receive `_$a`.
     const code = r!.code!;
-    expect(code.indexOf('_$a[0] === 0')).toBeLessThan(
-      code.indexOf('Number.isInteger(_$a[0])')
+    expect(code.indexOf('_$n[0] === 0')).toBeLessThan(
+      code.indexOf('Number.isInteger(_$n[0])')
     );
   });
 
@@ -187,7 +189,13 @@ describe('MULTI-CLAUSE COMPILE — complex-valued dispatch', () => {
 
   it('compiles a recursive complex clause set with interpreter parity', () => {
     defineJ(['Function', p('z', 'complex'), p('k', '0'), p('z', 'complex')]);
-    const r = compile(ce.box(['Function', ['J', 'n', 'w'], 'n', 'w']));
+    // The lambda's `w` is annotated complex: it is handed a `{re, im}` at
+    // run time, and an UNANNOTATED lambda parameter is wide — shaped real by
+    // the strict discipline — so the runner's D3 entry check would refuse
+    // the object (`docs/plans/2026-08-16-compile-complex-mode.md` §8 D3).
+    const r = compile(
+      ce.box(['Function', ['J', 'n', 'w'], 'n', p('w', 'complex')])
+    );
     expect(r?.code).toContain('_fn_J$c1');
     for (const n of [0, 1, 2, 3]) {
       const got = r?.run?.(n, { re: 0.1, im: 0.2 }) as {
@@ -248,12 +256,13 @@ describe('MULTI-CLAUSE COMPILE — complex-valued dispatch', () => {
       p('n', 'integer'),
       p('z', 'complex'),
     ]);
+    // `w` annotated complex — see the D3 note in the recursive test above.
     const r = compile(
       ce.box([
         'Function',
         ['Add', ['f', 'n', 'w'], ['Complex', 0, 1]],
         'n',
-        'w',
+        p('w', 'complex'),
       ])
     );
     expect(r?.code).toContain('re: 0, im: 0');

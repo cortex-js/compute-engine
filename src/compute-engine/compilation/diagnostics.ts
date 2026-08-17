@@ -50,7 +50,7 @@ export class LaneMismatchError extends CompileDeclineError {
   }) {
     const message =
       payload.message ??
-      `Lane mismatch at ${payload.boundary}: the complex-shaped value \`${payload.value}\` is bound to \`${payload.binding}\`, which this compilation shaped real. Declare \`${payload.binding}\` complex, or compile with \`mode: 'complex'\`.`;
+      `Lane mismatch at ${payload.boundary}: the complex-shaped value \`${payload.value}\` reaches ${payload.binding}, which this compilation shaped real. Declare it complex, or compile with \`mode: 'complex'\`. Fail closed (D6).`;
     super({
       code: 'lane-mismatch',
       kind: 'correctness',

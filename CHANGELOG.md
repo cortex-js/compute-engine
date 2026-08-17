@@ -70,6 +70,22 @@
   and the offending `value`, instead of a silently wrong `NaN` /
   `"[object Object]"` result. `auto` (the default) and `complex` keep today's
   emission in this release; step 4 of the migration makes `auto` escalate.
+- **`mode: 'complex'` now computes.** Under the complex discipline a
+  numeric binding whose static type is wide (`unknown`, `number`, an
+  unannotated parameter, a block local not declared real) is complex-shaped
+  and lifted at its use through the idempotent `_SYS.cplx` (a number becomes
+  `{re, im: 0}`, an object or a non-number passes through); a user function
+  is emitted once, whatever its call sites pass; unknown-sign
+  `Sqrt`/`Ln`/`Log` promote (`√a` at `a = −2` is `{re: 0, im: 1.414…}`, at
+  `a = 4` the number `2`); and the real-only heads take the D2/D6 RUNTIME
+  rule — an ordering comparison, an integer-only head (`Floor`, `Mod`,
+  `Max`, …) or a real-only helper (`Erf`, …) over a maybe-complex operand
+  binds it once, runs the real lowering when its imaginary part is exactly
+  zero, and answers `false` / `NaN` otherwise (`z < 2` for a complex-typed
+  `z` compiles: `true` at `1`, `false` at `i`); a statically non-real
+  operand (`i < 2`, `Floor(2i)`) is a compile-time `capability` decline
+  (`diagnostic.code === 'non-real-operand'`). Typed-real values keep the
+  real kernel. Step 3 of the compile-mode migration.
 - **D3 entry check on the compiled JavaScript runner.** `run(vars)` and a
   compiled lambda's arguments are checked against the shape the compilation
   analyzed each binding as: a `{re, im}` bound to a free symbol or unannotated
