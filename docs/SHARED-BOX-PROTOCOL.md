@@ -1,16 +1,12 @@
 # Shared-box protocol
 
 Several Claude sessions work on this machine at once, across two repos
-(`compute-engine` and the `tycho` consumer). On 2026-08-16 there were **ten
-concurrent sessions on an 8-core box**, which sat at **load ~11 with no tests
-running at all**. Baseline oversubscription is the normal state here: "wait
-for the box to go quiet" is not an available strategy, and any wall-clock
-number taken on this machine is contended by construction.
+(`compute-engine` and the `tycho` consumer). As a result, oversubscription on 
+this box may occur: "wait for the box to go quiet" is not an effective 
+strategy.
 
 This document is the coordination protocol. It exists because the rules below
-were each learned from a failure in a single afternoon, and because relaying
-them session-to-session does not work — a session that starts later, or misses
-one message, behaves incorrectly while believing it is compliant.
+were each learned from experience.
 
 **If you are a session starting work here, read this first.** Nothing in it is
 optional, and none of it is expensive.
@@ -48,6 +44,11 @@ node /Users/arno/dev/tycho/scripts/box-lock.mjs release
 node /Users/arno/dev/tycho/scripts/box-lock.mjs status
 ```
 
+**`<owner>` must be the name your session answers to.** The lock's owner field
+is the only handle a blocked peer has, and it is useless if it names something
+no one can reach. Use one identifier for your session name, your lock owner, 
+and the name you sign messages with.
+
 The lock is **advisory** — it never kills anything. `check` exits non-zero
 while another owner holds it, which is the point: **put it in the command**,
 not in your notes. A rule that lives in a briefing does not reach an agent you
@@ -63,13 +64,10 @@ numbers with any timing you report.
 serializes *runs*; it says nothing about *edits* — and a suite is invalidated by
 a concurrent write just as thoroughly as by CPU load, because jest loads test
 files **lazily** across the whole run. A save at minute three tears a run that
-started at minute zero. Twice in one hour a session ran with correct gates and
-got garbage: one passed both the lock check and a no-jest gate, then died on a
-peer's mid-write `compile-expression.ts` — **186 suites failed to load** on a
-syntax error. A writer invalidates other people's results where a runner only
-slows them, so the writer's claim on the lock is the stronger one. Acquire it
-while you are actively editing shared source, and release before you tell a
-peer the tree is stable.
+started at minute zero. A writer invalidates other people's results where a 
+runner only slows them, so the writer's claim on the lock is the stronger 
+one. Acquire it while you are actively editing shared source, and release 
+before you tell a peer the tree is stable.
 
 **A writer takes the lock in SHORT BURSTS, and yields.** The writer rule
 protects other people's runs; it is not a licence to hold the box for a whole
@@ -113,6 +111,37 @@ Two independent traps:
 **"I killed it" is not "the box is clear."** Verify with `ps`, not with the
 runner's exit.
 
+### Certifying a run against concurrent writes
+
+The writer rule in §2 is **prevention**, and prevention is not always available
+to you: a peer who never read this document, or a human editing directly, will
+write into your run regardless. Detection always is. Fingerprint the tree
+immediately before starting and immediately after jest exits:
+
+```
+find src test -name '*.ts' -exec stat -f "%m %N" {} + | sort | shasum
+```
+
+Identical values mean nothing was written while the suite ran, and the result
+is certifiable. Different values mean it was torn — and you know, instead of
+reporting a green run that straddled two source states.
+
+**One reading proves nothing: mtime is last-write-only, so it can falsify but
+never confirm.** Checking that the tree looks quiet before you start says
+nothing about minute three. The pair is the instrument; a single check is not a
+weaker version of it, it is a different and useless one.
+
+This is not hypothetical. A full suite held the lock 06:59–07:18, a peer saved
+`src/common/type/subtype.ts` at 07:02:58, and the run came back green across
+555 suites — uncertifiable, because jest loads test files **lazily**, so some
+suites read the old source and some the new. The owner of that run then blocked
+for twenty minutes trying to establish *who* had written, when a pair of
+fingerprints would have told them *whether* it mattered in four.
+
+**Prefer measuring the thing you care about over identifying who caused it.**
+Attribution is slow, needs everyone to answer, and is wrong by default — two
+sessions each concluded the other had made the edit, from matching mtimes.
+
 ## 4. Staging and file ownership
 
 The project rule (`CLAUDE.md`, Source Control Protocol): stage your work only
@@ -135,6 +164,19 @@ failure modes, both observed:
   strings-workstream change and a multi-clause change simultaneously; naming an
   owner from the most *recognizable* hunk assigned the whole file to the wrong
   session.
+- **The writer may be the human.** This document models sessions as the only
+  writers, and that assumption is wrong often enough to be expensive. An
+  unattributed edit is at least as likely to be the user working directly as a
+  session that failed to announce itself — so **check that first, before
+  opening an owner hunt.** One unattributed `subtype.ts` save cost six sessions
+  a round of polling and blocked a seventh for twenty minutes; the answer was
+  that the user had written it himself, and one session had said so early from
+  the timing (a human commit in the sibling repo interleaved with the edits)
+  and been talked past. The corollary is in §3 and is the more important half:
+  **holding the lock is not grounds to certify a run**, because no lock reaches
+  a human editing their own tree. The before/after tree fingerprint is the
+  certification standard precisely because it is robust to writers the lock
+  cannot see.
 
 Distinguish the porcelain columns: `M ` is staged, ` M` is unstaged. A status
 reading goes stale the moment anyone commits — re-read it immediately before
@@ -171,16 +213,29 @@ each of which looked green:
 - `JSON.stringify(NaN)` returning `"null"`, manufacturing an
   interpreter/compiler divergence that did not exist.
 
-Three rules follow, and they are cheap:
+Four rules follow, and they are cheap:
 
 1. **Run a control first.** A decline that hits a trivial case as hard as the
    expression under test is instrument failure, not a finding. A GLSL harness
    was blamed for four probes before a plain `x+1` failed identically and
    revealed the invocation was wrong.
-2. **Test the check against the state it is meant to EXCLUDE.** "Does it report
+2. **A repro you FILE must carry its control.** A durable entry's repro will
+   be re-run by whoever fixes it, months later, with none of your context —
+   so a repro that cannot discriminate will read to them as evidence the
+   finding was overstated, and the strongest argument in the entry gets
+   dropped. This is not hypothetical: an intersection-subtyping entry filed
+   `f(n)` staying symbolic as proof that an intersection parameter type
+   rejects its argument, but a plain `(number) -> number` signature stays
+   symbolic identically — a declared-but-UNDEFINED function on a valueless
+   symbol always does. Giving the operator an `evaluate` body separated them
+   at once, and turned a supposed silent decline into a user-visible
+   `incompatible-type` error on a literal `7`. Show the control's output next
+   to the repro's, and when you replace a bad probe, say IN the entry that it
+   failed its control rather than quietly swapping it.
+3. **Test the check against the state it is meant to EXCLUDE.** "Does it report
    clear when clear?" proves nothing. A mechanism nobody has run adversarially
    is a claim, not a protection.
-3. **Verify, do not relay.** Re-check a peer's all-clear rather than forwarding
+4. **Verify, do not relay.** Re-check a peer's all-clear rather than forwarding
    it — not from distrust, but because their instrument may be narrower than the
    claim they are making with it, and they cannot see that from inside. Two
    independent readings agreeing costs seconds.

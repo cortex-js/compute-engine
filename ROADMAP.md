@@ -225,11 +225,12 @@ That also explains the anomaly two earlier versions of this entry chased. At
 the time it was found, the type AST builder normalized an `<any>` parameter
 AWAY for some kinds but not others, and `BoxedType` kept that parsed shape
 without calling `reduceType()`, so the survivors on the public `ce.type()` path
-were exactly the structured ones. (`reduceType()` itself already correctly
-canonicalized BOTH `list<any>` to `list` and `set<any>` to `set`.)
+were exactly the structured ones. (`reduceType()` itself then still collapsed
+`list<any>` to `list`; the follow-up correction described below now preserves
+explicit element contracts for both lists and sets on both paths.)
 
 ```
-'set<any>' -> 'set'                             fails
+'set<any>' -> 'set<any>'                        PASSES  (does not normalize away)
 'dictionary<any>' -> 'dictionary'               fails
 'indexed_collection<any>' -> 'indexed_collection'  fails
 'collection<any>' -> 'collection'               fails
@@ -237,9 +238,9 @@ canonicalized BOTH `list<any>` to `list` and `set<any>` to `set`.)
 'tuple<any>' -> 'tuple<any>'                    PASSES
 ```
 
-So bare-vs-parameterized DOES separate the groups, once constructor-specific
-parse normalization is accounted for: `set<any>` was never a counterexample,
-because the AST builder strips its parameter. (Two earlier framings — "an
+So bare-vs-parameterized DOES separate the groups after the follow-up
+normalization correction: explicit `any` survives for both lists and sets.
+(Two earlier framings — "an
 interaction with negation" and "bare-vs-`<any>` doesn't separate the cases" —
 were both wrong; recorded so nobody re-derives them. The CE-POC session found
 the `collection & collection` and `number & number` repros.)
@@ -300,47 +301,93 @@ correct; bare type names simply returned before reaching it. The suite gate in
 `intersection-right-subtyping.test.ts` covers every primitive type name, union
 and structural-expansion paths, `list<any>`/`set<any>` before and after
 reduction, successful literal/symbol dispatch through an intersection
-parameter, and rejection when one arm does not match. The follow-up
-normalization fix makes the AST builder canonicalize an unshaped `list<any>` to
-bare `list`, matching `reduceType()` and the existing `set<any>` behavior,
-while retaining dimensioned forms such as `list<any^2x3>`.
+parameter, and rejection when one arm does not match. A follow-up normalization
+experiment was reverted: `list<any>` and `set<any>` remain explicit because
+`any` is a contract while a bare constructor carries no element argument. The
+corresponding `<unknown>` forms remain explicit too; nested `unknown` is not a
+top-level refinable slot, and it also excludes absence elements that the bare
+constructors admit. Dimensioned forms such as `list<any^2x3>` remain intact as
+well.
 
-### `Join`/`Append` of a dictionary or record duplicates KEYS, and materializes to the wrong head (OPEN, correctness + a merge-rule ruling — found 2026-08-17 reviewing the set-kind fix)
+### Bare collection constructors still normalize away an explicit `<any>`, inconsistently with `list`/`set` (OPEN, convention — found 2026-08-17 while applying the `list<any>`/`set<any>` ruling; DEFERRED by the user the same day)
 
-The set-kind half of this family was fixed (entry above). The
-record/dictionary half was not, and it is worse. `joinResultType` adopts
-`record`, then `dictionary`, then `set`, from any operand
-(`appendResultType` does the same from its source), but nothing merges keys:
+The ruling above settled `list` and `set`: an explicit element argument is a
+contract and survives both parse and `reduceType()`. Three constructors were
+not in its scope and still collapse an `<any>` argument to the bare primitive
+in the AST builder (`isAnyType()` checks in `type-builder.ts`), which leaves
+the family split two ways:
+
+```
+list<any>                -> list<any>                 (ruled: preserved)
+set<any>                 -> set<any>                  (ruled: preserved)
+dictionary<any>          -> dictionary                collapses
+collection<any>          -> collection                collapses
+indexed_collection<any>  -> indexed_collection        collapses
+```
+
+and split again WITHIN the collapsing three, because `isAnyType()` does not
+match `unknown` — so `dictionary<unknown>` and `collection<unknown>` are
+preserved while their `<any>` siblings are not. `tensor<any>` also normalizes
+to bare `list`, which IS intended (a tensor carries no dimensions, so there is
+no shape to keep) and is pinned by a test.
+
+Deferred deliberately: the user's decision is that how bare types are handled
+needs revisiting as a whole rather than being extended constructor by
+constructor. Nothing is blocked on it — the inconsistency is in canonical
+SPELLING, not in subtyping, so no relation is currently wrong because of it.
+What to decide when it is picked up: whether a bare constructor and its
+`<any>` form are the same type (today they differ for `list`/`set` and agree
+for the other three), and whether `<unknown>` follows `<any>` or stays
+distinct.
+
+### `dictionary<unknown>` reduced to the TOP type `any`, so a union containing one accepted everything (FIXED 2026-08-17 — found while applying the `list<any>`/`set<any>` ruling)
+
+`reduceDictionaryType()` widened the whole type when its VALUE type was
+unconstrained: `if (reducedValues === 'any' || reducedValues === 'unknown')
+return 'any'`. An unconstrained value type says nothing about the dictionary
+itself, so this was wrong under the old normalization convention as much as
+the new one. `BoxedType` masked it on the public path (it does not call
+`reduceType()`), but every reducing caller saw it, and it poisoned any union
+the dictionary appeared in:
+
+```
+number | dictionary<unknown>        ->  any
+isSubtype('string', <that union>)   ->  true      <- string is not in it
+```
+
+Fixed by preserving the value type, as `list`/`set` now preserve theirs.
+`dictionary<nothing>` still reduces to `error`.
+
+### `Join`/`Append` of a dictionary or record duplicated KEYS and materialized to the wrong head (FIXED 2026-08-17 — merge rule USER-RULED last-wins the same day)
+
+`joinResultType`/`appendResultType` adopt the `record`/`dictionary` kind from
+an operand exactly as they adopt `set`, but nothing merged keys:
 
 ```
 Join(Dictionary(a:1, b:2), Dictionary(b:3, c:4))
-  type   record
-  count  4
-  each   ("a",1) ; ("b",2) ; ("b",3) ; ("c",4)      <- `b` twice
+  count  4        each  ("a",1) ; ("b",2) ; ("b",3) ; ("c",4)     <- `b` twice
 ```
 
-A literal `Dictionary` with a repeated key already settles the rule by
-example — `Dictionary(a:1, a:2)` is `{a: 2}`, count 1, so the convention is
-LAST-WINS — but the lazy `Join` neither merges nor deduplicates.
+Two defects in one expression. The keys were not merged, and `Join` declared
+no `elttype` handler, so `materialize()` never reached its key-value branch
+(which tests `elttype` against `tuple<string, any>`); the node is not indexed,
+so it fell through to `engine.function('Set', …)` and a dictionary came back
+as a **`Set` of entry tuples** — the HEAD changed, not just the count.
 
-Second, independent bug in the same expression: `Join` declares no `elttype`
-handler, so `materialize()`'s key-value branch (which routes a
-`tuple<string, any>` element type to a `Dictionary`) never fires. The node is
-not indexed, so materialization falls through to `engine.function('Set', …)`
-and the dictionary comes back as a **`Set` of entry tuples** — the HEAD
-changes, not just the element count.
+**Merge rule, user-ruled 2026-08-17: LAST WINS**, matching the literal
+constructor. `Dictionary(a:1, b:2, a:3)` is `{a:3, b:2}`, so a repeated key
+keeps its FIRST POSITION and takes the LAST VALUE, and the lazy merge now
+reproduces that exactly — `elementsOf(joined)` equals `elementsOf(literal)`.
 
-Also note the adoption ORDER: `Join(Set(1,2), Dictionary(…))` types
-`dictionary`, so the set-kind gate does not apply and the set operand's
-distinctness is silently dropped.
-
-Two things to decide before this can be fixed, and only the first is a real
-question. (a) The merge rule: last-wins matches the `Dictionary` constructor,
-but a forward lazy iterator cannot know the last value for a key until it has
-walked everything, so last-wins costs a full walk up front (first-wins is
-free). (b) Whether `Append`'s source-only adoption should follow the same
-rule — it should, for the same reason. The `elttype` handler is not a
-decision, just work.
+Implementation note worth keeping: last-wins **cannot be streamed**. The
+winning value for the first key may come from the last entry, so the whole
+enumeration must be read before any entry is emitted — `mergeKeyedEntries`
+returns an array rather than wrapping the iterator, and declines past
+`ce.maxCollectionSize` or on an entry that is not a key-value pair. An
+infinite keyed operand is refused by `count` before it gets there. `contains`
+also answers from the merged entries: an entry whose key was overwritten is no
+longer a member, and asking the operands directly reported `("b", 2)` present
+in a dictionary whose `b` is 3.
 
 ### A truncated collection preview could drop an element and show no `...` (FIXED 2026-08-17 — found while fixing the `Join` set-kind defect)
 
