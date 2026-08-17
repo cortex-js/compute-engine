@@ -8682,6 +8682,7 @@ type ConformanceRecord = {
      block: Expression;
     };
   pending: boolean;
+  _pendingReason: string;
   declaredByStatement: boolean;
 };
 ```
