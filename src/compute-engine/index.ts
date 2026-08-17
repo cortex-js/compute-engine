@@ -721,6 +721,12 @@ export class ComputeEngine implements IComputeEngine {
           // own stamp as a duplicate.
           origin: c._implOrigin,
           pending: c.pending,
+          // The pending REASON rides with the flag it explains: a re-settled
+          // edge (a protocol replacement, a redefinition of the target type)
+          // records why it went pending, and restoring the flag without the
+          // reason would leave the end-of-batch warning quoting a layout
+          // change this rollback just undid.
+          pendingReason: c._pendingReason,
         })),
         declaredByStatement: r.declaredByStatement,
         // REDEFINITION DISCIPLINE — the protocol mirror of the type registry's
@@ -771,6 +777,11 @@ export class ComputeEngine implements IComputeEngine {
           else e.c._implOrigin = e.origin;
           if (e.c.pending !== e.pending) changed = true;
           e.c.pending = e.pending;
+          // Silent, like the `_implOrigin` restore above: the reason is
+          // diagnostic text, so restoring it alone cannot have changed any
+          // answer a boxed expression read.
+          if (e.pendingReason === undefined) delete e.c._pendingReason;
+          else e.c._pendingReason = e.pendingReason;
         }
         // A record that vanished from the table but is still captured keeps
         // its restored fields — the type-registry contract.

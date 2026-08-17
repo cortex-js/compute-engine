@@ -96,7 +96,65 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
-### `Limit` at ∞ declines on a SUM whose addends it resolves individually, when one needs `Erf(∞)` and another needs the ∞·0 resolution (OPEN, correctness — found 2026-08-16)
+### `Extract` and `Exclude` are documented but do not exist (OPEN, product decision — found 2026-08-16 auditing `doc/`)
+
+`doc/82-reference-collections.md` carries two full `<FunctionDefinition>`
+sections (~L1432–1544), an entry in the operator index (~L320) and a
+cross-reference from `Reverse` (~L1427) for `Extract(xs, …)` and
+`Exclude(xs, …)`. Neither name exists anywhere in `src/compute-engine/`:
+`ce.box(['Extract', ['List',5,2,10,18], 2])` evaluates to itself, and
+`ce.box('Extract').type` is `unknown` (auto-declared by the lookup). Eleven
+documented examples describe an API a caller cannot invoke.
+
+Three ways out, and the choice is a product one: implement both (the
+gather-by-indices half is already `At(xs, indices)`, so `Extract` may be a
+synonym worth having, and `Exclude` is its complement); delete the sections;
+or mark them "not yet implemented" in place. `Ordering`'s "use `Extract`"
+pointer was already re-pointed at the working `At(xs, Ordering(xs))`.
+
+### `Sequence` does not splice into `List`/`Set`/`Tuple` (OPEN, correctness — found 2026-08-16 auditing `doc/`)
+
+`Sequence`'s own doc comment (`library/core.ts`, the `Sequence` definition)
+says it "is automatically flattened and hoisted to the top level of the
+argument list", and the associative heads do exactly that
+(`Add(1, Sequence(2,3), 4)` is `10`). The collection constructors do not:
+
+```
+["List",  1, ["Sequence", 2, 3], 4]  ->  [1, 2 3, 4]     (3 elements; the
+      middle one is a `tuple<finite_integer, finite_integer>`)
+["Set",   1, ["Sequence", 2, 3], 4]  ->  Set(1, 2 3, 4)
+["Tuple", 1, ["Sequence", 2, 3], 4]  ->  (1, 2 3, 4)
+```
+
+so the element type comes out `list<finite_integer | tuple<finite_integer,
+finite_integer>>`. The empty `Sequence` (`Nothing`) IS erased from a `List`,
+which is what makes the gap easy to miss. `test/compute-engine/missing-value.test.ts`
+(~L84) looks like it pins the splice, but `['Sequence','Nothing',2]`
+collapses to `2` through the arity-1 branch of `Sequence`'s canonical
+handler, so no multi-element splice into `List` is actually exercised.
+Decide whether the constructors should splice (and fix `List`/`Set`/`Tuple`
+canonicalization) or whether the `Sequence` doc comment overpromises and
+should be narrowed to the associative heads. `doc/82-reference-collections.md:378`
+documents the splicing behavior and was deliberately left uncorrected
+pending this ruling.
+
+### `Join` of two sets can yield a set with a duplicate element (OPEN, correctness — found 2026-08-16 auditing `doc/`)
+
+```
+const j = ce.box(['Join', ['Set',5,2,10,18], ['Set',1,2,3]]).evaluate();
+j.type    // set
+j.count   // 7
+[...j.each()]   // 5, 2, 10, 18, 1, 2, 3     <- `2` twice
+```
+
+`Join` concatenates its operands' elements and keeps the first operand's
+kind, but a `set` result has to be deduplicated — `Set(…)` itself dedupes on
+construction, so only the `Join` path produces this. The documented answer
+(`doc/82-reference-collections.md:2742`, left uncorrected pending the fix) is
+`["Set", 5, 2, 10, 18, 1, 3]`. Either dedupe in `Join` when the result kind
+is `set`, or rebuild the result through the `Set` constructor.
+
+### `Limit` at ∞ declines on a SUM whose addends it resolves individually, when one needs `Erf(∞)` and another needs the ∞·0 resolution (FIXED 2026-08-16 — a COMPILER shape bug, not a limit bug; found 2026-08-16)
 
 Each addend's limit is computed correctly; their sum is not. Measured at
 HEAD, `y → +∞`:
@@ -145,7 +203,40 @@ here. Not attributed to a commit: none of the three candidates in the window
 touches the integration, limit or Rubi lane, so whether it is a committed or
 working-tree regression is unestablished and needs a clean-tree run.
 
-### An `unknown`-typed symbol compared to a SCALAR types the relation scalar, so adding evidence about the OTHER operand makes the answer worse (OPEN, correctness — found 2026-08-16 running down Tycho item 198)
+**RESOLUTION (2026-08-16).** The mechanism above was mis-narrowed: the
+discriminator is not "Erf(∞) mixed with ∞·0" but **any coefficient other
+than 1 on the `Erf` addend** — `2·Erf(√y) + 2/y` declined while
+`Erf(√y) + y·e^{−y}` resolved. `Limit`'s growth oracles probe expressions
+numerically THROUGH THE COMPILER (`numericAt` → `implicitCompile`), and
+`k·Erf(√y)` compiled wrong: in the default `auto` mode the unknown-sign
+radical `√y` promotes to the complex lane, `Erf` (a real-only STRING helper,
+`_SYS.erf`) takes the D2/D6 runtime rule and emits a bare REAL number, but
+`isComplexValued(Erf(√y))` still answered complex — `Erf` types wide
+(`number`), so the analysis fell through to the operand recursion — and the
+enclosing `Multiply` read `.re`/`.im` off that number:
+`{re: 2 * _b.re, …}` → `{re: NaN, im: NaN}` at every probe. The cancellation
+guard `hasCancellation` (`symbolic/limit.ts`) reads a non-finite term as an
+overflow and bails, so the whole sum declined. Same defect for every
+wide-typed real-only string helper: `Erfc`, `Gamma`, `Zeta`, `Digamma`,
+`Factorial`, `LambertW`, `Arsinh`, `ErfInv` (`Sign`/`Log10`/`Sinc`/… type
+`real` and were fine).
+
+Fix in `compilation/base-compiler.ts` (committed in `be88b1f7`): `compile()`
+latches the outermost target's helper table (`_realOnlyHelperLookup`, same
+mechanism as the mode/promotion latches) and `_isComplexValuedFunction`
+answers `false` for a head that table maps to a string — mirroring the exact
+routing condition of `compileExpr`'s string branch, so analysis and emission
+agree on the value shape. Nothing in `limit.ts` changed. All three ROADMAP
+sums now resolve to `3√2·√π`, and `∫ₓ^∞ y^{3/2}e^{−y/2}dy` closes to the
+exact `−3√2·√π·Erf(√2/2·√x) + 2e^{−x/2}x^{3/2} + 6e^{−x/2}√x + 3√2·√π`
+(6.3854728701 at x = 2 against the 6.385472870122 reference). Pins:
+`compile-mode-complex.test.ts` › "a real-only string helper is REAL-shaped to
+its parent" (the compiler shape, `auto` and `complex` modes) and
+`limit-special-functions.test.ts` › "a sum mixing a scaled Erf(∞) addend with
+a decaying addend resolves". Full suite after the fix: 551 suites / 29 383
+tests / 4 312 snapshots, zero snapshot changes.
+
+### An `unknown`-typed symbol compared to a SCALAR types the relation scalar, so adding evidence about the OTHER operand makes the answer worse (RULED 2026-08-16 — option 3: the scalar presumption stands and the INFERRED type is REVISED from its value; FIXED same day. Found 2026-08-16 running down Tycho item 198)
 
 `Equal` answers `broadcastable<boolean>` when neither operand's
 collection-ness is known, which is the honest "cannot tell" the 192/193/194
@@ -322,69 +413,149 @@ behaviour are independently measured and stand on their own. Equally, do not
 resurrect the 26 → 1 figure from any stale reference; it does not describe a
 CE change.
 
-**Disposition — NOT FIXED, awaiting a ruling, and the ruling is about how far
-to widen.** The fix belongs at the relation, not at `Sum`/`Which`: the
-`Equal`/`NotEqual` result type must treat an `unknown`-typed operand as
-"collection-ness not yet known" rather than as scalar. Three candidate
-scopes, cheapest first:
+**Disposition — NOT FIXED, awaiting a ruling. Option 1 was IMPLEMENTED,
+MEASURED on the full suite, and REVERTED (2026-08-16); the numbers are
+below.** The fix belongs at the relation, not at `Sum`/`Which`: the
+`Equal`/`NotEqual` (and ordering) result type must treat an `unknown`-typed
+operand as "collection-ness not yet known" rather than as scalar. Three
+candidate scopes, cheapest first:
 
-1. ~~**Comparison operators only**~~ — **ATTEMPTED 2026-08-16 AND REVERTED.
-   See the trial below: it works, and it breaks a real consumer.**
-2. **Widen `isPossiblyCollectionTyped`** to admit bare top-typed symbols, AND
-   fix the consumers that require a plain `boolean`. One consistent convention
-   — and precisely the change its own comment declines as "much larger". Its
-   comparison half is now measured (see the trial); its `Multiply` half is not.
-3. **Neither — leave comparison typing alone** and instead stop the assign
-   inference from committing a type derived through a top-typed operand,
-   leaving such symbols open as 0.112 did. Nothing in the trial below arises
-   under this option. **Recommended after the trial.**
+1. **Comparison operators only** — `comparisonResultType` (and a new
+   `orderingResultType` for `Less`/`LessEqual`, which share the gap: `C <
+   U[1]` types `boolean` too) admits a bare top-typed symbol as
+   possibly-a-collection. **The "inconsistent with `Add`/`Multiply`"
+   objection is REFUTED**: `isPossiblyCollectionTyped` excludes bare symbols
+   because arithmetic REFINES them on use (`Add(D, 5)` makes `D` `number`,
+   so the answer would be order-dependent), and a comparison refines nothing
+   — `Equal(C, 5)` leaves `C` `unknown` (measured) — so for comparisons a
+   top-typed symbol is exactly as unresolved as a top-typed application.
+   Principled, and it does close the four-row table (`C = U[1]` types
+   `broadcastable<boolean>` in both `unknown` rows; `C_0` then types
+   `broadcastable<integer>`, which its later `[1, 3]` satisfies, and `C_0[2]`
+   reads `3`). **But the blast radius is NOT small, and it is not the 44
+   `isPossiblyCollectionTyped` sites — it is every downstream
+   `type.matches('boolean')` gate**, because EVERY relation over an
+   undeclared symbol (`x < 3`, `y = x²` — the commonest expression shape in
+   the product) would type `broadcastable<boolean>`, a union that is a
+   subtype of neither `boolean` nor `indexed_collection<boolean>`. Census in
+   `src/`: ~25 such gates (`When` mask cells, `isBooleanishCondition`,
+   `Set`/`Element` conditions, `solve-domain`, rule wildcards, the
+   compiler's `isComplexValued` boolean short-circuit, GPU `bool` typing, …),
+   plus whatever the consumer gates on. **Full suite with option 1 applied:
+   6 suites / 8 tests / 1 snapshot fail** (baseline without it: 551 suites /
+   29 383 tests / 4 312 snapshots, all green), and every failure is a real
+   semantic break, not a stale pin: a predicate lambda `(a, b) ↦ b < a` types
+   `(unknown, unknown) -> broadcastable<boolean>` and no longer satisfies a
+   declared `(integer) -> boolean` callback contract
+   (`design-d-callback-contract.test.ts`, `lambda-param-element-inference.test.ts`
+   — the stamp declines with `incompatible-type`); `Element(d, D, d ≠ V)`
+   conditions become `Error`s (`latex-syntax/arithmetic.test.ts` snapshot);
+   `Set.contains` over a comprehension degrades to `undefined`
+   (`set-comprehension.test.ts`); `list-filtering.test.ts` › "symbolic
+   comparisons stay symbolic" pins `0 < x` as `boolean`; and one
+   `compile-mode-complex.test.ts` selection case throws. Choosing this option
+   therefore means ALSO widening every boolean-contract gate to admit
+   `broadcastable<boolean>` (a "boolean-ish predicate" convention), and
+   accepting that a predicate lambda over undeclared parameters is no longer
+   a `-> boolean` function to the type checker. The patch is small
+   (`isTopTypedSymbol` in `collection-utils.ts` + the two handlers in
+   `library/relational-operator.ts`, ~90 lines) and re-derivable from this
+   entry.
+2. **Widen `isPossiblyCollectionTyped`** to admit bare top-typed symbols —
+   everything in (1) PLUS every element-wise arithmetic operator; strictly
+   larger, and now known to be measurably breaking. Not measured separately.
+   **Also refuted for any future re-attempt of (1)/(2)** (CE-POC's independent
+   trial, same evening): gating the widening on "some OTHER operand is a
+   DEFINITE collection" does not rescue it — in `C = U[1]` there is no
+   collection operand at all (`U[1]` is a scalar ELEMENT), so the defect case
+   and the `d != V`-between-two-undeclared-symbols regression case (which
+   broke `Sum`'s `Element` constraint slot in that trial) are
+   indistinguishable at the type level. Any retry of (1)/(2) re-buys the
+   full blast radius; there is no cheaper conditional variant.
+3. **Neither — declare the relation's scalar `boolean` the CONVENTION** (an
+   undeclared symbol is presumed scalar until evidence says otherwise, which
+   is already what arithmetic inference does) and instead stop the assign
+   inference from COMMITTING a concrete type derived through a top-typed
+   free symbol of the RHS, leaving such symbols open as 0.112 did. Closes the
+   two measured HARMS (the unsound committed `number` on `C_0`, and the
+   `C_0[2]` read failing closed) without touching the relation's type; the
+   relation stays "wrong" only in the sense that `x = 5` types `boolean` for
+   an `x` that could later be assigned a list — the same presumption the
+   engine makes everywhere else. Blast radius unmeasured; expected to be
+   confined to assign-inference over RHSs mentioning an unrefined symbol.
 
-**⚠ TRIAL OF OPTION 1, 2026-08-16 — reverted, but its results decide the
-ruling. Do not re-attempt without reading this.**
+**RULED 2026-08-16 (user): option (3), with the principle stated as
+"inference doesn't have to be broadest, it has to be more likely, and is
+subject to revision."** (Numbering note: the ruling was given against the
+session's three-option summary, where this alternative — keep the scalar
+presumption, make the inferred type revisable — was listed as "(2)"; it is
+this entry's option 3. Same alternative, different list.) So: the relation over an undeclared symbol keeps the
+scalar `boolean` (the same presumption arithmetic inference already makes —
+the four-row table's `boolean` rows are the CONVENTION, not a defect, and
+the "less-informed is more honest" framing is withdrawn: the
+`broadcastable<boolean>` of the nothing-declared row comes from the
+top-typed APPLICATION `U[1]`, not from `C`); the assignment commits the
+LIKELY type; and that inferred type is REVISED when its own value refutes
+it. Implemented as `_reviseInferredType` in
+`boxed-expression/boxed-value-definition.ts`: the value-definition `type`
+getter re-checks an INFERRED type whose value is a function-shaped
+expression at most once per semantic generation (`ce._semanticVersion`)
+against the value's live type, and when the recorded guess no longer admits
+it, adopts the value's type — the D11 "the guess was wrong: adopt the
+value's own type" rule the assign path already applies. A DECLARED type is a
+contract and never moves; a literal value's type cannot move and is not
+checked; a guess the live value still fits (`y := x + 1`, then `x := 2`)
+keeps the likely `number`; self-referential bindings are skipped. Measured:
+`C_0` types `number` while `C` is unknown and `vector<integer^2>` once `C :=
+[10, 30]`, the value `[1, 3]` satisfies it, and `C_0[2]` reads `3`. (Re-
+measured on the way: harm (b) — the `C_0[2]` read failing closed — did NOT
+reproduce at HEAD; the read only fails while `C` is unresolved, when the
+value genuinely is not indexable, and a *declared* `number` fails at box
+time, which is the contract working. Harm (a), the stale recorded type, was
+real and is what the revision closes.) Pinned in
+`test/compute-engine/inferred-type-revision.test.ts` (the ruled `boolean`,
+the revision, the declared-type contract, the kept guess). Blast radius on the full suite: 552 suites / 29 390 tests /
+4 312 snapshots pass, zero snapshot changes. `Function`-literal values are
+excluded from the revision: a lambda's type is its signature, and the protocol
+conformance re-activation (`engine-protocols.ts`) re-settles it on alias
+re-declaration; a read-time retype pre-empted that (two joint-cause refusals in
+`protocol-type-redefinition.test.ts` turned into acceptances) — data values only.
 
-Widening `comparisonResultType` alone (a local helper admitting a bare
-top-typed operand; the evaluation gates deliberately untouched) **fixed the
-entire chain**: `C_0` typed `broadcastable<integer>`, the reader stayed
-symbolic instead of failing closed, and after `C` refined,
-`value <: declared` was **true** — the soundness hole gone. Targeted battery
-157/157 including `relational-broadcast-recursion.test.ts`, so the paired-guard
-stack overflow did not fire.
+**Three defects found and FIXED while measuring this (2026-08-16), all
+independent of the ruling:**
 
-**It also broke a real consumer.** Full suite: 29,345 passed, **one snapshot
-changed of 4,312** — and not cosmetically:
-
-```
-- ["Sum", "K", ["Element", "d", "D", ["NotEqual", "d", "V"]]]
-+ ["Sum", "K", ["Element", "d", "D", ["Error", ["ErrorCode", "incompatible-type", …]]]]
-```
-
-`d != V` between two bare undeclared symbols became `broadcastable<boolean>`,
-and `Sum`'s `Element` constraint slot requires a plain `boolean`.
-
-**And the obvious narrowing is REFUTED: requiring another operand to be a
-DEFINITE collection kills the fix.** In `C = U[1]` there is no collection
-operand at all — `U[1]` is a scalar ELEMENT, and the only broadcast
-possibility comes from `C` being open. The defect case (`C = U[1]`) and the
-regression case (`d != V`) are therefore the same shape at the type level:
-one or more open operands, no definite collection anywhere. **No
-operand-evidence discriminator separates them.** Anyone widening comparison
-typing must accept `d != V` widening too, and fix the consumers — which is
-why option 1 is struck out and option 2 now carries "AND fix the consumers".
-
-**A latent second defect sits behind this one.** With comparison typing
-widened, `Which` throws `Condition must evaluate to "True" or "False"` on a
-`broadcastable<boolean>` condition, although
-`isBooleanishCondition` (`library/control-structures.ts`) documents undecided
-conditions as held rather than thrown — it recognises plain `boolean` and a
-definite boolean collection, but not the `broadcastable` union between them.
-Currently UNREACHABLE (the wrong scalar type fails closed first), so nothing
-was landed for it; it becomes live the moment option 2 is taken and must ship
-with it.
-
-Whichever is chosen, add a regression asserting the four-row table above; the
-diagnostic property is that **the LESS-informed setup must not be MORE honest
-than the better-informed one**. Also check the sibling handlers listed in the
-192/193/194 entry below for the same assumption.
+- **`Which`/`If` THREW on an undecided `broadcastable<boolean>` condition.**
+  Since the 193 round, `Which(h(x) = 10, 1, True, 0)` (condition typed
+  `broadcastable<boolean>`) raised the "Condition must evaluate to True or
+  False" spell-check error out of `evaluate()`, where before the round it was
+  held: `isBooleanishCondition` (`library/control-structures.ts`) tested
+  `matches('boolean')` and `matches(indexed_collection<boolean | missing>)`,
+  and the union is a subtype of neither. Same gate class in `When`'s
+  mask-cell test, which left `x{h(x) ≤ [1,2,3]}` un-broadcast. Both now admit
+  the type through `possiblyElementwiseCondition`, the predicate the
+  `If`/`Which` TYPE handlers already used. Under option (1) this throw would
+  have hit every `Which(x = 5, …)`. Pinned in
+  `test/compute-engine/undecided-condition-broadcastable.test.ts`.
+- **A big operator's term that kept the loop index leaked it and summed
+  wrong.** `Σ_{k=1}^{3} Which(x < k, k, True, 0)` evaluated to
+  `Which(x < k, 9, True, 0)` and `Σ If(x < k, k, 0)` to `3·If(x < k, k, 0)`:
+  the loop binds the index by ASSIGNMENT, an undecided `If`/`Which` returned
+  `undefined`, the framework kept the ORIGINAL node with `k` unresolved, and
+  three identical terms were accumulated (then `3k` re-evaluated at the last
+  index value). The per-term step (`evaluateBigOpTerm`, `library/utils.ts`,
+  used by `Sum`/`Product` over `Limits` and `Element`) now substitutes the
+  current index values into a term that still mentions an index — the repair
+  `comprehensionStream` already applied to comprehension elements — with a
+  BINDER-AWARE substitution (`substituteFreeNames`: a nested `Σ_k` in a held
+  arm keeps its own `k`; a `t ↦ t + k` gets the value in its free position).
+  Result: `If(x < 1, 1, 0) + If(x < 2, 2, 0) + If(x < 3, 3, 0)`. Pinned in
+  `test/compute-engine/big-op-leaked-index.test.ts`.
+- **`If`/`Which` discarded the evaluated condition** (the lazy-operator
+  pitfall — `return undefined` hands back the original node): `Which(C =
+  U[1], …)` kept `U[1]` where its condition had read `10`. Both now rebuild
+  around the EVALUATED condition, arms untouched, `isSame`-fixpoint-guarded.
+  Same test file. Full suite with these three fixes and NOT option (1):
+  551 suites / 29 383 tests / 4 312 snapshots, zero snapshot changes.
 
 ### Tycho items 192/193/194 — residue after the 2026-08-15 fixes (OPEN)
 
@@ -2785,8 +2956,8 @@ field the new layout no longer declared kept answering, a field the new layout
 ADDED got none, and a RETYPED field left a value of the new type behind a
 requirement statically typed as the old one. `declareType` now calls
 `resettleTypeConformances()` (`src/compute-engine/engine-protocols.ts`) on
-every replacement, which re-runs `implementationProblem` + `settleFieldBacking`
-+ `refreshInheritedPending` exactly as the protocol-replacement loop does, and
+every replacement, which re-runs `implementationProblem`, `settleFieldBacking`
+and `refreshInheritedPending` exactly as the protocol-replacement loop does, and
 emits its `config` event and conformance-version bump only when a verdict
 actually moved. Because objects keep their own pinned layout (Appendix B,
 "layouts never migrate"), the field-backed READ and WRITE paths additionally
@@ -2818,13 +2989,59 @@ is where the author is told.
 
 The refusal is per EDGE and re-checked after each one, so an unrelated
 conformance the same re-declaration satisfies is untouched, and a violation
-that was already there before the sweep costs no re-activation anything. It is
-also STICKY (`ConformanceRecord._reactivationRefused`): without that, every
-later `type` statement — for any type — would re-offer the edge, re-run the
-global widening walk, refuse it again, and bump the conformance version twice
-for a world that did not move. The stamp clears when the author edits that
-conformance, or when a re-settlement finds the edge uncovered on its own
-merits.
+that was already there before the sweep costs no re-activation anything. When
+the walk finds anything at all, the re-activations are ALL undone, the
+surviving violations are recorded as the baseline, and the edges are then
+handed back one at a time — each kept if it introduces nothing against that
+baseline, each put back if it does. There is no second pass and no joint
+verdict: a contract breaks when the union over the non-pending conformers
+escapes a FIXED declared ceiling, and a union cannot escape a ceiling both of
+its parts respect, so an edge that introduces nothing alone cannot introduce
+anything on top of the edges already kept. Several edges may be refused by one
+declaration; each is told what IT exceeded.
+
+NOTHING IS REMEMBERED between sweeps: every sweep re-derives the whole
+question. An edge therefore stays refused exactly as long as an offending
+contract exists, and un-refusing it needs no bookkeeping — the author widens or
+removes that annotation, installs a block that does not widen, or replaces the
+protocol, then re-runs the type declaration. The price is one widening walk per
+sweep that re-activates something, which is zero for the overwhelming majority
+of sweeps. Version-bump economy comes from comparing the FINAL state to the
+one the sweep started from: a sweep whose re-activations were all refused lands
+where it began and emits no `config` event. (A sticky stamp was tried and removed: it was
+stolen by sibling edges and needed clearing rules at four registration sites,
+neither of which the re-derivation has. The inheritance interaction is NOT free
+either way — reverting a refused source strands the block-less edges that were
+granted its implementation earlier in the same sweep — and the sweep answers it
+by ORDER rather than by repair: inheritance is computed once, after every
+authored verdict and every refusal is final, so no inheritor is ever granted
+from a source that is later put back.)
+
+All three routes work: REMOVING the annotation
+(`function caller(t) pure -> integer` redefined bare) retracts the contract, a
+non-widening block fulfils the edge, and replacing the protocol retires the
+requirement set. The retraction needed two fixes, both landed:
+`BoxedOperatorDefinition.update()` replaces the annotation provenance instead of
+merging it, and the Epsil lone-clause REDEFINITION path
+(`defineFunctionClause`, `multi-clause.ts`) rebuilds the provenance from the
+incoming statement — `ce.assign` installs a body, not a signature, so the
+previous annotation would otherwise have survived a redefinition that dropped
+it.
+
+**OPEN, adjacent: a redefinition cannot WIDEN an effect annotation.**
+`function h(x: integer) -> integer { x }` redefined as
+`function h(x: integer) random -> integer { x }` is refused
+`incompatible-type: pure effects / random effects`, and so is any
+pure→random rewrite. The cause is not the provenance (that is fixed) but
+`ce.assign`'s type check, which validates the incoming literal against the
+binding's EXISTING signature instead of replacing it — a redefinition should
+replace, per "Across units" in
+`docs/plans/2026-08-14-redefinition-discipline.md`. Not fixed here: `ce.assign`
+is shared by every `f := …`, declare-then-define, multi-clause accumulation,
+generics and overloads, and the change could not be verified against those
+suites within this round. It does not block the ruling — removing the
+annotation is a working retraction route — but it makes "widen it" unreachable,
+so the docs promise removal, not widening.
 
 **KNOWN, not scheduled: pinned layouts are SHALLOW.** `detachDefinitionBody`
 (`boxed-expression/boxed-object.ts`) copies an object body one level deep and
@@ -2840,6 +3057,18 @@ STORED VALUE against the requirement, which closes the whole class: whatever
 route the layouts drifted by, a read may not deliver a value the property's
 declared type does not admit. Pinned by the alias case in
 `test/compute-engine/protocol-type-redefinition.test.ts`.
+
+**RULED 2026-08-16: a re-declared alias RETYPES values already stored through
+it, and the plain field read follows the alias.** With `type alias A = string`,
+an object `p` of `type T = object{a: A}` holding `"s"`, and then `type alias A =
+integer`, `p.a` is declared `integer` and answers `"s"`. The same question
+exists without objects at all — `let x: A = "s"` followed by `type alias A =
+integer` — and the ruling is one answer for both: an alias is a spelling, not a
+box, so re-declaring it re-spells every annotation written through it and does
+not revisit the values those annotations described. The PROTOCOL route is the
+exception rather than the rule: a conformance promises what a read delivers, so
+`p.(P.a)` refuses rather than hand back a value the property's declared type no
+longer admits. Pinned in `protocol-type-redefinition.test.ts`.
 
 **Migration cost, MEASURED on landing (2026-08-16): 45 tests** across
 `protocol-properties.test.ts` (23), `protocols.test.ts` (9),

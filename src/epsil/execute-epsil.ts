@@ -392,6 +392,12 @@ function executeEpsilBatch(
             'protocol-implementation-pending',
             conformance.targetKey,
             protocol.name,
+            // An edge left pending by a RE-SETTLEMENT — a replaced protocol, or
+            // a redefined target type — says what moved under it, since "there
+            // is no implementation yet" is not the story there. Absent for the
+            // ordinary declare-then-implement case, whose third operand stays
+            // the empty string.
+            conformance._pendingReason ?? '',
           ],
           range: [0, source.length],
         });

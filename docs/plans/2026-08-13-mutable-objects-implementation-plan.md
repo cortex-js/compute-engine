@@ -408,12 +408,25 @@ Spec: "Objects and protocols", "Which types can conform".
   > sees that parameter typed `unknown`; tracked in `ROADMAP.md`.
 - Protocol replacement: layouts never migrate; replacement re-runs
   conformance against the fixed layout — and a cross-batch redefinition
-  of the object TYPE must re-run conformance for its edges the same
-  way. Only the protocol half is implemented: `settleFieldBacking()`
-  reads the layout from the type registry at settle time, and nothing
-  re-settles an edge when the TYPE is redefined, so accessors
-  synthesized for a field the new layout dropped survive. Open, tracked
-  under the mutable-objects entry of `ROADMAP.md`.
+  of the object TYPE re-runs conformance for its edges the same way.
+  **DONE.** The protocol half shipped with 2A (the revalidation loop in
+  `declareProtocolImpl`); the TYPE half shipped 2026-08-16 as work
+  package 2D — `declareType` calls `resettleTypeConformances()`
+  (`src/compute-engine/engine-protocols.ts`), the field-backed read and
+  write paths re-check the RECEIVER's pinned layout so an object built
+  before a redefinition is refused rather than answered wrongly, and a
+  re-settled edge records why it went pending for the end-of-batch
+  warning to carry. Pinned by
+  `test/compute-engine/protocol-type-redefinition.test.ts`. A re-settlement
+  that would falsify a declared effect contract refuses the EDGE and not
+  the `type` statement (RULED 2026-08-16; see the mutable-objects entry of
+  `ROADMAP.md`), and pinned layouts are shallow, so the read path also
+  validates the stored VALUE against the requirement. Keeping an
+  author's RAW implementation block apart from the GROUNDED dispatch
+  view — the bookkeeping that would let a CONDITIONAL conformance's
+  members carry effect specifiers, tracked under the
+  `protocol-conditional-member-effects` entry of `ROADMAP.md` — is a
+  SEPARATE open item and did not land with 2D.
 - Appendix A doc amendments land with this phase (items 1–5 of
   "Changes to shipped documents", including the "Properties"
   must-be-implemented sentence).

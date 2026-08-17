@@ -105,6 +105,15 @@ function fieldBackedHandler(
   return (impl as JSImplementation).host;
 }
 
+/** The keys of the merged implementation map on the one conformance edge of
+ * `protocol`, sorted. "Which accessors does this edge carry?" has no public
+ * surface, and asking it through dispatch would conflate it with "does the
+ * edge apply?" — which a replacement moves independently. */
+function implKeys(protocol: string, engine = ce): string[] {
+  const edge = engine._protocolRegistry[protocol]?.conformances[0];
+  return Object.keys(edge?.impl ?? {}).sort();
+}
+
 describe('a stored field satisfies a property requirement', () => {
   test('SAME type satisfies `readwrite`, with no implementation block at all', () => {
     expect(
@@ -671,6 +680,70 @@ p.(Aged.age)`)
       []
     );
     expect(value('p.(Aged.age)')).toBe('42');
+  });
+
+  test('a MUTABILITY change drops the setter half and keeps the getter', () => {
+    // `readwrite` → `readonly`. The setter the engine synthesized for the old
+    // requirement is stripped — a `readonly` property has no `set` handler to
+    // implement — while the getter direction, whose rule only relaxed,
+    // survives. Nothing is pending: the field still answers the requirement.
+    expect(
+      value(`protocol Aged { readwrite age: number }
+type P = object{age: number} is Aged
+let p = P(age: 42)
+p.(Aged.age)`)
+    ).toBe('42');
+    expect(implKeys('Aged')).toEqual(['__get__age', '__set__age']);
+
+    expect(diagnosticCodes('protocol Aged { readonly age: number }')).toEqual(
+      []
+    );
+    expect(implKeys('Aged')).toEqual(['__get__age']);
+    expect(value('p.(Aged.age)')).toBe('42');
+    expect(result('p.(Aged.age) = 7')).toContain(
+      'protocol-property-readonly-set'
+    );
+  });
+
+  test('the OTHER mutability direction can un-satisfy a field that was enough', () => {
+    // `readonly` → `readwrite` tightens the rule from "subtype" to "same
+    // type", so a NARROWER field that satisfied the read-only requirement no
+    // longer satisfies the settable one. The edge goes pending rather than
+    // silently keeping a getter typed by the old requirement.
+    expect(
+      value(`protocol Aged { readonly age: number }
+type P = object{age: integer} is Aged
+let p = P(age: 42)
+p.(Aged.age)`)
+    ).toBe('42');
+    expect(implKeys('Aged')).toEqual(['__get__age']);
+
+    expect(diagnosticCodes('protocol Aged { readwrite age: number }')).toEqual([
+      'protocol-implementation-pending',
+    ]);
+    expect(implKeys('Aged')).toEqual([]);
+    expect(result('p.(Aged.age)')).toContain('protocol-implementation-missing');
+  });
+
+  test('MEMBER REMOVAL strips the accessors of the requirement that went away', () => {
+    // The replacement drops a requirement entirely. Its synthesized accessor
+    // has nothing left to implement, so it is removed — left behind it would
+    // keep answering a property the protocol no longer declares.
+    expect(
+      value(`protocol Two { readonly a: integer
+  readonly b: string }
+type P = object{a: integer, b: string} is Two
+let p = P(a: 1, b: "x")
+(p.(Two.a), p.(Two.b))`)
+    ).toBe('(1, "x")');
+    expect(implKeys('Two')).toEqual(['__get__a', '__get__b']);
+
+    expect(diagnosticCodes('protocol Two { readonly a: integer }')).toEqual([]);
+    expect(implKeys('Two')).toEqual(['__get__a']);
+    expect(value('p.(Two.a)')).toBe('1');
+    // `b` is no longer a member of `Two` at all, so the qualified read is a
+    // name error, not a missing implementation.
+    expect(result('p.(Two.b)')).toContain('unknown-field');
   });
 });
 

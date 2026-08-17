@@ -861,8 +861,45 @@ export function defineFunctionClause(
     (declared === undefined ||
       sameParameterDomain(incoming.signature, declared))
   ) {
-    if (shadowsDispatcher) declareShadowingFunction(ce, id, literal);
-    else ce.assign(id, literal);
+    // A REDEFINITION restates the whole definition, its effect annotation
+    // included. `ce.assign` installs a body, not a signature, so the previous
+    // definition's annotation PROVENANCE would otherwise survive it: after
+    // `function h(x: integer) pure -> integer { x }`, redeclaring
+    // `function h(x: integer) -> integer { x }` kept `pure` on the signature,
+    // and redeclaring it `random` was refused as `incompatible-type` against
+    // the contract the author had just rewritten away. Cross-unit redefinition
+    // has REPLACEMENT semantics (`docs/plans/2026-08-14-redefinition-
+    // discipline.md`, "Across units"), so the incoming statement is the whole
+    // truth about its own effects.
+    //
+    // Only when there is no author DECLARATION in force: under
+    // `let f: (integer) pure -> integer` the declaration is the contract and a
+    // later clause is checked against it (§4.3a), which is the case `declared`
+    // marks.
+    // Written only once the install SUCCEEDS, per this file's rule that the
+    // installed state is never mutated before the checks: `ce.assign` refuses a
+    // redefinition that widens the effect annotation (it validates the incoming
+    // literal against the binding's existing signature — the open widening
+    // defect recorded in `ROADMAP.md`), and a refused statement that had
+    // already flipped this flag would leave the surviving `pure` definition
+    // claiming it declares nothing, which `contractViolation` reads.
+    const retarget =
+      declared === undefined &&
+      existing !== undefined &&
+      isOperatorDef(existing)
+        ? existing.operator
+        : undefined;
+    const priorDeclared = retarget?.effectsDeclared;
+    try {
+      if (shadowsDispatcher) declareShadowingFunction(ce, id, literal);
+      else ce.assign(id, literal);
+    } catch (e) {
+      if (retarget !== undefined && priorDeclared !== undefined)
+        retarget.effectsDeclared = priorDeclared;
+      throw e;
+    }
+    if (retarget !== undefined)
+      retarget.effectsDeclared = incomingExplicit !== undefined;
     // The doc-comment description rides on the plain representation as a
     // field: written directly rather than through `update()`, which would
     // rebuild the definition's evaluate handler for a one-string change.

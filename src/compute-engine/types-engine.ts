@@ -307,6 +307,18 @@ export type ConformanceRecord = {
   /** No implementation yet: an end-of-batch `protocol-implementation-pending`
    * warning (ruling P3). A SEMANTIC protocol (no members) is never pending. */
   pending: boolean;
+  /** WHY {@link ConformanceRecord.pending} is set, when the edge was left
+   * pending by a RE-SETTLEMENT rather than by never having been implemented:
+   * a protocol replacement, or a redefinition of the target type. Without it
+   * the end-of-batch warning names only the pair, which for a re-settled edge
+   * is the least informative half of the story — an edge that read fine in the
+   * previous cell is now pending, and the reason is the requirement or the
+   * layout that moved under it. Carries the `implementationProblem` message,
+   * or a description of what the target's new layout no longer satisfies.
+   *
+   * Absent on an edge that is not pending, and on one pending only because no
+   * implementation has been written yet. */
+  _pendingReason?: string;
   declaredByStatement: boolean;
 };
 

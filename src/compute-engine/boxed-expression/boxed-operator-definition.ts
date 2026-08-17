@@ -897,7 +897,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // a CONTRACT; the other — an effect-bearing specifier on the signature — is
     // detected below. Deliberately NOT set by the legacy `pure`/`drawsRandom`
     // sugar, which promises only "not pure" and is an override, not a contract.
-    if (def.effects !== undefined) this.effectsDeclared = true;
+    let declaresEffectsNow = def.effects !== undefined;
 
     this.frameProtocol = def.frameProtocol ?? this.frameProtocol;
     if (def.invokes !== undefined)
@@ -941,11 +941,26 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             `Operator Definition "${this.name}": the 'effects' field and the effects on the signature "${this.signature}" disagree`
           );
         effects = { stated: true, effects: sigEffects };
-        this.effectsDeclared = true;
+        declaresEffectsNow = true;
       }
 
       assertArmsDistinguishableWithoutEffects(this.name, this.signature.type);
     }
+
+    // Annotation provenance is REPLACED by an update that restates the effect
+    // surface, never merged into it — the same rule the signature itself
+    // follows. Redefining `function caller(t: T) -> integer { … }` with no
+    // annotation RETRACTS the `pure` its previous definition declared; leaving
+    // the old contract in force would make it impossible to widen an annotation
+    // by rewriting the function, which is the only way an author can retire a
+    // contract that is holding something else back (a conformance refused for
+    // widening it, say). An update that supplies neither an `effects:` field nor
+    // a signature is not restating anything, so it leaves the provenance alone.
+    // `def.effects !== undefined` is not a second disjunct here: it already
+    // implies `declaresEffectsNow`, so a SIGNATURE is the only thing that can
+    // restate the surface without stating effects.
+    if (declaresEffectsNow) this.effectsDeclared = true;
+    else if (def.signature !== undefined) this.effectsDeclared = false;
 
     if (legacy.stated) {
       if (effects.stated) {

@@ -52,7 +52,7 @@ import type {
   ProtocolMembersInput,
   ProtocolRecord,
 } from './types-engine.js';
-import type { Expression } from './types-expression.js';
+import type { Expression, ObjectInterface } from './types-expression.js';
 import type {
   BoxedDefinition,
   OperatorDefinition,
@@ -306,12 +306,30 @@ export function declareProtocolImpl(
       // uncovered, so it reaches the block-less edges below by the same route.
       const covered = settleFieldBacking(ce, existing, c);
       c.pending = failure !== null || !covered;
+      // An edge that read fine in the previous cell and is pending now needs
+      // to say what moved: the end-of-batch warning names only the (target,
+      // protocol) pair, which for a re-settled edge is the least informative
+      // half of the story.
+      noteEdgePendingReason(ce, existing, c, failure, true);
     }
     // …and the implementation-LESS edges are recomputed from what the
     // implementations now cover: an edge that inherited a supertype's
     // implementation goes back to pending when that implementation stops
     // matching the new requirements, and vice versa.
+    //
+    // A re-settlement REASON is asked for only where the settlement actually
+    // moved. Re-executing an identical `protocol` statement re-runs all of
+    // this and changes nothing, and a blanket "these were re-settled" would
+    // then invent a layout reason on an edge that has simply never been
+    // implemented — the P3 notebook pattern, whose warning already says the
+    // whole story.
+    const blockLessBefore = existing.conformances
+      .filter((c) => c._authored === undefined)
+      .map((c) => ({ edge: c, impl: c.impl, pending: c.pending }));
     refreshInheritedPending(ce, existing);
+    for (const b of blockLessBefore)
+      if (b.edge.impl !== b.impl || b.edge.pending !== b.pending)
+        noteEdgePendingReason(ce, existing, b.edge, null, true);
     // A replacement is a `config`-class state event, exactly like a type
     // redefinition: cached decisions taken against the old requirement set
     // must not be left stale (P16).
@@ -1001,6 +1019,15 @@ export function declareConformance(
         // synthesized, and a property the block does not implement may be
         // covered by a stored field of the same name (Appendix B).
         existing.pending = !settleFieldBacking(ce, record, existing);
+        // Whatever a previous re-settlement recorded about this edge is now out
+        // of date: the block just installed is the new answer. Cleared BEFORE
+        // the call, because `noteEdgePendingReason` deliberately leaves an
+        // existing reason alone when it is not itself re-settling — otherwise a
+        // block that fixes some but not all of the requirements would leave the
+        // edge pending while still quoting the layout or signature problem the
+        // author has just addressed.
+        delete existing._pendingReason;
+        noteEdgePendingReason(ce, record, existing, null);
         // The new implementation may also fulfil the impl-less edges of the
         // target's SUBTYPES, which inherit it.
         refreshInheritedPending(ce, record);
@@ -1026,8 +1053,10 @@ export function declareConformance(
         conformance._implOrigin = { batch, block: options?.block };
     }
     record.conformances.push(conformance);
-    if (impl !== undefined)
+    if (impl !== undefined) {
       conformance.pending = !settleFieldBacking(ce, record, conformance);
+      noteEdgePendingReason(ce, record, conformance, null);
+    }
     mutated = true;
     // The new edge may INHERIT an implementation registered for a supertype,
     // and (with a block of its own) may fulfil impl-less subtype edges.
@@ -1246,10 +1275,41 @@ function implCoversRequirements(
       if (!has(member)) return false;
       continue;
     }
-    if (!has(`__get__${member}`)) return false;
-    if (kind === 'readwrite' && !has(`__set__${member}`)) return false;
+    if (!has(`${GET_PREFIX}${member}`)) return false;
+    if (kind === 'readwrite' && !has(`${SET_PREFIX}${member}`)) return false;
   }
   return true;
+}
+
+/**
+ * Which PROPERTY requirements of `members` the merged implementation map does
+ * not answer, named as an author would spell them (`get age`, `set age`).
+ *
+ * Property requirements only, and that is the point rather than an omission:
+ * the one caller ({@link noteEdgePendingReason}) uses this to say that a
+ * target's stored-field LAYOUT no longer satisfies something, and a function
+ * member can never be satisfied by a stored field — naming one there would
+ * advise the author to add a field that could not possibly help.
+ *
+ * Directly below {@link implCoversRequirements}, reading the same
+ * `members`/`impl` pair through the same own-key test and the same
+ * `GET_PREFIX`/`SET_PREFIX` constants: the two answer halves of one question
+ * and a change to the key mangling has to reach both.
+ */
+function uncoveredPropertyRequirements(
+  members: Record<string, ProtocolMember>,
+  impl: Record<string, Expression | JSImplementation> | undefined
+): string[] {
+  const has = (key: string): boolean =>
+    impl !== undefined && Object.prototype.hasOwnProperty.call(impl, key);
+  const missing: string[] = [];
+  for (const [member, requirement] of Object.entries(members)) {
+    if (requirement.kind === 'function') continue;
+    if (!has(`${GET_PREFIX}${member}`)) missing.push(`get ${member}`);
+    if (requirement.kind === 'readwrite' && !has(`${SET_PREFIX}${member}`))
+      missing.push(`set ${member}`);
+  }
+  return missing;
 }
 
 //
@@ -1345,12 +1405,38 @@ function fieldBackedProperties(
     } catch {
       continue;
     }
-    if (member.kind === 'readwrite') {
-      if (isSubtype(field, declared) && isSubtype(declared, field))
-        satisfied.add(name);
-    } else if (isSubtype(field, declared)) satisfied.add(name);
+    if (fieldSatisfiesRequirement(field, declared, member.kind))
+      satisfied.add(name);
   }
   return { satisfied, conflicts };
+}
+
+/**
+ * May a stored field of type `field` stand in for a property requirement of
+ * type `declared` and the given kind?
+ *
+ * `readwrite` demands the two types be the SAME: the getter direction alone
+ * would admit a narrower field and the setter direction alone a wider one, so
+ * the only type satisfying both is the property's own. `readonly` has only the
+ * getter direction, so the ordinary covariant rule applies and a subtype is
+ * enough.
+ *
+ * The single implementation of the rule, so that the two places that ask it
+ * cannot drift: {@link fieldBackedProperties}, which decides at registration
+ * time whether to synthesize accessors from the type registry's layout, and
+ * {@link evaluateProtocolProperty}, which re-asks it at READ time against the
+ * layout the receiving instance was constructed with. Should the `readonly`
+ * writability axis ever be revisited (the open `readonly` ruling), this is the
+ * one function to change.
+ */
+function fieldSatisfiesRequirement(
+  field: Type,
+  declared: Type,
+  kind: 'readonly' | 'readwrite'
+): boolean {
+  if (kind === 'readwrite')
+    return isSubtype(field, declared) && isSubtype(declared, field);
+  return isSubtype(field, declared);
 }
 
 /**
@@ -1360,7 +1446,11 @@ function fieldBackedProperties(
  * On the interpreted route the read path recognizes the `_fieldBacked` marker
  * and loads the slot itself (see {@link evaluateProtocolProperty}), so this
  * callback is the fallback for any other invoker; it answers `undefined` for a
- * receiver that is not an object, which the boxing layer turns into `Nothing`.
+ * receiver that is not an object — or one whose pinned layout has no such
+ * slot — which the boxing layer turns into `Nothing`. Declining rather than
+ * refusing is the right posture HERE, unlike in {@link fieldSetter}: a read
+ * that cannot be answered has always stayed symbolic, while a write that
+ * cannot be performed must not report success.
  *
  * Being a HOST callback also means the compile planner refuses it as a
  * candidate and the compiled tier declines — see the section comment above:
@@ -1369,8 +1459,27 @@ function fieldBackedProperties(
  */
 function fieldGetter(name: string): FieldBackedImplementation {
   return {
-    host: (self: Expression) =>
-      isObject(self) ? self._field(name) : undefined,
+    host: (self: Expression) => {
+      if (!isObject(self)) return undefined;
+      // The receiver's own PINNED layout has to carry the slot. The interpreted
+      // read path checks admissibility as well (it has the requirement in hand;
+      // see `pinnedLayoutRefusal`) and never reaches this callback — but an
+      // invoker that does reach it has passed through no such check, and
+      // loading a slot off an instance whose layout never declared the field
+      // would answer for a name it does not have.
+      //
+      // A receiver with no introspectable layout at all (the bare `object`
+      // type, or a nominal whose definition has gone) is exempt, exactly as it
+      // is in `fieldSetter` and `pinnedLayoutRefusal`: the missing field type
+      // there means "this layout cannot be read", not "this layout lacks the
+      // field", and the slot is the only authority left.
+      if (
+        objectLayoutOfType(self.type.type) !== undefined &&
+        self._fieldType(name) === undefined
+      )
+        return undefined;
+      return self._field(name);
+    },
     _fieldBacked: name,
   };
 }
@@ -1405,10 +1514,34 @@ function fieldSetter(
     host: (self: Expression, value: Expression) => {
       if (!isObject(self) || value === undefined) return undefined;
       const expected = self._fieldType(name);
-      if (expected !== undefined) {
-        const checked = checkType(ce, value, expected);
-        if (!checked.isValid) return checked;
+      if (expected === undefined) {
+        // A receiver whose PINNED layout DOES name its fields and does not
+        // include this one is refused rather than given a new slot: it was
+        // constructed before a `type` statement added the field this accessor
+        // stands for, and storing would give that one instance a slot its own
+        // layout does not declare — every read of it through the type would
+        // then disagree with every other instance. The read half refuses the
+        // mirror case (see `pinnedLayoutRefusal`).
+        //
+        // A receiver with NO introspectable layout (the bare `object` type, or
+        // a nominal whose definition has gone) is a different situation, and
+        // the same absence stands for it: nothing here can say the field is
+        // wrong, and a message advising the author to "rebuild it from the
+        // current declaration of `object`" would name a declaration that does
+        // not exist. Such a receiver stores unchecked, exactly as it did before
+        // any of this — the value has already been checked against the
+        // property's own declared type by every caller.
+        if (objectLayoutOfType(self.type.type) === undefined) {
+          self._store(name, value);
+          return self;
+        }
+        return ce.error([
+          'protocol-implementation-missing',
+          `\`${name}\` cannot be written on this value: it was constructed with a layout that has no stored field \`${name}\`. Rebuild it from the current declaration of \`${typeToString(self.type.type)}\`.`,
+        ]);
       }
+      const checked = checkType(ce, value, expected);
+      if (!checked.isValid) return checked;
       self._store(name, value);
       return self;
     },
@@ -1440,14 +1573,13 @@ function fieldSetter(
  * property is.
  *
  * The layout is read from the type REGISTRY as it stands at settle time, while
- * an object INSTANCE carries the layout it was constructed with. A protocol
- * replacement re-settles every edge, so a requirement change is picked up; a
- * cross-batch redefinition of the object TYPE itself does NOT — nothing
- * re-runs conformance for the edges of a redefined type, so accessors
- * synthesized for a field the new layout dropped survive until something else
- * re-settles the edge. Recorded as open work under the mutable-objects entry
- * of `ROADMAP.md` and scheduled with the Phase 2 "Protocol replacement"
- * bullet of `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`.
+ * an object INSTANCE carries the layout it was constructed with. Both halves
+ * of a redefinition therefore re-settle: a protocol replacement runs the loop
+ * in {@link declareProtocolImpl}, and a cross-batch redefinition of the object
+ * TYPE runs {@link resettleTypeConformances} from `declareType`. Objects built
+ * earlier keep their pinned layout ("layouts never migrate"), so the READ path
+ * re-checks that layout instead of trusting the edge — see
+ * `pinnedLayoutRefusal`.
  *
  * An edge the B1 mutability gate would now refuse is never "covered", whatever
  * it carries. Such an edge can only exist because the protocol was REPLACED
@@ -1574,7 +1706,12 @@ function mergedMapMatches(
  */
 function refreshInheritedPending(
   ce: IComputeEngine,
-  record: ProtocolRecord
+  record: ProtocolRecord,
+  /** See {@link noteEdgePendingReason}'s parameter of the same name: passed
+   * through so a block-less edge re-settled by a protocol replacement or a
+   * type redefinition can explain itself, while the same edge settled by an
+   * ordinary registration stays unglossed. */
+  resettled = false
 ): void {
   // "No implementation of its own" is asked of the AUTHORED block, not of the
   // merged map: an edge whose map holds nothing but engine-synthesized
@@ -1592,6 +1729,10 @@ function refreshInheritedPending(
   let anyPending = false;
   for (const c of inherited) {
     c.pending = !settleFieldBacking(ce, record, c);
+    // Most block-less pending edges are the ordinary P3 notebook pattern and
+    // get no reason; one whose OBJECT target's layout stopped satisfying a
+    // property requirement does (see {@link noteEdgePendingReason}).
+    noteEdgePendingReason(ce, record, c, null, resettled);
     if (c.pending) anyPending = true;
   }
   if (!anyPending) return;
@@ -1616,10 +1757,516 @@ function refreshInheritedPending(
       );
       if (inherits) {
         c.pending = false;
+        delete c._pendingReason;
         changed = true;
       }
     }
   }
+}
+
+/**
+ * Record — or clear — WHY this edge is pending, for the end-of-batch
+ * `protocol-implementation-pending` warning to carry.
+ *
+ * A reason is only worth adding when the edge is pending for a reason the
+ * warning's own wording does not already give. "The conformance has no
+ * implementation yet" is the P3 notebook pattern and needs no gloss — and that
+ * is the case for every edge of a FRESH declaration, whatever its target looks
+ * like. Everything else has moved under the author: a block that stopped
+ * validating, a target the B1 mutability gate now refuses, or a layout that no
+ * longer carries the stored field a property requirement was being satisfied
+ * by.
+ *
+ * `failure` is the verdict {@link implementationProblem} returned for an
+ * AUTHORED block, or `null` when there was no block to validate.
+ *
+ * `resettled` says this edge is being RE-settled — a protocol replacement or a
+ * redefinition of the target type — rather than settled for the first time. It
+ * is passed down from those two entry points rather than inferred from the
+ * edge, because nothing about an edge distinguishes "the layout stopped
+ * satisfying this" from "no implementation has been written yet": both leave
+ * the same uncovered requirements on the same map. Inferring it from the
+ * target's SHAPE (does it have an object layout?) is what made
+ * `type T = object{n: integer} is P` on a freshly declared protocol report
+ * "the layout of `T` does not satisfy `g`" where the author had simply not
+ * written the block yet.
+ */
+function noteEdgePendingReason(
+  ce: IComputeEngine,
+  record: ProtocolRecord,
+  edge: ConformanceRecord,
+  failure: ImplementationProblem | null,
+  resettled = false,
+  /** See {@link failedInheritanceSource}. Defaults to "assume not", so a caller
+   * with no before-state never claims an inheritance was lost. */
+  wasFulfilled: (candidate: ConformanceRecord) => boolean = () => false
+): void {
+  if (!edge.pending) {
+    delete edge._pendingReason;
+    return;
+  }
+  if (failure !== null) {
+    // The CODE rides in front of the message, as it does on both routes that
+    // report an implementation problem directly (`declareConformance` boxes it
+    // as the error's code, `declareProtocolImplementationImpl` throws
+    // `code: message`). Here the code has nowhere else to go — the warning it
+    // rides on is `protocol-implementation-pending` — and it is what
+    // `epsil doc <code>` keys on.
+    edge._pendingReason = `${failure.code}: ${failure.message}`;
+    return;
+  }
+  // Below the `!resettled` guard, not above it: a pass that is not re-settling
+  // this edge has nothing to say about it, and the gate message would otherwise
+  // overwrite whatever a pass that WAS re-settling it recorded.
+  if (!resettled) return;
+  const gated = mutabilityGateProblem(ce, record, edge.target, edge.targetKey);
+  if (gated !== null) {
+    edge._pendingReason = gated;
+    return;
+  }
+  // The layout reason, and the two remaining things that have to hold for it to
+  // be true: the target actually has a stored-field layout that could satisfy a
+  // property, and at least one PROPERTY requirement is uncovered (a function
+  // member is never field-backed, so a layout is not why it is missing).
+  if (objectLayoutOfType(edge.target) === undefined) {
+    delete edge._pendingReason;
+    return;
+  }
+  const missing = uncoveredPropertyRequirements(record.members, edge.impl);
+  if (missing.length === 0) {
+    // Nothing about this target's own fields explains it. An edge with no block
+    // of its own may instead have LOST an implementation it was inheriting: the
+    // supertype edge it used to take its members from has itself gone pending.
+    // Saying "no implementation yet" there would be wrong twice over — there
+    // was one, and the thing to fix is not on this edge.
+    const source = failedInheritanceSource(record, edge, wasFulfilled);
+    if (source !== undefined) {
+      edge._pendingReason = `the implementation inherited from \`${source.targetKey}\` no longer applies${
+        source._pendingReason === undefined ? '' : `: ${source._pendingReason}`
+      }`;
+      return;
+    }
+    delete edge._pendingReason;
+    return;
+  }
+  edge._pendingReason = `the layout of \`${edge.targetKey}\` does not satisfy \`${missing.join('`, `')}\` — write the accessor, or give \`${edge.targetKey}\` a stored field of the property's own type`;
+}
+
+/**
+ * The edge `edge` would be inheriting its implementation from, if that edge
+ * were not itself pending — or `undefined` when inheritance is not the story.
+ *
+ * Only asked of an edge with NO block of its own that has just gone pending
+ * with nothing of its own uncovered, which is the shape "I lost what I was
+ * borrowing" takes. In practice this reports only on the TYPE-redefinition
+ * route: `refreshInheritedPending` forwards no before-state, so the protocol
+ * REPLACEMENT route always passes the default `wasFulfilled` (which answers
+ * "no") and a replacement's inheritors fall back to the ordinary wording. The supertype test is the one
+ * {@link refreshInheritedPending} uses to grant inheritance in the first place,
+ * so the two cannot disagree about which edge was the source.
+ */
+function failedInheritanceSource(
+  record: ProtocolRecord,
+  edge: ConformanceRecord,
+  /** Was this edge fulfilled before the pass that is now asking? Only an edge
+   * that WAS supplying an implementation can have stopped; an ordinary
+   * never-implemented P3 edge on a supertype satisfies the shape test below and
+   * would otherwise be reported as a lost inheritance that never existed. */
+  wasFulfilled: (candidate: ConformanceRecord) => boolean
+): ConformanceRecord | undefined {
+  if (edge._authored !== undefined) return undefined;
+  const own = edgeComparisonTarget(edge);
+  const candidates = record.conformances.filter(
+    (other) =>
+      other !== edge &&
+      other.pending &&
+      other.where === undefined &&
+      isSubtype(own, other.target) &&
+      wasFulfilled(other)
+  );
+  if (candidates.length === 0) return undefined;
+  // The most specific one, matching how selection would have chosen among them.
+  return candidates.reduce((best, c) =>
+    isSubtype(c.target, best.target) ? c : best
+  );
+}
+
+/**
+ * Re-run conformance for every edge a TYPE redefinition may have moved the
+ * ground under — the type-side mirror of what {@link declareProtocolImpl}
+ * does for a replaced PROTOCOL.
+ *
+ * Field-backed satisfaction reads the target's stored-field layout from the
+ * type REGISTRY at settle time (see {@link settleFieldBacking}), so a
+ * cross-batch `type P = object{…}` re-run with different fields leaves every
+ * verdict taken against the old layout standing: an accessor synthesized for a
+ * field the new layout dropped keeps answering, a field the new layout ADDS
+ * gets none, and a retyped field keeps an accessor typed by the old
+ * declaration. Re-settling here is what makes
+ * `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B's "replacement re-runs conformance
+ * checking against that fixed layout" true of the type half as well as the
+ * protocol half. Objects CONSTRUCTED before the redefinition are unaffected —
+ * they pin their layout (`BoxedObject._type`), and the read path re-checks the
+ * pinned layout rather than trusting the edge (see
+ * {@link evaluateProtocolProperty}).
+ *
+ * EVERY edge of every protocol is re-settled, not only those whose target
+ * names the type that was redefined — which is why this takes no type name.
+ * A redefinition can change a verdict without appearing in the target at all:
+ * a requirement declared `readonly a: Alias` is compared against a stored
+ * field through the LIVE resolution of `Alias`, so redefining `Alias` moves
+ * an edge whose target never mentions it. Both halves of the re-settlement
+ * are idempotent and identity-preserving (`settleFieldBacking` keeps the
+ * existing implementation map when nothing about it changed;
+ * `implementationProblem` is a pure verdict), so a sweep that finds nothing
+ * costs a walk and changes no object identity. Type redefinition is a
+ * notebook-scale event, not a hot path: measured on 2026-08-16, a `type`
+ * statement re-declaring an unrelated type in an engine holding 8 protocols
+ * with one authored conformance each costs about 1.2 ms more per batch
+ * (~75 µs per authored edge, over the two `declareType` calls a plain `type`
+ * statement makes — one in the static pre-pass, one in evaluation). A SUM type
+ * makes N+1 `declareType` calls per pass, one per variant plus the union, so
+ * `type S = A(…) | B(…)` re-declared in a later cell pays that per-edge cost
+ * six times rather than twice.
+ *
+ * A `config` state event and a conformance-version bump are emitted only when
+ * something actually moved: the version keys memoized dispatcher effects, and
+ * bumping it on every re-run `type` statement would cold those caches for
+ * nothing.
+ */
+export function resettleTypeConformances(ce: IComputeEngine): void {
+  // INVARIANTS the sweep guarantees at exit — the whole design of the function
+  // is the order of its five steps, chosen so that each invariant is
+  // established by construction rather than repaired afterwards.
+  //
+  // (I1) IDEMPOTENCE. Running the sweep twice with nothing changed in between
+  //      leaves the registry as the first run left it: every step re-derives
+  //      from the registry and the type layouts (`implementationProblem` is a
+  //      pure verdict, `settleFieldBacking` keeps an unchanged map's identity,
+  //      the widening refusal is recomputed from scratch, and inheritance is a
+  //      deterministic fixpoint), so a second run reaches the same state and
+  //      moves nothing.
+  // (I2) ANNOUNCEMENT ECONOMY. The `config` state event and the conformance-
+  //      version bump at the end fire iff some edge's implementation-map
+  //      IDENTITY or `pending` flag differs from before the sweep. A sweep that
+  //      re-derives its way back to where it began — including one whose every
+  //      re-activation was refused — announces nothing. (The widening walk
+  //      bumps the version as it explores; see step 2. What this guard withholds
+  //      is the event and the announcement, which is what keys the memos.)
+  // (I3) REFUSAL SOUNDNESS. No declared effect contract that stood before the
+  //      sweep is falsified at exit by an edge this sweep re-activated: every
+  //      authored edge that went pending→fulfilled is kept fulfilled only if the
+  //      set of contracts it falsifies, given the other kept edges, is empty
+  //      (relative to the baseline with every re-activation undone). This rests
+  //      on step 1 bumping the conformance version when it moved anything: the
+  //      contract re-derivation reads memoized dispatcher effects, so without
+  //      that bump step 2 measures the world as step 1 found it and refuses
+  //      nothing.
+  // (I4) INHERITANCE CONSISTENCY. A block-less edge is non-pending iff its own
+  //      field backing covers the protocol or a non-pending unconditional
+  //      supertype edge exists — computed ONCE, after every authored verdict
+  //      and every refusal is final, so no inheritor can be granted from a
+  //      source that is later put back.
+  // (I5) REASONS. Every pending edge whose settlement this sweep moved carries a
+  //      `_pendingReason` describing THIS sweep's cause; an edge the sweep did
+  //      not move keeps whatever it had; a `conformance-widens-declared-contract`
+  //      reason exists only on an edge the CURRENT sweep refused.
+  // (I6) INSTANCE PINNING is not the sweep's to guarantee — it is the read/write
+  //      paths' (`pinnedLayoutRefusal`) — but the sweep never touches an
+  //      instance, so nothing here can break it.
+  //
+  // Undoes a PARTIAL sweep if anything below throws.
+  const restore = ce._protocolRegistryRollbackPoint();
+  /** One edge's settlement as it stood before the sweep. */
+  type Snapshot = {
+    record: ProtocolRecord;
+    edge: ConformanceRecord;
+    impl: Record<string, Expression | JSImplementation> | undefined;
+    pending: boolean;
+    reason: string | undefined;
+    /** The verdict on this edge's AUTHORED block, when it has one. */
+    failure: ImplementationProblem | null;
+  };
+  const allSnapshots: Snapshot[] = [];
+  /** Did this edge's settlement end up anywhere other than where it started?
+   * Asked of the FINAL state, after any refusal has been applied, so a sweep
+   * that re-derives its way back to where it began reports nothing (I2). */
+  const netMoved = (s: Snapshot): boolean =>
+    s.edge.impl !== s.impl || s.edge.pending !== s.pending;
+  try {
+    // STEP 1 — the AUTHORED edges of every protocol, exactly as the
+    // protocol-replacement loop settles them: the block is re-validated against
+    // the target's new layout (a field the redefinition added beside an
+    // authored accessor is now `object-property-conflict`), and its synthesized
+    // accessors are re-derived whether or not it validated — otherwise
+    // accessors for a field the new layout dropped would keep answering.
+    // Block-less edges are NOT touched here; they are computed once, in step 3,
+    // after the refusals of step 2 are final (I4).
+    for (const record of Object.values(ce._protocolRegistry)) {
+      for (const edge of record.conformances) {
+        const snapshot: Snapshot = {
+          record,
+          edge,
+          impl: edge.impl,
+          pending: edge.pending,
+          reason: edge._pendingReason,
+          failure: null,
+        };
+        allSnapshots.push(snapshot);
+        const authored = edge._authored;
+        if (authored === undefined) continue;
+        snapshot.failure = implementationProblem(
+          ce,
+          record,
+          edge.target,
+          edge.targetKey,
+          authored,
+          edge.where
+        );
+        const covered = settleFieldBacking(ce, record, edge);
+        edge.pending = snapshot.failure !== null || !covered;
+      }
+    }
+    // The verdicts step 1 has just installed have to be VISIBLE to step 2. Its
+    // first walk re-derives declared contracts, and that derivation reads a
+    // dispatcher's effect union through memos stamped on the conformance and
+    // callable versions — so with the counter unmoved it answers with the union
+    // as it stood BEFORE this step, and a re-activation that widens is waved
+    // through. I3 depends on this bump, not on a caller happening to churn a
+    // version first: reproduced by calling the sweep directly after warming the
+    // memo, where the refusal was skipped entirely. Consistent with I2, which
+    // withholds the EVENT and the announcement, never the counter — and
+    // conditional, so a sweep that moved no authored edge still costs nothing.
+    if (allSnapshots.some((s) => s.edge.pending !== s.pending))
+      ce._noteConformanceRegistryChange();
+
+    // STEP 2 — the widening refusal (I3). RE-ACTIVATING an authored edge can
+    // widen a dispatcher's derived effect union — the union skips pending
+    // edges, so a member whose implementation draws `random` contributes
+    // nothing while its edge is pending and everything once it is fulfilled
+    // again — and a function already accepted as `pure` because it called
+    // through that dispatcher would then be declaring something false. Only
+    // AUTHORED edges can widen anything: a block-less edge carries no
+    // implementation of its own (its field-backed accessors are host callbacks
+    // with no effects), which is why they need not exist yet at this point.
+    //
+    // RULED 2026-08-16: unlike the three conformance-REGISTRATION routes, which
+    // reject the offending statement outright, a `type` redefinition KEEPS its
+    // new type and refuses only the re-activation. The declaration is complete
+    // by the time this runs, so unwinding it would have to reach back through
+    // the constructor `mintTypeConstructor` bound, whose restore is local to its
+    // own failure path; and a type declaration should not fail because of
+    // somebody else's `pure` annotation somewhere across the program.
+    //
+    // Nothing is remembered between sweeps. Every sweep re-derives the whole
+    // question, so an edge stays refused exactly as long as an offending
+    // contract exists, and un-refusing it needs no bookkeeping. The price is
+    // one widening walk per sweep that re-activates something — bounded by the
+    // number of re-activations, and zero for the overwhelming majority of
+    // sweeps, which re-activate nothing.
+    const reactivated = allSnapshots.filter(
+      (s) => s.edge._authored !== undefined && s.pending && !s.edge.pending
+    );
+    const explained =
+      reactivated.length > 0
+        ? refuseWideningReactivations(ce, reactivated, (s) => {
+            s.edge.pending = s.pending;
+            if (s.impl === undefined) delete s.edge.impl;
+            else s.edge.impl = s.impl;
+          })
+        : new Set<ConformanceRecord>();
+
+    // STEP 3 — inheritance, ONCE, over the final authored verdicts (I4). A
+    // block-less edge is settled against its own field backing and then
+    // granted or denied inheritance from the non-pending supertype edges as
+    // they now stand; nothing decided after this point can move an authored
+    // edge, so no inheritor is ever left fulfilled by a source that was put
+    // back.
+    for (const record of Object.values(ce._protocolRegistry))
+      refreshInheritedPending(ce, record);
+
+    // An edge counts as having SUPPLIED an implementation if it was fulfilled
+    // before the sweep, or if this sweep offered it and then refused it: an
+    // inheritor that lost what it was borrowing is in the same position either
+    // way, and "no implementation yet" would be the wrong story for both.
+    const priorPending = new Map(allSnapshots.map((s) => [s.edge, s.pending]));
+    const wasFulfilled = (c: ConformanceRecord): boolean =>
+      priorPending.get(c) === false || explained.has(c);
+
+    // STEP 4 — reasons LAST, over the final state (I5): an edge the refusal
+    // put back is pending for the widening, and one the sweep moved is pending
+    // for whatever its own settlement says. A reason is diagnostic text, so
+    // recomputing it is never on its own a reason to bump the version.
+    for (const s of allSnapshots)
+      // …except the edges the refusal above has already explained: its message
+      // names the contract that would have been falsified, which nothing the
+      // edge itself says can replace.
+      // A `conformance-widens-declared-contract` reason is only true while this
+      // sweep is issuing it: nothing is remembered between sweeps, so one left
+      // over from an earlier refusal describes a fulfilment nobody is offering
+      // now — the edge may since have gone pending on its own merits. Recomputed
+      // whenever this sweep did not re-issue it.
+      if (
+        !explained.has(s.edge) &&
+        (netMoved(s) ||
+          s.edge._pendingReason !== s.reason ||
+          (s.edge.pending &&
+            s.edge._pendingReason?.startsWith(
+              'conformance-widens-declared-contract:'
+            ) === true))
+      )
+        noteEdgePendingReason(
+          ce,
+          s.record,
+          s.edge,
+          s.failure,
+          true,
+          wasFulfilled
+        );
+  } catch (e) {
+    // Nothing in the re-derivation, the widening analysis or the reason pass is
+    // meant to throw — every helper they call returns a verdict — but a
+    // half-swept registry would be worse than an unswept one, so the partial
+    // sweep is undone before the failure travels.
+    // The code is spelled into the message because the only channel out of here
+    // is `declareType`'s throw, which `declareTypeStatement` boxes as
+    // `invalid-type-declaration`: the TYPE was declared successfully by this
+    // point, and the label would otherwise say it was not. Same compromise the
+    // protocol path makes for `conformance-widens-declared-contract`.
+    restore();
+    throw Error(
+      `conformance-resettle-failed: the type was declared, but re-running conformance for it failed: ${messageOf(e)}`
+    );
+  }
+
+  // STEP 5 — the FINAL state against the one this sweep started from (I2). A
+  // sweep whose re-activations were all refused lands exactly where it began,
+  // and must then announce nothing: the version keys the memos, and colding
+  // them for a world that did not move is the invalidation anti-pattern this
+  // guard exists to avoid. (The widening analysis above bumps the version as
+  // it explores — it has to, or the effect re-derivation it reads would be
+  // served from a memo stamped against the world before the revert — so the
+  // counter can advance even here; what this withholds is the `config` event
+  // and the announcement that something changed.)
+  if (!allSnapshots.some(netMoved)) return;
+  ce._noteStateEvent({ kind: 'config' });
+  ce._noteConformanceRegistryChange();
+}
+
+/**
+ * Put back any re-activation in `reactivated` that would make a dispatched call
+ * more effectful than a declared contract allows, calling `revert` on each one
+ * refused and recording the reason on its edge; returns the refused edges.
+ *
+ * ONE procedure, a greedy hitting set, and its correctness argument. Derived
+ * dispatcher effects are MONOTONE in the set of fulfilled edges: fulfilling
+ * one more edge can only add implementations to a union, so the set of
+ * declared contracts the registry falsifies — and how far each is exceeded —
+ * can only grow. Start from the state with EVERY re-activation undone and
+ * measure the BASELINE there: the violations that stand with nothing this
+ * sweep re-activated, which are nobody's fault here (a contract that was
+ * already falsified before this sweep is laid at no edge's door). Then hand
+ * the edges back one at a time, in registry order, KEEPING each one iff the
+ * baseline-relative violations stay empty with it applied on top of the edges
+ * kept so far, and refusing it otherwise. Two properties follow directly:
+ *
+ * - SOUND — after every step the introduced set is empty, so it is empty at
+ *   exit (invariant I3 of {@link resettleTypeConformances}).
+ * - MINIMAL AGAINST THE KEPT SET — a refused edge introduced a violation when
+ *   applied over a SUBSET of the final kept set, so by monotonicity it would
+ *   introduce one over the whole of it: no refused edge can be added back. An
+ *   innocent edge swept up in the same declaration is kept, because it
+ *   introduces nothing.
+ *
+ * There is no JOINT case to handle, and none can arise: a contract is falsified
+ * when the union over the non-pending conformers escapes a FIXED declared
+ * ceiling, and a union cannot escape a ceiling that both of its parts respect.
+ * So two edges that each introduce nothing cannot introduce something together,
+ * and the verdict does not depend on the order they are handed back in — which
+ * also makes the kept set canonical, not merely deterministic. Several edges
+ * may be refused by one declaration; each is an independent culprit, and each
+ * one's reason names exactly the contracts ITS return would falsify given the
+ * kept set.
+ *
+ * Cost: one widening walk for the baseline plus one per re-activated edge.
+ * Every apply/revert bumps the conformance version, because the walk reads
+ * dispatcher effects through memos stamped on it and would otherwise be served
+ * a verdict from the previous state.
+ */
+function refuseWideningReactivations(
+  ce: IComputeEngine,
+  reactivated: readonly {
+    edge: ConformanceRecord;
+    impl: Record<string, Expression | JSImplementation> | undefined;
+    pending: boolean;
+  }[],
+  revert: (s: (typeof reactivated)[number]) => void
+): Set<ConformanceRecord> {
+  const explained = new Set<ConformanceRecord>();
+  // The common case, checked first because it is one walk: with everything
+  // this sweep re-activated in place, no declared contract is falsified at
+  // all — so nothing below could be, and there is nothing to attribute.
+  if (conformanceWideningViolations(ce).length === 0) return explained;
+
+  const states = reactivated.map((s) => ({ s, fulfilled: s.edge.impl }));
+  const undo = (e: (typeof states)[number]): void => {
+    revert(e.s);
+    ce._noteConformanceRegistryChange();
+  };
+  const apply = (e: (typeof states)[number]): void => {
+    if (e.fulfilled === undefined) delete e.s.edge.impl;
+    else e.s.edge.impl = e.fulfilled;
+    e.s.edge.pending = false;
+    ce._noteConformanceRegistryChange();
+  };
+
+  // The BASELINE: what stands with every re-activation undone. Measured rather
+  // than assumed — de-activations only ever narrow an effect union, so nothing
+  // else this sweep did can be a cause.
+  for (const e of states) undo(e);
+  const baseline = new Map(
+    conformanceWideningViolations(ce).map((v) => [
+      v.name,
+      effectSetToString(v.exceeding),
+    ])
+  );
+  /** The violations standing now that the baseline does not account for — a
+   * contract that was fine before, or one whose exceeding set has grown. A
+   * violation is compared by identity AND extent, so a re-activation that
+   * pushes an already-falsified contract further counts as introducing. */
+  const introduced = (): WideningViolation[] =>
+    conformanceWideningViolations(ce).filter(
+      (v) => baseline.get(v.name) !== effectSetToString(v.exceeding)
+    );
+
+  const refused: {
+    e: (typeof states)[number];
+    culprit: WideningViolation[];
+  }[] = [];
+  for (const e of states) {
+    apply(e);
+    const gained = introduced();
+    if (gained.length === 0) continue;
+    undo(e);
+    refused.push({ e, culprit: gained });
+  }
+
+  // Each refused edge is refused on its OWN account — there is no joint cause
+  // to report. A contract is falsified when the union over the non-pending
+  // conformers escapes a FIXED declared ceiling, and a union cannot escape a
+  // ceiling that both of its parts respect, so two edges that each introduce
+  // nothing can never introduce something together. The plural case is simply
+  // several independent culprits in one declaration, and each is told what IT
+  // exceeded.
+  for (const { e, culprit } of refused) {
+    explained.add(e.s.edge);
+    e.s.edge._pendingReason = `conformance-widens-declared-contract: ${wideningRejectionMessage(
+      culprit,
+      'satisfying this conformance again',
+      'leave it unsatisfied'
+    )}`;
+  }
+  return explained;
 }
 
 /**
@@ -2739,6 +3386,11 @@ export function declareProtocolImplementationImpl(
     // leaves to a stored field still needs its synthesized accessors installed
     // before anything can dispatch to it (Appendix B).
     existing.pending = !settleFieldBacking(ce, record, existing);
+    // Whatever a previous re-settlement recorded about this edge is now out of
+    // date: the block just installed is the new answer. See the same two
+    // deletions on the statement route in `declareConformance`.
+    delete existing._pendingReason;
+    noteEdgePendingReason(ce, record, existing, null);
   } else {
     const edge: ConformanceRecord = {
       target,
@@ -2751,6 +3403,7 @@ export function declareProtocolImplementationImpl(
     if (params !== undefined) edge.where = params;
     record.conformances.push(edge);
     edge.pending = !settleFieldBacking(ce, record, edge);
+    noteEdgePendingReason(ce, record, edge, null);
   }
   // The implementation may fulfil the impl-less edges of the target's
   // SUBTYPES, which inherit it.
@@ -4051,9 +4704,293 @@ export function evaluateProtocolProperty(
   // `Nothing` — lets both that case and a name the instance has no slot for
   // stay SYMBOLIC, which is what every other undecided receiver does. The load
   // records the per-object cache dependency, exactly as a `Field` read does.
-  if (isFieldBacked(getter))
-    return isObject(base) ? base._field(getter._fieldBacked) : undefined;
+  if (isFieldBacked(getter)) {
+    if (!isObject(base)) return undefined;
+    const refusal = pinnedLayoutRefusal(
+      ce,
+      base,
+      getter._fieldBacked,
+      resolved,
+      true
+    );
+    if (refusal !== null) return refusal;
+    return base._field(getter._fieldBacked);
+  }
   return invokeImplementation(ce, getter, [base], options);
+}
+
+/**
+ * Would loading `field` off this object answer the property requirement the
+ * conformance edge promised? `null` when it would; the refusal to report
+ * otherwise.
+ *
+ * The edge was settled against the layout the type REGISTRY held at settle
+ * time, while an object carries the layout it was CONSTRUCTED with
+ * (`BoxedObject._type` — "layouts never migrate", `docs/TYPE_SYSTEM_ROADMAP.md`
+ * Appendix B). The two can disagree in both directions once a `type` statement
+ * is re-run in a later cell: an instance built before the redefinition has no
+ * slot for a field the new layout added, and one built after may hold a
+ * differently-TYPED value under a name whose accessor was synthesized for the
+ * old declaration. Trusting the edge in the second case is a soundness hole —
+ * the read is statically typed by the requirement and would deliver whatever
+ * the new field holds — so the pinned layout is re-checked here, by the same
+ * rule that decided field backing in the first place
+ * ({@link fieldSatisfiesRequirement}).
+ *
+ * Two stages, in this order. The pinned LAYOUT decides admissibility: does this
+ * instance declare a field of that name, and does its declared type satisfy the
+ * requirement? Then — on the READ path only, and only once the layout has
+ * passed — the value actually in the slot is checked, because a pin is SHALLOW
+ * and a field typed through a transparent alias follows that alias when it is
+ * re-declared (see {@link valueOutOfContract}). An EMPTY slot is neither: the
+ * read stays symbolic, which is what it has always done for a receiver that
+ * cannot produce a value.
+ */
+function pinnedLayoutRefusal(
+  ce: IComputeEngine,
+  base: Expression & ObjectInterface,
+  field: string,
+  resolved: Extract<PropertyResolution, { status: 'found' }>,
+  /** Ask the stored VALUE question too. A read has to deliver what the property
+   * promises, so what is in the slot is exactly its subject; a WRITE's contract
+   * question is about the right-hand side, which the setter has already checked
+   * against the property's declared type, and judging the value being replaced
+   * would refuse a perfectly good store (`p.(P.a) = 5` after the field's alias
+   * was re-declared to `integer`). Layout admissibility is asked on both. */
+  checkStoredValue = false
+): Expression | null {
+  const pinned = base._fieldType(field);
+  const receiver = base.type.type;
+  // A receiver whose pinned type names no fields at all (the bare `object`
+  // type, or a nominal whose definition has gone) is exempt: the absence of a
+  // field type means "this layout cannot be introspected", not "this layout
+  // lacks the field", and refusing it would advise the author to rebuild the
+  // value "from the current declaration of `object`" — a declaration that does
+  // not exist. Decided HERE so that all three write routes and the read path
+  // agree; `fieldSetter`'s own arm is then the backstop it claims to be.
+  if (objectLayoutOfType(receiver) === undefined) return null;
+  if (pinned !== undefined) {
+    // FAST PATH, which is the overwhelmingly common one: the object's pinned
+    // field type is the very same type object the type REGISTRY holds for that
+    // field today. Pinning copies an object body ONE level deep and shares the
+    // field types on purpose (`detachDefinitionBody`, `boxed-object.ts`), so
+    // identity here means "this instance predates no redeclaration of this
+    // field".
+    //
+    // What makes that sufficient is that the registry's current layout is also
+    // what the edge was last settled against: every protocol replacement and
+    // every type redefinition re-settles the edge, and the accessor survives
+    // only where the layout satisfied the requirement. The one exception is an
+    // edge whose re-activation was REFUSED for widening a declared effect
+    // contract (see {@link resettleTypeConformances}) — but such an edge is left
+    // PENDING, so it is not a dispatch candidate and no accessor of its is ever
+    // selected to reach this check.
+    //
+    // An OWN-key test on both sides, like `fieldBackedProperties`: an object
+    // layout's `elements` may be an ordinary prototyped record, so a field
+    // named `toString` must not read a value off `Object.prototype` and
+    // compare it (against `undefined`, which is also what `_fieldType`
+    // answers for a name the pinned layout does not carry — two absences that
+    // would then look like a match).
+    const settledLayout = objectLayoutOfType(resolved.edge.target);
+    if (
+      settledLayout !== undefined &&
+      Object.prototype.hasOwnProperty.call(settledLayout.elements, field) &&
+      settledLayout.elements[field] === pinned
+    )
+      // The pinned field type is a cheap PRE-FILTER, not the verdict: a value
+      // it admits is one the requirement admits (the edge exists only because
+      // `field ⊑ requirement`), so passing here needs no parse at all. Failing
+      // it does NOT mean the requirement is violated — under `readonly` the
+      // field may be strictly narrower than the property — so that case falls
+      // through to the requirement itself, and the message names the property's
+      // declared type rather than the field's.
+      return checkStoredValue
+        ? valueOutOfContract(ce, base, field, resolved, undefined, pinned)
+        : null;
+    // SLOW PATH: this instance predates a redeclaration of the field, so the
+    // requirement has to be re-derived at this receiver. Memoized on the
+    // conformance and callable versions — an instance that survives a
+    // redefinition stays on this path for the rest of its life, and a loop
+    // reading one such object would otherwise re-parse the requirement's type
+    // text on every iteration.
+    const declared = memoizedRequirementType(
+      ce,
+      resolved.record.name,
+      field,
+      resolved.declared,
+      receiver
+    );
+    // The requirement does not parse at this receiver: a diagnostic of its
+    // own, owned by the signature-mismatch path, and not a reason to refuse a
+    // read the edge says is satisfied.
+    if (declared === undefined) return null;
+    if (fieldSatisfiesRequirement(pinned, declared, resolved.kind))
+      return checkStoredValue
+        ? valueOutOfContract(ce, base, field, resolved, declared)
+        : null;
+  }
+  return ce.error([
+    'protocol-implementation-missing',
+    `no implementation of the \`${resolved.record.name}.${field}\` property applies to this value: it was constructed with a layout in which \`${field}\` ${
+      pinned === undefined
+        ? 'is not a stored field'
+        : `is declared \`${typeToString(pinned)}\``
+    }, which does not satisfy the requirement. Rebuild it from the current declaration of \`${typeToString(receiver)}\`.`,
+  ]);
+}
+
+/**
+ * The last line of the pinned-layout defence: does the value actually IN the
+ * slot deliver what the property promises?
+ *
+ * A pinned layout is shallow. `detachDefinitionBody` (`boxed-object.ts`) copies
+ * the object body one level deep and SHARES the field types, so a field typed
+ * through a transparent ALIAS still holds the very same alias reference the
+ * registry does — and re-declaring that alias in a later cell moves the pinned
+ * layout with it. `type alias A = string`, an object with `a: A` holding
+ * `"s"`, then `type alias A = integer`: the layout comparison above sees the
+ * identical `A` on both sides and passes, while the read is statically typed
+ * `integer` and would hand back a string. The same is true of a NOMINAL field
+ * type whose own layout is redeclared.
+ *
+ * Comparing the stored value's type against the requirement closes that whole
+ * class rather than the alias case alone: whatever route the layouts drifted
+ * by, a read may not deliver a value the property's declared type does not
+ * admit. `declared` is passed when the caller has already parsed it and
+ * `undefined` when it has not (the layout fast path), in which case it is
+ * resolved here.
+ *
+ * The subtype direction is the read direction for BOTH kinds of property: a
+ * `readwrite` requirement constrains the FIELD's declared type exactly, but the
+ * value living in that field need only be something the declared type admits.
+ */
+function valueOutOfContract(
+  ce: IComputeEngine,
+  base: Expression & ObjectInterface,
+  field: string,
+  resolved: Extract<PropertyResolution, { status: 'found' }>,
+  declared: Type | undefined,
+  /** A type known to be AT LEAST AS TIGHT as the requirement — the receiver's
+   * pinned field type, on the path where identity has established it is the one
+   * the edge was settled against. A value it admits is a value the requirement
+   * admits, so passing it short-circuits the parse; failing it decides nothing
+   * and the requirement is consulted. */
+  prefilter?: Type
+): Expression | null {
+  const value = base._field(field);
+  // No value to judge: the read stays symbolic, as it always has.
+  if (value === undefined || !value.isValid) return null;
+  // An UNDECIDED value type is not evidence of anything. A stored field may
+  // legitimately hold a symbolic value — Appendix B allows it, and an
+  // unevaluated application types `unknown` — so comparing it against the
+  // requirement would refuse `T(a: sqrt(2))` and blame a redefinition that
+  // never happened. Same "nothing to say" posture as a requirement that does
+  // not parse at this receiver, below.
+  if (!isDecidedReceiverType(value.type.type)) return null;
+  if (prefilter !== undefined && isSubtype(value.type.type, prefilter))
+    return null;
+  const receiver = base.type.type;
+  const requirement =
+    declared ??
+    memoizedRequirementType(
+      ce,
+      resolved.record.name,
+      field,
+      resolved.declared,
+      receiver
+    );
+  if (requirement === undefined) return null;
+  if (isSubtype(value.type.type, requirement)) return null;
+  return ce.error([
+    'protocol-implementation-missing',
+    `no implementation of the \`${resolved.record.name}.${field}\` property applies to this value: its stored \`${field}\` holds \`${typeToString(value.type.type)}\`, which the property's \`${typeToString(requirement)}\` does not admit. It was built before \`${typeToString(receiver)}\` — or a type its layout refers to — was re-declared; rebuild it from the current declaration.`,
+  ]);
+}
+
+/** The {@link memoizedRequirementType} cache, keyed on the RECEIVER's type
+ * OBJECT rather than on its spelling, with an inner map per (protocol, member)
+ * and the usual two version stamps. `undefined` values are cached too — "does
+ * not parse here" is as stable an answer as a type.
+ *
+ * Identity, not serialization, for two reasons. It keeps `typeToString` — which
+ * walks the whole layout — off a path every field-backed READ now runs, and it
+ * is exact: a spelled key had to carry both the receiver's name AND its layout
+ * to separate two instances pinned at different layouts (same name) from two
+ * distinct nominal types with identical bodies (same layout), and even then it
+ * was only as precise as the printer.
+ *
+ * The cache is therefore PER INSTANCE: `detachNominalType` mints a fresh type
+ * object at every construction, so two objects of one type share no entry and
+ * each pays one parse. Accepted, because the parse is what makes the verdict
+ * correct: the fast path uses the pinned field type only as a pre-filter, and a
+ * value that fails it still has to be judged against the REQUIREMENT (under
+ * `readonly` the field may be strictly narrower than the property, so the field
+ * would over-refuse). Entries die with the instance. */
+const requirementTypeMemo = new WeakMap<
+  object,
+  Map<
+    string,
+    { conformance: number; callable: number; value: Type | undefined }
+  >
+>();
+
+/**
+ * The property requirement `record.member`, parsed with `Self` bound to
+ * `receiver` — or `undefined` when it does not parse there.
+ *
+ * Asked by {@link pinnedLayoutRefusal} on both of its paths: the slow one needs
+ * it to judge a drifted layout, and the fast one needs it to judge the stored
+ * VALUE. A receiver whose layout has drifted never returns to the fast path
+ * (its layout is fixed for life), so without a memo the requirement's source
+ * text would be re-parsed on every read of every such instance.
+ */
+function memoizedRequirementType(
+  ce: IComputeEngine,
+  protocol: string,
+  member: string,
+  declared: string,
+  receiver: Type
+): Type | undefined {
+  const parse = (): Type | undefined => {
+    try {
+      return parseType(
+        declared,
+        selfSubstitutingResolver(
+          ce._typeResolver,
+          receiver,
+          typeToString(receiver)
+        )
+      );
+    } catch {
+      return undefined;
+    }
+  };
+  // A builtin receiver is a bare string and cannot key a WeakMap. It also
+  // cannot be an object type, so it never reaches here through the field-backed
+  // paths; parsing uncached is the safe answer rather than a second cache.
+  if (typeof receiver !== 'object' || receiver === null) return parse();
+
+  let perReceiver = requirementTypeMemo.get(receiver);
+  if (perReceiver === undefined) {
+    perReceiver = new Map();
+    requirementTypeMemo.set(receiver, perReceiver);
+  }
+  const key = `${protocol}\u0000${member}`;
+  const cached = perReceiver.get(key);
+  if (
+    cached !== undefined &&
+    cached.conformance === ce._conformanceVersion &&
+    cached.callable === ce._callableVersion
+  )
+    return cached.value;
+  const value = parse();
+  perReceiver.set(key, {
+    conformance: ce._conformanceVersion,
+    callable: ce._callableVersion,
+    value,
+  });
+  return value;
 }
 
 //
@@ -4230,6 +5167,27 @@ export function evaluateProtocolPropertyOperator(
       ? null
       : propertyValueError(ce, receiver, declared.type, parts.value);
   if (refused !== null) return refused;
+  // A FIELD-BACKED setter writes a slot, so the receiver's own PINNED layout
+  // has to admit the requirement. Asked here as well as in
+  // {@link protocolPropertyStore} because the two spellings of a write reach
+  // the setter by different routes — `p.(P.a) = v` through this operator,
+  // `p.a = v` through `Assign` — and a receiver refused a READ must not be
+  // granted a write by either of them.
+  if (
+    isFieldBacked(winner.impl) &&
+    declared !== undefined &&
+    declared.kind !== 'function' &&
+    isObject(base)
+  ) {
+    const refusal = pinnedLayoutRefusal(ce, base, winner.impl._fieldBacked, {
+      status: 'found',
+      record: winner.record,
+      edge: winner.edge,
+      kind: declared.kind,
+      declared: declared.type,
+    });
+    if (refusal !== null) return refusal;
+  }
 
   const result = invokeImplementation(
     ce,
@@ -4426,9 +5384,22 @@ export function protocolPropertyWriteRefusal(
     return immutableValueAssignmentError(ce, name, t);
   if (!isObject(receiver)) return undefined;
   const resolved = resolveProtocolProperty(ce, t, name, only);
-  if (resolved.status !== 'found' || resolved.kind !== 'readonly')
-    return undefined;
-  return readonlyPropertyError(ce, resolved.record.name, name);
+  if (resolved.status !== 'found') return undefined;
+  if (resolved.kind === 'readonly')
+    return readonlyPropertyError(ce, resolved.record.name, name);
+  // The PINNED-LAYOUT refusal belongs here too, and for the same reason the
+  // `readonly` one does: it depends only on the receiver and the requirement,
+  // never on the value, so asking it before the right-hand side is evaluated is
+  // what keeps `p.(P.a) = bump()` from firing `bump()` on an instance the store
+  // cannot serve. `protocolPropertyStore` and the four-operand operator ask it
+  // again once they have the value — they are reachable directly from the box
+  // route, which never passes through this pre-check.
+  const setter = resolved.edge.impl?.[`${SET_PREFIX}${name}`];
+  if (setter === undefined || !isFieldBacked(setter)) return undefined;
+  return (
+    pinnedLayoutRefusal(ce, receiver, setter._fieldBacked, resolved) ??
+    undefined
+  );
 }
 
 export function protocolPropertyStore(
@@ -4464,6 +5435,19 @@ export function protocolPropertyStore(
   const setter = resolved.edge.impl?.[`${SET_PREFIX}${name}`];
   if (setter === undefined)
     return missingPropertyError(ce, receiver, name, resolved.record);
+  // A FIELD-BACKED setter writes a slot, so the receiver's own PINNED layout
+  // has to admit the requirement — the same question the read path asks, asked
+  // the same way, so that a stale instance cannot be refused a read and then
+  // granted the write that would make the two disagree further.
+  if (isFieldBacked(setter)) {
+    const refusal = pinnedLayoutRefusal(
+      ce,
+      receiver,
+      setter._fieldBacked,
+      resolved
+    );
+    if (refusal !== null) return refusal;
+  }
   const result = invokeImplementation(ce, setter, [receiver, rhs], options);
   // A handler that FAILED still has something to say; one that DECLINED
   // (`undefined` — an expression implementation that could not be applied)

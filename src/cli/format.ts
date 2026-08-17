@@ -474,7 +474,9 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
     case 'protocol-member-signature-expected':
       return `Expected a member of the "${args[0]}" protocol: "function name(self: Self, …) -> type", "readonly name: type" or "readwrite name: type"`;
     case 'protocol-implementation-pending':
-      return `The conformance "type ${args[0]} is ${args[1]}" has no implementation yet; provide one with "type ${args[0]} is ${args[1]} { … }"`;
+      return args[2]
+        ? `The conformance "type ${args[0]} is ${args[1]}" is not satisfied: ${args[2]}`
+        : `The conformance "type ${args[0]} is ${args[1]}" has no implementation yet; provide one with "type ${args[0]} is ${args[1]} { … }"`;
     case 'protocol-in-type-position':
       return `"${args[0]}" is a protocol, not a type. Use a constrained variable: "where T is ${args[0]}"`;
     case 'type-variables-unsupported':

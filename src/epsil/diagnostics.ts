@@ -39,7 +39,7 @@ export type DiagnosticCode =
   | 'protocol-name-expected' // a `protocol` statement whose head is not followed by a name
   | 'protocol-member-keyword-missing' // %0 = member name — a bare `value: string` protocol member; every member starts with `function`, `readonly` or `readwrite`
   | 'protocol-member-signature-expected' // %0 = protocol name — a protocol member that is neither `function IDENT(…) -> type` nor `readonly`/`readwrite` IDENT: type`
-  | 'protocol-implementation-pending' // (warning) %0 = conformance target, %1 = protocol name — a conformance still without an implementation at the end of a `ce.parse()` batch
+  | 'protocol-implementation-pending' // (warning) %0 = conformance target, %1 = protocol name, %2 = why it is pending ('' for the ordinary declare-then-implement case; a description of what moved when a protocol replacement or a target-type redefinition left the edge unsatisfied) — a conformance still without an implementation at the end of a `ce.parse()` batch
   | 'protocol-in-type-position' // %0 = protocol name — a PROTOCOL used where a type is expected (`function f(x: Comparable)`); protocols are not types (ruling P8), so the annotation must be a constrained variable instead
   | 'host-pragma-disabled' // %0 = pragma name (host-state pragmas gated off)
   | 'error-directive' // %0 = message from a `#error` pragma

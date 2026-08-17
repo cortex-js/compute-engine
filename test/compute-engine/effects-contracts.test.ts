@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { effectsOf } from '../../src/compute-engine/boxed-expression/effects-of';
 import { isEffectContractError } from '../../src/compute-engine/boxed-expression/effects-inference';
 import {
@@ -1556,6 +1557,78 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
     expect(def.pure).toBe(true);
     expect(def.effectsDeclared).toBe(true);
     expect(def.signature.toString()).toBe('() pure -> number');
+  });
+
+  it('an update that RESTATES the surface without an annotation retracts the contract', () => {
+    // Annotation provenance is replaced by an update that restates the effect
+    // surface, never merged into it — the same rule the signature itself
+    // follows. Load-bearing beyond tidiness: a declared contract is what
+    // `conformanceWideningViolations` checks against, so an author who cannot
+    // retract one by rewriting the function without the annotation cannot
+    // retire a contract that is holding a conformance back.
+    const ce = new ComputeEngine();
+    ce.declare('retract1', {
+      signature: '(integer) pure -> integer',
+      evaluate: () => ce.number(1),
+    });
+    const def = ce.lookupDefinition('retract1')!['operator'];
+    expect(def.effectsDeclared).toBe(true);
+
+    def.update({ signature: '(integer) -> integer' });
+    expect(def.effectsDeclared).toBe(false);
+  });
+
+  it('an update that restates NOTHING leaves the contract alone', () => {
+    // The other side: an update touching some unrelated attribute is not a
+    // restatement and must not silently drop the author's annotation.
+    const ce = new ComputeEngine();
+    ce.declare('retract2', {
+      signature: '(integer) pure -> integer',
+      evaluate: () => ce.number(1),
+    });
+    const def = ce.lookupDefinition('retract2')!['operator'];
+    def.update({ complexity: 1234 });
+    expect(def.effectsDeclared).toBe(true);
+  });
+
+  it('an Epsil REDEFINITION restates its own effect annotation', () => {
+    // Cross-unit redefinition has REPLACEMENT semantics, and the effect
+    // annotation is part of what is replaced: the incoming statement is the
+    // whole truth about its own effects. Load-bearing — a contract that cannot
+    // be retracted by rewriting the function cannot be retired at all, and it
+    // goes on refusing whatever it was refusing (see the mutable-objects entry
+    // of `ROADMAP.md`).
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'function h(x: integer) pure -> integer { x }');
+    expect(String(executeEpsil(ce, 'Type(h)').value)).toBe(
+      '"(x: integer) pure -> integer"'
+    );
+
+    executeEpsil(ce, 'function h(x: integer) -> integer { x }');
+    expect(String(executeEpsil(ce, 'Type(h)').value)).toBe(
+      '"(x: integer) -> integer"'
+    );
+  });
+
+  it('a REJECTED redefinition leaves the installed contract untouched', () => {
+    // The provenance is rebuilt from the incoming statement, but only once the
+    // install SUCCEEDS. A redefinition that `ce.assign` refuses — every bare
+    // one below, and the widening case that is the common rejection — must
+    // leave the surviving definition exactly as it was, or the contract check
+    // reads a `pure` definition that claims to declare nothing.
+    for (const rejected of [
+      'function h(x: integer) -> string { x }',
+      'function h(x: integer) -> integer { Random() }',
+      'function h(x: integer) random -> integer { x }',
+    ]) {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, 'function h(x: integer) pure -> integer { x }');
+      expect(String(executeEpsil(ce, rejected).value)).toMatch(/^Error\(/);
+
+      const def = ce.lookupDefinition('h')!['operator'];
+      expect(def.effectsDeclared).toBe(true);
+      expect(def.signature.toString()).toBe('(x: integer) pure -> integer');
+    }
   });
 
   it('the trusted contract is NOT revalidated when the head later resolves', () => {

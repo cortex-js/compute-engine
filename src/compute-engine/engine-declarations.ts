@@ -8,6 +8,7 @@ import type {
   TypeString,
 } from '../common/type/types.js';
 import { checkSameUnitRedefinition } from './declaration-origin.js';
+import { resettleTypeConformances } from './engine-protocols.js';
 import {
   functionResult,
   hasFunctionSignature,
@@ -1206,6 +1207,20 @@ export function declareType(
     // global-semantics event on all three axes ('operator/type redefinition'
     // in `_worldVersion`'s contract). A FRESH declaration deliberately bumps
     // none of these beyond what `ce.declare()` did for the constructor half.
+
+    // …and the CONFORMANCE half of the same change. A protocol's property
+    // requirement can be satisfied by a stored field of a conforming object
+    // type, and that verdict was taken against the layout this declaration has
+    // just replaced: an accessor synthesized for a field the new layout dropped
+    // would keep answering, and a field it adds would get none. Re-running
+    // conformance here is the type-side mirror of what a protocol REPLACEMENT
+    // already does for its own edges (`declareProtocolImpl`), and is what makes
+    // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B's "replacement re-runs
+    // conformance checking against that fixed layout" true of both halves.
+    // Idempotent: this runs on the static pre-pass AND the evaluation pass of
+    // the same `type` statement, and emits its own events only when a verdict
+    // actually moved.
+    resettleTypeConformances(ce);
   }
 }
 
@@ -1394,6 +1409,12 @@ export function declareSumType(
   // claims. `declareType` rolls its OWN failed declaration back — this covers
   // the ones that already succeeded when a later arm fails.
   const rollbackTypes = ce._typeRegistryRollbackPoint();
+  // The PROTOCOL registry needs the same snapshot: each `declareType` below
+  // re-settles the conformance edges of a REPLACED name against its new layout
+  // (see the call to `resettleTypeConformances`), so a later arm that throws
+  // must undo the pending flags and synthesized accessors the earlier arms left
+  // behind, not only their type records.
+  const rollbackProtocols = ce._protocolRegistryRollbackPoint();
   const surrogate =
     ce._staticTypeCheckDepth > 0 && ce.context.name === 'epsil:static-check';
   const mintScope = surrogate
@@ -1404,6 +1425,7 @@ export function declareSumType(
   );
   const rollback = (): void => {
     rollbackTypes();
+    rollbackProtocols();
     for (const [n, binding] of priorBindings) {
       if (binding === undefined) mintScope.bindings.delete(n);
       else mintScope.bindings.set(n, binding);

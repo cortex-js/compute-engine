@@ -1588,6 +1588,39 @@ no longer matches a field or accessor leaves the conformance incomplete
 (`protocol-implementation-missing`, as for any other replacement), and
 objects constructed earlier keep their fields. Layouts never migrate.
 
+Redefining the object *type* re-runs conformance the same way: the type's
+edges are re-settled against its new layout, so an accessor synthesized for
+a field the redefinition dropped stops answering and a field it adds is
+picked up — while every object already constructed keeps the layout it was
+built with, and is refused (`protocol-implementation-missing`) if asked for
+a property its own layout cannot satisfy — including one whose stored value
+no longer fits, which a *shallow* pin allows: a field typed through a
+transparent alias follows that alias when it is re-declared.
+
+Re-settling a conformance can also move an edge from pending back to
+satisfied, and that can make a dispatched call more effectful than an
+annotation elsewhere in the program already promised. Where a conformance
+*declaration* is refused outright for this, a **type** re-declaration is
+not: the type stands, and the offending edges stay pending, recording why.
+The edges are judged one at a time against the violations that stand with
+all of them undone, so an unrelated conformance the same re-declaration
+satisfies is unaffected, a violation that pre-dates the re-declaration is
+laid at nobody's door, and a re-declaration that merely un-satisfies an edge
+is never refused. When the check does find something, every re-activation of
+that declaration is undone, what remains is taken as the baseline, and the
+edges are handed back one at a time: each that introduces nothing is kept,
+each that does is left pending and told what it exceeded. One declaration may
+therefore leave several conformances pending, each on its own account.
+
+Nothing is remembered between re-declarations: the question is re-derived
+every time, so an edge stays refused exactly as long as an offending
+annotation exists. To satisfy it, remove that annotation, install an
+implementation that does not widen, or replace the protocol — then re-run
+the type declaration, which re-offers the edge. (Widening the annotation in
+place rather than removing it is refused for an unrelated reason — a
+redefinition is checked against the binding's previous signature — recorded
+under the mutable-objects entry of `ROADMAP.md`.)
+
 Using it:
 
 ```epsil

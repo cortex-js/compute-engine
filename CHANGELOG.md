@@ -399,6 +399,46 @@
   for scalar-ness, so a `(matrix) & (collection)` overload set no longer admits
   a list at the `matrix` slot unchecked.
 
+- **A real-only special function over a promoted radical no longer compiles to
+  `{re: NaN}`, and `Limit` at ∞ resolves sums with a scaled `Erf` term.**
+  Under the default `auto` mode `2·Erf(√y)` compiled its `Erf` through the
+  real-only helper (the D6 rule: a real value, or `NaN` for a non-real
+  argument) while the enclosing `Multiply` was told the value was complex — the
+  analysis fell through to the operand recursion because `Erf` types `number`
+  — and read `.re` off a plain number: `{re: NaN, im: NaN}` at every point.
+  Same for `Erfc`, `Gamma`, `Zeta`, `Digamma`, `Factorial`, `LambertW`,
+  `Arsinh`, `ErfInv`. The compiler now knows a head lowered through a real-only
+  string helper is real-shaped. `Limit` probes its growth oracles through the
+  compiler, so `lim_{y→∞} 3√2·√π·Erf(√2/2·√y) − 6e^{−y/2}√y − 2e^{−y/2}y^{3/2}`
+  (the χ²-tail antiderivative) resolves to `3√2·√π` instead of staying inert,
+  and `∫ₓ^∞ y^{3/2}e^{−y/2}dy` closes to its exact form.
+
+- **`Which`/`If` no longer throw on a comparison whose broadcast outcome is
+  statically undecided.** Since 0.114.0 a comparison such as `h(x) = 10` with
+  `h` undeclared types `broadcastable<boolean>`; `Which(h(x) = 10, 1, True,
+  0).evaluate()` then raised "Condition must evaluate to True or False" where
+  it used to be held, and `x{h(x) ≤ [1,2,3]}` stayed un-broadcast. Both are
+  held/broadcast again. An undecided `If`/`Which` is also returned with its
+  condition EVALUATED (arms untouched): `Which(C = U[1], …)` now reads
+  `Which(C = 10, …)`.
+
+- **A `Sum`/`Product` whose term is an undecided `If`/`Which` no longer leaks
+  the loop index or sums a wrong value.** `Σ_{k=1}^{3} If(x < k, k, 0)`
+  evaluated to `3·If(x < k, k, 0)` (and the `Which` spelling to `Which(x < k,
+  9, True, 0)`) — the held condition never saw the index's value, so three
+  identical terms were accumulated. It is now `If(x < 1, 1, 0) + If(x < 2, 2,
+  0) + If(x < 3, 3, 0)`; a nested binder that reuses the index name inside a
+  held arm keeps its own binding.
+
+- **A symbol's inferred type is revised when its own value outgrows it.** An
+  assignment commits the *likely* type of the assigned expression (`C_0 :=
+  Σ_k Which(C = U_k, k, True, 0)` with `C` still unknown types `number`, the
+  scalar reading); that type is now re-checked against the value's live type
+  and, once `C := [10, 30]` makes the value `[1, 3]`, moves to
+  `vector<integer^2>` instead of remaining a `number` the value no longer
+  satisfies. A declared type is a contract and never moves; a guess the value
+  still fits is kept.
+
 ## 0.114.0 _2026-08-16_
 
 ### Breaking Changes
@@ -619,6 +659,36 @@
   which covers a conformance the redefinition left pending as well as one whose
   implementation has simply not been written yet. A stored field the object does
   carry reads and writes directly, without consulting any conformance.
+
+  Two consequences are worth knowing by their message. A `type` statement can
+  now leave a conformance pending rather than satisfying it, when satisfying it
+  again would make a dispatched call more effectful than an annotation elsewhere
+  already promised — the type is still declared, and the end-of-batch warning
+  carries the reason:
+
+  ```epsil
+  // with `function caller(t: T) pure -> integer { f(t) }` already accepted
+  type T = object{n: integer}
+  // ➔ warning: protocol-implementation-pending T S
+  //    "conformance-widens-declared-contract: satisfying this conformance
+  //     again would make dispatched calls more effectful than declared
+  //     contracts allow: `caller` declares `pure` but would infer `random`…"
+  ```
+
+  And a protocol property read is refused when a transparent ALIAS the field is
+  typed through has been re-declared, because an object pins its layout one
+  level deep and the alias moves under it:
+
+  ```epsil
+  type alias A = string
+  protocol P { readonly a: A }
+  type T = object{a: A} is P
+  let p = T(a: "s")
+  type alias A = integer
+  p.(P.a)
+  // ➔ Error(protocol-implementation-missing, "…its stored `a` holds `string`,
+  //    which the property's `A` does not admit…")
+  ```
 
 - **`Reduce` under `.N()` no longer errors when the reducer's accumulator turns
   complex mid-fold.** `["Reduce", [1, 2, 3], ["Function", z² + c, z, k], 0]`
