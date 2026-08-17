@@ -879,13 +879,36 @@ later one being present:
 5. GPU route: an accumulator-lane decline (`combinerPlan` has no GPU
    equivalent; the multi-clause and protocol rows do not exist there — see
    §6); `mode: 'complex'` declines with a message; `interval-js` likewise.
-6. D1 measurement BEFORE/AFTER; split-scalar emission audit.
+   **VERIFIED 2026-08-16, satisfied by construction:** the shader targets
+   have NO `Reduce`/`Scan` lowering at all ("the operator is known to the
+   engine but target 'glsl' has no lowering for it", a `capability`
+   decline), so no accumulator shape can reach a wrong emission there;
+   `mode: 'complex'`/`'auto'` on `glsl`/`wgsl`/`interval-js` are the
+   `unsupported-mode` capability decline (step 1, tested in
+   `compile-mode-plumbing.test.ts`). Nothing to add.
+6. D1 measurement BEFORE/AFTER; split-scalar emission audit. **DEFERRED to a
+   quiet box (2026-08-16 evening: load 12–19 on 8 cores with ~10 sessions;
+   any timing taken here is contended by construction — see
+   `docs/SHARED-BOX-PROTOCOL.md`).** What to measure when it is: the
+   promoted-chain benchmark (`|√(u+1)/2 − 1|`, 200k points: 9 ms → 21 ms
+   was the pre-mode figure) under `strict` vs `auto`, and the fractal
+   corpus (`fractals.test.ts` shapes) under `auto` — expected byte-identical
+   code to `strict`, so identical timing.
 7. Docs (`doc/13-guide-compile.md`: "Real-Only Mode" → result convention; a
    "Modes" section replacing the `complexPromotion` text and stating the
    GLSL parallel and the per-row/per-document note of §7), option
    docstrings, CHANGELOG (Breaking: strict-mode declines where `NaN` was
    returned, the result convention; Deprecated: `complexPromotion`,
-   `realOnly`), ROADMAP entries named at the top marked resolved.
+   `realOnly`), ROADMAP entries named at the top marked resolved. **DONE
+   2026-08-16** (guide: "Result Convention" + "Modes: `auto`, `strict`,
+   `complex`" sections; `types.ts`/`compile-expression.ts` docstrings;
+   CHANGELOG `[Unreleased]` Breaking/New/Deprecated/Bug-fix entries; ROADMAP:
+   multi-clause complex parameter, protocol member complex parameter,
+   compiled scalar comparisons all marked resolved; the combiner-accumulator
+   entry was already FIXED by `combinerPlan`). Not written: the §7
+   per-row/per-document note in the guide — §7 is still Arno's open cost
+   question with Tycho, so the guide says only that `result.promoted` /
+   `result.escalation` tell a consumer per row.
 
 Snapshot blast radius: expected confined to expressions that today mix a
 complex-shaped value into a wide binding; measure with the full suite after
