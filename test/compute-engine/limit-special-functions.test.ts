@@ -175,6 +175,70 @@ describe('SATURATING & RADICAL LIMITS AT INFINITY', () => {
     );
   });
 
+  // A sum mixing a SCALED `Erf(∞)` addend with a decaying addend used to
+  // decline (`ROADMAP.md`, "Limit at ∞ declines on a SUM …", 2026-08-16),
+  // while each addend alone, and `Erf(√x) + x·e^{−x}` with coefficient 1,
+  // resolved. The limit itself was never at fault: its growth oracles probe
+  // numerically through the compiler, and `k·Erf(√x)` compiled in the
+  // complex lane (unknown-sign radical) to `{re: k * _b.re}` around a bare
+  // real `_SYS.erf(…)` — NaN at every probe — which the cancellation guard
+  // read as an overflowing term and bailed on. The compiler-side analysis
+  // (`isComplexValued`) now knows a real-only string helper is real-shaped;
+  // this pins the observable consequence at the limit.
+  test('a sum mixing a scaled Erf(∞) addend with a decaying addend resolves', () => {
+    const decay = [
+      'Multiply',
+      -6,
+      ['Exp', ['Negate', ['Divide', 'x', 2]]],
+      ['Sqrt', 'x'],
+    ];
+    const decay32 = [
+      'Multiply',
+      -2,
+      ['Exp', ['Negate', ['Divide', 'x', 2]]],
+      ['Power', 'x', ['Rational', 3, 2]],
+    ];
+    // 3√2·√π·Erf(√2/2·√x) → 3√2·√π
+    const erf = [
+      'Multiply',
+      3,
+      ['Sqrt', 2],
+      ['Sqrt', 'Pi'],
+      ['Erf', ['Multiply', ['Divide', ['Sqrt', 2], 2], ['Sqrt', 'x']]],
+    ];
+    const three = ce.box(['Multiply', 3, ['Sqrt', 2], ['Sqrt', 'Pi']]);
+    for (const body of [
+      ['Add', erf, decay],
+      ['Add', erf, decay32],
+      ['Add', erf, decay, decay32], // the χ²-tail antiderivative
+    ]) {
+      const l = lim(body, INF).evaluate();
+      expect(l.operator).not.toBe('Limit');
+      expect(l.isSame(three)).toBe(true);
+    }
+    // The minimal shape: any coefficient other than 1 on the Erf addend.
+    expect(
+      lim(
+        ['Add', ['Multiply', 2, ['Erf', ['Sqrt', 'x']]], ['Divide', 2, 'x']],
+        INF
+      )
+        .evaluate()
+        .isSame(ce.number(2))
+    ).toBe(true);
+    expect(
+      lim(
+        [
+          'Add',
+          ['Multiply', 3, ['Erf', ['Sqrt', 'x']]],
+          ['Multiply', 'x', ['Exp', ['Negate', 'x']]],
+        ],
+        INF
+      )
+        .evaluate()
+        .isSame(ce.number(3))
+    ).toBe(true);
+  });
+
   test('Erfc saturates: Erfc(x)→0, Erfc(−x)→2', () => {
     expect(lim(['Erfc', 'x'], INF).evaluate().isSame(ce.Zero)).toBe(true);
     expect(lim(['Erfc', 'x'], NEGINF).evaluate().isSame(ce.number(2))).toBe(

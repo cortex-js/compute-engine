@@ -356,6 +356,29 @@ describe('complex mode — D2/D6 runtime rules', () => {
     expect(r.run!({ z: { re: 0, im: 1 } })).toBeNaN();
   });
 
+  it('D6: a real-only string helper is REAL-shaped to its parent, whatever its result type', () => {
+    // `Erf`, `Gamma`, `Zeta`, `Digamma`, `Factorial`, `LambertW`, `Arsinh`,
+    // `ErfInv` all lower to a real-only helper (`_SYS.erf`, …) yet type wide
+    // (`number`), so the type-based analysis used to fall through to the
+    // operand recursion and report them complex when an operand was — here a
+    // promoted unknown-sign radical. The parent `Multiply` then read
+    // `.re`/`.im` off the plain number the guard emitted: `2·Erf(√y)` ran to
+    // `{re: NaN, im: NaN}` at every point (measured 2026-08-16, `auto` and
+    // `complex` modes alike). The value must be the plain real product.
+    for (const mode of ['auto', 'complex'] as const) {
+      for (const h of ['Erf', 'Gamma', 'Arsinh'] as const) {
+        const e = ce.box(['Multiply', 2, [h, ['Sqrt', 'y']]]);
+        const r = compile(e, { mode, fallback: false });
+        // Reference: the interpreter's own value at y = 2.
+        const ref = e.subs({ y: 2 }).N().re;
+        expect(r.run!({ y: 2 })).toBeCloseTo(ref, 6);
+        // …and the D6 rule still applies underneath: a negative radicand
+        // promotes to a non-real value, so the helper answers NaN.
+        expect(r.run!({ y: -2 })).toBeNaN();
+      }
+    }
+  });
+
   it('a statically non-real operand is a compile-time capability decline in every mode', () => {
     for (const mode of ['strict', 'auto', 'complex'] as const) {
       for (const expr of [

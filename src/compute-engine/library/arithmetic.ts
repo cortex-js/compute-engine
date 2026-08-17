@@ -88,6 +88,7 @@ import {
 } from '../boxed-expression/arithmetic-mul-div.js';
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
 import {
+  evaluateBigOpTerm,
   canonicalBigop,
   reduceBigOp,
   NON_ENUMERABLE_DOMAIN,
@@ -3558,12 +3559,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // against the same hazard in `BaseCompiler.containsUnboundedBigOp`).
           return undefined;
         }
+        // A capture-unsafe term (`evaluateBigOpTerm` declined) must keep the
+        // WHOLE operator symbolic: `fn` returning null stops the fold, but
+        // the fold's `undefined` result would fall through to the `?? NaN`
+        // below and report a wrong value, so the decline is carried out of
+        // the closure by this flag instead.
+        let captureUnsafe = false;
         const result = run(
           reduceBigOp(
             ops[0],
             bounds,
-            (acc: Expression, x) => {
-              const xe = x.evaluate({ numericApproximation: numeric });
+            (acc: Expression, x, bindings) => {
+              const xe = evaluateBigOpTerm(x, bindings, numeric);
+              if (xe === undefined) {
+                captureUnsafe = true;
+                return null;
+              }
               return reducerElementError(acc, xe) ?? acc.mul(xe);
             },
             ce.One
@@ -3571,6 +3582,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ce._timeRemaining,
           ce._deadlineFrame
         );
+        if (captureUnsafe) return undefined;
         // If domain is non-enumerable, keep expression unevaluated (symbolic)
         if (result === NON_ENUMERABLE_DOMAIN) {
           return undefined; // Return undefined to keep expression symbolic
@@ -3615,12 +3627,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return undefined;
           }
         }
+        // Capture-unsafe decline flag — see the Product sync handler.
+        let captureUnsafe = false;
         const result = await runAsync(
           reduceBigOp(
             ops[0],
             bounds,
-            (acc: Expression, x) => {
-              const xe = x.evaluate({ numericApproximation: numeric });
+            (acc: Expression, x, bindings) => {
+              const xe = evaluateBigOpTerm(x, bindings, numeric);
+              if (xe === undefined) {
+                captureUnsafe = true;
+                return null;
+              }
               return reducerElementError(acc, xe) ?? acc.mul(xe);
             },
             ce.One
@@ -3629,6 +3647,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           options.signal,
           ce._deadlineFrame
         );
+        if (captureUnsafe) return undefined;
         // If domain is non-enumerable, keep expression unevaluated (symbolic)
         if (result === NON_ENUMERABLE_DOMAIN) {
           return undefined; // Return undefined to keep expression symbolic
@@ -3737,21 +3756,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // same hazard in `BaseCompiler.containsUnboundedBigOp`).
           return undefined;
         }
+        // Capture-unsafe decline flag — see the Product sync handler.
+        let captureUnsafe = false;
         const result = run(
           reduceBigOp(
             first,
             rest,
-            (acc: Expression, x) =>
-              sumAccumulate(
-                acc,
-                x.evaluate({ numericApproximation: numeric }),
-                numeric
-              ),
+            (acc: Expression, x, bindings) => {
+              const term = evaluateBigOpTerm(x, bindings, numeric);
+              if (term === undefined) {
+                captureUnsafe = true;
+                return null;
+              }
+              return sumAccumulate(acc, term, numeric);
+            },
             engine.Zero
           ),
           engine._timeRemaining,
           engine._deadlineFrame
         );
+        if (captureUnsafe) return undefined;
         // Non-enumerable domain: keep the expression symbolic.
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
         // Bounds we cannot walk: surface an error rather than truncate.
@@ -3819,22 +3843,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return undefined;
           }
         }
+        // Capture-unsafe decline flag — see the Product sync handler.
+        let captureUnsafe = false;
         const result = await runAsync(
           reduceBigOp(
             first,
             rest,
-            (acc: Expression, x) =>
-              sumAccumulate(
-                acc,
-                x.evaluate({ numericApproximation: numeric }),
-                numeric
-              ),
+            (acc: Expression, x, bindings) => {
+              const term = evaluateBigOpTerm(x, bindings, numeric);
+              if (term === undefined) {
+                captureUnsafe = true;
+                return null;
+              }
+              return sumAccumulate(acc, term, numeric);
+            },
             engine.Zero
           ),
           engine._timeRemaining,
           signal,
           engine._deadlineFrame
         );
+        if (captureUnsafe) return undefined;
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(engine, rest);

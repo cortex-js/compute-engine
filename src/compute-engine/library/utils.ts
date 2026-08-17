@@ -11,6 +11,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
+import { rewriteWithBinders } from '../boxed-expression/binders.js';
 import { numericValueOf } from '../boxed-expression/numerics.js';
 
 import { checkDeadline } from '../../common/interruptible.js';
@@ -2104,6 +2105,121 @@ function* reduceCollectionOrDecline<T>(
 }
 
 /**
+ * The index bindings in force for ONE term of an indexed big operator: each
+ * index name with the value `reduceBigOp`/`reduceElementIndexingSets` has
+ * just assigned to it, in indexing-set order.
+ */
+export type BigOpIndexBindings = ReadonlyArray<
+  readonly [index: string, value: Expression | number]
+>;
+
+/**
+ * The per-term step of an indexed big operator (`Sum`/`Product` over `Limits`
+ * or `Element` indexing sets): evaluate `body` for the CURRENT index values,
+ * which the loop has just assigned, and repair a term that came back with an
+ * index still FREE in it.
+ *
+ * The loop binds each index by ASSIGNMENT (`assignLoopIndex`), so a body
+ * whose evaluation reads every index resolves on its own. A body can come
+ * back with an index unresolved when a lazy operator inside it holds an
+ * operand and then declines: `Which(x < k, k, True, 0)` under `k := 1`
+ * evaluates its condition to `x < 1`, finds it undecided, and returns
+ * `undefined` — the framework then keeps the ORIGINAL node, so both the
+ * condition and the held arm still spell `k` (`If` behaves the same). Every
+ * term of `Σ_{k=1}^{3} Which(x < k, k, True, 0)` was therefore the SAME
+ * expression, and the sum answered `Which(x < k, 9, True, 0)`: three copies
+ * of one arm, `3k` re-evaluated at the last index value, and the bound `k`
+ * leaked into the result (measured 2026-08-16; the honest value is
+ * `Which(x < 1, 1, True, 0) + Which(x < 2, 2, True, 0) + Which(x < 3, 3,
+ * True, 0)`, and that is what this now yields). Substituting the index
+ * values into the evaluated term is a no-op for a body that already resolved
+ * them — the same repair `comprehensionStream`
+ * (`library/control-structures.ts`) applies to each comprehension element,
+ * where a captured function literal would otherwise share one `i`.
+ *
+ * The substitution is BINDER-AWARE (`substituteFreeNames`, on the
+ * `rewriteWithBinders` walk): a term whose own binders rebind an index name —
+ * a nested `Σ_{k}` inside a held arm — keeps that inner binding, and only the
+ * FREE occurrences (the ones the loop's assignment was meant to reach) take
+ * the value. Plain `subs` rewrites through binders by name and would capture
+ * them.
+ *
+ * Returns `undefined` — DECLINE, the caller must keep the whole operator
+ * symbolic rather than accumulate this term — when the substitution would
+ * not be capture-safe in the other direction: a replacement VALUE (an
+ * `Element`-domain element can be an arbitrary expression) whose own free
+ * symbols collide with a binder inside the term would have those symbols
+ * captured once inserted (`k → t` substituted into a held `t ↦ k + t`).
+ * Shadow-narrowing cannot repair that, and substituting anyway is a silent
+ * wrong value — the same decline the degenerate-bounds substitution applies
+ * (`DEGENERATE_CAPTURE_UNSAFE` above). `Limits` indices are plain numbers
+ * (no free symbols), so they never decline.
+ *
+ * Cost note: the `has` screen below runs once per term. For a term that is a
+ * number literal — the common case in a large numeric loop — `has` is O(1);
+ * it is term-proportional only for symbolic terms, which are exactly the
+ * ones the repair exists for.
+ */
+export function evaluateBigOpTerm(
+  body: Expression,
+  bindings: BigOpIndexBindings | undefined,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const term = body.evaluate({ numericApproximation });
+  if (bindings === undefined || bindings.length === 0) return term;
+  const leaked = bindings.filter(([name]) => term.has(name));
+  if (leaked.length === 0) return term;
+  const ce = body.engine;
+  const subs: Record<string, Expression> = {};
+  let anyExpressionValue = false;
+  for (const [name, value] of leaked) {
+    if (typeof value === 'number') subs[name] = ce.number(value);
+    else {
+      subs[name] = value;
+      anyExpressionValue = true;
+    }
+  }
+  // Capture guard (see the doc comment): a replacement value's free symbols
+  // must not collide with any binder inside the term. Only expression-valued
+  // bindings can trip this, so the binder collection is skipped entirely for
+  // the numeric (`Limits`) case.
+  if (anyExpressionValue) {
+    const binders = collectBinderNames(term);
+    if (binders.size > 0)
+      for (const name of Object.keys(subs))
+        for (const sym of subs[name].symbols)
+          if (binders.has(sym)) return undefined;
+  }
+  const repaired = substituteFreeNames(term, subs);
+  return repaired === term ? term : repaired.evaluate({ numericApproximation });
+}
+
+/**
+ * Replace every FREE occurrence of the names in `subs` by the given value,
+ * leaving occurrences bound by a binder inside `expr` (a `Function` literal's
+ * parameters, a `Sum`/`Product`/`Block`/… scope) untouched.
+ *
+ * Built on `rewriteWithBinders` (`boxed-expression/binders.ts`), which owns
+ * the three behaviors a hand-rolled walk gets wrong: it tracks shadowing
+ * through binder nodes (an occurrence under a binder that rebinds the name is
+ * not free and stays), it descends into DICTIONARY values (not function
+ * operands, so a plain `ops` recursion never reaches them), and a rebuilt
+ * scoped node keeps its original `localScope` and form — a bare
+ * `ce.function` rebuild would mint a fresh empty scope, leaving untouched
+ * operands bound to the old scope while the node advertises a new one (a
+ * `Sum` whose body no longer resolves its index). Returns `expr` itself when
+ * nothing was replaced.
+ */
+function substituteFreeNames(
+  expr: Expression,
+  subs: Readonly<Record<string, Expression>>
+): Expression {
+  return rewriteWithBinders(expr, (sym, shadowed) =>
+    shadowed?.has(sym.symbol) ? sym : (subs[sym.symbol] ?? sym)
+  );
+}
+
+/**
  * Process an expression of the form
  * - ['Operator', body, ['Tuple', index1, lower, upper]]
  * - ['Operator', body, ['Tuple', index1, lower, upper], ['Tuple', index2, lower, upper], ...]
@@ -2121,7 +2237,7 @@ function* reduceCollectionOrDecline<T>(
 export function* reduceBigOp<T>(
   body: Expression,
   indexes: ReadonlyArray<Expression>,
-  fn: (acc: T, x: Expression) => T | null,
+  fn: (acc: T, x: Expression, bindings?: BigOpIndexBindings) => T | null,
   initial: T
 ): Generator<
   T | typeof NON_ENUMERABLE_DOMAIN | typeof NON_ENUMERABLE_BOUNDS | undefined
@@ -2256,11 +2372,14 @@ export function* reduceBigOp<T>(
     if ((++count & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     // An index-less bounds pair (`Limits(Nothing, 1, 9)`) iterates a constant
     // body: there is no index variable to assign.
+    const bindings: Array<readonly [string, number]> = [];
     indexingSets.forEach((x, i) => {
-      if (x.index && x.index !== 'Nothing')
+      if (x.index && x.index !== 'Nothing') {
         assignLoopIndex(ce, x.index, element[i]);
+        bindings.push([x.index, element[i]]);
+      }
     });
-    result = fn(result, body) ?? undefined;
+    result = fn(result, body, bindings) ?? undefined;
     yield result;
     if (result === undefined) break;
   }
@@ -2289,7 +2408,7 @@ export type ReduceElementResult<T> =
 function* reduceElementIndexingSets<T>(
   body: Expression,
   indexes: ReadonlyArray<Expression>,
-  fn: (acc: T, x: Expression) => T | null,
+  fn: (acc: T, x: Expression, bindings?: BigOpIndexBindings) => T | null,
   initial: T,
   returnReason = false
   // Yields only accumulator values (`T | undefined`) between iterations; the
@@ -2387,16 +2506,15 @@ function* reduceElementIndexingSets<T>(
 
   while (true) {
     // Apply current combination of assignments
+    const bindings: Array<readonly [string, Expression]> = [];
     for (let i = 0; i < elementDomains.length; i++) {
-      assignLoopIndex(
-        ce,
-        elementDomains[i].variable,
-        elementDomains[i].values[indices[i]]
-      );
+      const value = elementDomains[i].values[indices[i]];
+      assignLoopIndex(ce, elementDomains[i].variable, value);
+      bindings.push([elementDomains[i].variable, value]);
     }
 
     // Evaluate and accumulate
-    result = fn(result, body) ?? undefined;
+    result = fn(result, body, bindings) ?? undefined;
     yield result;
     if (result === undefined) break;
 

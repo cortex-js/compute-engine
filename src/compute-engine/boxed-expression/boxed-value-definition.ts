@@ -17,6 +17,7 @@ import { defaultCollectionHandlers } from '../collection-utils.js';
 import type { LatexString } from '../latex-syntax/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { isFunction } from './type-guards.js';
 import { matchesDeclaredTypeAxes } from './effects-inference.js';
 import { declaredTypeError } from './type-compatibility-error.js';
 import { isLatexString } from '../latex-syntax/utils.js';
@@ -413,7 +414,87 @@ export class _BoxedValueDefinition
   }
 
   get type(): BoxedType {
-    return this._type ?? this._value?.type ?? BoxedType.unknown;
+    const t = this._type;
+    if (t === undefined || t === null)
+      return this._value?.type ?? BoxedType.unknown;
+    return this._reviseInferredType(t);
+  }
+
+  // The semantic generation (`ce._semanticVersion`) at which the inferred
+  // type was last checked against the value's live type — see
+  // `_reviseInferredType`. `-1` = never checked.
+  private _revisionVersion = -1;
+
+  /**
+   * Revision of an INFERRED type against its own value (user-ruled
+   * 2026-08-16: "inference doesn't have to be broadest, it has to be more
+   * likely, and is subject to revision").
+   *
+   * An assignment commits the LIKELY type of the assigned value — `C_0 :=
+   * Σ_k Which(C = U_k, k, True, 0)` with `C` still `unknown` types `number`,
+   * the scalar reading — and records it here as `_type` with `inferredType`
+   * set. When the value is an EXPRESSION whose type depends on other symbols,
+   * that guess can be refuted later without any write to this definition:
+   * once `C := [10, 30]`, the same value types `vector<integer^2>`, and a
+   * frozen `number` no longer contains the value the symbol actually holds
+   * (measured 2026-08-16; `ROADMAP.md`, "An `unknown`-typed symbol compared
+   * to a SCALAR types the relation scalar"). A DECLARED type is a contract
+   * and is never touched (`inferredType` false); a literal value's type
+   * cannot move, so only a function-shaped value is re-checked — and NOT a
+   * `Function` LITERAL: a lambda's type is its signature, and when a type
+   * alias it mentions is re-declared the protocol machinery re-settles
+   * conformances over that signature itself (`engine-protocols.ts`,
+   * conformance re-activation); a read-time retype here would pre-empt that
+   * decision (measured 2026-08-16 against
+   * `test/compute-engine/protocol-type-redefinition.test.ts`: two joint-cause
+   * refusals turned into silent acceptances). Callable signatures stay on
+   * that path; this revision is for DATA values whose expression depends on
+   * other symbols.
+   *
+   * The check runs at most once per semantic generation per definition (an
+   * integer compare on the hot path otherwise; the value's own `type` is
+   * memoized per generation), and applies the rule the assign path already
+   * uses when a guess is incompatible with its value (D11,
+   * `engine-declarations.ts`): adopt the value's own current type. A value
+   * whose live type is still ADMITTED by the guess (a subtype) leaves the
+   * likely type in place. Self-referential bindings (`a := a + 1`) are
+   * skipped: reading their value's type reads this type.
+   *
+   * This is a deliberate, bounded exception to this file's "pay for
+   * precision at write sites, never at read sites" principle (`set value`
+   * below): the refuting event is a write to a DIFFERENT definition (the
+   * dependency's), which cannot reach this one at its own write site without
+   * a dependency graph the engine does not keep. The generation gate is what
+   * bounds the exception — after the first read of a generation, the getter
+   * is back to an integer compare.
+   *
+   * When the type actually moves, the same `type-write` state event every
+   * other def-retype site pairs with the write is emitted (its axis mask is
+   * `any` only — R5, `engine-configuration-lifecycle.ts` — so emitting from
+   * a read path cannot advance `semantic` and re-trigger this gate): a
+   * G-keyed `_type`/`_sgn` memo on a compound expression must see the
+   * revision even if the event that made it due had, for some future axis
+   * table, not advanced `any` itself.
+   */
+  private _reviseInferredType(recorded: BoxedType): BoxedType {
+    if (!this.inferredType || this._isConstant || this._isSelfReferential)
+      return recorded;
+    const v = this._value;
+    if (v === undefined || v === null || !isFunction(v)) return recorded;
+    if (v.operator === 'Function') return recorded;
+    const generation = this._engine._semanticVersion;
+    if (generation === this._revisionVersion) return recorded;
+    this._revisionVersion = generation;
+    const live = v.type;
+    if (live.isUnknown || live.matches(recorded)) return recorded;
+    this._engine._noteStateEvent({
+      kind: 'type-write',
+      callableBefore: containsSignatureArm(recorded.type),
+      callableAfter: containsSignatureArm(live.type),
+    });
+    this._type = live;
+    this._writeVersion += 1;
+    return live;
   }
 
   set type(t: Type | TypeString | BoxedType) {

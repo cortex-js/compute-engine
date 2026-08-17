@@ -178,7 +178,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             i === 0 ? op.canonical : canonicalStatement(engine, op)
           )
         ),
-      evaluate: ([cond, ifTrue, ifFalse], options) => {
+      evaluate: (ops, options) => {
+        const [cond, ifTrue, ifFalse] = ops;
         const engine = options.engine;
         const evaluated = cond.canonical.evaluate();
         const evaluatedCond = sym(evaluated);
@@ -216,7 +217,20 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // once the variables are bound. The throw below is reserved for
         // conditions that are not boolean at all (a number, a misspelled
         // symbol), where the spell-check hint is the useful outcome.
-        if (isBooleanishCondition(evaluated)) return undefined;
+        //
+        // The node is rebuilt around the EVALUATED condition (the held arms
+        // untouched): `If` is `lazy`, and a lazy handler that returns
+        // `undefined` hands the framework the ORIGINAL node, discarding the
+        // condition's evaluation — `If(C = U[1], …)` kept `U[1]` where its
+        // condition had already read `10`, and inside a big operator's loop
+        // the condition kept the INDEX symbol rather than the value the loop
+        // had assigned (see `evaluateBigOpTerm`, `library/utils.ts`). The
+        // `isSame` guard keeps this a fixpoint: an unchanged condition returns
+        // `undefined` as before, so the rebuilt node evaluates to itself.
+        if (isBooleanishCondition(evaluated))
+          return evaluated.isSame(cond)
+            ? undefined
+            : engine._fn('If', [evaluated, ...ops.slice(1)]);
         throw new Error(
           `Condition must evaluate to "True" or "False". ${spellCheckMessage(
             cond
@@ -368,9 +382,21 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // operators bypass the generic broadcast machinery, so handle it here.
         if (c.isCollection && c.isFiniteCollection) {
           const conds = Array.from(c.each()) as Expression[];
+          // A cell is a boolean condition when it types `boolean` — or
+          // `broadcastable<boolean>`, the type of a comparison whose broadcast
+          // outcome is not statically settled (`h(x) ≤ 1` with `h`
+          // undeclared; see `comparisonResultType`,
+          // `library/relational-operator.ts`). Such a cell is a scalar
+          // relation here (it is one element of the materialized mask) and
+          // is held exactly like an undecided `boolean` one; gating on
+          // `boolean` alone left `x{h(x) ≤ [1,2,3]}` un-broadcast as
+          // `When(x, [h(x) ≤ 1, …])`.
           if (
             conds.length > 0 &&
-            conds.every((ci) => ci.type.matches('boolean'))
+            conds.every(
+              (ci) =>
+                ci.type.matches('boolean') || possiblyElementwiseCondition([ci])
+            )
           ) {
             // If `expr` itself evaluates to a finite indexed collection, zip
             // elementwise (expr_i masked by c_i); otherwise mask the scalar
@@ -738,6 +764,22 @@ function isBooleanishCondition(evaluated: Expression): boolean {
     !evaluated.isCollection &&
     evaluated.type.matches(BOOLEAN_COLLECTION_TYPE)
   )
+    return true;
+  // A condition typed `broadcastable<boolean>` — a comparison whose broadcast
+  // outcome the engine cannot settle statically, `h(x) = 10` with `h`
+  // undeclared or `C = 5` with `C` unknown (`comparisonResultType`,
+  // `library/relational-operator.ts`) — that has NOT evaluated to a value is
+  // undecided in exactly the same way: it is a scalar boolean or a boolean
+  // list once its operands resolve, and neither can be picked now. The type
+  // handlers of `If`/`Which` already read this type
+  // (`possiblyElementwiseCondition`); the evaluate side did not, so
+  // `Which(h(x) = 10, 1, True, 0)` — held as an ordinary undecided condition
+  // before comparisons over unresolved operands started typing
+  // `broadcastable<boolean>` (Tycho item 193, 2026-08-15) — threw the
+  // spell-check error out of `evaluate()`. `broadcastable<boolean>` is the
+  // union `boolean | indexed_collection<boolean>`, which is a subtype of
+  // NEITHER check above, which is why a third one is needed.
+  if (!evaluated.isCollection && possiblyElementwiseCondition([evaluated]))
     return true;
   if (!evaluated.isCollection || !evaluated.isFiniteCollection) return false;
   const items = Array.from(evaluated.each()) as Expression[];
@@ -1137,7 +1179,21 @@ function evaluateWhich(
       // picking a later branch would be wrong once the condition becomes
       // decidable. The throw is reserved for conditions that are not
       // boolean at all, where the spell-check hint is the useful outcome.
-      if (isBooleanishCondition(evaluated)) return undefined;
+      //
+      // Rebuilt around the EVALUATED condition, arms and later clauses
+      // untouched — same reason as `If`: `Which` is `lazy`, and returning
+      // `undefined` would hand back the ORIGINAL node with the condition's
+      // evaluation discarded (`Which(C = U[1], …)` kept `U[1]` where the
+      // condition had read `10`; in a big-op loop it kept the index symbol
+      // in place of the assigned value). Fixpoint-guarded with `isSame`.
+      if (isBooleanishCondition(evaluated))
+        return evaluated.isSame(args[i])
+          ? undefined
+          : options.engine._fn('Which', [
+              ...args.slice(0, i),
+              evaluated,
+              ...args.slice(i + 1),
+            ]);
       throw new Error(
         `Condition must evaluate to "True" or "False". ${spellCheckMessage(
           args[i]
