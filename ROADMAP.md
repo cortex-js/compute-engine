@@ -3314,7 +3314,10 @@ registered. A conformance to a ground type is unaffected. Pinned on both routes
 by `test/compute-engine/protocol-annotated-members.test.ts` and documented in
 `src/epsil/docs/protocols.md` ("No effect specifiers on a conditional member").
 
-Lifting the restriction needs the author's RAW block kept apart from a GROUNDED
+**OPEN, adjacent: lifting the conditional restriction.** The fail-closed
+refusal above is the ruling and is not itself a defect; what stays open is
+allowing an effect specifier on a conditional member at all. It needs the
+author's RAW block kept apart from a GROUNDED
 dispatch view: P17 must keep reading the author's text (so the covariant check
 still runs against the head pattern), while dispatch, the effect walk and the
 literal's `.type` arrow read a receiver ground at the widest instantiation. The
