@@ -15,6 +15,19 @@
  * TWICE — it compiles, and its compiled value equals the interpreter's on the
  * same input — and every red cell asserts `success: false`.
  *
+ * The operands whose value decides between a result and an interpreter ERROR
+ * VALUE (`RangeOf`'s `from` and needle, `StringReplace`'s `target` and `count`,
+ * `StringRepeat`'s `n`, `PadStart`/`PadEnd`'s `n` and `pad`) have a third
+ * outcome, added by the user ruling of 2026-08-16. A LITERAL is still decided
+ * at compile time — valid compiles, invalid declines, since a known-bad call
+ * should not compile. A COMPUTED operand now COMPILES, and the emitted code
+ * checks the domain at run time and THROWS a `RangeError` naming the operator
+ * and the rule. The interpreter returns an error VALUE, compiled code throws — a
+ * visible failure, never a wrong value. This mirrors the `Slice` lowering,
+ * whose non-literal span argument has always compiled and thrown at run time
+ * on a span that is not an ascending index range. `throwsAtRuntime` asserts
+ * that pair (compiled throw, interpreted error value) cell by cell.
+ *
  * JavaScript is the only target with lowerings. Python, GLSL and WGSL decline
  * every Phase-2 operator, and they do so through the DEFAULT: an operator the
  * engine knows but the target has no entry for is refused by the compiler
@@ -105,22 +118,76 @@ function agreesWithInterpreter(
  * operands equals what the interpreter answers for the same substitution. The
  * run-time route is what exercises the ingress conditioning: a string literal
  * is already NFC when the engine boxes it, so only a raw host string can be
- * decomposed or hold a lone surrogate.
+ * decomposed or hold a lone surrogate. It is also the route a COMPUTED
+ * domain-deciding operand takes (`PadStart(s, w)` with `w` bound at run time).
  */
 function agreesWithInterpreterAtRuntime(
   expr: BoxedExpression,
-  vars: Record<string, string>
+  vars: Record<string, string | number>
 ): void {
   const r = compile(expr, { fallback: false, constantFold: false });
   expect(r.success).toBe(true);
-  const substituted = expr.subs(
+  expect((r.run as (v: Record<string, unknown>) => unknown)(vars)).toEqual(
+    project(substitute(expr, vars).evaluate())
+  );
+}
+
+/** `expr` with each of `vars` substituted as the boxed value the interpreter
+ * would see, so a compiled run and an interpreted one are given the same
+ * operands. */
+function substitute(
+  expr: BoxedExpression,
+  vars: Record<string, string | number>
+): BoxedExpression {
+  return expr.subs(
     Object.fromEntries(
-      Object.entries(vars).map(([k, v]) => [k, ce.string(v)])
+      Object.entries(vars).map(([k, v]) => [
+        k,
+        typeof v === 'string' ? ce.string(v) : ce.number(v),
+      ])
     ) as never
   );
-  expect((r.run as (v: Record<string, unknown>) => unknown)(vars)).toEqual(
-    project(substituted.evaluate())
-  );
+}
+
+/**
+ * Assert that a COMPUTED operand whose value is OUT OF DOMAIN compiles and
+ * makes the compiled function THROW a `RangeError` naming the operator and the
+ * violated rule, while the interpreter answers an error VALUE for the same
+ * operands.
+ *
+ * That divergence is the ruling of 2026-08-16, and it follows the `Slice`
+ * precedent in `javascript-target.ts`: a compiled artifact has no
+ * representation for an interpreter error value, so rather than declining the
+ * whole call — which would leave `PadStart(s, width)` with a computed width
+ * uncompilable — the emitted code checks the domain and fails LOUDLY. The
+ * interpreter returns an error VALUE, compiled code throws; neither ever
+ * answers a wrong value.
+ *
+ * `expectedInterpreterError` pins WHICH error value the interpreter answers
+ * (its code, or a substring of the rule it names). Asserting only
+ * `operator === 'Error'` would let an unrelated failure — a mistyped operand,
+ * an arity slip — stand in for the domain rejection the cell is about, and the
+ * cross-check would silently stop testing anything.
+ */
+function throwsAtRuntime(
+  expr: BoxedExpression,
+  vars: Record<string, string | number>,
+  message: string,
+  expectedInterpreterError: string
+): void {
+  const r = compile(expr, { fallback: false, constantFold: false });
+  expect(r.success).toBe(true);
+  expect(() =>
+    (r.run as (v: Record<string, unknown>) => unknown)(vars)
+  ).toThrow(RangeError);
+  expect(() =>
+    (r.run as (v: Record<string, unknown>) => unknown)(vars)
+  ).toThrow(message);
+  // The cross-check that makes the throw meaningful: the interpreter's own
+  // answer on these operands is an error value, not a result.
+  const interpreted = substitute(expr, vars).evaluate();
+  expect(interpreted.operator).toBe('Error');
+  expect(interpreted.toString()).toContain(expectedInterpreterError);
 }
 
 /** Assert `expr` declines to compile — the engine reports `success: false` and
@@ -411,12 +478,6 @@ describe('D8: sequence search over strings and lists', () => {
     // `list<character>` needle finds its span in a `string` subject — and the
     // emitted `_SYS.eqt` reproduces that, since both sides lower to
     // one-cluster JS strings.
-    //
-    // The needle is written as a LITERAL list: `RangeOf`'s gate requires the
-    // needle to be provably non-empty (an empty needle is an interpreter error
-    // value), and a `Characters(…)` call does not report its emptiness without
-    // being evaluated, so that spelling declines — see the fail-closed cell
-    // below.
     const expr = ce.box([
       'RangeOf',
       { str: 'abc' },
@@ -452,17 +513,75 @@ describe('D8: sequence search over strings and lists', () => {
     failsClosed(expr);
   });
 
-  test('a non-literal `from`, and a needle that is not provably non-empty, decline', () => {
+  test('a COMPUTED `from` compiles, and guards its domain at run time', () => {
     ce.declare('nv', 'integer');
+    const expr = ce.box(['RangeOf', { str: 'abcb' }, { str: 'b' }, 'nv']);
+    // In domain, the compiled span is the interpreter's.
+    agreesWithInterpreterAtRuntime(expr, { nv: 3 });
+    // Past the END of the subject is deliberately NOT an error in the
+    // interpreter, just `Nothing` — the natural find-all loop produces
+    // `Length(xs) + 1` after a match at the very end — so it must not throw.
+    agreesWithInterpreterAtRuntime(expr, { nv: 5 });
+    // Below 1, where the interpreter answers an `out-of-range` error value.
+    throwsAtRuntime(
+      expr,
+      { nv: 0 },
+      'RangeOf: `from` must be an integer of 1',
+      'out-of-range'
+    );
+  });
+
+  test('a needle whose emptiness is unknown compiles, and is guarded at run time', () => {
+    // An empty needle has no representable span — `Range(1, 0)` is the
+    // DESCENDING range [1, 0], not an empty one — so the interpreter answers
+    // an `out-of-range` error value for it. A needle that does not report its
+    // emptiness without being evaluated (a `string`-typed symbol, a
+    // `Characters(…)` call) therefore compiles with a `_SYS.domne` length
+    // guard rather than declining.
     ce.declare('needle', 'string');
-    failsClosed(ce.box(['RangeOf', { str: 'abc' }, { str: 'b' }, 'nv']));
-    failsClosed(ce.box(['RangeOf', { str: 'abc' }, 'needle']));
-    // A COMPUTED needle does not report its emptiness without being
-    // evaluated, so it is not provably non-empty either — the conservative
-    // side of the gate, and the reason the `list<character>` needle above is
-    // written as a literal list.
-    failsClosed(
+    const expr = ce.box(['RangeOf', { str: 'abcb' }, 'needle']);
+    agreesWithInterpreterAtRuntime(expr, { needle: 'b' });
+    throwsAtRuntime(
+      expr,
+      { needle: '' },
+      'RangeOf: the needle must not be empty',
+      'out-of-range'
+    );
+
+    // A COMPUTED needle takes the same route, and the guard covers the LIST
+    // shape too: `elementsArg` hands both kinds of needle to the emitted code
+    // as an array (a string's grapheme clusters, a list's elements).
+    agreesWithInterpreter(
       ce.box(['RangeOf', { str: 'abc' }, ['Characters', { str: 'b' }]])
+    );
+    const computedEmpty = ce.box([
+      'RangeOf',
+      { str: 'abc' },
+      ['Characters', { str: '' }],
+    ]);
+    const r = compile(computedEmpty, { fallback: false, constantFold: false });
+    expect(r.success).toBe(true);
+    expect(() =>
+      (r.run as (v: Record<string, unknown>) => unknown)({})
+    ).toThrow('RangeOf: the needle must not be empty');
+    expect(computedEmpty.evaluate().operator).toBe('Error');
+  });
+
+  test('with BOTH a bad `from` and an empty needle, the `from` rule wins', () => {
+    // The interpreter checks `from` FIRST — `start < 1` returns before the
+    // empty-needle test in `RangeOf` (`library/collections.ts`) — so the
+    // emitted guards have to fire in that order too, or the two engines would
+    // name different rules for the same call. JavaScript evaluates call
+    // arguments left to right, which is why the from-offset is the FIRST
+    // parameter of the emitted IIFE rather than an expression inside its body.
+    ce.declare('fv', 'integer');
+    ce.declare('nv2', 'string');
+    const expr = ce.box(['RangeOf', { str: 'abcb' }, 'nv2', 'fv']);
+    throwsAtRuntime(
+      expr,
+      { fv: 0, nv2: '' },
+      'RangeOf: `from` must be an integer of 1',
+      'an index of 1 or more'
     );
   });
 
@@ -586,14 +705,39 @@ describe('D8: StringReplace', () => {
     failsClosed(expr);
   });
 
-  test('a non-literal target or count declines', () => {
-    // Whether the interpreter answers a value or an error depends on the
-    // run-time operand, and a compiled artifact cannot return an error value.
+  test('a COMPUTED target or count compiles, and guards its domain at run time', () => {
     ce.declare('tv', 'string');
     ce.declare('nv', 'integer');
-    failsClosed(ce.box(['StringReplace', { str: 'ab' }, 'tv', { str: 'x' }]));
-    failsClosed(
-      ce.box(['StringReplace', { str: 'ab' }, { str: 'a' }, { str: 'x' }, 'nv'])
+    const target = ce.box([
+      'StringReplace',
+      { str: 'aaa' },
+      'tv',
+      { str: 'x' },
+    ]);
+    agreesWithInterpreterAtRuntime(target, { tv: 'a' });
+    // An empty target is an error value in the interpreter, and would make the
+    // emitted scan advance by zero and never terminate — so the guard has to
+    // fire before the kernel runs.
+    throwsAtRuntime(
+      target,
+      { tv: '' },
+      'StringReplace: the target must not be empty',
+      'unexpected-argument'
+    );
+
+    const count = ce.box([
+      'StringReplace',
+      { str: 'aaa' },
+      { str: 'a' },
+      { str: 'x' },
+      'nv',
+    ]);
+    agreesWithInterpreterAtRuntime(count, { nv: 2 });
+    throwsAtRuntime(
+      count,
+      { nv: 0 },
+      'StringReplace: `count` must be a positive integer',
+      'unexpected-argument'
     );
   });
 });
@@ -692,6 +836,15 @@ describe('D8: StringRepeat and PadStart / PadEnd', () => {
 
   test.each([
     ['a negative repeat count', ['StringRepeat', { str: 'ab' }, -1]],
+    // Above the UPPER bound too: the interpreter reads `n` with
+    // `asSmallInteger` (`library/core.ts`), which answers `null` — hence an
+    // error value — for a magnitude above `SMALL_INTEGER` (1000000).
+    ['an oversized repeat count', ['StringRepeat', { str: 'ab' }, 2_000_001]],
+    ['an oversized pad width', ['PadStart', { str: 'a' }, 2_000_001]],
+    [
+      'an oversized replace count',
+      ['StringReplace', { str: 'ab' }, { str: 'a' }, { str: 'x' }, 2_000_001],
+    ],
     ['a negative pad width', ['PadStart', { str: 'a' }, -1]],
     ['an empty pad', ['PadEnd', { str: 'a' }, 4, { str: '' }]],
   ] as const)('%s fails closed', (_label, json) => {
@@ -700,12 +853,94 @@ describe('D8: StringRepeat and PadStart / PadEnd', () => {
     failsClosed(expr);
   });
 
-  test('a non-literal count, width or pad declines', () => {
+  test('a COMPUTED count, width or pad compiles, and guards its domain at run time', () => {
     ce.declare('nv', 'integer');
     ce.declare('pv', 'string');
-    failsClosed(ce.box(['StringRepeat', { str: 'ab' }, 'nv']));
-    failsClosed(ce.box(['PadStart', { str: 'a' }, 'nv']));
-    failsClosed(ce.box(['PadEnd', { str: 'a' }, 4, 'pv']));
+
+    const repeat = ce.box(['StringRepeat', { str: 'ab' }, 'nv']);
+    agreesWithInterpreterAtRuntime(repeat, { nv: 3 });
+    // Zero is IN domain — `StringRepeat(s, 0)` is `""`, not an error.
+    agreesWithInterpreterAtRuntime(repeat, { nv: 0 });
+    throwsAtRuntime(
+      repeat,
+      { nv: -1 },
+      'StringRepeat: `n` must be a non-negative integer',
+      'unexpected-argument'
+    );
+    // The UPPER bound is the interpreter's own: it reads `n` with
+    // `asSmallInteger`, which answers `null` — hence an error value — above
+    // `SMALL_INTEGER` (1000000). Without the guard the compiled call would
+    // happily build a multi-megabyte string.
+    throwsAtRuntime(
+      repeat,
+      { nv: 2_000_001 },
+      'StringRepeat: `n` must be a non-negative integer of at most 1000000',
+      'unexpected-argument'
+    );
+
+    const width = ce.box(['PadStart', { str: 'a' }, 'nv']);
+    agreesWithInterpreterAtRuntime(width, { nv: 5 });
+    throwsAtRuntime(
+      width,
+      { nv: -1 },
+      'PadStart: `n` must be a non-negative integer',
+      'unexpected-argument'
+    );
+    // A caller who defies the `integer` declaration reaches the same guard:
+    // the compiled function throws rather than silently rounding, and the
+    // interpreter rejects the substituted 2.5 with `incompatible-type`.
+    throwsAtRuntime(
+      width,
+      { nv: 2.5 },
+      'PadStart: `n` must be a non-negative integer',
+      'incompatible-type'
+    );
+
+    const pad = ce.box(['PadEnd', { str: 'a' }, 4, 'pv']);
+    agreesWithInterpreterAtRuntime(pad, { pv: 'xy' });
+    throwsAtRuntime(
+      pad,
+      { pv: '' },
+      'PadEnd: `pad` must be a non-empty string',
+      'unexpected-argument'
+    );
+  });
+
+  test('a COMPUTED operand the engine can PROVE out of domain declines', () => {
+    // The compile-time/run-time split is about what is KNOWABLE, not about
+    // literal spelling: a known-bad call should not compile, and `-(|m| + 1)`
+    // is known negative for every integer `m` without ever being evaluated.
+    ce.declare('m', 'integer');
+    const negativeWidth = ce.box([
+      'PadStart',
+      { str: 'a' },
+      ['Negate', ['Add', ['Abs', 'm'], 1]],
+    ]);
+    expect(negativeWidth.op2.isNonNegative).toBe(false);
+    failsClosed(negativeWidth);
+
+    // The `min >= 1` operands take the strict facet: a count of zero is out of
+    // domain too, so the proof needed is `isPositive === false`, which `-|m|`
+    // satisfies while `isNonNegative` stays undecided.
+    const nonPositiveCount = ce.box([
+      'StringReplace',
+      { str: 'aaa' },
+      { str: 'a' },
+      { str: 'x' },
+      ['Negate', ['Abs', 'm']],
+    ]);
+    expect(nonPositiveCount.ops![3].isPositive).toBe(false);
+    failsClosed(nonPositiveCount);
+  });
+
+  test('a provably EMPTY pad declines even when it is not a literal', () => {
+    // Same rule for the non-empty string operands: `ev` is not spelled as the
+    // empty string literal, but it is assigned one, so the engine already
+    // knows the call is the interpreter's error value.
+    ce.assign('ev', ce.string(''));
+    const emptyPad = ce.box(['PadEnd', { str: 'a' }, 4, 'ev']);
+    expect(emptyPad.op3.isEmptyCollection).toBe(true);
+    failsClosed(emptyPad);
   });
 });
 

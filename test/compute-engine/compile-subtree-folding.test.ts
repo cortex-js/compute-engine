@@ -218,28 +218,35 @@ describe('COMPILE constant folding - constant collections', () => {
     // the node look complex while the element it selects is a plain number.
     const at = ce.box(['At', ['List', 10, 20, 30], ['Complex', 1, 2]] as any);
     expect(at.N().re).toBe(10);
-    expect(compile(at).code).toBe(
-      '_SYS.at([10, 20, 30], ({ re: 1, im: 2 }))'
-    );
+    expect(compile(at).code).toBe('_SYS.at([10, 20, 30], ({ re: 1, im: 2 }))');
   });
 
   it('a complex-ish COLLECTION never folds, in either direction', () => {
     // The structural lowering picks its element convention from a
     // conservative static analysis that the evaluated values need not match:
-    // `√` of negatives compiles to the real kernel (`[NaN, NaN, NaN]`) while
-    // `.N()` answers `[2i, 3i, 4i]`, and a mixed list would fold to one
-    // complex element beside one bare number. Since whether a fold happens
-    // also depends on the element cap and the evaluation budget, admitting
-    // these would make emitted VALUES depend on those thresholds. The whole
-    // class declines and the structural path defines value and shape.
+    // a mixed list would fold to one complex element beside one bare number.
+    // Since whether a fold happens also depends on the element cap and the
+    // evaluation budget, admitting these would make emitted VALUES depend on
+    // those thresholds. The whole class declines and the structural path
+    // defines value and shape — the emitted code is still the element-wise
+    // `.map` over the source list, never a folded literal.
     const negRoots = ce.box([
       'Map',
       ['Function', ['Sqrt', 'y'], 'y'],
       ['List', -4, -9, -16],
     ] as any);
     expect(negRoots.N().toString()).toBe('[2i,3i,4i]');
-    expect(compile(negRoots).code).toContain('Math.sqrt');
-    expect(compile(negRoots).code).not.toContain('im');
+    expect(compile(negRoots).code).toContain('.map(');
+    // The default mode promotes the unknown-sign radical inside the callback
+    // (compile-mode step 4, 2026-08-16), so the structural value now agrees
+    // with `.N()`; `mode: 'strict'` keeps the real kernel and its NaNs.
+    expect(compile(negRoots).code).toContain('_SYS.csqrt');
+    expect(compile(negRoots).run!({})).toEqual([
+      { re: 0, im: 2 },
+      { re: 0, im: 3 },
+      { re: 0, im: 4 },
+    ]);
+    expect(compile(negRoots, { mode: 'strict' }).code).toContain('Math.sqrt');
 
     // And a collection whose structural lowering fails closed keeps failing
     // closed, rather than the fold quietly answering for it. The witness is a

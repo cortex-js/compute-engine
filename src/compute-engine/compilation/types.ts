@@ -603,18 +603,13 @@ export interface CompileTarget<Expr = unknown> {
   constantFold?: boolean;
 
   /**
-   * When true, `Sqrt`/`Ln`/`Log` over a real operand of UNKNOWN sign lower
-   * through the complex helpers instead of the real kernel, so the compiled
-   * value matches the interpreter's complex promotion. Defaults to disabled.
-   * The caller-facing option of the same name documents the trade (about 2.3×
-   * on affected chains, and an ordering comparison over such a head fails
-   * closed); this field is how a target carries the choice into
-   * `BaseCompiler.isComplexValued`.
-   *
-   * Read ONCE, from the outermost compilation, and held for its whole
-   * duration: the analysis and every target emitter must agree on a node's
-   * value SHAPE, so a nested target must never be able to flip the lane
-   * mid-compile.
+   * DEPRECATED (2026-08-16) — the promotion of an unknown-sign
+   * `Sqrt`/`Ln`/`Log`/`Power` through the complex kernels is now a property
+   * of the compile MODE (`mode`: `auto`, the default on JavaScript/Python,
+   * and `complex` promote; `strict` never does). The engine-level `compile()`
+   * maps the deprecated caller option onto `mode` and no longer sets this
+   * field; a target that still sets it gets the same promotion (latched
+   * once, at the outermost compilation, for the whole duration).
    */
   complexPromotion?: boolean;
 
@@ -1262,52 +1257,27 @@ export interface CompilationOptions<Expr = unknown> {
   entryChecks?: boolean;
 
   /**
-   * When true, complex results (`{ re, im }`) are converted to real numbers:
-   * - If the imaginary part is zero, the real part is returned
-   * - Otherwise, `NaN` is returned
-   *
-   * This avoids object allocations for callers that only need real-valued
-   * results (e.g., plotting).
-   *
-   * This projects the compiled unit's RESULT and nothing else: it never
-   * influences which lowering an operator picks, so it can only discard
-   * complexness, never produce it. To make a square root of a possibly
-   * negative operand yield a complex value at all, see `complexPromotion`
-   * below — the two are independent and compose (promote internally, project
-   * at the boundary).
+   * DEPRECATED (2026-08-16, kept for one release with a one-time console
+   * warning) — the result convention makes it unnecessary: a compiled value
+   * whose imaginary part is exactly zero is returned as a plain `number`, and
+   * a returned `{ re, im }` always has `im !== 0`, so a consumer's per-sample
+   * test is `typeof v === 'number'`. When true, the OLD projection is still
+   * applied to the compiled unit's RESULT: a `{ re, im }` collapses to `re`
+   * when the imaginary part is at roundoff scale, `NaN` otherwise; a boolean
+   * → `NaN`. It never influences which lowering an operator picks — see
+   * `mode` for that.
    */
   realOnly?: boolean;
 
   /**
-   * Opt in to COMPLEX PROMOTION for `Sqrt`/`Ln`/`Log` applied to a real
-   * operand whose sign is not known at compile time (default `false`).
-   *
-   * By default such a head keeps the real kernel — `Math.sqrt(t - 1)` — even
-   * though its type admits complex, so a negative operand yields `NaN` where
-   * the interpreter promotes and returns a complex value. That default is
-   * deliberate: it keeps `√(⌈x⌉²+⌈y⌉²)` on the fast path, and it is what lets
-   * an ordering comparison over a radical compile at all (see below).
-   *
-   * With this option, such a head lowers through the complex helpers instead
-   * (`_SYS.csqrt`/`_SYS.clog`, lifting a real operand to `{re, im: 0}`), so
-   * the compiled value matches `evaluate()`/`.N()`. Intended for a caller that
-   * knows its documents are complex-valued — a plotting front-end with a
-   * per-document "complex mode" switch maps that switch onto this option.
-   *
-   * Two consequences to expect when enabling it:
-   *
-   * - Affected chains get slower: about 2.3× measured on a 200k-point sweep of
-   *   `|√(u+1)/2 − 1|` (9 ms → 21 ms). Chains with no unknown-sign
-   *   `Sqrt`/`Ln`/`Log` are emitted exactly as before and cost nothing.
-   * - An ordering comparison over such a head now FAILS CLOSED (D6) rather
-   *   than compiling: `Less(Sqrt(x), 2)` has no truth value once `Sqrt(x)` may
-   *   be complex, which is why the default keeps the real kernel there.
-   *
-   * Honored by the `javascript` and `python` targets. The shader targets
-   * (`glsl`/`wgsl`) do not accept it and keep the real kernel unconditionally:
-   * they have no runtime-failure channel, and their real-kernel behavior for
-   * an unknown-sign radicand is pinned by the Desmos-corpus render states of
-   * Tycho item 144 (`test/compute-engine/compile-glsl.test.ts`).
+   * DEPRECATED (2026-08-16) — superseded by `mode`. Consulted only when
+   * `mode` is absent: `true` maps to `mode: 'complex'` (a one-time console
+   * warning), and is dropped on a target that does not offer complex mode
+   * (the shader targets keep the real kernel, as this flag was always
+   * documented to do there); `false` is ignored; beside an explicit `mode`
+   * it is ignored with a warning. Note the default mode `auto` already
+   * promotes an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` — the trade this flag
+   * used to buy — so most callers can simply drop it.
    */
   complexPromotion?: boolean;
 
@@ -1472,8 +1442,10 @@ export interface CompiledRunner<R = number | ComplexResult, V = number> {
  * Three type parameters control the shape:
  * - `T` — the target name. For executable targets (`'javascript'` |
  *   `'interval-js'`), `run` and `calling` are guaranteed present.
- * - `R` — the return type of `run`. Defaults to `number | ComplexResult`.
- *   Pass `number` when `realOnly: true`.
+ * - `R` — the return type of `run`. Defaults to `number | ComplexResult` (a
+ *   value whose imaginary part is exactly zero is a plain `number`; a
+ *   returned `ComplexResult` always has `im !== 0`). `number` under the
+ *   deprecated `realOnly: true`.
  * - `V` — the type of the variable/argument values `run` accepts. Defaults to
  *   `number`; `interval-js` binds it to `number | Interval`, a complex runner
  *   to `number | ComplexResult`. (Positioned after `R` so existing
@@ -1489,9 +1461,9 @@ export interface CompiledRunner<R = number | ComplexResult, V = number> {
  * const js = compile(expr);
  * js.run({ x: 0.5 });
  *
- * // run is guaranteed, returns number only
- * const real = compile(expr, { realOnly: true });
- * real.run({ x: 0.5 }); // number
+ * // strict mode: today's real kernel, NaN for √(−1), lane mismatches decline
+ * const strict = compile(expr, { mode: 'strict' });
+ * strict.run({ x: 0.5 }); // number | ComplexResult (typed complex only)
  *
  * // check calling convention
  * if (result.calling === 'lambda') {

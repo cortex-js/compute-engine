@@ -266,12 +266,20 @@ describe('complexPromotion over a collection-valued body (ROADMAP 2026-08-15)', 
     }
   );
 
-  test('OFF: the default is unchanged — still the real kernel and its NaN', () => {
+  test('the DEFAULT now promotes too, and matches the interpreter', () => {
+    // Was "OFF: still the real kernel and its NaN". The default mode is `auto`
+    // since the compile-mode migration (step 4, 2026-08-16), and `auto`
+    // promotes an unknown-sign radical — so no opt-in is needed to reach the
+    // interpreter's value; `mode: 'strict'` is what keeps the real kernel.
     const ce = withFn('w', RADICALS('List'));
     const r = compile(ce.box(CHAIN('w') as any))!;
     expect(r.success).toBe(true);
-    expect(r.code).toContain('Math.abs');
-    expect(r.run!({ t: 0.3 } as any)).toBeNaN();
+    expect(r.code).toContain('_SYS.cabs');
+    expect(r.promoted).toBe(true);
+    expect(r.run!({ t: 0.3 } as any)).toBeCloseTo(PROMOTED, 12);
+    const strict = compile(ce.box(CHAIN('w') as any), { mode: 'strict' })!;
+    expect(strict.code).toContain('Math.abs');
+    expect(strict.run!({ t: 0.3 } as any)).toBeNaN();
   });
 
   test('ON: a MIXED body still hands back its real element as a number', () => {
@@ -286,24 +294,30 @@ describe('complexPromotion over a collection-valued body (ROADMAP 2026-08-15)', 
     expect(r.run!({ t: 0.3 } as any)).toEqual(2);
   });
 
-  test('ON: an ordering over a promoted element fails closed, as for a scalar', () => {
-    // The documented cost of the option, now reaching indexed reads as well:
-    // once the operand may be complex the comparison has no truth value. What
-    // it replaces is not a working comparison — before the element
+  test('an ordering over a promoted element takes the runtime rule, as for a scalar', () => {
+    // Was the documented cost of the option: the comparison failed closed once
+    // the operand might be complex. Since the compile-mode migration (step 4,
+    // 2026-08-16) D2 makes it a RUNTIME question instead — `false` when the
+    // value is complex at that point, the real comparison otherwise — so the
+    // ordering compiles and agrees with the interpreter at both ends. What
+    // this replaces is not a working comparison either: before the element
     // classification, `Less(w(t)[k], 2)` compiled to a CONSTANT `false`
     // (`{re, im} < 2` is never true), wrong at t = 2 where the interpreter
     // answers True.
     const ce = withFn('w', RADICALS('List'));
-    const r = compile(ce.box(['Less', ['At', ['w', 't'], 1], 2] as any), {
-      complexPromotion: true,
-    })!;
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Fail closed \(D6\)/s);
+    const r = compile(ce.box(['Less', ['At', ['w', 't'], 1], 2] as any))!;
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.cisreal(');
+    expect(r.run!({ t: 0.3 } as any)).toBe(false); // √(−0.7) is complex
+    expect(r.run!({ t: 2 } as any)).toBe(true); // √1 = 1 < 2
+    expect(r.run!({ t: 5 } as any)).toBe(false); // √4 = 2, not < 2
   });
 
-  test('OFF: that same ordering still compiles', () => {
+  test('that same ordering compiles in the strict lane as well', () => {
     const ce = withFn('w', RADICALS('List'));
-    const r = compile(ce.box(['Less', ['At', ['w', 't'], 1], 2] as any))!;
+    const r = compile(ce.box(['Less', ['At', ['w', 't'], 1], 2] as any), {
+      mode: 'strict',
+    })!;
     expect(r.success).toBe(true);
   });
 });
@@ -384,13 +398,17 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
     }
   });
 
-  test('ON: the default path is untouched — the OFF lowering is byte-identical', () => {
-    // The opt-in must not change what an unaffected shape compiles to. The
+  test('an unaffected shape lowers identically under the default and under strict', () => {
+    // Promotion must not change what an unaffected shape compiles to. The
     // no-radical control below is that shape: its elements never promote, so
-    // both flag states emit the same real `_SYS.bcast` closure.
+    // the default `auto` emits the same real `_SYS.bcast` closure as `strict`.
+    // (The comparison used to be ON vs OFF of `complexPromotion`; that option
+    // now maps to `mode: 'complex'`, whose single lane lifts wide symbols by
+    // design — compile-mode step 4, 2026-08-16.)
     const mj = ['Multiply', 2, ['w', 't']];
     const P = ['List', ['Multiply', 2, 't'], ['Add', 't', 1]];
-    expect(compiled(P, mj, true).code).toBe(compiled(P, mj, false).code);
+    const strict = compile(withFn('w', P).box(mj as any), { mode: 'strict' })!;
+    expect(compiled(P, mj, false).code).toBe(strict.code);
   });
 
   test('CONTROL: a collection body with NO radical compiles under both flag states', () => {

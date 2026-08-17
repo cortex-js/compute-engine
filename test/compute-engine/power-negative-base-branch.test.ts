@@ -304,12 +304,33 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       expect(folded(e)).toBe(4);
     });
 
-    it('a symbolic real base keeps the real Math.pow lowering', () => {
+    it('a symbolic real base still TYPES finite_number, and its lowering follows the mode', () => {
       const ce2 = new ComputeEngine();
       ce2.declare('r', 'real');
       const e = ce2.box(['Power', 'r', 0.3]);
       expect(e.type.toString()).toBe('finite_number');
-      expect(compile(e, { fallback: false }).code).toBe('Math.pow(_.r, 0.3)');
+      // The branch decision above is a TYPE decision and does not move. The
+      // LOWERING does: a non-integer number exponent over a base of unknown
+      // sign is promoted by the default mode `auto` (compile-mode step 4,
+      // 2026-08-16), which reproduces the interpreter at a negative base
+      // instead of `NaN`. `mode: 'strict'` keeps `Math.pow`.
+      const auto = compile(e, { fallback: false });
+      expect(auto.code).toBe(
+        '_SYS.cpow(({ re: _.r, im: 0 }), ({ re: 0.3, im: 0 }))'
+      );
+      expect(auto.run!({ r: 4 })).toBe(Math.pow(4, 0.3));
+      const neg = auto.run!({ r: -2 }) as { re: number; im: number };
+      const interp = ce2.box(['Power', -2, 0.3]).N();
+      expect(neg.re).toBeCloseTo(interp.re, 12);
+      expect(neg.im).toBeCloseTo(interp.im, 12);
+      expect(compile(e, { fallback: false, mode: 'strict' }).code).toBe(
+        'Math.pow(_.r, 0.3)'
+      );
+      // A VARIABLE exponent is not promoted: it keeps the real helper.
+      ce2.declare('q', 'real');
+      expect(
+        compile(ce2.box(['Power', 'r', 'q']), { fallback: false }).code
+      ).toBe('_SYS.pow(_.r, _.q)');
     });
   });
 

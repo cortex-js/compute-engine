@@ -131,7 +131,19 @@ D7. **`NumberFrom` exactness.** Integer numeral (no `.`/exponent) →
     which. `base` (2–36) accepts integer numerals only (`DigitsFrom`
     semantics; reuse its `fromDigits`).
 
-D8. **Compile targets (JS grapheme-correct where cheap; else fail closed;
+D8. **AMENDED 2026-08-16 (user ruling #2a): a THIRD outcome is authorized
+    for operands whose VALUE decides between a result and an interpreter
+    error value** — `RangeOf`'s `from` and needle, `StringReplace`'s
+    `target`/`count`, `StringRepeat`'s `n`, `PadStart`/`PadEnd`'s `n`/`pad`.
+    A valid LITERAL compiles bare; an invalid literal still declines at
+    compile time; a COMPUTED operand compiles and the emitted code checks the
+    domain at run time and THROWS a named `Error` (`_SYS.domi`/`doms`/
+    `domne`), never returning a wrong value — the `Slice` range-span
+    precedent in the same file. So "agree with the interpreter or
+    `success: false`" below reads, for these operands, "agree, or throw
+    loudly at run time where the interpreter returns an error value".
+    Original text follows.
+    **Compile targets (JS grapheme-correct where cheap; else fail closed;
     Python fails closed; GLSL/WGSL reject).** JS: `StartsWith`/`EndsWith`/
     `ContainsSequence`/`RangeOf` over segmented arrays (`_SYS.chars` for
     strings), element test `_SYS.eqt` for text; `StringReplace`, `Trim*`,

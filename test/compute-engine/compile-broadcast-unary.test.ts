@@ -159,8 +159,11 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
     });
 
     it('the element variable compiles bare, not as a vars lookup', () => {
+      // `np.emath.sqrt`: the element variable is a wide temporary of unknown
+      // sign, and the default `auto` mode promotes such a radical
+      // (compile-mode step 4, 2026-08-16); the point here is the bare `_tv1`.
       const code = p(['Sqrt', ['List', 1, 4, 9]]);
-      expect(code).toBe('[np.sqrt(_tv1) for _tv1 in [1, 4, 9]]');
+      expect(code).toBe('[np.emath.sqrt(_tv1) for _tv1 in [1, 4, 9]]');
       expect(code).not.toContain('_.');
     });
 

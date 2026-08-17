@@ -61,8 +61,11 @@ describe('PYTHON TARGET', () => {
     it('should compile exponential and logarithm', () => {
       const expr = ce.parse('\\exp(x) + \\ln(y)');
       const code = python.compile(expr).code;
-      // \exp(x) is canonicalized to e^x
-      expect(code).toBe('np.e ** x + np.log(y)');
+      // \exp(x) is canonicalized to e^x. `y` has unknown sign, so the default
+      // mode `auto` promotes the logarithm to `np.emath.log`, which returns a
+      // complex value for a negative argument (compile-mode step 4,
+      // 2026-08-16); `mode: 'strict'` keeps `np.log`.
+      expect(code).toBe('np.e ** x + np.emath.log(y)');
     });
 
     it('should compile square root', () => {
@@ -102,8 +105,11 @@ describe('PYTHON TARGET', () => {
     it('should compile nested expressions', () => {
       const expr = ce.parse('\\sqrt{\\sqrt{x^2 + 1} + x}');
       const code = python.compile(expr).code;
-      // Expression is canonicalized (arguments reordered)
-      expect(code).toBe('np.sqrt(x + np.sqrt(x ** 2 + 1))');
+      // Expression is canonicalized (arguments reordered). The INNER radicand
+      // `x² + 1` is provably non-negative and keeps `np.sqrt`; the outer one
+      // has unknown sign, so the default mode promotes it to `np.emath.sqrt`
+      // (compile-mode step 4, 2026-08-16).
+      expect(code).toBe('np.emath.sqrt(x + np.sqrt(x ** 2 + 1))');
     });
 
     it('should compile rational expressions', () => {
@@ -278,7 +284,10 @@ describe('PYTHON TARGET', () => {
       const expr = ce.parse('\\frac{-b + \\sqrt{b^2 - 4ac}}{2a}');
       const code = python.compile(expr).code;
 
-      expect(code).toContain('np.sqrt');
+      // The discriminant has unknown sign, so the default mode promotes it —
+      // `np.emath.sqrt` returns the complex root of a negative discriminant
+      // instead of `nan` (compile-mode step 4, 2026-08-16).
+      expect(code).toContain('np.emath.sqrt');
       expect(code).toContain('b ** 2');
     });
 
@@ -419,9 +428,13 @@ describe('PYTHON TARGET', () => {
       expect(src(expr)).toBe('cmath.sqrt(complex(0, 1))');
     });
 
-    it('should use np.sqrt for real sqrt', () => {
+    it('should use np.emath.sqrt for a real symbol of unknown sign', () => {
+      // A real operand whose sign is unknown is promoted by the default mode
+      // `auto` (compile-mode step 4, 2026-08-16); `mode: 'strict'` is where
+      // the real `np.sqrt` lowering lives.
       const expr = ce.parse('\\sqrt{x}');
-      expect(src(expr)).toBe('np.sqrt(x)');
+      expect(src(expr)).toBe('np.emath.sqrt(x)');
+      expect(python.compile(expr, { mode: 'strict' }).code).toBe('np.sqrt(x)');
     });
 
     it('should use ** for complex power', () => {
@@ -893,12 +906,15 @@ describe('PYTHON TARGET', () => {
 
   // CO-P1-3: a complex argument into a real-only helper returned garbage.
   describe('CO-P1-3 complex into a real-only helper fails closed (D6)', () => {
-    it('Erf of a complex value throws with the offending head', () => {
+    it('Erf of a complex value throws with the offending head, in strict mode', () => {
+      // Under the default mode `auto` a MAYBE-complex operand takes the D2/D6
+      // runtime rule instead of declining (compile-mode step 4, 2026-08-16);
+      // the compile-time decline is the strict-lane behavior.
       const scoped = new ComputeEngine();
       scoped.declare('z', 'complex');
-      expect(() => python.compile(scoped.box(['Erf', 'z'])).code).toThrow(
-        /Erf: real-only target helper/
-      );
+      expect(() =>
+        python.compile(scoped.box(['Erf', 'z']), { mode: 'strict' })
+      ).toThrow(/Erf: real-only target helper/);
     });
 
     it('Real / Conjugate of a complex value are allowed (complex-transparent)', () => {

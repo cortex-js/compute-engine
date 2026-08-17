@@ -33,7 +33,7 @@ describe('complex mode — result convention (design §5) and the lift at use', 
     expect(r.code).toContain('_SYS.cplx(_.a)');
     expect(r.run!({ a: -2 })).toBe(-3);
     expect(r.run!({ a: { re: 1, im: 1 } })).toEqual({ re: 3, im: 2 });
-    expect(r.mode).toBe('strict'); // step 3: the report is computed in step 4
+    expect(r.mode).toBe('complex');
   });
 
   it('√a promotes: {re: 0, im: 1.414…} at a = −2, the number 2 at a = 4', () => {
@@ -214,6 +214,43 @@ describe('complex mode — one emission per user function, lift at use (design �
       re: 6,
       im: 1,
     });
+  });
+
+  it('Sum over a list<complex> symbol folds with the shape-agnostic combiner in every mode', () => {
+    // Review round 3 (2026-08-16): a SYMBOL counted as "real by construction"
+    // regardless of its element type, so `Sum(L)` for `L: list<complex>`
+    // folded with the raw `+` and string-concatenated the objects.
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<complex>');
+    for (const mode of ['auto', 'complex', 'strict'] as const) {
+      const r = compile(ce.box(['Sum', 'L']), { mode, fallback: false });
+      expect(r.code).toContain('_SYS.sadd');
+      expect(r.run!({ L: [{ re: 1, im: 1 }, 2] })).toEqual({ re: 3, im: 1 });
+      expect(r.run!({ L: [1, 2] })).toBe(3);
+    }
+    // A `list<real>` symbol keeps the raw fold.
+    ce.declare('R', 'list<real>');
+    expect(compile(ce.box(['Sum', 'R']), { fallback: false }).code).toBe(
+      '(_.R).reduce((_a, _b) => _a + _b, 0)'
+    );
+  });
+
+  it("a decline raised before the mode latch reports strict/not-promoted, never a previous compilation's report", () => {
+    // Review round 3 (2026-08-16): an `unsupported-mode` decline throws in
+    // `resolveCompileMode` before the try/finally that freezes the report,
+    // so the fallback result could carry the PREVIOUS compilation's
+    // `mode: 'complex'`/`promoted: true`.
+    const ce = new ComputeEngine();
+    const prior = compile(ce.parse('\\sqrt{x}'), CX);
+    expect(prior.mode).toBe('complex');
+    expect(prior.promoted).toBe(true);
+    const declined = compile(ce.parse('x + 1'), {
+      to: 'glsl',
+      mode: 'complex',
+    });
+    expect(declined.success).toBe(false);
+    expect(declined.mode).toBe('strict');
+    expect(declined.promoted).toBe(false);
   });
 
   it('Reduce over a complex list matches the interpreter', () => {

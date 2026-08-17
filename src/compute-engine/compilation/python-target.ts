@@ -1663,8 +1663,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     return `np.exp(${compile(args[0])})`;
   },
   Ln: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      BaseCompiler.recordPromotion('Ln', args);
       return `cmath.log(${compile(args[0])})`;
+    }
     // The caller's `complexPromotion` opt-in: an operand of unknown sign takes
     // the complex lane so the compiled value matches the interpreter's
     // promotion. Uses the SAME predicate `BaseCompiler.isComplexValued`
@@ -1711,11 +1713,22 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(args[1])
     )
       return `(${compile(args[0])} ** ${compile(args[1])})`;
+    // PROMOTION (the `auto`/`complex` disciplines): an unknown-sign base with
+    // a provably non-integer exponent — `np.emath.power` returns the complex
+    // principal value for a negative base (the same helper family the
+    // promoted `Sqrt`/`Ln`/`Log` use), agreeing with `isComplexValued`'s
+    // report to the parent (`promotesRadicalToComplex`).
+    if (BaseCompiler.promotesRadicalToComplex('Power', args))
+      return `np.emath.power(${compile(args[0])}, ${compile(args[1])})`;
     return `np.power(${compile(args[0])}, ${compile(args[1])})`;
   },
   Sqrt: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      // Recorded for the `promoted` report when the operand is complex only
+      // by wideness (see `promotesRadicalToComplex`).
+      BaseCompiler.recordPromotion('Sqrt', args);
       return `cmath.sqrt(${compile(args[0])})`;
+    }
     // The `complexPromotion` opt-in — see `Ln` above. `np.emath.sqrt` rather
     // than `cmath.sqrt` for the same two reasons that matter across all three
     // promoted heads: the operand is a REAL of unknown sign (so the whole real

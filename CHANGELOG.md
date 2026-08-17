@@ -2,32 +2,60 @@
 
 ### Breaking Changes
 
+- **The default compile mode is now `auto`: strict shapes PLUS promotion of
+  unknown-sign radicals, escalating once to complex mode on a lane mismatch.**
+  `compile('\\sqrt{x}')` now lowers through the complex kernel (`_SYS.csqrt`)
+  and returns `{re: 0, im: 1}` at `x = −1` where it returned `NaN` — the
+  interpreter's value; at `x = 4` it is still the number `2`. Also promoted:
+  `Ln`/`Log` of an unknown-sign operand and `x^{0.3}`-style powers (a
+  non-integer NUMBER exponent of an unknown-sign base). Radicals whose operand
+  is non-negative under the compiler's own "wide is real" premise —
+  `√(x² + y²)`, `√((x−a)² + (y−b)²)`, `√|x|`, `ln(x²)` — keep the real kernel
+  byte-for-byte. A complex-shaped value reaching a wide binding (`b(z)` for
+  `b(x) := 2x`, `b(√a)`) no longer compiles a per-call-site lane specialization:
+  the compilation is redone once in complex mode and the result reports it
+  (`mode: 'complex'`, `escalation.boundary`, a user-legible
+  `escalation.binding`). `result.promoted` reports whether a promotion happened
+  (a compile-time fact decided from the source, so the same source always
+  reports the same flag). Real-only heads over a maybe-complex operand (`z < 2`
+  for a complex-typed `z`, `Floor`, `Max`, `Erf`, …) take the runtime rule under
+  `auto` too (`false`/`NaN` when the value is complex) instead of failing
+  closed; a statically non-real operand (`i < 2`) is still a compile-time
+  decline. Pass `mode: 'strict'` for the previous default (real kernel, `NaN`,
+  fail-closed); the shader targets are unchanged (`strict` only). Cost: ~2.3× on
+  chains that actually promote, nothing on the rest. Step 4 of the compile-mode
+  migration.
+- **`complexPromotion` and `realOnly` are deprecated.** `complexPromotion: true`
+  maps to `mode: 'complex'` (a console warning, once per process; it is ignored
+  with a warning beside an explicit `mode`); `realOnly: true` keeps its old
+  result projection for one release with a warning — the result convention below
+  (a real value is a plain `number`, a `ComplexResult` always has `im !== 0`)
+  replaces it.
 - **Compiled JavaScript result convention: a value whose imaginary part is
   exactly zero now comes back as a plain `number`, never as `{re, im: 0}`.**
-  Both directions are guaranteed at the `run()` boundary — a returned
-  `{re, im}` always has `im !== 0`, and a real value is never an object — so a
-  consumer's per-sample test is the single `typeof v === 'number'`. Applies
-  element by element to collection results, and to the interpreter-backed
-  fallback runner. The transcendental complex kernels (`_SYS.casin`,
-  `_SYS.cexp`, `_SYS.cpow`, …) now chop their own roundoff dust at the
-  machine scale (as the interpreter's `apply` does), which is what lets the
-  boundary test be exact instead of a chop: `arcsin(0.5)` compiled through
-  the complex kernel is the number `0.5235…`, and `1 + 1e-12i` stays
-  `{re: 1, im: 1e-12}` (nothing is chopped in ring arithmetic).
-  `realOnly: true` still projects as before. Step 1 of the compile-mode
-  migration (`docs/plans/2026-08-16-compile-complex-mode.md`).
+  Both directions are guaranteed at the `run()` boundary — a returned `{re, im}`
+  always has `im !== 0`, and a real value is never an object — so a consumer's
+  per-sample test is the single `typeof v === 'number'`. Applies element by
+  element to collection results, and to the interpreter-backed fallback runner.
+  The transcendental complex kernels (`_SYS.casin`, `_SYS.cexp`, `_SYS.cpow`, …)
+  now chop their own roundoff dust at the machine scale (as the interpreter's
+  `apply` does), which is what lets the boundary test be exact instead of a
+  chop: `arcsin(0.5)` compiled through the complex kernel is the number
+  `0.5235…`, and `1 + 1e-12i` stays `{re: 1, im: 1e-12}` (nothing is chopped in
+  ring arithmetic). `realOnly: true` still projects as before. Step 1 of the
+  compile-mode migration (`docs/plans/2026-08-16-compile-complex-mode.md`).
 
 - **`StringJoin` is no longer variadic, and a two-string call now means
   something else — silently.** The signature narrows to
   `(collection<string | character>, separator: string?) -> string`: one
-  collection to join, plus an optional separator between elements. There is
-  no compatibility spelling.
+  collection to join, plus an optional separator between elements. There is no
+  compatibility spelling.
 
-  This is the entry to read carefully, because the old spelling still
-  evaluates. `StringJoin("ab", "cd")` used to be `"abcd"`; a string is now a
-  collection of its characters, so the same call is read as "join the
-  characters of `"ab"` with the separator `"cd"`" and evaluates to `"acdb"`.
-  No error, a different answer. Audit every multi-argument `StringJoin` call.
+  This is the entry to read carefully, because the old spelling still evaluates.
+  `StringJoin("ab", "cd")` used to be `"abcd"`; a string is now a collection of
+  its characters, so the same call is read as "join the characters of `"ab"`
+  with the separator `"cd"`" and evaluates to `"acdb"`. No error, a different
+  answer. Audit every multi-argument `StringJoin` call.
 
   ```epsil
   StringJoin(["a", "b", "c"], ", ")   // ➔ "a, b, c"
@@ -35,35 +63,35 @@
   StringJoin("ab", "cd")              // ➔ "acdb"    (was "abcd")
   ```
 
-  Migration: for concatenating a fixed number of strings use `Join(a, b)`
-  (the new string arm below) or Epsil interpolation `"\(a)\(b)"`. Keep
-  `StringJoin` only where the subject really is a collection to be joined.
+  Migration: for concatenating a fixed number of strings use `Join(a, b)` (the
+  new string arm below) or Epsil interpolation `"\(a)\(b)"`. Keep `StringJoin`
+  only where the subject really is a collection to be joined.
 
-  Two smaller consequences of the narrowing: a `character` is not a
-  collection, so `StringJoin(CharacterFrom("a"))` is now an
-  `incompatible-type` error (wrap it — `String(c)`, or put it in a list), and
-  an element that is neither a string nor a character is reported as an
-  `incompatible-type` error at the operand wherever the operand's own type
-  shows it, rather than only leaving the call unevaluated.
+  Two smaller consequences of the narrowing: a `character` is not a collection,
+  so `StringJoin(CharacterFrom("a"))` is now an `incompatible-type` error (wrap
+  it — `String(c)`, or put it in a list), and an element that is neither a
+  string nor a character is reported as an `incompatible-type` error at the
+  operand wherever the operand's own type shows it, rather than only leaving the
+  call unevaluated.
 
 - **`RandomShuffle`, `RandomSample` and `DeleteAt` return a `string` for a
-  string source**, both as the static type and as the runtime value. All
-  three produce a permutation or a subset of the source's own characters, so
-  by the string-preservation rule they belong with `Reverse` and `Take`;
-  until now they returned `list<character>`. `Type(RandomShuffle("abc"))` is
-  `"string"`, and `DeleteAt("abcdef", 2)` is `"acdef"`, not
-  `["a", "c", "d", "e", "f"]`. Code that consumed the list result must either
-  accept the string or re-project it with `Characters(...)`. This closes the
-  last of the Phase-1 string-arm deferrals.
+  string source**, both as the static type and as the runtime value. All three
+  produce a permutation or a subset of the source's own characters, so by the
+  string-preservation rule they belong with `Reverse` and `Take`; until now they
+  returned `list<character>`. `Type(RandomShuffle("abc"))` is `"string"`, and
+  `DeleteAt("abcdef", 2)` is `"acdef"`, not `["a", "c", "d", "e", "f"]`. Code
+  that consumed the list result must either accept the string or re-project it
+  with `Characters(...)`. This closes the last of the Phase-1 string-arm
+  deferrals.
 
 - **The chunking and combinatorics operators return INNER STRINGS for a string
   source**, both as the static type and as the runtime value: `Chunk`,
   `Partition` (chunk, sliding-window and predicate forms), `ChunkBy`,
-  `SlidingWindow`, `Permutations` and `Combinations` now report
-  `list<string>` instead of `list<list<character>>`. Each inner element is a
-  contiguous run — or a reordering, or a subset — of the source's own
-  characters, which is the same condition under which `Reverse`, `Take` and
-  `RandomShuffle` already preserve the string kind.
+  `SlidingWindow`, `Permutations` and `Combinations` now report `list<string>`
+  instead of `list<list<character>>`. Each inner element is a contiguous run —
+  or a reordering, or a subset — of the source's own characters, which is the
+  same condition under which `Reverse`, `Take` and `RandomShuffle` already
+  preserve the string kind.
 
   ```epsil
   Chunk("abcdef", 2)          // ➔ ["abc", "def"]     (was [["a","b","c"], …])
@@ -76,16 +104,16 @@
   A group that comes out empty is an empty STRING, so `Chunk` — which always
   reshapes to exactly `k` groups — answers `Chunk("abc", 5)` with
   `["a", "b", "c", "", ""]`. `Partition`'s DISPLAYED signature is unchanged
-  (`list<list<T>>`): its string result comes from a `type` handler rather than
-  a leading string arm, because its second parameter is a contextual
-  `callback` slot and a second arm carrying that slot would make the Design-D
-  parameter stamp ambiguous, costing `Partition(xs, n => n < 3)` the `integer`
-  annotation on `n`.
+  (`list<list<T>>`): its string result comes from a `type` handler rather than a
+  leading string arm, because its second parameter is a contextual `callback`
+  slot and a second arm carrying that slot would make the Design-D parameter
+  stamp ambiguous, costing `Partition(xs, n => n < 3)` the `integer` annotation
+  on `n`.
 
   Code that consumed the inner lists must either accept the strings or
-  re-project them with `Characters(...)`. `Tally` is deliberately UNCHANGED
-  and still yields `character` values: its first component holds the source's
-  distinct *elements*, each paired with a count, not runs of them, so
+  re-project them with `Characters(...)`. `Tally` is deliberately UNCHANGED and
+  still yields `character` values: its first component holds the source's
+  distinct _elements_, each paired with a count, not runs of them, so
   `Tally("banana")` stays `(["b","a","n"], [1,3,2])`.
 
 ### New Features
@@ -95,88 +123,88 @@
   shaped real — a wide (unannotated) user-function parameter, whether called
   directly (`b(z)`, `b(L)` for a `list<complex>`) or passed by name
   (`Map(b, L)`), a wide multi-clause clause parameter, a wide protocol member
-  parameter, a `Block` local first bound real and later assigned a complex
-  value (top-level or inside a conditional) — is a `LaneMismatch` decline:
-  `success: false`, `diagnostic.code === 'lane-mismatch'`, `kind:
-  'correctness'`, with a user-legible `binding` ("the parameter `x` of `b`")
-  and the offending `value`, instead of a silently wrong `NaN` /
+  parameter, a `Block` local first bound real and later assigned a complex value
+  (top-level or inside a conditional) — is a `LaneMismatch` decline:
+  `success: false`, `diagnostic.code === 'lane-mismatch'`,
+  `kind: 'correctness'`, with a user-legible `binding` ("the parameter `x` of
+  `b`") and the offending `value`, instead of a silently wrong `NaN` /
   `"[object Object]"` result. `auto` (the default) and `complex` keep today's
   emission in this release; step 4 of the migration makes `auto` escalate.
-- **`mode: 'complex'` now computes.** Under the complex discipline a
-  numeric binding whose static type is wide (`unknown`, `number`, an
-  unannotated parameter, a block local not declared real) is complex-shaped
-  and lifted at its use through the idempotent `_SYS.cplx` (a number becomes
-  `{re, im: 0}`, an object or a non-number passes through); a user function
-  is emitted once, whatever its call sites pass; unknown-sign
-  `Sqrt`/`Ln`/`Log` promote (`√a` at `a = −2` is `{re: 0, im: 1.414…}`, at
-  `a = 4` the number `2`); and the real-only heads take the D2/D6 RUNTIME
-  rule — an ordering comparison, an integer-only head (`Floor`, `Mod`,
-  `Max`, …) or a real-only helper (`Erf`, …) over a maybe-complex operand
-  binds it once, runs the real lowering when its imaginary part is exactly
-  zero, and answers `false` / `NaN` otherwise (`z < 2` for a complex-typed
-  `z` compiles: `true` at `1`, `false` at `i`); a statically non-real
-  operand (`i < 2`, `Floor(2i)`) is a compile-time `capability` decline
-  (`diagnostic.code === 'non-real-operand'`). Typed-real values keep the
-  real kernel. Step 3 of the compile-mode migration.
+- **`mode: 'complex'` now computes.** Under the complex discipline a numeric
+  binding whose static type is wide (`unknown`, `number`, an unannotated
+  parameter, a block local not declared real) is complex-shaped and lifted at
+  its use through the idempotent `_SYS.cplx` (a number becomes `{re, im: 0}`, an
+  object or a non-number passes through); a user function is emitted once,
+  whatever its call sites pass; unknown-sign `Sqrt`/`Ln`/`Log` promote (`√a` at
+  `a = −2` is `{re: 0, im: 1.414…}`, at `a = 4` the number `2`); and the
+  real-only heads take the D2/D6 RUNTIME rule — an ordering comparison, an
+  integer-only head (`Floor`, `Mod`, `Max`, …) or a real-only helper (`Erf`, …)
+  over a maybe-complex operand binds it once, runs the real lowering when its
+  imaginary part is exactly zero, and answers `false` / `NaN` otherwise (`z < 2`
+  for a complex-typed `z` compiles: `true` at `1`, `false` at `i`); a statically
+  non-real operand (`i < 2`, `Floor(2i)`) is a compile-time `capability` decline
+  (`diagnostic.code === 'non-real-operand'`). Typed-real values keep the real
+  kernel. Step 3 of the compile-mode migration.
 - **D3 entry check on the compiled JavaScript runner.** `run(vars)` and a
   compiled lambda's arguments are checked against the shape the compilation
   analyzed each binding as: a `{re, im}` bound to a free symbol or unannotated
   lambda parameter analyzed real throws a `TypeError` naming it (it used to
   compute garbage), and a plain number bound to a `complex`-typed symbol or
   parameter is lifted to `{re, im: 0}` (`z^2 + z` with `run({z: 2})` used to
-  return `NaN`). One `typeof` per binding per call. Engine-initiated
-  (implicit) compilations opt out with the new `entryChecks: false` option;
-  their callers own the argument contract.
+  return `NaN`). One `typeof` per binding per call. Engine-initiated (implicit)
+  compilations opt out with the new `entryChecks: false` option; their callers
+  own the argument contract.
 - **Definition attributes: `bind` parameters, algebraic properties, and doc
   comments.** Three additions ride on the `DefineFunction` attributes operand
   introduced with `hold` in 0.114.0:
   - **`bind`** marks a bound-variable parameter of a `hold` function — the
-    user-defined counterpart of `Sum`'s index: `hold mySum(body, bind i, n)
-    = Sum(body, (i, 1, n))`, then `mySum(k^2, k, 3)` is `14`. The caller
-    passes a symbol at a `bind` position (else `bind-symbol-expected`); the
-    parameter is substituted by that symbol in the body, binder positions
-    included, and the definition is installed as a binder (`scoped:
-    operandSites(…)`), so the call declares the symbol in its own scope and a
-    global `k` does not leak in. `bind` requires `hold`
+    user-defined counterpart of `Sum`'s index:
+    `hold mySum(body, bind i, n) = Sum(body, (i, 1, n))`, then
+    `mySum(k^2, k, 3)` is `14`. The caller passes a symbol at a `bind` position
+    (else `bind-symbol-expected`); the parameter is substituted by that symbol
+    in the body, binder positions included, and the definition is installed as a
+    binder (`scoped: operandSites(…)`), so the call declares the symbol in its
+    own scope and a global `k` does not leak in. `bind` requires `hold`
     (`bind-requires-hold`) and is contextual (`f(bind) = …` is an ordinary
     parameter). MathJSON: `{hold: True, bind: ["i"]}`.
   - **`commutative`, `associative`, `idempotent`, `involution`** in the
-    specifier slot of a definition (`function op(a, b) commutative
-    associative -> number {…}`, `conj(z) involution -> number = -z`) set the
-    operator flags of the same names, so calls are sorted, flattened and
-    folded (`conj(conj(w))` → `w`) at canonicalization. An associative
-    function is binary and a flattened n-ary call is folded from the left.
-    Arity is checked; not combinable with `hold`; every clause of a
-    multi-clause definition must state the same words. MathJSON:
-    `{commutative: True, …}`.
+    specifier slot of a definition
+    (`function op(a, b) commutative associative -> number {…}`,
+    `conj(z) involution -> number = -z`) set the operator flags of the same
+    names, so calls are sorted, flattened and folded (`conj(conj(w))` → `w`) at
+    canonicalization. An associative function is binary and a flattened n-ary
+    call is folded from the left. Arity is checked; not combinable with `hold`;
+    every clause of a multi-clause definition must state the same words.
+    MathJSON: `{commutative: True, …}`.
   - **A doc comment** (`///` lines or a `/** … */` block) written immediately
-    before a function definition becomes its `description`: `About(f)`
-    prints it, the VS Code hover shows it below the quoted header, and it
-    survives a serialization round trip (re-emitted as `///` lines).
-    MathJSON: `{description: "…"}`. `About(f)` also now describes a
-    user-defined or library FUNCTION (signature, flags, description) instead
-    of falling through to "symbol / value".
+    before a function definition becomes its `description`: `About(f)` prints
+    it, the VS Code hover shows it below the quoted header, and it survives a
+    serialization round trip (re-emitted as `///` lines). MathJSON:
+    `{description: "…"}`. `About(f)` also now describes a user-defined or
+    library FUNCTION (signature, flags, description) instead of falling through
+    to "symbol / value".
 
-- **`compile()` accepts a `mode` option — `'strict'`, `'complex'` or
-  `'auto'`** — the arithmetic discipline a compilation runs under (what a
-  wide-typed numeric binding is shaped as, and what happens when a
-  complex-shaped value reaches one). The effective mode is `options.mode` ??
-  the target's `mode` ?? the target's default (`'auto'` on `javascript` and
-  `python`, `'strict'` on `interval-js`, `glsl` and `wgsl`); requesting a mode
-  a target does not offer is a `capability` decline, never a silent coercion.
-  A custom `CompileTarget` declares what it offers with `supportedModes` and
-  the `complexLift` / `complexIsReal` (and, for a reusable direct target,
-  `reset`) hooks. In this release every setting still compiles with the
-  strict-shaped emission; the strict lane-mismatch declines, the complex
-  discipline and `auto`'s escalation land in the following steps.
+- **`compile()` accepts a `mode` option — `'strict'`, `'complex'` or `'auto'`**
+  — the arithmetic discipline a compilation runs under (what a wide-typed
+  numeric binding is shaped as, and what happens when a complex-shaped value
+  reaches one). The effective mode is `options.mode` ?? the target's `mode` ??
+  the target's default (`'auto'` on `javascript` and `python`, `'strict'` on
+  `interval-js`, `glsl` and `wgsl`); requesting a mode a target does not offer
+  is a `capability` decline, never a silent coercion. A custom `CompileTarget`
+  declares what it offers with `supportedModes` and the `complexLift` /
+  `complexIsReal` (and, for a reusable direct target, `reset`) hooks. In this
+  release every setting still compiles with the strict-shaped emission; the
+  strict lane-mismatch declines, the complex discipline and `auto`'s escalation
+  land in the following steps.
 - **`CompilationResult` gains `mode`, `promoted`, `escalation` and
   `diagnostic`.** `diagnostic` is the structured form of `error` on every
-  decline — `{ code, kind: 'capability' | 'correctness', message, boundary?,
-  binding?, value? }` — so a consumer's census never re-cuts a taxonomy from
-  message text; `mode` and `promoted` report the discipline the code was
-  compiled under and whether a radical was promoted (`'strict'` / `false` in
-  this release). `LaneMismatchError` / `CompileDeclineError` and the
-  `CompileMode` / `CompileDiagnostic` types are exported.
+  decline —
+  `{ code, kind: 'capability' | 'correctness', message, boundary?, binding?, value? }`
+  — so a consumer's census never re-cuts a taxonomy from message text; `mode`
+  and `promoted` report the discipline the code was compiled under and whether a
+  radical was promoted (`'strict'` / `false` in this release).
+  `LaneMismatchError` / `CompileDeclineError` and the `CompileMode` /
+  `CompileDiagnostic` types are exported.
 
 - **`Join` concatenates strings.** When every argument is a string, `Join`
   answers a `string` — this is the variadic string concatenation, and the
@@ -188,17 +216,17 @@
   Join("ab", Characters("cd"))// ➔ ["a","b","c","d"]  (list<character>)
   ```
 
-  The arm is chosen by the arguments, not by the declared types: as soon as
-  one argument is not a string the generic collection arm applies and a
-  string operand contributes its characters. Concatenation joins and
-  re-segments, so `Join("e", "́")` is the single character `"é"`.
+  The arm is chosen by the arguments, not by the declared types: as soon as one
+  argument is not a string the generic collection arm applies and a string
+  operand contributes its characters. Concatenation joins and re-segments, so
+  `Join("e", "́")` is the single character `"é"`.
 
 - **Substring search: `RangeOf`, `ContainsSequence`, `StartsWith` and
   `EndsWith`.** These are contiguous-**subsequence** operators, generic over
-  indexed collections, and character-wise on strings. They are the answer to
-  the "substring search is a separate operation" note from the previous
-  release: `Contains`/`IndexOf` search for one **element**, this family
-  searches for a **sequence** of them.
+  indexed collections, and character-wise on strings. They are the answer to the
+  "substring search is a separate operation" note from the previous release:
+  `Contains`/`IndexOf` search for one **element**, this family searches for a
+  **sequence** of them.
 
   ```epsil
   RangeOf([9, 7, 5, 3], [7, 5])       // ➔ [2,3]    — the range 2..3
@@ -214,17 +242,15 @@
   third argument is the index to start searching at, with the span always
   reported in the original subject's indexes: find-next is
   `RangeOf(xs, needle, Last(r) + 1)`, and find-all is that loop run until it
-  answers `Nothing`. A `from` past the end is `Nothing`, never an error, so
-  the loop terminates cleanly; a `from` below 1 or non-integer is an error
-  value, as is an **empty** needle (an empty span is not representable —
-  `Range(1, 0)` is the descending range `[1, 0]`). The three booleans answer
-  `True` for an empty needle instead. An infinite or unknown-length subject
-  or needle leaves the expression symbolic, and `EndsWith` additionally needs
-  a known length.
+  answers `Nothing`. A `from` past the end is `Nothing`, never an error, so the
+  loop terminates cleanly; a `from` below 1 or non-integer is an error value, as
+  is an **empty** needle (an empty span is not representable — `Range(1, 0)` is
+  the descending range `[1, 0]`). The three booleans answer `True` for an empty
+  needle instead. An infinite or unknown-length subject or needle leaves the
+  expression symbolic, and `EndsWith` additionally needs a known length.
 
-  Matching whole elements is what makes the string cases grapheme-safe
-  without a separate rule — a needle can never match across a cluster
-  boundary:
+  Matching whole elements is what makes the string cases grapheme-safe without a
+  separate rule — a needle can never match across a cluster boundary:
 
   ```epsil
   RangeOf("x́y", "x")   // ➔ Nothing  (the characters are [x́, y])
@@ -235,11 +261,11 @@
 - **`Slice` accepts a `nothing` span and passes it through**, so a `RangeOf`
   result can be sliced without a test in between:
   `Slice(xs, RangeOf(xs, needle))` is the matched run, or `Nothing` when the
-  needle is absent. Sliced with a found span the result has the needle's
-  element sequence — the defining law of `RangeOf`, stated element-wise
-  because `Slice` is kind-preserving (a `list<character>` needle over a
-  string subject gives a `string` back, equal element by element but never
-  `==`, since the two types are disjoint siblings).
+  needle is absent. Sliced with a found span the result has the needle's element
+  sequence — the defining law of `RangeOf`, stated element-wise because `Slice`
+  is kind-preserving (a `list<character>` needle over a string subject gives a
+  `string` back, equal element by element but never `==`, since the two types
+  are disjoint siblings).
 
 - **String operations: `StringReplace`, `Trim`/`TrimStart`/`TrimEnd`,
   `StringRepeat`, `PadStart`/`PadEnd`.**
@@ -256,23 +282,22 @@
 
   `StringReplace` finds occurrences with the same character-wise matching
   `RangeOf` uses, non-overlapping, left to right, walking the **original**
-  subject and skipping past each match — so a replacement's own content is
-  never re-matched (`StringReplace("aa", "a", "aa")` is `"aaaa"`, not an
-  infinite expansion). An empty `target` is an error value: the host
-  `replaceAll("", x)` insert-at-every-boundary behavior is deliberately not
-  inherited. An empty `replacement` means deletion. `count` must be a
-  positive integer.
+  subject and skipping past each match — so a replacement's own content is never
+  re-matched (`StringReplace("aa", "a", "aa")` is `"aaaa"`, not an infinite
+  expansion). An empty `target` is an error value: the host `replaceAll("", x)`
+  insert-at-every-boundary behavior is deliberately not inherited. An empty
+  `replacement` means deletion. `count` must be a positive integer.
 
   `Trim`'s optional argument is a **set** of characters to strip (a string
   argument means "the set of this string's characters"), defaulting to the
   Unicode `White_Space` set `StringSplit` already uses. `PadStart`/`PadEnd`
-  count characters, not display columns; a multi-character pad repeats and
-  the final copy is truncated on a character boundary; an empty pad is an
-  error value, and `n` must be a non-negative integer.
+  count characters, not display columns; a multi-character pad repeats and the
+  final copy is truncated on a character boundary; an empty pad is an error
+  value, and `n` must be a non-negative integer.
 
-- **Case operations: `ToUpperCase`, `ToLowerCase`, `CaseFold`.** Unicode
-  default (locale-independent) mappings, applied to the whole string rather
-  than character by character, because case mapping is contextual:
+- **Case operations: `ToUpperCase`, `ToLowerCase`, `CaseFold`.** Unicode default
+  (locale-independent) mappings, applied to the whole string rather than
+  character by character, because case mapping is contextual:
 
   ```epsil
   ToUpperCase("straße")        // ➔ "STRASSE"  — Length 7, from a 6-character input
@@ -281,25 +306,25 @@
   CaseFold("ΟΔΟΣ") == CaseFold("οδοσ")   // ➔ True
   ```
 
-  `CaseFold` is the primitive for case-insensitive comparison — compare
-  folded forms, not `ToLowerCase` results, which disagree on the Greek final
-  sigma. There is no locale argument in v1, so the Turkish dotless-i mapping
-  is not available. The fold is a documented v1 approximation: the host
-  offers no case-folding primitive, so it is uppercase-then-lowercase with
-  the Greek final sigma restored to medial, which agrees with Unicode full
-  case folding on Latin, Greek and Cyrillic text and deviates for a few
-  characters `CaseFolding.txt` maps specially (Cherokee, some Turkic and
-  Lithuanian sequences).
+  `CaseFold` is the primitive for case-insensitive comparison — compare folded
+  forms, not `ToLowerCase` results, which disagree on the Greek final sigma.
+  There is no locale argument in v1, so the Turkish dotless-i mapping is not
+  available. The fold is a documented v1 approximation: the host offers no
+  case-folding primitive, so it is uppercase-then-lowercase with the Greek final
+  sigma restored to medial, which agrees with Unicode full case folding on
+  Latin, Greek and Cyrillic text and deviates for a few characters
+  `CaseFolding.txt` maps specially (Cherokee, some Turkic and Lithuanian
+  sequences).
 
 - **`StringCompare(a, b)`** answers `-1`, `0` or `1` for the **code-point**
   order of two strings, compared position by position over their NFC scalar
   sequences. This is not the order `<` gives: the relational operators on two
-  multi-character strings compare UTF-16 **code units**, which sorts the
-  astral characters (U+10000 and up, encoded from U+D800) below the range
-  U+E000–U+FFFF. The two orders agree on everything below U+D800 — all of
-  Latin, Greek, Cyrillic, CJK. `<` is unchanged; use `StringCompare` when the
-  ordering must be by code point. The order is deliberately never
-  locale-aware; a collation, if it ships, arrives as an explicit argument.
+  multi-character strings compare UTF-16 **code units**, which sorts the astral
+  characters (U+10000 and up, encoded from U+D800) below the range
+  U+E000–U+FFFF. The two orders agree on everything below U+D800 — all of Latin,
+  Greek, Cyrillic, CJK. `<` is unchanged; use `StringCompare` when the ordering
+  must be by code point. The order is deliberately never locale-aware; a
+  collation, if it ships, arrives as an explicit argument.
 
 - **`NumberFrom(s, base?)`** parses a numeral, filling the gap `DigitsFrom`
   (integer-only) left. The accepted grammar is fixed so hosts cannot drift:
@@ -319,11 +344,10 @@
   ```
 
   Failure is always an error value, never `NaN` — `NaN` is a legitimate parse
-  *result* for the literal `"NaN"`, so it cannot double as the failure
-  signal. Non-ASCII decimal digits are rejected, so homoglyph digits cannot
-  slip through. Exactness follows the evaluate/`N` contract: an integer
-  numeral is an exact integer, a fractional or exponent numeral an exact
-  decimal.
+  _result_ for the literal `"NaN"`, so it cannot double as the failure signal.
+  Non-ASCII decimal digits are rejected, so homoglyph digits cannot slip
+  through. Exactness follows the evaluate/`N` contract: an integer numeral is an
+  exact integer, a fractional or exponent numeral an exact decimal.
 
   See the [Strings reference](/compute-engine/reference/strings/) and the
   sequence-search family in the
@@ -332,47 +356,48 @@
 ### Bug Fixes
 
 - **A pipe stage missing its trailing argument now receives the piped value
-  there.** `xs |> Fold(f, 10)` put the list in the FIRST slot whose type it
-  fit — `initial: value` (a list is a value) — pushing `10` into the
-  collection slot and leaving an inert `Fold(f, xs, 10)`; likewise `xs |>
-  Fold(Join, header)` (a string is a collection, so `header` "fit" the slot it
-  was pushed into). The placement now also requires the written arguments to
-  fit the slots they are displaced into, and among the fitting slots takes
-  the TRAILING one — the one that displaces the fewest written arguments.
-  `xs |> Take(10)`, `xs |> Map(f)` and `xs |> Filter(p)` place as before.
+  there.** `xs |> Fold(f, 10)` put the list in the FIRST slot whose type it fit
+  — `initial: value` (a list is a value) — pushing `10` into the collection slot
+  and leaving an inert `Fold(f, xs, 10)`; likewise `xs |> Fold(Join, header)` (a
+  string is a collection, so `header` "fit" the slot it was pushed into). The
+  placement now also requires the written arguments to fit the slots they are
+  displaced into, and among the fitting slots takes the TRAILING one — the one
+  that displaces the fewest written arguments. `xs |> Take(10)`, `xs |> Map(f)`
+  and `xs |> Filter(p)` place as before.
 
-- **A multi-clause function with a declared `complex` parameter, and a
-  protocol member with a declared `complex` parameter, are now handed the
-  argument in the shape their body expects.** `S(0) -> complex {0}; S(z:
-  complex) -> complex {z + 1}` compiled as `S(w)` returned `{re: null}` at
-  `w = 2` (now `3`); `scale(2, w)` for `scale(self, k: complex)` returned
-  `{re: null}` at `w = 3` (now `4`). The multi-clause and protocol dispatchers
-  also decide dispatch on the normalized value — an exactly-real `{re, im:
-  0}` dispatches as the real number it is — so a value clause or a
-  `real`-typed clause selects as the interpreter selects.
-- **The interpreter-backed compile fallback honors the runner contract in
-  both directions.** A `{re, im}` value passed in `vars` is declared as a
-  complex number (it was declared `number`, so `run()` threw an
-  `incompatible-type` error on the assignment), and a boolean-valued or
-  complex-valued result comes back as a boolean / `{re, im}` instead of the
-  unconditional `.re` (`NaN` for a boolean, the real part of a genuinely
-  complex value). Shared by every target's `fallback: true` decline.
+- **A multi-clause function with a declared `complex` parameter, and a protocol
+  member with a declared `complex` parameter, are now handed the argument in the
+  shape their body expects.**
+  `S(0) -> complex {0}; S(z: complex) -> complex {z + 1}` compiled as `S(w)`
+  returned `{re: null}` at `w = 2` (now `3`); `scale(2, w)` for
+  `scale(self, k: complex)` returned `{re: null}` at `w = 3` (now `4`). The
+  multi-clause and protocol dispatchers also decide dispatch on the normalized
+  value — an exactly-real `{re, im: 0}` dispatches as the real number it is — so
+  a value clause or a `real`-typed clause selects as the interpreter selects.
+- **The interpreter-backed compile fallback honors the runner contract in both
+  directions.** A `{re, im}` value passed in `vars` is declared as a complex
+  number (it was declared `number`, so `run()` threw an `incompatible-type`
+  error on the assignment), and a boolean-valued or complex-valued result comes
+  back as a boolean / `{re, im}` instead of the unconditional `.re` (`NaN` for a
+  boolean, the real part of a genuinely complex value). Shared by every target's
+  `fallback: true` decline.
 - **A multi-clause function applied to a collection now maps over it, like a
-  function literal does.** `fib(0) = 0; fib(1) = 1; fib(n) = fib(n - 1) +
-  fib(n - 2)` then `5..10 |> fib |> Sum` bound the whole range to `n` — no
-  base clause ever matched, and the call died with "Maximum call stack size
-  exceeded". It now evaluates to `136` (`fib(5..10)` is `[5, 8, 13, 21, 34,
-  55]`). Same rules as for `x ↦ …`: every clause's parameters must be scalar
-  (a clause taking a `list<…>` binds the collection whole), and hold/binder
-  definitions are exempt. Two typing defects surfaced alongside and are
-  fixed: `g(x)` with an untyped `x` no longer narrows `x` to a literal clause's
-  type (`g(0) = 0; g(n) = n^2; g(x)` evaluated to `0`; it now stays `g(x)`);
-  and a user function's call is no longer re-typed by the "integer arguments
-  ⇒ integer result" heuristic that operators without a type handler get
-  (`k(n) = n / 3` typed `k(4)` as `finite_integer` for the value `4/3`; the
-  body's own inferred `finite_number` now stands). An intersection signature
-  is also read arm by arm for scalar-ness, so a `(matrix) & (collection)`
-  overload set no longer admits a list at the `matrix` slot unchecked.
+  function literal does.**
+  `fib(0) = 0; fib(1) = 1; fib(n) = fib(n - 1) + fib(n - 2)` then
+  `5..10 |> fib |> Sum` bound the whole range to `n` — no base clause ever
+  matched, and the call died with "Maximum call stack size exceeded". It now
+  evaluates to `136` (`fib(5..10)` is `[5, 8, 13, 21, 34, 55]`). Same rules as
+  for `x ↦ …`: every clause's parameters must be scalar (a clause taking a
+  `list<…>` binds the collection whole), and hold/binder definitions are exempt.
+  Two typing defects surfaced alongside and are fixed: `g(x)` with an untyped
+  `x` no longer narrows `x` to a literal clause's type
+  (`g(0) = 0; g(n) = n^2; g(x)` evaluated to `0`; it now stays `g(x)`); and a
+  user function's call is no longer re-typed by the "integer arguments ⇒ integer
+  result" heuristic that operators without a type handler get (`k(n) = n / 3`
+  typed `k(4)` as `finite_integer` for the value `4/3`; the body's own inferred
+  `finite_number` now stands). An intersection signature is also read arm by arm
+  for scalar-ness, so a `(matrix) & (collection)` overload set no longer admits
+  a list at the `matrix` slot unchecked.
 
 ## 0.114.0 _2026-08-16_
 
@@ -575,9 +600,9 @@
   conformances.** A protocol property can be satisfied by a stored field of the
   same name on a conforming object type, and that verdict was taken against the
   layout the type had when the conformance was registered. Re-running
-  `type P = object{…}` with different fields — which the notebook pattern
-  allows — left every such verdict standing: an accessor synthesized for a field
-  the new declaration dropped kept answering, a field it added got none, and a
+  `type P = object{…}` with different fields — which the notebook pattern allows
+  — left every such verdict standing: an accessor synthesized for a field the
+  new declaration dropped kept answering, a field it added got none, and a
   RETYPED field delivered a value of the new type through a property still
   statically typed as the old one (`readonly a: integer` reading `"s"`). A
   redefinition now re-settles every conformance edge exactly as replacing a
@@ -586,7 +611,14 @@
   the layout they were built with, so their own fields still read and write —
   but asking one for a protocol property its pinned layout cannot satisfy is now
   refused with `protocol-implementation-missing` instead of quietly evaluating
-  to the unevaluated call.
+  to the unevaluated call. The unqualified `p.name` reports the same thing in
+  the one case where the conformance is in force and only this instance cannot
+  meet it — a property the type gained after the object was built. It is
+  otherwise unchanged: `unknown-field`, naming the object's stored fields, is
+  still the answer whenever no live conformance answers for the name at all,
+  which covers a conformance the redefinition left pending as well as one whose
+  implementation has simply not been written yet. A stored field the object does
+  carry reads and writes directly, without consulting any conformance.
 
 - **`Reduce` under `.N()` no longer errors when the reducer's accumulator turns
   complex mid-fold.** `["Reduce", [1, 2, 3], ["Function", z² + c, z, k], 0]`

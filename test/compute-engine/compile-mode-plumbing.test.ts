@@ -32,9 +32,12 @@ import type { Expression } from '../../src/compute-engine/global-types';
  *   is a plain `number`, a `ComplexResult` always has `im !== 0`;
  * - the internal `realOnly` callers migrated to a local numeric projection.
  *
- * NOT in this step (and asserted as such where cheap): `mode: 'complex'` and
- * `mode: 'auto'` are accepted but compile as `strict`; `complexPromotion` and
- * `realOnly` are honored exactly as before.
+ * Migration step 4 (2026-08-16) landed the `auto` default on `javascript` and
+ * `python`: the pins below that used to read "accepted but compiled as
+ * `strict`" now read the shipped behavior — `auto` promotes an unknown-sign
+ * radical and escalates once to `complex` at a wide binding, and
+ * `complexPromotion: true` is deprecated to `mode: 'complex'`. A test whose
+ * subject is the non-promoting discipline passes `mode: 'strict'` explicitly.
  */
 
 /** A minimal direct custom target (the RPN shape of `compile-plugin.test.ts`). */
@@ -68,8 +71,9 @@ describe('compile mode — option surface (step 1)', () => {
     for (const mode of ['strict', 'complex', 'auto'] as const) {
       const r = compile(ce.parse('2x + 1'), { mode });
       expect(r.success).toBe(true);
-      // Step 1: every setting compiles under the strict-shaped emission.
-      expect(r.mode).toBe('strict');
+      // `2x + 1` has no promotable head, so `auto` reports the mode of its
+      // first (strict) attempt; only an explicit `complex` reports 'complex'.
+      expect(r.mode).toBe(mode === 'complex' ? 'complex' : 'strict');
       expect(r.promoted).toBe(false);
       expect(r.escalation).toBeUndefined();
       expect(r.diagnostic).toBeUndefined();
@@ -77,12 +81,21 @@ describe('compile mode — option surface (step 1)', () => {
     }
   });
 
-  it('strict and auto compile the same code (auto escalation is step 4)', () => {
+  it('strict and auto compile the same code when nothing promotes', () => {
+    const plain = ce.parse('2x + 1');
+    const plainStrict = compile(plain, { mode: 'strict' }).code;
+    expect(compile(plain, { mode: 'auto' }).code).toBe(plainStrict);
+    expect(compile(plain).code).toBe(plainStrict);
+    // With a promotable head the two lanes part: the default `auto` promotes
+    // the unknown-sign radical (compile-mode step 4, 2026-08-16), `strict`
+    // keeps the real kernel.
     const expr = ce.parse('\\sqrt{x} + 2x');
-    const strict = compile(expr, { mode: 'strict' }).code;
-    expect(compile(expr, { mode: 'auto' }).code).toBe(strict);
-    expect(compile(expr).code).toBe(strict);
-    // Complex mode (step 3) promotes the radical and lifts the wide `x`.
+    expect(compile(expr, { mode: 'strict' }).code).toContain('Math.sqrt');
+    const auto = compile(expr, { mode: 'auto' });
+    expect(auto.code).toContain('_SYS.csqrt');
+    expect(auto.promoted).toBe(true);
+    expect(compile(expr).code).toBe(auto.code);
+    // Complex mode promotes the radical and lifts the wide `x`.
     expect(compile(expr, { mode: 'complex' }).code).toContain('_SYS.csqrt');
   });
 
@@ -132,7 +145,10 @@ describe('compile mode — option surface (step 1)', () => {
     const e = new ComputeEngine();
     e.declare('z', 'complex');
     // `Erf` has a real-only helper: a complex-typed operand fails closed (D6).
-    const r = compile(e.box(['Erf', 'z']));
+    // Pinned in `strict`: under the default `auto` a MAYBE-complex operand
+    // takes the D2/D6 runtime rule and compiles (compile-mode step 4,
+    // 2026-08-16); the compile-time decline is the strict-lane behavior.
+    const r = compile(e.box(['Erf', 'z']), { mode: 'strict' });
     expect(r.success).toBe(false);
     expect(r.diagnostic).toEqual({
       code: 'compile-error',
@@ -376,8 +392,11 @@ describe('result convention (design §5) — exact im !== 0 at the boundary, ker
     });
   });
 
-  it('realOnly is still honored exactly as before (deprecation mapping is step 4)', () => {
+  it('realOnly is deprecated but still projects the result (complex → NaN)', () => {
     const e = new ComputeEngine();
+    // The default `auto` promotes the unknown-sign radical (compile-mode
+    // step 4, 2026-08-16); `realOnly` projects the promoted value back, so
+    // the observable numbers are unchanged.
     const r = compile(e.parse('\\sqrt{x}'), { realOnly: true });
     expect(r.run({ x: 4 })).toBe(2);
     expect(r.run({ x: -4 })).toBeNaN();
@@ -386,15 +405,18 @@ describe('result convention (design §5) — exact im !== 0 at the boundary, ker
     ).toBeNaN();
   });
 
-  it('complexPromotion is still honored exactly as before', () => {
+  it('complexPromotion still promotes, now as the deprecated spelling of mode: complex', () => {
     const e = new ComputeEngine();
     const r = compile(e.parse('\\sqrt{x}'), { complexPromotion: true });
     expect(r.code).toContain('csqrt');
     expect(r.run!({ x: -4 })).toEqual({ re: 0, im: 2 });
     // …and a promoted real value comes back as a number (dust chopped).
     expect(r.run!({ x: 4 })).toBe(2);
-    // The step-1 report does not yet track promotion.
-    expect(r.mode).toBe('strict');
+    // `complexPromotion: true` now maps to `mode: 'complex'` (compile-mode
+    // step 4, 2026-08-16), so the wide `x` is lifted at run time and the
+    // report names the complex lane.
+    expect(r.code).toContain('_SYS.cplx(_.x)');
+    expect(r.mode).toBe('complex');
   });
 });
 
@@ -403,7 +425,13 @@ describe('D7 — the shared interpreter fallback honors the runner contract in b
     const e = new ComputeEngine();
     e.declare('z', 'complex');
     // `Erf` fails closed on a complex-typed operand → interpreter fallback.
-    const r = compile(e.box(['Add', ['Erf', 'z'], 'z']), { fallback: true });
+    // `strict` keeps that decline: under the default `auto` the operand is
+    // only MAYBE complex and the D2/D6 runtime rule compiles it instead
+    // (compile-mode step 4, 2026-08-16).
+    const r = compile(e.box(['Add', ['Erf', 'z'], 'z']), {
+      fallback: true,
+      mode: 'strict',
+    });
     expect(r.success).toBe(false);
     expect(r.diagnostic!.kind).toBe('capability');
     // A real value handed as `{re, im: 0}` and as a number: erf(0.5) + 0.5.
@@ -420,9 +448,11 @@ describe('D7 — the shared interpreter fallback honors the runner contract in b
   it("realOnly still projects a decline's runner: complex → NaN, boolean → NaN, real → number", () => {
     const e = new ComputeEngine();
     e.declare('z', 'complex');
+    // `mode: 'strict'` keeps `Erf(z)` a decline fixture (see above).
     const r = compile(e.box(['Add', ['Erf', 'z'], 'z']), {
       fallback: true,
       realOnly: true,
+      mode: 'strict',
     });
     expect(r.success).toBe(false);
     expect(r.run({ z: { re: 0.5, im: 0 } as never })).toBeCloseTo(
@@ -433,6 +463,7 @@ describe('D7 — the shared interpreter fallback honors the runner contract in b
     const b = compile(e.box(['Less', ['Erf', 'z'], 1]), {
       fallback: true,
       realOnly: true,
+      mode: 'strict',
     });
     expect(b.run({ z: 0.2 })).toBeNaN();
   });
@@ -440,8 +471,11 @@ describe('D7 — the shared interpreter fallback honors the runner contract in b
   it('a boolean-valued decline runs to a boolean, not NaN', () => {
     const e = new ComputeEngine();
     e.declare('z', 'complex');
-    // `Erf(z)` declines; the comparison over it is boolean-valued.
-    const r = compile(e.box(['Less', ['Erf', 'z'], 1]), { fallback: true });
+    // `Erf(z)` declines in `strict`; the comparison over it is boolean-valued.
+    const r = compile(e.box(['Less', ['Erf', 'z'], 1]), {
+      fallback: true,
+      mode: 'strict',
+    });
     expect(r.success).toBe(false);
     expect(r.run!({ z: 0.2 })).toBe(true);
   });

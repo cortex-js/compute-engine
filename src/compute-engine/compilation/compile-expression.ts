@@ -1,8 +1,13 @@
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import type { Expression, JSSource } from '../global-types.js';
-import type { CompileMode, CompileTarget, CompilationResult } from './types.js';
+import type {
+  CompileDiagnostic,
+  CompileMode,
+  CompileTarget,
+  CompilationResult,
+} from './types.js';
 import { BaseCompiler } from './base-compiler.js';
-import { compileDiagnosticOf } from './diagnostics.js';
+import { compileDiagnosticOf, isLaneMismatchError } from './diagnostics.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 
@@ -27,6 +32,7 @@ type CompileExpressionOptions<T extends string = string> = {
   iterationBudget?: number;
   quadrature?: 'adaptive' | 'monte-carlo';
   symbolDeps?: Set<MathJsonSymbol>;
+  varsObjectRefs?: Set<MathJsonSymbol>;
   cse?: boolean;
   constantFold?: boolean;
 };
@@ -37,7 +43,9 @@ type CompileExpressionOptions<T extends string = string> = {
  * Returns a `CompilationResult` with the generated source code and,
  * for JS-executable targets, a `run` function.
  *
- * When `realOnly` is true, the return type of `run` is narrowed to `number`.
+ * When the deprecated `realOnly` is true, the return type of `run` is
+ * narrowed to `number` (the old projection; the result convention already
+ * returns an exactly-real value as a plain number).
  *
  * `mode` selects the arithmetic discipline (`'strict'` | `'complex'` |
  * `'auto'`, see `CompileMode` in `compilation/types.ts`); the effective mode
@@ -58,12 +66,16 @@ type CompileExpressionOptions<T extends string = string> = {
  * (`_SYS.erf`, `scipy.special.erf`, GLSL `log2`, …). They accept a real scalar
  * only. Elementary functions that *do* have a complex extension (`Sin`, `Exp`,
  * `Sqrt`, `Power`, …) dispatch to a complex helper when an argument is
- * complex-valued; the real-only special functions do not. Rather than hand a
- * complex value to a real helper — which silently returns garbage (e.g. a
- * compiled `Erf(z)` returning −1) — the compiler **fails closed** (D6) with the
- * offending head. Compile such subexpressions numerically, or restrict them to
- * real arguments. (`Real`/`Imaginary`/`Argument`/`Conjugate` are exempt: they
- * consume a complex value by design.)
+ * complex-valued; the real-only special functions do not. A complex value
+ * must never reach a real helper (a compiled `Erf(z)` would return −1): under
+ * `mode: 'strict'` the compiler **fails closed** (D6) with the offending
+ * head; under `auto` (the default) and `complex` a MAYBE-complex operand (a
+ * `complex`-typed symbol, a promoted radical, a wide binding in complex mode)
+ * takes the D2/D6 runtime rule — the real helper runs when the value's
+ * imaginary part is exactly zero, `NaN` otherwise — and only a STATICALLY
+ * non-real operand (`Erf(2i)`) is the compile-time decline. The shader
+ * targets always fail closed. (`Real`/`Imaginary`/`Argument`/`Conjugate` are
+ * exempt: they consume a complex value by design.)
  */
 export function compile<T extends string = 'javascript'>(
   expr: Expression,
@@ -78,6 +90,15 @@ export function compile<T extends string = 'javascript'>(
   options?: CompileExpressionOptions<T>
 ): CompilationResult<T> {
   assertCompilationOptionsContract(options);
+  // The deprecated `complexPromotion: true` maps to `mode: 'complex'` — but
+  // only where the target OFFERS complex mode. The flag was documented as
+  // ignored on the shader targets ("they keep the real kernel
+  // unconditionally"), so a caller passing it globally must not see a shader
+  // compile that used to succeed decline with `unsupported-mode`; on such a
+  // target the alias is dropped and the target's default mode applies.
+  const deprecated = applyDeprecatedModeOptions(options);
+  options = deprecated.options;
+  const modeFromAlias = deprecated.modeFromAlias;
 
   // An option-contract violation, not a compilation failure: raised OUTSIDE
   // the `try` so the interpreter fallback cannot swallow it. A direct custom
@@ -106,7 +127,7 @@ export function compile<T extends string = 'javascript'>(
       // options channel. Seeded with the names this compilation must not
       // reuse: the expression's own symbols and any `_tv`/`_cse` token in the
       // source the caller splices in.
-      options.target.naming = BaseCompiler.newNamingContext(rewritten, [
+      const namingSources = [
         options.preamble,
         options.target.preamble,
         ...(options.vars ? Object.values(options.vars) : []),
@@ -115,7 +136,11 @@ export function compile<T extends string = 'javascript'>(
               typeof f === 'string' ? f : undefined
             )
           : []),
-      ]);
+      ];
+      options.target.naming = BaseCompiler.newNamingContext(
+        rewritten,
+        namingSources
+      );
       // A DIRECT custom target gets no CSE in Phase 1 (design §4.2): a
       // `cseBind` attests binding SYNTAX, not that the target's other emitters
       // are pure and eager, and its resolver closures carry no override
@@ -147,10 +172,36 @@ export function compile<T extends string = 'javascript'>(
       // raised by `BaseCompiler.compile` when it latches the mode.
       options.target.mode = resolveDirectTargetMode(
         options.target,
-        options.mode
+        modeFromAlias &&
+          !(options.target.supportedModes ?? ['strict']).includes('complex')
+          ? undefined
+          : options.mode
       );
-      const code = BaseCompiler.compileRoot(rewritten, options.target);
-      return BaseCompiler.withReferences(
+      let code: string;
+      let escalation: CompileDiagnostic | undefined;
+      try {
+        code = BaseCompiler.compileRoot(rewritten, options.target);
+      } catch (e) {
+        // The single retry site (design §4): under `auto`, a `LaneMismatch`
+        // in the strict attempt redoes the compilation under the complex
+        // discipline, on FRESH target state — a direct target offers `auto`
+        // only when it provides `reset()` (`resolveDirectTargetMode`), which
+        // drops whatever the failed attempt wrote (helpers, definitions,
+        // temporaries).
+        if (!isLaneMismatchError(e) || options.target.mode !== 'auto') throw e;
+        options.target.reset?.();
+        options.target.mode = 'complex';
+        // The SAME collision seed as the first attempt (the caller's spliced
+        // `vars`/`functions` source included), or the retry could number a
+        // temporary into a name the caller's own source uses.
+        options.target.naming = BaseCompiler.newNamingContext(
+          rewritten,
+          namingSources
+        );
+        code = BaseCompiler.compileRoot(rewritten, options.target);
+        escalation = e.diagnostic;
+      }
+      const direct = BaseCompiler.withReferences(
         {
           target: (options.target.language ?? 'custom') as T,
           success: true,
@@ -160,6 +211,8 @@ export function compile<T extends string = 'javascript'>(
         options.target,
         options.vars ? new Set(Object.keys(options.vars)) : undefined
       );
+      if (escalation !== undefined) direct.escalation = escalation;
+      return direct;
     }
 
     const targetName = (options?.to ?? 'javascript') as T;
@@ -182,7 +235,7 @@ export function compile<T extends string = 'javascript'>(
     // reached the caller with no `run` at all, violating the fallback
     // contract. The catch below remains for custom registered targets and
     // pre-compile errors.
-    return languageTarget.compile(expr, {
+    const targetOptions = {
       fallback: options?.fallback ?? true,
       operators: options?.operators,
       functions: options?.functions,
@@ -199,7 +252,61 @@ export function compile<T extends string = 'javascript'>(
       varsObjectRefs: options?.varsObjectRefs,
       cse: options?.cse,
       constantFold: options?.constantFold,
-    }) as CompilationResult<T>;
+    };
+    // The single retry site (design §4): under `auto` — requested, or the
+    // target's default — a `LaneMismatch` in the strict attempt redoes the
+    // compilation under the complex discipline. A registered target builds a
+    // fresh per-compilation target on every `compile()`, so the retry starts
+    // from clean state. The first attempt is made with `fallback: false` so
+    // the mismatch reaches this site as a THROW — not as a `success: false`
+    // result the target has already wrapped in an interpreter fallback (and
+    // warned about); any other failure rethrows to the catch below, which
+    // builds the fallback exactly as for a target without `auto`.
+    // The alias is dropped on a target that does not offer complex mode (see
+    // `modeFromAlias` above): the target's default applies.
+    if (modeFromAlias && !targetSupportsMode(languageTarget, 'complex'))
+      targetOptions.mode = undefined;
+    // `auto` is in play only where the target OFFERS it: a target that does
+    // not (interval-js, the shader targets) takes the ordinary path with the
+    // caller's `fallback`, and reports a requested `'auto'` as its own
+    // `unsupported-mode` decline — with the interpreter-backed runner the
+    // fallback contract promises.
+    const auto =
+      (targetOptions.mode === 'auto' || targetOptions.mode === undefined) &&
+      targetSupportsAuto(languageTarget);
+    if (!auto)
+      return languageTarget.compile(
+        expr,
+        targetOptions
+      ) as CompilationResult<T>;
+    let first: CompilationResult<T>;
+    try {
+      first = languageTarget.compile(expr, {
+        ...targetOptions,
+        fallback: false,
+      }) as CompilationResult<T>;
+    } catch (e) {
+      if (!isLaneMismatchError(e)) throw e;
+      const retried = languageTarget.compile(expr, {
+        ...targetOptions,
+        mode: 'complex',
+      }) as CompilationResult<T>;
+      if (retried.success) retried.escalation = e.diagnostic;
+      return retried;
+    }
+    // A target that REPORTS a decline (`success: false`, no throw) rather
+    // than throwing it: honor the caller's fallback by redoing the compile
+    // with it (a decline is rare; the double compile costs nothing on the
+    // success path). Defensive: the two built-in targets that offer `auto`
+    // (`javascript`, `python`) always THROW under `fallback: false`, so this
+    // branch is reached only by a third-party `auto`-capable target that
+    // reports instead — the existing suite does not exercise it.
+    if (!first.success && (options?.fallback ?? true))
+      return languageTarget.compile(
+        expr,
+        targetOptions
+      ) as CompilationResult<T>;
+    return first;
   } catch (e) {
     if (options?.fallback ?? true) {
       const error = (e as Error).message;
@@ -237,6 +344,89 @@ export function compile<T extends string = 'javascript'>(
     }
     throw e;
   }
+}
+
+/**
+ * Whether a registered target offers `mode: 'auto'` — read once per
+ * `LanguageTarget` instance from a target it creates (`supportedModes`), so
+ * the default-mode decision costs nothing per compilation after the first.
+ */
+const modeSupport = new WeakMap<object, readonly CompileMode[]>();
+function targetSupportsMode(
+  lt: { createTarget(): CompileTarget<Expression> },
+  mode: CompileMode
+): boolean {
+  let known = modeSupport.get(lt);
+  if (known === undefined) {
+    known = lt.createTarget().supportedModes ?? ['strict'];
+    modeSupport.set(lt, known);
+  }
+  return known.includes(mode);
+}
+function targetSupportsAuto(lt: {
+  createTarget(): CompileTarget<Expression>;
+}): boolean {
+  return targetSupportsMode(lt, 'auto');
+}
+
+/** The deprecated options already warned about, once per process each. */
+const deprecationWarned = new Set<string>();
+
+function warnDeprecatedOnce(key: string, message: string): void {
+  if (deprecationWarned.has(key)) return;
+  deprecationWarned.add(key);
+  console.warn(message);
+}
+
+/**
+ * The deprecation mapping of the two pre-mode options (design §5,
+ * `docs/plans/2026-08-16-compile-complex-mode.md`), applied at the public
+ * entry before anything is compiled:
+ *
+ * - `complexPromotion` — consulted only when `mode` is absent: `true` maps to
+ *   `mode: 'complex'` (with a one-time console warning); `false` is ignored.
+ *   With an explicit `mode` the flag is ignored (with a warning; no conflict
+ *   error). It is not passed on to the target: the discipline now carries the
+ *   promotion.
+ * - `realOnly` — kept for one release as the OLD result projection
+ *   (`{re, im}` → `NaN` unless the imaginary part is at roundoff scale,
+ *   boolean → `NaN`), with a one-time warning; the result convention (§5) —
+ *   a real value is a plain `number`, a `ComplexResult` always has `im !==
+ *   0` — replaces it.
+ */
+function applyDeprecatedModeOptions<T extends string>(
+  options: CompileExpressionOptions<T> | undefined
+): {
+  options: CompileExpressionOptions<T> | undefined;
+  modeFromAlias: boolean;
+} {
+  if (options === undefined) return { options, modeFromAlias: false };
+  let out = options;
+  let modeFromAlias = false;
+  if (options.complexPromotion !== undefined) {
+    if (options.mode === undefined) {
+      if (options.complexPromotion === true) {
+        warnDeprecatedOnce(
+          'complexPromotion',
+          "compile(): the `complexPromotion` option is deprecated — it now maps to `mode: 'complex'` (ignored on a target that does not offer complex mode); pass `mode` instead."
+        );
+        out = { ...out, mode: 'complex' };
+        modeFromAlias = true;
+      }
+    } else {
+      warnDeprecatedOnce(
+        'complexPromotion+mode',
+        'compile(): the deprecated `complexPromotion` option is ignored when `mode` is given.'
+      );
+    }
+    out = { ...out, complexPromotion: undefined };
+  }
+  if (options.realOnly === true)
+    warnDeprecatedOnce(
+      'realOnly',
+      "compile(): the `realOnly` option is deprecated — a compiled value whose imaginary part is exactly zero is already returned as a plain number; test `typeof v === 'number'` instead. The projection is kept for one release."
+    );
+  return { options: out, modeFromAlias };
 }
 
 /**

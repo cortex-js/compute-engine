@@ -528,6 +528,39 @@ JS/interval-only.
 
 ## 7. **[field]** One document, two lanes — the consumer-side consequence
 
+**Reframed 2026-08-16 (Tycho's read of the payload + Arno's direction, via
+CE-POC; the cost question stays open for Arno and Tycho):** the
+inconsistency this section was written against is NOT per-row lane
+selection as such — it is per-row selection driven by ADJACENCY, when the
+rows that must agree are the ones that DEPEND on each other (Arno: "only
+dependent rows have to agree: if a row defines `f` and `f` promotes, the
+rows that USE `f` follow it; an adjacent row that does not use `f` can stay
+on its lane"). And dependent rows all SELF-REPORT: `result.promoted` is set
+by the compilation that LOWERED a promotable head through a complex kernel,
+and a document definition is compiled INTO each consuming row's compilation
+(its body is emitted into that row's preamble), so `|f(x)|`, `Re(f(x))` and
+every other consumer of a promoting `f` reports `promoted: true` itself —
+the flag is the dependency closure, arrived at row by row, with no closure
+walk, no definition identity and no `promotedIn` field (held, at Tycho's
+request). Per-row selection driven by the FLAG is therefore coherent:
+"any row reporting `promoted: true` → JS lane" is implementable at the seam
+today (Tycho, CODE-READ: their scalar channel is `Record<string, number>` by
+construction, their collection carriers stay symbols read from the engine
+binding; one `carrierOnlyNames` map is the residual to probe after the
+sweep). **Stability, by construction:** `promoted` is a COMPILE-TIME fact
+decided from the SOURCE — `promotesRadicalToComplex` asks whether the
+operand is PROVABLY non-negative, never what value it holds at run time (the
+D2 runtime rule governs how a comparison over the promoted value behaves,
+not whether the head was lowered through `csqrt`) — so the same source
+compiles to the same lowering and the same flag on every recompile; a flag
+can only change when the source (or a definition it consumes) changes,
+which is exactly when the row recompiles. What remains open is COST, not
+implementability: the per-document rows-promoted / rows-total distribution
+(corpus ceiling: `promotes-no-escalation` 573 of 6617 rows, 8.7%,
+concentrated in the 26/32 cross-lane documents), which Tycho is producing
+from the existing dump. The paragraphs below are the original framing, kept
+for the record.
+
 Tycho's seam selects a compile target PER ROW, so a single document can span
 the JS and GLSL lanes. Under this design strict mode is IDENTICAL across
 lanes (that is what §2 defines it to be), but `auto`'s promotion and
@@ -764,7 +797,61 @@ later one being present:
    (`_fn_K$z01`, `_fn_b$z1`) is rewritten to pin the VALUE. Observable
    change: `mode: 'complex'` now computes. Gate: the "Complex mode result
    convention", D2, D6, D8 and "Non-numeric wide bindings" witnesses.
-4. **`auto` and the option surface.** Also decide here (user-ruled
+4. **`auto` and the option surface.** — **IMPLEMENTED 2026-08-16; blast
+   radius MEASURED and the `auto` default APPROVED by Arno (staged on his
+   "stage" after the count):** full suite 29,345 tests, 4,312 snapshots
+   passing with ZERO snapshot changes; ~52 test pins moved in 15 files, all
+   in the predicted radical-related classes (default real-kernel/NaN pins →
+   promoted kernel + interpreter value with a `mode: 'strict'` pin kept
+   beside each; `complexPromotion: true` → complex-mode emission; CO-P1-3 /
+   ordering fail-closed pins under the default → the D2/D6 runtime rule,
+   statically-non-real declines kept; `$z` lane-name pins → escalation
+   fields + value; `Erf(z)`-as-decline fixtures → `mode: 'strict'`;
+   map-auto-compile counters); the only other failure was the pre-existing
+   `Limit`-at-∞ `Erf(∞)` defect (ROADMAP), outside this diff. Arno's stated
+   basis: `strict` costs nothing in performance and costs a decline class;
+   `auto` costs ~2.3× only where a radical's sign cannot be proven, which is
+   the case the workstream exists to fix. What landed:
+   `strictLanes` = strict OR auto (auto's first attempt raises the
+   `LaneMismatch`); `promotionActive` = auto | complex | `complexPromotion`;
+   `runtimeRealGuards` = auto | complex; the single retry site in
+   `compile()` — registered route: the first attempt runs with `fallback:
+   false` so the mismatch reaches the site as a THROW (no spurious
+   "Compilation fallback" warning), retried once with `mode: 'complex'` on
+   a fresh per-compilation target, `result.escalation` = the strict
+   attempt's diagnostic; direct route: `reset()` + `mode: 'complex'` +
+   fresh naming; `result.promoted` computed from the SOURCE (`notePromoted`
+   in `promotesRadicalToComplex`, only for a real-shaped operand of unknown
+   sign — a provably negative or complex-typed operand is not a lane
+   difference — and from the wide-lifted complex branch of Sqrt/Ln/Log/Power
+   under complex mode); `result.mode` = the latched discipline
+   (`_lastReport`); `Power` of an unknown-sign base with a NON-INTEGER NUMBER
+   literal exponent joins the promotable set (a variable exponent keeps the
+   real kernel — promoting `x^y` would move every such power off it);
+   `assumedRealNonNegative` — the sign proof under the compiler's own "wide
+   is real" premise (sums of squares, `Abs`, `Exp`, even powers), so
+   `√(x²+y²)` and `√((x−a)²+(y−b)²)` — the distance/norm shape, the commonest
+   radical in a plot — keep the real kernel and do NOT report `promoted`
+   (the engine's `isNonNegative` answers `undefined` for `x²` because a
+   complex `x` squares negative; that is not the compiled premise);
+   `complexPromotion: true` → `mode: 'complex'` (one warning per process;
+   ignored with a warning beside an explicit `mode`; not passed to the
+   target); `realOnly: true` → the old projection kept for one release with
+   a warning. Two consumers of compiled sub-lambdas hardened for promotion:
+   the numeric kernels `_SYS.integrate`/`integrateMC`/`nd`/`limit` project
+   their callback's value to real (`realFn`: an exactly-real `{re, im}` is
+   its real part, a complex value NaN) — `∫ y^{3/2} e^{−y/2}` returned NaN
+   without it; and a collection `Sum`/`Product` folds with the raw operator
+   only when its elements are real by construction (`collectionFoldsReal`,
+   shared by the analysis and the JS emitter — `Map(Ln, xs)` types
+   `list<real>` while its eta-expanded callback promotes), else with the
+   shape-agnostic `_SYS.sadd`/`smul` wrapped in the complex lift. NOT yet
+   done in this step: the REMOVAL of the lane specialization
+   (`userCallComplexLanes`, `$z` names, `laneFrames`) and the eta — they are
+   now unreachable under every mode (strict/auto raise the mismatch,
+   complex has no lanes) and come out in a follow-up pass once the pins are
+   settled; `result.escalation` is not set when the retry itself declines.
+   Also decide here (user-ruled
    2026-08-16 to wait for this step, from the step-1 review): whether the
    DEFAULT `R` of `CompiledRunner`/`CompilationResult` — today `number |
    ComplexResult` — is widened to what runners actually return (`boolean`,
@@ -945,21 +1032,26 @@ escalating; `complex` mode would move the whole corpus off the real lane to
 serve that 10% and would cost the GPU lane hardest (847 GLSL rows, 386
 already declining). Cross-lane sharing under 5% keeps §7's document-scoped
 fallback cheap. **What this spec does NOT solve, stated once:**
-`did-not-compile` is 1104 rows as classified, but that bucket is CONFLATED
-(Tycho retracted the framing, not the count, 2026-08-16): 529 of the 1104
-have no series type at all, of which 279 are DEFINITION rows (`H(i) = 10^4
-sin(10^3 i) mod 1` and friends — not render targets, nobody asked to render
-them) and ~250 are non-definition rows where the dump cannot tell a CE
-decline from a Tycho classifier that never asked. **The defensible refusal
-figure is somewhere between ~575 and 1104, currently unknown** — do not
-size against 16.7%. Together with the 386 classified-but-declined GLSL rows
-these are refusal questions, not mode questions (Arno's "death by a
-thousand cuts … or outright refusal to compile"). What the dump already
-shows for free: the refusals CLUSTER — at the 575 floor, `primitives3d` 243
-(42%: triangle / PointList 3D primitives) and `line` 119 (21%) are 63% of
-it, and the GLSL 386 is 68% two types (parametric 139, implicit 123) — so
-the follow-on work is enumerable, a handful of operator clusters, not a
-long tail. (One witness to keep: polygon decline `0rpoke7ti2` carries
+the REFUSAL SET IS NOT YET MEASURABLE — every figure the instrument has
+produced for it (1104 rows, then ~575, then ~541) was superseded within the
+hour by another flaw in the same denominator: 279 definition rows that are
+not render targets, ~250 no-series-type rows whose direction ("CE declined"
+vs "the seam never asked") is undecidable from the dump, and 34 polygon
+rows of a series type that never compiles BY DESIGN (`PolygonListSeries`,
+Tycho's `src/plot/types.ts`: "vertices are pre-materialized by the build
+path, so the renderer neither samples nor compiles" — the seam never
+submits them to CE, and there was never a Tycho request behind `Polygon`;
+Arno's ruling: no CE lowering, no point-in-polygon predicate). Tycho is
+rebuilding the exclusion into the instrument rather than subtracting after
+the fact, so NO cardinality is stated here (a number that moved three times
+does not get a fourth). What HAS survived every re-cut is the SHAPE: the
+refusals that are real cluster into a small number of operator families —
+`primitives3d` (triangle / PointList 3D primitives) and `line` — and the
+386 classified-but-declined GLSL rows are 68% two types (parametric 139,
+implicit 123); so the follow-on work is enumerable, not a long tail. (Method
+note, CE-POC's: a census that asks a capability question of everything —
+including things nobody asks that capability of — measures its own scope,
+not the capability.) (One witness to keep: polygon decline `0rpoke7ti2` carries
 `\frac{0}{0}`, a deliberate Desmos idiom for "skip this vertex". NOT a
 known CE gap: on the JS lane interpreter and compiler agree, scalar and in a
 collection — `PointList(0/0, 0)` runs to `[NaN, 0]`, a genuine `NaN` that
@@ -970,10 +1062,8 @@ the seam's to honor.) The reason-capture census runs
 lock-gated after Tycho's sweep. If any of Tycho's GLSL declines are a lane expecting `float` and receiving
 `vec2`, one mechanism that produces exactly that is a folded literal
 `ComplexInfinity` (§2 known limit (i′): `x + 1/0` → `vec2`) — `auto` would
-not change it. Also under scope review by Arno (raised by CE-POC): `Polygon`
-declines on every target (JS too — it evaluates to type `expression`);
-CE-POC's read is that a polygon is a rendering primitive and its lowering is
-the seam's; if ruled ours it is a real piece of work outside this spec.
+not change it. `Polygon`: RULED 2026-08-16 (Arno, after Tycho) — not CE's, and per the
+paragraph above never a refusal at all.
 This spec answers the LANE question; the
 refusal census is the next workstream's input.
 

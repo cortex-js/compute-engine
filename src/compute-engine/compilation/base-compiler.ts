@@ -1223,6 +1223,12 @@ export class BaseCompiler {
     // it would never be restored.
     const prevPromotion = BaseCompiler._complexPromotion;
     const prevMode = BaseCompiler._mode;
+    // The report of a compilation that DECLINES before its latches are
+    // written (an unsupported requested mode throws in `resolveCompileMode`)
+    // must not be the previous compilation's: reset it first, so a fallback
+    // built for that decline reports `strict`/not promoted.
+    if (BaseCompiler._compileDepth === 0)
+      BaseCompiler._lastReport = { mode: 'strict', promoted: false };
     const nextMode =
       BaseCompiler._compileDepth === 0
         ? BaseCompiler.resolveCompileMode(target)
@@ -1232,6 +1238,9 @@ export class BaseCompiler {
         target.complexPromotion === true &&
         BaseCompiler.COMPLEX_PROMOTION_LANGUAGES.has(target.language ?? '');
       BaseCompiler._mode = nextMode;
+      // The per-compilation report (`modeReport`) starts fresh: no head
+      // promoted yet; the discipline is the one just latched.
+      BaseCompiler._promoted = false;
     }
     BaseCompiler._compileDepth += 1;
     // Only a genuine CHANGE of the bound-variable context invalidates: the
@@ -1255,6 +1264,16 @@ export class BaseCompiler {
       return BaseCompiler.compileWithCse(expr, target, prec);
     } finally {
       BaseCompiler._compileDepth -= 1;
+      // Leaving the OUTERMOST compilation: freeze its report for the target
+      // to attach (`withReferences` → `modeReport`), before the latches are
+      // restored. `auto`'s first attempt IS the strict discipline, so it
+      // reports `'strict'`; a retry compiles under `'complex'` and reports
+      // that.
+      if (BaseCompiler._compileDepth === 0)
+        BaseCompiler._lastReport = {
+          mode: BaseCompiler._mode === 'complex' ? 'complex' : 'strict',
+          promoted: BaseCompiler._promoted,
+        };
       BaseCompiler._complexPromotion = prevPromotion;
       BaseCompiler._mode = prevMode;
       if (nextBoundCtx !== prevBoundCtx) {
@@ -1290,11 +1309,10 @@ export class BaseCompiler {
    * `supportedModes`, defaulting per `resolveCompileMode`) and restored on
    * the way out. `'strict'` outside any compilation.
    *
-   * Migration step 1 (2026-08-16): plumbed and reported, not yet consulted
-   * by the analysis or the emitters — every setting compiles as `'strict'`
-   * (plus the `complexPromotion` opt-in, honored as before). The strict
-   * lane-mismatch declines, the complex discipline and `auto`'s escalation
-   * are the later steps of `docs/plans/2026-08-16-compile-complex-mode.md`.
+   * Consulted by the analysis and the emitters through the three gates
+   * `strictLanes` (strict, auto), `complexDiscipline` (complex) and
+   * `promotionActive`/`runtimeRealGuards` (auto, complex); see
+   * `docs/plans/2026-08-16-compile-complex-mode.md` §2 for the disciplines.
    */
   private static _mode: CompileMode = 'strict';
 
@@ -1309,18 +1327,81 @@ export class BaseCompiler {
    * `docs/plans/2026-08-16-compile-complex-mode.md`), never a specialization
    * or a silent real-lane emission.
    *
-   * Migration step 2 (2026-08-16): the rule is in force for `mode: 'strict'`
-   * ONLY. Under `'auto'` (the default) and `'complex'` — which in this step
-   * still emit today's code — the pre-existing mechanisms stay in place: the
-   * per-call-site lane specialization (`userCallComplexLanes`, `_fn_b$z1`),
-   * the bare-callback eta expansion, the block-local promotion on a later
-   * complex assignment. That keeps every default-mode program byte-identical
-   * until step 4, where `auto` becomes "strict attempt, escalate to complex
-   * on a lane mismatch" and this gate widens to that first attempt.
+   * In force for `mode: 'strict'` and for `mode: 'auto'`, whose FIRST attempt
+   * is the strict discipline (with promotion): the `LaneMismatch` it raises
+   * is what the engine-level `compile()` catches to redo the compilation
+   * under `'complex'` (design §4, one retry site). Under `'complex'` a wide
+   * binding is complex-shaped and nothing mismatches.
    */
   static get strictLanes(): boolean {
-    return BaseCompiler._mode === 'strict';
+    return BaseCompiler._mode === 'strict' || BaseCompiler._mode === 'auto';
   }
+
+  /**
+   * Whether the compilation in progress PROMOTES: an unknown-sign
+   * `Sqrt`/`Ln`/`Log` (and the real-typed operand of an inverse-trig head of
+   * unknown magnitude) lowers through the complex kernels — the `auto` and
+   * `complex` disciplines, and the deprecated `complexPromotion` opt-in.
+   * `strict` never promotes (the shader targets' model).
+   */
+  static get promotionActive(): boolean {
+    return (
+      BaseCompiler._complexPromotion ||
+      BaseCompiler._mode === 'auto' ||
+      BaseCompiler._mode === 'complex'
+    );
+  }
+
+  /**
+   * Whether the D2/D6 RUNTIME rule is in force (`realOperandGuard`): a
+   * maybe-complex operand of a real-only head is guarded at run time rather
+   * than declined at compile time — the `auto` and `complex` disciplines. In
+   * strict mode nothing changes: such an operand fails closed as before.
+   */
+  static get runtimeRealGuards(): boolean {
+    return BaseCompiler._mode === 'auto' || BaseCompiler._mode === 'complex';
+  }
+
+  /**
+   * Set when this compilation lowered a promotable head through a complex
+   * kernel — the `promoted` field of the result (design §4): the signal that
+   * the compiled unit would NOT compute the same value on a shader target's
+   * real kernel, escalation or not. Reset at the outermost compilation entry,
+   * frozen into `_lastReport` at its exit. A compile-time fact decided from
+   * the source (operand sign provability, operand type), never from a
+   * runtime value — so the same source always reports the same flag.
+   */
+  private static _promoted = false;
+
+  /** Record that a promotable head was lowered through a complex kernel. */
+  static notePromoted(): void {
+    BaseCompiler._promoted = true;
+  }
+
+  /**
+   * Record, for the `promoted` report, that `head` (a promotable head) is
+   * being lowered through a complex kernel because its operand is already
+   * complex-valued — a promotion when that operand is complex only by
+   * WIDENESS (the complex discipline lifted it), a no-op otherwise. The
+   * emitters call this on their "operand is complex" branch, whose lowering
+   * is the same kernel either way; the decision is
+   * `promotesRadicalToComplex`, which does the recording.
+   */
+  static recordPromotion(
+    head: MathJsonSymbol,
+    args: ReadonlyArray<Expression>
+  ): void {
+    void BaseCompiler.promotesRadicalToComplex(head, args);
+  }
+
+  /**
+   * The report of the most recently COMPLETED outermost compilation, read by
+   * `modeReport` when a target attaches `mode`/`promoted` to its result.
+   */
+  private static _lastReport: {
+    mode: 'strict' | 'complex';
+    promoted: boolean;
+  } = { mode: 'strict', promoted: false };
 
   /**
    * Whether the compilation in progress runs under the COMPLEX discipline
@@ -1335,8 +1416,9 @@ export class BaseCompiler {
    * values keep the real kernel; the type-based realness proofs survive as an
    * optimization.
    *
-   * Migration step 3 (2026-08-16): in force for `mode: 'complex'`; `auto`
-   * still compiles as strict-with-lanes until step 4.
+   * In force for `mode: 'complex'` — as requested, or as the discipline of
+   * `auto`'s escalated retry after a `LaneMismatch` (the engine-level
+   * `compile()` redoes the compilation with `mode: 'complex'`).
    */
   static get complexDiscipline(): boolean {
     return BaseCompiler._mode === 'complex';
@@ -1445,11 +1527,11 @@ export class BaseCompiler {
     emit: () => TargetSource,
     elseCode: string
   ): TargetSource | undefined {
-    // The rule belongs to the COMPLEX discipline (and, from migration step 4,
-    // to `auto`); in strict mode nothing changes — a typed-complex or
-    // provably non-real operand of a real-only head fails closed as before
-    // (design D2/D6: "in strict mode nothing changes").
-    if (!BaseCompiler.complexDiscipline) return undefined;
+    // The rule belongs to the `auto` and `complex` disciplines; in strict
+    // mode nothing changes — a typed-complex or provably non-real operand of
+    // a real-only head fails closed as before (design D2/D6: "in strict mode
+    // nothing changes").
+    if (!BaseCompiler.runtimeRealGuards) return undefined;
     // Deduplicated by node identity: the same operand INSTANCE in two
     // positions (`Max(e, e)`) is bound once, and an impure one is evaluated
     // once.
@@ -1534,7 +1616,7 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): TargetSource | undefined {
-    if (!BaseCompiler.complexDiscipline) return undefined;
+    if (!BaseCompiler.runtimeRealGuards) return undefined;
     const isMaybe = (a: Expression): boolean =>
       BaseCompiler.isComplexValued(a) && !BaseCompiler._codeOverrides.has(a);
     if (!args.some(isMaybe)) return undefined;
@@ -1698,6 +1780,57 @@ export class BaseCompiler {
   ]);
 
   /**
+   * Is `expr` PROVABLY non-negative under the premise the strict-shaped
+   * analysis already makes — that a WIDE-typed value is REAL? The engine's
+   * own `isNonNegative` answers `undefined` for `x²` when `x` is wide,
+   * because a complex `x` has a negative square; but the compiler treats
+   * that `x` as real, so `√(x² + y²)` — the distance and norm shape, the
+   * commonest radical in a plot — must keep the real kernel rather than
+   * promote (Tycho item 144: `√(⌈x⌉² + ⌈y⌉²)` stays on the fast path).
+   *
+   * Sound because the premise IS the compiled contract: under strict/auto a
+   * wide binding holds a real (the D3 entry check refuses an object), and
+   * under complex mode a wide operand is complex-valued and takes the complex
+   * kernel before this predicate is consulted. A value TYPED non-real is not
+   * real-assumed and answers `false` (unless the engine proves it).
+   *
+   * Recognized: a non-negative literal; the engine's own proof; `Abs`,
+   * `Exp`, `Square`, an even integer `Power` of a real-assumed operand; a
+   * sum, product or quotient of recognized operands; a `Sqrt` of one.
+   */
+  static assumedRealNonNegative(expr: Expression): boolean {
+    if (expr.isNonNegative === true) return true;
+    if (isNumber(expr)) return expr.im === 0 && expr.re >= 0;
+    if (!isFunction(expr)) return false;
+    const t = expr.type?.type;
+    if (t !== undefined && isNonRealNumber(t)) return false;
+    const realAssumed = (e: Expression): boolean => {
+      const et = e.type?.type;
+      return et === undefined || !isNonRealNumber(et);
+    };
+    const h = expr.operator;
+    const ops = expr.ops;
+    if (h === 'Abs' || h === 'Exp')
+      return ops.length === 1 && realAssumed(ops[0]);
+    if (h === 'Square') return ops.length === 1 && realAssumed(ops[0]);
+    if (h === 'Power' && ops.length === 2) {
+      const e = ops[1];
+      return (
+        isNumber(e) &&
+        e.im === 0 &&
+        Number.isInteger(e.re) &&
+        e.re % 2 === 0 &&
+        realAssumed(ops[0])
+      );
+    }
+    if (h === 'Sqrt' && ops.length === 1)
+      return BaseCompiler.assumedRealNonNegative(ops[0]);
+    if (h === 'Add' || h === 'Multiply' || h === 'Divide')
+      return ops.every((o) => BaseCompiler.assumedRealNonNegative(o));
+    return false;
+  }
+
+  /**
    * Whether applying `head` to `args` takes the COMPLEX lane purely because
    * the caller opted in to complex promotion (`complexPromotion`).
    *
@@ -1722,15 +1855,50 @@ export class BaseCompiler {
     head: MathJsonSymbol,
     args: ReadonlyArray<Expression>
   ): boolean {
-    // The `complexPromotion` opt-in, or the COMPLEX discipline (design §2:
-    // "unknown-sign radicals/logarithms promote" — the interpreter's
-    // promotions `√(−1)`, `ln(−2)` fall out of complex mode).
-    if (!BaseCompiler._complexPromotion && !BaseCompiler.complexDiscipline)
-      return false;
+    // The `auto` and `complex` disciplines promote (design §2: "unknown-sign
+    // radicals/logarithms promote" — the interpreter's `√(−1)`, `ln(−2)` fall
+    // out), as does the deprecated `complexPromotion` opt-in; strict never.
+    if (!BaseCompiler.promotionActive) return false;
+    if (head === 'Power') {
+      // `Power` of an unknown-sign base with a PROVABLY non-integer exponent
+      // (`x^{0.3}`, `x^{2/3}`; `(−8)^{1/3}` is the interpreter's principal
+      // complex value): the real `Math.pow` is `NaN` there. An integer or
+      // unknown exponent keeps the real lowering — a variable exponent may be
+      // an integer at run time, and promoting it would move every `x^y` off
+      // the real kernel.
+      const [base, exp] = args;
+      if (base === undefined || exp === undefined) return false;
+      if (!isNumber(exp) || Number.isInteger(exp.re) || exp.im !== 0)
+        return false;
+      if (BaseCompiler.assumedRealNonNegative(base)) return false;
+      if (base.isNegative !== true && !isNonRealNumber(base.type.type))
+        BaseCompiler.notePromoted();
+      return true;
+    }
     if (!BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(head)) return false;
     // `Log(x, b)`: a negative BASE makes the quotient complex too, so every
     // operand has to clear the bar. An omitted operand cannot be cleared.
-    return args.some((a) => a?.isNonNegative !== true);
+    if (
+      !args.some(
+        (a) => a === undefined || !BaseCompiler.assumedRealNonNegative(a)
+      )
+    )
+      return false;
+    // `promoted` reports a lane DIFFERENCE with the shader targets: a
+    // PROVABLY negative operand, or one TYPED complex, is complex-shaped on
+    // every target and in every mode (not a promotion); only a real-shaped
+    // operand of UNKNOWN sign is.
+    if (
+      args.some(
+        (a) =>
+          a !== undefined &&
+          a.isNonNegative !== true &&
+          a.isNegative !== true &&
+          !isNonRealNumber(a.type.type)
+      )
+    )
+      BaseCompiler.notePromoted();
+    return true;
   }
 
   /**
@@ -1798,7 +1966,10 @@ export class BaseCompiler {
     const lanes = BaseCompiler.complexDiscipline
       ? literal.ops.slice(1).map(() => false)
       : BaseCompiler.userCallComplexLanes(expr.engine, op, literal, expr.ops);
-    if (!BaseCompiler._complexPromotion && !lanes.some((c) => c))
+    // Under a promoting discipline the body is always looked through: a
+    // radical inside `a(t) := √(t−1)` promotes THERE, and the call's wide
+    // result type would otherwise report it real (item 190's witness).
+    if (!BaseCompiler.promotionActive && !lanes.some((c) => c))
       return undefined;
     const mask = BaseCompiler.userCallMask(literal, lanes);
     const nextVisited = new Set(visited);
@@ -5967,6 +6138,82 @@ export class BaseCompiler {
    * itself is returned unresolved so a NOMINAL element keeps its identity for
    * the subtype question in {@link assertCallbackAnnotations}.
    */
+  /**
+   * Do the elements of `coll` fold with the RAW real operator — every
+   * element provably a real number — or must a `Sum`/`Product` over it take
+   * the shape-agnostic combiner (`_SYS.sadd`/`_SYS.smul`, wrapped in the
+   * complex lift) because an element may be a `{re, im}`?
+   *
+   * The element TYPE alone is not enough under a PROMOTING discipline:
+   * `Map(Ln, xs)` types `list<real>` from `Ln`'s signature while the
+   * eta-expanded callback promotes each element. So under promotion only a
+   * collection whose elements are real BY CONSTRUCTION — a real-typed symbol,
+   * a range, a literal list of real-analyzed elements — folds raw; any
+   * producer that applies a callback takes the agnostic fold. Both the
+   * analysis (`isComplexValued` of the fold: complex iff NOT real here) and
+   * the JavaScript emitter (`emitCollectionReduce`) read this one predicate,
+   * so parent and child agree on the fold's SHAPE.
+   */
+  static collectionFoldsReal(coll: Expression): boolean {
+    // An element the analysis calls complex (a complex cell, a callback body
+    // that promotes) — never a raw fold.
+    if (BaseCompiler.isComplexValued(coll)) return false;
+    // Elements TYPED non-real (`list<complex>`) are complex-shaped in every
+    // mode — shape follows the static type.
+    const elt = BaseCompiler.collectionElementTypeOf(coll);
+    if (elt !== undefined && isNonRealNumber(elt)) return false;
+    // COMPLEX discipline: a wide element (`list<number>`) may hold a
+    // `{re, im}` at run time; only a real-only element type folds raw.
+    if (BaseCompiler.complexDiscipline)
+      return elt !== undefined && isSubtype(elt, 'real');
+    // Strict shapes (strict, and `auto`'s first attempt): a wide element is
+    // real, as everywhere else — but under promotion the element TYPE can
+    // hide a promoting callback the analysis cannot see into.
+    if (!BaseCompiler.promotionActive) return true;
+    return BaseCompiler.elementsRealByConstruction(coll);
+  }
+
+  /**
+   * Under a promoting discipline, are the elements of `coll` real by
+   * CONSTRUCTION — i.e. is the element type trustworthy? A `Map` whose
+   * callback is a `Function` LITERAL is covered by the analysis (its body
+   * is looked through with the parameter bound), so it counts as real when
+   * `isComplexValued` said so; a `Map` over a bare callback SYMBOL (`Map(Ln,
+   * xs)`: an eta the analysis cannot see into) does not. Element-preserving
+   * producers defer to their source.
+   */
+  private static elementsRealByConstruction(coll: Expression): boolean {
+    // A symbol's elements are what its TYPE says: `list<real>` is real by
+    // construction, `list<complex>` (or a wide `list<number>` holding a
+    // `{re, im}` cell) is not.
+    if (isSymbol(coll)) {
+      const elt = BaseCompiler.collectionElementTypeOf(coll);
+      return elt !== undefined && isSubtype(elt, 'real');
+    }
+    if (!isFunction(coll)) return false;
+    const h = coll.operator;
+    if (h === 'Range' || h === 'Linspace') return true;
+    if (h === 'List' || h === 'Tuple')
+      return coll.ops.every((e) => !BaseCompiler.isComplexValued(e));
+    if (h === 'Map') return isFunction(coll.ops[0], 'Function');
+    if (
+      h === 'Filter' ||
+      h === 'Take' ||
+      h === 'Drop' ||
+      h === 'TakeWhile' ||
+      h === 'DropWhile' ||
+      h === 'Reverse' ||
+      h === 'Sort' ||
+      h === 'Unique' ||
+      h === 'Slice'
+    )
+      return (
+        coll.ops[0] !== undefined &&
+        BaseCompiler.elementsRealByConstruction(coll.ops[0])
+      );
+    return false;
+  }
+
   static collectionElementTypeOf(
     source: Expression | undefined
   ): Type | undefined {
@@ -8272,6 +8519,16 @@ export class BaseCompiler {
     // never a `{re, im}` object, so a wide RESULT type (`Max(a, b)` over
     // wide `a`, `b`) must not report complex.
     if (BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(expr.operator)) return false;
+    // A `Sum`/`Product` over a COLLECTION (no indexing set) folds either with
+    // the raw real operator or with the shape-agnostic combiner wrapped in
+    // the complex lift (`collectionFoldsReal`); its value is complex-shaped
+    // exactly when the latter is emitted.
+    if (
+      (expr.operator === 'Sum' || expr.operator === 'Product') &&
+      expr.ops.length === 1 &&
+      (expr.ops[0].isCollection || expr.ops[0].type.matches('collection'))
+    )
+      return !BaseCompiler.collectionFoldsReal(expr.ops[0]);
     // A SELECTION answers from its value ARMS, never from the node's type:
     // the emitters coerce every arm to `{re, im}` as soon as one arm is
     // complex-valued (`branchComplexCoercion`, Tycho item 60), so the value
@@ -8335,7 +8592,7 @@ export class BaseCompiler {
       if (isSymbol(op) && BaseCompiler.BUILTIN_FOLD_HEADS.has(op.symbol))
         return BaseCompiler.foldLaneIsComplex(coll, init);
     }
-    if (BaseCompiler._complexPromotion || BaseCompiler.complexDiscipline) {
+    if (BaseCompiler.promotionActive) {
       if (BaseCompiler.promotesRadicalToComplex(expr.operator, expr.ops))
         return true;
     }
@@ -12934,11 +13191,9 @@ export class BaseCompiler {
    * same object. Used by the built-in targets to make every result carry its
    * declarative reference analysis and the discipline it was compiled under.
    *
-   * Migration step 1 (2026-08-16): the report is the constant `mode:
-   * 'strict'`, `promoted: false` — every setting still compiles with the
-   * strict-shaped emission, and the one promotion that exists today (the
-   * `complexPromotion` opt-in) is not yet tracked into `promoted`. The later
-   * steps compute both from the compilation.
+   * The report is the one frozen when the outermost compilation ended
+   * (`modeReport`): `mode` is the latched discipline, `promoted` whether a
+   * promotable head was lowered through a complex kernel.
    */
   static withReferences<
     R extends {
@@ -12962,10 +13217,14 @@ export class BaseCompiler {
 
   /**
    * The `mode`/`promoted` fields every built-in result carries (see
-   * `CompilationResult`). Step 1 of the compile-mode migration: constant.
+   * `CompilationResult`): the report frozen when the most recent outermost
+   * compilation ended (`_lastReport`) — the discipline the code was compiled
+   * under (`'strict'` for strict and for `auto`'s first attempt, `'complex'`
+   * for complex and for an escalated retry) and whether a promotable head
+   * was lowered through a complex kernel.
    */
   static modeReport(): { mode: 'strict' | 'complex'; promoted: boolean } {
-    return { mode: 'strict', promoted: false };
+    return { ...BaseCompiler._lastReport };
   }
 
   /**

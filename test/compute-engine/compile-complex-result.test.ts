@@ -118,25 +118,55 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       }
     });
 
-    it('Sqrt of a real-typed symbol still emits the real lowering', () => {
+    // A real-typed symbol of UNKNOWN sign is exactly the case the default mode
+    // `auto` promotes (compile-mode step 4, 2026-08-16): the complex kernel
+    // covers both signs and hands an in-domain value back as a plain number.
+    // `mode: 'strict'` is where the real lowering lives now, and it is pinned
+    // here beside each promoted one.
+    it('Sqrt of a real-typed symbol promotes; strict keeps the real lowering', () => {
       const ce = engineWithNegativeAssignment();
       const result = compile(ce.parse('\\sqrt{r}'), { fallback: false });
-      expect(result.code).toBe('Math.sqrt(_.r)');
+      expect(result.code).toBe('_SYS.csqrt(({ re: _.r, im: 0 }))');
       expect(result.run!({ r: 4 })).toBe(2);
+      expect(result.run!({ r: -1 })).toEqual({ re: 0, im: 1 }); // √−1 = i
+      const strict = compile(ce.parse('\\sqrt{r}'), {
+        fallback: false,
+        mode: 'strict',
+      });
+      expect(strict.code).toBe('Math.sqrt(_.r)');
+      expect(strict.run!({ r: 4 })).toBe(2);
     });
 
-    it('Ln of a real-typed symbol still emits the real lowering', () => {
+    it('Ln of a real-typed symbol promotes; strict keeps the real lowering', () => {
       const ce = engineWithNegativeAssignment();
       const result = compile(ce.parse('\\ln(r)'), { fallback: false });
-      expect(result.code).toBe('Math.log(_.r)');
+      expect(result.code).toBe('_SYS.cln(({ re: _.r, im: 0 }))');
       expect(result.run!({ r: 1 })).toBe(0);
+      // ln(−1) = πi.
+      expect(result.run!({ r: -1 })).toEqual({ re: 0, im: Math.PI });
+      const strict = compile(ce.parse('\\ln(r)'), {
+        fallback: false,
+        mode: 'strict',
+      });
+      expect(strict.code).toBe('Math.log(_.r)');
+      expect(strict.run!({ r: 1 })).toBe(0);
     });
 
-    it('Log of a real-typed symbol still emits the real lowering', () => {
+    it('Log of a real-typed symbol promotes; strict keeps the real lowering', () => {
       const ce = engineWithNegativeAssignment();
       const result = compile(ce.parse('\\log(r)'), { fallback: false });
-      expect(result.code).toBe('Math.log10(_.r)');
+      expect(result.code).toContain('_SYS.cln(({ re: _.r, im: 0 }))');
       expect(result.run!({ r: 100 })).toBe(2);
+      // log₁₀(−1) = πi / ln 10.
+      const neg = result.run!({ r: -1 }) as { re: number; im: number };
+      expect(neg.re).toBe(0);
+      expect(neg.im).toBeCloseTo(Math.PI / Math.LN10, 12);
+      const strict = compile(ce.parse('\\log(r)'), {
+        fallback: false,
+        mode: 'strict',
+      });
+      expect(strict.code).toBe('Math.log10(_.r)');
+      expect(strict.run!({ r: 100 })).toBe(2);
     });
 
     it('Log of a negative literal no longer lowers to Math.log10', () => {
@@ -487,19 +517,23 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
     ).toBeNaN();
   });
 
-  it('Sqrt/Ln/Log under realOnly keep their real lowering', () => {
+  it('Sqrt/Ln/Log under realOnly promote and project back to the real values', () => {
+    // The default mode `auto` promotes an unknown-sign operand to the complex
+    // kernel (compile-mode step 4, 2026-08-16); `realOnly` then PROJECTS the
+    // result, so the observable numbers are the ones the real lowering used to
+    // produce — in-domain value, `NaN` out of domain.
     const ce = new ComputeEngine();
     ce.declare('u', 'real');
     for (const [latex, code, arg, expected] of [
-      ['\\sqrt{u}', 'Math.sqrt(_.u)', 4, 2],
-      ['\\ln(u)', 'Math.log(_.u)', 1, 0],
-      ['\\log(u)', 'Math.log10(_.u)', 100, 2],
+      ['\\sqrt{u}', '_SYS.csqrt(({ re: _.u, im: 0 }))', 4, 2],
+      ['\\ln(u)', '_SYS.cln(({ re: _.u, im: 0 }))', 1, 0],
+      ['\\log(u)', '_SYS.cln(({ re: _.u, im: 0 }))', 100, 2],
     ] as const) {
       const result = compile(ce.parse(latex), {
         realOnly: true,
         fallback: false,
       });
-      expect(result.code).toBe(code);
+      expect(result.code).toContain(code);
       expect(result.run!({ u: arg })).toBe(expected);
       expect(result.run!({ u: -1 })).toBeNaN();
     }

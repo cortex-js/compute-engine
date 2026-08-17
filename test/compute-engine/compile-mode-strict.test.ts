@@ -12,9 +12,10 @@ import type { MathJsonExpression } from '../../src/math-json/types';
  * compilation shaped REAL is a `LaneMismatch` decline (`code:
  * 'lane-mismatch'`, `kind: 'correctness'`, a user-legible `binding`), where
  * before it either compiled silently wrong or was served by a per-call-site
- * lane specialization. In this step the rule is in force for `mode: 'strict'`
- * ONLY: `auto` (the default) and `complex` keep today's emission until steps
- * 3–4 (see `BaseCompiler.strictLanes`).
+ * lane specialization. The rule is in force for `mode: 'strict'` ONLY: since
+ * step 4 (2026-08-16) the default `auto` answers the same mismatch by
+ * escalating the whole compilation to `mode: 'complex'`, which has a single
+ * lane and never declines here (see `BaseCompiler.strictLanes`).
  *
  * The D3 entry check applies in every mode: a `{re, im}` bound at `run()` to a
  * free symbol or lambda parameter analyzed real throws a `TypeError`; a plain
@@ -174,12 +175,20 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     ).toBeUndefined();
   });
 
-  it("nothing declines under auto (today's lane emission is kept until step 4) or complex (single lane)", () => {
+  it('nothing declines under auto (it escalates instead) or complex (single lane)', () => {
     const ce = engineWith();
     expect(declineOf(ce, ['b', 'z'], 'auto')).toBeUndefined();
     const auto = compile(ce.box(['b', 'z']), { mode: 'auto', fallback: false });
-    // The lane specialization still serves the call under `auto`.
-    expect(auto.code).toContain('_fn_b$z1');
+    // Lane specialization is gone: `auto` retries the whole compilation under
+    // the complex discipline (compile-mode step 4, 2026-08-16), so there is a
+    // single `_fn_b` and the mismatch is reported as the escalation cause.
+    expect(auto.success).toBe(true);
+    expect(auto.code).toBe('_fn_b(_.z)');
+    expect(auto.mode).toBe('complex');
+    expect(auto.escalation?.boundary).toBe('user-function parameter');
+    expect(auto.escalation?.binding).toBe('the parameter `x` of `b`');
+    expect(auto.escalation?.value).toBe('z');
+    // …and the value matches the interpreter's `b(1 + 2i) = 2 + 4i`.
     expect(auto.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
     // Complex mode: one emission of `b`, its wide parameter lifted at use.
     expect(declineOf(ce, ['b', 'z'], 'complex')).toBeUndefined();

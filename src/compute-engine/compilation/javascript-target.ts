@@ -47,6 +47,7 @@ import {
   realLcm as lcm,
   limit,
   centeredDiffHigherOrder,
+  SMALL_INTEGER,
 } from '../numerics/numeric.js';
 import {
   parseColor,
@@ -1767,8 +1768,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Limit: (args, compile) =>
     `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
   Ln: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      // The operand may be complex only by WIDENESS (the complex discipline
+      // lifted it): that is a promotion for the `promoted` report, and the
+      // predicate below records it (its lowering is the same kernel).
+      BaseCompiler.recordPromotion('Ln', args);
       return `_SYS.cln(${compile(args[0])})`;
+    }
     // Real-emitted operand with a complex result — a PROVABLY negative operand
     // (`Ln(-2)`, or `a := -2` → `Ln(a)` is `finite_complex`), or an
     // unknown-sign one under the caller's `complexPromotion` opt-in. The
@@ -2266,40 +2272,62 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const subject = elementsArg('RangeOf', args[0], compile, 1);
     // An EMPTY needle is an interpreter ERROR value here, not a span: an empty
     // span is not representable, because `Range(1, 0)` is the DESCENDING range
-    // [1, 0] rather than an empty one. A compiled artifact has no error value
-    // to return, so the needle must be PROVABLY non-empty at compile time; a
-    // needle whose emptiness is only known at run time declines.
-    if (args[1].isEmptyCollection !== false)
+    // [1, 0] rather than an empty one. A PROVABLY empty needle therefore
+    // declines — a known-bad call should not compile — while a needle whose
+    // emptiness is only known at run time compiles and carries the
+    // `_SYS.domne` guard below.
+    if (args[1].isEmptyCollection === true)
       throw new Error(
-        `RangeOf: cannot compile — the needle is not provably non-empty, and ` +
-          `an empty needle is an error value in the interpreter (an empty ` +
-          `span has no \`Range\` representation), which a compiled artifact ` +
+        `RangeOf: cannot compile — the needle is provably empty, and an ` +
+          `empty needle is an error value in the interpreter (an empty span ` +
+          `has no \`Range\` representation), which a compiled artifact ` +
           `cannot return. Fail closed (D6) — the interpreter evaluates it.`
       );
-    const needle = elementsArg('RangeOf', args[1], compile, 2);
-    let start = 0;
+    // `elementsArg` yields an ARRAY for both kinds of needle — the grapheme
+    // clusters of a string, or the materialized elements of a list — so one
+    // length guard covers both. Emitted only when emptiness is undecided at
+    // compile time; see `guardedIntegerArg` for the contract this shares with
+    // the other domain guards (interpreter returns an error VALUE, compiled
+    // code throws — a visible failure, never a wrong value).
+    let needle = elementsArg('RangeOf', args[1], compile, 2);
+    if (args[1].isEmptyCollection !== false)
+      needle =
+        `_SYS.domne(${needle}, ` +
+        `${JSON.stringify('RangeOf: the needle must not be empty')})`;
+    // `from` is 1-based and `_SYS.seqidx` scans from a 0-based offset. A
+    // literal in domain becomes that offset now; a COMPUTED `from` compiles
+    // and the emitted `_SYS.domi` guard throws when it is below 1 (see
+    // `guardedIntegerArg` for why that divergence is the intended one).
+    let start = '0';
     if (args.length === 3) {
       const from = literalInteger(args[2]);
-      if (from === undefined)
-        throw new Error(
-          `RangeOf: cannot compile — \`from\` must be an integer LITERAL. A ` +
-            `\`from\` below 1 is an \`out-of-range\` error value in the ` +
-            `interpreter, which a compiled artifact cannot return, so a ` +
-            `run-time \`from\` cannot be admitted. Fail closed (D6).`
-        );
-      if (from < 1)
-        throw new Error(
-          `RangeOf: cannot compile — \`from\` is ${from}; the interpreter ` +
-            `answers an \`out-of-range\` error for an index below 1, which a ` +
-            `compiled artifact cannot return. Fail closed (D6).`
-        );
-      start = from - 1;
+      start =
+        from !== undefined && from >= 1
+          ? `${from - 1}`
+          : `(${guardedIntegerArg(
+              'RangeOf',
+              args[2],
+              compile,
+              1,
+              '`from` must be an integer of 1 or more',
+              // No upper bound: the interpreter reads `from` with `toInteger`,
+              // not `asSmallInteger`, so a large `from` is not an error value
+              // — just a search that starts past the end and answers `Nothing`.
+              Number.POSITIVE_INFINITY
+            )} - 1)`;
     }
+    // The from-offset is a PARAMETER of the IIFE, not inlined in its body, for
+    // two reasons. JavaScript evaluates call arguments left to right, so this
+    // order fires the `from` guard before the needle guard — the interpreter's
+    // order, which checks `start < 1` before the empty needle (`RangeOf` in
+    // `library/collections.ts`). And a compiled subexpression inlined in the
+    // body would sit inside the scope binding `_s`/`_p`, where a free symbol
+    // of either name would be captured.
     return (
-      `((_s, _p) => { const _i = _SYS.seqidx(_s, _p, ${start}); ` +
+      `((_f, _s, _p) => { const _i = _SYS.seqidx(_s, _p, _f); ` +
       `return _i < 0 ? undefined : ` +
       `Array.from({length: _p.length}, (_e, _k) => _i + 1 + _k); })` +
-      `(${subject}, ${needle})`
+      `(${start}, ${subject}, ${needle})`
     );
   },
   // `True` when the needle occurs as a contiguous subsequence. An EMPTY needle
@@ -2358,13 +2386,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   //
   // Each runs on GRAPHEME CLUSTERS and re-joins once, exactly as the
   // interpreter does (`library/core.ts`), so a combining sequence, a ZWJ emoji
-  // family or a regional-indicator flag is never cut in half. The operands
-  // whose value decides between a result and an interpreter ERROR VALUE — an
-  // empty replace target, an empty pad, a negative count — must be LITERALS
-  // here: a compiled artifact has no representation for an error value, so an
-  // invalid literal declines with its reason named and a non-literal declines
-  // because its run-time value could be either.
-  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.)
+  // family or a regional-indicator flag is never cut in half.
+  //
+  // The operands whose value decides between a result and an interpreter ERROR
+  // VALUE — an empty replace target, an empty pad, a negative count — are
+  // decided at COMPILE time when they are literals (an out-of-domain literal
+  // declines with its reason named: a known-bad call should not compile) and
+  // guarded at RUN time when they are computed, so `PadStart(s, width)` with a
+  // computed width compiles. A compiled artifact has no representation for an
+  // error value, so the guard THROWS naming the operator and the violated rule:
+  // the interpreter returns an error VALUE, compiled code throws — a visible
+  // failure, never a wrong value. This follows the `Slice` lowering in this
+  // file, whose non-literal span argument likewise compiles and throws at run
+  // time when it is not an ascending index range. See `guardedIntegerArg` and
+  // `guardedNonEmptyStringArg`.
+  // (User ruling 2026-08-16;
+  // `docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.)
 
   StringReplace: (args, compile) => {
     if (args.length < 3 || args.length > 4)
@@ -2373,21 +2410,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `\`StringReplace(s, target, replacement, count?)\`. Fail closed (D6).`
       );
     const subject = stringArg('StringReplace', args[0], compile, 'the subject');
-    const target = literalStringContent(args[1]);
-    if (target === undefined)
-      throw new Error(
-        `StringReplace: cannot compile — the target must be a string ` +
-          `LITERAL. An EMPTY target is an error value in the interpreter (the ` +
-          `"insert at every boundary" behaviour is deliberately not ` +
-          `inherited), which a compiled artifact cannot return, so a run-time ` +
-          `target cannot be admitted. Fail closed (D6).`
-      );
-    if (target === '')
-      throw new Error(
-        `StringReplace: cannot compile — the target is empty, which the ` +
-          `interpreter answers with an error value. Fail closed (D6).`
-      );
-    const needle = stringArg('StringReplace', args[1], compile, 'the target');
+    // An EMPTY target is an error value in the interpreter (the "insert at
+    // every boundary" behaviour is deliberately not inherited), and it would
+    // make `_SYS.srep`'s scan advance by zero and never terminate — so the
+    // guard has to hold before the kernel runs, not inside it.
+    const needle = guardedNonEmptyStringArg(
+      'StringReplace',
+      args[1],
+      stringArg('StringReplace', args[1], compile, 'the target'),
+      'the target must not be empty'
+    );
     const replacement = stringArg(
       'StringReplace',
       args[2],
@@ -2395,17 +2427,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       'the replacement'
     );
     let limit = 'Infinity';
-    if (args.length === 4) {
-      const count = literalInteger(args[3]);
-      if (count === undefined || count < 1)
-        throw new Error(
-          `StringReplace: cannot compile — \`count\` must be an integer ` +
-            `LITERAL of 1 or more; anything else is an error value in the ` +
-            `interpreter, which a compiled artifact cannot return. ` +
-            `Fail closed (D6).`
-        );
-      limit = count.toString();
-    }
+    if (args.length === 4)
+      limit = guardedIntegerArg(
+        'StringReplace',
+        args[3],
+        compile,
+        1,
+        `\`count\` must be a positive integer of at most ${SMALL_INTEGER}`
+      );
     return `_SYS.srep(${subject}, ${needle}, ${replacement}, ${limit})`;
   },
   Trim: (args, compile) => compileJSTrim('Trim', args, compile, true, true),
@@ -2424,14 +2453,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `Fail closed (D6).`
       );
     const subject = stringArg('StringRepeat', args[0], compile, 'the subject');
-    const n = literalInteger(args[1]);
-    if (n === undefined || n < 0)
-      throw new Error(
-        `StringRepeat: cannot compile — \`n\` must be a non-negative integer ` +
-          `LITERAL; a negative or non-integer \`n\` is an error value in the ` +
-          `interpreter, which a compiled artifact cannot return. ` +
-          `Fail closed (D6).`
-      );
+    const n = guardedIntegerArg(
+      'StringRepeat',
+      args[1],
+      compile,
+      0,
+      `\`n\` must be a non-negative integer of at most ${SMALL_INTEGER}`
+    );
     return `(_SYS.ct(${subject}).repeat(${n}).normalize())`;
   },
   PadStart: (args, compile) => compileJSPad('PadStart', args, compile, true),
@@ -3278,6 +3306,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       args.some((a) => BaseCompiler.isComplexValued(a)) ||
       promotesToComplexLane('Log', args)
     ) {
+      // Recorded for the `promoted` report when the operand is complex only
+      // by wideness (a no-op otherwise; the lowering below is the same).
+      BaseCompiler.recordPromotion('Log', args);
       const n = BaseCompiler.tempVar(target);
       const num = `const ${n} = _SYS.cln(${complexOperandCode(args[0], compile)});`;
       if (args.length === 1)
@@ -3407,6 +3438,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(base) ||
       BaseCompiler.isComplexValued(exp)
     ) {
+      // A base complex only by WIDENESS with a non-integer exponent is a
+      // promotion for the `promoted` report (see `promotesRadicalToComplex`).
+      BaseCompiler.recordPromotion('Power', args);
       // Small literal integer power of a complex base: inline a
       // square-and-multiply chain instead of the polar-form `_SYS.cpow` — an
       // order of magnitude faster in iterated-map loops. The square is
@@ -3475,7 +3509,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `a ⩴ -2`). The enclosing expression reads `{re, im}` off this node, so
     // the real `Math.pow` lowering — a `NaN` *number* — would NaN-poison it.
     // See `resultIsComplexValued`.
-    if (resultIsComplexValued('Power', args))
+    // …or PROMOTED (the `auto`/`complex` disciplines): an unknown-sign base
+    // with a provably non-integer exponent takes the complex kernel too,
+    // agreeing with `isComplexValued`'s report to the parent
+    // (`promotesRadicalToComplex`).
+    if (
+      resultIsComplexValued('Power', args) ||
+      promotesToComplexLane('Power', args)
+    )
       return `_SYS.cpow(${complexOperandCode(base, compile)}, ${complexOperandCode(exp, compile)})`;
     if (eConst === 0) return '1';
     if (eConst === 1) return compile(base);
@@ -3768,8 +3809,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.sinh(${compile(args[0])})`;
   },
   Sqrt: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      // The operand may be complex only by WIDENESS (the complex discipline
+      // lifted it): that is a promotion for the `promoted` report, and the
+      // predicate below records it (its lowering is the same kernel).
+      BaseCompiler.recordPromotion('Sqrt', args);
       return `_SYS.csqrt(${compile(args[0])})`;
+    }
     const c = tryGetConstant(args[0]);
     if (c !== undefined) {
       const r = Math.sqrt(c);
@@ -5541,8 +5587,9 @@ const JS_UNICODE_WHITESPACE_CHARACTER =
  *
  * `limit` is `Infinity` for the count-less form. An EMPTY `target` would make
  * the scan advance by zero and never terminate; the interpreter answers an
- * error value for it and the lowering refuses to emit this call unless the
- * target is a literal that is provably non-empty, so it cannot arrive here.
+ * error value for it, and the lowering keeps it away from here — an empty
+ * literal declines to compile and a computed target is wrapped in a
+ * `_SYS.doms` guard that throws before this runs.
  */
 function replaceText(
   s: unknown,
@@ -5618,8 +5665,10 @@ function trimText(
  * The padding is built from `pad`'s own grapheme clusters, cycled, so the final
  * copy is truncated ON A CHARACTER BOUNDARY (`PadStart("a", 4, "xy")` is
  * `"xyxa"`). A string that already has `n` or more characters comes back
- * unchanged. The caller's compile-time gate has already rejected an empty `pad`
- * and a negative `n`, both of which are error values in the interpreter.
+ * unchanged. An empty `pad` and a negative `n` — both error values in the
+ * interpreter — never reach here: an out-of-domain literal declines to
+ * compile, and a computed operand is wrapped in a `_SYS.domi`/`_SYS.doms`
+ * guard that throws first.
  */
 function padText(
   s: unknown,
@@ -5652,6 +5701,33 @@ function caseFoldText(s: unknown): string {
     .toLowerCase()
     .replace(/ς/g, 'σ')
     .normalize();
+}
+
+/**
+ * A compiled scalar callback as the REAL function the numeric kernels
+ * (`_SYS.integrate`, `_SYS.nd`, `_SYS.limit`, the Monte-Carlo estimator)
+ * consume: those kernels are real-only, and under the promoting disciplines
+ * (`auto`, `complex`) a compiled body may hand back a `{re, im}` object —
+ * `y^{3/2}` in an integrand promotes to `_SYS.cpow`, which yields `{re: …, im:
+ * 0}` on the real axis. The value is projected exactly as the D2 rule
+ * projects a real-only head's operand: a plain number passes; an object with
+ * an EXACTLY zero imaginary part is its real part; anything else — a genuinely
+ * complex value, where the kernel's real result is meaningless — is `NaN`. A
+ * plain-number-returning callback costs one `typeof` per evaluation.
+ */
+function realFn(f: (x: number) => unknown): (x: number) => number {
+  return (x: number): number => {
+    const v = f(x);
+    if (typeof v === 'number') return v;
+    if (
+      typeof v === 'object' &&
+      v !== null &&
+      typeof (v as ComplexResult).re === 'number' &&
+      (v as ComplexResult).im === 0
+    )
+      return (v as ComplexResult).re;
+    return NaN;
+  };
 }
 
 /**
@@ -5698,6 +5774,26 @@ const SYS_HELPERS = {
   // dust (`toRI`).
   cisreal: (x: unknown): boolean =>
     typeof x === 'number' || (x as { im: number }).im === 0,
+  // Shape-agnostic SCALAR add / multiply: two numbers combine as numbers; a
+  // `{re, im}` in either position combines as complex (the other operand
+  // lifted). The fold combiner of a collection `Sum`/`Product` whose elements
+  // are not provably real (`emitCollectionReduce`), so a promoted or complex
+  // element never reaches the raw `+`.
+  sadd: (a: unknown, b: unknown): number | { re: number; im: number } => {
+    if (typeof a === 'number' && typeof b === 'number') return a + b;
+    const p = typeof a === 'number' ? { re: a, im: 0 } : (a as ComplexResult);
+    const q = typeof b === 'number' ? { re: b, im: 0 } : (b as ComplexResult);
+    return { re: p.re + q.re, im: p.im + q.im };
+  },
+  smul: (a: unknown, b: unknown): number | { re: number; im: number } => {
+    if (typeof a === 'number' && typeof b === 'number') return a * b;
+    const p = typeof a === 'number' ? { re: a, im: 0 } : (a as ComplexResult);
+    const q = typeof b === 'number' ? { re: b, im: 0 } : (b as ComplexResult);
+    return {
+      re: p.re * q.re - p.im * q.im,
+      im: p.re * q.im + p.im * q.re,
+    };
+  },
   // The exactly-real complex object `{re, im: 0}` AS the real number `re`;
   // any other value passes through. Used by the emitted DISPATCHERS
   // (multi-clause guard chains, protocol receiver guards) to test their
@@ -5745,7 +5841,7 @@ const SYS_HELPERS = {
   nd:
     (f: (x: number) => number, order: number) =>
     (x: number): number =>
-      centeredDiffHigherOrder(f, x, order),
+      centeredDiffHigherOrder(realFn(f), x, order),
   // Power with the interpreter's 0^0 = NaN convention. `Math.pow(0, 0)` is 1,
   // but the interpreter treats a genuine 0^0 as indeterminate (NaN). Used only
   // on the variable-exponent path — where the exponent could be 0 at run time
@@ -5835,6 +5931,46 @@ const SYS_HELPERS = {
   strim: trimText,
   spad: padText,
   cfold: caseFoldText,
+  // Run-time DOMAIN guards for the operands whose out-of-domain value the
+  // interpreter answers with an ERROR VALUE — `RangeOf`'s `from` and needle,
+  // `StringReplace`'s `count` and `target`, `StringRepeat`'s and
+  // `PadStart`/`PadEnd`'s `n` and `pad`. A compiled artifact has no error
+  // value to hand back, so the emitted code THROWS with the operator and the
+  // violated rule named: the interpreter returns an error VALUE, compiled
+  // code throws — a visible failure, never a wrong value. Same contract as
+  // the `Slice` lowering's run-time span check, which throws on a span
+  // argument that is not an ascending index range.
+  //
+  // Emitted only for a COMPUTED operand: a literal is decided at compile
+  // time, where an out-of-domain one declines instead (see
+  // `guardedIntegerArg`). Each returns its operand so it can wrap the value
+  // in place.
+  // `max` is the UPPER bound the interpreter's own reader imposes: the string
+  // operators read their count through `asSmallInteger` (`library/core.ts`),
+  // which answers `null` — hence an error value — for a magnitude above
+  // `SMALL_INTEGER` (1000000). Without it, `StringRepeat(s, 2000001)` would
+  // build a multi-megabyte string where the interpreter errors. `RangeOf`'s
+  // `from` reads through `toInteger` instead and has no such ceiling, so it
+  // passes `Infinity`. A lower bound below `-SMALL_INTEGER` needs no separate
+  // test: every caller's `min` is 0 or 1.
+  domi: (v: unknown, min: number, max: number, message: string): number => {
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max)
+      throw new RangeError(message);
+    return v;
+  },
+  doms: (v: unknown, message: string): string => {
+    if (typeof v !== 'string' || v === '') throw new RangeError(message);
+    return v;
+  },
+  // The needle of `RangeOf`, which must be a NON-EMPTY sequence: an empty
+  // needle has no representable span (`Range(1, 0)` is the DESCENDING range
+  // [1, 0], not an empty one), so the interpreter answers an error value for
+  // it. Both kinds of needle reach here as an array — a string's grapheme
+  // clusters or a list's elements — so the length test covers both.
+  domne: <T extends ArrayLike<unknown>>(v: T, message: string): T => {
+    if (v.length === 0) throw new RangeError(message);
+    return v;
+  },
   // --- Lazy infinite-collection streams ---------------------------------
   // A STATICALLY infinite collection (`Range(1, ∞)` and the Map/Filter/Drop/
   // Rest pipeline over it) has no array representation, so it compiles to a
@@ -6092,7 +6228,8 @@ const SYS_HELPERS = {
   // (`quadratureBeatsMonteCarlo`): an inner level of an iterated integral pays
   // this fallback once per OUTER node, so 1e7 samples of a stalled-but-accurate
   // result is minutes spent making the answer worse. See `compileIntegrate`.
-  integrate: (f: (x: number) => number, a: number, b: number) => {
+  integrate: (fn: (x: number) => number, a: number, b: number) => {
+    const f = realFn(fn);
     const r = adaptiveQuadrature(f, a, b);
     // A diagnosed divergence has no finite value, and sampling it would only
     // launder the divergence into a plausible-looking number.
@@ -6104,10 +6241,11 @@ const SYS_HELPERS = {
   // approximate (~1e-4 typical error, ~200 ms/call). Emitted when
   // `quadrature: 'monte-carlo'` is requested — see `compileIntegrate`.
   integrateMC: (f: (x: number) => number, a: number, b: number) =>
-    monteCarloEstimate(f, a, b, 10e6).estimate,
+    monteCarloEstimate(realFn(f), a, b, 10e6).estimate,
   lcm,
   lngamma: gammaln,
-  limit,
+  limit: (f: (x: number) => number, x: number, dir?: number): number =>
+    limit(realFn(f), x, dir),
   mean: oneDatumOk(mean),
   median: oneDatumOk(median),
   variance: oneDatumOk(variance),
@@ -7731,13 +7869,9 @@ function stringArg(
  *
  * Used by the string operators whose out-of-domain counts produce an interpreter
  * ERROR VALUE rather than a number — `StringRepeat(s, -1)`, `PadStart(s, -1)`,
- * `StringReplace(s, t, r, 0)`, `RangeOf(xs, needle, 0)`. A compiled artifact has
- * no representation for such an error value (`Nothing` projects to `undefined`
- * or `NaN`, but an error is neither), so the count operand must be decidable at
- * COMPILE time: a valid literal compiles, an invalid literal declines with its
- * reason named, and a non-literal declines because its run-time value could be
- * either. That is the conservative reading of decision D8 — never a wrong value
- * behind `success: true`.
+ * `StringReplace(s, t, r, 0)`, `RangeOf(xs, needle, 0)`. Their literal operands
+ * are decided at COMPILE time by {@link guardedIntegerArg}; a computed one gets
+ * a run-time guard instead.
  */
 function literalInteger(x: Expression | undefined): number | undefined {
   if (x === undefined || !isNumber(x) || x.im !== 0) return undefined;
@@ -7754,6 +7888,109 @@ function literalInteger(x: Expression | undefined): number | undefined {
 function literalStringContent(x: Expression | undefined): string | undefined {
   if (x === undefined || !isString(x)) return undefined;
   return x.string;
+}
+
+/**
+ * The emitted JavaScript for an integer operand whose out-of-domain values the
+ * interpreter answers with an ERROR VALUE: `RangeOf`'s `from` (an integer of 1
+ * or more — past the END of the subject is deliberately NOT an error, just
+ * `Nothing`), `StringReplace`'s `count` (a positive integer),
+ * `StringRepeat`'s and `PadStart`/`PadEnd`'s `n` (a non-negative integer).
+ * `min` is that lower bound and `rule` states it for the reader of a run-time
+ * failure (e.g. "`n` must be a non-negative integer").
+ *
+ * `max` is the matching UPPER bound. The string operators read their count with
+ * `asSmallInteger` (`library/core.ts`), which answers `null` — so the
+ * interpreter answers an error value — above `SMALL_INTEGER` (1000000); hence
+ * that default. `RangeOf`'s `from` goes through `toInteger` instead, which has
+ * no such ceiling, so it passes `Infinity`.
+ *
+ * A LITERAL is decided now: in domain it is emitted as a bare number, out of
+ * domain the call DECLINES to compile — a known-bad call should not compile,
+ * and the diagnostic names the reason. A COMPUTED operand the engine can
+ * already PROVE out of domain declines the same way. Otherwise it compiles and
+ * carries a `_SYS.domi` guard that THROWS at run time when the value is out of
+ * domain.
+ * The contract that divergence rests on: the interpreter returns an error
+ * VALUE, compiled code throws — a visible failure, never a wrong value. That
+ * is the precedent the `Slice` lowering in this file already sets, where a
+ * non-literal span compiles and the emitted code throws a `RangeError` on a
+ * span that is not an ascending index range.
+ * (User ruling 2026-08-16; `docs/plans/2026-08-16-string-phase2-join-search-ops.md`,
+ * decision D8.)
+ */
+function guardedIntegerArg(
+  kind: string,
+  arg: Expression,
+  compile: (expr: Expression) => string,
+  min: number,
+  rule: string,
+  max: number = SMALL_INTEGER
+): string {
+  const n = literalInteger(arg);
+  if (n !== undefined && n >= min && n <= max) return `${n}`;
+  if (isNumber(arg))
+    throw new Error(
+      `${kind}: cannot compile — ${rule}, and this operand is the literal ` +
+        `\`${arg.toString()}\`, which the interpreter answers with an error ` +
+        `value. Fail closed (D6).`
+    );
+  // A computed operand can still be PROVABLY below the bound — `Negate(k)` for
+  // a `k` known positive — and a known-bad call should not compile. Only the
+  // lower bound has such a proof available: `isPositive`/`isNonNegative` are
+  // the sign facets, and there is no facet for "at most 1000000", so an
+  // oversized computed value is left to the run-time guard.
+  const provablyBelow =
+    min >= 1 ? arg.isPositive === false : arg.isNonNegative === false;
+  if (provablyBelow)
+    throw new Error(
+      `${kind}: cannot compile — ${rule}, and this operand is provably ` +
+        `outside that domain, which the interpreter answers with an error ` +
+        `value. Fail closed (D6).`
+    );
+  return `_SYS.domi(${compile(arg)}, ${min}, ${max}, ${JSON.stringify(
+    `${kind}: ${rule}`
+  )})`;
+}
+
+/**
+ * The emitted JavaScript for a string operand that must be NON-EMPTY — the
+ * `target` of `StringReplace` and the `pad` of `PadStart`/`PadEnd`, both of
+ * which the interpreter answers with an ERROR VALUE when empty. `js` is the
+ * already-compiled operand.
+ *
+ * Same split as {@link guardedIntegerArg}: an empty literal — or a computed
+ * operand the engine can already PROVE empty — declines to compile, a
+ * non-empty literal is emitted bare, and any other computed operand carries a
+ * `_SYS.doms` guard that throws at run time. Interpreter returns an error
+ * VALUE, compiled code throws — a visible failure, never a wrong value (the
+ * `Slice` precedent, see {@link guardedIntegerArg}).
+ */
+function guardedNonEmptyStringArg(
+  kind: string,
+  arg: Expression,
+  js: string,
+  rule: string
+): string {
+  const literal = literalStringContent(arg);
+  if (literal !== undefined && literal !== '') return js;
+  if (literal === '')
+    throw new Error(
+      `${kind}: cannot compile — ${rule}, and this operand is the empty ` +
+        `string literal, which the interpreter answers with an error value. ` +
+        `Fail closed (D6).`
+    );
+  // Not spelled as a literal, but still provably empty — a symbol assigned
+  // `""`, say. Same rule as `RangeOf`'s needle: a known-bad call should not
+  // compile, while an operand whose emptiness is only known at run time gets
+  // the guard below.
+  if (arg.isEmptyCollection === true)
+    throw new Error(
+      `${kind}: cannot compile — ${rule}, and this operand is provably ` +
+        `empty, which the interpreter answers with an error value. ` +
+        `Fail closed (D6).`
+    );
+  return `_SYS.doms(${js}, ${JSON.stringify(`${kind}: ${rule}`)})`;
 }
 
 /**
@@ -7814,9 +8051,10 @@ function compileJSTrim(
  * display columns) by repeating `pad`, whose final copy is truncated on a
  * character boundary.
  *
- * `n` and `pad` must be literals: a negative `n` and an empty `pad` are both
- * interpreter ERROR VALUES, which a compiled artifact cannot return (see
- * {@link literalInteger}).
+ * A negative `n` and an empty `pad` are both interpreter ERROR VALUES, which a
+ * compiled artifact cannot return: an out-of-domain LITERAL declines to
+ * compile, while a computed `n` or `pad` compiles with a run-time guard that
+ * throws (see {@link guardedIntegerArg} and {@link guardedNonEmptyStringArg}).
  */
 function compileJSPad(
   kind: string,
@@ -7830,31 +8068,21 @@ function compileJSPad(
         `Fail closed (D6).`
     );
   const subject = stringArg(kind, args[0], compile, 'the subject');
-  const width = literalInteger(args[1]);
-  if (width === undefined || width < 0)
-    throw new Error(
-      `${kind}: cannot compile — \`n\` must be a non-negative integer ` +
-        `LITERAL; a negative or non-integer \`n\` is an error value in the ` +
-        `interpreter, which a compiled artifact cannot return. ` +
-        `Fail closed (D6).`
-    );
+  const width = guardedIntegerArg(
+    kind,
+    args[1],
+    compile,
+    0,
+    `\`n\` must be a non-negative integer of at most ${SMALL_INTEGER}`
+  );
   let pad = '" "';
-  if (args.length === 3) {
-    const literal = literalStringContent(args[2]);
-    if (literal === undefined)
-      throw new Error(
-        `${kind}: cannot compile — \`pad\` must be a string LITERAL. An EMPTY ` +
-          `pad is an error value in the interpreter, which a compiled ` +
-          `artifact cannot return, so a run-time pad cannot be admitted. ` +
-          `Fail closed (D6).`
-      );
-    if (literal === '')
-      throw new Error(
-        `${kind}: cannot compile — \`pad\` is empty, which the interpreter ` +
-          `answers with an error value. Fail closed (D6).`
-      );
-    pad = stringArg(kind, args[2], compile, 'the padding');
-  }
+  if (args.length === 3)
+    pad = guardedNonEmptyStringArg(
+      kind,
+      args[2],
+      stringArg(kind, args[2], compile, 'the padding'),
+      '`pad` must be a non-empty string'
+    );
   return `_SYS.spad(${subject}, ${width}, ${pad}, ${atStart})`;
 }
 
@@ -8279,12 +8507,27 @@ function emitCollectionReduce(
 ): string {
   const code = BaseCompiler.compile(coll, target);
   // A statically indexed collection has provably scalar elements (a
-  // `list<number>`/`vector<n>`), so it folds with the bare scalar operator and
-  // is always an array — no runtime guard.
+  // `list<number>`/`vector<n>`) and is always an array — no runtime guard.
+  // Elements PROVABLY real fold with the raw operator; anything else — a
+  // `list<number>` (wide elements), a `Map` whose callback promotes
+  // (`Map(Ln, xs)` under `auto`), a list with a complex cell — folds with the
+  // shape-agnostic scalar combiner (`_SYS.sadd`/`_SYS.smul`: numbers add as
+  // numbers, a `{re, im}` in either position adds as complex), so a complex
+  // element never reaches `+` and string-concatenates. One `typeof` per
+  // element on the wide path; the runner's result convention hands an
+  // exactly-real total back as a plain number.
   if (!guarded) {
-    const op = kind === 'Sum' ? '+' : '*';
     const identity = kind === 'Sum' ? '0' : '1';
-    return `(${code}).reduce((_a, _b) => _a ${op} _b, ${identity})`;
+    // The SAME predicate `isComplexValued` answers the parent from
+    // (`collectionFoldsReal`), so the fold's shape and its report agree: a
+    // raw fold yields a number; the agnostic fold, wrapped in the complex
+    // lift, always yields a `{re, im}` (the parent reads it as complex).
+    if (BaseCompiler.collectionFoldsReal(coll)) {
+      const op = kind === 'Sum' ? '+' : '*';
+      return `(${code}).reduce((_a, _b) => _a ${op} _b, ${identity})`;
+    }
+    const combiner = kind === 'Sum' ? '_SYS.sadd' : '_SYS.smul';
+    return `_SYS.cplx((${code}).reduce(${combiner}, ${identity}))`;
   }
   // A possibly-collection operand (`broadcastable<T>` / top-typed application)
   // may be a scalar OR an array whose elements are themselves vectors/matrices

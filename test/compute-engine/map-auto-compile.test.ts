@@ -350,8 +350,12 @@ describe('Map auto-compile', () => {
     expect(els[0].re).toBe(2);
     expect(els[1].re).toBe(0); // 2i: pure imaginary
     expect(els[1].im).toBe(2);
-    expect(stats.compiledHits).toBe(1); // the real element
-    expect(stats.nanDoubleChecks).toBe(1); // the −4 element
+    // Both elements are served by the compiled lambda: the default compile
+    // mode `auto` promotes the unknown-sign radical (compile-mode step 4,
+    // 2026-08-16), so `√(−4)` comes back as the complex `2i` instead of the
+    // `NaN` that used to send that element to the interpreter double-check.
+    expect(stats.compiledHits).toBe(2);
+    expect(stats.nanDoubleChecks).toBe(0);
   });
 
   // ── 11. Failure semantics: deadline ────────────────────────────────────
@@ -646,14 +650,21 @@ describe('Map auto-compile', () => {
     }
 
     test('the NaN double-check does not double-consume draws', () => {
-      // `√(Random() − 0.5)` is NaN for about half the elements under the
-      // compiled real emission, so each of those re-runs on the interpreter.
-      const body = ['Sqrt', ['Subtract', ['Random'], 0.5]];
+      // `(−1)^Random()` is NaN on the compiled path at every element: a
+      // VARIABLE exponent keeps the real `Math.pow`, which is NaN for a
+      // negative base and a non-integer exponent, so each element is
+      // discarded and re-run on the interpreter (which answers the complex
+      // principal value). The former witness `√(Random() − 0.5)` no longer
+      // reaches this path — the default mode `auto` promotes the radical to
+      // the complex kernel and it never returns NaN (compile-mode step 4,
+      // 2026-08-16).
+      const body = ['Power', -1, ['Random']];
       _resetMapAutoCompileStats();
       const compiled = framedDrain(body, 200, 'auto');
-      // The path under test was actually taken.
-      expect(stats.nanDoubleChecks).toBeGreaterThan(0);
-      expect(stats.compiledHits).toBeGreaterThan(0);
+      // The path under test was actually taken, for every element (so no
+      // element is served by the compiled value: `compiledHits` is 0).
+      expect(stats.nanDoubleChecks).toBe(200);
+      expect(stats.compiledHits).toBe(0);
 
       const interpreted = framedDrain(body, 200, 'off');
       // One draw per element, exactly as the interpreter consumes.

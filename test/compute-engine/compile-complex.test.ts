@@ -689,11 +689,16 @@ describe('COMPILE COMPLEX - literal square fast path and recursive lambdas', () 
       { fallback: false }
     );
     // True recursion: the emitted call references the named local. K's `z`
-    // slot is wide-typed and receives the complex `x + iy`, so the call site
-    // is the complex LANE of `K` — emitted as the `_fn_K$z01` specialization
-    // (`userFunctionName`: parameter 2 complex) — and the recursive self-call
-    // `K(n-1, z)` inside it resolves, by name, to that same specialization.
-    expect(res.code).toContain('_fn_K$z01(');
+    // slot is wide-typed and receives the complex `x + iy`; per-call-site lane
+    // specialization (`_fn_K$z01`) is gone — the default `auto` escalates the
+    // whole compilation to `mode: 'complex'` at that boundary (compile-mode
+    // step 4, 2026-08-16), so there is ONE `_fn_K`, complex throughout, which
+    // the recursive self-call `K(n-1, z)` reuses.
+    expect(res.code).toContain('_fn_K(');
+    expect(res.code).not.toContain('$z');
+    expect(res.mode).toBe('complex');
+    expect(res.escalation?.boundary).toBe('user-function parameter');
+    expect(res.escalation?.binding).toBe('the parameter `z` of `K`');
     const v = res.run!({ x: 0.13, y: 0.21 }) as { re: number; im: number };
     const interp = e.box(['K', 10, ['Complex', 0.13, 0.21]]).N();
     expect(v.re).toBeCloseTo(interp.re, 12);
@@ -1070,10 +1075,12 @@ describe('realOnly leaves an unused complex operand alone', () => {
 // emitted once, in the real lane, so `_fn_b({re, im})` computed `2 * {re, im}`
 // = NaN behind `success: true`. It was filed against the `complexPromotion`
 // opt-in (`b(a(t))` with `a(t) := √(t−1)`) but was never specific to it — a
-// declared-complex `w` took the same path on the default route. Now each call
-// site's lane pattern (`userCallComplexLanes`) selects a specialization
-// (`_fn_b$z1`) whose body compiles with the parameter bound complex, and the
-// real lane keeps its bare name and byte-identical body.
+// declared-complex `w` took the same path on the default route. Per-call-site
+// lane specialization (`_fn_b$z1`) served this for one release; since the
+// compile-mode migration (step 4, 2026-08-16) the default mode `auto` answers
+// the same boundary by escalating ONCE to `mode: 'complex'` — a single
+// `_fn_b`, complex throughout, with `result.escalation` naming the binding.
+// A call whose arguments are all real never escalates and keeps the real lane.
 describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function parameter (per-lane emission)', () => {
   const fresh = () => {
     const { ComputeEngine } = require('../../src/compute-engine');
@@ -1088,27 +1095,35 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
   };
   const W = { re: 1, im: 2 };
 
-  it('ON: the ROADMAP witness |b(a(t))/2 − 1| matches the interpreter', () => {
+  it('the ROADMAP witness |b(a(t))/2 − 1| matches the interpreter', () => {
     const e = fresh();
-    const r = compile(e.parse('|b(a(t))/2 - 1|'), { complexPromotion: true });
+    // No opt-in: the default `auto` promotes the unknown-sign radical in `a`
+    // and escalates at `b`'s wide parameter (compile-mode step 4, 2026-08-16).
+    const r = compile(e.parse('|b(a(t))/2 - 1|'));
     expect(r.success).toBe(true);
     // Interpreter: |2·√(0.3−1)/2 − 1| = |i·0.83666 − 1| = 1.30384…
     expect(r.run!({ t: 0.3 })).toBeCloseTo(1.3038404810405297, 12);
   });
 
-  it('ON: b(a(t)) is classified complex at the call site and returns {re, im}', () => {
+  it('b(a(t)) escalates the compilation to the complex lane and returns {re, im}', () => {
     const e = fresh();
-    expect(BaseCompiler.isComplexValued(e.parse('a(t)'))).toBe(false); // opt-in off here
-    const r = compile(e.parse('t \\mapsto b(a(t))'), { complexPromotion: true });
-    expect(r.code).toContain('_fn_b$z1');
+    expect(BaseCompiler.isComplexValued(e.parse('a(t)'))).toBe(false); // static verdict
+    const r = compile(e.parse('t \\mapsto b(a(t))'));
+    // One emission, no `$z` specialization: the promoted `a(t)` reaching `b`'s
+    // wide parameter escalates the whole compilation to `mode: 'complex'`
+    // (compile-mode step 4, 2026-08-16).
+    expect(r.code).not.toContain('$z');
+    expect(r.mode).toBe('complex');
+    expect(r.escalation?.boundary).toBe('user-function parameter');
+    expect(r.escalation?.binding).toBe('the parameter `x` of `b`');
     const v = r.run!(0.3) as { re: number; im: number };
     expect(v.re).toBeCloseTo(0, 12);
     expect(v.im).toBeCloseTo(1.6733200530681511, 12);
   });
 
-  it('ON: an identity body (pass-through) keeps working through the lane', () => {
+  it('an identity body (pass-through) keeps working through the complex lane', () => {
     const e = fresh();
-    const r = compile(e.parse('t \\mapsto f(a(t))'), { complexPromotion: true });
+    const r = compile(e.parse('t \\mapsto f(a(t))'));
     const v = r.run!(0.3) as { re: number; im: number };
     expect(v.re).toBeCloseTo(0, 12);
     expect(v.im).toBeCloseTo(0.8366600265340756, 12);
@@ -1151,23 +1166,26 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
     expect(r.run!(0.3)).toBeCloseTo(0.6, 12);
   });
 
-  it('both lanes of one function coexist in a single compilation', () => {
+  it('a real and a complex call to one function share the single escalated emission', () => {
     const e = fresh();
-    const r = compile(e.parse('t \\mapsto b(a(t)) + b(t)'), {
-      complexPromotion: true,
-    });
-    expect(r.code).toContain('const _fn_b = (x) => 2 * x;');
-    expect(r.code).toContain('const _fn_b$z1 = (x) =>');
+    const r = compile(e.parse('t \\mapsto b(a(t)) + b(t)'));
+    // The two lanes no longer coexist: the escalation to `mode: 'complex'`
+    // compiles ONE `_fn_b`, complex-bodied, which serves the real call `b(t)`
+    // too (compile-mode step 4, 2026-08-16).
+    expect(r.code).not.toContain('$z');
+    expect((r.code!.match(/const _fn_b = /g) ?? []).length).toBe(1);
+    expect(r.mode).toBe('complex');
     const v = r.run!(0.3) as { re: number; im: number };
     expect(v.re).toBeCloseTo(0.6, 12);
     expect(v.im).toBeCloseTo(1.6733200530681511, 12);
   });
 
-  it('a recursive self-call inside the complex lane resolves to the SAME specialization', () => {
-    // K's `z` slot is wide-typed. Inside `_fn_K$z01` the parameter `z` is
-    // framed as a scalar complex object, so the self-call `K(n-1, z)` grants
-    // the same lane and emits `_fn_K$z01` — never a real-lane `_fn_K` that
-    // would receive the complex object.
+  it('a recursive self-call inside the escalated compilation reuses the one emission', () => {
+    // K's `z` slot is wide-typed and receives a complex argument, so the
+    // compilation escalates to `mode: 'complex'` (compile-mode step 4,
+    // 2026-08-16). There is a single `_fn_K`, its `z` framed as a scalar
+    // complex object, which the self-call `K(n-1, z)` reuses — never a
+    // real-lane emission that would receive the complex object.
     const { ComputeEngine } = require('../../src/compute-engine');
     const e = new ComputeEngine();
     e.assign(
@@ -1194,23 +1212,32 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
       ])
     );
     const r = compile(e.parse('t \\mapsto K(3, t + 2i)'), { fallback: false });
-    expect(r.code).toContain('_fn_K$z01(');
-    expect(r.code).not.toContain('_fn_K(');
+    expect(r.code).not.toContain('$z');
+    expect((r.code!.match(/const _fn_K = /g) ?? []).length).toBe(1);
+    expect(r.mode).toBe('complex');
+    expect(r.escalation?.binding).toBe('the parameter `z` of `K`');
     const v = r.run!(0.1) as { re: number; im: number };
     const interp = e.box(['K', 3, ['Complex', 0.1, 2]]).N();
     expect(v.re).toBeCloseTo(interp.re, 10);
     expect(v.im).toBeCloseTo(interp.im, 10);
   });
 
-  it('a COLLECTION of complex scalars broadcast into a wide-typed parameter takes the complex lane', () => {
+  it('a COLLECTION of complex scalars broadcast into a wide-typed parameter escalates', () => {
     // `b(L)` broadcasts at run time (`_SYS.bcastFn`) — the body receives one
-    // ELEMENT per call, so the lane is the elements'. Before: `[NaN, NaN]`.
+    // ELEMENT per call, so the boundary is the elements'. Before: `[NaN, NaN]`.
     const e = fresh();
     e.declare('L', 'list<complex>');
-    const L = [{ re: 1, im: 2 }, { re: 0, im: 1 }];
+    const L = [
+      { re: 1, im: 2 },
+      { re: 0, im: 1 },
+    ];
     for (const src of ['b(L)', 'b([w, 2w])']) {
       const r = compile(e.parse(src), { fallback: false });
-      expect(r.code).toContain('_fn_b$z1');
+      // One emission, escalated, instead of the retired `_fn_b$z1`
+      // specialization (compile-mode step 4, 2026-08-16).
+      expect(r.code).not.toContain('$z');
+      expect(r.mode).toBe('complex');
+      expect(r.escalation?.binding).toBe('the parameter `x` of `b`');
       expect(r.run!({ L, w: W })).toEqual([
         { re: 2, im: 4 },
         src === 'b(L)' ? { re: 0, im: 2 } : { re: 4, im: 8 },
