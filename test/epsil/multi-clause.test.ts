@@ -515,3 +515,62 @@ f(∞) + 10 * f(-∞) + 100 * f(7)`);
     expect(value.re).toBeCloseTo(Math.PI, 12);
   });
 });
+
+describe('EPSIL MULTI-CLAUSE — broadcast over collections', () => {
+  test('a recursive clause set maps over a range through the pipe operator', () => {
+    // The README-style program: an untyped general clause, a numeric range,
+    // auto-mapping (`5..10 |> fib` maps `fib` over the range — it does not
+    // bind the whole range to `n`, which would recurse forever) and a reducer.
+    const { text, diagnostics } = run(`
+// Fibonacci
+
+// Multi-clause function definition
+fib(0) = 0
+fib(1) = 1
+fib(n) = fib(n - 1) + fib(n - 2)
+
+// Numeric range, auto-mapping, and pipe operators to chain operations
+5..10 |> fib |> Sum
+`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('136');
+  });
+
+  test('a list argument maps element-wise', () => {
+    const { text, diagnostics } = run(`
+fib(0) = 0
+fib(1) = 1
+fib(n) = fib(n - 1) + fib(n - 2)
+fib([5, 6])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[5,8]');
+  });
+
+  test('a clause taking a list binds it whole (no broadcast)', () => {
+    const { text, diagnostics } = run(`
+len(0) = 0
+len(xs: list<number>) = Length(xs)
+len([1, 2, 3])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('3');
+  });
+
+  test('a hold function receives a list expression whole', () => {
+    // A hold definition's operands are unevaluated expressions — never
+    // elements to map over — so it is exempt from the broadcast.
+    const { text, diagnostics } = run(`
+hold show(e) = Head(e)
+show([1, 2, 3])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('"List"');
+  });
+
+  test('an untyped symbol argument stays inert and keeps its type', () => {
+    const { text, diagnostics } = run(`
+g(0) = 0
+g(n) = n^2
+g(x)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('g(x)');
+  });
+});

@@ -561,3 +561,60 @@ describe('DEFINE FUNCTION — route parity (box vs pre-boxed)', () => {
     expect(ce.box(['u', 9]).evaluate().toString()).toBe('10');
   });
 });
+
+// ─── Broadcast over collections ─────────────────────────────────────────────
+
+describe('DEFINE FUNCTION — broadcast over an indexed collection', () => {
+  // A multi-clause definition is user code exactly like a function literal
+  // (`ce.assign('f', x ↦ …)`): applied to a finite indexed collection with
+  // scalar parameters, the call maps the function element-wise instead of
+  // binding the whole collection to the parameter. Before this, `fib([5, 6])`
+  // bound the LIST to `n`: neither literal clause matched, the general clause
+  // recursed on `[4, 5]`, `[3, 4]`, … forever ("Maximum call stack size
+  // exceeded").
+  beforeEach(() => {
+    clause('fib', ['Function', 0, p('z', '0')]);
+    clause('fib', ['Function', 1, p('o', '1')]);
+    clause('fib', [
+      'Function',
+      ['Add', ['fib', ['Subtract', 'n', 1]], ['fib', ['Subtract', 'n', 2]]],
+      'n',
+    ]);
+  });
+
+  it('maps a recursive multi-clause function over a list', () => {
+    expect(ce.box(['fib', ['List', 5, 6]]).evaluate().toString()).toBe(
+      '[5,8]'
+    );
+  });
+
+  it('maps over a lazy Range and feeds a reducer', () => {
+    expect(ce.box(['fib', ['Range', 5, 10]]).evaluate().toString()).toBe(
+      '[5,8,13,21,34,55]'
+    );
+    expect(ce.box(['Sum', ['fib', ['Range', 5, 10]]]).evaluate().toString()).toBe(
+      '136'
+    );
+  });
+
+  it('a clause with a collection-typed parameter binds the collection whole', () => {
+    // `paramsAreScalar` reads every arm of the intersection signature: one
+    // clause consuming a `list<number>` disables the broadcast for the set.
+    clause('len', ['Function', 0, p('z', '0')]);
+    clause('len', ['Function', ['Length', 'xs'], p('xs', 'list<number>')]);
+    expect(ce.box(['len', ['List', 1, 2, 3]]).evaluate().toString()).toBe('3');
+  });
+
+  it('a symbol of unknown type stays inert and is NOT narrowed to a literal clause', () => {
+    // `g(x)` with an untyped `x`: the join over the viable arms' parameters
+    // (`0` and `unknown`) is unconstrained, so `x` keeps its type and the call
+    // stays inert. It used to narrow `x` to the literal type `0` (`widen`
+    // drops `unknown`) and then SELECT the `g(0)` clause, evaluating to `0`.
+    clause('g', ['Function', 0, p('z', '0')]);
+    clause('g', ['Function', ['Power', 'n', 2], 'n']);
+    const call = ce.box(['g', 'x']);
+    expect(call.evaluate().toString()).toBe('g(x)');
+    expect(ce.box('x').type.toString()).toBe('unknown');
+    expect(call.type.toString()).toBe('number');
+  });
+});

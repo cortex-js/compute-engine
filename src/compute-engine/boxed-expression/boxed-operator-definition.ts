@@ -418,6 +418,23 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    */
   _lambdaLiteral?: Expression;
 
+  /** True if this operator definition is a user MULTI-CLAUSE function — a set
+   * of `f(0) = …`, `f(n) = …` clauses installed by `defineFunctionClause`
+   * (`multi-clause.ts`), dispatched at call time by clause selection. Set at
+   * install time, alongside the clause-storage marker.
+   *
+   * Read by `isUserFunctionDef()` (`boxed-function.ts`): a multi-clause
+   * function is user code exactly like a function-literal one (`_isLambda`),
+   * so a call whose argument is a finite indexed collection auto-broadcasts
+   * over it — `fib(5..10)` maps `fib` per element instead of binding the
+   * whole range to `n` (which for a recursive body never reaches a base
+   * clause). Hold (`lazy`) and binder (`scoped`) definitions are excluded by
+   * the predicate, not by this flag: their operands are expressions/symbols,
+   * never elements to map over.
+   * @internal
+   */
+  _isMultiClause = false;
+
   /** Public, traversable view of a user-defined function literal: its
    * parameters and body. `undefined` for built-in operators. Backed by the
    * internal `_lambdaLiteral`. */

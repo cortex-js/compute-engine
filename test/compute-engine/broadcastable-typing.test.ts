@@ -337,9 +337,19 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
   test('scalar-to-scalar application typing is unchanged (non-interference)', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto 2x'));
-    // A scalar argument: no broadcast. The finite-narrowing keeps today's type.
-    expect(ce.box(['g', 3]).type.toString()).toBe('finite_integer');
+    // A scalar argument: no broadcast — the type is the body's inferred result
+    // (`2x` with `x: unknown` is `finite_number`), NOT the closure narrowing
+    // "all-integer arguments ⇒ integer result" that operators without a type
+    // handler get. User code is exempt from that heuristic: it is unsound for a
+    // body like `n / 3` (`k(4)` was typed `finite_integer` while its value is
+    // the rational `4/3`), and a user function's body already says what it
+    // returns.
+    expect(ce.box(['g', 3]).type.toString()).toBe('finite_number');
     expect(ce.box(['g', 3]).evaluate().toString()).toBe('6');
+    // The unsound case that motivated the exemption.
+    ce.assign('k', ce.parse('n \\mapsto n / 3'));
+    expect(ce.box(['k', 4]).type.toString()).toBe('finite_number');
+    expect(ce.box(['k', 4]).evaluate().toString()).toBe('4/3');
   });
 
   test('collection-valued return: the element type is the return type VERBATIM', () => {

@@ -157,18 +157,25 @@ describe('OVERLOAD TRIALS — select once, no fallback', () => {
     expect(resolution.viable).toHaveLength(2);
   });
 
-  test('a repair-precondition admission agrees between trial and real validation', () => {
+  test('trial and real validation agree on A·v; no trial state leaks onto A', () => {
     const ce = new ComputeEngine();
-    // A·v (A fresh, v declared vector) reaches arm 1 (`matrix`) through the
-    // same provisional admissions in the arm's TRIAL and in the winner's
-    // REAL validation — the two must agree (the trial IS validateArguments),
-    // so the call resolves to the matrix arm without leaking any trial
-    // state onto A.
+    // A·v (A fresh, v declared vector) is a `list<number>`. The `matrix` arm's
+    // TRIAL refutes it and the `collection` arm's admits it, and the winner's
+    // REAL validation agrees (the trial IS validateArguments), so the call
+    // resolves to the collection arm without leaking any trial state onto A.
+    //
+    // History: this used to resolve to the MATRIX arm (`integer`), because
+    // `paramsAreScalar` answered `true` for ANY intersection signature, which
+    // made the whole set "threadable" and admitted the list at the `matrix`
+    // slot UNCHECKED (the hazard `threadableGate` in box.ts warns about). An
+    // intersection is now scalar only when every arm's parameters are, so a
+    // `(matrix) & (collection)` set is not threadable and the list is checked
+    // against each arm honestly.
     ce.declare('v', 'vector');
     ce.declare('q', '((matrix) -> integer) & ((collection) -> string)');
     const call = ce.box(['q', ['Multiply', 'A', 'v']]);
     expect(call.isValid).toBe(true);
-    expect(call.type.toString()).toBe('integer'); // the matrix arm's result
+    expect(call.type.toString()).toBe('string'); // the collection arm's result
     expect(ce.box('A').type.toString()).toBe('number'); // no phantom matrix
   });
 });
