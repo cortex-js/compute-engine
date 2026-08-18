@@ -518,7 +518,7 @@ describe('internal realOnly callers migrated to a local numeric projection', () 
       ] as never)
       .evaluate();
     const s = r.toString();
-    expect(s).toContain('"converged":true');
-    expect(s).toMatch(/"a":\{"num":"1\.99999/);
+    expect(s).toContain('"converged" -> "True"');
+    expect(s).toMatch(/"a" -> 1\.99999/);
   });
 });

@@ -19,6 +19,7 @@ import {
   isCharacter,
   isNumber,
   isObject,
+  isDictionary,
 } from './type-guards.js';
 import {
   CYCLE_DETECTED,
@@ -573,6 +574,48 @@ const FUNCTIONS: Record<
     const expr = expr_ as FnExpr;
     return `[${expr.ops.map((x) => serialize(x))}]`;
   },
+  // A dictionary prints as its literal form — `{"key" -> value, …}`, and
+  // `{->}` when empty (the spelling that parses back as an empty dictionary
+  // rather than an empty block) — instead of falling through to the raw
+  // MathJSON fallback at the bottom of `toAsciiMath`. Two shapes reach this
+  // handler: a boxed dictionary (kind `dictionary`, with `entries`), and a
+  // raw `["Dictionary", ["KeyValuePair", …], …]` function expression that
+  // was never re-boxed (non-canonical input).
+  Dictionary: (expr, serialize) => {
+    // A string or symbol key gets exactly ONE layer of quoting, applied
+    // here; every other key shape prints via `serialize()` UNWRAPPED —
+    // routing it through `serialize()` and then quoting the result would
+    // double-quote a multi-character symbol (`serializeSymbol` already
+    // quotes those) and would mislabel a numeric key as a string key.
+    const quoteKey = (k: string) => `"${escapeStringLiteral(k)}"`;
+    const entries: string[] = [];
+    if (isDictionary(expr)) {
+      for (const [k, v] of expr.entries)
+        entries.push(`${quoteKey(k)} -> ${serialize(v)}`);
+    } else if (isFunction(expr)) {
+      for (const kv of expr.ops) {
+        // A raw dictionary may still contain merge entries
+        // (`{...defaults, "k" -> v}`): `Spread` is lowered away at
+        // canonicalization, so it only appears here, on the raw route.
+        if (isFunction(kv) && kv.operator === 'Spread' && kv.nops === 1) {
+          entries.push(`...${serialize(kv.op1)}`);
+        } else if (isFunction(kv) && kv.nops === 2) {
+          const k = isString(kv.op1)
+            ? quoteKey(kv.op1.string)
+            : isSymbol(kv.op1)
+              ? quoteKey(kv.op1.symbol)
+              : serialize(kv.op1);
+          entries.push(`${k} -> ${serialize(kv.op2)}`);
+        } else {
+          // Not a well-formed entry: print it honestly rather than
+          // casting it into a pair shape it does not have.
+          entries.push(serialize(kv));
+        }
+      }
+    }
+    if (entries.length === 0) return '{->}';
+    return `{${entries.join(', ')}}`;
+  },
   Single: (expr_: Expression, serialize) => {
     const expr = expr_ as FnExpr;
     return `(${expr.ops.map((x) => serialize(x)).join(', ')})`;
@@ -814,6 +857,24 @@ function wrap(s: string, precedence = 0, target = -1): string {
   return s;
 }
 
+/** Escape the content of a double-quoted string literal so the output parses
+ * back to the same string. The escape set mirrors the sequences the Epsil
+ * lexer decodes (`ESCAPED_CHARS`, `src/epsil/characters.ts`): backslash
+ * first — escaping it last would corrupt the escapes already emitted — then
+ * the double quote and the control characters that have a short spelling.
+ */
+function escapeStringLiteral(s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\0/g, '\\0')
+    .replace(/[\b]/g, '\\b')
+    .replace(/\t/g, '\\t')
+    .replace(/\n/g, '\\n')
+    .replace(/\f/g, '\\f')
+    .replace(/\r/g, '\\r');
+}
+
 function serializeSymbol(
   symbol: string,
   options: Partial<AsciiMathOptions> = {}
@@ -857,7 +918,7 @@ export function toAsciiMath(
   // two are the same value, and AsciiMath has no character literal to
   // distinguish them with.
   if (isString(expr) || isCharacter(expr)) {
-    return `"${expr.string.replace(/"/g, '\\"')}"`;
+    return `"${escapeStringLiteral(expr.string)}"`;
   }
 
   //

@@ -5121,14 +5121,14 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
         .box(['Dictionary', ['Spread', d], ['Tuple', { str: 'b' }, 9]])
         .evaluate()
         .toString()
-    ).toBe('{"dict":{"a":1,"b":9}}');
+    ).toBe('{"a" -> 1, "b" -> 9}');
     // …and a later spread overrides an earlier literal entry.
     expect(
       ce2
         .box(['Dictionary', ['Tuple', { str: 'b' }, 9], ['Spread', d]])
         .evaluate()
         .toString()
-    ).toBe('{"dict":{"b":2,"a":1}}');
+    ).toBe('{"b" -> 2, "a" -> 1}');
     // Duplicate LITERAL keys keep the literal convention: FIRST wins.
     expect(
       ce2
@@ -5140,7 +5140,7 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe('{"dict":{"a":1,"b":2}}');
+    ).toBe('{"a" -> 1, "b" -> 2}');
     // …but a literal key REAPPEARING after a spread is the override idiom,
     // not a typo: the last one wins (the first-wins seen-set resets at
     // each spread).
@@ -5154,7 +5154,7 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe('{"dict":{"a":7,"b":2}}');
+    ).toBe('{"a" -> 7, "b" -> 2}');
   });
 
   test('a tuple spread in a dictionary literal collapses to the error', () => {
@@ -5186,7 +5186,7 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe('{"dict":{"x":1,"b":2}}');
+    ).toBe('{"x" -> 1, "b" -> 2}');
   });
 
   test('a set spread into a LIST literal stays a list (no dedup)', () => {

@@ -52,7 +52,7 @@ describe('EPSIL MULTI-LINE DEFINITION HEAD', () => {
 } = {a -> x, b -> x}
 f(3)`
       )
-    ).toEqual({ value: '{"dict":{"a":3,"b":3}}', diagnostics: [] });
+    ).toEqual({ value: '{"a" -> 3, "b" -> 3}', diagnostics: [] });
   });
 
   test('the one-line spelling of the same definition agrees', () => {
@@ -61,7 +61,7 @@ f(3)`
         `f(x: integer) -> record{a: integer, b: integer} = {a -> x, b -> x}
 f(3)`
       )
-    ).toEqual({ value: '{"dict":{"a":3,"b":3}}', diagnostics: [] });
+    ).toEqual({ value: '{"a" -> 3, "b" -> 3}', diagnostics: [] });
   });
 
   test('a multi-line `record{…}` return type, `function` form', () => {
@@ -73,7 +73,7 @@ f(3)`
 } { {a -> x, b -> x} }
 f(3)`
       )
-    ).toEqual({ value: '{"dict":{"a":3,"b":3}}', diagnostics: [] });
+    ).toEqual({ value: '{"a" -> 3, "b" -> 3}', diagnostics: [] });
   });
 
   test('a multi-line `tuple<…>` return type', () => {

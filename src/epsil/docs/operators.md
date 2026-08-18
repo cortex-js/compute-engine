@@ -450,7 +450,7 @@ defaults idiom:
 ```epsil-live
 let defaults = {"verbose" -> false, "depth" -> 3}
 {...defaults, "verbose" -> true}
-// ➔ {"dict":{"verbose":true,"depth":3}}
+// ➔ {"verbose" -> "True", "depth" -> 3}
 ```
 
 (Duplicate **literal** keys are different: they are almost certainly typos,

@@ -121,7 +121,7 @@ int_(D)(f(x, y) dx  dy)
 
 exports[`EXOTIC INTEGRALS \\intop 1`] = `
 (\\mathrm{Baseform}(\\text{unexpected-command}, \\error{\\blacksquare}),0,\\sin(dxx))
-(Baseform("unexpected-command", Error(ErrorCode("invalid-base", "\\"\\intop\\""))), 0, sin(d * x * x))
+(Baseform("unexpected-command", Error(ErrorCode("invalid-base", "\\"\\\\intop\\""))), 0, sin(d * x * x))
 [
   "Tuple",
   [
@@ -148,7 +148,7 @@ CircularIntegrate(f, Limits("Nothing", C, "Nothing"))
 
 exports[`EXOTIC INTEGRALS \\smallint 1`] = `
 (\\mathrm{Baseform}(\\text{unexpected-command}, \\error{\\blacksquare}),0,\\sin(dxx))
-(Baseform("unexpected-command", Error(ErrorCode("invalid-base", "\\"\\smallint\\""))), 0, sin(d * x * x))
+(Baseform("unexpected-command", Error(ErrorCode("invalid-base", "\\"\\\\smallint\\""))), 0, sin(d * x * x))
 [
   "Tuple",
   [

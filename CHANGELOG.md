@@ -2,6 +2,25 @@
 
 ### Breaking Changes
 
+- **Dictionaries now print as their literal form.** `toString()` (and the
+  Epsil REPL output) renders a dictionary as `{"key" -> value, …}` — `{->}`
+  when empty — instead of falling back to the raw MathJSON structure
+  (`{"dict":{…}}`). The `.json` MathJSON serialization is unchanged.
+  Alongside this, string literals printed by `toString()` now escape
+  backslashes and control characters (`\\`, `\n`, `\t`, …), not just the
+  double quote, so the printed form parses back to the same string.
+
+- **`About` now returns a dictionary, not a string** — matching its
+  documented contract. Entries include `kind` (`"symbol"`, `"constant"`,
+  `"function"`, `"multi-clause function (n clauses)"`, `"number"`, …),
+  `type` (the static type, as a string — the same report as `Type`, and
+  previously missing from the output entirely), `name`, `value`,
+  `signature`, `clauses`, `attributes`, `description`, `wikidata` and `url`,
+  each present only when applicable. Individual entries are addressable:
+  `About(Pi)["type"]` evaluates to `"finite_real"`. Code that treated the
+  result as a string should use the dictionary entries (or `Type(expr)` if
+  it only wanted the type).
+
 - **Bare collection types are now synonyms for their `<unknown>` form, and
   `any` sits strictly above `unknown`.** A bare `list` (likewise `set`,
   `dictionary`, `collection`, `indexed_collection`) means "some collection of

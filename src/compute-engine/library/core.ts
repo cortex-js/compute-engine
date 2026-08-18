@@ -2453,17 +2453,38 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     // Structural operations that can be applied to non-canonical expressions
     //
     About: {
-      description: 'Return information about an expression',
+      description:
+        'Return information about an expression as a dictionary: its kind ' +
+        '(symbol, constant, function, number, string, expression), its ' +
+        'static type and, when applicable, its name, value, signature, ' +
+        'clause listing, algebraic attributes, description, wikidata and ' +
+        'url.',
       lazy: true,
-      signature: '(any) -> string',
+      // `dictionary<any>`, not bare `dictionary` (≡ `dictionary<unknown>`,
+      // values only): a `value` entry may legitimately be an absence marker
+      // such as `Missing`.
+      signature: '(any) -> dictionary<any>',
       evaluate: ([x], { engine: ce }) => {
-        // A held symbol operand is unbound: name it directly rather than
-        // through its (quoted, raw) serialization.
-        const s = [isSymbol(x) ? x.symbol : x.toString()];
-        s.push(''); // Add a newline
+        // Entries are collected in display order, then assembled into a
+        // `Dictionary` expression (the documented contract: `About` yields a
+        // dictionary, so its parts are addressable — `About(f)["type"]` —
+        // rather than baked into one display string).
+        const entries: [key: string, value: Expression][] = [];
+        const add = (key: string, value: Expression | string): void => {
+          entries.push([
+            key,
+            typeof value === 'string' ? ce.string(value) : value,
+          ]);
+        };
 
-        if (isString(x)) s.push('string');
-        else if (isSymbol(x)) {
+        if (isString(x)) {
+          add('kind', 'string');
+          add('type', 'string');
+          add('value', x);
+        } else if (isSymbol(x)) {
+          // A held symbol operand is unbound: name it directly rather than
+          // through its (quoted, raw) serialization.
+          add('name', x.symbol);
           // A multi-clause function: list the clause set — signature per
           // clause, declaration order, with overlap/coverage annotations
           // (function-polymorphism design §4.6). This is the `methods(f)`
@@ -2481,9 +2502,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               isOperatorDef(fnDef) &&
               fnDef.operator.lazy === true
             )
-              s.push('hold function (arguments are bound unevaluated)');
-            else s.push(`multi-clause function (${clauses.length} clauses)`);
-            s.push(...clauses);
+              add('kind', 'hold function (arguments are bound unevaluated)');
+            else
+              add('kind', `multi-clause function (${clauses.length} clauses)`);
+            add(
+              'clauses',
+              ce.function(
+                'List',
+                clauses.map((c) => ce.string(c))
+              )
+            );
             if (fnDef !== undefined && isOperatorDef(fnDef)) {
               const op = fnDef.operator;
               const flags = (
@@ -2494,38 +2522,57 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                   'involution',
                 ] as const
               ).filter((f) => op[f] === true);
-              if (flags.length > 0) s.push(flags.join(' '));
+              if (flags.length > 0) add('attributes', flags.join(' '));
               // The doc-comment description; the auto-generated clause-storage
               // description ("Multi-clause function (…)", "Hold function (…)")
-              // is already conveyed by the header line above.
+              // is already conveyed by the `kind` entry above.
               const d = op.description;
               if (
                 typeof d === 'string' &&
                 !d.startsWith('Multi-clause function') &&
                 !d.startsWith('Hold function')
               )
-                s.push(d);
+                add('description', d);
             }
-          } else if (x.valueDefinition) {
-            const def = x.valueDefinition;
-
-            if (def.isConstant) s.push('constant');
-
-            if (typeof def.description === 'string') s.push(def.description);
-            else if (Array.isArray(def.description))
-              s.push(def.description.join('\n'));
-            if (def.wikidata) s.push(`WikiData: ${def.wikidata}`);
-            if (def.url) s.push(`Read More: ${def.url}`);
           } else {
-            // A held operand is unbound, so a FUNCTION name has no
-            // `valueDefinition` here: look the name up. A user-defined
-            // function (or a library operator) reports its signature, its
-            // description — for a user function, the doc comment written
-            // before the definition — and its algebraic attributes.
-            const fnDef = ce.lookupDefinition(x.symbol);
-            if (fnDef !== undefined && isOperatorDef(fnDef)) {
-              const op = fnDef.operator;
-              s.push(`function: ${op.signature.toString()}`);
+            // Look the name up in the current scope chain rather than
+            // through `x.canonical.valueDefinition`: a constant declared
+            // `holdUntil: 'never'` (`Half`, `ImaginaryUnit`) is SUBSTITUTED
+            // by its value at canonicalization, so its canonical form is a
+            // number literal with no value definition and the lookup is the
+            // only route to its metadata.
+            const symDef = ce.lookupDefinition(x.symbol);
+            if (symDef !== undefined && isValueDef(symDef)) {
+              const def = symDef.value;
+
+              add('kind', def.isConstant ? 'constant' : 'symbol');
+              // Canonicalizing binds the held symbol (`op.canonical` is
+              // value-safe — for a substituted constant it yields the value
+              // itself, whose type is the right report).
+              const xc = x.canonical;
+              add('type', xc.type.toString());
+              // The value, when the symbol resolves to one distinct from
+              // itself (a constant such as `Pi` evaluates to itself, so an
+              // identical `value` entry would be noise). Compare by NAME:
+              // `v.isSame(x)` is unreliably false here because `x` is the
+              // raw held symbol while `v` is its bound canonical form.
+              const v = xc.evaluate();
+              if (!isSymbol(v) || v.symbol !== x.symbol) add('value', v);
+
+              if (typeof def.description === 'string')
+                add('description', def.description);
+              else if (Array.isArray(def.description))
+                add('description', def.description.join('\n'));
+              if (def.wikidata) add('wikidata', def.wikidata);
+              if (def.url) add('url', def.url);
+            } else if (symDef !== undefined && isOperatorDef(symDef)) {
+              // A FUNCTION name: a user-defined function (or a library
+              // operator) reports its signature, its description — for a
+              // user function, the doc comment written before the
+              // definition — and its algebraic attributes.
+              const op = symDef.operator;
+              add('kind', 'function');
+              add('signature', op.signature.toString());
               const flags = (
                 [
                   'commutative',
@@ -2534,23 +2581,49 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                   'involution',
                 ] as const
               ).filter((f) => op[f] === true);
-              if (flags.length > 0) s.push(flags.join(' '));
-              if (typeof op.description === 'string') s.push(op.description);
+              if (flags.length > 0) add('attributes', flags.join(' '));
+              if (typeof op.description === 'string')
+                add('description', op.description);
               else if (Array.isArray(op.description))
-                s.push(op.description.join('\n'));
-              if (op.wikidata) s.push(`WikiData: ${op.wikidata}`);
-              if (op.url) s.push(`Read More: ${op.url}`);
+                add('description', op.description.join('\n'));
+              if (op.wikidata) add('wikidata', op.wikidata);
+              if (op.url) add('url', op.url);
             } else {
-              s.push('symbol');
-              s.push(`value: ${x.evaluate().toString()}`);
+              add('kind', 'symbol');
+              // Canonicalizing binds the held symbol without substituting
+              // its value (`op.canonical` is value-safe), so the static
+              // type is the declared/inferred one — the same report as
+              // `Type(x)`.
+              const xc = x.canonical;
+              add('type', xc.type.toString());
+              // Compare by NAME (see the value-definition branch above).
+              const v = xc.evaluate();
+              if (!isSymbol(v) || v.symbol !== x.symbol) add('value', v);
             }
           }
-        } else if (isNumber(x)) s.push(x.type.toString());
-        else if (isFunction(x)) {
-          s.push(x.type.toString());
-          s.push(x.isCanonical ? 'canonical' : 'non-canonical');
-        } else s.push("Unknown expression's type");
-        return ce.string(s.join('\n'));
+        } else if (isNumber(x)) {
+          add('kind', 'number');
+          add('type', x.type.toString());
+          add('value', x);
+        } else if (isFunction(x)) {
+          add('kind', 'expression');
+          // The held operand arrives non-canonical on the box/parse routes,
+          // where its own `.type` is uninformative: report the type of the
+          // canonical form, as `Type` does.
+          add('type', x.canonical.type.toString());
+        } else add('kind', 'unknown');
+
+        // Evaluate the assembled expression: a `Dictionary` whose values are
+        // not all literals (a symbolic `value`, say) only re-boxes as an
+        // actual dictionary once its values are evaluated.
+        return ce
+          .function(
+            'Dictionary',
+            entries.map(([k, v]) =>
+              ce.function('KeyValuePair', [ce.string(k), v])
+            )
+          )
+          .evaluate();
       },
     },
 
@@ -5782,7 +5855,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'user-perceived characters (grapheme clusters), like Characters. ' +
           'A non-string argument leaves the expression unevaluated.',
         'StringSplit(s, pattern): split on each match of a regular ' +
-          'expression, with the host dialect\'s own semantics — including ' +
+          "expression, with the host dialect's own semantics — including " +
           'splitting at a zero-width match. Captures are not interleaved ' +
           'into the result; use StringMatchAll for those.',
       ],

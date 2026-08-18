@@ -128,7 +128,8 @@ describe('hold: single-clause and other refusals', () => {
 
   test('About labels a hold function', () => {
     const { run } = fresh();
-    expect(run('hold f(e) = e + 1; About(f)').value.string).toContain(
+    // `About` returns a dictionary; assert on its serialized form.
+    expect(run('hold f(e) = e + 1; About(f)').value.toString()).toContain(
       'hold function'
     );
   });
@@ -413,7 +414,8 @@ describe('algebraic attributes: commutative / associative / idempotent / involut
     const { run } = fresh();
     const s = run(
       'function op(a, b) commutative associative -> number { a + b }; About(op)'
-    ).value.string;
+    ).value.toString();
+    // `About` returns a dictionary; the `attributes` entry carries the flags.
     expect(s).toContain('commutative associative');
   });
 
@@ -488,10 +490,12 @@ describe('doc comments become the definition description', () => {
       'Block doc\nmore'
     );
     // Both representations (plain and clause storage) surface it in About.
-    expect(executeEpsil(ce, 'About(add)').value.string).toContain(
+    expect(executeEpsil(ce, 'About(add)').value.toString()).toContain(
       'Adds two things.'
     );
-    expect(executeEpsil(ce, 'About(mul)').value.string).toContain('Block doc');
+    expect(executeEpsil(ce, 'About(mul)').value.toString()).toContain(
+      'Block doc'
+    );
   });
 
   test('survives conversion to clause storage, and a later overload may update it', () => {

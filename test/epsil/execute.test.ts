@@ -1100,25 +1100,36 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
       run(
         'let d = {"a" -> 1, "b" -> 2}\n{...d, "b" -> 9}'
       ).value.toString()
-    ).toBe('{"dict":{"a":1,"b":9}}');
+    ).toBe('{"a" -> 1, "b" -> 9}');
     expect(
       run('let d = {"b" -> 9}\n{"a" -> 1, "b" -> 2, ...d}').value.toString()
-    ).toBe('{"dict":{"a":1,"b":9}}');
+    ).toBe('{"a" -> 1, "b" -> 9}');
     // A brace of only spreads is a SET-spread; the `->` marker makes the
     // pure merge a dictionary.
     expect(
       run(
         'let d1 = {"a" -> 1}\nlet d2 = {"b" -> 2}\n{->, ...d1, ...d2}'
       ).value.toString()
-    ).toBe('{"dict":{"a":1,"b":2}}');
+    ).toBe('{"a" -> 1, "b" -> 2}');
     expect(run('let a = {1}\nlet b = {2}\n{...a, ...b}').value.toString()).toBe(
       'Set(1, 2)'
     );
     // A literal key reappearing AFTER a spread is the override idiom:
     // last wins, and no duplicate-key diagnostic fires.
     const override = run('let d = {"a" -> 5}\n{"a" -> 1, ...d, "a" -> 2}');
-    expect(override.value.toString()).toBe('{"dict":{"a":2}}');
+    expect(override.value.toString()).toBe('{"a" -> 2}');
     expect(override.diagnostics).toEqual([]);
+  });
+
+  test('an empty dictionary prints as `{->}` and round-trips', () => {
+    // `{->}` is the spelling that parses back as an empty dictionary (a bare
+    // `{}` is an empty block), so the printed form must be exactly that.
+    expect(run('{->}').value.toString()).toBe('{->}');
+    // Escaping round-trip: a key/value with a quote, backslash, and newline
+    // reparses to the same dictionary.
+    const printed = run('{"a\\"b\\\\c" -> "x\\ny"}').value.toString();
+    expect(printed).toBe('{"a\\"b\\\\c" -> "x\\ny"}');
+    expect(run(printed).value.toString()).toBe(printed);
   });
 
   test('a set spread into a LIST literal stays a list (no dedup)', () => {
@@ -1145,7 +1156,7 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
       run(
         'let d: dictionary<integer>\nd = {"a" -> 1}\n{->, ...d, "z" -> 3}'
       ).value.toString()
-    ).toBe('{"dict":{"a":1,"z":3}}');
+    ).toBe('{"a" -> 1, "z" -> 3}');
   });
 });
 
