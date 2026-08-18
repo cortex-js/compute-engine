@@ -301,6 +301,17 @@ await scenario('fixit diagnostic', undefined, async (c) => {
     diagnostics[0]?.message.includes('use the mapsto arrow "=>"') === true,
     JSON.stringify(diagnostics[0]?.message)
   );
+
+  // A fixit-carrying diagnostic closes its hover with a preview of the line
+  // as it would read once the quick fix is applied.
+  const hover = await c.hover(URI, 0, 13);
+  const value = hover?.contents.value ?? '';
+  check(
+    'the hover previews the fixed line',
+    value.includes('*fix:* Use the function arrow') &&
+      value.includes('```epsil\nconst f = x => x + 1\n```'),
+    value
+  );
 });
 
 // ── Representation views (the `epsil/view` request) ────────────────────

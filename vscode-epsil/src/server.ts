@@ -380,7 +380,9 @@ function diagnosticHovers(
  * The message itself is NOT restated: the editor already shows it verbatim
  * in the plain block it stacks above this hover. A "defined here" note for
  * `describedName` — the name whose own declaration hover is already part of
- * this pop-over — is skipped, not shown twice. */
+ * this pop-over — is skipped, not shown twice. A diagnostic carrying a quick
+ * fix closes with a preview: the source as it would read once the fix is
+ * applied. */
 function diagnosticMarkdown(
   entry: PublishedEntry,
   text: string,
@@ -405,7 +407,68 @@ function diagnosticMarkdown(
       codeBlock(clip(lineAt(text, note.start)))
     );
   }
+  const preview = fixPreview(entry, text);
+  if (preview !== undefined)
+    sections.push(
+      `*fix:* ${proseMarkdown(fixTitle(entry))}:`,
+      codeBlock(preview)
+    );
   return sections.join('\n\n');
+}
+
+/** Longest fix preview quoted in a hover, in lines. */
+const FIX_PREVIEW_LINES = 8;
+
+/**
+ * The source as it would read after this diagnostic's quick fix — the
+ * contiguous span from the first to the last line the edits touch,
+ * post-edit, each line trimmed and clipped — or `undefined` when the
+ * diagnostic carries no fixits. The fixits are a SERIES that applies
+ * together (see the quick-fix section), and the entries behind a hover are
+ * version-guarded, so the offsets are valid for `text` by construction; an
+ * out-of-range edit is treated as "no preview" rather than quoting garbage.
+ */
+function fixPreview(entry: PublishedEntry, text: string): string | undefined {
+  if (entry.fixits.length === 0) return undefined;
+  // Ascending by start; at an equal start, the WIDER edit first, so that the
+  // back-to-front application below never applies an edit whose region a
+  // later-processed edit has already rewritten (a zero-width insertion at
+  // the start of a replaced range must land after the replacement).
+  const ascending = [...entry.fixits].sort(
+    (a, b) => a.start - b.start || b.end - a.end
+  );
+
+  // Track the edited region's bounds in the FIXED text's coordinates: each
+  // edit lands at its original offset shifted by the length change of the
+  // edits before it. `last` is INCLUSIVE — for a pure deletion (empty
+  // value), the affected point is the join where the deleted text was.
+  let delta = 0;
+  let from = Infinity;
+  let last = 0;
+  for (const edit of ascending) {
+    if (edit.start < 0 || edit.start > edit.end || edit.end > text.length)
+      return undefined;
+    const at = edit.start + delta;
+    from = Math.min(from, at);
+    last = Math.max(last, at + Math.max(0, edit.value.length - 1));
+    delta += edit.value.length - (edit.end - edit.start);
+  }
+
+  // Apply back-to-front so the earlier edits' offsets stay valid.
+  let fixed = text;
+  for (const edit of [...ascending].reverse())
+    fixed = fixed.slice(0, edit.start) + edit.value + fixed.slice(edit.end);
+
+  const firstLine = sourceLocation(fixed, from).line;
+  const lastLine = sourceLocation(fixed, Math.max(from, last)).line;
+  // Same line-break rules as `sourceLocation`, which numbered the lines.
+  const lines = fixed
+    .split(/\r\n|[\n\r\u2028\u2029]/)
+    .slice(firstLine - 1, lastLine)
+    .map((line) => clip(line.trim()));
+  return lines.length > FIX_PREVIEW_LINES
+    ? [...lines.slice(0, FIX_PREVIEW_LINES), '…'].join('\n')
+    : lines.join('\n');
 }
 
 /**
