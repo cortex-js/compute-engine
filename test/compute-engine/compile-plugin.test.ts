@@ -118,21 +118,21 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
   describe('Target Registry', () => {
     it('should have default targets registered', () => {
       // JavaScript should be registered
-      const jsTarget = ce.getCompilationTarget('javascript');
+      const jsTarget = ce._getCompilationTarget('javascript');
       expect(jsTarget).toBeDefined();
 
       // GLSL should be registered
-      const glslTarget = ce.getCompilationTarget('glsl');
+      const glslTarget = ce._getCompilationTarget('glsl');
       expect(glslTarget).toBeDefined();
 
       // Interval targets should be registered
-      const intervalJSTarget = ce.getCompilationTarget('interval-js');
+      const intervalJSTarget = ce._getCompilationTarget('interval-js');
       expect(intervalJSTarget).toBeDefined();
 
     });
 
     it('should list all default targets', () => {
-      const targets = ce.listCompilationTargets();
+      const targets = ce._listCompilationTargets();
       expect(targets).toContain('javascript');
       expect(targets).toContain('glsl');
       expect(targets).toContain('interval-js');
@@ -140,44 +140,44 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
 
     it('should allow registering custom targets', () => {
       const pythonTarget = new PythonTarget();
-      ce.registerCompilationTarget('python', pythonTarget);
+      ce._registerCompilationTarget('python', pythonTarget);
 
-      const registered = ce.getCompilationTarget('python');
+      const registered = ce._getCompilationTarget('python');
       expect(registered).toBe(pythonTarget);
 
       // Should appear in list
-      expect(ce.listCompilationTargets()).toContain('python');
+      expect(ce._listCompilationTargets()).toContain('python');
     });
 
     it('should allow overriding existing targets', () => {
       const customJSTarget = new PythonTarget(); // Just for testing override
-      ce.registerCompilationTarget('javascript', customJSTarget);
+      ce._registerCompilationTarget('javascript', customJSTarget);
 
-      const registered = ce.getCompilationTarget('javascript');
+      const registered = ce._getCompilationTarget('javascript');
       expect(registered).toBe(customJSTarget);
 
       // Restore default
       const { JavaScriptTarget } = require('../../src/compute-engine/compilation/javascript-target');
-      ce.registerCompilationTarget('javascript', new JavaScriptTarget());
+      ce._registerCompilationTarget('javascript', new JavaScriptTarget());
     });
 
     it('should return undefined for unregistered target', () => {
-      expect(ce.getCompilationTarget('nonexistent')).toBeUndefined();
+      expect(ce._getCompilationTarget('nonexistent')).toBeUndefined();
     });
 
     it('should unregister a target', () => {
-      ce.registerCompilationTarget('temp-target', new PythonTarget());
-      expect(ce.getCompilationTarget('temp-target')).toBeDefined();
-      expect(ce.listCompilationTargets()).toContain('temp-target');
+      ce._registerCompilationTarget('temp-target', new PythonTarget());
+      expect(ce._getCompilationTarget('temp-target')).toBeDefined();
+      expect(ce._listCompilationTargets()).toContain('temp-target');
 
-      ce.unregisterCompilationTarget('temp-target');
-      expect(ce.getCompilationTarget('temp-target')).toBeUndefined();
-      expect(ce.listCompilationTargets()).not.toContain('temp-target');
+      ce._unregisterCompilationTarget('temp-target');
+      expect(ce._getCompilationTarget('temp-target')).toBeUndefined();
+      expect(ce._listCompilationTargets()).not.toContain('temp-target');
     });
 
     it('should throw when compiling with an unregistered target', () => {
-      ce.registerCompilationTarget('removable', new PythonTarget());
-      ce.unregisterCompilationTarget('removable');
+      ce._registerCompilationTarget('removable', new PythonTarget());
+      ce._unregisterCompilationTarget('removable');
 
       const expr = ce.parse('x + y');
       expect(() => {
@@ -188,8 +188,8 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
 
   describe('Compiling with Custom Targets', () => {
     beforeAll(() => {
-      ce.registerCompilationTarget('python', new PythonTarget());
-      ce.registerCompilationTarget('rpn', new RPNTarget());
+      ce._registerCompilationTarget('python', new PythonTarget());
+      ce._registerCompilationTarget('rpn', new RPNTarget());
     });
 
     it('should compile to Python target', () => {

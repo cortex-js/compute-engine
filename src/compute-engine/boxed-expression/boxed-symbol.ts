@@ -198,9 +198,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return (isValueDef(def) && def?.value.isConstant) ?? false;
   }
 
-  bind(): void {}
+  _bind(): void {}
 
-  reset(): void {}
+  _reset(): void {}
 
   get isCanonical(): boolean {
     return this._def !== undefined;
@@ -454,7 +454,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    *
    * @inheritdoc
    */
-  infer(t: Type, inferenceMode: 'narrow' | 'widen' = 'narrow'): boolean {
+  _infer(t: Type, inferenceMode: 'narrow' | 'widen' = 'narrow'): boolean {
     if (!this._def) return false;
 
     // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
@@ -1660,7 +1660,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
  * string ({@linkcode typeToDisplayString}) as a print-time override.
  *
  * Keyed on the `BoxedType` itself, so a definition whose type is REPLACED
- * (`update()`, an inference write) is re-projected on the next read, and a
+ * (`_update()`, an inference write) is re-projected on the next read, and a
  * definition whose type is unchanged never re-allocates. The overwhelmingly
  * common case — a type with no `callback<S>` anywhere — stores the ORIGINAL
  * object, which also keeps its type resolver.

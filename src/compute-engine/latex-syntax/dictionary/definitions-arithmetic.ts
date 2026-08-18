@@ -184,7 +184,7 @@ function expandContinuationAdd(
 ): MathJsonExpression {
   if (operator(result) !== 'Add') return result;
   // `result` is `lhs` with `rhs` folded in (possibly `lhs`'s own array,
-  // extended in place by `parser.appendAssociativeOperand`), so it carries a
+  // extended in place by `parser._appendAssociativeOperand`), so it carries a
   // continuation exactly when `lhs` or `rhs` does. Asking about `lhs` and
   // `rhs` rather than walking `result`'s operands is what keeps a long flat
   // chain linear: `lhs` is the previous step's `Add` — the parser's owned
@@ -634,7 +634,7 @@ function isFoldBarrierFactor(
 
 /**
  * Fold an explicit multiplication (`\cdot`, `*`) operand into a `Multiply`
- * chain. Like `parser.appendAssociativeOperand`, plus one repair: an UNDELIMITED
+ * chain. Like `parser._appendAssociativeOperand`, plus one repair: an UNDELIMITED
  * juxtaposition (`InvisibleOperator`) operand that carries a direct
  * `ContinuationPlaceholder` — `(px_1+1)\cdots(px_n+1) \cdot p^m` — is spliced
  * into the chain rather than kept as a nested operand. That grouping is a
@@ -661,7 +661,7 @@ function foldMultiplyChain(
   const r = splice(rhs);
   if (l !== null || r !== null)
     return ['Multiply', ...(l ?? [lhs]), ...(r ?? [rhs])];
-  return parser.appendAssociativeOperand('Multiply', lhs, rhs);
+  return parser._appendAssociativeOperand('Multiply', lhs, rhs);
 }
 
 function serializeMultiply(
@@ -1683,7 +1683,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // `+` continuation is left for the caller's infix loop instead of being
       // consumed by a nested `parseExpression`. This makes a flat `a+b+c+…`
       // chain iterative (bounded stack) rather than right-recursive;
-      // `expandContinuationAdd`/`appendAssociativeOperand` below still flatten
+      // `expandContinuationAdd`/`_appendAssociativeOperand` below still flatten
       // the result, so the parsed expression is unchanged.
       const rhs = parser.parseExpression({
         ...until,
@@ -1701,7 +1701,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         if (isNumberExpression(value))
           return expandContinuationAdd(
             parser,
-            parser.appendAssociativeOperand(
+            parser._appendAssociativeOperand(
               'Add',
               lhs,
               negateNumberLiteral(value)
@@ -1713,7 +1713,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
 
       return expandContinuationAdd(
         parser,
-        parser.appendAssociativeOperand('Add', lhs, rhs),
+        parser._appendAssociativeOperand('Add', lhs, rhs),
         lhs,
         rhs
       );
@@ -2260,7 +2260,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: (parser: Parser) => {
       // Diagnostics: checkpoint before `_{x \to 0}` so the limit variable — in
       // the `\to` clause and in the body — is not flagged as undeclared.
-      const diagCp = parser.diagnosticsCheckpoint();
+      const diagCp = parser._diagnosticsCheckpoint();
       if (!parser.match('_')) return null;
       const declStartToken = parser.index;
       const base = parser.parseGroup();
@@ -2277,7 +2277,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // Prune the limit variable in the `_{x \to …}` clause (its declaration)
       // and the body; a same-named free reference elsewhere would stay flagged.
       if (limitVar)
-        parser.pruneUndeclared([limitVar], diagCp, bodyStartToken, [
+        parser._pruneUndeclared([limitVar], diagCp, bodyStartToken, [
           [declStartToken, bodyStartToken],
         ]);
       // One-sided limits: a `^+`/`^-` on the limit point (`x \to 0^+`) is
@@ -3110,7 +3110,7 @@ function parseBigOp(name: string, minPrec: number) {
     // the bound index variable — in the subscript (`i=1`) and in the body —
     // can be retroactively un-flagged as `undeclared-symbol` once the index
     // names are known. Free variables (e.g. `n` in the upper bound) survive.
-    const diagCp = parser.diagnosticsCheckpoint();
+    const diagCp = parser._diagnosticsCheckpoint();
 
     // Push a symbol table early to isolate subscript/superscript parsing
     // This prevents index symbols (like 'n' in 'n \in S, n > 0') from
@@ -3166,7 +3166,7 @@ function parseBigOp(name: string, minPrec: number) {
     // Retroactively un-flag references to the bound index variables in the
     // body and at their declaration (the subscript). A same-named occurrence in
     // the upper bound (e.g. `n` differs, but were it to collide) stays flagged.
-    parser.pruneUndeclared(
+    parser._pruneUndeclared(
       boundVariableNames(indexes),
       diagCp,
       bodyStartToken,

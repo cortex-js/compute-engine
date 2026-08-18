@@ -956,7 +956,7 @@ describe('WGSL zero-width aggregates fail closed', () => {
 // must be bound to a hoisted temporary and drawn exactly once.
 describe('WGSL Mod with an impure operand draws once', () => {
   it('a framed Random divisor emits a single draw', () => {
-    const target = ce.getCompilationTarget('wgsl')!;
+    const target = ce._getCompilationTarget('wgsl')!;
     const code = target.compile(
       ce.box(['WithRandomSeed', 7, ['Mod', 10, ['Random']]]),
       NO_FOLD
@@ -965,7 +965,7 @@ describe('WGSL Mod with an impure operand draws once', () => {
   });
 
   it('a pure Mod emission is unchanged', () => {
-    const target = ce.getCompilationTarget('wgsl')!;
+    const target = ce._getCompilationTarget('wgsl')!;
     const code = target.compile(ce.box(['Mod', ['Add', 'x', 29], 900])).code;
     expect(code).toBe('((((x + 29.0) % (900.0)) + (900.0)) % (900.0))');
   });

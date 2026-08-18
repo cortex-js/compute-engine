@@ -7,7 +7,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  * context must not be inferred onto them either.
  *
  * Regression: `checkNumericArgs` walked the elements of a finite indexed
- * collection operand and ran `y.infer('real')` on each, with none of the
+ * collection operand and ran `y._infer('real')` on each, with none of the
  * exclusion the top-level operand already had. With `L := [1, 2]` that
  * narrowed `L`'s value definition from `vector<finite_integer^2>` to `real`
  * — at BOXING time, before any evaluation — while `2 * [L, L]` still

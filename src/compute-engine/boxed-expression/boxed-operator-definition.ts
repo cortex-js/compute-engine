@@ -542,7 +542,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       );
     } else this.signature = new BoxedType('(any*) -> unknown');
 
-    this.update(def);
+    this._update(def);
   }
 
   /** For debugging */
@@ -576,7 +576,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * The *resolved* missing-value behavior (§3.A of the missing-value typing
    * design). Computed from the declared {@link missingBehavior} and the current
    * signature on every access — never cached, so a signature mutation
-   * (`update()`, `BoxedFunction.infer()`) is reflected immediately.
+   * (`_update()`, `BoxedFunction._infer()`) is reflected immediately.
    */
   get resolvedMissingBehavior():
     | 'reject'
@@ -646,7 +646,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /**
    * Re-attach the definition's current effect set to the signature after the
    * signature object was REPLACED by type inference
-   * (`BoxedFunction.infer()`). The cached `_effects` is authoritative in that
+   * (`BoxedFunction._infer()`). The cached `_effects` is authoritative in that
    * situation: a rebuilt signature is assembled from the type-inference fields
    * alone, so without this the arrow would serialize pure while the definition
    * still reports its effects — the two must never disagree.
@@ -726,14 +726,14 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   }
 
   /** Snapshot every field that a provisional re-derivation —
-   * `installRebuiltLiteral` calling `update({ evaluate: rebuilt })` on a
+   * `installRebuiltLiteral` calling `_update({ evaluate: rebuilt })` on a
    * PRE-EXISTING definition (`function-utils.ts`) — can mutate, for an
    * exact later restore by an inference rollback frame. The result is
    * OPAQUE to callers (typed `unknown` on the public interface): it
    * captures private fields (`_effects`, `_inferredDraws`), so constructing
    * or peeking at one outside this class is meaningless. Only the fields an
    * `{ evaluate }`-only update can touch are captured; a full-definition
-   * `update()` on a pre-existing object never happens inside a rollback
+   * `_update()` on a pre-existing object never happens inside a rollback
    * frame (redefinition routes go through `updateDef`, whose half-swap the
    * frame journals separately).
    * @internal */
@@ -773,7 +773,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       _inferredDraws: boolean;
       _deriveEffects: (() => EffectSet | undefined) | undefined;
     };
-    // The lazy effect deriver round-trips with the rest: the `update()` being
+    // The lazy effect deriver round-trips with the rest: the `_update()` being
     // undone may have installed one (its body inference consulted a
     // registry-derived union) or cleared one, and leaving that state behind
     // would keep re-deriving — or stop re-deriving — against the literal the
@@ -791,7 +791,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this._inferredDraws = s._inferredDraws;
   }
 
-  update(def: OperatorDefinition): void {
+  _update(def: OperatorDefinition): void {
     if (this.engine.strict) {
       for (const key in def) {
         // Silently ignore private fields so that spreading an existing boxed
@@ -1140,7 +1140,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
               declared.effects,
               inferred.effects,
               // This definition's OWN effects-axis history: correct for the
-              // one in-place `update()` (the provisional re-derivation
+              // one in-place `_update()` (the provisional re-derivation
               // cascade, where `this` is the contract's prior holder), and
               // automatically `undefined` during construction (fresh
               // object, empty history) — which is also the right answer for
@@ -1206,7 +1206,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // lazy: true, evaluate: ‹Function literal› })`) receives its operands
       // unevaluated; the literal must then bind them as written rather than
       // evaluate them itself, or the flag would be silently undone one level
-      // down. Read at call time, so a later `update({ lazy })` is honored.
+      // down. Read at call time, so a later `_update({ lazy })` is honored.
       evaluate = (xs, options) =>
         fn(xs, this.lazy ? { ...options, holdArguments: true } : options);
       Object.defineProperty(evaluate, 'toString', {

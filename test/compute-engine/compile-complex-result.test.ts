@@ -278,7 +278,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       it(`${language}: Sqrt of an assigned negative emits the complex helper`, () => {
         const ce = engineWithNegativeAssignment();
         const code = ce
-          .getCompilationTarget(language)!
+          ._getCompilationTarget(language)!
           .compile(ce.parse('1 + \\sqrt{a}'), { constantFold: false }).code;
         expect(code).toBe(`_gpu_csqrt(${v2}((-2.0), 0.0)) + ${v2}(1.0, 0.0)`);
       });
@@ -286,7 +286,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       it(`${language}: Ln of an assigned negative emits the complex helper`, () => {
         const ce = engineWithNegativeAssignment();
         const code = ce
-          .getCompilationTarget(language)!
+          ._getCompilationTarget(language)!
           .compile(ce.parse('1 + \\ln(a)'), { constantFold: false }).code;
         expect(code).toBe(`_gpu_cln(${v2}((-2.0), 0.0)) + ${v2}(1.0, 0.0)`);
       });
@@ -294,7 +294,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       it(`${language}: Log of an assigned negative emits the complex helper`, () => {
         const ce = engineWithNegativeAssignment();
         const code = ce
-          .getCompilationTarget(language)!
+          ._getCompilationTarget(language)!
           .compile(ce.parse('1 + \\log(a)'), { constantFold: false }).code;
         expect(code).toContain(`_gpu_cln(${v2}((-2.0), 0.0))`);
         expect(code).not.toContain('log((-2.0))');
@@ -302,7 +302,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
 
       it(`${language}: a bounded inverse head out of domain emits the complex helper`, () => {
         const ce = engineWithNegativeAssignment();
-        const target = ce.getCompilationTarget(language)!;
+        const target = ce._getCompilationTarget(language)!;
         // Direct helper available.
         expect(
           target.compile(ce.parse('1 + \\arcsin(2)'), { constantFold: false })
@@ -341,7 +341,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
 
       it(`${language}: an IN-domain inverse-trig argument stays scalar`, () => {
         const ce = engineWithNegativeAssignment();
-        const target = ce.getCompilationTarget(language)!;
+        const target = ce._getCompilationTarget(language)!;
         expect(
           target.compile(ce.parse('\\arcsin(0.5)'), { constantFold: false })
             .code
@@ -355,7 +355,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
 
       it(`${language}: a real-typed symbol still emits the scalar lowering`, () => {
         const ce = engineWithNegativeAssignment();
-        const target = ce.getCompilationTarget(language)!;
+        const target = ce._getCompilationTarget(language)!;
         expect(target.compile(ce.parse('\\sqrt{r}')).code).toBe('sqrt(r)');
         expect(target.compile(ce.parse('\\ln(r)')).code).toBe('log(r)');
         expect(target.compile(ce.parse('\\log(r)')).code).toBe(

@@ -93,7 +93,7 @@ describe('COMPILE When', () => {
   // (Tycho 0.72.0 restriction-brace probe, issue 1: an input interval
   // entirely outside the condition returned a normal interval result.)
   describe('interval-js target', () => {
-    const target = ce.getCompilationTarget('interval-js')!;
+    const target = ce._getCompilationTarget('interval-js')!;
 
     it('compiles When to _IA.restrict, not a bare ternary', () => {
       const expr = ce.parse('\\sin(x)\\{x>0\\}');

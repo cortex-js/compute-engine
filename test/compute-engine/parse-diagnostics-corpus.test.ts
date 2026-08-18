@@ -9,7 +9,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  * names a symbol that is either (a) **free** in the result, or (b) **absent**
  * from the result entirely (folded away, or consumed as notation — e.g. the
  * Leibniz differential `d`). A name that appears **only bound** usually means a
- * binder parselet is missing its `pruneUndeclared` wiring.
+ * binder parselet is missing its `_pruneUndeclared` wiring.
  *
  * `ce.parse` installs a defense-in-depth post-check (see `index.ts`) that is
  * DETECT-ONLY: it never drops diagnostics (dropping a canonicalization
@@ -40,7 +40,7 @@ const SKIP_LEDGER: { input: string; reason: string }[] = [
       '`{n ∈ ℕ | n>1}` that reuses the membership variable name `n`. In the ' +
       'canonical result `n` appears only bound, but the source `n` is a free ' +
       'reference and is correctly reported (detect-only). Not a parse-time ' +
-      'binder, so no pruneUndeclared wiring applies.',
+      'binder, so no _pruneUndeclared wiring applies.',
   },
   {
     input: 'x, y \\in \\mathbb{R}_{>0}',
@@ -154,7 +154,7 @@ describe('parse-diagnostics corpus bound-variable gate', () => {
         .join('\n');
       throw new Error(
         `Bound-only name(s) in canonical result not in the skip-ledger:\n${summary}\n` +
-          `If a binder parselet is missing pruneUndeclared wiring, fix it; if it is a ` +
+          `If a binder parselet is missing _pruneUndeclared wiring, fix it; if it is a ` +
           `canonicalization name-reuse artifact (correct diagnostic), add a ledger entry with a reason.`
       );
     }

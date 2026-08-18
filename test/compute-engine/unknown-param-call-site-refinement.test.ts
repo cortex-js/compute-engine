@@ -384,18 +384,18 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
     ]);
     const expected = 'mod(100000.0 * sqrt(x + -1.0), 1.0)';
 
-    const plain = ce.getCompilationTarget('glsl')!.createTarget();
+    const plain = ce._getCompilationTarget('glsl')!.createTarget();
     expect(compile(expr, { target: plain }).code).toBe(expected);
-    const strict = ce.getCompilationTarget('glsl')!.createTarget();
+    const strict = ce._getCompilationTarget('glsl')!.createTarget();
     expect(compile(expr, { target: strict, mode: 'strict' }).code).toBe(
       expected
     );
 
-    const promoted = ce.getCompilationTarget('glsl')!.createTarget();
+    const promoted = ce._getCompilationTarget('glsl')!.createTarget();
     expect(
       compile(expr, { target: promoted, complexPromotion: true }).code
     ).toBe(expected);
-    const explicit = ce.getCompilationTarget('glsl')!.createTarget();
+    const explicit = ce._getCompilationTarget('glsl')!.createTarget();
     const r = compile(expr, { target: explicit, mode: 'complex' });
     expect(r.success).toBe(false);
     expect(r.diagnostic!.code).toBe('unsupported-mode');

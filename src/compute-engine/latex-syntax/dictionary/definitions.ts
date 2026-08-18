@@ -1003,7 +1003,7 @@ function makeParseHandler(
       // continuation (e.g. the next `\times` in `a \times b \times c`) is
       // left for the caller's infix loop rather than being consumed by a
       // nested `parseExpression`. This keeps a flat operator chain iterative
-      // (bounded stack) instead of right-recursive; `appendAssociativeOperand`
+      // (bounded stack) instead of right-recursive; `_appendAssociativeOperand`
       // flattens the accumulated left operand so the resulting expression is
       // identical to the right-recursive form.
       return (
@@ -1016,7 +1016,7 @@ function makeParseHandler(
           parser.parseExpression({ ...until, minPrec: prec + 1 })
         );
         if (typeof h !== 'string') return [h, lhs, rhs];
-        return parser.appendAssociativeOperand(h, lhs, rhs);
+        return parser._appendAssociativeOperand(h, lhs, rhs);
       };
     }
   }

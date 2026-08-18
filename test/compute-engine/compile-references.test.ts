@@ -16,7 +16,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
     it('lists the genuinely free symbols', () => {
       const ce = new ComputeEngine();
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(ce.parse('\\sin(a x) - y'));
       expect(r.freeSymbols!.sort()).toEqual(['a', 'x', 'y']);
       expect(r.unsupported).toEqual([]);
@@ -26,7 +26,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(ce.parse('\\sin(a x) - y'));
       expect(r.code).toContain('1.5');
       expect(r.freeSymbols!.sort()).toEqual(['x', 'y']);
@@ -43,7 +43,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(ce.parse('\\sin(a x) - y'), { vars: { a: 'u_var_a' } });
       // The vars mapping wins over folding, so `a` is referenced and must be
       // supplied — it appears in freeSymbols even though it has a value.
@@ -55,7 +55,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       ce.assign('b', ce.parse('c + 1'));
       const expr = ce.parse('b x');
       expect(expr.unknowns).toEqual(['x']); // `c` is hidden behind `b`'s value
-      const r = ce.getCompilationTarget('javascript')!.compile(expr);
+      const r = ce._getCompilationTarget('javascript')!.compile(expr);
       expect(r.freeSymbols!.sort()).toEqual(['c', 'x']);
     });
 
@@ -106,7 +106,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const ce = new ComputeEngine();
       ce.parse('h(x) := x^2').evaluate();
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(ce.box(['Map', 'h', ['List', 'a', 'b']]));
       expect(r.success).toBe(true);
       expect(r.code).toContain('_fn_h');
@@ -120,7 +120,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const ce = new ComputeEngine();
       ce.parse('p(x) := x > 2').evaluate();
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(ce.box(['Filter', ['List', 'a', 'b', 'c'], 'p']));
       expect(r.success).toBe(true);
       expect(r.run!({ a: 1, b: 3, c: 5 })).toEqual([3, 5]);
@@ -130,7 +130,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const ce = new ComputeEngine();
       ce.parse('q(x) := x + k').evaluate();
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(ce.box(['Map', 'q', ['List', 'a', 'b']]));
       // `k` (free in q's body) is surfaced; `q` itself is not free.
       expect(r.freeSymbols!.sort()).toEqual(['a', 'b', 'k']);
@@ -140,7 +140,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
     it('still compiles an inline lambda operand', () => {
       const ce = new ComputeEngine();
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(ce.parse('\\mathrm{Map}(x \\mapsto x^2, [1,2,3])'));
       expect(r.run!({})).toEqual([1, 4, 9]);
     });
@@ -153,7 +153,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       // f(h) := Map(h, [1,2,3]) — `h` here is f's (function-valued) parameter.
       ce.assign('f', ce.box(['Function', ['Map', 'h', ['List', 1, 2, 3]], 'h']));
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(ce.box(['f', ['Function', ['Add', 'y', 10], 'y']]));
       // The passed function (y ↦ y+10) must be used, not the global h(x)=x².
       expect(r.run!({})).toEqual([11, 12, 13]);
@@ -165,7 +165,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const ce = new ComputeEngine();
       ce.parse('h(x) := x^2').evaluate();
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(ce.box(['Map', 'h', ['List', 'a', 'b']]), {
           vars: { h: 'EXTERNAL_H' },
         });
@@ -191,7 +191,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
         ce.box(['Function', ['Add', 'x', 'k'], ['Typed', 'x', 'integer']])
       );
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(ce.box(['Map', 'p', ['List', 'a', 'b']]));
       // `x` is the bound (typed) parameter; only `a`, `b`, `k` are free.
       expect(r.freeSymbols!.sort()).toEqual(['a', 'b', 'k']);

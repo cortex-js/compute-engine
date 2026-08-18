@@ -47,6 +47,15 @@
   a bare string in the type AST with no `.kind`, exactly like `string` and
   `character`.
 
+### Improvements
+
+- **Internal methods are now visibly internal.** Methods tagged `@internal`
+  now start with `_`, including the compilation-target registry, expression
+  inference/binding/cache-reset hooks, parser diagnostic helpers, operator
+  definition updates, and precision-oriented `BigDecimal` helpers. These were
+  already outside the supported public API; the names now make that status
+  apparent at call sites.
+
 ### Bug Fixes
 
 - **`CompilationResult.mode` now reports the RESOLVED discipline.** It is
@@ -74,7 +83,7 @@
 - **The `realOnly` and `complexPromotion` deprecation warnings now reach the
   target-level compile entry.** They were emitted only by the standalone
   `compile()` export, so a caller using
-  `ce.getCompilationTarget(name).compile(...)` received no deprecation signal
+  `ce._getCompilationTarget(name).compile(...)` received no deprecation signal
   at all — while the options continued to work on that route. That is the
   route an integration takes once it needs a specific target, so the consumers
   missing the warning were systematically those with the most call sites to

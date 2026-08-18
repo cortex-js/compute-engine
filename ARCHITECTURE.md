@@ -477,8 +477,10 @@ public API groups into:
 - **Declarations & assignment**: `declare()`, `declareType()`,
   `declareSequence()`, `assign()`.
 - **Reasoning**: `assume()`, `ask()`, `verify()`, `forget()`.
-- **Compilation**: `registerCompilationTarget()`, `getCompilationTarget()`,
-  `listCompilationTargets()`.
+- **Compilation**: `compile()` on boxed expressions and the standalone
+  `compile()` export. The target registry is internal
+  (`_registerCompilationTarget()`, `_getCompilationTarget()`,
+  `_listCompilationTargets()`, `_unregisterCompilationTarget()`).
 - **Configuration**: `precision` (default 21 significant digits; `'machine'`
   selects 64-bit float), `tolerance` (default `1e-10`), `angularUnit`
   (default `'rad'`), `strict` (validation depth), `iterationLimit` /
@@ -741,9 +743,9 @@ and delegates formatting to a `LanguageTarget` / `CompileTarget`
 - `python-target.ts` — Python 3.
 - `interval-javascript-target.ts` — JavaScript with interval arithmetic.
 
-Targets are registered in the engine's compilation-target registry and validated
-by the extension contracts. Consumers can register custom targets via
-`ce.registerCompilationTarget()`.
+Built-in targets are registered in the engine's internal compilation-target
+registry and validated by the extension contracts. Consumers pass custom target
+instances directly to the standalone `compile()` function.
 
 ## Packaging and entry points
 

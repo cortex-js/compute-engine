@@ -1356,7 +1356,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (operator(rhs) === 'Sequence')
         rhs = [delimited ? 'Tuple' : 'Block', ...operands(rhs)];
 
-      parser.pruneUndeclared(params, diagCp);
+      parser._pruneUndeclared(params, diagCp);
 
       return ['Function', rhs, ...params] as MathJsonExpression;
     },
@@ -4614,7 +4614,7 @@ function pruneFunctionParams(
     const s = symbol(a);
     if (s) names.push(s);
   }
-  parser.pruneUndeclared(names, checkpoint);
+  parser._pruneUndeclared(names, checkpoint);
 }
 
 /**
@@ -4742,8 +4742,8 @@ function parseAssign(
     // `undeclared-symbol` for `f`. This is a definition, not a multiplication or
     // an undeclared reference — the construct declares `f` — so drop both
     // false positives for the head.
-    parser.pruneJuxtaposition(fn, paramDiagCp);
-    parser.pruneUndeclared([fn], paramDiagCp);
+    parser._pruneJuxtaposition(fn, paramDiagCp);
+    parser._pruneUndeclared([fn], paramDiagCp);
     return ['Assign', fn, ['Function', rhs, ...(args ?? [])]];
   }
 
@@ -4807,8 +4807,8 @@ function parseAssign(
     // Same as the InvisibleOperator form above: the consumed application-shaped
     // head is a definition target, so drop any spurious code-2 / undeclared
     // diagnostics for it.
-    parser.pruneJuxtaposition(fn, paramDiagCp);
-    parser.pruneUndeclared([fn], paramDiagCp);
+    parser._pruneJuxtaposition(fn, paramDiagCp);
+    parser._pruneUndeclared([fn], paramDiagCp);
     return ['Assign', fn, ['Function', rhs, ...args]];
   }
 
@@ -5071,13 +5071,13 @@ function matchKeyword(parser: Parser, keyword: string): boolean {
   // trigger the structural auto-prune). Checkpoint here and roll back on every
   // exit so no keyword probe ever contributes a diagnostic. Diagnostics-only —
   // no parse-output effect.
-  const diagCp = parser.diagnosticsCheckpoint();
+  const diagCp = parser._diagnosticsCheckpoint();
 
   // Try \text{keyword} or \keyword{keyword} — consume the brace-introducing
   // command first, then match the braced content.
   if (parser.match('\\text') || parser.match('\\keyword')) {
     if (matchBracedKeyword(parser, keyword)) {
-      parser.rollbackDiagnostics(diagCp);
+      parser._rollbackDiagnostics(diagCp);
       return true;
     }
     parser.index = start;
@@ -5087,7 +5087,7 @@ function matchKeyword(parser: Parser, keyword: string): boolean {
   // parseComplexId in parse.ts handles these via parseSymbol
   const saved = parser.index;
   const sym = parser.parseSymbol();
-  parser.rollbackDiagnostics(diagCp);
+  parser._rollbackDiagnostics(diagCp);
   if (sym !== null && symbol(sym) === keyword) return true;
   parser.index = saved;
 

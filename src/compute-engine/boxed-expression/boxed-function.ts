@@ -490,9 +490,9 @@ export class BoxedFunction
     this._localScope = options?.scope;
 
     this._isStructural = options?.structural ?? false;
-    if (options?.canonical || this._isStructural) this.bind();
+    if (options?.canonical || this._isStructural) this._bind();
     // `null` is "not bound" — as documented on `_def`, and as distinct from
-    // the `undefined` `bind()` leaves when it finds no definition. Only
+    // the `undefined` `_bind()` leaves when it finds no definition. Only
     // `evaluate()` reads the two apart (see `_canonicalToEvaluate()`); every
     // other use tests `_def` for falsiness.
     else this._def = null;
@@ -517,10 +517,10 @@ export class BoxedFunction
   }
 
   /**
-   * For function expressions, `infer()` infers the result type of the function
+   * For function expressions, `_infer()` infers the result type of the function
    * based on the provided type and inference mode.
    */
-  infer(t: Type, inferenceMode?: 'narrow' | 'widen'): boolean {
+  _infer(t: Type, inferenceMode?: 'narrow' | 'widen'): boolean {
     const def = this.operatorDefinition;
     if (!def || !def.inferredSignature) return false;
 
@@ -619,7 +619,7 @@ export class BoxedFunction
     return true;
   }
 
-  bind(): void {
+  _bind(): void {
     // Operator (function-application) position: an inner binding that
     // provably cannot be applied — a user symbol `N = 85` shadowing the
     // built-in `N` operator — defers to an outer applicable definition.
@@ -630,7 +630,7 @@ export class BoxedFunction
     );
   }
 
-  reset(): void {
+  _reset(): void {
     // Note: a non-canonical expression is never bound
     // this._def = null;
   }

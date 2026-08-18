@@ -142,14 +142,14 @@ describe('Comprehension element memo', () => {
     // change bumping the counter (see `snapshotDeps` in
     // `collection-element-memo.ts`). A symbol bound to an
     // operator definition whose (generic) signature is narrowed by inference is
-    // such a change: `BoxedSymbol.infer()`'s operator-def branch must bump too,
-    // mirroring `BoxedFunction.infer()`.
+    // such a change: `BoxedSymbol._infer()`'s operator-def branch must bump too,
+    // mirroring `BoxedFunction._infer()`.
     ce.declare('opmemo', { signature: 'function' });
     const s = ce.box('opmemo');
     const before = ce._semanticVersion;
     // Narrow the generic `function` signature to a concrete one — this hits the
     // `def.operator.signature = newType` exit of the operator-def branch.
-    const changed = (s as any).infer('(number) -> number', 'narrow');
+    const changed = (s as any)._infer('(number) -> number', 'narrow');
     expect(changed).toBe(true);
     expect((ce.box('opmemo') as any)._def?.operator?.signature?.toString()).toBe(
       '(number) -> number'

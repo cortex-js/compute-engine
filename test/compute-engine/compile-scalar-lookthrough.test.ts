@@ -40,7 +40,7 @@ function compileJS(
 ):
   | { ok: true; code: string; run: (args?: object) => unknown }
   | { ok: false; error: string } {
-  const jt = (ce as any).getCompilationTarget('javascript');
+  const jt = (ce as any)._getCompilationTarget('javascript');
   const expr = ce.parse(latex) as BoxedExpression;
   try {
     const r = jt.compile(expr);

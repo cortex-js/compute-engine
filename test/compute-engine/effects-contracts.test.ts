@@ -1574,7 +1574,7 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
     const def = ce.lookupDefinition('retract1')!['operator'];
     expect(def.effectsDeclared).toBe(true);
 
-    def.update({ signature: '(integer) -> integer' });
+    def._update({ signature: '(integer) -> integer' });
     expect(def.effectsDeclared).toBe(false);
   });
 
@@ -1587,7 +1587,7 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
       evaluate: () => ce.number(1),
     });
     const def = ce.lookupDefinition('retract2')!['operator'];
-    def.update({ complexity: 1234 });
+    def._update({ complexity: 1234 });
     expect(def.effectsDeclared).toBe(true);
   });
 

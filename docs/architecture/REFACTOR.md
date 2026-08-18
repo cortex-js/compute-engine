@@ -44,7 +44,7 @@ Given your tolerance for major refactors, the best path is:
 3. Multiple extensibility hooks already exist
 - Standard library composition: `src/compute-engine/library/library.ts`
 - Custom LaTeX dictionary input: `src/compute-engine/index.ts`
-- Custom compile targets: `registerCompilationTarget()` in `src/compute-engine/index.ts`
+- Custom compile targets: `_registerCompilationTarget()` in `src/compute-engine/index.ts`
 
 4. High test investment
 - Large test suite under `test/compute-engine/*`

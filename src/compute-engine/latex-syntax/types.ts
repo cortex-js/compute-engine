@@ -902,7 +902,7 @@ export type ParseLatexOptions = NumberFormat & {
   /**
    * Internal hook invoked (when `diagnostics` is enabled) with each bound-
    * variable name a binder parselet deliberately processed via
-   * `pruneUndeclared()`. `ce.parse()` uses this to exempt those names from its
+   * `_pruneUndeclared()`. `ce.parse()` uses this to exempt those names from its
    * bound-only post-check assertion: a surviving `undeclared-symbol` for a
    * processed name is a deliberately-kept *free* occurrence (e.g. the lower
    * bound in `\int_x^1 x\,dx`), not a wiring gap. Not part of the public
@@ -1004,15 +1004,15 @@ export interface Parser {
   /**
    * @internal
    * Diagnostics: a seq-based checkpoint (the next sequence id) for
-   * {@link rollbackDiagnostics}/{@link pruneUndeclared}.
+   * {@link _rollbackDiagnostics}/{@link _pruneUndeclared}.
    */
-  diagnosticsCheckpoint(): number;
+  _diagnosticsCheckpoint(): number;
 
   /**
    * @internal
    * Diagnostics: discard every diagnostic collected since `checkpoint`.
    */
-  rollbackDiagnostics(checkpoint: number): void;
+  _rollbackDiagnostics(checkpoint: number): void;
 
   /**
    * @internal
@@ -1023,7 +1023,7 @@ export interface Parser {
    * (`declSpanTokens`, token ranges) are removed, leaving same-named free
    * references in limit/bound sub-expressions flagged. Token indices.
    */
-  pruneUndeclared(
+  _pruneUndeclared(
     names: Iterable<string>,
     checkpoint: number,
     bodyStartToken?: number,
@@ -1038,7 +1038,7 @@ export interface Parser {
    * `f(x) := …`, where `f(x)` is consumed as a function signature, not a
    * product) so the head no longer reports a spurious multiplication.
    */
-  pruneJuxtaposition(name: string, checkpoint: number): void;
+  _pruneJuxtaposition(name: string, checkpoint: number): void;
 
   /**
    * @internal
@@ -1064,7 +1064,7 @@ export interface Parser {
    * chain `a+b+c+…` grows by appending instead of by copying at every
    * operator. The array returned becomes the owned chain.
    */
-  appendAssociativeOperand(
+  _appendAssociativeOperand(
     op: string,
     lhs: MathJsonExpression,
     rhs: MathJsonExpression
@@ -1072,7 +1072,7 @@ export interface Parser {
 
   /**
    * @internal
-   * The chain array most recently returned by `appendAssociativeOperand` at
+   * The chain array most recently returned by `_appendAssociativeOperand` at
    * the innermost in-progress `parseExpression` (or `null`). It was
    * allocated by this parser and, until the infix loop hands it on as an
    * operand of a larger expression, the loop's left operand is the only

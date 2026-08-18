@@ -45,7 +45,7 @@ Use `getDefaultEngine()` to configure it (precision, angular unit, etc.).
 
 Runtime contract checks are enforced for extension points:
 
-- `registerCompilationTarget(name, target)` validates target name format and required `LanguageTarget` methods (`getOperators()`, `getFunctions()`, `createTarget()`, `compile()`).
+- `_registerCompilationTarget(name, target)` validates target name format and required `LanguageTarget` methods (`getOperators()`, `getFunctions()`, `createTarget()`, `compile()`).
 - `new ComputeEngine({ libraries: [...] })` validates custom library shape (`name`, `requires`, `definitions`, `latexDictionary`).
 - `compile(expr, options)` validates extension-facing payload shape (`to`, `target`, `operators`, `functions`, `vars`, `imports`, `preamble`, `fallback`).
 

@@ -207,7 +207,7 @@ describe('compile mode — effective-mode resolution (step 1)', () => {
     // The mode is resolved BEFORE `_complexPromotion`/`_mode` are written:
     // the decline throws outside the try/finally that restores them, so a
     // latch mutated ahead of the resolution would stay stuck.
-    const glsl = ce.getCompilationTarget('glsl')!.createTarget();
+    const glsl = ce._getCompilationTarget('glsl')!.createTarget();
     expect(() =>
       compile(ce.parse('x'), {
         target: glsl,

@@ -55,7 +55,7 @@ import {
  *   (`docs/plans/2026-08-13-inference-tx-design.md`) the guarantee is
  *   rollback-shaped rather than abstinence-shaped: admission may run a
  *   caller-supplied TRIAL ({@link ArmTrialFn}) — full `validateArguments`,
- *   whose in-loop `op.infer(param, 'narrow')` genuinely writes — but the
+ *   whose in-loop `op._infer(param, 'narrow')` genuinely writes — but the
  *   caller runs each trial under a rollback frame that undoes every write
  *   whatever the verdict, so a rejected arm still leaves no trace. The
  *   trial-less paths (the cheap prefilter alone) remain write-free in the

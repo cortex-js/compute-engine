@@ -971,7 +971,7 @@ export function pow(
                 re:
                   re === 0
                     ? 0
-                    : magBig.mulToPrecision(reBig, BigDecimal.precision),
+                    : magBig._mulToPrecision(reBig, BigDecimal.precision),
                 im: im === 0 ? 0 : magNV.re * im,
               })
             );

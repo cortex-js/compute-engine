@@ -1026,7 +1026,7 @@ volumes
         // ODE, parsed as an invisible product while `y` was still unknown —
         // canonicalize to a function application, exactly as an
         // operator-position use (`["y", "x"]`) would have inferred it.
-        if (isSymbol(fn)) fn.infer('function');
+        if (isSymbol(fn)) fn._infer('function');
         const orders = ops
           .slice(1)
           .map((o) => checkType(engine, o.canonical, 'number'));

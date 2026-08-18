@@ -138,7 +138,7 @@ describe('callable transitions invalidate (§6 matrix)', () => {
     // axis advance pre-design — the inference{valueType} event covers it.
     const before = ce._callableVersion;
     ce.box(['Apply', 'uSym', 1]); // ensure binding exists
-    ce.symbol('uSym').infer(
+    ce.symbol('uSym')._infer(
       { kind: 'signature', result: 'number' },
       'narrow'
     );

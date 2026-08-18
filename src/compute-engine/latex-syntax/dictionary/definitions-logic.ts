@@ -780,7 +780,7 @@ export function parseQuantifier(
     const index = parser.index;
     // Diagnostics: checkpoint before the quantified variable so its references
     // (the binder and the body) are not flagged as `undeclared-symbol`.
-    const diagCp = parser.diagnosticsCheckpoint();
+    const diagCp = parser._diagnosticsCheckpoint();
     const useTightBinding = parser.options.quantifierScope !== 'loose';
 
     // There are several acceptable forms:
@@ -829,7 +829,7 @@ export function parseQuantifier(
         parser.enterQuantifierScope();
         const body = parser.parseExpression(bodyTerminator);
         parser.exitQuantifierScope();
-        if (boundName) parser.pruneUndeclared([boundName], diagCp);
+        if (boundName) parser._pruneUndeclared([boundName], diagCp);
         return [kind, symbol, missingIfEmpty(body)] as MathJsonExpression;
       }
       // Enter quantifier scope so predicates are recognized
@@ -849,7 +849,7 @@ export function parseQuantifier(
           parser.atTerminator(terminator) ||
           tightBindingCondition(parser, terminator)
         ) {
-          if (boundName) parser.pruneUndeclared([boundName], diagCp);
+          if (boundName) parser._pruneUndeclared([boundName], diagCp);
           return [kind, symbol, missingIfEmpty(body)];
         }
       }

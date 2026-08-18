@@ -36,7 +36,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /** `h([3,4])`-style compile of an expression, on the JS target. */
 function jsCompile(ce: ComputeEngine, expr: any, options?: any) {
-  return ce.getCompilationTarget('javascript')!.compile(expr, options);
+  return ce._getCompilationTarget('javascript')!.compile(expr, options);
 }
 
 /** The two-component complex-multiply witness from Tycho's library: TWO list
@@ -314,7 +314,7 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
   test('JS: with fallback:true the decline is reported, and run() is honest', () => {
     const ce = keyedEngine();
     const r = ce
-      .getCompilationTarget('javascript')!
+      ._getCompilationTarget('javascript')!
       .compile(ce.box(['k', REC]), { fallback: true, constantFold: false });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/not provably numeric/);
@@ -324,7 +324,7 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
 
   test('Python: the same shape declines identically', () => {
     const ce = new ComputeEngine();
-    const py = ce.getCompilationTarget('python')!;
+    const py = ce._getCompilationTarget('python')!;
     expect(() => py.compile(ce.box(KEYED))).toThrow(
       /not provably numeric.*Fail closed \(D6\)/
     );
@@ -341,7 +341,7 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
     expect(js.success).toBe(true);
     expect((js.run! as any)([10, 20, 30])).toBe(10);
 
-    const py = ce.getCompilationTarget('python')!.compile(NUMERIC);
+    const py = ce._getCompilationTarget('python')!.compile(NUMERIC);
     expect(py.success).toBe(true);
     // The Python emission mirrors `_SYS.at`'s runtime shape dispatch: a base
     // that is not a sequence projects to nan rather than raising.

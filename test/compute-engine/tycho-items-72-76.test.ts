@@ -93,7 +93,7 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
   });
 
   test('|(x,y)| compiles to a number on the js target', () => {
-    const target = ce.getCompilationTarget('javascript');
+    const target = ce._getCompilationTarget('javascript');
     const r = target.compile(ce.parse('\\left|(x,y)\\right|'));
     expect(r.success).toBe(true);
     const v = r.run?.({ x: 3, y: 4 });
@@ -102,7 +102,7 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
   });
 
   test('Norm compiles on the interval-js target (2-D and 3-D)', () => {
-    const target = ce.getCompilationTarget('interval-js');
+    const target = ce._getCompilationTarget('interval-js');
     const r2 = target.compile(ce.parse('\\left\\Vert (x-1,y)\\right\\Vert'));
     expect(r2.success).toBe(true);
     const v2 = r2.run?.({ x: 4, y: 4 }) as any;
@@ -117,7 +117,7 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
   });
 
   test('|(x,y)| compiles on the interval-js target', () => {
-    const target = ce.getCompilationTarget('interval-js');
+    const target = ce._getCompilationTarget('interval-js');
     const r = target.compile(ce.parse('\\left|(x-1,y)\\right|'));
     expect(r.success).toBe(true);
     const v = r.run?.({ x: 4, y: 4 }) as any;
@@ -126,7 +126,7 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
 
   test('|(x,y)| compiles to length() on the shader targets', () => {
     const glsl = ce
-      .getCompilationTarget('glsl')
+      ._getCompilationTarget('glsl')
       .compile(ce.parse('\\left|(x-1,y)\\right|'));
     expect(glsl.success).toBe(true);
     expect(glsl.code).toContain('length(');
@@ -202,7 +202,7 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     const engine = new ComputeEngine();
     engine.declare('p', 'tuple<real, real>');
     const r = engine
-      .getCompilationTarget('javascript')
+      ._getCompilationTarget('javascript')
       .compile(engine.box(['Abs', 'p']));
     expect(r.success).toBe(true);
     expect(r.run?.({ p: [3, 4] })).toEqual(5);
@@ -219,16 +219,16 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     // (js `_SYS.norm`) or vec constructor (glsl) cannot follow. Fail closed.
     const bad = ce.box(['Norm', ['List', ce.parse('x+[0.5,1]'), 'y', 'z']]);
     expect(
-      ce.getCompilationTarget('javascript').compile(bad, { fallback: true })
+      ce._getCompilationTarget('javascript').compile(bad, { fallback: true })
         .success
     ).toBe(false);
     expect(
-      ce.getCompilationTarget('glsl').compile(bad, { fallback: true }).success
+      ce._getCompilationTarget('glsl').compile(bad, { fallback: true }).success
     ).toBe(false);
     // A matrix literal's List components are rows — the Frobenius norm is a
     // legitimate scalar and must keep compiling on the js target.
     const frob = ce.box(['Norm', ['List', ['List', 3, 0], ['List', 0, 4]]]);
-    const r = ce.getCompilationTarget('javascript').compile(frob);
+    const r = ce._getCompilationTarget('javascript').compile(frob);
     expect(r.success).toBe(true);
     expect(r.run?.({})).toEqual(5);
   });
@@ -270,21 +270,21 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     // literal, so the whole norm would otherwise be evaluated at compile time
     // and emitted as a literal list, bypassing the broadcast gate under test.
     const js = ce
-      .getCompilationTarget('javascript')
+      ._getCompilationTarget('javascript')
       .compile(expr, { fallback: true, constantFold: false });
     expect(js.success).toBe(false);
     const iv = ce
-      .getCompilationTarget('interval-js')
+      ._getCompilationTarget('interval-js')
       .compile(expr, { constantFold: false });
     expect(iv.success).toBe(false);
     const glsl = ce
-      .getCompilationTarget('glsl')
+      ._getCompilationTarget('glsl')
       .compile(expr, { fallback: true, constantFold: false });
     expect(glsl.success).toBe(false);
   });
 
   test('shader norm arity limits: 3-vec uses length(), 5-tuple fails closed', () => {
-    const glsl = ce.getCompilationTarget('glsl');
+    const glsl = ce._getCompilationTarget('glsl');
     const ok = glsl.compile(ce.box(['Abs', ['Tuple', 'x', 'y', 'z']]));
     expect(ok.success).toBe(true);
     expect(ok.code).toContain('length(');

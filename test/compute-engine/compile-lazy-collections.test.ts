@@ -332,7 +332,7 @@ describe('Tycho item 187 — computed Range bounds keep every element', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<number>');
     ce.declare('n', 'number');
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     const expr = ce.box([
       'Comprehension',
       ['Tuple', 'i', 'i'],

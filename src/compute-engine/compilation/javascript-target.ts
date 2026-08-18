@@ -7150,7 +7150,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
-    // A caller reaching a target through `ce.getCompilationTarget(name)` and
+    // A caller reaching a target through `ce._getCompilationTarget(name)` and
     // invoking this method never passes through the standalone `compile()`
     // export, which is where the deprecated pre-`mode` options used to be
     // warned about AND resolved. The options keep WORKING on this route (the

@@ -1700,7 +1700,7 @@ describe('clause 1, on the POLYTYPE path: erasure reaches α-equivalence', () =>
 describe('clause 1: the erasure is DEEP in argument validation', () => {
   // A builtin writes the constructor as a whole parameter slot, but a
   // USER-declared signature may nest it — and a top-level-only erasure leaked
-  // `callback<…>` into both the diagnostic and the `infer()` write.
+  // `callback<…>` into both the diagnostic and the `_infer()` write.
   const NESTED = '(list<callback<(integer) -> boolean>>) -> integer';
 
   it('the diagnostic says `list<function>`', () => {
@@ -2209,7 +2209,7 @@ describe('R-D5: the display cache re-grounds a REPLACED signature', () => {
     expect(ce.symbol('CountIf').type.toString()).toBe(
       '(collection, predicate: function) -> integer'
     );
-    (ce.lookupDefinition('CountIf') as any).operator.update({
+    (ce.lookupDefinition('CountIf') as any).operator._update({
       signature:
         '(collection<U>, p: callback<(U) -> boolean>) -> number where U',
     });

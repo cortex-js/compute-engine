@@ -595,7 +595,7 @@ function boxFunctionInternal(
 
 /**
  * Mark the start of a (possibly nested) boxing operation. While at least one
- * is in progress, `BoxedSymbol.infer()` records every value definition whose
+ * is in progress, `BoxedSymbol._infer()` records every value definition whose
  * type transitions unknown → concrete into `ce._freshlyInferred` — the
  * forward-computed provenance for `repairFreshMatrixInference`'s "first
  * inferred while canonicalizing this argument" eligibility test. This
@@ -1493,7 +1493,7 @@ function makeCanonicalFunction(
   scope: Scope | undefined
 ): Expression {
   // Ambient inference-cause context: while this operator canonicalizes, any
-  // `infer()` write onto a definition records THIS expression as the cause
+  // `_infer()` write onto a definition records THIS expression as the cause
   // of the write in the definition's provenance history (`_noteInferenceWrite`
   // in `index.ts`). Save/restore rather than set/clear so nested
   // canonicalizations (a canonical handler boxing sub-expressions) resolve
@@ -1591,7 +1591,7 @@ function makeCanonicalFunctionCore(
   // Function-application position: an inner binding that provably cannot be
   // applied (a user symbol `N = 85` shadowing the built-in `N` operator)
   // defers to an outer applicable definition — see `lookupApplicable` — so
-  // the operator path (with its canonical handler) runs. `bind()` performs
+  // the operator path (with its canonical handler) runs. `_bind()` performs
   // the same resolution, keeping construction and binding consistent.
   //
   const def = lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
@@ -2054,7 +2054,7 @@ function narrowArgsFromInferredSignature(
     if (arg.type.type !== 'unknown') continue;
     const paramType = sig.args[i].type;
     if (!isCollectionOnlyType(paramType)) continue;
-    arg.infer(paramType, 'narrow');
+    arg._infer(paramType, 'narrow');
   }
 }
 
@@ -2538,7 +2538,7 @@ function canonicalizeBinder(
         // widen at the per-iteration `ce.assign(index, value)` rather than be
         // rejected by it as `incompatible-type` (`assignFn`,
         // `engine-declarations.ts`, which widens on the inferred track and
-        // enforces on the declared one). `BoxedSymbol.infer()` also marks the
+        // enforces on the declared one). `BoxedSymbol._infer()` also marks the
         // types it writes inferred, so this is belt-and-braces; declaring the
         // provenance HERE keeps the binding honest even before any inference
         // runs, for the readers of `inferredType` that ask whether a type was

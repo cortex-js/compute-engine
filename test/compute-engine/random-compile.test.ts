@@ -518,20 +518,20 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
   });
 
   test('GLSL: Remainder(Random(), 2) hoists the draw to a single temporary', () => {
-    const g = ce.getCompilationTarget('glsl')!;
+    const g = ce._getCompilationTarget('glsl')!;
     const r = g.compile(ce.box(['Remainder', ['Random'], 2]) as any);
     expect((r.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
     expect(r.code).toContain('float _tv1 =');
   });
 
   test('GLSL: Cot(Random()) hoists the draw to a single temporary', () => {
-    const g = ce.getCompilationTarget('glsl')!;
+    const g = ce._getCompilationTarget('glsl')!;
     const r = g.compile(ce.box(['Cot', ['Random']]) as any);
     expect((r.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
   });
 
   test('GLSL: Cot of a COMPLEX impure operand hoists the draw too', () => {
-    const g = ce.getCompilationTarget('glsl')!;
+    const g = ce._getCompilationTarget('glsl')!;
     const r = g.compile(
       ce.box(['Cot', ['Add', 'ImaginaryUnit', ['Random']]]) as any
     );
@@ -539,7 +539,7 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
   });
 
   test('GLSL: Coth and Beta hoist an impure operand too (same template class)', () => {
-    const g = ce.getCompilationTarget('glsl')!;
+    const g = ce._getCompilationTarget('glsl')!;
     const coth = g.compile(ce.box(['Coth', ['Random']]) as any);
     expect((coth.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
     const beta = g.compile(ce.box(['Beta', ['Random'], 2]) as any);
@@ -547,7 +547,7 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
   });
 
   test('GLSL: pure operands keep the direct emission (byte-identical pins)', () => {
-    const g = ce.getCompilationTarget('glsl')!;
+    const g = ce._getCompilationTarget('glsl')!;
     expect(g.compile(ce.box(['Cot', 'x']) as any).code).toBe(
       '(cos(x) / sin(x))'
     );
@@ -571,8 +571,8 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   // purity-gated, so a PURE operand keeps its emission byte-identical (pinned
   // in the `…pure…` tests).
   const ce = new ComputeEngine();
-  const glsl = () => ce.getCompilationTarget('glsl')!;
-  const wgsl = () => ce.getCompilationTarget('wgsl')!;
+  const glsl = () => ce._getCompilationTarget('glsl')!;
+  const wgsl = () => ce._getCompilationTarget('wgsl')!;
   /** GLSL/WGSL source for `json`, unframed (fragment-stage spatial noise). */
   const gpuCode = (json: any, lang: 'glsl' | 'wgsl' = 'glsl'): string =>
     (lang === 'glsl' ? glsl() : wgsl()).compile(ce.box(json) as any, {

@@ -92,7 +92,7 @@ const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
 /**
  * Exclusion gate for scalar numeric INFERENCE — deliberately WIDER than
  * broadcast admission (`couldBeUnkeyedCollectionOperand`). The hazard the
- * gate prevents is keyedness-independent: `x.infer('real')` on an operand
+ * gate prevents is keyedness-independent: `x._infer('real')` on an operand
  * whose inferred result signature is collection-shaped WIDENS the shared
  * definition (Tycho item 121), and a `dictionary<…>`-shaped signature is
  * corrupted by that write exactly as a `vector<2>` one is. So ANY operand
@@ -301,7 +301,7 @@ export function checkNumericArgs(
     // Numeric operators are threadable: an operand that could be a collection
     // at runtime (a `vector<n>`-returning application, `number | list`, a
     // tuple) is consumed by BROADCAST, so the scalar numeric context must not
-    // be inferred onto it — `x.infer('real')` on a call whose inferred result
+    // be inferred onto it — `x._infer('real')` on a call whose inferred result
     // signature is already `vector<2>` WIDENS the shared definition to
     // `real | vector<2>`, and every later use of that function then types as
     // `number` (Tycho item 121: the compiled Sum then emits scalar `+` over
@@ -309,7 +309,7 @@ export function checkNumericArgs(
     // `excludedFromScalarInference` — and mirrors the guard on the
     // signature-validation route (`validateSignature`).
     for (const x of xs)
-      if (!excludedFromScalarInference(x)) x.infer(inferredType);
+      if (!excludedFromScalarInference(x)) x._infer(inferredType);
     return xs;
   }
 
@@ -487,7 +487,7 @@ export function checkNumericArgs(
         // time (fail-open), mirroring the admission-branch guard above. Eager
         // collections (e.g. a literal `List`) already store their elements as
         // operands, so walking them is cheap regardless of `unknowns`:
-        // `BoxedFunction.infer()` also narrows an inferred *result signature*
+        // `BoxedFunction._infer()` also narrows an inferred *result signature*
         // (not just free symbols), so a concrete literal list containing an
         // inferred function call still needs the walk.
         if (x.isLazyCollection) continue;
@@ -501,8 +501,8 @@ export function checkNumericArgs(
         // broadcast over the same symbol claim `vector<real^2>` for a
         // `matrix<...^(2x2)>` result.
         for (const y of x.each())
-          if (!excludedFromScalarInference(y)) y.infer(inferredType);
-      } else if (!excludedFromScalarInference(x)) x.infer(inferredType);
+          if (!excludedFromScalarInference(y)) y._infer(inferredType);
+      } else if (!excludedFromScalarInference(x)) x._infer(inferredType);
     // A possibly-collection operand (a `vector<n>`-returning application,
     // `number | list`, a tuple, a `dictionary<…>`-shaped signature) is not a
     // scalar: inferring the scalar numeric context onto it would WIDEN a
@@ -905,7 +905,7 @@ export function validateArguments(
 
   // Positions accepted via overlap-deferred validation (§D6.2): acceptance
   // is an unrefuted possibility, not a proof, so these positions are
-  // excluded from the final `infer(param)` narrowing below — narrowing an
+  // excluded from the final `_infer(param)` narrowing below — narrowing an
   // inferred symbol to `matrix` on the strength of a guess would
   // over-constrain unrelated later uses.
   const deferredIdx = new Set<number>();
@@ -943,7 +943,7 @@ export function validateArguments(
     // Design D §4, contract clause 1: a `callback<S>` slot is the primitive
     // `function` for EVERY argument-validation decision. Erased once here, at
     // the projection every gate below reads, so admission, the reported
-    // expected type and the post-validation `infer()` write are all
+    // expected type and the post-validation `_infer()` write are all
     // byte-identical to the bare-`function` slot this converted from — the
     // wrapped signature is contextual-typing information and never escapes
     // through an inference WRITE or a diagnostic. (It legitimately survives
@@ -955,7 +955,7 @@ export function validateArguments(
     // parameter slot, but a USER-declared signature may nest it
     // (`(list<callback<(integer) -> boolean>>) -> integer`), and a top-level-
     // only erasure would leak `callback<…>` into both the diagnostic and the
-    // `infer()` write for those.
+    // `_infer()` write for those.
     param = deepEraseCallbackTypes(param);
     if (!solved) return param;
     const t = instantiatedParam(param, solved.bindings);
@@ -1111,7 +1111,7 @@ export function validateArguments(
       !hasValueComponent(param) &&
       narrowingPreservesEffects(op.type.type, param)
     ) {
-      op.infer(param, 'narrow');
+      op._infer(param, 'narrow');
       result.push(op);
       continue;
     }
@@ -1144,7 +1144,7 @@ export function validateArguments(
       // is provisionally admitted (the call could be fine — dispatch stays
       // open until the value is known); only proven refutation errors.
       // Mirrored in `paramMatches` (overload.ts). Deferred like the other
-      // provisional admissions: the final `infer(param)` pass must not
+      // provisional admissions: the final `_infer(param)` pass must not
       // narrow a symbol's type to the VALUE type (`k := 0; g(k)` would
       // otherwise pin `k: 0`).
       if (hasValueComponent(param) && admissionOf(op, param) !== 'refute') {
@@ -1154,7 +1154,7 @@ export function validateArguments(
       }
       // Strip-before-validate (§3.B): admit an operand carrying a `missing`
       // arm whose stripped type still matches the parameter. Accepted
-      // provisionally (added to `deferredIdx`) so the final `infer(param)`
+      // provisionally (added to `deferredIdx`) so the final `_infer(param)`
       // narrowing does not widen an unconstrained symbol (I4).
       if (strippedMatchesParam(op, param, idx, stripMissing)) {
         result.push(op);
@@ -1275,7 +1275,7 @@ export function validateArguments(
       !hasValueComponent(param) &&
       narrowingPreservesEffects(op.type.type, param)
     ) {
-      op.infer(param, 'narrow');
+      op._infer(param, 'narrow');
       result.push(op);
       i += 1;
       continue;
@@ -1382,7 +1382,7 @@ export function validateArguments(
         !hasValueComponent(varParam) &&
         narrowingPreservesEffects(op.type.type, varParam)
       ) {
-        op.infer(varParam, 'narrow');
+        op._infer(varParam, 'narrow');
         result.push(op);
         continue;
       }
@@ -1518,7 +1518,7 @@ export function validateArguments(
         !isThreadableAt(threadable, i) ||
         !couldBeUnkeyedCollectionOperand(finalOps[i])
       )
-        finalOps[i].infer(t);
+        finalOps[i]._infer(t);
     i += 1;
   }
   for (const param of optParams) {
@@ -1529,7 +1529,7 @@ export function validateArguments(
         !isThreadableAt(threadable, i) ||
         !couldBeUnkeyedCollectionOperand(finalOps[i])
       )
-        finalOps[i].infer(t);
+        finalOps[i]._infer(t);
     i += 1;
   }
   if (varParam) {
@@ -1540,7 +1540,7 @@ export function validateArguments(
           !isThreadableAt(threadable, i) ||
           !couldBeUnkeyedCollectionOperand(op)
         )
-          op.infer(t);
+          op._infer(t);
       i += 1;
     }
   }
@@ -1621,7 +1621,7 @@ function repairFreshMatrixInference(
     if (!def || !isValueDef(def) || !def.value.inferredType) continue;
     // "Fresh" = the definition's type was first inferred (unknown → concrete)
     // during this boxing operation — the forward log recorded by
-    // `BoxedSymbol.infer()` — or is still unknown (never inferred; the
+    // `BoxedSymbol._infer()` — or is still unknown (never inferred; the
     // previous snapshot-based provenance excluded unknown-typed definitions
     // from "inferred before", making them always eligible). Keying on the
     // definition's identity rather than its name also means a symbol whose

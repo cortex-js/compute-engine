@@ -1064,15 +1064,15 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
-  infer(_t: Type, _inferenceMode?: 'narrow' | 'widen'): boolean {
+  _infer(_t: Type, _inferenceMode?: 'narrow' | 'widen'): boolean {
     return false; // The inference was ignored if false
   }
 
-  bind(): void {
+  _bind(): void {
     return;
   }
 
-  reset(): void {
+  _reset(): void {
     return;
   }
 

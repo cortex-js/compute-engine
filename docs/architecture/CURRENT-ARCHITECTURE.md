@@ -163,7 +163,7 @@ registers a factory that includes `LatexSyntax`; the core entry point
 
 ## Extension Contracts (Runtime Guards)
 
-Compilation target registration (`ce.registerCompilationTarget()`):
+Internal compilation target registration (`ce._registerCompilationTarget()`):
 - name must be non-empty and whitespace-free
 - target must implement required `LanguageTarget` methods:
   - `getOperators()`

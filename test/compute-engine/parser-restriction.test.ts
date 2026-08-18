@@ -140,7 +140,7 @@ describe('Parser: restriction braces', () => {
 
     test('comma-Or restriction compiles to a masking ternary', () => {
       const expr = ce.parse('x\\left\\{x>4, x<0\\right\\}');
-      const run = ce.getCompilationTarget('javascript')!.compile(expr).run!;
+      const run = ce._getCompilationTarget('javascript')!.compile(expr).run!;
       expect(run({ x: 5 })).toBe(5);
       expect(run({ x: -1 })).toBe(-1);
       expect(run({ x: 2 })).toBeNaN();
@@ -199,7 +199,7 @@ describe('Parser: restriction braces', () => {
 
     test('colon group compiles to chained ternaries with NaN fallthrough', () => {
       const f = ce.parse('x\\left\\{x>0:1, x<0:-1\\right\\}');
-      const run = ce.getCompilationTarget('javascript')!.compile(f).run!;
+      const run = ce._getCompilationTarget('javascript')!.compile(f).run!;
       expect(run({ x: 2 })).toBe(2);
       expect(run({ x: -3 })).toBe(3);
       expect(run({ x: 0 })).toBeNaN();

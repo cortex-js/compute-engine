@@ -2226,7 +2226,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         target.valueDefinition?.inferredType &&
         target.type.type === 'unknown'
       )
-        target.infer('collection', 'narrow');
+        target._infer('collection', 'narrow');
       const adjusted = validateArguments(
         ce,
         stripped,

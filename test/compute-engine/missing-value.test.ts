@@ -446,7 +446,7 @@ describe('P2 — compile: absence capability & gates (§3.F)', () => {
   });
 
   test('every executable target exposes the numeric absence capability', () => {
-    const jsTarget = (ce as any).getCompilationTarget('javascript');
+    const jsTarget = (ce as any)._getCompilationTarget('javascript');
     const t = jsTarget.createTarget();
     expect(typeof t.absence.numeric.make).toBe('function');
     expect(t.absence.numeric.make()).toBe('Number.NaN');
@@ -455,14 +455,14 @@ describe('P2 — compile: absence capability & gates (§3.F)', () => {
   });
 
   test('interval target: numeric isAbsent = isnan(x.lo)', () => {
-    const it = (ce as any).getCompilationTarget('interval-js');
+    const it = (ce as any)._getCompilationTarget('interval-js');
     const t = it.createTarget();
     expect(t.absence.numeric.isAbsent('v')).toBe('Number.isNaN((v).lo)');
     expect(t.absence.object).toBeUndefined();
   });
 
   test('GPU target: make only, no isAbsent (fail closed)', () => {
-    const gl = (ce as any).getCompilationTarget('glsl');
+    const gl = (ce as any)._getCompilationTarget('glsl');
     const t = gl.createTarget();
     expect(typeof t.absence.numeric.make).toBe('function');
     expect(t.absence.numeric.isAbsent).toBeUndefined();

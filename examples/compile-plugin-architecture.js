@@ -110,7 +110,7 @@ class PythonTarget {
 }
 
 // Register the Python target
-ce.registerCompilationTarget('python', new PythonTarget());
+ce._registerCompilationTarget('python', new PythonTarget());
 
 // Compile expressions to Python
 const expr2 = ce.parse('\\sin(x) + \\cos(y)');
@@ -187,7 +187,7 @@ class RPNTarget {
 }
 
 // Register the RPN target
-ce.registerCompilationTarget('rpn', new RPNTarget());
+ce._registerCompilationTarget('rpn', new RPNTarget());
 
 // Compile expressions to RPN
 const expr5 = ce.parse('x + y');

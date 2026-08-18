@@ -195,7 +195,7 @@ function fromFixedPoint(
  * in the working precision) before crossing the bridge.
  */
 function decimalExponent(x: BigDecimal): number {
-  return x.exponent + x.digitCount() - 1;
+  return x.exponent + x._digitCount() - 1;
 }
 
 /**
@@ -447,7 +447,7 @@ BigDecimal.prototype.exp = function (): BigDecimal {
   // O(1), so the *result* never underflows the absolute-precision grid —
   // exp(-200) ≈ 1.38e-87 is recovered as exp(0.32)·10⁻⁸⁷ instead of rounding
   // to 0. The reduction is done in exact bigint fixed-point (no cancellation).
-  const magnitude = Math.max(0, this.exponent + this.digitCount());
+  const magnitude = Math.max(0, this.exponent + this._digitCount());
 
   // The √-depth argument reduction (and its guard bits) now live inside the
   // `fpexp` kernel, so exp() is a thin caller again: pick the working precision
@@ -511,7 +511,7 @@ BigDecimal.prototype.ln = function (): BigDecimal {
   // fixed-point input to 0 — which used to return −∞ (and previously hung in
   // the sqrt-reduction loop, `fpsqrt(0) = 0`).
   const sig = this.significand; // positive and finite here
-  const digits = this.digitCount();
+  const digits = this._digitCount();
   const e = this.exponent + digits - 1;
   const m = fromRaw(sig, -(digits - 1)); // m ∈ [1, 10)
 
@@ -828,15 +828,15 @@ BigDecimal.prototype.acos = function (): BigDecimal {
     const two = BigDecimal.TWO;
     if (this.significand >= 0n) {
       const t = BigDecimal.ONE.sub(this)
-        .mulToPrecision(BigDecimal.HALF, targetPrec + 10)
+        ._mulToPrecision(BigDecimal.HALF, targetPrec + 10)
         .sqrt();
       // Fused multiply-and-round (single rounding at targetPrec; the previous
       // mul-then-toPrecision double-rounded through the +10 guard — battery-
       // verified identical).
-      return two.mulToPrecision(t.asin(), targetPrec);
+      return two._mulToPrecision(t.asin(), targetPrec);
     }
     const t = BigDecimal.ONE.add(this)
-      .mulToPrecision(BigDecimal.HALF, targetPrec + 10)
+      ._mulToPrecision(BigDecimal.HALF, targetPrec + 10)
       .sqrt();
     return BigDecimal.PI.sub(two.mul(t.asin())).toPrecision(targetPrec);
   } finally {
@@ -942,7 +942,7 @@ BigDecimal.prototype.sinh = function (): BigDecimal {
       // ×HALF is exact in decimal (0.5 = 5·10⁻¹), so this is value-identical
       // to ÷2 while replacing the division machinery with a trivial ×5n; the
       // fused round also skips the intermediate normalize.
-      return expX.sub(expX.inv()).mulToPrecision(BigDecimal.HALF, targetPrec);
+      return expX.sub(expX.inv())._mulToPrecision(BigDecimal.HALF, targetPrec);
     } finally {
       BigDecimal.precision = saved;
     }
@@ -1212,7 +1212,7 @@ BigDecimal.prototype.atanh = function (): BigDecimal {
   try {
     const ratio = BigDecimal.ONE.add(this).div(BigDecimal.ONE.sub(this));
     // ×HALF (exact in decimal) replaces ÷2; fused single round to targetPrec.
-    return ratio.ln().mulToPrecision(BigDecimal.HALF, targetPrec);
+    return ratio.ln()._mulToPrecision(BigDecimal.HALF, targetPrec);
   } finally {
     BigDecimal.precision = saved;
   }

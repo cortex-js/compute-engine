@@ -311,7 +311,7 @@ describe('NORM / ABS of a point list agree on both routes (item 138)', () => {
     // each of these would otherwise be evaluated at compile time and emitted
     // as a literal vector, bypassing the point-list declines under test.
     for (const lang of ['glsl', 'wgsl', 'python', 'interval-js']) {
-      const target = e.getCompilationTarget(lang as any);
+      const target = e._getCompilationTarget(lang as any);
       for (const head of ['Norm', 'Abs']) {
         expect(
           target.compile(e.box([head, S_TUPLES]), {

@@ -1493,7 +1493,7 @@ function canonicalLoopLike(
       collCanonical.valueDefinition?.inferredType &&
       collCanonical.type.type === 'unknown'
     )
-      collCanonical.infer('collection', 'narrow');
+      collCanonical._infer('collection', 'narrow');
     // …and nothing typed the INDEX, either (the same bypass): the binder
     // hook declares each index `unknown`, and the body's arithmetic use
     // then widened it to `number` — so `for i in 1..3` typed `10 * i` as
@@ -1501,7 +1501,7 @@ function canonicalLoopLike(
     // protocol-property write. Narrow the fresh binding to the collection's
     // ELEMENT type when it is known, BEFORE the body canonicalizes against
     // it (the `Element` canonical handler's own inference, sets.ts, which
-    // this `_fn` rebuild bypasses). `.infer()` accepts an explicit-`unknown`
+    // this `_fn` rebuild bypasses). `._infer()` accepts an explicit-`unknown`
     // binding and carries the machinery a raw `def.type` write skips (the
     // resolve-only guard, the inference state event, the same-type no-op
     // that preserves `BoxedType` identity). The collection type is resolved
@@ -1518,7 +1518,7 @@ function canonicalLoopLike(
         resolveTypeForCompilation(collCanonical.type.type)
       );
       if (elt !== undefined && elt !== 'any' && elt !== 'unknown')
-        idxCanonical.infer(elt, 'narrow');
+        idxCanonical._infer(elt, 'narrow');
     }
     return ce._fn('Element', [idxCanonical, collCanonical]);
   });

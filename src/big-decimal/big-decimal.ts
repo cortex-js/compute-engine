@@ -37,56 +37,56 @@ export class BigDecimal {
 
   static readonly ZERO: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
-      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
+      _digits: 1, // single-digit significand; pre-seeded so `_digitCount` needs no frozen-guard
       significand: 0n,
       exponent: 0,
     })
   );
   static readonly ONE: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
-      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
+      _digits: 1, // single-digit significand; pre-seeded so `_digitCount` needs no frozen-guard
       significand: 1n,
       exponent: 0,
     })
   );
   static readonly TWO: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
-      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
+      _digits: 1, // single-digit significand; pre-seeded so `_digitCount` needs no frozen-guard
       significand: 2n,
       exponent: 0,
     })
   );
   static readonly NEGATIVE_ONE: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
-      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
+      _digits: 1, // single-digit significand; pre-seeded so `_digitCount` needs no frozen-guard
       significand: -1n,
       exponent: 0,
     })
   );
   static readonly HALF: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
-      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
+      _digits: 1, // single-digit significand; pre-seeded so `_digitCount` needs no frozen-guard
       significand: 5n,
       exponent: -1,
     })
   );
   static readonly NAN: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
-      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
+      _digits: 1, // single-digit significand; pre-seeded so `_digitCount` needs no frozen-guard
       significand: 0n,
       exponent: NaN,
     })
   );
   static readonly POSITIVE_INFINITY: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
-      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
+      _digits: 1, // single-digit significand; pre-seeded so `_digitCount` needs no frozen-guard
       significand: 1n,
       exponent: Infinity,
     })
   );
   static readonly NEGATIVE_INFINITY: BigDecimal = Object.freeze(
     Object.assign(Object.create(BigDecimal.prototype), {
-      _digits: 1, // single-digit significand; pre-seeded so `digitCount` needs no frozen-guard
+      _digits: 1, // single-digit significand; pre-seeded so `_digitCount` needs no frozen-guard
       significand: -1n,
       exponent: Infinity,
     })
@@ -155,7 +155,7 @@ export class BigDecimal {
   readonly significand: bigint;
   readonly exponent: number;
 
-  /** Lazily-cached decimal digit count of |significand| (see `digitCount`). */
+  /** Lazily-cached decimal digit count of |significand| (see `_digitCount`). */
   private _digits?: number;
 
   /**
@@ -168,7 +168,7 @@ export class BigDecimal {
    * so they recompute — trivially, since they are all single-digit.
    * @internal
    */
-  digitCount(): number {
+  _digitCount(): number {
     // The frozen static constants pre-seed `_digits` (see their definitions), so
     // the cache-write below is only ever reached on non-frozen, mutable
     // instances — no `Object.isFrozen` guard needed on this hot miss path.
@@ -306,8 +306,8 @@ export class BigDecimal {
     }
 
     // Same sign, different exponent: compare by order of magnitude
-    const thisDigits = this.digitCount();
-    const otherDigits = other.digitCount();
+    const thisDigits = this._digitCount();
+    const otherDigits = other._digitCount();
 
     const thisMag = thisDigits + thisExp;
     const otherMag = otherDigits + otherExp;
@@ -537,7 +537,7 @@ export class BigDecimal {
    *
    * The product of a `da`-digit and a `db`-digit significand has exactly
    * `da+db-1` or `da+db` decimal digits, so the raw product's digit count is
-   * *derived* from the operands' (cached) `digitCount`s with a single
+   * *derived* from the operands' (cached) `_digitCount`s with a single
    * cached-pow10 boundary compare instead of a fresh full-width scan. When the
    * product already fits in `prec` digits the normalized product is returned
    * (matching `toPrecision`'s `digits <= n` short-circuit); otherwise it rounds
@@ -555,7 +555,7 @@ export class BigDecimal {
    * way. Falls back to the plain composition for NaN/Infinity/zero.
    * @internal
    */
-  mulToPrecision(other: BigDecimal | number, prec: number): BigDecimal {
+  _mulToPrecision(other: BigDecimal | number, prec: number): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);
 
     const thisExp = this.exponent;
@@ -574,7 +574,7 @@ export class BigDecimal {
       const productSig = thisSig * otherSig;
       const productExp = thisExp + otherExp;
       // da+db-1 ≤ digits(|a·b|) ≤ da+db; one cached-pow10 compare resolves ±1.
-      const lo = this.digitCount() + other.digitCount() - 1;
+      const lo = this._digitCount() + other._digitCount() - 1;
       const absProd = productSig < 0n ? -productSig : productSig;
       const rawDigits = absProd >= pow10(lo) ? lo + 1 : lo;
       if (rawDigits <= prec) return fromRaw(productSig, productExp);
@@ -721,8 +721,8 @@ export class BigDecimal {
       // General case
       const prec = BigDecimal.precision;
       const guard = 10;
-      const dividendDigits = this.digitCount();
-      const divisorDigits = other.digitCount();
+      const dividendDigits = this._digitCount();
+      const divisorDigits = other._digitCount();
       const totalScale =
         prec + guard + Math.max(0, divisorDigits - dividendDigits);
       const scale = pow10(totalScale);
@@ -807,7 +807,7 @@ export class BigDecimal {
     const prec = BigDecimal.precision;
     const guard = 10;
     const totalScale =
-      prec + guard + Math.max(0, other.digitCount() - this.digitCount());
+      prec + guard + Math.max(0, other._digitCount() - this._digitCount());
     const num = absDividend * pow10(totalScale);
     const q = num / absDivisor; // ≥ 1 given the guard digits
     const inexact = num % absDivisor !== 0n;
@@ -818,7 +818,7 @@ export class BigDecimal {
     // digits, and dividing by a `divisorDigits`-digit divisor yields a quotient
     // of `lo` or `lo+1` digits (one cached-pow10 compare resolves the ±1). This
     // skips the full-width `bigintDigits` scan `roundMagnitudeToward` would run.
-    const lo = this.digitCount() + totalScale - other.digitCount();
+    const lo = this._digitCount() + totalScale - other._digitCount();
     const qDigits = q >= pow10(lo) ? lo + 1 : lo;
 
     // 'floor' rounds the true value toward −∞: round the magnitude away from
@@ -853,7 +853,7 @@ export class BigDecimal {
     const guard = 4;
     const sig = this.significand;
     const exp = this.exponent;
-    const decExp = exp + this.digitCount() - 1; // ⌊log10 v⌋
+    const decExp = exp + this._digitCount() - 1; // ⌊log10 v⌋
     const halfExp = Math.floor(decExp / 2);
     // Scale v to an integer V = sig·10^(exp+2·shift) whose floor sqrt carries
     // ~prec+guard significant digits; sqrt(v) = isqrt(V)·10^(−shift).
@@ -978,7 +978,7 @@ export class BigDecimal {
       // `1^1e16` (digits=1, log10=0) was estimated at 1e16 > 9e15 → Infinity.
       // Use the leading ~15 digits for an accurate float log10 (avoids Number
       // overflow when the significand has more digits than a double can hold).
-      const sigDigits = this.digitCount();
+      const sigDigits = this._digitCount();
       const dropped = sigDigits > 15 ? sigDigits - 15 : 0;
       const lead =
         dropped > 0 ? Number(absSig / 10n ** BigInt(dropped)) : Number(absSig);
@@ -1013,11 +1013,11 @@ export class BigDecimal {
 
       while (exp > 0n) {
         if (exp & 1n) {
-          result = result.mulToPrecision(base, workPrec);
+          result = result._mulToPrecision(base, workPrec);
         }
         exp >>= 1n;
         if (exp > 0n) {
-          base = base.mulToPrecision(base, workPrec);
+          base = base._mulToPrecision(base, workPrec);
         }
       }
 
@@ -1054,8 +1054,8 @@ export class BigDecimal {
     // extra digits, capped at 20: beyond |n·ln(this)| ≈ 10^17 the result's
     // decimal exponent exceeds the representable bound and exp() saturates
     // to 0/Infinity anyway.
-    const decExpBase = this.exponent + this.digitCount() - 1;
-    const decExpN = n.exponent + n.digitCount() - 1;
+    const decExpBase = this.exponent + this._digitCount() - 1;
+    const decExpN = n.exponent + n._digitCount() - 1;
     const argMag = decExpN + Math.log10(Math.abs(decExpBase) * 2.303 + 3) + 1;
     const extra = Math.min(20, Math.max(2, Math.ceil(argMag) + 2));
 
@@ -1240,7 +1240,7 @@ export class BigDecimal {
     // NaN ({0n,NaN}), zero ({0n,0}), ±Inf all return as-is
     if (this.significand === 0n || !Number.isFinite(this.exponent)) return this;
 
-    const digits = this.digitCount();
+    const digits = this._digitCount();
 
     if (digits <= n) return this; // already within precision
 
@@ -1250,7 +1250,7 @@ export class BigDecimal {
   /**
    * Round to `n` significant digits (round-half-to-even) given a *precomputed*
    * decimal digit count of |significand|. Precondition: the value is finite and
-   * nonzero and `digits === digitCount() > n` (so it always rounds). Callers
+   * nonzero and `digits === _digitCount() > n` (so it always rounds). Callers
    * that already know the digit count (e.g. `div`, whose quotient digit count is
    * derivable from the operand sizes) use this to skip the `bigintDigits` scan
    * that `toPrecision` would otherwise run. Byte-identical to `toPrecision(n)`

@@ -17,7 +17,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 function jsCompile(setup: (ce: ComputeEngine) => any) {
   const ce = new ComputeEngine();
   const expr = setup(ce);
-  return ce.getCompilationTarget('javascript')!.compile(expr);
+  return ce._getCompilationTarget('javascript')!.compile(expr);
 }
 
 describe('broadcastable<T> — JavaScript compile target', () => {
@@ -208,7 +208,7 @@ describe('broadcastable<T> — GPU targets keep scalar-slot compilation', () => 
     const ce = new ComputeEngine();
     ce.declare('b', 'broadcastable<number>');
     const expr = ce.box(['Subtract', ['Multiply', 2, 'b'], 1]);
-    const r = ce.getCompilationTarget('glsl')!.compile(expr);
+    const r = ce._getCompilationTarget('glsl')!.compile(expr);
     expect(r.success).toBe(true);
     // No _SYS.bcast (a JS-only construct); a plain scalar-slot expression.
     expect(r.code).not.toContain('bcast');
@@ -219,7 +219,7 @@ describe('broadcastable<T> — GPU targets keep scalar-slot compilation', () => 
     const ce = new ComputeEngine();
     ce.declare('b', 'broadcastable<number>');
     const expr = ce.box(['Subtract', ['Multiply', 2, 'b'], 1]);
-    const r = ce.getCompilationTarget('wgsl')!.compile(expr);
+    const r = ce._getCompilationTarget('wgsl')!.compile(expr);
     expect(r.success).toBe(true);
     expect(r.code).not.toContain('bcast');
     expect(r.code).toBe('2.0 * b + -1.0');

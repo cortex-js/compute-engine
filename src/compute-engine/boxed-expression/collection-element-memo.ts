@@ -39,7 +39,7 @@ import { containsObject } from './object-walk';
  *
  * - `ce._worldVersion` equality — the RARE global events for which no
  *   per-dependency tracking exists: `assume`/`forget` (and assumption-dirty
- *   scope pops), operator/type redefinition, signature inference, `reset()`,
+ *   scope pops), operator/type redefinition, signature inference, `_reset()`,
  *   and configuration changes. Deliberately NOT bumped by value writes, so an
  *   unrelated `assign()` (a per-frame slider tick, Tycho item 127) does not
  *   cold every memo in the engine.

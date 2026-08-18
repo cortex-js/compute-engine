@@ -219,12 +219,12 @@ export function compile<T extends string = 'javascript'>(
     const targetName = (options?.to ?? 'javascript') as T;
 
     // Look up the target in the registry
-    const languageTarget = expr.engine.getCompilationTarget(targetName);
+    const languageTarget = expr.engine._getCompilationTarget(targetName);
 
     if (!languageTarget) {
       throw new Error(
         `Compilation target "${targetName}" is not registered. Available targets: ${expr.engine
-          .listCompilationTargets()
+          ._listCompilationTargets()
           .join(', ')}`
       );
     }
@@ -320,7 +320,7 @@ export function compile<T extends string = 'javascript'>(
       // interpreter fallback below returns plain numbers, which would violate
       // the interval-js result contract. Delegate to the target.
       if ((target as string) === 'interval-js') {
-        const registered = expr.engine.getCompilationTarget('interval-js');
+        const registered = expr.engine._getCompilationTarget('interval-js');
         // `target === 'interval-js'` pins `T` to 'interval-js' at runtime,
         // but TypeScript cannot correlate the narrowed string with the type
         // parameter — hence the two-step conversion.
@@ -332,7 +332,7 @@ export function compile<T extends string = 'javascript'>(
       }
       const compileTarget =
         options?.target ??
-        expr.engine.getCompilationTarget(target as string)?.createTarget();
+        expr.engine._getCompilationTarget(target as string)?.createTarget();
       return BaseCompiler.buildInterpreterFallback(
         expr,
         error,

@@ -212,7 +212,7 @@ export type InferenceWriteEvent = {
   from: BoxedType;
   /** The type the write installed. */
   to: BoxedType;
-  /** `'inferred'` for `infer()` writes, `'assumed'` for writes by the
+  /** `'inferred'` for `_infer()` writes, `'assumed'` for writes by the
    * assumptions machinery. */
   kind: 'inferred' | 'assumed';
 };
@@ -1034,25 +1034,25 @@ export interface IComputeEngine {
    * `number | ComplexResult`. Any other name (source-only or custom targets)
    * falls back to the generic `LanguageTarget<Expression>`.
    */
-  getCompilationTarget(
+  _getCompilationTarget(
     name: 'interval-js'
   ): IntervalJsCompilationTarget<Expression> | undefined;
-  getCompilationTarget(
+  _getCompilationTarget(
     name: 'javascript'
   ): JavaScriptCompilationTarget<Expression> | undefined;
-  getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
+  _getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
 
   /** @internal Return the names of all registered compilation targets. */
-  listCompilationTargets(): string[];
+  _listCompilationTargets(): string[];
 
   /** @internal Register a compilation target. */
-  registerCompilationTarget(
+  _registerCompilationTarget(
     name: string,
     target: LanguageTarget<Expression>
   ): void;
 
   /** @internal Remove a registered compilation target. */
-  unregisterCompilationTarget(name: string): void;
+  _unregisterCompilationTarget(name: string): void;
 
   /** @internal Fu trigonometric simplification algorithm */
   _fuAlgorithm(
@@ -1201,7 +1201,7 @@ export interface IComputeEngine {
   _resolveOnlyDepth: number;
 
   /**
-   * Where `infer()` routes the narrowings it performs while a parse/box runs
+   * Where `_infer()` routes the narrowings it performs while a parse/box runs
    * against a `createScope()` product. `undefined` — the normal case — is the
    * gate that keeps the capture off.
    * @internal */
@@ -1497,7 +1497,7 @@ export interface IComputeEngine {
   _reset(): void;
 
   /** @internal */
-  listenToConfigurationChange(tracker: ConfigurationChangeListener): () => void;
+  _listenToConfigurationChange(tracker: ConfigurationChangeListener): () => void;
 
   /**
    * Introspect a registered operator head.

@@ -165,7 +165,7 @@ describe('GPU Max/Min over an EMPTY collection — the target NaN', () => {
     for (const expr of EMPTY) {
       expect(interp(expr)).toBeNaN();
       expect(
-        ce.getCompilationTarget('javascript')!.compile(ce.box(expr)).run!({})
+        ce._getCompilationTarget('javascript')!.compile(ce.box(expr)).run!({})
       ).toBeNaN();
     }
   });
@@ -208,12 +208,12 @@ describe('GPU Max/Min over a declared vector operand', () => {
     'agrees with the JavaScript target at v = %p',
     (v) => {
       const expr = cev.box(['Max', 'v']);
-      const js = cev.getCompilationTarget('javascript')!.compile(expr).run!({
+      const js = cev._getCompilationTarget('javascript')!.compile(expr).run!({
         v,
       });
       expect(runShader(gv(['Max', 'v']), { v })).toBe(js);
       expect(runShader(gv(['Min', 'v']), { v })).toBe(
-        cev.getCompilationTarget('javascript')!.compile(cev.box(['Min', 'v']))
+        cev._getCompilationTarget('javascript')!.compile(cev.box(['Min', 'v']))
           .run!({ v })
       );
     }

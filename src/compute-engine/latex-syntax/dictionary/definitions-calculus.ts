@@ -38,7 +38,7 @@ function parseIntegral(command: string, nIntegrals = 1) {
     // differential (dummy) variable — in the integrand and in `dx` — can be
     // retroactively un-flagged as `undeclared-symbol`. Bounds (`a`, `b` in
     // `\int_a^b`) are free variables and survive.
-    const diagCp = parser.diagnosticsCheckpoint();
+    const diagCp = parser._diagnosticsCheckpoint();
     //
     // 1/ Capture the limits of integration
     //
@@ -126,7 +126,7 @@ function parseIntegral(command: string, nIntegrals = 1) {
     // Retroactively un-flag references to the differential (dummy) variables
     // within the integrand/differential span only (leaving same-named limits).
     if (indexes.length > 0)
-      parser.pruneUndeclared(indexes, diagCp, bodyStartToken);
+      parser._pruneUndeclared(indexes, diagCp, bodyStartToken);
 
     //
     // 3/ Put together the limits, the function and the indexes

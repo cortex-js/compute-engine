@@ -366,9 +366,9 @@ describe('structural auto-prune on backtrack (follow-up item 1)', () => {
     expect(undeclaredNames(']a, b[')).toEqual(['a', 'b']);
   });
 
-  test('rollbackDiagnostics/pruneUndeclared clamp when a checkpoint exceeds the (auto-pruned) length', () => {
+  test('_rollbackDiagnostics/_pruneUndeclared clamp when a checkpoint exceeds the (auto-pruned) length', () => {
     // A binder captures a checkpoint, then an inner backtrack auto-prunes below
-    // it; the later pruneUndeclared must not extend the array with holes. If
+    // it; the later _pruneUndeclared must not extend the array with holes. If
     // clamping were wrong, `parseDiagnostics` would contain `undefined` holes.
     const ds = diags('\\sum_{j=1}^{(n)} j');
     expect(ds.every((d) => d !== undefined && typeof d.code === 'string')).toBe(

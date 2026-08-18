@@ -871,7 +871,7 @@ function clauseRedefinitionDiagnostic(
  *   runtime: reassigning a pinned binding to an incompatible signature is a
  *   runtime error that leaves the original binding in force, and even a
  *   compatible reassignment leaves the binding's declared TYPE — where the
- *   parameter names live — unchanged. First-wins also keeps `infer()`'s
+ *   parameter names live — unchanged. First-wins also keeps `_infer()`'s
  *   `narrow(old, new)` off the incompatible-signatures path, whose meet is
  *   `never`. The map is needed on top of the definition's own state because
  *   boxing a later `Assign` to the same name runs the recursion-knot retype
@@ -883,7 +883,7 @@ function clauseRedefinitionDiagnostic(
  *   creates). A pre-existing concrete type — a user declaration, an earlier
  *   cell's binding — wins for the same mirror-the-runtime reason.
  *
- * The write goes through `infer()` on a bound symbol — the `Assign`/`Declare`
+ * The write goes through `_infer()` on a bound symbol — the `Assign`/`Declare`
  * operands hold their target structurally, unbound — inside the pass's
  * inference rollback frame, so it is journaled and undone when the pass ends:
  * checking still mutates nothing (`test/epsil/static-check-rollback.test.ts`).
@@ -906,7 +906,7 @@ function registerPinnedSignature(
     // statement's right-hand side is.
     const already = name === null ? undefined : pinned.get(name);
     if (already !== undefined) {
-      ce.box(name!).infer(already, 'narrow');
+      ce.box(name!)._infer(already, 'narrow');
       return;
     }
     const rhs = boxed.ops[1];
@@ -943,7 +943,7 @@ function registerPinnedSignature(
     )
       return;
   }
-  if (ce.box(name).infer(type, 'narrow')) pinned.set(name, type);
+  if (ce.box(name)._infer(type, 'narrow')) pinned.set(name, type);
 }
 
 /** Is `t` a function signature declaring at least one parameter NAME — the

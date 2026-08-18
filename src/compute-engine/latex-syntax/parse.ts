@@ -539,7 +539,7 @@ export class _Parser implements Parser {
     // Known imperfection: a diagnostic whose span starts *before* the rewind
     // point but extends past it survives — only start-at-or-after entries are
     // provably from the abandoned branch. Diagnostic `start`s are not monotone
-    // in the array (`pruneUndeclared` splices from the middle, and retro spans
+    // in the array (`_pruneUndeclared` splices from the middle, and retro spans
     // exist), so the whole array is filtered, not truncated from the end.
     //
     // The `diagnostics === null` fast path keeps normal parsing (the flag off)
@@ -628,7 +628,7 @@ export class _Parser implements Parser {
   //
   // Each collected entry carries an internal monotonic `_seq` id (assigned in
   // emission order and never reused). Checkpoints are seq *values*, not array
-  // positions, so `rollbackDiagnostics`/`pruneUndeclared` are robust to the
+  // positions, so `_rollbackDiagnostics`/`_pruneUndeclared` are robust to the
   // index-setter auto-prune deleting entries from the middle of the array (a
   // length-based checkpoint would silently mis-target after such a deletion).
   // `_seq` is stripped before a diagnostic reaches the sink — the public
@@ -658,22 +658,22 @@ export class _Parser implements Parser {
   }
 
   /**
-   * A checkpoint for {@link rollbackDiagnostics} / {@link pruneUndeclared}: the
+   * A checkpoint for {@link _rollbackDiagnostics} / {@link _pruneUndeclared}: the
    * next sequence id to be assigned. Every diagnostic collected *after* this
    * call has `_seq >= checkpoint`. Seq-based (not a length), so it stays valid
    * even if the index-setter auto-prune later deletes entries.
    */
-  diagnosticsCheckpoint(): number {
+  _diagnosticsCheckpoint(): number {
     return this._diagnosticSeq;
   }
 
   /**
    * Discard every diagnostic collected since `checkpoint` (a value returned by
-   * {@link diagnosticsCheckpoint}) — i.e. every entry with `_seq >= checkpoint`.
+   * {@link _diagnosticsCheckpoint}) — i.e. every entry with `_seq >= checkpoint`.
    * Used to unwind diagnostics emitted while speculatively parsing a branch the
    * parser then backtracks out of.
    */
-  rollbackDiagnostics(checkpoint: number): void {
+  _rollbackDiagnostics(checkpoint: number): void {
     if (this.diagnostics === null) return;
     const d = this.diagnostics;
     let w = 0;
@@ -703,7 +703,7 @@ export class _Parser implements Parser {
    * `bodyStart` / `declSpans` are given as **token** indices and mapped to char
    * offsets here. Diagnostics-only — never affects parse output.
    */
-  pruneUndeclared(
+  _pruneUndeclared(
     names: Iterable<string>,
     checkpoint: number,
     bodyStartToken?: number,
@@ -760,7 +760,7 @@ export class _Parser implements Parser {
    * a neutral juxtaposition is a false positive. Diagnostics-only — never
    * affects parse output.
    */
-  pruneJuxtaposition(name: string, checkpoint: number): void {
+  _pruneJuxtaposition(name: string, checkpoint: number): void {
     if (this.diagnostics === null) return;
     const d = this.diagnostics;
     let w = 0;
@@ -781,7 +781,7 @@ export class _Parser implements Parser {
    * The diagnostics checkpoint captured just before the left operand of the
    * innermost in-progress {@link parseExpression} was parsed. Infix binder
    * parselets (notably `\mapsto`, whose parameter is the already-parsed left
-   * operand) use it to {@link pruneUndeclared} bound-parameter references that
+   * operand) use it to {@link _pruneUndeclared} bound-parameter references that
    * were emitted for that operand.
    */
   get operandDiagnosticCheckpoint(): number {
@@ -806,7 +806,7 @@ export class _Parser implements Parser {
     return this._ownedChain;
   }
   /**
-   * The chain array most recently produced by `appendAssociativeOperand` at
+   * The chain array most recently produced by `_appendAssociativeOperand` at
    * the current `parseExpression` level. `parseExpression` saves and restores
    * it around its body, so a nested parse (an infix parser's right operand)
    * cannot make the outer loop forget — or wrongly claim — its own chain.
@@ -814,7 +814,7 @@ export class _Parser implements Parser {
   private _ownedChain: MathJsonExpression | null = null;
 
   /**
-   * See `Parser.appendAssociativeOperand`. Why the in-place append is safe:
+   * See `Parser._appendAssociativeOperand`. Why the in-place append is safe:
    * `lhs` is only extended when it is the very array this parser returned from
    * its previous append at this expression level. That array was handed to
    * the infix loop as its new `lhs`, and until the loop hands it on — to the
@@ -831,7 +831,7 @@ export class _Parser implements Parser {
    * 12 000-term sum spent ~40% of its raw-parse time and most of its GC in
    * that copy.
    */
-  appendAssociativeOperand(
+  _appendAssociativeOperand(
     op: string,
     lhs: MathJsonExpression,
     rhs: MathJsonExpression
@@ -3607,7 +3607,7 @@ export class _Parser implements Parser {
     // Diagnostics checkpoint before the left operand: infix binder parselets
     // (`\mapsto`) read this via `operandDiagnosticCheckpoint` to retro-prune
     // bound-parameter references emitted for their left operand.
-    const operandDiagCheckpoint = this.diagnosticsCheckpoint();
+    const operandDiagCheckpoint = this._diagnosticsCheckpoint();
 
     until ??= { minPrec: 0 };
     console.assert(until.minPrec !== undefined);

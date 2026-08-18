@@ -425,7 +425,7 @@ describe('COMPILE constant folding - declines', () => {
     // The direct-target route stamps per-call state onto the caller's target;
     // an omitted option must RESET the folding choice to the default
     // (enabled), not inherit the previous call's `false`.
-    const target = ce.getCompilationTarget('javascript')!.createTarget();
+    const target = ce._getCompilationTarget('javascript')!.createTarget();
     const e = ce.box(SUM_SQUARES_1_TO_5 as any);
     const r1 = compile(e, { target, constantFold: false });
     expect(r1.code).toContain('.reduce(');

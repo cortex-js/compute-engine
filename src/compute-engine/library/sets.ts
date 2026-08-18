@@ -574,7 +574,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       ) {
         const elt = collectionElementType(canonicalCollection.type.type);
         if (elt !== undefined && elt !== 'any' && elt !== 'unknown')
-          canonicalValue.infer(elt, 'narrow');
+          canonicalValue._infer(elt, 'narrow');
       }
 
       // Validate optional third argument

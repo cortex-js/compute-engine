@@ -129,7 +129,7 @@ export type ScopeDeclaration = KernelScopeDeclaration<BoxedDefinition>;
 /** One outer-definition narrowing observed by an {@link InspectableScope}. */
 export type ScopeNarrowing = KernelScopeNarrowing<BoxedDefinition>;
 
-/** Where `infer()` routes narrowing captures. @internal */
+/** Where `_infer()` routes narrowing captures. @internal */
 export type NarrowingSink = KernelNarrowingSink<BoxedDefinition>;
 
 /** Evaluation context specialized to this engine/runtime model. */

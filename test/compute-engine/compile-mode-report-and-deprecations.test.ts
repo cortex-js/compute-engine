@@ -26,7 +26,7 @@ import { resetDeprecationWarnings } from '../../src/compute-engine/compilation/d
  *
  * **202 — the deprecation warnings reach the target-level entry.** They used
  * to live only in the standalone `compile()` export, so a caller going
- * through `ce.getCompilationTarget(name).compile(...)` — the route an
+ * through `ce._getCompilationTarget(name).compile(...)` — the route an
  * integration takes once it needs a specific target — got no signal at all
  * while `realOnly`/`complexPromotion` kept working.
  *
@@ -190,7 +190,7 @@ describe('201 — mode reports the resolved discipline', () => {
 describe('202 — deprecation warnings reach the target-level compile entry', () => {
   test('a target-level compile with no deprecated option warns about none', () => {
     const ce = new ComputeEngine();
-    const target = (ce as any).getCompilationTarget('javascript');
+    const target = (ce as any)._getCompilationTarget('javascript');
     const warnings = capture(() =>
       target.compile(ce.parse('\\sqrt{x}'), { mode: 'strict' })
     );
@@ -201,7 +201,7 @@ describe('202 — deprecation warnings reach the target-level compile entry', ()
 
   test('a target-level compile warns about realOnly, once', () => {
     const ce = new ComputeEngine();
-    const target = (ce as any).getCompilationTarget('javascript');
+    const target = (ce as any)._getCompilationTarget('javascript');
     const first = capture(() =>
       target.compile(ce.parse('\\sqrt{x}'), { realOnly: true })
     );
@@ -217,7 +217,7 @@ describe('202 — deprecation warnings reach the target-level compile entry', ()
 
   test('a target-level compile warns about complexPromotion', () => {
     const ce = new ComputeEngine();
-    const target = (ce as any).getCompilationTarget('javascript');
+    const target = (ce as any)._getCompilationTarget('javascript');
     const warnings = capture(() =>
       target.compile(ce.parse('\\sqrt{x}'), { complexPromotion: true })
     );

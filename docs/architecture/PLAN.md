@@ -67,8 +67,8 @@ curriculum.
 ### 2.3 Compilation Targets
 
 Five compilation targets (JavaScript, GLSL, Python, Interval-JavaScript,
-Interval-GLSL) with a shared `CompileTarget` interface. The
-`registerCompilationTarget()` API is the most plugin-friendly extension point in
+Interval-GLSL) with a shared `CompileTarget` interface. The internal
+`_registerCompilationTarget()` method is the registry extension point used by
 the codebase today. This pattern should be generalized.
 
 ### 2.4 LaTeX Parser
@@ -594,9 +594,10 @@ immediately.
     - 10 tests in `simplify-rules.test.ts`
 
 17. **Generalize compilation target registration** ✅ DONE
-    - `registerCompilationTarget()` / `unregisterCompilationTarget()` API
+    - `_registerCompilationTarget()` / `_unregisterCompilationTarget()`
+      internal API
     - Custom targets implement `LanguageTarget` interface
-    - Target discovery via `getCompilationTargets()`
+    - Target discovery via `_listCompilationTargets()`
 
 ### Phase 4: Type System Hardening (ongoing)
 
@@ -654,7 +655,7 @@ After implementing through Phase 3:
 2. A new mathematical function can be added by creating one file (library
    definition) with no changes to core engine files.
 3. A new compilation target can be added by implementing `CompileTarget` and
-   calling `registerCompilationTarget()` with no other changes.
+   passing it directly to `compile()` with no other changes.
 4. `BoxedExpression` interface members that do not apply to a given expression
    type are flagged by TypeScript when accessed without a type guard.
 5. All examples and documentation use consistent package-name imports.

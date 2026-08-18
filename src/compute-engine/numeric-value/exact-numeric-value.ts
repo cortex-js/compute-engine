@@ -344,7 +344,7 @@ export class ExactNumericValue extends NumericValue {
       // and toPrecision() rounding again. Single rounding is at least as
       // accurate as the previous double rounding (battery-verified vs
       // mpmath), and skips a full-width normalize + digit re-scan.
-      return quotient.mulToPrecision(new BigDecimal(radical).sqrt(), outPrec);
+      return quotient._mulToPrecision(new BigDecimal(radical).sqrt(), outPrec);
     } finally {
       BigDecimal.precision = saved;
     }

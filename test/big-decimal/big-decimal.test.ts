@@ -1403,10 +1403,10 @@ describe('trunc()', () => {
 });
 
 // ================================================================
-// mulToPrecision() — fused multiply-then-round
+// _mulToPrecision() — fused multiply-then-round
 // ================================================================
 
-describe('mulToPrecision()', () => {
+describe('_mulToPrecision()', () => {
   let savedPrec: number;
   beforeAll(() => {
     savedPrec = BigDecimal.precision;
@@ -1419,7 +1419,7 @@ describe('mulToPrecision()', () => {
     BigDecimal.precision = 50;
     const a = new BigDecimal('1.234567890123456789');
     const b = new BigDecimal('9.876543210987654321');
-    const fused = a.mulToPrecision(b, 20);
+    const fused = a._mulToPrecision(b, 20);
     const plain = a.mul(b).toPrecision(20);
     expect(fused.significand).toBe(plain.significand);
     expect(fused.exponent).toBe(plain.exponent);
@@ -1427,13 +1427,13 @@ describe('mulToPrecision()', () => {
 
   test('short-circuits when the product already fits in prec digits', () => {
     // 3 * 4 = 12 (two digits) rounded to 20 sig digits is unchanged.
-    const r = new BigDecimal('3').mulToPrecision(new BigDecimal('4'), 20);
+    const r = new BigDecimal('3')._mulToPrecision(new BigDecimal('4'), 20);
     expect(r.eq(new BigDecimal('12'))).toBe(true);
     expect(r.significand).toBe(12n);
   });
 
   test('handles trailing-zero products byte-identically (2 * 5 = 10)', () => {
-    const fused = new BigDecimal('2').mulToPrecision(new BigDecimal('5'), 10);
+    const fused = new BigDecimal('2')._mulToPrecision(new BigDecimal('5'), 10);
     const plain = new BigDecimal('2').mul(new BigDecimal('5')).toPrecision(10);
     expect(fused.significand).toBe(plain.significand);
     expect(fused.exponent).toBe(plain.exponent);
@@ -1442,7 +1442,7 @@ describe('mulToPrecision()', () => {
 
   test('accepts a number argument', () => {
     const a = new BigDecimal('1.5');
-    expect(a.mulToPrecision(4, 10).eq(a.mul(4).toPrecision(10))).toBe(true);
+    expect(a._mulToPrecision(4, 10).eq(a.mul(4).toPrecision(10))).toBe(true);
   });
 
   test.each([
@@ -1452,7 +1452,7 @@ describe('mulToPrecision()', () => {
     ['zero', new BigDecimal(0)],
   ])('falls back to mul().toPrecision() for %s operand', (_label, special) => {
     const a = new BigDecimal('3.14159');
-    const fused = a.mulToPrecision(special, 10);
+    const fused = a._mulToPrecision(special, 10);
     const plain = a.mul(special).toPrecision(10);
     // NaN significand is 0n with NaN exponent; compare via toString for parity.
     expect(fused.toString()).toBe(plain.toString());
@@ -1491,7 +1491,7 @@ describe('mulToPrecision()', () => {
       };
       const a = mk();
       const b = mk();
-      const fused = a.mulToPrecision(b, prec);
+      const fused = a._mulToPrecision(b, prec);
       const plain = a.mul(b).toPrecision(prec);
       if (
         fused.significand !== plain.significand ||
@@ -2203,10 +2203,10 @@ describe('Static constants', () => {
 });
 
 // ================================================================
-// digitCount() — lazily-cached decimal digit count of |significand|
+// _digitCount() — lazily-cached decimal digit count of |significand|
 // ================================================================
 
-describe('digitCount() cache', () => {
+describe('_digitCount() cache', () => {
   const abs = (n: bigint) => (n < 0n ? -n : n);
 
   test('matches bigintDigits(|significand|) across constructions', () => {
@@ -2225,8 +2225,8 @@ describe('digitCount() cache', () => {
     for (const d of samples) {
       const expected = bigintDigits(abs(d.significand));
       // First call computes, second call returns the cached value.
-      expect(d.digitCount()).toBe(expected);
-      expect(d.digitCount()).toBe(expected);
+      expect(d._digitCount()).toBe(expected);
+      expect(d._digitCount()).toBe(expected);
     }
   });
 
@@ -2245,9 +2245,9 @@ describe('digitCount() cache', () => {
       expect(Object.isFrozen(c)).toBe(true);
       const expected = bigintDigits(abs(c.significand)); // all single-digit → 1
       // Must not throw a strict-mode "add property to frozen object" error.
-      expect(() => c.digitCount()).not.toThrow();
-      expect(c.digitCount()).toBe(expected);
-      expect(c.digitCount()).toBe(expected); // idempotent
+      expect(() => c._digitCount()).not.toThrow();
+      expect(c._digitCount()).toBe(expected);
+      expect(c._digitCount()).toBe(expected); // idempotent
     }
   });
 });

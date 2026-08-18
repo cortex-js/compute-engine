@@ -766,12 +766,12 @@ readonly [`ExpressionInput`](#expressioninput)[]
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getCompilationTarget()~~
+##### ExpressionComputeEngine.~~\_getCompilationTarget()~~
 
-###### getCompilationTarget(name)
+###### \_getCompilationTarget(name)
 
 ```ts
-getCompilationTarget(name): 
+_getCompilationTarget(name):
   | JavaScriptCompilationTarget<Expression>
   | undefined
 ```
@@ -780,10 +780,10 @@ getCompilationTarget(name):
 
 `"javascript"`
 
-###### getCompilationTarget(name)
+###### \_getCompilationTarget(name)
 
 ```ts
-getCompilationTarget(name): 
+_getCompilationTarget(name):
   | LanguageTarget<Expression, string, unknown, number>
   | undefined
 ```
@@ -9462,12 +9462,12 @@ readonly [`ExpressionInput`](#expressioninput)[]
 
 <MemberCard>
 
-##### IComputeEngine.getCompilationTarget()
+##### IComputeEngine.\_getCompilationTarget()
 
-###### getCompilationTarget(name)
+###### \_getCompilationTarget(name)
 
 ```ts
-getCompilationTarget(name): 
+_getCompilationTarget(name):
   | JavaScriptCompilationTarget<Expression>
   | undefined
 ```
@@ -9476,10 +9476,10 @@ getCompilationTarget(name):
 
 `"javascript"`
 
-###### getCompilationTarget(name)
+###### \_getCompilationTarget(name)
 
 ```ts
-getCompilationTarget(name): 
+_getCompilationTarget(name):
   | LanguageTarget<Expression, string, unknown, number>
   | undefined
 ```

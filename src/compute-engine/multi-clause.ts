@@ -901,7 +901,7 @@ export function defineFunctionClause(
     if (retarget !== undefined)
       retarget.effectsDeclared = incomingExplicit !== undefined;
     // The doc-comment description rides on the plain representation as a
-    // field: written directly rather than through `update()`, which would
+    // field: written directly rather than through `_update()`, which would
     // rebuild the definition's evaluate handler for a one-string change.
     if (attributes.description !== undefined) {
       const plain = lookupInScope(ce, id);

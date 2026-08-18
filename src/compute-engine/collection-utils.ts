@@ -1029,7 +1029,7 @@ export function isDeclaredScalarNumber(expr: Expression): boolean {
     // just the same; a function type merely INFERRED from earlier use
     // (`inferredType`) is not, matching the `inferredSignature` rule above.
     // Read the definition this call was BOUND to, not a fresh lookup of the
-    // name: `bind()` resolves the head through `lookupApplicable`, which can
+    // name: `_bind()` resolves the head through `lookupApplicable`, which can
     // walk past an inner non-applicable shadow, and the call may carry its own
     // local scope. Re-resolving in the engine's current scope could read
     // `inferredType` off a different binding entirely.

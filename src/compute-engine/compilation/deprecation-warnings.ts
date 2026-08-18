@@ -8,7 +8,7 @@
  * semantics:
  *
  * - the standalone `compile()` export (`compile-expression.ts`), and
- * - a target obtained from `ce.getCompilationTarget(name)` and invoked
+ * - a target obtained from `ce._getCompilationTarget(name)` and invoked
  *   through its own `.compile()`, which reaches `BaseCompiler` directly and
  *   never passes through the standalone entry.
  *

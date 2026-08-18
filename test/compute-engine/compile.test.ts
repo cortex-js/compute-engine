@@ -2666,8 +2666,8 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
 describe('COMPILE removed targets', () => {
   it('does not register the removed interval-glsl target', () => {
     const e = new ComputeEngine();
-    expect(e.getCompilationTarget('interval-glsl')).toBeUndefined();
-    expect(e.listCompilationTargets()).not.toContain('interval-glsl');
+    expect(e._getCompilationTarget('interval-glsl')).toBeUndefined();
+    expect(e._listCompilationTargets()).not.toContain('interval-glsl');
   });
 
   it('throws an unregistered-target error when fallback is disabled', () => {
@@ -3055,7 +3055,7 @@ describe('COMPILE user-defined function calls', () => {
             ? `((${compile(args[0])})**2 + (${compile(args[1])})**2)`
             : undefined,
       });
-      const target = e.getCompilationTarget('javascript');
+      const target = e._getCompilationTarget('javascript');
       const fn = target.compile(e.parse('\\mathrm{Quadrance}(x, y)'));
       expect(fn.code).toEqual('((_.x)**2 + (_.y)**2)');
       expect(fn.run!({ x: 3, y: 4 })).toEqual(25);
@@ -3071,7 +3071,7 @@ describe('COMPILE user-defined function calls', () => {
             : undefined,
       });
       const code = e
-        .getCompilationTarget('javascript')
+        ._getCompilationTarget('javascript')
         .compile(e.parse('\\gcd(a, b)')).code;
       expect(code).toEqual('__mygcd(_.a, _.b)');
     });
@@ -3086,7 +3086,7 @@ describe('COMPILE user-defined function calls', () => {
           language === 'javascript' ? `__mygcd(...)` : undefined,
       });
       // glsl has a built-in GCD mapping; the undefined handler defers to it.
-      const r = e.getCompilationTarget('glsl').compile(e.parse('\\gcd(a, b)'));
+      const r = e._getCompilationTarget('glsl').compile(e.parse('\\gcd(a, b)'));
       expect(r.code).toContain('_gpu_gcd');
     });
 
@@ -3103,7 +3103,7 @@ describe('COMPILE user-defined function calls', () => {
             : undefined,
       });
       const code = e
-        .getCompilationTarget('javascript')
+        ._getCompilationTarget('javascript')
         .compile(e.parse('a + b')).code;
       expect(code).toEqual('__myadd(_.a, _.b)');
     });
@@ -3116,7 +3116,7 @@ describe('COMPILE user-defined function calls', () => {
       });
       // Empty string is "no code": fall through to the built-in GCD lowering.
       const code = e
-        .getCompilationTarget('javascript')
+        ._getCompilationTarget('javascript')
         .compile(e.box(['GCD', 12, 18])).code;
       expect(code).toContain('_SYS.gcd');
     });

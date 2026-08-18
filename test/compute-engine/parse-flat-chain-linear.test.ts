@@ -13,7 +13,7 @@ import * as mathJsonUtils from '../../src/math-json/utils';
  *    calls during the parse of an N-term sum was ~N²/2 (501 500 at N=1 000,
  *    2 003 000 at N=2 000). It is now memoized per chain: ~3N calls.
  * 2. `foldAssociativeOperator` copied the whole operand array at every
- *    operator (N−1 calls per chain). `parser.appendAssociativeOperand` now
+ *    operator (N−1 calls per chain). `parser._appendAssociativeOperand` now
  *    extends the chain the parser itself built (`parser.ownedChain`) in
  *    place, so the copy happens once per chain.
  *

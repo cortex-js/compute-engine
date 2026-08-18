@@ -876,14 +876,14 @@ describe('COMPILE COMPLEX - binder index named `i` (Tycho item 65)', () => {
   const ce2 = ce;
   const jsTarget = (
     ce2 as unknown as {
-      getCompilationTarget: (l: string) => {
+      _getCompilationTarget: (l: string) => {
         compile: (
           e: unknown,
           o: unknown
         ) => { success: boolean; run: (a: unknown) => unknown };
       };
     }
-  ).getCompilationTarget('javascript');
+  )._getCompilationTarget('javascript');
 
   const run = (latex: string): unknown => {
     const expr = ce2.parse(latex, { strict: false });
@@ -978,8 +978,8 @@ describe('COMPILE COMPLEX - binder index named `i` (Tycho item 65)', () => {
 describe('realOnly projects complex tuple components to NaN (Tycho item 62)', () => {
   const jsTarget = () =>
     (
-      ce as unknown as { getCompilationTarget: (t: string) => any }
-    ).getCompilationTarget('javascript');
+      ce as unknown as { _getCompilationTarget: (t: string) => any }
+    )._getCompilationTarget('javascript');
 
   test.each([
     ['(t, i t)', [0.5, NaN]],
@@ -1043,8 +1043,8 @@ describe('realOnly projects complex tuple components to NaN (Tycho item 62)', ()
 describe('realOnly leaves an unused complex operand alone', () => {
   const jsTarget = () =>
     (
-      ce as unknown as { getCompilationTarget: (t: string) => any }
-    ).getCompilationTarget('javascript');
+      ce as unknown as { _getCompilationTarget: (t: string) => any }
+    )._getCompilationTarget('javascript');
 
   test.each([
     ['\\mathrm{At}([i, 2], 2)', 2],

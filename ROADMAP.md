@@ -96,6 +96,31 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### An unseeded Monte Carlo test can fail any commit's gate at random (OPEN, test reliability — observed 2026-08-17)
+
+`test/compute-engine/monte-carlo.test.ts` draws from an unseeded generator —
+its own header says "Monte Carlo is stochastic — use generous tolerances" —
+so any full-suite run can fail on sampling luck alone. Observed once during a
+Strings Phase 3 gate:
+
+```
+∫_1^∞ 1/x² dx = 1   relative error 0.63, tolerance 0.15
+```
+
+then 3 consecutive passes of the same file in isolation. The
+semi-infinite-interval cases are the most exposed: they carry the loosest
+tolerance (0.15 versus 0.05 elsewhere) precisely because the transformed
+integrand is heavy-tailed, which is also what makes an unlucky draw large.
+
+The cost is not the occasional red run, it is that a red run has to be
+investigated before anyone can tell whether it is real — every session that
+gates a commit pays that, and a suite that cries wolf gets trusted less each
+time. Fix by seeding the estimator for the test (a deterministic generator
+passed in, or a documented fixed seed) so a failure means a regression;
+raising tolerances instead only widens the window in which a real regression
+hides.
+
+
 ### `CompilationResult.mode` reported `'strict'` for code lowered through the complex kernel (FIXED 2026-08-17 — reported by the Tycho consumer as item 201 during the 0.115.0 adoption; their headline claim was WITHDRAWN the same day, see below)
 
 `CompilationResult.mode` is documented (`compilation/types.ts`) as "the
@@ -976,6 +1001,40 @@ fixed:
   application yields `Derivative(Subscript(alpha,1))` while a fused name
   yields `Prime(F_0)` — pre-existing, whether `Prime` or `Derivative` is the
   canonical no-argument head is a convention question.
+
+### Symbolic-side commutativity for `And`/`Or` (OPEN, design settled 2026-08-16 — "Option B")
+
+Follow-up to the short-circuit conversion below, from a user design
+discussion (2026-08-16). Making `And`/`Or` ordered and lazy cost the
+symbolic side exactly two properties: `And(p, q).isSame(And(q, p))` is now
+`false` (operands are no longer sorted), and `match` no longer tries
+permutations for `And`/`Or` patterns (the single `commutative` flag meant
+both "sort at canonicalization" and "match permutations", and dropping the
+sort dropped the matching too). Two options were weighed: (A) split into two
+head families — commutative/eager `And`/`Or` for logic plus new
+`AndAlso`/`OrElse` short-circuit heads for Epsil's `&&`/`||` (the
+SymPy-`And`-vs-Python-`and` split) — and (B) keep one head and restore the
+two lost properties at the symbolic entry points. **The user chose B.**
+Agreed shape, in order:
+
+1. **Comparison-side AC-equivalence**: `isEqual`/`isIdenticallyEqual` on
+   boolean expressions compare modulo permutation (and nesting) of
+   `And`/`Or` operands. `isSame` stays strictly syntactic, as everywhere.
+2. **Permutation matching**: give `match` a commutative-for-matching flag
+   decoupled from canonical sorting, and set it on `And`/`Or` (and
+   plausibly `Xor`), so a rule pattern `p ∧ ¬p` hits `¬p ∧ p` again.
+3. **Optionally, later**: a gated canonical sort inside `simplify()` only —
+   reorder `And`/`Or` operands only when provably unobservable (every
+   operand pure, no `missing`-typed subterm, no indexed read / error-capable
+   call), so a simplified pure formula gets a canonical operand order for
+   `isSame`/snapshot workflows while a guard like `k <= n && xs[k] > 0`
+   keeps its written order. Skip unless a concrete workflow needs it.
+
+Context that makes 1–2 sufficient: the symbolic machinery itself
+(`evaluateAnd`/`evaluateOr` reducers, CNF/DNF, tautology/contradiction,
+absorption, truth tables) is order-independent and lost nothing. The
+evaluation semantics (short-circuit, written order, type-driven element-wise
+gate, relational-chain stop) are settled rulings and must not change.
 
 ### `And`/`Or` (`&&`/`||`) did not short-circuit and reordered their operands (FIXED 2026-08-15)
 

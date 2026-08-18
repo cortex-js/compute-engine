@@ -1298,7 +1298,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal */
-  listenToConfigurationChange(
+  _listenToConfigurationChange(
     tracker: ConfigurationChangeListener
   ): () => void {
     return this._configurationLifecycle.listen(tracker);
@@ -1313,24 +1313,24 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal Get a registered compilation target by name. */
-  getCompilationTarget(
+  _getCompilationTarget(
     name: 'interval-js'
   ): IntervalJsCompilationTarget<Expression> | undefined;
-  getCompilationTarget(
+  _getCompilationTarget(
     name: 'javascript'
   ): JavaScriptCompilationTarget<Expression> | undefined;
-  getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
-  getCompilationTarget(name: string): LanguageTarget<Expression> | undefined {
+  _getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
+  _getCompilationTarget(name: string): LanguageTarget<Expression> | undefined {
     return this._compilationTargets.get(name);
   }
 
   /** @internal Return the names of all registered compilation targets. */
-  listCompilationTargets(): string[] {
+  _listCompilationTargets(): string[] {
     return this._compilationTargets.list();
   }
 
   /** @internal Register a compilation target. */
-  registerCompilationTarget(
+  _registerCompilationTarget(
     name: string,
     target: LanguageTarget<Expression>
   ): void {
@@ -1338,7 +1338,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal Remove a registered compilation target. */
-  unregisterCompilationTarget(name: string): void {
+  _unregisterCompilationTarget(name: string): void {
     this._compilationTargets.unregister(name);
   }
 
@@ -2970,7 +2970,7 @@ export class ComputeEngine implements IComputeEngine {
     let diagnostics: ParseDiagnostic[] | undefined;
     let onDiagnostic: ((d: ParseDiagnostic) => void) | undefined;
     let onBoundVariable: ((name: string) => void) | undefined;
-    // Bound names a binder parselet deliberately processed (pruneUndeclared):
+    // Bound names a binder parselet deliberately processed (_pruneUndeclared):
     // exempt from the bound-only post-check assertion below.
     const processedBoundNames = new Set<string>();
     if (wantDiagnostics) {
@@ -3032,7 +3032,7 @@ export class ComputeEngine implements IComputeEngine {
         // drops diagnostics). On a canonical result, a name that appears among
         // the result's symbols but NOT among its free variables occurs only
         // bound. That has two causes, and only one is a defect:
-        //   1. a binder parselet forgot its `pruneUndeclared` wiring — a real
+        //   1. a binder parselet forgot its `_pruneUndeclared` wiring — a real
         //      false fire that should have been pruned at parse time; or
         //   2. canonicalization synthesized a same-named binder from a
         //      genuinely-free source reference (e.g. `\mathbb{R}_{>0}` builds a
@@ -3046,7 +3046,7 @@ export class ComputeEngine implements IComputeEngine {
         // and wrapped so a throw never breaks the parse.
         //
         // Names in `processedBoundNames` are exempt: a binder parselet DID run
-        // its `pruneUndeclared` wiring for them, so a surviving diagnostic is a
+        // its `_pruneUndeclared` wiring for them, so a surviving diagnostic is a
         // deliberately-kept free occurrence whose name collides with the dummy
         // (`\int_x^1 x\,dx` — the canonical result then reports the shared
         // name as bound-only, hiding the free lower bound from this check).
@@ -3062,7 +3062,7 @@ export class ComputeEngine implements IComputeEngine {
               if (symbols.has(name) && !free.has(name))
                 console.assert(
                   false,
-                  `parse-diagnostics: bound-only "${name}" in canonical result — either missing pruneUndeclared wiring in a binder parselet, or a canonicalization-synthesized binder reusing a free source name (diagnostic retained either way)`
+                  `parse-diagnostics: bound-only "${name}" in canonical result — either missing _pruneUndeclared wiring in a binder parselet, or a canonicalization-synthesized binder reusing a free source name (diagnostic retained either way)`
                 );
             }
           } catch {

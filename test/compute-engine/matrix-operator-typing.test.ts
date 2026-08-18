@@ -165,7 +165,7 @@ describe('Multiply numeric typing (regression — must be unchanged)', () => {
  * Fresh-matrix-inference repair — the P1–P11 behavior matrix (probe-verified
  * 2026-07-18, pinned when the repair's provenance moved from an eager
  * inferred-symbol snapshot to the forward log recorded by
- * `BoxedSymbol.infer()`; see
+ * `BoxedSymbol._infer()`; see
  * docs/plans/2026-07-18-expected-type-inference-context.md §0). Each test
  * uses a fresh engine: the repair retypes symbols for the engine's lifetime.
  */

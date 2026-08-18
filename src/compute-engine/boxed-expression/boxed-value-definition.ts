@@ -265,7 +265,7 @@ export class _BoxedValueDefinition
     // listen, which keeps engine construction cheap.
     if (this.isConstant)
       this._unsubscribeFromConfigurationChange =
-        ce.listenToConfigurationChange(this);
+        ce._listenToConfigurationChange(this);
   }
 
   /** For debugging */

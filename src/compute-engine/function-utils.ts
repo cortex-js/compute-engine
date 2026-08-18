@@ -754,7 +754,7 @@ function dependentLiteral(def: ProvisionalDependent): Expression | undefined {
  * capture it (`docs/plans/2026-08-13-inference-tx-design.md`, family 3 "As
  * implemented" note). While a rollback frame is open, each kind snapshots
  * exactly what its install mutates: the operator kind the
- * `update({evaluate})`-reachable fields (`_rederivationSnapshot`), the
+ * `_update({evaluate})`-reachable fields (`_rederivationSnapshot`), the
  * value kind the coupled type/value slots (`_typeSlotSnapshot` — the value
  * setter recomputes `_isSelfReferential`, which rides in the tuple). The
  * registry re-registrations are journaled by the registry's own hooks
@@ -772,7 +772,7 @@ function installRebuiltLiteral(
   // overriding any ambient canonicalization cause, which would
   // misattribute the re-derivation to the enclosing expression.
   const effectsBefore = effectsContractStateOf(def);
-  // `update()` re-registers the definition for whatever names the rebuilt body
+  // `_update()` re-registers the definition for whatever names the rebuilt body
   // still reads provisionally.
   if ('signature' in def) {
     if (frame !== undefined) {
@@ -781,7 +781,7 @@ function installRebuiltLiteral(
         undo: () => def._restoreRederivationSnapshot(snapshot),
       });
     }
-    def.update({ evaluate: rebuilt });
+    def._update({ evaluate: rebuilt });
     recordEffectsTransition(
       ce,
       def,
@@ -803,7 +803,7 @@ function installRebuiltLiteral(
     // effects contract state is read from, so the before/after comparison a
     // recording would make is identical by construction and could never
     // produce an entry. (W2 of the effects-axis provenance design covers the
-    // OPERATOR branch above, whose `update()` genuinely re-derives and
+    // OPERATOR branch above, whose `_update()` genuinely re-derives and
     // re-stamps the effect set.) Note the flip side, recorded in ROADMAP.md:
     // a value-bound literal under a DECLARED effects contract is rebuilt here
     // with no contract re-verification at all.
@@ -919,7 +919,7 @@ function repairWave(
   // effect contract, an invalid body). The queue has already been drained, so
   // an error escaping the loop would lose every dependent not yet processed.
   // Each one is therefore rebuilt in isolation; a failed one keeps its previous
-  // definition (`update()` constructs before it swaps) and is RE-REGISTERED so
+  // definition (`_update()` constructs before it swaps) and is RE-REGISTERED so
   // a later redefinition of `name` retries it; and the first error is rethrown
   // once the loop is done — a contract violation must still surface.
   let firstError: { error: unknown } | undefined;
@@ -992,7 +992,7 @@ function repairWave(
 
     // A successful rebuild IS that definition's own name gaining a better
     // definition — `middle` now takes a list — but `installRebuiltLiteral`
-    // mutates the definition in place (`def.update()` / `def.value = …`) and
+    // mutates the definition in place (`def._update()` / `def.value = …`) and
     // never passes through `updateDef`, the choke point that fires the repair.
     // So fire it here, or a chain `outer → middle → inner` would leave `outer`
     // stale once `inner` arrives.

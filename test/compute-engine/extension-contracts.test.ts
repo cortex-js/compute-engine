@@ -135,14 +135,14 @@ describe('Extension Contracts', () => {
       const ce = new ComputeEngine();
       const target = new ContractTarget();
 
-      expect(() => ce.registerCompilationTarget('', target)).toThrow(
+      expect(() => ce._registerCompilationTarget('', target)).toThrow(
         /must not be empty/
       );
-      expect(() => ce.registerCompilationTarget(' python', target)).toThrow(
+      expect(() => ce._registerCompilationTarget(' python', target)).toThrow(
         /leading or trailing whitespace/
       );
       expect(() =>
-        ce.registerCompilationTarget('python plugin', target)
+        ce._registerCompilationTarget('python plugin', target)
       ).toThrow(/must not include whitespace/);
     });
 
@@ -151,13 +151,13 @@ describe('Extension Contracts', () => {
       const invalidTarget = {} as unknown as LanguageTarget<Expression>;
 
       expect(() =>
-        ce.registerCompilationTarget('broken-target', invalidTarget)
+        ce._registerCompilationTarget('broken-target', invalidTarget)
       ).toThrow(/missing required method/);
     });
 
     test('accepts valid targets after contract checks', () => {
       const ce = new ComputeEngine();
-      ce.registerCompilationTarget('contract-target', new ContractTarget());
+      ce._registerCompilationTarget('contract-target', new ContractTarget());
 
       const expr = ce.parse('x+y');
       const compiled = compile(expr, { to: 'contract-target' });

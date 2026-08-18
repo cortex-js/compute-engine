@@ -677,7 +677,7 @@ function constructibleValuesInverse(
 
     (cache: ConstructibleTrigValuesInverse) => {
       for (const [[match_arg, _match_arg_N], [_n, _d]] of cache) {
-        match_arg.reset();
+        match_arg._reset();
       }
       return cache;
     }
@@ -786,7 +786,7 @@ export function constructibleValues(
 
     (cache: ConstructibleTrigValues) => {
       for (const [_k, v] of cache) {
-        for (const v2 of Object.values(v)) v2.reset();
+        for (const v2 of Object.values(v)) v2._reset();
       }
       return cache;
     }

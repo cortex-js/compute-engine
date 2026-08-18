@@ -1182,7 +1182,7 @@ export type TypeProvenanceEntry = {
    *   currently record no entry; `inferredType === false` is the marker).
    * - `'auto-declared'` — the binding was *created* as a side effect of
    *   boxing a free symbol or a function parameter, before any evidence.
-   * - `'inferred'` — an `infer()` write: narrowed from an argument use or
+   * - `'inferred'` — an `_infer()` write: narrowed from an argument use or
    *   widened from a result/value position.
    * - `'assumed'` — written by the assumptions machinery (`ce.assume`).
    * - `'value-derived'` — reserved: a type promoted from an assigned
@@ -1939,7 +1939,7 @@ export interface BoxedOperatorDefinition
   compile?: OperatorCompileHandler;
 
   /** @internal */
-  update(def: OperatorDefinition): void;
+  _update(def: OperatorDefinition): void;
 
   /** Re-attach the definition's effect set to its signature after the
    * signature object was REPLACED by type inference. The two are one source of
@@ -1963,7 +1963,7 @@ export interface BoxedOperatorDefinition
   _deriveEffects: (() => EffectSet | undefined) | undefined;
 
   /** Opaque snapshot of every field a provisional re-derivation
-   * (`installRebuiltLiteral` calling `update({ evaluate })` on a
+   * (`installRebuiltLiteral` calling `_update({ evaluate })` on a
    * pre-existing definition) can mutate, for an exact restore by an
    * inference rollback frame — see
    * {@link _restoreRederivationSnapshot}. The result captures private

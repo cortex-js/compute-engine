@@ -29,5 +29,5 @@ export function initializeCommonSymbols(
 }
 
 export function resetCommonSymbols(commonSymbols: CommonSymbolTable): void {
-  for (const symbol of Object.values(commonSymbols)) symbol?.reset();
+  for (const symbol of Object.values(commonSymbols)) symbol?._reset();
 }

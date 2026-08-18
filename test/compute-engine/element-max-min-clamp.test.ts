@@ -12,7 +12,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 const ce = new ComputeEngine();
 
 const evalStr = (mj: any) => ce.box(mj).evaluate().toString();
-const run = (mj: any) => ce.getCompilationTarget('javascript')!.compile(ce.box(mj)).run!({});
+const run = (mj: any) => ce._getCompilationTarget('javascript')!.compile(ce.box(mj)).run!({});
 
 describe('ElementMax / ElementMin — evaluate', () => {
   test('broadcasts a scalar over a collection', () => {
@@ -130,7 +130,7 @@ describe('Max / Min — scalar+collection compile fix (reduction, was NaN)', () 
 
 describe('cross-target compilation', () => {
   const compileOn = (target: string, mj: any) =>
-    ce.getCompilationTarget(target as any)!.compile(ce.box(mj));
+    ce._getCompilationTarget(target as any)!.compile(ce.box(mj));
 
   test('interval-js: Clamp clamps an interval (restores break detection)', () => {
     const r = compileOn('interval-js', ['Clamp', 'x', 0, 1]);

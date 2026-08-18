@@ -217,7 +217,7 @@ describe('Playground regressions', () => {
 
   describe('Ellipsis in a numeric context must not throw (MathNet corpus)', () => {
     // ContinuationPlaceholder is a constant with type 'unknown';
-    // checkNumericArgs → BoxedSymbol.infer() used to attempt to narrow its
+    // checkNumericArgs → BoxedSymbol._infer() used to attempt to narrow its
     // type, and the type setter throws for constants.
     test('\\dots as an Add operand parses without throwing', () => {
       const ce = new ComputeEngine();
@@ -231,10 +231,10 @@ describe('Playground regressions', () => {
       expect(expr.isValid).toBe(true);
     });
 
-    test('infer() is a no-op on constants', () => {
+    test('_infer() is a no-op on constants', () => {
       const ce = new ComputeEngine();
       const placeholder = ce.symbol('ContinuationPlaceholder');
-      expect(placeholder.infer('integer')).toBe(false);
+      expect(placeholder._infer('integer')).toBe(false);
       expect(placeholder.type.toString()).toBe('unknown');
     });
   });

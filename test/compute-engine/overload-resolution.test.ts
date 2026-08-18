@@ -325,7 +325,7 @@ describe('the bare `function` type has an UNKNOWN result, not `any`', () => {
   it('types an undeclared application honestly', () => {
     // `functionSignature` synthesized `(any*) -> unknown` for `function` while
     // `functionResult` answered `any` — an internal contradiction. `unknown` is
-    // also the signal `infer()` treats as "no information", whereas `any` gets
+    // also the signal `_infer()` treats as "no information", whereas `any` gets
     // written into a definition as a positive claim.
     const ce = new ComputeEngine();
     expect(ce.box(['List', ['h', 'x']]).type.toString()).toBe('list<unknown>');

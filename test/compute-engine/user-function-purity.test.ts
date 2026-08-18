@@ -493,7 +493,7 @@ describe('A signature rebuilt by inference keeps its effects', () => {
     expect(def.signature.toString()).toContain(' random -> ');
 
     // Using `g9v` where a narrower result is expected drives
-    // `BoxedFunction.infer()`, which REBUILDS the signature object. The rebuild
+    // `BoxedFunction._infer()`, which REBUILDS the signature object. The rebuild
     // is assembled from the type-inference fields alone, so without carrying
     // the effect specifier the arrow would serialize pure while the definition
     // still reported `{random}` — the two must never disagree.

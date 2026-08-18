@@ -1759,7 +1759,7 @@ describe('COMPILE (§6)', () => {
       compile: (args, compile, { language }) =>
         language === 'javascript' ? `(${compile(args[0])})` : undefined,
     });
-    const target = ce.getCompilationTarget('javascript');
+    const target = ce._getCompilationTarget('javascript');
     const fn = target.compile(ce.parse('\\mathrm{Echo}(x) + 1'));
     expect(fn.run!({ x: 4 })).toEqual(5);
   });

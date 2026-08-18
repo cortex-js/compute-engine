@@ -301,7 +301,7 @@ interface BoxedOperatorDefinition
     options: Partial<EvaluateOptions> & { engine: ExpressionComputeEngine }
   ) => Expression;
   compile?: OperatorCompileHandler;
-  update(def: unknown): void;
+  _update(def: unknown): void;
   /** Re-attach the definition's effect set to its signature after the
    * signature object was replaced by type inference. @internal */
   _resyncEffects(): void;
@@ -1951,7 +1951,7 @@ export interface Expression {
    *
    * @internal
    */
-  infer(t: Type, inferenceMode?: 'narrow' | 'widen'): boolean;
+  _infer(t: Type, inferenceMode?: 'narrow' | 'widen'): boolean;
 
   /**
    * Update the definition associated with this expression, using the
@@ -1959,7 +1959,7 @@ export interface Expression {
    *
    * @internal
    */
-  bind(): void;
+  _bind(): void;
 
   /**
    *
@@ -1970,7 +1970,7 @@ export interface Expression {
    *
    * @internal
    */
-  reset(): void;
+  _reset(): void;
 
   /**
    * Return a simpler form of this expression.

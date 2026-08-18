@@ -1076,7 +1076,7 @@ export interface CompileTarget<Expr = unknown> {
  * target name, `run` return type, and `run` variable/argument value type. They
  * default to the generic `string`/`unknown`/`number`, so `LanguageTarget<Expr>`
  * keeps its historical meaning; the executable targets bind them concretely
- * (see the `getCompilationTarget` overloads on the engine) so a caller gets a
+ * (see the `_getCompilationTarget` overloads on the engine) so a caller gets a
  * precisely-typed runner without a cast — e.g. the `interval-js` target's
  * `run` is `(vars: Record<string, number | Interval>) => IntervalResult`.
  */
@@ -1106,7 +1106,7 @@ export interface LanguageTarget<
  * The `interval-js` target, typed concretely: its compiled `run` accepts
  * `number | Interval` variables (a plain number is auto-converted to a point
  * interval) and returns an `IntervalResult`. Returned by
- * `getCompilationTarget("interval-js")` so callers get this without a cast.
+ * `_getCompilationTarget("interval-js")` so callers get this without a cast.
  *
  * Defined here (not in a `types-*.ts` file) because the layering rules forbid
  * the type-definition layer from importing `interval/`; `compilation/` may.
@@ -1122,7 +1122,7 @@ export type IntervalJsCompilationTarget<Expr = unknown> = LanguageTarget<
  * The `javascript` target, typed concretely: its compiled `run` accepts
  * `number | ComplexResult` variables (plain reals or complex domain-coloring
  * inputs) and returns `number | ComplexResult`. Returned by
- * `getCompilationTarget("javascript")`.
+ * `_getCompilationTarget("javascript")`.
  */
 export type JavaScriptCompilationTarget<Expr = unknown> = LanguageTarget<
   Expr,
@@ -1144,7 +1144,7 @@ export interface CompilationOptions<Expr = unknown> {
    * - `'wgsl'` - Compile to WGSL (WebGPU Shading Language)
    * - `'interval-js'` - Compile to JavaScript with interval arithmetic
    *
-   * Custom targets can be registered using `ce.registerCompilationTarget()`.
+   * Custom targets can be registered using `ce._registerCompilationTarget()`.
    *
    * @example
    * ```typescript
@@ -1152,7 +1152,7 @@ export interface CompilationOptions<Expr = unknown> {
    * const glslCode = expr.compile({ to: 'glsl' });
    *
    * // Compile to custom target
-   * ce.registerCompilationTarget('python', new PythonTarget());
+   * ce._registerCompilationTarget('python', new PythonTarget());
    * const pythonCode = expr.compile({ to: 'python' });
    * ```
    */

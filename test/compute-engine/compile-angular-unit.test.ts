@@ -97,7 +97,7 @@ describe('ANGULAR UNIT — evaluate() contract', () => {
 describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
   test('deg: javascript target — direct trig args are scaled', () => {
     const ce = degEngine();
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     const run = js.compile(ce.parse('\\sin(x)')).run!;
     expect(run({ x: 90 })).toBeCloseTo(1, 12);
     expect(run({ x: 30 })).toBeCloseTo(0.5, 12);
@@ -107,7 +107,7 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
 
   test('deg: javascript target — inverse trig results are scaled', () => {
     const ce = degEngine();
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     expect(js.compile(ce.parse('\\arcsin(x)')).run!({ x: 1 })).toBeCloseTo(
       90,
       10
@@ -125,7 +125,7 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
 
   test('deg: hyperbolics compile without scaling', () => {
     const ce = degEngine();
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     const r = js.compile(ce.parse('\\sinh(x)'));
     expect(r.code).toBe('Math.sinh(_.x)');
     expect(r.run!({ x: 1 })).toBeCloseTo(Math.sinh(1), 12);
@@ -133,7 +133,7 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
 
   test('deg: interval-js target', () => {
     const ce = degEngine();
-    const ijs = ce.getCompilationTarget('interval-js')!;
+    const ijs = ce._getCompilationTarget('interval-js')!;
     const r = ijs.compile(ce.parse('\\sin(x)')).run!({ x: 90 }) as {
       kind: string;
       value: { lo: number; hi: number };
@@ -145,7 +145,7 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
 
   test('deg: glsl target emits scaled radian-based code', () => {
     const ce = degEngine();
-    const glsl = ce.getCompilationTarget('glsl')!;
+    const glsl = ce._getCompilationTarget('glsl')!;
     expect(glsl.compile(ce.parse('\\sin(x)')).code).toContain(
       'sin(0.017453292519943295 * x)'
     );
@@ -157,7 +157,7 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
   test('grad and turn: javascript target', () => {
     const ce = new ComputeEngine();
     ce.angularUnit = 'grad';
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     expect(js.compile(ce.parse('\\sin(x)')).run!({ x: 100 })).toBeCloseTo(
       1,
       12
@@ -173,7 +173,7 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
     // Haversine evaluates as ½(1−cos z) (angle argument); InverseHaversine as
     // 2·arcsin(√z) (angle result). Compiled code must scale the same way.
     const ce = degEngine();
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     expect(
       js.compile(ce.box(['Haversine', ce.symbol('x')])).run!({ x: 30 })
     ).toBeCloseTo(ce.box(['Haversine', 30]).N().re, 10);
@@ -203,14 +203,14 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
 
   test('rad: no rewrite (codegen unchanged)', () => {
     const ce = new ComputeEngine();
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     expect(js.compile(ce.parse('\\sin(x)')).code).toBe('Math.sin(_.x)');
     expect(js.compile(ce.parse('\\arcsin(x)')).code).toBe('Math.asin(_.x)');
   });
 
   test('deg: composite expression (Fourier-style sum) agrees with .N()', () => {
     const ce = degEngine();
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     const latex = '\\sum_{k=1}^{3} \\frac{\\sin(k x)}{k}';
     const run = js.compile(ce.parse(latex)).run!;
     const interp = ce
@@ -275,7 +275,7 @@ describe('ANGULAR UNIT — symbolic derivative (by-reference vs inline)', () => 
 
     test(`${unit}: compiled — f'(x) and d/dx sin x agree with k·cos(k·x)`, () => {
       const ce = fEngine(unit);
-      const js = ce.getCompilationTarget('javascript')!;
+      const js = ce._getCompilationTarget('javascript')!;
       const byRef = js.compile(ce.parse("f'(x)"));
       const inline = js.compile(inlineD(ce));
       expect(byRef.success).toBe(true);
@@ -290,7 +290,7 @@ describe('ANGULAR UNIT — symbolic derivative (by-reference vs inline)', () => 
 
     test(`${unit}: second derivative carries k²`, () => {
       const ce = fEngine(unit);
-      const js = ce.getCompilationTarget('javascript')!;
+      const js = ce._getCompilationTarget('javascript')!;
       const compiled = js.compile(ce.parse("f''(x)"));
       for (const p of points) {
         const expected = -k * k * Math.sin(k * p);
@@ -303,7 +303,7 @@ describe('ANGULAR UNIT — symbolic derivative (by-reference vs inline)', () => 
   test('deg: cos and the chain rule agree on both routes', () => {
     const ce = new ComputeEngine();
     ce.angularUnit = 'deg';
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     const k = Math.PI / 180;
 
     // g := x ↦ cos x — d/dx cos(k·x) = −k·sin(k·x).
@@ -334,7 +334,7 @@ describe('ANGULAR UNIT — symbolic derivative (by-reference vs inline)', () => 
   test('deg: the by-reference derivative is not the radian value', () => {
     // The regression itself: `f'(0)` used to be 1 (cos 0) on both routes.
     const ce = fEngine('deg');
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     const run = js.compile(ce.parse("f'(x)")).run!;
     expect(ce.parse("f'(0)").N().re).toBeCloseTo(Math.PI / 180, 15);
     expect(run({ x: 0 }) as number).toBeCloseTo(Math.PI / 180, 15);
@@ -358,7 +358,7 @@ describe('ANGULAR UNIT — symbolic derivative (by-reference vs inline)', () => 
     // entry-point rewrite must not scale that body a second time.
     const ce = new ComputeEngine();
     ce.angularUnit = 'deg';
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     const nd = ce.box(['ND', ['Function', ['Sin', 'x'], 'x'], 0]);
     expect(nd.N().re).toBeCloseTo(Math.PI / 180, 10);
     expect(js.compile(nd).run!({}) as number).toBeCloseTo(Math.PI / 180, 10);
@@ -404,7 +404,7 @@ describe('ANGULAR UNIT — constant folding must not convert twice', () => {
     'deg: %s compiles to the interpreted value with folding ON',
     (latex, expected) => {
       const ce = degEngine();
-      const js = ce.getCompilationTarget('javascript')!;
+      const js = ce._getCompilationTarget('javascript')!;
       const compiled = js.compile(ce.parse(latex)).run!({}) as number;
       expect(compiled).toBeCloseTo(expected, 9);
       // …and agrees with interpretation, which was always correct.
@@ -415,7 +415,7 @@ describe('ANGULAR UNIT — constant folding must not convert twice', () => {
   test('folding ON and OFF agree in degree mode', () => {
     for (const [latex] of CASES) {
       const ce = degEngine();
-      const js = ce.getCompilationTarget('javascript')!;
+      const js = ce._getCompilationTarget('javascript')!;
       const on = js.compile(ce.parse(latex), {
         constantFold: true,
       } as never).run!({}) as number;
@@ -428,7 +428,7 @@ describe('ANGULAR UNIT — constant folding must not convert twice', () => {
 
   test('a FREE argument was never affected, and still is not', () => {
     const ce = degEngine();
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     const f = js.compile(ce.parse('\\sin(x)')).run!({ x: 90 }) as number;
     expect(f).toBeCloseTo(1, 9);
   });
@@ -437,7 +437,7 @@ describe('ANGULAR UNIT — constant folding must not convert twice', () => {
     // The neutralization is restored in a `finally`, so a fold — including one
     // that declines — must not leak radians into the caller's engine.
     const ce = degEngine();
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     js.compile(ce.parse('\\sin(90)'));
     expect(ce.angularUnit).toBe('deg');
     expect(ce.parse('\\sin(90)').N().re).toBeCloseTo(1, 9);
@@ -446,7 +446,7 @@ describe('ANGULAR UNIT — constant folding must not convert twice', () => {
   test('radian mode is unchanged', () => {
     const ce = new ComputeEngine();
     ce.angularUnit = 'rad';
-    const js = ce.getCompilationTarget('javascript')!;
+    const js = ce._getCompilationTarget('javascript')!;
     for (const latex of ['\\sin(1)', '\\arctan(1)', '\\cos(0)']) {
       const compiled = js.compile(ce.parse(latex)).run!({}) as number;
       expect(compiled).toBeCloseTo(ce.parse(latex).N().re as number, 9);

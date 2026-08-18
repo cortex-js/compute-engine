@@ -877,7 +877,7 @@ describe('GCD/LCM on non-integer reals (tolerant float Euclid)', () => {
 
   it('compiles gcd of reals to a finite value (plot render, not NaN)', () => {
     const engine = new ComputeEngine();
-    const target = engine.getCompilationTarget('javascript');
+    const target = engine._getCompilationTarget('javascript');
     const g = target.compile(engine.parse('\\gcd(x, y)'));
     expect(g.run!({ x: 2.25, y: 2.1 })).toBeCloseTo(0.15, 6);
     // Integer inputs still exact through the compiled path.

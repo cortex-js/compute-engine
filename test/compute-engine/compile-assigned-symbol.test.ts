@@ -29,7 +29,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
       const expr = ce.parse('\\sin(a x) - y');
-      const js = ce.getCompilationTarget('javascript')!;
+      const js = ce._getCompilationTarget('javascript')!;
       const { code, run } = js.compile(expr);
       expect(code).toBe('-_.y + Math.sin(1.5 * _.x)');
       // run no longer throws ReferenceError; `a` is folded to its value.
@@ -39,7 +39,7 @@ describe('COMPILE: assigned-symbol folding', () => {
     it('still emits _.a for a free (unassigned) symbol', () => {
       const ce = new ComputeEngine();
       const expr = ce.parse('\\sin(a x) - y');
-      const js = ce.getCompilationTarget('javascript')!;
+      const js = ce._getCompilationTarget('javascript')!;
       expect(js.compile(expr).code).toBe('-_.y + Math.sin(_.a * _.x)');
     });
 
@@ -48,7 +48,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       ce.declare('c', { value: 3 });
       const expr = ce.parse('c x');
       expect(expr.unknowns).toEqual(['x']);
-      expect(ce.getCompilationTarget('javascript')!.compile(expr).code).toBe(
+      expect(ce._getCompilationTarget('javascript')!.compile(expr).code).toBe(
         '3 * _.x'
       );
     });
@@ -58,7 +58,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       ce.assign('a', 1.5);
       const expr = ce.parse('\\sin(a x) - y');
       const code = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(expr, { vars: { a: 7 } }).code;
       // The mapped literal (7), not the assigned value (1.5), is emitted.
       expect(code).toBe('-_.y + Math.sin(7 * _.x)');
@@ -74,7 +74,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       ce.assign('a', 1.5);
       const expr = ce.parse('\\sin(a x) - y');
       const r = ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(expr, { vars: { a: '_.a' } });
       expect(r.code).toBe('-_.y + Math.sin(_.a * _.x)');
       expect(r.run!({ a: 2, x: 1, y: 0 })).toBeCloseTo(Math.sin(2), 12);
@@ -86,7 +86,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
       const expr = ce.parse('\\sin(a x) - y');
-      expect(ce.getCompilationTarget('glsl')!.compile(expr).code).toBe(
+      expect(ce._getCompilationTarget('glsl')!.compile(expr).code).toBe(
         '-y + sin(1.5 * x)'
       );
     });
@@ -95,7 +95,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 3);
       expect(
-        ce.getCompilationTarget('glsl')!.compile(ce.parse('a x')).code
+        ce._getCompilationTarget('glsl')!.compile(ce.parse('a x')).code
       ).toBe('3.0 * x');
     });
 
@@ -103,7 +103,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       const ce = new ComputeEngine();
       const expr = ce.parse('\\sin(a x) - y');
       expect(expr.unknowns).toEqual(['a', 'x', 'y']);
-      expect(ce.getCompilationTarget('glsl')!.compile(expr).code).toBe(
+      expect(ce._getCompilationTarget('glsl')!.compile(expr).code).toBe(
         '-y + sin(a * x)'
       );
     });
@@ -113,7 +113,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       ce.assign('a', 1.5);
       const expr = ce.parse('\\sin(a x) - y');
       const code = ce
-        .getCompilationTarget('glsl')!
+        ._getCompilationTarget('glsl')!
         .compile(expr, { vars: { a: 'u_var_a' } }).code;
       expect(code).toBe('-y + sin(u_var_a * x)');
     });
@@ -124,7 +124,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
       expect(
-        ce.getCompilationTarget('wgsl')!.compile(ce.parse('a x')).code
+        ce._getCompilationTarget('wgsl')!.compile(ce.parse('a x')).code
       ).toBe('1.5 * x');
     });
   });
@@ -133,7 +133,7 @@ describe('COMPILE: assigned-symbol folding', () => {
     it('folds an assigned value into an interval point', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
-      const t = ce.getCompilationTarget('interval-js')!;
+      const t = ce._getCompilationTarget('interval-js')!;
       const { code, run } = t.compile(ce.parse('a x'));
       expect(code).toBe('_IA.mul(_IA.point(1.5), _.x)');
       // x = 2 → [3, 3]
@@ -156,7 +156,7 @@ describe('COMPILE: assigned-symbol folding', () => {
     // would no longer be observable. The splicing under test is unaffected.
     expect(
       ce
-        .getCompilationTarget('javascript')!
+        ._getCompilationTarget('javascript')!
         .compile(expr, { constantFold: false }).code
     ).toBe('Math.sin((0.5 * Math.PI) * _.x)');
   });
@@ -177,21 +177,21 @@ describe('COMPILE: assigned-symbol folding', () => {
 
     it('parenthesizes the compound value in a product', () => {
       const ce = freshEngine();
-      const r = ce.getCompilationTarget('javascript')!.compile(ce.parse('b x'));
+      const r = ce._getCompilationTarget('javascript')!.compile(ce.parse('b x'));
       expect(r.code).toBe('(_.c + 1) * _.x');
       expect(r.run!({ c: 2, x: 3 })).toBe(9); // (2+1)*3
     });
 
     it('parenthesizes the compound value under a coefficient and a power', () => {
       const ce = freshEngine();
-      const js = ce.getCompilationTarget('javascript')!;
+      const js = ce._getCompilationTarget('javascript')!;
       expect(js.compile(ce.parse('2 b')).run!({ c: 2 })).toBe(6); // 2*(2+1)
       expect(js.compile(ce.parse('b^2')).run!({ c: 2 })).toBe(9); // (2+1)^2
     });
 
     it('routes the inner free symbol through the vars object (not a bare global)', () => {
       const ce = freshEngine();
-      const r = ce.getCompilationTarget('javascript')!.compile(ce.parse('b x'));
+      const r = ce._getCompilationTarget('javascript')!.compile(ce.parse('b x'));
       expect(r.code).toContain('_.c');
       expect(r.code).not.toMatch(/(^|[^.\w])c([^\w]|$)/); // no bare `c`
       // freeSymbols surfaces the transitively-referenced input.
@@ -200,7 +200,7 @@ describe('COMPILE: assigned-symbol folding', () => {
 
     it('keeps the GLSL precedence correct (free symbol stays a bare uniform there)', () => {
       const ce = freshEngine();
-      const r = ce.getCompilationTarget('glsl')!.compile(ce.parse('b x'));
+      const r = ce._getCompilationTarget('glsl')!.compile(ce.parse('b x'));
       expect(r.code).toBe('(c + 1.0) * x');
     });
   });
@@ -213,8 +213,8 @@ describe('COMPILE: assigned-symbol folding', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
       const expr = ce.parse('\\sin(a x)');
-      const glslRaw = ce.getCompilationTarget('glsl')!.createTarget();
-      const jsRaw = ce.getCompilationTarget('javascript')!.createTarget();
+      const glslRaw = ce._getCompilationTarget('glsl')!.createTarget();
+      const jsRaw = ce._getCompilationTarget('javascript')!.createTarget();
       expect(compile(expr, { target: glslRaw }).code).toBe('sin(1.5 * x)');
       expect(compile(expr, { target: jsRaw }).code).toBe('Math.sin(1.5 * x)');
     });
@@ -222,7 +222,7 @@ describe('COMPILE: assigned-symbol folding', () => {
     it('leaves a free symbol bare', () => {
       const ce = new ComputeEngine();
       const expr = ce.parse('\\sin(a x)');
-      const glslRaw = ce.getCompilationTarget('glsl')!.createTarget();
+      const glslRaw = ce._getCompilationTarget('glsl')!.createTarget();
       expect(compile(expr, { target: glslRaw }).code).toBe('sin(a * x)');
     });
   });
@@ -248,7 +248,7 @@ describe('COMPILE: non-finite numbers on GPU targets', () => {
     describe(target, () => {
       it('emits +∞ as a bit pattern, never a `1.0 / 0.0` a driver may fold', () => {
         const ce = new ComputeEngine();
-        const t = ce.getCompilationTarget(target)!;
+        const t = ce._getCompilationTarget(target)!;
         const r = t.compile(ce.parse('x + \\infty'));
         expect(r.code).toBe(`x + ${INF_CODE[target]}`);
         expect(r.code).not.toContain('/ 0.0');
@@ -256,7 +256,7 @@ describe('COMPILE: non-finite numbers on GPU targets', () => {
 
       it('emits −∞ as the negation of the same symbol', () => {
         const ce = new ComputeEngine();
-        const t = ce.getCompilationTarget(target)!;
+        const t = ce._getCompilationTarget(target)!;
         expect(t.compile(ce.parse('x - \\infty')).code).toBe(
           `x + (-${INF_CODE[target]})`
         );
@@ -264,7 +264,7 @@ describe('COMPILE: non-finite numbers on GPU targets', () => {
 
       it('emits NaN through the same mechanism as a masked branch', () => {
         const ce = new ComputeEngine();
-        const t = ce.getCompilationTarget(target)!;
+        const t = ce._getCompilationTarget(target)!;
         expect(t.compile(ce.box('NaN')).code).toBe(NAN_CODE[target]);
       });
 
@@ -278,7 +278,7 @@ describe('COMPILE: non-finite numbers on GPU targets', () => {
 
   it('GLSL declares the `_gpu_inf()` helper in the preamble (host-overridable)', () => {
     const ce = new ComputeEngine();
-    const r = ce.getCompilationTarget('glsl')!.compile(ce.parse('x + \\infty'));
+    const r = ce._getCompilationTarget('glsl')!.compile(ce.parse('x + \\infty'));
     expect(r.preamble ?? '').toContain('float _gpu_inf()');
     expect(r.preamble ?? '').toContain('intBitsToFloat(0x7F800000)');
   });
@@ -286,7 +286,7 @@ describe('COMPILE: non-finite numbers on GPU targets', () => {
   it('JavaScript still emits Infinity (a valid global)', () => {
     const ce = new ComputeEngine();
     const code = ce
-      .getCompilationTarget('javascript')!
+      ._getCompilationTarget('javascript')!
       .compile(ce.parse('x + \\infty')).code;
     expect(code).toContain('Infinity');
   });

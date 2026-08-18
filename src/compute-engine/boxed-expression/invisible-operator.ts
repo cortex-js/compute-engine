@@ -85,7 +85,7 @@ export function canonicalInvisibleOperator(
           }
 
           if (def.value.type.isUnknown) {
-            lhsCanon.infer('function');
+            lhsCanon._infer('function');
             return ce.expr([lhsCanon.symbol]);
           }
 
@@ -124,7 +124,7 @@ export function canonicalInvisibleOperator(
         if (!def)
           ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
         else if (!isOperatorDef(def) && def.value?.type?.isUnknown)
-          lhsCanon.infer('function');
+          lhsCanon._infer('function');
         return ce.function(lhsCanon.symbol, args);
       }
 
@@ -190,7 +190,7 @@ export function canonicalInvisibleOperator(
       if (!def)
         ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
       else if (!isOperatorDef(def) && def.value?.type?.isUnknown)
-        lhsCanon.infer('function');
+        lhsCanon._infer('function');
       return ce.function(lhsCanon.symbol, args);
     }
 
@@ -448,7 +448,7 @@ function combineFunctionApplications(
           // widen/override (D11).
           if (!def) ce.declare(symName, { type: 'function', inferred: true });
           else if (!isOperatorDef(def) && def.value?.type?.isUnknown)
-            op.canonical.infer('function');
+            op.canonical._infer('function');
           result.push(ce.function(symName, args));
           i += 2;
           continue;

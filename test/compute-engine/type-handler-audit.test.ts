@@ -450,7 +450,7 @@ describe('Tycho item 137: the GLSL band of a Which over a float radicand', () =>
   it('the raw and the folded radicand agree', () => {
     const engine = new ComputeEngine();
     engine.declare('x', 'real');
-    const glsl = engine.getCompilationTarget('glsl')!;
+    const glsl = engine._getCompilationTarget('glsl')!;
     const branch = (radicand: string) =>
       engine.parse(
         `\\begin{cases} \\sqrt{${radicand}} & x > 0 \\\\ 0 & \\text{otherwise}\\end{cases}`
