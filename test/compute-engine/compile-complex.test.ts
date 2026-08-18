@@ -1684,3 +1684,72 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
     expect(r.code).toContain('cmath.log(');
   });
 });
+
+describe('COMPILE COMPLEX - folded value of a complex-declared symbol', () => {
+  // A symbol declared `complex` whose ASSIGNED value is real is constant-
+  // folded into the kernel (`tryFoldKnownSymbol`). Consumers emit `{re, im}`
+  // reads for any symbol whose analysis says complex, so the folded emission
+  // must be complex-lifted: un-lifted it was a bare real literal, and every
+  // `.re`/`.im` read off it produced NaN. Reported by the Tycho consumer as
+  // `auto` = NaN on `\max(0, \sqrt{x^2+y_r^2}-1)` (y_r: complex, y_r := 5)
+  // where the value is well-defined and real (√89 − 1 ≈ 8.4340).
+  const witness = (sym: string) =>
+    ce.expr([
+      'Max',
+      0,
+      [
+        'Subtract',
+        ['Sqrt', ['Add', ['Power', 'x', 2], ['Power', sym, 2]]],
+        1,
+      ],
+    ]);
+  const expected = Math.sqrt(89) - 1;
+
+  it('auto promotes and computes the real value', () => {
+    ce.declare('zf1', 'complex');
+    ce.assign('zf1', 5);
+    const r = compile(witness('zf1'), { mode: 'auto', fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.promoted).toBe(true);
+    expect(r.run!({ x: -8 })).toBeCloseTo(expected, 10);
+    ce.forget('zf1');
+  });
+
+  it('complex mode computes the real value', () => {
+    ce.declare('zf2', 'complex');
+    ce.assign('zf2', 5);
+    const r = compile(witness('zf2'), { mode: 'complex', fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: -8 })).toBeCloseTo(expected, 10);
+    ce.forget('zf2');
+  });
+
+  it('a symbolic real value (√2) is lifted too', () => {
+    ce.declare('zf3', 'complex');
+    ce.assign('zf3', ce.expr(['Sqrt', 2]));
+    const r = compile(witness('zf3'), { mode: 'auto', fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: -8 })).toBeCloseTo(Math.sqrt(66) - 1, 10);
+    ce.forget('zf3');
+  });
+
+  it('a genuinely complex value still fails closed through real-only Max', () => {
+    // sqrt(64 + (3+4i)^2) has a nonzero imaginary part, and `Max` is
+    // real-only: the kernel's `cisreal` guard yields NaN by design (D6).
+    ce.declare('zf4', 'complex');
+    ce.assign('zf4', ce.expr(['Complex', 3, 4]));
+    const r = compile(witness('zf4'), { mode: 'auto', fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: -8 })).toBeNaN();
+    ce.forget('zf4');
+  });
+
+  it('a plain real assignment (no complex declaration) folds un-lifted', () => {
+    ce.assign('zf5', 5);
+    const r = compile(witness('zf5'), { mode: 'auto', fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.promoted).toBe(false);
+    expect(r.run!({ x: -8 })).toBeCloseTo(expected, 10);
+    ce.forget('zf5');
+  });
+});

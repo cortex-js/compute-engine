@@ -3495,7 +3495,38 @@ export class BaseCompiler {
       // covers the direct-target `compile(expr, { target })` path, where the
       // raw target has no engine context of its own.
       const folded = BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target);
-      if (folded !== undefined) return folded;
+      if (folded !== undefined) {
+        // A folded value is BAKED — there is no run-time binding, so the
+        // "coerced at every entry" exemption that leaves a declared-complex
+        // REFERENCE unlifted (see `liftWideReference`) does not apply here.
+        // Consumers of a symbol whose analysis says complex read the
+        // target's {re, im} encoding, but a real-valued assignment
+        // (`z: complex` with `z := 5`) compiles to a bare real literal, and
+        // reading `.re` off it yields NaN. Wrap the emission in the
+        // target's idempotent `complexLift`. Only a provably scalar-numeric
+        // value whose own emission is real-shaped is wrapped; a value
+        // already complex-shaped (`isComplexValued`) or non-scalar stays as
+        // emitted.
+        // The gate is `isComplexValued`, NOT `complexDiscipline`: consumers
+        // decide their {re, im} reads with that same predicate, and it is
+        // true for a declared-complex symbol under every mode — including
+        // `auto`'s per-node promotion, which stays in the strict-lanes
+        // discipline. Gating on mode left `auto` emitting `.re` reads
+        // against a bare folded literal.
+        if (
+          target.complexLift !== undefined &&
+          BaseCompiler.isComplexValued(expr)
+        ) {
+          const value = expr.engine._getSymbolValue(s);
+          if (
+            value !== undefined &&
+            !BaseCompiler.isComplexValued(value) &&
+            isSubtype(value.type.type, 'number')
+          )
+            return target.complexLift(folded);
+        }
+        return folded;
+      }
       // Genuinely free symbol: emit its bare identifier. Give the target a
       // chance to mangle it or fail closed (D6) — e.g. a GLSL/WGSL reserved
       // keyword used as a variable name would emit invalid shader source.

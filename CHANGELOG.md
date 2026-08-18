@@ -58,6 +58,27 @@
 
 ### Bug Fixes
 
+- **A complex-declared symbol with a real assigned value no longer compiles
+  to a NaN kernel.** With `z: complex` and `z := 5`, compiling an expression
+  using `z` constant-folds the value into the kernel — but the folded
+  emission was a bare real literal (`5`) while every consumer of a
+  complex-analyzed symbol reads the `{re, im}` encoding, so `.re`/`.im`
+  reads off it made the whole kernel return NaN unconditionally. The folded
+  emission is now wrapped in the target's idempotent complex lift
+  (`_SYS.cplx`) whenever the symbol's analysis is complex and the value's
+  own emission is a real scalar — a symbolically real value (`z := √2`)
+  included. Affected `auto` promotion and `complex` mode; `strict` already
+  failed closed. Reported by a consumer as `auto` returning NaN on
+  `\max(0, \sqrt{x^2+y_r^2}-1)` where the value is real (√89 − 1).
+
+- **`compile` is now on the global registration slot.** The self-registration
+  slot (`globalThis[Symbol.for('io.cortexjs.compute-engine')]`) carried the
+  constructor, `LatexSyntax` and the type guards but not the standalone
+  `compile()` wrapper, so a bundle-external consumer discovering the engine
+  through the slot could not reach the supported compilation entry point
+  (escalation retry, deprecation warnings, alias normalization) without
+  falling back to `@internal` API.
+
 - **`CompilationResult.mode` now reports the RESOLVED discipline.** It is
   documented as "the arithmetic discipline the returned code was compiled
   under", but under the `auto` default it reported `'strict'` for a

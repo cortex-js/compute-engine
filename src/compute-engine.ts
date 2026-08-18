@@ -105,6 +105,12 @@ export type {
 } from './compute-engine/interval/types.js';
 
 // ── Free functions (accept string | MathJSON | BoxedExpression) ─────
+// `compile` is also imported as a value so it can be placed on the global
+// registration slot below — bundle-external consumers (which may only
+// `import type` from this package) need the standalone wrapper, not just
+// `ce.compile()`, because the escalation retry, deprecation warnings and
+// alias normalization live in the wrapper.
+import { compile } from './compute-engine/free-functions.js';
 export {
   parse,
   expr,
@@ -213,4 +219,9 @@ export type { BoxedObject } from './compute-engine/boxed-expression/boxed-object
   isIndexedCollection,
   numericValue,
   sym,
+  // Standalone `compile()` wrapper (escalation retry, deprecation warnings,
+  // alias normalization — none of which exist on the `ce.getCompilationTarget()`
+  // route). Same category as `LatexSyntax`: a value export a bundle-external
+  // consumer must discover at runtime.
+  compile,
 };
