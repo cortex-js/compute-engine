@@ -500,7 +500,7 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
     // symbol, leaving any `_` for the Subscript parselet.
     if (info?.subscriptEvaluate) return id;
 
-    const isCollection = info?.type.matches('indexed_collection') ?? false;
+    const isCollection = info?.type.matches('indexed_collection<any>') ?? false;
 
     // Check if followed by subscript(s) - if so, include them in the symbol
     // name. An indexed-collection base only absorbs a subscript whose joined

@@ -22,7 +22,9 @@ import {
   isFiniteBroadcastParticipant,
   isPossiblyCollectionTyped,
   isTextAtom,
+  isRecordShapedType,
   isTuple,
+  isTupleShapedType,
   lazyBroadcastMap,
   MAX_SIZE_EAGER_COLLECTION,
   typeCouldBeCollection,
@@ -45,6 +47,11 @@ import {
   provablyDisjoint,
   resolveTypeReference,
 } from '../../common/type/subtype.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  DICTIONARY_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
   DictionaryType,
@@ -354,7 +361,7 @@ function isProvablyScalar(operand: Expression): boolean {
   const nonScalar = (t: Type): boolean =>
     typeof t !== 'string' && t.kind === 'union'
       ? t.types.some(nonScalar)
-      : isSubtype(t, 'collection');
+      : isSubtype(t, COLLECTION_SHAPE_TYPE);
   return !nonScalar(operand.type.type);
 }
 
@@ -397,7 +404,7 @@ function canEnumerateCollectionOperands(expr: Expression): boolean | undefined {
 // on the `At` definition), used by its custom canonical handler to delegate
 // operand validation to `validateArguments`.
 const AT_SIGNATURE = parseType(
-  '(value: indexed_collection | dictionary, index: (number|string|boolean|indexed_collection)+) -> unknown'
+  '(value: indexed_collection<any> | dictionary<any>, index: (number|string|boolean|indexed_collection<any>)+) -> unknown'
 );
 
 // NOTE (2026-07-17): the `restsOnUnknown` predicate and its
@@ -423,7 +430,7 @@ function hasIndexableMember(expr: Expression): boolean {
   const t = expr.type.type;
   if (typeof t === 'string' || t.kind !== 'union') return false;
   return t.types.some(
-    (m) => isSubtype(m, 'indexed_collection') || isSubtype(m, 'dictionary')
+    (m) => isSubtype(m, INDEXED_COLLECTION_SHAPE_TYPE) || isSubtype(m, DICTIONARY_SHAPE_TYPE)
   );
 }
 
@@ -500,9 +507,9 @@ const peekMembershipPreserving = (
 // respective definitions) for the count/membership canonical handlers to
 // delegate operand validation to `validateArguments`.
 const LENGTH_SIGNATURE = parseType('(any) -> integer');
-const COUNT_SIGNATURE = parseType('(collection, any?) -> integer');
-const ISEMPTY_SIGNATURE = parseType('(collection) -> boolean');
-const CONTAINS_SIGNATURE = parseType('(collection, element: any) -> boolean');
+const COUNT_SIGNATURE = parseType('(collection<any>, any?) -> integer');
+const ISEMPTY_SIGNATURE = parseType('(collection<any>) -> boolean');
+const CONTAINS_SIGNATURE = parseType('(collection<any>, element: any) -> boolean');
 // Only the GENERIC arm of `Join`'s overload set, and deliberately so: this
 // type is used by the custom `canonical` handler to validate the operands,
 // and the string-preserving arm (`(T+) -> T where T: string`) admits a strict
@@ -510,7 +517,7 @@ const CONTAINS_SIGNATURE = parseType('(collection, element: any) -> boolean');
 // validating against the generic arm alone never rejects a call the overload
 // set accepts. The RESULT type is not read here; the `type:` handler
 // (`joinResultType`) owns it.
-const JOIN_SIGNATURE = parseType('(collection*) -> collection');
+const JOIN_SIGNATURE = parseType('(collection<any>*) -> collection');
 // The full overload set of `Slice`, written ONCE. Two places need it and they
 // must not drift apart: the definition's `signature:` field (what the engine
 // registers, and what result typing resolves an arm from) and the parsed
@@ -526,7 +533,7 @@ const SLICE_SIGNATURE_TEXT =
 // Parsed once, so the `canonical` handler does not re-parse the signature on
 // every canonicalization.
 const SLICE_SIGNATURE = parseType(SLICE_SIGNATURE_TEXT);
-const APPEND_SIGNATURE = parseType('(collection, value+) -> collection');
+const APPEND_SIGNATURE = parseType('(collection<any>, value+) -> collection');
 
 // Validate the collection operand of a LAZY collection operator's canonical
 // handler — like `checkType(engine, op, type)` but fail-open: an operand whose
@@ -979,7 +986,7 @@ function iterateArgs(
  */
 function mapSource(xs: Expression): Expression {
   if (xs.isCollection) return xs;
-  if (!xs.type.matches('collection')) return xs;
+  if (!xs.type.matches('collection<any>')) return xs;
   // Guard: a self-referential binding (`xs := Map(f, xs)`) resolves to a value
   // that mentions `xs`, and that value's own shape predicates route straight
   // back here — `isFinite` → `mapSource` → `evaluate()` → `isFiniteCollection`
@@ -1559,7 +1566,7 @@ function isCollectionIndex(idx: Expression | undefined): boolean {
   return (
     idx !== undefined &&
     !isString(idx) &&
-    isSubtype(idx.type.type, 'indexed_collection')
+    isSubtype(idx.type.type, INDEXED_COLLECTION_SHAPE_TYPE)
   );
 }
 
@@ -1618,7 +1625,7 @@ function componentAt(
       ]);
     return xs.at(position) ?? absenceMarker(ce, xs);
   }
-  if (xs.type.matches('indexed_collection')) return undefined;
+  if (xs.type.matches('indexed_collection<any>')) return undefined;
   return ce.error([
     'incompatible-type',
     'indexed_collection',
@@ -1800,8 +1807,8 @@ function pointComponentType(
   // case, and it keeps the result an (honest) collection type, not a scalar.
   if (
     typeOverride !== undefined
-      ? isSubtype(t, 'indexed_collection')
-      : xs.type.matches('indexed_collection')
+      ? isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
+      : xs.type.matches('indexed_collection<any>')
   ) {
     // Only a collection whose elements are POINTS broadcasts. One whose
     // elements are scalars element-indexes like First/Second/Third, so the
@@ -2119,7 +2126,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // compare.ts can evaluate both sides and re-consult. A value whose
       // type cannot be a set is definitively unequal.
       if (a.operator !== b.operator)
-        return b.type.matches('set') ? undefined : false;
+        return b.type.matches('set<any>') ? undefined : false;
       if (!isFunction(a) || !isFunction(b)) return false;
       if (a.nops !== b.nops) return false;
       // The elements are not indexed
@@ -2350,7 +2357,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // The `evaluate` predicate (`isFiniteBroadcastParticipant`) excludes
         // strings too, so type and value stay in agreement.
         if (t === 'string') return false;
-        return !isTupleKind && op.type.matches('indexed_collection');
+        return !isTupleKind && op.type.matches('indexed_collection<any>');
       };
       if (ops.some(isListType)) return parseType('list<tuple>');
       return tupleTypeOf(ops);
@@ -2417,7 +2424,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // treats a string component atomically for the same reason
         // (`isFiniteBroadcastParticipant` excludes strings).
         if (t === 'string') return false;
-        return isSubtype(t, 'collection');
+        return isSubtype(t, COLLECTION_SHAPE_TYPE);
       };
       const nonScalar = args.findIndex((a) => isProvablyNonScalar(a.type.type));
       if (nonScalar >= 0) {
@@ -2571,7 +2578,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Keys: {
     description: 'Return a list of the keys of a dictionary.',
     complexity: 8200,
-    signature: '(dictionary) -> list<string>',
+    signature: '(dictionary<any>) -> list<string>',
     type: () => parseType('list<string>'),
     // Complete precondition: the evaluate guard (`isDictionary`) is the
     // handler's only decline — see `canEnumerate` (types-definitions.ts).
@@ -2594,7 +2601,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Values: {
     description: 'Return a list of the values of a dictionary.',
     complexity: 8200,
-    signature: '(dictionary) -> list',
+    signature: '(dictionary<any>) -> list',
     type: ([dict]) => {
       const t = dict.type.type;
       if (typeof t === 'object' && t.kind === 'dictionary')
@@ -2714,7 +2721,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // range (e.g. a symbol assigned a `Range`) — `eq()` in compare.ts
       // evaluates both sides and re-consults.
       if (a.operator !== b.operator)
-        return b.type.matches('indexed_collection') ? undefined : false;
+        return b.type.matches('indexed_collection<any>') ? undefined : false;
       // Symbolic bounds (e.g. Range(1, n)): `range()` coerces them to 1, so
       // the numeric comparison below would equate every symbolic range
       // (Range(1, n) = Range(1, m) → true). Compare structurally instead;
@@ -2968,7 +2975,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `b` may be an unevaluated set-valued expression (a symbol assigned
       // an interval, a set operation…): decline so `eq()` in compare.ts can
       // evaluate both sides and re-consult.
-      if (!intervalB && b.type.matches('set')) return undefined;
+      if (!intervalB && b.type.matches('set<any>')) return undefined;
       if (!intervalA || !intervalB) return false;
       return (
         intervalA.start === intervalB.start &&
@@ -3282,7 +3289,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return True if the collection contains the given element (structural identity, like `===`), False otherwise.\n\nEquivalent to `Any(xs, (e) => e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.',
     complexity: 8200,
-    signature: '(collection, element: any) -> boolean',
+    signature: '(collection<any>, element: any) -> boolean',
     // Peek through membership-preserving wrappers (incl. `Unique`) so an eager
     // Sort/RandomShuffle isn't materialized just to test membership (see
     // `peekMembershipPreserving`).
@@ -3317,7 +3324,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     keywords: ['cardinality', 'tally', 'occurrences'],
     complexity: 8200,
-    signature: '(collection, any?) -> integer',
+    signature: '(collection<any>, any?) -> integer',
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a count (see `peekCountPreserving`). Only the
     // 1-arg cardinality form is safe to strip: the 2-arg forms may carry an
@@ -3420,7 +3427,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   IsEmpty: {
     description: ['Return True if the collection is empty, False otherwise.'],
     complexity: 8200,
-    signature: '(collection) -> boolean',
+    signature: '(collection<any>) -> boolean',
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to test emptiness (see `peekCountPreserving`).
     canonical: (ops, { engine: ce }) => {
@@ -3659,7 +3666,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             : undefined;
         if (
           first !== undefined &&
-          first.type.matches('collection') &&
+          first.type.matches('collection<any>') &&
           (isFunction(last, 'Function') || last.type.matches('function'))
         )
           return engine._fn('Map', [
@@ -3909,7 +3916,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // produce a list, so claiming `string` would be a promise the
       // evaluation cannot keep.
       if (t.matches('string')) return t;
-      if (!t.matches('indexed_collection')) return t;
+      if (!t.matches('indexed_collection<any>')) return t;
       return { kind: 'list', elements: collectionElementType(t.type) ?? 'any' };
     },
     canonical: (ops, { engine }) => {
@@ -4490,7 +4497,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection) -> indexed_collection',
+    signature: '(collection<any>) -> indexed_collection',
     type: (ops) => {
       const elt = collectionElementType(ops[0].type.type) ?? 'number';
       // Each element is a SUBTRACTION of two source elements, so echoing the
@@ -4972,7 +4979,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // ACCENT produces ONE character, not two. That is inherent to Unicode
     // grapheme segmentation, not a defect (`docs/STRING_ROADMAP.md`, design
     // constraint 3).
-    signature: '((T+) -> T where T: string) & ((collection*) -> collection)',
+    signature: '((T+) -> T where T: string) & ((collection<any>*) -> collection)',
     // Same-head flatten: `Join(Join(…inner), …outer)` → `Join(…inner, …outer)`
     // (Change 2 of `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`).
     // Exact by construction — the head is unchanged, so every operand keeps
@@ -5047,7 +5054,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // operand may repeat one value forever, so the number of DISTINCT
             // elements is not decidable by a walk that terminates.
             if (!isSet) return Infinity;
-            return op.type.matches('set') ? Infinity : undefined;
+            return op.type.matches('set<any>') ? Infinity : undefined;
           }
           total += count;
         }
@@ -5094,7 +5101,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (isAtomicJoinOperand(op)) return true;
             const finite = op.isFiniteCollection;
             if (finite !== false || !isSet) return finite;
-            return op.type.matches('set') ? false : undefined;
+            return op.type.matches('set<any>') ? false : undefined;
           })
         );
       },
@@ -5247,7 +5254,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Append: {
     description: ['Add one or more elements to the end of a collection.'],
     complexity: 8200,
-    signature: '(collection, value+) -> collection',
+    signature: '(collection<any>, value+) -> collection',
     // Same-head flatten: `Append(Append(c, …vs), …ws)` → `Append(c, …vs, …ws)`,
     // so an accumulator loop (`xs = Append(xs, v)`) builds a node of bounded
     // DEPTH — every structural walker (serialization, hashing, `isSame`,
@@ -5312,7 +5319,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // elements through unchanged); appending finitely many values
             // cannot collapse that. Any other infinite source may repeat one
             // value forever — undecidable. See `Join`'s `count`.
-            return expr.op1.type.matches('set') ? Infinity : undefined;
+            return expr.op1.type.matches('set<any>') ? Infinity : undefined;
           }
           return distinctCount(expr, count + expr.nops - 1);
         }
@@ -5326,7 +5333,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         const finite = expr.op1.isFiniteCollection;
         if (finite !== false || !producesSet(expr)) return finite;
-        return expr.op1.type.matches('set') ? false : undefined;
+        return expr.op1.type.matches('set<any>') ? false : undefined;
       },
       // With at least one appended value the result is never empty. The 1-ary
       // identity form (`Append(c)`, valid in non-strict mode) has exactly the
@@ -5681,7 +5688,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature:
-      '(value: indexed_collection | dictionary, index: (number|string|boolean|indexed_collection)+) -> unknown',
+      '(value: indexed_collection<any> | dictionary<any>, index: (number|string|boolean|indexed_collection<any>)+) -> unknown',
     // `At` accepts absence into any position (base or index) and absorbs it at
     // runtime (§3.A/§3.C): declared `handle`, stripping ALL positions. This
     // subsumes the P1 operator-local carve-out — the general `missingStrip`
@@ -5714,8 +5721,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     elementCount: (expr) => {
       if (!isFunction(expr) || expr.nops !== 2) return undefined;
       const [xs, idx] = expr.ops;
-      if (!isSubtype(xs.type.type, 'indexed_collection')) return undefined;
-      if (isString(idx) || !isSubtype(idx.type.type, 'indexed_collection'))
+      if (!isSubtype(xs.type.type, INDEXED_COLLECTION_SHAPE_TYPE)) return undefined;
+      if (isString(idx) || !isSubtype(idx.type.type, INDEXED_COLLECTION_SHAPE_TYPE))
         return undefined;
       const elt = collectionElementType(idx.type.type);
       if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
@@ -5831,7 +5838,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const isGatherIndex = (idx: Expression | undefined): boolean =>
         idx !== undefined &&
         !isString(idx) &&
-        isSubtype(idx.type.type, 'indexed_collection');
+        isSubtype(idx.type.type, INDEXED_COLLECTION_SHAPE_TYPE);
 
       // A boolean MASK filters (in-range only, no marker); an integer gather is
       // POSITION-PRESERVING (each element `T | marker(T)`, §3.C).
@@ -5843,7 +5850,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       if (ops.length === 2) {
         if (
-          isSubtype(ops[0].type.type, 'indexed_collection') &&
+          isSubtype(ops[0].type.type, INDEXED_COLLECTION_SHAPE_TYPE) &&
           isGatherIndex(ops[1])
         ) {
           const inner = elementType();
@@ -5875,7 +5882,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const sourceType = ops[0].type.type;
       const isTupleSource =
         typeof sourceType !== 'string' && sourceType.kind === 'tuple';
-      if (!isSubtype(sourceType, 'indexed_collection') || isTupleSource)
+      if (!isSubtype(sourceType, INDEXED_COLLECTION_SHAPE_TYPE) || isTupleSource)
         return scalarResultType();
 
       // Peel RAW through the intermediate steps; the absence marker is applied
@@ -6372,7 +6379,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   First: {
     description: 'The first element of a collection.',
     complexity: 8200,
-    signature: '(xs: indexed_collection) -> any',
+    signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
     type: ([xs], { operandTypes }) =>
       componentResultType(xs, 1, operandTypes?.[0]),
@@ -6382,7 +6389,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Second: {
     description: 'The second element of a collection.',
     complexity: 8200,
-    signature: '(xs: indexed_collection) -> any',
+    signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
     type: ([xs], { operandTypes }) =>
       componentResultType(xs, 2, operandTypes?.[0]),
@@ -6392,7 +6399,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Third: {
     description: 'The third element of a collection.',
     complexity: 8200,
-    signature: '(xs: indexed_collection) -> any',
+    signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
     type: ([xs], { operandTypes }) =>
       componentResultType(xs, 3, operandTypes?.[0]),
@@ -6426,7 +6433,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'The x-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
-    signature: '(xs: collection | tuple) -> any',
+    signature: '(xs: collection<any> | tuple) -> any',
     missingBehavior: 'propagate',
     type: ([xs], { operandTypes }) =>
       pointComponentType(xs, 1, operandTypes?.[0]),
@@ -6438,7 +6445,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'The y-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
-    signature: '(xs: collection | tuple) -> any',
+    signature: '(xs: collection<any> | tuple) -> any',
     missingBehavior: 'propagate',
     type: ([xs], { operandTypes }) =>
       pointComponentType(xs, 2, operandTypes?.[0]),
@@ -6450,7 +6457,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'The z-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
-    signature: '(xs: collection | tuple) -> any',
+    signature: '(xs: collection<any> | tuple) -> any',
     missingBehavior: 'propagate',
     // A point with no z-coordinate is a DIMENSION mismatch, not an absent
     // slot (item 138 clarified ask — see `pointArityError`). When the operand
@@ -6482,7 +6489,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Last: {
     description: 'The last element of a collection.',
     complexity: 8200,
-    signature: '(xs: indexed_collection) -> any',
+    signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
     type: ([xs], { operandTypes }) =>
       componentResultType(xs, -1, operandTypes?.[0]),
@@ -7409,7 +7416,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the 1-based index of the first occurrence of value in collection, or 0 if not found.',
     complexity: 8200,
-    signature: '(collection, any) -> integer',
+    signature: '(collection<any>, any) -> integer',
     evaluate: ([xs, value], { engine: ce }) => {
       const index = xs.indexWhere((x) => x.isSame(value)) ?? undefined;
       return ce.number(index ?? 0);
@@ -7735,7 +7742,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Ordering: {
     description: 'Return the indexes that would sort the collection.',
     complexity: 8200,
-    signature: '(indexed_collection, order: function?) -> list<integer>',
+    signature: '(indexed_collection<any>, order: function?) -> list<integer>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Ordering', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
@@ -7814,7 +7821,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the element of the collection that maximizes the given key function.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, key: function) -> value',
+    signature: '(collection<any>, key: function) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalCallbackOperand(ops[1], {
@@ -7842,7 +7849,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the element of the collection that minimizes the given key function.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, key: function) -> value',
+    signature: '(collection<any>, key: function) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalCallbackOperand(ops[1], {
@@ -7874,7 +7881,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
-    signature: '(indexed_collection, key: function?) -> integer',
+    signature: '(indexed_collection<any>, key: function?) -> integer',
     canonical: (ops, { engine }) => {
       // Optimization form `ArgMax(f, domain)` (Wolfram/Fungrim convention:
       // the locations maximizing f over a set). The engine does not evaluate
@@ -7919,7 +7926,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
-    signature: '(indexed_collection, key: function?) -> integer',
+    signature: '(indexed_collection<any>, key: function?) -> integer',
     canonical: (ops, { engine }) => {
       // Optimization form `ArgMin(f, domain)` — see the ArgMax note.
       const optForm = canonicalOptimumForm(engine, 'ArgMin', ops);
@@ -8276,7 +8283,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    signature: '(collection) -> collection',
+    signature: '(collection<any>) -> collection',
     // Preserve the source's element type / indexed-ness (mirrors TakeWhile).
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
@@ -8816,7 +8823,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Partition the collection into a dictionary of lists based on the key returned by the function.',
     ],
     complexity: 8200,
-    signature: '(collection, key: function) -> dictionary<list>',
+    signature: '(collection<any>, key: function) -> dictionary<list>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'GroupBy', ops, 1, PER_ELEMENT_SUPPLY),
     // Provable declines only (finite, walkable source required); success also
@@ -8879,7 +8886,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input.',
     complexity: 8200,
-    signature: '(indexed_collection+) -> list',
+    signature: '(indexed_collection<any>+) -> list',
     collection: {
       isEnumerable: enumerableFromAllSources,
       isLazy: (_expr) => true,
@@ -9109,7 +9116,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Produce an infinite sequence by cycling through the elements of a finite collection.',
     complexity: 8200,
-    signature: '(list) -> list',
+    signature: '(list<any>) -> list',
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -9381,7 +9388,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Create a dictionary from the elements of a collection of (key, value) pairs.',
     complexity: 8200,
-    signature: '(collection) -> dictionary',
+    signature: '(collection<any>) -> dictionary',
     // Provable declines only (the source must be a finite, walkable
     // collection); success also depends on every element being a
     // string-keyed pair, so never `true` — see `canEnumerateFiniteSource`.
@@ -9819,9 +9826,9 @@ function canonicalList(
         // the literal's kind promise is enforced as far as static types
         // can prove.
         segments.push(
-          x.type.matches('set') ||
-            x.type.matches('dictionary') ||
-            x.type.matches('record')
+          x.type.matches('set<any>') ||
+            x.type.matches('dictionary<any>') ||
+            isRecordShapedType(x.type.type)
             ? ce._fn('ListFrom', [x])
             : x
         );
@@ -10437,7 +10444,7 @@ function isIterator(x: unknown): x is Iterator<Expression> {
  * a callback that may collapse them all onto one value. See the infinite-
  * operand branches of their `count`/`isFinite` handlers. */
 function producesSet(expr: Expression): boolean {
-  return expr.type.matches('set');
+  return expr.type.matches('set<any>');
 }
 
 /** Does this node promise a KEYED collection — a `record` or a `dictionary`?
@@ -10446,7 +10453,9 @@ function producesSet(expr: Expression): boolean {
  * `set` (`joinResultType`, `appendResultType`), and a keyed collection owes
  * its keys the same distinctness a set owes its elements. */
 function producesKeyed(expr: Expression): boolean {
-  return expr.type.matches('record') || expr.type.matches('dictionary');
+  return (
+    isRecordShapedType(expr.type.type) || expr.type.matches('dictionary<any>')
+  );
 }
 
 /** Does this node's enumeration need rewriting before anyone reads it —
@@ -10745,9 +10754,9 @@ function joinResultType(ops: ReadonlyArray<Expression>): Type {
   // `string`, not a subtype, so a character operand makes the call mixed.
   if (ops.length > 0 && ops.every((op) => op.type.matches('string')))
     return 'string';
-  if (ops.some((op) => op.type.matches('record'))) return 'record';
-  if (ops.some((op) => op.type.matches('dictionary'))) return 'dictionary';
-  if (ops.some((op) => op.type.matches('set'))) return 'set';
+  if (ops.some((op) => isRecordShapedType(op.type.type))) return 'record';
+  if (ops.some((op) => op.type.matches('dictionary<any>'))) return 'dictionary';
+  if (ops.some((op) => op.type.matches('set<any>'))) return 'set';
 
   // Carry the element type through, so a joined point list still MATCHES
   // `list<tuple<…>>` and downstream type-directed dispatch keeps recognizing
@@ -10845,9 +10854,9 @@ function appendResultType(ops: ReadonlyArray<Expression>): Type {
   if (ops.length === 0) return 'list';
   const source = ops[0].type.type;
   // A record/dictionary/set source: nothing to narrow, keep today's answer.
-  if (ops[0].type.matches('record')) return 'record';
-  if (ops[0].type.matches('dictionary')) return 'dictionary';
-  if (ops[0].type.matches('set')) return 'set';
+  if (isRecordShapedType(ops[0].type.type)) return 'record';
+  if (ops[0].type.matches('dictionary<any>')) return 'dictionary';
+  if (ops[0].type.matches('set<any>')) return 'set';
   // A source whose element type is unknown: fall back to the bare `list`
   // rather than narrowing to something the value may not satisfy.
   const elements = collectionElementType(source);
@@ -10870,7 +10879,7 @@ function defaultCollectionEq(a: Expression, b: Expression) {
     const compatible =
       a.operator === 'Tuple'
         ? b.type.matches('tuple')
-        : b.type.matches('indexed_collection') && !b.type.matches('tuple');
+        : b.type.matches('indexed_collection<any>') && !isTupleShapedType(b.type.type);
     return compatible ? undefined : false;
   }
   if (!isFunction(a) || !isFunction(b)) return false;
@@ -10990,7 +10999,7 @@ function canonicalOptimumForm(
   const [f, domain] = ops;
   if (!isFunction(f, 'Function')) return undefined;
   const d = domain.canonical;
-  if (!d.type.matches('set')) return undefined;
+  if (!d.type.matches('set<any>')) return undefined;
   const fn = canonicalCallbackOperand(f);
   if (!fn) return null;
   return engine._fn(operator, [fn, d]);

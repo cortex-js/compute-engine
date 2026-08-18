@@ -26,7 +26,8 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
  */
 
 const BODY = 'P \\mapsto \\sqrt{P[1]^2+P[2]^2}';
-const CONCRETE = '(dictionary | indexed_collection) -> broadcastable<number>';
+const CONCRETE =
+  '(dictionary<any> | indexed_collection<any>) -> broadcastable<number>';
 
 function freshEngine(): ComputeEngine {
   return new ComputeEngine();

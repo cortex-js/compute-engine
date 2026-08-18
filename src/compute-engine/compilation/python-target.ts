@@ -1,4 +1,5 @@
 import type { Expression } from '../global-types.js';
+import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 
 import type {
@@ -783,7 +784,10 @@ function isPyCollectionOperand(e: Expression): boolean {
   // collection operations do not compile to Python at all and must FAIL
   // CLOSED here rather than lower as if the string were an array.
   if (t.matches('string')) return false;
-  return t.matches('list') || t.matches('indexed_collection');
+  // Shape question — asked against the absence-admitting family tops (bare
+  // names are the values-only synonyms since the 2026-08-17 ruling); a
+  // `list<any>` operand is still a NumPy array.
+  return t.matches('list<any>') || t.matches('indexed_collection<any>');
 }
 
 /**
@@ -1430,7 +1434,7 @@ function pyCollArg(
   if (arg) assertPyNoCharacterOperand(kind, [arg]);
   if (
     !arg ||
-    !(arg.type.matches('list') || arg.type.matches('indexed_collection'))
+    !(arg.type.matches('list<any>') || arg.type.matches('indexed_collection<any>'))
   )
     throw new Error(
       `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
@@ -1456,8 +1460,8 @@ function pyCouldBeIndexedCollectionOperand(e: Expression): boolean {
   // A string is not an array-shaped operand — see `isPyCollectionOperand`.
   if (t === 'string') return false;
   if (typeof t === 'object' && t.kind === 'union')
-    return t.types.some((m) => isSubtype(m, 'indexed_collection'));
-  return isSubtype(t, 'indexed_collection');
+    return t.types.some((m) => isSubtype(m, INDEXED_COLLECTION_SHAPE_TYPE));
+  return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE);
 }
 
 function pyIsNumericIndexOperand(e: Expression): boolean {
@@ -2289,7 +2293,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // no compiled equivalent.
     const provablyIndexed =
       !base.type.matches('string') &&
-      (base.type.matches('list') || base.type.matches('indexed_collection'));
+      (base.type.matches('list<any>') || base.type.matches('indexed_collection<any>'));
     if (!provablyIndexed) {
       if (!pyCouldBeIndexedCollectionOperand(base))
         throw new Error(

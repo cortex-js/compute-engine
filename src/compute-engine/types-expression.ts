@@ -2400,7 +2400,7 @@ export interface Expression {
    * - has a `contains(other)` method that returns `true` if the `other`
    *   expression is in the collection.
    *
-   * ## `isCollection` is a CAPABILITY, `type.matches('collection')` is a SHAPE
+   * ## `isCollection` is a CAPABILITY, `type.matches('collection<any>')` is a SHAPE
    *
    * This is the single most common source of collection-handling bugs in the
    * engine, so it is worth stating precisely. The two predicates answer
@@ -2411,10 +2411,17 @@ export interface Expression {
    *   yet, and for an application whose head returns a collection (`L(1)`
    *   under `L: (number) -> vector<2>`): both are collection-shaped, but
    *   there is nothing to walk.
-   * - `type.matches('collection')` — "is this operand collection-**shaped**?"
-   *   It is `true` for those valueless cases, and `false` for a materialized
-   *   collection whose type is top (`unknown`/`any`), which `isCollection`
-   *   reports `true`.
+   * - `type.matches('collection<any>')` — "is this operand
+   *   collection-**shaped**?" It is `true` for those valueless cases, and
+   *   `false` for a materialized collection whose type is top
+   *   (`unknown`/`any`), which `isCollection` reports `true`.
+   *
+   * A shape test must spell the `<any>` FAMILY TOP, never the bare name:
+   * since the bare-synonym ruling (2026-08-17) bare `collection` is the
+   * values-only `collection<unknown>`, so `list<any>`, `list<nothing>` and
+   * `list<integer|missing>` — all collection-shaped — do NOT match it.
+   * (`COLLECTION_SHAPE_TYPE` and friends in `common/type/primitive.ts` are
+   * the same tops as `Type` constants, for `isSubtype` call sites.)
    *
    * Pick by the question you are actually asking:
    *
@@ -2422,7 +2429,7 @@ export interface Expression {
    *   a capability question. Use `isCollection`.
    * - Deciding whether an operand takes the SCALAR path or the
    *   collection/broadcast path — that is a shape question. Test
-   *   `isCollection || type.matches('collection')`, or the operand class
+   *   `isCollection || type.matches('collection<any>')`, or the operand class
    *   alone with `isValuelessCollectionTyped()` (`collection-utils.ts`).
    *
    * Getting this wrong has a characteristic signature: the operator takes its

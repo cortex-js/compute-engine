@@ -532,7 +532,7 @@ export function bigOpResultType(
   ops: ReadonlyArray<Expression>
 ): Type | BoxedType {
   const body = ops[0];
-  if (ops.length > 1 && body?.type.matches('indexed_collection'))
+  if (ops.length > 1 && body?.type.matches('indexed_collection<any>'))
     return body.type;
   // A body that is only POSSIBLY a collection carries its `broadcastable<T>`
   // type through for the same reason: `broadcastable<T>` abbreviates the union

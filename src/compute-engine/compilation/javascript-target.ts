@@ -27,6 +27,10 @@ import {
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
 
 /**
  * The type a compile-time **representation** question about `expr` is answered
@@ -637,7 +641,7 @@ function compileJSEquality(
   // faithful runtime dispatch, so no relaxation.
   const tol = args[0]?.engine?.tolerance ?? 1e-10;
   const collectionish = (a: Expression): boolean =>
-    a.type.matches('collection') || isPossiblyCollectionTypedJS(a);
+    a.type.matches('collection<any>') || isPossiblyCollectionTypedJS(a);
   if (args.some(collectionish)) {
     if (args.length === 2) {
       const helper = kind === 'Equal' ? 'eq' : 'neq';
@@ -842,7 +846,7 @@ function compileJSCollectionBoolean(
   // scalar — the broadcast lowering below must not fire there.
   const collectionish = (a: Expression): boolean =>
     a.isCollection ||
-    a.type.matches('collection') ||
+    a.type.matches('collection<any>') ||
     isPossiblyCollectionTypedJS(a);
   if (!args.some(collectionish)) {
     if (kind === 'Not') {
@@ -918,7 +922,7 @@ function compileJSSelection(
   const conds = args.filter((_x, i) => i % 2 === 0);
   const collectionish = (a: Expression): boolean =>
     a.isCollection ||
-    a.type.matches('collection') ||
+    a.type.matches('collection<any>') ||
     isPossiblyCollectionTypedJS(a);
   if (!conds.some(collectionish)) return null;
   const arms = args.filter((_x, i) => i % 2 === 1);
@@ -948,7 +952,7 @@ function admitsRuntimeBroadcast(a: Expression): boolean {
   const t = jsType(a);
   if ((typeof t !== 'string' && t.kind === 'tuple') || isFunction(a, 'Tuple'))
     return false;
-  if (!a.isCollection && !a.type.matches('collection')) return true;
+  if (!a.isCollection && !a.type.matches('collection<any>')) return true;
   return isIndexedCollectionOperand(a);
 }
 
@@ -993,7 +997,12 @@ function isIndexedCollectionOperand(e: Expression): boolean {
   // effect of `string` not matching `indexed_collection`), so string
   // operations fail closed here until the grapheme-aware lowerings exist.
   if (t.matches('string')) return false;
-  return t.matches('list') || t.matches('indexed_collection');
+  // This is a SHAPE question — "does this lower to a JS array?" — so it is
+  // asked against the absence-admitting family tops `list<any>` /
+  // `indexed_collection<any>`: a `list<any>` is array-shaped even though it
+  // is not a subtype of the values-only bare `list` (= `list<unknown>`,
+  // user ruling 2026-08-17).
+  return t.matches('list<any>') || t.matches('indexed_collection<any>');
 }
 
 /**
@@ -1018,9 +1027,11 @@ function couldBeIndexedCollectionOperand(e: Expression): boolean {
   if (t === 'unknown' || t === 'any' || t === 'value') return false;
   // A string is not an array-shaped operand — see `isIndexedCollectionOperand`.
   if (t === 'string') return false;
+  // Shape question, so asked against the family top `indexed_collection<any>`
+  // — see `isIndexedCollectionOperand` above.
   if (typeof t === 'object' && t.kind === 'union')
-    return t.types.some((m) => isSubtype(m, 'indexed_collection'));
-  return isSubtype(t, 'indexed_collection');
+    return t.types.some((m) => isSubtype(m, INDEXED_COLLECTION_SHAPE_TYPE));
+  return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE);
 }
 
 /**
@@ -1068,7 +1079,7 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
     return !isProvablyScalarApplication(
       e,
       new Set(),
-      (a) => !a.type.matches('collection') && !isPossiblyCollectionTypedJS(a)
+      (a) => !a.type.matches('collection<any>') && !isPossiblyCollectionTypedJS(a)
     );
   }
   if (typeof t !== 'string' && t.kind === 'broadcastable') {
@@ -1099,10 +1110,10 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
           e,
           new Set(),
           (a) =>
-            !a.type.matches('collection') && !isPossiblyCollectionTypedJS(a)
+            !a.type.matches('collection<any>') && !isPossiblyCollectionTypedJS(a)
         );
       return (e.ops ?? []).some(
-        (a) => a.type.matches('collection') || isPossiblyCollectionTypedJS(a)
+        (a) => a.type.matches('collection<any>') || isPossiblyCollectionTypedJS(a)
       );
     }
     return true;
@@ -1365,7 +1376,7 @@ function isPointListSource(e: Expression): boolean {
   // treats it atomically too. It is a scalar SLOT — the same value in every
   // point.
   if (t === 'string') return false;
-  return e.type.matches('indexed_collection');
+  return e.type.matches('indexed_collection<any>');
 }
 
 /**
@@ -1379,7 +1390,7 @@ function isProvablyNonScalarType(t: Type): boolean {
   // A string occupies a SCALAR slot — see `isPointListSource` and the mirror
   // guard in the `PointList` definition handler.
   if (t === 'string') return false;
-  return isSubtype(t, 'collection');
+  return isSubtype(t, COLLECTION_SHAPE_TYPE);
 }
 
 /**
@@ -1894,7 +1905,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // or the strip is a no-op and the axis test misclassifies the domain.
     const eltT = collectionElementType(jsType(coll));
     const scalarIndex =
-      !isIndexedCollectionOperand(index) && !index.type.matches('collection');
+      !isIndexedCollectionOperand(index) && !index.type.matches('collection<any>');
     const objectDomain =
       eltT !== undefined &&
       eltT !== 'unknown' &&
@@ -2642,7 +2653,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // the guard on this block, since `===` IS its faithful test.
       if (
         !(args[1].type.type === 'unknown' || args[1].type.type === 'any') &&
-        args[1].type.matches('collection')
+        args[1].type.matches('collection<any>')
       )
         throw new Error(
           `IndexOf: cannot compile — the needle is a collection, which the ` +
@@ -8702,7 +8713,7 @@ function compileGcdLcm(
   const identity = kind === 'GCD' ? '0' : '1';
   const parts = args.map((a) => {
     if (isIndexedCollectionOperand(a)) return `...(${compile(a)})`;
-    if (a.isCollection || a.type.matches('collection'))
+    if (a.isCollection || a.type.matches('collection<any>'))
       throw new Error(
         `${kind}: cannot compile — operand is a collection but not an indexed ` +
           `collection (list/vector/range). Fail closed (D6).`
@@ -8804,8 +8815,8 @@ function isElementwiseBigOpBody(body: Expression): boolean {
   // through to that assertion is what keeps the decline.
   if (isProvablyStringOperand(body)) return false;
   return (
-    body.type.matches('list') ||
-    body.type.matches('indexed_collection') ||
+    body.type.matches('list<any>') ||
+    body.type.matches('indexed_collection<any>') ||
     isPossiblyCollectionTypedJS(body)
   );
 }

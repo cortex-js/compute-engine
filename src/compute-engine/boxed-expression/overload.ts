@@ -1021,9 +1021,15 @@ function displayParamAt(
   if (solution === undefined || solution.unbound.size === 0) return ground;
   const pattern = paramAt(declared, index);
   if (pattern === undefined) return ground;
+  // An unbound variable DISPLAYS as `unknown`, the identity bound
+  // (bare-synonym ruling 2026-08-17): `reduceType` below collapses
+  // `indexed_collection<unknown>` to the bare name, so the diagnostic says
+  // "expected indexed_collection", not the wider `indexed_collection<any>`.
   const displayBindings: Record<string, Type> = {
     ...solution.bindings,
-    ...Object.fromEntries([...solution.unbound].map((v) => [v, 'any' as Type])),
+    ...Object.fromEntries(
+      [...solution.unbound].map((v) => [v, 'unknown' as Type])
+    ),
   };
   const t = substituteTypeVariables(
     deepEraseCallbackTypes(pattern),

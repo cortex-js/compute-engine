@@ -151,7 +151,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     isConstant: true,
     wikidata: 'Q226183',
     description: 'The empty set, a set containing no elements.',
-    eq: (b: Expression) => b.type.matches('set') && b.isEmptyCollection,
+    eq: (b: Expression) => b.type.matches('set<any>') && b.isEmptyCollection,
     collection: {
       iterator: () => ({
         next: () => ({ value: undefined, done: true }),
@@ -492,7 +492,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     keywords: ['element of', 'member'],
     // EL-3: Extended signature to support optional condition for filtered iteration
     // The condition is used by Sum/Product to filter values when iterating
-    signature: '(value, collection, boolean?) -> boolean',
+    signature: '(value, collection<any>, boolean?) -> boolean',
     description:
       'Test whether a value is an element of a collection. ' +
       'Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.\n\n' +
@@ -529,7 +529,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
       // Validate collection type
       if (
-        !canonicalCollection.type.matches('collection') &&
+        !canonicalCollection.type.matches('collection<any>') &&
         !sym(canonicalCollection) &&
         !canonicalCollection.isValid
       ) {
@@ -570,7 +570,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         ce._isShadowedParameter(canonicalValue.symbol) &&
         canonicalValue.valueDefinition?.inferredType &&
         canonicalValue.type.type === 'unknown' &&
-        !canonicalCollection.type.matches('set')
+        !canonicalCollection.type.matches('set<any>')
       ) {
         const elt = collectionElementType(canonicalCollection.type.type);
         if (elt !== undefined && elt !== 'any' && elt !== 'unknown')
@@ -636,7 +636,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotElement: {
     complexity: 11200,
-    signature: '(value, collection) -> boolean',
+    signature: '(value, collection<any>) -> boolean',
     description: 'Test whether a value is not an element of a collection.',
     canonical: (args, { engine: ce }) => {
       // Same collection leniency as `Element` (which accepts `K_a \in BC`):
@@ -661,7 +661,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   Subset: {
     complexity: 11200,
-    signature: '(lhs:collection, rhs: collection) -> boolean',
+    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
     description:
       'Test whether the first collection is a strict subset of the second.',
     canonical: (args, { engine: ce }) => {
@@ -678,7 +678,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   SubsetEqual: {
     complexity: 11200,
-    signature: '(lhs:collection, rhs: collection) -> boolean',
+    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
     description:
       'Test whether the first collection is a subset (possibly equal) of the second.',
     canonical: (args, { engine: ce }) => {
@@ -695,7 +695,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotSubset: {
     complexity: 11200,
-    signature: '(lhs:collection, rhs: collection) -> boolean',
+    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
     description:
       'Test whether the first collection is not a strict subset of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
@@ -708,7 +708,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   Superset: {
     complexity: 11200,
-    signature: '(lhs:collection, rhs: collection) -> boolean',
+    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
     description:
       'Test whether the first collection is a strict superset of the second.',
     canonical: (args, { engine: ce }) => {
@@ -725,7 +725,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   SupersetEqual: {
     complexity: 11200,
-    signature: '(lhs:collection, rhs: collection) -> boolean',
+    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
     description:
       'Test whether the first collection is a superset (possibly equal) of the second.',
     canonical: (args, { engine: ce }) => {
@@ -743,7 +743,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotSuperset: {
     complexity: 11200,
-    signature: '(lhs:collection, rhs: collection) -> boolean',
+    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
     description:
       'Test whether the first collection is not a strict superset of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
@@ -756,7 +756,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotSupersetEqual: {
     complexity: 11200,
-    signature: '(lhs:collection, rhs: collection) -> boolean',
+    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
     description:
       'Test whether the first collection is not a superset (possibly equal) of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
@@ -808,7 +808,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // `any` (not `value`) for the adjuncts: an indeterminate is typically an
     // undeclared free variable, and a narrower parameter type would INFER a
     // declaration for it (`\Z[x]` retyping `x` for the engine's lifetime).
-    signature: '(set, any+) -> set',
+    signature: '(set<any>, any+) -> set',
     type: adjoinType,
   },
 
@@ -832,7 +832,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // …) before any subscript parselet runs.
     // `any` for the modulus: see the note on `Adjoin` — a narrower parameter
     // type would infer a declaration for a free `n`/`p`.
-    signature: '(set, any) -> set',
+    signature: '(set<any>, any) -> set',
     type: quotientRingType,
   },
 
@@ -840,7 +840,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // Return the elements of the first argument that are not in any of
     // the subsequent sets
     wikidata: 'Q242767',
-    signature: '(set+) -> set',
+    signature: '(set<any>+) -> set',
     description:
       'Return the elements of the first set that are not in any of the subsequent sets.',
     collection: {
@@ -873,7 +873,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // list operands are coerced to a set (deduped) by `intersection`, so
     // `Intersection([1,2,3], [2,3,4])` works without building sets by hand.
     wikidata: 'Q185837',
-    signature: '(collection+) -> set',
+    signature: '(collection<any>+) -> set',
     description: 'Return the intersection of two or more collections as a set.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
@@ -884,7 +884,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           args.map((arg) => arg.canonical),
           'Intersection'
         ),
-        '(collection+) -> set'
+        '(collection<any>+) -> set'
       );
       return ce._fn('Intersection', validatedArgs);
     },
@@ -905,7 +905,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   Union: {
     // Works on set, but can also work on lists
     wikidata: 'Q185359',
-    signature: '(collection+) -> set',
+    signature: '(collection<any>+) -> set',
     description: 'Return the union of two or more collections as a set.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
@@ -915,7 +915,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           args.map((arg) => arg.canonical),
           'Union'
         ),
-        '(collection+) -> set'
+        '(collection<any>+) -> set'
       );
       // Even if there is only one argument, we still need to call Union
       // to canonicalize the argument, since it may not be a set (it could
@@ -956,7 +956,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   SetMinus: {
     wikidata: 'Q18192442',
-    signature: '(set, value*) -> set',
+    signature: '(set<any>, value*) -> set',
     description:
       'Return the set difference between the first set and subsequent values.',
     canonical: (args, { engine: ce }) => {
@@ -965,7 +965,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       // operand (e.g. `G`, the gravitational constant, types finite_real).
       return ce._fn(
         'SetMinus',
-        validateSetArguments(ce, args, '(set, value*) -> set')
+        validateSetArguments(ce, args, '(set<any>, value*) -> set')
       );
     },
     evaluate: setMinus,
@@ -998,7 +998,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     /* = Union(Complement(a, b), Complement(b, a) */
     /* Corresponds to XOR in boolean logic */
     wikidata: 'Q1147242',
-    signature: '(set, set) -> set',
+    signature: '(set<any>, set<any>) -> set',
     description:
       'Return the symmetric difference of two sets (elements in either set but not both).',
     evaluate: symmetricDifference,
@@ -1071,7 +1071,7 @@ function union(
   // such an operand unwrapped, so the finiteness gate below keeps the whole
   // `Union` symbolic until the value arrives.
   const xs = ops.map((op) =>
-    op.isCollection || op.type.matches('collection')
+    op.isCollection || op.type.matches('collection<any>')
       ? op
       : ce.function('Set', [op])
   );

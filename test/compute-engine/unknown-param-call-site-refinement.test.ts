@@ -110,7 +110,7 @@ describe('half 1 — the D-240 indexed-access class (fixed by the ruling)', () =
     ce.declare('g', { signature: '(unknown) -> unknown' });
     ce.parse('g(p) \\coloneq p[1] + p[2]', { strict: false }).evaluate();
     expect(ce.box('g').type.toString()).toEqual(
-      '(dictionary | indexed_collection) -> broadcastable<number>'
+      '(dictionary<any> | indexed_collection<any>) -> broadcastable<number>'
     );
     const r = compile(ce.parse('g([3,4])', { strict: false }))!;
     expect(r.success).toBe(true);

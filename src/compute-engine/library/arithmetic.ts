@@ -121,6 +121,7 @@ import {
   widen,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import type { Type } from '../../common/type/types.js';
 import {
   numericTypeHandler,
@@ -4094,7 +4095,7 @@ function isPointListType(x: Expression): boolean | undefined {
   }
   // A tuple, a nested list, or a union of those: an element that is itself an
   // indexed collection is a point.
-  return isSubtype(elt, 'indexed_collection');
+  return isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE);
 }
 
 /** The Euclidean distance between two points, as an EXPRESSION:

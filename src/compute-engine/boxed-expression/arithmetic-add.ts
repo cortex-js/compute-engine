@@ -5,6 +5,7 @@ import { order, sortAddTerms } from './order.js';
 import { Type } from '../../common/type/types.js';
 import { collectionElementType, widen } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
@@ -330,7 +331,7 @@ export function absorbScalarsIntoCells(
   // evaluated value (every element stays a list) and makes
   // `type.matches('collection')` answer a confident `false`.
   let cell: Type;
-  if (isSubtype(elt, 'collection')) {
+  if (isSubtype(elt, COLLECTION_SHAPE_TYPE)) {
     // Only the kinds whose `elements` is a single rebuildable cell type can be
     // recursed into. A `tuple`/`record`/`dictionary` cell, or a `reference` to
     // a (possibly recursive) alias, keeps the collection type unchanged: sound

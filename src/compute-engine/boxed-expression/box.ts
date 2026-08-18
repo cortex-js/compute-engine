@@ -81,7 +81,10 @@ import {
   type OverloadResolution,
 } from './overload.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { NUMERIC_TYPES } from '../../common/type/primitive.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  NUMERIC_TYPES,
+} from '../../common/type/primitive.js';
 import {
   isWildcardFunctionType,
   resolveTypeForCompilation as resolveType,
@@ -2003,7 +2006,10 @@ function makeCanonicalFunctionCore(
 function isCollectionOnlyType(t: Type): boolean {
   if (typeof t === 'object' && t.kind === 'union')
     return t.types.every(isCollectionOnlyType);
-  return isSubtype(t, 'collection');
+  // Shape question — asked against the absence-admitting family top (the
+  // bare-synonym ruling, 2026-08-17): `dictionary<any>` — At's base param —
+  // is collection-only evidence just as bare `dictionary` was.
+  return isSubtype(t, COLLECTION_SHAPE_TYPE);
 }
 
 /**

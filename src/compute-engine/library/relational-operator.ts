@@ -1279,7 +1279,7 @@ function broadcastableComparisonOperands(
           // re-entered step 2 — `M = [1,2]` with `M: vector<2>` overflowed the
           // stack out of `evaluate()` on a bare engine, in the same way the
           // top-typed case described above once did.
-          op.type.matches('collection'))
+          op.type.matches('collection<any>'))
     ).length < 2
   );
 }
@@ -1315,7 +1315,7 @@ function undecidedCollectionComparison(
 ): boolean {
   const unresolved = (op: Expression): boolean =>
     isPossiblyCollectionTyped(op) ||
-    (!op.isCollection && op.type.matches('collection'));
+    (!op.isCollection && op.type.matches('collection<any>'));
   return ops.some(unresolved) && ops.some((op) => op.isCollection);
 }
 

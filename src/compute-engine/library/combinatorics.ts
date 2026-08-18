@@ -373,7 +373,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // Aka the product set, the set direct product or cross product
       // Notation: \times
       wikidata: 'Q173740',
-      signature: '(set+) -> set',
+      signature: '(set<any>+) -> set',
       collection: {
         isEnumerable: enumerableFromAllSources,
         contains: (expr, x) => {
@@ -404,7 +404,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     PowerSet: {
       description: 'Return the power set of a set (set of all subsets).',
       wikidata: 'Q205170',
-      signature: '(set) -> set',
+      signature: '(set<any>) -> set',
       collection: {
         isEnumerable: enumerableFromSource,
         contains: (expr, x) => {

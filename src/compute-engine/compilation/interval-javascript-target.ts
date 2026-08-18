@@ -817,7 +817,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       selection: (args) => {
         for (let i = 0; i < args.length; i += 2) {
           const c = args[i];
-          if (c.isCollection || c.type.matches('collection'))
+          if (c.isCollection || c.type.matches('collection<any>'))
             throw new Error(
               'Which: a collection-valued condition has no interval-js lowering — ' +
                 'the interval domain is scalar (one interval per quantity), so there ' +

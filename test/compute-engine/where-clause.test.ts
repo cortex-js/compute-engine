@@ -79,14 +79,21 @@ describe('WHERE CLAUSE — positive forms', () => {
   });
 });
 
-describe('WHERE CLAUSE — `where T` is shorthand for `where T: any`', () => {
-  test('explicit `: any` normalizes to the shorthand', () => {
-    expect(roundTrip('(T) -> T where T: any')).toBe('(T) -> T where T');
+describe('WHERE CLAUSE — `where T` is shorthand for `where T: unknown`', () => {
+  // Since the bare-synonym ruling (2026-08-17) the identity bound is
+  // `unknown` — "some value type" — not `any`, which is the wider,
+  // absence-admitting contract and must survive serialization.
+  test('explicit `: unknown` normalizes to the shorthand', () => {
+    expect(roundTrip('(T) -> T where T: unknown')).toBe('(T) -> T where T');
   });
 
-  test('the two spellings build the identical type', () => {
+  test('explicit `: any` is a distinct contract and round-trips', () => {
+    expect(roundTrip('(T) -> T where T: any')).toBe('(T) -> T where T: any');
+  });
+
+  test('the shorthand and `: unknown` serialize identically', () => {
     const a = parseType('(T) -> T where T');
-    const b = parseType('(T) -> T where T: any');
+    const b = parseType('(T) -> T where T: unknown');
     expect(typeToString(a)).toBe(typeToString(b));
   });
 });

@@ -63,7 +63,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         if (isNumber(z)) return 'number'; // NaN or ~oo literal
         // Collection operand: scalar claim for the broadcast lift — elements
         // keep the generic finite-point convention (list-broadcast-typing).
-        if (t.matches('indexed_collection')) return 'finite_real';
+        if (t.matches('indexed_collection<any>')) return 'finite_real';
         // A real-typed operand is its own real part (`real` excludes NaN);
         // a `number`-typed one may be NaN/~oo, which `real` cannot admit.
         return t.matches('real') ? 'real' : 'number';
@@ -99,7 +99,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         if (t.matches('finite_number') || t.matches('non_finite_number'))
           return 'finite_real';
         if (isNumber(z)) return 'number'; // NaN or ~oo literal
-        if (t.matches('indexed_collection')) return 'finite_real';
+        if (t.matches('indexed_collection<any>')) return 'finite_real';
         // A real-typed operand has Im = 0; a `number`-typed one may be
         // NaN/~oo, whose imaginary part is not a (finite) real.
         return t.matches('real') ? 'finite_real' : 'number';
@@ -132,7 +132,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         if (t.matches('finite_number') || t.matches('non_finite_number'))
           return 'finite_real';
         if (isNumber(z)) return 'number'; // NaN or ~oo literal
-        if (t.matches('indexed_collection')) return 'finite_real';
+        if (t.matches('indexed_collection<any>')) return 'finite_real';
         // A real-typed operand has Arg ∈ {0, π}; a `number`-typed one may be
         // NaN/~oo, where Arg is NaN.
         return t.matches('real') ? 'finite_real' : 'number';

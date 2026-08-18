@@ -234,7 +234,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
         'The first argument may also be a data collection, in which case the ' +
         'empirical quantile is returned.',
       complexity: 7500,
-      signature: '(distribution | collection, number) -> number',
+      signature: '(distribution | collection<any>, number) -> number',
       evaluate: ([dist, p], { numericApproximation, engine: ce }) => {
         if (!dist || !p) return undefined;
         const pv = litVal(p);

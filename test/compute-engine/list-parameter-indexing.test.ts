@@ -142,7 +142,7 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
 
     // The parameter slot is no longer `unknown`, so `paramsAreScalar` is false.
     expect(ce.box('h').type.toString()).toBe(
-      '(dictionary | indexed_collection) -> broadcastable<number>'
+      '(dictionary<any> | indexed_collection<any>) -> broadcastable<number>'
     );
     // Before the fix this was `[h(3),h(4)]`.
     expect(ce.box(['h', ['List', 3, 4]]).evaluate().toString()).toBe('7');
@@ -295,7 +295,7 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
   test('the interpreter reads the key', () => {
     const ce = keyedEngine();
     expect(ce.box('k').type.toString()).toBe(
-      '(dictionary | indexed_collection) -> unknown'
+      '(dictionary<any> | indexed_collection<any>) -> unknown'
     );
     expect(ce.box(['k', REC]).evaluate().toString()).toBe('5');
   });
@@ -334,7 +334,7 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
     const ce = new ComputeEngine();
     const NUMERIC = ce.box(['Function', ['At', 'v', 1], 'v']);
     expect(NUMERIC.type.toString()).toBe(
-      '(v: dictionary | indexed_collection) -> unknown'
+      '(v: dictionary<any> | indexed_collection<any>) -> unknown'
     );
 
     const js = jsCompile(ce, NUMERIC);
@@ -377,7 +377,7 @@ describe('(d) inference: a point-accessor body infers a non-scalar parameter', (
   test('PointX(a): a list argument APPLIES, it does not broadcast', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'g', ['Function', ['PointX', 'a'], 'a']]).evaluate();
-    expect(ce.box('g').type.toString()).toBe('(collection | tuple) -> unknown');
+    expect(ce.box('g').type.toString()).toBe('(collection<any> | tuple) -> unknown');
     // Before the fix: `[g(3), g(4)]`, and `[null,null]` once compiled.
     expect(ce.box(['g', ['List', 3, 4]]).evaluate().toString()).toBe('3');
     const r = jsCompile(ce, ce.box(['g', ['List', 3, 4]]));

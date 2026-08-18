@@ -519,7 +519,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     ChineseRemainder: {
       description:
         'Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. Undefined if the system is inconsistent or the two lists differ in length.',
-      signature: '(collection, collection) -> integer',
+      signature: '(collection<any>, collection<any>) -> integer',
       examples: ['ChineseRemainder([2, 3, 2], [3, 5, 7])  // 23'],
       evaluate: ([residuesOp, moduliOp], { engine: ce }) => {
         const residues = Array.from(residuesOp?.each() ?? []).map(toBigint);
@@ -682,7 +682,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     FromContinuedFraction: {
       description:
         'Reconstruct the (rational) value of a continued fraction given its list of integer terms `[a0, a1, …]`.',
-      signature: '(collection) -> number',
+      signature: '(collection<any>) -> number',
       examples: ['FromContinuedFraction([2, 3, 1, 4])  // 43/19'],
       evaluate: ([listOp], { engine: ce }) => {
         const terms = Array.from(listOp?.each() ?? []).map(toBigint);
@@ -882,7 +882,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     FromDigits: {
       description:
         'Reconstruct an integer from its list of digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally (Horner evaluation).',
-      signature: '(collection, integer?) -> integer',
+      signature: '(collection<any>, integer?) -> integer',
       type: () => 'finite_integer',
       examples: ['FromDigits([1, 2, 3, 4])  // 1234'],
       evaluate: ([digitsOp, baseOp], { engine: ce }) => {

@@ -1,4 +1,5 @@
 import type { Expression } from '../global-types.js';
+import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import {
   isFunction,
@@ -2485,7 +2486,7 @@ function isPointListSource(e: Expression): boolean {
   if (t === 'tuple') return false;
   if (typeof t !== 'string' && (t.kind === 'tuple' || t.kind === 'union'))
     return false;
-  return e.type.matches('indexed_collection');
+  return e.type.matches('indexed_collection<any>');
 }
 
 /**
@@ -2637,7 +2638,7 @@ function compilePointSwizzle(
           : undefined
       : undefined;
 
-  if (pointArity === undefined && arg.type.matches('indexed_collection')) {
+  if (pointArity === undefined && arg.type.matches('indexed_collection<any>')) {
     const projected = compilePointListProjection(arg, idx, compile, target);
     if (typeof projected === 'string') return projected;
     throw new Error(
@@ -3329,7 +3330,7 @@ function compileGPUAt(
   // clusters) but this target has no strings at all, so the honest diagnostic
   // is the "provably not a number" one below, which names the type — the
   // diagnostic a string index has always received.
-  if (isSubtype(it, 'collection') && !isSubtype(it, 'string')) {
+  if (isSubtype(it, COLLECTION_SHAPE_TYPE) && !isSubtype(it, 'string')) {
     const k = BaseCompiler.aggregateComponentCount(index);
     // A NEGATIVE count is the type builder's encoding of an UNKNOWN extent
     // (`list<number^?>` → `dimensions: [-1]`), not a width — the same reading

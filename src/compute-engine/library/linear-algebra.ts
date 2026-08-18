@@ -274,7 +274,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // DECLINES (the call stays unevaluated), so the honest static type
         // is the declared result `value`, not `nothing` — `nothing` claimed
         // an absent value for an expression the runtime keeps intact.
-        if (!value.type.matches('list')) return 'value';
+        if (!value.type.matches('list<any>')) return 'value';
         const col = value.type.type as ListType;
         if (!isSubtype(col.elements, 'number')) return 'value';
         return parseType(

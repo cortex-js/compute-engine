@@ -44,6 +44,7 @@ import {
   type Threadable,
 } from './generic-instantiation.js';
 import { FunctionSignature, Type } from '../../common/type/types.js';
+import { adoptTopPlaceholderSlots } from './effects-inference.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
@@ -547,10 +548,51 @@ export function checkType(
   // Broadcastable operand: could be a plain scalar at runtime, admit it.
   if (broadcastableBaseMatches(arg.type.type, type)) return arg;
 
+  // Function-typed operand with placeholder slots: see
+  // `admitsPlaceholderSignature` below.
+  if (admitsPlaceholderSignature(arg, type)) return arg;
+
   // Overlap-deferred validation (§D6.2) — see validateArguments.
   if (overlapsForDeferredValidation(arg.type.type, type)) return arg;
 
   return ce.typeError(type, arg.type, arg);
+}
+
+/** The signature-kind arms a parameter type offers a function-typed operand:
+ * the type itself when it is a signature, the signature members of a union.
+ * Used by the placeholder-slot reconciliation below. */
+function signatureArmsOf(param: Type): FunctionSignature[] {
+  if (typeof param === 'object') {
+    if (param.kind === 'signature') return [param];
+    if (param.kind === 'union')
+      return param.types.filter(
+        (t): t is FunctionSignature =>
+          typeof t === 'object' && t.kind === 'signature'
+      );
+  }
+  return [];
+}
+
+/**
+ * A function-typed operand whose INFERRED signature carries placeholder
+ * `unknown` slots (inference put nothing there — e.g. `(x) => x` types as
+ * `(unknown) -> unknown`) reconciles those slots at the argument boundary,
+ * per the placeholder ruling (2026-08-15): each `unknown` slot adopts the
+ * expected parameter signature's slot, and the operand is admitted on the
+ * refined reading. This is what lets the identity lambda satisfy a parameter
+ * declared `(any) -> any`. It cannot live in the raw subtype relation —
+ * before the `any`/`unknown` lattice repair this admission rode on the
+ * erroneous `any <: unknown` edge, which made `(unknown) -> unknown` a
+ * mutual subtype of `(any) -> any`.
+ */
+function admitsPlaceholderSignature(op: Expression, param: Type): boolean {
+  const opType = op.type.type;
+  if (typeof opType !== 'object' || opType.kind !== 'signature') return false;
+  for (const expected of signatureArmsOf(param)) {
+    const refined = adoptTopPlaceholderSlots(opType, expected);
+    if (refined !== opType && isSubtype(refined, expected)) return true;
+  }
+  return false;
 }
 
 /**
@@ -1009,8 +1051,13 @@ export function validateArguments(
     solved && solved.unbound.size > 0
       ? {
           ...solved.bindings,
+          // An unbound variable DISPLAYS as `unknown`, the identity bound
+          // (bare-synonym ruling 2026-08-17): `reduceType` below then
+          // collapses `indexed_collection<unknown>` to the bare name, so an
+          // error message says "expected indexed_collection" rather than
+          // leaking the wider `indexed_collection<any>`.
           ...Object.fromEntries(
-            [...solved.unbound].map((v) => [v, 'any' as Type])
+            [...solved.unbound].map((v) => [v, 'unknown' as Type])
           ),
         }
       : undefined;
@@ -1213,6 +1260,12 @@ export function validateArguments(
         deferredIdx.add(result.length - 1);
         continue;
       }
+      // An inferred signature with placeholder `unknown` slots reconciles
+      // against the declared parameter (see `admitsPlaceholderSignature`).
+      if (admitsPlaceholderSignature(op, param)) {
+        result.push(op);
+        continue;
+      }
       result.push(ce.typeError(displayParams[idx] ?? param, op.type, op));
       isValid = false;
       continue;
@@ -1319,6 +1372,12 @@ export function validateArguments(
         i += 1;
         continue;
       }
+      // Placeholder-signature reconciliation — see the required-param gate.
+      if (admitsPlaceholderSignature(op, param)) {
+        result.push(op);
+        i += 1;
+        continue;
+      }
       result.push(
         ce.typeError(displayOptParams[i - params.length] ?? param, op.type, op)
       );
@@ -1422,6 +1481,11 @@ export function validateArguments(
         if (overlapsForDeferredValidation(op.type.type, varParam)) {
           result.push(op);
           deferredIdx.add(result.length - 1);
+          continue;
+        }
+        // Placeholder-signature reconciliation — see the required-param gate.
+        if (admitsPlaceholderSignature(op, varParam)) {
+          result.push(op);
           continue;
         }
         result.push(ce.typeError(displayVarParam ?? varParam, op.type, op));

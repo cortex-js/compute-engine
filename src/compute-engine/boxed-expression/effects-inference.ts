@@ -336,6 +336,48 @@ export function refineDeclaredPlaceholders(declared: Type, value: Type): Type {
   return refined;
 }
 
+/**
+ * The MIRROR of {@link refineDeclaredPlaceholders}, deliberately NARROWER: a
+ * VALUE's placeholder `unknown` slot adopts the expected signature's slot
+ * only when that slot is a TOP type (`any` — adopting `unknown` is a no-op).
+ * This is exactly the acceptance the `any`/`unknown` lattice repair
+ * (2026-08-17) orphaned: `(x) => x`, inferred `(unknown) -> unknown`, must
+ * still satisfy a parameter declared `(any) -> any`, which previously worked
+ * only via the erroneous `any <: unknown` edge. It must go NO wider: adopting
+ * a CONCRETE expected slot (`(number) -> number`) would silently ascribe a
+ * result type nothing proved — a `(unknown) -> unknown` value was refused at
+ * such a parameter before the repair, and still is.
+ */
+export function adoptTopPlaceholderSlots(value: Type, expected: Type): Type {
+  if (typeof value !== 'object' || value.kind !== 'signature') return value;
+  if (isPolymorphicType(value)) return value;
+  if (typeof expected !== 'object' || expected.kind !== 'signature')
+    return value;
+  if ((value.optArgs?.length ?? 0) > 0) return value;
+  if (value.variadicArg !== undefined) return value;
+  const vArgs = value.args ?? [];
+  const eArgs = expected.args ?? [];
+  if (vArgs.length !== eArgs.length) return value;
+
+  let argsChanged = false;
+  const args = vArgs.map((a, i) => {
+    if (a.type !== 'unknown') return a;
+    if (eArgs[i]?.type !== 'any') return a;
+    argsChanged = true;
+    return { ...a, type: 'any' as Type };
+  });
+  let resultChanged = false;
+  let result = value.result;
+  if (result === 'unknown' && expected.result === 'any') {
+    resultChanged = true;
+    result = 'any';
+  }
+  if (!argsChanged && !resultChanged) return value;
+  const refined = { ...value, result };
+  if (argsChanged) refined.args = args;
+  return refined;
+}
+
 export function matchesDeclaredTypeAxes(
   ce: ComputeEngine,
   value: BoxedType,
@@ -352,6 +394,17 @@ export function matchesDeclaredTypeAxes(
   if (!declared.isPolymorphic) {
     const refined = refineDeclaredPlaceholders(declared.type, value.type);
     if (refined !== declared.type) declared = ce.type(refined);
+  }
+  // The MIRROR reconciliation: the VALUE's own inferred signature can carry
+  // placeholder `unknown` slots too (a lambda whose body did not constrain a
+  // parameter types `(unknown) -> …`), and such a slot adopts a TOP-typed
+  // declared slot before compatibility is judged — this is what lets
+  // `vf: (any) -> any` accept `(y) => …`. Deliberately top-only (see
+  // `adoptTopPlaceholderSlots`): adopting a concrete declared slot would
+  // silently ascribe behavior nothing proved.
+  if (!declared.isPolymorphic) {
+    const refinedValue = adoptTopPlaceholderSlots(value.type, declared.type);
+    if (refinedValue !== value.type) value = ce.type(refinedValue);
   }
   // Declaration compatibility uses SUBTYPE semantics. `BoxedType.matches` on
   // a polymorphic pattern is the D12 existential QUERY ("does SOME

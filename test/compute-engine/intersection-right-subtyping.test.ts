@@ -36,28 +36,38 @@ describe('isSubtype with an intersection on the right', () => {
     expect(ce.type('number').matches('number & number')).toBe(true);
   });
 
-  test('preserves explicit `any` and `unknown` collection elements', () => {
+  test('bare constructors are `<unknown>` synonyms; explicit `any` survives', () => {
+    // User ruling 2026-08-17: a bare collection constructor is a SYNONYM for
+    // its `<unknown>` parameterization ("some list of values, element type
+    // not stated"), so the explicit `<unknown>` spelling normalizes to the
+    // bare canonical form. An explicit `<any>` is a different, strictly
+    // wider contract — it additionally admits absence elements — and
+    // survives normalization; it is NOT a subtype of the bare name.
     const ce = new ComputeEngine();
     for (const kind of ['list', 'set']) {
       expect(parseType(kind)).toBe(kind);
       expect(reduceType(parseType(kind))).toBe(kind);
 
-      for (const element of ['any', 'unknown']) {
-        const source = `${kind}<${element}>`;
-        expect(typeToString(parseType(source))).toBe(source);
-        expect(typeToString(reduceType(parseType(source)))).toBe(source);
-        expect(ce.type(source).toString()).toBe(source);
-        expect(ce.type(source).matches(`${source} & ${source}`)).toBe(true);
-        expect(ce.type(source).matches(`${kind} & ${kind}`)).toBe(true);
-      }
+      // `<unknown>` collapses to the bare synonym, in both directions.
+      expect(parseType(`${kind}<unknown>`)).toBe(kind);
+      expect(ce.type(`${kind}<unknown>`).toString()).toBe(kind);
+      expect(ce.type(kind).matches(`${kind}<unknown>`)).toBe(true);
+
+      // `<any>` survives and sits strictly ABOVE the bare name.
+      const source = `${kind}<any>`;
+      expect(typeToString(parseType(source))).toBe(source);
+      expect(typeToString(reduceType(parseType(source)))).toBe(source);
+      expect(ce.type(source).toString()).toBe(source);
+      expect(ce.type(source).matches(`${source} & ${source}`)).toBe(true);
+      expect(ce.type(kind).matches(source)).toBe(true);
+      expect(ce.type(source).matches(`${kind} & ${kind}`)).toBe(false);
     }
 
-    // A bare constructor admits its entire collection kind, including an
-    // absence element. Explicit `unknown` does not: absence is opt-in for
-    // placeholders.
+    // Absence elements are excluded from the values-only bare form (= its
+    // `<unknown>` synonym) and admitted by the explicit `<any>` contract.
     for (const kind of ['list', 'set']) {
-      expect(isSubtype(`${kind}<nothing>`, kind)).toBe(true);
-      expect(isSubtype(`${kind}<nothing>`, `${kind}<unknown>`)).toBe(false);
+      expect(isSubtype(`${kind}<nothing>`, kind)).toBe(false);
+      expect(isSubtype(`${kind}<nothing>`, `${kind}<any>`)).toBe(true);
     }
   });
 
@@ -113,9 +123,13 @@ describe('isSubtype with an intersection on the right', () => {
       dimensions: [3],
     });
 
-    // A `tensor` carries NO dimensions — its rank is unknown — so there is no
-    // shape to preserve and `tensor<any>` really is the bare primitive.
-    expect(parseType('tensor<any>')).toBe('list');
+    // A `tensor` carries NO dimensions — its rank is unknown — so there is
+    // no shape to preserve and the tensor spelling normalizes into the
+    // `list` family. Bare `list` means `list<unknown>` (user ruling
+    // 2026-08-17), so it is `tensor<unknown>` that collapses to the bare
+    // primitive; `tensor<any>` keeps its wider, absence-admitting element.
+    expect(parseType('tensor<unknown>')).toBe('list');
+    expect(parseType('tensor<any>')).toEqual({ kind: 'list', elements: 'any' });
   });
 
   test('round-trips every open-rank list spelling through the serializer', () => {
@@ -165,6 +179,78 @@ describe('intersection parameters at the call boundary', () => {
 
     expect(ce.box(['acceptIntersection', 7]).evaluate().toString()).toContain(
       'incompatible-type'
+    );
+  });
+});
+
+describe('`any` / `unknown` lattice (repaired 2026-08-17)', () => {
+  // `unknown` is the top of the VALUE types; `any` sits STRICTLY above it,
+  // additionally admitting the absence markers. `any <: unknown` used to be
+  // (wrongly) true, which made the two mutual subtypes while they disagreed
+  // on `nothing` — so the relation was not transitive.
+  test('`any` is strictly above `unknown`', () => {
+    expect(isSubtype('unknown', 'any')).toBe(true);
+    expect(isSubtype('any', 'unknown')).toBe(false);
+    expect(isSubtype('nothing', 'any')).toBe(true);
+    expect(isSubtype('nothing', 'unknown')).toBe(false);
+  });
+
+  test('transitivity holds through the list family', () => {
+    // The witness chain that used to break: with `any <: unknown`,
+    // `list<nothing> <: list<any> <: list<unknown>` both held while
+    // `list<nothing> <: list<unknown>` did not.
+    expect(isSubtype('list<nothing>', 'list<any>')).toBe(true);
+    expect(isSubtype('list<any>', 'list<unknown>')).toBe(false);
+    expect(isSubtype('list<nothing>', 'list<unknown>')).toBe(false);
+  });
+
+  test('a union with an absence arm is not a value type', () => {
+    // The blanket "everything <: unknown" rule must not admit a union whose
+    // arm is an absence marker — that is what keeps a Missing-bearing list
+    // out of the values-only bare `list`.
+    expect(isSubtype('integer | missing', 'unknown')).toBe(false);
+    expect(isSubtype('integer | string', 'unknown')).toBe(true);
+    expect(isSubtype('list<integer | missing>', 'list')).toBe(false);
+    expect(isSubtype('list<integer | missing>', 'list<any>')).toBe(true);
+  });
+
+  test('bare constructors relate as their `<unknown>` synonyms', () => {
+    expect(isSubtype('list', 'list<any>')).toBe(true);
+    expect(isSubtype('list<any>', 'list')).toBe(false);
+    expect(isSubtype('list', 'collection<unknown>')).toBe(true);
+    expect(isSubtype('list', 'list<integer>')).toBe(false);
+    expect(isSubtype('record', 'dictionary<unknown>')).toBe(true);
+    expect(isSubtype('tuple', 'indexed_collection')).toBe(true);
+    expect(isSubtype('tuple<integer, missing>', 'tuple')).toBe(false);
+  });
+
+  test('couldMatch sees overlap for a bare collection subject (Tycho F3)', () => {
+    // A bare subject expands to its `<unknown>` synonym before the overlap
+    // probes, so overlap no longer depends on one side happening to CONTAIN
+    // the other: `indexed_collection` overlaps both the more specific
+    // `list<tuple<…>>` and the less specific `collection<number>` (they meet
+    // in `indexed_collection<number>`). Disjoint kinds still refute.
+    const ce = new ComputeEngine();
+    expect(
+      ce.type('indexed_collection').couldMatch('list<tuple<number, number>>')
+    ).toBe(true);
+    expect(ce.type('indexed_collection').couldMatch('collection<number>')).toBe(
+      true
+    );
+    expect(ce.type('list<any>').couldMatch('collection<number>')).toBe(true);
+    expect(ce.type('list').couldMatch('set<number>')).toBe(false);
+  });
+
+  test('shape gates use the `<any>` family tops', () => {
+    // A `list<any>` or `list<nothing>` operand is still collection-SHAPED
+    // even though it is not a subtype of the values-only bare names; shape
+    // and capability gates therefore ask against `collection<any>` /
+    // `indexed_collection<any>` (see COLLECTION_SHAPE_TYPE, primitive.ts).
+    const ce = new ComputeEngine();
+    expect(ce.type('list<any>').matches('indexed_collection<any>')).toBe(true);
+    expect(ce.type('list<nothing>').matches('collection<any>')).toBe(true);
+    expect(ce.type('list<integer|missing>').matches('collection<any>')).toBe(
+      true
     );
   });
 });

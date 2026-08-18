@@ -53,6 +53,10 @@ import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { typeToDisplayString } from '../../common/type/display.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
 import { defaultCollectionHandlers } from '../collection-utils.js';
 import { registerProvisionalDependents } from './provisional-application.js';
 import { latestDeclaredEffectsSite } from './effects-provenance.js';
@@ -996,7 +1000,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // value it guards is one). Such an operator's result type is legitimately
     // not a collection type in general, so skip the static signature check.
     if (this.collection && !this.collection.isCollection) {
-      // Every free type variable read as its declared bound (`any` when
+      // Every free type variable read as its declared bound (`unknown` when
       // unbounded) — the D6 bound-reading this SUBJECT-LESS check uses (§5.1
       // of the type-variables design). It is what makes a migrated identity
       // echo (`(T) -> T where T: indexed_collection`) count as possibly
@@ -1008,11 +1012,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         throw new Error(
           `Operator Definition "${this.name}": a collection handler is defined, but the signature "${this.signature}" does not have a result type`
         );
-      if (!isSubtype(resultType, 'collection'))
+      if (!isSubtype(resultType, COLLECTION_SHAPE_TYPE))
         throw new Error(
           `Operator Definition "${this.name}": a collection handler is defined, but the signature "${this.signature}" is not a collection type`
         );
-      if (isSubtype(resultType, 'indexed_collection') && !this.collection.at) {
+      if (isSubtype(resultType, INDEXED_COLLECTION_SHAPE_TYPE) && !this.collection.at) {
         throw new Error(
           `Operator Definition "${this.name}" returns an indexed collection, but the 'at' handler is missing`
         );

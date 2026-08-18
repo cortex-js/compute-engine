@@ -825,9 +825,9 @@ describe('SLICE (range)', () => {
     expect(evaluate(['Slice', list, ['Range', 8, 9]])).toMatchInlineSnapshot(
       `["List"]`
     );
-    expect(evaluate(['Slice', emptyList, ['Range', 1, 3]])).toMatchInlineSnapshot(
-      `["List"]`
-    );
+    expect(
+      evaluate(['Slice', emptyList, ['Range', 1, 3]])
+    ).toMatchInlineSnapshot(`["List"]`);
   });
 
   test('every source kind the positional arm accepts', () => {
@@ -868,15 +868,19 @@ describe('SLICE (range)', () => {
     const ce = new ComputeEngine();
     ce.declare('r', 'range');
     ce.assign('r', ce.box(['Range', 2, 3]));
-    expect(ce.box(['ListFrom', ['Slice', list, 'r']]).evaluate().json).toEqual(
-      ['List', 13, 5]
-    );
+    expect(ce.box(['ListFrom', ['Slice', list, 'r']]).evaluate().json).toEqual([
+      'List',
+      13,
+      5,
+    ]);
     // Inferred from the assigned value: `Range(3, 4)` qualifies as a span.
     ce.assign('q', ce.box(['Range', 3, 4]));
     expect(ce.box('q').type.toString()).toBe('range');
-    expect(ce.box(['ListFrom', ['Slice', list, 'q']]).evaluate().json).toEqual(
-      ['List', 5, 19]
-    );
+    expect(ce.box(['ListFrom', ['Slice', list, 'q']]).evaluate().json).toEqual([
+      'List',
+      5,
+      19,
+    ]);
   });
 
   test('a span operand whose VALUE is not a span declines at run time', () => {
@@ -1405,7 +1409,9 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
         ['List', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]],
       ])
       .evaluate();
-    expect(d.type.toString()).toBe('record{a: finite_integer, b: finite_integer}');
+    expect(d.type.toString()).toBe(
+      'record{a: finite_integer, b: finite_integer}'
+    );
   });
 });
 

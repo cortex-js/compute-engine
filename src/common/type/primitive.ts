@@ -77,6 +77,69 @@ export const STRING_STRUCTURAL_TYPE: Type = Object.freeze({
   elements: 'character',
 }) as Type;
 
+/**
+ * The bare collection constructors are synonyms for their `<unknown>`
+ * parameterization (user ruling 2026-08-17): `list` IS `list<unknown>` — "a
+ * list of values, element type not stated" — and likewise `set`,
+ * `dictionary`, `collection` and `indexed_collection`. These are their
+ * structural expansions, used when a bare name meets a composite type in a
+ * subtype check. The list expansion deliberately carries NO dimensions: the
+ * bare form's rank is unconstrained. The explicit `<any>` spellings are the
+ * strictly wider, absence-admitting contracts — a bare name never expands to
+ * them.
+ *
+ * Frozen for the same reason `RANGE_STRUCTURAL_TYPE` is: shared by reference
+ * across every subtype call in the process.
+ */
+export const BARE_LIST_STRUCTURAL_TYPE: Type = Object.freeze({
+  kind: 'list',
+  elements: 'unknown',
+}) as Type;
+
+export const BARE_SET_STRUCTURAL_TYPE: Type = Object.freeze({
+  kind: 'set',
+  elements: 'unknown',
+}) as Type;
+
+export const BARE_DICTIONARY_STRUCTURAL_TYPE: Type = Object.freeze({
+  kind: 'dictionary',
+  values: 'unknown',
+}) as Type;
+
+export const BARE_COLLECTION_STRUCTURAL_TYPE: Type = Object.freeze({
+  kind: 'collection',
+  elements: 'unknown',
+}) as Type;
+
+export const BARE_INDEXED_COLLECTION_STRUCTURAL_TYPE: Type = Object.freeze({
+  kind: 'indexed_collection',
+  elements: 'unknown',
+}) as Type;
+
+/**
+ * The absence-admitting TOPS of the collection families, for SHAPE and
+ * capability gates ("is this operand collection-shaped?", "does it lower to
+ * an array?"). Since the bare-constructor synonym ruling (2026-08-17), a bare
+ * name in such a gate silently narrowed it to the values-only reading —
+ * `list<any>`, `list<nothing>` and `list<integer|missing>` all stopped
+ * matching `'collection'` — so shape questions must be asked against these
+ * instead. Frozen for the same sharing reason as the constants above.
+ */
+export const COLLECTION_SHAPE_TYPE: Type = Object.freeze({
+  kind: 'collection',
+  elements: 'any',
+}) as Type;
+
+export const INDEXED_COLLECTION_SHAPE_TYPE: Type = Object.freeze({
+  kind: 'indexed_collection',
+  elements: 'any',
+}) as Type;
+
+export const DICTIONARY_SHAPE_TYPE: Type = Object.freeze({
+  kind: 'dictionary',
+  values: 'any',
+}) as Type;
+
 export const COLLECTION_TYPES: PrimitiveType[] = [
   ...INDEXED_COLLECTION_TYPES,
   'collection',

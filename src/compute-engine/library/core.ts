@@ -432,7 +432,7 @@ function pipeImplicitMap(
   if (!isFunction(f, 'Function')) return undefined;
   if (f.nops !== 2) return undefined; // body + exactly one parameter
   if (isString(topic) || topic.type.matches('string')) return undefined;
-  if (!(topic.isCollection || topic.type.matches('collection')))
+  if (!(topic.isCollection || topic.type.matches('collection<any>')))
     return undefined;
   const rawParam = isFunction(rawStage, 'Function')
     ? rawStage.ops[1]
@@ -2338,7 +2338,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     Annotated: {
       description: 'Attach metadata or style annotations to an expression.',
-      signature: '(expression, dictionary) -> expression',
+      signature: '(expression, dictionary<any>) -> expression',
       type: ([x]) => x.type,
       complexity: 9000,
       lazy: true,
@@ -2884,7 +2884,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'earlier clause in place, any other clause is appended, and calls ' +
         'dispatch to the most specific clause admitting the arguments.',
       lazy: true,
-      signature: '(symbol, function, dictionary?) scope -> nothing',
+      signature: '(symbol, function, dictionary<any>?) scope -> nothing',
       invokes: false,
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2 && args.length !== 3) return null;
@@ -3855,8 +3855,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       // Introduces a binding in a scope that outlives the application: the
       // `scope` label (see `Assign`).
+      // The attributes bag's entry VALUES are arbitrary expressions — a
+      // `value` entry can be typed `range | nothing`, say — so the parameter
+      // is the absence-admitting `dictionary<any>`, not the values-only bare
+      // `dictionary` (= `dictionary<unknown>` since the bare-synonym ruling,
+      // 2026-08-17, which went inert on exactly that `let`).
       signature:
-        '(symbol, type: (string | symbol)?, value: any?, attributes: dictionary?) scope -> any',
+        '(symbol, type: (string | symbol)?, value: any?, attributes: dictionary<any>?) scope -> any',
       // A STORING writer, like `Assign`: no position applies a function-valued
       // operand, so `Declare(f, "function", randomLambda)` is `{scope}`. The
       // value's PRODUCTION effects still count.
@@ -4228,7 +4233,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Introduces a type binding in a scope that outlives the application:
       // the `scope` label (see `Declare`).
       signature:
-        '(symbol|string, type: string|symbol, attributes: dictionary?) scope -> nothing',
+        '(symbol|string, type: string|symbol, attributes: dictionary<any>?) scope -> nothing',
       // A STORING writer, like `Declare`: no position applies a
       // function-valued operand.
       invokes: false,
@@ -4322,7 +4327,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       // Introduces an engine-global declaration that outlives the
       // application: the `scope` label (see `DeclareType`).
-      signature: '(symbol|string, members: dictionary?) scope -> nothing',
+      signature: '(symbol|string, members: dictionary<any>?) scope -> nothing',
       // A STORING writer, like `DeclareType`: no position applies a
       // function-valued operand.
       invokes: false,
@@ -4361,7 +4366,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         '`Nothing`.',
       lazy: true,
       signature:
-        '(target: string|symbol, protocols: any, whereClauseOrImplementation: any?, implementation: dictionary?) scope -> nothing',
+        '(target: string|symbol, protocols: any, whereClauseOrImplementation: any?, implementation: dictionary<any>?) scope -> nothing',
       invokes: false,
       canonical: (args, { engine: ce }) => {
         const err = declareConformanceStatement(
@@ -5062,7 +5067,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // rejects `Random(5)` and `Random(5, 7)`. The `random` specifier is the
       // effect set: it consumes draws from the ambient seeded stream, hence
       // impure (the derived `pure`/`drawsRandom` getters read it).
-      signature: '((collection | set<real>)?) random -> any',
+      signature: '((collection<any> | set<real>)?) random -> any',
       type: ([domain]) => {
         if (domain === undefined) return 'finite_real';
         return randomElementType(domain);
@@ -5131,7 +5136,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `k` is typed `number`, not `integer`: a caller who computes a count
       // (`Count(xs)/2`, a fitted value, `4N` for a slider `N`) should not have
       // to round it first. It is rounded on evaluation.
-      signature: '(collection | set<real>, number) random -> list<any>',
+      signature: '(collection<any> | set<real>, number) random -> list<any>',
       type: ([domain, k]) => randomListType(domain, k),
       // IMPURE producer: decline-only, from the domain operand's facet alone
       // — zero draws, never `true` (the `at()` materialize fallback is
@@ -5223,7 +5228,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // removed during canonicalization.
       lazy: true,
 
-      signature: '(collection, any) -> any',
+      signature: '(collection<any>, any) -> any',
       type: ([op1, op2], { engine: ce }) => {
         // A string base is read as a NUMERAL in base `op2` — the whole
         // `isString(op1)` branch of the `canonical` handler below, never the

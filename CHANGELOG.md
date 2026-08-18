@@ -1,5 +1,43 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Bare collection types are now synonyms for their `<unknown>` form, and
+  `any` sits strictly above `unknown`.** A bare `list` (likewise `set`,
+  `dictionary`, `collection`, `indexed_collection`) means "some collection of
+  **values**, element type not stated" — exactly `list<unknown>`, and the two
+  spellings normalize to the bare form. Previously the docs equated bare
+  `list` with `list<any>`; that is now a **different, strictly wider type**:
+  `any` additionally admits the absence markers (`Nothing`, `Missing`), so a
+  `list<any>` accepts a `Missing`-bearing list while the bare `list` does
+  not. Consequences:
+  - `any <: unknown` is now **false** (it was true, which made the subtype
+    relation intransitive: `list<nothing> <: list<any> <: list<unknown>`
+    both held while `list<nothing> <: list<unknown>` did not).
+  - `list<nothing>` and `list<integer|missing>` are no longer `<: list`;
+    they are `<: list<any>`. Code that uses a bare collection name as a
+    *shape* test ("is this operand collection-shaped?") should test against
+    `collection<any>` / `indexed_collection<any>` instead — the engine's own
+    gates were converted.
+  - An unbounded type variable (`where T`) now reads as bound `unknown`
+    ("some value type"), not `any`; an explicit `: any` bound survives
+    serialization instead of being elided.
+  - `dictionary<any>`, `collection<any>` and `indexed_collection<any>` no
+    longer collapse to the bare name at parse time (that collapse now
+    silently *narrowed* them); `tensor<any>` normalizes to `list<any>`, and
+    it is `tensor<unknown>` that normalizes to bare `list`.
+  - `tuple<nothing>` reduces to `nothing` (a `nothing` slot collapses, and
+    the empty tuple is `nothing`) rather than widening to bare `tuple`.
+  - `couldMatch` now sees the overlap between a bare collection subject and
+    a parameterized target (`indexed_collection` couldMatch
+    `collection<number>` was false while the *more* specific
+    `list<tuple<…>>` was true).
+  - An inferred function literal such as `(x) => x` (typed
+    `(unknown) -> unknown`) is still accepted at a parameter declared
+    `(any) -> any` — placeholder slots reconcile at the argument boundary
+    (previously this worked only by riding on the erroneous
+    `any <: unknown` edge).
+
 ### New Features
 
 - **Regular expressions (Strings Phase 3).** A new primitive type `regexp`,

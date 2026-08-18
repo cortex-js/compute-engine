@@ -204,7 +204,11 @@ export function conditionalTargetInstance(
 
 /**
  * The WIDEST instantiation of a conditional target: every clause variable read
- * as its declared bound (`any` when unbounded).
+ * as its declared bound (`unknown` — "some value type" — when unbounded,
+ * matching the solver's S3 rule and `readTypeVariablesAsBounds`; NOT `any`,
+ * which since the bare-constructor synonym ruling of 2026-08-17 would take
+ * `list<T>` OUT of the `list` family — `list<any> ⊄ list` — and stall the
+ * lattice-inheritance pass below on every unbounded clause).
  *
  * A ground stand-in for the whole family of instantiations, used wherever a
  * conditional edge has to be compared against another target with no receiver
@@ -217,6 +221,6 @@ export function widestConditionalTarget(
   params: readonly TypeParameter[]
 ): Type {
   const bindings: Record<string, Type> = Object.create(null);
-  for (const p of params) bindings[p.name] = p.bound ?? 'any';
+  for (const p of params) bindings[p.name] = p.bound ?? 'unknown';
   return substituteTypeVariables(head, bindings);
 }

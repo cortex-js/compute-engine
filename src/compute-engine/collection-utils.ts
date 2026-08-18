@@ -948,7 +948,7 @@ export function isPossiblyCollectionTyped(expr: Expression): boolean {
  * `isValuelessCollectionTyped(x) || isPossiblyCollectionTyped(x)`.
  */
 export function isValuelessCollectionTyped(expr: Expression): boolean {
-  return !expr.isCollection && expr.type.matches('collection');
+  return !expr.isCollection && expr.type.matches('collection<any>');
 }
 
 /**
@@ -1058,7 +1058,34 @@ export function isDeclaredScalarNumber(expr: Expression): boolean {
  * evaluation stops at the first deciding operand.
  */
 export function isCollectionShaped(x: Expression): boolean {
-  return x.type.matches('collection') && !x.type.matches('tuple');
+  return x.type.matches('collection<any>') && !isTupleShapedType(x.type.type);
+}
+
+/**
+ * Is this type a TUPLE, structurally — the bare `tuple` primitive or any
+ * composite tuple, regardless of its slot types?
+ *
+ * Shape exclusions must use this rather than `matches('tuple')`: since the
+ * bare-synonym ruling (2026-08-17) bare `tuple` is values-only, so an
+ * absence-slotted tuple (`tuple<integer, missing>`) does NOT match it — and
+ * there is no `tuple<any>` family-top spelling (a `tuple<any>` is a 1-tuple
+ * whose slot is `any`). A gate that means "tuples are atomic, never mapped
+ * over" must therefore recognize the KIND, not the values-only subtype.
+ */
+export function isTupleShapedType(t: Type): boolean {
+  return t === 'tuple' || (typeof t === 'object' && t.kind === 'tuple');
+}
+
+/**
+ * Is this type a RECORD, structurally — the bare `record` primitive or any
+ * composite record, regardless of its field types? Same rationale as
+ * {@link isTupleShapedType}: `record<any>` is not a spellable type, so a
+ * record shape gate cannot be widened the way the `dictionary<any>` gates
+ * were, and `matches('record')` wrongly excludes a record with an
+ * absence-typed field.
+ */
+export function isRecordShapedType(t: Type): boolean {
+  return t === 'record' || (typeof t === 'object' && t.kind === 'record');
 }
 
 /**

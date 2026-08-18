@@ -1247,7 +1247,13 @@ export function readTypeVariablesAsBounds(t: Type): Type {
     return { ...t, types: t.types.map(readTypeVariablesAsBounds) };
   if (t.kind !== 'signature') return t;
   const bindings: TypeBindings = Object.create(null);
-  for (const p of t.typeParams ?? []) bindings[p.name] = p.bound ?? 'any';
+  // An unbounded variable reads as `unknown` — "some value type", the same
+  // reading the solver's S3 rule gives it — NOT as `any`: `any` is the
+  // absence-admitting top, and reading `list<T> where T` as `list<any>`
+  // would take a constructor result OUT of its own collection family (bare
+  // `collection` is the values-only `collection<unknown>` synonym, user
+  // ruling 2026-08-17, and `list<any> ⊄ collection`).
+  for (const p of t.typeParams ?? []) bindings[p.name] = p.bound ?? 'unknown';
   return substituteTypeVariables(t, bindings);
 }
 

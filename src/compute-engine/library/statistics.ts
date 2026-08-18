@@ -291,7 +291,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Mean: {
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection|number|distribution)+) -> number',
+      signature: '((collection<any>|number|distribution)+) -> number',
       // A data-consuming aggregate (§3.C): result type is the numeric base
       // with NO `| missing` arm (I6 absorption) — `number`, NOT `finite_real`,
       // because an absent datum or empty input evaluates to `NaN`.
@@ -325,7 +325,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Median: {
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection|number)+) -> number',
+      signature: '((collection<any>|number)+) -> number',
       type: () => 'number',
       missingBehavior: 'handle',
       description: 'Median of a collection of numbers.',
@@ -353,7 +353,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Sample variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection|number|distribution)+) -> number',
+      signature: '((collection<any>|number|distribution)+) -> number',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -383,7 +383,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Population variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection|number)+) -> number',
+      signature: '((collection<any>|number)+) -> number',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -410,7 +410,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       description: 'Sample Standard Deviation of a collection of numbers.',
       keywords: ['stdev', 'std'],
-      signature: '((collection|number|distribution)+) -> number',
+      signature: '((collection<any>|number|distribution)+) -> number',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -443,7 +443,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       description: 'Population Standard Deviation of a collection of numbers.',
-      signature: '((collection|number)+) -> number',
+      signature: '((collection<any>|number)+) -> number',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -472,7 +472,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Kurtosis of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection|number)+) -> number',
+      signature: '((collection<any>|number)+) -> number',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -498,7 +498,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Skewness of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection|number)+) -> number',
+      signature: '((collection<any>|number)+) -> number',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -524,7 +524,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Most frequently occurring value in a collection.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection|number)+) -> number',
+      signature: '((collection<any>|number)+) -> number',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -557,7 +557,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature:
-        '((collection|number)+) -> tuple<mid:number, lower:number, upper:number>',
+        '((collection<any>|number)+) -> tuple<mid:number, lower:number, upper:number>',
       missingBehavior: 'handle',
       examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)'],
       // Decline-only: a definitively-unavailable datum (a valueless symbol)
@@ -602,7 +602,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Interquartile range (Q3 - Q1) of a collection.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection|number)+) -> number',
+      signature: '((collection<any>|number)+) -> number',
       type: () => 'number',
       missingBehavior: 'handle',
 
@@ -637,7 +637,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // (`computeBinning` returns undefined) — width semantics are the
       // importer's to translate (e.g. to explicit bin edges).
       signature:
-        '(collection, number | list<number>) -> list<tuple<number, integer>>',
+        '(collection<any>, number | list<number>) -> list<tuple<number, integer>>',
       examples: [
         'Histogram([1, 2, 2, 3], 3)  // Returns [(1,1), (1.6667,2), (2.3333,1)]',
       ],
@@ -664,7 +664,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Count the number of elements falling into each bin.',
       complexity: 8200,
       // Same widened bin spec as Histogram (non-integer counts stay inert).
-      signature: '(collection, number | list<number>) -> list<number>',
+      signature: '(collection<any>, number | list<number>) -> list<number>',
       examples: ['BinCounts([1, 2, 2, 3], 3)  // Returns [1, 2, 1]'],
       // Decline-only, same `computeBinning` precondition as `Histogram`.
       canEnumerate: canEnumerateFiniteSource,
@@ -757,7 +757,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'equal-length collections or one collection of (x, y) pairs.',
       complexity: 1200,
       broadcastable: false,
-      signature: '(collection, collection?) -> number',
+      signature: '(collection<any>, collection<any>?) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCovariance(ce, ops, !!numericApproximation, false),
@@ -769,7 +769,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'equal-length collections or one collection of (x, y) pairs.',
       complexity: 1200,
       broadcastable: false,
-      signature: '(collection, collection?) -> number',
+      signature: '(collection<any>, collection<any>?) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCovariance(ce, ops, !!numericApproximation, true),
@@ -781,7 +781,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'equal-length collections or one collection of (x, y) pairs.',
       complexity: 1200,
       broadcastable: false,
-      signature: '(collection, collection?) -> number',
+      signature: '(collection<any>, collection<any>?) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCorrelation(ce, ops, !!numericApproximation),

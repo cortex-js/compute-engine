@@ -121,7 +121,11 @@ function groundVacuousVariables(erased: Type): Type {
   const bindings: Record<string, Type> = Object.create(null);
   for (const p of typeParams)
     if ((occurrences.get(p.name) ?? 0) <= 1)
-      bindings[p.name] = p.bound ?? 'any';
+      // An unbounded variable grounds as `unknown` — the identity bound
+      // since the bare-synonym ruling (2026-08-17) — so `collection<T>`
+      // displays as the bare `collection` (which `reduceType` collapses),
+      // not as the wider `collection<any>`.
+      bindings[p.name] = p.bound ?? 'unknown';
   const grounded = substituteTypeVariables(erased, bindings);
   // The variables the projection KEPT must still form a declarable clause.
   // `validateDeclaredType` throws when they do not; the caller falls back.

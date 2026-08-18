@@ -440,7 +440,71 @@ top-level refinable slot, and it also excludes absence elements that the bare
 constructors admit. Dimensioned forms such as `list<any^2x3>` remain intact as
 well.
 
-### Bare collection constructors still normalize away an explicit `<any>`, inconsistently with `list`/`set` (OPEN, convention — found 2026-08-17 while applying the `list<any>`/`set<any>` ruling; DEFERRED by the user the same day)
+### Bare collection constructors: RULED AND IMPLEMENTED 2026-08-17 — bare `X` IS `X<unknown>`; `any` sits strictly above `unknown`
+
+**RULING (user, 2026-08-17, the deferred whole-family revisit):** a bare
+collection constructor is a SYNONYM for its `<unknown>` parameterization —
+"some list of values, element type not stated" — because `list<any>` is "too
+specific a contract" for the informal bare spelling. This SUPERSEDES the
+prior doc line "`list` is equivalent to `list<any>`" and the recorded
+rationale "the bare form admits absence elements". Implemented the same day
+(this session), together with the audit fixes below. The new invariants:
+
+- **Primitive lattice:** `any` is STRICTLY above `unknown`
+  (`any <: unknown` is now false — it was true, breaking transitivity); a
+  union with an absence arm is not `<: unknown`.
+- **Synonyms:** `X<unknown>` normalizes to bare `X` at parse and reduce for
+  `list` (dimensionless), `set`, `dictionary`, `collection`,
+  `indexed_collection`, and `tensor<unknown>` → `list`. The `<any>` collapses
+  in the AST builder were REMOVED (they now silently narrowed);
+  `tensor<any>` → `list<any>`.
+- **Relation:** bare names expand to `<unknown>` structural synonyms on both
+  sides of `isSubtype` (constants in `primitive.ts`); bare `record`/`tuple`
+  get the same values-only reading (closure coherence: `record <: dictionary`
+  and `tuple <: indexed_collection`). `list<nothing>` and
+  `list<…|missing>` are NOT `<: list` any more; they are `<: list<any>`.
+- **Unbounded type variables** read as bound `unknown` (not `any`):
+  `readTypeVariablesAsBounds`, `widestConditionalTarget`; the serializer now
+  elides `: unknown` (not `: any`, which survives). Residual `?? 'any'`
+  bound-defaults remain in `engine-protocols.ts` (2 sites, nominal type-param
+  defs) and `engine-declarations.ts` (1 site) — untouched, tests green;
+  revisit if a bound-reading bug surfaces there.
+- **Shape/capability gates** ask against the absence-admitting family tops
+  (`COLLECTION_SHAPE_TYPE` / `INDEXED_COLLECTION_SHAPE_TYPE` /
+  `DICTIONARY_SHAPE_TYPE` in `primitive.ts`, or the string
+  `'collection<any>'` for `matches()`), never bare names — a bare name in a
+  gate now means values-only. ~25 engine sites swept.
+- **Placeholder lambdas:** `(x) => x` (inferred `(unknown) -> unknown`) is
+  admitted at a `(any) -> any` parameter by placeholder-slot reconciliation
+  in `validate.ts` (`admitsPlaceholderSignature`) — this admission previously
+  rode on the erroneous `any <: unknown` edge.
+- **couldMatch** expands bare subjects and probes cross-kind collection
+  overlap (fixes the Tycho-reported F3 asymmetry: `indexed_collection`
+  couldMatch `collection<number>` was false while the more specific
+  `list<tuple<…>>` was true).
+
+Pins: `test/compute-engine/intersection-right-subtyping.test.ts` (lattice,
+synonyms, shape tops, F3), `test/common/types.test.ts`.
+
+**Follow-up track:** collection-ELEMENT inference — refining a declared
+bare `list`'s placeholder element slot from assignments and uses, per the
+"`unknown` means refine-later" intent — is designed in
+[`docs/INFERENCE_ROADMAP.md`](./docs/INFERENCE_ROADMAP.md) (drafted
+2026-08-18, three phases, three open rulings R1–R3; nothing implemented).
+
+**Residual, deliberate:** `dictionary<nothing>` still reduces to `error`
+(needs its own ruling — a `Nothing` dictionary value means "entry absent", so
+the type may be genuinely uninhabited); `reduceListType` still drops
+dimensions on a `nothing` element (consistent with value-level slot
+collapse); there is no absence-admitting spelling for "any tuple" (bare
+`tuple` is now values-only; a `tuple<…, missing, …>` value matches only
+`any`-family supertypes and its exact spelling); `['Nothing']` (CALL form)
+survives as an inert element with a type that omits it, while the SYMBOL
+collapses — needs a ruling on whether `Nothing()` is an error or the symbol.
+
+The original OPEN entry follows for provenance.
+
+### Bare collection constructors still normalize away an explicit `<any>`, inconsistently with `list`/`set` (RESOLVED by the ruling above — found 2026-08-17 while applying the `list<any>`/`set<any>` ruling; DEFERRED by the user the same day)
 
 The ruling above settled `list` and `set`: an explicit element argument is a
 contract and survives both parse and `reduceType()`. Three constructors were
@@ -470,6 +534,67 @@ What to decide when it is picked up: whether a bare constructor and its
 `<any>` form are the same type (today they differ for `list`/`set` and agree
 for the other three), and whether `<unknown>` follows `<any>` or stays
 distinct.
+
+**Whole-family audit 2026-08-17 (the revisit session): additional defects
+found, beyond the spelling split above.** Each verified empirically via
+`parseType`+`reduceType`/`isSubtype` probes:
+
+1. **`any <: unknown` is TRUE — and this one IS a subtyping bug, breaking
+   transitivity.** In both `isPrimitiveSubtype` (`subtype.ts` ~213) and
+   `isSubtype` (~949), the blanket rule `rhs === 'unknown' → true` fires when
+   the LEFT side is `any`, even though the adjacent comment states `unknown`
+   "is a subtype only of `any`/`unknown`" — i.e. `any` is meant to be
+   STRICTLY above (it admits `nothing`/`missing`/`error`, which `unknown`
+   excludes by the 2026-08-15 placeholder ruling). Consequence chain:
+   `list<nothing> <: list<any>` (true) and `list<any> <: list<unknown>`
+   (true, via the bad edge under covariance) but `list<nothing> <:
+   list<unknown>` (false) — the relation is not transitive, so
+   `reduceUnionType`/`meet2` tie-breaks can be operand-order-dependent. The
+   2026-08-15 "do not flip" warning covers making `unknown <: T` true
+   (unknown on the LEFT); this is the other, uncovered edge (`any` on the
+   left). Candidate fix: guard `lhs !== 'any'` before the unknown rule, in
+   both functions.
+2. **`list <: list<any>` is FALSE while `list<any> <: list` is TRUE** (same
+   for `set`). No value separates the two types — `nothing <: any`, so
+   `list<any>` admits absence elements exactly as bare `list` does
+   (`list<nothing> <: list<any>` is already true). They denote the same set
+   and should be mutual subtypes; the missing edge is the default
+   primitive-left/composite-right rejection (same mechanism as the
+   FIXED intersection entry above).
+3. **`tuple<nothing>` reduces to bare `tuple`** — drops the explicit
+   argument, the exact collapse the `list<any>`/`set<any>` ruling forbids
+   (and wrong as a set: bare `tuple` accepts every tuple, `tuple<nothing>`
+   only the 1-tuple of an absence marker).
+4. **`vector<nothing>` and `matrix<nothing>` reduce to `list<nothing>`** —
+   the rank/dimension information is dropped (compare the FIXED unsized
+   `vector` rank-drop in the entry above; this is the same loss on the
+   reduce path).
+5. **`dictionary<nothing>` reduces to `error`** (explicit line in
+   `reduceDictionaryType`, `reduce.ts` ~694) while `list<nothing>` is a
+   valid, ruled-meaningful type. Possibly intentional (a dictionary value
+   slot holding `Nothing` means the entry is absent, so the type is
+   uninhabitable) — needs a ruling either way; if kept, the asymmetry with
+   `list<nothing>` should be documented where `nothing` is documented.
+6. **`record<any>` / `record<unknown>` are PARSE errors** while
+   `dictionary<any>` parses (and collapses). Likely fine — `record` takes
+   named entries, not an element type — but the grammar asymmetry belongs in
+   the same sweep.
+7. **Element-type inference vs the `Nothing()` CALL form:** `ce.box(['List',
+   1, ['Nothing']])` keeps `Nothing()` as a live element yet types as
+   `list<finite_integer>` — the element union omits a value actually present
+   and the length is dropped — while the bare SYMBOL `Nothing` collapses the
+   slot as documented (`[1]`, `vector<finite_integer^1>`). The call form and
+   the symbol form should agree.
+
+Working notes for the ruling: the coherent target lattice is `any` strictly
+top; `unknown` the top of VALUE types; bare `X` ≡ `X<any>` as sets (mutual
+subtypes, both spellings surviving normalization per the contract ruling);
+`X<unknown>` strictly below both. Declared-symbol behavior verified correct
+meanwhile: `let a: list` keeps `list` as the symbol's static type (contract),
+an undeclared symbol infers the value's exact type and re-infers on every
+assignment (`vector<finite_integer^3>` → `vector<finite_integer^2>` →
+`list<string^2>`), and assignment violations surface as `incompatible-type`
+error values.
 
 ### `dictionary<unknown>` reduced to the TOP type `any`, so a union containing one accepted everything (FIXED 2026-08-17 — found while applying the `list<any>`/`set<any>` ruling)
 

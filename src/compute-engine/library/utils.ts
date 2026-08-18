@@ -16,6 +16,7 @@ import { numericValueOf } from '../boxed-expression/numerics.js';
 
 import { checkDeadline } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
 import {
@@ -45,7 +46,7 @@ import { isTuple, isValuelessCollectionTyped } from '../collection-utils.js';
 export function pointNormBroadcasts(point: Expression): boolean {
   if (isFunction(point))
     return point.ops.some(
-      (op) => op.type.matches('indexed_collection') && !isTuple(op)
+      (op) => op.type.matches('indexed_collection<any>') && !isTuple(op)
     );
   const t = point.type.type;
   return (
@@ -54,7 +55,7 @@ export function pointNormBroadcasts(point: Expression): boolean {
     t.elements.some((el) => {
       const et = el.type;
       if (typeof et !== 'string' && et.kind === 'tuple') return false;
-      return isSubtype(et, 'indexed_collection');
+      return isSubtype(et, INDEXED_COLLECTION_SHAPE_TYPE);
     })
   );
 }

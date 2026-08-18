@@ -248,13 +248,15 @@ describe('Collection Type Parser', () => {
   });
 
   it('should parse a list expression with dimensions and no type', () => {
+    // The omitted element type is `unknown`, the bare-`list` synonym reading
+    // (user ruling 2026-08-17) — not the wider, absence-admitting `any`.
     expect(parseType('list<2x3>')).toMatchInlineSnapshot(`
       {
         "dimensions": [
           2,
           3,
         ],
-        "elements": "any",
+        "elements": "unknown",
         "kind": "list",
       }
     `);
@@ -1396,7 +1398,11 @@ describe('reduceType Tests', () => {
   });
 
   it('should handle collections of anything', () => {
-    expect(reduce('collection<any>')).toMatchInlineSnapshot(`"collection"`);
+    // `collection<any>` is the absence-admitting contract and survives; it
+    // is the `<unknown>` spelling that is the synonym of the bare name and
+    // collapses (user ruling 2026-08-17).
+    expect(reduce('collection<any>')).toMatchInlineSnapshot(`"collection<any>"`);
+    expect(reduce('collection<unknown>')).toMatchInlineSnapshot(`"collection"`);
   });
 
   // Test Cases for Function Signatures

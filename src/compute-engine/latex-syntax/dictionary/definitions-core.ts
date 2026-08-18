@@ -366,7 +366,7 @@ function parseComponentAccess(
     const lhsSym = symbol(lhs);
     if (
       lhsSym !== null &&
-      parser.resolveSymbol(lhsSym)?.type.matches('dictionary')
+      parser.resolveSymbol(lhsSym)?.type.matches('dictionary<any>')
     ) {
       let key = '';
       while (typeof parser.peek === 'string' && /^[a-zA-Z]$/.test(parser.peek))
@@ -2048,7 +2048,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (
         rhs !== null &&
         ((sym &&
-          parser.resolveSymbol(sym)?.type.matches('indexed_collection')) ||
+          parser.resolveSymbol(sym)?.type.matches('indexed_collection<any>')) ||
           operator(lhs) === 'List')
       ) {
         // Unwrap Delimiter if present (e.g. from comma-separated subscripts)
@@ -3460,7 +3460,7 @@ function absorbPrimeSubscript(
       const joined = absorbSubscripts(
         parser,
         id,
-        info?.type.matches('indexed_collection') ?? false
+        info?.type.matches('indexed_collection<any>') ?? false
       );
       if (joined !== id) return joined;
       // `absorbSubscripts()` can consume input yet return the base name
@@ -4707,7 +4707,7 @@ function parseAssign(
         (typeof subscript === 'string' && subscript.length === 1));
 
     if (
-      parser.resolveSymbol(baseName)?.type.matches('indexed_collection') ||
+      parser.resolveSymbol(baseName)?.type.matches('indexed_collection<any>') ||
       (!isLocalBindingContext && simpleSequenceLikeSubscript)
     ) {
       // Base is a collection, or this is a top-level sequence-like assignment
@@ -4755,7 +4755,7 @@ function parseAssign(
 
     // In local-binding contexts, if the base is NOT a known collection,
     // treat simple subscripted names as compound symbols for assignment.
-    if (!parser.resolveSymbol(fn)?.type.matches('indexed_collection')) {
+    if (!parser.resolveSymbol(fn)?.type.matches('indexed_collection<any>')) {
       const sub = operand(lhs, 2);
       const subStr =
         (sub !== null && typeof sub === 'string' ? sub : undefined) ??

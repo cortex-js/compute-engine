@@ -90,7 +90,10 @@ import { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { NUMERIC_TYPES } from '../../common/type/primitive.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  NUMERIC_TYPES,
+} from '../../common/type/primitive.js';
 import {
   absorbNumericAbsence,
   broadcastElementType,
@@ -2388,7 +2391,7 @@ export class BoxedFunction
     // (to access its keys), but can be indexed or not, depending on the
     // input collection
 
-    return this.type.matches('indexed_collection');
+    return this.type.matches('indexed_collection<any>');
   }
 
   get isLazyCollection(): boolean {
@@ -3399,7 +3402,7 @@ export class BoxedFunction
           // until the value arrives, which is the honest undecided answer.
           // This test must stay in lockstep with its twin in `evaluateAsync`
           // (step 3a) — the two gates decide the same question on two routes.
-          !tail.some((x) => x.isCollection || x.type.matches('collection'))
+          !tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
         ) {
           if (behavior === 'reject')
             return this.engine.error([
@@ -3866,7 +3869,7 @@ export class BoxedFunction
         if (
           (behavior === 'propagate' || behavior === 'reject') &&
           tail.some((x) => isSymbol(x, 'Missing')) &&
-          !tail.some((x) => x.isCollection || x.type.matches('collection'))
+          !tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
         ) {
           if (behavior === 'reject')
             return this.engine.error([
@@ -4297,7 +4300,7 @@ function skipBroadcastForVectorOps(
         !isTextAtom(x) &&
         (x.isCollection ||
           isPossiblyCollectionTyped(x) ||
-          x.type.matches('collection'))
+          x.type.matches('collection<any>'))
     ).length >= 2
   )
     return true;
@@ -4326,7 +4329,7 @@ function skipBroadcastForVectorOps(
     (ops[0].isCollection ||
       (!ops[0].type.isUnknown &&
         ops[0].type.type !== 'any' &&
-        ops[0].type.matches('collection')))
+        ops[0].type.matches('collection<any>')))
   )
     return true;
   return false;
@@ -4701,10 +4704,10 @@ function type(expr: BoxedFunction): Type {
           expr.operator === 'Negate';
         const deferToHandler =
           handlerOwnsCollectionTyping &&
-          (isSubtype(sigResult, 'collection') ||
+          (isSubtype(sigResult, COLLECTION_SHAPE_TYPE) ||
             (typeof sigResult !== 'string' &&
               sigResult.kind === 'union' &&
-              sigResult.types.some((m) => isSubtype(m, 'collection'))));
+              sigResult.types.some((m) => isSubtype(m, COLLECTION_SHAPE_TYPE))));
         const broadcastingOps = expr.ops.filter(
           (x, i) =>
             // Per-slot when the signature DECLARES `broadcastable<T>` slots: an
@@ -4753,7 +4756,7 @@ function type(expr: BoxedFunction): Type {
           // a collection `sigResult` and fall through unchanged.
           if (
             deferToHandler &&
-            isSubtype(sigResult, 'collection') &&
+            isSubtype(sigResult, COLLECTION_SHAPE_TYPE) &&
             staticCollectionDims(sigResult) !== null
           )
             return maybeAbsorb(sigResult);
@@ -4884,10 +4887,10 @@ function type(expr: BoxedFunction): Type {
           // list mixes encodings and breaks `evaluated ⊆ declared` (the
           // value is a rank-2 tensor with scalar leaves).
           const collectionValued =
-            isSubtype(lambdaResult, 'collection') ||
+            isSubtype(lambdaResult, COLLECTION_SHAPE_TYPE) ||
             (typeof lambdaResult !== 'string' &&
               lambdaResult.kind === 'union' &&
-              lambdaResult.types.some((m) => isSubtype(m, 'collection')));
+              lambdaResult.types.some((m) => isSubtype(m, COLLECTION_SHAPE_TYPE)));
           if (collectionValued) return broadcastResultType(lambdaResult);
           // Shape-aware (§D6.1): the map preserves the source's structure.
           return broadcastShapedResultType(
@@ -4994,10 +4997,10 @@ function type(expr: BoxedFunction): Type {
           // site above, `sigResult` is already the PER-ELEMENT result, so the
           // ordinary wrap below is the whole answer on this route too.
           const collectionValued =
-            isSubtype(sigResult, 'collection') ||
+            isSubtype(sigResult, COLLECTION_SHAPE_TYPE) ||
             (typeof sigResult !== 'string' &&
               sigResult.kind === 'union' &&
-              sigResult.types.some((m) => isSubtype(m, 'collection')));
+              sigResult.types.some((m) => isSubtype(m, COLLECTION_SHAPE_TYPE)));
           if (collectionValued) return broadcastResultType(sigResult);
           return broadcastShapedResultType(
             mapped.map((x) => x.type.type),

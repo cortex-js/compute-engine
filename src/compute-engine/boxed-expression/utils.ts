@@ -87,11 +87,18 @@ export function hasSymbolicTranscendental(expr: Expression): boolean {
 }
 
 export function isDictionary(expr: unknown): expr is DictionaryInterface {
+  // A CAPABILITY guard, so it asks against the absence-admitting family top
+  // `dictionary<any>`: bare `dictionary` is the values-only
+  // `dictionary<unknown>` synonym (user ruling 2026-08-17), and an
+  // attributes bag whose entry value types carry an absence arm (a `value`
+  // entry typed `range | nothing`, say) is still a dictionary — testing the
+  // bare name made `Declare` fail to recognize exactly such a bag and go
+  // inert.
   return (
     expr !== null &&
     expr !== undefined &&
     expr instanceof _BoxedExpression &&
-    expr.type.matches('dictionary')
+    expr.type.matches('dictionary<any>')
   );
 }
 

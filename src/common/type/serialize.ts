@@ -315,19 +315,23 @@ export function typeToString(type: Type, precedence = 0): string {
           : ` ${effectSetToString(type.effects)}`;
       // The trailing `where` clause, emitted with the author's variable names
       // (they round-trip by construction). An unbounded variable — including
-      // an author-written explicit `: any`, which is the identity bound —
-      // emits the SHORTHAND (`where T`), so a type has exactly one canonical
-      // string (the serialization ruling of the where-clause spec). A polytype
-      // has SIGNATURE_PRECEDENCE, so an arm of an overload set is
-      // parenthesized by the check below, exactly as the per-arm clause
-      // syntax requires.
+      // an author-written explicit `: unknown`, which since the bare-synonym
+      // ruling (2026-08-17) is the identity bound (`where T` means "some
+      // value type") — emits the SHORTHAND (`where T`), so a type has
+      // exactly one canonical string (the serialization ruling of the
+      // where-clause spec). An explicit `: any` bound is a DIFFERENT, wider
+      // contract (it admits absence markers) and must survive serialization
+      // — eliding it round-tripped `T: any` into the narrower unbounded
+      // reading. A polytype has SIGNATURE_PRECEDENCE, so an arm of an
+      // overload set is parenthesized by the check below, exactly as the
+      // per-arm clause syntax requires.
       const clause = type.typeParams?.length
         ? ` where ${type.typeParams
             .map((p) => {
               const bound =
                 p.bound === undefined ? undefined : typeToString(p.bound);
               const decl =
-                bound === undefined || bound === 'any'
+                bound === undefined || bound === 'unknown'
                   ? p.name
                   : `${p.name}: ${bound}`;
               return p.protocols?.length

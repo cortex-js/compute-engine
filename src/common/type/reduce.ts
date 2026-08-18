@@ -554,8 +554,12 @@ function reduceCollectionType(
   // A collection of `nothing` is an empty collection
   if (reducedType === 'nothing') return decorate({ kind, elements: 'nothing' });
 
-  // A collection of `any` is a collection
-  if (reducedType === 'any') return kind;
+  // The bare constructor is the canonical spelling of the `<unknown>` form
+  // (user ruling 2026-08-17: bare `collection` IS `collection<unknown>`). An
+  // explicit `<any>` is the strictly wider, absence-admitting contract and
+  // survives — collapsing it here (as this function once did) would silently
+  // narrow it to the values-only bare reading.
+  if (reducedType === 'unknown') return kind;
 
   return decorate({
     ...type,
@@ -582,6 +586,11 @@ function reduceListType(type: ListType): Type {
     if (dimensions.length === 0) return 'nothing';
   }
 
+  // Bare `list` is the canonical spelling of `list<unknown>` (user ruling
+  // 2026-08-17) — but only when no dimensions constrain the rank, which the
+  // bare form cannot express.
+  if (reducedType === 'unknown' && dimensions === undefined) return 'list';
+
   return decorate({
     ...type,
     dimensions,
@@ -597,6 +606,10 @@ function reduceSetType(type: SetType): Type {
   // A set of `nothing` is an empty set
   if (reducedType === 'nothing')
     return decorate({ kind: 'set', elements: 'nothing' });
+
+  // Bare `set` is the canonical spelling of `set<unknown>` (user ruling
+  // 2026-08-17); an explicit `<any>` is wider and survives.
+  if (reducedType === 'unknown') return 'set';
 
   return decorate({
     ...type,
@@ -635,6 +648,13 @@ function reduceTupleType(type: TupleType): Type {
   reducedElements = reducedElements.filter(
     (element) => element.type !== 'nothing'
   );
+
+  // A `nothing` slot collapses (mirroring the value-level rule: writing
+  // `Nothing` into a positional slot deletes it), so a tuple whose every
+  // slot was `nothing` is the empty tuple — and the empty tuple is
+  // `nothing`, per the check above. Without this re-check, `tuple<nothing>`
+  // reduced to a bare `tuple`, silently widening it to "any tuple".
+  if (reducedElements.length === 0) return 'nothing';
 
   return decorate({
     ...type,
@@ -693,12 +713,16 @@ function reduceDictionaryType(type: DictionaryType): Type {
   if (reducedValues === 'error') return 'error';
   if (reducedValues === 'nothing') return 'error';
 
-  // An unconstrained VALUE type says nothing about the dictionary itself, so
-  // it must not widen the whole type: returning the top type `any` here made a
-  // `dictionary<unknown>` accept — and be accepted by — every other type, and
-  // it poisoned any union containing one (`number | dictionary<unknown>`
-  // reduced to `any`, after which `string` was a subtype of it). The element
-  // type is preserved exactly as `list<any>` and `set<any>` preserve theirs.
+  // Bare `dictionary` is the canonical spelling of `dictionary<unknown>`
+  // (user ruling 2026-08-17). Collapsing to the bare NAME is safe where the
+  // historical collapse to the top type `any` was not: that one made a
+  // `dictionary<unknown>` accept — and be accepted by — every other type,
+  // and poisoned any union containing one (`number | dictionary<unknown>`
+  // reduced to `any`, after which `string` was a subtype of it). An explicit
+  // `<any>` value type is the wider, absence-admitting contract and is
+  // preserved exactly as `list<any>` and `set<any>` preserve theirs.
+  if (reducedValues === 'unknown') return 'dictionary';
+
   return decorate({ kind: 'dictionary', values: reducedValues });
 }
 

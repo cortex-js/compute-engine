@@ -76,6 +76,15 @@ describe('The Function-literal construction seam is the only builder', () => {
       // compatibility check. It READS a stored literal's arrow; it never
       // builds one.
       'compute-engine/boxed-expression/boxed-value-definition.ts',
+      // Argument validation's placeholder-signature reconciliation
+      // (`admitsPlaceholderSignature`): a function-typed operand whose
+      // INFERRED arrow carries `unknown` slots adopts the expected
+      // parameter's slots before the admission check (the placeholder
+      // ruling, 2026-08-15 — previously this admission rode on the
+      // erroneous `any <: unknown` edge, removed 2026-08-17). It READS the
+      // operand's arrow through `refineDeclaredPlaceholders`; it never
+      // builds one.
+      'compute-engine/boxed-expression/validate.ts',
       'compute-engine/engine-declarations.ts',
       // The protocol dispatcher's DERIVED effect set: a function requirement
       // with a bare effect specifier imposes no bound, so the dispatcher's

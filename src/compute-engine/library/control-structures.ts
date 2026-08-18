@@ -20,6 +20,7 @@ import {
   isBroadcastableCollection,
   isFiniteBroadcastParticipant,
   isTuple,
+  isTupleShapedType,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -452,8 +453,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // element-wise distribution, so `When("ab", c)` must stay a restricted
         // string rather than become a list of restricted characters.
         if (
-          expr.type.matches('collection') &&
-          !expr.type.matches('tuple') &&
+          expr.type.matches('collection<any>') &&
+          !isTupleShapedType(expr.type.type) &&
           !expr.type.matches('string')
         ) {
           const ev = expr.evaluate(options);
@@ -758,7 +759,7 @@ function isBooleanishCondition(evaluated: Expression): boolean {
   // `evaluate()` — while the SAME condition evaluates element-wise once `B`
   // is assigned, and while the compiled path already holds it
   // (`compilation/interval-javascript-target.ts` tests
-  // `c.isCollection || c.type.matches('collection')`), so the interpreter and
+  // `c.isCollection || c.type.matches('collection<any>')`), so the interpreter and
   // the compiler disagreed about what a collection-typed condition is.
   if (
     !evaluated.isCollection &&

@@ -4,6 +4,10 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import {
   broadcastableParamSlots,
@@ -655,7 +659,7 @@ export function isFlatAllStringComparisonParticipant(x: Expression): boolean {
  * True when a comparison PARTICIPANT's static type ADMITS a collection at run
  * time — not only when the whole type is one.
  *
- * `x.type.matches('collection')` (and Python's `isPyCollectionOperand`) answer
+ * `x.type.matches('collection<any>')` (and Python's `isPyCollectionOperand`) answer
  * the SUBTYPE question, so a general UNION with a collection arm slips through:
  * `string | list<string>` is not a subtype of `collection`, yet the run-time
  * value can be a list. That blind spot let the tier-2 scalar string-equality
@@ -700,7 +704,7 @@ export function couldBeCollectionParticipant(x: Expression): boolean {
     if (r === 'string') return false;
     if (typeof r !== 'string' && r.kind === 'union')
       return r.types.some((m) => walk(m, visited));
-    return isSubtype(r, 'collection');
+    return isSubtype(r, COLLECTION_SHAPE_TYPE);
   };
   return walk(x.type.type);
 }
@@ -764,14 +768,14 @@ export function pointHasBroadcastComponent(expr: Expression): boolean {
     return expr.ops.some(
       (op) =>
         !isTuple(op) &&
-        (op.isCollection || op.type.matches('indexed_collection'))
+        (op.isCollection || op.type.matches('indexed_collection<any>'))
     );
   if (isFunction(expr, 'List'))
     return expr.ops.some(
       (op) =>
         !isFunction(op, 'List') &&
         !isTuple(op) &&
-        (op.isCollection || op.type.matches('indexed_collection'))
+        (op.isCollection || op.type.matches('indexed_collection<any>'))
     );
   return false;
 }
@@ -1682,7 +1686,7 @@ export class BaseCompiler {
       !target.complexIsReal ||
       !target.complexReal ||
       !target.realGuard ||
-      maybe.some((a) => a.type.matches('collection'))
+      maybe.some((a) => a.type.matches('collection<any>'))
     )
       return undefined;
     const bindings: Array<[string, string]> = [];
@@ -1756,7 +1760,7 @@ export class BaseCompiler {
       !isReal ||
       !real ||
       !guard ||
-      args.some((a) => a.type.matches('collection'))
+      args.some((a) => a.type.matches('collection<any>'))
     )
       return undefined;
     const op = { Less: '<', LessEqual: '<=', Greater: '>', GreaterEqual: '>=' }[
@@ -2091,7 +2095,7 @@ export class BaseCompiler {
     // collection (`[√(t−1), 1]` types `vector<finite_number^2>`), while
     // `isPossiblyCollectionTyped` catches the merely POSSIBLE ones — a
     // `broadcastable<T>` or top-typed body, for which the former is false.
-    if (body.type.matches('collection') || isPossiblyCollectionTyped(body))
+    if (body.type.matches('collection<any>') || isPossiblyCollectionTyped(body))
       return undefined;
     // The parameters are shielded — bound as declared, never read through
     // the engine — the same binding the emitted definition compiles under,
@@ -2337,8 +2341,8 @@ export class BaseCompiler {
       // sees whole.
       if (
         op.isCollection ||
-        op.type.matches('list') ||
-        op.type.matches('indexed_collection') ||
+        op.type.matches('list<any>') ||
+        op.type.matches('indexed_collection<any>') ||
         isBoundPossiblyCollectionTyped(op)
       ) {
         const elts = BaseCompiler.elementComplexness(op);
@@ -2391,8 +2395,8 @@ export class BaseCompiler {
     if (
       !(
         element.isCollection ||
-        element.type.matches('list') ||
-        element.type.matches('indexed_collection') ||
+        element.type.matches('list<any>') ||
+        element.type.matches('indexed_collection<any>') ||
         isBoundPossiblyCollectionTyped(element)
       )
     )
@@ -2446,7 +2450,7 @@ export class BaseCompiler {
    */
   private static isGatherIndex(index: Expression): boolean {
     return (
-      index.type.matches('collection') ||
+      index.type.matches('collection<any>') ||
       index.isCollection === true ||
       isPossiblyCollectionTyped(index)
     );
@@ -2711,7 +2715,7 @@ export class BaseCompiler {
       t !== 'value' &&
       !isSubtype(t, 'number') &&
       !isSubtype(t, 'boolean') &&
-      !isSubtype(t, 'indexed_collection')
+      !isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
     )
       return undefined;
 
@@ -3907,8 +3911,8 @@ export class BaseCompiler {
             // (`compilesToArray`, `isArrayOperand`) carry.
             !isProvablyStringOperand(a) &&
             (a.isCollection ||
-              a.type.matches('list') ||
-              a.type.matches('indexed_collection') ||
+              a.type.matches('list<any>') ||
+              a.type.matches('indexed_collection<any>') ||
               isBoundPossiblyCollectionTyped(a))
         )
       ) {
@@ -3976,8 +3980,8 @@ export class BaseCompiler {
         args.some(
           (a) =>
             a.isCollection ||
-            a.type.matches('list') ||
-            a.type.matches('indexed_collection') ||
+            a.type.matches('list<any>') ||
+            a.type.matches('indexed_collection<any>') ||
             isBoundPossiblyCollectionTyped(a)
         )
       )
@@ -4132,7 +4136,7 @@ export class BaseCompiler {
             args.some(
               (x) =>
                 !isProvablyStringOperand(x) &&
-                (x.type.matches('collection') ||
+                (x.type.matches('collection<any>') ||
                   isBoundPossiblyCollectionTyped(x))
             );
           // An ORDERING that MIXES a string operand with one that is not
@@ -4215,7 +4219,7 @@ export class BaseCompiler {
                   // above. Python's `<` on `str` is the interpreter's own
                   // string comparison.
                   !isProvablyStringOperand(x) &&
-                  (x.type.matches('collection') ||
+                  (x.type.matches('collection<any>') ||
                     isBoundPossiblyCollectionTyped(x))
               ) ||
               isMixedStringOrderingParticipants(args));
@@ -4870,7 +4874,7 @@ export class BaseCompiler {
       args.every(
         (a) =>
           isProvablyStringOperand(a) ||
-          (!a.isCollection && !a.type.matches('collection'))
+          (!a.isCollection && !a.type.matches('collection<any>'))
       )
     ) {
       if (target.absence.object === undefined)
@@ -5588,7 +5592,7 @@ export class BaseCompiler {
         if (isProvablyStringOperand(a)) return false;
         if (a.isCollection) return true;
         if (isSymbol(a))
-          return a.type.matches('list') || a.type.matches('indexed_collection');
+          return a.type.matches('list<any>') || a.type.matches('indexed_collection<any>');
         if (isFunction(a)) {
           const d = engine.lookupDefinition(a.operator);
           // A USER function's body is compiled as scalar code; only a built-in
@@ -5612,7 +5616,7 @@ export class BaseCompiler {
           (a) =>
             !compilesToArray(a) &&
             !isProvablyStringOperand(a) &&
-            (a.type.matches('collection') || isBoundPossiblyCollectionTyped(a))
+            (a.type.matches('collection<any>') || isBoundPossiblyCollectionTyped(a))
         )
       )
         return null;
@@ -5760,8 +5764,8 @@ export class BaseCompiler {
         !isProvablyStringOperand(a) &&
         (isTensorValue(a) ||
           isNumericTuple(a) ||
-          a.type.matches('list') ||
-          a.type.matches('indexed_collection') ||
+          a.type.matches('list<any>') ||
+          a.type.matches('indexed_collection<any>') ||
           isBoundPossiblyCollectionTyped(a));
       const collection = args.filter(isArrayish);
       if (collection.length >= 2) {
@@ -5819,8 +5823,8 @@ export class BaseCompiler {
       // `compilesToArray` above.
       !isProvablyStringOperand(a) &&
       (a.isCollection ||
-        a.type.matches('list') ||
-        a.type.matches('indexed_collection') ||
+        a.type.matches('list<any>') ||
+        a.type.matches('indexed_collection<any>') ||
         isBoundPossiblyCollectionTyped(a));
     if (!args.some(isArrayOperand)) return null;
 
@@ -8815,7 +8819,7 @@ export class BaseCompiler {
     if (
       (expr.operator === 'Sum' || expr.operator === 'Product') &&
       expr.ops.length === 1 &&
-      (expr.ops[0].isCollection || expr.ops[0].type.matches('collection'))
+      (expr.ops[0].isCollection || expr.ops[0].type.matches('collection<any>'))
     )
       return !BaseCompiler.collectionFoldsReal(expr.ops[0]);
     // A SELECTION answers from its value ARMS, never from the node's type:
@@ -9332,7 +9336,7 @@ export class BaseCompiler {
    * is what the callers want (they fall back to expansion / the interpreter).
    */
   static assertScalarBigOpBody(kind: string, body: Expression): void {
-    if (body.type.matches('list') || body.type.matches('indexed_collection'))
+    if (body.type.matches('list<any>') || body.type.matches('indexed_collection<any>'))
       throw new Error(
         `${kind}: a collection-valued body does not compile — distribute the ` +
           `element access through the ${kind} (At(${kind}(…), k) → ` +
@@ -9711,7 +9715,7 @@ export class BaseCompiler {
         fnBody = fnBody.ops[0];
       else break;
     }
-    if (fnBody.type.matches('collection')) return true;
+    if (fnBody.type.matches('collection<any>')) return true;
     return BaseCompiler.isProvablyCollectionValuedApplication(fnBody, visited);
   }
 
@@ -9815,7 +9819,7 @@ export class BaseCompiler {
    * `guardCondition` already funnel through.
    */
   static assertScalarCondition(cond: Expression): void {
-    if (cond.type.matches('collection'))
+    if (cond.type.matches('collection<any>'))
       throw new Error(
         'Cannot compile: a branch condition is a collection-valued expression, ' +
           'which is never a scalar boolean. Materialize the collection first. ' +

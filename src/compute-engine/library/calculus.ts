@@ -2095,7 +2095,7 @@ volumes
         'Stays symbolic for a non-numeric argument.',
       broadcastable: false,
       lazy: true,
-      signature: '(list, number?) -> number',
+      signature: '(list<any>, number?) -> number',
       evaluate: ([data, x], { engine }) => {
         if (x === undefined) return undefined;
         const xv = x.N().re;
