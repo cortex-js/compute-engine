@@ -59,6 +59,100 @@ What already works and must not regress:
   parameter narrows to the parameter type, including through user-function
   forwarding (`narrowArgsFromInferredSignature`, `boxed-expression/box.ts`).
 
+## 2b. Phase 0 — evidence/requirement bounds for symbol inference
+
+_Added 2026-08-18, from the observation that this program reports its
+conflict only at evaluation:_
+
+```
+let x
+let f: () -> integer
+let g: () -> number
+let k: (integer) -> integer
+x = f()      // x infers integer
+x = g()      // x re-infers number
+k(x)         // no static error; incompatible-type surfaces at EVALUATION —
+             // and the call NARROWS x back to integer, contradicting the
+             // number-typed value it holds
+```
+
+**Current model:** a symbol's inferred type is ONE mutable cell
+(`def.value.type` + the `inferredType` flag), mutated by two verbs —
+assignment replaces/widens, argument positions narrow (`checkType`'s
+"narrowing is sound" branch in `boxed-expression/validate.ts`). Evidence
+(what assignments prove the symbol HOLDS) and requirements (what uses need
+it to FIT) share the cell, so a use can rewrite assignment history: above,
+`k(x)` treats its requirement as evidence, passes statically, and leaves the
+stored type (`integer`) contradicting the held value (`number`). The model
+is also order-dependent — swap `x = g()` and `k(x)` and the stored type
+differs.
+
+**Why it is this way:** the CAS persona. For a pure mathematical unknown
+(never assigned), use-narrowing is CORRECT — `k(n)` *declares* `n: integer`;
+that is the documented behavior (`doc/08-guide-types.md` §Type Inference)
+and must be preserved. The model is only unsound for the program-variable
+persona, where assignment evidence exists. One cell serves both; the seam is
+programs like the one above.
+
+**The fix shape — track the two directions separately:**
+
+- Two slots on the value definition: a **value bound** (lower — set by
+  assignment, REPLACED on re-assignment: mutable variables are
+  last-write-wins) and a **use bound** (upper — the MEET of argument-position
+  requirements; today's narrow-writes become this).
+- The invariant `valueBound <: useBound` is checked whenever either slot
+  moves. In the example, `x = g()` sets lower `number`; `k(x)` proposes
+  upper `integer`; the check fails AT THE CALL, statically, and the
+  diagnostic can name both sides ("x was assigned a `number` (from `g()`);
+  `k` requires `integer`") instead of whichever mutation survived.
+- **Epoch semantics:** re-assignment resets the use bound with the value
+  bound. Otherwise `x = f(); k(x); x = g()` — fine at run time, `k` already
+  ran — would be rejected by a stale upper. Bounds are per assignment-epoch,
+  which is the flow-sensitivity a statement-sequence language actually has.
+- **Reporting:** an unassigned symbol reports its use bound (preserving CAS
+  behavior byte-for-byte — uses narrow what `typeof` shows); an assigned one
+  reports its value bound. The two personas fall out of which bound has
+  content; no mode flag.
+- **Reuse:** the join/meet/absorption machinery already exists in the
+  type-variable solver (S1/S2, `common/type/instantiate.ts`) — this phase
+  applies it to symbols; `widen`/`narrow`, the rollback journal, state
+  events, provenance flags and speculative-parse confinement all carry over
+  (confinement must cover BOTH slots). Genuinely new: the second slot, the
+  two-site check, epoch reset on re-assignment, and the two-bound
+  diagnostic.
+- **Side benefit:** within an epoch, bounds accumulate commutatively, so
+  symbol inference becomes order-independent — worth having even apart from
+  the error-catching.
+
+Phase 0 is listed before the element phases because Phase 3's use-driven
+element writes are ALSO requirements — they want a use-bound slot to land
+in; building them on the single-cell model would deepen the conflation this
+phase removes.
+
+**VERDICT (2026-08-18, after an honest cost/benefit pass): right direction,
+deferred — a targeted guard captures most of the value now.** The narrow
+branch in `validate.ts` checks `inferredType` but never whether the symbol
+currently HOLDS a value; adding an evidence-beats-requirement guard ("do
+not use-narrow a symbol with assignment evidence") makes the motivating
+example fail AT CANONICALIZATION with the standard diagnostic and removes
+the corrupted-stored-type aftermath, while leaving the CAS persona
+(valueless symbols narrow from use) untouched — the guard keys on held
+value, not history. What full bounds add beyond the guard — two-sided
+diagnostics, within-epoch order-independence, the Phase 3 landing slot — is
+real but modest, while the costs are concentrated: the persona fork becomes
+USER-VISIBLE semantics (the same `k(x)` is a declaration or a check
+depending on invisible prior state, and notebook out-of-order re-runs make
+epoch boundaries observable — a deliberate violation of the
+"states differing only by history must not behave differently" principle),
+and the second slot threads through rollback, state events, notebook
+re-run, and speculative confinement, each with an incident history. In an
+interpreted, eagerly-evaluated language the static/runtime gap is one
+statement wide, discounting the headline benefit. **Plan of record: ship
+the guard (needs a go/no-go ruling — it stops use-narrowing of assigned
+symbols); build full Phase 0 only when Phase 3 is scheduled or field
+evidence demands the diagnostics/order-independence, and rule on the
+notebook-epoch UX with concrete re-run scenarios before building.**
+
 ## 3. Phase 1 — assignment-driven placeholder refinement of constructor arguments
 
 **Feature:** a declared type whose constructor argument is the placeholder
@@ -208,6 +302,10 @@ palliative).
 
 ## 7. Suggested order
 
+0. **The Phase 0 GUARD** (evidence-beats-requirement, see the Phase 0
+   verdict) can ship immediately after its go/no-go ruling. **Full Phase 0
+   bounds are deferred** — contingent on Phase 3 being scheduled or on
+   field demand, with the notebook-epoch UX ruled first.
 1. **Phase 1** after R1–R3 are ruled — self-contained, completes the
    placeholder-ruling symmetry, immediately makes `let a: list` behave per
    the stated intent.

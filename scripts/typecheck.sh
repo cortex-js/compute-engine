@@ -53,8 +53,25 @@ echo ""
 echo "Checking public type surfaces for explicit 'any'..."
 
 ANY_PATTERN='as any\b|:\s*any\b|<any>|any\[\]'
+# Comment-ONLY lines are excluded: the check targets TypeScript type
+# surfaces, and doc comments legitimately spell the ENGINE's type-language
+# literals (`collection<any>`, `list<any>`), which are unrelated to
+# TypeScript `any`. A line is dropped (content = after the rg `file:line:`
+# prefix) only when it is comment to its end:
+#   - `//…`                        line comment
+#   - `* …` or a lone `*`          doc-comment interior prose — `*` must be
+#                                  followed by whitespace/EOL, so a generator
+#                                  method (`*items(x: any)`) and a
+#                                  close-then-code line (`*/ code`) are KEPT
+#   - `/*…` never closing, or      whole-line block comment — `/* c */ code`
+#     closing exactly at EOL       does NOT match and is KEPT
+# Known gap (fails LOUD, not silent): a block-comment interior line written
+# without the conventional leading `*` is not dropped and still trips the
+# gate; prettier formats doc comments with the `*` prefix, so that spelling
+# does not occur in practice.
 ANY_OUTPUT=$(
-  rg -n --glob 'types*.ts' --glob 'types-*.ts' --glob 'global-types.ts' "$ANY_PATTERN" src/compute-engine || true
+  rg -n --glob 'types*.ts' --glob 'types-*.ts' --glob 'global-types.ts' "$ANY_PATTERN" src/compute-engine |
+    grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*([[:space:]]|$)|/\*([^*]|\*[^/])*(\*/)?[[:space:]]*$)' || true
 )
 
 if [ -n "$ANY_OUTPUT" ]; then
