@@ -711,7 +711,14 @@ function reduceDictionaryType(type: DictionaryType): Type {
 
   const reducedValues = reduceType(type.values);
   if (reducedValues === 'error') return 'error';
-  if (reducedValues === 'nothing') return 'error';
+
+  // A dictionary of `nothing` is an EMPTY dictionary — writing `Nothing`
+  // into an entry deletes it (the same slot-collapse rule lists have), so
+  // the only inhabitant is `{->}`. Preserved like `list<nothing>` /
+  // `set<nothing>`; this used to reduce to `error`, which was inconsistent
+  // with its siblings (user-confirmed 2026-08-18).
+  if (reducedValues === 'nothing')
+    return decorate({ kind: 'dictionary', values: 'nothing' });
 
   // Bare `dictionary` is the canonical spelling of `dictionary<unknown>`
   // (user ruling 2026-08-17). Collapsing to the bare NAME is safe where the

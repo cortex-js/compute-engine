@@ -1397,6 +1397,15 @@ describe('reduceType Tests', () => {
     expect(reduce('set<nothing>')).toMatchInlineSnapshot(`"set<nothing>"`);
   });
 
+  it('should handle dictionaries of nothing', () => {
+    // A `Nothing`-valued entry collapses (slot rule), so the only inhabitant
+    // is the empty dictionary — preserved like `list<nothing>`/`set<nothing>`
+    // (this reduced to `error` until 2026-08-18).
+    expect(reduce('dictionary<nothing>')).toMatchInlineSnapshot(
+      `"dictionary<nothing>"`
+    );
+  });
+
   it('should handle collections of anything', () => {
     // `collection<any>` is the absence-admitting contract and survives; it
     // is the `<unknown>` spelling that is the synonym of the bare name and

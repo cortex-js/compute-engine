@@ -508,9 +508,11 @@ bare `list`'s placeholder element slot from assignments and uses, per the
 [`docs/INFERENCE_ROADMAP.md`](./docs/INFERENCE_ROADMAP.md) (drafted
 2026-08-18, three phases, three open rulings R1–R3; nothing implemented).
 
-**Residual, deliberate:** `dictionary<nothing>` still reduces to `error`
-(needs its own ruling — a `Nothing` dictionary value means "entry absent", so
-the type may be genuinely uninhabited); `reduceListType` still drops
+**Residual — `dictionary<nothing>` RESOLVED 2026-08-18:** it now reduces to
+itself, like `list<nothing>`/`set<nothing>` (user-confirmed: a
+`Nothing`-valued entry collapses, so the type's one inhabitant is the empty
+dictionary — the old `error` reduction was inconsistent with its siblings).
+Still residual: `reduceListType` still drops
 dimensions on a `nothing` element (consistent with value-level slot
 collapse); there is no absence-admitting spelling for "any tuple" (bare
 `tuple` is now values-only; a `tuple<…, missing, …>` value matches only
