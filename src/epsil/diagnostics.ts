@@ -47,7 +47,7 @@ export type DiagnosticCode =
   | 'static-type-error' // %0 = error description, %1 = offending statement in Epsil form (a type error the engine detects at canonicalization time, before anything runs)
   | 'evaluation-canceled' // %0 = machine-readable CancellationCause, %1 = error description (non-final statement hit a cap breach: timeout/iteration/recursion)
   | 'unknown-function' // %0 = called name, %1 = suggested known operator ("did you mean")
-  | 'print-not-available' // %0 = called name — there is no print; a program's output is its last statement's value
+  | 'print-not-available' // %0 = called name — an unresolved print-like alias (`puts`, `echo`, ...); the function that exists is `print`
   | 'type-not-callable' // %0 = type name — a type name used as a function; types have no constructor yet; annotate instead: `const p: %0 = …`
   | 'assign-in-condition' // `if flag := true { … }` — the assignment's VALUE becomes the test. A bare `=` in a condition compares (positional `=`), so only the explicit `:=` reaches this
   | 'chained-assignment' // `a = b = 5` — the outer `=` assigns and the inner COMPARES, so this assigns a boolean. Write `a := b := 5` to chain, or `a := (b == 5)` if the comparison was meant
