@@ -131,7 +131,7 @@
   "types": "./dist/types/compute-engine.d.ts",
   "engines": {
     "npm": ">=10.5.0",
-    "node": ">=21.7.3"
+    "node": ">=22.3.0"
   },
   "devDependencies": {
     "@cortex-js/prettier-config": "^1.2.0",

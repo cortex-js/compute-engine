@@ -96,6 +96,22 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### `Print`/`Input` should route through the Stage 4 capability registry (OPEN, effects — opened 2026-08-18)
+
+The console operators (`Print`, `Input`, Epsil `print`/`input`) declare the
+`console` effect label but reach the host directly — `console.log` via
+`globalThis`, stdin via `process.getBuiltinModule('node:fs')`, the browser
+`prompt()` dialog. `docs/EFFECTS-MODEL.md` (Stage 4, unbuilt) specifies the
+`ce.effects` handler registry as the seam these operators should consume —
+per-engine, mockable, deniable (`null` = capability denial, the sandboxing
+primitive). Until it exists, a host can redirect or deny console I/O only by
+patching globals; the Epsil MCP server does exactly that
+(`withHostIOCaptured` in `src/cli/mcp.ts` — its stdio transport carries
+JSON-RPC, so program output must not reach the real stdout, and interactive
+input must not consume protocol bytes). When Stage 4 lands: route both
+operators through `ce.effects.console`, replace the MCP global-patching with
+a registry override, and add denied/overridden-capability coverage.
+
 ### An unseeded Monte Carlo test can fail any commit's gate at random (OPEN, test reliability — observed 2026-08-17)
 
 `test/compute-engine/monte-carlo.test.ts` draws from an unseeded generator —

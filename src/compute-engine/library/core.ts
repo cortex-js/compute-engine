@@ -6611,6 +6611,88 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
   },
 
   // ---------------------------------------------------------------------------
+  // Host console I/O — `Print` and `Input`, with the Epsil-facing lowercase
+  // aliases `print` and `input` (Epsil spells commands in lowercase; the
+  // aliases canonicalize to the capitalized operators, so scope shadowing
+  // works the same as for any library name). Both carry the `console` effect
+  // label. When the capability registry of `docs/EFFECTS-MODEL.md` (Stage 4)
+  // lands they should route through `ce.effects.console`; until then they
+  // reach the host console directly and degrade gracefully where the host
+  // has none.
+  // ---------------------------------------------------------------------------
+  {
+    Print: {
+      description:
+        'Print the operands to the host console, separated by spaces and ' +
+        'followed by a newline. String operands print their content ' +
+        '(without quotes); other expressions print their text form. ' +
+        'Evaluates to `Nothing`. On a host without a console, prints ' +
+        'nothing.',
+      signature: '(any*) console -> nothing',
+      evaluate: (ops, { engine: ce }) => {
+        // Reach the console through `globalThis` and a method reference,
+        // never as a direct `console.log(...)` call: the production build
+        // declares `console.log` pure (scripts/build.mjs, `pure:` option)
+        // and the minifier deletes such calls — the direct spelling would
+        // make `Print` a no-op in the published bundles.
+        const console_ = globalThis.console;
+        const log = console_?.log;
+        if (typeof log === 'function')
+          log.call(
+            console_,
+            ops
+              .map((op) =>
+                isString(op) || isCharacter(op) ? op.string : op.toString()
+              )
+              .join(' ')
+          );
+        return ce.Nothing;
+      },
+    },
+
+    Input: {
+      description:
+        'Read one line of text from the host: the terminal in a ' +
+        'command-line host, the `prompt()` dialog in a browser. The ' +
+        'optional operand is a prompt string, displayed before reading. ' +
+        'Evaluates to the line read, without the trailing newline; to ' +
+        '`Nothing` at end-of-input (or a canceled dialog). On a host with ' +
+        'no interactive input, stays unevaluated.',
+      signature: '(prompt: string?) console -> string | nothing',
+      evaluate: (ops, { engine: ce }) => {
+        const promptOp = ops[0];
+        const line = hostReadLine(
+          isString(promptOp) ? promptOp.string : undefined
+        );
+        if (line === undefined) return undefined;
+        if (line === null) return ce.Nothing;
+        return ce.string(line);
+      },
+    },
+
+    // The aliases restate their target's signature — including the
+    // `console` label, which is what the type of the SYMBOL `print` (e.g.
+    // passed as a callback value) is read from before canonicalization.
+    // Keep each alias signature identical to its capitalized operator's
+    // signature above.
+    print: {
+      description:
+        'Lowercase alias for `Print` (the Epsil command spelling); ' +
+        'canonicalizes to `Print`.',
+      signature: '(any*) console -> nothing',
+      canonical: (args, { engine: ce }) => ce.function('Print', args),
+    },
+
+    input: {
+      description:
+        'Lowercase alias for `Input` (the Epsil command spelling); ' +
+        'canonicalizes to `Input`.',
+      signature: '(prompt: string?) console -> string | nothing',
+      canonical: (args, { engine: ce }) => ce.function('Input', args),
+    },
+  },
+
+  // ---------------------------------------------------------------------------
   // Opaque typed heads — registered so the names are in the standard set
   // (consumers can branch on the operator name); CE itself does not evaluate
   // them. Geometric primitives `Triangle`/`Sphere`/`Segment` and the action
@@ -6762,4 +6844,89 @@ function qualifiedWriteOperands(
   if (protocol === undefined || name === undefined || base === undefined)
     return undefined;
   return { protocol, name, base };
+}
+
+/**
+ * Read one line of text from the host, synchronously — the backend of the
+ * `Input` operator.
+ *
+ * Returns the line with its trailing newline (and `\r`) removed; `null` at
+ * end-of-input or a canceled browser dialog; `undefined` when the host
+ * offers no interactive input at all (no Node stdin, no `prompt()`), so
+ * `Input` can stay unevaluated.
+ *
+ * In a Node-compatible host, reads the controlling terminal (`/dev/tty`)
+ * when stdin is one: reading fd 0 directly can fail with `EAGAIN` when
+ * another consumer — a REPL's readline, say — has switched stdin to
+ * non-blocking mode, and `/dev/tty` is a blocking view of the same
+ * terminal. Piped (non-tty) stdin reads fd 0, so `echo 5 | epsil program`
+ * works. The `node:fs` module is reached through `process.getBuiltinModule`
+ * rather than an import so this module stays loadable in browsers. That API
+ * needs Node ≥ 22.3, the package's `engines` floor (raised for this, user
+ * ruling 2026-08-18); the guard still degrades gracefully — input reported
+ * unavailable — on an unsupported older host.
+ */
+function hostReadLine(prompt: string | undefined): string | null | undefined {
+  const g = globalThis as Record<string, any>;
+  const proc = g.process;
+  if (proc?.stdin && typeof proc.getBuiltinModule === 'function') {
+    const fs = proc.getBuiltinModule('node:fs');
+    if (!fs) return undefined;
+    if (prompt) proc.stdout?.write?.(prompt);
+    let fd: number = proc.stdin.fd ?? 0;
+    let ownFd = false;
+    if (proc.stdin.isTTY) {
+      try {
+        fd = fs.openSync('/dev/tty', 'rs');
+        ownFd = true;
+      } catch {
+        // No /dev/tty (e.g. Windows): read fd 0 directly.
+      }
+    }
+    try {
+      const bytes: number[] = [];
+      const buf = new Uint8Array(1);
+      const eagainWait = new Int32Array(new SharedArrayBuffer(4));
+      let eof = false;
+      for (;;) {
+        let n = 0;
+        try {
+          n = fs.readSync(fd, buf, 0, 1, null);
+        } catch (e) {
+          const code = (e as { code?: string }).code;
+          // Windows reports end-of-input on a terminal as an `EOF` error.
+          if (code === 'EOF') {
+            eof = true;
+            break;
+          }
+          // `EAGAIN` is a non-blocking descriptor with no data YET — not
+          // end-of-input (it can occur when reading fd 0 directly after the
+          // `/dev/tty` bypass was unavailable). Wait briefly and retry
+          // rather than misreporting a pending line as `Nothing` — or
+          // truncating one mid-read. `Atomics.wait` is the only synchronous
+          // sleep available; this branch is Node-only, where blocking the
+          // main thread is permitted.
+          if (code === 'EAGAIN') {
+            Atomics.wait(eagainWait, 0, 0, 10);
+            continue;
+          }
+          throw e;
+        }
+        if (n === 0) {
+          eof = true;
+          break;
+        }
+        if (buf[0] === 0x0a) break;
+        bytes.push(buf[0]);
+      }
+      if (eof && bytes.length === 0) return null;
+      if (bytes[bytes.length - 1] === 0x0d) bytes.pop();
+      return new TextDecoder().decode(new Uint8Array(bytes));
+    } finally {
+      if (ownFd) fs.closeSync(fd);
+    }
+  }
+  // Browser: the modal `prompt()` dialog. Returns `null` on cancel.
+  if (typeof g.prompt === 'function') return g.prompt(prompt ?? '');
+  return undefined;
 }

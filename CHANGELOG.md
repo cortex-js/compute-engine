@@ -2,6 +2,11 @@
 
 ### Breaking Changes
 
+- **The minimum supported Node version is now 22.3.0** (previously 21.7.3;
+  Node 21 has been end-of-life since June 2024). The new `Input` operator's
+  synchronous stdin reader relies on `process.getBuiltinModule`, introduced
+  in Node 22.3.
+
 - **Dictionaries now print as their literal form.** `toString()` (and the
   Epsil REPL output) renders a dictionary as `{"key" -> value, …}` — `{->}`
   when empty — instead of falling back to the raw MathJSON structure
@@ -58,6 +63,24 @@
     `any <: unknown` edge).
 
 ### New Features
+
+- **Console I/O: `Print` and `Input`** (Epsil commands `print` and
+  `input`). `Print(x, …)` writes its evaluated operands to the host
+  console — space-separated, strings without their quotes — and evaluates
+  to `Nothing`. `Input(prompt?)` reads one line of text and evaluates to it
+  as a string: from the terminal (or piped standard input) in a
+  command-line host, via the `prompt()` dialog in a browser; `Nothing` at
+  end-of-input or on a canceled dialog, and the call stays symbolic on a
+  host with no interactive input. Both carry the `console` effect label,
+  so they are never constant-folded or eliminated as common
+  subexpressions. The lowercase Epsil spellings are ordinary library
+  aliases that canonicalize to `Print`/`Input`, so a local declaration of
+  `print` shadows the command like any other library name. In a
+  command-line host, `Input`'s stdin reader requires Node ≥ 22.3 — now the
+  package's minimum (see Breaking Changes); on an unsupported older Node
+  the call degrades to staying symbolic. The Epsil MCP server captures `print` output into the `evaluate` tool
+  result (its stdio transport carries JSON-RPC, so program output cannot
+  share standard output) and keeps `input()` symbolic during evaluation.
 
 - **Regular expressions (Strings Phase 3).** A new primitive type `regexp`,
   built with `RegExp(pattern, flags?)`, plus `IsMatch`, `StringMatch`,

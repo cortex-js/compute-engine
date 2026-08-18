@@ -222,6 +222,39 @@ a `runtime-error` diagnostic — for example an indexed assignment
 (`xs[2] = 9`, which is rejected: element assignment is not supported), or
 reassigning a `const` in the middle of a program.
 
+## Console input and output
+
+`print` writes its operands to the host console — the terminal for the
+command-line tools, the developer console in a browser — separated by
+spaces and followed by a newline. Strings print their content, without the
+quotes; every other value prints its ordinary textual form. It evaluates to
+`Nothing`:
+
+```epsil
+let x = 6
+print("x is", x * 7)
+// prints: x is 42
+```
+
+`input` reads one line of text and evaluates to it as a string, without the
+trailing newline. An optional operand is a prompt, displayed before
+reading. In a terminal it reads from the terminal (piped standard input
+works too); in a browser it opens the `prompt()` dialog. At end-of-input —
+or when the dialog is canceled — it evaluates to `Nothing`; on a host with
+no interactive input at all, the call stays symbolic.
+
+```text
+> let name = input("Who? ")
+Who? Arno
+> print("Hello,", name)
+Hello, Arno
+```
+
+`print` and `input` follow the lowercase command convention. They are
+ordinary library aliases for the `Print` and `Input` operators — not
+keywords — so a local declaration of `print` shadows the command like any
+other library name.
+
 ## Pragma security
 
 `#env(...)` and `#navigator(...)` read state from the host process (or the

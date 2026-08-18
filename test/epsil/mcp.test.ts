@@ -212,6 +212,40 @@ describe('MCP server tools', () => {
     expect(payload(responses[1]).value).toBe('x');
   });
 
+  test('evaluate captures print output instead of writing the transport stream', async () => {
+    // The stdio transport carries JSON-RPC on stdout, so `print` must land
+    // in the tool result's `output` lines, never on the real console.
+    const logged: unknown[][] = [];
+    const spy = jest
+      .spyOn(console, 'log')
+      .mockImplementation((...args: unknown[]) => {
+        logged.push(args);
+      });
+    try {
+      const [response] = await runServer([
+        callTool(1, 'evaluate', { source: 'print("hi", 6 * 7)\n1' }),
+      ]);
+      const result = payload(response);
+      expect(result.ok).toBe(true);
+      expect(result.output).toEqual(['hi 42']);
+      expect(logged).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('evaluate keeps input() symbolic instead of reading the transport stream', async () => {
+    // Reading stdin would consume (or block on) protocol bytes, so the
+    // interactive-input backends are hidden during evaluation and the call
+    // stays unevaluated.
+    const [response] = await runServer([
+      callTool(1, 'evaluate', { source: 'input("Who? ")' }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(true);
+    expect(result.value).toContain('Input');
+  });
+
   test('evaluate validates its arguments as a tool error', async () => {
     const [response] = await runServer([callTool(1, 'evaluate', {})]);
     expect(response.result.isError).toBe(true);

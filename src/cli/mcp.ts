@@ -51,7 +51,7 @@ const TOOLS = [
   {
     name: 'evaluate',
     description:
-      'Evaluate a complete Epsil program and return its value (the value of the last statement) in display, Epsil and MathJSON forms, along with any diagnostics. Each call runs in a fresh session: definitions do not persist between calls, so the program must be self-contained.',
+      'Evaluate a complete Epsil program and return its value (the value of the last statement) in display, Epsil and MathJSON forms, along with any diagnostics. Anything the program prints with `print` is returned as the `output` lines. Each call runs in a fresh session: definitions do not persist between calls, so the program must be self-contained.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -143,6 +143,42 @@ function readOnlyAnnotations(): Record<string, boolean> {
     destructiveHint: false,
     openWorldHint: false,
   };
+}
+
+/**
+ * Run `fn` with the host's console-I/O surface captured. The stdio
+ * transport carries JSON-RPC on standard output and input, so an evaluated
+ * program's `Print` writing through `console.log` would corrupt the
+ * outgoing protocol stream, and an `Input` reading standard input would
+ * consume — or block on — protocol bytes. For the duration of `fn`:
+ * `console.log` is swapped for a collector (the printed lines are returned
+ * so the caller can report them in the tool result), and the two backends
+ * `Input` probes — `process.getBuiltinModule` for the synchronous stdin
+ * reader, and the browser-style `prompt` — are hidden, so `input()` stays
+ * an unevaluated symbolic call. Everything is restored on exit, including
+ * on a throw. Evaluation is synchronous, so the swap cannot leak across
+ * concurrently handled requests.
+ */
+function withHostIOCaptured<T>(fn: () => T): { result: T; output: string[] } {
+  const output: string[] = [];
+  const console_ = globalThis.console;
+  const savedLog = console_.log;
+  const proc = globalThis.process as unknown as Record<string, unknown>;
+  const savedGetBuiltin = proc.getBuiltinModule;
+  const g = globalThis as Record<string, unknown>;
+  const savedPrompt = g.prompt;
+  console_.log = (...items: unknown[]) => {
+    output.push(items.map((x) => String(x)).join(' '));
+  };
+  delete proc.getBuiltinModule;
+  delete g.prompt;
+  try {
+    return { result: fn(), output };
+  } finally {
+    console_.log = savedLog;
+    if (savedGetBuiltin !== undefined) proc.getBuiltinModule = savedGetBuiltin;
+    if (savedPrompt !== undefined) g.prompt = savedPrompt;
+  }
 }
 
 /** A JSON-RPC protocol error (as opposed to a tool-execution failure,
@@ -491,13 +527,16 @@ class McpServer {
         ? this.timeLimit
         : requireTimeLimit(args.timeLimit);
 
-    const result = makeEpsilSession(timeLimit).evaluate(source);
+    const { result, output } = withHostIOCaptured(() =>
+      makeEpsilSession(timeLimit).evaluate(source)
+    );
     const json = formatValue(result, 'json');
     return toolResult({
       ok: !hasErrors(result),
       value: formatValue(result, 'value'),
       epsil: formatValue(result, 'epsil'),
       mathjson: json ? JSON.parse(json) : null,
+      ...(output.length > 0 ? { output } : {}),
       diagnostics: result.diagnostics.map((x) => diagnosticToJson(x, source)),
     });
   }
