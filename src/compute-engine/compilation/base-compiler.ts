@@ -1972,6 +1972,31 @@ export class BaseCompiler {
     // radicals/logarithms promote" — the interpreter's `√(−1)`, `ln(−2)` fall
     // out), as does the deprecated `complexPromotion` opt-in; strict never.
     if (!BaseCompiler.promotionActive) return false;
+    // Broadcast closures re-invoke the head's scalar codegen on synthetic
+    // element temps, which carry no sign or type information of their own —
+    // deriving the verdict from a temp PROMOTES shapes whose real operands
+    // are provably non-negative. Measured: `√(x²+L²)` with a list-valued `L`
+    // emitted `_SYS.csqrt` while the downstream analysis, reading the real
+    // radicand, said real — the producer/consumer divergence behind
+    // `"[object Object]-1"` string concatenation on the composed `−1`. The
+    // verdict for such a closure is therefore decided ONCE, on the
+    // node-level operands (in `tryCompileBroadcast`), and recorded; a call
+    // whose arguments are exactly that closure's element temps returns the
+    // recorded verdict. This is also what keeps a broadcast `Power` honest:
+    // its literal exponent is elementized into a temp, so `isNumber(exp)`
+    // below could never see it. `notePromoted` is not re-fired here — the
+    // node-level decision already ran it.
+    for (let i = BaseCompiler._broadcastRadicalVerdict.length - 1; i >= 0; i--) {
+      const frame = BaseCompiler._broadcastRadicalVerdict[i];
+      if (
+        frame.head === head &&
+        args.length > 0 &&
+        args.every(
+          (a) => a !== undefined && isSymbol(a) && frame.params.has(a.symbol)
+        )
+      )
+        return frame.promotes;
+    }
     if (head === 'Power') {
       // `Power` of an unknown-sign base with a PROVABLY non-integer exponent
       // (`x^{0.3}`, `x^{2/3}`; `(−8)^{1/3}` is the interpreter's principal
@@ -5789,6 +5814,26 @@ export class BaseCompiler {
     const complexFrame = new Map<string, boolean>();
     params.forEach((p, i) => complexFrame.set(p, argIsComplex[i] === true));
     BaseCompiler._pushLocalComplex(complexFrame);
+    // For a promotable radical/`Power` head, the promotion verdict must be
+    // decided on the NODE-LEVEL operands — the element temps the closure is
+    // built from carry no sign or type evidence, so a verdict derived from
+    // them promotes shapes whose operands are provably non-negative
+    // (`√(x²+L²)` with a list `L`), diverging from the downstream
+    // `isComplexValued` analysis that reads the real operands. Record the
+    // node-level verdict for `promotesRadicalToComplex` to return when the
+    // scalar codegen re-asks with exactly these temps. Pushed strictly
+    // inside the `_pushLocalComplex` frame so memoized analysis answers
+    // stay in that frame's memo layer.
+    const radicalFrame =
+      h === 'Power' || BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(h)
+        ? {
+            head: h,
+            params: new Set(params),
+            promotes: BaseCompiler.promotesRadicalToComplex(h, args),
+          }
+        : undefined;
+    if (radicalFrame !== undefined)
+      BaseCompiler._broadcastRadicalVerdict.push(radicalFrame);
     let scalarBody: string;
     try {
       scalarBody =
@@ -5800,6 +5845,8 @@ export class BaseCompiler {
             )
           : `${fn}(${params.join(', ')})`;
     } finally {
+      if (radicalFrame !== undefined)
+        BaseCompiler._broadcastRadicalVerdict.pop();
       BaseCompiler._popLocalComplex();
     }
     const compiledArgs = args
@@ -8171,6 +8218,23 @@ export class BaseCompiler {
    * real.
    */
   private static _binderShield: Set<string>[] = [];
+
+  /**
+   * Promotion verdicts recorded for broadcast closures currently being
+   * emitted (`tryCompileBroadcast`): for a promotable radical/`Power` head,
+   * the verdict is decided ONCE on the node-level operands — which carry the
+   * sign/type evidence — and consulted by `promotesRadicalToComplex` when
+   * the head's scalar codegen re-asks with the closure's synthetic element
+   * temps, which carry none. Managed as a stack with symmetric try/finally
+   * push/pop, always strictly inside the closure's `_pushLocalComplex`
+   * frame, so `isComplexValued` answers memoized under a recorded verdict
+   * stay in that frame's memo layer and cannot leak past it.
+   */
+  private static _broadcastRadicalVerdict: Array<{
+    head: string;
+    params: Set<string>;
+    promotes: boolean;
+  }> = [];
 
   /**
    * Memoized `isComplexValued` answers for FUNCTION expressions (Tycho item

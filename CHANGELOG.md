@@ -58,6 +58,25 @@
 
 ### Bug Fixes
 
+- **Broadcast over a list operand no longer breaks the "wide is real"
+  promotion analysis.** With `L := [0,1,2,3]`, compiling
+  `\sqrt{x^2+L^2}-1` under the default `auto` mode produced
+  `["[object Object]-1", …]` (JS string concatenation), `\cdot 2` produced
+  NaN, and `\max(0, …)` returned NaN — all behind `success: true`. A
+  broadcast closure re-invokes the head's scalar codegen on synthetic
+  element temps that carry no sign or type evidence, so the promotion
+  verdict re-derived inside the closure promoted `√(x²+L²)` to the complex
+  kernel even though the radicand is provably non-negative — while the
+  downstream analysis, reading the real radicand, correctly said real and
+  emitted plain arithmetic over the `{re, im}` elements. The verdict is now
+  decided once on the node-level operands and carried into the closure, so
+  producer and consumer agree again: the norm shape keeps the real kernel
+  (and no longer misreports `promoted: true`), and a broadcast `Power` with
+  a literal fractional exponent now promotes correctly (the literal was
+  previously elementized into a temp the `isNumber` test could never see).
+  Reported by a consumer from a 687-document strict/auto parity sweep (186
+  corrupted sample points across 16 documents).
+
 - **A complex-declared symbol with a real assigned value no longer compiles
   to a NaN kernel.** With `z: complex` and `z := 5`, compiling an expression
   using `z` constant-folds the value into the kernel — but the folded

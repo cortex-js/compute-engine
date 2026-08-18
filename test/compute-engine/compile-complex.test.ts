@@ -1753,3 +1753,112 @@ describe('COMPILE COMPLEX - folded value of a complex-declared symbol', () => {
     ce.forget('zf5');
   });
 });
+
+describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
+  // A broadcast closure re-invokes the head's scalar codegen on synthetic
+  // element temps, which carry no sign/type evidence. The promotion verdict
+  // derived from a temp PROMOTED shapes whose real operands are provably
+  // non-negative: `\sqrt{x^2+L^2}` with a list `L` emitted `_SYS.csqrt`
+  // while the downstream analysis, reading the real radicand, said real —
+  // so composed arithmetic treated `{re, im}` elements as numbers
+  // (`"[object Object]-1"` string concat, NaN from `* 2`). The verdict is
+  // now decided once on the node-level operands and carried into the
+  // closure. Reported by the Tycho consumer (686-doc strict/auto parity
+  // sweep, 186 corrupted sample points across 16 documents).
+  const setupL = () => ce.assign('Lbc', ce.expr(['List', 0, 1, 2, 3]));
+
+  it('norm shape keeps the real kernel: composed subtraction', () => {
+    setupL();
+    const expr = ce.expr([
+      'Subtract',
+      ['Sqrt', ['Add', ['Power', 'x', 2], ['Power', 'Lbc', 2]]],
+      1,
+    ]);
+    const r = compile(expr, { mode: 'auto', fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.promoted).toBe(false);
+    const v = r.run!({ x: -8 }) as number[];
+    expect(v.map((e) => typeof e)).toEqual(['number', 'number', 'number', 'number']);
+    expect(v[0]).toBeCloseTo(7, 10);
+    expect(v[3]).toBeCloseTo(Math.sqrt(64 + 9) - 1, 10);
+    ce.forget('Lbc');
+  });
+
+  it('norm shape: composed multiplication and real-only Max', () => {
+    setupL();
+    const sqrtL = ['Sqrt', ['Add', ['Power', 'x', 2], ['Power', 'Lbc', 2]]];
+    const mul = compile(ce.expr(['Multiply', sqrtL, 2]), {
+      mode: 'auto',
+      fallback: false,
+    });
+    expect(mul.success).toBe(true);
+    expect((mul.run!({ x: -8 }) as number[])[0]).toBeCloseTo(16, 10);
+    const max = compile(ce.expr(['Max', 0, ['Subtract', sqrtL, 1]]), {
+      mode: 'auto',
+      fallback: false,
+    });
+    expect(max.success).toBe(true);
+    expect(max.run!({ x: -8 })).toBeCloseTo(Math.sqrt(73) - 1, 10);
+    ce.forget('Lbc');
+  });
+
+  it('Ln of a provably positive broadcast operand stays real', () => {
+    setupL();
+    const expr = ce.expr([
+      'Add',
+      ['Ln', ['Add', ['Power', 'x', 2], ['Power', 'Lbc', 2], 1]],
+      1,
+    ]);
+    const r = compile(expr, { mode: 'auto', fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.promoted).toBe(false);
+    const v = r.run!({ x: -8 }) as number[];
+    expect(v[0]).toBeCloseTo(Math.log(65) + 1, 10);
+    ce.forget('Lbc');
+  });
+
+  it('broadcast Power promotes from the NODE-level literal exponent', () => {
+    // In the closure the literal exponent is elementized into a temp, so
+    // the `isNumber(exp)` promotion test could never see it — the closure
+    // stayed real while the analysis said complex. With the node-level
+    // verdict carried in, the closure emits the complex kernel: element
+    // `-1` yields the interpreter's principal value of `(-1)^{0.3}`.
+    ce.assign('Mbc', ce.expr(['List', -1, 2]));
+    const r = compile(ce.expr(['Power', ['Add', 'x', 'Mbc'], 0.3]), {
+      mode: 'auto',
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.promoted).toBe(true);
+    const v = r.run!({ x: 0 }) as [
+      { re: number; im: number },
+      number,
+    ];
+    expect(v[0].re).toBeCloseTo(Math.cos(0.3 * Math.PI), 10);
+    expect(v[0].im).toBeCloseTo(Math.sin(0.3 * Math.PI), 10);
+    expect(v[1]).toBeCloseTo(Math.pow(2, 0.3), 10);
+    ce.forget('Mbc');
+  });
+
+  it('a genuinely promoting broadcast radical still never emits corrupt code', () => {
+    // Bare `√L` (unknown-sign elements from the analysis's viewpoint)
+    // legitimately promotes; the composed consumer cannot attribute an
+    // element shape and must fail closed (D6) rather than emit real
+    // arithmetic over `{re, im}` elements.
+    setupL();
+    const expr = ce.expr(['Multiply', ['Sqrt', 'Lbc'], 2]);
+    let outcome: 'declined' | 'threw' | 'ran' = 'ran';
+    let v: unknown;
+    try {
+      const r = compile(expr, { mode: 'auto', fallback: false });
+      if (!r.success) outcome = 'declined';
+      else v = r.run!({});
+    } catch {
+      outcome = 'threw';
+    }
+    if (outcome === 'ran')
+      expect((v as unknown[]).every((e) => typeof e === 'number')).toBe(true);
+    else expect(['declined', 'threw']).toContain(outcome);
+    ce.forget('Lbc');
+  });
+});
