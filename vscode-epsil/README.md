@@ -23,8 +23,9 @@ fib(n: integer) = fib(n - 1) + fib(n - 2)
   errors the engine catches when it canonicalizes a program. This is exactly
   what `epsil check` reports — nothing is evaluated, so checking a program has
   no side effects and never runs a long computation. A call that does not match
-  the function's signature explains itself: the diagnostic names the signature
-  and which argument was at fault.
+  the function's signature explains itself: the diagnostic headline says which
+  argument was at fault, and hovering it shows the callee's signature and the
+  declaration it points at, syntax-highlighted.
 - **Hover** over a name to see what it is: for a library function or constant,
   its signature (or type and value) and description — the same entry
   `epsil doc <name>` prints; for a name your file declares, the declaration as

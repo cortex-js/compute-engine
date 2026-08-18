@@ -62,10 +62,9 @@ type PublishedEntry = {
   start: number;
   end: number;
   fixits: { start: number; end: number; value: string }[];
-  /** The renderer's base message and its notes, kept STRUCTURED (not folded
-   * into one string) so the hover can re-render them as markdown — VS Code
-   * shows `Diagnostic.message` itself as plain text only. */
-  message: string;
+  /** The renderer's notes, kept structured so the hover can render them as
+   * markdown. They are deliberately NOT part of `Diagnostic.message`, which
+   * stays a one-line headline on the plain-text surfaces (see `toEntry`). */
   notes: NonNullable<JsonDiagnostic['notes']>;
 };
 /** The entries behind the last publish, per document URI, stamped with the
@@ -129,14 +128,22 @@ connection.onHover(({ textDocument, position }) => {
 
   // Diagnostics first — an error under the cursor is what the reader is
   // asking about — then what the hovered name is. The editor stacks the raw
-  // diagnostic (plain text) and this hover in one pop-over; the sections
-  // built here are the RICH rendering of the same diagnostic, which only a
-  // hover can provide (see `diagnosticMarkdown`).
-  const sections = diagnosticHovers(textDocument.uri, document, offset, text);
-  if (word !== undefined) {
-    const symbol = describeSymbol(word.name, text);
-    if (symbol !== undefined) sections.push(symbol);
-  }
+  // diagnostic headline (plain text) and this hover in one pop-over; the
+  // sections built here carry the diagnostic's NOTES, which the headline
+  // deliberately omits (see `toEntry` and `diagnosticMarkdown`). When the
+  // symbol hover below already captions the hovered name's declaration, the
+  // diagnostic's own "defined here" quote of that same declaration is elided
+  // rather than shown twice.
+  const symbol =
+    word === undefined ? undefined : describeSymbol(word.name, text);
+  const sections = diagnosticHovers(
+    textDocument.uri,
+    document,
+    offset,
+    text,
+    symbol === undefined ? undefined : word?.name
+  );
+  if (symbol !== undefined) sections.push(symbol);
   if (sections.length === 0) return null;
 
   return {
@@ -267,18 +274,22 @@ function toEntry(
   const end = Math.max(start, Math.min(json.end, text.length));
 
   // A note is either prose (the callee's signature) or a pointer at a second
-  // place in the file (where that callee was defined). Prose has nowhere else
-  // to go, so it is always folded into the message — the hover is where a
-  // reader looks for the explanation. A pointer becomes navigable related
-  // information, and is folded in too when the client cannot show it.
+  // place in the file (where that callee was defined). For a full-capability
+  // client, notes are NOT folded into the message: the message stays a
+  // one-line headline on every plain-text surface (hover top block, peek,
+  // Problems panel), pointers become navigable related information, and the
+  // notes render in full in the hover's markdown section (see
+  // `diagnosticMarkdown`). A client without the related-information
+  // capability gets every note folded into the message instead, so the
+  // explanation is never lost. This leans on one assumption: a client that
+  // advertises related information also implements hover — true of every
+  // mainstream LSP client — since the hover is the prose notes' only home.
   const notes = json.notes ?? [];
   const located = notes.filter(
     (note): note is typeof note & { start: number; end: number } =>
       note.start !== undefined && note.end !== undefined
   );
-  const folded = notes.filter(
-    (note) => note.start === undefined || !hasRelatedInformationCapability
-  );
+  const folded = hasRelatedInformationCapability ? [] : notes;
   const message = [
     json.message,
     ...folded.map((note) =>
@@ -318,7 +329,6 @@ function toEntry(
     start,
     end,
     fixits: json.fixits ?? [],
-    message: json.message,
     notes,
   };
 }
@@ -332,18 +342,20 @@ const HOVER_DECLARATION_LENGTH = 200;
 /**
  * The markdown renderings of the published diagnostics that cover `offset`.
  *
- * This is the hover-only rich layer: `Diagnostic.message` is rendered by the
- * editor as plain text everywhere it appears (hover, peek, Problems panel),
- * so its backtick-quoted names show as literal backticks. A hover, by
- * contrast, is markdown — so the same diagnostic is re-rendered here with the
- * quotes as real code spans and the callee's definition quoted
- * syntax-highlighted.
+ * This is the hover-only rich layer. `Diagnostic.message` is rendered by the
+ * editor as plain text everywhere it appears (hover top block, peek,
+ * Problems panel), so it is kept to a one-line headline; a diagnostic's
+ * NOTES — the callee's signature, the definition it points at — appear only
+ * here, as markdown: quoted names as code spans, the definition's source
+ * line syntax-highlighted. A diagnostic without notes contributes nothing —
+ * its headline, already on screen in the plain block, is the whole story.
  */
 function diagnosticHovers(
   uri: string,
   document: TextDocument,
   offset: number,
-  text: string
+  text: string,
+  describedName?: string
 ): string[] {
   const state = published.get(uri);
   // The stored offsets are relative to the text that was checked; after an
@@ -358,21 +370,38 @@ function diagnosticHovers(
         // hovers at its anchor.
         (offset < entry.end || offset === entry.start)
     )
-    .map((entry) => diagnosticMarkdown(entry, text));
+    .map((entry) => diagnosticMarkdown(entry, text, describedName))
+    .filter((section) => section !== '');
 }
 
-/** One diagnostic as markdown: the message, then each note — and when a note
- * points at a second place in the file (the definition of the callee), the
- * source line it points at, quoted in a highlighted code block. */
-function diagnosticMarkdown(entry: PublishedEntry, text: string): string {
-  const sections = [proseMarkdown(entry.message)];
+/** One diagnostic's hover-only details: each note as a paragraph — and when
+ * a note points at a second place in the file (the definition of the
+ * callee), the source line it points at, quoted in a highlighted code block.
+ * The message itself is NOT restated: the editor already shows it verbatim
+ * in the plain block it stacks above this hover. A "defined here" note for
+ * `describedName` — the name whose own declaration hover is already part of
+ * this pop-over — is skipped, not shown twice. */
+function diagnosticMarkdown(
+  entry: PublishedEntry,
+  text: string,
+  describedName?: string
+): string {
+  const sections: string[] = [];
   for (const note of entry.notes) {
     if (note.start === undefined || note.line === undefined) {
       sections.push(`*note:* ${proseMarkdown(note.message)}`);
       continue;
     }
+    // A "defined here" pointer is captioned the way the declaration hover
+    // captions its quote, so the two read in one voice; other located notes
+    // (the redefinition diagnostics' "is first declared here" / "is first
+    // defined here" pointers, for instance) keep their own wording.
+    const definedHere = /^`([^`]+)` is defined here$/.exec(note.message);
+    if (definedHere !== null && definedHere[1] === describedName) continue;
     sections.push(
-      `*note:* ${proseMarkdown(note.message)} (line ${note.line}):`,
+      definedHere === null
+        ? `*note:* ${proseMarkdown(note.message)} (line ${note.line}):`
+        : `Declaration of \`${definedHere[1]}\` (line ${note.line}):`,
       codeBlock(clip(lineAt(text, note.start)))
     );
   }

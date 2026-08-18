@@ -105,17 +105,27 @@ await scenario('hover', undefined, async (c) => {
 await scenario('signature notes', undefined, async (c) => {
   const diagnostics = await c.open(URI, 'let a = Ln()\na');
   const [first] = diagnostics;
+  // For a full-capability client the message is a one-line headline: notes
+  // live in the hover's markdown section instead of being folded in.
   check(
-    'the signature is folded into the message',
-    first?.message.includes(
-      'note: `Ln` has signature `(number, base: number?) -> number`'
-    ) === true,
+    'the message stays a one-line headline without the note',
+    first !== undefined &&
+      !first.message.includes('note:') &&
+      !first.message.includes('\n'),
     JSON.stringify(diagnostics)
   );
   check(
     'the diagnostic keeps its code and severity',
     first?.code === 'static-type-error' && first.severity === 1,
     JSON.stringify(first)
+  );
+  const hover = await c.hover(URI, 0, 9);
+  check(
+    'the signature note appears in the hover instead',
+    hover?.contents.value.includes(
+      '*note:* `Ln` has signature `(number, base: number?) -> number`'
+    ) === true,
+    JSON.stringify(hover)
   );
 });
 
@@ -129,11 +139,10 @@ await scenario('user-defined callee', undefined, async (c) => {
   );
   const [first] = diagnostics;
   check(
-    'a wrong call to a local function is reported',
+    'a wrong call to a local function is reported, headline only',
     first?.message.includes('a required argument is missing') === true &&
-      first.message.includes(
-        '`parseDigits` has signature `(cs: string, i: integer) -> integer`'
-      ),
+      !first.message.includes('note:') &&
+      !first.message.includes('has signature'),
     JSON.stringify(diagnostics)
   );
   check(
@@ -150,11 +159,11 @@ await scenario('user-defined callee', undefined, async (c) => {
   );
 });
 
-// ── Hover: the diagnostic rendered rich ─────────────────────────────────
-// `Diagnostic.message` is plain text wherever the editor shows it; the hover
-// re-renders the diagnostic under the cursor as markdown — backtick quotes
-// become code spans, and a "defined here" note quotes the definition line in
-// a highlighted code block.
+// ── Hover: the diagnostic's notes rendered rich ─────────────────────────
+// `Diagnostic.message` is plain text wherever the editor shows it, so it is
+// kept to a one-line headline; the notes appear only in the hover, as
+// markdown — backtick quotes become code spans, and a "defined here" note
+// quotes the definition line in a highlighted code block.
 await scenario('diagnostic hover', undefined, async (c) => {
   await c.open(
     URI,
@@ -164,8 +173,8 @@ await scenario('diagnostic hover', undefined, async (c) => {
   const onCall = await c.hover(URI, 4, 3);
   const value = onCall?.contents.value ?? '';
   check(
-    'the diagnostic message appears in the hover markdown',
-    value.includes('a required argument is missing'),
+    'the headline is not restated in the hover markdown',
+    !value.includes('a required argument is missing'),
     JSON.stringify(onCall)
   );
   check(
@@ -173,28 +182,40 @@ await scenario('diagnostic hover', undefined, async (c) => {
     value.includes('*note:*') && value.includes('`parseDigits` has signature'),
     value
   );
+  // Hovering the callee's NAME: the symbol hover already captions this very
+  // declaration, so the note's own "Declaration of …" quote is elided
+  // rather than shown twice.
   check(
-    'a "defined here" note quotes the definition line, highlighted',
-    value.includes('is defined here (line 1):') &&
-      value.includes(
-        '```epsil\nfunction parseDigits(cs: string, i: integer) {'
-      ),
+    'the "defined here" quote is elided when the symbol hover shows it',
+    value.split('Declaration of `parseDigits`').length === 2 &&
+      !value.includes('is defined here') &&
+      !value.includes('function parseDigits(cs: string, i: integer) {'),
     value
   );
   check(
     'the symbol hover follows, separated by a rule',
     value.includes('\n\n---\n\n') &&
-      value.includes('Declaration of `parseDigits` (line 1):'),
+      // The declaration hover quotes the HEADER, which stops before the body.
+      value.includes(
+        '```epsil\nfunction parseDigits(cs: string, i: integer)\n```'
+      ),
     value
   );
 
   // Inside the argument string there is no identifier, so this hover is
-  // served by the diagnostic alone — and anchors to no range.
+  // served by the diagnostic alone — no symbol hover, no elision, and it
+  // anchors to no range. The note reads like the declaration hover and
+  // quotes the raw source LINE (brace included).
   const inArgument = await c.hover(URI, 4, 13);
+  const argValue = inArgument?.contents.value ?? '';
   check(
     'a diagnostic hover needs no identifier under the cursor',
-    inArgument?.contents.value.includes('a required argument is missing') ===
-      true && inArgument.range === undefined,
+    argValue.includes('`parseDigits` has signature') &&
+      argValue.includes('Declaration of `parseDigits` (line 1):') &&
+      argValue.includes(
+        '```epsil\nfunction parseDigits(cs: string, i: integer) {'
+      ) &&
+      inArgument.range === undefined,
     JSON.stringify(inArgument)
   );
 
@@ -211,8 +232,7 @@ await scenario('diagnostic hover', undefined, async (c) => {
   const atLastChar = await c.hover(URI, 4, 16);
   check(
     'the diagnostic hover covers its last character',
-    atLastChar?.contents.value.includes('a required argument is missing') ===
-      true,
+    atLastChar?.contents.value.includes('`parseDigits` has signature') === true,
     JSON.stringify(atLastChar)
   );
   const pastEnd = await c.hover(URI, 4, 17);
@@ -231,7 +251,9 @@ await scenario('diagnostic hover with CR line endings', undefined, async (c) => 
     URI,
     'function parseDigits(cs: string, i: integer) {\r  i\r}\r\rparseDigits("42")'
   );
-  const hover = await c.hover(URI, 4, 3);
+  // Inside the argument string: no symbol hover, so the "defined here" note
+  // renders in full.
+  const hover = await c.hover(URI, 4, 13);
   const value = hover?.contents.value ?? '';
   check(
     'the "defined here" quote is the definition line, not the whole document',
@@ -242,8 +264,7 @@ await scenario('diagnostic hover with CR line endings', undefined, async (c) => 
   );
   check(
     'captions still number lines correctly',
-    value.includes('is defined here (line 1):') &&
-      value.includes('Declaration of `parseDigits` (line 1):'),
+    value.includes('Declaration of `parseDigits` (line 1):'),
     value
   );
 });
