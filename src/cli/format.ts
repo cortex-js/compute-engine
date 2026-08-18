@@ -556,7 +556,14 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
   }
 }
 
-function sourceLocation(
+/**
+ * The 1-based line/column of `offset` in `source`, with the full text of that
+ * line and its starting offset. Clamps `offset` into range. Recognizes every
+ * line break the language does (CRLF, LF, lone CR, U+2028, U+2029) — exported
+ * so the editor's language server quotes and numbers lines by the same rules
+ * that produced the diagnostic's own `line`.
+ */
+export function sourceLocation(
   source: string,
   offset: number
 ): { line: number; column: number; text?: string; lineStart: number } {

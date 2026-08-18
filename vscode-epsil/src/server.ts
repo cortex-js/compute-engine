@@ -19,7 +19,11 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 // `.js`-suffixed TypeScript imports the same way the repo's own build does.
 import { checkSource, parseSource } from '../../src/cli/check.js';
 import { describeName } from '../../src/cli/doc.js';
-import { diagnosticToJson } from '../../src/cli/format.js';
+import {
+  diagnosticToJson,
+  sourceLocation,
+  type JsonDiagnostic,
+} from '../../src/cli/format.js';
 import { compile } from '../../src/compute-engine/compilation/compile-expression.js';
 import { ComputeEngine, parseEpsil } from '../../src/epsil.js';
 import type { MathJsonExpression } from '../../src/math-json/types.js';
@@ -58,6 +62,11 @@ type PublishedEntry = {
   start: number;
   end: number;
   fixits: { start: number; end: number; value: string }[];
+  /** The renderer's base message and its notes, kept STRUCTURED (not folded
+   * into one string) so the hover can re-render them as markdown — VS Code
+   * shows `Diagnostic.message` itself as plain text only. */
+  message: string;
+  notes: NonNullable<JsonDiagnostic['notes']>;
 };
 /** The entries behind the last publish, per document URI, stamped with the
  * document version they were computed from — a version mismatch means the
@@ -115,18 +124,36 @@ connection.onHover(({ textDocument, position }) => {
   if (document === undefined) return null;
 
   const text = document.getText();
-  const word = identifierAt(text, document.offsetAt(position));
-  if (word === undefined) return null;
+  const offset = document.offsetAt(position);
+  const word = identifierAt(text, offset);
 
-  const markdown = describeSymbol(word.name, text);
-  if (markdown === undefined) return null;
+  // Diagnostics first — an error under the cursor is what the reader is
+  // asking about — then what the hovered name is. The editor stacks the raw
+  // diagnostic (plain text) and this hover in one pop-over; the sections
+  // built here are the RICH rendering of the same diagnostic, which only a
+  // hover can provide (see `diagnosticMarkdown`).
+  const sections = diagnosticHovers(textDocument.uri, document, offset, text);
+  if (word !== undefined) {
+    const symbol = describeSymbol(word.name, text);
+    if (symbol !== undefined) sections.push(symbol);
+  }
+  if (sections.length === 0) return null;
 
   return {
-    contents: { kind: MarkupKind.Markdown, value: markdown },
-    range: {
-      start: document.positionAt(word.start),
-      end: document.positionAt(word.end),
+    contents: {
+      kind: MarkupKind.Markdown,
+      value: sections.join('\n\n---\n\n'),
     },
+    // Anchor to the hovered name when there is one; for a hover served only
+    // by a diagnostic, let the client pick its default range.
+    ...(word === undefined
+      ? {}
+      : {
+          range: {
+            start: document.positionAt(word.start),
+            end: document.positionAt(word.end),
+          },
+        }),
   };
 });
 
@@ -291,6 +318,8 @@ function toEntry(
     start,
     end,
     fixits: json.fixits ?? [],
+    message: json.message,
+    notes,
   };
 }
 
@@ -299,6 +328,94 @@ function toEntry(
 
 /** Longest declaration quoted in a hover, in characters. */
 const HOVER_DECLARATION_LENGTH = 200;
+
+/**
+ * The markdown renderings of the published diagnostics that cover `offset`.
+ *
+ * This is the hover-only rich layer: `Diagnostic.message` is rendered by the
+ * editor as plain text everywhere it appears (hover, peek, Problems panel),
+ * so its backtick-quoted names show as literal backticks. A hover, by
+ * contrast, is markdown — so the same diagnostic is re-rendered here with the
+ * quotes as real code spans and the callee's definition quoted
+ * syntax-highlighted.
+ */
+function diagnosticHovers(
+  uri: string,
+  document: TextDocument,
+  offset: number,
+  text: string
+): string[] {
+  const state = published.get(uri);
+  // The stored offsets are relative to the text that was checked; after an
+  // edit they no longer apply (a re-check is already scheduled).
+  if (state === undefined || state.version !== document.version) return [];
+  return state.entries
+    .filter(
+      (entry) =>
+        entry.start <= offset &&
+        // Half-open, matching the published LSP range — the position just
+        // past the underline is NOT covered; a zero-width diagnostic still
+        // hovers at its anchor.
+        (offset < entry.end || offset === entry.start)
+    )
+    .map((entry) => diagnosticMarkdown(entry, text));
+}
+
+/** One diagnostic as markdown: the message, then each note — and when a note
+ * points at a second place in the file (the definition of the callee), the
+ * source line it points at, quoted in a highlighted code block. */
+function diagnosticMarkdown(entry: PublishedEntry, text: string): string {
+  const sections = [proseMarkdown(entry.message)];
+  for (const note of entry.notes) {
+    if (note.start === undefined || note.line === undefined) {
+      sections.push(`*note:* ${proseMarkdown(note.message)}`);
+      continue;
+    }
+    sections.push(
+      `*note:* ${proseMarkdown(note.message)} (line ${note.line}):`,
+      codeBlock(clip(lineAt(text, note.start)))
+    );
+  }
+  return sections.join('\n\n');
+}
+
+/**
+ * Diagnostic prose as markdown. The renderer quotes names and types in
+ * backticks, which markdown turns into real code spans; everything OUTSIDE a
+ * quoted span is escaped, so a bare `*` cannot start emphasis and a bare
+ * `<...>` cannot be dropped as unsupported HTML. Newlines become hard breaks.
+ */
+function proseMarkdown(prose: string): string {
+  return prose
+    .split(/(`[^`\n]*`)/)
+    .map((run, i) =>
+      // Odd indices are the captured code spans, kept verbatim.
+      i % 2 === 1 ? run : run.replace(/[\\`*_{}[\]<>#|!~]/g, '\\$&')
+    )
+    .join('')
+    .replaceAll('\n', '\\\n');
+}
+
+/** The full source line containing `offset`, trimmed. `sourceLocation` is
+ * the CLI renderer's own offset-to-line resolver, so the line quoted here is
+ * split by the same line-break rules (CRLF, lone CR, U+2028/U+2029) that
+ * produced the diagnostic's `line` — and the offset is clamped into range. */
+function lineAt(text: string, offset: number): string {
+  return (sourceLocation(text, offset).text ?? '').trim();
+}
+
+/** The 1-based line number of `offset` in `text`, by the same line-break
+ * rules as `lineAt`. */
+function lineNumberAt(text: string, offset: number): number {
+  return sourceLocation(text, offset).line;
+}
+
+/** `code` shortened to what a hover should quote at most. */
+function clip(code: string): string {
+  return code.length > HOVER_DECLARATION_LENGTH
+    ? `${code.slice(0, HOVER_DECLARATION_LENGTH - 1)}…`
+    : code;
+}
 
 /**
  * The engine consulted for hovers. Cached: constructing one costs ~10ms and
@@ -410,11 +527,10 @@ function declarationHover(name: string, text: string): string | undefined {
   if (quoted === '') return undefined;
 
   const sections = [
-    codeBlock(
-      quoted.length > HOVER_DECLARATION_LENGTH
-        ? `${quoted.slice(0, HOVER_DECLARATION_LENGTH - 1)}…`
-        : quoted
-    ),
+    // Caption the quote: without it, hovering a USE of `x` pops up a bare
+    // `let x` with nothing saying that this is where `x` was declared.
+    `Declaration of \`${name}\` (line ${lineNumberAt(text, site.name[0])}):`,
+    codeBlock(clip(quoted)),
   ];
   // The doc comment written before the definition (`///` lines or a
   // `/** … *\/` block) — markdown, shown below the quoted header exactly as
@@ -445,9 +561,15 @@ function libraryHover(name: string): string | undefined {
 }
 
 /** A fenced Epsil code block — `epsil` is the language the extension
- * registers, so the hover gets the editor's own syntax highlighting. */
+ * registers, so the hover gets the editor's own syntax highlighting. The
+ * fence outgrows any backtick run in the quoted code (which can be an
+ * arbitrary source line), so the code cannot close the fence early. */
 function codeBlock(code: string): string {
-  return ['```epsil', code, '```'].join('\n');
+  const backticks = code.match(/`+/g) ?? [];
+  const fence = '`'.repeat(
+    Math.max(3, ...backticks.map((run) => run.length + 1))
+  );
+  return [`${fence}epsil`, code, fence].join('\n');
 }
 
 //

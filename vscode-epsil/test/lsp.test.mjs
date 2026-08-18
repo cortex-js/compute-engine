@@ -150,6 +150,104 @@ await scenario('user-defined callee', undefined, async (c) => {
   );
 });
 
+// ── Hover: the diagnostic rendered rich ─────────────────────────────────
+// `Diagnostic.message` is plain text wherever the editor shows it; the hover
+// re-renders the diagnostic under the cursor as markdown — backtick quotes
+// become code spans, and a "defined here" note quotes the definition line in
+// a highlighted code block.
+await scenario('diagnostic hover', undefined, async (c) => {
+  await c.open(
+    URI,
+    'function parseDigits(cs: string, i: integer) {\n  i\n}\n\nparseDigits("42")'
+  );
+
+  const onCall = await c.hover(URI, 4, 3);
+  const value = onCall?.contents.value ?? '';
+  check(
+    'the diagnostic message appears in the hover markdown',
+    value.includes('a required argument is missing'),
+    JSON.stringify(onCall)
+  );
+  check(
+    'notes render as their own paragraphs',
+    value.includes('*note:*') && value.includes('`parseDigits` has signature'),
+    value
+  );
+  check(
+    'a "defined here" note quotes the definition line, highlighted',
+    value.includes('is defined here (line 1):') &&
+      value.includes(
+        '```epsil\nfunction parseDigits(cs: string, i: integer) {'
+      ),
+    value
+  );
+  check(
+    'the symbol hover follows, separated by a rule',
+    value.includes('\n\n---\n\n') &&
+      value.includes('Declaration of `parseDigits` (line 1):'),
+    value
+  );
+
+  // Inside the argument string there is no identifier, so this hover is
+  // served by the diagnostic alone — and anchors to no range.
+  const inArgument = await c.hover(URI, 4, 13);
+  check(
+    'a diagnostic hover needs no identifier under the cursor',
+    inArgument?.contents.value.includes('a required argument is missing') ===
+      true && inArgument.range === undefined,
+    JSON.stringify(inArgument)
+  );
+
+  // Away from the diagnostic, the hover is the plain symbol hover.
+  const offDiagnostic = await c.hover(URI, 0, 10);
+  check(
+    'off the diagnostic no error section is added',
+    offDiagnostic?.contents.value.includes('note:') === false,
+    JSON.stringify(offDiagnostic)
+  );
+
+  // The overlap is half-open, matching the published range: the call's last
+  // character (the `)` at 16) is covered, the position just past it is not.
+  const atLastChar = await c.hover(URI, 4, 16);
+  check(
+    'the diagnostic hover covers its last character',
+    atLastChar?.contents.value.includes('a required argument is missing') ===
+      true,
+    JSON.stringify(atLastChar)
+  );
+  const pastEnd = await c.hover(URI, 4, 17);
+  check(
+    'and stops at the end of the underline',
+    pastEnd === null,
+    JSON.stringify(pastEnd)
+  );
+});
+
+await scenario('diagnostic hover with CR line endings', undefined, async (c) => {
+  // Lines separated by lone carriage returns — a break the language (and the
+  // diagnostic renderer) recognizes. The quoted line and the line numbers
+  // must follow those rules, not just '\n'.
+  await c.open(
+    URI,
+    'function parseDigits(cs: string, i: integer) {\r  i\r}\r\rparseDigits("42")'
+  );
+  const hover = await c.hover(URI, 4, 3);
+  const value = hover?.contents.value ?? '';
+  check(
+    'the "defined here" quote is the definition line, not the whole document',
+    value.includes(
+      '```epsil\nfunction parseDigits(cs: string, i: integer) {\n```'
+    ),
+    value
+  );
+  check(
+    'captions still number lines correctly',
+    value.includes('is defined here (line 1):') &&
+      value.includes('Declaration of `parseDigits` (line 1):'),
+    value
+  );
+});
+
 await scenario(
   'signature notes without relatedInformation',
   { textDocument: { publishDiagnostics: {} } },
