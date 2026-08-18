@@ -66,9 +66,9 @@ export function canonInstallSkipped(def: object | undefined): boolean {
  *
  * They live here, beside {@link CANON_INSTALL_SKIPPED}, because all three are
  * keyed on the same object and share one lifetime rule — see
- * {@link clearClauseProvenance}, which `updateDef()` calls and which is the
- * reason this trio must be reachable from `boxed-expression/utils.ts` without
- * dragging in the clause machinery.
+ * {@link clearClauseProvenance}, which the assignment path in
+ * `engine-declarations.ts` calls when an `Assign` replaces the whole
+ * definition (design rule D6).
  */
 const SINGLE_CLAUSE_ORIGIN = new WeakMap<object, DeclarationOrigin>();
 const SINGLE_CLAUSE_DECLARED = new WeakMap<object, FunctionSignature>();
@@ -107,13 +107,18 @@ export function singleClauseDeclared(
  * Drop everything this module remembers about a definition record, because the
  * definition it described has been REPLACED.
  *
- * Called from `updateDef()` (`boxed-expression/utils.ts`), which swaps a
- * binding's inner value/operator half wholesale. The clause LIST needs no such
- * call — it hangs off the inner operator object and dies with it, which is what
+ * Called from the assignment path in `engine-declarations.ts` when an
+ * `Assign` replaces a binding's definition wholesale. The clause LIST needs no
+ * such call — it hangs off the inner operator object and dies when
+ * `updateDef()` (`boxed-expression/utils.ts`) swaps that half, which is what
  * makes `Assign`'s full-replace semantics (design rule D6) fall out for free.
  * These three hang off the OUTER record instead, which `updateDef()` mutates in
  * place and therefore survives, so without this they describe a definition that
- * no longer exists.
+ * no longer exists. Hooking the clearing into `updateDef()` itself — the
+ * tidier-looking choke point — was rejected: `DefineFunction`'s recursion-knot
+ * machinery retypes the target through that path while a clause is being
+ * installed, so clearing there wiped the stamp mid-definition and let a
+ * genuine duplicate clause through. Only ASSIGNMENT means full replacement.
  *
  * The bug that motivated it: `g(n) = 1` then `g = x ↦ 2` then `g(n) = 3` left
  * the first statement's origin stamp on the record, so the third statement was

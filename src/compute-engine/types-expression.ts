@@ -2230,6 +2230,7 @@ export interface Expression {
         >
       | number[]
       | number
+      | ExpressionInput
       | undefined
   );
 

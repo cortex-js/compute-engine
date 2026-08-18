@@ -61,6 +61,7 @@ import { negate } from './negate.js';
 
 import { match } from './match.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { clearClauseProvenance } from '../clause-identity.js';
 import {
   hashCode,
   isOperatorDef,
@@ -684,6 +685,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           ]
         >
       | number
+      | _BoxedExpression
       | undefined
   ) {
     if (!this._def)
@@ -702,17 +704,39 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     let v: Expression | undefined;
     if (typeof value === 'boolean') value = value ? ce.True : ce.False;
     if (typeof value === 'string') value = ce.string(value);
-    if (typeof value === 'object') {
-      if ('re' in value && 'im' in value)
-        value = ce.number(ce.complex(value.re ?? 0, value.im));
-      else if ('num' in value && 'denom' in value)
-        value = ce.number([value.num!, value.denom!]);
-      else if (Array.isArray(value))
+    if (typeof value === 'object' && value !== null) {
+      // An already-boxed expression must be recognized BEFORE the
+      // `{re, im}` sniff below: every BoxedExpression has `re`/`im`
+      // getters, so the sniff used to convert a boxed non-numeric value
+      // (a lambda, a symbol, a list) into a complex number whose parts
+      // are NaN. `ce.expr()` below passes a boxed value through
+      // unchanged.
+      if (value instanceof _BoxedExpression) {
+        // Handled by `ce.expr()` below.
+      } else if (
+        Array.isArray(value) &&
+        value.every((x) => typeof x === 'number')
+      )
         value = ce._fn(
           'List',
           value.map((x) => ce.expr(x))
         );
-      else throw new Error(`Invalid value for symbol ${this._id}: ${value}`);
+      else if (Array.isArray(value)) {
+        // A MathJSON function expression such as `["Function", body, "x"]`
+        // (an array of numbers is the List convenience above): boxed by
+        // `ce.expr()` below.
+      } else if ('re' in value && 'im' in value)
+        value = ce.number(ce.complex(value.re ?? 0, value.im));
+      else if ('num' in value && 'denom' in value)
+        value = ce.number([value.num!, value.denom!]);
+      // Any other object is a MathJSON object form (`{fn: …}`, `{num: …}`,
+      // `{sym: …}`, `{str: …}`) handled by `ce.expr()` below. Note the two
+      // deliberate consequences: `{num: 1}` WITHOUT `denom` is the MathJSON
+      // number-object form and boxes to the plain number 1 (only the
+      // `{num, denom}` pair is the rational shorthand), and an object
+      // matching no MathJSON shape becomes an `unexpected-mathjson` error
+      // EXPRESSION rather than a synchronous throw — `ce.expr()`'s
+      // untrusted-input contract, which this setter now follows.
     }
 
     if (value !== undefined) {
@@ -723,22 +747,46 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     //
     // Assign the value to the corresponding definition
     //
-    if (v?.type.matches('function')) {
-      // New operator definitions always completely replace an existing one
-      // @ts-expect-error - value may not exist on all def types
-      delete this._def.value;
-      // @ts-expect-error - adding operator to def that may not have it
-      this._def.operator = {
-        signature: v.type,
-        evaluate: v, // Evaluate as a lambda
-      };
-      return;
-    }
-
+    // The constant guard runs BEFORE the function branch: both branches
+    // replace the definition, and the setter's documented contract is that
+    // writing a constant throws — for a lambda value as much as for `0`.
     if (isValueDef(this._def) && this._def.value.isConstant)
       throw new Error(
         `The value of the constant "${this._id}" cannot be changed`
       );
+
+    if (v?.type.matches('function')) {
+      // New operator definitions always completely replace an existing one.
+      // This is assignment-shaped full replacement (design rule D6), so the
+      // clause-provenance side channels keyed on the outer record must be
+      // dropped first — a surviving origin stamp would read a later clause
+      // as redefining a clause this replacement threw away.
+      clearClauseProvenance(this._def);
+      // Route the swap through `updateDef` so the operator half is a real
+      // `_BoxedOperatorDefinition` — provenance carried over, rollback
+      // journaling, provisional-dependent repair — rather than a raw object
+      // literal missing the class entirely (which left the definition
+      // without `_update`, effects derivation, or a `redefine` event).
+      // No explicit `signature`: like `assignValueAsOperatorDef`'s untyped
+      // branch (`engine-declarations.ts`), the signature is inferred from
+      // the body (`inferredSignature = true`), so a later `ce.assign` can
+      // full-replace it and no body-inferred effects specifier is promoted
+      // to an author-declared contract.
+      const callableBefore = defIsCallableShaped(this._def);
+      updateDef(ce, this._id, this._def, {
+        evaluate: v, // Evaluate as a lambda
+      });
+      // No value-setter write happens on this branch, so the `redefine`
+      // event is the sole advance (semantic + world axes) — same discipline
+      // as the `ce.assign` operator-install route in
+      // `engine-declarations.ts`.
+      ce._noteStateEvent({
+        kind: 'redefine',
+        callableBefore,
+        callableAfter: true,
+      });
+      return;
+    }
 
     ce._setSymbolValue(this._id, v);
   }

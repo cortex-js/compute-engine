@@ -173,6 +173,19 @@
 
 ### Bug Fixes
 
+- **Setting `expr.value` to a boxed expression no longer corrupts the
+  value.** The setter's input dispatch sniffed for a `{re, im}`
+  plain-object before recognizing an already-boxed expression — and every
+  `BoxedExpression` has `re`/`im` getters, so a boxed non-numeric value (a
+  lambda, a list, `√2`) was silently converted to a complex number whose
+  parts are NaN. A MathJSON function expression in array form
+  (`["Function", …]`) was likewise swallowed by the `number[] → List`
+  convenience. Both now box correctly, so `expr.value = ce.parse('x
+  \\mapsto x^2+1')` installs a callable function — and that install now
+  routes through the same definition-update path as `ce.assign` (a real
+  operator definition with provenance, journaling, and a `redefine` state
+  event) instead of a raw object literal.
+
 - **The `print` hint no longer fires for `print` itself.** Since `print` is
   a real function, the `print-not-available` hint now serves only as a
   did-you-mean for the unresolved aliases (`puts`, `echo`, `println`,

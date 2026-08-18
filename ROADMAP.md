@@ -112,7 +112,16 @@ input must not consume protocol bytes). When Stage 4 lands: route both
 operators through `ce.effects.console`, replace the MCP global-patching with
 a registry override, and add denied/overridden-capability coverage.
 
-### An unseeded Monte Carlo test can fail any commit's gate at random (OPEN, test reliability — observed 2026-08-17)
+### An unseeded Monte Carlo test can fail any commit's gate at random (FIXED 2026-08-18 — observed 2026-08-17)
+
+**Fix (2026-08-18):** every `monteCarloEstimate` call in the suite now passes
+a deterministic `draw` stream — a per-test PCG3D substream built from
+`foldSeed(tag)`/`frameDraw` (`src/compute-engine/numerics/random.ts`), the
+same counter-based generator `WithRandomSeed` uses — through the estimator's
+existing `draw` parameter. No estimator change. A replay-determinism test
+pins that the same seed reproduces the identical estimate, so a failure now
+means a regression, never sampling luck. Verified with three consecutive
+green runs.
 
 `test/compute-engine/monte-carlo.test.ts` draws from an unseeded generator —
 its own header says "Monte Carlo is stochastic — use generous tolerances" —
