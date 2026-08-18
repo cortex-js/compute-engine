@@ -8,6 +8,7 @@ import type {
 } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
 import { compileDiagnosticOf, isLaneMismatchError } from './diagnostics.js';
+import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 
@@ -369,25 +370,16 @@ function targetSupportsAuto(lt: {
   return targetSupportsMode(lt, 'auto');
 }
 
-/** The deprecated options already warned about, once per process each. */
-const deprecationWarned = new Set<string>();
-
-function warnDeprecatedOnce(key: string, message: string): void {
-  if (deprecationWarned.has(key)) return;
-  deprecationWarned.add(key);
-  console.warn(message);
-}
-
 /**
  * The deprecation mapping of the two pre-mode options (design §5,
  * `docs/plans/2026-08-16-compile-complex-mode.md`), applied at the public
  * entry before anything is compiled:
  *
  * - `complexPromotion` — consulted only when `mode` is absent: `true` maps to
- *   `mode: 'complex'` (with a one-time console warning); `false` is ignored.
- *   With an explicit `mode` the flag is ignored (with a warning; no conflict
- *   error). It is not passed on to the target: the discipline now carries the
- *   promotion.
+ *   `mode: 'complex'`; `false` selects nothing. With an explicit `mode` the
+ *   flag is ignored (no conflict error). Every present spelling gets a
+ *   one-time console warning. It is not passed on to the target: the
+ *   discipline now carries the promotion.
  * - `realOnly` — kept for one release as the OLD result projection
  *   (`{re, im}` → `NaN` unless the imaginary part is at roundoff scale,
  *   boolean → `NaN`), with a one-time warning; the result convention (§5) —
@@ -401,32 +393,16 @@ function applyDeprecatedModeOptions<T extends string>(
   modeFromAlias: boolean;
 } {
   if (options === undefined) return { options, modeFromAlias: false };
-  let out = options;
-  let modeFromAlias = false;
-  if (options.complexPromotion !== undefined) {
-    if (options.mode === undefined) {
-      if (options.complexPromotion === true) {
-        warnDeprecatedOnce(
-          'complexPromotion',
-          "compile(): the `complexPromotion` option is deprecated — it now maps to `mode: 'complex'` (ignored on a target that does not offer complex mode); pass `mode` instead."
-        );
-        out = { ...out, mode: 'complex' };
-        modeFromAlias = true;
-      }
-    } else {
-      warnDeprecatedOnce(
-        'complexPromotion+mode',
-        'compile(): the deprecated `complexPromotion` option is ignored when `mode` is given.'
-      );
-    }
-    out = { ...out, complexPromotion: undefined };
-  }
-  if (options.realOnly === true)
-    warnDeprecatedOnce(
-      'realOnly',
-      "compile(): the `realOnly` option is deprecated — a compiled value whose imaginary part is exactly zero is already returned as a plain number; test `typeof v === 'number'` instead. The projection is kept for one release."
-    );
-  return { options: out, modeFromAlias };
+  // Both the warning and the mapping live in `deprecation-warnings.ts`,
+  // because the target-level `.compile()` route owes the caller the same ones
+  // and cannot reach this module (see that file's header). The target is not
+  // known yet here, so the alias is mapped onto `mode` unconditionally and the
+  // returned `modeFromAlias` lets the caller drop it once the target turns out
+  // not to offer complex mode. `normalizeDeprecatedCompileOptions` warns at
+  // most once per process per deprecated option, so a compilation that passes
+  // through this entry AND the target's own `compile()` still produces exactly
+  // one warning.
+  return normalizeDeprecatedCompileOptions(options);
 }
 
 /**

@@ -112,8 +112,13 @@ describe('Matrix-operator typing (declared symbols)', () => {
     expect(ce.parse('S+1').type.toString()).toContain('|');
   });
 
-  test('vector + vector → list<number> (acceptable)', () => {
-    expect(engine().parse('v+v').type.toString()).toBe('list<number>');
+  test('vector + vector → vector, rank preserved', () => {
+    // Was `list<number>`, which this test's old name called merely
+    // "acceptable". Since the type parser started recording an unsized
+    // `vector`'s open rank-1 dimension (commit eaae156c), vector-ness
+    // survives the addition instead of widening to a bare list — a strictly
+    // better answer, so the expectation moved rather than the code.
+    expect(engine().parse('v+v').type.toString()).toBe('vector');
   });
 });
 
@@ -233,8 +238,11 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     // which admits a point as well as a vector or matrix (`Dot` is the
     // sanctioned spelling of the point inner product, Tycho item 158).
     expect(e.isValid).toBe(false);
-    expect(sym(ce, 'u')).toBe('list<number> | matrix | tuple');
-    expect(sym(ce, 'v')).toBe('list<number> | matrix | tuple');
+    // `list<number>` in this union is now spelled `vector`, for the same
+    // reason as the `v+v` case above (commit eaae156c): an unsized vector
+    // keeps its rank-1 dimension rather than flattening to a bare list.
+    expect(sym(ce, 'u')).toBe('matrix | tuple | vector');
+    expect(sym(ce, 'v')).toBe('matrix | tuple | vector');
   });
 
   test('P8: Det(A·M) with declared M: matrix — no unnecessary promotion', () => {

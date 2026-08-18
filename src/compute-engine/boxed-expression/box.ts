@@ -1410,6 +1410,11 @@ const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
   'character',
   'string',
   'color',
+  // `regexp` for exactly the reason `color` is here: a leaf primitive with no
+  // subtypes, outside `SCALAR_TYPES` only because `scalar` does not cover it.
+  // A callback over a `list<regexp>` deserves the same contextual element
+  // stamp a `list<color>` gets.
+  'regexp',
 ]);
 
 /**

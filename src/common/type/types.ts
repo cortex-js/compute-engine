@@ -86,6 +86,15 @@ export type PrimitiveType =
   // the runtime says a character has no elements. See
   // `docs/STRING_ROADMAP.md` ("The `character` value model").
   | 'character'
+  // A compiled regular expression. An OPAQUE value, like `color`: neither a
+  // `scalar` (it has no numeric or boolean reading, and nothing broadcasts
+  // over it component-wise) nor a `collection` (a pattern is not a sequence
+  // of anything the engine can index). It is disjoint from `string` for the
+  // same reason `character` is: a pattern is not text, and `IsMatch(s, p)`
+  // wants the two apart in its signature so a plain string cannot be passed
+  // where a pattern is meant. See `docs/STRING_ROADMAP.md` (Phase 3) and
+  // `docs/plans/2026-08-17-string-phase3-regular-expressions.md` (D1).
+  | 'regexp'
   | 'color'
   | 'expression'
   | 'unknown'

@@ -25,10 +25,11 @@ export type TargetSource = string;
  * - `'auto'` — `strict` plus promotion of the unknown-sign radicals, and on
  *   a `LaneMismatch` the compilation is redone ONCE in `complex` mode.
  *
- * Migration step 1 (2026-08-16): the option is accepted, validated and
- * resolved end to end, and reported on the result; every setting still
- * compiles with today's emission (no promotion beyond `complexPromotion`, no
- * lane-mismatch decline, no retry). The disciplines land in the later steps.
+ * All three are implemented, and `'auto'` is the default of the `javascript`
+ * and `python` targets: an unknown-sign radical promotes with no opt-in, a
+ * lane mismatch declines, and that decline redoes the compilation once under
+ * `'complex'`. Which discipline the returned code was compiled under is
+ * reported on the result (`CompilationResult.mode`, never `'auto'`).
  */
 export type CompileMode = 'strict' | 'complex' | 'auto';
 
@@ -603,13 +604,22 @@ export interface CompileTarget<Expr = unknown> {
   constantFold?: boolean;
 
   /**
-   * DEPRECATED (2026-08-16) — the promotion of an unknown-sign
-   * `Sqrt`/`Ln`/`Log`/`Power` through the complex kernels is now a property
-   * of the compile MODE (`mode`: `auto`, the default on JavaScript/Python,
-   * and `complex` promote; `strict` never does). The engine-level `compile()`
-   * maps the deprecated caller option onto `mode` and no longer sets this
-   * field; a target that still sets it gets the same promotion (latched
-   * once, at the outermost compilation, for the whole duration).
+   * The promotion of an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` through the
+   * complex kernels is now a property of the compile MODE (`mode`: `auto`,
+   * the default on JavaScript/Python, and `complex` promote; `strict` never
+   * does). Both public routes into a compilation — the engine-level
+   * `compile()` and a registered target's own `compile()` — map the
+   * deprecated caller option onto `mode` and clear it, so they never set this
+   * field.
+   *
+   * A target that sets it BY HAND still gets the promotion, and that is the
+   * one remaining way the deprecated flag can outvote an explicit discipline:
+   * `BaseCompiler.promotionActive` reads this latch with `||` against the
+   * mode, so a hand-built target carrying `complexPromotion: true` promotes
+   * even under `mode: 'strict'`. Set `mode` instead.
+   *
+   * @deprecated Superseded by `mode` (2026-08-16). Use
+   * `mode: 'complex'` — or the default `auto` — rather than this field.
    */
   complexPromotion?: boolean;
 
@@ -1232,9 +1242,15 @@ export interface CompilationOptions<Expr = unknown> {
    * `escalation` (under `'auto'`) why the compilation was redone in complex
    * mode.
    *
-   * Migration step 1 (2026-08-16): accepted, validated and reported; every
-   * setting still emits today's code (`complexPromotion` and `realOnly` are
-   * honored exactly as before). See `CompileMode` for the disciplines.
+   * The disciplines are live, not merely reported: a default (`'auto'`)
+   * compilation promotes an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` with no
+   * opt-in, a complex-shaped value reaching a binding the strict attempt
+   * shaped real declines with a lane mismatch, and that decline redoes the
+   * compilation ONCE under `'complex'`. The two older flags are deprecated
+   * and subordinate to this option: `complexPromotion: true` maps to
+   * `mode: 'complex'` only when no `mode` is given, and `realOnly` never
+   * selects a lowering — it projects the compiled unit's RESULT after the
+   * kernel has run. See `CompileMode` for the disciplines.
    */
   mode?: CompileMode;
 
@@ -1266,6 +1282,7 @@ export interface CompilationOptions<Expr = unknown> {
    * when the imaginary part is at roundoff scale, `NaN` otherwise; a boolean
    * → `NaN`. It never influences which lowering an operator picks — see
    * `mode` for that.
+   * @deprecated
    */
   realOnly?: boolean;
 
@@ -1278,6 +1295,7 @@ export interface CompilationOptions<Expr = unknown> {
    * it is ignored with a warning. Note the default mode `auto` already
    * promotes an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` — the trade this flag
    * used to buy — so most callers can simply drop it.
+   * @deprecated
    */
   complexPromotion?: boolean;
 
@@ -1543,7 +1561,34 @@ export type CompilationResult<
   /**
    * The arithmetic discipline the returned code was compiled under —
    * `'strict'` or `'complex'` (never `'auto'`, which is a policy over the
-   * two). Set by the built-in targets on every result. See `CompileMode`.
+   * two disciplines, not one code can be compiled under). Set by the built-in
+   * targets on every result. See `CompileMode`.
+   *
+   * `'complex'` is reported whenever the complex discipline was latched (it
+   * was requested, or `'auto'` escalated to it after a lane mismatch — see
+   * `escalation`) OR a promotable head (an unknown-sign `Sqrt`/`Ln`/`Log`, or
+   * a `Power` with a non-integer exponent) was promoted through the complex
+   * kernel; `'strict'` otherwise. So `promoted === true` implies
+   * `mode === 'complex'`. The two fields still differ: an explicitly
+   * requested `'complex'` compile that contains no promotable head reports
+   * `mode: 'complex'` with `promoted: false`.
+   *
+   * **Not a lane oracle, and not a shader-portability test.** An operand that
+   * is ALREADY complex-typed — a `complex`/`imaginary`-typed symbol, a
+   * `Complex(…)` literal, `ImaginaryUnit` — routes through the complex kernel
+   * in EVERY discipline, so it is deliberately not counted as a promotion:
+   * compiling `3 + 2i` with `mode: 'strict'` emits `({ re: 3, im: 2 })` and
+   * reports `('strict', false)`. `mode: 'strict'` therefore does NOT
+   * guarantee the emitted code is free of `{re, im}` arithmetic. (The
+   * exclusion is the `!isNonRealNumber(a.type.type)` conjunct guarding the
+   * `notePromoted()` call in `BaseCompiler.promotesRadicalToComplex`.)
+   *
+   * `mode` describes the EMISSION, not the shape of a returned value. Under
+   * the deprecated `realOnly: true` a promoted compile still reports
+   * `'complex'` while handing back a real number (or `NaN`), because
+   * `realOnly` is a projection applied to the RESULT after the complex kernel
+   * has run. The only sound per-sample test of a returned value's shape is
+   * `typeof v === 'number'`.
    */
   mode?: 'strict' | 'complex';
 

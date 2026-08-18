@@ -8,6 +8,7 @@
  */
 
 import type { Expression } from '../global-types.js';
+import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import {
   isSymbol,
   isNumber,
@@ -881,6 +882,17 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'interval-js', IntervalResult | Interval> {
+    // See the note in `javascript-target.ts`: the target-level route bypasses
+    // the standalone `compile()` export, where these deprecations were warned
+    // about and where the `complexPromotion` alias is resolved, so each target
+    // entry warns and normalizes for itself. This target declares `['strict']`
+    // only, so the alias is NOT mapped onto `mode: 'complex'` (that would turn
+    // a compile that used to succeed into an `unsupported-mode` decline); it
+    // is merely cleared. Once-per-process per key.
+    options = normalizeDeprecatedCompileOptions(
+      options,
+      INTERVAL_SUPPORTED_MODES.includes('complex')
+    ).options;
     let result: CompilationResult<'interval-js', IntervalResult | Interval>;
     try {
       result = this.compileOrThrow(expr, options);

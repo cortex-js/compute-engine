@@ -96,6 +96,112 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### `CompilationResult.mode` reported `'strict'` for code lowered through the complex kernel (FIXED 2026-08-17 — reported by the Tycho consumer as item 201 during the 0.115.0 adoption; their headline claim was WITHDRAWN the same day, see below)
+
+`CompilationResult.mode` is documented (`compilation/types.ts`) as "the
+arithmetic discipline the returned code was compiled under — `'strict'` or
+`'complex'` (never `'auto'`, which is a policy over the two)". Under the
+`auto` default it reported `'strict'` for a compilation whose emitted code ran
+in the complex kernel:
+
+```
+compile(ce.parse('\\sqrt{x}'), { to: 'javascript' })          // auto default
+   was  mode='strict'  promoted=true   run({x:-1}) -> {re:0, im:1}
+   now  mode='complex' promoted=true   run({x:-1}) -> {re:0, im:1}
+```
+
+`promoted: true` is defined two fields down as "any promotable head was
+lowered through a complex kernel", so the two fields described the same
+compiled unit and contradicted each other.
+
+**Cause.** `auto` promotes a promotable head on its FIRST attempt, with no
+`LaneMismatch` escalation — so the `_mode` latch still read `'strict'` while
+the emitted code was complex. The report consulted only `_mode`.
+
+**Fix** (`compilation/base-compiler.ts`, the `_lastReport` freeze): report
+`'complex'` when `_mode === 'complex'` **or** `_promoted`. USER RULING
+2026-08-17 — `mode` names the RESOLVED discipline. No public type changed:
+`'auto'` was never a possible result value and still is not. Gate:
+`test/compute-engine/compile-mode-report-and-deprecations.test.ts`, which
+pins the non-promoting default still reporting `'strict'` (otherwise "report
+the resolved mode" is indistinguishable from "always say complex").
+
+Note `mode === 'complex'` is now implied by `promoted === true`; the fields
+still differ, since an explicitly requested `'complex'` compile with no
+promotable head reports `('complex', false)`. `realOnly` does not enter into
+it — it is a result projection applied AFTER the kernel runs, so a promoted
+`realOnly` compile reports `'complex'` beside a real `NaN`. That row is
+pinned deliberately: `mode` describes the emission, never the result shape,
+for which `typeof v === 'number'` remains the only sound per-sample test.
+
+**What was withdrawn, recorded so it is not re-derived.** The item was filed
+as "the default and an explicit `strict` are indistinguishable". They are
+distinguishable — `promoted` differs (`true` vs `false`) — and the consumer
+withdrew that claim the same day. Two further corrections from that exchange:
+their withdrawal reasoned that "every setting still compiles with
+strict-shaped emission in 0.115.0", which is false (an explicit
+`mode: 'complex'` reported `'complex'` before this fix); and the residual
+documentation defect they cited is at `CHANGELOG.md:306`, describing an
+already-shipped release, which should stay as written. What survived, and
+what this entry fixed, is the contradiction against `mode`'s OWN docstring.
+
+**Not a measurement blocker, for the record.** A consumer sizing the impact of
+`auto` vs `strict` across a corpus can partition on `promoted` under `auto`
+alone: measured over seven shapes, every `promoted=true` expression differs
+between the two disciplines and every `promoted=false` one is byte-identical.
+That is what `promoted` is specified to mean.
+
+### The `realOnly`/`complexPromotion` deprecation warnings never reached the target-level compile entry (FIXED 2026-08-17 — reported by the Tycho consumer as item 202; reproduced here the same day)
+
+There are two public routes into a compilation and only one warned:
+
+```
+compile(expr, { realOnly: true })                                  warns
+ce.getCompilationTarget('javascript').compile(expr, {realOnly:true})   SILENT (was)
+```
+
+`applyDeprecatedModeOptions()` had exactly one call site, inside the
+standalone `compile()` export, so a caller holding a target invoked its
+`.compile()` directly and was never told the option was deprecated. The
+options kept WORKING on that route — each target reads `realOnly` and
+`complexPromotion` itself — so nothing was broken; the migration signal was
+simply absent.
+
+**Why it mattered more than a missing log line:** the target-level call is
+what an integration reaches for once it needs a specific target, so the
+consumers who missed the deprecation were systematically the ones with the
+most call sites to migrate. The Tycho consumer reported **all 12 of their
+production `realOnly: true` sites** on the silent path; they learned the clock
+was running by reading the CHANGELOG, which the next integration will not do.
+
+**Fix.** The warning text moved to `compilation/deprecation-warnings.ts` — a
+new module, because `base-compiler.ts` cannot import from
+`compile-expression.ts` without a cycle (that module imports the targets,
+which import `BaseCompiler`), and the repo has a zero-cycle budget. Each of
+the four built-in targets (`javascript`, `python`, `gpu`,
+`interval-javascript`) calls `warnDeprecatedCompileOptions(options)` at the
+top of its `compile()`. The alias NORMALIZATION (mapping `complexPromotion`
+onto `mode`) stays in `compile-expression.ts`, since only the standalone entry
+owns the options object it passes onward. Warnings remain once-per-process per
+key, so a call that passes through both routes still emits exactly one.
+
+**Trap met while writing the gate, worth keeping:** once-per-process warnings
+make any test of them ORDER-DEPENDENT — the first case to touch a key consumes
+it and every later assertion on that key sees silence and reads it as a
+regression. That is how the gate first failed. `resetDeprecationWarnings()` is
+exported for tests to call in `beforeEach`; nothing in the engine calls it.
+
+**Unresolved and worth a decision before the removal is scheduled:** the
+deprecation names no replacement for what `realOnly` actually does. It is a
+RESULT projection (`{re, im}` → `NaN` unless the imaginary part is at roundoff
+scale), not a lowering choice, and `mode` does not do that job. Dropping it is
+behaviour-bearing at the call site — `\sqrt{x}` at `x = -1` moves from `NaN`
+to `{re:0, im:1}`, and consumers that read `NaN` as "no sample here" change
+what they plot. `mode: 'strict'` returns `NaN` for the shapes measured here,
+but strict can also fail closed (D6) where `auto` + `realOnly` compiles and
+projects, so the two are not equivalent and no shape triggering that
+difference has been found yet.
+
 ### `Extract` and `Exclude` were documented but never existed (RESOLVED 2026-08-17 — the doc sections were deleted; found 2026-08-16 auditing `doc/`)
 
 `doc/82-reference-collections.md` carried two full `<FunctionDefinition>`

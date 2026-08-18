@@ -136,6 +136,11 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   // One grapheme cluster: an atom with no subtypes. Disjoint from `string`.
   character: [],
   color: [],
+  // A compiled pattern: an atom with no subtypes, and disjoint from `string`
+  // (a pattern is not text). Deliberately NOT reached by the structural
+  // expansion `string`/`range` get in `isSubtype` — it has no element type to
+  // expand to.
+  regexp: [],
   expression: EXPRESSION_TYPES,
 };
 

@@ -1,4 +1,5 @@
 import type { Expression } from '../global-types.js';
+import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 
 import type {
   CompileMode,
@@ -2872,6 +2873,16 @@ export class PythonTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'python'> {
+    // See the note in `javascript-target.ts`: the target-level route bypasses
+    // the standalone `compile()` export, where these deprecations were warned
+    // about and where the `complexPromotion` alias is mapped onto `mode`, so
+    // each target entry warns and normalizes for itself — otherwise the flag
+    // reaches `BaseCompiler`'s legacy promotion latch and promotes even under
+    // an explicit `mode: 'strict'`. Once-per-process per key.
+    options = normalizeDeprecatedCompileOptions(
+      options,
+      PYTHON_SUPPORTED_MODES.includes('complex')
+    ).options;
     try {
       return this.compileOrThrow(expr, options);
     } catch (e) {

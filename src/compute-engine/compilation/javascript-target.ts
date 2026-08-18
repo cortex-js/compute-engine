@@ -4,6 +4,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
+import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import {
   isSymbol,
   isNumber,
@@ -2403,6 +2404,39 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // (User ruling 2026-08-16;
   // `docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.)
 
+  // --- Regular expressions ------------------------------------------------
+  // A `regexp` VALUE is the `RegExp(pattern, flags)` expression itself, so a
+  // lowering reads its pattern and flag TEXT straight off the operands. Both
+  // must be literal strings: a computed pattern has no text at compile time,
+  // and emitting `new RegExp(<expr>)` would move a construction error the
+  // interpreter reports at canonicalization into the compiled artifact.
+  //
+  // NOT lowered, deliberately, and it is a coverage boundary rather than a
+  // dialect one (the dialect ruling put no limits on patterns): `StringMatch`
+  // and `StringMatchAll` report a match RECORD whose `range` is in GRAPHEME
+  // CLUSTERS, and a function replacement receives that same record. Compiled
+  // code has no record value and no cluster-index translation, so those fail
+  // closed with a diagnostic rather than silently reporting code-unit
+  // offsets, which would disagree with the interpreter. Absent from the
+  // Python and shader targets for the same reason those targets have no
+  // string surface at all.
+  RegExp: () => {
+    throw new Error(
+      `RegExp: cannot compile — a compiled pattern is not a value on this ` +
+        `target; use it directly in \`IsMatch\` or \`StringReplace\`. ` +
+        `Fail closed (D6).`
+    );
+  },
+  IsMatch: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        `IsMatch: cannot compile — expected \`IsMatch(subject, pattern)\`. ` +
+          `Fail closed (D6).`
+      );
+    const subject = stringArg('IsMatch', args[0], compile, 'the subject');
+    const { source, flags } = literalPatternArg('IsMatch', args[1]);
+    return `_SYS.reis(${subject}, ${source}, ${flags})`;
+  },
   StringReplace: (args, compile) => {
     if (args.length < 3 || args.length > 4)
       throw new Error(
@@ -2410,6 +2444,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `\`StringReplace(s, target, replacement, count?)\`. Fail closed (D6).`
       );
     const subject = stringArg('StringReplace', args[0], compile, 'the subject');
+    // A PATTERN target takes the regex kernel. Only a string replacement is
+    // lowered: a function replacement is called with the match record, which
+    // this target cannot build (see the note above `RegExp`).
+    if (isRegExpOperand(args[1])) {
+      const { source, flags } = literalPatternArg('StringReplace', args[1]);
+      const repl = stringArg(
+        'StringReplace',
+        args[2],
+        compile,
+        'the replacement'
+      );
+      let n = 'Infinity';
+      if (args.length === 4)
+        n = guardedIntegerArg(
+          'StringReplace',
+          args[3],
+          compile,
+          1,
+          `\`count\` must be a positive integer of at most ${SMALL_INTEGER}`
+        );
+      return `_SYS.rerep(${subject}, ${source}, ${flags}, ${repl}, ${n})`;
+    }
     // An EMPTY target is an error value in the interpreter (the "insert at
     // every boundary" behaviour is deliberately not inherited), and it would
     // make `_SYS.srep`'s scan advance by zero and never terminate — so the
@@ -5462,6 +5518,18 @@ let graphemeSegmenter: Intl.Segmenter | undefined = undefined;
  * produces are already conditioned, so this only changes a raw host string
  * bound to a compiled parameter.
  */
+/** The code-unit width of the code POINT starting at `i` — 2 for a surrogate
+ * pair, 1 otherwise.
+ *
+ * Used to step past a zero-width regex match. The obvious spelling,
+ * `[...s.slice(i)][0].length`, copies the entire remaining suffix and expands
+ * all of its code points just to look at the first one, which makes a pattern
+ * that matches everywhere (`(?:)`) quadratic in the subject length. */
+function codePointWidthAt(s: string, i: number): number {
+  const cp = s.codePointAt(i);
+  return cp !== undefined && cp > 0xffff ? 2 : 1;
+}
+
 function conditionText(x: unknown): string {
   const s = String(x).normalize();
   // `toWellFormed` is Node ≥ 20 / ES2024; older hosts keep the raw string,
@@ -5925,6 +5993,76 @@ const SYS_HELPERS = {
   // See `matchesSequenceAtJS`, `findSequenceJS`, `replaceText`, `trimText`,
   // `padText` and `caseFoldText`.
   // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.)
+  // --- Regular expressions (Strings Phase 3) ----------------------------
+  // The dialect is the HOST's, by user ruling 2026-08-17 — no feature subset
+  // and no caps — which is exactly what makes compiled code and the
+  // interpreter agree here: both hand the same pattern text to the same
+  // `RegExp` implementation, so there is no second engine to diverge from.
+  //
+  // `rerep` compiles its own `g`-flagged object per call rather than reusing
+  // one. A `g`-flagged `RegExp` carries its scan position in `lastIndex`, so
+  // a shared instance corrupts two live loops; the interpreter learned this
+  // the hard way when a replacement callback re-entered the same pattern and
+  // hung. Compiled code has the same hazard. `reis` is NOT global — `.test()`
+  // on a plain pattern neither reads nor writes `lastIndex` — so its per-call
+  // construction is only a small allocation, not a correctness requirement.
+  // `conditionText` + the non-string rejection, exactly as `chars` does: the
+  // interpreter conditions a string at INGRESS (NFC normalization AND the
+  // lone-surrogate → U+FFFD repair of `BoxedString`'s constructor), so a raw
+  // host string bound to a compiled parameter must go through the same steps
+  // or the two surfaces disagree. Measured before this: the NFD spelling of
+  // `é` (`e` + U+0301) matched `/é/` in the interpreter and NOT in compiled
+  // code. Rejecting a non-string is the same contract too — `test()` would
+  // otherwise coerce `42` to `\"42\"` and answer.
+  reis: (s: unknown, src: string, flags: string) => {
+    if (typeof s !== 'string')
+      throw new Error('IsMatch: expected a string subject');
+    return new RegExp(src, flags).test(conditionText(s));
+  },
+  // Conditioned on both the subject and the replacement, for the reason given
+  // on `reis`: the interpreter has already conditioned both by the time it
+  // builds a result, so compiled code must too.
+  rerep: (
+    sRaw: unknown,
+    src: string,
+    flags: string,
+    replacementRaw: unknown,
+    limit: number
+  ) => {
+    if (typeof sRaw !== 'string' || typeof replacementRaw !== 'string')
+      throw new Error('StringReplace: expected string operands');
+    const s = conditionText(sRaw);
+    const replacement = conditionText(replacementRaw);
+    const re = new RegExp(src, flags.includes('g') ? flags : flags + 'g');
+    const out: string[] = [];
+    let from = 0;
+    let done = 0;
+    re.lastIndex = 0;
+    for (;;) {
+      if (done >= limit) break;
+      const m = re.exec(s);
+      if (m === null) break;
+      out.push(s.slice(from, m.index), replacement);
+      from = m.index + m[0].length;
+      done += 1;
+      if (m[0].length === 0) {
+        const step = codePointWidthAt(s, re.lastIndex);
+        out.push(s.slice(from, from + step));
+        from += step;
+        re.lastIndex += step;
+        if (re.lastIndex > s.length) break;
+      }
+    }
+    out.push(s.slice(from));
+    // NFC-normalize the JOIN, as `replaceText` (the literal-target kernel) and
+    // the interpreter's `ce.string(out.join(''))` both do. Re-segmentation
+    // happens once, when the pieces are joined, so a replacement whose
+    // trailing edge composes with the character following it must combine:
+    // replacing `q` with `e` in `q` + U+0301 is the single character `é`
+    // (U+E9), not `e` + U+0301. Without this the compiled result had a
+    // different `Length()` from the interpreted one.
+    return out.join('').normalize();
+  },
   seqat: matchesSequenceAtJS,
   seqidx: findSequenceJS,
   srep: replaceText,
@@ -7012,6 +7150,23 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
+    // A caller reaching a target through `ce.getCompilationTarget(name)` and
+    // invoking this method never passes through the standalone `compile()`
+    // export, which is where the deprecated pre-`mode` options used to be
+    // warned about AND resolved. The options keep WORKING on this route (the
+    // emitter reads `realOnly` directly), so the omission was silent — and
+    // this is the route an integration takes once it needs a specific target,
+    // i.e. the callers with the most sites to migrate. Normalizing here as
+    // well is what makes the warning's wording true on this route: it maps
+    // `complexPromotion: true` onto `mode: 'complex'` and clears the alias, so
+    // the flag can no longer reach `BaseCompiler`'s legacy promotion latch and
+    // promote under an explicit `mode: 'strict'`. Warning is once-per-process
+    // per key, so a call that also goes through the standalone entry still
+    // produces exactly one.
+    options = normalizeDeprecatedCompileOptions(
+      options,
+      JS_SUPPORTED_MODES.includes('complex')
+    ).options;
     try {
       return this.compileOrThrow(expr, options);
     } catch (e) {
@@ -7847,6 +8002,62 @@ function joinIfString(source: Expression | undefined, code: string): string {
  * interpreter, and compiling it would answer a value where interpretation
  * answers an error. `position` labels the operand in the diagnostic.
  */
+/** Is this operand a compiled pattern — a `RegExp(...)` node or a
+ * `regexp`-typed value? */
+function isRegExpOperand(arg: Expression | undefined): boolean {
+  return arg !== undefined && arg.type.matches('regexp');
+}
+
+/** The pattern source and flag text of a `RegExp(...)` operand, as JS string
+ * literals ready to embed.
+ *
+ * Both must be LITERAL: a computed pattern has no text at compile time, and
+ * emitting `new RegExp(<expr>)` would move a construction error that the
+ * interpreter reports at canonicalization into the compiled artifact, where
+ * it becomes a run-time throw instead of a visible error value.
+ *
+ * A Unicode mode is added exactly as the interpreter's `hostFlags` does, so
+ * compiled code and the interpreter compile the SAME pattern — `u` rather
+ * than `v`, since `v` rejects patterns `u` accepts.
+ *
+ * ⚠️ This is a SECOND COPY of that rule: the other is `hostFlags()` in
+ * `compute-engine/library/regexp.ts`, and `compilation/` does not import from
+ * `library/`, so nothing mechanically keeps them in step. The whole safety
+ * argument for compiling a regex is that the same pattern text reaches the
+ * same `RegExp`, and the flag string is the one input where that can quietly
+ * stop holding — so change both together, and see the compiled/interpreted
+ * parity tests in `test/compute-engine/regexp.test.ts`, which cover an
+ * explicit `u` and none.
+ *
+ * It also does not re-apply `ACCEPTED_FLAGS`. That is safe only because
+ * canonicalization rejects `g`/`y`/unknown/duplicate flags before any node
+ * can reach compilation — a non-local invariant, stated here because this
+ * function does not enforce it itself. */
+function literalPatternArg(
+  operator: string,
+  arg: Expression | undefined
+): { source: string; flags: string } {
+  const re = arg !== undefined && isFunction(arg, 'RegExp') ? arg : undefined;
+  if (re === undefined || !isString(re.op1))
+    throw new Error(
+      `${operator}: cannot compile — the pattern must be a literal ` +
+        `\`RegExp("...")\`. Fail closed (D6).`
+    );
+  const flagText =
+    re.nops >= 2 && isString(re.op2) ? re.op2.string : '';
+  if (re.nops >= 2 && !isString(re.op2))
+    throw new Error(
+      `${operator}: cannot compile — the flags must be a literal string. ` +
+        `Fail closed (D6).`
+    );
+  const withUnicode =
+    flagText.includes('u') || flagText.includes('v') ? flagText : flagText + 'u';
+  return {
+    source: JSON.stringify(re.op1.string),
+    flags: JSON.stringify(withUnicode),
+  };
+}
+
 function stringArg(
   kind: string,
   arg: Expression | undefined,

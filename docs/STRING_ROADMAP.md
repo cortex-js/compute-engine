@@ -942,6 +942,18 @@ operator to land on.
 
 ## Phases
 
+**STATUS: COMPLETE — all four phases shipped (0, 1, 2 on 2026-08-16; 3 on
+2026-08-17).** What remains is explicitly deferred rather than pending, and
+each item names why: locale-aware collation (`StringCompare`'s tail is left
+free for a `collation` argument), number FORMATTING (fixed decimals,
+scientific notation, grouping separators — a format-string mini-language
+versus an options record is its own design surface), splitting with captures
+retained and `$1`-style replacement templates (Phase 3 D12: the function
+replacement covers the need without the parsing ambiguity), and a lazy
+`StringMatchAll` (Phase 3 deviations: laziness buys little when the match
+count is bounded by the subject length).
+
+
 0. **The `range` type + honest per-kind signatures (upfront — no string
    involvement).** Three pieces, all independent of strings:
 
@@ -1155,7 +1167,20 @@ operator to land on.
      header)` placed the piped value in the wrong slot once a string fit a
      collection slot (epsil-syntax), and `Join`/`Sort` string
      materialization above.
-3. **Regular expressions.** Independent of the collection change.
+3. **Regular expressions. SHIPPED 2026-08-17** —
+   `docs/plans/2026-08-17-string-phase3-regular-expressions.md` (decisions,
+   deviations and the two review defects). `regexp` is a primitive VALUE type
+   (beside `color`, not a scalar and not a collection), built by
+   `RegExp(pattern, flags?)`; `IsMatch`, `StringMatch`, `StringMatchAll`, and
+   regex arms on `StringSplit`/`StringReplace` including a function
+   replacement. Dialect = the host's in full, by user ruling: no feature
+   subset and no caps, so backreferences and lookbehind work and catastrophic
+   backtracking is a DOCUMENTED property the engine cannot interrupt (stated
+   in `doc/97-reference-strings.md`). Match positions are grapheme-cluster
+   `range`s, so `Slice(s, m.range)` composes — and the field is absent rather
+   than wrong when a match does not span whole clusters. The raw string
+   literal the spec sketched needed no work: `#"..."#` already existed in the
+   Epsil lexer.
 
 ## Regular Expressions (Phase 3 sketch)
 

@@ -190,6 +190,7 @@ import {
   narrowStringLiteralToCharacter,
 } from '../boxed-expression/boxed-character.js';
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
+import { splitByPattern, replaceByPattern } from './regexp.js';
 
 //   // := assign 80 // @todo
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
@@ -5775,20 +5776,44 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           '(empty parts are kept). An empty separator splits into ' +
           'user-perceived characters (grapheme clusters), like Characters. ' +
           'A non-string argument leaves the expression unevaluated.',
+        'StringSplit(s, pattern): split on each match of a regular ' +
+          'expression, with the host dialect\'s own semantics — including ' +
+          'splitting at a zero-width match. Captures are not interleaved ' +
+          'into the result; use StringMatchAll for those.',
       ],
-      signature: '(string, string?) -> list<string>',
+      // The `regexp` arm is spelled as a separate ground arm rather than by
+      // widening the separator to `string | regexp`: the two have different
+      // SEMANTICS (a literal separator is matched cluster-wise, a pattern is
+      // matched by the host), and keeping them apart makes the signature say
+      // so. `regexp` and `string` are disjoint, so the arms cannot both apply,
+      // and both return `list<string>`, so an `unknown` separator gets the
+      // same result type whichever arm most-specific-wins picks.
+      signature:
+        '((string, string?) -> list<string>) & ((string, regexp) -> list<string>)',
       // Complete precondition: op1 must be a string; a PRESENT separator must
-      // be one too (an absent separator selects the whitespace split).
+      // be a string or a compiled pattern (an absent separator selects the
+      // whitespace split).
       canEnumerate: (expr) => {
         if (!isFunction(expr)) return undefined;
         const s = canEnumerateOperand(expr.ops[0], isString);
         if (s !== true) return s;
         if (expr.ops[1] === undefined) return true;
+        if (expr.ops[1].type.matches('regexp')) return true;
         return canEnumerateOperand(expr.ops[1], isString);
       },
       evaluate: ([s, sep], { engine }) => {
         if (!isString(s)) return undefined;
         let parts: string[];
+        // A PATTERN separator splits on each match, host semantics. An empty
+        // match would not advance, so `splitByPattern` steps past it; see
+        // there.
+        const bySplitPattern =
+          sep !== undefined ? splitByPattern(s.string, sep) : undefined;
+        if (bySplitPattern !== undefined)
+          return engine.function(
+            'List',
+            bySplitPattern.map((x) => engine.string(x))
+          );
         if (sep === undefined) {
           parts = s.string
             .split(UNICODE_WHITESPACE)
@@ -5808,21 +5833,32 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    // Replace occurrences of `target` in `s` with `replacement`. Occurrences
-    // are found by CHARACTER-WISE matching over grapheme clusters — the same
-    // semantics as sequence search — so a match can never start or end inside
-    // a cluster. The scan walks the ORIGINAL subject's character sequence and
-    // skips past each match's span, so a replacement's own content is never
-    // re-matched: `StringReplace("aa", "a", "aa")` is `"aaaa"`, not an
-    // infinite expansion. Matches are non-overlapping, taken left to right.
+    // Replace occurrences of `target` in `s` with `replacement`.
+    //
+    // With a STRING target, occurrences are found by CHARACTER-WISE matching
+    // over grapheme clusters — the same semantics as sequence search — so a
+    // match can never start or end inside a cluster. The scan walks the
+    // ORIGINAL subject's character sequence and skips past each match's span,
+    // so a replacement's own content is never re-matched:
+    // `StringReplace("aa", "a", "aa")` is `"aaaa"`, not an infinite
+    // expansion. Matches are non-overlapping, taken left to right.
     // Re-segmentation happens ONCE, when the pieces are joined to build the
     // result (design constraint 3 of `docs/STRING_ROADMAP.md`), so a
     // replacement whose edge combines with a neighbouring character yields
     // one merged cluster.
     //
-    // Deliberately string-only: splicing forces join + re-segmentation, which
-    // is where strings genuinely diverge from lists. A non-string operand
-    // leaves the expression unevaluated, like every other operand here.
+    // With a `regexp` target (Strings Phase 3) the host does the matching, so
+    // the cluster-wise promise above does NOT hold: a pattern can match a
+    // code point that is only part of a character, and replacing it can leave
+    // a combining mark attached to whatever now precedes it. That is inherent
+    // to handing matching to the host, which the dialect ruling did
+    // deliberately; `replaceByPattern` in `library/regexp.ts` owns that arm.
+    // The `replacement` may then also be a FUNCTION, called with the match
+    // record.
+    //
+    // Every other operand is still string-only: splicing forces join +
+    // re-segmentation, which is where strings genuinely diverge from lists,
+    // and a non-string operand leaves the expression unevaluated.
     StringReplace: {
       description: [
         'StringReplace(s, target, replacement): replace every ' +
@@ -5833,11 +5869,31 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'error (the "insert at every boundary" behavior is deliberately ' +
           'not inherited); an empty `replacement` means deletion. `count` ' +
           'must be a positive integer.',
+        'StringReplace(s, pattern, replacement, count?): `target` may be a ' +
+          'regular expression, matched with the host dialect. `$1`-style ' +
+          'templates are NOT expanded in `replacement`.',
+        'StringReplace(s, pattern, f, count?): `replacement` may be a ' +
+          'function, called with the same match record StringMatch returns, ' +
+          'so each replacement can be computed from its captures.',
       ],
-      signature: '(string, string, string, count: integer?) -> string',
+      // Regex arms, kept separate from the literal-target ones for the same
+      // reason as `StringSplit`'s: a literal target is matched cluster-wise,
+      // a pattern is matched by the host. The third arm takes a FUNCTION
+      // replacement, called with the match record `StringMatch` returns, so a
+      // caller can compute each replacement from its captures.
+      signature:
+        '((string, string, string, count: integer?) -> string) & ' +
+        '((string, regexp, string, count: integer?) -> string) & ' +
+        '((string, regexp, function, count: integer?) -> string)',
       evaluate: ([s, target, replacement, count], { engine: ce }) => {
-        if (!isString(s) || !isString(target) || !isString(replacement))
-          return undefined;
+        if (!isString(s)) return undefined;
+        // A PATTERN target: `replaceByPattern` owns the whole call, including
+        // the `count` guard, because its notion of an occurrence is the
+        // host's rather than a cluster run.
+        if (target !== undefined && target.type.matches('regexp')) {
+          return replaceByPattern(ce, s.string, target, replacement, count);
+        }
+        if (!isString(target) || !isString(replacement)) return undefined;
         if (target.string === '')
           return ce.error(
             'unexpected-argument',

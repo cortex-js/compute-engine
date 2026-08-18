@@ -1,6 +1,86 @@
 ## [Unreleased]
 
+### New Features
+
+- **Regular expressions (Strings Phase 3).** A new primitive type `regexp`,
+  built with `RegExp(pattern, flags?)`, plus `IsMatch`, `StringMatch`,
+  `StringMatchAll`, and pattern forms of `StringSplit` and `StringReplace`
+  (including a **function replacement** called with the match record):
+
+  ```
+  IsMatch("abc123", RegExp("[0-9]+"))                    // True
+  StringReplace("a1b22c", RegExp("[0-9]+"), "#")         // "a#b#c"
+  StringSplit("a1b22c", RegExp("[0-9]+"))                // ["a", "b", "c"]
+  ```
+
+  The dialect is the host JavaScript engine's, in full — backreferences,
+  lookahead and lookbehind all work, and there is no restricted subset.
+  Compiled JavaScript uses the same engine, so compiled and interpreted
+  results agree. Patterns are most readable as a raw string literal:
+  `RegExp(#"[0-9]+(\.[0-9]+)?"#)`.
+
+  **`regexp` is disjoint from `string`**: a plain string cannot be passed
+  where a pattern is expected, so ordinary string arguments never become
+  silently pattern-sensitive. The `g` and `y` flags are rejected because they
+  carry a mutable scan position; use `StringMatchAll`.
+
+  `StringMatch` returns a record with `match`, `range`, `groups` and `names`.
+  `range` counts **characters** (grapheme clusters) like every other string
+  operation, so `Slice(subject, m.range)` returns the matched text. A pattern
+  can match part of a character — `👩` inside `👨‍👩‍👧` — and there is no
+  span of whole characters naming exactly that, so `range` is absent for such
+  a match rather than being subtly wrong.
+
+  **Matching cannot be interrupted.** Regular-expression matching backtracks,
+  and some patterns take time exponential in the subject length; a single
+  match is one evaluation step, so no timeout, span or abort signal ends it.
+  Matching a pattern you wrote against data you control is fine; a pattern or
+  subject from an untrusted source is a denial-of-service path with no
+  protection from the engine. See `doc/97-reference-strings.md`.
+
+  Compilation covers `IsMatch` and `StringReplace` with a literal pattern and
+  a string replacement. `StringMatch`, `StringMatchAll`, function
+  replacements and computed patterns fail closed, as does every regular
+  expression on the Python and shader targets.
+
+  Note for consumers that switch on a type's `.kind`: `regexp` is a PRIMITIVE,
+  a bare string in the type AST with no `.kind`, exactly like `string` and
+  `character`.
+
 ### Bug Fixes
+
+- **`CompilationResult.mode` now reports the RESOLVED discipline.** It is
+  documented as "the arithmetic discipline the returned code was compiled
+  under", but under the `auto` default it reported `'strict'` for a
+  compilation whose emitted code ran in the complex kernel — contradicting
+  `promoted: true` on the same result, which is defined as "any promotable
+  head was lowered through a complex kernel". `auto` promotes on its FIRST
+  attempt, with no escalation, so the mode latch still read `'strict'`:
+
+  ```js
+  compile(ce.parse('\\sqrt{x}'), { to: 'javascript' }); // auto default
+  // was  mode: 'strict'   promoted: true   run({x:-1}) -> {re:0, im:1}
+  // now  mode: 'complex'  promoted: true   run({x:-1}) -> {re:0, im:1}
+  ```
+
+  A default compile that promotes nothing still reports `'strict'`, and
+  `'auto'` is still never a reported value — it is a policy over the two
+  disciplines, so **no public type changed**. Note `mode` describes the
+  EMISSION, not the result shape: a promoted compile under the deprecated
+  `realOnly: true` reports `'complex'` beside a real `NaN`, because `realOnly`
+  is a projection applied after the kernel runs. `typeof v === 'number'`
+  remains the only sound per-sample test of a returned value.
+
+- **The `realOnly` and `complexPromotion` deprecation warnings now reach the
+  target-level compile entry.** They were emitted only by the standalone
+  `compile()` export, so a caller using
+  `ce.getCompilationTarget(name).compile(...)` received no deprecation signal
+  at all — while the options continued to work on that route. That is the
+  route an integration takes once it needs a specific target, so the consumers
+  missing the warning were systematically those with the most call sites to
+  migrate. All four built-in targets (`javascript`, `python`, `gpu`,
+  `interval-javascript`) now warn; the warnings remain once-per-process per
+  option, so a call passing through both routes still emits exactly one.
 
 - **A `Sequence` operand is now spliced into a `List`, `Set` or `Tuple`
   literal.** `["List", 1, ["Sequence", 2, 3], 4]` is the 4-element

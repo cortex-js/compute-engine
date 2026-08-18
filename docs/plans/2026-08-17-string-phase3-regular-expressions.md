@@ -7,7 +7,9 @@ work, and lists acceptance tests. Where this plan and the spec disagree, the
 spec wins; "Decisions taken here" names each place the plan resolves something
 the spec did not.
 
-**Status:** plan written 2026-08-17. Phase 1 (character type,
+**Status: SHIPPED 2026-08-17.** All workstreams landed; deviations from the
+plan as written are recorded in "Deviations" at the end. Plan written
+2026-08-17. Phase 1 (character type,
 string-as-collection) and Phase 2 (`Join`/`StringJoin` roles, sequence search,
 string operations) are shipped and committed
 (`docs/plans/2026-08-16-string-phase1-character-type.md`,
@@ -413,3 +415,74 @@ Full suite with the box lock, snapshot blast radius measured and reported.
   a pattern using a backreference or lookbehind — the features the rejected
   option (c) could not express — actually works, since the ruling is what buys
   them.
+
+
+---
+
+## Deviations from this plan, and why
+
+Recorded so the plan and the code do not drift apart silently.
+
+**D5 / D11 — `StringMatchAll` is EAGER, not lazy.** The plan called for a lazy
+collection. It builds the whole list in `evaluate` instead, and declines
+(staying symbolic) past `ce.maxCollectionSize`. The reason is that laziness
+buys very little here and costs a lot: the number of matches is bounded by the
+subject length, every match record is built by the same `exec` walk that a
+lazy iterator would run anyway, and a lazy version would need its own
+`g`-flagged compiled object living across `next()` calls — precisely the
+shared-mutable-state shape that caused the re-entrancy hang (see below). If a
+consumer appears that needs to stream matches out of a very large subject,
+this is the place to revisit.
+
+**D5 — the match record's `range` is ABSENT, not `Nothing`, when there is no
+span.** A `Nothing` value is erased from a dictionary by the engine's own
+literal rule, so the key simply does not appear and reading it answers
+`Missing` — which is the right marker for "absent but meaningful" anyway. More
+importantly, the set of cases where there is no span is WIDER than the plan
+assumed: not just an empty match, but any match that starts or ends INSIDE a
+grapheme cluster. A host regex can match `👩` within the single character
+`👨‍👩‍👧`, and widening the span outward to the containing cluster would
+make `Slice(subject, m.range)` return the whole family emoji while `match` is
+the component — silently breaking the composition law the field exists for.
+There is no honest span for such a match, so the field is absent and `match`
+carries the exact text.
+
+**D2 — `u`, not `v`.** The spec allowed either. `v` is STRICTER: it rejects
+patterns with an unescaped `[`, `{` or `-` inside a character class that `u`
+accepts. Rejecting a pattern a user wrote is a dialect limitation, which the
+ruling excludes, so `u` is the permissive choice and the one taken.
+
+**WS-D — compile coverage is narrower than the operator surface**, and this is
+a coverage boundary rather than a dialect one. `IsMatch` and `StringReplace`
+with a literal pattern and a string replacement lower to JavaScript.
+`StringMatch`, `StringMatchAll`, a function replacement and a computed pattern
+fail closed. The first three report grapheme-cluster positions or match
+RECORDS that compiled code has no representation for; lowering them would
+report code-unit offsets that disagree with the interpreter, which is worse
+than declining. A computed pattern has no text at compile time, and emitting
+`new RegExp(<expr>)` would move a construction error the interpreter reports
+at canonicalization into the artifact. `StringSplit` has no JavaScript
+lowering at all, regex arm or otherwise — it did not have one before this
+phase either.
+
+## Defects found and fixed during review
+
+Both were found by the dual review, and both were real:
+
+**A shared compiled pattern hung the engine.** Compiled `RegExp` objects were
+cached and reused, including the `g`-flagged ones. A `g`-flagged object keeps
+its scan position in `lastIndex`, so two live loops over one object corrupt
+each other — and that is reachable from ordinary user code, not just in
+principle: a function replacement whose body matches the same pattern
+re-enters the library mid-scan, resets `lastIndex` under the outer loop, and
+the outer loop restarts forever. Now anything that ITERATES compiles its own
+object per call (`iteratingRegExp`); only the stateless non-global objects are
+cached, and that cache is bounded.
+
+**Zero-width separators did not split.** `StringSplit("ab", RegExp("(?=b)"))`
+answered `["ab"]` where the host answers `["a", "b"]`. Splitting on a
+zero-width match needs the host's actual rule — a match whose END equals the
+current segment start produces no split, and a match at the very end of the
+subject produces none either — rather than an `exec` loop that skips empty
+matches. Now pinned against `String.prototype.split` over fourteen shapes,
+including `(?=b)`, `a*`, `(?:)`, `\b`, `^`, `$` and an astral subject.

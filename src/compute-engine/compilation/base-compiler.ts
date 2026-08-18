@@ -1224,10 +1224,12 @@ export class BaseCompiler {
     const prevPromotion = BaseCompiler._complexPromotion;
     const prevMode = BaseCompiler._mode;
     const prevHelperLookup = BaseCompiler._realOnlyHelperLookup;
-    // The report of a compilation that DECLINES before its latches are
-    // written (an unsupported requested mode throws in `resolveCompileMode`)
-    // must not be the previous compilation's: reset it first, so a fallback
-    // built for that decline reports `strict`/not promoted.
+    // The report of a compilation that DECLINES must not be the previous
+    // compilation's: reset it first, so a fallback built for that decline
+    // reports `strict`/not promoted. This is the ONLY report a decline gets —
+    // whether it throws before the latches below are written (an unsupported
+    // requested mode throws in `resolveCompileMode`) or long after, since the
+    // `finally` re-freezes only on the success path.
     if (BaseCompiler._compileDepth === 0)
       BaseCompiler._lastReport = { mode: 'strict', promoted: false };
     const nextMode =
@@ -1262,6 +1264,11 @@ export class BaseCompiler {
       BaseCompiler._boundVarsCtx = nextBoundCtx;
       BaseCompiler._invalidateComplexMemo();
     }
+    // Set on the way out of a compilation that produced code. A decline
+    // leaves the `try` by THROWING, so this stays `false` there and the
+    // `finally` below knows not to freeze a report for code that was never
+    // emitted.
+    let emitted = false;
     try {
       // Compile-time constant folding, attempted top-down at every function
       // node so the LARGEST constant subtree folds: a pure subtree with no
@@ -1271,19 +1278,65 @@ export class BaseCompiler {
       // never inventoried. All the safety gates live in `tryConstantFold`.
       if (isFunction(expr)) {
         const folded = BaseCompiler.tryConstantFold(expr, target, prec);
-        if (folded !== undefined) return folded;
+        if (folded !== undefined) {
+          emitted = true;
+          return folded;
+        }
       }
-      return BaseCompiler.compileWithCse(expr, target, prec);
+      const compiled = BaseCompiler.compileWithCse(expr, target, prec);
+      emitted = true;
+      return compiled;
     } finally {
       BaseCompiler._compileDepth -= 1;
       // Leaving the OUTERMOST compilation: freeze its report for the target
       // to attach (`withReferences` → `modeReport`), before the latches are
-      // restored. `auto`'s first attempt IS the strict discipline, so it
-      // reports `'strict'`; a retry compiles under `'complex'` and reports
-      // that.
-      if (BaseCompiler._compileDepth === 0)
+      // restored.
+      //
+      // `mode` is the latched DISCIPLINE — `'strict'` or `'complex'`, with
+      // `'auto'` collapsed to `'strict'` because `auto` is a policy OVER the
+      // two disciplines (try strict, escalate on a `LaneMismatch`), not a
+      // discipline code can be compiled under — WIDENED to `'complex'` when a
+      // promotable head was promoted (`_promoted`). The widening is needed
+      // because under `auto` a promotable head is lowered through the complex
+      // kernel on the FIRST attempt, with no escalation: `_mode` still reads
+      // `'strict'` while the emitted code computes in the complex kernel and
+      // returns `{re, im}`, so `_mode` alone contradicted `promoted: true` on
+      // the same result.
+      //
+      // The widening is NOT a lane oracle: an operand that is already
+      // complex-TYPED (`Sqrt(z)` with `z: complex`) or a complex literal
+      // (`2i·x`) routes through the complex kernel in EVERY discipline, and
+      // `promotesRadicalToComplex` deliberately does not count that as a
+      // promotion (`promoted` reports a lane DIFFERENCE with the shader
+      // targets, which is what a merely-unknown-sign operand creates). Such a
+      // compile emits `{re, im}` and still reports `mode: 'strict'`. Read the
+      // returned value's shape (`typeof v === 'number'`), never `mode`, to
+      // decide whether a result is complex-shaped.
+      //
+      // Note `realOnly` does not enter into this: it is a RESULT projection
+      // applied after the kernel runs, so a promoted compile under
+      // `realOnly: true` correctly reports `'complex'` even though the value
+      // handed back is a real number (or `NaN`). `mode` describes the
+      // emission.
+      //
+      // Only a compilation that EMITTED code gets this report: the report
+      // describes emitted code, and a decline emitted none. A decline throws
+      // out of the `try` above with the latches already written, so freezing
+      // unconditionally here would hand `buildInterpreterFallback` — which
+      // spreads `modeReport()` onto a `success: false` result whose `run` is
+      // interpreter-backed — a `{mode: 'complex', promoted: true}` describing
+      // code that does not exist. `_promoted` is especially unsafe there: it
+      // is set from `promotesRadicalToComplex`, which the contextless
+      // ANALYSIS predicate `isComplexValued` also calls, so it can be true
+      // for a subtree that was never emitted at all. On the throw path the
+      // neutral `{mode: 'strict', promoted: false}` installed at depth-0 entry
+      // stands. (User ruling 2026-08-17, on Tycho consumer item 201.)
+      if (BaseCompiler._compileDepth === 0 && emitted)
         BaseCompiler._lastReport = {
-          mode: BaseCompiler._mode === 'complex' ? 'complex' : 'strict',
+          mode:
+            BaseCompiler._mode === 'complex' || BaseCompiler._promoted
+              ? 'complex'
+              : 'strict',
           promoted: BaseCompiler._promoted,
         };
       BaseCompiler._complexPromotion = prevPromotion;
@@ -1454,7 +1507,9 @@ export class BaseCompiler {
 
   /**
    * The report of the most recently COMPLETED outermost compilation, read by
-   * `modeReport` when a target attaches `mode`/`promoted` to its result.
+   * `modeReport` when a target attaches `mode`/`promoted` to its result. A
+   * compilation that DECLINES leaves the neutral value written at its entry
+   * instead — it emitted no code for a report to describe.
    */
   private static _lastReport: {
     mode: 'strict' | 'complex';
@@ -13128,10 +13183,37 @@ export class BaseCompiler {
   /**
    * The `mode`/`promoted` fields every built-in result carries (see
    * `CompilationResult`): the report frozen when the most recent outermost
-   * compilation ended (`_lastReport`) — the discipline the code was compiled
-   * under (`'strict'` for strict and for `auto`'s first attempt, `'complex'`
-   * for complex and for an escalated retry) and whether a promotable head
-   * was lowered through a complex kernel.
+   * compilation ended (`_lastReport`) — the RESOLVED discipline the code was
+   * compiled under, and whether a promotable head was lowered through a
+   * complex kernel.
+   *
+   * `mode` is the latched DISCIPLINE, with `'auto'` collapsed to `'strict'`
+   * (`'auto'` is never reported: it is a policy over the two disciplines —
+   * try strict, escalate on a `LaneMismatch` — not one code can be compiled
+   * under), widened to `'complex'` when a promotable head was promoted. So it
+   * is `'complex'` when the complex discipline was requested, when `auto`
+   * escalated to it on a retry, and when `auto`'s first attempt promoted a
+   * head without escalating.
+   *
+   * It is NOT a lane oracle: an operand that is already complex-TYPED
+   * (`Sqrt(z)` with `z: complex`) or a complex literal (`2i·x`) routes
+   * through the complex kernel in every discipline, and
+   * `promotesRadicalToComplex` deliberately does not count that as a
+   * promotion — `promoted` reports a lane DIFFERENCE with the shader targets,
+   * which only an unknown-sign real-shaped operand creates. Such a compile
+   * emits `{re, im}` and still reports `mode: 'strict'`. Test a returned
+   * value's shape with `typeof v === 'number'`, not with `mode`.
+   *
+   * `realOnly` does not enter into it either: that is a RESULT projection
+   * applied after the kernel runs, so a promoted compile under
+   * `realOnly: true` reports `'complex'` while handing back a real number.
+   *
+   * `mode === 'complex'` is implied by `promoted === true`; the two still
+   * differ, since an explicitly requested `'complex'` compile that contained
+   * no promotable head reports `('complex', false)`.
+   *
+   * A DECLINE reports the neutral `('strict', false)`: the report describes
+   * emitted code, and a decline emitted none (see `compile`'s `finally`).
    */
   static modeReport(): { mode: 'strict' | 'complex'; promoted: boolean } {
     return { ...BaseCompiler._lastReport };

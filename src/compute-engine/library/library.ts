@@ -1,6 +1,7 @@
 import { ARITHMETIC_LIBRARY } from './arithmetic.js';
 import { CALCULUS_LIBRARY } from './calculus.js';
 import { COLLECTIONS_LIBRARY } from './collections.js';
+import { REGEXP_LIBRARY } from './regexp.js';
 import { COLORS_LIBRARY } from './colors.js';
 import { CONTROL_STRUCTURES_LIBRARY } from './control-structures.js';
 import { COMBINATORICS_LIBRARY } from './combinatorics.js';
@@ -66,6 +67,11 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     name: 'colors',
     requires: ['core'],
     definitions: COLORS_LIBRARY,
+  },
+  {
+    name: 'regexp',
+    requires: ['core'],
+    definitions: REGEXP_LIBRARY,
   },
   {
     name: 'fractals',
