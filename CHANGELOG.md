@@ -64,6 +64,33 @@
 
 ### New Features
 
+- **Declared bare collection types refine their element type from
+  assignments.** A bare constructor annotation (`let a: list` — likewise
+  `set`, `dictionary`, `collection`, `indexed_collection`) declares the
+  *constructor* as the contract and the element slot as a placeholder:
+  `a = [1, 2, 3]` refines `a` to `list<finite_integer>` (element only —
+  rank and length stay open), `a = ["x"]` re-refines to `list<string>`,
+  and `a = 42` is still rejected against the `list` contract. An explicit
+  element type (`list<integer>`, `list<any>`) is a full contract and never
+  moves. Collection parameters also distribute their element type onto
+  symbol elements of a list literal: `f([a, b])` against
+  `(list<number>) -> number` infers `a` and `b` as `number`, matching what
+  `f(a)` alone always did.
+
+- **Uses of an assigned symbol are checked, not inferred — statically.**
+  A use of a *valueless* symbol still declares its type (`k(n)` with
+  `k: (integer) -> integer` infers `n: integer`, as documented). But once a
+  symbol has assignment evidence, a use is a requirement checked against
+  that evidence: `x = g()` (a `number`) followed by `k(x)` is now an
+  `incompatible-type` error at canonicalization instead of silently
+  narrowing `x` and failing later at evaluation. The Epsil pre-run check
+  tracks declaration and assignment type effects through a whole program
+  (without evaluating anything), so the mismatch above — and a typed
+  declaration's initializer conflicting with a later use — are reported as
+  static diagnostics before anything runs. Assignment is last-write-wins:
+  re-ordering the assignments makes the program correct and the check
+  accepts it.
+
 - **Console I/O: `Print` and `Input`** (Epsil commands `print` and
   `input`). `Print(x, …)` writes its evaluated operands to the host
   console — space-separated, strings without their quotes — and evaluates

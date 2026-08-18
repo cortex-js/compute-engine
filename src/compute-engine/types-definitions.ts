@@ -1305,6 +1305,22 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    */
   inferredType: boolean;
 
+  /** When the declaration's type was a bare collection constructor (`list`,
+   * `set`, `dictionary`, `collection`, `indexed_collection` — the
+   * `<unknown>` synonyms), the declared skeleton: the constructor is the
+   * CONTRACT (assignments are validated against it and it never moves),
+   * while `type` carries the element REFINEMENT the latest assignment
+   * produced (`docs/INFERENCE_ROADMAP.md`, Phase 1, ruled 2026-08-18).
+   * `undefined` for every other declaration.
+   * @internal */
+  _placeholderSkeleton: Type | undefined;
+
+  /** Install an element refinement of the placeholder skeleton without
+   * disturbing `_placeholderSkeleton` (the public `type` setter maintains
+   * the skeleton on every explicit write and would clear it).
+   * @internal */
+  _setElementRefinement(t: BoxedType): void;
+
   /** History of writes to this definition's type: which type each write
    * installed, by which mechanism, and — for inference writes — the
    * expression whose canonicalization triggered it. Appended only when a

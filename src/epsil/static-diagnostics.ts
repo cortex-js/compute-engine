@@ -33,6 +33,7 @@ import { expectsCharacterNotString } from '../compute-engine/boxed-expression/va
 import { isSingleGraphemeCluster } from '../compute-engine/boxed-expression/boxed-character.js';
 import {
   inferTypeFromValue,
+  refineConstructorPlaceholder,
   widenAssignedType,
 } from '../compute-engine/boxed-expression/boxed-value-definition.js';
 import {
@@ -320,7 +321,8 @@ export function staticDiagnostics(
  */
 function applyAssignmentTypeEffect(
   ce: ComputeEngine,
-  boxed: ReturnType<ComputeEngine['box']>
+  boxed: ReturnType<ComputeEngine['box']>,
+  effectDeclared: Set<string>
 ): void {
   const evidence = ce._staticAssignmentEvidence;
   if (evidence === undefined) return;
@@ -364,6 +366,7 @@ function applyAssignmentTypeEffect(
       if (target !== undefined && isSymbol(target) && source !== null) {
         try {
           ce.declare(target.symbol, source as TypeString);
+          effectDeclared.add(target.symbol);
         } catch {
           // Already declared in this scope (a forward use auto-declared
           // it), or a malformed annotation — both already have their own
@@ -382,7 +385,24 @@ function applyAssignmentTypeEffect(
           const init = initOp.canonical;
           if (init.isValid && !init.type.isUnknown) {
             const def = ce.box(target.symbol).valueDefinition;
-            if (def !== undefined) evidence.set(def, init.type.type);
+            if (def !== undefined) {
+              evidence.set(def, init.type.type);
+              // A pass-declared PLACEHOLDER skeleton (`let a: list = ["x"]`)
+              // refines from its initializer here too, so element uses in
+              // later statements (`k(a[1])`) are checkable — mirroring the
+              // assignment branch below (review catch, 2026-08-18).
+              if (
+                def._placeholderSkeleton !== undefined &&
+                effectDeclared.has(target.symbol)
+              ) {
+                const refined = refineConstructorPlaceholder(
+                  def._placeholderSkeleton,
+                  init.type.type
+                );
+                if (refined !== def.type.type)
+                  def._setElementRefinement(ce.type(refined));
+              }
+            }
           }
         }
       }
@@ -432,7 +452,25 @@ function applyAssignmentTypeEffect(
   const sym = ce.box(target.symbol);
   const def = sym.valueDefinition;
   if (def === undefined) return;
-  sym._infer(inferTypeFromValue(ce, rhs).type, 'replace');
+  // A pass-declared placeholder skeleton (`let a: list` checked earlier in
+  // this same pass) refines exactly as the runtime assignment will (Phase 1
+  // rulings, 2026-08-18) — its definition lives in the pass scope, so the
+  // direct type write dies with it. Skeleton-declared OUTER symbols are
+  // left alone (their runtime refinement needs no help from the pass, and
+  // a direct write here would bypass the rollback journal).
+  if (
+    def._placeholderSkeleton !== undefined &&
+    effectDeclared.has(target.symbol)
+  ) {
+    const refined = refineConstructorPlaceholder(
+      def._placeholderSkeleton,
+      raw.type
+    );
+    if (refined !== def.type.type)
+      def._setElementRefinement(ce.type(refined));
+  } else {
+    sym._infer(inferTypeFromValue(ce, rhs).type, 'replace');
+  }
   evidence.set(def, raw.type);
 }
 
@@ -475,6 +513,12 @@ function canonicalizationDiagnostics(
   // any number of clauses, and only a second clause at the SAME domain is a
   // redefinition.
   const clausesInThisUnit = new Map<string, ClauseSite[]>();
+
+  // The names `applyAssignmentTypeEffect` itself declared into the pass
+  // scope (so their definitions die with it) — the only definitions the
+  // effect may REFINE in place (placeholder-skeleton refinement); an outer
+  // definition is never mutated outside the journaled `_infer` channel.
+  const effectDeclared = new Set<string>();
 
   for (const statement of statements) {
     const redefinition = redefinitionDiagnostic(
@@ -572,7 +616,8 @@ function canonicalizationDiagnostics(
     // The statement's ASSIGNMENT type effect, visible to the LATER statements
     // of this program (never earlier ones — the walk is in source order,
     // matching the runtime where the assignment has not yet run).
-    if (declMismatch === undefined) applyAssignmentTypeEffect(ce, boxed);
+    if (declMismatch === undefined)
+      applyAssignmentTypeEffect(ce, boxed, effectDeclared);
 
     const errors: MathJsonExpression[] = [];
     collectErrors(canonical, errors);

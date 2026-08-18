@@ -194,7 +194,27 @@ bounds remain DEFERRED — contingent on Phase 3 being scheduled or field
 evidence demanding the two-sided diagnostics/order-independence, with the
 notebook-epoch UX ruled on concrete re-run scenarios before building.
 
-## 3. Phase 1 — assignment-driven placeholder refinement of constructor arguments
+## 3. Phase 1 — assignment-driven placeholder refinement of constructor arguments — **SHIPPED 2026-08-18** (with Phase 2)
+
+Implemented as ruled (re-refine; element-only; `typeof` shows it):
+`_placeholderSkeleton` on the value definition keeps the declared bare
+constructor as the CONTRACT (assignment compatibility judges against it —
+`assertAssignableValueDef`), while the reported type carries the element
+refinement (`refineConstructorPlaceholder`,
+`boxed-expression/boxed-value-definition.ts`), recomputed by every
+assignment on the assign route, the declare-with-value route, and the Epsil
+static pre-pass (pass-declared skeletons only — outer definitions are never
+mutated outside the journaled channel). Phase 2 shipped alongside:
+`distributeLiteralElementInference` (`boxed-expression/validate.ts`) writes
+a collection parameter's element type onto the symbol elements of a
+genuinely admitted List literal (`f([a, b])` at `(list<number>) -> …`
+infers both); tuple-slot distribution exists but fires only on genuine
+admission — a tuple of unknowns is only provisionally re-admitted by the
+free-variable un-rejection, and inference from an unproven admission is
+deliberately withheld. Pins:
+`test/compute-engine/placeholder-element-refinement.test.ts`.
+
+### Original Phase 1 design (for reference)
 
 **Feature:** a declared type whose constructor argument is the placeholder
 (`unknown`, including the bare synonyms `list`/`set`/`dictionary`/
@@ -226,7 +246,7 @@ type is a contract, and eroding it is the failure mode this design must
 prove it avoids. Likewise `list<any>` never refines: `any` is the contract
 spelling by definition.
 
-### Open rulings Phase 1 needs (with recommendations)
+### Open rulings Phase 1 needs — ALL RULED 2026-08-18, as recommended (re-refine; element-only; typeof shows the refinement)
 
 - **R1 — Does refinement re-revise?** After `a: list` and `a = [1,2,3]`
   (element refined to `finite_integer`), does `a = ["x"]` fail

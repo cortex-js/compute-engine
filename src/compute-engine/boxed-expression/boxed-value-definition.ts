@@ -10,7 +10,12 @@ import type {
 
 import type { Type, TypeString } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
-import { containsSignatureArm, isValidType } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  containsSignatureArm,
+  isValidType,
+  widen,
+} from '../../common/type/utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 
 import { defaultCollectionHandlers } from '../collection-utils.js';
@@ -82,6 +87,19 @@ export class _BoxedValueDefinition
 
   // If true, the `_type` is inferred
   inferredType = false;
+
+  /** The declared PLACEHOLDER SKELETON, when the declaration's type was a
+   * bare collection constructor (`list`, `set`, `dictionary`, `collection`,
+   * `indexed_collection` — each the `<unknown>` synonym: "some X of values,
+   * elements to be determined"). The skeleton is the CONTRACT and never
+   * moves; `_type` then carries the current element REFINEMENT, recomputed
+   * from each assignment (`docs/INFERENCE_ROADMAP.md`, Phase 1 — ruled
+   * 2026-08-18: re-refine on re-assignment; element only; `typeof` shows
+   * the refinement). Assignment compatibility is checked against the
+   * skeleton, so `a: list` still refuses `a = 42` after refining to
+   * `list<finite_integer>`, while `a = ["x"]` re-refines. `undefined` for
+   * every other declaration. */
+  _placeholderSkeleton: Type | undefined = undefined;
 
   // History of writes to this definition's type (see `TypeProvenanceEntry`
   // in `types-definitions.ts` and the phase-1 design in
@@ -195,6 +213,8 @@ export class _BoxedValueDefinition
 
       this._type = new BoxedType(type, ce._typeResolver);
       this.inferredType = def.inferred ?? false;
+      if (!this.inferredType && isConstructorPlaceholderType(type))
+        this._placeholderSkeleton = type;
     }
 
     this.effectsDeclared = def.effectsDeclared ?? false;
@@ -236,6 +256,19 @@ export class _BoxedValueDefinition
           )
         ) {
           throw declaredTypeError(this.name, this._value, this._type);
+        }
+        // A declared placeholder skeleton refines from the initializer,
+        // exactly as it refines from an assignment (Phase 1 rulings, ruled
+        // 2026-08-18): `let a: list = [1, 2, 3]` reports
+        // `list<finite_integer>` just as the split `let a: list; a = [1,2,3]`
+        // does.
+        if (this._placeholderSkeleton !== undefined) {
+          const refined = refineConstructorPlaceholder(
+            this._placeholderSkeleton,
+            this._value.type.type
+          );
+          if (refined !== this._type.type)
+            this._type = new BoxedType(refined, ce._typeResolver);
         }
       }
     }
@@ -507,11 +540,33 @@ export class _BoxedValueDefinition
       t instanceof BoxedType ? t : new BoxedType(t, this._engine._typeResolver);
     this._writeVersion += 1;
 
+    // Maintain the placeholder skeleton on every EXPLICIT type write: a
+    // retype to a bare constructor (re)establishes the placeholder, and a
+    // retype to anything else CLEARS a stale one — without this, a symbol
+    // declared `list`, refined, then explicitly retyped `list<integer>`
+    // kept its old `list` skeleton, so later assignments were checked
+    // against the stale bare contract and could re-refine right past the
+    // new explicit one (review catch, 2026-08-18). Element-REFINEMENT
+    // writes use `_setElementRefinement` below, which preserves the
+    // skeleton by construction.
+    this._placeholderSkeleton = isConstructorPlaceholderType(this._type.type)
+      ? this._type.type
+      : undefined;
+
     // Are we resetting the type/value?
     if (this._type.isUnknown) {
       this._defValue = undefined;
       this._value = undefined;
     }
+  }
+
+  /** Install an element REFINEMENT of the placeholder skeleton
+   * (`refineConstructorPlaceholder`) — a type write that must NOT disturb
+   * `_placeholderSkeleton`, unlike the public `type` setter above.
+   * @internal */
+  _setElementRefinement(t: BoxedType): void {
+    this._type = t;
+    this._writeVersion += 1;
   }
 
   onConfigurationChange(): void {
@@ -561,6 +616,71 @@ function isSelfReferentialValue(
   value: Expression | undefined | null
 ): boolean {
   return !!value && value.symbols.includes(name);
+}
+
+/** Is this declared type a bare collection constructor — the `<unknown>`
+ * synonym, whose ELEMENT slot is a refinable placeholder? (The synonym
+ * normalization collapses `list<unknown>` to the bare name, so the bare
+ * strings are the complete trigger set.) */
+export function isConstructorPlaceholderType(t: Type): boolean {
+  return (
+    t === 'list' ||
+    t === 'set' ||
+    t === 'dictionary' ||
+    t === 'collection' ||
+    t === 'indexed_collection'
+  );
+}
+
+/**
+ * The Phase 1 placeholder refinement (`docs/INFERENCE_ROADMAP.md`, ruled
+ * 2026-08-18): a declared bare-constructor skeleton adopts the assigned
+ * value's ELEMENT type — element only (rank and length stay open: the user
+ * wrote `list`, so list-ness of any shape is the contract), raw (elements
+ * are not assignment-widened, matching what an unannotated `b = [1,2,3]`
+ * records). Returns the skeleton unchanged when the value's element type
+ * cannot be read (the refinement is best-effort; the contract already
+ * admitted the value).
+ */
+export function refineConstructorPlaceholder(
+  skeleton: Type,
+  valueType: Type
+): Type {
+  switch (skeleton) {
+    case 'list':
+    case 'indexed_collection':
+    case 'collection': {
+      // `collectionElementType` also knows the PRIMITIVE indexed
+      // collections' elements (`string` → `character`, `range` →
+      // `integer`), so a string-form value type is not rejected up front:
+      // `a: indexed_collection; a = "abc"` refines to
+      // `indexed_collection<character>` (review catch, 2026-08-18).
+      const elements = collectionElementType(valueType);
+      if (elements === undefined || elements === 'unknown') return skeleton;
+      return { kind: skeleton, elements } as Type;
+    }
+    case 'set':
+      if (
+        typeof valueType === 'string' ||
+        valueType.kind !== 'set' ||
+        valueType.elements === 'unknown'
+      )
+        return skeleton;
+      return { kind: 'set', elements: valueType.elements };
+    case 'dictionary': {
+      if (typeof valueType === 'string') return skeleton;
+      const values =
+        valueType.kind === 'dictionary'
+          ? valueType.values
+          : valueType.kind === 'record'
+            ? widen(...Object.values(valueType.elements))
+            : undefined;
+      if (values === undefined || values === 'unknown') return skeleton;
+      return { kind: 'dictionary', values };
+    }
+    default:
+      return skeleton;
+  }
 }
 
 /** The assignment-widening table at the TYPE level: the type a symbol's

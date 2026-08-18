@@ -1,3 +1,41 @@
+let x;
+
+let f: () -> integer
+let g: () -> number
+let k: (integer) -> integer;
+
+x = f()
+print("After f: \(Type(x))")
+x = g()
+print("After g: \(Type(x))")
+k(x)
+print("After k \(Type(x))")
+
+// let f: (x: any) -> list<number>
+// let g: (x: any) -> list<integer>
+
+// let xs: list;
+// xs = f(0)
+// Type(xs)  // -> "list" should be list<number>
+
+// let i : real;
+// i = 5
+// Type(i)
+// About(i)
+
+// let n: unknown
+// n = 1
+// // Type(n) -> integer
+// n = 1.1
+// // Type(n) -> real
+
+
+// let a: list
+// a = [1, 2, 3]
+// Type(a)
+// // Type(a) -> list, not list<integer>
+
+
 // const s1 = "Sightglass Coffee Shop"
 // const s2 = "Le café des Deux Magots"
 // const s3 = "singer 👨🏻‍🎤"
@@ -24,8 +62,8 @@
 // ----
 
 
-const g = (k) => Sum(Take(Map( _ => _^2, 1..oo,), k))
-g(3)
+// const g = (k) => Sum(Take(Map( _ => _^2, 1..oo,), k))
+// g(3)
 
 // ----
 

@@ -876,6 +876,20 @@ function collectionLeafType(t: Readonly<Type>): Type | null {
   ) {
     const el = t.elements;
     if (el === 'unknown' || el === 'any') return null;
+    // Recurse through a collection-kind element to the LEAF, exactly as the
+    // `list` branch above does. Without this, a refined
+    // `indexed_collection<vector<finite_integer^2>>` (the shape a
+    // placeholder-declared symbol takes from an assigned list of points —
+    // Phase 1, 2026-08-18) reported its ROW as the leaf, and the
+    // leaf-disjointness refutation compared `vector<…>` against `number`
+    // and wrongly refuted an operand whose runtime value fits.
+    if (
+      typeof el !== 'string' &&
+      (el.kind === 'list' ||
+        el.kind === 'collection' ||
+        el.kind === 'indexed_collection')
+    )
+      return collectionLeafType(el);
     return el as Type;
   }
   return null;

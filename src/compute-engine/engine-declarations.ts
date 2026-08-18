@@ -72,7 +72,10 @@ import type {
   Scope,
 } from './global-types.js';
 
-import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition.js';
+import {
+  _BoxedValueDefinition,
+  refineConstructorPlaceholder,
+} from './boxed-expression/boxed-value-definition.js';
 import {
   activeRollbackFrame,
   type InferenceRollbackFrame,
@@ -2659,6 +2662,21 @@ export function assignFn(
         });
     }
 
+    // A declared placeholder skeleton adopts the assigned value's ELEMENT
+    // type — element only, re-computed on every assignment, and shown by
+    // `typeof` (Phase 1 rulings R1-R3, 2026-08-18;
+    // `refineConstructorPlaceholder`). `inferredType` stays false: the
+    // refinement is declaration-flavored — argument positions must not
+    // narrow it further (use-driven element inference is Phase 3).
+    if (def.value._placeholderSkeleton !== undefined) {
+      const refined = refineConstructorPlaceholder(
+        def.value._placeholderSkeleton,
+        value.type.type
+      );
+      if (refined !== def.value.type.type)
+        def.value._setElementRefinement(ce.type(refined));
+    }
+
     // ... and set the value
     ce._setSymbolValue(id, value);
 
@@ -2722,17 +2740,26 @@ function assertAssignableValueDef(
   // effects axis judged by its own provenance, so a `{scope}`-inferred closure
   // still fits a bare-specifier declared arrow.
   if (def.inferredType || def.type.isUnknown) return;
+  // A declared PLACEHOLDER SKELETON (`a: list` — bare constructor, elements
+  // to be determined) is the contract; the stored type may carry a previous
+  // assignment's element REFINEMENT (`list<finite_integer>`), which must not
+  // harden into the contract: `a = ["x"]` re-refines (Phase 1 ruling R1,
+  // 2026-08-18), so compatibility is judged against the skeleton.
+  const contract =
+    def._placeholderSkeleton !== undefined
+      ? ce.type(def._placeholderSkeleton)
+      : def.type;
   if (
     !matchesDeclaredTypeAxes(
       ce,
       value.type,
-      def.type,
+      contract,
       def.effectsDeclared,
       value,
       id
     )
   )
-    throw declaredTypeError(id, value, def.type);
+    throw declaredTypeError(id, value, contract);
 }
 
 /**

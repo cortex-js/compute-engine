@@ -13,6 +13,7 @@ import { deepEraseCallbackTypes } from '../../common/type/callback.js';
 import { admissionOf, hasValueComponent } from './value-membership.js';
 import {
   broadcastableBaseMatches,
+  collectionElementType,
   couldBeNonRealNumber,
   narrowingPreservesEffects,
   overlapsForDeferredValidation,
@@ -520,6 +521,42 @@ export function checkNumericArgs(
  *
  * Converts the arguments to canonical
  */
+
+
+/**
+ * PHASE 2 of `docs/INFERENCE_ROADMAP.md` (2026-08-18): distribute a
+ * collection parameter's ELEMENT type onto the symbol elements of a
+ * List/Tuple LITERAL operand, so `f([a, b])` against `(list<number>) -> …`
+ * infers `a: number` and `b: number` — the same write `f(a)` would make,
+ * which previously died at the literal's boundary. Conservative: only
+ * literal List/Tuple operands, only SYMBOL elements (nested structure keeps
+ * its own inference), and only a usable element type (`unknown`/`any`
+ * distribute nothing).
+ */
+function distributeLiteralElementInference(op: Expression, param: Type): void {
+  if (!isFunction(op, 'List') && !isFunction(op, 'Tuple')) return;
+  if (typeof param === 'string') return;
+  if (op.operator === 'Tuple' && param.kind === 'tuple') {
+    // Per-slot for a tuple parameter of matching arity. NOTE: this fires
+    // only when the tuple literal was GENUINELY admitted; a tuple of
+    // unknown-typed symbols fails `matches` against a concrete tuple
+    // parameter and is only provisionally re-admitted by the free-variable
+    // un-rejection in `box.ts` — the final inference pass (this helper's
+    // caller) deliberately does not run on that path, because writing slot
+    // types from an unproven admission would be inference from a guess.
+    if (param.elements.length !== op.nops) return;
+    op.ops.forEach((el, i) => {
+      const slot = param.elements[i].type;
+      if (slot === 'unknown' || slot === 'any') return;
+      if (isSymbol(el)) el._infer(slot, 'narrow');
+    });
+    return;
+  }
+  const element = collectionElementType(param);
+  if (element === undefined || element === 'unknown' || element === 'any')
+    return;
+  for (const el of op.ops) if (isSymbol(el)) el._infer(element, 'narrow');
+}
 
 /**
  * The EVIDENCE-BEATS-REQUIREMENT decision at a narrow-eligible slot
@@ -1640,8 +1677,10 @@ export function validateArguments(
       if (
         !isThreadableAt(threadable, i) ||
         !couldBeUnkeyedCollectionOperand(finalOps[i])
-      )
+      ) {
         finalOps[i]._infer(t);
+        distributeLiteralElementInference(finalOps[i], t);
+      }
     i += 1;
   }
   for (const param of optParams) {
@@ -1651,8 +1690,10 @@ export function validateArguments(
       if (
         !isThreadableAt(threadable, i) ||
         !couldBeUnkeyedCollectionOperand(finalOps[i])
-      )
+      ) {
         finalOps[i]._infer(t);
+        distributeLiteralElementInference(finalOps[i], t);
+      }
     i += 1;
   }
   if (varParam) {
@@ -1662,8 +1703,10 @@ export function validateArguments(
         if (
           !isThreadableAt(threadable, i) ||
           !couldBeUnkeyedCollectionOperand(op)
-        )
+        ) {
           op._infer(t);
+          distributeLiteralElementInference(op, t);
+        }
       i += 1;
     }
   }

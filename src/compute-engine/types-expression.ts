@@ -141,6 +141,16 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _isDevolvedShadow: true | undefined;
 
+  /** Declared placeholder skeleton for bare-constructor declarations —
+   * mirror of the member documented in `types-definitions.ts`.
+   * @internal */
+  _placeholderSkeleton: Type | undefined;
+
+  /** Element-refinement write that preserves `_placeholderSkeleton` —
+   * mirror of the member documented in `types-definitions.ts`.
+   * @internal */
+  _setElementRefinement(t: BoxedType): void;
+
   /** Opaque snapshot/restore of the coupled type/value slots — mirror of
    * the members documented in `types-definitions.ts`.
    * @internal */

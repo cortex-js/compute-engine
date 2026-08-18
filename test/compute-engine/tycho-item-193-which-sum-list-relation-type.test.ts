@@ -80,21 +80,27 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
       );
     });
 
-    test('types do not depend on the symbols having values', () => {
+    test('assignment refines the placeholder, and re-parses see the sharper types', () => {
+      // HISTORY: this test used to pin "types do not depend on the symbols
+      // having values". Since the Phase 1 placeholder-refinement ruling
+      // (2026-08-18, `docs/INFERENCE_ROADMAP.md`), that invariant is
+      // deliberately GONE for a symbol declared with a BARE constructor:
+      // the assignment refines the element slot (`C: indexed_collection`
+      // becomes `indexed_collection<finite_integer>`), so a re-parse lands
+      // exactly where the concrete `list<number>` declaration leg has
+      // always landed — the sharper, provable `list<…>` types. The
+      // PRE-assignment types (the previous test) are unchanged: a valueless
+      // placeholder still reads `broadcastable<…>`.
       const { ce, rows, assign } = witness('indexed_collection');
-      const before = [
-        rows.relation.type.toString(),
-        rows.which.type.toString(),
-        rows.sum.type.toString(),
-      ];
+      expect(rows.relation.type.toString()).toBe('broadcastable<boolean>');
       assign();
-      // Re-parse against the now-assigned symbols: the answer is the same.
-      const after = [
-        ce.parse('C=U_1').type.toString(),
-        ce.parse('\\{C=U_1: 1, 0\\}').type.toString(),
-        ce.parse('\\sum_{i=1}^{2}\\{C=U_i: i, 0\\}').type.toString(),
-      ];
-      expect(after).toEqual(before);
+      expect(ce.parse('C=U_1').type.toString()).toBe('list<boolean>');
+      expect(ce.parse('\\{C=U_1: 1, 0\\}').type.toString()).toBe(
+        'list<finite_integer>'
+      );
+      expect(ce.parse('\\sum_{i=1}^{2}\\{C=U_i: i, 0\\}').type.toString()).toBe(
+        'list<integer>'
+      );
     });
   });
 
