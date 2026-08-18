@@ -1638,7 +1638,13 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
     emit: () => TargetSource,
-    elseCode: string
+    // The shape of the failing branch, forwarded to the target's
+    // `realGuard`. It must match the shape the head returns when the guard
+    // passes — see the `realGuard` contract in `types.ts`. The color
+    // constructors pass `{ array: n }` so a genuinely-complex operand
+    // yields an n-element NaN-filled color, never a bare scalar that flips
+    // the caller's destructuring at runtime.
+    resultKind: 'boolean' | 'number' | { array: number }
   ): TargetSource | undefined {
     // The rule belongs to the `auto` and `complex` disciplines; in strict
     // mode nothing changes — a typed-complex or provably non-real operand of
@@ -1696,11 +1702,7 @@ export class BaseCompiler {
       // `((body) if (g) else float('nan'))`.
       return target.bindExpr(
         bindings,
-        target.realGuard(
-          guards,
-          body,
-          elseCode === 'false' ? 'boolean' : 'number'
-        )
+        target.realGuard(guards, body, resultKind)
       );
     } finally {
       for (const a of bound) BaseCompiler._codeOverrides.delete(a);
@@ -4054,7 +4056,7 @@ export class BaseCompiler {
               target,
               () =>
                 BaseCompiler.compileExpr(engine, h, args, prec, target, node),
-              'false'
+              'boolean'
             );
       if (guarded !== undefined) return guarded;
       const complexOperand = args.find(
@@ -5084,27 +5086,38 @@ export class BaseCompiler {
       if (
         BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(h) &&
         target.language !== undefined &&
-        !target.language.startsWith('interval') &&
-        args.some(
-          (a) =>
-            BaseCompiler.isComplexValued(a) &&
-            !BaseCompiler._codeOverrides.has(a)
-        )
+        !target.language.startsWith('interval')
       ) {
-        // D2/D6 runtime rule (see `realOperandGuard`): a maybe-complex scalar
-        // operand is bound once and the real lowering runs on its real part
-        // when every imaginary part is exactly zero, `NaN` otherwise.
-        const guarded = BaseCompiler.realOperandGuard(
-          h,
-          args,
-          target,
-          () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
-          'NaN'
-        );
-        if (guarded !== undefined) return guarded;
-        throw new Error(
-          `${h}: the target's lowering for this head is real-only and cannot represent a complex-valued argument. Fail closed (D6).`
-        );
+        // The operands the gate scans and binds — the args themselves,
+        // except `ColorFromColorspace`, whose maybe-complex scalars live
+        // INSIDE its literal components tuple (`realOnlyGuardOperands`).
+        const guardArgs = BaseCompiler.realOnlyGuardOperands(h, args);
+        if (
+          guardArgs.some(
+            (a) =>
+              BaseCompiler.isComplexValued(a) &&
+              !BaseCompiler._codeOverrides.has(a)
+          )
+        ) {
+          // D2/D6 runtime rule (see `realOperandGuard`): each maybe-complex
+          // scalar operand is bound once and the real lowering runs on its
+          // real part when every imaginary part is exactly zero; otherwise
+          // the failing branch has the SAME shape the head returns — scalar
+          // NaN for the scalar heads, an equally-sized NaN-filled array for
+          // the color constructors (`realOnlyResultKind`).
+          const guarded = BaseCompiler.realOperandGuard(
+            h,
+            guardArgs,
+            target,
+            () =>
+              BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+            BaseCompiler.realOnlyResultKind(h, args)
+          );
+          if (guarded !== undefined) return guarded;
+          throw new Error(
+            `${h}: the target's lowering for this head is real-only and cannot represent a complex-valued argument. Fail closed (D6).`
+          );
+        }
       }
 
       // A `broadcastable` head over a single finite indexed collection:
@@ -5176,7 +5189,7 @@ export class BaseCompiler {
         args,
         target,
         () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
-        'NaN'
+        'number'
       );
       if (guarded !== undefined) return guarded;
       throw new Error(
@@ -5290,7 +5303,7 @@ export class BaseCompiler {
    * string-mapped branch of `compileExpr` never reached them. The
    * function-codegen branch applies the same rule through this set.
    *
-   * Three families, and none of them has a complex extension to reach for:
+   * Five families, and none of them has a complex extension to reach for:
    *
    *  - ROUNDING (`Floor`, `Ceiling`, `Round`, `Truncate`, `Fract`) — there is
    *    no rounding of a complex number. They are function codegen for an
@@ -5304,6 +5317,24 @@ export class BaseCompiler {
    *    `InterquartileRange`) — the `_SYS.*` reducers behind them sum and
    *    compare plain numbers. Measured: `Mean([i, 2i])` compiled to `NaN`
    *    where the interpreter answers the complex mean.
+   *  - COLOR HEADS (`Rgb`, `Hsv`, `Hsl`, `Oklab`, `Oklch`, `Colormap`,
+   *    `ColorMix`, `ColorFromColorspace`) — color components and mix ratios
+   *    are real by definition; the `_SYS.*` converters behind them do plain
+   *    arithmetic on their channels. Measured (Tycho item 204, on 0.115.0):
+   *    `Hsv(90·√(x+1), 1, 1)` under the default `auto` handed `_SYS.hsv`
+   *    the promoted `{re, im}` object and returned `[NaN, NaN, NaN]` at
+   *    EVERY input — including `x = 3`, where `√4 = 2` is entirely real —
+   *    with no decline the consumer could detect; a `ColorMix` ratio and a
+   *    `ColorFromColorspace` tuple component failed identically. With the
+   *    guard, a real-at-runtime promoted value unwraps and yields the true
+   *    color; a genuinely complex one yields an equally-sized NaN-filled
+   *    array (`realOnlyResultKind` — never a bare scalar, which would flip
+   *    the result shape at runtime under a caller's destructuring).
+   *    `ColorFromColorspace` carries its scalars inside a literal
+   *    components tuple, so the gate scans and binds the tuple's ELEMENTS
+   *    (`realOnlyGuardOperands`); a non-literal components operand keeps
+   *    the compile-time fail-closed decline. The `As*` converters take
+   *    already-constructed colors and need no gate of their own.
    *
    * Measured on the DEFAULT path with `x` bound to `0`, so the operand
    * `x + (1+i)` is complex but not a foldable literal. Every one of these
@@ -5357,7 +5388,69 @@ export class BaseCompiler {
       'Skewness',
       'Quartiles',
       'InterquartileRange',
+      'Rgb',
+      'Hsv',
+      'Hsl',
+      'Oklab',
+      'Oklch',
+      'Colormap',
+      'ColorMix',
+      'ColorFromColorspace',
     ]);
+
+  /**
+   * The operands the real-only gate scans and binds for head `h`: the args
+   * themselves, except `ColorFromColorspace`, whose maybe-complex scalars
+   * live INSIDE its literal components tuple/list — the elements are
+   * returned so `realOperandGuard` binds each one (its `_codeOverrides`
+   * substitution reaches them when the components literal re-compiles
+   * inside the guarded body). A non-literal components operand keeps the
+   * default, and with it the compile-time fail-closed decline.
+   */
+  private static realOnlyGuardOperands(
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): ReadonlyArray<Expression> {
+    if (h !== 'ColorFromColorspace' || args.length === 0) return args;
+    const comps = args[0];
+    if (!isFunction(comps, 'Tuple') && !isFunction(comps, 'List')) return args;
+    return [...comps.ops, ...args.slice(1)];
+  }
+
+  /**
+   * The failing-branch shape for a guarded real-only head (the `realGuard`
+   * kind): the color heads return `[L, C, H]` or `[L, C, H, alpha]`, so
+   * their guard emits an equally-sized NaN-filled array — a caller
+   * destructuring the color must never see the result shape flip at
+   * runtime on data. Everything else in `REAL_ONLY_CODEGEN_HEADS` returns
+   * a scalar. `Colormap`'s guarded form is the two-argument sample (the
+   * one-argument palette form has no numeric operand to promote) and
+   * `ColorMix` mixes to one color; both answer a 3-channel array — alpha,
+   * when present, is lost on the FAILING branch only.
+   */
+  private static realOnlyResultKind(
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): 'number' | { array: number } {
+    switch (h) {
+      case 'Rgb':
+      case 'Hsv':
+      case 'Hsl':
+      case 'Oklab':
+      case 'Oklch':
+        return { array: args.length >= 4 ? 4 : 3 };
+      case 'ColorFromColorspace': {
+        const comps = args[0];
+        const n = isFunction(comps) ? (comps.ops?.length ?? 3) : 3;
+        return { array: n >= 4 ? 4 : 3 };
+      }
+      case 'Colormap':
+      case 'ColorMix':
+        return { array: 3 };
+      default:
+        return 'number';
+    }
+  }
 
   /**
    * Heads that only PROPAGATE complexness from their operands: the value they

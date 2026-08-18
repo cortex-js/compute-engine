@@ -2748,7 +2748,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
         guards.length === 0
           ? `(${body})`
           : `((${body}) if (${guards.join(' and ')}) else ${
-              kind === 'boolean' ? 'False' : "float('nan')"
+              kind === 'boolean'
+                ? 'False'
+                : typeof kind === 'object'
+                  ? `[float('nan')] * ${kind.array}`
+                  : "float('nan')"
             })`,
       // Chained relations join with Python's `and`, not `&&`.
       chainOp: 'and',

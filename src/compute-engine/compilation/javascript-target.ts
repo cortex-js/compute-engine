@@ -4771,6 +4771,13 @@ const colorHelpers = {
       return result;
     }
 
+    // A non-finite position (NaN from upstream real arithmetic, ±∞ — e.g. a
+    // real-only guard's failing branch, or plain `√(-1)` in strict mode)
+    // cannot index the palette: `colors[NaN]` is `undefined` and the
+    // destructuring in `_interpolatePalette` throws "undefined is not
+    // iterable" at run time. NaN-in/NaN-out, like compiled real arithmetic.
+    if (!Number.isFinite(arg)) return [NaN, NaN, NaN];
+
     // Float t in [0, 1] → interpolate at position t
     const t = Math.max(0, Math.min(1, arg));
     return this._interpolatePalette(colors, t);
@@ -7135,7 +7142,13 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       realGuard: (guards, body, kind) =>
         guards.length === 0
           ? `(${body})`
-          : `((${guards.join(' && ')}) ? (${body}) : ${kind === 'boolean' ? 'false' : 'NaN'})`,
+          : `((${guards.join(' && ')}) ? (${body}) : ${
+              kind === 'boolean'
+                ? 'false'
+                : typeof kind === 'object'
+                  ? `[${Array(kind.array).fill('NaN').join(', ')}]`
+                  : 'NaN'
+            })`,
       // Per-compilation naming state for generated temporaries. Created here —
       // `createTarget()` is called once per compilation — so `tempVar()` numbers
       // `_tv1, _tv2, …` deterministically and two compiles of one expression

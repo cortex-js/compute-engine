@@ -1862,3 +1862,93 @@ describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
     ce.forget('Lbc');
   });
 });
+
+describe('COMPILE COMPLEX - real-only color constructors guard promoted operands', () => {
+  // Tycho item 204: `Hsv(90·√(x+1), 1, 1)` under the default `auto` handed
+  // `_SYS.hsv` the promoted `{re, im}` object and returned NaN at EVERY
+  // input — including x = 3, where √4 = 2 is entirely real — with no
+  // decline the consumer could detect. The color constructors are now in
+  // `REAL_ONLY_CODEGEN_HEADS`, so a maybe-complex operand takes the D2/D6
+  // runtime guard: real-at-runtime unwraps to the true color, genuinely
+  // complex yields NaN.
+  const hsv = () =>
+    ce.expr(['Hsv', ['Multiply', 90, ['Sqrt', ['Add', 'x', 1]]], 1, 1]);
+
+  it('auto matches strict on real inputs through the promoted lane', () => {
+    const s = compile(hsv(), { mode: 'strict', fallback: false });
+    const a = compile(hsv(), { mode: 'auto', fallback: false });
+    expect(s.success).toBe(true);
+    expect(a.success).toBe(true);
+    for (const x of [0, 3]) {
+      const sv = s.run!({ x }) as number[];
+      const av = a.run!({ x }) as number[];
+      expect(av).toHaveLength(3);
+      av.forEach((c, i) => expect(c).toBeCloseTo(sv[i], 10));
+    }
+  });
+
+  it('a genuinely complex hue yields a NaN-filled COLOR, same shape as success', () => {
+    // The failing branch must have the same shape the head returns when the
+    // guard passes: a caller destructuring `[L, C, H]` must never receive a
+    // bare scalar NaN (review finding: the first guard version did exactly
+    // that, and this test's original form papered over it with an
+    // `Array.isArray` workaround).
+    const a = compile(hsv(), { mode: 'auto', fallback: false });
+    const v = a.run!({ x: -2 });
+    expect(Array.isArray(v)).toBe(true);
+    expect(v).toHaveLength(3);
+    expect((v as number[]).every((c) => Number.isNaN(c))).toBe(true);
+  });
+
+  it('every color head: auto matches strict on real inputs, NaN-array on complex', () => {
+    const sqrtX = ['Sqrt', ['Add', 'x', 1]];
+    const shapes: [string, unknown, number][] = [
+      ['Rgb', ['Rgb', ['Multiply', 0.2, sqrtX], 0.5, 0.5], 3],
+      ['Rgb alpha', ['Rgb', ['Multiply', 0.2, sqrtX], 0.5, 0.5, 0.8], 4],
+      ['Colormap', ['Colormap', { str: 'viridis' }, ['Multiply', 0.25, sqrtX]], 3],
+      [
+        'ColorMix',
+        ['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1], ['Multiply', 0.25, sqrtX]],
+        3,
+      ],
+      [
+        'ColorFromColorspace',
+        [
+          'ColorFromColorspace',
+          ['Tuple', ['Multiply', 0.2, sqrtX], 0.5, 0.5],
+          { str: 'rgb' },
+        ],
+        3,
+      ],
+    ];
+    for (const [label, json, channels] of shapes) {
+      const expr = ce.expr(json as Parameters<typeof ce.expr>[0]);
+      const s = compile(expr, { mode: 'strict', fallback: false });
+      const a = compile(expr, { mode: 'auto', fallback: false });
+      expect(`${label}: ${s.success}/${a.success}`).toBe(`${label}: true/true`);
+      const sv = s.run!({ x: 3 }) as number[];
+      const av = a.run!({ x: 3 }) as number[];
+      expect(Array.isArray(av)).toBe(true);
+      av.forEach((c, i) => expect(c).toBeCloseTo(sv[i], 10));
+      const bad = a.run!({ x: -2 });
+      expect(Array.isArray(bad)).toBe(true);
+      expect(bad).toHaveLength(channels);
+      expect((bad as number[]).every((c) => Number.isNaN(c))).toBe(true);
+    }
+  });
+
+  it('compiled Colormap with a NaN position returns a NaN color, never throws', () => {
+    // Pre-existing crash found while fixing the guard: `colors[NaN]` is
+    // undefined and destructuring it threw "undefined is not iterable" —
+    // strict mode hit it with plain `√(-1)` arithmetic, no promotion
+    // involved. NaN-in/NaN-out, like compiled real arithmetic.
+    const cm = compile(
+      ce.expr(['Colormap', { str: 'viridis' }, 'nanpos']),
+      { mode: 'strict', fallback: false }
+    );
+    expect(cm.success).toBe(true);
+    const v = cm.run!({ nanpos: NaN });
+    expect(Array.isArray(v)).toBe(true);
+    expect((v as number[]).every((c) => Number.isNaN(c))).toBe(true);
+  });
+});

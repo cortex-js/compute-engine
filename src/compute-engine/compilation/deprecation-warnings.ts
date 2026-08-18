@@ -104,7 +104,7 @@ function warnDeprecatedCompileOptions(options: {
     if (options.realOnly === true) {
       warnDeprecatedOnce(
         'realOnly',
-        "compile(): the `realOnly` option is deprecated — a compiled value whose imaginary part is exactly zero is already returned as a plain number; test `typeof v === 'number'` instead. The projection is kept for one release."
+        "compile(): the `realOnly` option is deprecated — a compiled value whose imaginary part is exactly zero is already returned as a plain number; test `typeof v === 'number'` instead. Note `realOnly` is an OUTPUT projection only: it does not suppress promotion or hold the real lane — pass `mode: 'strict'` for that. The projection is kept for one release."
       );
     } else {
       warnDeprecatedOnce(

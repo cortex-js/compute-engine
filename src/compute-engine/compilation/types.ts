@@ -697,7 +697,13 @@ export interface CompileTarget<Expr = unknown> {
   realGuard?: (
     guards: ReadonlyArray<TargetSource>,
     body: TargetSource,
-    kind: 'boolean' | 'number'
+    // The failing branch must have the SAME shape the head returns when the
+    // guard passes — a caller destructuring the result must never see the
+    // shape flip at runtime on data. `'number'` → the target's NaN,
+    // `'boolean'` → the target's false, `{ array: n }` → an n-element
+    // NaN-filled array (the color constructors return `[L, C, H]` /
+    // `[L, C, H, a]`, so their guard emits `[NaN, NaN, NaN(, NaN)]`).
+    kind: 'boolean' | 'number' | { array: number }
   ) => TargetSource;
 
   /**

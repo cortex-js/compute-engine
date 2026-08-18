@@ -58,6 +58,26 @@
 
 ### Bug Fixes
 
+- **Color heads guard promoted (maybe-complex) operands instead of emitting
+  channel garbage.** `Hsv(90\cdot\sqrt{x+1}, 1, 1)` under the default
+  `auto` mode handed `_SYS.hsv` the promoted `{re, im}` object and returned
+  NaN at every input — including inputs where the radical is entirely real
+  (`x = 3`, `√4 = 2`) — with no decline a consumer could detect. All eight
+  color heads (`Rgb`, `Hsv`, `Hsl`, `Oklab`, `Oklch`, `Colormap`,
+  `ColorMix`'s ratio, and `ColorFromColorspace`'s literal tuple components)
+  now take the same D2/D6 runtime guard as `Max`/`Floor`/`Mean`: a promoted
+  value that is real at run time unwraps and yields the true color; a
+  genuinely complex one yields an equally-sized NaN-filled color array —
+  never a bare scalar NaN, so the result shape a caller destructures is
+  invariant. In `strict` mode a definitely-complex operand fails closed at
+  compile time, as elsewhere. Found in the same pass: compiled
+  `Colormap(name, t)` with a non-finite `t` (e.g. plain `√(-1)` in strict
+  mode) crashed at run time with "undefined is not iterable" — it now
+  returns a NaN color. Reported by a consumer as their item 204
+  (dynamic-colour feature, two red browser specs); the `ColorMix` /
+  `ColorFromColorspace` / shape-invariance gaps were caught by dual review
+  before staging.
+
 - **Broadcast over a list operand no longer breaks the "wide is real"
   promotion analysis.** With `L := [0,1,2,3]`, compiling
   `\sqrt{x^2+L^2}-1` under the default `auto` mode produced
