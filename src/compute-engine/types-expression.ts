@@ -1951,7 +1951,7 @@ export interface Expression {
    *
    * @internal
    */
-  _infer(t: Type, inferenceMode?: 'narrow' | 'widen'): boolean;
+  _infer(t: Type, inferenceMode?: 'narrow' | 'widen' | 'replace'): boolean;
 
   /**
    * Update the definition associated with this expression, using the

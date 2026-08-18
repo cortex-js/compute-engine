@@ -563,7 +563,21 @@ function isSelfReferentialValue(
   return !!value && value.symbols.includes(name);
 }
 
-function inferTypeFromValue(
+/** The assignment-widening table at the TYPE level: the type a symbol's
+ * inferred type takes when a value of type `t` is assigned to it. The same
+ * table `inferTypeFromValue` applies to a value — factored out so the Epsil
+ * static pre-pass can widen a DESTRUCTURED leaf, where only the component
+ * TYPE (not a value expression) is in hand. */
+export function widenAssignedType(ce: ComputeEngine, t: Type): Type {
+  const bt = ce.type(t);
+  if (bt.matches('integer')) return 'integer';
+  if (bt.matches('rational')) return 'real';
+  if (bt.matches('real')) return 'real';
+  if (bt.matches('complex')) return 'number';
+  return t;
+}
+
+export function inferTypeFromValue(
   ce: ComputeEngine,
   value: Expression | undefined
 ): BoxedType {

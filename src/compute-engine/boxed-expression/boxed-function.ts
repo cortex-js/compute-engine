@@ -523,7 +523,7 @@ export class BoxedFunction
    * For function expressions, `_infer()` infers the result type of the function
    * based on the provided type and inference mode.
    */
-  _infer(t: Type, inferenceMode?: 'narrow' | 'widen'): boolean {
+  _infer(t: Type, inferenceMode?: 'narrow' | 'widen' | 'replace'): boolean {
     const def = this.operatorDefinition;
     if (!def || !def.inferredSignature) return false;
 

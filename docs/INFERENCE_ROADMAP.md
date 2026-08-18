@@ -147,11 +147,52 @@ epoch boundaries observable — a deliberate violation of the
 and the second slot threads through rollback, state events, notebook
 re-run, and speculative confinement, each with an incident history. In an
 interpreted, eagerly-evaluated language the static/runtime gap is one
-statement wide, discounting the headline benefit. **Plan of record: ship
-the guard (needs a go/no-go ruling — it stops use-narrowing of assigned
-symbols); build full Phase 0 only when Phase 3 is scheduled or field
-evidence demands the diagnostics/order-independence, and rule on the
-notebook-epoch UX with concrete re-run scenarios before building.**
+statement wide, discounting the headline benefit. **Plan of record — GUARD RULED GO AND SHIPPED 2026-08-18, INCLUDING
+the whole-program static half:** in the narrow branch of
+`validateArguments` (`boxed-expression/validate.ts`), a use of an ASSIGNED
+symbol now checks instead of narrowing — and the evidence checked is the
+**held value's own type**, not the symbol's stored type, because
+assignment WIDENING (a `Complex(1,-1)` value stores the symbol as
+`number`) can make the stored type fail a parameter the actual evidence
+satisfies. Three outcomes: a valueless symbol narrows exactly as before
+(the CAS reading); an assigned symbol whose held value fits the parameter
+is admitted, and the post-validation pass may then SHARPEN the widened
+stored type toward the parameter (licensed: admission guaranteed the held
+value satisfies it); one whose held value does not fit gets the ordinary
+`incompatible-type` error at canonicalization.
+
+The catch a whole-file run exposed (2026-08-18, same day): inference state
+is created by EXECUTION, so the Epsil static pre-pass — which runs before
+anything evaluates — saw `k(x)` against an `x` that had never learned
+`number`, and the error only surfaced mid-run at the offending statement.
+Fixed by teaching the pass STATIC TYPE EFFECTS
+(`applyAssignmentTypeEffect`, `epsil/static-diagnostics.ts`):
+
+- `let f: () -> integer` installs a pass-scoped CONTRACT declaration
+  (`Declare` installs at evaluate time, which the pass never runs, and
+  `registerPinnedSignature` covers only names-carrying signatures);
+- a top-level `x = g()` writes `x : number` through the journaled `_infer`
+  channel with the new `replace` mode (assignment is last-write-wins — a
+  join-of-assignments model would wrongly reject the reversed program) and
+  records the RAW right-hand-side type as assignment evidence
+  (`ce._staticAssignmentEvidence`), which the validation guard reads where
+  a held value would otherwise be;
+- the free-variable "provisional type" un-rejection in `box.ts`'s
+  symbol-head validation treats evidence-carrying symbols as definite, so
+  the pass's rejection survives to become a `static-type-error`.
+
+Two lazy-operator traps hit on the way: `Assign`/`Declare` hold their
+operands UNBOUND (the right-hand side types `unknown` until `.canonical`
+binds it), and the effect must be top-level-only (statements nested in
+control flow contribute nothing — conservative without flow analysis).
+The motivating program now reports `static-type-error: expected
+`integer`, got `number` at `x`` BEFORE anything runs; the reversed
+program, the widened-`Complex` program, and valueless CAS programs stay
+clean. All personas and the one-shot matrix pinned in
+`test/compute-engine/use-narrowing-evidence-guard.test.ts`. Full Phase 0
+bounds remain DEFERRED — contingent on Phase 3 being scheduled or field
+evidence demanding the two-sided diagnostics/order-independence, with the
+notebook-epoch UX ruled on concrete re-run scenarios before building.
 
 ## 3. Phase 1 — assignment-driven placeholder refinement of constructor arguments
 
@@ -302,10 +343,10 @@ palliative).
 
 ## 7. Suggested order
 
-0. **The Phase 0 GUARD** (evidence-beats-requirement, see the Phase 0
-   verdict) can ship immediately after its go/no-go ruling. **Full Phase 0
-   bounds are deferred** — contingent on Phase 3 being scheduled or on
-   field demand, with the notebook-epoch UX ruled first.
+0. **The Phase 0 GUARD** (evidence-beats-requirement) — **SHIPPED
+   2026-08-18.** Full Phase 0 bounds remain deferred — contingent on
+   Phase 3 being scheduled or on field demand, with the notebook-epoch UX
+   ruled first.
 1. **Phase 1** after R1–R3 are ruled — self-contained, completes the
    placeholder-ruling symmetry, immediately makes `let a: list` behave per
    the stated intent.

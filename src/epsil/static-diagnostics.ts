@@ -11,7 +11,7 @@ import {
   stringValue,
   symbol,
 } from '../math-json/utils.js';
-import type { FunctionSignature, Type } from '../common/type/types.js';
+import type { FunctionSignature, Type, TypeString } from '../common/type/types.js';
 import { isWildcardFunctionType } from '../common/type/utils.js';
 import { isPolymorphicType } from '../common/type/instantiate.js';
 
@@ -31,6 +31,10 @@ import { unboundSignatureHint } from '../compute-engine/boxed-expression/type-co
 // the conversion, `isSingleGraphemeCluster` decides which literals qualify.
 import { expectsCharacterNotString } from '../compute-engine/boxed-expression/validate.js';
 import { isSingleGraphemeCluster } from '../compute-engine/boxed-expression/boxed-character.js';
+import {
+  inferTypeFromValue,
+  widenAssignedType,
+} from '../compute-engine/boxed-expression/boxed-value-definition.js';
 import {
   isDictionary,
   isFunction,
@@ -241,6 +245,14 @@ export function staticDiagnostics(
   // surrogate and smuggle a nested `DeclareType` past the top-level rule).
   ce._staticTypeCheckDepth += 1;
   ce.pushScope(undefined, 'epsil:static-check');
+  // Assignment EVIDENCE for this pass (see `applyAssignmentTypeEffect`):
+  // maps a symbol's value-definition record to the RAW type of the last
+  // top-level assignment's right-hand side, so the evidence-beats-requirement
+  // guard in argument validation treats the symbol as ASSIGNED during the
+  // pass. Restored (not cleared) so a nested pass leaves the outer one's
+  // evidence intact, mirroring `_epsilBatchId`.
+  const enclosingEvidence = ce._staticAssignmentEvidence;
+  ce._staticAssignmentEvidence = new Map();
   try {
     // One INFERENCE ROLLBACK FRAME spans the whole pass (phase 2b of
     // `docs/plans/2026-08-13-inference-tx-design.md`). It journals — and
@@ -270,11 +282,158 @@ export function staticDiagnostics(
       )
     );
   } finally {
+    ce._staticAssignmentEvidence = enclosingEvidence;
     ce.popScope();
     ce._staticTypeCheckDepth -= 1;
     rollbackTypes();
     rollbackProtocols();
   }
+}
+
+/**
+ * The STATIC TYPE EFFECT of a top-level assignment (`docs/INFERENCE_ROADMAP.md`,
+ * Phase 0 guard — the whole-program half, 2026-08-18).
+ *
+ * At run time, evaluating `x = g()` gives `x` an inferred type
+ * (`inferTypeFromValue`, widened) and assignment EVIDENCE, so a later use is
+ * checked against the evidence instead of narrowing it. The Assign write
+ * happens in the EVALUATE handler, which this pass never runs — so without
+ * this, the pass checked `k(x)` against an `x` that never learned `number`,
+ * and the mismatch a whole-file run reports at the `k(x)` statement was
+ * invisible to `epsil check`. This applies the same effect statically: the
+ * type is computable from the canonical right-hand side's STATIC type
+ * (nothing is evaluated), written through the journaled `_infer` channel
+ * with `replace` (assignment is last-write-wins), and the raw (unwidened)
+ * type is recorded as evidence — raw for the same reason the runtime guard
+ * checks the held VALUE's type: widening stores a `Complex` under `number`,
+ * which a `complex` parameter must still admit.
+ *
+ * Deliberately narrow: TOP-LEVEL statements only (the caller iterates the
+ * program's `Block`; an assignment nested in an `If` body is one statement
+ * here and contributes nothing — conservative, matching what the pass can
+ * know without control-flow analysis), symbol left-hand sides only, and
+ * only when the statement carries no error and the right-hand side has a
+ * usable static type. A `Function` right-hand side is left to
+ * `registerPinnedSignature`, which owns function-signature effects. An
+ * EXPLICITLY TYPED declaration contributes nothing either — its annotation
+ * is a contract, and `declaredTypeMismatch` owns conflicts with it.
+ */
+function applyAssignmentTypeEffect(
+  ce: ComputeEngine,
+  boxed: ReturnType<ComputeEngine['box']>
+): void {
+  const evidence = ce._staticAssignmentEvidence;
+  if (evidence === undefined) return;
+
+  let target: ReturnType<ComputeEngine['box']> | undefined;
+  let rhs: ReturnType<ComputeEngine['box']> | undefined;
+  if (isFunction(boxed, 'Assign')) {
+    target = boxed.ops[0];
+    rhs = boxed.ops[1];
+  } else if (isFunction(boxed, 'Declare')) {
+    // `["Declare", sym, type?, value?, attrs?]` — positional type and value,
+    // or a trailing attributes dictionary carrying `type`/`value` entries
+    // (the Epsil `let x = …` lowering). An explicit type annotation makes
+    // the declaration a CONTRACT: the annotation is installed, and only the
+    // initializer's EVIDENCE is recorded. NOTE: the attrs-vs-positional
+    // split assumes Epsil-parser-shaped `Declare` nodes (the parser always
+    // wraps a `let` initializer in the attributes dictionary); a
+    // hand-constructed `Declare(sym, type, ⟨dictionary VALUE⟩)` would read
+    // its positional dictionary value as the attributes bag and skip the
+    // effect — harmless (the effect is best-effort) but worth knowing.
+    target = boxed.ops[0];
+    const rest = boxed.ops.slice(1);
+    const last = rest[rest.length - 1];
+    const attrs = isDictionary(last) ? last : undefined;
+    const positional = attrs === undefined ? rest : rest.slice(0, -1);
+    const typeOp =
+      positional.find((op) => isString(op)) ?? attrs?.get('type');
+    if (typeOp !== undefined) {
+      // An explicit annotation is a CONTRACT. `Declare` installs it at
+      // EVALUATE time, which this pass never runs — and
+      // `registerPinnedSignature` covers only names-carrying function
+      // signatures — so without this, `let f: () -> integer` left `f`
+      // unknown for the pass and every later statement using `f` was
+      // uncheckable. Install a pass-scoped declaration with the same
+      // contract; it dies when the pass pops its scope.
+      const source = isString(typeOp)
+        ? typeOp.string
+        : isSymbol(typeOp)
+          ? typeOp.symbol
+          : null;
+      if (target !== undefined && isSymbol(target) && source !== null) {
+        try {
+          ce.declare(target.symbol, source as TypeString);
+        } catch {
+          // Already declared in this scope (a forward use auto-declared
+          // it), or a malformed annotation — both already have their own
+          // diagnostics; the effect is best-effort.
+        }
+        // A typed declaration WITH an initializer still contributes
+        // assignment EVIDENCE (the raw initializer type): the contract
+        // stays the reported type, but a later use that the contract merely
+        // OVERLAPS (`let x: number = 1.5` at an `integer` parameter —
+        // `number` and `integer` are not disjoint, so the free-variable
+        // un-rejection would otherwise call the mismatch provisional) is
+        // checked against what the program actually assigned.
+        const initOp =
+          positional.find((op) => !isString(op)) ?? attrs?.get('value');
+        if (initOp !== undefined && initOp.operator !== 'Function') {
+          const init = initOp.canonical;
+          if (init.isValid && !init.type.isUnknown) {
+            const def = ce.box(target.symbol).valueDefinition;
+            if (def !== undefined) evidence.set(def, init.type.type);
+          }
+        }
+      }
+      return;
+    }
+    rhs = positional.find((op) => !isString(op)) ?? attrs?.get('value');
+  } else return;
+
+  if (target === undefined) return;
+  if (rhs === undefined || rhs.operator === 'Function') return;
+  // `Assign`/`Declare` are LAZY: their held operands arrive UNBOUND, typing
+  // `unknown`. Canonicalizing binds structure — resolving `f()` to its
+  // declared result type — without substituting values or evaluating
+  // anything (`op.canonical` is value-safe).
+  rhs = rhs.canonical;
+  if (!rhs.isValid) return;
+  const raw = rhs.type;
+  if (raw.isUnknown) return;
+
+  // A DESTRUCTURING target (`let (a, b) = v`, `(a, b) = v`) distributes the
+  // effect per leaf when the right-hand side's static type pins a matching
+  // tuple shape; anything else (mismatched arity, non-tuple type, nested
+  // patterns) contributes nothing — conservative, like the rest of this
+  // function.
+  if (isFunction(target, 'Tuple')) {
+    const t = raw.type;
+    if (
+      typeof t === 'object' &&
+      t.kind === 'tuple' &&
+      t.elements.length === target.nops &&
+      target.ops.every((o) => isSymbol(o))
+    ) {
+      target.ops.forEach((leaf, idx) => {
+        const leafType = t.elements[idx].type;
+        if (leafType === 'unknown' || !isSymbol(leaf)) return;
+        const leafSym = ce.box(leaf.symbol);
+        const leafDef = leafSym.valueDefinition;
+        if (leafDef === undefined) return;
+        leafSym._infer(widenAssignedType(ce, leafType), 'replace');
+        evidence.set(leafDef, leafType);
+      });
+    }
+    return;
+  }
+
+  if (!isSymbol(target)) return;
+  const sym = ce.box(target.symbol);
+  const def = sym.valueDefinition;
+  if (def === undefined) return;
+  sym._infer(inferTypeFromValue(ce, rhs).type, 'replace');
+  evidence.set(def, raw.type);
 }
 
 function canonicalizationDiagnostics(
@@ -409,6 +568,11 @@ function canonicalizationDiagnostics(
     // source order, so a call written before the assignment still has no
     // names to check, matching the runtime where the callee is unassigned).
     if (declMismatch === undefined) registerPinnedSignature(ce, boxed, pinned);
+
+    // The statement's ASSIGNMENT type effect, visible to the LATER statements
+    // of this program (never earlier ones — the walk is in source order,
+    // matching the runtime where the assignment has not yet run).
+    if (declMismatch === undefined) applyAssignmentTypeEffect(ce, boxed);
 
     const errors: MathJsonExpression[] = [];
     collectErrors(canonical, errors);

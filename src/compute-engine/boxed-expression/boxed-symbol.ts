@@ -454,7 +454,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    *
    * @inheritdoc
    */
-  _infer(t: Type, inferenceMode: 'narrow' | 'widen' = 'narrow'): boolean {
+  _infer(
+    t: Type,
+    inferenceMode: 'narrow' | 'widen' | 'replace' = 'narrow'
+  ): boolean {
     if (!this._def) return false;
 
     // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
@@ -471,10 +474,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
       if (def.value.inferredType || def.value.type.isUnknown) {
         const previousType = def.value.type;
+        // `replace` is LAST-WRITE-WINS — the Epsil static pre-pass uses it
+        // to apply the type effect of a top-level assignment, whose runtime
+        // counterpart replaces rather than merges (`x = f(); x = g()` leaves
+        // `x` with `g`'s type, whatever `f`'s was).
         const inferred = this.engine.type(
-          inferenceMode === 'widen'
-            ? widen(def.value.type.type, t)
-            : narrow(def.value.type.type, t)
+          inferenceMode === 'replace'
+            ? t
+            : inferenceMode === 'widen'
+              ? widen(def.value.type.type, t)
+              : narrow(def.value.type.type, t)
         );
         // Inferring `unknown` adds no information — the argument's type is
         // still open. It is a no-op, so skip the write: assigning `unknown`

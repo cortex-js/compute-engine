@@ -520,6 +520,43 @@ export function checkNumericArgs(
  *
  * Converts the arguments to canonical
  */
+
+/**
+ * The EVIDENCE-BEATS-REQUIREMENT decision at a narrow-eligible slot
+ * (`docs/INFERENCE_ROADMAP.md`, Phase 0 guard, 2026-08-18). Called once the
+ * caller has established the narrow preconditions (inferred type, `param`
+ * strictly below the stored type, no value component, effects preserved):
+ *
+ * - `'narrowed'` — the symbol is VALUELESS (and carries no static
+ *   assignment evidence): the CAS reading applies, the use declares, and
+ *   the type was narrowed to `param`.
+ * - `'admitted'` — the symbol has evidence (a held value, or the Epsil
+ *   static pre-pass's assignment record) whose RAW type fits `param`:
+ *   admit without an eager write (the post-validation pass may sharpen).
+ * - `'fall-through'` — the evidence does not fit: the caller must fall
+ *   through to its ordinary rejection path.
+ *
+ * Shared by the REQUIRED, OPTIONAL and VARIADIC parameter loops — the guard
+ * lived only in the required loop at first, so an assigned symbol passed
+ * through an optional or variadic slot could still be silently rewritten.
+ */
+function evidenceGuardedNarrow(
+  ce: ComputeEngine,
+  op: Expression,
+  param: Type
+): 'narrowed' | 'admitted' | 'fall-through' {
+  const def = op.valueDefinition!;
+  const held = def.value;
+  const staticEvidence =
+    held === undefined ? ce._staticAssignmentEvidence?.get(def) : undefined;
+  if (held === undefined && staticEvidence === undefined) {
+    op._infer(param, 'narrow');
+    return 'narrowed';
+  }
+  const evidenceType = held !== undefined ? held.type.type : staticEvidence!;
+  return isSubtype(evidenceType, param) ? 'admitted' : 'fall-through';
+}
+
 export function checkType(
   ce: ComputeEngine,
   arg: Expression | undefined | null,
@@ -1158,9 +1195,27 @@ export function validateArguments(
       !hasValueComponent(param) &&
       narrowingPreservesEffects(op.type.type, param)
     ) {
-      op._infer(param, 'narrow');
-      result.push(op);
-      continue;
+      // EVIDENCE BEATS REQUIREMENT (`docs/INFERENCE_ROADMAP.md`, Phase 0
+      // verdict, ruled 2026-08-18): use-narrowing is the CAS reading — a
+      // use of a VALUELESS symbol declares what it must be (`k(n)` makes
+      // `n` an integer). A symbol that HOLDS a value has assignment
+      // evidence, and a use is a requirement to CHECK against that
+      // evidence, not evidence to merge: narrowing here let `x = g()` (a
+      // `number`) pass a `(integer) -> …` parameter by rewriting `x`'s
+      // type to `integer` — the conflict only surfaced at evaluation, and
+      // the stored type was left contradicting the held value.
+      //
+      // The evidence checked is the HELD VALUE'S own type, not the symbol's
+      // stored type: assignment WIDENS (a `Complex(1,-1)` value stores the
+      // symbol as `number`), so the stored type can fail a parameter —
+      // `number ⊄ complex` — that the actual evidence satisfies. A value
+      // whose own type fits is admitted with no write; one that does not
+      // falls through to the ordinary `incompatible-type` error, minted at
+      // canonicalization.
+      if (evidenceGuardedNarrow(ce, op, param) !== 'fall-through') {
+        result.push(op);
+        continue;
+      }
     }
 
     if (op.operatorDefinition?.inferredSignature && op.type.matches(param)) {
@@ -1328,10 +1383,12 @@ export function validateArguments(
       !hasValueComponent(param) &&
       narrowingPreservesEffects(op.type.type, param)
     ) {
-      op._infer(param, 'narrow');
-      result.push(op);
-      i += 1;
-      continue;
+      // Evidence-beats-requirement — see `evidenceGuardedNarrow`.
+      if (evidenceGuardedNarrow(ce, op, param) !== 'fall-through') {
+        result.push(op);
+        i += 1;
+        continue;
+      }
     }
     // Broadcastable operand: could be a plain scalar at runtime, admit it.
     if (broadcastableBaseMatches(op.type.type, param)) {
@@ -1441,9 +1498,11 @@ export function validateArguments(
         !hasValueComponent(varParam) &&
         narrowingPreservesEffects(op.type.type, varParam)
       ) {
-        op._infer(varParam, 'narrow');
-        result.push(op);
-        continue;
+        // Evidence-beats-requirement — see `evidenceGuardedNarrow`.
+        if (evidenceGuardedNarrow(ce, op, varParam) !== 'fall-through') {
+          result.push(op);
+          continue;
+        }
       }
       // Broadcastable operand: could be a plain scalar at runtime, admit it.
       if (broadcastableBaseMatches(op.type.type, varParam)) {

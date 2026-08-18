@@ -563,6 +563,19 @@ export interface IComputeEngine {
    * @internal */
   _epsilBatchId: number | undefined;
 
+  /** Assignment EVIDENCE the Epsil static pre-pass established, keyed by the
+   * symbol's value-definition record. Set (and restored) only by
+   * `staticDiagnostics`: when the pass applies the type effect of a
+   * top-level assignment (`x = g()` ⇒ `x : number`, statically, nothing
+   * evaluated), it records the right-hand side's RAW type here so that
+   * argument validation's evidence-beats-requirement guard can treat the
+   * symbol as ASSIGNED — a later use then CHECKS against this evidence
+   * (raw, not widened, for the same reason the runtime guard checks the
+   * held VALUE's type: widening stores a `Complex` under `number`, which a
+   * `complex` parameter must still admit). `undefined` outside the pass.
+   * @internal */
+  _staticAssignmentEvidence: Map<BoxedValueDefinition, Type> | undefined;
+
   /** `true` only while the Epsil interpreter is canonicalizing or evaluating a
    * top-level statement whose AST head is `DeclareType`, `DeclareSumType` or
    * `DeclareProtocol` — the REDEFINITION DISCIPLINE's statement-route marker

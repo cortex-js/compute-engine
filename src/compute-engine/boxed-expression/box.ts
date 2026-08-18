@@ -1927,7 +1927,19 @@ function makeCanonicalFunctionCore(
             orig &&
             orig.isValid &&
             !r.isValid &&
-            orig.freeVariables.length > 0
+            orig.freeVariables.length > 0 &&
+            // "Has free variables" is a proxy for "provisional type" — and a
+            // symbol the Epsil static pre-pass recorded ASSIGNMENT EVIDENCE
+            // for is NOT provisional: the pass established its type from an
+            // actual assignment (`x = g()` ⇒ `x: number`), so a rejection
+            // against that type is as definite as one against a held value,
+            // and un-rejecting it here was what kept the whole-program
+            // static check from ever reporting the mismatch.
+            !(
+              isSymbol(orig) &&
+              orig.valueDefinition !== undefined &&
+              ce._staticAssignmentEvidence?.has(orig.valueDefinition)
+            )
           ) {
             const params = candidateParamsAt(valueType, i);
             if (

@@ -374,8 +374,13 @@ describe('Epsil CLI runtime error reporting', () => {
     expect(
       await main(['-e', 'let s: string = "hi"\nLn(s, 2)'], io)
     ).toBe(1);
-    expect(stderr()).toContain('error: Runtime error: expected `number`');
-    // Narrowed to the offending `s` inside `Ln(s, 2)`, not the statement.
+    // Since the static pre-pass applies declaration type effects
+    // (`applyAssignmentTypeEffect`, 2026-08-18), `s: string` is known BEFORE
+    // anything runs and the mismatch is a STATIC type error — it used to
+    // surface only as `Runtime error:` when the statement executed. The
+    // anchoring is unchanged: the offending `s` inside `Ln(s, 2)`, not the
+    // statement.
+    expect(stderr()).toContain('error: Type error: expected `number`');
     expect(stderr()).toContain('--> 2:4');
     expect(stderr()).toContain('2 | Ln(s, 2)');
   });

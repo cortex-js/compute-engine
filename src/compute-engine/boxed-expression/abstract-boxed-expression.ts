@@ -1064,7 +1064,7 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
-  _infer(_t: Type, _inferenceMode?: 'narrow' | 'widen'): boolean {
+  _infer(_t: Type, _inferenceMode?: 'narrow' | 'widen' | 'replace'): boolean {
     return false; // The inference was ignored if false
   }
 

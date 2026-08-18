@@ -554,6 +554,10 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._epsilBatchId`. @internal */
   _epsilBatchId: number | undefined = undefined;
 
+  /** See `IComputeEngine._staticAssignmentEvidence`. @internal */
+  _staticAssignmentEvidence: Map<BoxedValueDefinition, Type> | undefined =
+    undefined;
+
   /** See `IComputeEngine._epsilDeclarationRoute`. @internal */
   _epsilDeclarationRoute = false;
 
