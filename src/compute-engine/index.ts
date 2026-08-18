@@ -1449,18 +1449,12 @@ export class ComputeEngine implements IComputeEngine {
     }
   }
 
-  /** Absolute time beyond which evaluation should not proceed.
+  /** Absolute time (`Date.now()` epoch ms) beyond which evaluation should
+   * not proceed, or `undefined` when no time limit is active. (An un-prefixed
+   * `deadline` alias existed from the 2026-02 service refactor until
+   * 2026-08-17; `_deadline` is the one spelling.)
    * @internal
    */
-  get deadline(): number | undefined {
-    return this._runtimeState.deadline;
-  }
-
-  set deadline(value: number | undefined) {
-    this._runtimeState.deadline = value;
-  }
-
-  /** The time after which the time limit has been exceeded */
   get _deadline(): number | undefined {
     return this._runtimeState.deadline;
   }

@@ -586,12 +586,10 @@ export interface IComputeEngine {
    * @internal */
   _epsilDeclarationRoute: boolean;
 
-  /** Absolute time beyond which evaluation should not proceed.
-   * @internal
-   */
-  deadline: number | undefined;
-
-  /** Absolute time beyond which evaluation should not proceed
+  /** Absolute time (`Date.now()` epoch ms) beyond which evaluation should
+   * not proceed, or `undefined` when no time limit is active. A derived view
+   * of `_deadlineFrame` (which adds attribution); prefer passing
+   * `_deadlineFrame` to `checkDeadline`.
    * @internal
    */
   _deadline?: number;

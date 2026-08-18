@@ -599,7 +599,7 @@ describe('withTimeLimit', () => {
     // It got partway through, then the shared deadline fired.
     expect(drained).toBeLessThan(2469);
     // The deadline is restored: the engine still evaluates normally.
-    expect(engine.deadline).toBeUndefined();
+    expect(engine._deadline).toBeUndefined();
     expect(engine.parse('1+1').evaluate().re).toBe(2);
   });
 
@@ -622,14 +622,14 @@ describe('withTimeLimit', () => {
   // §6.4). This test asserts the span leaves no deadline installed behind it.
   it('an async evaluation under a span leaves no deadline behind', async () => {
     const engine = new ComputeEngine();
-    expect(engine.deadline).toBeUndefined();
+    expect(engine._deadline).toBeUndefined();
 
     await engine.withTimeLimit(60_000, () =>
       engine.parse('2+2').evaluateAsync()
     );
 
     // The span has exited: no deadline may remain installed.
-    expect(engine.deadline).toBeUndefined();
+    expect(engine._deadline).toBeUndefined();
 
     // A later evaluation on the same engine is unaffected.
     expect(engine.parse('\\sqrt{16}').evaluate().re).toBe(4);
@@ -710,7 +710,7 @@ describe('withTimeLimit', () => {
         CancellationError
       );
       // Deadline restored afterwards.
-      expect(engine.deadline).toBeUndefined();
+      expect(engine._deadline).toBeUndefined();
     });
   });
 
@@ -722,10 +722,10 @@ describe('withTimeLimit', () => {
     // arithmetic), so a build in progress is never interrupted by the span.
     const engine = new ComputeEngine();
     engine.withTimeLimit(10_000, () => {
-      const before = engine.deadline!;
+      const before = engine._deadline!;
       engine._cache('test-deadline-exclusion', () => {
         // The deadline is suspended during the build...
-        expect(engine.deadline).toBeUndefined();
+        expect(engine._deadline).toBeUndefined();
         const t0 = Date.now();
         while (Date.now() - t0 < 30) {
           /* busy-wait ≥30ms */
@@ -733,10 +733,10 @@ describe('withTimeLimit', () => {
         return 1;
       });
       // ...and afterwards restored unchanged (verbatim, not shifted).
-      expect(engine.deadline).toBe(before);
+      expect(engine._deadline).toBe(before);
     });
     // Cache hits don't touch anything: no deadline armed, none created.
     engine._cache('test-deadline-exclusion', () => 2);
-    expect(engine.deadline).toBeUndefined();
+    expect(engine._deadline).toBeUndefined();
   });
 });
