@@ -44,8 +44,12 @@ effects stand; the declaration keyword is **`resource`** (protocol
 stays `Resource`; `effect` reserved for a possible marker-label
 route); object backing applies to the **handle wrapper**, the payload
 `T` is unconstrained. The ambient-form declaration mechanism was
-**reopened** the same day, and the discharge-surface open question
-closed (declaration-site only, never use sites).
+**reopened** the same day and **ruled 2026-08-17**: the
+declared-ambient-symbol desugaring — `with random(seed)` ≡ the named
+form over the delimiter-declared symbol, spelling by per-declarer
+convention (`__ambient_<label>`, shadowing = deliberate
+interposition). The discharge-surface open question is closed
+(declaration-site only, never use sites).
 v5 folds in the round-3 dual review
 (`docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R3.md`, 16 findings — all 16
 rulings validated). Headline v5 rulings, each specified in its section:
@@ -2207,9 +2211,10 @@ appears.
   revocation and the delimiter surface (2026-08-14: revocation + static
   diagnostics; the `with` binding block with release implied by the
   `Resource` protocol), and the tracking mechanism (2026-08-15:
-  scope-attached finalization — Appendix A, "The mechanism"). Still
-  open: the ambient-form declaration mechanism (reopened 2026-08-15)
-  and the rest of Appendix A's "To pin before implementation" list.
+  scope-attached finalization — Appendix A, "The mechanism"), as is
+  the ambient form (2026-08-17: declared-ambient-symbol desugaring,
+  spelling by per-declarer convention). Still open: only Appendix A's
+  "To pin before implementation" list.
 
 Resolved since v3: the `write` local/global split (v4: confinement
 inference, "Scope writes"); `host` vs `entropy` (v4: `host` superseded by
@@ -2242,8 +2247,9 @@ review — `docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R4.md` — was folded in
 mechanism — scope-attached finalization, "The mechanism" below; `with`
 as an expression; unconditional `finish` effects; the builtin-wins
 namespacing policy; and the `resource` keyword. The ambient-form
-declaration mechanism was REOPENED the same day — see "Ambient
-form".)*
+declaration mechanism was reopened the same day and **ruled
+2026-08-17**: the declared-ambient-symbol desugaring, spelling by
+per-declarer convention (`__ambient_<label>`) — see "Ambient form".)*
 
 ### The `resource` declaration — one form, three registrations
 
@@ -2496,15 +2502,19 @@ with random(seed) {
 ```
 
 How a label declares itself a valid head of this unnamed form was
-reopened 2026-08-15; the current **lean** (second round, same day,
-pending ratification) is the **declared-ambient-symbol desugaring**:
+reopened 2026-08-15 and **ruled 2026-08-17**: the
+**declared-ambient-symbol desugaring**, with the symbol's spelling
+left to **convention, per declarer** (no enforced sigil, no
+unspellable internal symbol — the spelling decision below):
 
 - An ambient effect's **delimiter definition declares its ambient
-  symbol** (say, `ambientSymbol` metadata on `random`'s definition;
-  the symbol's spelling is open — a `#` sigil would collide with the
-  parse-time pragma namespace of `#env()`/`#navigator()`).
+  symbol** (`ambientSymbol` metadata on `random`'s definition). The
+  declarer forms a collision-unlikely name; the recommended pattern is
+  `__ambient_<label>` (`__ambient_random`). A `#` sigil is unavailable
+  in any case — it is the parse-time pragma namespace of
+  `#env()`/`#navigator()`.
 - `with random(seed) { … }` desugars to the **named form over that
-  symbol** — `with ⟨current-random⟩ = random(seed) { … }` — so the
+  symbol** — `with __ambient_random = random(seed) { … }` — so the
   assignment is performed by the `with` machinery against the declared
   symbol, never by user code receiving a raw binding site.
 - Frame-participating operators resolve the well-known symbol up the
@@ -2512,6 +2522,58 @@ pending ratification) is the **declared-ambient-symbol desugaring**:
   "The mechanism". One lookup path serves both forms: named `with`
   binds the symbol the user wrote; ambient `with` binds the symbol the
   effect declared.
+
+**Worked example.** The declaration side is definition metadata on the
+delimiter (builtin today — no user-facing declaration form is needed
+until user-defined frame kinds exist, which nothing anticipates):
+
+```ts
+// definition of the `random` delimiter (builtin):
+{
+  frameProtocol: 'seed',              // the frame kind, as today
+  ambientSymbol: '__ambient_random',  // NEW: what the unnamed form binds
+  ...
+}
+```
+
+With that one field declared, the unnamed form is pure desugaring:
+
+```epsil
+with random(seed) {
+  let r = Random()
+}
+
+// desugars to the named form over the DECLARED symbol:
+with __ambient_random = random(seed) {
+  let r = Random()   // Random() resolves __ambient_random up the scope chain
+}
+```
+
+`Random()` (and every operator whose label has this frame kind) reads
+`__ambient_random` from the scope chain — the innermost binding *is*
+the current frame; nesting and shadowing come free from ordinary scope
+rules, and the finalization mechanism, escape rules, and lookup path
+are all shared with the named resource form.
+
+**The spelling decision (ruled 2026-08-17): convention, per
+declarer.** The spelling matters only because it decides who can
+name — and therefore shadow — the symbol; nothing else in the design
+depends on it. Three options were on the table: an unspellable
+internal symbol (frame invisible to user code except through its
+operators), an enforced reserved spelling (sigil or reserved prefix),
+and a **convention-formed ordinary identifier — ruled**. The declarer
+forms a name unlikely to collide (recommended pattern:
+`__ambient_<label>`, e.g. `__ambient_random`); the engine enforces
+nothing. Two consequences, accepted deliberately:
+
+- User code **can read** the current frame explicitly
+  (`__ambient_random` is an ordinary symbol) — an observation,
+  harmless.
+- User code **can bind over** it — and that is not a hazard but the
+  point: deliberately shadowing `__ambient_random` is frame
+  *interposition*, exactly what a nested `with random(…)` does. The
+  convention exists to make **accidental** collision unlikely, not to
+  make shadowing impossible.
 
 A `Resource.assign(symbol, any+)` protocol member was considered for
 this (2026-08-15) and set aside for four reasons, recorded so the shape
@@ -2548,9 +2610,6 @@ genuine resources get named handles.**
   and the abnormal paths — error-value propagation, timeout abort,
   async cancellation (imitate the registry's
   try/finally-including-async discipline).
-- Ratify the ambient-form lean ("Ambient form"): the
-  declared-ambient-symbol desugaring — and pick the well-known
-  symbol's spelling (a `#` sigil collides with the pragma namespace).
 - A per-resource-type deny/mock surface — or ratify
   constructor-shadowing plus underlying-capability denial as the
   answer ("The mechanism", third bullet).

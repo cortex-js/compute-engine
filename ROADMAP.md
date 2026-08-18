@@ -1030,6 +1030,18 @@ Agreed shape, in order:
    `isSame`/snapshot workflows while a guard like `k <= n && xs[k] > 0`
    keeps its written order. Skip unless a concrete workflow needs it.
 
+Open question the user flagged before implementation (2026-08-17): the
+design accepts a real tension — mathematically `And`/`Or` are commutative,
+but the TREE is a program and stays ordered. Option B's position is that
+commutativity is a property of the VALUE and is honored at every value-level
+question (`isEqual`, `match`, `simplify`, CNF, tautology), while order
+belongs to the program that computes the value (Mathematica's stance: `And`
+is Flat + HoldAll, not Orderless). The tension only becomes practical if a
+workflow treats the tree itself as the mathematical object (canonical forms
+in rendered output, comparisons of unevaluated formulas) — then step 3's
+gated sort, or at the extreme Option A, is the pressure valve. The user is
+mulling this before implementation starts.
+
 Context that makes 1–2 sufficient: the symbolic machinery itself
 (`evaluateAnd`/`evaluateOr` reducers, CNF/DNF, tautology/contradiction,
 absorption, truth tables) is order-independent and lost nothing. The
