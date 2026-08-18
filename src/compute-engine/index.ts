@@ -1459,6 +1459,7 @@ export class ComputeEngine implements IComputeEngine {
     return this._runtimeState.deadline;
   }
 
+  /** @internal */
   set _deadline(value: number | undefined) {
     this._runtimeState.deadline = value;
   }
@@ -1470,10 +1471,12 @@ export class ComputeEngine implements IComputeEngine {
     return this._runtimeState.deadlineFrame;
   }
 
+  /** @internal */
   set _deadlineFrame(value: DeadlineFrame | undefined) {
     this._runtimeState.deadlineFrame = value;
   }
 
+  /** @internal */
   get _timeRemaining(): number {
     return this._runtimeState.timeRemaining;
   }

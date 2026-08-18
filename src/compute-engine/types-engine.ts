@@ -589,10 +589,11 @@ export interface IComputeEngine {
   /** Absolute time (`Date.now()` epoch ms) beyond which evaluation should
    * not proceed, or `undefined` when no time limit is active. A derived view
    * of `_deadlineFrame` (which adds attribution); prefer passing
-   * `_deadlineFrame` to `checkDeadline`.
+   * `_deadlineFrame` to `checkDeadline`. Read-only: a deadline is armed only
+   * by a `withTimeLimit` span.
    * @internal
    */
-  _deadline?: number;
+  readonly _deadline?: number;
 
   /** The full deadline frame (effective deadline plus attribution).
    * @internal

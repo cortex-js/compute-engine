@@ -186,16 +186,18 @@ describe('SOLVE OVER A DOMAIN — budget and interruption', () => {
 
   test('deadline interruption propagates a CancellationError', () => {
     const c = new ComputeEngine();
-    // A deadline already in the past: the enumeration stride check throws.
-    c._deadline = Date.now() - 1;
+    // A zero-length span: the deadline is already reached when the
+    // enumeration stride check runs (`checkDeadline` fires on `now >= at`).
     expect(() =>
-      c
-        .box([
-          'Solve',
-          ['Divides', 3, 'n'],
-          ['Element', 'n', ['Range', 1, 9000]],
-        ])
-        .evaluate()
+      c.withTimeLimit(0, () =>
+        c
+          .box([
+            'Solve',
+            ['Divides', 3, 'n'],
+            ['Element', 'n', ['Range', 1, 9000]],
+          ])
+          .evaluate()
+      )
     ).toThrow();
   });
 });
@@ -321,16 +323,18 @@ describe('SOLVE OVER A DOMAIN — multi-variable enumeration', () => {
 
   test('deadline interruption propagates a CancellationError', () => {
     const c = new ComputeEngine();
-    c._deadline = Date.now() - 1;
+    // Zero-length span, as above: expired on arrival.
     expect(() =>
-      c
-        .box([
-          'Solve',
-          ['Equal', ['Add', 'x', 'y'], 5],
-          ['Element', 'x', ['Range', 1, 200]],
-          ['Element', 'y', ['Range', 1, 200]],
-        ])
-        .evaluate()
+      c.withTimeLimit(0, () =>
+        c
+          .box([
+            'Solve',
+            ['Equal', ['Add', 'x', 'y'], 5],
+            ['Element', 'x', ['Range', 1, 200]],
+            ['Element', 'y', ['Range', 1, 200]],
+          ])
+          .evaluate()
+      )
     ).toThrow();
   });
 });
