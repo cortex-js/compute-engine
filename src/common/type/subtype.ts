@@ -763,6 +763,24 @@ export function couldMatch(a: Type, b: Type): boolean {
   if (typeof b === 'object' && b.kind === 'union')
     return b.types.some((t) => couldMatch(a, t));
 
+  // `broadcastable<T>` is the union `T | indexed_collection<T>` (the same
+  // expansion `isSubtype` and `provablyDisjoint` use), so it distributes
+  // like one: it could match iff EITHER arm could. Without this a
+  // broadcastable subject fell to the containment fallback, which answered
+  // `broadcastable<number>` vs `collection<any>` with `false` even though
+  // the collection arm inhabits it. Both sides gain the expansion together
+  // and the recursion is on strictly smaller types, so it terminates.
+  if (typeof a === 'object' && a.kind === 'broadcastable')
+    return (
+      couldMatch(a.elements, b) ||
+      couldMatch({ kind: 'indexed_collection', elements: a.elements }, b)
+    );
+  if (typeof b === 'object' && b.kind === 'broadcastable')
+    return (
+      couldMatch(a, b.elements) ||
+      couldMatch(a, { kind: 'indexed_collection', elements: b.elements })
+    );
+
   // The bare collection constructors are their `<unknown>` synonyms (user
   // ruling 2026-08-17); expand them so the structural overlap probes below
   // see the element type. Without this, a bare subject fell straight to the
@@ -805,13 +823,13 @@ export function couldMatch(a: Type, b: Type): boolean {
         return true;
     } else if (
       a.kind === b.kind &&
+      // `broadcastable` is absent: the early distribution above intercepts
+      // every broadcastable operand before this probe is reached.
       (a.kind === 'set' ||
         a.kind === 'collection' ||
-        a.kind === 'indexed_collection' ||
-        a.kind === 'broadcastable')
+        a.kind === 'indexed_collection')
     ) {
-      const elements = (b as SetType | CollectionType | BroadcastableType)
-        .elements;
+      const elements = (b as SetType | CollectionType).elements;
       if (couldMatch(a.elements, elements)) return true;
     } else if (a.kind !== b.kind) {
       // CROSS-KIND overlap within the collection families: a generic

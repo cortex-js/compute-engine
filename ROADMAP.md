@@ -3609,6 +3609,24 @@ suites within this round. It does not block the ruling — removing the
 annotation is a working retraction route — but it makes "widen it" unreachable,
 so the docs promise removal, not widening.
 
+**OPEN, adjacent: the host `expr.value = ⟨lambda⟩` route ignores literal
+annotations.** The `BoxedSymbol.value` setter's function branch (repaired
+2026-08-18 — it previously corrupted every boxed input to a complex NaN and
+installed a raw object literal; see `symbol-value-setter.test.ts`) now mirrors
+`assignValueAsOperatorDef`'s UNTYPED branch: it installs `{ evaluate }` with no
+explicit signature, so the signature is inferred from the body. An ANNOTATED
+function literal assigned through `ce.assign` additionally gets a pinned
+derived signature (stripped effects, `_derivedSignature: true`,
+broadcastable-from-params — `assignValueAsOperatorDef`,
+`engine-declarations.ts`), so calls validate the annotated parameter types;
+the same literal assigned through `.value =` keeps inferred-signature behavior
+and does not enforce its annotations on calls. Proper fix: relocate
+`assignValueAsOperatorDef` (and its literal-annotation helpers) to a home
+importable from `boxed-expression/` without a cycle, and route the setter's
+function branch through it. Until then the two routes diverge only for
+annotated literals on the host setter — a route that was entirely broken
+before 2026-08-18, so nothing shipped depends on the difference.
+
 **KNOWN, not scheduled: pinned layouts are SHALLOW.** `detachDefinitionBody`
 (`boxed-expression/boxed-object.ts`) copies an object body one level deep and
 shares the field TYPES, so a field typed through a transparent alias — or

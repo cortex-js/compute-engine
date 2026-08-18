@@ -1973,6 +1973,43 @@ function makeCanonicalFunctionCore(
       return fn;
     }
 
+    // A symbol whose DECLARED type is provably INAPPLICABLE — a scalar
+    // constant (`Pi`), an absence marker (`Nothing`), a `number`-declared
+    // variable — applied as a function is a definite mistake: nothing can
+    // make the application meaningful, and it used to stay inert typed
+    // `unknown` (`Pi(2)` and `Nothing()` alike), silently absorbing what is
+    // almost always a syntax slip. The error code starts with `expected-`,
+    // so the Epsil static pre-pass reports it before anything runs.
+    //
+    // Narrow by construction — every one of these stays inert/applicable:
+    // - INFERRED types (a guess; the devolve/repair machinery owns those);
+    // - `any`/`unknown` (could still be a function);
+    // - anything that COULD be a function, including a mixed callable
+    //   union (`((integer) -> integer) | number` keeps its latent set);
+    // - collection-SHAPED types: a collection-typed head applied is a
+    //   legal APPLICATION (Tycho item 173 — `S(B)` with `S: set<number>`
+    //   keeps operator `S`; field adjunction applies a set constant,
+    //   `Q(\sqrt{2})`).
+    if (
+      // Non-strict engines skip application-time type validation, matching
+      // the declared-signature parameter checks above.
+      ce.strict &&
+      !def.value.inferredType &&
+      !def.value.type.isUnknown &&
+      def.value.type.type !== 'any' &&
+      !def.value.type.couldMatch('function') &&
+      // `couldMatch`, not `matches`: a MIXED union (`set<number> | number`)
+      // or a `broadcastable<T>` head could still hold an applicable
+      // collection at run time — only a type that could not possibly be
+      // collection-shaped is provably inapplicable.
+      !def.value.type.couldMatch('collection<any>')
+    ) {
+      return ce.error(
+        ['expected-function', name, def.value.type.toString()],
+        name
+      );
+    }
+
     return new BoxedFunction(ce, name, boxedOps, {
       metadata,
       canonical: true,

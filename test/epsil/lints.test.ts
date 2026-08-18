@@ -160,11 +160,25 @@ describe('zero-index lint', () => {
 });
 
 describe('print hint', () => {
-  test('print-like calls get a dedicated hint, once per name', () => {
-    const diags = execDiagnostics('print("hi")\nprint("again")');
-    expect(diags).toEqual([['print-not-available', 'print']]);
-    expect(execDiagnostics('puts(42)')).toEqual([
+  test('print-like ALIASES get a dedicated hint, once per name; `print` itself resolves', () => {
+    // `print` is a real function since the Print/Input feature (2026-08-18),
+    // so calling it produces output, not a hint. The hint remains as a
+    // did-you-mean net for the unresolved aliases.
+    expect(execDiagnostics('print("hi")\nprint("again")')).toEqual([]);
+    expect(execDiagnostics('puts(42)\nputs(43)')).toEqual([
       ['print-not-available', 'puts'],
+    ]);
+    expect(execDiagnostics('echo("x")')).toEqual([
+      ['print-not-available', 'echo'],
+    ]);
+  });
+
+  test('a user binding that shadows `print` never gets the self-contradictory hint', () => {
+    // `print` is deliberately NOT in the PRINT_LIKE alias set: a `let print`
+    // shadowing the builtin must fall through to the ordinary did-you-mean
+    // path, never to "There is no print; did you mean print?".
+    expect(execDiagnostics('let print\nprint("x")')).toEqual([
+      ['unknown-function', 'print', 'Print'],
     ]);
   });
 

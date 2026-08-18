@@ -1373,6 +1373,20 @@ export function describeError(error: MathJsonExpression): string {
 
   let detail: string;
   switch (code) {
+    case 'expected-function':
+      // Payload: [name, type]. With a site, the site quote names the symbol,
+      // so the detail carries only the TYPE -- "expected a function, got
+      // `finite_real` at `Pi`". WITHOUT a site -- `dedupKey()` deliberately
+      // strips it, and authored errors may omit it -- the payload's name is
+      // the only identity, so keep it: two different heads with the same
+      // declared type must not collapse to one dedup key.
+      detail =
+        payload.length >= 2
+          ? site === ''
+            ? `\`${payload[0]}\`: expected a function, got \`${payload[1]}\``
+            : `expected a function, got \`${payload[1]}\``
+          : `expected a function (${payload.join(', ')})`;
+      break;
     case 'incompatible-type':
       detail =
         payload.length === 2

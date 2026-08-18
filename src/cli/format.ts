@@ -452,7 +452,7 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
     case 'unknown-function':
       return `Unknown function "${args[0]}"; did you mean "${args[1]}"?`;
     case 'print-not-available':
-      return `There is no "${args[0]}" function: a program's output is the value of its last statement`;
+      return `There is no "${args[0]}" function; did you mean "print"?`;
     case 'type-not-callable':
       return `"${args[0]}" is a type, not a function: types have no constructor; annotate instead, e.g. "const p: ${args[0]} = …"`;
     case 'type-declaration-not-top-level':

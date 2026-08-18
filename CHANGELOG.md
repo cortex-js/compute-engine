@@ -64,6 +64,14 @@
 
 ### New Features
 
+- **Applying a non-function errors instead of going inert.** A symbol whose
+  declared type is a concrete non-function — `Pi(2)`, `Nothing()`, a
+  `number`-declared variable applied as a call — now produces an
+  `expected-function` error at canonicalization (and a static diagnostic in
+  the Epsil pre-run check) instead of silently staying inert with type
+  `unknown`. Undeclared heads and inferred-type symbols are untouched: they
+  may still become functions.
+
 - **Declared bare collection types refine their element type from
   assignments.** A bare constructor annotation (`let a: list` — likewise
   `set`, `dictionary`, `collection`, `indexed_collection`) declares the
@@ -164,6 +172,22 @@
   apparent at call sites.
 
 ### Bug Fixes
+
+- **The `print` hint no longer fires for `print` itself.** Since `print` is
+  a real function, the `print-not-available` hint now serves only as a
+  did-you-mean for the unresolved aliases (`puts`, `echo`, `println`,
+  `printf`), and its message points at `print`. A user binding that shadows
+  `print` falls through to the ordinary did-you-mean path instead of the
+  self-contradictory "There is no print; did you mean print?".
+
+- **`couldMatch()` now sees through `broadcastable<T>`.** The predicate
+  distributes `broadcastable<T>` as the union `T | indexed_collection<T>` —
+  the same expansion the subtype and disjointness checks already used — so
+  `broadcastable<number>` correctly reports it could match
+  `collection<any>` (and any type either arm could match). Previously it
+  fell to the containment fallback and answered `false`, which among other
+  things made the new `expected-function` guard reject a
+  broadcastable-typed head.
 
 - **Color heads guard promoted (maybe-complex) operands instead of emitting
   channel garbage.** `Hsv(90\cdot\sqrt{x+1}, 1, 1)` under the default

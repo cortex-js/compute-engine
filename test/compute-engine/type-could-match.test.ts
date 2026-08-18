@@ -92,6 +92,22 @@ describe('BoxedType.couldMatch', () => {
     expect(ce.type('unknown').isUnknown).toBe(true);
   });
 
+  it('distributes `broadcastable<T>` as the union `T | indexed_collection<T>`', () => {
+    // The same expansion `isSubtype` and `provablyDisjoint` use. Before
+    // 2026-08-18 a broadcastable subject fell to the containment fallback,
+    // which answered `broadcastable<number>` vs `collection<any>` with
+    // `false` even though the collection arm inhabits it.
+    expect(ce.type('broadcastable<number>').couldMatch('collection<any>')).toBe(
+      true
+    );
+    expect(ce.type('collection<number>').couldMatch('broadcastable<number>')).toBe(
+      true
+    );
+    // The scalar arm is visible too, and disjoint types stay refused.
+    expect(ce.type('broadcastable<number>').couldMatch('integer')).toBe(true);
+    expect(ce.type('broadcastable<number>').couldMatch('string')).toBe(false);
+  });
+
   it('accepts a Type, a TypeString or a BoxedType, and throws on a bad string', () => {
     const t = ce.type(POINT_LIST);
     expect(t.couldMatch(POINT_LIST)).toBe(true);

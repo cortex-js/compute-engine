@@ -510,10 +510,12 @@ function statementRange(
   );
 }
 
-/** Print-statement names from other languages: these get a dedicated hint
- * (there is no printing in Epsil) instead of a fuzzy did-you-mean, which
- * would either stay silent or suggest something misleading. */
-const PRINT_LIKE = new Set(['print', 'println', 'printf', 'puts', 'echo']);
+// Unresolved print-like ALIASES that get a did-you-mean toward the real
+// `print` (which EXISTS since the Print/Input feature, 2026-08-18, and is
+// deliberately NOT in this set: it normally resolves before the
+// unknown-head scan, and a user binding that shadows it -- `let print` --
+// must not produce the self-contradictory "no print; did you mean print?").
+const PRINT_LIKE = new Set(['println', 'printf', 'puts', 'echo']);
 
 /**
  * Warn when a `Function` literal's parameter is named after an engine
@@ -617,8 +619,9 @@ function scanUnknownFunctions(
         range: statementRange(stmt, source),
       });
     } else if (PRINT_LIKE.has(head.toLowerCase())) {
-      // `print(...)` deserves better than a fuzzy suggestion: there is no
-      // print in Epsil — the value of the last statement is the output.
+      // A print-like name deserves better than a fuzzy suggestion: the one
+      // that exists is `print` (since the Print/Input feature), so an
+      // unresolved `puts`/`echo`/`println` points there.
       diagnostics.push({
         severity: 'warning',
         message: ['print-not-available', head],
