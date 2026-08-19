@@ -51,7 +51,6 @@ import { functionResult, signatureArms } from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import { typeToString } from '../../common/type/serialize.js';
-import { typeToDisplayString } from '../../common/type/display.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -583,7 +582,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     result.complexity = this.complexity;
     result.scoped = this.scoped;
     // R-D5: GROUND display — see `typeToDisplayString`.
-    result.signature = typeToDisplayString(this.signature.type);
+    result.signature = typeToString(this.signature.type);
     result.inferredSignature = this.inferredSignature;
 
     if (this.collection) result.collection = this.collection;

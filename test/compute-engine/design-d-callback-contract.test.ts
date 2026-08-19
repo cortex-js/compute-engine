@@ -4,8 +4,7 @@ import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { parseType } from '../../src/common/type/parse';
-import { typeToDedupKey, typeToString } from '../../src/common/type/serialize';
-import { isSubtype, provablyDisjoint } from '../../src/common/type/subtype';
+import { typeToString } from '../../src/common/type/serialize';
 import {
   freeTypeVariables,
   solveTypeArguments,
@@ -13,23 +12,44 @@ import {
 } from '../../src/common/type/instantiate';
 import {
   contextualCallbackPlan,
-  contextualSlotCallback,
+  contextualSlotSignature,
   instantiateCallbackSlots,
 } from '../../src/compute-engine/boxed-expression/generic-instantiation';
 import { resolveContextualArm } from '../../src/compute-engine/boxed-expression/overload';
 import type { FunctionSignature, Type } from '../../src/common/type/types';
 
 /**
- * # Design D — the `callback<S>` contract, phases 0 through 3
+ * # The converted-callback family — behavioral contract under Design E
  *
- * `docs/plans/2026-08-09-design-d-generic-callback-signatures.md`. §4 states
- * the constructor's contract as five independently testable clauses; §10 is
- * the acceptance list, starting with `CountIf` (phase 0, eager) and `Filter`
- * (phase 0b, lazy) and ending with `Map`'s two clauses (phase 3), which is
- * where the superseded `callbackElementOf` metadata was deleted outright.
+ * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`. Design E
+ * retired the `callback<S>` type constructor: a callback slot is now written
+ * as the plain, effect-top arrow it always meant (`predicate: (T) any ->
+ * boolean`), an operand is ADMITTED at such a slot unless it is provably
+ * unusable there (§3's compatibility relation, not contravariant subtyping),
+ * and the R-D5 display projection is gone — every operator now prints the
+ * honest polytype it declares (§8).
+ *
+ * What this file pins for the whole converted family — `CountIf`, `Filter`,
+ * `Find`, `IndexWhere`, `Position`, `Any`, `All`, `TakeWhile`, `DropWhile`,
+ * `FlatMap`, `Reduce`, `Scan`, `Fold`, `Partition`, `Map`:
+ *
+ * - **admission** — a named narrower-than-slot callback, a wildcard
+ *   `function`-typed symbol and an inline literal with an undeclared head all
+ *   enter and stay dynamic per element, while a provably-disjoint operand is
+ *   rejected at canonicalization (§3 rules 1/3/4);
+ * - **contextual stamping** — the slot's solved parameter type is written
+ *   onto an inline `Function` literal, with the union-source, arity and
+ *   unprovable-source declines unchanged (§10 keeps the stamp and its gates);
+ * - **route parity** — box, Epsil and LaTeX produce byte-identical canonical
+ *   forms, since the gate and the stamp both run at canonicalization;
+ * - **display** — the declared signature IS the displayed signature, on
+ *   `.type`, the `Signature` operator, `toJSON()` and the scope listing;
+ * - **the constructor's retirement** — the `callback<…>` spelling no longer
+ *   parses, and says so with a migration hint.
  *
  * The suites that pin what must NOT change are elsewhere and stay untouched:
- * `collection-callback-signatures.test.ts` (the admission contract) and
+ * `collection-callback-signatures.test.ts` (the admission contract),
+ * `design-e-compatibility.test.ts` (the relation itself) and
  * `lambda-param-element-inference.test.ts` (the stamps and their evaluation).
  */
 
@@ -62,259 +82,75 @@ function declaredParam(ce: ComputeEngine, op: string, index: number): Type {
 const XS = ['List', 1, 2, 3, 4] as const;
 
 //
-// ── Clause 1 — ordinary admission and subtyping see only `function` ──────────
+// ── The retired constructor, and the plain-arrow trigger that replaced it ────
 //
 
-describe('clause 1: `callback<S>` IS the primitive `function` for subtyping', () => {
-  const CB = 'callback<(integer) -> boolean>';
-
-  it('is bivariant with `function`, in both directions', () => {
-    const ce = new ComputeEngine();
-    expect(ce.type(CB).matches('function')).toBe(true);
-    expect(ce.type('function').matches(CB)).toBe(true);
-    expect(ce.type(CB).is('function')).toBe(true);
-    expect(isSubtype(parseType(CB), 'function')).toBe(true);
-    expect(isSubtype('function', parseType(CB))).toBe(true);
-  });
-
-  it('admits a NARROWER named callback the wrapped arrow would reject', () => {
-    // The finding that forced the constructor (§2, F1): under a plain arrow
-    // this operand is rejected contravariantly. `S` plays no role in
-    // admission, so it is admitted and judged per element at runtime.
-    const ce = new ComputeEngine();
-    expect(
-      ce.type('(number) -> boolean').matches('(unknown) any -> boolean')
-    ).toBe(false);
-    expect(
-      ce
-        .type('(number) -> boolean')
-        .matches('callback<(unknown) any -> boolean>')
-    ).toBe(true);
-  });
-
-  it('admits a bare-`function` symbol and an unknown-result literal', () => {
-    const ce = new ComputeEngine();
-    // The primitive is a subtype of NO signature — only of the callback slot.
-    expect(ce.type('function').matches('(never) any -> boolean')).toBe(false);
-    expect(
-      ce.type('function').matches('callback<(never) any -> boolean>')
-    ).toBe(true);
-    expect(ce.type('(unknown) any -> unknown').matches(CB)).toBe(true);
-  });
-
-  it('admits an unknown ARITY (the `Sort` comparator shape)', () => {
-    const ce = new ComputeEngine();
-    expect(ce.type('(integer, integer) -> integer').matches(CB)).toBe(true);
-  });
-
-  it('is disjoint from exactly what `function` is disjoint from', () => {
-    expect(provablyDisjoint(parseType(CB), 'string')).toBe(
-      provablyDisjoint('function', 'string')
+describe('the `callback<…>` constructor is RETIRED (Design E §7)', () => {
+  // Design D's five-clause contract dissolved with the constructor
+  // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`): admission
+  // is the compatibility relation of §3, contextual typing triggers on plain
+  // arrow slots, and there is nothing left to erase. What this block pins is
+  // the DELETION itself.
+  it('the spelling no longer parses, and the message carries the migration hint', () => {
+    // The constructor is gone from the grammar, on the bare `parseType` route
+    // and through a declaration alike. Both spell the replacement in the
+    // message, so a user reading the error can rewrite the signature without
+    // opening the design doc.
+    expect(() => parseType('callback<(T) -> boolean>')).toThrow(
+      /retired: write the arrow directly/
     );
-    expect(provablyDisjoint(parseType(CB), 'function')).toBe(false);
     const ce = new ComputeEngine();
-    expect(ce.type(CB).couldMatch('function')).toBe(true);
-    expect(ce.type('(integer) -> boolean').couldMatch(CB)).toBe(true);
+    expect(() =>
+      ce.declare(
+        'f',
+        '(collection<T>, callback<(T) -> boolean>) -> integer where T'
+      )
+    ).toThrow(/retired: write the arrow directly/);
   });
 
-  it('a non-function operand is still refused, and the message names the arrow', () => {
+  it('a user type NAMED `callback` is unaffected in its bare spelling', () => {
+    // Only the CONSTRUCTOR spelling `callback<…>` was hijacked by the grammar
+    // and is now a parse error; the bare identifier is an ordinary type name a
+    // user may still claim. A transparent alias displays by its own NAME here
+    // — that is how every alias prints, not something specific to this one —
+    // and resolves to its definition for matching.
     const ce = new ComputeEngine();
-    const e = ce.box(['CountIf', XS, 5]);
-    expect(e.isValid).toBe(false);
-    // Design E phase E1 (`docs/plans/2026-08-18-compatibility-admission-
-    // callbacks.md` §8): `CountIf`'s slot is an honest arrow, and the
-    // diagnostic now names it INSTANTIATED from the sources — strictly more
-    // informative than the erased `"function"` the callback<S> era reported.
-    expect(e.toString()).toContain('"(finite_integer) any -> boolean"');
-    expect(e.toString()).not.toContain('callback<');
+    ce.declareType('callback', 'integer', { alias: true });
+    ce.declare('n', 'callback');
+    expect(ce.box('n').type.toString()).toBe('callback');
+    expect(ce.box('n').type.matches('integer')).toBe(true);
   });
 });
 
-//
-// ── Clause 2 — the contextual solve reads only `S`'s PARAMETER types ─────────
-//
-
-describe('clause 2: the contextual solve traverses `S`’s parameters only', () => {
+describe('the contextual solve plans PLAIN-ARROW slots (Design E §6b)', () => {
   const ARM = parseType(
-    '(collection<T>, callback<(T) -> U>) -> list<U> where T, U'
+    '(collection<T>, (T) any -> boolean) -> integer where T'
   ) as FunctionSignature;
 
-  it('plans the callback slot and the sources its PARAMETERS read', () => {
+  it('plans the arrow slot and the sources its PARAMETERS read', () => {
     const plan = contextualCallbackPlan(ARM, 2)!;
-    expect(plan).toBeDefined();
     expect(plan.callbacks.map((c) => c.index)).toEqual([1]);
-    // Operand 0 mentions `T`, which `S`'s parameter reads. `U` occurs only in
-    // `S`'s RESULT, so no position is a source on its account.
+    expect([...plan.domainVars]).toEqual(['T']);
     expect(plan.sources).toEqual([0]);
   });
 
-  it('instantiates `S` from the source operand alone', () => {
+  it('instantiates the slot from the source operand alone', () => {
     const plan = contextualCallbackPlan(ARM, 2)!;
-    // A sparse actuals array: only the planned source carries a type — the
-    // callback operand is never forced (the lazy carve-out’s rationale).
     const slots = instantiateCallbackSlots(ARM, plan, [
       parseType('list<integer>'),
       undefined,
     ]);
-    expect(typeToString(slots.get(1)!)).toBe('(integer) -> U');
+    expect(typeToString(slots.get(1)!)).toBe('(integer) any -> boolean');
   });
 
-  it('plans a PLAIN-ARROW slot too (Design E §6b), declines with no domain source', () => {
-    // Design E (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`
-    // §6b): the trigger no longer requires the `callback<S>` spelling — a
-    // plain arrow slot is a contextual slot, which is what lets a converted
-    // signature keep its stamp after the constructor is deleted.
-    const plain = parseType(
-      '(collection<T>, (T) -> boolean) -> integer where T'
-    ) as FunctionSignature;
-    const plan = contextualCallbackPlan(plain, 2)!;
-    expect(plan.callbacks.map((c) => c.index)).toEqual([1]);
-    expect([...plan.domainVars]).toEqual(['T']);
-    // `T` is read only by `S`'s RESULT: nothing to solve the domain from.
+  it('declines with no domain source', () => {
+    // `T` read only by the slot's RESULT: nothing to solve the domain from.
     const resultOnly = parseType(
-      '(callback<() -> T>, T) -> integer where T'
+      '(() any -> T, T) -> integer where T'
     ) as FunctionSignature;
     expect(contextualCallbackPlan(resultOnly, 2)).toBeUndefined();
   });
 });
-
-//
-// ── Clause 3 — inference from the operand is RESULT-side only ────────────────
-//
-
-describe('clause 3: a named callback’s PARAMETERS never constrain a variable', () => {
-  const ARM = parseType(
-    '(collection<T>, callback<(T) -> U>) -> list<U> where T, U'
-  ) as FunctionSignature;
-
-  it('the callback’s RESULT contributes, its parameters do not', () => {
-    const solved = solveTypeArguments(ARM, [
-      parseType('list<integer>'),
-      parseType('(string) -> boolean'),
-    ]);
-    // `T` from the source only — an arrow pattern would have collected the
-    // callback's `string` parameter as an UPPER bound and failed.
-    expect(typeToString(solved.bindings['T'])).toBe('integer');
-    expect(typeToString(solved.bindings['U'])).toBe('boolean');
-    expect(solved.failures).toEqual([]);
-    expect(solved.matched).toBe(true);
-  });
-
-  it('the same arm spelled with a bare arrow DOES conflict — the contrast', () => {
-    const plain = parseType(
-      '(collection<T>, (T) -> U) -> list<U> where T, U'
-    ) as FunctionSignature;
-    const solved = solveTypeArguments(plain, [
-      parseType('list<integer>'),
-      parseType('(string) -> boolean'),
-    ]);
-    expect(solved.failures.length).toBeGreaterThan(0);
-  });
-
-  it('an operand at a callback slot never refutes the structural match', () => {
-    // A `function`-typed symbol, and an operand that is not callable at all:
-    // admission is clause 1's business, not the walk's.
-    for (const actual of ['function', 'integer'] as Type[]) {
-      const solved = solveTypeArguments(ARM, [
-        parseType('list<integer>'),
-        actual,
-      ]);
-      expect(solved.failures).toEqual([]);
-    }
-  });
-});
-
-//
-// ── Clause 4 — free variables and substitution reach inside `S` ──────────────
-//
-
-describe('clause 4: variables inside `S` are retained and substituted', () => {
-  it('a variable occurring ONLY inside `S` counts as occurring in an argument', () => {
-    // Without discovery inside `S` this is `unsolvable-type-variable`.
-    expect(() =>
-      parseType('(callback<(T) -> boolean>) -> integer where T')
-    ).not.toThrow();
-  });
-
-  it('an unquantified variable inside `S` is still reported', () => {
-    expect(() => parseType('(callback<(T) -> boolean>) -> integer')).toThrow(
-      /unresolved-type-variable|Unknown type/
-    );
-  });
-
-  it('`freeTypeVariables` sees through the wrapper', () => {
-    const arm = parseType(
-      '(collection<T>, callback<(T) -> U>) -> list<U> where T, U'
-    ) as FunctionSignature;
-    // Quantified at the arm, so free at the arm is empty…
-    expect([...freeTypeVariables(arm)]).toEqual([]);
-    // …but present in the slot read on its own.
-    expect([...freeTypeVariables(arm.args![1].type)].sort()).toEqual([
-      'T',
-      'U',
-    ]);
-  });
-
-  it('substitution rewrites inside `S`, and returns identity otherwise', () => {
-    const slot = parseType(
-      '(callback<(T) -> boolean>) -> integer where T'
-    ) as FunctionSignature;
-    const cb = slot.args![0].type;
-    expect(typeToString(substituteTypeVariables(cb, { T: 'integer' }))).toBe(
-      'callback<(integer) -> boolean>'
-    );
-    expect(substituteTypeVariables(cb, { Z: 'integer' })).toBe(cb);
-  });
-});
-
-//
-// ── Clause 5 — internal serialization preserves the constructor ──────────────
-//
-
-describe('clause 5: `callback<S>` round-trips through serialize/parse', () => {
-  const SPELLINGS = [
-    'callback<(integer) -> boolean>',
-    'callback<(integer, string) -> list<integer>>',
-    'callback<(integer) random -> boolean>',
-    'callback<() -> nothing>',
-    '(callback<(T) -> boolean>) -> integer where T',
-    '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T',
-    '(collection<T>, callback<(T) -> U>) -> list<U> where T, U',
-  ];
-
-  it.each(SPELLINGS)('%s survives a round trip exactly', (text) => {
-    const t = parseType(text);
-    expect(typeToString(t)).toBe(text);
-    expect(typeToString(parseType(typeToString(t)))).toBe(text);
-  });
-
-  it('the dedup key distinguishes it from the bare `function`', () => {
-    expect(
-      typeToDedupKey(parseType('callback<(integer) -> boolean>'))
-    ).not.toBe(typeToDedupKey('function'));
-    expect(typeToDedupKey(parseType('callback<(integer) -> boolean>'))).toBe(
-      'callback<(integer) -> boolean>'
-    );
-  });
-
-  it('a user type NAMED `callback` is unaffected', () => {
-    // The constructor is recognized only when a `<` follows, so a bare
-    // `callback` is still an ordinary type reference.
-    const ce = new ComputeEngine();
-    ce.declareType('callback', 'integer', { alias: true });
-    expect(ce.type('callback').matches('integer')).toBe(true);
-  });
-
-  it('the wrapper requires an arrow', () => {
-    expect(() => parseType('callback<integer>')).toThrow(
-      /expects a function signature/
-    );
-  });
-});
-
-//
-// ── §10 acceptance — phase 0 (`CountIf`, eager) ──────────────────────────────
-//
 
 describe('phase 0: `CountIf` converts to the contextual signature', () => {
   it('declares the contextual slot and NO metadata', () => {
@@ -562,48 +398,34 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
 //
 
 describe('phase 1: the single-clause single-collection family converts', () => {
-  /** op, declared signature, pre-conversion GROUND display, callback slot. */
-  const CONVERTED: ReadonlyArray<[string, string, string]> = [
-    [
-      'Find',
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> any where T',
-      '(collection, predicate: function) -> any',
-    ],
+  /** op, declared signature — which under Design E is also what it DISPLAYS. */
+  const CONVERTED: ReadonlyArray<[string, string]> = [
+    ['Find', '(collection<T>, predicate: (T) any -> boolean) -> any where T'],
     [
       'IndexWhere',
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T',
-      '(collection, predicate: function) -> integer',
+      '(collection<T>, predicate: (T) any -> boolean) -> integer where T',
     ],
     [
       'Position',
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> list<integer> where T',
-      '(collection, predicate: function) -> list<integer>',
+      '(collection<T>, predicate: (T) any -> boolean) -> list<integer> where T',
     ],
     [
       'Any',
-      '(collection<T>, predicate: callback<(T) -> boolean>?) -> boolean where T',
-      '(collection, predicate: function?) -> boolean',
+      '(collection<T>, predicate: (T) any -> boolean?) -> boolean where T',
     ],
     [
       'All',
-      '(collection<T>, predicate: callback<(T) -> boolean>?) -> boolean where T',
-      '(collection, predicate: function?) -> boolean',
+      '(collection<T>, predicate: (T) any -> boolean?) -> boolean where T',
     ],
     [
       'TakeWhile',
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
-      '(collection, predicate: function) -> collection',
+      '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
     ],
     [
       'DropWhile',
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
-      '(collection, predicate: function) -> collection',
+      '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
     ],
-    [
-      'FlatMap',
-      '(collection<T>, mapping: callback<(T) -> U>) -> list where T, U',
-      '(collection, mapping: function) -> list',
-    ],
+    ['FlatMap', '(collection<T>, mapping: (T) any -> U) -> list where T, U'],
   ];
 
   it.each(CONVERTED)(
@@ -616,15 +438,19 @@ describe('phase 1: the single-clause single-collection family converts', () => {
   );
 
   it.each(CONVERTED)(
-    '%s displays its PRE-conversion ground signature (R-D5)',
-    (op, _declared, ground) => {
+    '%s displays its honest declared signature',
+    (op, declared) => {
+      // Design E §8 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`)
+      // voided R-D5's premise: the arrow now STATES the (compatibility) contract,
+      // so printing it claims no narrowing and there is nothing left to ground.
+      // Declaration and display are one string, on all three surfaces.
       const ce = new ComputeEngine();
-      expect(ce.box(op).type.toString()).toBe(ground);
+      expect(ce.box(op).type.toString()).toBe(declared);
       expect(ce.function('Signature', [ce.symbol(op)]).evaluate().string).toBe(
-        ground
+        declared
       );
       expect((ce.lookupDefinition(op) as any).operator.toJSON().signature).toBe(
-        ground
+        declared
       );
     }
   );
@@ -636,13 +462,19 @@ describe('phase 1: the single-clause single-collection family converts', () => {
   // arguments first. The name is now resolved by LOOKUP, which also keeps the
   // route free of the scope side effect `.canonical` would have had (it
   // DECLARES an unknown symbol).
-  it.each(CONVERTED)('%s answers on the box and parse routes', (op, _d, g) => {
-    const ce = new ComputeEngine();
-    expect(ce.box(['Signature', op]).evaluate().string).toBe(g);
-    expect(
-      ce.parse(`\\mathrm{Signature}(\\mathrm{${op}})`).evaluate().string
-    ).toBe(g);
-  });
+  // The answer itself is now the honest declared signature (Design E §8,
+  // `docs/plans/2026-08-18-compatibility-admission-callbacks.md`); what this
+  // test is about — that all three routes agree on it — is unchanged.
+  it.each(CONVERTED)(
+    '%s answers on the box and parse routes',
+    (op, declared) => {
+      const ce = new ComputeEngine();
+      expect(ce.box(['Signature', op]).evaluate().string).toBe(declared);
+      expect(
+        ce.parse(`\\mathrm{Signature}(\\mathrm{${op}})`).evaluate().string
+      ).toBe(declared);
+    }
+  );
 
   it('`Signature` of an unknown name is `Nothing`, and declares nothing', () => {
     const ce = new ComputeEngine();
@@ -680,8 +512,11 @@ describe('phase 1: the single-clause single-collection family converts', () => {
   );
 
   it.each(CONVERTED)('%s admits a NAMED, narrower callback', (op) => {
-    // Clause 1: `S` plays no role in admission, so `IsPrime: (number) ->
-    // boolean` still enters every converted slot and is never rebuilt.
+    // Design E §3 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`):
+    // admission asks whether the operand is provably UNUSABLE, not whether it
+    // is a subtype of the slot. `IsPrime: (number) -> boolean` overlaps the
+    // solved `(finite_integer) any -> boolean` at every position, so it enters
+    // every converted slot and is never rebuilt.
     const ce = new ComputeEngine();
     const e = ce.box([op, XS, 'IsPrime'] as any);
     expect(e.isValid).toBe(true);
@@ -691,7 +526,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
 
 describe('phase 1: `Any` / `All` — the OPTIONAL callback slot', () => {
   const ARM = parseType(
-    '(collection<T>, predicate: callback<(T) -> boolean>?) -> boolean where T'
+    '(collection<T>, predicate: (T) any -> boolean?) -> boolean where T'
   ) as FunctionSignature;
 
   it('the planner maps an OPTIONAL slot to its operand position', () => {
@@ -702,6 +537,11 @@ describe('phase 1: `Any` / `All` — the OPTIONAL callback slot', () => {
     const plan = contextualCallbackPlan(ARM, 2)!;
     expect(plan.callbacks.map((c) => c.index)).toEqual([1]);
     expect(plan.sources).toEqual([0]);
+    // Design E §5: the converted slot is spelled effect-TOP, and instantiation
+    // preserves the effect specifier — so the solved slot reads
+    // `(integer) any -> boolean`, not the pure `(integer) -> boolean` the
+    // `callback<S>` spelling used to carry
+    // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
     expect(
       typeToString(
         instantiateCallbackSlots(ARM, plan, [
@@ -709,7 +549,7 @@ describe('phase 1: `Any` / `All` — the OPTIONAL callback slot', () => {
           undefined,
         ]).get(1)!
       )
-    ).toBe('(integer) -> boolean');
+    ).toBe('(integer) any -> boolean');
   });
 
   it('the slot is ABSENT at one operand: nothing to plan, nothing to stamp', () => {
@@ -762,19 +602,38 @@ describe('phase 1: `Any` / `All` — the OPTIONAL callback slot', () => {
 
 describe('phase 1: `FlatMap` — R-D2′ result inference', () => {
   const ARM = parseType(
-    '(collection<T>, mapping: callback<(T) -> U>) -> list where T, U'
+    '(collection<T>, mapping: (T) any -> U) -> list where T, U'
   ) as FunctionSignature;
 
   it('the SOLVER binds `U` from the callback’s result, `T` from the source', () => {
-    // R-D2′ at the constraint level: `U` comes from `S`'s RESULT position only.
+    // R-D2′ at the constraint level: `U` comes from the slot's RESULT position
+    // only, `T` from the source.
     const solved = solveTypeArguments(ARM, [
       parseType('list<integer>'),
       parseType('(string) -> list<string>'),
     ]);
     expect(typeToString(solved.bindings['T'])).toBe('integer');
     expect(typeToString(solved.bindings['U'])).toBe('list<string>');
-    // …and the callback's `string` PARAMETER never touched `T` (clause 3).
-    expect(solved.failures).toEqual([]);
+    // The callback's `string` PARAMETER now DOES reach `T` at this level and
+    // conflicts with the source's `integer`: Design E deleted the blanket
+    // "callback parameters never constrain the solve" and moved the skip up
+    // into `solveArm`, which drops an arrow-slot operand only when every
+    // variable in the slot's parameters also occurs at a data position — the
+    // FlatMap case, hence the engine-level admission below (R-E3′, §12b item 1
+    // of `docs/plans/2026-08-18-compatibility-admission-callbacks.md`). The RAW
+    // solver, which has no such notion, reports the conflict.
+    expect(solved.failures).toEqual([
+      {
+        kind: 'upper',
+        variable: 'T',
+        solution: 'integer',
+        expected: 'string',
+        index: 1,
+        pin: 'integer',
+        detail:
+          '`T` was solved to `integer` (from argument 1); this position requires `T <: string`',
+      },
+    ]);
   });
 
   it('an INLINE literal’s result reaches the application type', () => {
@@ -804,7 +663,7 @@ describe('phase 1: `FlatMap` — R-D2′ result inference', () => {
   });
 
   it('a SCALAR callback result is still singleton-lifted (§7 rule 2)', () => {
-    // The slot is `callback<(T) -> U>`, not `callback<(T) -> collection<U>>`:
+    // The slot is `(T) any -> U`, not `callback<(T) -> collection<U>>`:
     // `S` describes the stamp, never the operator's tolerance.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
@@ -817,16 +676,23 @@ describe('phase 1: `FlatMap` — R-D2′ result inference', () => {
     expect(e.evaluate().toString()).toBe('[2,4,6]');
   });
 
-  it('a MISMATCHED named callback is admitted and stays dynamic', () => {
-    // Clause 3 end to end: the operand's `string` parameter never constrains
-    // `T`, so the call is admitted and the type error is a per-element VALUE.
+  it('a PROVABLY DISJOINT named callback is rejected at canonicalization', () => {
+    // Design E §3 rule 3 (`docs/plans/2026-08-18-compatibility-admission-
+    // callbacks.md`): a `string` parameter can never receive an element of a
+    // `list<integer>`, so this operand is provably unusable and the call is
+    // statically invalid — where Design D admitted it and let the mismatch
+    // surface as a per-element error VALUE. The diagnostic names both arrows:
+    // the per-call SUPPLY arrow built from the source, and the operand's own
+    // declared type. Partial overlap (a narrower callback over a union source)
+    // is still admitted — see `Filter`'s per-element-dynamics pin above.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     executeEpsil(ce, 'let wrap = (s: string) => [s]');
     const e = ce.box(['FlatMap', 'cs', 'wrap']);
-    expect(e.isValid).toBe(true);
-    expect(e.toMathJson()).toEqual(['FlatMap', 'cs', 'wrap']);
-    expect(e.evaluate().toString()).toContain('incompatible-type');
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toBe(
+      'FlatMap("cs", Error(ErrorCode("incompatible-type", "(integer) any -> unknown", "(s: string) -> list<string^1>"), "wrap"))'
+    );
   });
 });
 
@@ -935,22 +801,19 @@ describe('phase 1: route parity (box / Epsil / LaTeX)', () => {
 //
 
 describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
-  /** op, declared signature, pre-conversion GROUND display. */
-  const CONVERTED: ReadonlyArray<[string, string, string]> = [
+  /** op, declared signature — which under Design E is also what it DISPLAYS. */
+  const CONVERTED: ReadonlyArray<[string, string]> = [
     [
       'Reduce',
-      '(collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> value where T',
-      '(collection, reducer: function, initial: value?) -> value',
+      '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T',
     ],
     [
       'Scan',
-      '(collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> indexed_collection where T',
-      '(collection, reducer: function, initial: value?) -> indexed_collection',
+      '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
     ],
     [
       'Fold',
-      '(reducer: callback<(unknown, T) -> unknown>, initial: value, collection<T>) -> value where T',
-      '(reducer: function, initial: value, collection) -> value',
+      '(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T',
     ],
   ];
 
@@ -964,15 +827,18 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
   );
 
   it.each(CONVERTED)(
-    '%s displays its PRE-conversion ground signature (R-D5)',
-    (op, _declared, ground) => {
+    '%s displays its honest declared signature',
+    (op, declared) => {
+      // Design E §8 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`):
+      // the R-D5 projection is gone, so the `unknown` accumulator and the `where`
+      // clause are printed as declared on all three display surfaces.
       const ce = new ComputeEngine();
-      expect(ce.box(op).type.toString()).toBe(ground);
+      expect(ce.box(op).type.toString()).toBe(declared);
       expect(ce.function('Signature', [ce.symbol(op)]).evaluate().string).toBe(
-        ground
+        declared
       );
       expect((ce.lookupDefinition(op) as any).operator.toJSON().signature).toBe(
-        ground
+        declared
       );
     }
   );
@@ -1156,27 +1022,27 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
 });
 
 describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity', () => {
+  // The arrow arm has to be PARENTHESIZED inside the union: written bare, the
+  // arrow's result would swallow the `| integer` and the slot would parse as
+  // `(T) any -> (boolean | integer)`.
   const DECLARED =
-    '(collection<T>, callback<(T) -> boolean> | integer, integer?) -> list<list<T>> where T';
-  const DISPLAY =
-    '(collection<T>, function | integer, integer?) -> list<list<T>> where T';
+    '(collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T';
 
-  it('declares the union slot, keeps its display, and drops the metadata', () => {
+  it('declares the union slot, displays it honestly, and drops the metadata', () => {
     const ce = new ComputeEngine();
     expect(typeToString(declaredSignature(ce, 'Partition'))).toBe(DECLARED);
     expect(hasCallbackMetadata(ce, 'Partition')).toBe(false);
-    // R-D5, with the vacuity refinement phase 2 required: `T` still relates
-    // the source's elements to the result AFTER the callback erasure, so it is
-    // a pre-existing declared contract — not a conversion artifact — and the
-    // `where` clause survives the projection. Byte-identical to the
-    // pre-conversion display.
-    expect(ce.box('Partition').type.toString()).toBe(DISPLAY);
+    // Design E §9 item 4 kept the UNION spelling (compatibility applies to the
+    // arrow arm), and §8 retired the R-D5 projection — so the display is now
+    // the declared union verbatim rather than the grounded `function | integer`
+    // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
+    expect(ce.box('Partition').type.toString()).toBe(DECLARED);
     expect(
       ce.function('Signature', [ce.symbol('Partition')]).evaluate().string
-    ).toBe(DISPLAY);
+    ).toBe(DECLARED);
     expect(
       (ce.lookupDefinition('Partition') as any).operator.toJSON().signature
-    ).toBe(DISPLAY);
+    ).toBe(DECLARED);
   });
 
   it('stamps the PREDICATE arm', () => {
@@ -1229,10 +1095,14 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
       'IsPrime',
     ]);
     expect(ce.box(['Partition', 'cs', 'p']).isValid).toBe(true);
-    // The diagnostic names the GROUND union (clause 1's deep erasure), which
-    // is what it named before the conversion.
+    // A non-function, non-integer operand is rejected as before; what changed
+    // is that the diagnostic now names the INSTANTIATED union rather than the
+    // erased `function | integer` (Design E §12b item 3,
+    // `docs/plans/2026-08-18-compatibility-admission-callbacks.md`) — strictly
+    // more informative, since it says which element type the predicate arm
+    // would have been applied to.
     expect(ce.box(['Partition', 'cs', { str: 'banana' }]).toString()).toBe(
-      'Partition("cs", Error(ErrorCode("incompatible-type", "function | integer", "string"), "banana"))'
+      'Partition("cs", Error(ErrorCode("incompatible-type", "((integer) any -> boolean) | integer", "string"), "banana"))'
     );
   });
 
@@ -1247,6 +1117,9 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
   });
 
   it('the planner reads the callback out of the UNION slot', () => {
+    // The instantiated slot is the ARROW ARM alone — the union resolves before
+    // the solve — and it keeps the effect-top specifier the Design E respelling
+    // gave it (§5, `docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
     const ARM = parseType(DECLARED) as FunctionSignature;
     const plan = contextualCallbackPlan(ARM, 2)!;
     expect(plan.callbacks.map((c) => c.index)).toEqual([1]);
@@ -1258,7 +1131,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
           undefined,
         ]).get(1)!
       )
-    ).toBe('(integer) -> boolean');
+    ).toBe('(integer) any -> boolean');
   });
 });
 
@@ -1462,40 +1335,44 @@ describe('phase 3: `Map` — the callback-first signature', () => {
 });
 
 describe('R-D4: the resolve-then-stamp helpers', () => {
-  const CB = 'callback<(integer) -> boolean>';
+  const CB = '(integer) any -> boolean';
 
   it('SLOT granularity: a union resolves to its single callback arm', () => {
+    // Design E §6 replaced `contextualSlotCallback` with
+    // `contextualSlotSignature`: the trigger is now the PLAIN ARROW rather than
+    // the retired `callback<S>` spelling, and the forced-resolution rule for a
+    // union slot is carried over unchanged
+    // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`). An arrow
+    // arm inside a union must be parenthesized, or its result swallows the
+    // sibling arms.
     const cb = (spec: string) =>
-      contextualSlotCallback(parseType(spec)) === undefined
+      contextualSlotSignature(parseType(spec)) === undefined
         ? undefined
-        : typeToString(contextualSlotCallback(parseType(spec))!);
+        : typeToString(contextualSlotSignature(parseType(spec))!);
 
     expect(cb(CB)).toBe(CB);
-    expect(cb(`integer | ${CB}`)).toBe(CB);
+    expect(cb(`integer | (${CB})`)).toBe(CB);
     expect(cb('function')).toBeUndefined();
     expect(cb('integer')).toBeUndefined();
     // Ambiguous: a second callback arm, or an arm a function could inhabit.
-    expect(cb(`${CB} | callback<(string) -> boolean>`)).toBeUndefined();
-    expect(cb(`${CB} | function`)).toBeUndefined();
-    expect(cb(`${CB} | any`)).toBeUndefined();
-    expect(cb(`${CB} | ((integer) -> string)`)).toBeUndefined();
+    expect(cb(`(${CB}) | ((string) any -> boolean)`)).toBeUndefined();
+    expect(cb(`(${CB}) | function`)).toBeUndefined();
+    expect(cb(`(${CB}) | any`)).toBeUndefined();
+    expect(cb(`(${CB}) | ((integer) -> string)`)).toBeUndefined();
   });
 
   it('SLOT granularity: an OPEN sibling arm declines (and never reaches `provablyDisjoint`)', () => {
-    // The §4.2 ground invariant asserts on an open type, so the check is
-    // ordered to decline before it: nothing says a function could not inhabit
-    // `T` anyway.
+    // The ground invariant asserts on an open type, so the check is ordered to
+    // decline before it: nothing says a function could not inhabit `T` anyway.
     const arm = (
-      parseType(`(x: T | ${CB}) -> integer where T`) as FunctionSignature
+      parseType(`(x: T | (${CB})) -> integer where T`) as FunctionSignature
     ).args![0].type;
-    expect(contextualSlotCallback(arm)).toBeUndefined();
+    expect(contextualSlotSignature(arm)).toBeUndefined();
   });
 
   it('ARM granularity: arity, then the contextual slot, then ambiguity', () => {
     const sig = (s: string) => parseType(s) as FunctionSignature;
-    const unary = sig(
-      `(collection<T>, callback<(T) -> boolean>) -> integer where T`
-    );
+    const unary = sig(`(collection<T>, (T) any -> boolean) -> integer where T`);
     // Spelled variadic-LAST: `(collection+, function)` is the same type (the
     // bins are filled by modifier, not by source order) but the type parser
     // now rejects that spelling rather than silently hoisting the `function`
@@ -1520,7 +1397,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     ce.declare(
       'pick',
-      '((collection<T>, callback<(T) -> boolean>) -> integer where T) & ((collection, integer) -> integer)'
+      '((collection<T>, (T) any -> boolean) -> integer where T) & ((collection, integer) -> integer)'
     );
     expect(
       ce
@@ -1545,7 +1422,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     ce.declare(
       'amb',
-      '((collection<T>, callback<(T) -> boolean>) -> integer where T) & ((collection<T>, f: function) -> string where T)'
+      '((collection<T>, (T) any -> boolean) -> integer where T) & ((collection<T>, f: function) -> string where T)'
     );
     expect(
       ce.box(['amb', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson()
@@ -1555,7 +1432,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     // provably disjoint from `function`.
     ce.declare(
       'ok',
-      '((collection<T>, callback<(T) -> boolean>) -> integer where T) & ((collection<T>, n: integer) -> string where T)'
+      '((collection<T>, (T) any -> boolean) -> integer where T) & ((collection<T>, n: integer) -> string where T)'
     );
     expect(
       ce.box(['ok', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson()
@@ -1566,30 +1443,11 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     ]);
   });
 
-  it('a GROUND `callback<S>` in an overload arm stamps like the standalone signature', () => {
-    // The contextual plan is `undefined` when there are no domain variables to
-    // solve — the ground-`S` case — and the overload route used to stop there,
-    // stamping nothing where the identical non-overload signature stamped.
-    const ce = new ComputeEngine();
-    const literal = ['Function', ['Less', 'x', 2], 'x'];
-    const stamped = ['Function', ['Less', 'x', 2], ['Typed', 'x', "'integer'"]];
-    ce.declare(
-      'g1',
-      '(collection<integer>, p: callback<(integer) -> boolean>) -> integer'
-    );
-    ce.declare(
-      'g2',
-      '((collection<integer>, p: callback<(integer) -> boolean>) -> integer) & ((string, string) -> string)'
-    );
-    expect(ce.box(['g1', ['List', 1, 2], literal]).ops[1].toMathJson()).toEqual(
-      stamped
-    );
-    expect(ce.box(['g2', ['List', 1, 2], literal]).ops[1].toMathJson()).toEqual(
-      stamped
-    );
-  });
-
-  it('a user-defined overload set with NO contextual slot keeps the conservative skip', () => {
+  it('a user overload set with ONE resolvable arrow arm stamps like its standalone twin', () => {
+    // Design E: the uniform trigger reaches user overload sets — the arm
+    // resolution (one arrow-slot arm, the competitor provably unable to take
+    // a function) is the same R-D4 machinery the library uses, and the
+    // resolved arm stamps exactly as the standalone signature always did.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     ce.declare(
@@ -1598,7 +1456,26 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     );
     expect(
       ce.box(['two', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson()
-    ).toEqual(['two', 'cs', ['Function', ['Less', 1, 'n'], 'n']]);
+    ).toEqual([
+      'two',
+      'cs',
+      ['Function', ['Less', 1, 'n'], ['Typed', 'n', "'integer'"]],
+    ]);
+  });
+
+  it('an AMBIGUOUS user overload set — two arrow arms — keeps the conservative skip', () => {
+    // The stamp never guesses which arm an operand took: with two
+    // slot-declaring arms at the same arity, resolution declines and the
+    // literal stays bare.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
+    ce.declare(
+      'amb',
+      '((collection, (integer) -> boolean) -> integer) & ((collection, (string) -> boolean) -> string)'
+    );
+    expect(
+      ce.box(['amb', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson()
+    ).toEqual(['amb', 'cs', ['Function', ['Less', 1, 'n'], 'n']]);
   });
 });
 
@@ -1651,107 +1528,22 @@ describe('phase 2: route parity (box / Epsil / LaTeX)', () => {
 //
 // ── Adversarial-review round (2026-08-09) ────────────────────────────────────
 //
-// Coverage the first implementation pass left open, plus regressions for the
-// three erasure/display holes the review found.
+// Coverage the first implementation pass left open. The three erasure blocks
+// this round originally added went out with the constructor: Design E deleted
+// `callback<S>`, so there is no longer a spelling for the subtype layer, the
+// argument-validation diagnostics or the dedup key to erase
+// (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §7).
 //
 
-describe('clause 1, on the POLYTYPE path: erasure reaches α-equivalence', () => {
-  // `Poly <: Poly` is decided by comparing dedup-key STRINGS, and the dedup
-  // key PRESERVES `callback<S>` (clause 5). Without a deep erasure on that
-  // path the two arms below were unrelated in BOTH directions — clause 1
-  // holding for ground signatures but not for the `where`-quantified arms that actually
-  // carry the constructor.
-  const WITH = '(collection<T>, callback<(T) -> boolean>) -> integer where T';
-  const WITHOUT = '(collection<T>, function) -> integer where T';
-
-  it('a converted arm and its pre-conversion arm are equivalent', () => {
-    expect(isSubtype(parseType(WITH), parseType(WITHOUT))).toBe(true);
-    expect(isSubtype(parseType(WITHOUT), parseType(WITH))).toBe(true);
-    const ce = new ComputeEngine();
-    expect(ce.type(WITH).matches(WITHOUT)).toBe(true);
-    expect(ce.type(WITHOUT).matches(WITH)).toBe(true);
-  });
-
-  it('the erasure is DEEP — a nested slot too', () => {
-    expect(
-      isSubtype(
-        parseType(
-          '(collection<T>, list<callback<(T) -> boolean>>) -> integer where T'
-        ),
-        parseType('(collection<T>, list<function>) -> integer where T')
-      )
-    ).toBe(true);
-    expect(
-      isSubtype(
-        parseType('(collection<T>, list<function>) -> integer where T'),
-        parseType(
-          '(collection<T>, list<callback<(T) -> boolean>>) -> integer where T'
-        )
-      )
-    ).toBe(true);
-  });
-
-  it('NEGATIVE control: a non-callback difference is still a difference', () => {
-    expect(
-      isSubtype(
-        parseType(WITHOUT),
-        parseType('(collection<T>, function) -> number where T')
-      )
-    ).toBe(false);
-    expect(
-      isSubtype(
-        parseType(WITH),
-        parseType('(list<T>, callback<(T) -> boolean>) -> integer where T')
-      )
-    ).toBe(false);
-    // …and the dedup key itself still distinguishes them (clause 5 intact).
-    expect(
-      typeToDedupKey(parseType('callback<(integer) -> boolean>'))
-    ).not.toBe(typeToDedupKey('function'));
-  });
-});
-
-describe('clause 1: the erasure is DEEP in argument validation', () => {
-  // A builtin writes the constructor as a whole parameter slot, but a
-  // USER-declared signature may nest it — and a top-level-only erasure leaked
-  // `callback<…>` into both the diagnostic and the `_infer()` write.
-  const NESTED = '(list<callback<(integer) -> boolean>>) -> integer';
-
-  it('the diagnostic says `list<function>`', () => {
-    const ce = new ComputeEngine();
-    ce.declare('g', NESTED);
-    const e = ce.box(['g', 5]);
-    expect(e.isValid).toBe(false);
-    expect(e.toString()).toContain('list<function>');
-    expect(e.toString()).not.toContain('callback<');
-  });
-
-  it('the inference write is `list<function>`', () => {
-    const ce = new ComputeEngine();
-    ce.declare('g', NESTED);
-    ce.declare('u', 'unknown');
-    ce.box(['g', 'u']);
-    expect(ce.box('u').type.toString()).toBe('list<function>');
-  });
-
-  it('the TOP-LEVEL behavior is unchanged', () => {
-    const ce = new ComputeEngine();
-    ce.declare('h', '(callback<(integer) -> boolean>) -> integer');
-    expect(ce.box(['h', 5]).toString()).toContain('"function"');
-    ce.declare('v', 'unknown');
-    ce.box(['h', 'v']);
-    expect(ce.box('v').type.toString()).toBe('function');
-  });
-});
-
-describe('R-D5: runtime signature display is the GROUND form', () => {
-  // Ruled 2026-08-09; superseded PER CONVERTED OPERATOR by Design E §8
-  // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`): an
-  // operator whose slot is an honest arrow displays its honest polytype —
-  // the arrow now STATES the (compatibility) contract, so printing it no
-  // longer claims a narrowing that did not happen. `CountIf` converted in
-  // phase E1; `Filter` and `Map` in phase E2. The still-unconverted
-  // operators keep the R-D5 grounded display until the E3 sweep.
+describe('runtime signature display is the HONEST declared polytype', () => {
+  // R-D5 (ruled 2026-08-09) grounded every displayed signature that carried a
+  // `callback<S>`, because printing the constructor's inner arrow would have
+  // claimed a contravariant narrowing that admission did not perform. Design E
+  // §8 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`) voided
+  // that premise — the arrow now STATES the compatibility contract — and
+  // deleted the projection outright, so declaration and display are one string
+  // everywhere: `.type`, the `Signature` operator, `toJSON()`, the scope
+  // listing, and the VALUE-definition surface for a user's own signature.
   const COUNT_IF_E =
     '(collection<T>, predicate: (T) any -> boolean) -> integer where T';
   // Design E phase E2: `Filter` converted — honest polytype display (§8).
@@ -1803,17 +1595,18 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
     expect(countIfLine).toBe(`CountIf: ${COUNT_IF_E}`);
   });
 
-  it('an UNCONVERTED operator is byte-identical to before', () => {
+  it('an operator with no callback slot is untouched; the comparators converted', () => {
     const ce = new ComputeEngine();
     expect(ce.box('Add').type.toString()).toBe('(value+) -> value');
-    // …and an unconverted POLYTYPE keeps its `where` display: the trigger is
-    // the presence of a `callback<S>`, not being generic (R-D5, scoping).
-    // `Sort` gained a leading string-preserving arm with Strings Phase 1 (a
-    // reordering of a string's characters is a string), so what is pinned here
-    // is that BOTH arms still display their `where` clause and neither slot
-    // was converted to a `callback<S>`.
+    // `Sort`'s comparator slots were ruled INTO the sweep (Design E §9 item 6,
+    // `docs/plans/2026-08-18-compatibility-admission-callbacks.md`) with the
+    // union spelling chosen for dual-mode slots — a unary key extractor or a
+    // binary comparator — so both arms now print their honest slot type where
+    // they used to print the bare `function`. `Sort` gained the leading
+    // string-preserving arm with Strings Phase 1 (a reordering of a string's
+    // characters is a string); both arms still display their `where` clause.
     expect(ce.box('Sort').type.toString()).toBe(
-      '((T, order: function?) -> T where T: string) & ((indexed_collection<T>, order: function?) -> list<T> where T)'
+      '((T, order: ((character) any -> unknown) | ((character, character) any -> number)?) -> T where T: string) & ((indexed_collection<T>, order: ((T) any -> unknown) | ((any, any) any -> number)?) -> list<T> where T)'
     );
   });
 
@@ -1824,9 +1617,8 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
     expect(typeToString(declaredSignature(ce, 'CountIf'))).toBe(COUNT_IF_E);
   });
 
-  // The seam is STRINGIFICATION, not the type (review round A). `.type`
-  // returns the FAITHFUL type — semantics byte-identical to the definition —
-  // and only its printed form is projected.
+  // `.type` was always the FAITHFUL type — semantics byte-identical to the
+  // definition — and under Design E its printed form is faithful too.
   it('the boxed type is FAITHFUL: polymorphic, and it matches its declaration', () => {
     const ce = new ComputeEngine();
     const t = ce.box('CountIf').type;
@@ -1837,57 +1629,19 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
     expect(t.matches(COUNT_IF_E)).toBe(true);
 
     // …and the same for a user's own callback-bearing polytype, on the VALUE
-    // definition surface.
-    ce.declare(
-      'myCount',
-      '(collection<T>, p: callback<(T) -> boolean>) -> integer where T'
-    );
+    // definition surface: it now prints what its author wrote, where R-D5 used
+    // to project it to `(collection, p: function) -> integer` (Design E §8,
+    // `docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
+    const MY_COUNT =
+      '(collection<T>, p: (T) any -> boolean) -> integer where T';
+    ce.declare('myCount', MY_COUNT);
     const u = ce.symbol('myCount').type;
-    expect(u.toString()).toBe('(collection, p: function) -> integer');
+    expect(u.toString()).toBe(MY_COUNT);
     expect(u.isPolymorphic).toBe(true);
+    expect(u.matches(MY_COUNT)).toBe(true);
     expect(
-      u.matches(
-        '(collection<T>, p: callback<(T) -> boolean>) -> integer where T'
-      )
-    ).toBe(true);
-  });
-
-  it('a callback-bearing INTERSECTION displays its ARMS, never `nothing`', () => {
-    // `reduceType` collapses an intersection of two signatures that are not
-    // mutually subtypes to the empty type, so a projection that ended in it
-    // erased a user's whole overload set — through `.type`, hence through
-    // `.matches` too.
-    const ce = new ComputeEngine();
-    ce.declare(
-      'ov',
-      '((collection<integer>, p: callback<(integer) -> boolean>) -> integer) & ((string) -> string)'
-    );
-    const t = ce.symbol('ov').type;
-    expect(t.toString()).toBe(
-      '((collection<integer>, p: function) -> integer) & ((string) -> string)'
-    );
-    expect(t.matches('(string) -> string')).toBe(true);
-  });
-
-  it('the projection never THROWS out of the getter', () => {
-    // The erasure can leave a quantified variable occurring only result-side,
-    // which is not a declarable polytype: re-boxing that form raised
-    // `unsolvable-type-variable` from a property read. The projection now falls
-    // back to the erased-but-`where`-kept spelling.
-    const ce = new ComputeEngine();
-    ce.declare('r', '(c: callback<(T) -> boolean>) -> tuple<T, T> where T');
-    expect(ce.symbol('r').type.toString()).toBe(
-      '(c: function) -> tuple<T, T> where T'
-    );
-    // A variable the erasure leaves relating an argument to the result is kept
-    // as before (the §12.3 vacuity rule) and validates.
-    ce.declare(
-      'r2',
-      '(c: callback<(T) -> boolean>, collection<T>) -> tuple<T, T> where T'
-    );
-    expect(ce.symbol('r2').type.toString()).toBe(
-      '(c: function, collection<T>) -> tuple<T, T> where T'
-    );
+      typeToString((ce.lookupDefinition('myCount') as any).value.type.type)
+    ).toBe(MY_COUNT);
   });
 });
 
@@ -1896,7 +1650,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     const ce = new ComputeEngine();
     ce.declare(
       'zipw',
-      '(collection<T>, collection<U>, callback<(T, U) -> V>) -> list<V> where T, U, V'
+      '(collection<T>, collection<U>, (T, U) any -> V) -> list<V> where T, U, V'
     );
     const e = ce.box([
       'zipw',
@@ -1913,13 +1667,13 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
   });
 
   it('OPTIONAL parameters inside `S` round-trip and stamp', () => {
-    expect(
-      typeToString(parseType('callback<(integer, string?) -> boolean>'))
-    ).toBe('callback<(integer, string?) -> boolean>');
+    expect(typeToString(parseType('(integer, string?) any -> boolean'))).toBe(
+      '(integer, string?) any -> boolean'
+    );
     const ce = new ComputeEngine();
     ce.declare(
       'optcb',
-      '(collection<T>, callback<(T, T?) -> boolean>) -> integer where T'
+      '(collection<T>, (T, T?) any -> boolean) -> integer where T'
     );
     const e = ce.box([
       'optcb',
@@ -1938,7 +1692,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     const ce = new ComputeEngine();
     ce.declare(
       'two',
-      '(collection<T>, callback<(T) -> boolean>, callback<(T) -> boolean>) -> integer where T'
+      '(collection<T>, (T) any -> boolean, (T) any -> boolean) -> integer where T'
     );
     const e = ce.box([
       'two',
@@ -1960,10 +1714,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
 
   it('a VARIADIC `S` is admitted but declines the stamp (R-D6, retired)', () => {
     const ce = new ComputeEngine();
-    ce.declare(
-      'vz',
-      '(collection<T>, callback<(T+) -> U>) -> list<U> where T, U'
-    );
+    ce.declare('vz', '(collection<T>, (T+) any -> U) -> list<U> where T, U');
     const e = ce.box([
       'vz',
       ['List', 1, 2],
@@ -1981,7 +1732,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     const ce = new ComputeEngine();
     ce.declare(
       'part',
-      '(collection<T>, callback<(T, U) -> boolean>) -> integer where T, U'
+      '(collection<T>, (T, U) any -> boolean) -> integer where T, U'
     );
     const e = ce.box([
       'part',
@@ -2050,8 +1801,11 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
 // ── Adversarial-review round 2 (2026-08-09) ─────────────────────────────────
 //
 // Conformance the first review round found missing: the effects marker at a
-// converted slot, the GROUND `callback<S>` stamp, route parity for the
-// remaining shapes, and the display cache's re-grounding.
+// converted slot, and route parity for the remaining shapes. The two blocks
+// this round added for the `callback<S>` spelling itself — its ground stamp
+// and its display cache's re-grounding — went out with the constructor and
+// its display projection (Design E §7/§8,
+// `docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
 //
 
 describe('effects: an undeclared symbol at a converted slot reads `any`', () => {
@@ -2083,72 +1837,6 @@ describe('effects: an undeclared symbol at a converted slot reads `any`', () => 
     expect(ce.box(['FlatMap', ['List', 1, 2], 'tostr']).type.toString()).toBe(
       'list<string>'
     );
-  });
-});
-
-describe('a GROUND `callback<S>` stamps like the plain-arrow spelling', () => {
-  // §4 makes contextual typing `S`'s ONLY purpose, so a MONOMORPHIC signature
-  // that spells its slot `callback<(integer) -> boolean>` must stamp — it
-  // never reaches the contextual solve (a polytype route) and a ground `S` has
-  // no domain variables to solve. A dead `S` would violate §4.
-  const CB = '(list<integer>, callback<(integer) -> boolean>) -> integer';
-  const ARROW = '(list<integer>, (integer) -> boolean) -> integer';
-  const call = (ce: ComputeEngine, op: string) =>
-    ce.box([op, ['List', 1, 2, 3], ['Function', ['Greater', 'n', 0], 'n']]);
-
-  it('stamps identically to the plain arrow', () => {
-    const ce = new ComputeEngine();
-    ce.declare('cbCount', CB);
-    ce.declare('arrCount', ARROW);
-    const stamped = ['Function', ['Less', 0, 'n'], ['Typed', 'n', "'integer'"]];
-    expect(call(ce, 'cbCount').toMathJson()).toEqual([
-      'cbCount',
-      ['List', 1, 2, 3],
-      stamped,
-    ]);
-    expect(call(ce, 'arrCount').toMathJson()).toEqual([
-      'arrCount',
-      ['List', 1, 2, 3],
-      stamped,
-    ]);
-  });
-
-  it('…but admits BROADLY where the plain arrow narrows (clause 1)', () => {
-    // The whole reason the two spellings exist. A named callback whose own
-    // signature does not fit the slot ENTERS at `callback<S>` — and is judged
-    // at application time — where the plain arrow rejects it at the boundary.
-    const ce = new ComputeEngine();
-    ce.declare('cbCount', CB);
-    ce.declare('arrCount', ARROW);
-    ce.assign(
-      'strPred',
-      ce.box(['Function', ['StringJoin', 's', '!'], ['Typed', 's', "'string'"]])
-    );
-    const cb = ce.function('cbCount', [
-      ce.box(['List', 1, 2, 3]),
-      ce.symbol('strPred'),
-    ]);
-    expect(cb.isValid).toBe(true);
-    const arrow = ce.function('arrCount', [
-      ce.box(['List', 1, 2, 3]),
-      ce.symbol('strPred'),
-    ]);
-    expect(arrow.isValid).toBe(false);
-    expect(arrow.toString()).toContain('incompatible-type');
-  });
-
-  it('a non-function at the slot reports `function`, not `S`', () => {
-    // The R-D5/clause-1 erasure of the DIAGNOSTIC: `S` is contextual-typing
-    // information and never claims a narrowing that did not happen.
-    const ce = new ComputeEngine();
-    ce.declare('cbCount', CB);
-    ce.declare('arrCount', ARROW);
-    expect(
-      ce.function('cbCount', [ce.box(['List', 1]), ce.box(42)]).toString()
-    ).toContain('"function", "finite_integer"');
-    expect(
-      ce.function('arrCount', [ce.box(['List', 1]), ce.box(42)]).toString()
-    ).toContain('"(integer) -> boolean", "finite_integer"');
   });
 });
 
@@ -2191,52 +1879,11 @@ describe('the stamp declines on an ARITY mismatch', () => {
   });
 });
 
-describe('R-D5: the ground display reaches the VALUE-definition surface', () => {
-  // The same signature displayed the raw `where`/`callback<>` as a value
-  // definition and the ground form as an operator definition. The projection
-  // is trigger-scoped (presence of a `callback<S>`), so nothing else moves.
-  const SIG =
-    '(collection<T>, p: callback<(T) -> boolean>) -> integer where T';
-
-  it('a function-typed value declared with a `callback<S>` displays ground', () => {
-    const ce = new ComputeEngine();
-    ce.declare('myCount', SIG);
-    expect(ce.symbol('myCount').type.toString()).toBe(
-      '(collection, p: function) -> integer'
-    );
-    // Clause 5: the DEFINITION keeps the constructor for round-tripping.
-    expect(
-      typeToString((ce.lookupDefinition('myCount') as any).value.type.type)
-    ).toBe(SIG);
-  });
-
+describe('a user polytype displays its declared contract', () => {
   it('a user polytype with no callback keeps its declared contract', () => {
     const ce = new ComputeEngine();
     ce.declare('idf', '(x: T) -> T where T');
     expect(ce.symbol('idf').type.toString()).toBe('(x: T) -> T where T');
-  });
-});
-
-describe('R-D5: the display cache re-grounds a REPLACED signature', () => {
-  it('an operator whose signature is updated displays the new ground form', () => {
-    // The cache is keyed on the signature `BoxedType` OBJECT, so a definition
-    // whose signature is replaced is re-grounded on the next read rather than
-    // serving a stale projection.
-    const ce = new ComputeEngine();
-    // Design E: `CountIf`'s own display is the honest polytype (§8); the
-    // REPLACED signature below still carries a `callback<S>`, so what this
-    // pins — the cache re-grounding on replacement, not serving stale — is
-    // exercised across the two display regimes at once.
-    expect(ce.symbol('CountIf').type.toString()).toBe(
-      '(collection<T>, predicate: (T) any -> boolean) -> integer where T'
-    );
-    (ce.lookupDefinition('CountIf') as any).operator._update({
-      signature:
-        '(collection<U>, p: callback<(U) -> boolean>) -> number where U',
-    });
-    expect(ce.symbol('CountIf').type.toString()).toBe(
-      '(collection, p: function) -> number'
-    );
   });
 });
 
@@ -2261,9 +1908,7 @@ describe('phase 2/3: route parity for the remaining shapes', () => {
       10,
     ]);
     expect(
-      parityJson((ce) =>
-        ce.box(parseEpsil('Fold((a, x) => a + x, 10, cs)')[0])
-      )
+      parityJson((ce) => ce.box(parseEpsil('Fold((a, x) => a + x, 10, cs)')[0]))
     ).toBe(viaBox);
     expect(
       parityJson((ce) =>

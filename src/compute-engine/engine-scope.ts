@@ -1,5 +1,5 @@
 import { BLUE, BOLD, CYAN, GREY, RESET } from '../common/ansi-codes.js';
-import { typeToDisplayString } from '../common/type/display.js';
+import { typeToString } from '../common/type/serialize.js';
 
 import type { BoxedDefinition, IComputeEngine, Scope } from './global-types.js';
 
@@ -264,10 +264,10 @@ function defToString(name: string, def: BoxedDefinition): string {
 
     result = `${CYAN}${name}${RESET}:${allTags}`;
 
-    // R-D5: GROUND display — see `typeToDisplayString`. A function-typed VALUE
-    // definition can carry the same `callback<S>` signature an operator
+    // A function-typed VALUE
+    // definition can carry the same signature an operator
     // definition does, and must print it the same way.
-    const displayed = typeToDisplayString(def.value.type.type);
+    const displayed = typeToString(def.value.type.type);
     if (def.value.isConstant) {
       result += ` const ${displayed}`;
       if (def.value.value !== undefined)
@@ -279,8 +279,7 @@ function defToString(name: string, def: BoxedDefinition): string {
 
     const allTags = tags.length > 0 ? ` (${tags.join(' ')})` : '';
 
-    // R-D5: GROUND display — see `typeToDisplayString`.
-    result = `${CYAN}${name}${RESET}:${allTags} ${typeToDisplayString(
+    result = `${CYAN}${name}${RESET}:${allTags} ${typeToString(
       def.operator.signature.type
     )}`;
 

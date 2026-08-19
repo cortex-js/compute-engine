@@ -17,7 +17,6 @@ import {
   DictionaryTypeNode,
   SetTypeNode,
   BroadcastableTypeNode,
-  CallbackTypeNode,
   CollectionTypeNode,
   ExpressionTypeNode,
   SymbolTypeNode,
@@ -319,18 +318,6 @@ export class TypeBuilder implements ASTVisitor<Type> {
     // form so the constructor is always object-only.
     const elements = this.buildType(node.elementType);
     return { kind: 'broadcastable', elements };
-  }
-
-  visitCallbackType(node: CallbackTypeNode): Type {
-    const signature = this.buildType(node.signatureType);
-    // The wrapper is meaningless around anything but an arrow: `S` exists to
-    // be read parameter-wise (the contextual stamp) and result-wise (the
-    // inference contribution).
-    if (typeof signature === 'string' || signature.kind !== 'signature')
-      throw new Error(
-        '`callback<…>` expects a function signature, e.g. `callback<(T) -> boolean>`'
-      );
-    return { kind: 'callback', signature };
   }
 
   visitCollectionType(node: CollectionTypeNode): Type {

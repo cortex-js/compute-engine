@@ -1757,11 +1757,11 @@ describe('EPSIL TYPE RE-DECLARATION (value dependents and bounds)', () => {
     expect((recordOf(ce, 'Bar').def as any).elements).toHaveLength(2);
   });
 
-  // The dependency walk (`mentionsOf`) descends every type constructor. The
-  // contextual-callback wrapper (Design D §4) is one of them: a reference
-  // occurring ONLY inside `callback<S>` was invisible to the walk, so an
+  // The dependency walk (`mentionsOf`) descends every type constructor —
+  // including a nested arrow-typed parameter slot: a reference occurring
+  // ONLY inside such an arrow was once invisible to the walk, so an
   // incompatible re-declaration behind one landed silently.
-  test('a mention hidden inside `callback<S>` is still a dependent', () => {
+  test('a mention hidden inside a nested arrow slot is still a dependent', () => {
     const control = (slot: string) => {
       const ce = new ComputeEngine();
       expect(
@@ -1773,8 +1773,8 @@ describe('EPSIL TYPE RE-DECLARATION (value dependents and bounds)', () => {
     };
 
     for (const slot of [
-      'Wrap<integer>', // the uncallback'd control
-      'callback<(Wrap<integer>) -> boolean>', // the hidden mention
+      'Wrap<integer>', // the direct-mention control
+      '((Wrap<integer>) any -> boolean)', // the mention inside the arrow slot
     ]) {
       const v = control(slot);
       expect(v.operator).toBe('Error');

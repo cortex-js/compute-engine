@@ -4,8 +4,7 @@ import {
   isWildcardFunctionType,
   signatureArms,
 } from '../../common/type/utils.js';
-import { contextualSlotCallback } from '../boxed-expression/generic-instantiation.js';
-import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
+import { isFunction, isSymbol } from './type-guards.js';
 import type { Expression } from '../global-types.js';
 
 /**
@@ -60,8 +59,8 @@ type CallbackArity = { required: number; max: number };
  *   optional parameters, since those are filled first.
  *
  * Everything else declines: the bare `function` wildcard (which promises
- * nothing about arity), a `callback<S>` slot (whose whole purpose is to admit
- * broadly), a generic signature (its arity is a pattern until instantiated),
+ * nothing about arity), a generic signature (its arity is a pattern until
+ * instantiated),
  * an overload/union of signatures (nothing says which arm the operand took),
  * an undeclared forward reference, and any non-literal non-symbol operand
  * (`InverseFunction(f)`, a protocol member) whose arity is only known once it
@@ -91,7 +90,6 @@ export function callbackArity(fn: Expression): CallbackArity | undefined {
 function signatureArity(type: Type | undefined): CallbackArity | undefined {
   if (type === undefined) return undefined;
   if (isWildcardFunctionType(type)) return undefined;
-  if (contextualSlotCallback(type) !== undefined) return undefined;
   const arms = signatureArms(type);
   if (arms === undefined || arms.length !== 1) return undefined;
   const sig: FunctionSignature = arms[0];

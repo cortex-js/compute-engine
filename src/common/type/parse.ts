@@ -358,8 +358,6 @@ function containsObjectLayout(t: Type): boolean {
       return containsObjectLayout(t.values);
     case 'tuple':
       return t.elements.some((e) => containsObjectLayout(e.type));
-    case 'callback':
-      return containsObjectLayout(t.signature);
     case 'signature':
       return (
         containsObjectLayout(t.result) ||

@@ -4480,13 +4480,13 @@ describe('Partition and Fill with an unresolved argument', () => {
     }
   });
 
-  test('Partition still rejects a predicate that resolves to a non-boolean', () => {
-    // The throw carries a spell-check hint and is reserved for this case —
-    // a predicate that DID resolve, to the wrong kind of value.
+  test('Partition rejects a provably non-boolean predicate at canonicalization', () => {
+    // Design E §9 Q3 (E3 sweep): the rejection moved from the runtime throw
+    // to a canonicalization-time `incompatible-type` on the predicate arm.
     const ce = fresh();
-    expect(() =>
-      ce.box(['Partition', 'Sy', ['Function', ['Add', 'x', 1], 'x']]).evaluate()
-    ).toThrow(/must return "True" or "False"/);
+    const e = ce.box(['Partition', 'Sy', ['Function', ['Add', 'x', 1], 'x']]);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain('incompatible-type');
   });
 
   test('Partition forms with resolved arguments are unchanged', () => {
@@ -4618,9 +4618,11 @@ describe('Indeterminate collection facets stay coherent (review round)', () => {
         .evaluate()
         .toString()
     ).toBe('[[3],[1,2]]');
-    expect(() =>
-      ce.box(['Partition', 'Sz', ['Function', ['Add', 'x', 1], 'x']]).evaluate()
-    ).toThrow(/must return "True" or "False"/);
+    // A provably non-boolean predicate rejects at canonicalization
+    // (Design E §9 Q3, E3 sweep) — see the sibling pin above.
+    expect(
+      ce.box(['Partition', 'Sz', ['Function', ['Add', 'x', 1], 'x']]).isValid
+    ).toBe(false);
   });
 });
 

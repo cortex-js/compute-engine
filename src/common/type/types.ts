@@ -271,41 +271,6 @@ export type FunctionSignature = {
   result: Type;
 };
 
-/**
- * A **contextual callback** parameter type, spelled `callback<(T) -> boolean>`.
- *
- * It is the primitive `function` for every admission and subtyping decision,
- * and carries — for CONTEXTUAL TYPING only — the signature `S` an INLINE
- * `Function` literal at that slot is stamped with
- * (`docs/plans/2026-08-09-design-d-generic-callback-signatures.md` §4). Its
- * five-clause contract:
- *
- * 1. **Ordinary admission and subtyping see only `function`.** Every subtype
- *    query, `.matches` and argument-validation decision treats `callback<S>`
- *    as the primitive `function`; `S` plays NO role in admission, so a named
- *    callback narrower (or broader) than `S` enters exactly as it does today
- *    and errors — or not — per element at application time.
- * 2. **The contextual domain solve traverses only `S`'s PARAMETER types.**
- * 3. **Inference from the operand traverses only `S`'s RESULT type** — a named
- *    callback's own parameter types must never constrain a type variable.
- * 4. **Free-variable discovery and substitution retain variables inside `S`**:
- *    `callback<(T) -> U>` contributes `T` and `U` to its signature's `where`
- *    accounting, and instantiation substitutes inside `S` normally.
- * 5. **Internal serialization preserves it** (`typeToString`/`parseType`
- *    round-trip, dedup keys), even where user-facing display erases it.
- *
- * Intended for a signature PARAMETER, where it replaces the bare `function`
- * primitive a builtin callback slot declares — that is the only position in
- * which `S` can do anything, contextual typing being its whole purpose. The
- * position is NOT enforced: written anywhere else (a result type, a value's
- * declared type, a collection's element type) the constructor simply behaves
- * as `function`, by clause 1, and stamps nothing.
- */
-export type CallbackType = {
-  kind: 'callback';
-  signature: FunctionSignature;
-};
-
 export type AlgebraicType = {
   kind: 'union' | 'intersection';
   types: Type[];
@@ -580,7 +545,6 @@ export type Type =
   | NumericType
   | NumericPrimitiveType
   | FunctionSignature
-  | CallbackType
   | ValueType
   | TypeVariable
   | TypeReference;
@@ -603,7 +567,6 @@ export type Type =
  * <primary_type> ::=  <primitive>
  *                | <tuple_type>
  *                | <signature>
- *                | <callback>
  *                | <list_type>
  *                | <set>
  *                | <broadcastable>
@@ -681,15 +644,10 @@ export type Type =
  *
  * <multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
  *
- * <callback> ::= "callback<" <signature> ">"
- *
- * (A contextual callback slot. Semantically the primitive `function`; the
- * signature it wraps types an inline literal at that position. See
- * {@link CallbackType}. Like every other constructor keyword — `list`, `set`,
- * `tuple`, `collection`, … — `callback` is RESERVED in APPLIED position: a
- * user-declared generic type of that name can be declared but never referenced,
- * since `callback<…>` always parses as this production. The BARE spelling is
- * unaffected, so `type alias callback = integer` remains usable.)
+ * (The `callback<…>` constructor of Design D was RETIRED by Design E
+ * (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §7): callback
+ * slots are ordinary arrow types, admitted by COMPATIBILITY rather than
+ * subtyping. The spelling now fails to parse, with a migration hint.)
  *
  * <set> ::= "set<" <type> ">"
  *

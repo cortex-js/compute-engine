@@ -33,7 +33,7 @@ import {
   type WindowedParams,
 } from '../collection-utils.js';
 import type { CollectionHandlers } from '../types-definitions.js';
-import { callbackArityError, type CallbackSupply } from './callback-arity.js';
+import { callbackArityError, type CallbackSupply } from '../boxed-expression/callback-arity.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
@@ -75,11 +75,11 @@ import {
   arityProvablyIncapable,
   callbackIncompatibility,
 } from '../../common/type/compatibility.js';
-import { freeTypeVariables } from '../../common/type/instantiate.js';
 import {
-  contextualSlotCallback,
-  contextualSlotSignature,
-} from '../boxed-expression/generic-instantiation.js';
+  freeTypeVariables,
+  substituteTypeVariables,
+} from '../../common/type/instantiate.js';
+import { contextualSlotSignature } from '../boxed-expression/generic-instantiation.js';
 import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import {
@@ -133,15 +133,15 @@ import {
 export const DEFAULT_LINSPACE_COUNT = 50;
 
 /**
- * Tri-state read of an integer PARAMETER of a collection handler, for the
- * operators whose fallback would be a DIFFERENT collection rather than
+ * Tri-state read of an integer parameter for collection handlers whose
+ * fallback would be a different collection rather than
  * "unknown":
  *
  * - a `number` — the parameter resolved (see {@link toIntegerOperand}: the
  *   operand may not have been evaluated yet).
- * - `undefined` — the parameter is ABSENT (omitted, so the slot holds
+ * - `undefined` — the parameter is absent (omitted, so the slot holds
  *   `Nothing`); apply the operator's own default.
- * - `null` — the parameter is PRESENT but does not resolve to an integer (a
+ * - `null` — the parameter is present but does not resolve to an integer (a
  *   free symbol, a `NaN`). The handler must bail to its indeterminate channel
  *   (`count`/`at` → `undefined`, an empty iterator) instead of substituting a
  *   default, or the expression silently answers a collection it does not
@@ -169,14 +169,13 @@ function integerParam(op: Expression | undefined): number | undefined | null {
  * Returns `undefined` — decline — if any element is not text, so a handler
  * never fabricates a string out of elements it did not understand.
  *
- * RE-SEGMENTATION CAVEAT: concatenation can MERGE adjacent grapheme clusters
+ * Concatenation can merge adjacent grapheme clusters
  * or split one apart, so the result may hold a different number of characters
  * than were handed in. Reversing `"xé"` written as `x` + `e` + COMBINING ACUTE
  * ACCENT, for instance, puts the combining mark first, where it attaches to
  * nothing and stands as a character of its own. A character-selecting
- * operation is closed over strings but NOT over character COUNTS; that is
- * inherent to Unicode grapheme segmentation, not a defect
- * (`docs/STRING_ROADMAP.md`, design constraint 3).
+ * operation is closed over strings but not over character counts. This follows
+ * from Unicode grapheme segmentation.
  */
 export function joinCharacters(
   ce: ComputeEngine,
@@ -194,9 +193,9 @@ export function joinCharacters(
  * The source operand as an actual string node when it is text, otherwise the
  * operand unchanged — the form {@link innerRun} needs.
  *
- * EAGER handlers never need this: `evaluate` receives operands already
- * evaluated, so a string source arrives as a `BoxedString`. The LAZY handlers
- * (`collection.at`, `collection.iterator`) receive the RAW operand instead, and
+ * Eager handlers receive evaluated operands, so a string source arrives as a
+ * `BoxedString`. Lazy handlers (`collection.at`, `collection.iterator`) receive
+ * the raw operand instead, and
  * a symbol holding a string (`s := "abcd"`) or a string-valued application
  * (`Join("ab","cd")`) is not a `BoxedString` node — so a bare `isString` test
  * fails there and the same operator emits inner LISTS on the lazy route while
@@ -207,7 +206,7 @@ export function joinCharacters(
  * `isTextAtom` decides text-ness from the static type and the symbol's value
  * binding, so the `evaluate()` hop only runs for a source that is text but not
  * yet a literal; a general collection is returned untouched and never
- * evaluated. Resolve ONCE per lazy view and reuse the result — do not call this
+ * evaluated. Resolve once per lazy view and reuse the result; do not call this
  * per emitted element.
  */
 export function resolveTextSource(source: Expression): Expression {
@@ -217,22 +216,21 @@ export function resolveTextSource(source: Expression): Expression {
 }
 
 /**
- * Wrap ONE inner run of source elements — a chunk, a window, a group, a
+ * Wrap one inner run of source elements — a chunk, a window, a group, a
  * permutation, a combination — as a single element of the result.
  *
- * For a general collection that element is a `List`. For a STRING source it is
- * a STRING: a run of a string's characters is itself a string, so
+ * For a general collection that element is a `List`. For a string source it is
+ * a string: a run of a string's characters is itself a string, so
  * `Partition("abcdef", 2)` is `["ab","cd","ef"]` rather than `[["a","b"],…]`
- * (ruling D9(b), 2026-08-16; `docs/plans/2026-08-16-string-phase2-join-search-ops.md`).
  * Every operator that uses this declares a matching leading string arm in its
  * signature, so the declared result type and the emitted elements agree.
  *
- * RE-SEGMENTATION CAVEAT: joining whole grapheme clusters back into a string
+ * Joining whole grapheme clusters back into a string
  * re-runs segmentation, and two adjacent clusters can merge into one — but
  * only when the SOURCE itself contained a LONE COMBINING MARK, since that is
  * the only way a cluster can begin with a character that attaches to whatever
  * precedes it. For a well-formed source the character count of each inner run
- * is preserved (`docs/STRING_ROADMAP.md`, design constraint 3).
+ * is preserved.
  *
  * Falls back to a `List` if the run holds anything that is not text, so a
  * handler never fabricates a string out of elements it did not understand;
@@ -252,10 +250,9 @@ export function innerRun(
 
 /**
  * {@link windowedCollectionOps} with the string rule applied to the emitted
- * windows: over a STRING source each window comes back as a string rather than
+ * windows: over a string source each window comes back as a string rather than
  * as a `List` of characters, matching the leading string arm the windowing
- * operators (`Partition`, `SlidingWindow`) declare (ruling D9(b), 2026-08-16;
- * see `innerRun`).
+ * operators (`Partition`, `SlidingWindow`) declare; see `innerRun`.
  *
  * Only `at` and `iterator` differ — every geometric facet (`count`,
  * `isFinite`, `isEmpty`, `isEnumerable`) counts windows, not characters, and is
@@ -312,17 +309,16 @@ export function stringAwareWindowedCollectionOps(
 /**
  * The subject's and the needle's element sequences, for the sequence-search
  * family (`RangeOf`, `ContainsSequence`, `StartsWith`, `EndsWith`), or
- * `undefined` when the call must stay SYMBOLIC.
+ * `undefined` when the call must stay symbolic.
  *
- * Both operands must be FINITE collections. Searching an infinite subject for
+ * Both operands must be finite collections. Searching an infinite subject for
  * an absent needle would not terminate, and the anchored tests additionally
- * need the subject's length; a collection whose finiteness is merely UNKNOWN
+ * need the subject's length; a collection whose finiteness is unknown
  * (a valueless symbol, a lazy view over a symbolic bound) is not searched
- * either — the house pattern is to leave the expression unevaluated rather
- * than guess, as `Sort` and `StringJoin` already do
- * (`docs/STRING_ROADMAP.md`, "Sequence-search operations").
+ * either. Leave the expression unevaluated rather than guessing, as `Sort` and
+ * `StringJoin` already do.
  *
- * A string contributes its GRAPHEME CLUSTERS, since that is what its `each()`
+ * A string contributes its grapheme clusters, since that is what its `each()`
  * yields. Comparing whole characters is what makes the grapheme-boundary
  * guarantee structural rather than an extra rule: no comparison can ever
  * straddle a cluster boundary.
@@ -418,17 +414,6 @@ function canEnumerateCollectionOperands(expr: Expression): boolean | undefined {
 const AT_SIGNATURE = parseType(
   '(value: indexed_collection<any> | dictionary<any>, index: (number|string|boolean|indexed_collection<any>)+) -> unknown'
 );
-
-// NOTE (2026-07-17): the `restsOnUnknown` predicate and its
-// `AT_NARROWING_OPERATORS` set — the short-term half of Tycho item 19.3 —
-// were RETIRED after the `broadcastable<T>` lift landed. Arithmetic over a
-// top-typed APPLICATION (`2·h(x,y)-1`) now types `broadcastable<number>` and
-// is admitted by the At gate's direct kind arm; no constructible base still
-// types scalar `number` while resting on an `unknown` leaf (unknown SYMBOLS
-// are inferred numeric by the arithmetic itself, and non-broadcastable
-// numeric operators like `GCD` genuinely reduce — scalar is honest there).
-// The `!isDeclaredScalarNumber` arm below still covers inferred-number
-// symbols and inferred-signature calls (inference is retractable).
 
 // True when `expr`'s type is a *union* with at least one member compatible with
 // an indexable base — a broadcast-aware inference such as `finite_integer |
@@ -609,7 +594,7 @@ function isPredicateShorthand(op: Expression): boolean {
  *
  * A predicate applied to an element can fail on the ELEMENT rather than on the
  * predicate itself: the callback parameter's `Typed` annotation (installed by
- * the contextual `callback<S>` slot) rejects an element whose type was
+ * the contextual stamp) rejects an element whose type was
  * retracted, and
  * `applicable()` returns `["Apply", fn, ["Error", …]]` instead of `True`/
  * `False`. That is not a malformed predicate, so reporting
@@ -747,10 +732,10 @@ const FILL_SUPPLY: CallbackSupply = {
  * have (`validateArguments` skips their operands, and `Map` never runs it at
  * all).
  *
- * Applies ONLY when the operator's DECLARED slot is a plain (converted)
- * arrow: an unconverted `callback<S>` slot — and any operator with a bare
- * `function` slot — declines, byte-identical to pre-E behavior until its own
- * conversion lands. The supply arrow is built from the ACTUAL sources (one
+ * Applies ONLY when the operator's DECLARED slot is an arrow: an operator
+ * with a bare `function` slot (`Iterate`'s parametric contract, `Tabulate`'s
+ * dimension-dependent arity, `Count`'s dual value-or-predicate slot)
+ * declines, keeping its historical admission. The supply arrow is built from the ACTUAL sources (one
  * parameter per source, element-typed — `Map`'s zip form checks positionally
  * against each source), with the declared slot's result; rules 1/3/4 run
  * through `callbackIncompatibility`, rule 5 through the effect-subset check,
@@ -778,15 +763,13 @@ function callbackCompatibilityError(
   if (sig.kind !== 'signature') return undefined;
 
   // The declared CONTEXTUAL arrow slot — first one wins (every operator on
-  // this route declares exactly one). A legacy `callback<S>` slot declines
-  // the gate outright.
+  // this route declares exactly one).
   let declared: FunctionSignature | undefined = undefined;
   for (const el of [
     ...(sig.args ?? []),
     ...(sig.optArgs ?? []),
     ...(sig.variadicArg ? [sig.variadicArg] : []),
   ]) {
-    if (contextualSlotCallback(el.type) !== undefined) return undefined;
     const arrow = contextualSlotSignature(el.type);
     if (arrow !== undefined) {
       declared = arrow;
@@ -813,20 +796,55 @@ function callbackCompatibilityError(
 
   const sources = arity.sources ?? (arity.source ? [arity.source] : []);
   if (sources.length === 0) return undefined;
-  // Rule 2 owns an arity-incapable operand (its richer diagnostic already
-  // ran, or deliberately declined on an unreadable shape).
-  if (arityProvablyIncapable(opType, sources.length)) return undefined;
 
-  // The §3 supply arrow: one parameter per actual source, element-typed
-  // (`any` where unsolvable), with the DECLARED result (a free result
+  // The §3 supply arrow, in one of two modes:
+  //
+  // - ZIP mode (several sources — `Map`'s variadic form): one parameter per
+  //   actual source, element-typed, so a position-swapped callback is caught
+  //   where the declared unary arrow (its variable being the sources' JOIN)
+  //   never could.
+  // - DECLARED mode (single source): the declared arrow with its domain
+  //   variables substituted by the source's element type. This keeps
+  //   non-element parameters at their declared types — a REDUCER's slot is
+  //   `(unknown, T)`, and building the supply from source positions alone
+  //   would have judged the ACCUMULATOR parameter against the element type
+  //   (`Reduce(ints, (a: string, x) => …, '')` must not reject `a`).
+  //
+  // Either way the DECLARED result rides along (a still-free result
   // variable is skipped by the relation).
-  const supplyArrow: FunctionSignature = {
-    kind: 'signature',
-    args: sources.map((src) => ({
-      type: collectionElementType(src.type.type) ?? ('any' as Type),
-    })),
-    result: declared.result,
-  };
+  const elementOf = (src: Expression): Type =>
+    collectionElementType(src.type.type) ?? ('any' as Type);
+  let supplyArrow: FunctionSignature;
+  if (sources.length > 1) {
+    supplyArrow = {
+      kind: 'signature',
+      args: sources.map((src) => ({ type: elementOf(src) })),
+      result: declared.result,
+    };
+  } else {
+    const domainVars = new Set<string>();
+    for (const el of declared.args ?? [])
+      for (const v of freeTypeVariables(el.type)) domainVars.add(v);
+    const elt = elementOf(sources[0]);
+    const bindings: Record<string, Type> = Object.create(null);
+    for (const v of domainVars) bindings[v] = elt;
+    supplyArrow = {
+      kind: 'signature',
+      args: (declared.args ?? []).map((el) => ({
+        type:
+          freeTypeVariables(el.type).size > 0
+            ? substituteTypeVariables(el.type, bindings)
+            : el.type,
+      })),
+      result: declared.result,
+    };
+  }
+  // Rule 2 owns an arity-incapable operand (its richer diagnostic already
+  // ran, or deliberately declined on an unreadable shape). The supplied
+  // count is the supply arrow's parameter count — per-source in zip mode,
+  // the declared arity otherwise.
+  if (arityProvablyIncapable(opType, supplyArrow.args?.length ?? 0))
+    return undefined;
 
   // The error's EXPECTED side displays the instantiated supply with the
   // declared effect slot, matching the eager gate's `incompatible-type`
@@ -1040,10 +1058,14 @@ function canonicalFunctionSlot(
     : undefined;
 
   const final = adjusted ?? args;
-  // The source feeds the tuple-pattern hint only. Every operator on this route
-  // is binary in the shape that matters — one collection and one callback — so
-  // the source is simply the OTHER of the two operands, which spares each call
-  // site from restating a position it already fixed by passing `index`.
+  // The arity check runs on the VALIDATED operand, whose source provenance
+  // the Epsil static tier maps to a precise range. Ordering with the
+  // compatibility gate needs no care here: `validateArguments` is called
+  // with no `operatorName`, so its gate never minting an arity diagnostic
+  // on this route is by construction — an arity-incapable operand is
+  // admitted through and lands here, where the hand-authored per-operator
+  // wording ("each element of the collection", the tuple-pattern hint)
+  // reports it. The source feeds the tuple-pattern hint only.
   const arityError =
     supply === undefined || final[index] === undefined
       ? undefined
@@ -1069,7 +1091,8 @@ function canonicalFunctionSlot(
  * Contract clause 3 in one function: only the operand's RESULT position is
  * read. Its parameter types are never consulted, so a callback narrower than
  * the source's elements still enters and is still judged per element at
- * application time — the whole reason `callback<S>` exists.
+ * application time — the compatibility-admission semantics (Design E §3,
+ * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
  *
  * BOTH an inline literal and a NAMED callback contribute (that is R-D2′). A
  * named one needs a second look: a `lazy` operator holds its callback operand
@@ -1835,15 +1858,13 @@ function staticPointArity(t: Type): number | undefined {
     const inner = t.dimensions![t.dimensions!.length - 1];
     return inner > 0 ? inner : undefined;
   }
-  // NOTE: a rank-1 numeric list is deliberately NOT a point here. `PointX`,
+  // A rank-1 numeric list is deliberately not a point here. `PointX`,
   // `PointY` and `PointZ` element-INDEX such a list (`isPointLike` is false for
   // its scalar elements, so `pointComponentAt` falls to `componentAt`), which
   // is why `PointX([3, 4])` is `3` — element one, not an x-coordinate that
   // happens to agree. `PointZ([7, 8])` is therefore an out-of-range element
   // access carrying the position-preserving marker, exactly like
-  // `Third([7, 8])`, and not the item-138 dimension error. Pinned in
-  // `tycho-items-130-138.test.ts` ("a 2-element numeric list is NOT a point
-  // here").
+  // `Third([7, 8])`, not a point-dimension error.
   const elt = collectionElementType(t);
   if (elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple')
     return elt.elements?.length;
@@ -1882,16 +1903,14 @@ function runtimePointArity(xs: Expression): number | undefined {
   return undefined;
 }
 
-// Item 138 clarified ask (2026-08-02): a statically-absent component is a
-// TYPE-level fact → a typed error. `PointZ` of a provably 2-D point (or of a
+// A statically absent component is a type-level fact and produces a typed
+// error. `PointZ` of a provably 2-D point (or of a
 // list/set of provably 2-D points) is `incompatible-dimensions`, not the
-// position-preserving absence marker. This REVERSES the 2026-07-22
-// NaN-over-Nothing ruling for this case — that ruling weighed marker vs
-// `Nothing` and never weighed a typed error. Scope: `PointZ` only; `PointX`/
-// `PointY` and 3-D points are untouched.
+// position-preserving absence marker. This applies only to `PointZ`; `PointX`,
+// `PointY`, and 3-D points are unaffected.
 //
 // Like the item-129 `At` multi-index gate, the check proves the mismatch
-// POSITIVELY: an `unknown`, unbound, bare-`tuple`, `list<tuple>` or union
+// positively: an `unknown`, unbound, bare-`tuple`, `list<tuple>` or union
 // operand proves nothing and stays inert (falling through to the
 // evaluate-time check, then to the marker on the compiled route).
 function pointArityError(
@@ -3620,12 +3639,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) => e === v)`.',
     complexity: 8200,
     lazy: true,
-    // Design D phase 1: the element-of link lives in the SIGNATURE (see
-    // `CountIf`). The predicate slot stays OPTIONAL — `Any(xs)` tests the
+    // The signature links the predicate parameter to the collection element
+    // type; see `CountIf`. The predicate stays optional — `Any(xs)` tests the
     // elements themselves — and the contextual stamp simply never runs when the
     // operand is absent.
     signature:
-      '(collection<T>, predicate: callback<(T) -> boolean>?) -> boolean where T',
+      '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
@@ -3651,10 +3670,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given).',
     complexity: 8200,
     lazy: true,
-    // Design D phase 1: the element-of link lives in the SIGNATURE, with the
-    // OPTIONAL predicate slot of `Any`.
+    // The signature links the predicate parameter to the collection element
+    // type, with the same optional predicate as `Any`.
     signature:
-      '(collection<T>, predicate: callback<(T) -> boolean>?) -> boolean where T',
+      '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
@@ -3684,25 +3703,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    // The mapping function comes FIRST, the source collections after it
-    // (ruled 2026-08-14, resolving the Map-spelling challenge left open by
-    // Design D phase 3): the operator is variadic over its sources, and the
-    // type language consumes required→optional→variadic, so a callback-LAST
-    // spelling (`(collection+, mapping)`) is not positionally expressible —
-    // the historical order forced a loose signature whose parameter positions
-    // lied about the operands. Callback-first is the one honest spelling:
-    // `(mapping, collection+)` is exactly what the handlers consume.
+    // The mapping function comes first, followed by a variadic list of source
+    // collections. The type language consumes required→optional→variadic, so a
+    // callback-last spelling (`(collection+, mapping)`) is not positionally
+    // expressible. `(mapping, collection+)` matches what the handlers consume.
     //
-    // Contextual stamping (Design D) is position-driven and survives the
-    // flip, exactly as it does for the callback-first `Fold`:
+    // Contextual callback typing is position-driven, as it is for `Fold`:
     //
-    //  - the UNARY form `Map(f, xs)` solves `T` from the source at operand 1
+    //  - the unary form `Map(f, xs)` solves `T` from the source at operand 1
     //    and stamps `f`'s parameter with it;
-    //  - the VARIADIC (`zipWith`) form's sources ALL mention `T`, whose
+    //  - the variadic (`zipWith`) form's sources all mention `T`, whose
     //    solution is their join — and the declared slot `(T) -> U` is unary,
-    //    so an n-ary zip mapping is admitted UNSTAMPED under the R-D6
-    //    arity-mismatch rule, preserving the historical no-stamp behavior of
-    //    the multi-collection form.
+    //    so an n-ary zip mapping remains unstamped when its arity differs.
     signature:
       '(mapping: (T) any -> U, collection<T>+) -> indexed_collection where T, U',
     // The mapped collection keeps the source's shape/indexed-ness, but its
@@ -3743,12 +3755,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // supertype — the same reasoning as `mapResultType`'s `range` case,
           // which this fallback path bypasses.
           if (s === 'range') return 'indexed_collection';
-          // A STRING source must not be echoed either, and for a stronger
+          // A string source must not be echoed either, and for a stronger
           // reason: `Map` is permanently list-out over a string (a mapped
-          // string is a `list`, even when the callback returns characters —
-          // `docs/STRING_ROADMAP.md`, "String preservation rule"), so echoing
-          // `string` would promise a value the runtime never produces. The
-          // element type is the unknown one this branch is handling.
+          // string is a `list`, even when the callback returns characters — so
+          // echoing `string` would promise a value the runtime never produces.
+          // The element type is the unknown one this branch is handling.
           if (s === 'string') return 'list';
           if (s === 'indexed_collection' && ops[1].type.type !== s) return s;
           return ops[1].type;
@@ -3764,13 +3775,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
     },
     canonical: (ops, { engine }) => {
-      // The mapping function is the FIRST argument; every following argument
-      // is a source collection. It is applied to one element from EACH source
+      // The mapping function is the first argument; every following argument
+      // is a source collection. It is applied to one element from each source
       // (`Map(f, xs, ys)` is zipWith), so that is the arity it must accept.
-      // With NO source there is nothing to map and the call declines below;
+      // With no source there is nothing to map and the call declines below;
       // the arity check would otherwise report a nonsensical "0 arguments".
       const sourceCount = ops.length - 1;
-      // The sources are checked BEFORE the callback so the arity check can be
+      // Check the sources before the callback so the arity check can be
       // handed a bound one. `Map` is `lazy`, so `ops` arrive unbound and a raw
       // source answers `unknown` for its type — which would silently cost the
       // tuple-pattern hint. `checkCollectionOperand` canonicalizes, so
@@ -3797,8 +3808,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               // element, so its supply is not `destructurable` and the source
               // goes unread.
               source: collections[0],
-              // Design E §3: the supply ARROW takes one parameter per
-              // source, each element-typed — the zip disjointness check is
+              // The supply signature takes one element-typed parameter per
+              // source, so the zip disjointness check is
               // positional against each source (a position-swapped callback
               // is provably unusable even where the join of the sources is
               // not).
@@ -3810,15 +3821,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         collections.length === 0 ||
         collections.some((c) => !c.isValid)
       ) {
-        // Migration aid for the 2026-08-14 argument-order flip (the mapping
-        // function moved from last to FIRST): a call written in the legacy
-        // order — a provable collection first, a function-shaped operand
-        // last — would otherwise just decline here and sit as an inert
+        // Diagnose the former callback-last spelling: a call written with a
+        // provable collection first and a function-shaped operand
+        // last would otherwise just decline here and sit as an inert
         // symbolic `Map`. Surface the callback-slot type error instead, so
         // the misorder is loud and names the offending operand. The operands
-        // arrive RAW (every type reads `unknown`), so the first is
+        // arrive raw (every type reads `unknown`), so the first is
         // canonicalized to read its type — but never a bare symbol, whose
-        // canonicalization would DECLARE it as a side effect (and whose
+        // canonicalization would declare it as a side effect (and whose
         // callback slot defers by design anyway).
         const last = ops[ops.length - 1];
         const first =
@@ -4339,12 +4349,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The RESULT stays with the `type:` handler below: it is the reducer's own
     // result type, which the accumulator channel does not carry.
     signature:
-      '(collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> value where T',
+      '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'Reduce',
         supply: ACCUMULATOR_SUPPLY,
+        // The compatibility gate's supply source: the reducer's ELEMENT
+        // parameter is judged against this collection's element type (its
+        // accumulator parameter is declared `unknown` and never judged).
+        source: collection,
       });
       if (!collection.isValid || !fn) return null;
 
@@ -4534,14 +4548,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // stamp survives this operator's rewrite into a `Reduce`: it runs before
     // the canonical handler, on the raw literal the handler then reuses.
     signature:
-      '(reducer: callback<(unknown, T) -> unknown>, initial: value, collection<T>) -> value where T',
+      '(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T',
     canonical: (ops, { engine }) => {
+      // The collection is checked FIRST so the callback's compatibility gate
+      // can judge the reducer's element parameter against its element type.
+      const collection = checkCollectionOperand(engine, ops[2]);
       const fn = canonicalCallbackOperand(ops[0], {
         operator: 'Fold',
         supply: ACCUMULATOR_SUPPLY,
+        source: collection,
       });
       const initial = ops[1]?.canonical;
-      const collection = checkCollectionOperand(engine, ops[2]);
       if (!fn || !initial?.isValid || !collection.isValid) return null;
       return engine._fn('Reduce', [collection, fn, initial]);
     },
@@ -4563,7 +4580,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // accumulator). The RESULT stays with the `type:` handler below: the
     // source's shape with the fold's result as its elements.
     signature:
-      '(collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> indexed_collection where T',
+      '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
     // Same shape/indexed-ness as the source, but elements are the fold's
     // result type (mirrors Map).
     type: (ops) => {
@@ -4577,6 +4594,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'Scan',
         supply: ACCUMULATOR_SUPPLY,
+        // Same supply-source wiring as `Reduce`.
+        source: collection,
       });
       if (!collection.isValid || !fn) return null;
       // An initial value is optional, but when one is PROVIDED it must not be
@@ -4749,7 +4768,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // collection kind and indexedness, which the type language cannot express
     // (§7 rule 1).
     signature:
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
+      '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
     // Preserve the source's element type / indexed-ness (mirrors Filter).
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
@@ -4893,7 +4912,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Design D phase 1: as `TakeWhile` — the result stays with the `type:`
     // handler (§7 rule 1).
     signature:
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
+      '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -4990,7 +5009,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // tolerance, and the scalar-result singleton lift is the `type:` handler's
     // calculation below (§7 rule 2).
     signature:
-      '(collection<T>, mapping: callback<(T) -> U>) -> list where T, U',
+      '(collection<T>, mapping: (T) any -> U) -> list where T, U',
     type: (ops) => {
       const resultType = callbackResultType(ops[1]);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
@@ -7741,7 +7760,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Design D phase 1: the element-of link lives in the SIGNATURE (see
     // `CountIf`). The result type is unchanged.
     signature:
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T',
+      '(collection<T>, predicate: (T) any -> boolean) -> integer where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'IndexWhere', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -7781,7 +7800,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // answer is `Nothing`, so the precise `elementType | nothing` is the `type:`
     // handler's below, not something `T` alone could say (§7 rule 1).
     signature:
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> any where T',
+      '(collection<T>, predicate: (T) any -> boolean) -> any where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1, PER_ELEMENT_SUPPLY),
     // Returns a single element, or `Nothing` when no element matches: the
@@ -7865,7 +7884,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `CountIf`). The result is INDEXES, not elements — independent of `T`, and
     // unchanged.
     signature:
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> list<integer> where T',
+      '(collection<T>, predicate: (T) any -> boolean) -> list<integer> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Position', ops, 1, PER_ELEMENT_SUPPLY),
     type: () => 'list<integer>',
@@ -7903,7 +7922,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Ordering: {
     description: 'Return the indexes that would sort the collection.',
     complexity: 8200,
-    signature: '(indexed_collection<any>, order: function?) -> list<integer>',
+    signature: '(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number))?) -> list<integer> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Ordering', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
@@ -7946,7 +7965,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
     signature:
-      '((T, order: function?) -> T where T: string) & ((indexed_collection<T>, order: function?) -> list<T> where T)',
+      '((T, order: (((character) any -> unknown) | ((character, character) any -> number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number))?) -> list<T> where T)',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Sort', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
@@ -7982,7 +8001,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the element of the collection that maximizes the given key function.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection<any>, key: function) -> value',
+    signature: '(collection<T>, key: (T) any -> unknown) -> value where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalCallbackOperand(ops[1], {
@@ -8010,7 +8029,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the element of the collection that minimizes the given key function.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection<any>, key: function) -> value',
+    signature: '(collection<T>, key: (T) any -> unknown) -> value where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalCallbackOperand(ops[1], {
@@ -8042,7 +8061,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
-    signature: '(indexed_collection<any>, key: function?) -> integer',
+    signature: '(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
     canonical: (ops, { engine }) => {
       // Optimization form `ArgMax(f, domain)` (Wolfram/Fungrim convention:
       // the locations maximizing f over a set). The engine does not evaluate
@@ -8087,7 +8106,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
-    signature: '(indexed_collection<any>, key: function?) -> integer',
+    signature: '(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
     canonical: (ops, { engine }) => {
       // Optimization form `ArgMin(f, domain)` — see the ArgMax note.
       const optForm = canonicalOptimumForm(engine, 'ArgMin', ops);
@@ -8578,23 +8597,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     wikidata: 'Q381060',
     complexity: 8200,
-    // Design D phase 2 — the first R-D4 (resolve-then-stamp) consumer. The
-    // second parameter is a genuine TWO-ARM shape, and it stays ONE union
-    // rather than becoming an overload set: the arms are disjoint (`integer`
-    // vs a function), `callback<S>` admits exactly what the primitive
-    // `function` admits (§4 clause 1), so admission, validation, the
-    // diagnostics and the result type are byte-identical to the pre-conversion
-    // spelling — while an intersection would have changed all of them plus the
-    // displayed signature. Rule U admits it: exactly ONE arm of the union is
-    // open.
+    // The second parameter is a genuine TWO-ARM shape, and it stays ONE
+    // union rather than becoming an overload set (ruled with Design E §9
+    // item 4): the arms are disjoint (`integer` vs an arrow), the arrow arm
+    // admits by COMPATIBILITY, and an intersection would have changed
+    // admission, validation, the diagnostics, the result type and the
+    // displayed signature. Rule U admits the union: exactly ONE arm is open.
     //
-    // The stamp RESOLVES the arm first (`contextualSlotCallback`): the only
+    // The stamp RESOLVES the arm first (`contextualSlotSignature`): the only
     // operand shape it rewrites is an inline `Function` literal, which the
-    // `integer` arm cannot take, so the callback arm is the resolved one. A
+    // `integer` arm cannot take, so the arrow arm is the resolved one. A
     // size operand (a number, or a symbol holding one) is not a literal, so
-    // the SIZE arm is untouched — as it was under the metadata.
+    // the SIZE arm is untouched.
     signature:
-      '(collection<T>, integer | callback<(T) -> boolean>, integer?) -> list<list<T>> where T',
+      '(collection<T>, integer | ((T) any -> boolean), integer?) -> list<list<T>> where T',
     // The string rule, and it covers BOTH forms: a chunk, a window and a
     // predicate group are each made of the source's own characters, so each is
     // itself a string and `Partition("abcd", 2)` is `["ab","cd"]` (ruling
@@ -8605,7 +8621,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Its sibling operators (`Chunk`, `ChunkBy`, `SlidingWindow`,
     // `Permutations`, `Combinations`) spell this rule as a LEADING OVERLOAD
     // ARM instead. `Partition` cannot: its second parameter is a contextual
-    // `callback<S>` slot, and the Design D stamp that annotates an inline
+    // arrow slot, and the contextual stamp that annotates an inline
     // predicate's parameter with the source's element type runs only when
     // exactly ONE arity-viable arm declares such a slot
     // (`resolveContextualArm` in `boxed-expression/overload.ts`). A second arm
@@ -8827,7 +8843,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // refutes no arm, so a ground `string` parameter would win
     // most-specific-wins on every untyped operand.
     signature:
-      '((S, key: function) -> list<string> where S: string) & ((collection<T>, key: function) -> list<list<T>> where T)',
+      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -8984,7 +9000,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Partition the collection into a dictionary of lists based on the key returned by the function.',
     ],
     complexity: 8200,
-    signature: '(collection<any>, key: function) -> dictionary<list>',
+    signature: '(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'GroupBy', ops, 1, PER_ELEMENT_SUPPLY),
     // Provable declines only (finite, walkable source required); success also

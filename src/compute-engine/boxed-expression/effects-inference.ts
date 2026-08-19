@@ -10,7 +10,6 @@ import {
   signatureArms,
   signatureEffects,
 } from '../../common/type/utils.js';
-import { isCallbackType } from '../../common/type/callback.js';
 import { isSubtype, objectLayoutOfType } from '../../common/type/subtype.js';
 import {
   effectSetToString,
@@ -1710,16 +1709,15 @@ class Walker {
  * and `any` are excluded. This predicate arms the unresolved-operand `{any}`
  * rule, and most user-function parameters are typed `unknown` — admitting them
  * would collapse every literal that passes a free symbol to an ordinary head.
- * Only a position DECLARED callable (a `callback<S>` slot, the bare `function`
+ * Only a position DECLARED callable (an arrow slot, the bare `function`
  * primitive, an explicit arrow parameter) says "this operand is a callback".
  *
- * A `callback<S>` counts, per Design D §4 clause 1: the constructor is the
+ * An arrow slot counts — under compatibility admission (Design E §3) it is
  * primitive `function` for every admission and subtyping question, and this is
  * one of them.
  */
 function isCallableType(t: Type): boolean {
   if (typeof t === 'string') return t === 'function';
-  if (isCallbackType(t)) return true;
   if (t.kind === 'signature') return true;
   if (t.kind === 'union' || t.kind === 'intersection')
     return (t.types as Type[]).some(isCallableType);
@@ -1877,7 +1875,6 @@ function bindingCouldHoldFunction(t: Type | undefined): boolean {
     return t === 'unknown' || t === 'any' || t === 'function' || t === 'symbol';
   return (
     t.kind === 'signature' ||
-    t.kind === 'callback' ||
     t.kind === 'intersection' ||
     t.kind === 'union' ||
     t.kind === 'reference'

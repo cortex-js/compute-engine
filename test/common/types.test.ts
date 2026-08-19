@@ -1999,89 +1999,51 @@ describe('isSubtype with an intersection on the left', () => {
   });
 });
 
-describe('`callback<S>` union absorption is order-independent', () => {
-  // `callback<S>` erases to the primitive `function` for every admission
-  // question, so the two members absorb each other. The tie-break keeps the
-  // `callback<S>` member — the one carrying the signature the contextual solve
-  // reads — whichever order they are written in.
-  const cb = parseType('callback<(integer) -> boolean>');
-  const union = (...types: Type[]): string =>
-    typeToString(reduceType({ kind: 'union', types }));
-
-  it('reduces `callback<S> | function` and `function | callback<S>` alike', () => {
-    expect(union(cb, 'function')).toBe('callback<(integer) -> boolean>');
-    expect(union('function', cb)).toBe('callback<(integer) -> boolean>');
+describe('the `callback<…>` constructor is RETIRED (Design E §7)', () => {
+  // Design E (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`)
+  // deleted the constructor: callback slots are ordinary arrows admitted by
+  // compatibility, and the spelling fails to parse with a migration hint.
+  // (The union tie-break this block used to pin died with the constructor —
+  // ordinary subtype absorption is all that remains.)
+  it('fails to parse, with the migration hint and the parser caret', () => {
+    const messageOf = (source: string): string => {
+      try {
+        parseType(source);
+      } catch (e) {
+        return (e as Error).message;
+      }
+      throw new Error(`Expected \`${source}\` to be rejected`);
+    };
+    const message = messageOf('callback<(integer) -> boolean>');
+    expect(message).toContain('retired: write the arrow directly');
+    expect(message).toContain('Invalid type');
   });
 
-  it('keeps the callback over a mutually-subtype signature, in either order', () => {
-    const sig = parseType('(integer) -> boolean');
-    expect(union(cb, sig)).toBe('callback<(integer) -> boolean>');
-    expect(union(sig, cb)).toBe('callback<(integer) -> boolean>');
-  });
-
-  it('does not disturb ordinary subtype absorption', () => {
+  it('ordinary subtype absorption is undisturbed', () => {
+    const union = (...types: Type[]): string =>
+      typeToString(reduceType({ kind: 'union', types }));
     expect(union('integer', 'number')).toBe('number');
     expect(union('number', 'integer')).toBe('number');
+    const sig = parseType('(integer) -> boolean');
+    expect(union(sig, 'function')).toBe('function');
+    expect(union('function', sig)).toBe('function');
   });
 });
 
-describe('`callback<…>` rejects a non-signature payload with a position', () => {
-  const messageOf = (source: string): string => {
-    try {
-      parseType(source);
-    } catch (e) {
-      return (e as Error).message;
-    }
-    throw new Error(`Expected \`${source}\` to be rejected`);
-  };
-
-  it('reports the misuse with the parser caret, not a bare builder throw', () => {
-    const message = messageOf('callback<integer>');
-    expect(message).toContain(
-      '`callback<…>` expects a function signature, e.g. `callback<(T) -> boolean>`'
-    );
-    // The parser's own rejection convention: the offending source line and a
-    // caret under the payload.
-    expect(message).toContain('Invalid type');
-    expect(message).toContain('|   callback<integer>');
-    expect(message).toContain('^');
-  });
-
-  it('rejects a collection payload the same way', () => {
-    expect(messageOf('callback<list<number>>')).toContain(
-      '`callback<…>` expects a function signature'
-    );
-  });
-
-  it('still accepts a parenthesized signature', () => {
-    expect(typeToString(parseType('callback<((integer) -> boolean)>'))).toBe(
-      'callback<(integer) -> boolean>'
-    );
-  });
-
-  it('leaves the nested-`where` rejection to its own (better) message', () => {
-    expect(messageOf('callback<((T) -> boolean where T)>')).toContain(
-      'unsupported-variable-position'
-    );
-  });
-});
-
-describe('`callback<…>` misuse on the Epsil annotation route', () => {
-  // `parseTypePrefix()` is where a bare builder `throw` used to escape with no
-  // position at all. The annotation route must report it like any other type
-  // rejection: a diagnostic with a source range.
-  it('reports a positioned diagnostic, not an unlocated throw', () => {
+describe('the retired `callback<…>` spelling on the Epsil annotation route', () => {
+  // The annotation route reports the retirement like any other type
+  // rejection: a positioned diagnostic carrying the migration hint
+  // (Design E §7), anchored on the `callback` keyword itself.
+  it('reports a positioned diagnostic with the migration hint', () => {
     // Imported lazily: this suite is otherwise free of engine dependencies.
     const { parseEpsil } = require('../../src/epsil/parse-epsil');
     const [, diagnostics] = parseEpsil('let x: callback<integer> = 1');
     expect(diagnostics).toHaveLength(1);
     const [diagnostic] = diagnostics;
     expect(diagnostic.severity).toBe('error');
-    expect(diagnostic.message[1]).toContain(
-      '`callback<…>` expects a function signature'
-    );
-    // `callback<` ends at offset 16, `integer` at 23.
-    expect(diagnostic.range).toEqual([16, 23]);
+    expect(diagnostic.message[1]).toContain('retired: write the arrow directly');
+    // The keyword `callback` spans offsets 7–15.
+    expect(diagnostic.range).toEqual([7, 15]);
   });
 });
 

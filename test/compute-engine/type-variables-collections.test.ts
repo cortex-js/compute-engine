@@ -110,8 +110,11 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // Phase 1: a reordering (or a de-duplication) of a string's characters is
     // a string. `Sort` keeps its OPTIONAL `order` in that arm — an overload
     // arm may carry an optional parameter, so no arity split is needed.
+    // Design E §9 item 6: the comparator slot is the ruled key|comparator
+    // union (the comparator arm grounded to `(any, any)` — at most one union
+    // arm may carry a type variable).
     expect(sig(ce, 'Sort')).toBe(
-      '((T, order: function?) -> T where T: string) & ((indexed_collection<T>, order: function?) -> list<T> where T)'
+      '((T, order: ((character) any -> unknown) | ((character, character) any -> number)?) -> T where T: string) & ((indexed_collection<T>, order: ((T) any -> unknown) | ((any, any) any -> number)?) -> list<T> where T)'
     );
     expect(sig(ce, 'Unique')).toBe(
       '((T) -> T where T: string) & ((collection<T>) -> list<T> where T)'
@@ -138,11 +141,15 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // disable the Design D stamp on an inline predicate's parameter, so the
     // string result type comes from a `type` handler instead. See the comment
     // on the definition in `library/collections.ts`.
+    // Design E E3: the predicate arm is an honest arrow (reduce order puts
+    // the arrow arm first).
     expect(sig(ce, 'Partition')).toBe(
-      '(collection<T>, callback<(T) -> boolean> | integer, integer?) -> list<list<T>> where T'
+      '(collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T'
     );
+    // …and the DISPLAYED type is the same honest polytype (the R-D5
+    // grounding projection retired with the constructor).
     expect(ce.box('Partition').type.toString()).toBe(
-      '(collection<T>, function | integer, integer?) -> list<list<T>> where T'
+      '(collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T'
     );
     // `ChunkBy`'s `key` slot is the PRIMITIVE `function`, not a contextual
     // callback, so it takes the leading string arm: a maximal run of a
@@ -150,8 +157,10 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // variable (`S where S: string`) rather than the ground type, because an
     // `unknown`-typed operand refutes no arm and a ground `string` parameter
     // would therefore claim the arm on every untyped call.
+    // Design E E3: both arms carry honest key arrows (the string arm's
+    // element type is `character`, a ground type).
     expect(sig(ce, 'ChunkBy')).toBe(
-      '((S, key: function) -> list<string> where S: string) & ((collection<T>, key: function) -> list<list<T>> where T)'
+      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)'
     );
   });
 });

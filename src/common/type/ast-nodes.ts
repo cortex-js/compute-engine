@@ -141,13 +141,6 @@ export interface BroadcastableTypeNode extends ASTNode {
   elementType: TypeNode;
 }
 
-export interface CallbackTypeNode extends ASTNode {
-  kind: 'callback';
-  /** The wrapped signature. Required to BE a signature — the builder rejects
-   * anything else. */
-  signatureType: TypeNode;
-}
-
 export interface CollectionTypeNode extends ASTNode {
   kind: 'collection';
   elementType: TypeNode;
@@ -226,7 +219,6 @@ export type TypeNode =
   | DictionaryTypeNode
   | SetTypeNode
   | BroadcastableTypeNode
-  | CallbackTypeNode
   | CollectionTypeNode
   | ExpressionTypeNode
   | SymbolTypeNode
@@ -253,7 +245,6 @@ export interface ASTVisitor<T> {
   visitDictionaryType(node: DictionaryTypeNode): T;
   visitSetType(node: SetTypeNode): T;
   visitBroadcastableType(node: BroadcastableTypeNode): T;
-  visitCallbackType(node: CallbackTypeNode): T;
   visitCollectionType(node: CollectionTypeNode): T;
   visitExpressionType(node: ExpressionTypeNode): T;
   visitSymbolType(node: SymbolTypeNode): T;
@@ -299,8 +290,6 @@ export function visitNode<T>(node: TypeNode, visitor: ASTVisitor<T>): T {
       return visitor.visitSetType(node);
     case 'broadcastable':
       return visitor.visitBroadcastableType(node);
-    case 'callback':
-      return visitor.visitCallbackType(node);
     case 'collection':
       return visitor.visitCollectionType(node);
     case 'expression':

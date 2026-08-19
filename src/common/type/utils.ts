@@ -1120,7 +1120,6 @@ function containsArm(
     return t === 'function' || t === 'unknown' || t === 'any';
   switch (t.kind) {
     case 'signature':
-    case 'callback':
       return true;
     case 'variable':
       // A type variable can instantiate to anything: conservative.

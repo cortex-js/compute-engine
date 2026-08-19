@@ -82,23 +82,16 @@ import { checkArity, checkType } from './boxed-expression/validate.js';
 import { apply, lookup } from './function-utils.js';
 
 //
-// PROTOCOLS — declarations, conformance and implementations (phases 1–2).
+// PROTOCOLS — declarations, conformance, implementations, and dispatch.
 //
-// `docs/TYPE_SYSTEM_ROADMAP.md` Appendix A is the surface specification;
-// `docs/plans/2026-08-12-protocols-design.md` is the ruling record. Phase 1
-// implemented DECLARATIONS and CONFORMANCE; phase 2 adds IMPLEMENTATION
-// validation (member coverage, P17 signature matching, property handlers) and
-// the host implementation API. Dispatch is phase 3 and property SEMANTICS
-// phase 4.
-//
-// Protocols are engine-global, exactly like types — the second kind of
-// registry entry the global-type-registry design pre-writes (its §5), not a
-// second scoping regime. Protocol names are NOT types (ruling P8): they never
+// Protocols are engine-global, like types, but protocol names are not types:
+// they never
 // enter `_typeRegistry`, `knownTypeNames`, or the type resolver.
+// `docs/plans/2026-08-12-protocols-design.md` records the full design.
 //
 
-/** `Self` is a textual substitution token, never a declarable type (P12). It
- * must not be resolvable through the engine's registry, so the ONLY place it
+/** `Self` is a textual substitution token, never a declarable type. It must
+ * not resolve through the engine's registry, so the only place it
  * has a meaning is the wrapper below. */
 export const SELF_TYPE_NAME = 'Self';
 
@@ -109,10 +102,9 @@ function isReservedProtocolName(name: string): boolean {
 }
 
 /**
- * A resolver that additionally resolves `Self` — the ONLY route by which the
- * token becomes parseable. Used to syntax-check a protocol member's signature
- * at declaration time; the signature is still STORED verbatim, with `Self`
- * unsubstituted (P12), so nothing downstream depends on this record.
+ * A resolver that additionally recognizes `Self` while validating a protocol
+ * member's signature. The stored signature keeps `Self` unsubstituted, so
+ * downstream resolution still depends on the receiver type.
  */
 function selfAwareResolver(base: TypeResolver): TypeResolver {
   const self: TypeReference = {
@@ -133,10 +125,10 @@ function selfAwareResolver(base: TypeResolver): TypeResolver {
   };
 }
 
-/** Is `name` a DECLARED type of this engine?
+/** Is `name` a declared type of this engine?
  *
  * The resolver THROWS `protocol-in-type-position` for a name its protocol
- * registry holds — which is exactly the case a re-declaration (P5) probes here
+ * registry holds — which is exactly the case a re-declaration probes here
  * — so the miss is caught: "it is a protocol" is the same answer as "it is not
  * a type", which is all this asks.
  */
@@ -158,10 +150,9 @@ function messageOf(e: unknown): string {
 //
 
 /**
- * Register a protocol. THROWS on every error — the host contract (Appendix A
- * "Host API"). The Epsil statement route passes `fromStatement: true`, which
- * makes a re-run REPLACE its own declaration instead (ruling P5), and converts
- * a throw into an error value.
+ * Register a protocol. Host API errors throw. The Epsil statement route passes
+ * `fromStatement: true`, allowing a later statement batch to replace its own
+ * declaration and converting a thrown error into an error value.
  */
 export function declareProtocolImpl(
   ce: IComputeEngine,
@@ -173,10 +164,8 @@ export function declareProtocolImpl(
     throw Error(`The protocol name "${name}" is invalid`);
   if (isReservedProtocolName(name))
     throw Error(`The protocol name "${name}" is reserved`);
-  // P8, the no-dual-role rule, in the protocol-over-type direction: a protocol
-  // name is NOT a type name, so it may not shadow one either — neither a
-  // built-in (`protocol string {}`, `protocol collection {}`) nor a declared
-  // one. The type-over-protocol direction is enforced in `declareType()`.
+  // Protocols and types share a namespace, so a protocol may not shadow either
+  // a built-in or a declared type. `declareType()` enforces the reverse case.
   if (isValidPrimitiveType(name) || isDeclaredTypeName(ce, name))
     throw Error(
       `The protocol name "${name}" is already a type; protocols and types share no names`
@@ -187,35 +176,24 @@ export function declareProtocolImpl(
   const fromStatement = options?.fromStatement === true;
   const origin = options?.origin;
   if (existing !== undefined) {
-    // REDEFINITION DISCIPLINE — a second `protocol` statement declaring this
-    // name in the SAME compilation unit is refused; the same statement in a
-    // LATER unit still replaces (P5's notebook pattern, generalized by
-    // `docs/plans/2026-08-14-redefinition-discipline.md`). Checked first, and
-    // before the members are validated: the record is replaced IN PLACE below,
+    // A second `protocol` statement declaring this name in the same compilation
+    // unit is refused; a later unit may replace it. Check before validating the
+    // members because the record is replaced in place below,
     // so a rejected duplicate must not have touched it.
     checkSameUnitRedefinition('protocol', name, existing._declOrigin, origin);
-    // P5: a record this engine created from a `protocol` STATEMENT is ours to
-    // replace (a notebook re-run with an edited declaration). A host
+    // A record created from a `protocol` statement may be replaced by a later
+    // statement batch, such as an edited notebook cell. A host
     // declaration is never replaced — it throws, like `ce.declareType()`.
     if (!fromStatement || !existing.declaredByStatement)
       throw Error(`The protocol "${name}" is already declared`);
-    // SAME-STATEMENT RE-REGISTRATION IS A NO-OP — the protocol twin of the
-    // check in `declareType` (see its comment for the mechanism: the
-    // canonical and evaluate handler of one statement run back-to-back, so
-    // the record already holds exactly what this registration would rebuild).
-    // It used to take the full replacement branch anyway: re-validating every
-    // member signature, revalidating every conformance edge, re-syncing the
-    // dispatchers and re-running the widening sweep. The stamp proves the
-    // earlier registration STOOD: it is written before the replacement
-    // branch's widening check, and a rejected replacement restores the
-    // previous stamp along with the rest of the record (the rollback thunk).
-    // A protocol record is complete from creation (members and stamp are set
-    // together on the fresh path), so no `def`-style completeness guard is
-    // needed here.
+    // The canonical and evaluate handlers of one statement run back-to-back.
+    // Their shared origin stamp proves the record already contains this exact
+    // registration, so the second pass is a no-op. A rejected replacement
+    // restores the previous stamp through the registry rollback point.
     if (isSameStatementReRegistration(existing._declOrigin, origin)) return;
   }
 
-  // Validate every member BEFORE touching the registry, so a malformed
+  // Validate every member before touching the registry, so a malformed
   // declaration leaves the previous one exactly as it was.
   const validated: Record<string, ProtocolMember> = Object.create(null);
   const resolver = selfAwareResolver(ce._typeResolver);
@@ -267,36 +245,35 @@ export function declareProtocolImpl(
   }
 
   if (existing !== undefined) {
-    // Replacing a protocol can WIDEN a dispatcher's effect set — a
+    // Replacing a protocol can widen a dispatcher's effect set: a
     // requirement's ceiling loosened from `pure` to `random`, or a bare
-    // requirement whose changed shape now matches an effectful conformer that
-    // used to be stranded — and a function annotated `pure` that calls through
-    // that dispatcher then declares something that is no longer true. As in
+    // requirement whose changed shape now matches an effectful conformer can
+    // invalidate a `pure` caller. As in
     // `declareConformance`, the declared contracts can only be re-derived
-    // against the LIVE registry, so the replacement is applied and undone
-    // below if it turns out to have falsified one. A FRESH declaration needs
+    // against the live registry, so the replacement is applied and undone
+    // below if it falsifies one. A fresh declaration needs
     // no such guard: it installs dispatchers for a name nothing could already
     // be calling.
     const restore = ce._protocolRegistryRollbackPoint();
-    // Records mutate IN PLACE (the type-registry contract, same reason:
-    // captured references). The conformance edges survive a re-declaration —
-    // conformance is monotone (Appendix A "Conformance").
+    // Mutate records in place so captured references remain valid.
+    // Conformance edges survive a re-declaration because conformance is
+    // monotone.
     existing.members = validated;
     existing.declaredByStatement = fromStatement;
-    // The redefinition stamp rides with the declaration it describes. A
-    // replacement carrying NO origin (the box route, which has no batch)
-    // CLEARS it rather than leaving a stale one behind: an unstamped record is
+    // The redefinition stamp belongs to the declaration it describes. A
+    // replacement without an origin (the box route, which has no batch) clears
+    // it rather than leaving a stale one behind: an unstamped record is
     // one no statement of the current unit owns. Undone by the rollback thunk
     // below if the widening check rejects this replacement.
     if (origin === undefined) delete existing._declOrigin;
     else existing._declOrigin = origin;
-    // A replaced protocol may have gained, lost or RETYPED requirements, so
-    // every conformance is revalidated against the new requirement set
-    // (Appendix A "Scope and lifecycle"). An implementation that no longer
-    // matches leaves its conformance PENDING — the edge survives (conformance
-    // is monotone) but is not fulfilled, so the end-of-batch warning fires
+    // A replaced protocol may have gained, lost, or retyped requirements, so
+    // every conformance is revalidated against the new requirement set.
+    // An implementation that no longer matches leaves its conformance pending:
+    // the edge survives because conformance is monotone, but is not fulfilled,
+    // so the end-of-batch warning fires
     // until the implementation is edited to match.
-    // The validator is handed the AUTHOR's block only: the edge's map may also
+    // The validator receives only the author's block: the edge's map may also
     // carry accessors the engine synthesized for field-backed properties, and
     // those would read as an author writing an accessor beside a stored field
     // (`object-property-conflict`). They are re-derived right after, against
@@ -317,7 +294,7 @@ export function declareProtocolImpl(
       // requirement the replacement dropped would keep answering.
       // A replacement that made the protocol object-only (it gained a
       // `readwrite` property, or a member declaring `state`) leaves every
-      // value-type edge PENDING rather than removing it — conformance is
+      // value-type edge pending rather than removing it — conformance is
       // monotone, and the replacement itself is not rejected. That verdict
       // comes from `settleFieldBacking`, which reports a gated edge as
       // uncovered, so it reaches the block-less edges below by the same route.
@@ -329,17 +306,16 @@ export function declareProtocolImpl(
       // half of the story.
       noteEdgePendingReason(ce, existing, c, failure, true);
     }
-    // …and the implementation-LESS edges are recomputed from what the
+    // Edges without authored implementations are recomputed from what the
     // implementations now cover: an edge that inherited a supertype's
     // implementation goes back to pending when that implementation stops
     // matching the new requirements, and vice versa.
     //
-    // A re-settlement REASON is asked for only where the settlement actually
+    // Record a new settlement reason only where the settlement actually
     // moved. Re-executing an identical `protocol` statement re-runs all of
     // this and changes nothing, and a blanket "these were re-settled" would
     // then invent a layout reason on an edge that has simply never been
-    // implemented — the P3 notebook pattern, whose warning already says the
-    // whole story.
+    // implemented, whose existing warning already explains the whole state.
     const blockLessBefore = existing.conformances
       .filter((c) => c._authored === undefined)
       .map((c) => ({ edge: c, impl: c.impl, pending: c.pending }));
@@ -349,19 +325,19 @@ export function declareProtocolImpl(
         noteEdgePendingReason(ce, existing, b.edge, null, true);
     // A replacement is a `config`-class state event, exactly like a type
     // redefinition: cached decisions taken against the old requirement set
-    // must not be left stale (P16).
+    // must not be left stale.
     ce._noteStateEvent({ kind: 'config' });
     ce._noteConformanceRegistryChange();
     // The requirement set changed: install the dispatchers of the members it
     // gained, refresh the survivors' signatures, and remove the ones it
-    // dropped (P13).
+    // dropped.
     syncProtocolDispatchers(ce);
 
     const violations = conformanceWideningViolations(ce);
     if (violations.length > 0) {
       // The rollback thunk emits its own `config` state event and bumps the
       // conformance version when it restores anything, so nothing is emitted
-      // here on top of that — but it only restores the REGISTRY, so the
+      // here on top of that. It only restores the registry, so the
       // dispatchers installed against the replaced requirement set are
       // re-synced explicitly against the restored one.
       restore();
@@ -385,18 +361,18 @@ export function declareProtocolImpl(
   };
   if (origin !== undefined) record._declOrigin = origin;
   registry[name] = record;
-  // A FRESH declaration is also a config event: `typesOverlap`/dispatch
-  // decisions are keyed on the registry, and phase 3 installs dispatchers here.
+  // A fresh declaration is a config event because `typesOverlap` and dispatch
+  // decisions are keyed on the registry.
   ce._noteStateEvent({ kind: 'config' });
   ce._noteConformanceRegistryChange();
-  // P13 — every FUNCTION member becomes callable by its bare name, unless the
+  // Every function member becomes callable by its bare name unless the
   // name is already taken (see `syncProtocolDispatchers`).
   syncProtocolDispatchers(ce);
 }
 
 /**
- * The first parameter of a protocol function is the DISPATCH position and must
- * be typed `Self` (Appendix A "`Self`"). Checked by STRING INSPECTION of the
+ * The first parameter of a protocol function is the dispatch position and must
+ * be typed `Self`. Check the parsed parameter's spelling because
  * parsed parameter — `Self` is a substitution token, not a declared type, so
  * there is nothing to compare identities against.
  */
@@ -413,10 +389,11 @@ function assertSelfFirstParameter(
 }
 
 /**
- * P17 — "no optional/variadic/generic protocol members in v1". Enforced HERE,
+ * Protocol members cannot be optional, variadic, or generic. Enforce this
  * at declaration, because every downstream consumer (the dispatcher's arity,
  * `checkMemberArguments`, the implementation signature check) reads only
- * `signature.args`: a requirement carrying `optArgs`, `variadicArg` or
+ * at declaration because downstream consumers read only `signature.args`; a
+ * requirement carrying `optArgs`, `variadicArg`, or
  * `typeParams` would silently lose them and be matched, dispatched and typed
  * at the wrong arity. Naming the offending feature is what makes the
  * rejection actionable — the prohibition is not spelled anywhere in the
@@ -445,9 +422,8 @@ function assertV1MemberShape(
 // ── Conformance ──────────────────────────────────────────────────────────────
 //
 
-/** A conformance target must be NAMED and GROUND (Appendix A "Conformance
- * targets"): a built-in type name or a ground application of one, or a nominal
- * type. Everything else is rejected, with a message that steers. */
+/** A conformance target must be named and ground: a built-in type name, a
+ * ground application, or a nominal type. */
 function conformanceTargetProblem(
   target: Type,
   source: string,
@@ -465,7 +441,6 @@ function conformanceTargetProblem(
     case 'tuple':
     case 'record':
     case 'signature':
-    case 'callback':
       return `the conformance target \`${source}\` is an anonymous structural type; declare a nominal wrapper (\`type Pt = ${source}\`) and conform that instead`;
 
     case 'variable':
@@ -489,26 +464,22 @@ function conformanceTargetProblem(
 }
 
 //
-// ── The mutability gate (B1) ─────────────────────────────────────────────────
+// ── The mutability gate ──────────────────────────────────────────────────────
 //
-// A writable property is meaningful only on a MUTABLE OBJECT (user-ruled
-// 2026-08-15; `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Which types can
-// conform (the mutability gate)"). A protocol that can MODIFY object state —
-// because it declares at least one `readwrite` property, or a function member
-// whose DECLARED effects include the `state` label — is therefore conformable
-// only by OBJECT types. A protocol with only `readonly` properties and no
-// declared `state` is conformable by any type, exactly as before, and so is a
-// SEMANTIC protocol with no members at all.
+// A writable property is meaningful only on a mutable object. A protocol that
+// can modify object state — through a `readwrite` property or a function member
+// with a declared `state` effect — can therefore be adopted only by object
+// types. Read-only and semantic protocols remain available to other types.
 //
-// Two non-obvious boundaries, both from the ruling:
+// Two non-obvious boundaries:
 //
-//   * A BARE function requirement never gates. Its effects are DERIVED from
+//   * A bare function requirement never gates. Its effects are derived from
 //     whatever conformers exist, so reading `state` off it would make the gate
 //     depend on the conformer set rather than on the protocol's declaration
 //     alone — and a record may legitimately conform to a bare-function
 //     protocol with a pure implementation while object conformers of the same
 //     protocol mutate.
-//   * An explicit `pure` never gates. It parses to the STATED EMPTY set, which
+//   * An explicit `pure` never gates. It parses to the stated empty set, which
 //     is a real (and the strongest) ceiling, not an absence — the same
 //     `undefined`-means-bare / `[]`-means-pure discipline the effect ceiling in
 //     `signatureMismatch` uses.
@@ -650,7 +621,6 @@ function targetKindPhrase(target: Type): {
     case 'indexed_collection':
       return phrase('a collection', 'collections');
     case 'signature':
-    case 'callback':
       return phrase('a function type', 'function types');
     default:
       // A builtin primitive reached directly is "a builtin type"; the same
@@ -704,15 +674,15 @@ function mutabilityGateProblem(
 }
 
 //
-// ── Conditional conformance (phase 5) ────────────────────────────────────────
+// ── Conditional conformance ──────────────────────────────────────────────────
 //
 // `type list<T> is Comparable where T is Comparable { … }`. The head names the
-// target's variables and the trailing `where` clause BINDS them — the same
+// target's variables and the trailing `where` clause binds them — the same
 // single-binding-site rule as a function declaration. The clause rides into the
-// engine as SOURCE TEXT (the P11 pattern `DeclareType`'s `typeParams` attribute
-// uses) and is re-parsed here, so the parser owns no part of its meaning.
+// engine as source text, like `DeclareType`'s `typeParams` attribute, and is
+// re-parsed here so the parser owns no part of its meaning.
 //
-// The clause and the head are parsed TOGETHER, as one synthetic signature:
+// The clause and head are parsed together as one synthetic signature:
 // `(self: list<T>) -> nothing where T is Comparable`. That is not a trick for
 // its own sake — it is what makes the type grammar's own declaration-time
 // validation apply verbatim: a duplicate variable, a non-ground bound, a
@@ -721,7 +691,7 @@ function mutabilityGateProblem(
 // supplying `conformsTo`.
 //
 
-/** The conformance oracle of `ce`, in the shape the type layer takes it (P36).
+/** The conformance oracle of `ce`, in the shape the type layer expects.
  * The engine's resolver is the only implementation; it also owns the
  * re-entrancy guard that keeps a self-referential conditional conformance
  * (`list<T> is P where T is P`) terminating. */
@@ -746,7 +716,7 @@ function clauseToString(params: readonly TypeParameter[]): string {
     .join(', ');
 }
 
-/** The CONSTRUCTOR identity of a conformance target — what "the same head"
+/** The constructor identity of a conformance target — what "the same head"
  * means in the one-conditional-per-(head, protocol) rule. Two targets with the
  * same head key are two instantiations of one constructor (`list<string>` and
  * `list<T>`), which is exactly the pair the rule forbids. */
@@ -793,13 +763,13 @@ function parseConditionalTarget(
 }
 
 /**
- * The GROUND target a conformance edge stands for at a receiver of type
+ * The ground target a conformance edge stands for at a receiver of type
  * `receiver`, or `null` when the edge does not apply to it.
  *
  * The one admission test both halves of dispatch, property resolution and the
  * `conformsTo` oracle go through, so an unconditional and a conditional edge
  * can never drift apart on what "applies" means. Unconditional: the ordinary
- * `isSubtype(receiver, target)` (P32). Conditional: the receiver must match the
+ * `isSubtype(receiver, target)`. Conditional: the receiver must match the
  * head, and every extracted argument must satisfy the clause.
  */
 function edgeTargetAt(
@@ -817,7 +787,7 @@ function edgeTargetAt(
   );
 }
 
-/** The GROUND type an edge is compared against when there is no receiver in
+/** The ground type an edge is compared against when there is no receiver in
  * hand: its own target, or — for a conditional edge — the widest instantiation
  * of its head (every variable read as its bound). Open types must never reach
  * `isSubtype`, so every receiver-less comparison goes through this. */
@@ -826,8 +796,8 @@ function edgeComparisonTarget(edge: ConformanceRecord): Type {
   return widestConditionalTarget(edge.target, edge.where);
 }
 
-/** Two-way applicability (Appendix A's wording, P35): does the edge apply to
- * `receiver`, or to some subtype of it? Used only by the STATIC advisory
+/** Does the edge apply to `receiver`, or to some subtype of it? Used only by
+ * static advisory
  * verdicts, never to select an implementation. */
 function edgeCouldApply(
   ce: IComputeEngine,
@@ -842,21 +812,21 @@ function edgeCouldApply(
  * Register the conformance of `targetSource` to each of `protocolNames`,
  * optionally with an implementation block.
  *
- * Returns an `Error` VALUE on failure and `null` on success — the shared
+ * Returns an `Error` value on failure and `null` on success — the shared
  * contract of the statement helpers in `library/core.ts` (errors are values,
- * never throws to the host). Used by BOTH the canonical and the evaluate
+ * never throws to the host). Used by both the canonical and evaluate
  * handler of `DeclareConformance`.
  *
  * An implementation block is validated against the protocol's requirements
- * BEFORE anything is stored (phase 2, ruling P17): on any failure the previous
+ * before anything is stored: on failure the previous
  * implementation — and the edge's `pending` flag — are left exactly as they
  * were, and the first problem comes back as the error value.
  *
- * `options.where` makes it a CONDITIONAL conformance (phase 5): `targetSource`
- * is then a HEAD PATTERN naming the clause's variables (`list<T>`).
+ * `options.where` makes it a conditional conformance: `targetSource` is then a
+ * head pattern naming the clause's variables (`list<T>`).
  *
- * `options.block` is the implementation block EXPRESSION the statement carries
- * — the identity P47's same-batch duplicate rule is keyed on (see
+ * `options.block` is the implementation-block expression the statement carries
+ * and provides identity for the same-batch duplicate rule; see
  * {@link ConformanceRecord._implOrigin}).
  */
 export function declareConformance(
@@ -867,7 +837,7 @@ export function declareConformance(
   options?: {
     where?: string;
     block?: Expression;
-    /** True when this registration is an Epsil conformance STATEMENT's own —
+    /** True when this registration belongs to an Epsil conformance statement.
      * read from the `_epsilDeclarationRoute` marker by the `DeclareConformance`
      * handlers (`withStatementRoute` in `library/core.ts`). Required by the
      * same-block no-op below: an ambient batch id alone cannot distinguish
@@ -883,8 +853,8 @@ export function declareConformance(
       'Expected at least one protocol name',
     ]);
 
-  // An implementation block belongs to ONE protocol: with `&` there is no way
-  // to say which requirement a member implements (Appendix A).
+  // An implementation block belongs to one protocol; with `&` there is no way
+  // to say which requirement a member implements.
   if (impl !== undefined && protocolNames.length > 1)
     return ce.error([
       'protocol-implementation-split',
@@ -899,8 +869,8 @@ export function declareConformance(
     records.push(record);
   }
 
-  // The target rides as type-expression SOURCE, like `DeclareType`'s body; a
-  // CONDITIONAL one is parsed together with its clause, which binds the head's
+  // The target arrives as type-expression source, like `DeclareType`'s body. A
+  // conditional target is parsed with its clause, which binds the head's
   // variables.
   const whereText = options?.where;
   let target: Type;
@@ -939,7 +909,7 @@ export function declareConformance(
       ? typeToString(target)
       : `${typeToString(target)} where ${clauseToString(params)}`;
 
-  // Validate the overlap rules against EVERY protocol first, so a rejected
+  // Validate the overlap rules against every protocol first, so a rejected
   // multi-protocol conformance registers nothing at all.
   for (const record of records) {
     const headConflict = headConflictOf(record, target, targetKey, params);
@@ -951,22 +921,22 @@ export function declareConformance(
         'protocol-conformance-overlap',
         `\`${targetKey}\` overlaps \`${conflict.other}\` (meet \`${conflict.meet}\`) for the protocol \`${record.name}\`, and neither contains the other. Conform the common supertype, or disjoint refinements, instead.`,
       ]);
-    // The B1 mutability gate: a protocol that can modify object state is
+    // A protocol that can modify object state is
     // conformable only by object types. Checked here, in the per-protocol
     // pre-pass, so a multi-protocol `is A & B` whose second arm gates
-    // registers nothing at all — and BEFORE `implementationProblem`, because
+    // registers nothing at all. Check before `implementationProblem` because
     // the verdict is on the (type, protocol) pair whatever the block contains.
     const gated = mutabilityGateProblem(ce, record, target, targetSource);
     if (gated !== null) return ce.error(['protocol-requires-object', gated]);
   }
 
-  // P47 — a SECOND implementation block for the same (type, protocol) pair
-  // WITHIN ONE BATCH is an error; the same statement re-run in a LATER batch
-  // replaces (the notebook pattern). The two are told apart by the batch stamp
-  // the install leaves behind, and a re-registration of the SAME block — one
+  // A second implementation block for the same (type, protocol) pair within one
+  // batch is an error; the same statement re-run in a later batch replaces the
+  // implementation. The install's batch stamp distinguishes the two. A
+  // re-registration of the same block — one
   // statement registers up to three times per batch: the static pre-pass
   // canonicalizes it, then the evaluation loop canonicalizes and evaluates it
-  // — is not a second block. Checked BEFORE the block is validated: a second
+  // — is not a second block. Check before validating the block: a second
   // block is inadmissible whatever it contains. `impl` implies a single
   // protocol (checked above).
   const batch = ce._epsilBatchId;
@@ -983,28 +953,12 @@ export function declareConformance(
         'protocol-implementation-duplicate',
         `the type \`${targetKey}\` already has an implementation of the \`${records[0]!.name}\` protocol in this batch`,
       ]);
-    // SAME-BLOCK RE-REGISTRATION IS A NO-OP — the conformance twin of the
-    // same-statement check in `declareType` (see its comment for the
-    // mechanism). The identity that proves it is the {batch, block} stamp
-    // this very duplicate rule keys on: the canonical and evaluate handler of
-    // one statement pass the SAME block operand object, and nothing runs
-    // between the two, so grounding, validating and re-installing the
-    // identical block — and re-running the widening sweep behind it — would
-    // change nothing. The stamp proves the earlier install stood: a widening
-    // rejection restores the registry (stamp included) before returning.
-    // THREE guards keep the no-op exactly that narrow. `fromStatementRoute`
-    // (the `_epsilDeclarationRoute` marker, threaded by the handlers) is what
-    // an ambient batch id cannot supply: a re-entrant box-route `.evaluate()`
-    // of the same boxed statement also arrives with this batch and this block
-    // object, but arbitrary registry changes may separate it from the
-    // install, so it keeps taking the full replacement path — the box-route
-    // re-assertion pattern, like an install from outside any batch. The block
-    // must be a real operand (`!== undefined`) so two anchor-less
-    // registrations cannot alias each other, mirroring the duplicate rule's
-    // own caution. And the stamp was looked up by `targetKey`, so even if the
-    // boxer ever interned identical block literals across statements, only a
-    // second block for the SAME (target, protocol) pair could reach this
-    // comparison — a pair the duplicate rule above already polices.
+    // The canonical and evaluate handlers pass the same block object, so their
+    // repeated registration is a no-op. `fromStatementRoute` keeps this shortcut
+    // narrower than a batch-id check: a re-entrant box-route evaluation can use
+    // the same batch and object after the registry has changed, and must take
+    // the full replacement path. Requiring a real block also prevents unrelated
+    // registrations without block identity from aliasing one another.
     if (
       options?.fromStatementRoute === true &&
       origin !== undefined &&
@@ -1015,18 +969,18 @@ export function declareConformance(
       return null;
   }
 
-  // P12's `Self` substitution is applied to the block ONCE, here, before it is
-  // either validated or stored: every consumer downstream — the P17 check, the
+  // Apply `Self` substitution once, before the block is validated or stored.
+  // Every downstream consumer — validation, the
   // effect walk, dispatch's `apply()`, the literal's own `.type` arrow — reads
   // the stored literal with an ordinary resolver that does not know `Self`.
   // See {@link groundedImplementationLiteral}.
   if (impl !== undefined)
     impl = groundedImplementationBlock(ce, impl, target, targetKey, params);
 
-  // The implementation block is validated BEFORE anything is stored: a
+  // Validate the implementation block before storing anything: a
   // rejected block must leave the previous implementation (and `pending`)
   // untouched, so that a re-run with an edited, broken block does not destroy
-  // a working one (P5 + P17). `impl` implies a single protocol (checked above).
+  // a working one. `impl` implies a single protocol (checked above).
   if (impl !== undefined) {
     const failure = implementationProblem(
       ce,
@@ -1048,10 +1002,9 @@ export function declareConformance(
   // `pure` that calls through that dispatcher then declares something that is
   // no longer true. Such a statement is BLOCKED, not merely flagged — the same
   // polarity as an `Assign` that violates a declared type — but the contracts
-  // can only be re-derived against the LIVE registry, so the registration
+  // can only be re-derived against the live registry, so the registration
   // happens first and is undone if it turns out to have falsified one
-  // (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an
-  // effect").
+  // if a contract no longer holds.
   const restore = ce._protocolRegistryRollbackPoint();
   /** Did the loop below actually change the registry? A re-declared
    * conformance with no implementation block is a no-op, and re-deriving every
@@ -1061,21 +1014,21 @@ export function declareConformance(
   for (const record of records) {
     const existing = record.conformances.find((c) => c.targetKey === targetKey);
     if (existing !== undefined) {
-      // A re-declared conformance is a NO-OP (Appendix A) — except that an
-      // implementation block fulfils a pending edge, if it COVERS the
+      // A re-declared conformance is a no-op unless an implementation block
+      // fulfils a pending edge by covering the
       // requirements.
       if (impl !== undefined) {
         mutated = true;
         existing._authored = impl;
         existing.impl = impl;
         // The stamp rides with the implementation: an install from outside a
-        // batch (the box route, P47) leaves it UNSTAMPED and replaces freely.
+        // batch leaves it unstamped and replaces freely.
         if (batch === undefined) delete existing._implOrigin;
         else existing._implOrigin = { batch, block: options?.block };
         // Field backing is settled against the edge as it now stands: the
         // block just installed replaces whatever accessors the engine had
         // synthesized, and a property the block does not implement may be
-        // covered by a stored field of the same name (Appendix B).
+        // covered by a stored field of the same name.
         existing.pending = !settleFieldBacking(ce, record, existing);
         // Whatever a previous re-settlement recorded about this edge is now out
         // of date: the block just installed is the new answer. Cleared BEFORE
@@ -1116,10 +1069,10 @@ export function declareConformance(
       noteEdgePendingReason(ce, record, conformance, null);
     }
     mutated = true;
-    // The new edge may INHERIT an implementation registered for a supertype,
+    // The new edge may inherit an implementation registered for a supertype,
     // and (with a block of its own) may fulfil impl-less subtype edges.
     refreshInheritedPending(ce, record);
-    // P16 — a conformance ADDITION must invalidate cached static-dispatch
+    // A conformance addition must invalidate cached static-dispatch
     // decisions, so it is a `config` event (all axes), not a `declare`.
     ce._noteStateEvent({ kind: 'config' });
     ce._noteConformanceRegistryChange();
@@ -1276,10 +1229,9 @@ function exceededContract(
   };
 }
 
-/** The `conformance-widens-declared-contract` message: EVERY violated
+/** The `conformance-widens-declared-contract` message: every violated
  * dependent, with the set it declares, the set it would now infer, and the
- * labels that exceed its ceiling — plus the two remedies Appendix B names
- * ("widen or remove the dependent's annotation, or don't conform").
+ * labels that exceed its ceiling, followed by the available remedies.
  *
  * `subject` and `remedy` name the statement being rejected, since the same
  * diagnostic serves a conformance registration (`declareConformance`) and a
@@ -1302,17 +1254,18 @@ function wideningRejectionMessage(
 }
 
 /**
- * Does `impl` COVER every requirement of `members`?
+ * Does `impl` cover every requirement of `members`?
  *
- * COVERAGE only — the keys that must be present — never the signature or the
+ * Coverage here means only the keys that must be present, never the signature
+ * or the
  * type of what they are bound to (that is {@link implementationProblem}). An
  * empty block on a protocol WITH requirements therefore leaves the conformance
- * pending instead of silently fulfilling it. Kept as the cheap PRE-CHECK on
- * the `pending` flag: since phase 2 a stored block has already been validated,
+ * pending instead of silently fulfilling it. Kept as the cheap pre-check on
+ * the `pending` flag: a stored block has already been validated,
  * so on that path this can only answer `true`.
  *
- * The mangling of the property keys is the design's (`__get__x` / `__set__x`).
- * A SEMANTIC protocol (no members) is covered by every block, and by none.
+ * Property keys use the `__get__x` / `__set__x` mangling. A semantic protocol
+ * with no members is covered by every block, including no block.
  */
 function implCoversRequirements(
   members: Record<string, ProtocolMember>,
@@ -1340,12 +1293,12 @@ function implCoversRequirements(
 }
 
 /**
- * Which PROPERTY requirements of `members` the merged implementation map does
+ * Which property requirements of `members` the merged implementation map does
  * not answer, named as an author would spell them (`get age`, `set age`).
  *
  * Property requirements only, and that is the point rather than an omission:
  * the one caller ({@link noteEdgePendingReason}) uses this to say that a
- * target's stored-field LAYOUT no longer satisfies something, and a function
+ * target's stored-field layout no longer satisfies something, and a function
  * member can never be satisfied by a stored field — naming one there would
  * advise the author to add a field that could not possibly help.
  *
@@ -1387,17 +1340,15 @@ function uncoveredPropertyRequirements(
 // selection, property reads, property writes — need no special case: they
 // find a handler where they always look.
 //
-// The COMPILED tier is the exception, and it fails closed. A synthesized
+// The compiled tier is the exception, and it fails closed. A synthesized
 // accessor is a host callback, and the compile planner refuses host
 // candidates (`compilation/protocol-dispatch.ts`), so a compiled qualified
 // read or write on a field-backed type declines and the expression stays
-// interpreted. That is the right answer until objects themselves compile:
-// lowering object field access is Phase 4 of
-// `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`, and until
-// it lands there is nothing for the planner to emit.
+// interpreted. Until objects themselves compile, there is no field load or
+// store representation for the planner to emit.
 //
 
-/** An accessor the ENGINE synthesized for a field-backed property, as opposed
+/** An accessor the engine synthesized for a field-backed property, as opposed
  * to one the author wrote. The marker carries the field's name, and is what
  * lets a later re-derivation (a protocol replacement, a new implementation
  * block) tell the engine's own entries from the author's and strip them. */
@@ -1414,11 +1365,11 @@ function isFieldBacked(
  * satisfy, and which names are declared BOTH as a stored field and as an
  * explicit accessor in `impl`.
  *
- * Field backing applies to OBJECT types only. A record, a primitive, the bare
+ * Field backing applies to object types only. A record, a primitive, the bare
  * `object` type (which promises that fields exist without naming them, so no
- * field type can be read off it) and a CONDITIONAL conformance all get none:
- * Appendix B states the rule for object types, and a conditional conformance's
- * target is a head PATTERN rather than a ground layout, so there is no single
+ * field type can be read off it), and a conditional conformance all get none.
+ * A conditional conformance's target is a head pattern rather than a ground
+ * layout, so there is no single
  * set of stored fields to match a requirement against.
  *
  * A requirement whose type does not parse at `Self = target` is skipped rather
@@ -1473,7 +1424,7 @@ function fieldBackedProperties(
  * May a stored field of type `field` stand in for a property requirement of
  * type `declared` and the given kind?
  *
- * `readwrite` demands the two types be the SAME: the getter direction alone
+ * `readwrite` demands the two types be the same: the getter direction alone
  * would admit a narrower field and the setter direction alone a wider one, so
  * the only type satisfying both is the property's own. `readonly` has only the
  * getter direction, so the ordinary covariant rule applies and a subtype is
@@ -1501,25 +1452,23 @@ function fieldSatisfiesRequirement(
  * The synthesized getter of a field-backed property: a pure load of the stored
  * slot, which runs no user code.
  *
- * On the interpreted route the read path recognizes the `_fieldBacked` marker
+ * On the interpreted route, the read path recognizes the `_fieldBacked` marker
  * and loads the slot itself (see {@link evaluateProtocolProperty}), so this
  * callback is the fallback for any other invoker; it answers `undefined` for a
  * receiver that is not an object — or one whose pinned layout has no such
  * slot — which the boxing layer turns into `Nothing`. Declining rather than
- * refusing is the right posture HERE, unlike in {@link fieldSetter}: a read
+ * refusing is appropriate here, unlike in {@link fieldSetter}: a read
  * that cannot be answered has always stayed symbolic, while a write that
  * cannot be performed must not report success.
  *
- * Being a HOST callback also means the compile planner refuses it as a
- * candidate and the compiled tier declines — see the section comment above:
- * lowering a field-backed accessor to a slot load is Phase 4 work, alongside
- * objects themselves.
+ * As a host callback, it is refused by the compile planner, so the compiled
+ * tier declines until object field loads have a compiled representation.
  */
 function fieldGetter(name: string): FieldBackedImplementation {
   return {
     host: (self: Expression) => {
       if (!isObject(self)) return undefined;
-      // The receiver's own PINNED layout has to carry the slot. The interpreted
+      // The receiver's own pinned layout has to carry the slot. The interpreted
       // read path checks admissibility as well (it has the requirement in hand;
       // see `pinnedLayoutRefusal`) and never reaches this callback — but an
       // invoker that does reach it has passed through no such check, and
@@ -1560,9 +1509,8 @@ function fieldGetter(name: string): FieldBackedImplementation {
  * was constructed), and it is the only check an invoker that reaches this
  * callback directly passes through.
  *
- * Like the getter, this is a HOST callback, so the compile planner refuses it
- * as a candidate and the compiled tier declines — see the section comment
- * above.
+ * Like the getter, this is a host callback, so the compile planner refuses it
+ * until object field stores have a compiled representation.
  */
 function fieldSetter(
   ce: IComputeEngine,
@@ -1630,8 +1578,8 @@ function fieldSetter(
  * stored field" agree here, and the field is what the type itself says the
  * property is.
  *
- * The layout is read from the type REGISTRY as it stands at settle time, while
- * an object INSTANCE carries the layout it was constructed with. Both halves
+ * The layout is read from the type registry as it stands at settle time, while
+ * an object instance carries the layout it was constructed with. Both halves
  * of a redefinition therefore re-settle: a protocol replacement runs the loop
  * in {@link declareProtocolImpl}, and a cross-batch redefinition of the object
  * TYPE runs {@link resettleTypeConformances} from `declareType`. Objects built
@@ -1639,7 +1587,7 @@ function fieldSetter(
  * re-checks that layout instead of trusting the edge — see
  * `pinnedLayoutRefusal`.
  *
- * An edge the B1 mutability gate would now refuse is never "covered", whatever
+ * An edge the mutability gate would now refuse is never "covered", whatever
  * it carries. Such an edge can only exist because the protocol was REPLACED
  * into a gating one after the edge was registered: conformance is monotone, so
  * the edge survives, but it is left pending rather than removed, and reporting
@@ -1657,7 +1605,8 @@ function settleFieldBacking(
    * runs, so a gated edge is left with the accessors its target's layout
    * warrants rather than with stale ones.
    *
-   * The PREDICATE half only: this runs on every edge of every registration and
+   * This uses only the predicate half: it runs on every edge of every
+   * registration and
    * on every pass of {@link refreshInheritedPending}, and the message it would
    * otherwise build is discarded. The memoized protocol half is asked first,
    * so the target is only inspected for a protocol that actually gates. */
@@ -1674,7 +1623,7 @@ function settleFieldBacking(
 
   if (satisfied.size === 0) {
     // No accessor of the engine's belongs on this edge — the overwhelmingly
-    // common case, since only an OBJECT target can be field-backed at all.
+    // common case, since only an object target can be field-backed at all.
     // The merged map is then exactly the author's block, and an edge with
     // neither is implementation-LESS, which is what makes it eligible to
     // inherit a supertype's implementation.
@@ -1740,12 +1689,12 @@ function mergedMapMatches(
 }
 
 /**
- * Recompute the `pending` flag of every implementation-LESS conformance edge
+ * Recompute the `pending` flag of every implementation-less conformance edge
  * of `record`.
  *
- * An edge without a block of its own is NOT necessarily pending: an
- * implementation registered for a SUPERTYPE satisfies the completeness
- * requirement (Appendix A "Lattice inheritance and overlap"), so
+ * An edge without a block of its own is not necessarily pending: an
+ * implementation registered for a supertype satisfies the completeness
+ * requirement, so
  * `type integer is Comparable` is complete on the spot when `number` already
  * has a fulfilled implementation. The dependency runs BETWEEN edges, so the
  * whole set is recomputed whenever an implementation lands or the requirement
@@ -1756,10 +1705,10 @@ function mergedMapMatches(
  * `number` edge that itself inherits) — starting from `true` keeps a pair of
  * mutually-comparable targets from holding each other non-pending.
  *
- * "Reset to pending" is a PER-EDGE question rather than one record-wide
- * verdict, because an edge onto an OBJECT type may be complete on its own
- * stored fields (Appendix B's field-backed satisfaction, see
- * {@link settleFieldBacking}) while another edge of the same protocol, onto a
+ * "Reset to pending" is a per-edge question rather than one record-wide
+ * verdict, because an edge onto an object type may be complete through its own
+ * stored fields ({@link settleFieldBacking}) while another edge of the same
+ * protocol, onto a
  * type with no such layout, is not.
  */
 function refreshInheritedPending(
@@ -1771,7 +1720,7 @@ function refreshInheritedPending(
    * ordinary registration stays unglossed. */
   resettled = false
 ): void {
-  // "No implementation of its own" is asked of the AUTHORED block, not of the
+  // "No implementation of its own" is asked of the authored block, not of the
   // merged map: an edge whose map holds nothing but engine-synthesized
   // accessors still takes part here, because its author wrote nothing and it
   // may therefore inherit — while an author's EMPTY block claims the edge and
@@ -1782,7 +1731,7 @@ function refreshInheritedPending(
   // Each such edge is pending unless what it carries of its own — nothing at
   // all for most, the synthesized accessors of its stored fields for an object
   // type — already covers the requirements. A SEMANTIC protocol (no
-  // requirements) is covered by nothing at all, so none of its edges is ever
+  // requirements) is covered by no block, so none of its edges is ever
   // pending and the inheritance pass below is skipped outright.
   let anyPending = false;
   for (const c of inherited) {
@@ -1914,22 +1863,19 @@ function noteEdgePendingReason(
  * The edge `edge` would be inheriting its implementation from, if that edge
  * were not itself pending — or `undefined` when inheritance is not the story.
  *
- * Only asked of an edge with NO block of its own that has just gone pending
- * with nothing of its own uncovered, which is the shape "I lost what I was
- * borrowing" takes. In practice this reports only on the TYPE-redefinition
- * route: `refreshInheritedPending` forwards no before-state, so the protocol
- * REPLACEMENT route always passes the default `wasFulfilled` (which answers
- * "no") and a replacement's inheritors fall back to the ordinary wording. The supertype test is the one
- * {@link refreshInheritedPending} uses to grant inheritance in the first place,
- * so the two cannot disagree about which edge was the source.
+ * Called only for an edge without its own implementation that has just become
+ * pending despite having no uncovered requirement of its own. That shape means
+ * the edge may have lost an implementation inherited from a supertype.
+ *
+ * The supertype test matches {@link refreshInheritedPending}, so settlement and
+ * diagnostics agree about which edge supplied the inherited implementation.
  */
 function failedInheritanceSource(
   record: ProtocolRecord,
   edge: ConformanceRecord,
-  /** Was this edge fulfilled before the pass that is now asking? Only an edge
-   * that WAS supplying an implementation can have stopped; an ordinary
-   * never-implemented P3 edge on a supertype satisfies the shape test below and
-   * would otherwise be reported as a lost inheritance that never existed. */
+  /** Whether a candidate was fulfilled before this settlement pass. This keeps
+   * an edge that never supplied an implementation from being reported as lost
+   * inheritance. */
   wasFulfilled: (candidate: ConformanceRecord) => boolean
 ): ConformanceRecord | undefined {
   if (edge._authored !== undefined) return undefined;
@@ -1950,49 +1896,18 @@ function failedInheritanceSource(
 }
 
 /**
- * Re-run conformance for every edge a TYPE redefinition may have moved the
- * ground under — the type-side mirror of what {@link declareProtocolImpl}
- * does for a replaced PROTOCOL.
+ * Recompute protocol conformances after a type-registry change.
  *
- * Field-backed satisfaction reads the target's stored-field layout from the
- * type REGISTRY at settle time (see {@link settleFieldBacking}), so a
- * cross-batch `type P = object{…}` re-run with different fields leaves every
- * verdict taken against the old layout standing: an accessor synthesized for a
- * field the new layout dropped keeps answering, a field the new layout ADDS
- * gets none, and a retyped field keeps an accessor typed by the old
- * declaration. Re-settling here is what makes
- * `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B's "replacement re-runs conformance
- * checking against that fixed layout" true of the type half as well as the
- * protocol half. Objects CONSTRUCTED before the redefinition are unaffected —
- * they pin their layout (`BoxedObject._type`), and the read path re-checks the
- * pinned layout rather than trusting the edge (see
- * {@link evaluateProtocolProperty}).
+ * Field-backed satisfaction uses the target's current stored-field layout. A
+ * redefinition can add, remove, or retype a field, so accessors and validation
+ * must be derived again. Existing objects are unaffected because they retain
+ * their construction layout and property access checks that pinned layout; see
+ * {@link evaluateProtocolProperty}.
  *
- * EVERY edge of every protocol is re-settled, not only those whose target
- * names the type that was redefined — which is why this takes no type name.
- * A redefinition can change a verdict without appearing in the target at all:
- * a requirement declared `readonly a: Alias` is compared against a stored
- * field through the LIVE resolution of `Alias`, so redefining `Alias` moves
- * an edge whose target never mentions it. Both halves of the re-settlement
- * are idempotent and identity-preserving (`settleFieldBacking` keeps the
- * existing implementation map when nothing about it changed;
- * `implementationProblem` is a pure verdict), so a sweep that finds nothing
- * costs a walk and changes no object identity. Type redefinition is a
- * notebook-scale event, not a hot path: measured on 2026-08-16, the sweep
- * costs ~75 µs per authored edge per `declareType` replacement (about 0.6 ms
- * per replacement in an engine holding 8 protocols with one authored
- * conformance each). A statement's registrations that would pay it: the
- * static pre-pass canonicalization and the evaluation-loop canonicalization
- * each replace once when the statement RE-declares a name from an earlier
- * batch; the evaluate handler's third registration of the same statement is
- * recognized as a no-op (`isSameStatementReRegistration` in `declareType`,
- * linear-posture R1, 2026-08-18) and pays nothing — which also means a FRESH
- * `type` statement, whose two canonicalization passes install rather than
- * replace, never runs this sweep at all (measured: ~1.7 ms → ~0.2 ms per
- * fresh-`type` batch in the 8-protocol engine). A SUM type makes N+1
- * `declareType` calls per pass, one per variant plus the union, so a
- * re-declared `type S = A(…) | B(…)` pays the per-edge cost that many times
- * per replacing pass.
+ * Every edge is revisited because a requirement can refer to an alias whose
+ * definition changed even when the target does not name the redefined type.
+ * Settlement is idempotent and preserves implementation-map identity when the
+ * result is unchanged.
  *
  * A `config` state event and a conformance-version bump are emitted only when
  * something actually moved: the version keys memoized dispatcher effects, and
@@ -2000,25 +1915,23 @@ function failedInheritanceSource(
  * nothing.
  */
 export function resettleTypeConformances(ce: IComputeEngine): void {
-  // INVARIANTS the sweep guarantees at exit — the whole design of the function
-  // is the order of its five steps, chosen so that each invariant is
-  // established by construction rather than repaired afterwards.
+  // The five steps below establish these invariants in order.
   //
-  // (I1) IDEMPOTENCE. Running the sweep twice with nothing changed in between
+  // (I1) Idempotence. Running the sweep twice with nothing changed in between
   //      leaves the registry as the first run left it: every step re-derives
   //      from the registry and the type layouts (`implementationProblem` is a
   //      pure verdict, `settleFieldBacking` keeps an unchanged map's identity,
   //      the widening refusal is recomputed from scratch, and inheritance is a
   //      deterministic fixpoint), so a second run reaches the same state and
   //      moves nothing.
-  // (I2) ANNOUNCEMENT ECONOMY. The `config` state event and the conformance-
+  // (I2) Announcement economy. The `config` state event and the conformance-
   //      version bump at the end fire iff some edge's implementation-map
-  //      IDENTITY or `pending` flag differs from before the sweep. A sweep that
+  //      identity or `pending` flag differs from before the sweep. A sweep that
   //      re-derives its way back to where it began — including one whose every
   //      re-activation was refused — announces nothing. (The widening walk
   //      bumps the version as it explores; see step 2. What this guard withholds
   //      is the event and the announcement, which is what keys the memos.)
-  // (I3) REFUSAL SOUNDNESS. No declared effect contract that stood before the
+  // (I3) Refusal soundness. No declared effect contract that stood before the
   //      sweep is falsified at exit by an edge this sweep re-activated: every
   //      authored edge that went pending→fulfilled is kept fulfilled only if the
   //      set of contracts it falsifies, given the other kept edges, is empty
@@ -2027,20 +1940,20 @@ export function resettleTypeConformances(ce: IComputeEngine): void {
   //      contract re-derivation reads memoized dispatcher effects, so without
   //      that bump step 2 measures the world as step 1 found it and refuses
   //      nothing.
-  // (I4) INHERITANCE CONSISTENCY. A block-less edge is non-pending iff its own
+  // (I4) Inheritance consistency. A block-less edge is non-pending iff its own
   //      field backing covers the protocol or a non-pending unconditional
   //      supertype edge exists — computed ONCE, after every authored verdict
   //      and every refusal is final, so no inheritor can be granted from a
   //      source that is later put back.
-  // (I5) REASONS. Every pending edge whose settlement this sweep moved carries a
-  //      `_pendingReason` describing THIS sweep's cause; an edge the sweep did
+  // (I5) Reasons. Every pending edge whose settlement this sweep moved carries a
+  //      `_pendingReason` describing this sweep's cause; an edge the sweep did
   //      not move keeps whatever it had; a `conformance-widens-declared-contract`
-  //      reason exists only on an edge the CURRENT sweep refused.
-  // (I6) INSTANCE PINNING is not the sweep's to guarantee — it is the read/write
+  //      reason exists only on an edge the current sweep refused.
+  // (I6) Instance pinning is enforced by the read and write paths
   //      paths' (`pinnedLayoutRefusal`) — but the sweep never touches an
-  //      instance, so nothing here can break it.
+  //      (`pinnedLayoutRefusal`). This sweep never touches an instance.
   //
-  // Undoes a PARTIAL sweep if anything below throws.
+  // Restores the registry if anything below throws.
   const restore = ce._protocolRegistryRollbackPoint();
   /** One edge's settlement as it stood before the sweep. */
   type Snapshot = {
@@ -2049,23 +1962,23 @@ export function resettleTypeConformances(ce: IComputeEngine): void {
     impl: Record<string, Expression | JSImplementation> | undefined;
     pending: boolean;
     reason: string | undefined;
-    /** The verdict on this edge's AUTHORED block, when it has one. */
+    /** The verdict on this edge's authored block, when it has one. */
     failure: ImplementationProblem | null;
   };
   const allSnapshots: Snapshot[] = [];
   /** Did this edge's settlement end up anywhere other than where it started?
-   * Asked of the FINAL state, after any refusal has been applied, so a sweep
+   * Asked of the final state, after any refusal has been applied, so a sweep
    * that re-derives its way back to where it began reports nothing (I2). */
   const netMoved = (s: Snapshot): boolean =>
     s.edge.impl !== s.impl || s.edge.pending !== s.pending;
   try {
-    // STEP 1 — the AUTHORED edges of every protocol, exactly as the
+    // Step 1 — settle the authored edges of every protocol, exactly as the
     // protocol-replacement loop settles them: the block is re-validated against
     // the target's new layout (a field the redefinition added beside an
     // authored accessor is now `object-property-conflict`), and its synthesized
     // accessors are re-derived whether or not it validated — otherwise
     // accessors for a field the new layout dropped would keep answering.
-    // Block-less edges are NOT touched here; they are computed once, in step 3,
+    // Edges without blocks are not touched here; they are computed in step 3,
     // after the refusals of step 2 are final (I4).
     for (const record of Object.values(ce._protocolRegistry)) {
       for (const edge of record.conformances) {
@@ -2105,23 +2018,20 @@ export function resettleTypeConformances(ce: IComputeEngine): void {
     if (allSnapshots.some((s) => s.edge.pending !== s.pending))
       ce._noteConformanceRegistryChange();
 
-    // STEP 2 — the widening refusal (I3). RE-ACTIVATING an authored edge can
+    // Step 2 — enforce effect contracts (I3). Reactivating an authored edge can
     // widen a dispatcher's derived effect union — the union skips pending
     // edges, so a member whose implementation draws `random` contributes
     // nothing while its edge is pending and everything once it is fulfilled
     // again — and a function already accepted as `pure` because it called
     // through that dispatcher would then be declaring something false. Only
-    // AUTHORED edges can widen anything: a block-less edge carries no
+    // Only authored edges can widen anything: an edge without a block carries no
     // implementation of its own (its field-backed accessors are host callbacks
     // with no effects), which is why they need not exist yet at this point.
     //
-    // RULED 2026-08-16: unlike the three conformance-REGISTRATION routes, which
-    // reject the offending statement outright, a `type` redefinition KEEPS its
-    // new type and refuses only the re-activation. The declaration is complete
-    // by the time this runs, so unwinding it would have to reach back through
-    // the constructor `mintTypeConstructor` bound, whose restore is local to its
-    // own failure path; and a type declaration should not fail because of
-    // somebody else's `pure` annotation somewhere across the program.
+    // Unlike conformance registration, a type redefinition remains installed
+    // when it would widen a declared effect contract; only the conformance
+    // reactivation is refused. The type declaration is already complete here,
+    // and should not fail because of a contract elsewhere in the program.
     //
     // Nothing is remembered between sweeps. Every sweep re-derives the whole
     // question, so an edge stays refused exactly as long as an offending
@@ -2141,7 +2051,7 @@ export function resettleTypeConformances(ce: IComputeEngine): void {
           })
         : new Set<ConformanceRecord>();
 
-    // STEP 3 — inheritance, ONCE, over the final authored verdicts (I4). A
+    // Step 3 — compute inheritance once over the final authored verdicts (I4). An
     // block-less edge is settled against its own field backing and then
     // granted or denied inheritance from the non-pending supertype edges as
     // they now stand; nothing decided after this point can move an authored
@@ -2335,14 +2245,13 @@ function refuseWideningReactivations(
 }
 
 /**
- * The one-conditional-per-(head, protocol) rule and its companion, "a
- * conditional conformance excludes an unconditional one on the same head"
- * (Appendix A "Conditional Conformance"). Both orders, since a conformance may
- * arrive in either.
+ * Enforce at most one conformance for each type head and protocol. A
+ * conditional conformance also excludes an unconditional conformance on the
+ * same head. Check both orders because declarations may arrive in either.
  *
  * `null` when the new target is admissible. Reported as
- * `protocol-conformance-overlap`, the same code the P4 meet rule uses: to an
- * author both are "two conformances of one protocol competing for one value".
+ * `protocol-conformance-overlap`: both cases represent two conformances of one
+ * protocol competing for the same value.
  */
 function headConflictOf(
   record: ProtocolRecord,
@@ -2353,7 +2262,7 @@ function headConflictOf(
   const head = headKeyOf(target);
   for (const c of record.conformances) {
     if (c.targetKey === targetKey) continue; // A duplicate, handled by caller.
-    if (params === undefined && c.where === undefined) continue; // The P4 rule's job.
+    if (params === undefined && c.where === undefined) continue; // Checked by overlapConflict.
     if (headKeyOf(c.target) !== head) continue;
     const conditional = params !== undefined ? targetKey : c.targetKey;
     const other = params !== undefined ? c.targetKey : targetKey;
@@ -2363,10 +2272,9 @@ function headConflictOf(
 }
 
 /**
- * The P4 overlap rule: a new target that OVERLAPS an existing conforming type
- * for the same protocol without being COMPARABLE to it (neither is a subtype
- * of the other) would make dispatch ambiguous for the values in the
- * intersection.
+ * Reject a target that overlaps an existing conforming type without being
+ * comparable to it (neither is a subtype of the other). Dispatch would be
+ * ambiguous for values in the intersection.
  *
  * Returns the offending pair, or `null` when the target is admissible.
  */
@@ -2376,9 +2284,9 @@ function overlapConflict(
   targetKey: string,
   params?: readonly TypeParameter[]
 ): { other: string; meet: string } | null {
-  // A CONDITIONAL target is not a set of values the meet algebra can weigh: its
+  // A conditional target is not a set of values the meet algebra can weigh. Its
   // head-level collisions are ruled by {@link headConflictOf}, and against a
-  // DIFFERENT head it cannot overlap at all.
+  // different head it cannot overlap at all.
   if (params !== undefined) return null;
   for (const c of record.conformances) {
     if (c.targetKey === targetKey) continue; // A duplicate, handled by caller.
@@ -2402,10 +2310,10 @@ function meetDescription(a: Type, b: Type): string {
 }
 
 //
-// ── Implementation validation (phase 2, ruling P17) ──────────────────────────
+// ── Implementation validation ────────────────────────────────────────────────
 //
 // An implementation block is checked against the protocol's requirements
-// BEFORE it is stored. Everything below is a PURE reader over the block and
+// before it is stored. Everything below only reads the block and
 // the requirements: it registers nothing, so a caller can reject atomically.
 //
 
@@ -2426,15 +2334,14 @@ const GET_PREFIX = '__get__';
 const SET_PREFIX = '__set__';
 
 /**
- * A resolver in which `Self` denotes the conformance TARGET (P12). The
- * reference is an ALIAS — structurally transparent, so subtyping sees straight
- * through to the target — and takes the target's own NAME, so a signature
+ * A resolver in which `Self` denotes the conformance target. The reference is
+ * a structurally transparent alias, so subtyping sees through to the target,
+ * and takes the target's name so a signature
  * serializes with the substitution already applied (`(self: string, other:
  * string) -> string`), which is what the mismatch diagnostic quotes.
  *
- * This is also what makes `Self` and the target's own name synonyms inside an
- * IMPLEMENTATION (Appendix A "Protocol Implementation"): both spellings reach
- * the very same type.
+ * This also makes `Self` and the target's own name synonyms inside an
+ * implementation: both spellings resolve to the same type.
  */
 function selfSubstitutingResolver(
   base: TypeResolver,
@@ -2449,17 +2356,17 @@ function selfSubstitutingResolver(
     alias: true,
     def: target,
   };
-  // The clause variables of a CONDITIONAL conformance, each read as its own
-  // BOUND (`any` when unbounded) — the widest instantiation, which is also what
+  // Read each conditional-conformance variable as its bound (`any` when
+  // unbounded), which is the widest instantiation and also what
   // `target` is here. An implementation's annotations may spell `list<T>`, and
   // reading `T` as an open variable instead would hand `isSubtype` a
-  // non-ground type; at the widest instantiation the P17 check stays exactly
+  // non-ground type. At the widest instantiation the implementation check stays
   // the ground signature comparison it is for every other conformance.
   //
-  // `opaqueVariables` reads them as NOMINAL references instead — still ground,
+  // `opaqueVariables` reads them as nominal references instead — still ground,
   // but a subtype of nothing but themselves, so ordinary subtyping enforces a
-  // match up to the clause BINDING rather than at the widest instantiation.
-  // That is what a COVARIANT position needs (see {@link clauseVariablePattern}).
+  // match up to the clause binding rather than at the widest instantiation.
+  // Covariant positions need that behavior; see {@link clauseVariablePattern}.
   const variables: Record<string, TypeReference> = Object.create(null);
   for (const p of params ?? [])
     variables[p.name] = {

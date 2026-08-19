@@ -4,7 +4,6 @@ import {
   widen,
 } from '../../common/type/subtype.js';
 import { isEffectSubset } from '../../common/type/effects.js';
-import { deepEraseCallbackTypes } from '../../common/type/callback.js';
 import { reduceType } from '../../common/type/reduce.js';
 import {
   freeTypeVariables,
@@ -154,7 +153,7 @@ export { paramAt };
  *
  * 1. **arity** — an arm that cannot take this many operands is not a
  *    candidate;
- * 2. **the contextual slot** — an arm that declares no `callback<S>` cannot be
+ * 2. **the contextual slot** — an arm that declares no contextual arrow slot cannot be
  *    stamped against at all, so it is not a candidate either. This is what
  *    makes `Map`'s two clauses (§6) resolve for free: at arity 2 only the
  *    unary clause declares a slot, and at arity ≥ 3 only the variadic clause
@@ -1034,10 +1033,7 @@ function displayParamAt(
       [...solution.unbound].map((v) => [v, 'unknown' as Type])
     ),
   };
-  const t = substituteTypeVariables(
-    deepEraseCallbackTypes(pattern),
-    displayBindings
-  );
+  const t = substituteTypeVariables(pattern, displayBindings);
   return freeTypeVariables(t).size === 0 ? reduceType(t) : ground;
 }
 

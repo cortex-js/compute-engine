@@ -290,6 +290,73 @@ describe('E2 — the lazy-route gate (`canonicalCallbackOperand`)', () => {
   });
 });
 
+describe('E3 — user-declared slots get the static arity rejection (§12d)', () => {
+  it('a DECLARED binary callback at a unary user slot rejects with `callback-arity`', () => {
+    // Rule 2 at a slot with no hand-wired supply: the shipped
+    // `callbackArityError`, minted from the compatibility gate with a supply
+    // DERIVED from the slot's own arrow arity.
+    const ce = new ComputeEngine();
+    ce.declare('myOp', {
+      signature: '((number) -> number) -> number',
+      evaluate: (ops) => ops[0],
+    });
+    ce.declare('h', '(number, number) -> boolean');
+    const e = ce.box(['myOp', 'h']);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain(
+      'myOp calls its callback with 1 argument (per the declared parameter list); `h` declares 2 parameters'
+    );
+    // The library's hand-authored wording is untouched: its canonical
+    // handlers mint BEFORE validation runs.
+    const f = ce.box([
+      'CountIf',
+      ['List', 1, 2, 3],
+      ['Function', ['Add', 'p', 'q'], 'p', 'q'],
+    ]);
+    expect(f.toString()).toContain(
+      'CountIf calls its callback with 1 argument (each element of the collection)'
+    );
+  });
+});
+
+describe('E3 — a MONOMORPHIC overload arm stamps its ground arrow slot', () => {
+  it('the resolved arm stamps exactly like the standalone signature', () => {
+    // The Design D ground-`S` fallback, inherited by the arrow spelling
+    // (review finding, restored in `annotateCallbacksFromContextualSolve`):
+    // without it an overload arm silently stamped nothing. Ambiguous sets
+    // (two slot-declaring arms at the same arity) still decline — the stamp
+    // never guesses an arm.
+    const ce = new ComputeEngine();
+    ce.declare(
+      'ov',
+      '(((integer) any -> boolean, number) -> integer) & ((string) -> string)'
+    );
+    const e = ce.box(['ov', ['Function', ['Greater', 'n', 1], 'n'], 5]);
+    expect(e.op1.toMathJson()).toEqual([
+      'Function',
+      ['Less', 1, 'n'],
+      ['Typed', 'n', "'integer'"],
+    ]);
+  });
+});
+
+describe('E3 — a POLYMORPHIC overload arm declines the ground-slot stamp', () => {
+  it('a ground arrow slot inside an arm with its own `where` clause stays unstamped', () => {
+    // Accepted narrowing (dual review, recorded in the spec's §12d): with
+    // the `callback<S>` marker gone, nothing distinguishes "stamp this
+    // ground slot" from an arm variable's kin inside a polymorphic arm, so
+    // the fallback declines the whole arm. No shipped signature exercises
+    // this shape; a user's polytype arm keeps its literal bare.
+    const ce = new ComputeEngine();
+    ce.declare(
+      'pov',
+      '(((integer) any -> boolean, T) -> T where T) & ((string) -> string)'
+    );
+    const e = ce.box(['pov', ['Function', ['Greater', 'n', 1], 'n'], 5]);
+    expect(e.op1.toMathJson()).toEqual(['Function', ['Less', 1, 'n'], 'n']);
+  });
+});
+
 describe('E2 — inferred literal parameters are not contracts', () => {
   it('a lambda whose parameter type was INFERRED from its body is admitted', () => {
     // `l => Length(l)` infers `l: collection` from the body use — a guess

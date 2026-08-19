@@ -1,7 +1,10 @@
 # First-Class Types: type values and type algebra in Epsil
 
-**Status:** Rulings R1–R8 DECIDED (2026-08-18, inline review + discussion) —
-ready for phase-1 planning. No implementation yet. Review record:
+**Status:** Rulings R1–R8 DECIDED (2026-08-18). Pass-2 review applied same
+day; it introduced four items AWAITING RATIFICATION, marked `[PROPOSED]`
+below: the settling design (§3.1), the polytype relaxation (§3.1), the R5
+mechanics amendment (variadic `Conforms`, match-pattern exclusion), and R9.
+No implementation yet. Review record (pass 2; pass 1 applied and superseded):
 `docs/scratch/2026-08-18-first-class-types_SPEC_REVIEW.md`.
 **Date:** 2026-08-18
 
@@ -68,20 +71,16 @@ What is broken or missing:
 
 ## 3. Design
 
-### 3.1 Keystone: a `type` value kind, on the `RegExp` template
+### 3.1 Keystone: a `type` value kind that SETTLES to canonical text
 
-`RegExp` (`src/compute-engine/library/regexp.ts`) is the exact precedent for
-an opaque value minted from source text: an inert container expression that
-stores its pattern string as an operand, has **no evaluate handler** (the
-expression IS the value), validates a **literal** operand at canonicalization
-so a typo surfaces where it was written (a computed operand stays inert and is
-validated by consumers), and reports a leaf primitive via `type: () =>
-'regexp'`. Its design record is
-`docs/plans/2026-08-17-string-phase3-regular-expressions.md`; decisions D9
-(equality) and D10 (no implicit coercion) are engaged explicitly below rather
-than inherited silently.
-
-The mirror:
+`RegExp` (`src/compute-engine/library/regexp.ts`) is the starting template:
+an opaque value minted from source text, validated at canonicalization when
+the operand is literal, reported as a leaf primitive. This design departs
+from the template in ONE deliberate way, explained under "Settling" — the
+regexp plan (`docs/plans/2026-08-17-string-phase3-regular-expressions.md`)
+compares values by RAW text (its decision D9), which lets a computed-operand
+node stay inert forever; type values compare by CANONICAL text (R8), so the
+value form must BE canonical, and an unsettled node is not yet a value.
 
 - **New leaf primitive `type`** in the lattice
   (`src/common/type/primitive.ts`), sitting in `VALUE_TYPES` beside `regexp`
@@ -95,64 +94,93 @@ The mirror:
   disambiguate by one-token lookahead**, contingent on the phase-1 spike
   (§4).
 - **`TypeFrom(text: string) -> type`** (ruling R2, decided — the house
-  `XFrom` conversion convention, alongside the existing `StringFrom`): the
-  inert container. Canonicalization of a literal operand parses the text and
-  surfaces a parse or unknown-name error in place; the parsed `Type` object
-  is cached on the boxed node (lifetime rules below). The container head is
-  **public, callable Epsil syntax** — `TypeFrom("list<integer>")` is an
-  ordinary function call, so `let t: type = TypeFrom("list<integer>")` works
-  (the annotation is optional; inference types `t` from the value) — which is
-  what makes evaluated type values serializable (§4 phase 1) without
-  dedicated literal syntax (ruling R6).
+  `XFrom` conversion convention, alongside the existing `StringFrom`). The
+  head is **public, callable Epsil syntax** — `TypeFrom("list<integer>")` is
+  an ordinary function call, so `let t: type = TypeFrom("list<integer>")`
+  works (the annotation is optional; inference types `t` from the value) —
+  which is what makes evaluated type values serializable (§4 phase 1)
+  without dedicated literal syntax (ruling R6).
 
-**Admissible type-value grammar (construction is side-effect-free).** The
-resolver-aware type parser accepts the forward-reference spelling
-`type Later` and registers a placeholder via `TypeResolver.forward()` —
-a REGISTRY MUTATION. A `TypeFrom` value must never do that: it parses with
-forwarding disabled, and a forward reference or an unbound type variable in
-the text is a canonicalization error, not a placeholder. Polytypes
-(`where`-quantified signatures) are **rejected as type values in this round**
-— `Subtype` over quantified types engages `matches()`'s existential
-machinery, which deserves its own design pass; the restriction is checked at
-the same canonicalization step and lifting it is a named future extension,
-not an oversight.
+**Settling `[PROPOSED — pass-2 resolution of the identity/lifecycle
+conflict]`.** Constructing a type value SETTLES it: the text is parsed with
+the forwarding-disabled resolver (below), REDUCED, and the node becomes
+`TypeFrom("<reduced canonical text>")` — the stored operand IS the canonical
+text, and the parsed `Type` object rides the node from birth. Two routes:
 
-**Value semantics.**
+- A LITERAL operand settles at canonicalization — a typo or unknown name
+  errors at the author's line, and the resulting node is inert (no further
+  evaluation), exactly like `RegExp`.
+- A COMPUTED operand makes the node an ordinary strict application;
+  EVALUATION settles it (a parse failure is an error value at the call
+  site). This is the departure from RegExp's "no evaluate handler": an
+  unsettled computed node is a pending construction, not a value, so
+  `TypeFrom` evaluates it into one.
 
-- *Equality and hashing* (ruling R8, decided — the tier split): `isSame` and
-  the hash compare the REDUCED CANONICAL TEXT of the parsed type (cheap,
-  registry-independent, `isSame ⇒ hash` holds); `==` (the `Equal` tier) is
-  MUTUAL SUBTYPING (`Subtype(t,u) && Subtype(u,t)`), which additionally
-  equates the pairs reduction cannot see, such as an alias name and its
-  body. `isSame ⇒ isEqual` holds (reduced-identical implies mutually
-  subtype). `==` between a type value and a string is `False` — no text
-  comparison, which would re-open the string-equality trap.
-- *Registry lifetime*: a `TypeFrom` value is **live, with a version-gated
-  cache** — the cached parse is keyed to the engine's redefinition version
-  axis (the same axis type redeclaration already bumps, per
-  `docs/plans/2026-08-10-global-type-registry.md`), and re-parses after a
-  bump. This keeps it in agreement with `Element`'s existing arm (which
-  re-resolves via `ce.type(name)` on every evaluation) and makes the static
-  pre-pass's register-then-rollback transaction safe: rollback bumps the
-  axes when it restored something, invalidating any cache built against the
-  transient registration. Pin with tests: alias replacement, generic-alias
-  use, nominal redeclaration, forward-record fulfillment, and a value built
-  during the pre-pass surviving rollback.
+What settling buys, and what it fixes:
 
-**String acceptance — a per-operator convention, not engine-wide coercion.**
-There is no generic coercion facility in the argument checker, and the regexp
-plan's D10 explicitly rejected implicit string→regexp coercion because a
-plain string at those positions has a competing meaning (a literal match
-subject). At the NEW operators' type positions a string has **no** competing
-meaning — `Subtype("integer", "number")` can only intend types — so the
-ambiguity objection does not transfer. Still, the mechanism is deliberately
-narrow: each new type-consuming operator (`MatchesType`, `Subtype`,
-`Conforms`) declares its parameter `string|type` (an explicit union, exactly
-the `DeclareType` pattern) and its `canonical` handler rewrites a LITERAL
-string operand to `TypeFrom(...)` — validation at the author's line — while a
-COMPUTED string is parsed at evaluation by the consumer. No signature-checker
-hook, no rule that other operators inherit. Overload ranking is unaffected
-because the union is spelled in the signature.
+- **Identity is immutable and cheap.** `isSame`/hash compare the STORED
+  canonical text — plain string comparison, registry-independent, exactly
+  as cheap as regexp's D9 — because canonicalization already happened at
+  settling. A later type redefinition never rewrites the stored text, so
+  two values that are `isSame` today are `isSame` forever: the set/
+  dictionary-key stability R8 requires holds unconditionally, and the
+  permanently-cached expression hash is safe.
+- **Semantic operations are live.** `Subtype`, `MatchesType`, `Conforms`,
+  and `==` use the parsed form, re-derived against the CURRENT registry
+  when the redefinition version axis has bumped since the cached parse
+  (`docs/plans/2026-08-10-global-type-registry.md` — the axis type
+  redeclaration already bumps). The cache is pure memoization of the
+  semantic parse; it never feeds back into the identity text.
+- **Redefinition semantics are coherent and must be documented**: the
+  stored text NAMES nominal types and reference-kept aliases, so semantic
+  operations see their current meaning after a redeclaration; an eagerly
+  EXPANDED construct (a generic alias application) was captured at
+  settling, so the value keeps the expansion it computed — like any value
+  computed from mutable state. Pin with tests: alias replacement,
+  generic-alias use before/after redefinition, nominal redeclaration,
+  forward-record fulfillment, and a value settled during the static
+  pre-pass surviving rollback (rollback bumps the axes when it restored
+  something, so the semantic cache re-derives; pre-pass values do not
+  escape the surrogate frame).
+
+**Construction is side-effect-free — on every route.** The resolver-aware
+type parser accepts the forward-reference spelling `type Later` and
+registers a placeholder via `TypeResolver.forward()` — a REGISTRY MUTATION.
+Settling therefore parses with forwarding DISABLED, and a forward reference
+or an unbound type variable in the text is an error, not a placeholder. The
+SAME forwarding-disabled parse is used everywhere type text is consumed at
+runtime: literal settling, computed settling, and the consumer-side parse of
+a computed string handed directly to `Subtype`/`MatchesType`/`Conforms` —
+no route may mutate the registry as a side effect of asking a question.
+
+**Polytypes `[PROPOSED — pass-2 amendment]`.** Polytypes
+(`where`-quantified signatures) ARE admissible as type values: `Type` on a
+generic function must observe its static type honestly (R3), and the
+canonical text — `where` clause included — parses, prints, and round-trips
+like any other. What stays out this round are the COMPARISON operators:
+`Subtype` and `MatchesType` reject a polytype operand with a named error
+(`polytype-comparison-unsupported`) — comparing quantified types engages
+`matches()`'s existential machinery, which deserves its own design pass.
+(This replaces the earlier blanket rejection of polytype VALUES, which
+conflicted with R3: `Type(genericFunction)` must return something.)
+
+**String acceptance — `MatchesType` and `Subtype` only.** There is no
+generic coercion facility in the argument checker, and the regexp plan's
+D10 explicitly rejected implicit string→regexp coercion because a plain
+string at those positions has a competing meaning (a literal match
+subject). At `MatchesType`/`Subtype` type positions a string has **no**
+competing meaning — `Subtype("integer", "number")` can only intend types —
+so the ambiguity objection does not transfer. The mechanism is deliberately
+narrow: these two operators declare the parameter `string|type` (an
+explicit union, exactly the `DeclareType` pattern) and their `canonical`
+handlers rewrite a LITERAL string operand to `TypeFrom(...)` — validation
+at the author's line — while a COMPUTED string is parsed at evaluation
+(forwarding disabled, above). No signature-checker hook, no rule other
+operators inherit; overload ranking is unaffected because the union is
+spelled in the signature. **`Conforms` is the deliberate exception**: its
+subject is `any` (the type-value case is a runtime branch, not a signature
+union) and its protocol operands are plain `string` — protocols are not
+types, so there is nothing to rewrite to `TypeFrom` (§3.3).
 
 ### 3.2 Re-lower the dynamic type test; lift the simple-name restriction
 
@@ -163,7 +191,7 @@ unblocks:
   `x is list<integer>` lower to `MatchesType(x, TypeFrom("<source>"))`
   (ruling R1, decided) — simple names do NOT keep the bare-symbol form,
   because a bare symbol satisfies neither the operator's `string|type`
-  parameter nor any coercion this design defines. `match` type patterns
+  parameter nor any coercion this design defines. `match` TYPE patterns
   lower identically, preserving the agreement-by-construction property
   between the two surfaces. `Element`'s existing type-name arm remains for
   direct MathJSON authors and the math sets; this plan neither extends nor
@@ -184,17 +212,27 @@ unblocks:
   spelling: `MatchesType(x, t)` and `Subtype(t, u)` accept computed
   `string|type` operands. The sugar is for statically written types; the
   operators are the general form.
-- **The test operator is an observer**: `lazy: true` + `inspectsErrors:
+- **Every `is` lowering is an observer**: `lazy: true` + `inspectsErrors:
   true`, like `Match` and `IsError` — a strict operator never sees an
   `Error` subject (propagation bubbles it away first), which would make the
-  promised `x is error` / `x is !error` unimplementable. The handler
+  promised `x is error` / `x is !error` unimplementable. This contract
+  covers `MatchesType` AND `Conforms` (§3.3) identically, so
+  `err is Hashable` and `err is error` route the same way. The handler
   canonicalizes and evaluates the held subject exactly once, then tests.
 - The parser's grammar guard already resolves the hard conflict: the lexer
   munches `&&`/`||` into single tokens, so a compound type after `is` is
   recognizable by a lone `|`, `&`, `<`, or `->`, and
   `x is integer && y is string` stays a conjunction of two tests. The
   compound path already parses today; it just has nowhere to go.
-- The `type-pattern-unsupported` diagnostic retires.
+- The `type-pattern-unsupported` diagnostic retires for TYPE patterns.
+  **Protocol names in match patterns stay OUT this round `[PROPOSED —
+  pass-2 scope decision]`**: a match arm's `n: Hashable => …` annotation
+  rides `finishBindingPattern` → `parseTypeAnnotation` — machinery SHARED
+  with ordinary parameter and variable annotations, where a protocol name
+  must NOT become silently legal — so admitting protocols there is a
+  separate parser design, not a rider on this plan. The test is spelled
+  with `is` instead (in the case body, or a guard if `match` has them).
+  Phase 2's deliverable is scoped accordingly.
 
 ### 3.3 The algebra surface (small, on demand)
 
@@ -208,41 +246,59 @@ All of these are thin wrappers over machinery the engine already has:
   `Type(x) == "some string"` comparisons now answer `False` (R8 — no
   type-vs-string text comparison); the supported idiom is `x is T` /
   `Subtype(Type(x), u)` / `StringFrom(Type(x)) == "..."`. The Tycho usage
-  check (§7) must complete BEFORE this flip lands.
+  check (§7) must complete BEFORE this flip lands. `Type` on a generic
+  function returns a polytype value (§3.1 "Polytypes") — pin a
+  generic-function fixture in phase 3, round-trip included.
 - **`Subtype(t, u) -> boolean`** — **true iff `t <: u`**, i.e. the FIRST
   operand is the (candidate) subtype: `Subtype("integer", "number")` →
   `True`, `Subtype("number", "integer")` → `False`. (Direction stated here
   because the codebase has prior confusion on exactly this — the `subsetOf`
-  convention sweep.) Operands are `string|type` per §3.1. **This IS the
-  type-comparison operator — no infix `<:` this round** (decided
-  2026-08-18): the comparison story is complete without it (`is` for
-  value-inhabitance, `Subtype` for ordering, `==` for equivalence per R8),
-  an infix form needs a new compound lexer token, and R6's
-  verbose-by-design stance applies. `t <: u` as pure sugar for
-  `Subtype(t, u)` is a named candidate for R6's sugar revisit — zero design
-  risk later, since the semantics is fixed here. The relation is
+  convention sweep.) Operands are `string|type` per §3.1; a polytype
+  operand is a named error (§3.1). **This IS the type-comparison operator —
+  no infix `<:` this round** (decided 2026-08-18): the comparison story is
+  complete without it (`is` for value-inhabitance, `Subtype` for ordering,
+  `==` for equivalence per R8), an infix form needs a new compound lexer
+  token, and R6's verbose-by-design stance applies. `t <: u` as pure sugar
+  for `Subtype(t, u)` is a named candidate for R6's sugar revisit — zero
+  design risk later, since the semantics is fixed here. The relation is
   "is compatible with" — the same one annotations and signatures use,
   including the 2026-08-17 bare-name ruling (bare `list` ≡ `list<unknown>`,
   values-only). Exposing it makes that ruling user-visible;
   `doc/08-guide-types.md` §"Which spelling, when" becomes user documentation
   for this operator too. Acceptance matrix in §5.
-- **Conformance test — one operator, two subject kinds.**
-  `Conforms(subject: any, protocol: string) -> boolean`: when the subject is
-  a `type` value, it asks whether that TYPE conforms; any other subject is
+- **`Conforms(subject: any, protocols: string+) -> boolean`** `[signature
+  amended pass-2 — PROPOSED]`: variadic over one or more protocol names,
+  answering the CONJUNCTION, with the subject evaluated exactly once — this
+  is what `x is Hashable & Comparable` lowers to
+  (`Conforms(x, "Hashable", "Comparable")`), so the conjunction spelling the
+  `where` grammar already allows works on the `is` surface too; a `&` tail
+  MIXING protocol and type names is a parse diagnostic this round. The
+  operator is an observer (`lazy` + `inspectsErrors`, §3.2). Subject kinds:
+  a `type` value asks whether that TYPE conforms; any other subject is
   evaluated and its precise type is asked. **What keeps the branch
   unambiguous: the primitive `type` itself declares NO protocol conformances
   in this round** — so a type-value subject can only intend the type-level
   question. (Engine-internal `isSame`/hash covers set and dictionary
   membership for type values without protocol `Hashable`; if `type` ever
-  gains conformances, this branch must be revisited.) The protocol operand
-  rides as a string (matching `DeclareConformance`'s convention; protocol
-  names are not types and have no other value representation). The operator
-  delegates to `TypeResolver.conformsTo`, whose full semantics — inherited,
+  gains conformances, this branch must be revisited.) The operator delegates
+  to `TypeResolver.conformsTo`, whose full semantics — inherited,
   conditional, and pending conformances — are the contract, not a naive
-  registry lookup; §5 pins the edge cases. `x is Hashable` (ruling R5,
-  decided) lowers to `Conforms(x, "Hashable")` — a THIRD lowering case for
-  `is`, distinct from `MatchesType`, selected at parse time (see R5 for the
-  disambiguation and the required parser exception).
+  registry lookup. **Outcome matrix `[PROPOSED]`**: a SETTLED subject (§5)
+  is definitive both ways against the current registry (conformance is
+  monotone, and the answer is correct at the moment asked — the version
+  axis invalidates caches when declarations arrive later); an UNSETTLED
+  subject stays symbolic this round — answering `True` from a declared
+  type's conformance requires the downward-inheritance property of
+  `conformsTo` (does a subtype inherit its supertype's conformance
+  unconditionally?) to be verified first, a named follow-up; an UNKNOWN
+  protocol name is an error value (mirroring `TypeFrom`'s unknown type
+  name — `conformsTo` answering `false` internally is not license to
+  report a clean `False` for a name that does not exist); a computed
+  protocol string resolves at evaluation with the same error; an ERROR
+  subject answers `False` for every protocol (the value's precise type is
+  `error`, which declares no conformances) — pinned beside `err is error`.
+  `x is Hashable` (ruling R5, decided) lowers here — a THIRD lowering case
+  for `is`, distinct from `MatchesType`, selected at parse time (see R5).
 - **Type values at existing type-STRING positions (the reverse direction).**
   A user holding `let t = Type(x)` will immediately try
   `DeclareType("alias2", t)`. In scope for phase 3: `DeclareType`'s type
@@ -255,20 +311,27 @@ All of these are thin wrappers over machinery the engine already has:
 Non-goals for this round: a runtime type-construction algebra (building
 unions/intersections by operating on type values with `|`/`&` at the
 expression level — compose in the type grammar or in the string instead);
-infix `<:` (candidate sugar, above); making protocols types; conformances ON
-the `type` primitive (above); polytype values (§3.1); EXECUTABLE compilation
-of the new operators. **Compilation fail-closed behavior is IN scope**, per
-phase: every compile target (`javascript`, `python`, `glsl`) must reject a
-`TypeFrom`, `MatchesType`, `Subtype`, `Type`, or `Conforms` node — and a
-`type`-typed value crossing the compile boundary — with a compile-time
-unsupported-operation diagnostic, never silently-wrong code; each phase adds
-per-target rejection tests, following the regexp plan's supported-vs-
-fail-closed test pattern.
+infix `<:` (candidate sugar, above); protocol names in match patterns
+(§3.2); making protocols types; conformances ON the `type` primitive
+(above); polytype COMPARISON (§3.1 — polytype values themselves are in);
+EXECUTABLE compilation of the new operators. **Compilation fail-closed
+behavior is IN scope**, per phase: every built-in compile target — all FIVE:
+`javascript`, `glsl`, `wgsl`, `python`, `interval-js`
+(`src/compute-engine/engine-compilation-targets.ts`) — must reject a
+`TypeFrom`, `MatchesType`, `Subtype`, `Type`, or `Conforms` node, and a
+`type`-typed value crossing the compile boundary, with a compile-time
+unsupported-operation diagnostic, never silently-wrong code. The rejection
+belongs in the SHARED compile machinery (the base compiler's type gate),
+not per-target, so custom registered targets fail closed too; each phase
+adds per-target rejection tests for the operators that phase introduces
+(§4), following the regexp plan's supported-vs-fail-closed test pattern.
 
 ## 4. Phases
 
 The phases are **dependent increments** — each builds on the previous. All
-rulings are decided; the one remaining contingency is the R7 spike.
+rulings are decided; the `[PROPOSED]` items (§3.1 settling and polytypes,
+§3.3 `Conforms` amendments, R9) need ratification before their phase
+starts; the one technical contingency is the R7 spike.
 
 1. **`type` primitive + `TypeFrom` + string acceptance.**
    *First step — the R7 lookahead spike*: verify that `parsePrimitiveType`
@@ -277,26 +340,32 @@ rulings are decided; the one remaining contingency is the R7 spike.
    resolver)` keeps yielding a forward reference (plus the compound
    positions `list<type>` and `type | nothing`). If the lookahead cannot be
    made to work, R7 reopens on the rename option before anything else
-   lands. Then: lattice, boxing, MathJSON serialization, Epsil printing —
-   an evaluated type value serializes as the public constructor call
-   (`TypeFrom("list<integer>")`), which reparses to an identical value;
-   this IS the round-trip story, so it lands here, not later. `isSame`/
-   hash on reduced canonical text and `==` as mutual subtyping (R8).
-   Compile fail-closed tests for the container. Deliverable: a type value
-   round-trips both formats, validates literals at canonicalization,
-   construction is registry-side-effect-free, `Subtype` works.
-2. **Typed patterns.** Re-lower `is` and `match` type patterns onto the
+   lands. Then: lattice, boxing, the SETTLING construction (§3.1), MathJSON
+   serialization, Epsil printing — an evaluated type value serializes as
+   the public constructor call over its canonical text, which reparses to
+   an `isSame`-identical value; this IS the round-trip story, so it lands
+   here, not later. `isSame`/hash on the stored canonical text; `==` as
+   mutual subtyping (R8). **Fail-closed tests for `TypeFrom` AND `Subtype`
+   across all five targets**, via the shared boundary check (§3.3).
+   Deliverable: a type value round-trips both formats, settles (or errors)
+   at construction on both the literal and computed routes, construction is
+   registry-side-effect-free, `Subtype` works.
+2. **Typed patterns.** Re-lower `is` and `match` TYPE patterns onto the
    single IR (`MatchesType`); lift the simple-name restriction; add the
-   protocol arm of `is` (R5); fix the misleading `incompatible-type
-   'collection'` surfacing. **Measure and surface the snapshot blast radius
-   before landing** — re-lowering a widely-used construct is exactly the
+   protocol arm of `is` (R5, single names and `&`-conjunctions — match
+   patterns excluded, §3.2); fix the misleading `incompatible-type
+   'collection'` surfacing. **Fail-closed tests for `MatchesType` and
+   `Conforms`.** **Measure and surface the snapshot blast radius before
+   landing** — re-lowering a widely-used construct is exactly the
    canonicalization churn CLAUDE.md's snapshot policy gates. Deliverable:
    `x is list<integer>`, `x is number | string`, `x is !error`,
-   `x is Hashable`, and the equivalent match patterns — the prerequisite
-   for `if let` named in the 2026-08-03 review.
+   `x is Hashable`, `x is Hashable & Comparable`, and the equivalent match
+   TYPE patterns (protocol patterns excluded) — the prerequisite for
+   `if let` named in the 2026-08-03 review.
 3. **Observers and the flip.** The `Type` flip to `-> type` plus the
-   `StringFrom(type)` arm (R3) — **gated on the Tycho usage check (§7)** —
-   and `DeclareType` accepting type values (§3.3).
+   `StringFrom(type)` arm (R3) — **gated on the Tycho criterion (§7)** —
+   `DeclareType` accepting type values (§3.3), the generic-function
+   (polytype) fixture, and **fail-closed tests for `Type`**.
    `CommonType`/`ElementType` only if a consumer asks.
 
 ## 5. Semantics to pin in tests
@@ -309,52 +378,72 @@ rulings are decided; the one remaining contingency is the R7 spike.
   `TypeFrom("integer") is type` → `True`,
   `Subtype(TypeFrom("integer"), "number")` → `True` — all three on one
   fixture, so the value/type level split is pinned as a trio.
-- **Settled subjects are decided — both ways.** For an evaluated,
-  value-bearing subject, the subject's precise type is EXACT, so
-  `matches()` failure is a definitive `False` — the new operator must NOT
-  inherit the `matches(...) ? true : undefined` asymmetry of the current
-  `Element` arm (definitive-on-failure only for numbers). Truth-table
-  fixtures: nonempty and empty lists (`[] is list<integer>` → `True`, via
-  `list<nothing>` element covariance; `["a"] is list<integer>` → `False`),
-  tuples, records, functions, unions on the right, absence-bearing
+- **The decision regime is by NODE FORM `[R9 — PROPOSED]`.** After the
+  single evaluation, a **value form** — a node whose precise type derives
+  from its own structure: number/string/character/boolean literals,
+  collection values, function literals, nominal constructor values, error
+  values, type values — is decided BOTH ways: `matches()` → `True`,
+  otherwise a definitive `False` (the precise type of a value form is
+  exact, so the new operator must NOT inherit the
+  `matches(...) ? true : undefined` asymmetry of the current `Element`
+  arm). Every **other** form — a valueless symbol, an unresolved
+  application whose type is declared or inferred (`Ln(2)`, `f(2)`), a lazy
+  collection — is three-way on its STATIC type: static `<:` T → `True`;
+  static provably DISJOINT from T → `False`; otherwise the test stays
+  symbolic. Fixtures: `[] is list<integer>` → `True` (value form;
+  `list<nothing>` element covariance); `["a"] is list<integer>` → `False`
+  (value form, definitive); `Ln(2) is integer` → symbolic (unresolved
+  application typed `finite_real`, which overlaps `integer` — the type
+  route cannot prove irrationality); `f(2)` typed `real` vs `integer` →
+  symbolic; `f(2)` typed `string` vs `integer` → `False` (disjoint);
+  a valueless `x: integer` vs `integer` → `True`; a function value; a lazy
+  collection; tuples, records, unions on the right, absence-bearing
   collections, aliases, nominals.
-- **Valueless symbols are three-way.** Declared type `<:` T → `True` even
-  valueless; declared type provably DISJOINT from T → `False`; overlapping
-  but undecided → the test stays symbolic. (This is a proposed pinned
-  semantic, not an open ruling; it follows the engine convention for
-  undecidable predicates. If contested it becomes its own ruling.)
 - **Error subjects**: `err is error` → `True`, `err is !error` → `False`,
-  and both agree across the direct, piped (`|> `), box, and match-pattern
-  routes — the `lazy` + `inspectsErrors` observer contract of §3.2, pinned
-  the way `IsError`'s route parity is.
+  `err is Hashable` → `False` (the `Conforms` matrix, §3.3), and all agree
+  across the direct, piped (`|> `), box, and match-pattern routes — the
+  `lazy` + `inspectsErrors` observer contract shared by ALL `is` lowerings
+  (§3.2), pinned the way `IsError`'s route parity is.
 - **Route parity generally**: the test operators hold operands — add
   box-route and parse-route probes, not only `ce.function(...)` probes (the
   `lazy`-operator trap recorded in `test/compute-engine/find-fit.test.ts`'s
   route-parity block).
-- **Equality tiers (R8)**: `TypeFrom("integer|real").isSame(
-  TypeFrom("real|integer"))` → `true` (reduced canonical text) with equal
-  hashes; alias name vs its body — `isSame` `false`, `==` `True`; nominal
-  vs its body — `isSame` `false`, `==` `False` (R4 opacity);
-  `t == "integer"` → `False` for every type value `t`;
-  `StringFrom(TypeFrom(s))` reparses to an `isSame`-identical value.
+- **Equality tiers (R8) and settling**:
+  `TypeFrom("integer|real").isSame(TypeFrom("real|integer"))` → `true` —
+  both settle to the same canonical text — with equal hashes; a COMPUTED
+  construction (`let s = "integer"; TypeFrom(s)`) settles at evaluation to
+  a value `isSame`-identical to `TypeFrom("integer")`; identity survives a
+  type redefinition (settle, redeclare, `isSame` unchanged) while
+  `Subtype`/`==` answer from the CURRENT registry; alias name vs its body —
+  `isSame` `false`, `==` `True`; nominal vs its body — `isSame` `false`,
+  `==` `False` (R4 opacity); `t == "integer"` → `False` for every type
+  value `t`; `StringFrom(TypeFrom(s))` reparses to an `isSame`-identical
+  value; malformed or unknown-name text errors on BOTH routes (literal: at
+  canonicalization; computed: at evaluation); a reassigned string variable
+  does not retroactively change an already-settled value.
 - **`Subtype` acceptance matrix**: direction (`Subtype("integer","number")`
   `True` / reverse `False` / equal types both ways), `any`/`unknown`
   asymmetry (`Subtype("any","unknown")` → `False` per the 2026-08-17
   ruling), `never`, bare collection names vs `<any>` tops, aliases,
-  nominals, function-signature variance, malformed text → error value,
-  unknown name → error value, computed-string operands, wrong-kind operands.
-- **`Conforms` edge cases**: inherited conformance, conditional conformance
+  nominals, function-signature variance, polytype operand → named error,
+  malformed text → error value, unknown name → error value,
+  computed-string operands, wrong-kind operands.
+- **`Conforms` matrix (§3.3)**: settled conforming/nonconforming subjects
+  (definitive both ways), inherited conformance, conditional conformance
   (bound satisfied and not), pending/forward conformance, unknown protocol
-  name, alias subjects, nominal subjects, `never`, symbolic subjects
-  (stays symbolic), and the branch rule: a type-value subject asks about
-  the HELD type (pin one fixture asking about a conforming held type).
+  name → error value, computed protocol strings, wrong-kind protocol
+  operands, valueless symbols → symbolic (this round), type-value subjects
+  ask about the HELD type (pin one fixture with a conforming held type),
+  variadic conjunction (all conform / one missing), error subjects →
+  `False`.
 - **Bare names in `is`**: `x is list` means the values-only bare-`list`
   reading (2026-08-17 ruling); a list holding absence markers answers
   `False`. Pin it so the ruling is user-visible on purpose.
 
-## 6. Rulings (all DECIDED 2026-08-18)
+## 6. Rulings
 
-Reasoning retained for the record; the decision is the bolded line.
+R1–R8 DECIDED 2026-08-18; R9 PROPOSED (pass-2). Reasoning retained for the
+record; the decision is the bolded line.
 
 **R1 — Which operator carries the dynamic type test?** Keeping `Element`
 would mean one lowering for both mental models (`3 ∈ ℤ` and type tests) but
@@ -376,8 +465,9 @@ similarly-named operators forever. **DECIDED: flip `Type` to return a
 `type` value (static-observer semantics unchanged); add a
 `StringFrom(type) -> string` arm for the text.** Breaking change accepted:
 `Type(x) == "..."` comparisons stop working (they answer `False`; R8 rules
-out type-vs-string text comparison) — the flip is gated on the Tycho usage
-check (§7) and lands in phase 3.
+out type-vs-string text comparison) — the flip is gated on the Tycho
+criterion (§7) and lands in phase 3. `Type` on a generic function returns a
+polytype value (§3.1).
 
 **R4 — Is `p is tuple` → `False` intended?** Nominal opacity (a Swift
 struct is not a tuple) vs seeing through to the body; opacity is what makes
@@ -391,12 +481,15 @@ spells conformance with `is` (`where T is Comparable`), and dispatch by
 registry lookup is unambiguous: a name can never be both a type and a
 protocol — declaring either over the other errors with "protocols and types
 share no names" (verified 2026-08-18, both directions). **DECIDED: (a) —
-yes.** Mechanics: the `is` tail consults the registries BEFORE handing the
-name to the type subparser — the type grammar currently diagnoses a
-protocol name in type position, so this contextual slot needs a deliberate
-exception — and a protocol name lowers to `Conforms(x, "<name>")` (§3.3),
-never to `MatchesType`, whose `type`-typed parameter a protocol can never
-satisfy.
+yes.** Mechanics `[amended pass-2 — PROPOSED]`: the `is` tail consults the
+registries BEFORE handing the name to the type subparser — the type grammar
+currently diagnoses a protocol name in type position, so this contextual
+slot needs a deliberate exception — and a protocol name (or a
+`&`-conjunction of protocol names) lowers to the variadic
+`Conforms(x, "P", …)` (§3.3), never to `MatchesType`, whose `type`-typed
+parameter a protocol can never satisfy. A `&` tail mixing protocol and type
+names is a parse diagnostic this round. Protocol names in MATCH patterns
+are excluded this round (§3.2 — shared annotation machinery).
 
 **R6 — Epsil surface for a standalone type value.** Bare `integer` in
 expression position is a plain symbol (`let integer = 5` is legal), so a
@@ -432,7 +525,20 @@ of the parsed type; `==` (the `Equal` tier) is MUTUAL SUBTYPING,
 `Subtype(t,u) && Subtype(u,t)`.** `isSame ⇒ hash` and `isSame ⇒ isEqual`
 both hold; alias-vs-body lands on the `==` side; `==` between a type value
 and a string is `False` (no text comparison — that would re-open the R3
-trap).
+trap). *Lifecycle note (pass-2)*: the settling design (§3.1) is what makes
+this implementable — the canonical text is computed ONCE at construction
+and stored as the operand, so `isSame`/hash are plain text comparisons and
+identity is immune to later registry changes; the mutual-subtyping `==`
+side stays live.
+
+**R9 `[PROPOSED — pass-2]` — The dynamic test's decision regime.**
+`MatchesType` decides by NODE FORM after the single evaluation: value forms
+(precise-by-construction) are definitive both ways; all other forms
+(typed-by-declaration-or-inference) are three-way on the static type —
+subtype → `True`, provably disjoint → `False`, otherwise symbolic (§5).
+This subsumes the earlier valueless-symbol bullet and gives "settled" an
+implementable criterion. Saying no reverts to an unspecified boundary,
+which blocks phase 2.
 
 ## 7. Interactions to keep in view
 
@@ -441,11 +547,15 @@ trap).
   FALSE), shape-vs-values tops. That is a feature — one relation everywhere —
   but the user docs for `Subtype`/`is` must present these, not bury them.
 - **The static pre-pass** (`src/epsil/static-diagnostics.ts`) will see the
-  new operators; `TypeFrom` validation at canonicalization means type
-  typos in `is` expressions surface as static diagnostics for free. The
-  pre-pass's registry rollback interacts with the version-gated cache
-  (§3.1 "Registry lifetime") — the rollback's conditional version bump is
-  what keeps a pre-pass-built value from carrying a transient registration.
-- **Tycho**: the R3 flip is a REAL break for any consumer comparing
-  `Type(...)` results to strings — audit Tycho's usage of `Type` and agree
-  on a migration (mechanical: wrap in `StringFrom`) BEFORE phase 3 lands.
+  new operators; `TypeFrom` settling at canonicalization means type typos
+  in `is` expressions surface as static diagnostics for free. The
+  pre-pass's registry rollback interacts with the semantic-parse cache
+  (§3.1 "Settling") — the rollback's conditional version bump is what
+  keeps a pre-pass-settled value from carrying a transient semantic parse.
+- **Tycho — the phase-3 gate, with a checkable criterion**: the R3 flip is
+  a REAL break for any consumer comparing `Type(...)` results to strings.
+  Phase 3 starts when EITHER a Tycho-side change wrapping every
+  string-comparison use of `Type(...)` in `StringFrom` has landed in the
+  Tycho repo, OR a search of the Tycho checkout (both repos live on this
+  machine) confirms zero such call sites — recorded in the phase-3 work
+  log either way. "Audit later" is not a gate; this is.

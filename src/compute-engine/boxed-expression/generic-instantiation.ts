@@ -7,11 +7,9 @@ import {
   substituteTypeVariables,
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
-import { isCallbackType } from '../../common/type/callback.js';
 import { provablyDisjoint } from '../../common/type/subtype.js';
 import { functionResult, typeContainsMissing } from '../../common/type/utils.js';
 import type {
-  CallbackType,
   FunctionSignature,
   Type,
   TypeParameter,
@@ -158,13 +156,10 @@ export function solveArm(
   // 2026-08-18 on a user polytype: `apply2: ((T) -> U, T) -> U` bound `T`
   // from `IsPrime`). The slot's RESULT still flows — a bare result variable
   // the data operands leave unbound is bound from the callback operand's own
-  // result type after the solve (Design D §4 clause 3, preserved). A legacy
-  // `callback<S>` slot keeps its pre-E path byte-identical until the E3 sweep.
-  const arrowSlots = positions.map((p) => {
-    if (p === undefined) return undefined;
-    if (contextualSlotCallback(p) !== undefined) return undefined;
-    return contextualSlotSignature(p);
-  });
+  // result type after the solve (Design D §4 clause 3, preserved).
+  const arrowSlots = positions.map((p) =>
+    p === undefined ? undefined : contextualSlotSignature(p)
+  );
   // R-E3 as built: DATA positions are AUTHORITATIVE for a domain variable —
   // an arrow-slot operand is consulted only for variables NO data position
   // mentions. The full-suite round showed the blanket skip deleted ratified
@@ -180,12 +175,6 @@ export function solveArm(
   const dataVars = new Set<string>();
   positions.forEach((p, i) => {
     if (p === undefined || arrowSlots[i] !== undefined) return;
-    // A legacy `callback<S>` position is not a DATA position either — its
-    // variables must not anchor (and so silence) a sibling plain-arrow
-    // slot. Dormant until a transition-period signature mixes the two
-    // spellings over a shared variable, but the authority test should match
-    // its own definition of "data".
-    if (contextualSlotCallback(p) !== undefined) return;
     for (const v of freeTypeVariables(p)) dataVars.add(v);
   });
   const skippedArrowSlots = arrowSlots.map((s) => {
@@ -307,7 +296,7 @@ function refineResultSideFromCallbacks(
 // ── The contextual callback solve (Design D §5) ───────────────────────────────
 //
 
-/** One `callback<S>` slot of an arm, at a concrete application. */
+/** One contextual arrow slot of an arm, at a concrete application. */
 export interface CallbackSlot {
   /** The operand position the slot consumes. */
   index: number;
@@ -317,7 +306,7 @@ export interface CallbackSlot {
 
 /** The positions Design D §5 steps 1–2 need from an application. */
 export interface ContextualCallbackPlan {
-  /** The `callback<S>` slots, in operand order. Never empty. */
+  /** The contextual arrow slots, in operand order. Never empty. */
   callbacks: ReadonlyArray<CallbackSlot>;
   /** The NON-callback positions whose type constrains a callback-DOMAIN
    * variable — the only operands step 1 canonicalizes. Never empty. */
@@ -331,65 +320,19 @@ export interface ContextualCallbackPlan {
 }
 
 /**
- * The `callback<S>` a PARAMETER SLOT offers a contextual stamp — R-D4
- * (resolve-then-stamp, ruled 2026-08-09) at SLOT granularity, the companion of
- * {@link resolveContextualArm}'s arm granularity.
- *
- * A slot spelled `callback<S>` is its own answer. A UNION slot resolves first:
- * `Partition`'s `integer | callback<(T) -> boolean>` has two disjoint arms, and
- * the only operand shape a contextual stamp ever rewrites — an inline
- * `Function` literal — can take just one of them. So the callback arm is the
- * RESOLVED arm, and the stamp runs against it.
- *
- * Declines whenever the resolution is not forced: two callback arms, or a
- * non-callback arm that a function could also inhabit (`callback<S> |
- * function`, `callback<S> | any`). The stamp never guesses which arm an operand
- * took.
- */
-export function contextualSlotCallback(t: Type): CallbackType | undefined {
-  if (isCallbackType(t)) return t;
-  if (typeof t !== 'object' || t.kind !== 'union') return undefined;
-
-  // The O(1)-per-arm scan FIRST: a union with no callback arm is every other
-  // union in the library, and it must not pay for the checks below.
-  let found: CallbackType | undefined;
-  for (const arm of t.types)
-    if (isCallbackType(arm)) {
-      if (found !== undefined) return undefined;
-      found = arm;
-    }
-  if (found === undefined) return undefined;
-
-  for (const arm of t.types) {
-    if (isCallbackType(arm)) continue;
-    // An OPEN arm (`T | callback<…>`) declines twice over: nothing says a
-    // function could not inhabit `T`, and an open type must never reach
-    // `provablyDisjoint` (the §4.2 ground invariant asserts on one).
-    if (hasFreeTypeVariables(arm)) return undefined;
-    // `provablyDisjoint`, not "is not a function": an arm that MIGHT admit a
-    // function (`any`, an arrow of its own) leaves the resolution open.
-    if (!provablyDisjoint(arm, 'function')) return undefined;
-  }
-  return found;
-}
-
-/**
- * The signature a parameter slot offers a contextual stamp, under Design E
- * (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §6): a PLAIN
- * ARROW slot is a contextual slot — the trigger no longer requires the
- * `callback<S>` spelling, which the E3 sweep deletes. A legacy `callback<S>`
- * slot still answers through {@link contextualSlotCallback} (byte-identical
- * until the sweep), and a UNION slot resolves under the same forced-resolution
- * rule: exactly one signature arm, every other arm closed and provably unable
- * to take a function — the only operand shape a stamp rewrites.
+ * The signature a parameter slot offers a contextual stamp (Design E §6,
+ * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`): a PLAIN
+ * ARROW slot is a contextual slot. A UNION slot resolves under the
+ * forced-resolution rule — exactly one signature arm, every other arm closed
+ * and provably unable to take a function, the only operand shape a stamp
+ * rewrites (`Partition`'s `integer | ((T) any -> boolean)`); the stamp never
+ * guesses which arm an operand took.
  *
  * A GROUND arrow answers too: the callers that only care about a solvable slot
  * (the planning pass) decline later for lack of domain variables, and the
  * ground-stamp fallback path keeps its own narrower filter.
  */
 export function contextualSlotSignature(t: Type): FunctionSignature | undefined {
-  const cb = contextualSlotCallback(t);
-  if (cb !== undefined) return cb.signature;
   if (typeof t !== 'object') return undefined;
   if (t.kind === 'signature') return t;
   // A transparent alias IS its definition — §6b's claim that the
@@ -419,7 +362,7 @@ export function contextualSlotSignature(t: Type): FunctionSignature | undefined 
 }
 
 /** Does any DECLARED parameter of `arm` offer a contextual callback slot
- * ({@link contextualSlotCallback})? Allocation-free — the guard on the
+ * ({@link contextualSlotSignature})? Allocation-free — the guard on the
  * contextual pass's whole cost. */
 export function hasCallbackParam(arm: FunctionSignature): boolean {
   for (const a of arm.args ?? [])
@@ -434,7 +377,7 @@ export function hasCallbackParam(arm: FunctionSignature): boolean {
 
 /**
  * The PLANNING pass, write-free: which operands of this application feed a
- * `callback<S>` slot's PARAMETER types, and which slots they feed. It precedes
+ * contextual arrow slot's PARAMETER types, and which slots they feed. It precedes
  * §5's five steps — it decides what step 1 canonicalizes and what step 2
  * solves — rather than being one of them.
  *

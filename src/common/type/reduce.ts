@@ -1,4 +1,3 @@
-import { isCallbackType } from './callback.js';
 import { typeToDedupKey, typeToString } from './serialize.js';
 import {
   assertGroundType,
@@ -81,16 +80,6 @@ export function reduceType(type: Type): Type {
 
     case 'signature':
       return reduceSignatureType(type);
-
-    // The contextual-callback wrapper is ATOMIC: it is never collapsed to the
-    // `function` it means for admission (that erasure is the subtype layer's,
-    // and collapsing here would lose the signature the contextual solve
-    // reads). Its wrapped signature is reduced like any other.
-    case 'callback': {
-      const s = reduceSignatureType(type.signature);
-      if (typeof s !== 'object' || s.kind !== 'signature') return type;
-      return s === type.signature ? type : { kind: 'callback', signature: s };
-    }
 
     case 'value':
       return type;
@@ -293,23 +282,7 @@ function reduceUnionType(type: AlgebraicType): Type {
   const acc: Type[] = [];
   for (const current of reducedTypes) {
     const coveredBy = acc.findIndex((t) => isSubtype(current, t));
-    if (coveredBy !== -1) {
-      // Deterministic tie-break for a MUTUALLY-subtype pair, in the spirit of
-      // `addDedupedMember`: `callback<S>` erases to the primitive `function`
-      // for every admission question (clause 1), so `callback<S>` and
-      // `function` absorb each other and plain "first seen wins" would make
-      // `callback<S> | function` and `function | callback<S>` reduce
-      // differently. The `callback<S>` member wins — it is the one carrying
-      // the signature the contextual solve reads, and keeping the bare
-      // `function` instead would silently stop the stamping.
-      if (
-        isCallbackType(current) &&
-        !isCallbackType(acc[coveredBy]) &&
-        isSubtype(acc[coveredBy], current)
-      )
-        acc[coveredBy] = current;
-      continue;
-    }
+    if (coveredBy !== -1) continue;
     for (let i = acc.length - 1; i >= 0; i--)
       if (isSubtype(acc[i], current)) acc.splice(i, 1);
     acc.push(current);

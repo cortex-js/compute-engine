@@ -93,7 +93,7 @@ function arityFromSignature(sig: unknown): string {
   if (args === '') return '0';
   // Split, and read the optional/variadic markers, at the TOP LEVEL only. A
   // parameter type can carry commas and markers of its own —
-  // `reducer: callback<(unknown, T) -> unknown>` is ONE parameter, and a naive
+  // `reducer: (unknown, T) any -> unknown` is ONE parameter, and a naive
   // `split(',')` counted `Fold` as 4-ary.
   const params = topLevelParams(args);
   if (params.some((p) => /[*+]$/.test(p))) return 'variadic';
@@ -103,8 +103,9 @@ function arityFromSignature(sig: unknown): string {
 
 /** `args` split on the commas that separate PARAMETERS — those outside any
  * `(`, `<` or `[` group. The `>` of an ARROW (`->`) closes nothing: without
- * that exclusion `callback<(unknown, T) -> unknown>` reads as unbalanced and
- * every parameter after it merges into one. */
+ * that exclusion a constructor argument containing an arrow
+ * (`list<(unknown, T) any -> unknown>`) reads as unbalanced and every
+ * parameter after it merges into one. */
 function topLevelParams(args: string): string[] {
   const out: string[] = [];
   let depth = 0;

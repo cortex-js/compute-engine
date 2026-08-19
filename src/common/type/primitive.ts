@@ -268,8 +268,6 @@ export function hasOptionalWithVariadic(t: Type): boolean {
         ) ??
           false)
       );
-    case 'callback':
-      return hasOptionalWithVariadic(t.signature);
     case 'record':
     case 'object':
       return Object.values(t.elements).some(hasOptionalWithVariadic);
@@ -306,7 +304,6 @@ export function isValidType(t: any): t is Readonly<Type> {
   if (!('kind' in t)) return false;
   return (
     t.kind === 'signature' ||
-    t.kind === 'callback' ||
     t.kind === 'union' ||
     t.kind === 'intersection' ||
     t.kind === 'negation' ||

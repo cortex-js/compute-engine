@@ -391,7 +391,7 @@ describe('WHERE CLAUSE — serialize → parse → serialize stability', () => {
     '(tuple<T, U>) -> tuple<U, T> where T, U',
     '(T) random -> T where T',
     '((list<T>) -> T where T) & ((set<T>) -> boolean where T)',
-    '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
+    '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
   ];
   for (const f of forms) {
     test(f, () => {

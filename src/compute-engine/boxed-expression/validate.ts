@@ -10,11 +10,11 @@ import {
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { functionLiteralParameterType } from './function-literal.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import { callbackArityError } from './callback-arity.js';
 import {
   arityProvablyIncapable,
   callbackIncompatibility,
 } from '../../common/type/compatibility.js';
-import { deepEraseCallbackTypes } from '../../common/type/callback.js';
 import { admissionOf, hasValueComponent } from './value-membership.js';
 import {
   broadcastableBaseMatches,
@@ -783,8 +783,7 @@ export function widenUnannotatedLiteralParams(fn: Expression, t: Type): Type {
  * itself when it is a signature, or the signature members of a union or
  * intersection (`Partition`'s `integer | ((T) any -> boolean)`; a user
  * overload set as a parameter). `undefined` when the slot has no arrow arm —
- * the compatibility gate then does not apply. A `callback<S>` slot never
- * reaches this: `groundParam` deep-erases the constructor first.
+ * the compatibility gate then does not apply.
  */
 function paramArrowArms(
   param: Type
@@ -854,7 +853,8 @@ function arrowSlotAdmission(
   ce: ComputeEngine,
   op: Expression,
   param: Type,
-  displayParam: Type | undefined
+  displayParam: Type | undefined,
+  operatorName?: string
 ): Expression | 'admit' | undefined {
   const arms = paramArrowArms(param);
   if (arms === undefined) return undefined;
@@ -877,14 +877,65 @@ function arrowSlotAdmission(
   // (`integer | pure-arrow`), so a whole-param check silently waved an
   // effectful callback through a pure arrow arm. Admission requires one arm
   // that is arity-capable AND effect-admitting AND type-compatible.
+  // The slot arm's ADMISSIBLE arity range walks required → optional →
+  // variadic, exactly as the operand side does — reading `args.length`
+  // alone under-counted a slot whose own arrow carries an optional or
+  // variadic tail (`((number, number?) -> number)`), and the E3 mint then
+  // falsely rejected arity-capable callbacks (dual-review finding).
+  const armArityRange = (arm: FunctionSignature): [number, number] => {
+    const req = arm.args?.length ?? 0;
+    const max =
+      arm.variadicArg !== undefined
+        ? Infinity
+        : req + (arm.optArgs?.length ?? 0);
+    return [req, max];
+  };
+  const capableAt = (arm: FunctionSignature): boolean => {
+    const [lo, hi] = armArityRange(arm);
+    // Capable iff SOME call arity satisfies both the slot's range and the
+    // operand's own: the ranges intersect. `arityProvablyIncapable` answers
+    // for a single count; probe the bounds (ranges are contiguous).
+    if (!arityProvablyIncapable(opType, Math.min(lo, hi))) return true;
+    if (hi !== lo && !arityProvablyIncapable(opType, Math.min(hi, lo + 8)))
+      return true;
+    return false;
+  };
   let sawArityCapableArm = false;
   for (const arm of arms) {
-    if (arityProvablyIncapable(opType, arm.args?.length ?? 0)) continue;
+    if (!capableAt(arm)) continue;
     sawArityCapableArm = true;
     if (!narrowingPreservesEffects(opType, arm)) continue;
     if (callbackIncompatibility(arm, opType) === undefined) return 'admit';
   }
-  if (!sawArityCapableArm) return 'admit';
+  if (!sawArityCapableArm) {
+    // Rule 2's diagnostic for a slot with NO hand-wired arity machinery —
+    // user-declared operators (Design E §12d). The shipped
+    // `callbackArityError` is minted with a supply DERIVED from the slot
+    // arms' own arities; the library's collection operators never reach
+    // this (their canonical handlers minted the richer per-operator wording
+    // BEFORE validation ran). With no operator name to word the sentence,
+    // or an operand arity the expression-level reader cannot confirm,
+    // ADMIT — byte-identical to the pre-E3 behavior.
+    if (operatorName === undefined) return 'admit';
+    // A variadic slot arm has no single supply count to word a sentence
+    // around — and its unbounded range never proves incapability anyway.
+    if (arms.some((arm) => arm.variadicArg !== undefined)) return 'admit';
+    const counts = new Set<number>();
+    for (const arm of arms) {
+      const [lo, hi] = armArityRange(arm);
+      for (let n = lo; n <= hi; n++) counts.add(n);
+    }
+    return (
+      callbackArityError(
+        op,
+        operatorName,
+        [...counts].map((count) => ({
+          count,
+          describes: 'per the declared parameter list',
+        }))
+      ) ?? 'admit'
+    );
+  }
   return ce.typeError(displayParam ?? param, op.type, op);
 }
 
@@ -972,6 +1023,11 @@ export interface ValidateArgumentsInternals {
    * The winning arm's REAL validation — non-trial, no frame — performs any
    * repairs, exactly once. */
   trial?: boolean;
+  /** The OPERATOR (or function-valued symbol) being applied, for diagnostics
+   * that name it — the compatibility gate's generic `callback-arity` mint
+   * (Design E §12d). Absent where no name is known; the mint then declines
+   * rather than word a sentence about an anonymous operator. */
+  operatorName?: string;
   /** The solve `resolveOverload` already ran on this (single-arm, polytype)
    * signature with the identical context — reused instead of re-solving. */
   armSolution?: TypeInferenceResult;
@@ -1214,23 +1270,6 @@ export function validateArguments(
     : undefined;
   let paramStillOpen = false;
   const groundParam = (param: Type): Type => {
-    // Design D §4, contract clause 1: a `callback<S>` slot is the primitive
-    // `function` for EVERY argument-validation decision. Erased once here, at
-    // the projection every gate below reads, so admission, the reported
-    // expected type and the post-validation `_infer()` write are all
-    // byte-identical to the bare-`function` slot this converted from — the
-    // wrapped signature is contextual-typing information and never escapes
-    // through an inference WRITE or a diagnostic. (It legitimately survives
-    // where a user DECLARED it: a value declared `callback<S>` carries the
-    // constructor in its definition, per clause 5; R-D5 erases it again at the
-    // display surfaces.)
-    //
-    // DEEP: the builtins converted so far write the constructor as a whole
-    // parameter slot, but a USER-declared signature may nest it
-    // (`(list<callback<(integer) -> boolean>>) -> integer`), and a top-level-
-    // only erasure would leak `callback<…>` into both the diagnostic and the
-    // `_infer()` write for those.
-    param = deepEraseCallbackTypes(param);
     if (!solved) return param;
     const t = instantiatedParam(param, solved.bindings);
     if (t !== undefined) return t;
@@ -1295,9 +1334,7 @@ export function validateArguments(
       : undefined;
   const displayParam = (param: Type, ground: Type): Type => {
     if (displayBindings === undefined) return ground;
-    // Clause 1 again: what is DISPLAYED for a callback slot is `function` —
-    // deeply, for the nested-slot reason `groundParam` documents.
-    const t = instantiatedParam(deepEraseCallbackTypes(param), displayBindings);
+    const t = instantiatedParam(param, displayBindings);
     return t === undefined ? ground : reduceType(t);
   };
   const displayParams =
@@ -1437,7 +1474,13 @@ export function validateArguments(
       // (it is a per-call supply, not the operand's own contract), so they
       // are excluded from the final `_infer(param)` narrowing via
       // `deferredIdx`, exactly like the other provisional admissions.
-      const compat = arrowSlotAdmission(ce, op, param, displayParams[idx]);
+      const compat = arrowSlotAdmission(
+        ce,
+        op,
+        param,
+        displayParams[idx],
+        internals?.operatorName
+      );
       if (compat === 'admit') {
         result.push(op);
         deferredIdx.add(result.length - 1);
@@ -1621,7 +1664,8 @@ export function validateArguments(
         ce,
         op,
         param,
-        displayOptParams[i - params.length]
+        displayOptParams[i - params.length],
+        internals?.operatorName
       );
       if (compat === 'admit') {
         result.push(op);
@@ -1750,7 +1794,13 @@ export function validateArguments(
       }
       if (!op.type.matches(varParam)) {
         // Design E §3 compatibility admission — see the required-param gate.
-        const compat = arrowSlotAdmission(ce, op, varParam, displayVarParam);
+        const compat = arrowSlotAdmission(
+          ce,
+          op,
+          varParam,
+          displayVarParam,
+          internals?.operatorName
+        );
         if (compat === 'admit') {
           result.push(op);
           deferredIdx.add(result.length - 1);

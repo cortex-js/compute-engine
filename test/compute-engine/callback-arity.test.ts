@@ -470,12 +470,13 @@ describe('CALLBACK ARITY — the check DECLINES when the arity is not readable',
     );
   });
 
-  test('a `callback<…>`-typed symbol declines; a plain arrow is checked', () => {
+  test('the retired `callback<…>` spelling fails to parse; a plain arrow is checked', () => {
     const ce = new ComputeEngine();
-    // A `callback<S>` slot exists to admit BROADLY (Design D §4 clause 1), so
-    // a value typed that way says nothing binding about its arity.
-    ce.declare('cb', 'callback<(number, number) -> boolean>');
-    expect(hasArityError(ce.box(['Filter', LIST, 'cb']))).toBe(false);
+    // Design E §7 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`):
+    // the constructor is gone from the type grammar, with a migration hint.
+    expect(() =>
+      ce.declare('cb', 'callback<(number, number) -> boolean>')
+    ).toThrow(/retired: write the arrow directly/);
 
     ce.declare('h', '(number, number) -> boolean');
     expect(ce.box(['Filter', LIST, 'h']).toString()).toContain(

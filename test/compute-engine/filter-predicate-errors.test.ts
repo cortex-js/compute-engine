@@ -107,25 +107,20 @@ describe('Sibling predicate consumers with an Error-valued result', () => {
       expect(result.toString()).not.toContain('Did you mean');
     });
 
-    test(`${op} rejects (or errors on) a genuine non-boolean predicate`, () => {
+    test(`${op} rejects a genuine non-boolean predicate at canonicalization`, () => {
+      // Design E §9 Q3 (`docs/plans/2026-08-18-compatibility-admission-
+      // callbacks.md`, ruled 2026-08-18): a provably non-boolean predicate is
+      // rejected at CANONICALIZATION — the program could only ever throw
+      // `must return "True" or "False"` per element. The E3 sweep converted
+      // the whole family.
       const ce = new ComputeEngine();
       const e = ce.box([
         op,
         ['List', 1, 2, 3],
         ['Function', ['Add', 'k', 1], 'k'],
       ]);
-      if (op === 'CountIf') {
-        // Design E §9 Q3 (`docs/plans/2026-08-18-compatibility-admission-
-        // callbacks.md`, ruled 2026-08-18): a converted operator rejects a
-        // provably non-boolean predicate at CANONICALIZATION — the program
-        // could only ever throw `must return "True" or "False"` per element,
-        // so the failure moves to declaration time. The unconverted siblings
-        // keep the runtime throw until the E3 sweep converts them.
-        expect(e.isValid).toBe(false);
-        expect(e.toString()).toContain('incompatible-type');
-      } else {
-        expect(() => e.evaluate()).toThrow('must return "True" or "False"');
-      }
+      expect(e.isValid).toBe(false);
+      expect(e.toString()).toContain('incompatible-type');
     });
   }
 
@@ -211,17 +206,18 @@ describe('Any/All with an Error-valued predicate result', () => {
       ).toBe('"True"');
     });
 
-    test(`${op} stays inert for a genuine non-boolean predicate`, () => {
-      // Unlike the eager siblings, the quantifiers never threw here: a
-      // non-boolean result is "undetermined" and the expression stays inert.
-      // Surfacing the ERROR value must not change that.
+    test(`${op} rejects a genuine non-boolean predicate at canonicalization`, () => {
+      // Design E §9 Q3 (E3 sweep): a provably non-boolean predicate is a
+      // can-only-fail program — the quantifiers' historical inertness moves
+      // to a canonicalization-time rejection.
       const ce = new ComputeEngine();
       const e = ce.box([
         op,
         ['List', 1, 2, 3],
         ['Function', ['Add', 'k', 1], 'k'],
       ]);
-      expect(e.evaluate().operator).toBe(op);
+      expect(e.isValid).toBe(false);
+      expect(e.toString()).toContain('incompatible-type');
     });
   }
 

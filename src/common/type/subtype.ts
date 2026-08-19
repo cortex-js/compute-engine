@@ -34,7 +34,6 @@ import type {
   TypeString,
 } from './types.js';
 import { parseType } from './parse.js';
-import { deepEraseCallbackTypes, eraseCallbackType } from './callback.js';
 import { isEffectSubset } from './effects.js';
 import {
   _setTypeAlgebra,
@@ -453,9 +452,6 @@ function endUnfoldAgainst(ref: TypeReference, lhs: unknown): void {
 export function provablyDisjoint(a: Type, b: Type): boolean {
   assertGroundType('provablyDisjoint', a);
   assertGroundType('provablyDisjoint', b);
-  // Clause 1: `callback<S>` is the primitive `function` here too.
-  a = eraseCallbackType(a);
-  b = eraseCallbackType(b);
   if (a === 'never' || b === 'never') return true; // empty set
   if (a === 'any' || b === 'any') return false;
 
@@ -648,8 +644,6 @@ function typeCategory(t: Type): PrimitiveType | undefined {
     case 'indexed_collection':
       return 'indexed_collection';
     case 'signature':
-    // Clause 1: the constructor inhabits the `function` bucket, nothing else.
-    case 'callback':
       return 'function';
     case 'symbol':
       return 'symbol';
@@ -748,9 +742,6 @@ const BARE_COLLECTION_EXPANSIONS: Partial<Record<string, Type>> = Object.assign(
 );
 
 export function couldMatch(a: Type, b: Type): boolean {
-  // Clause 1: `callback<S>` is the primitive `function` here too.
-  a = eraseCallbackType(a);
-  b = eraseCallbackType(b);
 
   // `never` is uninhabited: no value is one.
   if (a === 'never' || b === 'never') return false;
@@ -892,16 +883,6 @@ function isPolytype(t: FunctionSignature): boolean {
  * are the two spellings of the same ∅ effect set (`isEffectSubset` already
  * treats them as equal on the ground path), and comparing serializations would
  * make the generic path gratuitously stricter than the ground one.
- *
- * The keys are computed on the CALLBACK-ERASED types (Design D §4 clause 1).
- * The dedup key deliberately PRESERVES `callback<S>` (clause 5, round-tripping)
- * — but this is an admission decision, and for admission `callback<S>` IS the
- * primitive `function`. Without the erasure, `(collection<T>,
- * callback<(T) -> boolean>) -> integer where T` and `(collection<T>,
- * function) -> integer where T` would be unrelated in BOTH directions, which is exactly
- * the equivalence clause 1 promises. Erasure is DEEP here: unlike the
- * structural walk in `isSubtype`, this path consumes the whole type as one
- * string.
  */
 function alphaEquivalentSignatures(
   a: FunctionSignature,
@@ -920,7 +901,7 @@ function alphaEquivalentSignatures(
     if ((aBound === undefined) !== (bBound === undefined)) return false;
     if (
       aBound !== undefined &&
-      erasedDedupKey(aBound) !== erasedDedupKey(bBound!)
+      typeToDedupKey(aBound) !== typeToDedupKey(bBound!)
     )
       return false;
     renaming[ap[i].name] = { kind: 'variable', name: bp[i].name };
@@ -931,13 +912,7 @@ function alphaEquivalentSignatures(
   const renamed = substituteTypeVariables(a, renaming);
   const stripped: FunctionSignature = { ...b };
   delete stripped.typeParams;
-  return erasedDedupKey(renamed) === erasedDedupKey(stripped);
-}
-
-/** {@linkcode typeToDedupKey} of `t` with every `callback<S>` erased to
- * `function`, at any depth — the key to compare on an ADMISSION path. */
-function erasedDedupKey(t: Type): string {
-  return typeToDedupKey(deepEraseCallbackTypes(t));
+  return typeToDedupKey(renamed) === typeToDedupKey(stripped);
 }
 
 /** Return true if lhs is a subtype of rhs */
@@ -949,20 +924,6 @@ export function isSubtype(
     lhs = parseType(lhs);
   if (typeof rhs === 'string' && !PRIMITIVE_TYPES_SET.has(rhs as PrimitiveType))
     rhs = parseType(rhs);
-
-  // Design D §4, contract clause 1: `callback<S>` IS the primitive `function`
-  // for every subtyping decision, in both directions. `S` is contextual-typing
-  // information, never an admission constraint — erasing it here is what keeps
-  // a converted operator's callback slot admitting exactly what the bare
-  // `function` slot admitted (a narrower named predicate, a `function`-typed
-  // symbol, an unknown-result literal). Shallow: the STRUCTURAL walk below
-  // recurses through this same entry point, so a nested occurrence reaching it
-  // as a child is erased in turn. It does NOT cover the paths that consume a
-  // type whole — notably `alphaEquivalentSignatures`, which compares dedup-key
-  // STRINGS (and the key preserves `callback<S>` by clause 5); that path erases
-  // deeply for itself.
-  lhs = eraseCallbackType(lhs as Type);
-  rhs = eraseCallbackType(rhs as Type);
 
   //
   // A structural alias reference on the LHS unfolds to its definition

@@ -258,15 +258,6 @@ export function typeToString(type: Type, precedence = 0): string {
       result = `broadcastable<${typeToString(type.elements)}>`;
       break;
 
-    // INTERNAL serialization PRESERVES the contextual-callback constructor
-    // (Design D §4, contract clause 5): the wrapped signature is what a later
-    // contextual solve reads, so it has to survive a serialize/parse round
-    // trip and has to keep the type distinct from the bare `function` in a
-    // dedup key. User-facing erasure, where it applies, is a display concern.
-    case 'callback':
-      result = `callback<${typeToString(type.signature)}>`;
-      break;
-
     case 'collection':
       result = `collection<${typeToString(type.elements)}>`;
       break;
@@ -398,8 +389,6 @@ function getPrecedence(kind: string): number {
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
-    // Bracketed, like the other `name<…>` constructors: never parenthesized.
-    case 'callback':
       return COLLECTION_PRECEDENCE;
     case 'tuple':
       return TUPLE_PRECEDENCE;

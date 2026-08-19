@@ -1,4 +1,3 @@
-import { eraseCallbackType } from './callback.js';
 import { signatureArms } from './utils.js';
 import { freeTypeVariables } from './instantiate.js';
 import { provablyDisjoint } from './subtype.js';
@@ -16,7 +15,7 @@ import type { FunctionSignature, Type } from './types.js';
  * other rules live elsewhere by design:
  *
  * - rule 2 (arity) is the shipped `callbackArityError`
- *   (`src/compute-engine/library/callback-arity.ts`);
+ *   (`src/compute-engine/boxed-expression/callback-arity.ts`);
  * - rule 5 (effects) is the existing effect-subset check at the call
  *   boundary (`docs/EFFECTS-MODEL.md`);
  * - the engine's planning pass (Design E §6) sequences all three and decides
@@ -68,10 +67,7 @@ export function callbackIncompatibility(
   supply: Readonly<FunctionSignature>,
   operand: Readonly<Type>
 ): CallbackIncompatibility | undefined {
-  // Transition period only: an operand may still be TYPED `callback<S>`
-  // (a value declared with the constructor, legal until Design E phase E3
-  // deletes it). Clause 1 semantics: it is the primitive `function`.
-  const f = eraseCallbackType(operand as Type);
+  const f = operand as Type;
 
   // Rule 1 — not callable. `provablyDisjoint` distributes over unions, so a
   // union with any possibly-callable arm passes. Guard the ground-type
@@ -112,9 +108,6 @@ function collectSignatureArms(
   switch (t.kind) {
     case 'signature':
       return [t];
-    case 'callback':
-      // Clause 1: the constructor is the primitive `function` — wildcard.
-      return undefined;
     case 'variable':
       return undefined;
     case 'union':

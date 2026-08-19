@@ -284,10 +284,6 @@ export function taggedSumInType(
         return visit(x.values);
       case 'signature':
         return x.result === undefined ? undefined : visit(x.result);
-      case 'callback':
-        // A contextual callback wraps a signature — the RESULT rule applies to
-        // it exactly as it does to a bare `signature`.
-        return visit(x.signature);
       default:
         // The remaining kinds carry no `Type` payload to descend into
         // (`variable`, `symbol`, `expression`, `numeric`, `value`). Every

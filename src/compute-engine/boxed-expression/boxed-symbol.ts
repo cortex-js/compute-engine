@@ -16,8 +16,6 @@ import {
 import { reduceType } from '../../common/type/reduce.js';
 import type { OneOf } from '../../common/one-of.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
-import { typeToDisplayString } from '../../common/type/display.js';
-import { deepEraseCallbackTypes } from '../../common/type/callback.js';
 import { parseType } from '../../common/type/parse.js';
 
 import type { BigNum } from '../numerics/types.js';
@@ -803,29 +801,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    */
   get type(): BoxedType {
     const def = this._def;
-    // R-D5 (Design D): a NAME PRINTS its signature in the GROUND display form
-    // — a converted operator's `callback<S>` slot reads as the `function` slot
-    // it converted from, and its `where`-bound variables at their ground skeleton.
-    // Neither carries admission information (contract clause 1), so the printed
-    // string is byte-identical to the pre-conversion type.
-    //
-    // The projection is applied at STRINGIFICATION ONLY: the boxed type
-    // returned here holds the definition's own `Type`, unchanged, and merely
-    // prints differently (`BoxedType.withDisplayString`). Applying it to the
-    // TYPE — which is what this getter used to do — made a display ruling
-    // semantics-visible: an overload set reduced to `nothing`, a dropped
-    // `where` clause flipped `isPolymorphic` and broke `Ground <: Poly`, and
-    // re-boxing the projected polytype could throw `unsolvable-type-variable`
-    // out of the getter.
-    //
-    // BOTH definition kinds, because the same signature can be either: a
-    // function-typed VALUE definition (`Declare(f, "(collection<T>,
-    // callback<…>) -> …")`) displayed the raw `where`/`callback<>` where the
-    // identical OPERATOR definition displayed the ground form. The projection
-    // is trigger-scoped — a type with no `callback<S>` is returned by
-    // reference — so nothing else moves.
-    if (isValueDef(def)) return groundedValueDisplay(def.value);
-    if (isOperatorDef(def)) return groundedSignatureDisplay(def.operator);
+    // The definition's own type, faithfully — Design E retired the R-D5
+    // display projection with the `callback<S>` constructor: an honest arrow
+    // slot displays as itself
+    // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §8).
+    if (isValueDef(def)) return def.value.type;
+    if (isOperatorDef(def)) return def.operator.signature;
     return BoxedType.unknown;
   }
 
@@ -1711,45 +1692,3 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 }
 
-/**
- * R-D5 display cache: the FAITHFUL type of a definition — an operator's
- * signature or a function-typed value's type — carrying the ground display
- * string ({@linkcode typeToDisplayString}) as a print-time override.
- *
- * Keyed on the `BoxedType` itself, so a definition whose type is REPLACED
- * (`_update()`, an inference write) is re-projected on the next read, and a
- * definition whose type is unchanged never re-allocates. The overwhelmingly
- * common case — a type with no `callback<S>` anywhere — stores the ORIGINAL
- * object, which also keeps its type resolver.
- */
-const GROUNDED_SIGNATURE_DISPLAY = new WeakMap<BoxedType, BoxedType>();
-
-function groundedSignatureDisplay(def: BoxedOperatorDefinition): BoxedType {
-  return groundedTypeDisplay(def.signature);
-}
-
-/** R-D5 for the VALUE-definition surface: a function-typed value declared with
- * a `callback<S>` slot displays the same ground form its operator-definition
- * twin does. */
-function groundedValueDisplay(def: BoxedValueDefinition): BoxedType {
-  return groundedTypeDisplay(def.type);
-}
-
-function groundedTypeDisplay(t: BoxedType): BoxedType {
-  // A primitive type carries no `callback<S>`, so the projection is the
-  // identity: return by reference without touching the WeakMap. This getter
-  // runs on EVERY symbol `.type` read (~39×/box in the P-BOX canary), so the
-  // fast path is load-bearing, not cosmetic.
-  if (typeof t.type === 'string') return t;
-  const cached = GROUNDED_SIGNATURE_DISPLAY.get(t);
-  if (cached !== undefined) return cached;
-  // The trigger is the presence of a `callback<S>` and nothing else (R-D5
-  // scoping): a type with none is returned BY REFERENCE, `where` clause included.
-  // `deepEraseCallbackTypes` is identity-preserving, so this IS that test.
-  const result =
-    deepEraseCallbackTypes(t.type) === t.type
-      ? t
-      : t.withDisplayString(() => typeToDisplayString(t.type));
-  GROUNDED_SIGNATURE_DISPLAY.set(t, result);
-  return result;
-}

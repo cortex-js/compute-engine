@@ -65,7 +65,6 @@ import {
 import type { CallbackSlot, Threadable } from './generic-instantiation.js';
 import {
   contextualCallbackPlan,
-  contextualSlotCallback,
   hasCallbackParam,
   instantiateCallbackSlots,
 } from './generic-instantiation.js';
@@ -1019,32 +1018,22 @@ function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
  * are not types a literal can be annotated with, and instantiating them is the
  * contextual solve's job.
  *
- * A `callback<S>` slot reads as `S`. Design D §4 makes contextual typing `S`'s
- * ONLY purpose, so a GROUND one — a user-declared MONOMORPHIC signature that
- * spells a slot `callback<(integer) -> boolean>` — has to stamp here or be dead
- * weight: it never reaches the contextual solve (that route is entered only by
- * a polytype, and a ground `S` has no domain variables to solve anyway).
- * Admission is untouched by this: clause 1's erasure to `function` happens in
- * the subtype layer and in `validateArguments`, so the `callback<S>` spelling
- * admits BROADLY where the plain-arrow spelling narrows — the difference
- * between the two spellings is admission, never the stamp.
+ * Admission is untouched by the stamp either way: an arrow slot admits by
+ * COMPATIBILITY (Design E §3,
+ * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`), and what is
+ * annotated here is the author's own declared contract.
  */
 function declaredCallbackParamTypes(t: Type): DeclaredCallbackSlot | undefined {
-  const callback = contextualSlotCallback(t);
-  const sig = callback?.signature ?? t;
+  const sig = t;
   if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
   if (sig.typeParams !== undefined && sig.typeParams.length > 0)
     return undefined;
   const args = sig.args;
   if (args === undefined || args.length === 0) return undefined;
-  // A contextual slot is gated by `admissibleElementType`, as on the
-  // contextual-solve path; a plain arrow is an explicit author-written
-  // contract and keeps its wider `concreteCallbackParamType` gate.
-  const types = args.map((arg) =>
-    callback === undefined
-      ? concreteCallbackParamType(arg.type)
-      : stampableParamType(arg.type)
-  );
+  // A plain arrow is an explicit author-written contract and keeps the wider
+  // `concreteCallbackParamType` gate (the contextual-solve path applies its
+  // own `admissibleElementType` gate to what it stamps).
+  const types = args.map((arg) => concreteCallbackParamType(arg.type));
   if (!types.some((x) => x !== undefined)) return undefined;
   // The declared slot's CONSUMPTION arity: its required parameters, optionally
   // through its optional ones, and unbounded when it declares a variadic tail.
@@ -1093,7 +1082,7 @@ function concreteCallbackParamType(t: Type): Type | undefined {
  * (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ruling 1): a
  * callee whose signature declares a concrete arrow-typed parameter annotates
  * an INLINE `Function` literal passed at that position with the declared
- * parameter types — a plain arrow, or a ground `callback<S>` (see
+ * parameter types — a plain concrete arrow (see
  * {@link declaredCallbackParamTypes}). This is what the mechanism offers
  * USER-DEFINED functions; no library signature qualifies, every converted
  * library slot being a POLYTYPE that takes the contextual route below.
@@ -1104,7 +1093,7 @@ function concreteCallbackParamType(t: Type): Type | undefined {
  *
  * An OVERLOAD set is skipped: resolution happens after this hook and the
  * annotation would itself feed the resolution. The one exception is R-D4
- * resolve-then-stamp — an arm that declares a `callback<S>` — since a
+ * resolve-then-stamp — an arm that declares a contextual arrow slot — since a
  * contextual stamp is decided by the DECLARED slot, never by the operand's own
  * type, so it cannot feed the resolution it follows.
  */
@@ -1128,7 +1117,7 @@ function annotateCallbacksFromSignature(
   // A POLYMORPHIC callee takes the CONTEXTUAL route instead (Design D): its
   // parameter types mention the variables its own `where` clause binds, so
   // stamping one verbatim would leave `T` unresolved outside that scope (or
-  // capture an unrelated nominal type of the same name). Only a `callback<S>`
+  // capture an unrelated nominal type of the same name). Only a contextual
   // slot is contextually typed there, and only after `S` has been
   // instantiated from the sibling operands.
   if (sigType.typeParams !== undefined && sigType.typeParams.length > 0)
@@ -1143,18 +1132,11 @@ function annotateCallbacksFromSignature(
  * ({@link declaredCallbackParamTypes}) and an inline `Function` literal there is
  * annotated with them.
  *
- * `contextualOnly` restricts the scan to `callback<S>` slots. That is the shape
- * the contextual pass falls back to when its solve has nothing to solve — a
- * GROUND `S` in a POLYMORPHIC arm — where the plain-arrow slots of the same arm
- * must still decline: their types mention the variables the arm's own `where`
- * clause binds, and stamping one verbatim would leave `T` unresolved outside that
- * scope.
  */
 function annotateFromDeclaredParams(
   ce: ComputeEngine,
   ops: ReadonlyArray<ExpressionInput>,
-  sig: FunctionSignature,
-  contextualOnly = false
+  sig: FunctionSignature
 ): ReadonlyArray<ExpressionInput> {
   let result: ExpressionInput[] | undefined;
   for (let i = 0; i < ops.length; i++) {
@@ -1164,7 +1146,6 @@ function annotateFromDeclaredParams(
     // triggers exactly like a required one.
     const param = paramAt(sig, i);
     if (param === undefined) break;
-    if (contextualOnly && contextualSlotCallback(param) === undefined) continue;
     const slot = declaredCallbackParamTypes(param);
     if (slot === undefined) continue;
     // The raw box is taken here rather than left to
@@ -1193,7 +1174,7 @@ function annotateFromDeclaredParams(
 /**
  * The CONTEXTUAL-CALLBACK trigger (Design D, `docs/plans/2026-08-09-design-d-
  * generic-callback-signatures.md` §5): a POLYMORPHIC callee with a
- * `callback<S>` slot annotates an INLINE `Function` literal at that slot with
+ * contextual arrow slot annotates an INLINE `Function` literal at that slot with
  * `S`'s parameter types, instantiated from the sibling operands.
  *
  * The five steps of §5, in the spec's numbering:
@@ -1211,7 +1192,8 @@ function annotateFromDeclaredParams(
  *    verbatim from the `callbackElementOf` metadata trigger this replaced);
  * 4. **result-side** variables are solved from the callback's own type — NOT
  *    this pass: they are left open here and fall to ordinary validation;
- * 5. **validate** proceeds normally — where a `callback<S>` slot admits
+ * 5. **validate** proceeds normally — where an arrow slot admits by
+ *    COMPATIBILITY (Design E §3), broad in exactly the way a bare slot
  *    exactly what the primitive `function` admits (§4 clause 1).
  *
  * The discrimination that precedes step 1 (does the arm declare a slot, does
@@ -1248,13 +1230,21 @@ function annotateCallbacksFromContextualSolve(
   // the same field scan, and on the overload route `resolveContextualArm` has
   // already run it a third time.
   const plan = contextualCallbackPlan(arm, ops.length, true);
-  if (plan === undefined)
-    // No plan, but the arm DOES declare a contextual slot — the GROUND-`S`
-    // case, where there are no domain variables to solve (and hence no
-    // sources). A ground `callback<(integer) -> boolean>` stamps directly off
-    // the declaration, exactly as the identical NON-generic signature does on
-    // the route above; without this an overload arm silently stamped nothing.
-    return annotateFromDeclaredParams(ce, ops, arm, true);
+  if (plan === undefined) {
+    // No plan: the arm's arrow slots have no domain variables to solve. A
+    // MONOMORPHIC arm — an overload-set arm reached through
+    // `resolveContextualArm` — stamps its concrete arrow slots straight off
+    // the declaration, exactly as the identical standalone signature does;
+    // without this, an overload arm silently stamped nothing (the Design D
+    // ground-`S` fallback, inherited by the arrow spelling). A POLYMORPHIC
+    // arm's ground arrow slot deliberately declines: pre-Design-E plain
+    // arrows in polytype arms never stamped on this route, and
+    // `declaredCallbackParamTypes` cannot judge which of the arm's own
+    // `where`-bound variables its sibling slots mention.
+    if (arm.typeParams === undefined || arm.typeParams.length === 0)
+      return annotateFromDeclaredParams(ce, ops, arm);
+    return ops;
+  }
 
   // The raw box is computed ONCE per slot here and threaded into the stamp
   // below. `annotateFunctionLiteralParams` still re-boxes what it is given —
@@ -1297,11 +1287,11 @@ function annotateCallbacksFromContextualSolve(
   for (const { slot, raw } of stampable) {
     const s = instantiated.get(slot.index);
     if (s === undefined) continue;
-    // A VARIADIC `S` (`callback<(T+) -> U>`) would pair one parameter with N
-    // sources. No converted signature spells one: R-D6, which existed only to
-    // stamp `Map`'s variadic arrow, was RETIRED with the §6 re-ruling (that
-    // clause declares no contextual slot at all). A slot that did spell one
-    // declines outright rather than stamping a guess.
+    // A VARIADIC contextual arrow (`(T+) any -> U` as a SLOT) would pair one
+    // parameter with N sources. No converted signature spells one — `Map`'s
+    // variadic (zip) clause deliberately declares no contextual slot — and a
+    // slot that did spell one declines outright rather than stamping a
+    // guess.
     if (s.variadicArg !== undefined) continue;
     // ARITY GUARD: the stamp pairs the literal's parameters with `S`'s
     // POSITIONALLY, so a literal of the wrong arity would take a PARTIAL stamp
@@ -1361,7 +1351,7 @@ function inlineLiteral(
   return raw;
 }
 
-/** An instantiated `callback<S>` parameter type this trigger will stamp, or
+/** An instantiated contextual arrow parameter type this trigger will stamp, or
  * `undefined`. The gate is {@link admissibleElementType}'s — including the
  * PERMANENT union exclusion — plus the ground-type invariant: a parameter
  * still mentioning a variable the solve could not pin says nothing about an
@@ -1901,7 +1891,7 @@ function makeCanonicalFunctionCore(
         threadableGate(valueType, paramsAreScalar(valueType)),
         undefined,
         undefined,
-        { resolutionOut: valueResolutionOut }
+        { resolutionOut: valueResolutionOut, operatorName: name }
       );
       if (invalid) {
         // Only reject *closed* operands — literals and constant expressions
@@ -2293,7 +2283,7 @@ function applyOperatorDefinition(
             threadableGate(opDef.signature.type, opDef.broadcastable === true),
             undefined,
             undefined,
-            { resolutionOut: lazyResolutionOut }
+            { resolutionOut: lazyResolutionOut, operatorName: name }
           ) ?? xs),
       { metadata, canonical: true, scope }
     );
@@ -2454,7 +2444,7 @@ function applyOperatorDefinition(
         // an absent (`Missing`) or possibly-absent (`T | missing`) operand in a
         // stripped position; the runtime gate carries the absence.
         (i) => opDef.stripsMissingAt(i),
-        { resolutionOut }
+        { resolutionOut, operatorName: name }
       );
 
   if (adjustedArgs) {

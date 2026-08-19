@@ -18,7 +18,6 @@ import {
   DictionaryTypeNode,
   SetTypeNode,
   BroadcastableTypeNode,
-  CallbackTypeNode,
   CollectionTypeNode,
   ExpressionTypeNode,
   SymbolTypeNode,
@@ -251,8 +250,8 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
  */
 
 /**
- * True when `node` is an arrow signature, looking through the redundant
- * parentheses `callback<((T) -> boolean)>` produces.
+ * True when `node` is an arrow signature, looking through redundant
+ * parentheses (`((T) -> boolean)`).
  *
  * A `where`-constrained node answers `true` as well — not because it is
  * admissible, but because it already has a *better* rejection downstream (a
@@ -1943,46 +1942,22 @@ export class Parser {
   }
 
   /**
-   * `callback<(T) -> boolean>` — the contextual-callback constructor (Design D
-   * §4). The wrapped type must be a signature, which the builder checks.
-   *
-   * Recognized only when a `<` follows. The escape that leaves is NARROW, and
-   * covers only the BARE spelling: a user type declared and referenced without
-   * arguments (`type alias callback = integer`, used as `callback`) is still an
-   * ordinary type reference. An APPLIED one is not reachable at all —
-   * `callback<integer>` always parses here, so a user's generic `callback<T>`
-   * can be declared but never used. That is the same fate every other
-   * constructor keyword deals a same-named user type (`collection<T>`,
-   * `list<T>`, `tuple<T>`, … are all hijacked at use on both declaration
-   * routes); `callback` differs only in that its hijack REPORTS itself — the
-   * application fails to parse with "expects a function signature" instead of
-   * silently resolving to the builtin.
+   * The RETIRED `callback<…>` constructor (Design E,
+   * `docs/plans/2026-08-18-compatibility-admission-callbacks.md` §7): callback
+   * slots are ordinary arrow types now, admitted by compatibility rather than
+   * subtyping, so the constructor no longer exists. A signature that still
+   * spells it fails LOUDLY with a migration hint instead of silently resolving
+   * to a same-named user type — the bare spelling (`type alias callback = …`,
+   * used without `<`) remains an ordinary type reference.
    */
-  private parseCallbackType(): CallbackTypeNode | undefined {
+  private parseCallbackType(): TypeNode | undefined {
     if (this.current.type !== 'IDENTIFIER' || this.current.value !== 'callback')
       return undefined;
     if (this.lexer.peekToken().type !== '<') return undefined;
-
-    this.advance();
-    this.expect('<');
-    const payloadToken = this.current;
-    const signatureType = this.parseUnionType();
-    if (!signatureType) this.error('Expected a function signature');
-    // Reject a non-signature payload HERE, with the parser's own caret, rather
-    // than letting it reach the builder: the builder's bare `throw` carries no
-    // position, and `parseTypePrefix()` callers (the Epsil annotation route)
-    // surface it verbatim, unlike every other type rejection. The builder check
-    // stays as the backstop for any node this one cannot judge.
-    if (!isFunctionSignatureNode(signatureType!))
-      this.errorAtToken(
-        payloadToken,
-        '`callback<…>` expects a function signature, e.g. `callback<(T) -> boolean>`'
-      );
-    this.expect('>');
-
-    return this.createNode<CallbackTypeNode>('callback', {
-      signatureType: signatureType!,
-    });
+    this.error(
+      'The `callback<…>` constructor was retired: write the arrow directly (e.g. `(T) any -> boolean`) — callback operands are admitted by compatibility, not subtyping'
+    );
+    return undefined;
   }
 
   private parseCollectionType(): CollectionTypeNode | undefined {

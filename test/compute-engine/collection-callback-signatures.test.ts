@@ -123,21 +123,31 @@ describe('a parameterless operand is rejected at every callback slot', () => {
     expect(ce.box([op, XS, 5]).isValid).toBe(false);
   });
 
-  // The diagnostic is the declared slot's, identical on both halves — the
-  // eager one from `validateArguments`, the lazy one from the operand the
-  // canonical handler replaced with it. A Design E-converted operator
-  // (`CountIf`, phase E1) names its honest INSTANTIATED arrow instead of the
-  // erased `function` — strictly more informative, and the whole family
-  // converges on that spelling as the E3 sweep converts the rest
-  // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §8).
-  const CONVERTED_EXPECTED: Record<string, string> = {
+  // The diagnostic is the declared slot's, on both halves. The EAGER route
+  // (`validateArguments`) names the honest INSTANTIATED arrow — strictly
+  // more informative than the pre-Design-E erased `function`
+  // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §8) — with
+  // the slot's own result (`boolean` for a predicate, `unknown` for a key).
+  // The LAZY route's non-callable rejection (`canonicalCallbackOperand`'s
+  // `reject()`) keeps the stable `function` expected type: "this operand is
+  // not a function at all" needs no arrow detail.
+  const EAGER_EXPECTED: Record<string, string> = {
+    IndexWhere:
+      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "finite_integer"), 5)',
+    Find: 'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "finite_integer"), 5)',
     CountIf:
       'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "finite_integer"), 5)',
+    Position:
+      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "finite_integer"), 5)',
+    ChunkBy:
+      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> unknown", "finite_integer"), 5)',
+    GroupBy:
+      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> unknown", "finite_integer"), 5)',
   };
   it.each([...eager, ...lazy])('%s reports incompatible-type', (op) => {
     const ce = new ComputeEngine();
     expect(ce.box([op, XS, 5]).errors[0]?.toString()).toBe(
-      CONVERTED_EXPECTED[op] ??
+      EAGER_EXPECTED[op] ??
         'Error(ErrorCode("incompatible-type", "function", "finite_integer"), 5)'
     );
   });

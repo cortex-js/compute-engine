@@ -1,11 +1,15 @@
 # Design E — Compatibility admission for callback slots; retiring `callback<S>`
 
-**Status: rev 5 (2026-08-18) — PHASES E0, E1 AND E2 IMPLEMENTED (§12b/§12c
-record the as-built decisions: R-E3′ — data positions are authoritative for
-a domain variable, not exclusive; the lazy-route gate lives in
-`canonicalCallbackOperand`; the pipe placement heuristic judges arrow slots
-by compatibility). Remaining: E3 (the sweep, the deletion, user-slot arity,
-the generic §6 pass) and the Tycho coordination window. Rev 3 applied the dual spec review
+**Status: rev 6 (2026-08-18) — ALL PHASES (E0–E3) IMPLEMENTED. The
+`callback<S>` constructor is DELETED; every collection callback slot is an
+honest arrow admitted by compatibility. §12b/§12c/§12d record the as-built
+decisions — R-E3′ (data positions authoritative, not exclusive), the
+canonical-funnel lazy gate, the pipe-placement fix, the comparator-union
+spelling deviation (one variable-bearing arm), the declared-mode supply
+arrow, user-slot static arity. Consumer display deltas:
+`docs/plans/2026-08-18-design-e-tycho-display-deltas.md` — the Tycho
+notification window is the one remaining §8 step, before this lands in a
+release. Rev 3 applied the dual spec review
 (Claude + Codex, 11 findings;
 `docs/scratch/2026-08-18-compatibility-admission-callbacks_SPEC_REVIEW.md`)
 and the two review-round rulings (maintainer, same day): the EFFECT-SUBSET
@@ -710,6 +714,103 @@ indexed_collection where T, U`). Decisions:
    weight; and the literal's RESULT stays authoritative (`k => k + 1`
    still rejects on its inferred `number`, per Q3). Named callbacks'
    declared types are contracts and are judged whole, as before.
+
+## 12d. Phase E3 addendum (implemented 2026-08-18): the sweep, the deletion, as built
+
+The sweep converted every remaining §5 operator plus the §9-item-6
+comparators and the audit's key-slot family — twenty signatures in all:
+`Any`, `All`, `Reduce`, `Fold`, `Scan`, `TakeWhile`, `DropWhile`, `FlatMap`,
+`Find`, `IndexWhere`, `Position`, `Partition`, `MaxBy`, `MinBy`, `ArgMax`,
+`ArgMin`, `GroupBy`, `ChunkBy`, `Sort`, `Ordering`. The `callback<S>`
+constructor is DELETED. The full before/after display table for consumers is
+`docs/plans/2026-08-18-design-e-tycho-display-deltas.md`. As-built decisions
+and deviations:
+
+1. **The ruled comparator spelling is unparseable — DEVIATION from §9
+   item 6, needs no re-ruling but is recorded for review.** The type
+   language enforces "at most one arm of a union may reference a type
+   variable" (a pre-existing solver constraint), and
+   `((T) any -> unknown) | ((T, T) any -> number)` references `T` in both
+   arms. As built, the KEY arm keeps `T` (element-typed — a provably
+   disjoint key still rejects) and the COMPARATOR arm grounds to
+   `(any, any) any -> number` (arity duality and honest documentation
+   retained; comparator-side disjointness rejection is given up). `Sort`'s
+   string arm is fully ground (`character`) and keeps both arms
+   element-typed.
+2. **The single-source supply arrow is the DECLARED arrow instantiated,
+   not source positions** (§3's supply-arrow definition, sharpened): a
+   reducer's slot is `(unknown, T)`, and a positional build judged the
+   ACCUMULATOR against the element type
+   (`Reduce(ints, (a: string, x) => …, '')` must stay admitted). Domain
+   variables substitute to the source's element type; declared `unknown`
+   positions stay unjudged. The zip (multi-source) mode keeps the
+   per-source positional build. `Reduce`/`Scan`/`Fold` now wire their
+   collection into the gate as its supply source (`Fold` hoists its
+   collection check above the callback's).
+3. **The audit kept three slots on their historical spellings**
+   (`canonicalCallbackOperand`'s gate declines them by construction):
+   `Iterate` (parametric accumulator contract, inexpressible), `Tabulate`
+   (dimension-dependent generator arity), `Count` (dual value-or-predicate
+   `any?` operand). `Sort`/`Ordering` keep their dual-entry `SORT_SUPPLY`
+   arity check; the eager gate judges their union slot per arm.
+4. **The deletion, as executed**, covered the §7 inventory plus eleven
+   further sites only the compiler could enumerate: `variance.ts`,
+   `engine-protocols.ts` (two), `sum-representation.ts`, `parse.ts`,
+   `primitive.ts`, `utils.ts`, `ast-nodes.ts`/`type-builder.ts` (the AST
+   node and its visitor), `effects-of.ts`, `engine-declarations.ts`, and
+   `effects-inference.ts`. `display.ts` (the whole R-D5 module) and
+   `boxed-type.ts`'s `withDisplayString` mechanism are gone — `.type`,
+   `toJSON`, `Signature` and the scope listing all print `typeToString` of
+   the faithful definition. `alphaEquivalentSignatures` compares plain
+   dedup keys. The parser's `callback<…>` production now THROWS the §7
+   migration hint; the BARE name `callback` remains an ordinary
+   identifier.
+5. **Diagnostics split by route, both honest**: the EAGER route names the
+   instantiated supply arrow (`(finite_integer) any -> boolean`, or the
+   union for `Sort`-class slots); the LAZY route's not-a-function-at-all
+   rejection keeps the stable `function` expected type. Q3's rejection now
+   covers the whole family — the quantifiers' historical stay-inert on a
+   non-boolean predicate, and `Partition`'s runtime throw over symbolic
+   sources, both moved to canonicalization-time `incompatible-type`;
+   Filter-facet queries on such an invalid expression surface the static
+   diagnostic (`invalidPredicateError`).
+6. **User-slot static arity SHIPPED** (closing §12b's second deferral):
+   `callback-arity.ts` moved to `boxed-expression/` (it never had library
+   dependencies), `canonicalFunctionSlot` runs the hand-authored check
+   BEFORE `validateArguments` so per-operator wording always wins, and the
+   compatibility gate mints `callbackArityError` with a supply DERIVED
+   from the slot's own arrow arities for slots with no hand-wired
+   machinery — `myOp calls its callback with 1 argument (per the declared
+   parameter list); `h` declares 2 parameters`. The operator name is
+   threaded via `ValidateArgumentsInternals.operatorName`; with no name
+   the mint declines. CAVEAT, pre-existing and unchanged: an INLINE
+   literal's placeholder-`unknown` parameters make its signature `match`
+   a lower-arity slot (the deliberate placeholder-reconciliation
+   leniency), so the literal-shaped user-slot arity case still admits and
+   fails at application; only concretely-declared shapes reject
+   statically.
+7. **Post-review records** (dual code review, 2026-08-18): the generated
+   `src/math-json/OPERATORS.json` is REGENERATED with the arrow spellings
+   (its persisted `callback<…>` strings would no longer parse); a
+   POLYMORPHIC overload arm's ground arrow slot no longer stamps — with
+   the constructor gone, nothing marks a ground slot inside a `where`-
+   bearing arm as stampable, so the fallback declines the whole arm
+   (pinned; no shipped signature has the shape); and the derived-supply
+   arity mint computes the slot arm's admissible RANGE
+   (required → optional → variadic), so a slot whose own arrow carries an
+   optional or variadic tail never falsely rejects an arity-capable
+   callback.
+8. **The generic §6 pass for USER-DECLARED LAZY operators remains
+   deferred, with a sharper reason than §12b's**: the lazy solve
+   deliberately contributes no bindings (§4.5 carve-out), so a lazy-route
+   gate could only ever judge GROUND arrow slots — polytype slots
+   instantiate to the open sentinel and every rule declines — and an
+   unbound lazy operand's type reads `unknown`, so even a ground slot
+   could judge only NAMED callbacks read through a declaration lookup.
+   The library's lazy operators get full judgment through their
+   canonical-funnel gate instead; a user's lazy operator with a ground
+   arrow slot keeps admitting until application, as it always has.
+   Revisit only with a concrete consumer need.
 
 ## 13. Acceptance criteria
 

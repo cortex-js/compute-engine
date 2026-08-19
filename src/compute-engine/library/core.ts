@@ -1,6 +1,6 @@
 import { joinLatex } from '../latex-syntax/tokenizer.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
-import { callbackArity, declaresPhrase } from './callback-arity.js';
+import { callbackArity, declaresPhrase } from '../boxed-expression/callback-arity.js';
 import {
   effectsContractStateOf,
   recordEffectsTransition,
@@ -53,7 +53,7 @@ import {
   rangeLast,
 } from './collections.js';
 import { checkDeadline } from '../../common/interruptible.js';
-import { typeToDisplayString } from '../../common/type/display.js';
+import { typeToString } from '../../common/type/serialize.js';
 
 import { randomExpression } from './random-expression.js';
 import { canonicalInvisibleOperator } from '../boxed-expression/invisible-operator.js';
@@ -93,7 +93,6 @@ import type {
   TypeParameter,
   DeclarationOrigin,
 } from '../../common/type/types.js';
-import { deepEraseCallbackTypes } from '../../common/type/callback.js';
 import { provablyDisjoint } from '../../common/type/subtype.js';
 import {
   freeTypeVariables,
@@ -193,17 +192,9 @@ import {
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { splitByPattern, replaceByPattern } from './regexp.js';
 
-//   // := assign 80 // @todo
-// compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
-
-// Symbols() -> return list of all known symbols
-
-// xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html
-// https://www.haskell.org/onlinereport/haskell2010/haskellch9.html#x16-1720009.1
-
 /**
- * LITERAL NARROWING at a typed declaration or assignment: the character a
- * string LITERAL denotes when it is being stored into a name whose DECLARED
+ * Literal narrowing at a typed declaration or assignment: the character a
+ * string literal denotes when it is stored into a name whose declared
  * type expects a character and refuses a string. Returns `undefined` when no
  * narrowing applies, so every call site reads
  * `narrowDeclaredCharacter(...) ?? <its existing behavior>`.
@@ -216,10 +207,10 @@ import { splitByPattern, replaceByPattern } from './regexp.js';
  * the declaration and the call site cannot disagree about which literals
  * narrow or which declared types accept a narrowing.
  *
- * Keyed on the RAW, un-evaluated right-hand operand on purpose: only a
+ * Keyed on the raw, unevaluated right-hand operand on purpose: only a
  * syntactic literal narrows. A symbol that happens to hold a one-cluster
- * string does NOT implicitly convert and must be written `CharacterFrom(s)`
- * (`docs/STRING_ROADMAP.md`, design constraint 4). An empty or multi-cluster
+ * string does not implicitly convert and must be written `CharacterFrom(s)`.
+ * An empty or multi-cluster
  * literal narrows to nothing and falls through to the ordinary
  * `incompatible-type` declared-type diagnostic.
  */
@@ -235,8 +226,8 @@ function narrowDeclaredCharacter(
 }
 
 /**
- * The type `name` was DECLARED with, or `undefined` when the name is unbound,
- * is not a value binding, or carries only an INFERRED type.
+ * The type `name` was declared with, or `undefined` when the name is unbound,
+ * is not a value binding, or carries only an inferred type.
  *
  * The inferred case is excluded because an inferred type is a summary of what
  * has been stored so far, not a contract the next store must satisfy: widening
@@ -270,20 +261,20 @@ function isRefutablePipeTarget(f: Expression): boolean {
  * with a `_` placeholder inserted first (raw, like the held operand it
  * replaces), or `undefined` when the sugar does not apply.
  *
- * Deliberately narrow — the implicit `_` fills a HOLE, it never rewrites a
+ * Deliberately narrow: the implicit `_` fills a hole; it never rewrites a
  * complete call:
  * - the stage must be a call `F(…)` on an operator with a known signature;
  * - it must mention no placeholder of its own (an explicit `_`/`_1`…`_9`
  *   already says where the topic goes, e.g. `Take(_, 10)`, `Map(f, _)`);
- * - the written argument count must be below EVERY signature arm's minimum
+ * - the written argument count must be below every signature arm's minimum
  *   arity — required parameters plus a one-or-more variadic's minimum (the
  *   call is incomplete however it is read) — and the completed count must
  *   fit some arm's arity.
  *
  * The placeholder fills a slot that qualifies twice over: its declared type
- * is one the topic provably satisfies, AND the written arguments still fit
+ * is one the topic provably satisfies, and the written arguments still fit
  * the slots they are displaced into (those before the slot stay put, those
- * from it on shift one right). Among the qualifying slots the LAST one wins
+ * from it on shift one right). Among the qualifying slots the last one wins
  * — the one that displaces the fewest written arguments, since a stage
  * missing an argument is most naturally missing its trailing one. So a
  * collection piped into `Take(10)` goes first (`Take(_, 10)`: slot 1 is
@@ -331,29 +322,27 @@ function pipeStageWithImplicitTopic(
   // Placement: first slot (across the arms, in order) whose declared
   // parameter type the topic provably satisfies, bounded by the written
   // argument count (the topic can at most be appended). The declared type is
-  // GROUNDED for the test: a `callback<S>` slot is the primitive `function`
-  // for every admission decision (Design D contract clause 1), and a free
-  // type variable (`collection<T>`) is substituted with `any` — the question
-  // here is "could the topic belong in this slot", not the solve itself.
-  // Design E (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`
-  // §3): an arrow-typed slot admits callbacks by COMPATIBILITY, so for
-  // PLACEMENT — "could this belong here" — any function-shaped candidate
+  // grounded for the test: a free type variable (`collection<T>`) is
+  // substituted with `any` — the question here is "could the topic belong in
+  // this slot", not the solve itself.
+  // An arrow-typed slot admits callbacks by compatibility, so for placement —
+  // "could this belong here" — any function-shaped candidate
   // fits an arrow slot. Strict contravariant `matches` refused the very
   // stages the sugar exists for once `Map`'s slot became an honest arrow:
   // the lambda of `xs |> Map(n => n^2)` types `(unknown) -> number`, which
   // is not a SUBTYPE of the grounded `(any) any -> any`.
   const couldBeCallbackAt = (t: Type, p: Type): boolean =>
     signatureArms(p) !== undefined &&
-    // The TOP types are excluded: an `unknown`/`any` candidate is not
+    // Top types are excluded: an `unknown`/`any` candidate is not
     // function-shaped evidence, and admitting it here would let an
     // ambiguous topic outcompete its semantically right slot; such
-    // candidates keep the pre-Design-E placement rules.
+    // candidates keep the ordinary placement rules.
     t !== 'unknown' &&
     t !== 'any' &&
     freeTypeVariables(t).size === 0 &&
     !provablyDisjoint(t, 'function');
   const slotAccepts = (param: Type): boolean => {
-    let p = deepEraseCallbackTypes(param);
+    let p = param;
     const vars = freeTypeVariables(p);
     if (vars.size > 0) {
       const bindings: Record<string, Type> = Object.create(null);
@@ -372,7 +361,7 @@ function pipeStageWithImplicitTopic(
   // is placement, not validation, which the canonical call performs after.
   const argAccepts = (arg: Expression, param: Type): boolean => {
     if (arg.type.isUnknown) return true;
-    let p = deepEraseCallbackTypes(param);
+    let p = param;
     const vars = freeTypeVariables(p);
     if (vars.size > 0) {
       const bindings: Record<string, Type> = Object.create(null);
@@ -467,21 +456,19 @@ function pipeImplicitMap(
 }
 
 /**
- * Derivations of `pipeImplicitMapType`, keyed on the pipe STAGE (a held
+ * Derivations of `pipeImplicitMapType`, keyed on the pipe stage (a held
  * operand, so a stable object for the lifetime of the canonical `Pipe`).
  *
  * The memo is what makes the derivation affordable on a type read, and it is
- * load-bearing rather than an optimization. Deriving the type canonicalizes
- * the stage, which DECLARES the stage's parameter and so advances the engine's
- * `any` axis. `BoxedFunction.type` records the generation it observed ON
- * ENTRY, deliberately leaving its fast path closed when the computation itself
+ * required for correctness, not only performance. Deriving the type
+ * canonicalizes the stage, declares its parameter, and advances the engine's
+ * `any` axis. `BoxedFunction.type` records the generation observed on entry,
+ * leaving its fast path closed when the computation itself
  * bumped the generation — so an unmemoized derivation would recompute on every
  * single read, and each recompute would advance the axis again, retiring the
- * `_type`/`_sgn` caches of every other expression in the engine. That is the
- * self-invalidating read that cost ~60–90 s per `.type` in Tycho item 181;
- * measured here it was 157 µs/read versus 0.05 µs for a non-mapping pipe.
+ * `_type` and `_sgn` caches of every other expression in the engine.
  *
- * The recorded generation is the one observed AFTER the derivation, for the
+ * Record the generation observed after the derivation, for the
  * same reason: keying on the entry generation would never match. An entry is
  * served only when the axis has not moved since (a later declaration or
  * assignment can change the answer) and the topic is the same object, since
@@ -641,62 +628,15 @@ function holdValuesShieldNames(spec: Expression): string[] {
 }
 
 /**
- * True if a partially-evaluated `WithRandomSeed` body still OWES random draws
- * to the enclosing seed frame: an application of a stream-drawing operator
- * (`drawsRandom` — `Random`, `RandomShuffle`, a nested `WithRandomSeed`…)
- * survived evaluation in a position this evaluation was supposed to finish.
- * Used by `WithRandomSeed` to keep the frame (Tycho item 104).
+ * Whether a partially evaluated `WithRandomSeed` body still depends on its
+ * seed frame. A surviving node participates when it draws from the stream,
+ * delimits a nested seed frame, or reads the frame for an estimator. General
+ * impurity does not count, and an `any` effect does not pin a frame forever.
  *
- * **Keyed on all three seed-frame participation modes** (`docs/EFFECTS-MODEL.md`,
- * "Runtime counterpart"), never on impurity in general — `Assign`/`Assume`/
- * `Declare` are impure but owe the stream nothing, and a surviving one must not
- * pin the frame forever:
- *
- * 1. the node DRAWS — `random` explicitly in the node's own projected effects
- *    (which includes the LATENT effects of a callback it invokes, e.g.
- *    `Map(randomF, xs)` beneath a survivor), or the derived `drawsRandom`
- *    getter, which additionally carries the frame protocol and the inference's
- *    positively-observed-draw bit;
- * 2. the node DELIMITS — `frameProtocol === 'seed'` (a nested
- *    `WithRandomSeed`), folded into `drawsRandom`;
- * 3. the node READS the frame without consuming indices —
- *    `readsRandomFrame`, the stochastic estimators.
- *
- * **`any` never pins.** Per the `any` ruling under "Labels and lattice",
- * conservatism inverts on the frame axis — pinning a frame forever is the harm
- * — so frame participation requires an EXPLICIT `random` label:
- * `hasDeclaredEffectLabel` reports `false` for `'any'` and for a co-finite
- * value ¬D (which can only have arisen from discharging an *unknown* body, so
- * `random ∈ ¬D` is a fact about the complement, not a declaration).
- *
- * The walk distinguishes VALUE position from a surviving EAGER application:
- *
- * - Quote content (`holdClass: 'quote'` — `Hold`) never counts: inert until
- *   `Release`, under whatever frame is active then. DERIVED from the
- *   definition flag, not a name check — it is the same quote-position rule the
- *   projection uses to make `effectsOf(Hold(Random()))` empty.
- * - A lazy collection VIEW in value position — `Map(x => Random(), xs)`
- *   escaping as the result, directly or inside `List`/`Tuple` cells — is a
- *   COMPLETED value: its lambda draws at materialization (the §6 escape
- *   ruling of `docs/RANDOMNESS-MODEL.md`), so its `Function` subtree is
- *   skipped. A lazy view that BINDS its own variables — `Comprehension(body,
- *   Element(k, xs))`, the shape `[… for k = …]` parses to — is the same
- *   thing spelled without a syntactic `Function` node, so its body is
- *   skipped the same way (Tycho item 106). Which operands are the body is
- *   derived from the definition's binding-site selector, not from a list of
- *   operator names: the operands that carry binding sites are its clauses
- *   and stay scanned, exactly as a `Map`'s source collection does.
- * - Any OTHER surviving application (`ListFrom(Map(x => Random(), xs))`
- *   with an unresolved length, an `At` over it, …) is work THIS evaluation
- *   was supposed to finish: everything beneath it — lambdas included — is
- *   scanned, so the draws it still owes are detected and the frame is kept.
- *
- * The walk assumes a surviving stream-drawing application is eventually
- * resolvable (a free symbol binds; the draws then replay in-frame). Should a
- * collection operator ever surface permanently-raw impure cells, the failure
- * direction is conservative: the expression stays whole and deterministic,
- * it just never reduces. (Probed: `Repeat(Random(), n)` is NOT such a case —
- * its cells evaluate in-frame to one completed draw.)
+ * Quoted content is inert. A lazy collection returned as a completed value
+ * draws when it is materialized, so its body is skipped; beneath any other
+ * surviving eager application, function bodies are scanned because that work
+ * was expected to finish during the current evaluation.
  */
 function hasPendingImpureApplication(
   expr: Expression,
@@ -859,12 +799,11 @@ function trimClusters(
 /**
  * `s` padded to `n` characters by repeating `pad`, with the padding placed at
  * the start (`atStart`) or the end. The padding is built from `pad`'s own
- * grapheme clusters, cycled, so the final copy is truncated ON A CHARACTER
- * BOUNDARY (`PadStart("a", 4, "xy")` is `"xyxa"`). The caller has already
+ * grapheme clusters, cycled, so the final copy ends on a character boundary
+ * (`PadStart("a", 4, "xy")` is `"xyxa"`). The caller has already
  * rejected an empty `pad` and a negative or non-integer `n`.
  *
- * Note the re-segmentation caveat (design constraint 3 of
- * `docs/STRING_ROADMAP.md`): the pieces are concatenated once and the RESULT
+ * The pieces are concatenated once and the result
  * is segmented afresh, so a pad whose last character combines with `s`'s
  * first character can yield fewer than `n` characters. That is inherent to
  * joining text, not a defect.
@@ -884,12 +823,10 @@ function padClusters(
 }
 
 /**
- * `a` compared to `b` as NFC Unicode SCALAR sequences, code point by code
- * point: `-1`, `0` or `1`. This is the character order of
- * `docs/plans/2026-08-16-string-phase1-character-type.md` (decision D8),
- * lifted to whole strings, and NOT JS `<` on strings: `<` compares UTF-16
- * code UNITS, which sorts every astral character (U+10000 and above, encoded
- * as a surrogate pair starting at U+D800) BELOW U+E000–U+FFFF. The two orders
+ * `a` compared to `b` as NFC Unicode scalar sequences, code point by code
+ * point: `-1`, `0` or `1`. This is not JavaScript `<` on strings: `<` compares
+ * UTF-16 code units, which sorts every astral character (U+10000 and above,
+ * encoded as a surrogate pair starting at U+D800) below U+E000–U+FFFF. The two orders
  * therefore differ only for an astral character against one in
  * U+E000–U+FFFF; `<` is left as it is, and `StringCompare` is the operator
  * that answers the scalar order.
@@ -904,22 +841,19 @@ function compareScalarSequences(a: number[], b: number[]): number {
   return a.length < b.length ? -1 : 1;
 }
 
-// The grammar `NumberFrom(s)` accepts for a base-10 numeral, per
-// `docs/STRING_ROADMAP.md` ("Missing operations (proposed)" → "Conversions"):
-// an optional sign, then ASCII digits with an optional `.` fraction and an
+// The grammar `NumberFrom(s)` accepts for a base-10 numeral: an optional sign,
+// then ASCII digits with an optional `.` fraction and an
 // optional `e`/`E` exponent. ASCII digits ONLY — other Unicode decimal digits
 // are rejected, since silently accepting them invites homoglyph confusion.
-//
-// The two sides of the `.` are governed by different rules (user ruling
-// 2026-08-16). The INTEGER part is optional when a fraction is present, so
+// The integer part is optional when a fraction is present, so
 // `".5"`, `"-.5"` and `".5e2"` are accepted and mean 0.5, -0.5 and 50 — the
 // leading-zero-less spelling is common in hand-entered data and denotes
-// exactly one number. A TRAILING dot with no fraction digits (`"5."`) is
-// REJECTED: it carries no information the bare `"5"` does not, and accepting
+// exactly one number. A trailing dot with no fraction digits (`"5."`) is
+// rejected: it carries no information the bare `"5"` does not, and accepting
 // it would mean accepting a numeral whose last character is a separator with
 // nothing after it, which is far more often a truncation than an intent.
 //
-// Anchored, so a numeric PREFIX such as `"12abc"` is a rejection, never a
+// Anchored, so a numeric prefix such as `"12abc"` is a rejection, never a
 // partial parse the way `parseFloat` would read it.
 const NUMBER_FROM_DECIMAL =
   /^[+-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
@@ -928,8 +862,8 @@ const NUMBER_FROM_DECIMAL =
 // alphanumeric digits. Whether each digit belongs to the requested base is
 // decided by `fromDigits`, which reports the first one that does not.
 //
-// A leading `0x`/`0b` is REJECTED (the negative lookahead). `fromDigits`
-// treats those two spellings as a radix PREFIX that OVERRIDES the base it was
+// A leading `0x`/`0b` is rejected (the negative lookahead). `fromDigits`
+// treats those two spellings as a radix prefix that overrides the base it was
 // handed — `fromDigits("0x10", 10)` is 16, not 0 — and here the `base`
 // operand is the only authority on the radix, so a numeral that looks like a
 // prefix cannot be read at all. This also matches the base-less form, which
@@ -942,7 +876,7 @@ const NUMBER_FROM_BASE_INTEGER = /^[+-]?(?!0[xXbB])[0-9a-zA-Z]+$/;
 
 // The `base` operand of `NumberFrom`/`DigitsFrom` may be written as a STRING
 // (`NumberFrom("101", "2")`). That string is a numeral for the base itself,
-// so it must be read WHOLE: `Number.parseInt` accepts a numeric PREFIX and
+// so it must be read whole: `Number.parseInt` accepts a numeric prefix and
 // would silently read `"16abc"` as base 16. Text that is not entirely ASCII
 // digits yields `NaN` here, which is what makes the caller's
 // `unexpected-base` error fire.
@@ -955,14 +889,13 @@ function baseFromString(s: string): number {
 //
 // ─── Random domains ─────────────────────────────────────────────────────────
 //
-// `Random` and `RandomChoice` share one domain analysis. See
-// `docs/plans/2026-07-25-random-signature-redesign.md` §4: domain validity is
-// decided by KIND, never by `count` — a bounded `Interval` reports
+// `Random` and `RandomChoice` share one domain analysis. Domain validity is
+// decided by kind, never by `count`: a bounded `Interval` reports
 // `count: Infinity` (and `Interval(1,0)`/`Interval(1,1)` do too, though they
 // are empty), so a count test would silently draw from a degenerate interval.
 //
-// Validation completes BEFORE the first draw, so an invalid domain consumes
-// zero draws (the §4 draw-consumption contract).
+// Validation completes before the first draw, so an invalid domain consumes
+// zero draws.
 //
 
 /** How `Random`/`RandomChoice` draw from a domain, once its kind is known. */
@@ -1231,30 +1164,28 @@ function bindTuplePattern(
 }
 
 /**
- * The REDEFINITION DISCIPLINE's runtime stamp for a `Declare*` STATEMENT
- * (`docs/plans/2026-08-14-redefinition-discipline.md`, "Mechanics"): which
- * compilation unit is declaring, and which statement of it.
+ * Runtime identity for a `Declare*` statement: the compilation unit and the
+ * statement within it.
  *
- * `anchor` is the statement's RAW (uncanonicalized) NAME operand. Two
+ * `anchor` is the statement's raw (uncanonicalized) name operand. Two
  * properties make it the identity token:
  *
  * - **Distinct per statement.** Boxing does not intern raw operands, so two
  *   `type Dup = …` statements — even byte-identical ones — hold two different
  *   objects.
- * - **Stable across the registrations ONE statement performs.** The canonical
+ * - Stable across the registrations one statement performs. The canonical
  *   handler keeps the name operand raw and hands the very same object to
  *   `ce._fn(…)`, so the evaluate handler that runs afterwards sees the
  *   identical object. (The static pre-pass boxes the statement independently
  *   and therefore mints a different token — which is harmless because the
  *   pre-pass rolls its registrations, stamp included, back.)
  *
- * The NAME operand rather than the body/members operand — which is what ruling
- * P47 anchors implementation blocks on — because every declaration statement
- * has one: `protocol Marker {}` carries no members operand at all, so a
+ * Use the name operand rather than the body or members because every declaration
+ * has one. `protocol Marker {}` carries no members operand, so a
  * members-anchored token would be `undefined` for two different member-less
  * protocol statements and their collision would go unseen.
  *
- * Returns `undefined` unless the caller is on the Epsil STATEMENT ROUTE —
+ * Returns `undefined` unless the caller is on the Epsil statement route —
  * `onStatementRoute`, read from `ce._epsilDeclarationRoute` by
  * {@link withStatementRoute} — and a batch is live. The batch id alone is not
  * enough: it is ambient for the whole `executeEpsil` extent, so a
@@ -1262,7 +1193,7 @@ function bindTuplePattern(
  * operator's evaluate handler would otherwise be stamped as a statement of the
  * running program, and the program's own declaration of that name would then
  * falsely report `type-redefinition`. A box-route declaration runs under no
- * compilation unit of its own, so it has nothing to collide with. The HOST API
+ * compilation unit of its own, so it has nothing to collide with. The host API
  * (`ce.declareType()`) is unstamped for a different and stronger reason — it
  * never calls this function at all, so it throws its already-defined error even
  * when a batch happens to be live around it.
@@ -1285,7 +1216,7 @@ function statementOrigin(
 
 /**
  * Run one `Declare*` handler's body, telling it whether it was reached on the
- * Epsil STATEMENT ROUTE and clearing the marker for the duration of the call.
+ * Epsil statement route and clearing the marker for the duration of the call.
  *
  * The Epsil interpreter raises `ce._epsilDeclarationRoute` around the statement
  * it canonicalizes and evaluates (`src/epsil/execute-epsil.ts`,
@@ -1297,8 +1228,6 @@ function statementOrigin(
  * (pre-pass canonicalize, eval-loop canonicalize, evaluate) and every one of
  * those registrations needs the stamp — an unstamped third registration would
  * be indistinguishable from a second declaration of the name.
- *
- * See `docs/plans/2026-08-14-redefinition-discipline.md`, "Mechanics".
  */
 function withStatementRoute<T>(
   ce: ComputeEngine,
@@ -1314,7 +1243,7 @@ function withStatementRoute<T>(
 }
 
 /**
- * Register the type declared by a `DeclareType` statement in the ENGINE-LEVEL
+ * Register the type declared by a `DeclareType` statement in the engine-level
  * type registry. Returns an `Error` value on failure, `null` on success.
  *
  * Called from both the canonical and the evaluate handler: the canonical pass
@@ -1324,8 +1253,8 @@ function withStatementRoute<T>(
  * canonicalization. Both passes are idempotent thanks to the
  * `fromStatement` replace rule in `ce.declareType()`.
  *
- * Types are engine-global (`docs/plans/2026-08-10-global-type-registry.md`),
- * so a `DeclareType` statement is legal only at the TOP LEVEL of a program —
+ * Types are engine-global, so a `DeclareType` statement is legal only at the
+ * top level of a program —
  * inside a `do` block, a function body, an `if` branch or a loop it is a hard
  * error (no hoisting). A registration from a nested scope would still write
  * global state; the error keeps "a block mutated the engine's type namespace"
@@ -5301,10 +5230,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const def = operatorDefinitionOfHeldSymbol(ce, x);
         if (!def) return ce.Nothing;
 
-        // R-D5: a runtime signature display is GROUND — a converted operator's
-        // `where`/`callback<S>` slot prints as the `function` slot it
-        // converted from, since neither carries admission information.
-        return ce.string(typeToDisplayString(def.signature.type));
+        // The signature prints faithfully: an arrow slot IS the contract
+        // under compatibility admission (Design E §8), so there is no
+        // display projection.
+        return ce.string(typeToString(def.signature.type));
       },
     },
 

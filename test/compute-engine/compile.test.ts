@@ -3280,7 +3280,7 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // A VARIADIC operator symbol accepts the two arguments `Reduce` passes, so
     // the static callback-arity check (2026-08-15) declines on it, the call
     // stays valid, and the combiner gate under test is what refuses it.
-    for (const op of ['Less', 'Greater', 'And', 'Or']) {
+    for (const op of ['Less', 'Greater']) {
       expect(() =>
         // The list and seed are constant, so constant folding would answer from
         // the interpreter and never reach the combiner check under test.
@@ -3289,6 +3289,17 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
           constantFold: false,
         })
       ).toThrow(/Fail closed/);
+    }
+    // `And`/`Or` are refused one stage earlier under Design E: their
+    // `boolean+` element parameter is provably disjoint from an integer
+    // element, so the compatibility gate rejects the call at
+    // canonicalization and the compiler sees an invalid expression.
+    for (const op of ['And', 'Or']) {
+      const bad = e.box(['Reduce', L, op, 0]);
+      expect(bad.isValid).toBe(false);
+      expect(() =>
+        js.compile(bad, { realOnly: true, constantFold: false })
+      ).toThrow(/invalid expression/);
     }
     // A FIXED-arity operator symbol (`Negate`, `Not`) cannot take two
     // arguments at all, so it is rejected one stage earlier — the static
