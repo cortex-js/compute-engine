@@ -639,7 +639,7 @@ describe('MATCH — error subjects (rung 1)', () => {
   it('a bare binding binds the error value', () => {
     expect(
       m(['Match', BAD, ['MatchCase', '_v', ['Type', 'v']]])
-    ).toBe('"error"');
+    ).toBe('TypeFrom("error")');
   });
 
   it('a sequence wildcard catches it too', () => {

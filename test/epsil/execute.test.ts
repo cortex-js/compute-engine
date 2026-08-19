@@ -185,9 +185,8 @@ describe('EPSIL EXECUTE — programs', () => {
 
   test('a for loop executes (evaluated for effect → Nothing)', () => {
     // `for x in xs` DOES execute today via the engine `Loop`, but `Loop` is
-    // evaluated *for effect*: its value is `Nothing` (the collecting/scoping
-    // quirk is what the pending Loop/Map de-conflation addresses —
-    // docs/plans/2026-07-07-loop-map-deconflation.md).
+    // evaluated *for effect*: its value is `Nothing`. `Loop` is the imperative
+    // form; collecting expressions use `Map` or `Comprehension`.
     const { value, diagnostics } = run('for x in [1, 2, 3] { x }');
     expect(diagnostics).toEqual([]);
     expect(value.symbol).toBe('Nothing');
@@ -408,7 +407,7 @@ describe('EPSIL EXECUTE — static (canonicalization-time) type errors', () => {
     // Canonicalizing auto-declares the symbols an expression mentions; the
     // static pass must not leak those into the program's own scope (a
     // pre-declared `x` would make `let x = 2047` narrow to `finite_integer`).
-    const { value } = run('let x = 2047\nType(x)');
+    const { value } = run('let x = 2047\nStringFrom(Type(x))');
     expect(value.string).toBe('integer');
   });
 

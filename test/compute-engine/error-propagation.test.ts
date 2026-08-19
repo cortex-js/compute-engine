@@ -406,8 +406,12 @@ describe('ERROR PROPAGATION — rung 1: IsError', () => {
 
   test('`Type` is likewise an observer on both routes', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Type', BAD]).evaluate().toString()).toBe('"error"');
-    expect(ce.box(['Pipe', BAD, 'Type']).evaluate().toString()).toBe('"error"');
+    expect(ce.box(['Type', BAD]).evaluate().toString()).toBe(
+      'TypeFrom("error")'
+    );
+    expect(ce.box(['Pipe', BAD, 'Type']).evaluate().toString()).toBe(
+      'TypeFrom("error")'
+    );
   });
 });
 
@@ -690,22 +694,24 @@ describe('ERROR PROPAGATION — Nothing: erasure is a rule on the WRITTEN argume
   test('an argument that only EVALUATES to Nothing is bound — on every route', () => {
     const ce = nothingSetup();
     // Named callee.
-    expect(ce.box(['f', ['g']]).evaluate().toString()).toBe('"nothing"');
+    expect(ce.box(['f', ['g']]).evaluate().toString()).toBe(
+      'TypeFrom("nothing")'
+    );
     expect(ce.box(['Apply', 'f', ['g']]).evaluate().toString()).toBe(
-      '"nothing"'
+      'TypeFrom("nothing")'
     );
     expect(ce.box(['Pipe', ['g'], 'f']).evaluate().toString()).toBe(
-      '"nothing"'
+      'TypeFrom("nothing")'
     );
     // `Function`-literal callee (the route that never reaches `flattenOps`).
     expect(ce.box(['Apply', NOTHING_FN, ['g']]).evaluate().toString()).toBe(
-      '"nothing"'
+      'TypeFrom("nothing")'
     );
     expect(ce.box(['Pipe', ['g'], NOTHING_FN]).evaluate().toString()).toBe(
-      '"nothing"'
+      'TypeFrom("nothing")'
     );
     expect(epsil('let g = () => Nothing; (x => Type(x))(g())')).toBe(
-      '"nothing"'
+      'TypeFrom("nothing")'
     );
   });
 

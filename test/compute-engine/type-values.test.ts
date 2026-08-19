@@ -576,3 +576,97 @@ describe('compile fail-closed: the phase-2 operators', () => {
     expect(rc.success).toBe(false);
   });
 });
+
+
+describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
+  test('Type is typed `-> type` and settles like any construction', () => {
+    const t = ev(['Type', 3]);
+    expect(t.toString()).toBe('TypeFrom("finite_integer")');
+    expect(t.type.toString()).toBe('type');
+    expect(t.isSame(ev(['TypeFrom', { str: 'finite_integer' }]))).toBe(true);
+  });
+
+  test('StringFrom(type) is the inverse of TypeFrom', () => {
+    expect(
+      ev(['StringFrom', ['TypeFrom', { str: 'integer|real' }]]).toString()
+    ).toBe('"real"');
+    expect(
+      ce
+        .box(['TypeFrom', ['StringFrom', ['TypeFrom', { str: 'list<integer>' }]]])
+        .evaluate()
+        .isSame(ev(['TypeFrom', { str: 'list<integer>' }]))
+    ).toBe(true);
+  });
+
+  test('a ground Type call folds; its type-valued RESULT still cannot compile', () => {
+    // Constant folding evaluates `Type(3)` to a settled type value; the
+    // shared gate then rejects the folded node by its result type — a type
+    // value has no compiled representation on any target.
+    const target = (ce as any)._getCompilationTarget('javascript');
+    expect(() => target.compile(ce.box(['Type', 3]))).toThrow(
+      /cannot compile/i
+    );
+    // `StringFrom` itself has no JS lowering (pre-existing — nothing to do
+    // with type values), so the through-the-value spelling also fails
+    // closed, with the ordinary no-entry rejection rather than the gate's.
+    expect(() =>
+      target.compile(ce.box(['StringFrom', ['Type', 3]]))
+    ).toThrow(/cannot compile/i);
+  });
+});
+
+describe('phase-3 review fixes: route parity and throw containment', () => {
+  test('the host route rejects a `type`-primitive conformance too', () => {
+    const eng = new ComputeEngine();
+    eng.declareProtocol('Tagged', {});
+    expect(() =>
+      eng.declareProtocolImplementation('type', 'Tagged', {})
+    ).toThrow(/cannot conform to a protocol/);
+    // An ordinary nominal target on the same engine still works.
+    eng.declareType('Badge', 'record{id: string}');
+    expect(() =>
+      eng.declareProtocolImplementation('Badge', 'Tagged', {})
+    ).not.toThrow();
+  });
+
+  test('a throwing computed type operand becomes an error VALUE, not a throw', () => {
+    // The structural construction mode reaches `DeclareType`'s evaluate
+    // handler without box.ts's guarded canonical dispatch, so a built-in
+    // handler's throw used to escape the public `.evaluate()` API.
+    const eng = new ComputeEngine();
+    const node = eng.function(
+      'DeclareType',
+      [
+        eng.symbol('boomAlias'),
+        eng.function('If', [eng.number(1)], { form: 'structural' }),
+      ],
+      { form: 'structural' }
+    );
+    let result: string | undefined;
+    expect(() => {
+      result = node.evaluate().toString();
+    }).not.toThrow();
+    expect(result).toContain('invalid-type-declaration');
+  });
+
+  test('a computed type operand evaluates exactly once (canonical settles it)', () => {
+    const eng = new ComputeEngine();
+    let calls = 0;
+    eng.declare('nextType', {
+      signature: '() -> type',
+      evaluate: (_ops, { engine }) => {
+        calls += 1;
+        return engine
+          .box(['TypeFrom', { str: calls === 1 ? 'integer' : 'string' }])
+          .evaluate();
+      },
+    });
+    const node = eng.box(['DeclareType', { str: 'tOnce' }, ['nextType']]);
+    // Canonicalization settles the operand into the node itself...
+    expect(node.toString()).toBe('DeclareType("tOnce", TypeFrom("integer"))');
+    node.evaluate();
+    // ...so evaluation re-settles the literal instead of re-running the
+    // impure operand.
+    expect(calls).toBe(1);
+  });
+});

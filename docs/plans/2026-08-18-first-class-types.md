@@ -2,7 +2,7 @@
 
 **Status:** Rulings R1–R8 DECIDED (2026-08-18); the pass-2 items (settling,
 polytype relaxation, R5 mechanics amendment, R9) RATIFIED 2026-08-19.
-**Phases 1 AND 2 are IMPLEMENTED** (2026-08-19). Phase 1: the R7 lookahead
+**ALL THREE PHASES ARE IMPLEMENTED** (2026-08-19). Phase 1: the R7 lookahead
 spike PASSED — the name `type` stands — and the primitive, `TypeFrom` with
 settling, `Subtype`, and the `==`/`isSame` tiers are in. Phase 2:
 `MatchesType` (the R9 regime) and variadic `Conforms` are in; `is` and match
@@ -17,7 +17,24 @@ failed `matches` a WRONG definitive False, so `fn is (integer) -> integer`
 stays symbolic (pinned; revisit when literal signatures become
 precise-by-construction); (b) an unevaluated test PRINTS as the explicit
 `MatchesType(x, TypeFrom("T"))` call — it re-parses to the same node, and an
-`is` print-sugar is bundled into R6's sugar revisit. Phase 3 remains. Review record (pass 2; pass 1 applied and superseded):
+`is` print-sugar is bundled into R6's sugar revisit. Phase 3 (same day):
+the Tycho gate was MET (zero call sites, audit recorded in §7), and the
+`Type` flip to `-> type` landed with `StringFrom(type)`, type-value
+rendering in string interpolation (`"\(Type(x))"` reads "integer", not the
+constructor form), `DeclareType` accepting type values on the ENGINE routes
+(a `TypeFrom`/`Type` call operand, or a symbol holding a type value once its
+name resolves to no type — the Epsil `type` STATEMENT deliberately keeps
+TYPE SYNTAX in its body; note that boundary is a SPELLING-level nicety, not
+an enforced property: the `DeclareType` operator is ordinary callable Epsil,
+so `DeclareType("a", t, {alias -> True})` in plain source declares from a
+variable with no parse-time protection — the statement grammar protects
+only those who use it), and the
+`type`-primitive conformance guard — SHARED by both conformance-edge
+creators (statement route and the host `declareProtocolImplementation`),
+mutual-subtype against the primitive. Verified boundaries: an alias to
+`type` is refused earlier by the general no-alias-conformance rule; a
+NOMINAL wrapper of `type` may conform, harmlessly — its values are tagged
+constructor nodes, so `Conforms` never takes the held-type branch for them. Review record (pass 2; pass 1 applied and superseded):
 `docs/scratch/2026-08-18-first-class-types_SPEC_REVIEW.md`.
 **Date:** 2026-08-18 (rulings), 2026-08-19 (phase 1)
 
@@ -603,3 +620,7 @@ literal decides: `(x: integer) -> x + 1` `is (integer) -> number` →
   Tycho repo, OR a search of the Tycho checkout (both repos live on this
   machine) confirms zero such call sites — recorded in the phase-3 work
   log either way. "Audit later" is not a gate; this is.
+  **GATE MET (2026-08-19): the audit found ZERO call sites** — no MathJSON
+  `['Type', …]` constructions, no `Type(` inside any string literal
+  (Epsil/LaTeX source), no `.epsil`/`.json` fixture uses, across
+  `~/dev/tycho`'s `src` and `test`. The flip may land.

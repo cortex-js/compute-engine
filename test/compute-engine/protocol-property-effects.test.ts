@@ -483,7 +483,7 @@ describe('the inference channel: a function body that stores', () => {
       run(`${FIELD_BACKED}
 function f(x: P) { x.age = 43 }
 Type(f)`).value
-    ).toBe('"(x: P) state -> number"');
+    ).toBe('TypeFrom("(x: P) state -> number")');
   });
 
   test('…and annotating that function `pure` is REFUSED, as an error value', () => {
@@ -507,7 +507,7 @@ function f(x: P) pure { x.age = 43 }`);
       run(`${COMPUTED}
 function f(x: Q) { x.age = 3 }
 Type(f)`).value
-    ).toBe('"(x: Q) state -> number"');
+    ).toBe('TypeFrom("(x: Q) state -> number")');
   });
 
   test('…and annotating THAT function `pure` is refused too', () => {
@@ -531,12 +531,12 @@ function f(x: Q) pure { x.age = 3 }`);
 type Outer = object{child: Inner}
 function f(o: Outer) { o.child.age = 9 }
 Type(f)`).value
-    ).toBe('"(o: Outer) state -> number"');
+    ).toBe('TypeFrom("(o: Outer) state -> number")');
     expect(
       run(`type Inner = object{age: integer}
 function f(xs: list<Inner>) { xs[1].age = 9 }
 Type(f)`).value
-    ).toBe('"(xs: list<Inner>) state -> number"');
+    ).toBe('TypeFrom("(xs: list<Inner>) state -> number")');
   });
 
   test('an UNANNOTATED parameter is a store too — `pure` is refused', () => {
@@ -558,7 +558,7 @@ function k(x) pure { x.id = "Z" }`);
     const { ce, value } = run(`type M = object{id: string}
 function rename(x) { x.id = "X" }
 Type(rename)`);
-    expect(value).toBe('"(unknown) state -> string"');
+    expect(value).toBe('TypeFrom("(unknown) state -> string")');
     expect(run('let m = M(id: "a")\nrename(m)\nm.id', ce).value).toBe('"X"');
   });
 
@@ -580,7 +580,7 @@ function make() -> M { let r = M(id: "a")
   r.id = "b"
   r }
 Type(make)`).value
-    ).toBe('"() state -> M"');
+    ).toBe('TypeFrom("() state -> M")');
   });
 
   test('a DECIDED non-object parameter is not a store', () => {
@@ -607,7 +607,7 @@ function f(x: Q) { x.age = 3 }
 Type(f)`,
         ce
       ).value
-    ).toBe('"(x: Q) state -> number"');
+    ).toBe('TypeFrom("(x: Q) state -> number")');
 
     // A LATER batch declares the protocol and the conformance; the arrow is
     // unchanged, because it never depended on them.
@@ -620,7 +620,7 @@ type Q is Aged {
 }`,
       ce
     );
-    expect(run('Type(f)', ce).value).toBe('"(x: Q) state -> number"');
+    expect(run('Type(f)', ce).value).toBe('TypeFrom("(x: Q) state -> number")');
   });
 
   test('…so a `pure` annotation is refused at the definition, not later', () => {
@@ -644,7 +644,7 @@ function f(x: Q) pure { x.age = 3 }`);
       run(`let g = 0
 function f(x: integer) scope { g = x }
 Type(f)`).value
-    ).toBe('"(x: integer) scope -> integer"');
+    ).toBe('TypeFrom("(x: integer) scope -> integer")');
   });
 
   test('a body that only READS a property stays pure', () => {
@@ -652,7 +652,7 @@ Type(f)`).value
       run(`${FIELD_BACKED}
 function f(x: P) -> integer { x.age }
 Type(f)`).value
-    ).toBe('"(x: P) -> integer"');
+    ).toBe('TypeFrom("(x: P) -> integer")');
   });
 });
 

@@ -123,7 +123,7 @@ is not cosmetic:
 
 ```epsil
 (Type({1, 2, 3}), Type([1, 2, 3]))
-// ➔ ("set<finite_integer>", "vector<finite_integer^3>")
+// ➔ (TypeFrom("set<finite_integer>"), TypeFrom("vector<finite_integer^3>"))
 ```
 
 ### Threading over lists

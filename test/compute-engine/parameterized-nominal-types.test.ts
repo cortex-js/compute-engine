@@ -236,9 +236,11 @@ describe('PARAMETERIZED NOMINAL TYPES — application', () => {
   test('`Type()` reports the applied spelling', () => {
     const ce = hostEngine();
     ce.declare('t', ce.type('tree<integer>'));
-    expect(ce.box(['Type', 't']).evaluate().toString()).toBe('"tree<integer>"');
+    expect(ce.box(['Type', 't']).evaluate().toString()).toBe(
+      'TypeFrom("tree<integer>")'
+    );
     expect(ce.parse('\\mathrm{Type}(t)').evaluate().toString()).toBe(
-      '"tree<integer>"'
+      'TypeFrom("tree<integer>")'
     );
   });
 

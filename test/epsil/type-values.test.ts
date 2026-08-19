@@ -21,7 +21,12 @@ describe('type values on the Epsil surface', () => {
 
   test('the annotation is optional — inference types the binding', () => {
     const ce = new ComputeEngine();
-    expect(run(ce, 'let u = TypeFrom("integer")\nType(u)')).toBe('"type"');
+    // `Type` returns a TYPE VALUE since the R3 flip (phase 3); the text is
+    // one `StringFrom` away.
+    expect(run(ce, 'let u = TypeFrom("integer")\nType(u)')).toBe(
+      'TypeFrom("type")'
+    );
+    expect(run(ce, 'StringFrom(Type(u))')).toBe('"type"');
   });
 
   test('printing round-trips: the printed form re-executes to the same value', () => {
@@ -205,5 +210,121 @@ describe('typed patterns (phase 2): compound types and the protocol arm of `is`'
     const ce = new ComputeEngine();
     expect(run(ce, 'TypeFrom("integer") is type')).toBe('"True"');
     expect(run(ce, 'TypeFrom("integer") is number')).toBe('"False"');
+  });
+});
+
+
+describe('the Type flip and its algebra (phase 3, ruling R3)', () => {
+  test('Type returns a type value; StringFrom recovers the text', () => {
+    const ce = new ComputeEngine();
+    expect(run(ce, 'Type(3)')).toBe('TypeFrom("finite_integer")');
+    expect(run(ce, 'let x = 2047\nType(x)')).toBe('TypeFrom("integer")');
+    expect(run(ce, 'StringFrom(Type(x))')).toBe('"integer"');
+    // The breaking comparison the flip retires: never a text comparison.
+    expect(run(ce, 'Type(x) == "integer"')).toBe('"False"');
+    // The supported idioms.
+    expect(run(ce, 'x is integer')).toBe('"True"');
+    expect(run(ce, 'Subtype(Type(x), "number")')).toBe('"True"');
+  });
+
+  test('a type value interpolates as its bare text', () => {
+    const ce = new ComputeEngine();
+    expect(run(ce, 'let x = 2047\n"x has type \\(Type(x))"')).toBe(
+      '"x has type integer"'
+    );
+  });
+
+  test('round trip: TypeFrom(StringFrom(t)) == t', () => {
+    const ce = new ComputeEngine();
+    expect(
+      run(ce, 'let x = 5\nTypeFrom(StringFrom(Type(x))) == Type(x)')
+    ).toBe('"True"');
+  });
+
+  test('Type of a function observes its signature; a monomorphic one is plain', () => {
+    const ce = new ComputeEngine();
+    expect(
+      run(ce, 'function idf(v: integer) -> integer { v }\nType(idf)')
+    ).toBe('TypeFrom("(v: integer) -> integer")');
+    expect(run(ce, 'Type(idf) is type')).toBe('"True"');
+  });
+
+  test('Type of a GENERIC function observes a genuine polytype and round-trips', () => {
+    // A quantified signature is only observable through a generic — user
+    // generics are not declarable in Epsil, so a built-in overload set with
+    // `where` arms (`Sort`) is the fixture. The observed value settles,
+    // round-trips, and is rejected by the comparison operators with the
+    // named error — the full phase-3 polytype contract on one subject.
+    const ce = new ComputeEngine();
+    expect(run(ce, 'StringFrom(Type(Sort))')).toContain('where');
+    expect(run(ce, 'Type(Sort) is type')).toBe('"True"');
+    expect(run(ce, 'TypeFrom(StringFrom(Type(Sort))) == Type(Sort)')).toBe(
+      '"True"'
+    );
+    expect(run(ce, 'Subtype(Type(Sort), "function")')).toContain(
+      'polytype-comparison-unsupported'
+    );
+  });
+
+  test('Type stays an observer: an error operand reports the error type', () => {
+    const ce = new ComputeEngine();
+    expect(run(ce, 'Type("a" + 1)')).toBe('TypeFrom("error")');
+  });
+});
+
+describe('DeclareType accepts type values (phase 3)', () => {
+  test('a symbol holding a type value declares an alias on the box route', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let x = 2047\nlet t = Type(x)');
+    ce.box([
+      'DeclareType',
+      { str: 'xalA' },
+      't',
+      ['Dictionary', ['KeyValuePair', { str: 'alias' }, 'True']],
+    ]).evaluate();
+    expect(run(ce, 'let qa: xalA = 5\nqa')).toBe('5');
+  });
+
+  test('a TypeFrom call operand declares directly', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'DeclareType',
+      { str: 'xalB' },
+      ['TypeFrom', { str: 'string' }],
+      ['Dictionary', ['KeyValuePair', { str: 'alias' }, 'True']],
+    ]).evaluate();
+    expect(run(ce, 'let qb: xalB = "hi"\nqb')).toBe('"hi"');
+  });
+
+  test('the Epsil `type` statement keeps TYPE SYNTAX in its body', () => {
+    // The statement grammar validates its body at parse time — a bare
+    // unknown name is a crisp typo diagnostic there, so a variable holding a
+    // type value is the ENGINE operator's route, not the statement's.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let t2 = Type(3)');
+    const r = executeEpsil(ce, 'type alias xalC = t2');
+    const codes = (r.diagnostics ?? []).map((d: any) =>
+      Array.isArray(d.message) ? String(d.message[0]) : String(d.message)
+    );
+    expect(codes).toContain('type-annotation-error');
+  });
+});
+
+describe('the `type` primitive declares no conformances (phase 3 guard)', () => {
+  test('a conformance targeting `type` is rejected', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'protocol Pz { }');
+    const r = executeEpsil(ce, 'type type is Pz');
+    expect(String(r.value ?? '')).toContain('invalid-protocol-declaration');
+  });
+
+  test('an alias whose body is `type` is refused (by the general alias rule)', () => {
+    // The refusal comes from the PRE-EXISTING rule that no structural alias
+    // may conform — the `type`-primitive guard never needs to see it.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'protocol Pz2 { }');
+    executeEpsil(ce, 'type alias tvAlias = type');
+    const r = executeEpsil(ce, 'type tvAlias is Pz2');
+    expect(String(r.value ?? '')).toContain('invalid-protocol-declaration');
   });
 });

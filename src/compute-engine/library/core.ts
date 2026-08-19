@@ -161,6 +161,7 @@ import {
   protocolPropertyWriteRefusal,
   protocolsWithProperty,
   protocolPropertyResultType,
+  typePrimitiveConformanceProblem,
 } from '../engine-protocols.js';
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
@@ -1279,7 +1280,16 @@ function declareTypeStatement(
   attrs: Expression | undefined,
   /** Whether this call came from an Epsil `type` STATEMENT — see
    * {@link withStatementRoute}, which is how every caller obtains it. */
-  onStatementRoute: boolean
+  onStatementRoute: boolean,
+  /**
+   * Out-param: when the type operand was FUNCTION-shaped — the only operand
+   * shape this function EVALUATES — `typeText` is set to the settled canonical
+   * text of the resulting type value. The canonical handler rebuilds its node
+   * from that text, so the evaluate pass re-settles a literal instead of
+   * running the computation a second time. Only meaningful when the call
+   * returned `null` (success).
+   */
+  settled?: { typeText?: string }
 ): Expression | null {
   // The name and the type are read off the RAW operands: a symbol or a string.
   const name = nameOp
@@ -1324,9 +1334,63 @@ function declareTypeStatement(
       name
     );
 
-  const typeStr = typeOp
+  let typeStr = typeOp
     ? ((isString(typeOp) ? typeOp.string : sym(typeOp)) ?? undefined)
     : undefined;
+  // A TYPE VALUE operand (the reverse direction of the plan's string
+  // acceptance, phase 3): a FUNCTION-shaped operand — `TypeFrom("…")`, a
+  // `Type(x)` call — is not a type name, so evaluating it cannot
+  // auto-declare anything; it must produce a type value, whose canonical
+  // text becomes the declared body. A SYMBOL operand still names a TYPE
+  // first (unchanged behavior); only when the name resolves to no type does
+  // the symbol's held VALUE get a look — turning what was an unknown-type
+  // error into the documented `let t = Type(x); DeclareType("a", t)` form.
+  if (typeStr === undefined && typeOp !== undefined && isFunction(typeOp)) {
+    // Errors are values, here as everywhere in this handler: evaluating the
+    // operand runs arbitrary built-in handlers, some of which THROW, and the
+    // guard that converts a throw into an error value on the box route sits in
+    // `box.ts`'s canonical dispatch — which a node built directly in
+    // structural form never passes through. Catching here is what keeps
+    // `DeclareType` from letting an operand's throw escape to the host.
+    let v: Expression;
+    try {
+      v = typeOp.canonical.evaluate();
+    } catch (e) {
+      return ce.error(
+        [
+          'invalid-type-declaration',
+          e instanceof Error ? e.message : String(e),
+        ],
+        name
+      );
+    }
+    typeStr = settledTypeText(v);
+    if (typeStr === undefined)
+      return ce.error(
+        [
+          'invalid-type-declaration',
+          'Expected a type expression, a type name, or a type value',
+        ],
+        name
+      );
+    // Report the settled text back, so the caller can rebuild its node with a
+    // value instead of the computation that produced it — see the `settled`
+    // parameter.
+    if (settled !== undefined) settled.typeText = typeStr;
+  } else if (
+    typeStr !== undefined &&
+    !isString(typeOp!) &&
+    ce._typeRegistry[typeStr] === undefined &&
+    !isValidType(typeStr as any)
+  ) {
+    // A bare symbol that names no type: consult its value binding WITHOUT
+    // boxing the symbol (boxing an unknown symbol would auto-declare it).
+    const def = ce.lookupDefinition(typeStr);
+    const held =
+      def !== undefined && isValueDef(def) ? def.value.value : undefined;
+    const tt = held !== undefined ? settledTypeText(held) : undefined;
+    if (tt !== undefined) typeStr = tt;
+  }
   if (!typeStr)
     return ce.error(
       ['invalid-type-declaration', 'Expected a type expression'],
@@ -1705,6 +1769,18 @@ function declareConformanceStatement(
       ],
       target
     );
+
+  // The primitive `type` (a reified type expression) declares NO
+  // conformances — see `typePrimitiveConformanceProblem`, which states the
+  // ruling and which the HOST route (`ce.declareProtocolImplementation()`)
+  // applies as well, so the invariant `Conforms` depends on holds however the
+  // edge was declared. Errors are values on this route, so the message is
+  // boxed rather than thrown.
+  {
+    const problem = typePrimitiveConformanceProblem(ce, target);
+    if (problem !== null)
+      return ce.error(['invalid-protocol-declaration', problem], target);
+  }
 
   const names: string[] = [];
   if (protocolsOp !== undefined && isFunction(protocolsOp, 'List')) {
@@ -4297,7 +4373,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Introduces a type binding in a scope that outlives the application:
       // the `scope` label (see `Declare`).
       signature:
-        '(symbol|string, type: string|symbol, attributes: dictionary<any>?) scope -> nothing',
+        '(symbol|string, type: string|symbol|type, attributes: dictionary<any>?) scope -> nothing',
       // A STORING writer, like `Declare`: no position applies a
       // function-valued operand.
       invokes: false,
@@ -4311,12 +4387,25 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         // Register during the canonical pass, so that the statements
         // canonicalized after this one (in the same `Block`) see the type.
+        const settled: { typeText?: string } = {};
         const err = withStatementRoute(ce, (route) =>
-          declareTypeStatement(ce, args[0], args[1], attrs, route)
+          declareTypeStatement(ce, args[0], args[1], attrs, route, settled)
         );
         if (err) return err;
 
-        const ops = [args[0], args[1]];
+        // A FUNCTION-shaped type operand (`Type(x)`, a computed `TypeFrom`)
+        // was EVALUATED by the registration above. Keeping the raw operand
+        // would make the evaluate handler — which runs the same registration
+        // again — evaluate it a SECOND time, so an impure operand could
+        // declare a different type than this pass just did. Carry the settled
+        // type VALUE instead: re-settling an already-canonical text is a
+        // no-op, which makes the evaluate pass idempotent by construction. A
+        // name operand stays raw (canonicalizing it would auto-declare it).
+        const typeOp =
+          settled.typeText !== undefined
+            ? ce._fn('TypeFrom', [ce.string(settled.typeText)])
+            : args[1];
+        const ops = [args[0], typeOp];
         if (attrs) ops.push(attrs);
         return ce._fn('DeclareType', ops);
       },
@@ -4525,20 +4614,39 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     /** Return the type of an expression */
     Type: {
-      description: 'Return the type of an expression as a string.',
+      description:
+        'The STATIC type of an expression, as a type value: ' +
+        '`Type(3)` is `TypeFrom("finite_integer")`. The observer does not ' +
+        'evaluate its operand. Recover the text with `StringFrom(Type(x))`; ' +
+        'in a string interpolation a type value renders as its text ' +
+        'directly. BREAKING (2026-08-19, ruling R3 of ' +
+        '`docs/plans/2026-08-18-first-class-types.md`): the result used to ' +
+        'be a STRING, and `Type(x) == "some text"` is now always `False` — ' +
+        'use `x is T`, `Subtype(Type(x), u)`, or compare `StringFrom` text.',
       lazy: true,
-      // An observer: `Type("a" + 1)` is `"error"`. Holding the operand is what
-      // makes that work on the box/parse routes (the raw operand carries no
-      // `Error` node yet); the flag makes it work on the routes that hand over
-      // an already-canonical operand — `("a" + 1) |> Type`, `Apply(Type, …)`.
+      // An observer: `Type("a" + 1)` is the `error` type value. Holding the
+      // operand is what makes that work on the box/parse routes (the raw
+      // operand carries no `Error` node yet); the flag makes it work on the
+      // routes that hand over an already-canonical operand —
+      // `("a" + 1) |> Type`, `Apply(Type, …)`.
       inspectsErrors: true,
-      signature: '(any) -> string',
+      signature: '(any) -> type',
       // The operand is lazy (Type reports the static type, without
       // evaluating), but a *non-canonical* expression has no type — a lazy
       // operand is not canonicalized, so `Type(y)` reported "unknown" even
       // for a symbol bound to an integer. Canonicalize, don't evaluate.
-      evaluate: ([x], { engine: ce }) =>
-        ce.string(x.canonical.type.toString() ?? 'unknown'),
+      evaluate: ([x], { engine: ce }) => {
+        const text = x.canonical.type.toString() ?? 'unknown';
+        // Settle the observed text like any other construction. The text
+        // came from the engine's own serializer, so a parse failure here is
+        // an engine bug — surfaced, not hidden. A generic function's
+        // quantified signature is admissible (polytype VALUES are legal;
+        // only the comparison operators reject them).
+        const settled = settleTypeText(ce, text);
+        if ('error' in settled)
+          return ce.error(['invalid-value', settled.error], x.toString());
+        return ce._fn('TypeFrom', [ce.string(settled.canonicalText)]);
+      },
     },
 
     /** A type expression reified as a first-class value. */
@@ -5982,7 +6090,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return engine.string(
             [...ops[0].each()]
               .map((x) =>
-                isString(x) || isCharacter(x) ? x.string : x.toString()
+                isString(x) || isCharacter(x)
+                  ? x.string
+                  : (settledTypeText(x) ?? x.toString())
               )
               .join('')
           );
@@ -5990,11 +6100,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Join the *values*: a string (or character) operand contributes its
         // content — `.toString()` on a string is its serialized form, with
         // quotes, which used to leak into the result (`String("x = ", 3)`
-        // produced the content `"x = "3`).
+        // produced the content `"x = "3`). A TYPE VALUE likewise contributes
+        // its canonical TEXT, not its constructor form: the interpolation
+        // idiom `"x has type \(Type(x))"` must read "… has type integer",
+        // never "… has type TypeFrom(\"integer\")".
         return engine.string(
           ops
             .map((x) =>
-              isString(x) || isCharacter(x) ? x.string : x.toString()
+              isString(x) || isCharacter(x)
+                ? x.string
+                : (settledTypeText(x) ?? x.toString())
             )
             .join('')
         );
@@ -6562,7 +6677,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (value === undefined) return engine.string('');
         const fmt = (isString(format) ? format.string : undefined) ?? 'default';
 
-        if (fmt === 'default') return engine.string(value.toString());
+        if (fmt === 'default') {
+          // A TYPE VALUE converts to its canonical text — the inverse of
+          // `TypeFrom`: `TypeFrom(StringFrom(t))` is `isSame`-identical to
+          // `t` (the text is already settled).
+          const typeText = settledTypeText(value);
+          if (typeText !== undefined) return engine.string(typeText);
+          return engine.string(value.toString());
+        }
 
         /**
          * The integer code units `value` supplies, or `undefined` when it

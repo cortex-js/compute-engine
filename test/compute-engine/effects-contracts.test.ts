@@ -1601,12 +1601,12 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
     const ce = new ComputeEngine();
     executeEpsil(ce, 'function h(x: integer) pure -> integer { x }');
     expect(String(executeEpsil(ce, 'Type(h)').value)).toBe(
-      '"(x: integer) pure -> integer"'
+      'TypeFrom("(x: integer) pure -> integer")'
     );
 
     executeEpsil(ce, 'function h(x: integer) -> integer { x }');
     expect(String(executeEpsil(ce, 'Type(h)').value)).toBe(
-      '"(x: integer) -> integer"'
+      'TypeFrom("(x: integer) -> integer")'
     );
   });
 
@@ -2158,9 +2158,6 @@ describe('effects memo re-entrancy (recursive definition bodies)', () => {
  * working. Anonymous literals are not gated — they have no annotation surface
  * (the lambda specifier slot is deferred); their arrows carry the inferred
  * `scope` honestly, which is what the census measured.
- *
- * Blast radius measured before the ruling:
- * `docs/plans/2026-08-14-default-noscope-census.md`.
  */
 describe('The default-`!scope` ceiling: escaping writes are opt-in', () => {
   it('a bare install of an escaping writer is refused on the Assign route', () => {

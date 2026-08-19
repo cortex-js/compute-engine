@@ -36,14 +36,14 @@ start. `Type` reports the one a value has:
 
 ```epsil-live
 (Type(42), Type(1/3), Type(2.5), Type("hi"), Type(True))
-// ➔ ("finite_integer", "finite_rational", "finite_real", "string", "boolean")
+// ➔ (TypeFrom("finite_integer"), TypeFrom("finite_rational"), TypeFrom("finite_real"), TypeFrom("string"), TypeFrom("boolean"))
 ```
 
 Collections carry the type of what is in them, and how many:
 
 ```epsil-live
 (Type([1, 2, 3]), Type({1, 2}), Type((1, "a")), Type({x -> 1}))
-// ➔ ("vector<finite_integer^3>", "set<finite_integer>", "tuple<finite_integer, string>", "record{x: finite_integer}")
+// ➔ (TypeFrom("vector<finite_integer^3>"), TypeFrom("set<finite_integer>"), TypeFrom("tuple<finite_integer, string>"), TypeFrom("record{x: finite_integer}"))
 ```
 
 Numeric types form a tower — `integer ⊂ rational ⊂ real ⊂ complex ⊂ number` —
@@ -61,7 +61,7 @@ would have written:
 let radius = 2.5
 let area = Pi * radius^2
 Type(area)
-// ➔ "real"
+// ➔ TypeFrom("real")
 ```
 
 Writing `let radius: real = 2.5` adds a word and no information — the
@@ -127,7 +127,7 @@ starts at the bottom of the lattice:
 ```epsil-live
 let xs = []
 Type(xs)
-// ➔ "list<never>"
+// ➔ TypeFrom("list<never>")
 ```
 
 Say what you mean instead:
@@ -135,7 +135,7 @@ Say what you mean instead:
 ```epsil-live
 let xs: list<integer> = []
 Type(xs)
-// ➔ "list<integer>"
+// ➔ TypeFrom("list<integer>")
 ```
 
 The same applies to a name declared without an initializer (`let x: real`) and
@@ -373,7 +373,7 @@ A value built this way carries its type with it, wherever it goes:
 type point = tuple<x: number, y: number>
 let ps = [point(1, 2), point(3, 4)]
 Type(ps)
-// ➔ "list<point^2>"
+// ➔ TypeFrom("list<point^2>")
 ```
 
 An **alias** constructor is a checked cast instead of a tag: it validates the
@@ -404,7 +404,7 @@ the type. This is how a `record`-bodied type gets its constructor:
 type circle = record{x: number, y: number, r: number}
 function circle(x, y, r) { {x -> x, y -> y, r -> r} }
 Type(circle(1, 2, 3))
-// ➔ "circle"
+// ➔ TypeFrom("circle")
 ```
 
 Constructor functions are not record-specific: one may be written for any
@@ -600,7 +600,7 @@ never expanded — which is exactly what lets its body mention itself:
 type tree<T> = tuple<value: T, children: list<tree<T>>>
 let t = tree(1, [tree(2, [])])
 Type(t)
-// ➔ "tree<finite_integer>"
+// ➔ TypeFrom("tree<finite_integer>")
 ```
 
 The constructor is **quantified** — `tree: (T, list<tree<T>>) -> tree<T>
@@ -616,7 +616,7 @@ arguments**, so it comes back at the type the application supplied, not at
 type tree<T> = tuple<value: T, children: list<tree<T>>>
 let t: tree<number> = tree(1, [])
 Type(t.value)
-// ➔ "number"
+// ➔ TypeFrom("number")
 ```
 
 `match` is not a projection of the annotation — it binds **values**, so each
@@ -627,7 +627,7 @@ the annotation's:
 type tree<T> = tuple<value: T, children: list<tree<T>>>
 let t: tree<number> = tree(1, [])
 match t { tree(v, cs) => Type(v) }
-// ➔ "integer"
+// ➔ TypeFrom("integer")
 ```
 
 ### Variance
@@ -680,7 +680,7 @@ optional payload expressible:
 type opt<T> = T | missing
 let a = opt(1)
 Type(a)
-// ➔ "opt<finite_integer>"
+// ➔ TypeFrom("opt<finite_integer>")
 ```
 
 Each construction takes exactly one arm. Taking the **ground** arm says
@@ -691,7 +691,7 @@ family, and (under `out`) a subtype of every other:
 type opt<T> = T | missing
 let b = opt(Missing)
 Type(b)
-// ➔ "opt<never>"
+// ➔ TypeFrom("opt<never>")
 ```
 
 Only **one** arm may mention a variable: with two open arms nothing at the

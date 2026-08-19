@@ -578,12 +578,15 @@ describe('MATCH ladder — error subjects reject shape patterns (both tiers)', (
         ['MatchCase', ['Error', '_c'], ['Type', 'c']],
         ['MatchCase', '_', { str: 'wildcard' }],
       ],
-      '"string"'
+      'TypeFrom("string")'
     );
   });
 
   it('wildcards and sequence wildcards still catch it', () => {
-    bothTiers(['Match', BAD, ['MatchCase', '_v', ['Type', 'v']]], '"error"');
+    bothTiers(
+      ['Match', BAD, ['MatchCase', '_v', ['Type', 'v']]],
+      'TypeFrom("error")'
+    );
     bothTiers(['Match', ERR, ['MatchCase', '___r', { str: 'rest' }]], '"rest"');
   });
 });

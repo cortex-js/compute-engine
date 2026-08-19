@@ -337,21 +337,29 @@ describe('Type operator reports the canonical type without evaluating', () => {
   test('symbol bound to an integer', () => {
     const ce = new ComputeEngine();
     ce.assign('y', 2047);
-    expect(ce.box(['Type', 'y']).evaluate().string).toBe('integer');
+    expect(
+      ce.box(['StringFrom', ['Type', 'y']]).evaluate().string
+    ).toBe('integer');
   });
 
   test('number literal', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Type', 2047]).evaluate().string).toBe('finite_integer');
+    expect(
+      ce.box(['StringFrom', ['Type', 2047]]).evaluate().string
+    ).toBe('finite_integer');
   });
 
   test('string literal', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Type', { str: 'abc' }]).evaluate().string).toBe('string');
+    expect(
+      ce.box(['StringFrom', ['Type', { str: 'abc' }]]).evaluate().string
+    ).toBe('string');
   });
 
   test('function expression with a free variable', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Type', ['Add', 1, 'x']]).evaluate().string).toBe('number');
+    expect(
+      ce.box(['StringFrom', ['Type', ['Add', 1, 'x']]]).evaluate().string
+    ).toBe('number');
   });
 });

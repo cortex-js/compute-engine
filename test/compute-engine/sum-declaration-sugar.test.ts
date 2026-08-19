@@ -110,7 +110,9 @@ describe('the sugar reproduces the manual desugaring', () => {
     'type expr = lit(num: number) | plus(op1: expr, op2: expr) | times(op1: expr, op2: expr)';
 
   test('a recursive AST constructs, and its members belong to the sum', () => {
-    expect(value(`${AST}\nType(plus(lit(1), lit(2)))`)).toBe('"plus"');
+    expect(value(`${AST}\nType(plus(lit(1), lit(2)))`)).toBe(
+      'TypeFrom("plus")'
+    );
     expect(subtype(AST, 'lit', 'expr')).toBe(true);
     expect(subtype(AST, 'plus', 'expr')).toBe(true);
   });
@@ -138,7 +140,7 @@ describe('the sugar reproduces the manual desugaring', () => {
       value(
         'type expr<T> = lit(num: number) | plus(op1: expr<T>, op2: expr<T>)\nType(plus(lit(5), lit(2)))'
       )
-    ).toBe('"plus<never>"');
+    ).toBe('TypeFrom("plus<never>")');
   });
 
   // `sum-types.test.ts`, "the GENERIC recursive sum works through a collection
@@ -187,7 +189,7 @@ describe('A1 — what is sugar and what is not', () => {
     const [v, d] = outcome('type X = integer | string\nType(X)');
     expect(d).toEqual([]);
     // The nominal constructor of an opaque union body, exactly as today.
-    expect(v).toBe('"(integer | string) -> X"');
+    expect(v).toBe('TypeFrom("(integer | string) -> X")');
   });
 
   test('MIXED known and unknown bare arms keep their `Unknown type` error', () => {
@@ -218,7 +220,7 @@ describe('A1 — what is sugar and what is not', () => {
     expect(v).toContain('invalid-type-declaration');
     // A call-form arm alongside genuinely fresh names is the ordinary case.
     expect(value('type X = flag | wrapped(integer)\nType(wrapped(3))')).toBe(
-      '"wrapped"'
+      'TypeFrom("wrapped")'
     );
   });
 
@@ -244,13 +246,17 @@ describe('A2 — variant forms and their lowering', () => {
   test('a bare arm is a NULLARY constructor', () => {
     // `type red = nothing`: `nothing`'s sole inhabitant elides as an operand,
     // so the constructor is nullary rather than unary.
-    expect(value('type light = red | green\nType(red)')).toBe('"() -> red"');
-    expect(value('type light = red | green\nType(red())')).toBe('"red"');
+    expect(value('type light = red | green\nType(red)')).toBe(
+      'TypeFrom("() -> red")'
+    );
+    expect(value('type light = red | green\nType(red())')).toBe(
+      'TypeFrom("red")'
+    );
   });
 
   test('an empty argument list is the same nullary variant', () => {
     expect(value('type light = red() | green(boolean)\nType(red())')).toBe(
-      '"red"'
+      'TypeFrom("red")'
     );
   });
 
@@ -258,7 +264,7 @@ describe('A2 — variant forms and their lowering', () => {
     // `type jbool = boolean` — a unary constructor over the payload type, no
     // tuple wrapper.
     const JSONISH = 'type json = jnull | jbool(boolean) | jnum(number)';
-    expect(value(`${JSONISH}\nType(jbool(true))`)).toBe('"jbool"');
+    expect(value(`${JSONISH}\nType(jbool(true))`)).toBe('TypeFrom("jbool")');
     expect(value(`${JSONISH}\njbool(true)`)).toBe('jbool("True")');
   });
 
@@ -277,7 +283,7 @@ describe('A2 — variant forms and their lowering', () => {
 
   test('TWO OR MORE positionals are a positional tuple', () => {
     expect(value('type p = pair(integer, string)\nType(pair(1, "a"))')).toBe(
-      '"pair"'
+      'TypeFrom("pair")'
     );
   });
 });
@@ -290,7 +296,7 @@ describe('A3 — the sum names itself in a payload, with no marker', () => {
       value(
         'type expr = lit(num: number) | plus(op1: expr, op2: expr)\nType(plus(lit(1), lit(2)))'
       )
-    ).toBe('"plus"');
+    ).toBe('TypeFrom("plus")');
   });
 
   test('a reference to ANOTHER not-yet-declared type still needs its marker', () => {
@@ -560,6 +566,6 @@ describe('A6 — plumbing: box route, statements, round-trip', () => {
 
         Type(plus(lit(1), lit(2)))
       `)
-    ).toBe('"plus"');
+    ).toBe('TypeFrom("plus")');
   });
 });

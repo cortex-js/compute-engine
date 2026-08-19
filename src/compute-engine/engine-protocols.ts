@@ -79,6 +79,7 @@ import {
   updateDef,
 } from './boxed-expression/utils.js';
 import { checkArity, checkType } from './boxed-expression/validate.js';
+import { settleTypeText } from './library/type-value-utils.js';
 import { apply, lookup } from './function-utils.js';
 import { journalCheckpointMapEntry } from './checkpoint-journal.js';
 import { journalDefinitionRecord } from './boxed-expression/boxed-value-definition.js';
@@ -463,6 +464,63 @@ function conformanceTargetProblem(
       // literal value type — all named-and-ground.
       return null;
   }
+}
+
+/**
+ * Why the primitive `type` (a reified type expression) may not be a
+ * conformance target, or `null` when the target is admissible.
+ *
+ * The primitive `type` declares NO conformances — by ruling, not by accident:
+ * `Conforms` reads a type-VALUE subject as asking about the HELD type, and
+ * that branch is unambiguous only while the value's own type conforms to
+ * nothing (`docs/plans/2026-08-18-first-class-types.md` §3.3).
+ *
+ * Both routes that create a conformance edge must apply this, or the
+ * invariant holds only for the one that does: the Epsil `type X is P`
+ * statement (`declareConformanceStatement` in `library/core.ts`, which turns
+ * the message into an error VALUE) and the host
+ * `ce.declareProtocolImplementation()` (which THROWS, its convention
+ * throughout).
+ *
+ * The test is mutual subtyping against the RESOLVED target, so an alias whose
+ * body is `type` is caught too, while a target that does not settle — a
+ * conditional-conformance head pattern such as `list<T>`, whose variable is
+ * bound by a `where` clause this function does not see — passes through to
+ * its own pipeline. Settling (rather than `parseType` on the engine resolver)
+ * is what keeps the check free of side effects: it never forward-registers an
+ * unknown name.
+ */
+/**
+ * The `type`-primitive conformance guard, shared by BOTH conformance-edge
+ * creators (the `DeclareConformance` statement route and the host
+ * `declareProtocolImplementation` route — the complete set): a target that
+ * is MUTUALLY SUBTYPE with the primitive `type` may not conform to any
+ * protocol. `Conforms` reads a type-VALUE subject as asking about the type
+ * it HOLDS, and that branch is unambiguous only while the value's own
+ * type conforms to nothing
+ * (`docs/plans/2026-08-18-first-class-types.md` §3.3).
+ *
+ * Deliberately NOT caught here, verified harmless: a NOMINAL wrapper
+ * (`ce.declareType('TNom', 'type')`) may conform — its values are TAGGED
+ * constructor nodes, not bare type values, so `Conforms` never takes the
+ * held-type branch for them and the ambiguity cannot arise. A structural
+ * ALIAS of `type` never reaches this check: the alias rule in
+ * `conformanceTargetProblem` refuses every alias target first. A
+ * conditional-conformance head pattern (`list<T>`) does not settle, so the
+ * guard skips it (returns null) and its own pipeline validates it.
+ */
+export function typePrimitiveConformanceProblem(
+  ce: IComputeEngine,
+  targetSource: string
+): string | null {
+  const settled = settleTypeText(ce, targetSource);
+  if ('error' in settled) return null;
+  if (
+    !ce.type(settled.type).matches('type') ||
+    !ce.type('type').matches(settled.type)
+  )
+    return null;
+  return 'The `type` primitive cannot conform to a protocol: a type-value subject of `Conforms` asks about the type it HOLDS, which is unambiguous only while `type` itself conforms to nothing';
 }
 
 //
@@ -3281,6 +3339,13 @@ export function declareProtocolImplementationImpl(
   );
   if (problem !== null)
     throw Error(`protocol-conformance-target-invalid: ${problem}`);
+
+  // A host implementation IS a conformance declaration, so it is bound by the
+  // same `type`-primitive prohibition as the statement route — reported by
+  // throwing, this route's convention for every invalid target.
+  const typeProblem = typePrimitiveConformanceProblem(ce, targetSource);
+  if (typeProblem !== null)
+    throw Error(`protocol-conformance-target-invalid: ${typeProblem}`);
 
   // The B1 mutability gate applies to the host channel on the same terms as
   // the statement route — a host implementation IS a conformance declaration.

@@ -157,7 +157,7 @@ describe('a RECURSIVE sum survives its own payload', () => {
     // Every one of these failed as `incompatible-type` while the forward
     // reference went unexpanded — the declarations above were accepted and the
     // sum was unusable from the first nested construction on.
-    expect(value(`${AST} Type(plus(lit(1), lit(2)))`)).toBe('"plus"');
+    expect(value(`${AST} Type(plus(lit(1), lit(2)))`)).toBe('TypeFrom("plus")');
     expect(subtype(AST, 'lit', 'expr')).toBe(true);
     expect(subtype(AST, 'plus', 'expr')).toBe(true);
   });
@@ -183,8 +183,10 @@ describe('a RECURSIVE sum survives its own payload', () => {
     // a unary `(nothing) -> leaf` constructor could never be called: `leaf()`
     // was a missing argument and `leaf(Nothing)` collapsed to the same call.
     // The constructor is nullary, like the one an empty tuple body gets.
-    expect(value(`type leaf = nothing\nType(leaf)`)).toBe('"() -> leaf"');
-    expect(value(`type leaf = nothing\nType(leaf())`)).toBe('"leaf"');
+    expect(value(`type leaf = nothing\nType(leaf)`)).toBe(
+      'TypeFrom("() -> leaf")'
+    );
+    expect(value(`type leaf = nothing\nType(leaf())`)).toBe('TypeFrom("leaf")');
   });
 
   test('a payload-free variant discriminates in a sum', () => {
@@ -217,11 +219,13 @@ describe('a RECURSIVE sum survives its own payload', () => {
       type plus<T> = tuple<op1: type expr<T>, op2: type expr<T>>
       type alias expr<T> = lit | plus<T>
     `;
-    expect(value(`${AST}\nType(plus(lit(5), lit(2)))`)).toBe('"plus<never>"');
+    expect(value(`${AST}\nType(plus(lit(5), lit(2)))`)).toBe(
+      'TypeFrom("plus<never>")'
+    );
     // The flagship bare-variable arm, for contrast — same rule, and the shape
     // that already worked because no alias stood in the way.
     expect(value(`type opt<T> = T | missing\nType(opt(Missing))`)).toBe(
-      '"opt<never>"'
+      'TypeFrom("opt<never>")'
     );
   });
 
