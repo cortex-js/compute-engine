@@ -1,6 +1,9 @@
 import { joinLatex } from '../latex-syntax/tokenizer.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
-import { callbackArity, declaresPhrase } from '../boxed-expression/callback-arity.js';
+import {
+  callbackArity,
+  declaresPhrase,
+} from '../boxed-expression/callback-arity.js';
 import {
   effectsContractStateOf,
   recordEffectsTransition,
@@ -199,8 +202,10 @@ import {
 } from '../boxed-expression/boxed-character.js';
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { splitByPattern, replaceByPattern } from './regexp.js';
-import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
-import { journalCheckpointField } from '../checkpoint-journal.js';
+import {
+  journalCheckpointMapEntry,
+  journalCheckpointField,
+} from '../checkpoint-journal.js';
 import { journalDefinitionRecord } from '../boxed-expression/boxed-value-definition.js';
 
 /**
@@ -4978,8 +4983,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         } else {
           return undefined;
         }
-        for (const name of names)
-          if (!conformsTo(asked, name)) return ce.False;
+        for (const name of names) if (!conformsTo(asked, name)) return ce.False;
         return ce.True;
       },
     },

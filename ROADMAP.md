@@ -2220,7 +2220,21 @@ number/symbol/string arms of `boxInternal`) live in helpers that are called and
 returned from before the recursion. Expected gain another ~1.5–2×; still a
 cliff. Removing the cliff needs the (a)/(b) ruling above.
 
-### The LaTeX parser cannot honor a deadline at all (OPEN, correctness — found while fixing the canonicalization deadline-granularity entry)
+### The LaTeX parser cannot honor a deadline at all (OPEN but DEPRIORITIZED — ruled 2026-08-19 unlikely to ever be scheduled; found while fixing the canonicalization deadline-granularity entry)
+
+**Ruling (user, 2026-08-19): this is unlikely to be prioritized, because the
+inputs that make it matter are self-inflicted.** The megabyte-scale parses
+observed in the field come from the consumer fanning out and RE-TEXTUALIZING
+expressions to LaTeX, then re-parsing the result — LaTeX used as an internal
+interchange format, which it is not. The supported answer is to stop
+round-tripping through LaTeX text: keep expressions boxed and hand the engine
+structure directly (raw MathJSON via `ce.box`, or Epsil source — both routes
+are deadline-aware since 0.111.0/0.116.0), so parse cost stays proportional to
+what the user actually typed. The analysis below is kept because it is correct
+and hard-won (the budget is decorative on this path — tightening it buys
+nothing), and because the fix shape at the end is the right one if a
+non-self-inflicted workload ever surfaces. Consumers were told to plan around
+this entry, not for it (CE-0.116.0 pre-release brief, 2026-08-19).
 
 The canonicalization fix above bounds the SMALLER and better-behaved half of
 `ce.parse(…)`. The RAW PARSE is the expensive half, it grows superlinearly, and

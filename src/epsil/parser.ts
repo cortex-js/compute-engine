@@ -4,10 +4,7 @@ import {
   isLiteralParamName,
 } from '../math-json/symbols.js';
 import { Origin } from '../common/debug.js';
-import {
-  checkDeadline,
-  type DeadlineFrame,
-} from '../common/interruptible.js';
+import { checkDeadline, type DeadlineFrame } from '../common/interruptible.js';
 import {
   parseType,
   parseTypeParameterClause,
@@ -685,10 +682,7 @@ export class Parser {
   }
 
   private advance(): Token {
-    if (
-      this.deadline !== undefined &&
-      (++this.deadlineTick & 0x3ff) === 0
-    )
+    if (this.deadline !== undefined && (++this.deadlineTick & 0x3ff) === 0)
       checkDeadline(this.deadline);
     const token = this.current;
     if (token.type !== 'EOF') this.pos += 1;
