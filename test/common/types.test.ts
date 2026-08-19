@@ -1352,6 +1352,98 @@ describe('reduceType Tests', () => {
     expect(reduce('number & boolean')).toMatch('nothing');
   });
 
+  // An intersection of signatures is how this type system SPELLS an overload
+  // set, and `isSubtype` reports one as a subtype of each of its arms. The
+  // meet used to have no rule for a pair of signatures and fell through to
+  // "disjoint", so every overload set written as a type reduced away — to
+  // `nothing` on its own, and, because a `nothing` tuple slot collapses, to a
+  // tuple of the WRONG ARITY when one sat in a tuple. Reduction runs on the
+  // `TypeFrom` construction path, so this was reachable from a type value.
+  describe('an intersection of signatures (an overload set) survives', () => {
+    it('keeps both arms', () => {
+      expect(reduce('((number) -> number) & ((string) -> string)')).toBe(
+        '((number) -> number) & ((string) -> string)'
+      );
+    });
+
+    it('keeps the arms in written order, which dispatch ranking ties break on', () => {
+      expect(reduce('((string) -> string) & ((number) -> number)')).toBe(
+        '((string) -> string) & ((number) -> number)'
+      );
+    });
+
+    it('flattens nested arms, so the reduced form is associative', () => {
+      const flat =
+        '((number) -> number) & ((string) -> string) & ((boolean) -> boolean)';
+      expect(
+        reduce('(((number) -> number) & ((string) -> string)) & ((boolean) -> boolean)')
+      ).toBe(flat);
+      expect(
+        reduce('((number) -> number) & (((string) -> string) & ((boolean) -> boolean))')
+      ).toBe(flat);
+    });
+
+    it('still merges arms one of which subsumes the other', () => {
+      // `(number) -> number <: (integer) -> number` (contravariant parameter),
+      // so the pair is not an overload set but a single narrower signature.
+      expect(reduce('((number) -> number) & ((integer) -> number)')).toBe(
+        '(number) -> number'
+      );
+      expect(reduce('((number) -> number) & ((number) -> number)')).toBe(
+        '(number) -> number'
+      );
+    });
+
+    it('survives nested inside a collection and keeps a tuple\'s arity', () => {
+      expect(
+        reduce('list<((number) -> number) & ((string) -> string)>')
+      ).toBe('list<((number) -> number) & ((string) -> string)>');
+      expect(
+        reduce('tuple<((number) -> number) & ((string) -> string), integer>')
+      ).toBe('tuple<((number) -> number) & ((string) -> string), integer>');
+    });
+  });
+
+  it('still collapses a pair that is not two signatures', () => {
+    // Two signatures are the only pair kept: their intersection is the
+    // overload set, which has no other spelling. Everything else collapses as
+    // it always has — including same-kind composites, where sharing a kind is
+    // not a witness of sharing a value (different tuple arities, or a common
+    // record key with disjoint types, share none) and where treating it as one
+    // makes `typesOverlap` report an overlap the conformance gate then refuses.
+    expect(reduce('((number) -> number) & integer')).toMatch('nothing');
+    expect(reduce('list<integer> & integer')).toMatch('nothing');
+    expect(reduce('nothing & integer')).toMatch('nothing');
+    expect(reduce('list<integer> & list<string>')).toMatch('nothing');
+    expect(reduce('tuple<integer, integer> & tuple<string, string, string>')).toMatch(
+      'nothing'
+    );
+    expect(reduce('record{a: integer} & record{a: boolean}')).toMatch('nothing');
+  });
+
+  it('reduces an overload set to a fixed point, so settling is idempotent', () => {
+    // A member that merges keeps being offered to the remaining members: the
+    // merged arm is narrower than either side and may absorb arms neither side
+    // did. `(any) -> integer` is a subtype of both other arms here (parameters
+    // are contravariant), but it is written last, so a fold that stopped at the
+    // first merge left a second arm behind — and reducing THAT output again
+    // dropped it, which `settleTypeText` cannot afford.
+    const t = '((number) -> number) & ((integer) -> integer) & ((any) -> integer)';
+    expect(reduce(t)).toBe('(any) -> integer');
+    expect(reduce(reduce(t))).toBe('(any) -> integer');
+  });
+
+  it('distributes a union over an overload-set meet', () => {
+    // `meet2` reports "no rule for this pair" out of band rather than by
+    // returning the pair, because `meetUnion` legitimately RETURNS an
+    // intersection — its single surviving member — and a caller that read that
+    // by kind mistook the computed answer for a give-up marker and kept the
+    // undistributed union instead.
+    expect(reduce('(((number) -> number) | integer) & ((string) -> string)')).toBe(
+      '((number) -> number) & ((string) -> string)'
+    );
+  });
+
   // Test Cases for Tuple Types
 
   it('should reduce tuple types by reducing each element', () => {

@@ -186,24 +186,6 @@ function addDedupedMember(
     result[at] = member;
 }
 
-/**
- * Reduce and structurally de-duplicate the member types of an algebraic
- * type. The key of each member is computed once (a string for primitive
- * types, the serialized form otherwise) — no `typeToString` → `parseType`
- * round-trip. The key is `typeToDedupKey`, not the serialization: a
- * stated-pure arrow and a bare one are the same type and must merge, with the
- * order-independent tie-break of {@link addDedupedMember}.
- */
-function reduceMembers(types: Readonly<Type[]>): Type[] {
-  const result: Type[] = [];
-  const seen = new Map<string, number>();
-  for (const t of types) {
-    const reduced = reduceType(t);
-    addDedupedMember(result, seen, typeToDedupKey(reduced), reduced);
-  }
-  return result;
-}
-
 function reduceNegationType(type: NegationType): Type {
   const reducedType = reduceType(type.type);
 
@@ -327,9 +309,21 @@ function reduceUnionType(type: AlgebraicType): Type {
  *   incomparable pairs (e.g. `finite_number ∧ real` = `finite_real`).
  * - Unions (which can arise from previous meets) distribute:
  *   `(a | b) ∧ c` = `(a ∧ c) | (b ∧ c)`.
- * - Incomparable non-primitive pairs are considered disjoint → `nothing`.
+ * - A pair no rule above applies to yields `undefined`, meaning "no meet
+ *   rule, and not shown to be empty either". Only {@link isOverloadPair}
+ *   currently reports that; everything else collapses to `nothing`. Callers
+ *   decide what an irreducible pair becomes — {@link reduceIntersectionType}
+ *   keeps both members, {@link meetUnion} keeps the pair as one union member.
+ *
+ * The `undefined` is what keeps "I have no rule" distinguishable from a
+ * computed answer: an earlier design returned the irreducible pair as an
+ * `{ kind: 'intersection' }` object and let callers detect it by kind, but
+ * `meetUnion` can legitimately RETURN such an object (its single surviving
+ * member), so callers read a fully-computed meet as a give-up marker and
+ * discarded it — `(list<integer> | integer) & list<string>` came back with
+ * the union never distributed.
  */
-function meet2(a: Type, b: Type): Type {
+function meet2(a: Type, b: Type): Type | undefined {
   // Dev tripwire (§4.2): the algebra helpers never see an OPEN type.
   assertGroundType('meet', a);
   assertGroundType('meet', b);
@@ -360,7 +354,72 @@ function meet2(a: Type, b: Type): Type {
     if (an && bn) return meetNumericRanges(an, bn);
   }
 
+  // No meet rule applies. Two signatures are the one pair that must survive
+  // rather than collapse; everything else keeps the historical `nothing`.
+  if (isOverloadPair(a, b)) return undefined;
+
   return 'nothing';
+}
+
+/**
+ * True when `a` and `b` are two function signatures, whose intersection is an
+ * OVERLOAD SET — the way this type system spells "inhabited by a function
+ * answering to both shapes". `isSubtype` already reports such an intersection
+ * as a subtype of each of its arms, so collapsing it here contradicted the
+ * subtype relation and erased every overload set written as a type.
+ *
+ * A positive witness like this one is required, rather than the absence of a
+ * disjointness proof (`!provablyDisjoint(a, b)`). That oracle answers the
+ * conservative "may overlap" for a NOMINAL reference — its inhabitants are not
+ * its definition's, so it cannot rule on them — while two distinct nominal
+ * types do share no value, and the protocol-conformance overlap gate
+ * (`engine-protocols.ts`, reached through `typesOverlap`) depends on their
+ * meet being empty. Reading that conservative answer as "keep the
+ * intersection" made every unrelated nominal pair collide.
+ *
+ * Same-kind COMPOSITES (two lists, two records) are deliberately not included,
+ * even though some pairs do share an inhabitant — `list<never>` is a subtype
+ * of both `list<integer>` and `list<string>`. Kind alone is not a witness for
+ * them: tuples of different arity share no value, nor do records whose common
+ * key has disjoint types, and admitting the whole kind makes `typesOverlap`
+ * report those as overlapping and the conformance gate reject legitimately
+ * disjoint conformances. Deciding them needs real structural meets, tracked in
+ * `ROADMAP.md` under "The meet has no structural rule for same-kind
+ * composites".
+ */
+function isOverloadPair(a: Type, b: Type): boolean {
+  return (
+    typeof a === 'object' &&
+    typeof b === 'object' &&
+    a.kind === 'signature' &&
+    b.kind === 'signature'
+  );
+}
+
+/**
+ * Recursively flatten nested intersections and reduce + de-duplicate the
+ * members, so `(a & (b & c))` and `((a & b) & c)` yield the same flat member
+ * list. De-duplication uses `typeToDedupKey` with the order-independent
+ * tie-break of {@link addDedupedMember}, so a stated-pure arrow and its bare
+ * twin merge to the spelling that carries the marker.
+ *
+ * The union counterpart is {@link flattenUnionMembers}; unlike that one the
+ * member ORDER is preserved rather than canonicalized, because an intersection
+ * of signatures is an overload set and its arm order is dispatch-significant
+ * (`overload.ts` breaks ranking ties by declaration order).
+ */
+function flattenIntersectionMembers(types: Readonly<Type[]>): Type[] {
+  const result: Type[] = [];
+  const seen = new Map<string, number>();
+  const add = (t: Type): void => {
+    if (typeof t === 'object' && t.kind === 'intersection') {
+      for (const m of t.types) add(m);
+      return;
+    }
+    addDedupedMember(result, seen, typeToDedupKey(t), t);
+  };
+  for (const t of types) add(reduceType(t));
+  return result;
 }
 
 /** Coerce a numeric primitive string or numeric range object to a
@@ -408,14 +467,21 @@ function makeNumericRange(
 }
 
 function meetUnion(types: Readonly<Type[]>, b: Type): Type {
-  const members = types.map((t) => meet2(t, b)).filter((t) => t !== 'nothing');
+  const members: Type[] = [];
+  for (const t of types) {
+    const m = meet2(t, b);
+    if (m === 'nothing') continue;
+    // No meet rule for this member: the distribution still happened, and this
+    // member's share of it is the irreducible pair itself.
+    members.push(m === undefined ? { kind: 'intersection', types: [t, b] } : m);
+  }
   if (members.length === 0) return 'nothing';
   if (members.length === 1) return members[0];
   return reduceUnionType({ kind: 'union', types: members });
 }
 
 function reduceIntersectionType(type: AlgebraicType): Type {
-  const reducedTypes = reduceMembers(type.types);
+  const reducedTypes = flattenIntersectionMembers(type.types);
 
   if (reducedTypes.length === 0) return 'nothing';
 
@@ -426,13 +492,44 @@ function reduceIntersectionType(type: AlgebraicType): Type {
   // primitives intersect to their lattice meet (e.g. `integer & finite_real`
   // = `finite_integer`) instead of collapsing to `nothing`; genuinely
   // disjoint types (e.g. `number & boolean`) still annihilate to `nothing`.
-  let result: Type = reducedTypes[0];
-  for (let i = 1; i < reducedTypes.length; i++) {
-    result = meet2(result, reducedTypes[i]);
-    if (result === 'nothing') return 'nothing';
+  //
+  // A pair `meet2` can neither merge nor prove disjoint stays as it was
+  // written, so each member is offered to the accumulated ones and appended
+  // when none of them absorbs it. The surviving list is the intersection —
+  // for signatures, the overload set. Members keep their written order: it is
+  // the tie-break `overload.ts` uses when ranking equally-good arms.
+  //
+  // A member that merges keeps being offered to the REST of the accumulated
+  // list, because the merged result is narrower than either side and may now
+  // absorb members that neither side did. Stopping at the first merge left
+  // reduction non-idempotent: `((number) -> number) & ((integer) -> integer) &
+  // ((any) -> integer)` settled to a two-arm intersection that reducing again
+  // collapsed to one arm — and settling a canonical type text is required to
+  // reproduce it (`settleTypeText`, `library/type-value-utils.ts`).
+  const members: Type[] = [];
+  for (const t of reducedTypes) {
+    let merged: Type = t;
+    // Where the merged result goes back, so a merge cannot reorder the arms:
+    // the slot of the FIRST member it absorbed, or the end if it absorbed none.
+    let at = -1;
+    for (let i = 0; i < members.length; ) {
+      const m = meet2(members[i], merged);
+      if (m === 'nothing') return 'nothing';
+      if (m === undefined) {
+        i += 1;
+        continue;
+      }
+      if (at === -1) at = i;
+      members.splice(i, 1);
+      merged = m;
+    }
+    if (at === -1) members.push(merged);
+    else members.splice(at, 0, merged);
   }
 
-  return decorate(result);
+  if (members.length === 1) return decorate(members[0]);
+
+  return decorate({ ...type, types: members });
 }
 
 /**

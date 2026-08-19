@@ -247,8 +247,9 @@ describe('grammar: accepted forms', () => {
     });
 
     test('an intersection of the two spellings does the same', () => {
-      // The intersection path shares `reduceMembers`, and — unlike the union —
-      // does not re-sort its members, so it is the order-sensitive one.
+      // The intersection path de-duplicates its members the same way (via
+      // `addDedupedMember`) and — unlike the union — does not re-sort them, so
+      // it is the order-sensitive one.
       const reduceIntersection = (a: string, b: string): string =>
         typeToString(
           reduceType({
