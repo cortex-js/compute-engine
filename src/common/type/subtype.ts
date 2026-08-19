@@ -2132,6 +2132,21 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (a === 'unknown') return b;
   if (b === 'unknown') return a;
 
+  // `nothing` is ABSORBED rather than joined: `widen('nothing', 'integer')` is
+  // `integer`, not `integer | nothing`. As pure lattice algebra that is wrong
+  // — the join must be a supertype of both sides, and `integer` is not a
+  // supertype of `nothing` — so this looks like the same unit-vs-empty
+  // confusion that `narrow2` above had, and it is NOT. It is deliberate, and
+  // was put to the user and approved on 2026-08-19.
+  //
+  // The reason is that absence is OPT-IN in this type system: `nothing` and
+  // `missing` are excluded from `unknown`, and a type admits them only by
+  // saying so (`integer | nothing`). Joining them in would contradict that at
+  // every inference site that widens a series of observed types — most
+  // visibly element-type inference, where `[1, Nothing, 3]` is meant to infer
+  // `list<integer>` rather than `list<integer | nothing>`.
+  //
+  // Do not "fix" this to match `narrow2`. The two are asymmetric on purpose.
   if (a === 'nothing') return b;
   if (b === 'nothing') return a;
 
