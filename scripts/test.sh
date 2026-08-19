@@ -30,9 +30,20 @@ run_declaration_type_tests() {
 if [ "$VARIANT" = "coverage" ] || [ "$VARIANT" = "-coverage" ]; then
     run_declaration_type_tests
     npx jest --config ./config/jest.config.cjs --coverage --no-cache
+    echo -e "\n🕯  Checkpoint bypass canary..."
+    CE_CHECKPOINT_CANARY=1 npx jest --config ./config/jest.config.cjs \
+      --reporters summary -- test/compute-engine/checkpoint-differential.test.ts
 elif [ "$VARIANT" = "test" ] || [ "$VARIANT" = "-test" ]; then
     run_declaration_type_tests
     npx jest --config ./config/jest.config.cjs --no-cache --reporters summary
+    # The checkpoint journal's bypass canary (CE_CHECKPOINT_CANARY) is a
+    # module-load flag, so its assertions are inert in the run above. Re-run
+    # the one differential-harness file in a fresh process with the flag set:
+    # every state event a checkpoint window sees must be backed by a journal
+    # hook of the matching kind, or a write has bypassed the journal.
+    echo -e "\n🕯  Checkpoint bypass canary..."
+    CE_CHECKPOINT_CANARY=1 npx jest --config ./config/jest.config.cjs \
+      --reporters summary -- test/compute-engine/checkpoint-differential.test.ts
 elif [ "$VARIANT" = "snapshot" ]  || [ "$VARIANT" = "-snapshot" ]; then
     run_declaration_type_tests
     npx jest --config ./config/jest.config.cjs  --updateSnapshot

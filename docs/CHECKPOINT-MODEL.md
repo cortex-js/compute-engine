@@ -124,14 +124,22 @@ not silently captured.
 
 Object serials and similar identity-bearing display fields need not match a
 fresh engine byte-for-byte; semantic comparison strips those fields. The
-active differential harness defines the comparator for results, types,
-diagnostics, serialization, and `About()` output.
+differential harness (`test/compute-engine/checkpoint-differential.test.ts`)
+defines the comparator: printed results, their types and LaTeX
+serialization, every diagnostic at every severity, `About()` output,
+`verify()` on assumptions, sequence terms, object fields, and the numeric
+configuration. It is validated by MUTATION: each journal family and restore
+step has been hand-disabled and shown to turn seeds red. A change to the
+coverage tables above should be accompanied by the same exercise — a harness
+that has never failed is evidence about the harness, not the engine.
 
 ## Remaining work
 
-The randomized differential harness and the strict linear-session posture flip
-remain active in `plans/2026-08-18-checkpoint-restore-design.md`. Once those
-gates close, that plan is removed; this document remains the contract.
+The randomized differential harness shipped
+(`test/compute-engine/checkpoint-differential.test.ts`); the strict
+linear-session posture flip and in-scope (v2) checkpoints remain active in
+`plans/2026-08-18-checkpoint-restore-design.md`. Once those gates close, that
+plan is removed; this document remains the contract.
 
 Two things the harness should treat as classes of defect rather than as
 one-off bugs, because both were found by review after a full green suite:

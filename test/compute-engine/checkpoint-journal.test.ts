@@ -1,15 +1,15 @@
 /**
  * Stage C1 of the checkpoint work — the copy-on-write journal
  * (`src/compute-engine/checkpoint-journal.ts`), its window lifecycle, and the
- * §5.2/§5.3 hook set of
- * `docs/CHECKPOINT-MODEL.md`.
+ * definition-record and object-slot hook set described under "State coverage"
+ * in `docs/CHECKPOINT-MODEL.md`.
  *
  * C1 ships the MECHANISM, not the `checkpoint()`/`restore()`/`discard()` API
  * — that is C2 — so these tests drive the window directly: install one on the
  * engine, run a cell's worth of writes, replay the window, and check that the
  * state is the state the window opened on. That is exactly what C2's restore
  * step 2 will do, minus the registry snapshots, the purges and the version
- * bumps that surround it (§6).
+ * bumps that surround it.
  *
  * Two things every family test checks, because they are what the whole design
  * rests on:
@@ -88,7 +88,7 @@ describe('window mechanics', () => {
   });
 
   test('folding an interior window keeps the OLDER prior value', () => {
-    // The `discard()` shape of §4b: cp2's window folds into cp1's, and a later
+    // The `discard()` shape: cp2's window folds into cp1's, and a later
     // restore to cp1 must land on the state cp1 saw — not on cp2's.
     const record = { field: 'at-cp1' };
     const older = new CheckpointWindow();
@@ -297,7 +297,7 @@ describe('funnel 4 — declarations and scope bindings', () => {
     const w = inWindow(ce, () => {
       executeEpsil(ce, 'brandNew = 1');
     });
-    // §6 step 5: every half created in the window is orphaned by the restore
+    // Disposal contract: every half created in the window is orphaned by the restore
     // and has to be disposed, or a constant's configuration-change listener
     // leaks for the engine's lifetime.
     expect(w.created().length).toBeGreaterThan(0);
@@ -350,7 +350,7 @@ describe('funnel 6 — operator-definition updates', () => {
   });
 });
 
-describe('§5.3 — object slot writes', () => {
+describe('object slot writes', () => {
   test('a field store on an object that predates the window is rewound', () => {
     const ce = new ComputeEngine();
     ce.declareType('Person', 'object{name: string, age: integer}');
@@ -373,7 +373,7 @@ describe('§5.3 — object slot writes', () => {
   });
 
   test('the OBJECT is the recorded owner, not its slot map', () => {
-    // §6 step 8 bumps `_version` once per touched object after its slot undos.
+    // The restore bumps `_version` once per touched object after its slot undos.
     // With the slot `Map` as owner there is no way back to the object, so the
     // restore could not find what to bump.
     const ce = new ComputeEngine();

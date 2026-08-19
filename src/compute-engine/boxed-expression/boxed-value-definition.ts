@@ -33,8 +33,9 @@ import type { CheckpointHookKind } from '../checkpoint-journal.js';
 
 /**
  * Record this definition record's mutable state in the active checkpoint
- * journal window, once per window (`checkpoint-journal.ts`; §5.2 funnels 1, 2
- * and 5 of `docs/CHECKPOINT-MODEL.md`).
+ * journal window, once per window — the value-write, type-write and
+ * bare-field definition funnels ("State coverage" in
+ * `docs/CHECKPOINT-MODEL.md`; the mechanism is `checkpoint-journal.ts`).
  *
  * ONE key for the whole record rather than one per field: the snapshot is the
  * complete mutable field set, so a per-field key would take more snapshots to
@@ -495,7 +496,7 @@ export class _BoxedValueDefinition
 
   /**
    * Snapshot EVERY mutable field of this record, for the checkpoint journal
-   * (`checkpoint-journal.ts`; stage C1 of
+   * (`checkpoint-journal.ts`, and "State coverage" in
    * `docs/CHECKPOINT-MODEL.md`). Deliberately
    * a different, wider tuple than {@link _typeSlotSnapshot}: that one covers
    * the six slots an inference re-derivation can move, and a checkpoint has

@@ -188,6 +188,25 @@ list, which is a subtype of every list — instead of being refuted. A differing
 list SHAPE still refutes, correctly: no value is both a 2-vector and a
 3-vector.
 
+`broadcastable` is the one collection constructor that does NOT meet
+elementwise, and it must not be added to `meetCollections`. It denotes the
+union `T | indexed_collection<T>`, so `meet2` expands it and lets the union
+distribution compute the exact answer. Meeting it elementwise keeps
+`(A & B) | indexed_collection<A & B>` and silently drops the cross terms
+`A & indexed_collection<B>` and `indexed_collection<A> & B`, which are
+inhabited whenever an element type is itself collection-shaped — real usage,
+not a curiosity: a `vector<3>` inhabits both `broadcastable<vector<3>>`,
+through its scalar arm, and `broadcastable<number>`, through its collection
+arm, and the elementwise answer `broadcastable<never>` loses it. That version
+was written, reviewed, and refuted the same day; the witness is pinned in
+`test/common/types.test.ts` under "`broadcastable` meets by expanding to the
+union it denotes".
+
+Guard against re-deriving the elementwise version from a passing check: being a
+subtype of both operands is necessary for a meet but NOT sufficient, since any
+under-approximation satisfies it, `never` included. The test that matters asks
+whether a type inhabiting both operands survives the meet.
+
 TUPLES and RECORDS now meet structurally too (`meetTuples` / `meetRecords`).
 Records are WIDTH-subtyped, so the meet merges both key sets and meets any key
 they share; tuples meet slot-wise, requiring equal arity and agreeing slot

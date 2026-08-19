@@ -823,7 +823,8 @@ export function getSequenceInfo(
  * List all defined sequences.
  */
 /**
- * Snapshot both sequence registries for a checkpoint (§4a of
+ * Snapshot both sequence registries for a checkpoint — bounded state, taken
+ * whole at checkpoint creation rather than journaled ("State coverage" in
  * `docs/CHECKPOINT-MODEL.md`).
  *
  * Sequences (`a_n := …`) bypass the binding model entirely into these

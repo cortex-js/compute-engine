@@ -1,9 +1,10 @@
 /**
  * Stage C2 of the checkpoint work — the `checkpoint()` / `restore()` /
- * `discard()` API (`src/compute-engine/checkpoint.ts`), its §5.1 quiescence
- * precondition, the §3 error contract, and the §6 ordered restore.
+ * `discard()` API (`src/compute-engine/checkpoint.ts`): the quiescence
+ * precondition, the typed error contract, and the ordered two-phase restore
+ * ("API" and "Quiescence" in `docs/CHECKPOINT-MODEL.md`).
  *
- * The oracle throughout is §2's correctness specification: a restore followed
+ * The oracle throughout is the correctness specification itself: a restore followed
  * by replay must be observationally indistinguishable from a FRESH engine
  * running the corresponding linear program. Where a test can afford it, it
  * builds that fresh engine and compares against it rather than against a
@@ -21,7 +22,8 @@ import {
   type CheckpointErrorCode,
 } from '../../src/compute-engine/checkpoint';
 
-/** Run `cells` on a fresh engine — the §2 oracle. */
+/** Run `cells` on a fresh engine — the fresh-engine oracle the correctness
+ * specification is stated against. */
 function oracle(cells: string[]): ComputeEngine {
   const ce = new ComputeEngine();
   for (const c of cells) executeEpsil(ce, c);
@@ -212,7 +214,7 @@ describe('discard', () => {
   });
 });
 
-describe('the error contract (§3)', () => {
+describe('the error contract', () => {
   test('a discarded checkpoint is dead to restore and to discard', () => {
     const ce = new ComputeEngine();
     const cp = ce.checkpoint();
@@ -291,7 +293,7 @@ describe('the error contract (§3)', () => {
   });
 
   test('restore() and discard() refuse mid-evaluation too', () => {
-    // The §3 table says `checkpoint-not-quiescent` is thrown by ALL THREE
+    // The error contract says `checkpoint-not-quiescent` is thrown by ALL THREE
     // operations; testing only `checkpoint()` leaves the other two branches
     // unexercised.
     const ce = new ComputeEngine();
@@ -345,9 +347,9 @@ describe('the error contract (§3)', () => {
   });
 });
 
-describe('restore failure and poisoning (§6a)', () => {
+describe('restore failure and poisoning', () => {
   test('a forced phase-2 throw poisons the engine detectably', () => {
-    // §10 requires restore-failure injection. The mutation phase is built out
+    // Restore-failure injection: the mutation phase is built out
     // of plain assignments and map surgery so it has no expected throw path —
     // which is exactly why it needs a forced one to be tested at all.
     const ce = new ComputeEngine();
@@ -398,7 +400,7 @@ describe('restore failure and poisoning (§6a)', () => {
   });
 });
 
-describe('the bounded state families (§4a)', () => {
+describe('the bounded state families', () => {
   test('numeric configuration is restored, precision before tolerance', () => {
     // Setting precision RESETS tolerance, so an unordered restore would
     // silently install the precision-derived default instead of the
@@ -454,7 +456,7 @@ describe('the bounded state families (§4a)', () => {
   });
 });
 
-describe('the sequence registries (§4a)', () => {
+describe('the sequence registries', () => {
   test('a sequence declared after the checkpoint is gone', () => {
     const ce = new ComputeEngine();
     const cp = ce.checkpoint();
@@ -468,23 +470,35 @@ describe('the sequence registries (§4a)', () => {
   test('a memoized term computed after the checkpoint does not survive', () => {
     // The memo map is created by `createSequenceHandler` and CLOSED OVER by
     // the handler; the metadata merely holds the same reference. Replacing
-    // `meta.memo` with a fresh map on restore would leave the handler reading
-    // the old one, so every post-checkpoint term would still be served — a
-    // failure invisible to `getSequenceInfo`, which reports the metadata.
+    // `meta.memo` with a fresh map on restore leaves the handler reading the
+    // old one — and every registry probe reports the FRESH map, so a
+    // size-based assertion here is satisfied by exactly the broken restore
+    // it exists to catch (mutation-tested during C3). The recurrence
+    // therefore references a symbol reassigned inside the window: a
+    // window-era memo entry then DIFFERS from recomputation, and the value
+    // assertion below fails unless the handler's own map was cleared.
     const ce = new ComputeEngine();
-    ce.declareSequence('T', { variable: 'n', base: { 0: 1 }, recurrence: 'T_{n-1} + 2' });
+    // A SINGLE-LETTER dependency: the recurrence is parsed as LaTeX, where a
+    // two-letter name is implicit multiplication of two unknowns.
+    executeEpsil(ce, 'y = 2');
+    ce.declareSequence('T', {
+      variable: 'n',
+      base: { 0: 1 },
+      recurrence: 'T_{n-1} + y',
+    });
     expect(ce.parse('T_{4}').evaluate().re).toBe(9);
 
     const cp = ce.checkpoint();
-    // Populate the memo further inside the window.
-    expect(ce.parse('T_{8}').evaluate().re).toBe(17);
-    const cachedInWindow = ce.getSequenceCache('T')?.size ?? 0;
-    expect(cachedInWindow).toBeGreaterThan(0);
+    executeEpsil(ce, 'y = 1000');
+    // Populate the memo inside the window, with the window-only zm.
+    expect(ce.parse('T_{8}').evaluate().re).toBe(9 + 4 * 1000);
+    expect(ce.getSequenceCache('T')?.size ?? 0).toBeGreaterThan(0);
 
     ce.restore(cp);
-    // Cleared in place, so the handler and the metadata agree that nothing is
-    // memoized — and the recomputed terms still agree with a fresh engine.
+    // The registry-side map is empty — necessary but NOT sufficient…
     expect(ce.getSequenceCache('T')?.size ?? 0).toBe(0);
+    // …and the recomputed terms use the restored y = 2, which only holds if
+    // the handler's captured map was cleared rather than swapped away.
     expect(ce.parse('T_{8}').evaluate().re).toBe(17);
   });
 });

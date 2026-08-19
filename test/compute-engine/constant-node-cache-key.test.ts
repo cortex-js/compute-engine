@@ -20,8 +20,8 @@
  * without a witness to write.
  *
  * Settled empirically as the exit criterion of stage C1 of the checkpoint
- * work — `docs/CHECKPOINT-MODEL.md`, the
- * "all-constant-pure `undefined`-key memo question". A restore reaches the
+ * work — see "Generation keys and constant nodes" in
+ * `docs/CHECKPOINT-MODEL.md`. A restore reaches the
  * same entries the same way, so leaving them unkeyed would have made
  * restore-then-replay serve pre-restore answers.
  */
