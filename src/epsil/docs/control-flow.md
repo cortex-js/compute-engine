@@ -30,8 +30,8 @@ function f(x) { x + 1 }
 ```
 
 Parameters can carry a type annotation (`f(x: real) = …`), and the block
-form accepts a return-type annotation in the unambiguous post-parameter-list
-position (`function f(x) -> real { … }`). Parameter types are enforced when
+form accepts a return-type annotation after the parameter list 
+(`function f(x) -> real { … }`). Parameter types are enforced when
 the function is called. Return types are retained in the function signature;
 the current runtime does not validate the inferred type of every returned
 value against that annotation.

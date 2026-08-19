@@ -159,7 +159,7 @@ const c = 1
 c = 2
 ```
 
-## Arguments are values — unless the function holds them
+## Arguments are values — unless the function holds them {#arguments-are-values-unless-the-function-holds-them}
 
 A call evaluates its arguments first and hands the function their values:
 with `let a = 3`, `f(a + 1)` receives `4`. A function declared with the

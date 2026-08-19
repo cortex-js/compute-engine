@@ -21,8 +21,8 @@ const c = 6.28
 
 Reach for `const` when the name stands for something fixed — a physical
 constant, a conversion factor, a lookup table — so that an accidental write is
-reported instead of quietly taking effect. Use `let` for anything that varies:
-accumulators, loop state, values you refine as you go.
+reported. Use `let` for anything that varies: accumulators, loop state, 
+values you refine as you go.
 
 A type annotation also **implies** a declaration, even without a keyword:
 
