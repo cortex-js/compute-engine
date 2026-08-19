@@ -1,4 +1,4 @@
-import { isSubtype } from '../common/type/subtype.js';
+import { isEmptyType, isSubtype } from '../common/type/subtype.js';
 import { reduceType } from '../common/type/reduce.js';
 import { functionResult } from '../common/type/utils.js';
 import { BoxedType } from '../common/type/boxed-type.js';
@@ -1101,7 +1101,7 @@ function refineSymbolType(
         kind: 'intersection',
         types: [type, def.value.type.type],
       });
-      if (meet === 'nothing') return 'contradiction';
+      if (isEmptyType(meet)) return 'contradiction';
       const previousMeet = def.value.type;
       def.value.type = new BoxedType(meet, ce._typeResolver);
       def.value.inferredType = false;

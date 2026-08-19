@@ -442,6 +442,26 @@ function endUnfoldAgainst(ref: TypeReference, lhs: unknown): void {
 }
 
 /**
+ * True when `t` is the EMPTY type — the one no value inhabits.
+ *
+ * `never` is that type. `nothing` is NOT: it is the unit type, whose single
+ * member is the symbol `Nothing`. The two are a standing trap because "nothing"
+ * reads like emptiness in English, and the meet algebra used to return
+ * `nothing` for a refuted intersection — so `number & boolean` produced a type
+ * that still admitted a value, which then survived into a union
+ * (`(number & boolean) | integer` kept a `| nothing` arm) and deleted tuple
+ * slots (a `nothing` slot collapses, by the value-level rule that writing
+ * `Nothing` into a positional slot removes it).
+ *
+ * Use this wherever the question is "did this meet come back empty?", so the
+ * distinction is asked for by name rather than by an `=== 'never'` literal
+ * that the next reader has to weigh against `=== 'nothing'`.
+ */
+export function isEmptyType(t: Type): boolean {
+  return t === 'never';
+}
+
+/**
  * True when `a` and `b` are *provably* disjoint (no value inhabits both).
  * Used for `A <: !B` (a subtype of a negation iff it is disjoint from the
  * negated type), and exposed to consumers as `BoxedType.isDisjointFrom()`.
@@ -2071,17 +2091,27 @@ function isSymbol(type: Type): boolean {
 function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (a === b) return a;
 
-  if (a === 'nothing' || b === 'nothing') return 'nothing';
-
   if (a === 'any') return b;
   if (b === 'any') return a;
 
-  if (a === 'never') return b;
-  if (b === 'never') return a;
-
-  if (a === 'unknown') return b;
-  if (b === 'unknown') return a;
-
+  // `nothing`, `never` and `unknown` deliberately have NO short-circuit here;
+  // the subtype tests below give each the right answer, and the short-circuits
+  // they used to have gave the wrong one.
+  //
+  // `nothing` is the UNIT type (its one member is the symbol `Nothing`), not
+  // the bottom, so it does not absorb the other side: `narrow('nothing',
+  // 'integer')` shares no value and is `never`, which is what the disjoint
+  // fallback returns. `never` IS the bottom, so it absorbs rather than yields
+  // — `isSubtype('never', b)` holds for every `b`, so the first test below
+  // returns it. And `unknown` excludes the absence types by ruling (absence is
+  // opt-in), so `narrow('nothing', 'unknown')` is likewise `never`; every
+  // ordinary type still narrows through `isSubtype(b, 'unknown')`.
+  //
+  // Placeholder semantics for a declared `unknown` slot deliberately do NOT
+  // live in this relation — they are applied by `refineDeclaredPlaceholders`
+  // (`boxed-expression/effects-inference.ts`), because `meet2` and
+  // `reduceUnionType` call `isSubtype` directly and would otherwise become
+  // operand-order-dependent.
   if (isSubtype(a, b)) return a;
   if (isSubtype(b, a)) return b;
 

@@ -5,6 +5,7 @@ import { Complex } from 'complex-esm';
 import { kleeneAnd, kleeneNot, kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
+import { isEmptyType } from '../../common/type/subtype.js';
 import { collectionElementType } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import { flatten } from '../boxed-expression/flatten.js';
@@ -96,7 +97,9 @@ function numberSetSubsetOf(
  * The `false` refutation relies on the type lattice computing a correct
  * *meet* for intersections: overlapping numeric primitives intersect to
  * their greatest lower bound (e.g. `integer ∩ finite_real` =
- * `finite_integer`), so `'nothing'` genuinely means "disjoint types"
+ * `finite_integer`), so an EMPTY meet genuinely means "disjoint types"
+ * (`isEmptyType`, `common/type/subtype.ts`) — the empty type is `never`, not
+ * `nothing`, which is the unit type inhabited by the symbol `Nothing`
  * (REVIEW.md G15; see `meetPrimitiveTypes` in `common/type/subtype.ts`).
  * This is what makes the precise per-set types used by the `contains`
  * handlers below (e.g. `finite_complex`, `imaginary`) sound: a symbol
@@ -105,7 +108,7 @@ function numberSetSubsetOf(
 export function typeMembership(x: Expression, t: Type): boolean | undefined {
   const vt = x.type;
   if (vt.matches(t)) return true;
-  if (typeIntersection(vt.type, t) === 'nothing') return false;
+  if (isEmptyType(typeIntersection(vt.type, t))) return false;
   // The static type overlaps `t` but does not entail it. A concrete number
   // literal has an exact value, so a non-match is definitive; a symbol of
   // indeterminate type is unknown.

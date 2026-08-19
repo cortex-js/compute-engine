@@ -1348,8 +1348,48 @@ describe('reduceType Tests', () => {
     expect(reduce('integer & number')).toMatch('integer');
   });
 
-  it('should return "nothing" for incompatible intersection types', () => {
-    expect(reduce('number & boolean')).toMatch('nothing');
+  it('returns the EMPTY type for incompatible intersection types', () => {
+    // `never`, not `nothing`: no value is both a number and a boolean, whereas
+    // `nothing` is the UNIT type, whose one member is the symbol `Nothing`.
+    // Spelling the refutation with the unit type left a value in the result —
+    // see the two tests below for what that leaked into.
+    expect(reduce('number & boolean')).toBe('never');
+  });
+
+  it('a refuted intersection does not admit `Nothing` through a union', () => {
+    // With the empty meet spelled as the unit type, the refuted arm survived
+    // union reduction as a `nothing` member and the union then admitted the
+    // value `Nothing`.
+    expect(reduce('(number & boolean) | integer')).toBe('integer');
+    expect(
+      isSubtype(
+        'nothing',
+        reduceType(parseType('(number & boolean) | integer'))
+      )
+    ).toBe(false);
+  });
+
+  it('a refuted intersection does not delete the tuple slot holding it', () => {
+    // A `nothing` slot collapses, mirroring the value-level rule that writing
+    // `Nothing` into a positional slot removes it — so a refuted slot silently
+    // changed the tuple's ARITY. An empty slot is `never` and stays put.
+    expect(reduce('tuple<number & boolean, integer>')).toBe(
+      'tuple<never, integer>'
+    );
+  });
+
+  it('an element meet that refutes yields the EMPTY collection', () => {
+    // `list<never>` is the empty list, and it is a subtype of every list — the
+    // right answer for a list whose element type is uninhabited.
+    // `list<nothing>` would instead be "a list of `Nothing` values", which is
+    // not a subtype of `list<integer>` at all.
+    expect(reduce('list<integer & string>')).toBe('list<never>');
+    expect(
+      isSubtype(
+        reduceType(parseType('list<integer & string>')),
+        parseType('list<integer>')
+      )
+    ).toBe(true);
   });
 
   // An intersection of signatures is how this type system SPELLS an overload
@@ -1376,10 +1416,14 @@ describe('reduceType Tests', () => {
       const flat =
         '((number) -> number) & ((string) -> string) & ((boolean) -> boolean)';
       expect(
-        reduce('(((number) -> number) & ((string) -> string)) & ((boolean) -> boolean)')
+        reduce(
+          '(((number) -> number) & ((string) -> string)) & ((boolean) -> boolean)'
+        )
       ).toBe(flat);
       expect(
-        reduce('((number) -> number) & (((string) -> string) & ((boolean) -> boolean))')
+        reduce(
+          '((number) -> number) & (((string) -> string) & ((boolean) -> boolean))'
+        )
       ).toBe(flat);
     });
 
@@ -1394,10 +1438,10 @@ describe('reduceType Tests', () => {
       );
     });
 
-    it('survives nested inside a collection and keeps a tuple\'s arity', () => {
-      expect(
-        reduce('list<((number) -> number) & ((string) -> string)>')
-      ).toBe('list<((number) -> number) & ((string) -> string)>');
+    it("survives nested inside a collection and keeps a tuple's arity", () => {
+      expect(reduce('list<((number) -> number) & ((string) -> string)>')).toBe(
+        'list<((number) -> number) & ((string) -> string)>'
+      );
       expect(
         reduce('tuple<((number) -> number) & ((string) -> string), integer>')
       ).toBe('tuple<((number) -> number) & ((string) -> string), integer>');
@@ -1411,14 +1455,38 @@ describe('reduceType Tests', () => {
     // not a witness of sharing a value (different tuple arities, or a common
     // record key with disjoint types, share none) and where treating it as one
     // makes `typesOverlap` report an overlap the conformance gate then refuses.
-    expect(reduce('((number) -> number) & integer')).toMatch('nothing');
-    expect(reduce('list<integer> & integer')).toMatch('nothing');
-    expect(reduce('nothing & integer')).toMatch('nothing');
-    expect(reduce('list<integer> & list<string>')).toMatch('nothing');
-    expect(reduce('tuple<integer, integer> & tuple<string, string, string>')).toMatch(
-      'nothing'
+    expect(reduce('((number) -> number) & integer')).toBe('never');
+    expect(reduce('list<integer> & integer')).toBe('never');
+    expect(reduce('nothing & integer')).toBe('never');
+    expect(
+      reduce('tuple<integer, integer> & tuple<string, string, string>')
+    ).toBe('never');
+    expect(reduce('record{a: integer} & record{a: boolean}')).toBe('never');
+  });
+
+  it('meets two applications of the same collection constructor elementwise', () => {
+    // Never empty: the EMPTY collection inhabits both sides whatever their
+    // element types say, since `[]` is `list<never>` and `never <: X` makes
+    // `list<never>` a subtype of every list. Refuting the pair outright, as
+    // this used to, was unsound.
+    expect(reduce('list<integer> & list<string>')).toBe('list<never>');
+    expect(reduce('set<integer> & set<string>')).toBe('set<never>');
+    expect(reduce('dictionary<integer> & dictionary<string>')).toBe(
+      'dictionary<never>'
     );
-    expect(reduce('record{a: integer} & record{a: boolean}')).toMatch('nothing');
+    expect(reduce('list<integer> & list<number>')).toBe('list<integer>');
+    expect(
+      isSubtype(
+        reduceType(parseType('list<integer> & list<string>')),
+        parseType('list<integer>')
+      )
+    ).toBe(true);
+  });
+
+  it('refutes two lists whose SHAPES differ, which is not an elementwise question', () => {
+    // No value is both a 2-vector and a 3-vector, so the elementwise meet does
+    // not apply and the pair stays refuted.
+    expect(reduce('list<integer^2> & list<integer^3>')).toBe('never');
   });
 
   it('reduces an overload set to a fixed point, so settling is idempotent', () => {
@@ -1428,7 +1496,8 @@ describe('reduceType Tests', () => {
     // are contravariant), but it is written last, so a fold that stopped at the
     // first merge left a second arm behind — and reducing THAT output again
     // dropped it, which `settleTypeText` cannot afford.
-    const t = '((number) -> number) & ((integer) -> integer) & ((any) -> integer)';
+    const t =
+      '((number) -> number) & ((integer) -> integer) & ((any) -> integer)';
     expect(reduce(t)).toBe('(any) -> integer');
     expect(reduce(reduce(t))).toBe('(any) -> integer');
   });
@@ -1439,9 +1508,9 @@ describe('reduceType Tests', () => {
     // intersection — its single surviving member — and a caller that read that
     // by kind mistook the computed answer for a give-up marker and kept the
     // undistributed union instead.
-    expect(reduce('(((number) -> number) | integer) & ((string) -> string)')).toBe(
-      '((number) -> number) & ((string) -> string)'
-    );
+    expect(
+      reduce('(((number) -> number) | integer) & ((string) -> string)')
+    ).toBe('((number) -> number) & ((string) -> string)');
   });
 
   // Test Cases for Tuple Types

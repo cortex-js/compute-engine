@@ -14,6 +14,7 @@ import {
   typeElementCount,
 } from '../../common/type/utils.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { isEmptyType } from '../../common/type/subtype.js';
 import type { OneOf } from '../../common/one-of.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
@@ -1083,8 +1084,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // Non-numeric / composite types (e.g. `!string`): definitely-not only when
     // provably disjoint from the integers.
     if (
-      reduceType({ kind: 'intersection', types: [t.type, 'integer'] }) ===
-      'nothing'
+      isEmptyType(
+        reduceType({ kind: 'intersection', types: [t.type, 'integer'] })
+      )
     )
       return false;
     return undefined;
@@ -1097,8 +1099,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (t.matches('real')) return undefined;
     if (t.matches('number')) return isNonRealNumber(t.type) ? false : undefined;
     if (
-      reduceType({ kind: 'intersection', types: [t.type, 'rational'] }) ===
-      'nothing'
+      isEmptyType(
+        reduceType({ kind: 'intersection', types: [t.type, 'rational'] })
+      )
     )
       return false;
     return undefined;

@@ -2,6 +2,7 @@ import { typeToDedupKey, typeToString } from './serialize.js';
 import {
   assertGroundType,
   COVERING_UNION_MAP,
+  isEmptyType,
   isSubtype,
   meetPrimitiveTypes,
 } from './subtype.js';
@@ -309,9 +310,12 @@ function reduceUnionType(type: AlgebraicType): Type {
  *   incomparable pairs (e.g. `finite_number ∧ real` = `finite_real`).
  * - Unions (which can arise from previous meets) distribute:
  *   `(a | b) ∧ c` = `(a ∧ c) | (b ∧ c)`.
+ * - Two applications of the same collection constructor meet ELEMENTWISE
+ *   (see {@link meetCollections}); the pair is never empty, because the empty
+ *   collection inhabits both.
  * - A pair no rule above applies to yields `undefined`, meaning "no meet
  *   rule, and not shown to be empty either". Only {@link isOverloadPair}
- *   currently reports that; everything else collapses to `nothing`. Callers
+ *   currently reports that; everything else collapses to `never`. Callers
  *   decide what an irreducible pair becomes — {@link reduceIntersectionType}
  *   keeps both members, {@link meetUnion} keeps the pair as one union member.
  *
@@ -336,7 +340,7 @@ function meet2(a: Type, b: Type): Type | undefined {
 
   if (typeof a === 'string' && typeof b === 'string') {
     const maximals = meetPrimitiveTypes(a as PrimitiveType, b as PrimitiveType);
-    if (maximals.length === 0) return 'nothing';
+    if (maximals.length === 0) return 'never';
     if (maximals.length === 1) return maximals[0];
     return { kind: 'union', types: maximals };
   }
@@ -344,7 +348,8 @@ function meet2(a: Type, b: Type): Type | undefined {
   // Two bounded numeric ranges (or a range and a bare numeric primitive): the
   // meet is the intersection of their base kinds combined with the
   // intersection of their intervals. Overlapping ranges no longer annihilate
-  // to `nothing` (an unsound refutation); only genuinely disjoint ranges do.
+  // to the empty type (an unsound refutation); only genuinely disjoint ranges
+  // do.
   if (
     (typeof a === 'object' && a.kind === 'numeric') ||
     (typeof b === 'object' && b.kind === 'numeric')
@@ -354,11 +359,75 @@ function meet2(a: Type, b: Type): Type | undefined {
     if (an && bn) return meetNumericRanges(an, bn);
   }
 
-  // No meet rule applies. Two signatures are the one pair that must survive
-  // rather than collapse; everything else keeps the historical `nothing`.
+  // Two applications of the SAME collection constructor meet ELEMENTWISE.
+  const collection = meetCollections(a, b);
+  if (collection !== undefined) return collection;
+
+  // No meet rule applies. Two signatures are the one remaining pair that must
+  // survive rather than collapse.
   if (isOverloadPair(a, b)) return undefined;
 
-  return 'nothing';
+  return 'never';
+}
+
+/**
+ * The meet of two applications of the SAME collection constructor, or
+ * `undefined` when `a` and `b` are not such a pair.
+ *
+ * The meet is elementwise, and it is never empty: the EMPTY collection
+ * inhabits both sides whatever their element types say, because `[]` is
+ * `list<never>` and `never <: X` makes `list<never>` a subtype of every list.
+ * So `list<integer> & list<string>` is `list<never>` — the type of the empty
+ * list alone — and refuting the pair outright, as this used to, was unsound.
+ *
+ * A differing list SHAPE is not an elementwise question and takes no meet
+ * here: no value is both a 2-vector and a 3-vector, so those stay refuted by
+ * the caller.
+ *
+ * Doing this does NOT disturb the protocol-conformance ruling that counts two
+ * collections with disjoint element types as non-overlapping (an empty
+ * collection carries no element a conformance could dispatch on). That rule
+ * lives in {@link typesOverlap}, which answers from `sameHeadArguments`
+ * BEFORE it ever consults this meet.
+ */
+function meetCollections(a: Type, b: Type): Type | undefined {
+  if (typeof a !== 'object' || typeof b !== 'object') return undefined;
+  if (a.kind !== b.kind) return undefined;
+
+  const meetElements = (x: Type, y: Type): Type =>
+    reduceType({ kind: 'intersection', types: [x, y] });
+
+  switch (a.kind) {
+    case 'list': {
+      const other = b as ListType;
+      if ((a.dimensions?.join() ?? '') !== (other.dimensions?.join() ?? ''))
+        return undefined;
+      return decorate({
+        ...a,
+        elements: meetElements(a.elements, other.elements),
+      });
+    }
+
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+      return decorate({
+        ...a,
+        elements: meetElements(
+          a.elements,
+          (b as SetType | CollectionType).elements
+        ),
+      });
+
+    case 'dictionary':
+      return decorate({
+        ...a,
+        values: meetElements(a.values, (b as DictionaryType).values),
+      });
+
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -433,14 +502,15 @@ function asNumericRange(t: Type): NumericType | null {
 
 /** The meet (intersection) of two bounded numeric types: the intersection of
  *  their base kinds over the intersection of their intervals. An empty
- *  interval or disjoint base kinds correctly yield `nothing`. */
+ *  interval or disjoint base kinds correctly yield `never`, the EMPTY type —
+ *  never `nothing`, which is the unit type of the symbol `Nothing`. */
 function meetNumericRanges(a: NumericType, b: NumericType): Type {
   const bases = meetPrimitiveTypes(a.type, b.type);
-  if (bases.length === 0) return 'nothing';
+  if (bases.length === 0) return 'never';
 
   const lower = Math.max(a.lower ?? -Infinity, b.lower ?? -Infinity);
   const upper = Math.min(a.upper ?? Infinity, b.upper ?? Infinity);
-  if (lower > upper) return 'nothing';
+  if (lower > upper) return 'never';
 
   const finite = lower !== -Infinity || upper !== Infinity;
   const ranges: Type[] = [];
@@ -451,7 +521,7 @@ function meetNumericRanges(a: NumericType, b: NumericType): Type {
     ranges.push(makeNumericRange(base as NumericPrimitiveType, lower, upper));
   }
 
-  if (ranges.length === 0) return 'nothing';
+  if (ranges.length === 0) return 'never';
   if (ranges.length === 1) return ranges[0];
   return reduceUnionType({ kind: 'union', types: ranges });
 }
@@ -470,12 +540,12 @@ function meetUnion(types: Readonly<Type[]>, b: Type): Type {
   const members: Type[] = [];
   for (const t of types) {
     const m = meet2(t, b);
-    if (m === 'nothing') continue;
+    if (m !== undefined && isEmptyType(m)) continue;
     // No meet rule for this member: the distribution still happened, and this
     // member's share of it is the irreducible pair itself.
     members.push(m === undefined ? { kind: 'intersection', types: [t, b] } : m);
   }
-  if (members.length === 0) return 'nothing';
+  if (members.length === 0) return 'never';
   if (members.length === 1) return members[0];
   return reduceUnionType({ kind: 'union', types: members });
 }
@@ -483,15 +553,19 @@ function meetUnion(types: Readonly<Type[]>, b: Type): Type {
 function reduceIntersectionType(type: AlgebraicType): Type {
   const reducedTypes = flattenIntersectionMembers(type.types);
 
-  if (reducedTypes.length === 0) return 'nothing';
+  // An intersection of NO types constrains nothing, so every value satisfies
+  // it vacuously: the answer is the TOP type. It is neither `never` (which no
+  // value inhabits) nor `nothing` (the unit type of the symbol `Nothing`) —
+  // the same false friend `narrow()` documents for its own zero-arity case.
+  if (reducedTypes.length === 0) return 'any';
 
   // If the intersection contains an `error`, return `error`
   if (reducedTypes.some((type) => type === 'error')) return 'error';
 
   // Fold the members pairwise through the meet. Overlapping numeric
   // primitives intersect to their lattice meet (e.g. `integer & finite_real`
-  // = `finite_integer`) instead of collapsing to `nothing`; genuinely
-  // disjoint types (e.g. `number & boolean`) still annihilate to `nothing`.
+  // = `finite_integer`) instead of collapsing; genuinely disjoint types (e.g.
+  // `number & boolean`) annihilate to `never`, the EMPTY type.
   //
   // A pair `meet2` can neither merge nor prove disjoint stays as it was
   // written, so each member is offered to the accumulated ones and appended
@@ -514,7 +588,7 @@ function reduceIntersectionType(type: AlgebraicType): Type {
     let at = -1;
     for (let i = 0; i < members.length; ) {
       const m = meet2(members[i], merged);
-      if (m === 'nothing') return 'nothing';
+      if (m !== undefined && isEmptyType(m)) return 'never';
       if (m === undefined) {
         i += 1;
         continue;
@@ -544,17 +618,18 @@ function reduceIntersectionType(type: AlgebraicType): Type {
  * ranges and so cannot decide `integer<1..10>` vs `integer<5..20>` (meet
  * `integer<5..10>`, inhabited).
  *
- * The bottom type has TWO spellings here — `reduceIntersectionType` returns
- * `'nothing'` for a disjoint pair while an empty numeric range reduces to
- * `'never'` — and both mean "no value", so both count as empty.
+ * Emptiness has ONE spelling: `never`, tested through `isEmptyType`. A meet
+ * that comes back `nothing` is NOT empty — that is the unit type, inhabited by
+ * the symbol `Nothing` — which is why `typesOverlap('nothing', 'nothing')` is
+ * true.
  */
 export function typesOverlap(a: Type, b: Type): boolean {
   // Same-head applications are decided ARGUMENT-WISE, not by the reduction:
-  // `meet2` treats an incomparable non-primitive pair as disjoint, so
-  // `list<integer<1..10>>` and `list<integer<5..20>>` would reduce to
-  // `nothing` even though `[7]` inhabits both. Only this predicate takes the
-  // shortcut — `meet2`/`reduceType` keep their semantics for every other
-  // caller.
+  // `meet2` meets two lists elementwise, so `list<integer<1..10>>` and
+  // `list<integer<5..20>>` reduce to `list<integer<5..10>>` — inhabited, but
+  // by way of a reduction this predicate would then have to inspect. Deciding
+  // argument-wise answers directly. Only this predicate takes the shortcut —
+  // `meet2`/`reduceType` keep their semantics for every other caller.
   //
   // Residual, deliberately accepted (protocols design P4): two same-head
   // COLLECTIONS with disjoint element types still share the EMPTY value
@@ -566,7 +641,7 @@ export function typesOverlap(a: Type, b: Type): boolean {
     return args[0].every((t, i) => typesOverlap(t, args[1][i]));
 
   const meet = reduceType({ kind: 'intersection', types: [a, b] });
-  return meet !== 'nothing' && meet !== 'never';
+  return !isEmptyType(meet);
 }
 
 /**

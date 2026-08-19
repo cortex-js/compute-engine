@@ -20,10 +20,7 @@ import {
   NUMERIC_TYPES,
   PRIMITIVE_TYPES,
 } from '../../../src/common/type/primitive';
-import type {
-  PrimitiveType,
-  Type,
-} from '../../../src/common/type/types';
+import type { PrimitiveType, Type } from '../../../src/common/type/types';
 
 function intersect(a: Type, b: Type): Type {
   return reduceType({ kind: 'intersection', types: [a, b] });
@@ -80,11 +77,14 @@ describe('Numeric primitive meets (G15)', () => {
     );
   });
 
-  test('genuinely disjoint pairs still reduce to nothing', () => {
-    expect(intersectStr('imaginary', 'real')).toBe('nothing');
-    expect(intersectStr('imaginary', 'rational')).toBe('nothing');
-    expect(intersectStr('number', 'boolean')).toBe('nothing');
-    expect(intersectStr('integer', 'string')).toBe('nothing');
+  test('genuinely disjoint pairs still reduce to the empty type', () => {
+    // `never`, the type no value inhabits — not `nothing`, the unit type whose
+    // one member is the symbol `Nothing`. A refuted meet must not leave a
+    // value behind.
+    expect(intersectStr('imaginary', 'real')).toBe('never');
+    expect(intersectStr('imaginary', 'rational')).toBe('never');
+    expect(intersectStr('number', 'boolean')).toBe('never');
+    expect(intersectStr('integer', 'string')).toBe('never');
   });
 
   test('non-numeric overlapping primitives still meet correctly', () => {
@@ -94,10 +94,10 @@ describe('Numeric primitive meets (G15)', () => {
     );
   });
 
-  test('composite/primitive disjoint intersections remain nothing', () => {
-    expect(
-      intersectStr({ kind: 'list', elements: 'integer' }, 'integer')
-    ).toBe('nothing');
+  test('composite/primitive disjoint intersections remain empty', () => {
+    expect(intersectStr({ kind: 'list', elements: 'integer' }, 'integer')).toBe(
+      'never'
+    );
   });
 });
 
@@ -174,7 +174,9 @@ describe('isPrimitiveSubtype and isSubtype agree (SYM P2-22)', () => {
       );
       // `unknown <: X`: only `any`/`unknown`.
       expect(isPrimitiveSubtype('unknown', t)).toBe(isSubtype('unknown', t));
-      expect(isPrimitiveSubtype('unknown', t)).toBe(t === 'any' || t === 'unknown');
+      expect(isPrimitiveSubtype('unknown', t)).toBe(
+        t === 'any' || t === 'unknown'
+      );
     }
   });
 });
@@ -376,8 +378,8 @@ describe('Bounded numeric meets (SYM P1-18b)', () => {
   test('nested ranges intersect to the inner range', () =>
     expect(isect('integer<0..100>', 'integer<5..10>')).toBe('integer<5..10>'));
 
-  test('disjoint ranges meet to nothing', () =>
-    expect(isect('integer<0..3>', 'integer<5..10>')).toBe('nothing'));
+  test('disjoint ranges meet to the empty type', () =>
+    expect(isect('integer<0..3>', 'integer<5..10>')).toBe('never'));
 
   test('ranges touching at a point meet to that point', () =>
     expect(isect('integer<0..5>', 'integer<5..10>')).toBe('integer<5..5>'));
@@ -388,11 +390,11 @@ describe('Bounded numeric meets (SYM P1-18b)', () => {
   test('range ∩ overlapping bare numeric primitive', () =>
     expect(isect('real<0..10>', 'integer')).toBe('integer<0..10>'));
 
-  test('range ∩ disjoint primitive = nothing', () =>
-    expect(isect('integer<0..10>', 'boolean')).toBe('nothing'));
+  test('range ∩ disjoint primitive = the empty type', () =>
+    expect(isect('integer<0..10>', 'boolean')).toBe('never'));
 
-  test('range ∩ non_finite_number (disjoint) = nothing', () =>
-    expect(isect('integer<0..10>', 'non_finite_number')).toBe('nothing'));
+  test('range ∩ non_finite_number (disjoint) = the empty type', () =>
+    expect(isect('integer<0..10>', 'non_finite_number')).toBe('never'));
 
   test('half-open intersection is bounded from both', () =>
     expect(isect('integer<0..>', 'integer<..10>')).toBe('integer<0..10>'));
@@ -401,7 +403,9 @@ describe('Bounded numeric meets (SYM P1-18b)', () => {
     expect(isect('integer<0..10>', 'integer<5..20>')).toBe(
       isect('integer<5..20>', 'integer<0..10>')
     );
-    expect(isect('real<0..10>', 'integer')).toBe(isect('integer', 'real<0..10>'));
+    expect(isect('real<0..10>', 'integer')).toBe(
+      isect('integer', 'real<0..10>')
+    );
   });
 });
 
