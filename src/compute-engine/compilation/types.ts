@@ -163,8 +163,8 @@ export type NamingContext = {
  * `region`, and the keys of `state`/`names`, are the `CseRegion` /
  * `CseCandidate` of `cse.ts`, kept structurally opaque (`object`) in this
  * module: `compilation/types.ts` is expression-type-free by design — an import
- * reaching `global-types` would close a module cycle (the zero-cycle budget,
- * `docs/architecture/ZERO-CYCLES-PLAN.md`) — and `cse.ts`'s types are built on
+ * reaching `global-types` would close a module cycle (the zero-cycle invariant
+ * in `ARCHITECTURE.md`) — and `cse.ts`'s types are built on
  * `Expression`. `BaseCompiler`, the only consumer, narrows them; nothing else
  * inspects these fields.
  */

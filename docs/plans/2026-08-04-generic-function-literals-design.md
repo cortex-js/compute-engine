@@ -22,7 +22,7 @@
 
 Status: v2 RATIFIED 2026-08-04 — ready for implementation. Dual spec
 review applied (14 findings, record in
-`docs/scratch/2026-08-04-generic-function-literals-design_SPEC_REVIEW.md`);
+the incorporated spec review);
 all decisions G1–G11 ruled by the user 2026-08-04 (§4).
 Implements §9.1 of
 [`2026-08-01-type-variables-design.md`](./2026-08-01-type-variables-design.md)

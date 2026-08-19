@@ -99,7 +99,7 @@ rest.
   Miller–Rabin, `jacobiSymbol`, trial-division `bigPrimeFactors`. **Missing:**
   periodic continued fraction of √D / PQa (the Pell core), Tonelli–Shanks,
   Cornacchia, and the linear family wrapper.
-- **Placement** (per `docs/architecture/CURRENT-ARCHITECTURE.md` layering):
+- **Placement** (per the layering in `ARCHITECTURE.md`):
   pure bigint kernels in **`numerics/diophantine.ts`** (no engine imports;
   unit-testable standalone); recognition/boxing/dispatch in
   **`boxed-expression/diophantine.ts`**, imported by `solve-domain.ts` — a

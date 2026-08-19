@@ -9,8 +9,8 @@ drafts to get right.
 (`PointList(∫…)`), in `docs/COMPUTE_ENGINE.md` of the Tycho repo. They are one
 defect; the two filings are two surfaces of it.
 
-**Repro:** `docs/scratch/ce-item178ac-boxing-determinism.mts` (four
-`ComputeEngine`s, no corpus).
+**Repro:** the four-`ComputeEngine`, no-corpus case is now pinned in the
+first-boxing determinism tests.
 
 ## The symptom
 
@@ -116,8 +116,7 @@ began — and a genuinely free symbol auto-declared into the scope enclosing the
 OUTERMOST literal instead of into the body scope.
 
 **It worked on the target invariant and preserved capture.** Seven
-closure-capture probes
-(`docs/scratch/2026-08-13-closure-capture-invariants.mts`) were recorded before
+closure-capture probes were recorded before
 and after; the only line that moved was the defect —
 `ce.box(J).isSame(ce.box(J))` false → true. Type behaviour was untouched
 (witness and control both moved exactly as before), which is the measurement
@@ -317,8 +316,7 @@ Measured on the shipped change:
   (`List(Block(m+1), m)` — same divergence via a Block scope instead of a
   function body) is fixed by the same mechanism with no binder-kind
   enumeration; box-vs-parse of the 178(a) integral agrees.
-- All seven closure-capture invariant probes
-  (`docs/scratch/2026-08-13-closure-capture-invariants.mts`) unchanged; only
+- All seven closure-capture invariant probes were unchanged; only
   the defect line moved. The attempt-1 leak pins and the attempt-2
   assigned-value-capture cluster pass.
 - Type movement (the withdrawn criterion below) is untouched, as required.
@@ -362,8 +360,7 @@ shared binding already carries the body's usage evidence.
 the acceptance criterion for this fix is (1) alone.** A draft of this section
 replaced the value-pinning criterion with a consistency one ("identical across
 boxings"). The Tycho team's type-stability audit refuted that too, and their
-order matrix reproduces here verbatim on the published 0.105.0
-(`docs/scratch/ce-item178-type-stability-order-matrix.mts` in their repo):
+order matrix reproduces here verbatim on the published 0.105.0:
 
 | ordering | witness (binder) | control (NO binder) |
 | --- | --- | --- |
@@ -406,8 +403,7 @@ assign-first fixes `integer` first, and a use does not widen. See
 different starting order.
 
 **Adjacent finding, and it is behaving as §1 describes — not a defect.** The
-direction rules were probed individually
-(`docs/scratch/2026-08-13-inference-direction-rules.mts`):
+direction rules were probed individually:
 
 | probe | control on a fresh symbol | result |
 | --- | --- | --- |

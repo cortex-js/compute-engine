@@ -12,13 +12,12 @@ notification was FILED 2026-08-19 in their channel
 (`tycho/docs/COMPUTE_ENGINE.md`, "THIRD incoming batch"), with the
 adoption-obligations checklist — §8 is complete; the release ships when
 their window opens. Rev 3 applied the dual spec review
-(Claude + Codex, 11 findings;
-`docs/scratch/2026-08-18-compatibility-admission-callbacks_SPEC_REVIEW.md`)
+(Claude + Codex, 11 findings)
 and the two review-round rulings (maintainer, same day): the EFFECT-SUBSET
 check joins the relation as rule 5, and the comparator slots convert IN the
 sweep with UNION spellings (§9 items 5–6). All §9 questions RULED.
 Successor to Design D
-(`docs/plans/2026-08-09-design-d-generic-callback-signatures.md`), whose
+(the completed generic-callback-signature design), whose
 `callback<S>` constructor this design deletes. Rulings made in the
 2026-08-18 conversation:**
 
@@ -481,7 +480,7 @@ Each entry keeps the question for context; the ruling is authoritative.
    resolution machinery it uses survives for user overload sets.
 
 Two further questions surfaced by the dual spec review
-(`docs/scratch/2026-08-18-compatibility-admission-callbacks_SPEC_REVIEW.md`)
+(the incorporated spec review)
 and ruled the same day:
 
 5. **Effects under uniformity — RULED: rule 5, not a carve-out.** The

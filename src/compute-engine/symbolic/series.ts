@@ -1539,7 +1539,7 @@ function expandLaurent(
 /**
  * Exact local Laurent data of a function about a finite point — the shared
  * accessor behind the limit engine's pole handling and `Residue` (Strategic
- * item 7c; see `docs/plans/2026-07-10-pole-asymptotics-design.md`).
+ * item 7c).
  * Coefficients are exact/symbolic and reliable only inside `[v, hi]`.
  */
 export interface LaurentData {

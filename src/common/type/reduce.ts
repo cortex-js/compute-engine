@@ -17,6 +17,7 @@ import type {
   SetType,
   BroadcastableType,
   TupleType,
+  NamedElement,
   FunctionSignature,
   NegationType,
   DictionaryType,
@@ -363,6 +364,10 @@ function meet2(a: Type, b: Type): Type | undefined {
   const collection = meetCollections(a, b);
   if (collection !== undefined) return collection;
 
+  // Tuples meet slot-wise and records meet by merging their keys.
+  const structural = meetTuples(a, b) ?? meetRecords(a, b);
+  if (structural !== undefined) return structural;
+
   // No meet rule applies. Two signatures are the one remaining pair that must
   // survive rather than collapse.
   if (isOverloadPair(a, b)) return undefined;
@@ -431,6 +436,88 @@ function meetCollections(a: Type, b: Type): Type | undefined {
 }
 
 /**
+ * The meet of two TUPLE types, or `undefined` when `a` and `b` are not both
+ * tuples.
+ *
+ * Tuples meet slot-wise, and — unlike a collection — the meet can be empty:
+ * every slot of a tuple must hold a value, so one uninhabited slot leaves the
+ * whole tuple with no inhabitant. That is why `tuple<integer> & tuple<string>`
+ * is `never` and not `tuple<never>`, even though `tuple<never>` is a subtype
+ * of both: no value inhabits it, and every consumer of this meet is asking
+ * whether a value could. Differing arity is empty for the same reason —
+ * nothing is both a 2-tuple and a 3-tuple. (Ruled in `ROADMAP.md`, "The meet
+ * had no structural rule for same-kind composites".)
+ *
+ * Slot names must agree where both sides name one: a slot cannot be called
+ * both `x` and `y`. An unnamed slot takes the other side's name, mirroring
+ * `isSubtype`, where a named tuple is a subtype of the same-shape unnamed one.
+ */
+function meetTuples(a: Type, b: Type): Type | undefined {
+  if (typeof a !== 'object' || typeof b !== 'object') return undefined;
+  if (a.kind !== 'tuple' || b.kind !== 'tuple') return undefined;
+  if (a.elements.length !== b.elements.length) return 'never';
+
+  const elements: NamedElement[] = [];
+  for (let i = 0; i < a.elements.length; i++) {
+    const x = a.elements[i];
+    const y = b.elements[i];
+    if (x.name !== undefined && y.name !== undefined && x.name !== y.name)
+      return 'never';
+    const type = reduceType({ kind: 'intersection', types: [x.type, y.type] });
+    if (isEmptyType(type)) return 'never';
+    const name = x.name ?? y.name;
+    elements.push(name === undefined ? { type } : { name, type });
+  }
+
+  return decorate({ kind: 'tuple', elements });
+}
+
+/**
+ * The meet of two RECORD types, or `undefined` when `a` and `b` are not both
+ * records.
+ *
+ * Records are width-subtyped — a record with more keys is a subtype of one
+ * with fewer — so the meet carries the union of both key sets: the value
+ * inhabiting both `record{a: integer}` and `record{b: string}` is
+ * `record{a: integer, b: string}`. A key both sides declare takes the meet of
+ * its two types, and an uninhabited key empties the whole record, since a
+ * declared key must hold a value: `record{a: integer} & record{a: string}` is
+ * `never`, not `record{a: never}`. (Ruled in `ROADMAP.md`, "The meet had no
+ * structural rule for same-kind composites".)
+ *
+ * `object` is deliberately absent: object layouts are exact and their fields
+ * invariant (`isSubtype`), so two object types that are not already
+ * subtype-related share no value and the caller's refutation is right.
+ */
+function meetRecords(a: Type, b: Type): Type | undefined {
+  if (typeof a !== 'object' || typeof b !== 'object') return undefined;
+  if (a.kind !== 'record' || b.kind !== 'record') return undefined;
+
+  const elements: Record<string, Type> = { ...a.elements };
+  for (const [key, type] of Object.entries(b.elements)) {
+    // Presence must be an own-property test. `Object.prototype` member names
+    // are valid record keys — `record{toString: string}` parses and
+    // serializes — so a plain `elements[key]` lookup finds the inherited
+    // function for those names and hands it to `reduceType` as if it were a
+    // type, which throws "Unknown type kind". It also made the meet
+    // order-dependent, since the crash only happened when the prototype name
+    // arrived from the right-hand side.
+    if (!Object.prototype.hasOwnProperty.call(elements, key)) {
+      elements[key] = type;
+      continue;
+    }
+    const meet = reduceType({
+      kind: 'intersection',
+      types: [elements[key], type],
+    });
+    if (isEmptyType(meet)) return 'never';
+    elements[key] = meet;
+  }
+
+  return decorate({ kind: 'record', elements });
+}
+
+/**
  * True when `a` and `b` are two function signatures, whose intersection is an
  * OVERLOAD SET — the way this type system spells "inhabited by a function
  * answering to both shapes". `isSubtype` already reports such an intersection
@@ -446,15 +533,16 @@ function meetCollections(a: Type, b: Type): Type | undefined {
  * meet being empty. Reading that conservative answer as "keep the
  * intersection" made every unrelated nominal pair collide.
  *
- * Same-kind COMPOSITES (two lists, two records) are deliberately not included,
- * even though some pairs do share an inhabitant — `list<never>` is a subtype
- * of both `list<integer>` and `list<string>`. Kind alone is not a witness for
- * them: tuples of different arity share no value, nor do records whose common
- * key has disjoint types, and admitting the whole kind makes `typesOverlap`
- * report those as overlapping and the conformance gate reject legitimately
- * disjoint conformances. Deciding them needs real structural meets, tracked in
- * `ROADMAP.md` under "The meet has no structural rule for same-kind
- * composites".
+ * Same-kind composites are not decided here, because kind alone is not a
+ * witness of a shared value: two lists always share the empty one, two records
+ * merge only if every key they both declare can agree, and two tuples must
+ * match on arity and slot names. Admitting a whole kind on the strength of the
+ * kind — which an earlier version of this function did — makes `typesOverlap`
+ * report tuples of different arity, and records whose common key has disjoint
+ * types, as overlapping, and the conformance gate then rejects legitimately
+ * disjoint conformances. Each of those kinds carries its own rule instead:
+ * {@link meetCollections}, {@link meetRecords} and {@link meetTuples}, all
+ * consulted by `meet2` before it reaches this function.
  */
 function isOverloadPair(a: Type, b: Type): boolean {
   return (
@@ -790,6 +878,15 @@ function reduceTupleType(type: TupleType): Type {
 
   if (reducedElements.some((element) => element.type === 'error'))
     return 'error';
+
+  // An uninhabited slot empties the whole tuple: every slot must hold a value,
+  // so if one of them can hold none, no tuple exists. Note this is the
+  // opposite of the `nothing` rule just below, and deliberately so — `nothing`
+  // is the unit type, so its slot collapses, while `never` is the empty type,
+  // so its slot can never be filled.
+  if (reducedElements.some((element) => isEmptyType(element.type)))
+    return 'never';
+
   reducedElements = reducedElements.filter(
     (element) => element.type !== 'nothing'
   );
@@ -814,6 +911,11 @@ function reduceRecordType(type: RecordType): Type {
 
   if (Object.values(reducedElements).some((type) => type === 'error'))
     return 'error';
+
+  // An uninhabited key empties the whole record, for the same reason a tuple
+  // slot does: a declared key must hold a value.
+  if (Object.values(reducedElements).some((type) => isEmptyType(type)))
+    return 'never';
 
   // If the type of any key is 'nothing', remove it from the record
   reducedElements = Object.fromEntries(

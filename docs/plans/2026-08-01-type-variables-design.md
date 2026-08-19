@@ -12,12 +12,10 @@ Status: **draft v4 — D1–D12 RULED (2026-08-01, approved as
 recommended); v2 milestone (generic literals + `function f<T>(…)`
 sugar) IMPLEMENTED 2026-08-04, see §9.1; open: D13's encoding half
 (joint with the effects Stage-3 marker case)**
-Date: 2026-08-01 (v2 addressed the 27-finding dual review in
-`docs/scratch/2026-08-01-type-variables-design_SPEC_REVIEW.md`; v3
+Date: 2026-08-01 (v2 addressed a 27-finding dual review; v3
 integrated inline review R1–R11 and the Option-C syntax ruling; v4 folds
 in the second inline pass R12–R17 — comments are folded into the text
-and removed. The D4 candidate list is backed by the full library audit
-in `docs/scratch/2026-08-01-type-handler-audit.md`.)
+and removed. The D4 candidate list is backed by a full library audit.)
 Related: `docs/plans/2026-07-25-overload-resolution-design.md`,
 `docs/plans/2026-07-12-typed-function-literals-design.md`,
 `doc/08-guide-types.md`, `src/common/type/types.ts` (the "Future
@@ -79,8 +77,7 @@ ce.declare('apply',   'forall T, U. ((T) any -> U, T) -> U');
 
 The primary v1 deliverable is **user-declared generic functions** plus an
 audited set of library-handler conversions — a full audit of all 281
-library `type:` sites (2026-08-01,
-`docs/scratch/2026-08-01-type-handler-audit.md`) found **26 verified
+library `type:` sites (2026-08-01) found **26 verified
 candidates**: 18 plain-generic (`Identity`, `Sort`, `Take`-class,
 `Single`-class, …) and 8 bounded identity-echoes (`Reverse`, `Conjugate`,
 `Inverse`, `Chop`, `Negate`, …) where `forall T: <bound>. (T) -> T`
@@ -788,8 +785,7 @@ mapping (pinned so tests don't have to guess):
    check; then the handler conversions. The **full library audit ran
    2026-08-01** (all 281 `type:` sites in `src/compute-engine/library/`,
    four independent reviewers, every candidate verdict re-verified
-   against source): `docs/scratch/2026-08-01-type-handler-audit.md` is
-   the authoritative table. Result — **26 candidates** out of 281 (~98
+   against source). Result — **26 candidates** out of 281 (~98
    constants need no generics; ~157 blocked: value/pole/domain reasoning
    ~70, `lazy: true` ~40, type-packs/positional/dimension ~20,
    structural-kind dispatch ~15):
@@ -1085,7 +1081,7 @@ are D10–D13**.
    expected. (The reverse — using a generic where a concrete is
    expected — is the common case and is supported.)
 4. **D4 — phase-3 migration scope: AUDITED + CONFIRMED** (2026-08-01,
-   full 281-site sweep, `docs/scratch/2026-08-01-type-handler-audit.md`):
+   full 281-site sweep):
    the verified 26-candidate list (§7.3) — 18 plain + 8 bounded in;
    `First`/`Last`-class, `At`, `Map`/`Filter` and all lazy operators
    out. Note the audit *corrected* the v2 draft: `Sort`/`Unique` are

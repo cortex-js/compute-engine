@@ -232,7 +232,7 @@ validation to a silent no-op. Not recommended.
 
 ## Precedent (already in the engine)
 
-- **`When` masking** (`control-structures.ts`, `2026-05-22-058-a2-restrictions.md`
+- **`When` masking** (`control-structures.ts`; the restrictions implementation
   Task A2.4): `When(e, cond)` returns `Undefined` when `cond` is `False` — a
   *scalar* restriction mask for plot domains. Related concept (mask by boolean),
   different surface (single value, not list filtering).
@@ -343,6 +343,4 @@ Tests: parse/serialize round-trip for `L[L>0]`, `L[|[1...5]-2|>0]`; assert
 - Sibling plan (hard dependency): `docs/plans/2026-07-07-honest-list-broadcast-
   typing.md` — supplies the `list<boolean>` relational-broadcast type that lets
   `At` accept the condition.
-- Precedent docs: `docs/plans/2026-05-22-058-a2-restrictions.md` (`When`
-  masking), CHANGELOG 0.58.0 (`At` dictionary access, `indexStyle` serialize,
-  A3 collection indexing at `CHANGELOG.md:1329-1399`).
+- Precedent: the shipped `When` masking and `At` collection-indexing behavior.

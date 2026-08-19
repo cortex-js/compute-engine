@@ -2,7 +2,7 @@
 
 Status: **draft v2 — all decision points D1–D8 ruled 2026-08-01; ready for
 implementation** (revised 2026-08-01 after dual spec review — findings and
-sources in `docs/scratch/2026-08-01-function-polymorphism-design_SPEC_REVIEW.md`;
+sources in the incorporated spec review;
 v1 2026-08-01)
 Date: 2026-08-01
 Related: `docs/plans/2026-07-25-overload-resolution-design.md` (static overload

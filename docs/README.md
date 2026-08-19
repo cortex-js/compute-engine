@@ -1,7 +1,9 @@
-# Compute Engine Docs Guide
+# Compute Engine Engineering Documents
 
-This directory contains both user-facing guides and internal engineering
-snapshots.
+This directory contains internal specifications, active design work, corpus
+tooling, and historical migration guides. User-facing documentation is under
+[`doc/`](../doc/) and published at
+[cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/).
 
 ## Start Here
 
@@ -14,46 +16,26 @@ read the repository [`README.md`](../README.md).
 | --- | --- |
 | Learn package usage quickly | [`../README.md`](../README.md) |
 | Understand the overall architecture | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) |
-| Use free functions for common operations | This file (Free Functions section) |
-| Understand simplification behavior snapshots | [`SIMPLIFY.md`](./SIMPLIFY.md) |
+| Review internal architecture history | [`STATUS_REPORT.md`](./STATUS_REPORT.md) |
+| Understand simplification invariants | [`SIMPLIFY.md`](./SIMPLIFY.md) |
 | Understand seeding, `Random` draws, and cross-target parity | [`RANDOMNESS-MODEL.md`](./RANDOMNESS-MODEL.md) |
 | Understand time budgets and cancellation | [`TIMEOUT-MODEL.md`](./TIMEOUT-MODEL.md) |
 | Understand broadcast length-mismatch policy (strict lifting vs shortest pairing) | [`BROADCAST-MODEL.md`](./BROADCAST-MODEL.md) |
-| Review playground sample outcomes | [`PLAYGROUND.md`](./PLAYGROUND.md) |
-| Validate arguments in custom function definitions | [`FUNCTION-VALIDATION.md`](./FUNCTION-VALIDATION.md) |
-| Review internal architecture boundaries | [`architecture/README.md`](./architecture/README.md) |
+| Understand effects and effect inference | [`EFFECTS-MODEL.md`](./EFFECTS-MODEL.md) |
+| Understand type-system direction | [`TYPE_SYSTEM_ROADMAP.md`](./TYPE_SYSTEM_ROADMAP.md) |
+| Understand collection-element inference | [`INFERENCE_ROADMAP.md`](./INFERENCE_ROADMAP.md) |
+| Understand string and character invariants | [`STRING_ROADMAP.md`](./STRING_ROADMAP.md) |
+| Reproduce parser corpus checks | [`mathnet/README.md`](./mathnet/README.md) |
+| Upgrade from an old release | [`MIGRATIONS.md`](./MIGRATIONS.md) |
 | Write or review code comments | [`COMMENTING-GUIDELINES.md`](./COMMENTING-GUIDELINES.md) |
 
-## Free Functions
+## Document lifecycle
 
-Top-level free functions for common operations — no `ComputeEngine` setup required:
-
-- `parse(latex)` — parse a LaTeX string into an `Expression`
-- `simplify(latex | expr)` — simplify a LaTeX string or expression
-- `evaluate(latex | expr)` — evaluate a LaTeX string or expression
-- `N(latex | expr)` — compute a numeric approximation
-- `expand(latex | expr)` — expand products and powers (distributive law)
-- `expandAll(latex | expr)` — recursively expand all sub-expressions
-- `factor(latex | expr)` — factor an expression as a product
-- `solve(latex | expr, vars)` — solve an equation or system for the given variables
-- `compile(latex | expr, options?)` — compile an expression to JavaScript (or another target)
-- `assign(id, value)` / `assign({...})` — assign values in the shared engine
-
-These use a shared `ComputeEngine` instance created on first call.
-Use `getDefaultEngine()` to configure it (precision, angular unit, etc.).
-
-## Extension Contracts
-
-Runtime contract checks are enforced for extension points:
-
-- `_registerCompilationTarget(name, target)` validates target name format and required `LanguageTarget` methods (`getOperators()`, `getFunctions()`, `createTarget()`, `compile()`).
-- `new ComputeEngine({ libraries: [...] })` validates custom library shape (`name`, `requires`, `definitions`, `latexDictionary`).
-- `compile(expr, options)` validates extension-facing payload shape (`to`, `target`, `operators`, `functions`, `vars`, `imports`, `preamble`, `fallback`).
-
-## Snapshot Reports
-
-These files are useful implementation snapshots, but they are not a canonical
-API reference:
-
-- [`PLAYGROUND.md`](./PLAYGROUND.md)
-- [`SIMPLIFY.md`](./SIMPLIFY.md)
+- Current public behavior belongs in `doc/`.
+- Current internal behavior belongs in `ARCHITECTURE.md` or a focused model.
+- `plans/` is for active work only.
+- Internal initiative history is summarized in `STATUS_REPORT.md`.
+- Completed execution plans, review transcripts, generated findings, and
+  scratch probes are removed after their durable conclusions are incorporated.
+- The versioned migration guides are historical documents and should not be
+  read as current API reference.

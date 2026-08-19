@@ -17,7 +17,7 @@
     "test:epsil-runtime": "node ./test/consumer/epsil-runtime-smoke.mjs",
     "test:epsil-cli": "node ./test/consumer/epsil-cli-smoke.mjs",
     "test:nightly": "CE_NIGHTLY=1 jest --config ./config/jest.config.cjs --reporters default -- test/compute-engine/nightly/",
-    "check:deps": "madge --circular --extensions ts src/compute-engine && echo 'No runtime circular dependencies found (type-only cycles are expected)'",
+    "check:deps": "madge --circular --extensions ts src/compute-engine && echo 'No circular dependencies found'",
     "check:corpus": "npx --yes tsx docs/mathnet/scripts/check-corpus.ts",
     "check:roundtrip": "npx --yes tsx docs/mathnet/scripts/check-roundtrip.ts",
     "lint": "eslint src --ext .ts --fix && prettier --write 'src/**/*.{ts,js,css,md}'",

@@ -3,7 +3,7 @@
 **Status: DRAFT r4 — revised per three review passes, review converged**
 **Date: 2026-07-28**
 **Motivated by: Tycho item 108 (corpus survey, `docs/scratch/2026-07-28-cse-opportunities-for-ce.md` in the Tycho repo)**
-**Revision history: r1–r3 reviewed (Claude + Codex, three passes) → `docs/scratch/2026-07-28-compile-cse-design_SPEC_REVIEW.md`; r4 addresses the pass-3 findings (callback invisibility, callback-API edge wiring, override provenance, verification budget).**
+**Revision history: r1–r3 reviewed (Claude + Codex, three passes) → the incorporated spec review; r4 addresses the pass-3 findings (callback invisibility, callback-API edge wiring, override provenance, verification budget).**
 
 ## 1. Motivation
 

@@ -37,7 +37,7 @@ double-bump G on every install); the §6 R1 no-op case is split to match
 topology-preserving rename with the grep-pin's scope stated.
 
 **Revision 4 (2026-08-09):** second dual-review round applied (findings in
-`docs/scratch/2026-08-09-state-event-invalidation-axes_SPEC_REVIEW.md`).
+the incorporated spec review).
 Material changes: the inventory's closure axis is corrected — §2 now has a
 second table of **zero-mask mutation sites** (semantic mutations no counter
 sees today: the operator→scalar swap, `BoxedSymbol.infer`'s value branch,
@@ -944,11 +944,9 @@ flag-off). The **shadow callable-axis simulation** (§1b) also lives here:
 `bumpShadowCallable()` called from the epoch setter, `updateDef`'s callable
 branch, the two binding-repair sites, and the classified value setter;
 `shadowEffectsOnHit`/`shadowEffectsOnRecompute` wired into `_effectsOf`.
-Runner scripts for workloads A/B/C and the bump-attribution sampler are
-preserved as `docs/scratch/cache-stats-workloads.ts` and
-`docs/scratch/cache-stats-bump-attribution.ts` (run from the repo root with
-`CE_CACHE_STATS=1 npx tsx <path>`); promote to `benchmarks/` if these
-measurements become recurring.
+The one-off workload and bump-attribution samplers were removed after the
+measurement round. Recover them from Git history and promote them to
+`benchmarks/` if these measurements become recurring.
 
 After step 2 lands, bump attribution comes free from the event stream and
 the sampler is obsolete.

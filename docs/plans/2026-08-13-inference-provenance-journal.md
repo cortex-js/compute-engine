@@ -342,8 +342,7 @@ states the model: "evidence-based and *revisable* (narrow from argument use,
 widen from value assignment, non-monotone override per D11, forward-ref
 re-derivation) rather than a once-and-final principal type." What produces
 order-sensitivity is the **direction rules**, not an absence of revision.
-Measured behavior (fixture: `docs/scratch/2026-08-13-inference-direction-rules.mts`,
-`x` pre-declared `number`; measured across the Tycho-integration,
+Measured behavior (`x` pre-declared `number`; measured across the Tycho-integration,
 named-arguments, and this session, 2026-08-13, each probe re-run here):
 
 | probe | result |
@@ -357,8 +356,7 @@ Probe trap: `v!` after `x·v` appears to show "no further narrowing" but is
 vacuous — `Factorial` (and `IsPrime`) pin `number` even on a fresh symbol,
 so they cannot discriminate. The non-vacuous control is `Fibonacci`, which
 pins `integer` from `unknown` — and it narrows `v` from `number` to
-`integer` exactly like the declared-signature route
-(`docs/scratch/2026-08-13-inference-narrowing-controls.mts`). So there is
+`integer` exactly like the declared-signature route. So there is
 NO route split: uses narrow monotonically by both the operator-context and
 declared-signature routes; assignment widens and never narrows;
 order-sensitivity is the fixpoint of exactly those rules. The only open

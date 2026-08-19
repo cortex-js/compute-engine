@@ -26,11 +26,10 @@ A follow-up round the same day unified both threads into **Appendix A**
 declaration fuses type/label/lifecycle registration; no `init`
 (acquisition = evaluation); escape = static diagnostics + dynamic
 revocation (settlement not chosen). A round-4 dual spec review of the
-additions (`docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R4.md`) was folded
-the same day: resource lifecycle is a **separate dimension, not a
+additions was folded the same day: resource lifecycle is a **separate dimension, not a
 `frameProtocol` kind**, and handles ride a per-evaluation frame stack,
 NOT the `ce.effects` snapshot (mechanism recorded as a lean pending
-ratification); the label-emission rule was respecified
+ratification); the round-4 review also respecified the label-emission rule
 (intrinsic-to-the-consumer, ordinary projection); `finish`'s own
 effects joined the `with` projection rule; resource types are
 object-backed by definition; `with` is an expression, adding a third
@@ -50,9 +49,8 @@ form over the delimiter-declared symbol, spelling by per-declarer
 convention (`__ambient_<label>`, shadowing = deliberate
 interposition). The discharge-surface open question is closed
 (declaration-site only, never use sites).
-v5 folds in the round-3 dual review
-(`docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R3.md`, 16 findings — all 16
-rulings validated). Headline v5 rulings, each specified in its section:
+v5 folds in the 16-finding round-3 dual review; every ruling was validated.
+Headline v5 rulings, each specified in its section:
 the seed frame has **three participation modes** (draws / delimits /
 reads — `readsRandomFrame` survives as the third); the `random` kernel is
 **index-addressed** (`draw(seed, n)`, compile fails closed on non-default
@@ -63,8 +61,7 @@ metadata; quote positions are **inert**; discharge from `any` yields an
 (unresolved named head → `{any}`; explicit annotation → trusted);
 **`effectsDeclared`** provenance; `ce.effects` is **snapshot-scoped** with
 **`null` = denial**; `environment` pragmas stay parse-time.
-v3 incorporated the round-2 review
-(`docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R2.md`). Ratified decisions:
+v3 incorporated the round-2 review. Ratified decisions:
 **(a)** application effects come from *projection with declared discharge*
 (v3 respecifies the mechanism per review findings 2–4);
 **(b′ — supersedes v2's (b))** `RandomExpression` keeps raw `Math.random()`
@@ -345,9 +342,8 @@ reverses the bare-specifier fork ruling of 2026-08-01 for this one label —
 every other label stays on the freely re-stamping inferred track;
 escaping writes alone are a contract that must be chosen, because a write
 to an outer binding is always a deliberate design decision by the author.
-The measured blast radius that supported the ruling is
-`docs/plans/2026-08-14-default-noscope-census.md` (49 escaping writes in
-18 of 493 test suites, zero in the real-program corpus). Mechanics:
+The pre-ruling census found 49 escaping writes in 18 of 493 test suites and
+zero in the real-program corpus. Mechanics:
 
 - **The trigger is the walk's proven-mutation bit** (`escapingWrite` on
   `InferredLiteralEffects`), set by an unconfined `Assign`, by `Assume`,
@@ -2242,8 +2238,8 @@ earlier `init(sym, …)` sketch existed to serve the ambient case, which
 the frame-kind metadata below covers instead); **(c)** the escape story
 is **static diagnostics where detectable, dynamic revocation as the
 backstop**. Everything else here is exploratory. *(A round-4 dual spec
-review — `docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R4.md` — was folded in
-2026-08-14. A ruling round 2026-08-15 then ratified: the tracking
+review was folded in on 2026-08-14. A ruling round 2026-08-15 then ratified:
+the tracking
 mechanism — scope-attached finalization, "The mechanism" below; `with`
 as an expression; unconditional `finish` effects; the builtin-wins
 namespacing policy; and the `resource` keyword. The ambient-form

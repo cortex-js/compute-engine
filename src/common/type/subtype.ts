@@ -1578,7 +1578,16 @@ export function isSubtype(
   //
   if (lhs.kind === 'record' && rhs.kind === 'record') {
     for (const key of Object.keys(rhs.elements)) {
-      if (!(key in lhs.elements)) return false;
+      // An own-property test, not `key in`: `Object.prototype` member names
+      // are valid record keys (`record{toString: string}` parses and
+      // serializes), and `in` finds those on the prototype of a record that
+      // does not declare them. That made `record{a: integer}` a subtype of
+      // `record{toString: any}` — width subtyping satisfied by a key the
+      // record does not have — because the inherited function was then
+      // compared against the declared type instead of reporting the key
+      // missing.
+      if (!Object.prototype.hasOwnProperty.call(lhs.elements, key))
+        return false;
       // Depth subtyping
       if (!isSubtype(lhs.elements[key], rhs.elements[key])) return false;
     }
@@ -1606,7 +1615,9 @@ export function isSubtype(
     const rhsKeys = Object.keys(rhs.elements);
     if (lhsKeys.length !== rhsKeys.length) return false;
     for (const key of rhsKeys) {
-      if (!(key in lhs.elements)) return false;
+      // Own-property test, for the same reason as the record case above.
+      if (!Object.prototype.hasOwnProperty.call(lhs.elements, key))
+        return false;
       if (!isSubtype(lhs.elements[key], rhs.elements[key])) return false;
       if (!isSubtype(rhs.elements[key], lhs.elements[key])) return false;
     }
@@ -2132,12 +2143,12 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (a === 'unknown') return b;
   if (b === 'unknown') return a;
 
-  // `nothing` is ABSORBED rather than joined: `widen('nothing', 'integer')` is
+  // `nothing` is absorbed rather than joined: `widen('nothing', 'integer')` is
   // `integer`, not `integer | nothing`. As pure lattice algebra that is wrong
   // — the join must be a supertype of both sides, and `integer` is not a
   // supertype of `nothing` — so this looks like the same unit-vs-empty
-  // confusion that `narrow2` above had, and it is NOT. It is deliberate, and
-  // was put to the user and approved on 2026-08-19.
+  // confusion `narrow2` above had, and it is not. It is deliberate and ruled;
+  // see `ROADMAP.md`, "An empty meet was spelled `nothing`, the UNIT type".
   //
   // The reason is that absence is OPT-IN in this type system: `nothing` and
   // `missing` are excluded from `unknown`, and a type admits them only by

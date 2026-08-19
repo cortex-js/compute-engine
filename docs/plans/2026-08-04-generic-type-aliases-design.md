@@ -2,7 +2,7 @@
 
 Status: IMPLEMENTED 2026-08-04 (all phases, incl. docs and CHANGELOG) —
 v2, dual spec review applied (19 findings,
-record in `docs/scratch/2026-08-04-generic-type-aliases-design_SPEC_REVIEW.md`).
+record in the incorporated spec review).
 All decisions A1–A8 ruled by the user 2026-08-04 (A1/A2/A7 as
 recommended); the rest is derived from rulings and precedent. Implements the generic-alias half of the type-variables
 design's §9.2 scope

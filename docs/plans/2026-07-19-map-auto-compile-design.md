@@ -1,8 +1,7 @@
 # Auto-compiling lazy-`Map` element lambdas on numeric drains — Design
 
-**Date**: 2026-07-19 (v2 — revised against the dual spec review, findings in
-[`docs/scratch/MAP_AUTO_COMPILE_SPEC_REVIEW.md`](../scratch/MAP_AUTO_COMPILE_SPEC_REVIEW.md);
-supersedes the same-day v1)
+**Date**: 2026-07-19 (v2 — revised against two spec reviews; supersedes the
+same-day v1)
 **ROADMAP**: "Auto-compile lazy-`Map` element lambdas on numeric drains
 (ratified 2026-07-19, from the Tycho item-42 addendum)" — collections backlog.
 **Status**: **RATIFIED 2026-07-19** (both product decisions resolved — see

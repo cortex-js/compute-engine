@@ -2991,7 +2991,7 @@ export class _Parser implements Parser {
     // `x12 → x_12`. Flattened subscripts (indexed variables such as `x1`, `x2`,
     // …) are the common intent of ASCII/copy-paste input; producing a subscript
     // (rather than a superscript power) preserves the index, matches the strict
-    // `x_2` form, and follows the recommendation in `docs/LENIENT_PARSER.md`.
+    // `x_2` form. Loose adjacent digits are ordinary identifier text.
     // The base may be a single letter (`x2`) or a recognized multi-letter
     // constant name (`alpha2` → `alpha_2`, `Pi2` → `Pi_2`); an arbitrary
     // multi-letter run never reaches here as a single string (it is a product),

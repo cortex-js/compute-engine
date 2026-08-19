@@ -3,14 +3,14 @@
 Status: DESIGN, revision 6 (2026-08-16) — the implementation baseline. Rev 4
 was read by the Tycho team (via CE-POC); rev 5 folded their requirements and
 field data (marked **[field]**); rev 6 is the final dual-review pass (13
-findings, `docs/scratch/2026-08-16-compile-complex-mode_SPEC_REVIEW.md`
+findings, the incorporated spec review
 round 3): post-rename drift removed, the accumulator boundary reconciled with
 the shipped `combinerPlan`, and every default an implementer would otherwise
 guess at stated. Two API shapes in this revision are the author's defaults,
 not rulings, and can be vetoed before step 1 lands: `result.diagnostic`
 (structured decline payload beside the unchanged `error: string`, §4) and
 `result.promoted` (the promotion-without-escalation signal, §4).
-Review history: `docs/scratch/2026-08-16-compile-complex-mode_SPEC_REVIEW.md`
+Review history: the incorporated spec review
 (two dual-review rounds, 28 findings, all folded in). Field data from Tycho
 against the released 0.113.0 (relayed by CE-POC 2026-08-16) is folded in
 where marked **[field]**.

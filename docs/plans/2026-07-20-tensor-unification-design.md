@@ -1,7 +1,7 @@
 # Tensor Unification — One List Representation, Lazy Tensor View
 
 **Date**: 2026-07-20 (revision 4 — resolves all three review rounds in
-`docs/scratch/2026-07-20-tensor-unification-design_SPEC_REVIEW.md`)
+the incorporated spec review)
 **Status**: **IMPLEMENTED — all three phases** (A committed 2026-07-20; B
 committed 2026-07-21; C staged 2026-07-21). `BoxedTensor` is deleted; tensor
 values are canonical `List`s with a lazy view (`boxed-expression/

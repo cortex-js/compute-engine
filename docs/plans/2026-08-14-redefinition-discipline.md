@@ -3,7 +3,7 @@
 **Date**: 2026-08-14 · **Revision 2** (dual spec review 2026-08-14 —
 11 findings, all applied, including the resequencing of finding 5;
 record:
-`docs/scratch/2026-08-14-redefinition-discipline_SPEC_REVIEW.md`) ·
+the incorporated spec review) ·
 **Status**: DESIGN, ready to implement (user-approved direction
 2026-08-14) · **Companion to**:
 `docs/plans/2026-08-14-object-representation-decision.md` (whose

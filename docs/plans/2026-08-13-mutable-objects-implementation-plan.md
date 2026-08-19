@@ -2,7 +2,7 @@
 
 Plan for implementing `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B
 ("Mutable objects"), as revised and spec-reviewed 2026-08-13 (review
-record: `docs/scratch/TYPE_SYSTEM_ROADMAP_SPEC_REVIEW.md`, all 16
+record: the incorporated spec review, all 16
 findings applied). The appendix's prose is the normative spec; its
 decision record (B1–B13) indexes status. This plan sequences the work,
 names dependencies and acceptance criteria per phase, and records what

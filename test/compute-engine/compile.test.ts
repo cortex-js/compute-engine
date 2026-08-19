@@ -2746,9 +2746,8 @@ describe('COMPILE user-defined function calls', () => {
     expect(r.run({})).toBeCloseTo(want, 12);
   });
 
-  // Recursive definitions compile to true self-reference by emitted name
-  // (lenient-recursion design, ratified 2026-07-19 — see
-  // docs/plans/2026-07-19-compiled-recursive-lambdas-design.md). Termination
+  // Recursive definitions compile to true self-reference by emitted name.
+  // Termination
   // is backstopped by the JS call stack: runaway recursion throws a catchable
   // RangeError, consistent with compiled unbounded Loop being unguarded.
   it('compiles a directly recursive definition (fact(5) = 120)', () => {

@@ -5,9 +5,8 @@ re-derivation at canonicalization of the call), generalized with a
 signature-driven trigger. See "Rulings" below. Implementation started
 2026-08-08.**
 
-2026-08-08. Follow-on to the 2026-08-07/08 compile-soundness rounds and the
-forward-ref re-derivation
-(`docs/plans/2026-08-07-forward-ref-inference-rederivation.md`).
+2026-08-08. Follow-on to the 2026-08-07/08 compile-soundness and
+forward-reference re-derivation rounds.
 
 ## Rulings (maintainer, 2026-08-08)
 

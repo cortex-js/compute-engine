@@ -576,7 +576,7 @@ keyword; reword to *"Rank = how deeply a quantifier nests"*.
 ## Review status
 
 Reviewed 2026-08-11 by Claude + Codex (13 findings —
-`docs/scratch/2026-08-11-where-clause-type-constraints_SPEC_REVIEW.md`). All 13
+the incorporated spec review). All 13
 are resolved in this revision. The one remaining open question (the bare-`where`
 lint) is cosmetic and does not block implementation.
 

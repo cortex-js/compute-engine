@@ -1,7 +1,7 @@
 # Missing-Value Typing — Missing-ability as an Implicit Signature Lift
 
 **Date**: 2026-07-24 (revision 6 — applies resolutions R1–R7 from the round-4
-dual review, `docs/scratch/2026-07-22-missing-value-typing-design_SPEC_REVIEW_r4.md`.
+dual review.
 The keystone change is **R1, domain normalization at value construction**
 (§2-I6), which absorbs absence into `NaN` on every numeric result path and
 collapses the propagate-side type machinery of revision 5. Finding→section
@@ -751,9 +751,7 @@ comparisons need no guard (plain `==` is IEEE), so compiled/interpreted agree by
 construction; only an object-domain (`string | missing`) comparison keeps the
 guarded lowering; compiled `Max([])`/`Min([])` now return `NaN`.
 
-**Round 4 → revision 6** (review:
-`docs/scratch/2026-07-22-missing-value-typing-design_SPEC_REVIEW_r4.md`;
-resolutions R1–R7 therein)
+**Round 4 → revision 6** (resolutions R1–R7)
 
 | # | finding | resolution |
 |---|---|---|

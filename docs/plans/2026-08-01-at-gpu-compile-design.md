@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-01 · **Status:** revised after the dual-reviewer pass
 (24 findings, dispositions in
-`docs/scratch/2026-08-01-at-gpu-compile-design_SPEC_REVIEW.md`) and the
+the incorporated spec review) and the
 §3.F ruling; pre-implementation ·
 **Ledger entry:** ROADMAP § Compile-target coverage, group A rank 1 (`At`
 on glsl — 26 st, largest GPU gap). Sibling design (machinery + as-built

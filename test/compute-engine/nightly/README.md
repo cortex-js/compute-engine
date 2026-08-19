@@ -31,8 +31,7 @@ const describeNightly = NIGHTLY ? describe : describe.skip;
 
 **Total nightly runtime ≈ 6 s** (target < 10 min). All suites are green except a
 handful of `test.skip` / allowlisted cells, each carrying a comment naming the
-documented finding it tracks (see the per-suite notes below and the
-`docs/reviews/2026-07-archive/*-findings.md` files).
+documented residual it tracks; see the per-suite notes below.
 
 ## Suites
 

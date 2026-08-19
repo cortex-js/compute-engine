@@ -12,7 +12,7 @@ lowering, typing, diagnostics, and serialization.
 
 Related:
 
-- [`src/cortex/docs/`](../../src/cortex/docs/) — current public language definition
+- [`src/epsil/docs/`](../../src/epsil/docs/) — current public language definition
 - [`roadmap/cortex/README.md`](../../roadmap/cortex/README.md) — current Cortex backlog
 - [`roadmap/cortex/language-review.md`](../../roadmap/cortex/language-review.md) — the earlier 2026-07-05 review
 - [`docs/EFFECTS-MODEL.md`](../EFFECTS-MODEL.md) — function effects

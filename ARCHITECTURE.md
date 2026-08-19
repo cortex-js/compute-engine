@@ -8,9 +8,9 @@ evaluation of mathematical expressions, published as
 It is the high-level map of the codebase, intended for contributors and
 maintainers. For the public API and usage guides, see
 [`README.md`](./README.md) and
-[cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/). For the
-detailed module-boundary and dependency-direction rules, see
-[`docs/architecture/CURRENT-ARCHITECTURE.md`](./docs/architecture/CURRENT-ARCHITECTURE.md).
+[cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/). Internal
+architecture history is summarized in
+[`docs/STATUS_REPORT.md`](./docs/STATUS_REPORT.md).
 
 ## What the Compute Engine does
 
@@ -114,8 +114,8 @@ src/
 Outside `src/`: **`data/`** holds the Rubi and Fungrim rule corpora consumed
 by the plugin entries (see "Integration rules" below); **`benchmarks/`** is
 the cross-library benchmark and audit harness (see
-[`benchmarks/README.md`](./benchmarks/README.md)); **`docs/reviews/`** holds
-findings trackers from codebase reviews.
+[`benchmarks/README.md`](./benchmarks/README.md)). Completed internal review
+campaigns are summarized in [`docs/STATUS_REPORT.md`](./docs/STATUS_REPORT.md).
 
 ## Where does X live?
 
@@ -153,9 +153,8 @@ and a zero-circular-dependency budget checked with `madge`):
 The `ComputeEngine` class is deliberately an "API shell and integration point":
 business logic lives in the `engine-*.ts` services (startup, scoping,
 declarations, assumptions, numeric configuration, caching, extension contracts,
-compilation-target registry, etc.). See
-[`docs/architecture/CURRENT-ARCHITECTURE.md`](./docs/architecture/CURRENT-ARCHITECTURE.md)
-for the full service inventory and the dependency rules.
+compilation-target registry, etc.). The dependency rules below are enforced by
+ESLint boundaries and the zero-cycle check.
 
 ## MathJSON: the interchange format
 
@@ -456,14 +455,14 @@ domain files (`definitions-arithmetic.ts`, `definitions-algebra.ts`,
 `definitions-trigonometry.ts`, `definitions-sets.ts`, …), each contributing
 `symbol`, `function`, `infix`, `prefix`, `postfix`, `matchfix`, or `environment`
 entries with precedence. A **lenient** (non-strict) mode accepts ASCIIMath-style
-input such as bare `sin(x)` and `x^(2)`; see
-[`docs/LENIENT_PARSER.md`](./docs/LENIENT_PARSER.md).
+input such as bare `sin(x)` and `x^(2)`; see the public
+[LaTeX syntax guide](./doc/07-guide-latex-syntax.md#other-parsing-options).
 
 `LatexSyntax` is an **injectable dependency** of `ComputeEngine`, not a static
 import. The full package entry wires it in via a factory so `ce.parse()` works
 out of the box; the core entry omits it (LaTeX methods then throw a clear
 error). This keeps LaTeX out of bundles that don't need it — see
-[`docs/architecture/CURRENT-ARCHITECTURE.md`](./docs/architecture/CURRENT-ARCHITECTURE.md#latexsyntax-as-injectable-dependency).
+the package-entry table below for the corresponding wiring.
 
 ## The ComputeEngine and its services
 
@@ -793,8 +792,7 @@ These properties are intentional and enforced; preserve them when contributing:
 
 1. **Zero circular dependencies** in `src/compute-engine` (runtime *and*
    type-only), checked with `madge`. See
-   [CLAUDE.md](./CLAUDE.md#circular-dependencies) and
-   `docs/architecture/ZERO-CYCLES-PLAN.md`.
+   [CLAUDE.md](./CLAUDE.md#circular-dependencies).
 2. **Layered imports**: kernel types → wrappers → services → composition root;
    no upward imports. Enforced by ESLint `import/no-restricted-paths`.
 3. **LaTeX is optional**: the engine depends on the structural `ILatexSyntax`
@@ -810,8 +808,7 @@ These properties are intentional and enforced; preserve them when contributing:
 - [`README.md`](./README.md) — installation, quick start, public API examples.
 - [`CLAUDE.md`](./CLAUDE.md) — detailed conventions: comparison methods,
   creation modes, simplification/recursion rules, circular-dependency patterns.
-- [`docs/architecture/CURRENT-ARCHITECTURE.md`](./docs/architecture/CURRENT-ARCHITECTURE.md)
-  — module/service inventory, dependency rules, extension contracts.
-- [`docs/`](./docs/) — focused notes: `LENIENT_PARSER.md`, `SIMPLIFY.md`,
-  `NUMERIC-SERIALIZATION.md`, and architecture/refactor plans.
+- [`docs/STATUS_REPORT.md`](./docs/STATUS_REPORT.md) — internal architecture
+  history and documentation lifecycle.
+- [`docs/`](./docs/) — focused internal specifications and active design work.
 - [`BUILD.md`](./BUILD.md) — build instructions.

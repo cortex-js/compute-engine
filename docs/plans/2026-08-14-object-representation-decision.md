@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-14 · **Revision 2** (dual spec review 2026-08-14 —
 11 findings, all applied; record:
-`docs/scratch/2026-08-14-object-representation-decision_SPEC_REVIEW.md`;
+the incorporated spec review;
 the type-pinning fork was user-ruled option (a) same day) · **Status**:
 DECISION — Phase 1 step 1 of
 `docs/plans/2026-08-13-mutable-objects-implementation-plan.md` (the

@@ -1369,13 +1369,14 @@ describe('reduceType Tests', () => {
     ).toBe(false);
   });
 
-  it('a refuted intersection does not delete the tuple slot holding it', () => {
+  it('a refuted intersection empties its tuple, and never deletes the slot', () => {
     // A `nothing` slot collapses, mirroring the value-level rule that writing
-    // `Nothing` into a positional slot removes it — so a refuted slot silently
-    // changed the tuple's ARITY. An empty slot is `never` and stays put.
-    expect(reduce('tuple<number & boolean, integer>')).toBe(
-      'tuple<never, integer>'
-    );
+    // `Nothing` into a positional slot removes it — so a refuted slot used to
+    // silently change the tuple's ARITY, reducing this to `tuple<integer>`.
+    // An uninhabited slot is a different thing: every slot must hold a value,
+    // so one that can hold none leaves no tuple at all.
+    expect(reduce('tuple<number & boolean, integer>')).toBe('never');
+    expect(reduce('record{a: never}')).toBe('never');
   });
 
   it('an element meet that refutes yields the EMPTY collection', () => {
@@ -1448,13 +1449,11 @@ describe('reduceType Tests', () => {
     });
   });
 
-  it('still collapses a pair that is not two signatures', () => {
-    // Two signatures are the only pair kept: their intersection is the
-    // overload set, which has no other spelling. Everything else collapses as
-    // it always has — including same-kind composites, where sharing a kind is
-    // not a witness of sharing a value (different tuple arities, or a common
-    // record key with disjoint types, share none) and where treating it as one
-    // makes `typesOverlap` report an overlap the conformance gate then refuses.
+  it('collapses a pair with no shared inhabitant', () => {
+    // Sharing a KIND is not a witness of sharing a value, which is why each
+    // composite kind has its own rule rather than a blanket "same kind is
+    // kept": tuples of different arity share no value, nor do records whose
+    // common key has disjoint types.
     expect(reduce('((number) -> number) & integer')).toBe('never');
     expect(reduce('list<integer> & integer')).toBe('never');
     expect(reduce('nothing & integer')).toBe('never');
@@ -1462,6 +1461,113 @@ describe('reduceType Tests', () => {
       reduce('tuple<integer, integer> & tuple<string, string, string>')
     ).toBe('never');
     expect(reduce('record{a: integer} & record{a: boolean}')).toBe('never');
+  });
+
+  describe('tuples and records meet structurally', () => {
+    it('merges the key sets of two records, because records are width-subtyped', () => {
+      // The value inhabiting both is the record carrying BOTH keys, and it is
+      // a subtype of each side — so refuting the pair, as this used to, was
+      // unsound.
+      expect(reduce('record{a: integer} & record{b: string}')).toBe(
+        'record{a: integer, b: string}'
+      );
+      expect(
+        reduce('record{a: integer, b: string} & record{b: string, c: boolean}')
+      ).toBe('record{a: integer, b: string, c: boolean}');
+      const merged = reduceType(
+        parseType('record{a: integer} & record{b: string}')
+      );
+      expect(isSubtype(merged, parseType('record{a: integer}'))).toBe(true);
+      expect(isSubtype(merged, parseType('record{b: string}'))).toBe(true);
+    });
+
+    it('treats an `Object.prototype` member name as an ordinary record key', () => {
+      // `toString`, `constructor` and friends are valid record keys, so key
+      // presence must be an own-property test. A plain `elements[key]` lookup
+      // found the INHERITED function and handed it to `reduceType` as a type,
+      // throwing "Unknown type kind" — and only when the name arrived from the
+      // right-hand operand, so the meet was order-dependent too.
+      expect(reduce('record{a: integer} & record{toString: string}')).toBe(
+        'record{a: integer, toString: string}'
+      );
+      expect(reduce('record{toString: string} & record{a: integer}')).toBe(
+        'record{toString: string, a: integer}'
+      );
+      expect(reduce('record{a: integer} & record{constructor: string}')).toBe(
+        'record{a: integer, constructor: string}'
+      );
+      // Still meets normally when both sides declare the prototype name.
+      expect(
+        reduce('record{toString: integer} & record{toString: string}')
+      ).toBe('never');
+    });
+
+    it('does not let a record satisfy a key it never declared', () => {
+      // Width subtyping asks whether the lhs HAS each rhs key. `key in
+      // lhs.elements` answered yes for a prototype member name, so a record
+      // with no `toString` key satisfied a contract requiring one.
+      expect(
+        isSubtype(
+          parseType('record{a: integer}'),
+          parseType('record{toString: any}')
+        )
+      ).toBe(false);
+      expect(
+        isSubtype(
+          parseType('record{a: integer, toString: string}'),
+          parseType('record{toString: string}')
+        )
+      ).toBe(true);
+    });
+
+    it('meets a key that both records declare', () => {
+      expect(reduce('record{a: integer} & record{a: number}')).toBe(
+        'record{a: integer}'
+      );
+    });
+
+    it('empties the record when a shared key has no common value', () => {
+      // `record{a: never}` is a subtype of both sides, so the type order has
+      // an answer — but no value inhabits it, since a declared key must hold
+      // one. The ruling takes the value reading, which is the question every
+      // consumer of this meet is actually asking.
+      expect(reduce('record{a: integer} & record{a: string}')).toBe('never');
+    });
+
+    it('meets tuples slot-wise', () => {
+      expect(reduce('tuple<integer, string> & tuple<number, string>')).toBe(
+        'tuple<integer, string>'
+      );
+      // An unnamed slot takes the other side's name, as `isSubtype` allows.
+      expect(reduce('tuple<x: integer> & tuple<number>')).toBe(
+        'tuple<x: integer>'
+      );
+    });
+
+    it('empties the tuple on differing arity, an unfillable slot, or clashing names', () => {
+      expect(reduce('tuple<integer, integer> & tuple<integer>')).toBe('never');
+      expect(reduce('tuple<integer> & tuple<string>')).toBe('never');
+      // A slot cannot be called both `x` and `y`.
+      expect(reduce('tuple<x: integer> & tuple<y: integer>')).toBe('never');
+    });
+
+    it('leaves OBJECT layouts refuted, since their fields are invariant', () => {
+      // Unlike a record, an object layout is exact and its fields invariant,
+      // so two that are not already subtype-related share no value. The
+      // parser only accepts an object literal in a type declaration, so the
+      // pair is built directly.
+      expect(
+        typeToString(
+          reduceType({
+            kind: 'intersection',
+            types: [
+              { kind: 'object', elements: { a: 'integer' } },
+              { kind: 'object', elements: { b: 'string' } },
+            ],
+          } as Type)
+        )
+      ).toBe('never');
+    });
   });
 
   it('meets two applications of the same collection constructor elementwise', () => {
@@ -2202,7 +2308,9 @@ describe('the retired `callback<…>` spelling on the Epsil annotation route', (
     expect(diagnostics).toHaveLength(1);
     const [diagnostic] = diagnostics;
     expect(diagnostic.severity).toBe('error');
-    expect(diagnostic.message[1]).toContain('retired: write the arrow directly');
+    expect(diagnostic.message[1]).toContain(
+      'retired: write the arrow directly'
+    );
     // The keyword `callback` spans offsets 7–15.
     expect(diagnostic.range).toEqual([7, 15]);
   });

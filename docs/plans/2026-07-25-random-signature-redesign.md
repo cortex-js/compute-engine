@@ -3,7 +3,7 @@
 **Status**: design ratified 2026-07-25 (revised three times: after the dual
 spec review, after the `WithRandomSeed` direction change, then after a second
 dual review round — 24 findings applied, see
-`docs/scratch/2026-07-25-random-signature-redesign_SPEC_REVIEW.md`).
+the incorporated spec review).
 **Implemented 2026-07-25.** Where implementation reality diverged from the text,
 the text is corrected in place and marked; the durable model reference extracted
 from this plan is [`docs/RANDOMNESS-MODEL.md`](../RANDOMNESS-MODEL.md), and
@@ -1147,7 +1147,7 @@ Compile:
 
 Docs: `doc/80-reference-arithmetic.md:457-505`,
 `doc/03-guide-expressions.md:293`, and
-**`docs/architecture/actions-and-randomness.md`**, which still documents
+**`doc/84-reference-control-structures.md`**, which documents
 `Random(m,n) → [m,n)` and the old per-operator-seed forms (it never mentions
 `ce.randomSeed` — verified, zero grep hits). Plus one **new** durable doc:
 **`docs/RANDOMNESS-MODEL.md`** — the frame stack is a second engine-wide,

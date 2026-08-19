@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-13 · **Revision 2** (post dual-spec-review; r1's findings
 and their disposition are in
-`docs/scratch/2026-08-13-inference-tx-design_SPEC_REVIEW.md`) ·
+the incorporated spec review) ·
 **Status**: phases 2a, 2b AND 2c IMPLEMENTED (see the "As implemented"
 sections below; 2c's perf gate awaits the user's sign-off on the recorded
 numbers) · **Builds on**:

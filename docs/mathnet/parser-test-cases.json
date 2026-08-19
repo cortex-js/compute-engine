@@ -1,5 +1,5 @@
 {
- "$comment": "Parser regression corpus distilled from the 2026-07-04 MathNet sweep (see ce-mathnet-experiment.md), with follow-up cases appended from fresh-sweep-report.md and a later shifted sample. fragments = LaTeX from problem statements that did NOT parse clean when selected; unicodeAnswers = non-prose final_answer strings (mixed Unicode/ASCII math) that failed when selected. `observed` records the current parser outcome as of `lastChecked`. A case is FIXED when ce.parse() yields a valid expression with no Error subexpression (and no throw). Regenerate from scratch with scripts/ (see README.md).",
+ "$comment": "Parser regression corpus distilled from the 2026-07-04 MathNet sweep (from the original 2026-07-04 sweep), with follow-up cases appended from fresh-sample-2026-07-04 and a later shifted sample. fragments = LaTeX from problem statements that did NOT parse clean when selected; unicodeAnswers = non-prose final_answer strings (mixed Unicode/ASCII math) that failed when selected. `observed` records the current parser outcome as of `lastChecked`. A case is FIXED when ce.parse() yields a valid expression with no Error subexpression (and no throw). Regenerate from scratch with scripts/ (see README.md).",
  "date": "2026-07-04",
  "engineVersion": "0.67.0",
  "source": "huggingface.co/datasets/ShadenA/MathNet (800-row sample, offsets 0..24500 step 3500)",
@@ -1772,67 +1772,67 @@
    "latex": "\\cos^2 x + 2\\sin^2 x = 1?",
    "category": "trailing-question",
    "observed": "clean",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "\\sum_{n=1}^{100} a_n^2?",
    "category": "trailing-question",
    "observed": "clean",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "a^3+b^3+c^3+5a^2+5b^2+5c^2?",
    "category": "trailing-question",
    "observed": "clean",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "\\mathbb{Z}[x]",
    "category": "polynomial-ring",
    "observed": "'incompatible-type'",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "\\mathbb{R}[X, Y]",
    "category": "polynomial-ring",
    "observed": "'incompatible-type'",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "\\theta : \\mathbb{Z}[x] \\to \\mathbb{Z}",
    "category": "polynomial-ring",
    "observed": "'incompatible-type'",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "P = AC \\cap BD",
    "category": "geometry-intersection",
    "observed": "clean",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "A_1 = AO \\cap SBC",
    "category": "geometry-intersection",
    "observed": "clean",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "\\{F\\} = DI \\cap AM",
    "category": "geometry-intersection",
    "observed": "clean",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "f[S]",
    "category": "set-image-brackets",
    "observed": "clean",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "f[\\operatorname{divs}(m)]=\\operatorname{divs}(n)",
    "category": "set-image-brackets",
    "observed": "clean",
-   "source": "fresh-sweep-report.md"
+   "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "1/\\ N_0 = 120 ?",

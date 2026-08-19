@@ -483,7 +483,7 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     // interpreted as an implicit *subscript* in non-strict mode (`x2 → x_2`,
     // `x12 → x_12`). This preserves the index (a flattened indexed variable is
     // the common intent of ASCII/copy-paste input) and matches the strict `x_2`
-    // form, per docs/LENIENT_PARSER.md.
+    // form; adjacent digits in loose input are ordinary identifier text.
 
     test('x2 → x_2', () => {
       expect(ce.parse('x2', { strict: false })).toMatchInlineSnapshot(`x_2`);

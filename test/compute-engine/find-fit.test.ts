@@ -3,8 +3,7 @@ import type { BoxedExpression } from '../../src/compute-engine';
 import { CancellationError } from '../../src/common/interruptible';
 
 //
-// Tests for the nonlinear least-squares operators `FindFit` and `FindRoot`
-// (design: docs/plans/2026-07-21-findfit-design.md § 7).
+// Tests for the nonlinear least-squares operators `FindFit` and `FindRoot`.
 //
 // Every reference value is verified empirically: synthetic data is generated
 // from known ground-truth parameters (exact model evaluation) and the fit is

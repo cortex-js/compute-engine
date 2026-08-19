@@ -1,7 +1,7 @@
 # PointList as a compiled value — design
 
 **Date:** 2026-07-31 · **Status:** rulings ratified; spec revised after the
-dual-reviewer pass (`docs/scratch/2026-07-31-pointlist-compile-design_SPEC_REVIEW.md`) ·
+dual-reviewer pass (the incorporated spec review) ·
 **Ledger entry:** ROADMAP § Compile-target coverage, group A rank 1
 (`PointList` w/ collection-valued component + `PointZ` over a point list —
 11 st / 36 mem JS + 2 st GPU).

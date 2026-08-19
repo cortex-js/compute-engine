@@ -25,8 +25,8 @@ The 2026-06 release shipped:
 - a substantial bignum/numeric performance pass (item 17): base-2 internal
   kernels, AGM `ln`, faster `sqrt`/`Gamma`, on-demand π and γ.
 
-**MathNet parser hardening (2026-07-04):** all four tiers of
-`docs/mathnet/parser-hardening-plan.md` landed and are test-locked
+**MathNet parser hardening (2026-07-04):** all four tiers of the campaign
+summarized in `docs/mathnet/README.md` landed and are test-locked
 (`ContinuationPlaceholder` crash, ellipsis/trailing-punctuation recovery,
 Unicode relation tokens, congruence/divisibility, geometry heads; corpus
 clean-parse 3/345 → 278/345, throws 9 → 0). Fresh unseen-sample validation
@@ -179,37 +179,58 @@ the generic-arm overload set now REACHES `Subtype` and is rejected there as a
 polytype, which the `isPolytype` predicate had been pinned for while
 unreachable.
 
-### The meet has no structural rule for same-kind composites (OPEN, type system — found 2026-08-19 while fixing the entry above)
+### The meet had no structural rule for same-kind composites (FIXED 2026-08-19 — found the same day; RULED by the user for the contested half)
 
-`meet2` has rules for primitives, numeric ranges and unions, and now keeps an
-intersection of signatures. It has none for two same-kind COMPOSITES, so those
-still collapse to `nothing` even when a value inhabits both:
+The COLLECTION half is fixed: two applications of the same collection
+constructor now meet elementwise (`meetCollections`, `src/common/type/reduce.ts`),
+so `list<integer> & list<string>` is `list<never>` — the type of the empty
+list, which is a subtype of every list — instead of being refuted. A differing
+list SHAPE still refutes, correctly: no value is both a 2-vector and a
+3-vector.
+
+TUPLES and RECORDS now meet structurally too (`meetTuples` / `meetRecords`).
+Records are WIDTH-subtyped, so the meet merges both key sets and meets any key
+they share; tuples meet slot-wise, requiring equal arity and agreeing slot
+names. `object` is deliberately excluded — object layouts are EXACT and their
+fields INVARIANT, so two that are not already subtype-related share no value.
 
 ```
-list<integer> & list<string>            reduces to  nothing
-record{a: integer} & record{b: string}  reduces to  nothing
+record{a: integer} & record{b: string}  ->  record{a: integer, b: string}
+record{a: integer} & record{a: number}  ->  record{a: integer}
+tuple<integer, string> & tuple<number, string>  ->  tuple<integer, string>
 ```
 
-`list<never>` — the empty list — is a subtype of both lists, and
-`record{a: integer, b: string}` is a subtype of both records (width
-subtyping), so neither meet is empty. `provablyDisjoint` in `subtype.ts`
-answers both correctly, so the two predicates disagree.
+**RULED 2026-08-19 (user): an uninhabited slot or key empties the WHOLE type —
+the value-level reading.** `record{a: integer} & record{a: string}` is `never`,
+not `record{a: never}`, and `tuple<integer> & tuple<string>` is `never`, not
+`tuple<never>`. The two readings genuinely disagree here: `record{a: never}` IS
+a subtype of both sides, so the TYPE order has an answer, but no VALUE inhabits
+it, because a declared key or slot must hold one. The value reading won because
+it is the question all four consumers of this meet actually ask — the
+protocol-conformance gate (would otherwise refuse conformances that can never
+collide), `assume()` (would miss a real contradiction), `isInteger`/
+`isRational`, and set membership — and because it matches the precedent already
+in the file, where an empty numeric range reduces to `never`.
 
-Fixing it means giving the meet real structural rules — elementwise for a
-tuple (equal arity, or empty), key-merge for a record (shared keys meet), the
-element meet plus dimension compatibility for the collection constructors —
-NOT widening the keep-condition by kind. That shortcut was tried and reverted
-the same day: admitting a whole kind makes `typesOverlap` report tuples of
-different arity, and records whose shared key has disjoint types, as
-overlapping, and the protocol-conformance gate then refuses legitimately
-disjoint conformances.
+The collection precedent does NOT transfer, which is why this needed a ruling
+and the collection half did not: `list<never>` is genuinely inhabited, by `[]`.
+Nothing forces a list to have elements, while every tuple slot and record key
+must be filled. As a consequence `tuple<number & boolean, integer>` now reduces
+to `never` rather than `tuple<never, integer>`, and `reduceTupleType` /
+`reduceRecordType` collapse an uninhabited slot or key wherever it arrives, not
+only from a meet.
 
-One case needs a ruling first: `record{a: integer} & record{a: string}` is
-inhabited by `record{a: never}` at the TYPE level (it is a subtype of both),
-while no VALUE inhabits it. Whether the meet algebra reasons about types or
-values decides the answer.
+Note what the rule is NOT: widening the keep-condition by KIND. That shortcut
+was tried and reverted the same day — admitting a whole kind makes
+`typesOverlap` report tuples of different arity, and records whose shared key
+has disjoint types, as overlapping, and the conformance gate then refuses
+legitimately disjoint conformances. Each kind carries its own witness instead.
+The collection fix never had that problem, because `typesOverlap` answers
+same-head collections from `sameHeadArguments` before it consults the meet;
+`sameHeadArguments` has no tuple or record case, which is exactly why these two
+needed real rules.
 
-### An empty meet is spelled `nothing`, the UNIT type, not the bottom `never` (OPEN, type system — found 2026-08-19 while fixing the entry above)
+### An empty meet was spelled `nothing`, the UNIT type, not the bottom `never` (FIXED 2026-08-19 — found the same day while fixing the entry above)
 
 `reduceIntersectionType` returns `'nothing'` for a genuinely disjoint pair, and
 `nothing` is the type whose one member is the symbol `Nothing` — not the empty
@@ -229,14 +250,60 @@ This is the same conflation `reduceNegationType` already fixed for the
 complement (`!any` returned `nothing`, now `never` — see the SYM P2-21 comments
 in `src/common/type/reduce.ts`); the intersection path was not carried along.
 
-Not fixed with the entry above because the spelling is load-bearing: the empty
-meet is detected by an `=== 'nothing'` identity test in `assume.ts`
-(a contradictory assumption) and twice in `boxed-symbol.ts`
-(`isInteger`/`isRational` proving a symbol is definitely NOT one), and
-`test/common/types.test.ts` pins `number & boolean` → `nothing`. Changing it
-means moving those call sites to a shared "is the empty type" predicate that
-accepts both spellings, then flipping the return. Worth doing as its own
-change, with the union and tuple consequences above as the regression tests.
+Fix: `isEmptyType(t)` (`src/common/type/subtype.ts`) names the question "did
+this meet come back empty?", and the meet returns `never` — the primitive meet,
+both numeric-range meets, the union distribution and the accumulate fold. The
+three consumers that detected emptiness by an `=== 'nothing'` identity test now
+ask the predicate instead: `assume.ts` (a contradictory assumption) and
+`boxed-symbol.ts` twice (`isInteger`/`isRational` proving a symbol is
+definitely NOT one). The predicate deliberately accepts ONLY `never`; accepting
+both spellings would have preserved the conflation it exists to remove, and
+would misread a legitimate `nothing` meet (`nothing & nothing`) as empty.
+
+Two further defects the change exposed, both fixed here:
+
+- `typesOverlap('nothing', 'nothing')` was FALSE. It tested the meet against
+  the `nothing` literal, so the unit type failed to overlap itself. It now asks
+  `isEmptyType`.
+- `narrow()` — the lattice meet in `subtype.ts` — short-circuited past its own
+  correct disjoint fallback. `narrow('never', 'integer')` returned `integer`,
+  treating the BOTTOM type as an identity the way `any` (the top) legitimately
+  is, so the result was not a subtype of its input; `narrow('nothing', X)`
+  returned `nothing` by the same conflation. The three guards are deleted —
+  `isSubtype('never', b)` holds for every `b`, so the existing tests return the
+  right answer unaided.
+
+A refuted element meet now also yields the right EMPTY collection rather than a
+collection of `Nothing`: `list<integer & string>` reduces to `list<never>`,
+which is a subtype of every list type.
+
+Two more fixes came out of the dual review of this change:
+
+- Same-kind COLLECTIONS now meet elementwise (see the entry below), which the
+  review showed to be safe in a way the earlier round had wrongly ruled out.
+- `narrow2`'s `unknown` short-circuit had the same flaw as the `nothing` and
+  `never` ones: `narrow('nothing', 'unknown')` returned `nothing`, but the
+  absence types are excluded from `unknown` by ruling (absence is opt-in), so
+  the meet is `never`. All three short-circuits are gone; the subtype tests
+  decide. Placeholder semantics for a declared `unknown` slot are unaffected —
+  they live in `refineDeclaredPlaceholders`, deliberately outside this
+  relation.
+
+Blast radius measured on the full suite: 5 assertions, all of them pins of the
+defect (`internals/type-lattice.test.ts` expecting `nothing` from a refuted
+meet), and ZERO snapshot churn.
+
+**RULED 2026-08-19 (user): `widen()` keeps absorbing `nothing`, and that is
+not a bug.** `widen('nothing', 'integer')` is `integer`, never
+`integer | nothing`. As lattice algebra the join ought to be a supertype of
+both sides and `integer` is not a supertype of `nothing`, so this reads like
+the same unit-vs-empty confusion `narrow2` had — it was raised as such and
+approved as-is. Absence is OPT-IN here: a type admits `nothing`/`missing` only
+by saying so, and joining them in would contradict that wherever a series of
+observed types is widened, most visibly element-type inference (`[1, Nothing,
+3]` infers `list<integer>`, not `list<integer | nothing>`). `narrow` and
+`widen` are asymmetric on this by design; the reasoning is recorded at the
+site in `widen2` (`src/common/type/subtype.ts`) so it is not "fixed" later.
 
 ### Compatibility gate for USER-DECLARED lazy operators (OPEN, demand-gated — opened 2026-08-19)
 
@@ -2136,7 +2203,7 @@ under `latex-syntax/` references `ComputeEngine`, `_deadlineFrame` or
 `_timeRemaining`, which is deliberate — `LatexSyntax` is an injected,
 structurally-typed dependency (`ILatexSyntax`), and that decoupling is the
 architecture described in `CLAUDE.md` and
-`docs/architecture/CURRENT-ARCHITECTURE.md`. So there is no deadline for a
+`ARCHITECTURE.md`. So there is no deadline for a
 strided check to read, and adding one means threading a deadline (or an abstract
 "should I stop" callback) across the `ILatexSyntax` boundary.
 
@@ -4378,8 +4445,7 @@ nominal.
 
 ### Contextual callback typing residue (Design D landed 2026-08-09)
 
-The `callback<S>` conversion of the 15 collection operators
-(`docs/plans/2026-08-09-design-d-generic-callback-signatures.md`) closed with
+The `callback<S>` conversion of the 15 collection operators closed with
 these items open. Items marked RULED-DEFERRED have a maintainer decision on
 record; the rest are recorded here so they are not rediscovered from the
 outside.
@@ -5543,9 +5609,7 @@ result against the declared return type (returns are pure ascriptions today),
 and **(S)** LaTeX typed-parameter notation behind a serialization style flag
 (annotations currently drop in LaTeX).
 
-**Compiled recursive lambdas** shipped 2026-07-19 as lenient true recursion
-(as-built record:
-[`docs/plans/2026-07-19-compiled-recursive-lambdas-design.md`](./docs/plans/2026-07-19-compiled-recursive-lambdas-design.md)).
+**Compiled recursive lambdas** shipped 2026-07-19 as lenient true recursion.
 Standing contracts: termination is the caller's — runaway recursion throws a
 catchable `RangeError`; complex-valued recursion needs a `Typed` `complex`
 return ascription (untyped applications type `broadcastable<number>` and hit the
@@ -5634,9 +5698,7 @@ unambiguous and could be revisited); set arithmetic such as `2\mathbb{Z}+1`;
 richer `array`/`cases` environment variants; prose-heavy or fragment-boundary
 inputs that need surrounding natural-language context.
 
-**Uncertainty/Measurement residue** (MVP landed 2026-07-07; design + phased
-record:
-[`docs/plans/2026-07-07-uncertainty-design.md`](./docs/plans/2026-07-07-uncertainty-design.md)).
+**Uncertainty/Measurement residue** (MVP landed 2026-07-07).
 Deferred:
 
 - **Dual-number correlation tracking** (correct-by-default) — the documented
@@ -5647,8 +5709,7 @@ Deferred:
 - **Relative-error notation** (`±5%`) and **distribution/`RandomVariate` links**
   (reuse the statistics RNG/seed policy).
 
-**`FindFit`/`FindRoot` residue (landed 2026-07-21, Tycho item 77; ratified
-design: `docs/plans/2026-07-21-findfit-design.md` § 8–9):** demand-gated v2
+**`FindFit`/`FindRoot` residue (landed 2026-07-21, Tycho item 77):** demand-gated v2
 items — per-point **weights** (resolved future shape: a trailing optional
 `weights` argument, NOT tuple-shape deduction), parameter uncertainty/covariance
 output (`JᵀJ⁻¹` is a byproduct), general `FindMinimum`, and multi-start/global
@@ -5683,8 +5744,8 @@ filed): number-juxtaposed bracket lists (`2[1,2,3]`) don't parse;
 The 2026-07-04 review's P0/P1 fixes all landed (DSolve repeated-root and
 Error-node bugs, the ODE P1 tail incl. the parsed-LaTeX path, the loose-parsing
 cluster with the `strict` escape hatch, and the top P2/P3 items: Beta poles,
-`x·∞`, inverse-hyperbolic poles, the rules.ts edge bugs). Full record:
-[`docs/reviews/2026-07-04-review.md`](./docs/reviews/2026-07-04-review.md).
+`x·∞`, inverse-hyperbolic poles, the rules.ts edge bugs). The completed review
+campaign is summarized in [`docs/STATUS_REPORT.md`](./docs/STATUS_REPORT.md).
 Still open from its ranked list:
 
 - **defint error bar 1.6× optimistic on endpoint-singular integrands** — large
@@ -6442,8 +6503,6 @@ the store are only partially built:
 
 - **(c) Exact asymptotics at special-function poles — one rung remains** (the
   kernel, residue-at-∞, signed pole limits, and `Beta` pole data all landed;
-  design + record in
-  [`docs/plans/2026-07-10-pole-asymptotics-design.md`](./docs/plans/2026-07-10-pole-asymptotics-design.md);
   `GammaLn` is a genuine non-goal — logarithmic branch point, not meromorphic).
   Demand-paced:
   - **Sum-of-residues-in-a-region helper** — needs a pole-enumeration API over
@@ -6487,24 +6546,20 @@ itself completed in the tail-phase rounds 8–10** (`72f3a353`, `f5e0e339`,
 `a2b78928`, plus the P2-1 dispatch index `8667a0aa` and the benchmark capstone
 `c20a4b2e`) and the follow-on round (`e65eee11` complex-type inference,
 `99fa7276` D12-A exact Gaussians + parser perf, `c4def410` non-finite typing
-convention). The findings docs are kept for the record —
-[`CORRECTNESS_FINDINGS.md`](./CORRECTNESS_FINDINGS.md),
-[`SYMBOLIC_FINDINGS.md`](./SYMBOLIC_FINDINGS.md), with the full implementation
-log, the closed-as-measured-no-wins list (do not re-attempt without new
-evidence), and the residual inventory in
-[`docs/reviews/2026-07-findings-tracker.md`](./docs/reviews/2026-07-findings-tracker.md)
-(see its "RESUME HERE" section). What remains from the reviews is that residual
+convention). The campaign is summarized in
+[`docs/STATUS_REPORT.md`](./docs/STATUS_REPORT.md); detailed execution records
+remain in Git history. What remains from the reviews is the residual
 tail: the item-4 filed residuals (Artanh/Arcoth-class literal poles, `∞+i`
 numeric-value finiteness, the `~oo` lattice question, the `Multiply(x, +∞)` fold
 positivity review), the non-blocking tracked residuals (fu `sin⁴−cos⁴`, defint
 error-bar/tanh-sinh, machine `gamma()` mid-range digits, …), and the item-5 perf
 levers — of which only bundle cold-start survives: the cache-shaped levers were
-closed measured-unprofitable by the 2026-07-18 P2/P3 tail (see
-`PERFORMANCE_FINDINGS.md`; do not re-attempt without a new profile).
+closed measured-unprofitable by the 2026-07-18 P2/P3 tail; do not re-attempt
+them without a new profile.
 
 The Stage-2 corpus audit (2026-07-10, all 57 topics) surfaced three
 engine/tooling items — all fixed; the full-corpus run grades **0 False** (True
-1589, seed 42). Record in the findings tracker.
+1589, seed 42).
 
 Two design-level residues are deliberately carried forward:
 

@@ -262,7 +262,7 @@ function isComplexOnly(
 // bug remains in this corpus.
 const KNOWN_COMPILE_BUG = new Set<string>([]);
 
-// Documented compiler finding CO-P0-2 (compile-findings.md, residual): a
+// Known compiler residual: a
 // rational exponent p/q of a NEGATIVE base has a real value via the odd-q branch
 // (interp), but compiled JS `Math.pow` → NaN. Only odd-n Root / x^(1/n) received
 // the sign-corrected fix; general p/q (e.g. x^(2/3)) did not. Points where

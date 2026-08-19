@@ -1,262 +1,122 @@
-# Simplification Status Report
+# Simplification Invariants
 
-This document tracks the current status of simplification in the Compute Engine, including working features, known limitations, and remaining tasks.
+This document records internal simplification contracts that are easy to break
+when changing canonicalization, evaluation, or rewrite rules. User-facing
+examples and API guidance belong in
+[`doc/11-guide-simplify.md`](../doc/11-guide-simplify.md); unfinished feature
+work belongs in [`ROADMAP.md`](../ROADMAP.md).
 
-**Checked**: 2026-02-10
-**Compute Engine version**: 0.35.6
+## Canonicalization is not simplification
 
----
+Canonicalization runs when expressions are boxed or parsed. It normalizes
+structure and folds exact numeric operands before any `.simplify()` call.
+Examples include:
 
-## 1. Summary of Progress
-
-| Category           | Working | Limitations | Total  |
-| ------------------ | ------- | ----------- | ------ |
-| Division/Fractions | 7       | 2*          | 9      |
-| Powers & Exponents | 18      | 0           | 18     |
-| Square Roots       | 7       | 0           | 7      |
-| Logarithms         | 12      | 2*          | 14     |
-| Negative Signs     | 5       | 0           | 5      |
-| Infinity           | 10      | 0           | 10     |
-| Trigonometry       | 11      | 1*          | 12     |
-| Parsing            | 1       | 0           | 1      |
-| **Total**          | **71**  | **5**       | **76** |
-
-\*Limitations are by-design decisions or architectural constraints, not bugs.
-
-### Exact Numeric Folding (Canonicalization)
-
-Canonicalization now folds exact numeric operands in `Add` and `Multiply` expressions. This happens automatically when expressions are boxed or parsed (before any `.simplify()` call).
-
-**Folding rules applied:**
 - `Add(2, x, 5)` → `Add(x, 7)`
 - `Add(1/3, x, 2/3)` → `Add(x, 1)`
-- `Add(√2, x, √2)` → `Add(x, 2√2)`
 - `Multiply(2, x, 5)` → `Multiply(10, x)`
 - `Multiply(1/2, x, 2)` → `x`
 
-A separate set of folds — `x/x → 1`, `1^x → 1`, `x/0`, `0/x`, `x/∞` — also fire
-at **canonicalization** (not simplify) for generic symbols. Their conventions and
-protections are documented in
+The generic-symbol folds `x/x → 1`, `1^x → 1`, `x/0`, `0/x`, and `x/∞` also
+belong to canonicalization. Their conventions are documented in
 [`ARCHITECTURE.md`](../ARCHITECTURE.md#generic-symbol-conventions-at-canonicalization).
 
----
+## `simplify()` and the `Simplify` operator
 
-## `simplify()` and operator `evaluate` handlers
+The `.simplify()` method and the `Simplify` operator deliberately have
+different contracts.
 
-The `.simplify()` **method** and the `Simplify` **operator** are deliberately
-different, and the split is the whole story (Ruling 2026-07-24):
+### The method is rule-based and value-blind
 
-- **Method — rules only, value-blind.** `expr.simplify()` applies the
-  simplification rule set and folds purely numeric subexpressions
-  (`evaluateNumericSubexpressions` in `boxed-expression/simplify.ts`). It
-  **never** invokes an operator's `evaluate` handler, and never reads an
-  assigned symbol's value. So a head whose result comes from a handler rather
-  than a rule — `Determinant`, `Trace`, `Transpose`, `Length`, `D`,
-  `Integrate`, `Inverse`, … — comes back untouched under the method:
+`expr.simplify()` applies simplification rules and folds purely numeric
+subexpressions. It does not invoke an operator's `evaluate` handler and does not
+substitute assigned symbol values.
 
-  ```
-  ce.parse('\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}').simplify()
-  // → Determinant(Matrix([[a,b],[c,d]]))   (unchanged — no rule for it)
-  ```
+Consequently, a head whose result comes only from an evaluation handler — such
+as `Determinant`, `Trace`, `Length`, `D`, or `Integrate` — can remain unchanged
+under the method when no simplification rule covers it.
 
-- **Operator — evaluate, then rules.** `Simplify(expr)` is evaluate-then-
-  simplify: it calls `.evaluate()` on its argument, then `.simplify()` on the
-  result. So it *does* run handlers and *does* substitute assigned symbol
-  values — it is the operator counterpart of the `expr.evaluate().simplify()`
-  recipe:
+For an evaluate-then-simplify operation, use:
 
-  ```
-  ce.box(['Simplify', ['Max', 3, 5]]).evaluate()                 // → 5
-  ce.box(['Simplify', ['Determinant', [[a,b],[c,d]]]]).evaluate() // → a·d − b·c
-  // with a := 5, the operator substitutes the value:              → 5·d − b·c
-  ```
-
-The reliable ordering rule for the method stands — `expr.simplify()` alone is
-not a superset of `expr.evaluate()`:
-
-```
-expr.evaluate().simplify()   // the reliable order (method-side recipe)
+```ts
+expr.evaluate().simplify();
 ```
 
-`N()` runs handlers too, but yields the float form rather than the exact one.
+### The operator evaluates before applying rules
 
-### The method is value-blind
+`Simplify(expr)` evaluates its argument and then simplifies the result. It runs
+operator handlers and observes assigned values. It is the operator-surface
+counterpart of `expr.evaluate().simplify()`.
 
-`expr.simplify()` never substitutes an assigned symbol value, and never reads it
-— not its magnitude, and not its **sign or parity**. For the duration of a
-`.simplify()` call, every assigned non-constant symbol is shadowed *valueless*
-(keeping its declared type), so its sign/parity come from its type and in-scope
-assumptions, never its value:
+`N()` also runs handlers, but requests a numeric approximation rather than an
+exact result.
 
-- with `a := 5`, `(a + 2).simplify()` is `a + 2` (while `(a + 2).evaluate()`
-  is `7`);
-- with `w := 5`, `|w|.simplify()` stays `|w|` and `√(w²).simplify()` is `|w|` —
-  the sign is *not* baked in, so the result is still correct after `w := -3`
-  (whereas `assume(w > 0)` *does* license `|w| → w`, because an assumption is
-  not a value).
+### Assigned values do not influence the method
 
-Constants (`π`, `e`, …) keep their value — their value *is* their identity.
+During `.simplify()`, assigned non-constant symbols are treated as valueless
+while retaining their declared types. Sign and parity information therefore
+comes from types and assumptions, not from the current assigned value.
 
-The **operator** does the opposite by design: `Simplify(v)` with
-`v := (x²-1)/(x-1)` gives `x + 1` (evaluation resolves `v`), while the method
-`ce.symbol('v').simplify()` gives `v`. The other transformers (`Expand`,
-`Factor`, `Together`, `Distribute`) keep their reduce-not-evaluate behavior —
-they resolve bound symbols in their operand but do not run a full evaluation.
+For example, with `w := 5`, `abs(w).simplify()` remains `abs(w)` and
+`sqrt(w^2).simplify()` is `abs(w)`. The result remains valid if `w` is later
+assigned `-3`. An assumption such as `assume(w > 0)` may license the stronger
+rewrite because an assumption is part of the symbolic context.
 
-**Operator-surface value-blindness — `HoldValues`.** Since the `Simplify`
-operator now evaluates its argument first, and the `.simplify()` method is not
-reachable from the operator surface (e.g. Epsil), the value-blind route there
-is `HoldValues(body)`: it shields the assigned free symbols of `body` (all
-of them, or a listed subset) so they stay symbolic — declared type and
-assumptions apply, the assigned value does not — for the duration of the
-evaluation. `HoldValues(Simplify(|w|))` with `w := 5` is `|w|`, where the
-bare `Simplify(|w|)` is `5`. It shares the shadow-scope shield described above
-(`withValueShield`, `boxed-expression/utils.ts`).
+Constants such as π retain their values because their value is part of their
+identity.
 
----
+On the operator surface, `HoldValues(body)` provides the value-blind route. It
+shields all assigned free symbols, or a selected subset, for the duration of
+evaluation while preserving declared types and assumptions.
 
 ## Generic-real simplification policy
 
-This is the single authoritative statement of how `.simplify()` treats an
-**unknown** symbol.
+This is the authoritative policy for real-only rewrites over an unknown symbol.
 
-**An unknown is a generic real unless declared otherwise.** A symbol with no
-declared type (or a declared numeric supertype that admits ℝ) is assumed to
-stand for a generic real value. "Real-only" rewrites — identities that are valid
-on ℝ but change meaning on the complex plane — fire on such symbols. They can
-therefore change meaning at negative reals; this is an accepted convention, the
-price of simplifying unconstrained expressions.
+An unconstrained numeric symbol is treated as a generic real unless declared
+otherwise. Identities that are valid over the reals may therefore apply even
+when they differ on the complex plane or at a measure-zero exceptional point.
 
-Concretely, for an unconstrained `x`:
+For an unconstrained `x`:
 
-| Simplification        | Result         | Kind |
-| --------------------- | -------------- | ---- |
-| `ln x + ln y`         | `ln(xy)`       | generic-real |
-| `ln(x³)` (odd exp.)   | `3 ln(x)`      | generic-real (differs at negative reals) |
-| `ln(x²)` (even exp.)  | `2 ln(\|x\|)`  | always-sound `\|x\|` form |
-| `√(x²)`               | `\|x\|`        | always-sound `\|x\|` form |
+| Simplification | Result | Rule class |
+| --- | --- | --- |
+| `ln(x) + ln(y)` | `ln(xy)` | Generic-real |
+| `ln(x^3)` | `3 ln(x)` | Generic-real; differs at negative reals |
+| `ln(x^2)` | `2 ln(abs(x))` | Always sound over the reals |
+| `sqrt(x^2)` | `abs(x)` | Always sound over the reals |
 
-Even powers use the always-sound absolute-value form (`2 ln|x|`, `|x|`), valid
-for every real `x`. Odd and irrational exponents keep the optimistic generic-real
-convention (`ln(x³) → 3 ln(x)`, `ln(x^√2) → √2 ln(x)`), which is what changes
-meaning at negative reals.
+Even powers use the absolute-value form. Odd and irrational exponents use the
+optimistic generic-real convention.
 
-**When the rewrite bails.** A real-only rewrite is skipped when the operand's
-type admits genuinely non-real values — i.e. its type matches `complex` (or
-`imaginary`) but **not** `real`. This is the `isEligibleRealRewrite` gate
-(`src/compute-engine/function-properties/index.ts`). Detection is by *type*, so:
+### When a real-only rewrite must decline
 
-- **Unconstrained** `x` — the rewrite fires (generic-real). `ln x + ln y → ln(xy)`,
-  `√(x²) → |x|`.
-- **Declared `complex`** (or `imaginary`) `x` — the rewrite does **not** fire at
-  all. `ln x + ln y`, `ln(x²)`, `√(z²)`, `|z|² → z²` are all left unchanged (each
-  is false at `z = i`).
-- **`assume(x > 0)`** (so `x.isReal === true` and `x > 0`) — the stronger,
-  abs-free form fires: `ln(x²) → 2 ln(x)` and `√(x²) → x`, with no `|·|`.
+A real-only rewrite is skipped when the operand's declared type admits
+genuinely non-real values: its type matches `complex` or `imaginary`, but not
+`real`. The shared gate is `isEligibleRealRewrite` in
+`src/compute-engine/function-properties/index.ts`.
 
-Declared real subtypes behave like the generic real case: for `n : integer`,
-`√(n²) → |n|` and `ln(n²) → 2 ln(|n|)`.
+- An unconstrained symbol is eligible.
+- A symbol declared `complex` or `imaginary` is not eligible.
+- A symbol known positive through assumptions may use a stronger form without
+  an absolute value.
+- Declared real subtypes, such as `integer`, use the real-safe absolute-value
+  form unless assumptions prove a sign.
 
-The branch-cut-sensitive log combinations (`ln a + ln b → ln(ab)` and the
-`ln(bⁿ)`/`ln(a/b)` expansions) additionally consult the `onBranchCut` guard and
-stay symbolic when an operand is provably on the negative-real cut. See the
-[0.60.0 migration guide](./MIGRATION_GUIDE_0.60.0.md#1-evaluate-stays-symbolic-for-exact-values--use-n)
-for the consumer-facing summary.
+Branch-cut-sensitive logarithm combinations additionally consult the branch-cut
+guard and remain symbolic when an operand is provably on the negative-real
+cut.
 
----
+## Recursion and ordering constraints
 
-## 2. Remaining Tasks (Skipped Tests)
-
-There are **14 skipped tests** remaining in `test/compute-engine/simplify.test.ts`. This list identifies items still requiring resolution.
-
-### 2.1 Logarithm Rules
-- **Log of quotient involving e** (Line 498): `ln((x+1)/e^{2x})` → `ln(x+1) - 2x`. Operand simplification expands the fraction before the log quotient rule fires. Deep ordering issue.
-- ~~**Mixed log product identity**: `log_c(a) * ln(a)` → `ln(c)`.~~ **Resolved (test removed):** the identity is mathematically wrong — `log_c(a)·ln(a) = ln(a)²/ln(c)`, not `ln(c)` — so the skipped test was deleted rather than fixed.
-
-### 2.2 Powers and Roots
-- **Negative base** (Line 404): `(-x)^{3/4}` → `x^{3/4}`. **Wrong test** — complex for x > 0.
-- ~~**Symbolic exponent**: `x^{sqrt(2)}/x^3` → `x^{sqrt(2)-3}`.~~ **Resolved:** now simplifies to `x^{-3+sqrt(2)}` (test unskipped).
-- **Root factoring** (Line 447): `root4(16b^4)` → `2|b|`. Factor numeric coefficients from roots.
-
-### 2.3 Common Denominator (Lines 458, 460)
-- `1/(x+1) - 1/x` → `-1/(x^2+x)`
-- `1/x - 1/(x+1)` → `1/(x^2+x)`
-Requires finding a common denominator for fractions with polynomial denominators — a significant new capability.
-
-### 2.4 Multi-Variable Expansion — RESOLVED
-- ~~`2*(x+h)^2 - 2*x^2` → `4xh + 2h^2`.~~ **Resolved:** now simplifies to `2h^2 + 4hx` (test unskipped).
-
-### 2.5 Float / Mixed Arithmetic — RESOLVED
-- ~~`sqrt(3.1)` → `1.76068168616590091458` (decimal)~~ **Resolved** (test unskipped).
-- ~~`sqrt(3) + 0.3` → `2.03205080756887729353` (decimal)~~ **Resolved** (test unskipped; expected value corrected to full precision).
-
-### 2.6 Inequality Simplification (Line 113)
-- `(2*pi + 2*pi*e) < 4*pi` → `1 + e < 2`. Extend inequality GCD-factor-out to handle sums with common factors.
-
-### 2.7 Inverse Hyperbolic ↔ Logarithm Rewrites (Lines 822-835)
-- `1/2*ln((x+1)/(x-1))` → `arccoth(x)`
-- `ln(x + sqrt(x^2+1))` → `arsinh(x)`
-- `ln(x + sqrt(x^2-1))` → `arcosh(x)`
-- `1/2*ln((1+x)/(1-x))` → `artanh(x)`
-- `ln((1+sqrt(1-x^2))/x)` → `arsech(x)`
-- `ln(1/x + sqrt(1/x^2+1))` → `arcsch(x)`
-
-### 2.8 Inverse Trig / Other (Lines 843, 1279)
-- `arctan(x/sqrt(1-x^2))` → `arcsin(x)`
-- `1 - (1/4)*sin^2(2x) - sin^2(y) - cos^4(x)` → `sin(x+y)*sin(x-y)` (Fu Trig Simplification — Phase 14)
-
----
-
-## 3. Current Behavior Snapshot (Issue #178)
-
-Checked using `ce.parse(<latex>, { canonical: false }).simplify()`.
-
-| Section   | Issue text                            | Simplified (LaTeX)                                         | Notes                                                                                                        |
-| --------- | ------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Base      | `x+x`                                 | `2x`                                                       |                                                                                                              |
-| Hard      | `\frac{0}{1-1}`                       | `\frac{0}{1-1}`                                            | No longer incorrectly simplifies to 0.                                                                       |
-| Hard      | `\frac{1-1}{0}`                       | `\tilde\infty`                                             | Requires explicit evaluation of (1-1) to reach 0/0.                                                          |
-| Hard      | `\frac{0}{0}`                         | `\operatorname{NaN}`                                       |                                                                                                              |
-| Hard      | `2(x+h)^2-2x^2`                       | `2h^2+4hx`                                                 | Now expands and cancels (difference-of-squares style).                                                       |
-| Hard      | `\frac{\pi+1}{\pi+1}`                 | `1`                                                        |                                                                                                              |
-| Hard      | `\frac{x^2}{5x^2}`                    | `\frac{1}{5}`                                              |                                                                                                              |
-| Hard      | `(-1)^{3/5}`                          | `-1`                                                       |                                                                                                              |
-| Hard      | `\exp(x)\exp(2)`                      | `\exp(x+2)`                                                | Adjacent `\exp()` calls parse correctly as multiplication.                                                   |
-| Hard      | `\frac{x+1-1+1}{x}`                   | `\frac{1}{x}+1`                                            |                                                                                                              |
-| Hard      | `\sqrt{12}`                           | `2\sqrt{3}`                                                |                                                                                                              |
-| Hard      | `\sqrt{x^2}`                          | `\vert x\vert`                                             |                                                                                                              |
-| Logs      | `\ln(\frac{x}{y})`                    | `\ln(\frac{x}{y})`                                         | Quotient expansion is domain-sensitive.                                                                      |
-| Logs      | `log(xy)-log(x)-log(y)`               | `0`                                                        |                                                                                                              |
-| Exponents | `xx`                                  | `x^2`                                                      | Now simplifies to x^2.                                                                                       |
-| Trig      | `2\sin(x)\cos(x)`                     | `\sin(2x)`                                                 |                                                                                                              |
-
----
-
-## 4. Completed Fixes & Phases
-
-### Phase 9
-- ✅ `x * √2` → `√2 · x` (preserve symbolic radicals instead of evaluating to floats)
-- ✅ `x * ∛2` → `x · ∛2` (preserve symbolic roots)
-- ✅ `\exp(x)\exp(2)` → `e^{x+2}` (fixed adjacent `\exp()` parsing as multiplication)
-
-### Phase 8
-- ✅ `ln(x/y)` → `ln(x) - ln(y)` (quotient rule expansion for positive arguments)
-- ✅ `log(x/y)` → `log(x) - log(y)` (quotient rule for any base)
-- ✅ `exp(log(x))` → `x^{1/ln(10)}` (exp-log composition rule)
-
-### Phase 6
-- ✅ `log(x) + log(y)` → `log(xy)` (fixed base-10 log combination preserving base)
-- ✅ `√(x²y)` → `|x|√y` (factor perfect squares from radicals via cost function adjustment)
-
-### Phase 5
-- ✅ `(x^3)^2 * (y^2)^2` → `x^6y^4` (evaluate numeric exponents in Multiply operands)
-- ✅ `(x³/y²)^{-2}` → `y⁴/x⁶` (distribute negative exponents on fractions)
-
-### Phases 1-4
-- ✅ 0/0 → NaN, 1/0 → ~∞ (ComplexInfinity)
-- ✅ csc(π+x) → -csc(x), cot(π+x) → cot(x)
-- ✅ log(exp(x)) → x/ln(10), log(e) → 1/ln(10)
-- ✅ (x³y²)² → x⁶y⁴, (-2x)² → 4x², (-x)² → x²
-- ✅ e^x / e → e^{x-1}, e^x · e² → e^{x+2}
-- ✅ tan(π/2-x) → cot(x), 2sin(x)cos(x) → sin(2x)
-- ✅ 0^π → 0 (symbolic positive exponents)
+- Do not call `.simplify()` from inside a simplification rule or from a helper
+  invoked by a rule. Re-entering the rule engine can recurse indefinitely.
+- Evaluation is not a subset of simplification, and simplification is not a
+  subset of evaluation. Choose the operation that matches the intended
+  contract.
+- A transformation that needs assigned values belongs on an evaluation path,
+  not in the value-blind method.
+- Domain-sensitive rewrites must be gated by declared types and assumptions;
+  they must not inspect an assigned value as evidence.
+- Completed regression campaigns belong in tests and Git history rather than
+  in this specification.
