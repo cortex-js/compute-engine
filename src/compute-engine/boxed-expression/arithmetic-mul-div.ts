@@ -559,7 +559,27 @@ export class Product {
 
     const coef = this.coefficient;
     if (coef.isNaN) return ce.NaN;
-    if (coef.isZero) return ce.Zero;
+    if (coef.isZero) {
+      // `0 · x → 0` is sound for any term that could still be a NUMBER at
+      // run time (a free symbol, a `value`-typed operand). But a term whose
+      // type PROVES it is neither a number nor numeric-broadcastable — a
+      // concrete string or boolean substituted at evaluation time, e.g.
+      // `0a` with `a: value` bound to `"hello"` — must not be absorbed:
+      // collapsing would convert a type error into a plain `0`. Arithmetic
+      // is deliberately permissive at boxing time (`checkNumericArgs`
+      // admits could-be-a-number operands), so this is where the mistake
+      // surfaces. Absence markers are exempt: they propagate, not error.
+      const nonNumeric = this.terms.find((t) =>
+        t.term.type.isDisjointFrom('broadcastable<number> | missing | nothing')
+      );
+      if (nonNumeric !== undefined)
+        return ce.typeError(
+          'number',
+          nonNumeric.term.type,
+          nonNumeric.term
+        );
+      return ce.Zero;
+    }
 
     if (coef.isPositiveInfinity || coef.isNegativeInfinity) {
       const infinity = coef.isPositiveInfinity

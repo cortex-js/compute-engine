@@ -645,6 +645,40 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
           expect(ce.parse('g(2)').json).toEqual(['g', 2]);
         }
       });
+
+      test('a `value`-typed head keeps the product reading, even when the arg mentions the head', () => {
+        // A symbol declared `value` COULD be a number, so juxtaposition
+        // reads as a product (the wide-type arms in invisible-operator.ts).
+        // Two admissions make this hold end to end: `checkNumericArgs`
+        // accepts a could-be-a-number operand (so `1-a` boxes cleanly
+        // instead of erroring `incompatible-type`), and the numeric-arg
+        // gate tests overlap rather than subtype (the arg types as
+        // `broadcastable<number>`, not bare `number`). A non-number bound
+        // to `a` surfaces at evaluation time, not at boxing.
+        const ce = new ComputeEngine();
+        ce.declare('a', 'value');
+        expect(ce.parse('1-a').isValid).toBe(true);
+        expect(ce.parse('a(1-a)').json).toEqual([
+          'Multiply',
+          'a',
+          ['Add', ['Negate', 'a'], 1],
+        ]);
+        expect(ce.parse('a(2)').json).toEqual(['Multiply', 2, 'a']);
+        expect(ce.parse('2a').json).toEqual(['Multiply', 2, 'a']);
+        // The declared `value` contract is not narrowed by the numeric use…
+        expect(ce.box('a').type.toString()).toBe('value');
+        // …and a numeric binding evaluates through it.
+        ce.assign('a', 3);
+        expect(ce.parse('1-a').evaluate().json).toEqual(-2);
+        // A NON-numeric binding (legal under `value`) errors at evaluation
+        // time — permissive boxing must not become silent absorption. In
+        // particular the `0 · x → 0` collapse must not swallow a provably
+        // non-numeric term: `0 * "hello"` is a type error, not `0`.
+        ce.assign('a', ce.string('hello'));
+        const zeroFold = ce.parse('0a').evaluate();
+        expect(zeroFold.json).not.toEqual(0);
+        expect(zeroFold.toString()).toContain('incompatible-type');
+      });
     });
   });
 });

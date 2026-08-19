@@ -128,12 +128,18 @@ export function canonicalInvisibleOperator(
         return ce.function(lhsCanon.symbol, args);
       }
 
-      // Single arg: check if it's scalar-numeric.
-      // If so, prefer multiplication: q(2q) → q·(2q), not q-as-function(2q)
-      // Note: we exclude indexed collections (vectors, matrices, tuples)
-      // since those as parenthesized args are more likely function arguments.
+      // Single arg: check if it COULD be scalar-numeric.
+      // If so, prefer multiplication: q(2q) → q·(2q), not q-as-function(2q).
+      // `couldMatch` (overlap), not `matches` (subtype): an argument built
+      // from wide-typed operands types as `broadcastable<number>` or `value`
+      // rather than `number` — e.g. `1-a` with `a: value`, since arithmetic
+      // admits could-be-a-number operands at boxing time — and the product
+      // reading must survive that widening (`x(x+1)` with `x: value` is a
+      // product). Committed collection types (vectors, matrices, tuples) are
+      // disjoint from `number`, so they still fail the gate: a parenthesized
+      // collection arg is more likely a function argument.
       const allArgsNumeric = args.every(
-        (x) => x.isValid && (x.type.isUnknown || x.type.matches('number'))
+        (x) => x.isValid && (x.type.isUnknown || x.type.couldMatch('number'))
       );
 
       // …but the HEAD decides, not the argument: a head bound to a value that

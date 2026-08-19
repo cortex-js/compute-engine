@@ -457,6 +457,17 @@ export function checkNumericArgs(
     ) {
       // We keep 'Hold' expressions as is
       xs.push(op);
+    } else if (op.type.couldMatch('number')) {
+      // The declared type overlaps `number` — a wide value type (`value`,
+      // `scalar`) or a union with a numeric arm (`integer | string`). The
+      // operand COULD be a number, so admit it: arithmetic operators are
+      // permissive at boxing time and reject a non-numeric value at
+      // evaluation time. (Types with their own admission story — collections,
+      // tuples, tensors, `any`/`unknown` — are handled by the branches
+      // above; disjoint types like `string` or `boolean` still error here.)
+      // Note the post-validation `_infer` pass below is a no-op for these:
+      // an explicitly declared type is never rewritten by a use.
+      xs.push(op);
     } else {
       // Last chance: an un-applied single-letter builtin operator (`N + 1`)
       // devolves to an unknown symbol (see devolveUnappliedOperator)

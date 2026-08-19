@@ -65,6 +65,26 @@ describe('expected-function for non-callable declared heads', () => {
     expect(ce.box(['smix', 1]).isValid).toBe(false);
   });
 
+  test('a head declared exactly `value` errors: no positive collection evidence', () => {
+    // `value` overlaps `collection<any>` only because it is the widest value
+    // type; it excludes functions from the lattice, so applying a
+    // `value`-declared symbol can never become a meaningful CALL. Unlike the
+    // committed collection heads above, the vacuous overlap is no evidence
+    // for the indexing/adjunction reading, so the guard fires. (The LaTeX
+    // route reads the same juxtaposition as multiplication instead — see the
+    // wide-type arms in `invisible-operator.ts`.)
+    const ce = new ComputeEngine();
+    ce.declare('a', 'value');
+    const app = ce.box(['a', ['Subtract', 1, 'a']]);
+    expect(app.isValid).toBe(false);
+    expect(app.toString()).toContain('ErrorCode("expected-function", "a"');
+    // Epsil route: `a(1-a)` is call syntax, so the program is diagnosed
+    // statically rather than staying an inert application.
+    const r = executeEpsil(new ComputeEngine(), 'a: value; a(1-a)');
+    expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
+    expect(JSON.stringify(r.diagnostics)).toContain('expected-function');
+  });
+
   test('the Epsil static pre-pass reports it before anything runs', () => {
     const r = executeEpsil(new ComputeEngine(), 'Pi(2)');
     expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');

@@ -1983,6 +1983,16 @@ function makeCanonicalFunctionCore(
     //   legal APPLICATION (Tycho item 173 — `S(B)` with `S: set<number>`
     //   keeps operator `S`; field adjunction applies a set constant,
     //   `Q(\sqrt{2})`).
+    //
+    // A head declared exactly `value` is NOT exempted, even though `value`
+    // overlaps `collection<any>`: `value` excludes functions from the
+    // lattice, so the application can never become meaningful as a CALL,
+    // and the vacuous could-be-a-collection overlap of the widest value
+    // type is no positive evidence for the indexing/adjunction reading the
+    // collection exemption exists for. Declaring `a: value` and writing
+    // `a(x)` is diagnosed as applying a non-function; the LaTeX route reads
+    // the same juxtaposition as multiplication instead (see the wide-type
+    // arms in `invisible-operator.ts`).
     if (
       // Non-strict engines skip application-time type validation, matching
       // the declared-signature parameter checks above.
@@ -1995,7 +2005,8 @@ function makeCanonicalFunctionCore(
       // or a `broadcastable<T>` head could still hold an applicable
       // collection at run time — only a type that could not possibly be
       // collection-shaped is provably inapplicable.
-      !def.value.type.couldMatch('collection<any>')
+      (def.value.type.type === 'value' ||
+        !def.value.type.couldMatch('collection<any>'))
     ) {
       return ce.error(
         ['expected-function', name, def.value.type.toString()],
