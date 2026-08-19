@@ -4024,8 +4024,38 @@ the last step):
    window-added one survived into `getSequenceStatus`. Both are now fixed and
    pinned. Worth carrying into C3: the full suite was green BEFORE any of
    this was found, because none of those paths had a test.
-4. **Stage C3 — the differential harness** (fresh-engine oracle, comparator
-   table, lifecycle/failure matrix, bypass canary).
+4. **Stage C3 — the differential harness. SHIPPED 2026-08-19.**
+   `test/compute-engine/checkpoint-differential.test.ts`: 20 seeded random
+   notebook sessions (deterministic PRNG — a failure replays from its seed
+   via `FOCUS_SEED`), each opening with a fixed SPINE cell per state family
+   (scalar, object, sequence-with-dependency, function, assumption) so
+   coverage is by construction rather than by luck, then biased random cells
+   and 1–3 random edits with interleaved discards. The oracle is a fresh
+   engine running the final linear program; observations registered by the
+   generator compare values, `About()`, dispatcher results, sequence terms,
+   object fields, `verify` on assumptions, and the numeric configuration.
+   Structural invariants the oracle cannot see are asserted at each restore:
+   binding count, configuration-listener count, and sequence-memo emptiness.
+   With `CE_CHECKPOINT_CANARY=1` the same file also checks every live
+   window's bypass tally at each restore (run it once per mode).
+
+   **The harness was validated by mutation, and the first version failed
+   that validation.** Seven hand-applied defects (each journal family
+   disabled, the memo clear replaced by a map swap, the registry rollback
+   and assumption/config restores skipped): the initial harness caught one.
+   Diagnosed causes, each now fixed and re-verified red-under-mutation:
+   whole-record snapshots make per-funnel hooks mutually redundant, so the
+   honest mutation grain is the shared helper; the Epsil `assume(...)`
+   spelling is inert (the cells assumed nothing — host-API `ce.assume` with
+   `verify` observations is the working form); a memo's staleness is
+   value-invisible unless its recurrence references a symbol reassigned
+   inside the discarded window (recurrences now reference the spine scalar);
+   and a two-letter name in a LaTeX-parsed recurrence is implicit
+   multiplication, which had made the strengthened C2 pin fail on NaN in
+   clean AND mutated runs — a confounded "caught it". Two targeted
+   deterministic probes encode the discriminating orders the random walk
+   reaches rarely. The vacuous C2 sequence-memo assertion (it read the same
+   registry field the defect replaces) was repaired in the same pass.
 5. **Checkpoint v2 — in-scope checkpoints** (COMMITTED, not optional: Tycho's
    cells always evaluate inside a host-pushed scope; v2 is what unlocks their
    per-cell checkpointing).

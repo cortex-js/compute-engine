@@ -1581,12 +1581,81 @@ describe('reduceType Tests', () => {
       'dictionary<never>'
     );
     expect(reduce('list<integer> & list<number>')).toBe('list<integer>');
-    expect(
-      isSubtype(
-        reduceType(parseType('list<integer> & list<string>')),
-        parseType('list<integer>')
-      )
-    ).toBe(true);
+
+    // A meet must be a subtype of both operands.
+    for (const [x, y] of [
+      ['list<integer>', 'list<string>'],
+      ['set<integer>', 'set<string>'],
+    ]) {
+      const meet = reduceType({
+        kind: 'intersection',
+        types: [parseType(x), parseType(y)],
+      } as Type);
+      expect(isSubtype(meet, parseType(x))).toBe(true);
+      expect(isSubtype(meet, parseType(y))).toBe(true);
+    }
+  });
+
+  describe('`broadcastable` meets by expanding to the union it denotes', () => {
+    // `broadcastable<T>` is exactly `T | indexed_collection<T>`, so its meet
+    // distributes over those two arms. Meeting two broadcastables elementwise
+    // instead silently drops the cross terms, and the loss is not hypothetical
+    // — see the witness test below, which is what an "is the meet a subtype of
+    // both operands?" check cannot catch, since an under-approximation passes
+    // that test too.
+    const meetOf = (x: string, y: string): Type =>
+      reduceType({
+        kind: 'intersection',
+        types: [parseType(x), parseType(y)],
+      } as Type);
+
+    it('keeps every type that inhabits both operands', () => {
+      // A collection-shaped element type is real usage, not a curiosity:
+      // `broadcastable<vector<n>>` is what a vector-valued call produces, and
+      // is declared in `library/arithmetic.ts` and `collection-utils.ts`.
+      //
+      // A `vector<3>` inhabits `broadcastable<vector<3>>` through its scalar
+      // arm and `broadcastable<number>` through its collection arm — a vector
+      // of numbers is itself a collection of numbers — so it must survive the
+      // meet.
+      // Meeting the two element types instead gave `broadcastable<never>`,
+      // silently dropping it.
+      const x = 'broadcastable<vector<3>>';
+      const y = 'broadcastable<number>';
+      const witness = parseType('vector<3>');
+      expect(isSubtype(witness, parseType(x))).toBe(true);
+      expect(isSubtype(witness, parseType(y))).toBe(true);
+      expect(isSubtype(witness, meetOf(x, y))).toBe(true);
+    });
+
+    it('does not widen to the other operand', () => {
+      // `broadcastable<number>` is not the meet above, even though it looks
+      // like the "simpler" answer: a bare `number` does not inhabit
+      // `broadcastable<vector<3>>`, whose scalar arm is `vector<3>`.
+      expect(
+        isSubtype(
+          parseType('broadcastable<number>'),
+          parseType('broadcastable<vector<3>>')
+        )
+      ).toBe(false);
+    });
+
+    it('reduces two disjoint element types to the empty collection', () => {
+      // Both scalar arms and both cross terms are empty, leaving only
+      // `indexed_collection<never>` — the empty collection, which does inhabit
+      // both, so the pair must not refute.
+      const m = meetOf('broadcastable<integer>', 'broadcastable<string>');
+      expect(typeToString(m)).toBe('indexed_collection<never>');
+      expect(isSubtype(parseType('list<never>'), m)).toBe(true);
+    });
+
+    it('keeps the `broadcastable` spelling when one side subsumes the other', () => {
+      // Subtype-related pairs are settled before the expansion runs, so the
+      // narrower operand is returned as written rather than as a union.
+      expect(reduce('broadcastable<integer> & broadcastable<number>')).toBe(
+        'broadcastable<integer>'
+      );
+    });
   });
 
   it('refutes two lists whose SHAPES differ, which is not an elementwise question', () => {

@@ -335,6 +335,30 @@ function meet2(a: Type, b: Type): Type | undefined {
   if (isSubtype(a, b)) return a;
   if (isSubtype(b, a)) return b;
 
+  // `broadcastable<T>` denotes the union `T | indexed_collection<T>` — the
+  // same expansion `isSubtype` and `provablyDisjoint` use — so it is met by
+  // expanding it and letting the union distribution just below do the work.
+  //
+  // Meeting two broadcastables elementwise instead is wrong, not merely
+  // imprecise. That keeps `(A & B) | indexed_collection<A & B>` and drops the
+  // cross terms `A & indexed_collection<B>` and `indexed_collection<A> & B`,
+  // which are inhabited whenever one side's element type is itself
+  // collection-shaped — real usage, not a curiosity: `broadcastable<vector<n>>`
+  // is what a vector-valued call produces (`library/arithmetic.ts`). A
+  // `vector<3>` inhabits both `broadcastable<vector<3>>`, through its scalar
+  // arm, and `broadcastable<number>`, through its collection arm, since a
+  // vector of numbers is a collection of numbers — yet the elementwise answer
+  // `broadcastable<never>` drops it. Being a subtype of both operands is
+  // necessary for a meet but not sufficient; it admits any
+  // under-approximation, `never` included.
+  //
+  // Placed after the subtype tests above, so a subtype-related pair keeps its
+  // `broadcastable<…>` spelling rather than expanding into a union.
+  const expandedA = expandBroadcastable(a);
+  if (expandedA !== undefined) return meet2(expandedA, b);
+  const expandedB = expandBroadcastable(b);
+  if (expandedB !== undefined) return meet2(a, expandedB);
+
   // Distribute the meet over union members
   if (typeof a === 'object' && a.kind === 'union') return meetUnion(a.types, b);
   if (typeof b === 'object' && b.kind === 'union') return meetUnion(b.types, a);
@@ -373,6 +397,16 @@ function meet2(a: Type, b: Type): Type | undefined {
   if (isOverloadPair(a, b)) return undefined;
 
   return 'never';
+}
+
+/** `broadcastable<T>` as the union it denotes, `T | indexed_collection<T>`, or
+ *  `undefined` when `t` is not a broadcastable. */
+function expandBroadcastable(t: Type): Type | undefined {
+  if (typeof t !== 'object' || t.kind !== 'broadcastable') return undefined;
+  return {
+    kind: 'union',
+    types: [t.elements, { kind: 'indexed_collection', elements: t.elements }],
+  };
 }
 
 /**
