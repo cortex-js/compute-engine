@@ -4102,9 +4102,24 @@ the last step):
    deterministic probes encode the discriminating orders the random walk
    reaches rarely. The vacuous C2 sequence-memo assertion (it read the same
    registry field the defect replaces) was repaired in the same pass.
-5. **Checkpoint v2 — in-scope checkpoints** (COMMITTED, not optional: Tycho's
-   cells always evaluate inside a host-pushed scope; v2 is what unlocks their
-   per-cell checkpointing).
+5. **Checkpoint v2 — in-scope checkpoints. SHIPPED 2026-08-19.** The
+   session-base depth rule is replaced by STACK IDENTITY: a checkpoint
+   captures its evaluation-context frames by identity; `restore` requires
+   the live stack to equal the captured one frame for frame; popping a
+   frame a live checkpoint stands on retires it on the spot, folding its
+   journal window into the next-older checkpoint (`checkpoint.ts`
+   `invalidateCheckpointsOnFrameDiscard`, hooked at all three frame-discard
+   sites — `discardEvalContext` covers `popScope` and the async
+   `removeEvalContext` route, and `inScope`'s transient pop runs the hook
+   itself because it bypasses `discardEvalContext`); `discard` needs no
+   stack check at all. `_checkpointBaseDepth` is gone. This is what unlocks
+   the consumer's per-cell checkpointing — their cells always evaluate
+   inside a host-pushed scope. Pins:
+   `test/compute-engine/checkpoint-in-scope.test.ts` (9,
+   mutation-validated: an inert retirement hook, a depth-only stack check
+   and a dropped fold each turn tests red — the latter two needed
+   deliberately discriminating shapes, recorded in the tests themselves),
+   and the differential harness now runs every seed in BOTH modes.
 6. **The Epsil-route strictness flip + machinery deletion** (~1,384 source
    lines, ~1,891 test lines, ≈92 test flips — audit §5), gated on Tycho shipping
    restore-before-Run client-side. Until then both mechanisms coexist.

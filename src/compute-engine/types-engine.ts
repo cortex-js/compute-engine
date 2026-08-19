@@ -366,8 +366,10 @@ export type ProtocolImplementationInput = {
  * through the sequence registry. */
 export interface EngineCheckpoint {
   readonly id: number;
-  /** False once invalidated by a restore to an EARLIER checkpoint, or by
-   * `discard()`. A dead checkpoint can never be restored again. */
+  /** False once invalidated — by a restore to an EARLIER checkpoint, by
+   * `discard()`, or by popping a scope this checkpoint was taken inside
+   * (the pop disposes the scope's bindings, so there is no world left to
+   * restore). A dead checkpoint can never be restored again. */
   readonly live: boolean;
 }
 
@@ -535,12 +537,15 @@ export interface IComputeEngine {
    * @internal */
   _nextCheckpointId: number;
 
-  /** The eval-context stack depth that counts as the session base — the only
-   * depth at which v1 takes checkpoints. In-scope checkpoints are a committed
-   * v2 item (the consumer's cells always evaluate inside a host-pushed
-   * scope), which is what this field exists to make adjustable.
+  /** Retire every checkpoint standing on `context` — the scope-pop side of
+   * the checkpoint stack-identity rule (`checkpoint.ts`). A popped frame's
+   * bindings are disposed with it, so a checkpoint that captured the frame
+   * has no world left to restore; its journal window folds into the
+   * next-older checkpoint so restoring PAST it stays sound. Callers gate on
+   * a non-empty `_checkpointStack`, so a session with no checkpoints pays
+   * one length read per pop.
    * @internal */
-  _checkpointBaseDepth: number;
+  _invalidateCheckpointsOnFrameDiscard(context: EvalContext): void;
 
   /** How many `evaluateAsync` calls are in flight, including ones suspended
    * at an `await`. A suspended async evaluation holds its eval context across
@@ -567,11 +572,15 @@ export interface IComputeEngine {
   _checkpointResetHooks?: (() => void)[];
 
   /**
-   * Take a checkpoint of the engine's state at a quiescent cell boundary, so
-   * a later {@link restore} can rewind to it. Legal on a freshly constructed
-   * engine, which is how a client gets a `cp[0]` covering an edit of the
-   * first cell. Throws a `CheckpointError` when the engine is mid-evaluation,
-   * mid-pre-pass, or inside a pushed scope.
+   * Take a checkpoint of the engine's state at a quiescent point — between
+   * statements, at any scope depth — so a later {@link restore} can rewind
+   * to it. Legal on a freshly constructed engine, which is how a client gets
+   * a `cp[0]` covering an edit of the first cell, and inside a host-pushed
+   * scope, which is how a notebook takes per-cell checkpoints within a pass.
+   * A checkpoint taken inside a scope dies when that scope pops. Throws a
+   * `CheckpointError` when the engine is mid-evaluation or mid-pre-pass;
+   * {@link restore} additionally requires the same scope stack the
+   * checkpoint was taken on.
    */
   checkpoint(label?: string): EngineCheckpoint;
 

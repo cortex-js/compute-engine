@@ -418,7 +418,7 @@ function assertNoCanaryBypass(records: CpRecord[], history: string[]): void {
   }
 }
 
-function runSession(seed: number): void {
+function runSession(seed: number, inScope: boolean): void {
   const state: GenState = {
     r: prng(seed),
     fresh: 1,
@@ -431,6 +431,11 @@ function runSession(seed: number): void {
   const history: string[] = [`seed ${seed}`];
 
   const subject = new ComputeEngine();
+  // In-scope mode runs the WHOLE session inside a host-pushed scope — the
+  // consumer's shape: its cells always evaluate inside one. The scope push is
+  // part of the program, so the oracle pushes the same scope before running
+  // the final linear cells.
+  if (inScope) subject.pushScope(undefined, 'pass');
   const cells: Cell[] = [];
   // records[i] is the checkpoint taken after i cells; records[0] is cp[0] on
   // the fresh engine. The index alignment is what lets an edit at cell k
@@ -541,6 +546,7 @@ function runSession(seed: number): void {
 
   // The oracle: a fresh engine running the final linear program.
   const oracle = new ComputeEngine();
+  if (inScope) oracle.pushScope(undefined, 'pass');
   for (const cell of cells) runCell(oracle, cell);
 
   const context = history.join('\n');
@@ -567,7 +573,11 @@ describe('checkpoint differential oracle', () => {
   });
 
   test.each(SEEDS)('randomized session, seed %i', (seed) => {
-    runSession(seed);
+    runSession(seed, false);
+  });
+
+  test.each(SEEDS)('randomized session inside a host scope, seed %i', (seed) => {
+    runSession(seed, true);
   });
 });
 

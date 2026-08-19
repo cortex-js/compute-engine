@@ -93,6 +93,13 @@ function discardEvalContext(
   ce: IComputeEngine,
   context: EvalContext | undefined
 ): void {
+  // A checkpoint standing on this frame has no world left to restore once
+  // the frame's bindings are disposed below — retire it, folding its journal
+  // window downward so older checkpoints still unwind this scope's writes
+  // (`checkpoint.ts`). Gated on the stack so the no-checkpoint path pays one
+  // length read.
+  if (context !== undefined && ce._checkpointStack.length > 0)
+    ce._invalidateCheckpointsOnFrameDiscard(context);
   // Definitions owned by a scope may subscribe to engine-wide lifecycle
   // events. Release those subscriptions as soon as the scope is discarded,
   // rather than retaining otherwise-dead local constants for the lifetime of
@@ -176,6 +183,11 @@ export function inScope<T>(
     return ce._boxingState.withScopedRepair(scope, f);
   } finally {
     const popped = ce._evalContextStack.pop();
+    // This transient pop bypasses `discardEvalContext`, so it runs the
+    // checkpoint frame-retirement hook itself: a checkpoint taken inside
+    // this extent stood on the popped frame and dies with it.
+    if (popped !== undefined && ce._checkpointStack.length > 0)
+      ce._invalidateCheckpointsOnFrameDiscard(popped);
     // Mirror popEvalContext: reverting assumptions modified inside the
     // temporary context is a semantic change. (The `transient` variant has
     // no G advance — §2's measured mask — and emits even when clean, for

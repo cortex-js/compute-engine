@@ -154,10 +154,14 @@ export class _EngineCheckpoint implements EngineCheckpoint {
    * by `discard()`. */
   window: CheckpointWindow | undefined;
   readonly snapshot: BoundedSnapshot;
-  /** The eval-context stack depth when this checkpoint was taken. Restoring
-   * at a different depth would rewind into a scope the checkpoint never saw
-   * (§5.1); v1 only ever records the session base. */
-  readonly contextDepth: number;
+  /** The eval-context FRAMES that were on the stack when this checkpoint was
+   * taken — the frames themselves, by identity, not their count. Restore
+   * rewrites per-frame state (each frame's assumptions map) in place, so a
+   * same-depth stack of DIFFERENT frames is a different world that happens to
+   * be the same height: only identity distinguishes them. The kill-on-pop
+   * rule keeps every LIVE checkpoint's captured stack a prefix of the
+   * engine's current stack. */
+  readonly contextStack: ReadonlyArray<EvalContext>;
   _live = true;
 
   get live(): boolean {
@@ -170,36 +174,41 @@ export class _EngineCheckpoint implements EngineCheckpoint {
     label: string | undefined,
     window: CheckpointWindow,
     snapshot: BoundedSnapshot,
-    contextDepth: number
+    contextStack: ReadonlyArray<EvalContext>
   ) {
     this.engine = engine;
     this.id = id;
     this.label = label;
     this.window = window;
     this.snapshot = snapshot;
-    this.contextDepth = contextDepth;
+    this.contextStack = contextStack;
   }
 }
 
 /**
- * The quiescence precondition (§5.1), exhaustively.
+ * The quiescence precondition, exhaustively.
  *
- * A checkpoint operation is legal only at a cell boundary with the engine in
- * its base state. Checking it turns every transient state family — a static
- * pre-pass in progress, an open Epsil batch, an inference frame, a boxing
- * repair — from "must be snapshotted" into "must be absent", which is both
- * cheaper and a standing invariant check.
+ * A checkpoint operation is legal only between statements, with no transient
+ * machinery live. Checking that turns every transient state family — a
+ * static pre-pass in progress, an open Epsil batch, an inference frame, a
+ * boxing repair — from "must be snapshotted" into "must be absent", which is
+ * both cheaper and a standing invariant check. Scope DEPTH is deliberately
+ * not part of this predicate: checkpoints are legal at any depth, and the
+ * scope discipline lives in `restore`'s separate {@link assertSameStack}
+ * plus the kill-on-pop rule.
  *
- * The two subtle members:
+ * The two members that catch a call from inside an evaluation:
  *
- * - **Context-stack depth.** A synchronous evaluation cannot be interleaved
+ * - **`_evaluationDepth`.** A synchronous evaluation cannot be interleaved
  *   with a host call on a single thread, so the only way to reach here from
- *   inside one is for a handler to call the API mid-evaluation. That shows up
- *   as extra frames on the eval-context stack, which is what this compares.
+ *   inside one is for an operator handler to call the API mid-evaluation. A
+ *   plain `evaluate` handler pushes no eval-context frame, so no stack
+ *   comparison can see this — the bracketed counter is the only signal, and
+ *   for `checkpoint()` and `discard()` it is the ONLY mid-evaluation guard.
  * - **In-flight ASYNC evaluation.** An `evaluateAsync` suspended at an
  *   `await` holds its context across the suspension and hands control back to
- *   the host, so it is NOT visible as stack depth — the engine counts those
- *   separately and refuses while the count is nonzero.
+ *   the host, so the engine counts those separately and refuses while the
+ *   count is nonzero.
  */
 function assertQuiescent(ce: IComputeEngine, operation: string): void {
   const refuse = (why: string): never => {
@@ -234,23 +243,49 @@ function assertQuiescent(ce: IComputeEngine, operation: string): void {
     refuse('an asynchronous evaluation is suspended');
 }
 
-/** Refuse a depth that does not match what the operation requires. Split from
- * {@link assertQuiescent} because `checkpoint()` compares against the session
- * base while `restore`/`discard` compare against the depth their checkpoint
- * was taken at. */
-function assertDepth(
+/** Refuse a restore whose live eval-context stack is not the one the
+ * checkpoint captured — frame for frame, by identity. A depth count is not
+ * enough: restore rewrites each captured frame's assumption state in place,
+ * and a same-height stack of different frames (the old scope popped, a new
+ * one pushed) would have those writes land on frames the checkpoint never
+ * saw. In practice the kill-on-pop rule already retires a checkpoint whose
+ * frame pops, so the mismatch a caller actually meets is a scope pushed on
+ * TOP since the checkpoint was taken. */
+function assertSameStack(
   ce: IComputeEngine,
   operation: string,
-  expected: number
+  expected: ReadonlyArray<EvalContext>
 ): void {
-  const actual = ce._evalContextStack.length;
-  if (actual !== expected)
+  const actual = ce._evalContextStack;
+  if (actual.length > expected.length) {
+    // The one mismatch a caller can produce: scopes pushed on top since the
+    // checkpoint was taken. (A shallower stack cannot carry a LIVE
+    // checkpoint — the pop that removed a captured frame retires it.)
     throw new CheckpointError(
       'checkpoint-not-quiescent',
-      `${operation}: the engine is inside ${actual - expected} pushed ` +
-        `scope(s) that the checkpoint does not cover. v1 checkpoints are ` +
-        `taken and restored at the session base only; in-scope checkpoints ` +
-        `are a v2 item.`
+      `${operation}: ${actual.length - expected.length} scope(s) have been ` +
+        `pushed since this checkpoint was taken. Pop back to the ` +
+        `checkpoint's scope before restoring.`
+    );
+  }
+  const same =
+    actual.length === expected.length &&
+    expected.every((frame, i) => actual[i] === frame);
+  if (!same)
+    // Unreachable through the public surface: kill-on-pop keeps every live
+    // checkpoint's frames a prefix of the current stack, so a live
+    // checkpoint with a shallower or same-depth-different-frames stack means
+    // a frame-discard site failed to run the retirement hook. Say so — the
+    // reader of this message is debugging that gap, and "pop a scope" would
+    // send them the wrong way.
+    throw new CheckpointError(
+      'checkpoint-not-quiescent',
+      `${operation}: the evaluation-context stack no longer contains the ` +
+        `frames this checkpoint captured (now ${actual.length} frame(s), ` +
+        `captured ${expected.length}). A live checkpoint's frames should ` +
+        `be impossible to pop without retiring it, so this indicates a ` +
+        `frame-discard site that missed the checkpoint-retirement hook — ` +
+        `an engine bug, not a caller scope mismatch.`
     );
 }
 
@@ -404,7 +439,6 @@ export function takeCheckpoint(
   label?: string
 ): EngineCheckpoint {
   assertQuiescent(ce, 'checkpoint()');
-  assertDepth(ce, 'checkpoint()', ce._checkpointBaseDepth);
 
   const snapshot: BoundedSnapshot = {
     typeRegistry: ce._typeRegistryRollbackPoint(),
@@ -427,7 +461,8 @@ export function takeCheckpoint(
     label,
     window,
     snapshot,
-    ce._evalContextStack.length
+    // A COPY: the live stack keeps growing and shrinking after this.
+    [...ce._evalContextStack]
   );
   ce._checkpointStack.push(cp);
   return cp;
@@ -450,7 +485,7 @@ export function restoreCheckpoint(ce: IComputeEngine, cp: EngineCheckpoint): voi
   // ── Phase 1: validate and collect. No live writes. ──
   assertQuiescent(ce, 'restore()');
   const target = assertOwned(ce, cp, 'restore()');
-  assertDepth(ce, 'restore()', target.contextDepth);
+  assertSameStack(ce, 'restore()', target.contextStack);
 
   const stack = ce._checkpointStack as _EngineCheckpoint[];
   const index = stack.indexOf(target);
@@ -614,6 +649,55 @@ export function restoreCheckpoint(ce: IComputeEngine, cp: EngineCheckpoint): voi
 }
 
 /**
+ * Retire every checkpoint standing on `frame`, because that frame is being
+ * discarded — the scope-pop side of the stack-identity rule.
+ *
+ * A popped frame's bindings are disposed by the pop itself, so a checkpoint
+ * that captured the frame can never be restored again: the world it would
+ * rewrite no longer exists. It dies the way an interior discard does — its
+ * window FOLDS into the next-older checkpoint (or is freed when there is
+ * none), so restoring an older, still-live checkpoint continues to unwind
+ * the writes made inside the popped scope. Undo entries that reference the
+ * popped scope's own records replay harmlessly against unreachable objects
+ * (`dispose()` on a definition half is idempotent by design).
+ *
+ * The checkpoints standing on `frame` are a contiguous TOP segment of the
+ * stack: a checkpoint contains the frame exactly when it was taken while the
+ * frame was up, frames pop once, and checkpoints are chronological. The scan
+ * therefore walks down from the top and stops at the first survivor.
+ *
+ * Called from every frame-discard site through
+ * `IComputeEngine._invalidateCheckpointsOnFrameDiscard`, gated there on a
+ * non-empty checkpoint stack so a session that never takes a checkpoint pays
+ * one length read per pop.
+ */
+export function invalidateCheckpointsOnFrameDiscard(
+  ce: IComputeEngine,
+  frame: EvalContext
+): void {
+  const stack = ce._checkpointStack as _EngineCheckpoint[];
+  let first = stack.length;
+  while (first > 0 && stack[first - 1].contextStack.includes(frame)) first--;
+  if (first === stack.length) return;
+
+  const survivorWindow = first > 0 ? stack[first - 1].window : undefined;
+  const dying = stack.slice(first);
+  // Newest first, each folding into the one below it — the bottom of the
+  // dying segment folds into the survivor — so first-write-wins keeps the
+  // oldest prior value at every key, exactly as a chain of interior
+  // discards would.
+  for (let i = dying.length - 1; i >= 0; i--) {
+    const below = i > 0 ? dying[i - 1].window : survivorWindow;
+    const w = dying[i].window;
+    if (w !== undefined && below !== undefined) w.foldInto(below);
+    dying[i]._live = false;
+    dying[i].window = undefined;
+  }
+  stack.length = first;
+  ce._checkpointWindow = survivorWindow;
+}
+
+/**
  * Release `cp`'s restore capability.
  *
  * Restoring PAST a discarded interior checkpoint stays possible through any
@@ -629,11 +713,12 @@ export function discardCheckpoint(
 ): void {
   assertQuiescent(ce, 'discard()');
   const target = assertOwned(ce, cp, 'discard()');
-  // The §5.1 precondition names discard alongside restore: both compare
-  // against the depth their checkpoint was taken at. Folding or freeing a
-  // window while the host sits inside a pushed scope would silently change
-  // what a later restore can reach.
-  assertDepth(ce, 'discard()', target.contextDepth);
+  // No stack check, deliberately — a departure from the restore rule.
+  // Discard folds journal windows and rewrites no frame state, so nothing it
+  // does lands on a frame; and refusing it away from the capture depth would
+  // make cleanup of an in-scope checkpoint impossible once the host's own
+  // scope timing has moved on. The kill-on-pop rule keeps every live
+  // checkpoint's frames on the current stack, so the fold target is live.
 
   const stack = ce._checkpointStack as _EngineCheckpoint[];
   const index = stack.indexOf(target);

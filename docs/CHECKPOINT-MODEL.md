@@ -24,10 +24,28 @@ clients must not inspect implementation snapshots or journal windows.
 
 ## Quiescence
 
-Checkpoint operations are legal only at the session base between cells: no
-evaluation (including suspended async evaluation), Epsil batch/static pass,
-inference rollback, boxing repair, or pushed scope may be active. A refusal is
-a no-op and throws `CheckpointError` with a stable code.
+Checkpoint operations are legal at any quiescent point, at any scope depth:
+no evaluation (including suspended async evaluation), Epsil batch/static
+pass, inference rollback, or boxing repair may be active. A refusal is a
+no-op and throws `CheckpointError` with a stable code.
+
+Scope discipline is STACK IDENTITY, not a depth count. A checkpoint captures
+the evaluation-context frames it was taken on, by identity — restore rewrites
+per-frame state (each frame's assumptions) in place, so a same-height stack
+of different frames is a different world that happens to be the same height.
+`restore` requires the live stack to equal the captured one frame for frame;
+in practice the mismatch a caller meets is a scope pushed on top since the
+checkpoint was taken, because POPPING a frame a live checkpoint stands on
+retires that checkpoint on the spot: the pop disposes the frame's bindings,
+so there is no world left to restore, and the checkpoint's journal window
+folds into the next-older checkpoint so restoring past it still unwinds the
+popped scope's writes. `discard` needs no stack check at all — it folds
+journal windows and rewrites no frame state.
+
+This is what makes per-cell checkpointing possible for a host whose cells
+always evaluate inside a pushed scope: checkpoint per cell inside the pass
+scope, restore within it, and let the pass-ending pop retire whatever
+checkpoints remain.
 
 Dead tokens and tokens from another engine are rejected. If mutation fails
 during restore, the engine is poisoned; the client must rebuild it and replay
@@ -136,10 +154,16 @@ that has never failed is evidence about the harness, not the engine.
 ## Remaining work
 
 The randomized differential harness shipped
-(`test/compute-engine/checkpoint-differential.test.ts`); the strict
-linear-session posture flip and in-scope (v2) checkpoints remain active in
-`plans/2026-08-18-checkpoint-restore-design.md`. Once those gates close, that
-plan is removed; this document remains the contract.
+(`test/compute-engine/checkpoint-differential.test.ts`), and in-scope
+checkpoints shipped with it — the harness runs every seed both at the
+session base and inside a host-pushed scope, and
+`test/compute-engine/checkpoint-in-scope.test.ts` pins the stack-identity
+contract, including its two mutation-hardened edges: the identity half of
+the restore check is the net under a pop site that misses the retirement
+hook, and the fold-on-kill is only observable through a key first written
+after the killed checkpoint. The strict linear-session posture flip remains
+active in `plans/2026-08-18-checkpoint-restore-design.md`; once that gate
+closes, the plan is removed and this document remains the contract.
 
 Two things the harness should treat as classes of defect rather than as
 one-off bugs, because both were found by review after a full green suite:

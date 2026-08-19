@@ -264,17 +264,21 @@ describe('the error contract', () => {
     expect(value(ce, 'a')).toBe('1');
   });
 
-  test('a checkpoint taken inside a pushed scope is refused, naming v2', () => {
+  test('a checkpoint taken inside a pushed scope is legal, and dies with it', () => {
+    // The session-base restriction was v1; checkpoints are now legal at any
+    // quiescent depth, and a checkpoint standing on a popped frame is
+    // retired by the pop (the full in-scope contract is pinned in
+    // checkpoint-in-scope.test.ts).
     const ce = new ComputeEngine();
     ce.pushScope(undefined, 'host-cell');
+    let inner: ReturnType<ComputeEngine['checkpoint']>;
     try {
-      expect(refusalCode(() => ce.checkpoint())).toBe(
-        'checkpoint-not-quiescent'
-      );
+      inner = ce.checkpoint();
+      expect(inner.live).toBe(true);
     } finally {
       ce.popScope();
     }
-    // And it works again at the session base.
+    expect(inner.live).toBe(false);
     expect(ce.checkpoint().live).toBe(true);
   });
 

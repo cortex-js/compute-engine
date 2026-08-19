@@ -99,6 +99,7 @@ import {
 import {
   _EngineCheckpoint,
   discardCheckpoint,
+  invalidateCheckpointsOnFrameDiscard,
   restoreCheckpoint,
   takeCheckpoint,
 } from './checkpoint.js';
@@ -1046,10 +1047,11 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _nextCheckpointId = 1;
 
-  /** See `IComputeEngine._checkpointBaseDepth`. Overwritten with the real
-   * depth at the end of the constructor.
+  /** See `IComputeEngine._invalidateCheckpointsOnFrameDiscard`.
    * @internal */
-  _checkpointBaseDepth = 0;
+  _invalidateCheckpointsOnFrameDiscard(context: EvalContext): void {
+    invalidateCheckpointsOnFrameDiscard(this, context);
+  }
 
   /** See `IComputeEngine._inFlightAsyncEvaluations`.
    * @internal */
@@ -1356,14 +1358,6 @@ export class ComputeEngine implements IComputeEngine {
       validateStyleOptions(options.latexOptions);
       this._latexOptions = { ...options.latexOptions };
     }
-
-    // The SESSION BASE for checkpoints: the eval-context depth a fully
-    // constructed engine sits at, once the system scope is pushed and the
-    // libraries are bootstrapped. Captured rather than hard-coded, so a
-    // change to how many frames construction leaves behind cannot silently
-    // turn every checkpoint call into a refusal. v1 takes and restores
-    // checkpoints only here; in-scope checkpoints are a committed v2 item.
-    this._checkpointBaseDepth = this._evalContextStack.length;
 
     hidePrivateProperties(this);
   }
