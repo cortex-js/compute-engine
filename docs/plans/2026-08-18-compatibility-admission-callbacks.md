@@ -1,9 +1,11 @@
 # Design E — Compatibility admission for callback slots; retiring `callback<S>`
 
-**Status: DRAFT rev 2 (2026-08-18) — the §9 questions are RULED (maintainer,
-same day; answers folded in below), the §2 probes corrected to `Map`'s
-callback-first calling convention, and R-E2 recast around the already-shipped
-static `callback-arity` check. Awaiting spec review. Successor to Design D
+**Status: DRAFT rev 3 (2026-08-18) — dual spec review (Claude + Codex, 11
+findings; `docs/scratch/2026-08-18-compatibility-admission-callbacks_SPEC_REVIEW.md`)
+applied end to end, including the two review-round rulings (maintainer, same
+day): the EFFECT-SUBSET check joins the relation as rule 5, and the
+comparator slots convert IN the sweep with UNION spellings (§9 items 5–6).
+All §9 questions RULED. Successor to Design D
 (`docs/plans/2026-08-09-design-d-generic-callback-signatures.md`), whose
 `callback<S>` constructor this design deletes. Rulings made in the
 2026-08-18 conversation:**
@@ -27,11 +29,16 @@ static `callback-arity` check. Awaiting spec review. Successor to Design D
   application error (`Too many arguments …`,
   `src/compute-engine/function-utils.ts:2523`) remains the fallback where
   arity cannot be read statically (bare-`function` symbols).
-- **R-E3 — Callback-to-data inference is DEFERRED.** Type variables are solved
-  from data operands only, exactly as today. A callback's parameter types
-  never constrain `T` — neither for admission (compatibility makes that
-  unnecessary) nor for inference writes. Revisitable later without
-  re-touching admission.
+- **R-E3 — Callback-to-DOMAIN inference is DEFERRED.** Variables occurring in
+  the callback slot's PARAMETER positions (`T`) are solved from data operands
+  only, exactly as today: a callback's parameter types never constrain the
+  solve — neither for admission (compatibility makes that unnecessary) nor
+  for inference writes. RESULT-side inference is explicitly UNCHANGED: a
+  callback's declared (or rebuilt-literal) result type continues to flow
+  into result-side variables (`U` in `Map`/`FlatMap`), per Design D §4
+  clause 3 / R-D2′ — without it, `U` would fall to `unknown` and the §5
+  signatures would silently weaken. Only the parameter-side flow is
+  deferred, and it is revisitable later without re-touching admission.
 - **R-E4 — `callback<S>` is retired**, not re-housed (the parameter-facet
   alternative considered in the same conversation is rejected along with the
   status quo): converted slots become ordinary arrow types, and the entire
@@ -122,9 +129,18 @@ to
 > is the operand **provably unusable** at this slot? (reject only certain
 > nonsense; admit everything else and let the runtime stay the honest party)
 
-**Definition.** Let `P = (p₁ … pₙ) e -> r` be the slot's arrow after
-instantiation (variables solved from data operands per R-E3; an unsolved
-variable instantiates to `unknown` for this check). Let `F` be the operand's
+**Definition.** Let `P = (p₁ … pₙ) e -> r` be the slot's **supply arrow**
+after instantiation: for most slots this is the declared arrow with
+variables solved from data operands per R-E3; an unsolved variable
+instantiates to `any` — the value `groundParam`'s existing `paramStillOpen`
+path produces, kept as the single check-time sentinel. For a slot whose
+operator supplies arguments differently than the declared arrow states —
+`Map`'s zip form, where the callback receives ONE ARGUMENT PER SOURCE — the
+supply arrow is built per call: one parameter per actually-supplied
+argument, each typed by its own source's element type where solvable (else
+`any`), with the declared result. This is the same per-call supply notion
+`CallbackSupply` already models for the arity diagnostic; the DECLARED
+arrow remains what contextual stamping reads. Let `F` be the operand's
 type. The operand is **admitted** unless one of the following holds:
 
 1. **Not callable.** `F` is provably not a function value (e.g. a `string`
@@ -134,12 +150,23 @@ type. The operand is **admitted** unless one of the following holds:
    variadic structure cannot accept `n` arguments. Rejected at
    canonicalization. NOT new machinery: the shipped `callbackArityError`
    module (`src/compute-engine/library/callback-arity.ts`) is the
-   implementation — it already reads an operand's arity range from function
-   literals and declared signatures, deliberately DECLINES when arity cannot
-   be read statically (bare `function`, unknown-typed symbols — those stay
-   admitted), and phrases the diagnostic per operator. The design's delta is
-   wiring it into the uniform relation so user-declared arrow slots get it
-   too.
+   implementation. Its decline set is NORMATIVE — a decline ADMITS, the
+   relation stays reject-only-on-proof — and is wider than "bare
+   `function`": the module deliberately declines whenever arity cannot be
+   read statically, which today means bare-`function` and unknown-typed
+   symbols, GENERIC signatures, overload sets and unions, and computed
+   callable expressions; and a NULLARY INLINE literal is treated as
+   accepting any supplied arity while a named nullary signature is max-0.
+   Each of those forms gets a pin. Two deltas: (a) the check is wired into
+   the uniform relation so user-declared arrow slots get it too; (b) for a
+   slot not hand-wired through `canonicalCallbackOperand` (every current
+   call site is a per-operator constant — `PER_ELEMENT_SUPPLY`,
+   `ACCUMULATOR_SUPPLY`, `SORT_SUPPLY`, … — invoked from that operator's
+   own canonical handler), the `CallbackSupply` is DERIVED generically:
+   `count` from the supply arrow's parameter count, and a generic
+   `describes` phrase naming the parameter ("`MyOp` calls its `f` callback
+   with 1 argument"). The generic derivation runs from the §6 planning
+   pass, the new hook for slots with no hand-authored supply.
 3. **Provably disjoint parameter.** For some position `i`, `F`'s parameter
    type `fᵢ` and the slot's `pᵢ` are provably disjoint —
    `provablyDisjoint(pᵢ, fᵢ)` (`src/common/type/subtype.ts:454`). `unknown`,
@@ -151,6 +178,20 @@ type. The operand is **admitted** unless one of the following holds:
    scalar-result tolerance and the folds' `unknown` accumulator survive
    because their slot spellings put `unknown`/variables in those positions
    (§5).
+5. **Incompatible effects (RULED 2026-08-18, spec-review round).** `F`'s
+   declared effect set is not tolerated by the slot's effect specifier —
+   the EXISTING effect-subset check at the call boundary
+   (`docs/EFFECTS-MODEL.md`), unchanged and mandatory. Compatibility
+   replaces only the parameter/result TYPE halves of admission; effect
+   bounds were never part of the permissiveness being liberalized (they
+   were unreachable at library slots precisely because those slots were
+   bare `function`). A bare arrow therefore still demands a pure callback:
+   the pinned `integ(f: (any) -> number, real, real)` fixture
+   (`test/compute-engine/effects-call-boundary.test.ts`) must keep
+   rejecting `integ(x |-> Random(), 0, 1)` — without this rule, §3's type
+   rules alone would admit it, silently reversing a pinned effect-safety
+   behavior. Converted LIBRARY slots never trip this rule because they are
+   spelled effect-top (§4).
 
 Notes on the predicate:
 
@@ -158,6 +199,26 @@ Notes on the predicate:
   check runs strictly on the instantiated projection. A slot that is still
   open after the solve admits everything at that position — this is the
   existing `paramStillOpen → 'any'` path in `groundParam`, kept verbatim.
+- **Bottom types are vacuously compatible.** `provablyDisjoint` reports
+  `never`/`nothing` disjoint from everything, but a supply type of `never`
+  means the callback is never invoked with any value — the call cannot go
+  wrong, so it is not "provably unusable". Rule 3 SKIPS a position whose
+  supply type is `never`/`nothing` (probed 2026-08-18: `ce.box(['List'])`
+  types as `list<never>`, so without this carve-out EVERY callback over an
+  empty source would be rejected, where today `Filter([], IsPrime) → []`),
+  and rule 4 ADMITS an operand result of `never` (a non-returning callback
+  satisfies every result contract).
+- **Operand shapes beyond a single monomorphic arrow.** A UNION operand is
+  admitted if ANY callable arm is compatible (rule 1 rejects only when no
+  arm is callable); an INTERSECTION (overload set) is admitted if any arm
+  is compatible — the runtime selects the applicable arm per call, so one
+  usable arm suffices; a POLYMORPHIC operand is checked at its
+  instantiation against the supply arrow where its variables solve, else at
+  its `unknown` skeleton — genericity alone never rejects; a type
+  REFERENCE is unfolded first. Ordering against the callee's own overload
+  resolution: compatibility runs AFTER arm resolution (resolve-then-check,
+  mirroring R-D4's resolve-then-stamp) and never participates in arm
+  viability, so arm selection and ambiguity diagnostics are unchanged.
 - This is an **argument-validation relation, not a lattice change**.
   `isSubtype`, `.matches`, `reduceType` and the type algebra are untouched;
   arrows keep their sound contravariant subtyping everywhere types are
@@ -165,17 +226,12 @@ Notes on the predicate:
   *operand* changes. (This is what makes the design explainable in one
   sentence: "callback slots are checked for compatibility, not subtyping,
   because collections are heterogeneous and application is per-element.")
-- **Uniformity question — needs a ruling before implementation** (§9 Q1):
-  does compatibility admission apply to *every* arrow-typed parameter slot
-  (library and user-declared alike), or only to the converted library
-  operators? Recommended: **uniform**. One rule, no second-class arrows, and
-  it is the same permissive-declaration bias the engine already has. The
-  cost: a user-declared operator with an arrow-typed parameter today gets
-  strict contravariant checking, which uniform compatibility loosens (a
-  narrower-than-slot callback would newly be admitted and resolve per
-  element). The alternative — compatibility only at designated slots —
-  reintroduces exactly the two-kinds-of-arrows problem this design exists to
-  delete.
+- **Uniformity — RULED (§9 item 1): the relation applies to every
+  arrow-typed parameter slot**, library and user-declared alike. The
+  accepted trade: a user-declared arrow slot loses strict contravariant
+  TYPE admission (a narrower-than-slot callback is newly admitted,
+  resolving per element) but keeps its EFFECT bound intact (rule 5) and
+  gains the static arity and disjointness checks it lacks today.
 
 ## 4. The effects interaction (discovered 2026-08-18 — do not skip)
 
@@ -201,9 +257,18 @@ time. Therefore:
   through every converted operator**, and the pinned-empty enumeration in
   `effects-call-boundary.test.ts` flips to pin the full converted inventory
   with its `any` effect slots.
-- Whether any operator should *ever* demand purity of its callback (e.g. a
-  future parallel evaluator) is out of scope; the migration is
-  effect-neutral by construction.
+- **The effect-subset check is rule 5 of the relation, not a casualty of
+  it** (spec-review finding, RULED 2026-08-18). The effect-top spelling
+  makes the LIBRARY conversions effect-neutral; it says nothing about
+  user-declared slots that already carry an effect bound — `integ(f: (any)
+  -> number, real, real)` rejecting an impure callback is pinned behavior
+  (`effects-call-boundary.test.ts`) that §3's type rules alone would have
+  reversed under uniform admission. Rule 5 keeps the existing effect gate
+  mandatory at every arrow slot; that test file must pass UNCHANGED
+  (acceptance, §13).
+- Whether any LIBRARY operator should *ever* demand purity of its callback
+  (e.g. a future parallel evaluator) is out of scope; the library
+  conversions are effect-neutral by the effect-top spelling.
 
 ## 5. Signature respellings (inventory, from `src/compute-engine/library/collections.ts` at 2026-08-18)
 
@@ -235,22 +300,36 @@ Contract notes carried over from Design D, still true under E:
   declines `unknown`, so the accumulator parameter of an inline reducer
   stays bare. The probe that ratified this
   (`Reduce([1,2,3], (a,x) |-> a/x, 1) → 1/6`) must stay green.
-- **`Map`'s variadic (zip) form**: the slot arrow is unary `(T) any -> U`,
-  and multi-source zips pass callbacks of matching arity. The arity gate
-  for the zip form already works this way today: `callbackArityError`
-  checks the callback against the **number of sources actually supplied**
-  (its `CallbackSupply` carries the count and the per-operator phrasing),
-  not the declared unary arrow — kept verbatim. The heterogeneous zip stays
-  admitted (its per-parameter overlap is checked against the respective
-  source's element type where solvable, else `unknown`); Design D §6's
-  "the variadic form is not stamped" stays true (stamping is unchanged by
-  this design).
+- **`Map`'s variadic (zip) form** runs the relation against the per-call
+  SUPPLY ARROW of §3's definition — one parameter per actually-supplied
+  source, each typed by its own source's element type — never against the
+  declared unary `(T) any -> U` (which supplies only one `p₁` and, being
+  the join of all sources, could not catch a position-swapped
+  `(string, integer)` callback over an integer-source/string-source zip).
+  The arity half already works this way today: `callbackArityError` checks
+  against the number of sources actually supplied (`CallbackSupply` carries
+  the count and phrasing) — kept verbatim; the disjointness rules use the
+  same supply. The heterogeneous zip stays admitted (per-position overlap,
+  `any` where a source's element type is unsolvable); Design D §6's "the
+  variadic form is not stamped" stays true (stamping is unchanged by this
+  design and reads only the declared arrow).
 
-`Sort` / `ChunkBy` / other comparator-slot operators (Design D phase 4,
-never done): now trivial — spell the comparator `(T, T) any -> number` in
-the same sweep, or leave bare `function` and convert later; recommended in
-the sweep, since under E a conversion is a one-line respelling with no new
-machinery.
+**Comparator-slot operators — RULED IN (§9 item 6), with per-operator
+audit.** Design D's never-done phase 4 converts in the same sweep, but the
+naive `(T, T) any -> number` spelling is WRONG for `Sort`/`Ordering`: their
+slot accepts a unary KEY or a binary COMPARATOR (`SORT_SUPPLY` in
+`collections.ts` carries both modes, verified 2026-08-18), so a single
+binary arrow would statically reject supported unary-key callbacks. Ruled
+spellings (maintainer: union for clarity):
+
+- `Sort` / `Ordering`: `((T) any -> unknown) | ((T, T) any -> number)` —
+  key mode | comparator mode; the relation's union-operand rule (§3 notes)
+  admits an operand compatible with either arm, and the shipped dual-entry
+  `SORT_SUPPLY` arity check is unchanged.
+- `ChunkBy`: `(T) any -> unknown` (unary key, unconstrained result).
+- Any remaining primitive-`function` slot in the sweep gets the same
+  audit: enumerate its actual invocation modes (its `CallbackSupply`
+  constants are the ground truth) before spelling the arrow(s).
 
 ## 6. Where the checks run (route parity)
 
@@ -276,13 +355,34 @@ strict AND lazy branches, plus the value-def route) — NOT only in
   converted operator's acceptance tests probe all three routes: Epsil,
   `ce.box` (raw MathJSON), and `ce.parse`.
 
-**Contextual stamping is unchanged in mechanism.** The §5 solve, the
-stamp-back into inline literals, `admissibleElementType`, the no-overwrite
-guard for hand annotations, and R-D4 arm resolution all survive verbatim;
-only the *trigger* changes from "slot has `kind: 'callback'`"
-(`hasCallbackParam`, `isCallbackType`) to "slot is an arrow type". This also
-closes Design D §9b's reference-hidden-slot gap for free: an alias that
-expands to an arrow is an arrow.
+**Two passes, not one — the existing stamping hook cannot carry the
+validation** (spec-review finding). The contextual pass in `box.ts` exits
+for operands that are not inline `Function` literals (stamping literals is
+its whole purpose) and is gated `rawOps === undefined` (the binder
+pre-phase skips it — Design D §9b). Named-callback validation — the
+flagship `Filter(names, IsPrime)` rejection — would therefore never get
+its sibling data solve from that hook. The design is a SPLIT:
+
+- **(a) The compatibility planning pass** — NEW, read-only. Runs at the
+  hook points above whenever an arrow-typed slot's operand has a
+  statically readable callback type (a named symbol's declared type OR an
+  inline literal's signature), instantiating sibling data exactly as the
+  contextual solve does. Rules 2–5 of §3 run here, on BOTH operand routes
+  (raw and pre-boxed — validation, unlike stamping, has no
+  canonicalize-once contract to protect), including lazy-with-`canonical`
+  operators and the value-def route, for every callback slot a signature
+  declares (multi-slot signatures check each).
+- **(b) Contextual stamping — unchanged in mechanism.** The Design D §5
+  solve, the stamp-back into inline literals, `admissibleElementType`, the
+  no-overwrite guard for hand annotations, R-D4 arm resolution, and the
+  unboxed-route-only gate all survive verbatim; only the *trigger* changes
+  from "slot has `kind: 'callback'`" (`hasCallbackParam`,
+  `isCallbackType`) to "slot is an arrow type". This also closes Design D
+  §9b's reference-hidden-slot gap for free: an alias that expands to an
+  arrow is an arrow.
+
+Route-parity tests must cover NAMED callbacks through pass (a), not just
+inline literals through pass (b).
 
 ## 7. Deletion inventory
 
@@ -368,6 +468,22 @@ Each entry keeps the question for context; the ruling is authoritative.
    arrow arm. Rule U already admits the union, and the SLOT-form R-D4
    resolution machinery it uses survives for user overload sets.
 
+Two further questions surfaced by the dual spec review
+(`docs/scratch/2026-08-18-compatibility-admission-callbacks_SPEC_REVIEW.md`)
+and ruled the same day:
+
+5. **Effects under uniformity — RULED: rule 5, not a carve-out.** The
+   effect-subset check joins the relation as its fifth rule (§3), keeping
+   every user-declared effect bound enforced; uniformity stands whole.
+   The alternative — carving effect-bounded user slots out of Q1 — was
+   rejected.
+6. **Comparator slots — RULED: convert IN the sweep, union spellings for
+   dual-mode slots** (§5): `Sort`/`Ordering` get
+   `((T) any -> unknown) | ((T, T) any -> number)` — the union chosen for
+   clarity over leaving the slot bare — and `ChunkBy` gets its unary-key
+   arrow. This retires the dangling "if Q-ruled in" from the earlier §12
+   draft.
+
 ## 10. What this deliberately does NOT change
 
 - Runtime per-element semantics for admitted calls — error values, `NaN`s,
@@ -395,7 +511,7 @@ Each entry keeps the question for context; the ruling is authoritative.
 | `test/compute-engine/collection-callback-signatures.test.ts` | Rewritten around R-E1: the operator-table pins keep every admitted case (named narrower-than-slot, wildcard, inline with undeclared fn); the doc-comment rationale ("why the rest stay on the primitive") is replaced by the compatibility rationale; NEW pins for the disjointness rejections and the user-declared-slot cases (the library operators' `callback-arity` pins already exist and stay). |
 | `test/compute-engine/design-d-callback-contract.test.ts` | Clause pins retired with the constructor; the behavioral pins (admission cases, stamp cases) migrate into the file above or the operator suites. Keep a deletion pin asserting `callback<` no longer parses. |
 | `test/compute-engine/lambda-param-element-inference.test.ts` | Stamp behavior unchanged — survives as is, minus any assertion reading a definition's `callback<S>` signature string. |
-| `test/compute-engine/effects-call-boundary.test.ts` | The pinned-EMPTY enumeration flips to pin the full converted inventory with `any` effect slots (§4); add the effectful-callback probes. |
+| `test/compute-engine/effects-call-boundary.test.ts` | The pinned-EMPTY enumeration flips to pin the full converted inventory with `any` effect slots (§4); add the effectful-callback probes. The user-declared effect-bound fixtures (`integ` et al.) pass UNCHANGED — they are the §3 rule 5 acceptance evidence, never rewritten. |
 | `test/compute-engine/type-variables-collections.test.ts` | `Partition` definition-signature expectation updated to the arrow spelling; the byte-identical-display companion assertion is retired (display now intentionally differs — §8). |
 | `test/common/types.test.ts` | `reduceType` tie-break pin deleted with the tie-break. |
 | `test/compute-engine/generic-function-literals.test.ts` | Untouched (user-polytype display never depended on callbacks). |
@@ -412,10 +528,14 @@ Measure both with a full-suite run before staging.
    compatibility check (§3 rules 1, 3, 4) as a pure function in
    `src/common/type/` beside `provablyDisjoint` (it needs nothing from the
    engine), with direct unit tests: overlap admits, disjoint rejects,
-   `unknown`/bare-`function` exempt, open-slot exempt. The arity half
-   (rule 2) is NOT reimplemented — the shipped `callbackArityError` module
-   stays where it is; E1/E3 wire the two halves together at the §6 hook
-   points.
+   `unknown`/bare-`function` exempt, open-slot exempt, bottom types
+   vacuously compatible (`never`/`nothing` supply positions skipped,
+   `-> never` results admitted), and the operand-shape rules (union /
+   overload-set / polymorphic / reference operands, §3 notes). The arity
+   half (rule 2) is NOT reimplemented — the shipped `callbackArityError`
+   module stays where it is, gaining only the generic supply derivation —
+   and rule 5 IS the existing effect-subset check; E1/E3 wire the pieces
+   together via the §6 planning pass.
 2. **Phase E1 — one eager operator (`CountIf`)**, wired at the §6 hook
    points: respell the signature, keep the stamp, add the rejection pins,
    three-route probes, effectful-callback probe. This phase proves the
@@ -423,9 +543,17 @@ Measure both with a full-suite run before staging.
 3. **Phase E2 — one lazy operator (`Filter`)**, proving the lazy-route gate
    and the `Map`-style no-`validateArguments` path (via `Filter` first;
    `Map` itself lands here too, with the zip arity rule of §5).
-4. **Phase E3 — the sweep**: remaining §5 respellings (including the
-   comparator slots if Q-ruled in), the deletion inventory (§7), the pin
-   migration (§11), the display-table enumeration, Tycho notification (§8).
+4. **Phase E3 — the sweep**: remaining §5 respellings including the
+   comparator slots (RULED in, §9 item 6, with their union spellings), the
+   deletion inventory (§7), the pin migration (§11), the display-table
+   enumeration, Tycho notification (§8), and the user-guide rewrite:
+   `doc/08-guide-types.md`'s "Function Type" section currently teaches "a
+   written signature constrains callbacks contravariantly … use `function`
+   for operator parameters that take a callback whose shape depends on
+   other operands (e.g. `Map`)" — both halves inverted under E; rewrite it
+   around compatibility admission for operand slots vs. contravariant
+   subtyping for type comparison, and spot-check
+   `doc/06-guide-augmenting.md` for the same guidance.
 5. Each phase: `npm run typecheck`, targeted suites, madge after the
    `callback.ts` deletion (breaking an import can create a new cycle), and
    the staging-status protocol.
@@ -442,7 +570,19 @@ Measure both with a full-suite run before staging.
   canonicalization with the `callback-arity` diagnostic; a
   narrower-than-slot named callback at the same slot → newly ADMITTED,
   resolving per element at application.
-- `Filter(xs, x |-> (Print(x); x > 1))` admitted and evaluating (§4).
+- `Filter(xs, x |-> (Print(x); x > 1))` admitted and evaluating (§4) —
+  AND `test/compute-engine/effects-call-boundary.test.ts` passes
+  UNCHANGED, in particular `integ(x |-> Random(), 0, 1)` still rejected
+  (§3 rule 5).
+- Bottom-type carve-outs: `Filter([], IsPrime)` stays valid and evaluates
+  to `[]`; a `-> never` callback admitted at any result position.
+- Zip positional check: a position-swapped `(string, integer)` callback
+  over an integer-source/string-source `Map` zip → invalid at
+  canonicalization (§3 supply arrow); the matching `(integer, string)`
+  callback admitted.
+- Operand shapes: an overload-set callback with one compatible arm
+  admitted; a polymorphic callback admitted at its skeleton; a union with
+  no callable arm rejected by rule 1.
 - Stamping unchanged: `CountIf(points, pt |-> pt.1 == 0)` over
   `list<tuple<…>>` stamps/evaluates/compiles identically to today;
   `map-fusion` and `map-exact-compile` green.
