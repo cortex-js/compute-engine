@@ -446,6 +446,17 @@ const NAV_SOURCE = [
 await scenario('navigation', undefined, async (c) => {
   await c.open(URI, NAV_SOURCE);
 
+  const outerHover = await c.hover(URI, 6, 0);
+  const innerHover = await c.hover(URI, 4, 1);
+  check(
+    'hovers follow lexical shadowing instead of the first same-named declaration',
+    outerHover?.contents.value.includes('let x = 1') === true &&
+      !outerHover.contents.value.includes('let x = 2') &&
+      innerHover?.contents.value.includes('let x = 2') === true &&
+      !innerHover.contents.value.includes('let x = 1'),
+    JSON.stringify({ outerHover, innerHover })
+  );
+
   const outer = await c.request('textDocument/definition', {
     textDocument: { uri: URI },
     position: { line: 6, character: 0 },
@@ -570,6 +581,52 @@ await scenario(
         symbols[0].kind === 13 && // Variable
         f?.kind === 12 && // Function
         f.children.map((s) => s.name).join(',') === 'y,x',
+      JSON.stringify(symbols)
+    );
+  }
+);
+
+await scenario(
+  'outline with interleaved function clauses',
+  { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
+  async (c) => {
+    await c.open(URI, 'f(0) = 0\nlet between = 1\nf(n: integer) = n');
+    const symbols = await c.request('textDocument/documentSymbol', {
+      textDocument: { uri: URI },
+    });
+    const f = symbols?.find((s) => s.name === 'f');
+    check(
+      'a declaration between clauses remains top-level',
+      symbols?.map((s) => s.name).join(',') === 'f,between' &&
+        f?.children?.length === 0,
+      JSON.stringify(symbols)
+    );
+  }
+);
+
+await scenario(
+  'outline with a local in a clause after an interleaved declaration',
+  { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
+  async (c) => {
+    await c.open(
+      URI,
+      [
+        'f(0) = 0',
+        'let between = 1',
+        'function f(n: integer) {',
+        '  let inner = n',
+        '  inner',
+        '}',
+      ].join('\n')
+    );
+    const symbols = await c.request('textDocument/documentSymbol', {
+      textDocument: { uri: URI },
+    });
+    const f = symbols?.find((s) => s.name === 'f');
+    check(
+      'a local in a later clause still nests under the function',
+      symbols?.map((s) => s.name).join(',') === 'f,between' &&
+        f?.children?.map((s) => s.name).join(',') === 'inner',
       JSON.stringify(symbols)
     );
   }
@@ -716,6 +773,62 @@ await scenario('rename capture by the library and by labels', undefined, async (
     'a parameter passed by name at a call site refuses rename',
     labeled.error?.message.includes('passes it by name') === true,
     JSON.stringify(labeled)
+  );
+});
+
+await scenario('rename with LaTeX islands', undefined, async (c) => {
+  const diagnostics = await c.open(
+    URI,
+    'let y = 1\n$\\frac{1}{2}$\ny'
+  );
+  const unrelated = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 4 },
+    newName: 'z',
+  });
+  check(
+    'a valid LaTeX island does not create a divergent parse error for rename',
+    diagnostics.length === 0 && unrelated?.changes?.[URI]?.length === 2,
+    JSON.stringify({ diagnostics, unrelated })
+  );
+
+  // Use an expression canonicalization could erase completely; rename safety
+  // must inspect the unsimplified LaTeX tree.
+  await c.open(URI, 'let x = 1\n$x-x$\nx');
+  const referenced = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 4 },
+    newName: 'z',
+  });
+  check(
+    'rename fails closed when the binding is referenced inside LaTeX',
+    referenced.error?.message.includes('LaTeX') === true,
+    JSON.stringify(referenced)
+  );
+});
+
+// One server process serves every document of a session, so anything the
+// server declares in an engine it keeps is visible to the next document.
+// Parsing a `$…$` island canonicalizes it, and canonicalizing `x + 1`
+// DECLARES `x` in the engine that ran the parse — which would then report
+// `x` as a defined name and refuse to rename a free `x` anywhere else.
+await scenario('LaTeX islands do not leak declarations across documents', undefined, async (c) => {
+  const OTHER = 'file:///tmp/lsp-test-other.epsil';
+  await c.open(URI, ['let a = 1', '$x + 1$', 'a'].join('\n'));
+  // `documentSymbol` goes through the parse that injects the LaTeX parser.
+  await c.request('textDocument/documentSymbol', { textDocument: { uri: URI } });
+
+  await c.open(OTHER, 'x + 1');
+  const renamed = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: OTHER },
+    position: { line: 0, character: 0 },
+    newName: 'w',
+  });
+  check(
+    'a free name is still renamable after another document mentioned it in LaTeX',
+    renamed.error === undefined &&
+      renamed.result?.changes?.[OTHER]?.length === 1,
+    JSON.stringify(renamed)
   );
 });
 

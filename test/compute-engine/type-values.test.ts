@@ -579,6 +579,51 @@ describe('compile fail-closed: the phase-2 operators', () => {
 
 
 describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
+  test('Type preserves arity errors instead of observing their type', () => {
+    const missing = ce.box(['Type']).evaluate().toString();
+    expect(missing).toContain('missing');
+    expect(missing).not.toContain('TypeFrom');
+
+    const extra = ce.box(['Type', 1, 2]).evaluate().toString();
+    expect(extra).toContain('unexpected-argument');
+    expect(extra).not.toContain('TypeFrom');
+
+    // A real Error operand remains observable: only malformed arity is gated.
+    expect(ce.box(['Type', ['Error', { str: 'boom' }]]).evaluate().toString())
+      .toBe('TypeFrom("error")');
+  });
+
+  test('the arity report wins over an Error the operand carries itself', () => {
+    // The operand is an `Error` AND the call has an extra argument. The
+    // reported error must be the one arity validation introduced, not the
+    // operand's own error, which `inspectsErrors` would otherwise let
+    // through as if the call were well formed.
+    const both = ce
+      .box(['Type', ['Error', { str: 'boom' }], 2])
+      .evaluate()
+      .toString();
+    expect(both).toContain('unexpected-argument');
+    expect(both).not.toContain('boom');
+    expect(both).not.toContain('TypeFrom');
+  });
+
+  test('a Sequence operand is counted by its effective arity', () => {
+    // A `Sequence` contributes its operands to the argument list, so a
+    // single `Sequence` operand can still be a malformed call.
+    const two = ce.box(['Type', ['Sequence', 1, 2]]).evaluate().toString();
+    expect(two).toContain('unexpected-argument');
+    expect(two).not.toContain('TypeFrom');
+
+    const none = ce.box(['Type', ['Sequence']]).evaluate().toString();
+    expect(none).toContain('missing');
+    expect(none).not.toContain('TypeFrom');
+
+    // One effective argument is a well-formed call.
+    expect(ev(['Type', ['Sequence', 3]]).toString()).toBe(
+      'TypeFrom("finite_integer")'
+    );
+  });
+
   test('Type is typed `-> type` and settles like any construction', () => {
     const t = ev(['Type', 3]);
     expect(t.toString()).toBe('TypeFrom("finite_integer")');

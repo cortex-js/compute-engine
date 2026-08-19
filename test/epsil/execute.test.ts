@@ -581,6 +581,20 @@ describe('EPSIL EXECUTE — an expired time budget ends the program', () => {
   // Wall-clock doctrine: no elapsed-time assertions. A `ms: 0` span is
   // expired the moment it is armed, so every outcome below is deterministic.
 
+  test('an expired budget interrupts parsing a large source file', () => {
+    const ce = new ComputeEngine();
+    const source = `${' '.repeat(4_096)}x = 1`;
+    const { value, diagnostics, valueRange } = ce.withTimeLimit(
+      { ms: 0, label: 'test:epsil-parse-expired' },
+      () => executeEpsil(ce, source)
+    );
+    expect(value.operator).toBe('Error');
+    expect(value.op2?.string).toBe('timeout');
+    expect(diagnostics).toEqual([]);
+    expect(valueRange).toEqual([0, source.length]);
+    expect(ce.box('x').value).toBeUndefined();
+  });
+
   test('no statement runs once the budget has expired', () => {
     const ce = new ComputeEngine();
     const { value, diagnostics, valueRange } = ce.withTimeLimit(

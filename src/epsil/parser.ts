@@ -5,6 +5,10 @@ import {
 } from '../math-json/symbols.js';
 import { Origin } from '../common/debug.js';
 import {
+  checkDeadline,
+  type DeadlineFrame,
+} from '../common/interruptible.js';
+import {
   parseType,
   parseTypeParameterClause,
   parseTypePrefix,
@@ -51,6 +55,11 @@ const PREFIX_PRECEDENCE = prefixOperatorForSymbol('!')!.precedence;
 /** Precedence of `Multiply`, used for invisible multiplication (`2x`). Read
  * from the shared table so it stays in sync. */
 const MULTIPLY_PRECEDENCE = infixOperatorForSymbol('*')!.precedence;
+
+/** Bound recursive expression descent before the JavaScript stack becomes
+ * the language's accidental resource limit. */
+const MAX_EXPRESSION_NESTING = 256;
+const EXPRESSION_NESTING_ABORT = Symbol('expression-nesting-abort');
 
 /** The legacy spelling of the mapsto arrow, replaced by `=>`. Still lexed and
  * parsed as the arrow, but reported (`mapsto-arrow-legacy`) with a fixit. */
@@ -422,6 +431,14 @@ export class Parser {
 
   private tokens: Token[];
   private pos = 0;
+  /** Current recursive `parseExpression` depth, bounded by
+   * `MAX_EXPRESSION_NESTING`. A string interpolation is parsed by a SEPARATE
+   * `Parser` instance running on the enclosing parser's JavaScript stack, so
+   * that sub-parser is seeded with the enclosing depth (constructor option
+   * `nestingDepth`) and the whole descent shares one budget. */
+  private expressionNesting: number;
+  private deadlineTick = 0;
+  private readonly deadline?: DeadlineFrame;
 
   /** Stack of open-bracket tokens, for bracket-level panic recovery. */
   private brackets: Token[] = [];
@@ -606,6 +623,10 @@ export class Parser {
       typeNames?: readonly string[];
       protocolNames?: readonly string[];
       sumVariants?: Readonly<Record<string, string>>;
+      deadline?: DeadlineFrame;
+      /** Expression-nesting depth already consumed by an enclosing parser
+       * whose stack this one runs on (see `expressionNesting`). */
+      nestingDepth?: number;
     }
   ) {
     this.source = source;
@@ -613,6 +634,8 @@ export class Parser {
     this.baseOffset = options?.offset ?? 0;
     this.parseLatex = options?.parseLatex;
     this.allowHostPragmas = options?.allowHostPragmas ?? false;
+    this.deadline = options?.deadline;
+    this.expressionNesting = options?.nestingDepth ?? 0;
     this.knownTypeNames = new Set(options?.typeNames ?? []);
     this.protocolNames = new Set(options?.protocolNames ?? []);
     this.sumVariants = { ...options?.sumVariants };
@@ -646,7 +669,7 @@ export class Parser {
         return name as any;
       },
     };
-    this.tokens = tokenize(source);
+    this.tokens = tokenize(source, this.deadline);
   }
 
   //
@@ -662,6 +685,11 @@ export class Parser {
   }
 
   private advance(): Token {
+    if (
+      this.deadline !== undefined &&
+      (++this.deadlineTick & 0x3ff) === 0
+    )
+      checkDeadline(this.deadline);
     const token = this.current;
     if (token.type !== 'EOF') this.pos += 1;
     return token;
@@ -752,6 +780,15 @@ export class Parser {
    * or drops it (interpolation).
    */
   parseProgram(): MathJsonExpression | null {
+    try {
+      return this.parseProgramUnchecked();
+    } catch (error) {
+      if (error === EXPRESSION_NESTING_ABORT) return null;
+      throw error;
+    }
+  }
+
+  private parseProgramUnchecked(): MathJsonExpression | null {
     // An optional shebang at the very start.
     if (this.current.type === 'SHEBANG') this.advance();
 
@@ -5838,6 +5875,25 @@ export class Parser {
    * `minPrecedence`. Returns `null` if no primary can be parsed.
    */
   private parseExpression(minPrecedence: number): MathJsonExpression | null {
+    this.expressionNesting += 1;
+    try {
+      if (this.expressionNesting > MAX_EXPRESSION_NESTING) {
+        this.error(
+          ['expression-nesting-limit', MAX_EXPRESSION_NESTING],
+          this.current.start,
+          this.current.end
+        );
+        throw EXPRESSION_NESTING_ABORT;
+      }
+      return this.parseExpressionAtDepth(minPrecedence);
+    } finally {
+      this.expressionNesting -= 1;
+    }
+  }
+
+  private parseExpressionAtDepth(
+    minPrecedence: number
+  ): MathJsonExpression | null {
     // CONSUME the statement-position flag: only this call may read a bare `=`
     // as an assignment, and every nested `parseExpression` — including the one
     // that parses this expression's own right operand — sees it cleared.
@@ -7496,6 +7552,13 @@ export class Parser {
       offset: this.baseOffset + span.start,
       parseLatex: this.parseLatex,
       allowHostPragmas: this.allowHostPragmas,
+      deadline: this.deadline,
+      // The sub-parser recurses on THIS parser's JavaScript stack, so it
+      // continues the enclosing expression descent rather than starting a
+      // fresh one: seeding it with the current depth makes nested `\(…)`
+      // spans share the single `MAX_EXPRESSION_NESTING` budget instead of
+      // each level restarting at zero and overflowing the real stack.
+      nestingDepth: this.expressionNesting,
     });
     const value = sub.parseProgram();
     for (const d of sub.diagnostics) this.diagnostics.push(d);

@@ -3,6 +3,32 @@ import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { validEpsil, invalidEpsil } from '../utils';
 
+describe('EPSIL PARSING RESOURCE LIMITS', () => {
+  test('deeply nested expressions report a diagnostic instead of overflowing', () => {
+    const source = `${'('.repeat(1_000)}1${')'.repeat(1_000)}`;
+    expect(() => parseEpsil(source)).not.toThrow();
+    const [value, diagnostics] = parseEpsil(source);
+    expect(value).toBe('Nothing');
+    expect(diagnostics.map((d) => d.message[0])).toContain(
+      'expression-nesting-limit'
+    );
+  });
+
+  test('deeply nested string interpolations report a diagnostic instead of overflowing', () => {
+    // Each `\(…)` span is parsed by a SEPARATE `Parser` instance running on the
+    // enclosing parser's JavaScript stack, so the nesting budget has to be
+    // threaded into it: a sub-parser that restarted its depth count at zero
+    // would let this input recurse until the engine threw a `RangeError`.
+    let source = '"x"';
+    for (let i = 0; i < 1_000; i++) source = `"a\\(${source})b"`;
+    expect(() => parseEpsil(source)).not.toThrow();
+    const [, diagnostics] = parseEpsil(source);
+    expect(diagnostics.map((d) => d.message[0])).toContain(
+      'expression-nesting-limit'
+    );
+  });
+});
+
 describe('EPSIL PARSING SHEBANG', () => {
   test('Valid shebang', () => {
     expect(validEpsil('#! /bin/epsil\n3.14 ')).toBe(3.14);

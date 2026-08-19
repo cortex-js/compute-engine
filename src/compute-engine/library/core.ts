@@ -4631,6 +4631,32 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `("a" + 1) |> Type`, `Apply(Type, …)`.
       inspectsErrors: true,
       signature: '(any) -> type',
+      // `inspectsErrors` deliberately lets a well-formed `Type(Error(...))`
+      // observe the operand instead of propagating it. It also lets the
+      // evaluate handler see Error nodes inserted by arity validation, so
+      // reject malformed arity before those can be mistaken for the operand.
+      canonical: (ops, { engine: ce }) => {
+        // A `Sequence` operand contributes its own operands to the argument
+        // list, so the effective arity is only known after lifting them:
+        // `Type(Sequence(a, b))` arrives as one operand but supplies two
+        // arguments, and would otherwise skip arity validation entirely.
+        const args = flattenSequence(ops);
+        if (args.length === 1) return ce._fn('Type', args);
+
+        const xs = checkArity(ce, args, 1);
+        // Report the marker arity validation INTRODUCED, never merely the
+        // first `Error` in the list: since `inspectsErrors` lets a
+        // well-formed operand be an `Error` itself, `Type(Error("boom"), 2)`
+        // must surface the extra argument rather than the operand's own
+        // error. `checkArity` puts its markers at the positions the expected
+        // arity does not cover — a `missing` pad from `args.length` up, or an
+        // `unexpected-argument` from index 1 (the arity) up — so the search
+        // starts at the first such position.
+        const marker = xs
+          .slice(Math.min(1, args.length))
+          .find((x) => isFunction(x, 'Error'));
+        return marker ?? ce._fn('Type', xs);
+      },
       // The operand is lazy (Type reports the static type, without
       // evaluating), but a *non-canonical* expression has no type — a lazy
       // operand is not canonicalized, so `Type(y)` reported "unknown" even

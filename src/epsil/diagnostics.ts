@@ -15,6 +15,7 @@ export type DiagnosticCode =
   | 'end-of-comment-expected'
   | 'exponent-expected'
   | 'expression-expected'
+  | 'expression-nesting-limit' // %0 = maximum supported recursive expression nesting
   | 'hexadecimal-number-expected'
   | 'invalid-symbol-name' // %0 = symbol name
   | 'type-annotation-error' // %0 = message from the type subparser

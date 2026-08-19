@@ -43,13 +43,25 @@ export function definitionSites(
   ast: MathJsonExpression
 ): Map<string, DefinitionSite> {
   const sites = new Map<string, DefinitionSite>();
-  collect(ast, sites);
+  collect(ast, (name, site) => {
+    if (!sites.has(name)) sites.set(name, site);
+  });
+  return sites;
+}
+
+/** Every declaration site keyed by its written name's source offset. Unlike
+ * `definitionSites()`, this preserves shadowing and redeclarations. */
+export function definitionSitesByOffset(
+  ast: MathJsonExpression
+): Map<number, DefinitionSite> {
+  const sites = new Map<number, DefinitionSite>();
+  collect(ast, (_name, site) => sites.set(site.name[0], site));
   return sites;
 }
 
 function collect(
   expr: MathJsonExpression | null,
-  sites: Map<string, DefinitionSite>
+  visit: (name: string, site: DefinitionSite) => void
 ): void {
   if (expr === null) return;
   const head = operator(expr);
@@ -59,17 +71,17 @@ function collect(
     const name = symbol(target);
     const nameRange = nodeOffsets(target);
     const statement = nodeOffsets(expr);
-    if (name !== null && nameRange !== undefined && !sites.has(name)) {
+    if (name !== null && nameRange !== undefined) {
       const description =
         head === 'DefineFunction' ? definitionDescription(expr) : undefined;
-      sites.set(name, {
+      visit(name, {
         name: nameRange,
         header: headerRange(expr, head, statement ?? nameRange),
         ...(description !== undefined ? { description } : {}),
       });
     }
   }
-  for (const op of operands(expr)) collect(op, sites);
+  for (const op of operands(expr)) collect(op, visit);
 }
 
 /**

@@ -9,6 +9,7 @@
     "end-of-comment-expected": "End of comment (\"*/\") was not found",
     "exponent-expected": "An exponent was expected",
     "expression-expected": "An expression was expected",
+    "expression-nesting-limit": "Expression nesting exceeds the supported limit (%0)",
     "hexadecimal-number-expected": "A hexadecimal number was expected",
     "invalid-identifier": "\"%0\" is not a valid identifier",
     "invalid-escape-sequence": "\"%0\" is not a valid escape sequence",

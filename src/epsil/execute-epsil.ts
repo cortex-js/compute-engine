@@ -157,6 +157,8 @@ function executeEpsilBatch(
       // …and which of those names are sum VARIANTS, so re-running a
       // sugar-declared sum still reads as the sugar (see `parseEpsil`).
       sumVariants: sumVariantNames(ce),
+      // Parsing and lexing consume the same host budget as execution.
+      deadline: ce._deadlineFrame,
     });
     ast = parsed;
     diagnostics.push(...parseDiagnostics);
@@ -168,6 +170,17 @@ function executeEpsilBatch(
         makeDiagnostic(['error-directive', e.message], [0, source.length])
       );
       return { value: ce.Nothing, diagnostics };
+    }
+    if (isTimeoutCancellation(e)) {
+      return {
+        value: ce.box([
+          'Error',
+          { str: e instanceof Error ? e.message : 'Timeout exceeded' },
+          { str: 'timeout' },
+        ]),
+        diagnostics,
+        valueRange: [0, source.length],
+      };
     }
     throw e;
   }

@@ -11,6 +11,10 @@ import {
   codePointLength,
 } from './characters.js';
 import { isValidSymbol } from '../math-json/symbols.js';
+import {
+  checkDeadline,
+  type DeadlineFrame,
+} from '../common/interruptible.js';
 
 /**
  * The canonical symbol a single-codepoint glyph aliases — the CAPITALIZED
@@ -107,6 +111,7 @@ export class Lexer {
   readonly source: string;
   private pos = 0;
   private tokens: Token[] = [];
+  private deadlineTick = 0;
 
   // Trivia state for the token currently being produced. Refreshed by
   // `scanTrivia()` and consumed by `makeToken()`.
@@ -114,7 +119,10 @@ export class Lexer {
   private _precededByLinebreak = false;
   private _docComments: DocComment[] = [];
 
-  constructor(source: string) {
+  constructor(
+    source: string,
+    private readonly deadline?: DeadlineFrame
+  ) {
     this.source = source;
   }
 
@@ -124,12 +132,23 @@ export class Lexer {
 
   /** Code point at `pos + offset` (offset in UTF-16 units), or -1 past EOF. */
   private cp(offset = 0): number {
+    this.checkDeadlineStride();
     return this.source.codePointAt(this.pos + offset) ?? -1;
   }
 
   /** Code point at an absolute index `i`, or -1 past EOF. */
   private codeAt(i: number): number {
+    this.checkDeadlineStride();
     return this.source.codePointAt(i) ?? -1;
+  }
+
+  /** Honor an enclosing evaluation budget while scanning a long token. */
+  private checkDeadlineStride(): void {
+    if (
+      this.deadline !== undefined &&
+      (++this.deadlineTick & 0x3ff) === 0
+    )
+      checkDeadline(this.deadline);
   }
 
   private atEnd(): boolean {
@@ -1003,7 +1022,8 @@ export class Lexer {
   }
 }
 
-/** Convenience: tokenize `source` into a `Token[]` (never throws). */
-export function tokenize(source: string): Token[] {
-  return new Lexer(source).tokenize();
+/** Convenience: tokenize `source` into a `Token[]`. Lexical errors never
+ * throw; an explicitly supplied expired deadline still cancels the scan. */
+export function tokenize(source: string, deadline?: DeadlineFrame): Token[] {
+  return new Lexer(source, deadline).tokenize();
 }

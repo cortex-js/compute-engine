@@ -35,16 +35,17 @@ import {
   type JsonDiagnostic,
 } from '../../src/cli/format.js';
 import { compile } from '../../src/compute-engine/compilation/compile-expression.js';
-import { ComputeEngine, parseEpsil } from '../../src/epsil.js';
+import { ComputeEngine } from '../../src/epsil.js';
 import type { MathJsonExpression } from '../../src/math-json/types.js';
 import {
   operand,
   operator,
   operands,
   stringValue,
+  symbol,
 } from '../../src/math-json/utils.js';
 import {
-  definitionSites,
+  definitionSitesByOffset,
   type DefinitionSite,
 } from '../../src/epsil/definition-sites.js';
 import {
@@ -174,6 +175,8 @@ connection.onHover(({ textDocument, position }) => {
   const text = document.getText();
   const offset = document.offsetAt(position);
   const word = identifierAt(text, offset);
+  const binding =
+    word === undefined ? undefined : bindingAt(textDocument.uri, position);
 
   // Diagnostics first — an error under the cursor is what the reader is
   // asking about — then what the hovered name is. The editor stacks the raw
@@ -183,16 +186,17 @@ connection.onHover(({ textDocument, position }) => {
   // symbol hover below already captions the hovered name's declaration, the
   // diagnostic's own "defined here" quote of that same declaration is elided
   // rather than shown twice.
-  const symbol =
-    word === undefined ? undefined : describeSymbol(word.name, text);
+  const symbolHover = word === undefined
+    ? undefined
+    : describeSymbol(word.name, text, binding?.group);
   const sections = diagnosticHovers(
     textDocument.uri,
     document,
     offset,
     text,
-    symbol === undefined ? undefined : word?.name
+    symbolHover === undefined ? undefined : word?.name
   );
-  if (symbol !== undefined) sections.push(symbol);
+  if (symbolHover !== undefined) sections.push(symbolHover);
   if (sections.length === 0) return null;
 
   return {
@@ -567,10 +571,13 @@ function clip(code: string): string {
 
 /**
  * The engine consulted for hovers. Cached: constructing one costs ~10ms and
- * every lookup below is read-only (`lookupDefinition` of an unknown name
- * declares nothing), so — unlike `checkSource()`, whose canonicalization can
- * retype symbols and therefore needs a fresh engine per call — one instance
- * serves the whole session.
+ * every use below is read-only — `describeName()` of an unknown name declares
+ * nothing, and a `{ form: 'raw' }` parse boxes without binding, so it declares
+ * nothing either. Anything that CANONICALIZES needs its own engine instead:
+ * canonicalizing `x + 1` declares `x` as a `number` in the engine it runs in,
+ * and that declaration would then make a free `x` in another document look
+ * library-defined. `checkSource()` and `parseOf()` therefore each construct a
+ * fresh engine per call.
  */
 let hoverEngine: ComputeEngine | undefined;
 
@@ -585,8 +592,9 @@ let hoverCache: {
   text: string;
   tokens?: Token[];
   parse?: { ast: MathJsonExpression | null; errors: number };
-  sites?: Map<string, DefinitionSite>;
+  sites?: Map<number, DefinitionSite>;
   bindings?: BindingGroup[];
+  latexReferences?: { names: Set<string>; complete: boolean };
 } = { text: '' };
 
 function cacheFor(text: string): typeof hoverCache {
@@ -608,26 +616,31 @@ function tokensOf(text: string): Token[] {
 function parseOf(text: string): { ast: MathJsonExpression | null; errors: number } {
   const cache = cacheFor(text);
   if (cache.parse === undefined) {
-    try {
-      const [ast, diagnostics] = parseEpsil(text);
-      cache.parse = {
-        ast,
-        errors: (diagnostics ?? []).filter((d) => d.severity === 'error')
-          .length,
-      };
-    } catch {
-      cache.parse = { ast: null, errors: 1 };
-    }
+    // Match diagnostics' LaTeX-aware parser configuration so navigation and
+    // rename do not reject a document diagnostics accepted.
+    //
+    // A fresh engine per parse, same rule as `renderView()`: `parseSource`
+    // injects a CANONICAL LaTeX parse, which declares and types the symbols a
+    // `$…$` island mentions. Sharing `hoverEngine` here would carry those
+    // declarations across documents, and a free `x` in one document would then
+    // be refused a rename because another document's island made the engine
+    // report `x` as library-defined. Only one construction per edit: this
+    // result is memoized by document text.
+    const { ast, diagnostics } = parseSource(text, undefined, new ComputeEngine());
+    cache.parse = {
+      ast,
+      errors: diagnostics.filter((d) => d.severity === 'error').length,
+    };
   }
   return cache.parse;
 }
 
 /** Where the document declares each of its names. */
-function sitesOf(text: string): Map<string, DefinitionSite> {
+function sitesOf(text: string): Map<number, DefinitionSite> {
   const cache = cacheFor(text);
   if (cache.sites === undefined) {
     const { ast } = parseOf(text);
-    cache.sites = ast === null ? new Map() : definitionSites(ast);
+    cache.sites = ast === null ? new Map() : definitionSitesByOffset(ast);
   }
   return cache.sites;
 }
@@ -680,8 +693,12 @@ function identifierAt(
  * file that declares its own would describe something the reader is not
  * looking at.
  */
-function describeSymbol(name: string, text: string): string | undefined {
-  return declarationHover(name, text) ?? libraryHover(name);
+function describeSymbol(
+  name: string,
+  text: string,
+  group?: BindingGroup
+): string | undefined {
+  return declarationHover(group, text) ?? libraryHover(name);
 }
 
 /**
@@ -692,8 +709,14 @@ function describeSymbol(name: string, text: string): string | undefined {
  * buffer that does not yet run, and reports what is WRITTEN rather than what
  * the engine would infer.
  */
-function declarationHover(name: string, text: string): string | undefined {
-  const site = sitesOf(text).get(name);
+function declarationHover(
+  group: BindingGroup | undefined,
+  text: string
+): string | undefined {
+  if (group === undefined || group.kind === 'free') return undefined;
+  const definition = group.occurrences.find((o) => o.role === 'definition');
+  if (definition === undefined) return undefined;
+  const site = sitesOf(text).get(definition.start);
   if (site === undefined) return undefined;
 
   const quoted = text
@@ -705,7 +728,7 @@ function declarationHover(name: string, text: string): string | undefined {
   const sections = [
     // Caption the quote: without it, hovering a USE of `x` pops up a bare
     // `let x` with nothing saying that this is where `x` was declared.
-    `Declaration of \`${name}\` (line ${lineNumberAt(text, site.name[0])}):`,
+    `Declaration of \`${group.name}\` (line ${lineNumberAt(text, site.name[0])}):`,
     codeBlock(clip(quoted)),
   ];
   // The doc comment written before the definition (`///` lines or a
@@ -839,7 +862,11 @@ connection.onDocumentSymbol(({ textDocument }): DocumentSymbol[] | SymbolInforma
   if (document === undefined) return null;
   const text = document.getText();
 
-  type Entry = DocumentSymbol & { span: [number, number] };
+  type Entry = DocumentSymbol & {
+    span: [number, number];
+    scope: [number, number];
+    container: boolean;
+  };
   const entries: Entry[] = [];
   for (const group of bindingsOf(text)) {
     const kind = outlineKind(group);
@@ -850,6 +877,8 @@ connection.onDocumentSymbol(({ textDocument }): DocumentSymbol[] | SymbolInforma
       name: group.name,
       kind,
       span,
+      scope: group.scope,
+      container: kind === SymbolKind.Function,
       range: {
         start: document.positionAt(span[0]),
         end: document.positionAt(span[1]),
@@ -869,25 +898,42 @@ connection.onDocumentSymbol(({ textDocument }): DocumentSymbol[] | SymbolInforma
       location: { uri: textDocument.uri, range },
     }));
 
-  // Nest by span containment: a function-local `let` files under its
-  // function. The entries are in source order, so a stack of open containers
-  // suffices. The internal `span` is split off here — only protocol fields
-  // go over the wire.
+  // Nest by lexical scope, not declaration range. A multi-clause function's
+  // display range crosses every clause, including unrelated top-level
+  // declarations between them. Only functions are outline containers.
   const roots: DocumentSymbol[] = [];
-  const stack: { span: [number, number]; symbol: DocumentSymbol }[] = [];
+  // Every container seen so far, in source order, rather than a stack that is
+  // unwound: a multi-clause function is a SINGLE entry, so once it were popped
+  // it could never be pushed back — and a declaration between two of its
+  // clauses does pop it, orphaning the locals of every later clause. The
+  // parent is instead searched for per entry, which needs no re-push.
+  const containers: {
+    span: [number, number];
+    enclosingScope: [number, number];
+    symbol: DocumentSymbol;
+  }[] = [];
   for (const entry of entries) {
-    const { span, ...symbol } = entry;
-    while (
-      stack.length > 0 &&
-      !(
-        stack[stack.length - 1].span[0] <= span[0] &&
-        span[1] <= stack[stack.length - 1].span[1]
-      )
-    )
-      stack.pop();
-    const parent = stack[stack.length - 1];
+    const { span, scope, container, ...symbol } = entry;
+    // The innermost container whose display range encloses this entry's SCOPE.
+    // Entries are sorted by start, so among the containers that enclose it the
+    // last one is the innermost. A declaration sharing the container's own
+    // enclosing scope is a sibling, even when the container's widened display
+    // range surrounds it.
+    let parent: (typeof containers)[number] | undefined;
+    for (let i = containers.length - 1; i >= 0; i--) {
+      const candidate = containers[i];
+      if (
+        (scope[0] !== candidate.enclosingScope[0] ||
+          scope[1] !== candidate.enclosingScope[1]) &&
+        candidate.span[0] <= scope[0] &&
+        scope[1] <= candidate.span[1]
+      ) {
+        parent = candidate;
+        break;
+      }
+    }
     (parent === undefined ? roots : parent.symbol.children!).push(symbol);
-    stack.push({ span, symbol });
+    if (container) containers.push({ span, enclosingScope: scope, symbol });
   }
   return roots;
 });
@@ -918,8 +964,59 @@ function namedArgumentLabels(text: string): Set<string> {
   return labels;
 }
 
+/** Names referenced by embedded LaTeX. Those MathJSON nodes lack individual
+ * Epsil offsets, so rename cannot edit them; collecting their names lets an
+ * unrelated rename proceed while a potentially incomplete one fails closed. */
+function latexReferences(text: string): { names: Set<string>; complete: boolean } {
+  const cache = cacheFor(text);
+  if (cache.latexReferences !== undefined) return cache.latexReferences;
+
+  const names = new Set<string>();
+  let complete = true;
+  const visit = (node: MathJsonExpression | null): void => {
+    if (node === null) return;
+    const leaf = symbol(node);
+    if (leaf !== null) names.add(leaf);
+    const head = operator(node);
+    if (typeof head === 'string' && head !== '') names.add(head);
+    else if (typeof head === 'object') visit(head);
+    for (const op of operands(node)) visit(op);
+  };
+
+  hoverEngine ??= new ComputeEngine();
+  for (const token of tokensOf(text)) {
+    if (token.type !== 'LATEX_ISLAND' || token.island === undefined) continue;
+    try {
+      const parsed = hoverEngine.parse(
+        text.slice(token.island.start, token.island.end),
+        // Canonicalization may erase a written reference (`x - x` -> `0`).
+        // Rename safety needs every source symbol, not the simplified value.
+        // `form: 'raw'` neither binds nor canonicalizes, so it also writes
+        // nothing into the shared engine — the legacy `{ canonical: false }`
+        // spelling means the same thing at runtime but is not on the typed
+        // surface of `ComputeEngine`.
+        { form: 'raw' }
+      );
+      if (parsed.errors.length > 0) complete = false;
+      visit(parsed.json);
+    } catch {
+      complete = false;
+    }
+  }
+  cache.latexReferences = { names, complete };
+  return cache.latexReferences;
+}
+
 /** Why this binding cannot be renamed, or `undefined` when it can. */
 function renameRefusal(group: BindingGroup, text: string): string | undefined {
+  const latex = latexReferences(text);
+  if (!latex.complete)
+    return 'Cannot rename while a LaTeX island cannot be analyzed safely.';
+  if (latex.names.has(group.name))
+    return (
+      `Cannot rename \`${group.name}\`: it is referenced inside a LaTeX ` +
+      'island, whose source spelling is not tracked by rename.'
+    );
   if (group.kind === 'type')
     return (
       'Cannot rename a type: uses of a type name inside type annotations ' +

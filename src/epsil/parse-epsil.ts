@@ -1,5 +1,6 @@
 import { MathJsonExpression } from '../math-json/types.js';
 import { Origin } from '../common/debug.js';
+import type { DeadlineFrame } from '../common/interruptible.js';
 
 import { ParsingDiagnostic } from './diagnostics.js';
 import { Parser } from './parser.js';
@@ -51,6 +52,8 @@ export function analyzeErrors(
  * single exception: a `#error` pragma throws a `FatalParsingError`. It is
  * propagated to the caller (`executeEpsil` catches it and turns it into a
  * diagnostic, so a notebook cell never throws to the host — plan §5).
+ * An explicitly supplied evaluation `deadline` is also allowed to throw its
+ * cancellation so an execution host can stop parsing immediately.
  *
  * `options.allowHostPragmas` (default `false`) gates the host-state pragmas
  * `#env`/`#navigator`: when off they emit a `host-pragma-disabled` diagnostic
@@ -82,6 +85,7 @@ export function parseEpsil(
     typeNames?: readonly string[];
     protocolNames?: readonly string[];
     sumVariants?: Readonly<Record<string, string>>;
+    deadline?: DeadlineFrame;
   }
 ): [MathJsonExpression, ParsingDiagnostic[]] {
   const parser = new Parser(source, {
@@ -91,6 +95,7 @@ export function parseEpsil(
     typeNames: options?.typeNames,
     protocolNames: options?.protocolNames,
     sumVariants: options?.sumVariants,
+    deadline: options?.deadline,
   });
 
   const value: MathJsonExpression | null = parser.parseProgram();
