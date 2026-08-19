@@ -34,6 +34,14 @@ fib(n: integer) = fib(n - 1) + fib(n - 2)
   `epsil doc <name>` prints; for a name your file declares, the declaration as
   you wrote it. Hovering a word inside a string or a comment shows nothing, so
   prose is never mistaken for code.
+- **Navigation and rename** — Go to Definition, Find All References,
+  occurrence highlighting, an Outline (with breadcrumbs and _Go to Symbol_),
+  and Rename Symbol (<kbd>F2</kbd>). All of it is scope-aware: a lambda
+  parameter `x` and a top-level `x` are different symbols, a use above a
+  shadowing `let` resolves to the outer binding, and the clauses of a
+  multi-clause function count as one definition. Rename refuses to make a
+  change it cannot make correctly — a name that collides with one already in
+  scope, a library builtin, a type name — rather than corrupting the program.
 - **Epsil: Show Representation** (`epsil.showRepresentation`, the `{}` button
   in the editor title bar) — opens a read-only pane beside your file showing
   what the engine makes of it: the **MathJSON** it parses to, its **canonical

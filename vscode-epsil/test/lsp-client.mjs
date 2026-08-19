@@ -74,10 +74,12 @@ export class LspClient {
       });
       return;
     }
-    const resolve = this.pending.get(msg.id);
-    if (resolve !== undefined) {
+    const entry = this.pending.get(msg.id);
+    if (entry !== undefined) {
       this.pending.delete(msg.id);
-      resolve(msg.result);
+      entry.resolve(
+        entry.raw ? { result: msg.result, error: msg.error } : msg.result
+      );
     }
   }
 
@@ -95,7 +97,17 @@ export class LspClient {
   request(method, params) {
     const id = this.id++;
     return new Promise((resolve) => {
-      this.pending.set(id, resolve);
+      this.pending.set(id, { resolve, raw: false });
+      this.#write({ jsonrpc: '2.0', id, method, params });
+    });
+  }
+
+  /** Like `request`, but resolves `{result, error}` so a scenario can assert
+   * on a server-side refusal (a rename conflict, say) instead of losing it. */
+  requestRaw(method, params) {
+    const id = this.id++;
+    return new Promise((resolve) => {
+      this.pending.set(id, { resolve, raw: true });
       this.#write({ jsonrpc: '2.0', id, method, params });
     });
   }

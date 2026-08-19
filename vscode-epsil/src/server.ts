@@ -3,15 +3,25 @@ import {
   createConnection,
   DiagnosticSeverity,
   DidChangeConfigurationNotification,
+  DocumentHighlightKind,
+  LSPErrorCodes,
   MarkupKind,
   ProposedFeatures,
+  ResponseError,
+  SymbolKind,
   TextDocuments,
   TextDocumentSyncKind,
   type CodeAction,
   type Diagnostic,
+  type DocumentHighlight,
+  type DocumentSymbol,
   type InitializeParams,
   type InitializeResult,
+  type Location,
+  type Range,
+  type SymbolInformation,
   type TextEdit,
+  type WorkspaceEdit,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
@@ -27,12 +37,25 @@ import {
 import { compile } from '../../src/compute-engine/compilation/compile-expression.js';
 import { ComputeEngine, parseEpsil } from '../../src/epsil.js';
 import type { MathJsonExpression } from '../../src/math-json/types.js';
-import { operator, operands } from '../../src/math-json/utils.js';
+import {
+  operand,
+  operator,
+  operands,
+  stringValue,
+} from '../../src/math-json/utils.js';
 import {
   definitionSites,
   type DefinitionSite,
 } from '../../src/epsil/definition-sites.js';
+import {
+  documentBindings,
+  isNameVisibleAt,
+  occurrenceAt,
+  type BindingGroup,
+  type Occurrence,
+} from '../../src/epsil/occurrences.js';
 import { ERROR_EXPLANATIONS } from '../../src/epsil/error-explanations.js';
+import { HARD_RESERVED_WORDS } from '../../src/epsil/reserved-words.js';
 import type { ParsingDiagnostic } from '../../src/epsil/diagnostics.js';
 import { tokenize } from '../../src/epsil/lexer.js';
 import type { Token } from '../../src/epsil/tokens.js';
@@ -49,6 +72,7 @@ const documents = new TextDocuments(TextDocument);
 let hasConfigurationCapability = false;
 let hasRelatedInformationCapability = false;
 let hasCodeDescriptionCapability = false;
+let hasHierarchicalSymbolCapability = false;
 let diagnosticsEnabled = true;
 
 /** Where the extended error explanations are hosted — one section per
@@ -97,11 +121,21 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
   hasCodeDescriptionCapability =
     params.capabilities.textDocument?.publishDiagnostics
       ?.codeDescriptionSupport === true;
+  // With this capability the outline is served as a TREE (a function's local
+  // declarations nest under it); without it, as a flat symbol list.
+  hasHierarchicalSymbolCapability =
+    params.capabilities.textDocument?.documentSymbol
+      ?.hierarchicalDocumentSymbolSupport === true;
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix] },
       hoverProvider: true,
+      definitionProvider: true,
+      referencesProvider: true,
+      documentHighlightProvider: true,
+      documentSymbolProvider: true,
+      renameProvider: { prepareProvider: true },
     },
   };
 });
@@ -541,16 +575,18 @@ function clip(code: string): string {
 let hoverEngine: ComputeEngine | undefined;
 
 /**
- * The lexed and parsed views of the document a hover is being served for,
- * memoized so that moving the mouse across one buffer does not re-lex and
- * re-parse it per pixel. Keyed by the text itself — an edit produces different
- * text and therefore a miss — and one entry deep, since hovers arrive in runs
- * on a single document.
+ * The lexed and parsed views of the document a hover or navigation request is
+ * being served for, memoized so that moving the mouse across one buffer does
+ * not re-lex and re-parse it per pixel. Keyed by the text itself — an edit
+ * produces different text and therefore a miss — and one entry deep, since
+ * requests arrive in runs on a single document.
  */
 let hoverCache: {
   text: string;
   tokens?: Token[];
+  parse?: { ast: MathJsonExpression | null; errors: number };
   sites?: Map<string, DefinitionSite>;
+  bindings?: BindingGroup[];
 } = { text: '' };
 
 function cacheFor(text: string): typeof hoverCache {
@@ -566,18 +602,44 @@ function tokensOf(text: string): Token[] {
   return cache.tokens;
 }
 
-/** Where the document declares each of its names. The PARSER can throw (a
- * `#error` pragma), which for a hover just means "no declarations known". */
+/** The document's raw AST with its error count. The PARSER can throw (a
+ * `#error` pragma), which is reported as "no tree, one error" — hovers then
+ * know no declarations and a rename knows to refuse. */
+function parseOf(text: string): { ast: MathJsonExpression | null; errors: number } {
+  const cache = cacheFor(text);
+  if (cache.parse === undefined) {
+    try {
+      const [ast, diagnostics] = parseEpsil(text);
+      cache.parse = {
+        ast,
+        errors: (diagnostics ?? []).filter((d) => d.severity === 'error')
+          .length,
+      };
+    } catch {
+      cache.parse = { ast: null, errors: 1 };
+    }
+  }
+  return cache.parse;
+}
+
+/** Where the document declares each of its names. */
 function sitesOf(text: string): Map<string, DefinitionSite> {
   const cache = cacheFor(text);
   if (cache.sites === undefined) {
-    try {
-      cache.sites = definitionSites(parseEpsil(text)[0]);
-    } catch {
-      cache.sites = new Map();
-    }
+    const { ast } = parseOf(text);
+    cache.sites = ast === null ? new Map() : definitionSites(ast);
   }
   return cache.sites;
+}
+
+/** Every symbol occurrence in the document, resolved to its binding —
+ * computed on the raw AST, which is the only tree carrying source offsets on
+ * each written symbol. Best-effort on a recovered parse: what parsed,
+ * resolves. */
+function bindingsOf(text: string): BindingGroup[] {
+  const cache = cacheFor(text);
+  cache.bindings ??= documentBindings(parseOf(text).ast, text);
+  return cache.bindings;
 }
 
 /**
@@ -685,6 +747,318 @@ function codeBlock(code: string): string {
   );
   return [`${fence}epsil`, code, fence].join('\n');
 }
+
+//
+// ─── Navigation: definition, references, highlights, outline, rename ────────
+//
+// All five are served from ONE analysis: `bindingsOf(text)` resolves every
+// symbol occurrence in the raw AST to its binding, scope-aware (see
+// `src/epsil/occurrences.ts`). A cursor position is first snapped to a name
+// token by the LEXER (`identifierAt` — same rule as the hover, so comments
+// and string contents are never names), then matched to the occurrence at
+// that token's span.
+//
+
+/** The binding group under the cursor, with everything the handlers need.
+ * `undefined` when the cursor is not on a resolved name occurrence — being
+ * on a TOKEN is not enough: `number` in a type annotation lexes as a symbol
+ * but is no occurrence (annotations are strings to the resolver). */
+function bindingAt(
+  uri: string,
+  position: { line: number; character: number }
+):
+  | {
+      document: TextDocument;
+      text: string;
+      word: { name: string; start: number; end: number };
+      groups: BindingGroup[];
+      group: BindingGroup;
+    }
+  | undefined {
+  const document = documents.get(uri);
+  if (document === undefined) return undefined;
+  const text = document.getText();
+  const word = identifierAt(text, document.offsetAt(position));
+  if (word === undefined) return undefined;
+  const groups = bindingsOf(text);
+  const found = occurrenceAt(groups, word.start);
+  if (found === undefined || found.group.name !== word.name) return undefined;
+  return { document, text, word, groups, group: found.group };
+}
+
+function rangeOf(document: TextDocument, span: Occurrence): Range {
+  return {
+    start: document.positionAt(span.start),
+    end: document.positionAt(span.end),
+  };
+}
+
+connection.onDefinition(({ textDocument, position }): Location | null => {
+  const at = bindingAt(textDocument.uri, position);
+  if (at === undefined) return null;
+  // The first definition occurrence: a multi-clause function's first clause.
+  // A free name — undeclared, or a library builtin — has no source to go to.
+  const definition = at.group.occurrences.find((o) => o.role === 'definition');
+  if (definition === undefined) return null;
+  return { uri: textDocument.uri, range: rangeOf(at.document, definition) };
+});
+
+connection.onReferences(({ textDocument, position, context }): Location[] | null => {
+  const at = bindingAt(textDocument.uri, position);
+  if (at === undefined) return null;
+  return at.group.occurrences
+    .filter((o) => context.includeDeclaration || o.role !== 'definition')
+    .map((o) => ({ uri: textDocument.uri, range: rangeOf(at.document, o) }));
+});
+
+connection.onDocumentHighlight(({ textDocument, position }): DocumentHighlight[] | null => {
+  const at = bindingAt(textDocument.uri, position);
+  if (at === undefined) return null;
+  return at.group.occurrences.map((o) => ({
+    range: rangeOf(at.document, o),
+    kind:
+      o.role === 'read' ? DocumentHighlightKind.Read : DocumentHighlightKind.Write,
+  }));
+});
+
+//
+// ─── Outline ────────────────────────────────────────────────────────────────
+
+/** The outline's kind for a binding — the bindings that are NOT listed
+ * (parameters, loop and match-pattern variables, free names) return
+ * `undefined`. */
+function outlineKind(group: BindingGroup): SymbolKind | undefined {
+  if (group.kind === 'function') return SymbolKind.Function;
+  if (group.kind === 'variable') return SymbolKind.Variable;
+  if (group.kind === 'type') return SymbolKind.Struct;
+  return undefined;
+}
+
+connection.onDocumentSymbol(({ textDocument }): DocumentSymbol[] | SymbolInformation[] | null => {
+  const document = documents.get(textDocument.uri);
+  if (document === undefined) return null;
+  const text = document.getText();
+
+  type Entry = DocumentSymbol & { span: [number, number] };
+  const entries: Entry[] = [];
+  for (const group of bindingsOf(text)) {
+    const kind = outlineKind(group);
+    const definition = group.occurrences.find((o) => o.role === 'definition');
+    if (kind === undefined || definition === undefined) continue;
+    const span = group.declaration ?? [definition.start, definition.end];
+    entries.push({
+      name: group.name,
+      kind,
+      span,
+      range: {
+        start: document.positionAt(span[0]),
+        end: document.positionAt(span[1]),
+      },
+      selectionRange: rangeOf(document, definition),
+      children: [],
+    });
+  }
+  // Source order; at an equal start the WIDER span first, so a container
+  // precedes its contents when nesting below.
+  entries.sort((a, b) => a.span[0] - b.span[0] || b.span[1] - a.span[1]);
+
+  if (!hasHierarchicalSymbolCapability)
+    return entries.map(({ name, kind, range }) => ({
+      name,
+      kind,
+      location: { uri: textDocument.uri, range },
+    }));
+
+  // Nest by span containment: a function-local `let` files under its
+  // function. The entries are in source order, so a stack of open containers
+  // suffices. The internal `span` is split off here — only protocol fields
+  // go over the wire.
+  const roots: DocumentSymbol[] = [];
+  const stack: { span: [number, number]; symbol: DocumentSymbol }[] = [];
+  for (const entry of entries) {
+    const { span, ...symbol } = entry;
+    while (
+      stack.length > 0 &&
+      !(
+        stack[stack.length - 1].span[0] <= span[0] &&
+        span[1] <= stack[stack.length - 1].span[1]
+      )
+    )
+      stack.pop();
+    const parent = stack[stack.length - 1];
+    (parent === undefined ? roots : parent.symbol.children!).push(symbol);
+    stack.push({ span, symbol });
+  }
+  return roots;
+});
+
+//
+// ─── Rename ─────────────────────────────────────────────────────────────────
+
+/**
+ * Every name used as a named-argument label anywhere in the document
+ * (`f(x: 3)`). A label names the callee's PARAMETER; which callee a call
+ * reaches is not resolved statically here, so a parameter whose name appears
+ * as ANY label is refused a rename rather than renamed incompletely — a
+ * left-behind label would change which parameter the argument binds to.
+ */
+function namedArgumentLabels(text: string): Set<string> {
+  const labels = new Set<string>();
+  const visit = (node: MathJsonExpression | null): void => {
+    if (node === null || typeof node !== 'object') return;
+    if (operator(node) === 'NamedArgument') {
+      const label = stringValue(operand(node, 1));
+      if (label !== null) labels.add(label);
+    }
+    const head = operator(node);
+    if (typeof head === 'object') visit(head);
+    for (const op of operands(node)) visit(op);
+  };
+  visit(parseOf(text).ast);
+  return labels;
+}
+
+/** Why this binding cannot be renamed, or `undefined` when it can. */
+function renameRefusal(group: BindingGroup, text: string): string | undefined {
+  if (group.kind === 'type')
+    return (
+      'Cannot rename a type: uses of a type name inside type annotations ' +
+      'are not tracked, so they would not be renamed with it.'
+    );
+  if (group.kind === 'free') {
+    // An undeclared name CAN be renamed (all its free uses rename together),
+    // but a library builtin cannot — its definition is not in this file.
+    hoverEngine ??= new ComputeEngine();
+    if (describeName(hoverEngine, group.name) !== undefined)
+      return `Cannot rename \`${group.name}\`: it is defined by the library, not by this file.`;
+  }
+  if (group.kind === 'parameter' && namedArgumentLabels(text).has(group.name))
+    return (
+      `Cannot rename the parameter \`${group.name}\`: a call site passes it ` +
+      `by name (\`${group.name}: …\`), and named-argument labels are not ` +
+      'tracked by rename yet.'
+    );
+  return undefined;
+}
+
+connection.onPrepareRename(({ textDocument, position }) => {
+  const at = bindingAt(textDocument.uri, position);
+  if (at === undefined) return null;
+  const refusal = renameRefusal(at.group, at.text);
+  if (refusal !== undefined)
+    throw new ResponseError(LSPErrorCodes.RequestFailed, refusal);
+  // Same gate as the rename itself: on a broken parse the occurrence list is
+  // incomplete, so the rename WILL be refused — better to say so before the
+  // user is offered an edit box and types a name.
+  if (parseOf(at.text).errors > 0)
+    throw new ResponseError(
+      LSPErrorCodes.RequestFailed,
+      'Cannot rename while the file has parse errors.'
+    );
+  return {
+    range: {
+      start: at.document.positionAt(at.word.start),
+      end: at.document.positionAt(at.word.end),
+    },
+    placeholder: at.word.name,
+  };
+});
+
+connection.onRenameRequest(({ textDocument, position, newName }): WorkspaceEdit | null => {
+  const at = bindingAt(textDocument.uri, position);
+  if (at === undefined) return null;
+  const refusal = renameRefusal(at.group, at.text);
+  if (refusal !== undefined)
+    throw new ResponseError(LSPErrorCodes.RequestFailed, refusal);
+
+  // On a broken parse the occurrence list is incomplete (whatever failed to
+  // parse resolved nothing), and an incomplete rename corrupts the program.
+  if (parseOf(at.text).errors > 0)
+    throw new ResponseError(
+      LSPErrorCodes.RequestFailed,
+      'Cannot rename while the file has parse errors.'
+    );
+
+  // The new name must lex as ONE symbol token — plain or verbatim — covering
+  // the whole input. A verbatim spelling must also be well-formed: the lexer
+  // RECOVERS an unterminated `` `foo `` into a symbol token, but inserting
+  // that raw spelling would leave an unterminated name in the program.
+  const spelling = newName.trim();
+  const tokens = tokenize(spelling).filter((t) => t.type !== 'EOF');
+  const token =
+    tokens.length === 1 &&
+    tokens[0].start === 0 &&
+    tokens[0].end === spelling.length &&
+    (tokens[0].type === 'SYMBOL' ||
+      (tokens[0].type === 'VERBATIM_SYMBOL' &&
+        spelling.length >= 3 &&
+        spelling.endsWith('`')))
+      ? tokens[0]
+      : undefined;
+  if (token === undefined)
+    throw new ResponseError(
+      LSPErrorCodes.RequestFailed,
+      `\`${newName}\` is not a valid symbol name.`
+    );
+  // The checks below run on the COOKED name — `∞` lexes as the literal
+  // `Infinity` and must be caught by what it MEANS, not how it is typed. An
+  // underscore-only plain spelling is the discard wildcard in pattern
+  // position: renaming a binding to `_` would orphan its uses.
+  const cooked = token.value ?? token.text;
+  if (token.type === 'SYMBOL' && /^_+$/.test(cooked))
+    throw new ResponseError(
+      LSPErrorCodes.RequestFailed,
+      `\`${spelling}\` is the discard wildcard, not a name.`
+    );
+  if (token.type === 'SYMBOL' && HARD_RESERVED_WORDS.has(cooked))
+    throw new ResponseError(
+      LSPErrorCodes.RequestFailed,
+      `\`${cooked}\` is a reserved word. The verbatim form \`\`${cooked}\`\` can spell it.`
+    );
+  if (cooked === at.group.name) return null;
+
+  // Renaming a FREE name to a library name would silently rebind every use
+  // to the library's meaning (`x` → `Pi` turns `x + 1` into π + 1). A BOUND
+  // group is safe: its binder shadows the library inside its scope.
+  if (at.group.kind === 'free') {
+    hoverEngine ??= new ComputeEngine();
+    if (describeName(hoverEngine, cooked) !== undefined)
+      throw new ResponseError(
+        LSPErrorCodes.RequestFailed,
+        `\`${cooked}\` is a library name; renaming \`${at.group.name}\` to it would change what the program means.`
+      );
+  }
+
+  // Refuse a rename that would change what any occurrence binds to — in
+  // either direction: the new name already visible at a renamed occurrence
+  // would capture it, and an existing use of the new name inside the renamed
+  // binding's scope would be captured by it. Deliberately over-approximate
+  // (scope spans, not exact shadowing): declining a safe rename costs a
+  // manual edit; performing an unsafe one corrupts the program.
+  const conflict = new ResponseError(
+    LSPErrorCodes.RequestFailed,
+    `\`${cooked}\` is already in use in an overlapping scope; renaming would change what it refers to.`
+  );
+  for (const o of at.group.occurrences)
+    if (isNameVisibleAt(at.groups, cooked, o.start)) throw conflict;
+  const visibleFrom = Math.max(at.group.scope[0], at.group.visibleFrom);
+  for (const other of at.groups)
+    if (other !== at.group && other.name === cooked)
+      for (const o of other.occurrences)
+        if (o.start >= visibleFrom && o.start < at.group.scope[1])
+          throw conflict;
+
+  return {
+    changes: {
+      [textDocument.uri]: at.group.occurrences.map((o) => ({
+        range: rangeOf(at.document, o),
+        // The spelling as typed: a verbatim occurrence being renamed to a
+        // plain name loses its backticks (the span covers them).
+        newText: spelling,
+      })),
+    },
+  };
+});
 
 //
 // ─── Quick fixes ────────────────────────────────────────────────────────────

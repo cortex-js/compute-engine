@@ -428,5 +428,319 @@ await scenario('representation views on a broken program', undefined, async (c) 
   );
 });
 
+// ── Navigation: definition, references, highlights, rename ─────────────
+//
+// One program exercises the scope rules end to end: an outer `x`, a
+// function-local `y`, a shadowing local `x` (uses above it bind outward —
+// interpreter-verified semantics), and uses of everything at top level.
+const NAV_SOURCE = [
+  'let x = 1', //          0
+  'function f() {', //     1
+  ' let y = x', //         2  ← this x is the OUTER x
+  ' let x = 2', //         3
+  ' x + y', //             4  ← this x is the INNER x
+  '}', //                  5
+  'x + f(x)', //           6
+].join('\n');
+
+await scenario('navigation', undefined, async (c) => {
+  await c.open(URI, NAV_SOURCE);
+
+  const outer = await c.request('textDocument/definition', {
+    textDocument: { uri: URI },
+    position: { line: 6, character: 0 },
+  });
+  check(
+    'go-to-definition from a top-level use finds the outer let',
+    outer?.range.start.line === 0 && outer.range.start.character === 4,
+    JSON.stringify(outer)
+  );
+
+  const inner = await c.request('textDocument/definition', {
+    textDocument: { uri: URI },
+    position: { line: 4, character: 1 },
+  });
+  check(
+    'go-to-definition under a shadowing let finds the local, not the outer',
+    inner?.range.start.line === 3 && inner.range.start.character === 5,
+    JSON.stringify(inner)
+  );
+
+  const fn = await c.request('textDocument/definition', {
+    textDocument: { uri: URI },
+    position: { line: 6, character: 5 },
+  });
+  check(
+    'go-to-definition on a call finds the function statement',
+    fn?.range.start.line === 1 && fn.range.start.character === 9,
+    JSON.stringify(fn)
+  );
+
+  const references = await c.request('textDocument/references', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 4 },
+    context: { includeDeclaration: true },
+  });
+  check(
+    'references to the outer x span its declaration and every co-binding use',
+    references?.length === 4 &&
+      references.some((r) => r.range.start.line === 2) &&
+      references.filter((r) => r.range.start.line === 6).length === 2 &&
+      // The shadowed uses on lines 3–4 belong to the INNER x.
+      !references.some(
+        (r) => r.range.start.line === 3 || r.range.start.line === 4
+      ),
+    JSON.stringify(references)
+  );
+
+  const highlights = await c.request('textDocument/documentHighlight', {
+    textDocument: { uri: URI },
+    position: { line: 4, character: 1 },
+  });
+  check(
+    'occurrence highlights cover the inner x only, write-kinded at its definition',
+    highlights?.length === 2 &&
+      highlights[0].range.start.line === 3 &&
+      highlights[0].kind === 3 && // Write
+      highlights[1].range.start.line === 4 &&
+      highlights[1].kind === 2, // Read
+    JSON.stringify(highlights)
+  );
+
+  const prepared = await c.request('textDocument/prepareRename', {
+    textDocument: { uri: URI },
+    position: { line: 2, character: 5 },
+  });
+  check(
+    'prepareRename answers the name token range and placeholder',
+    prepared?.placeholder === 'y' &&
+      prepared.range.start.line === 2 &&
+      prepared.range.start.character === 5 &&
+      prepared.range.end.character === 6,
+    JSON.stringify(prepared)
+  );
+
+  const rename = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 2, character: 5 },
+    newName: 'total',
+  });
+  const edits = rename?.changes?.[URI];
+  check(
+    'renaming the local y edits its two occurrences and nothing else',
+    edits?.length === 2 &&
+      edits.every((e) => e.newText === 'total') &&
+      edits[0].range.start.line === 2 &&
+      edits[1].range.start.line === 4 &&
+      edits[1].range.start.character === 5,
+    JSON.stringify(rename)
+  );
+
+  const captured = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 4, character: 1 },
+    newName: 'y',
+  });
+  check(
+    'a rename that would capture an existing name is refused',
+    captured.error?.message.includes('already in use') === true,
+    JSON.stringify(captured)
+  );
+
+  const notAName = await c.request('textDocument/definition', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 0 }, // the `function` keyword
+  });
+  check('a non-name position has no definition', notAName === null, JSON.stringify(notAName));
+});
+
+await scenario(
+  'outline',
+  { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
+  async (c) => {
+    await c.open(URI, NAV_SOURCE);
+    const symbols = await c.request('textDocument/documentSymbol', {
+      textDocument: { uri: URI },
+    });
+    const f = symbols?.find((s) => s.name === 'f');
+    check(
+      'the outline nests function-local declarations under the function',
+      symbols?.length === 2 &&
+        symbols[0].name === 'x' &&
+        symbols[0].kind === 13 && // Variable
+        f?.kind === 12 && // Function
+        f.children.map((s) => s.name).join(',') === 'y,x',
+      JSON.stringify(symbols)
+    );
+  }
+);
+
+await scenario('outline for a flat client', undefined, async (c) => {
+  await c.open(URI, NAV_SOURCE);
+  const symbols = await c.request('textDocument/documentSymbol', {
+    textDocument: { uri: URI },
+  });
+  check(
+    'a client without hierarchy support gets a flat SymbolInformation list',
+    symbols?.length === 4 &&
+      symbols.every((s) => s.location?.uri === URI) &&
+      symbols.map((s) => s.name).join(',') === 'x,f,y,x',
+    JSON.stringify(symbols)
+  );
+});
+
+await scenario('rename refusals', undefined, async (c) => {
+  await c.open(
+    URI,
+    ['type Point = tuple<number, number>', 'let z = Pi + 1', 'w = z'].join('\n')
+  );
+
+  const type = await c.requestRaw('textDocument/prepareRename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 5 },
+  });
+  check(
+    'a type cannot be renamed — its annotation uses live in strings',
+    type.error?.message.includes('Cannot rename a type') === true,
+    JSON.stringify(type)
+  );
+
+  const library = await c.requestRaw('textDocument/prepareRename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 8 },
+  });
+  check(
+    'a library builtin cannot be renamed',
+    library.error?.message.includes('library') === true,
+    JSON.stringify(library)
+  );
+
+  const reserved = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 4 },
+    newName: 'while',
+  });
+  check(
+    'a reserved word is refused as a new name',
+    reserved.error?.message.includes('reserved word') === true,
+    JSON.stringify(reserved)
+  );
+
+  const invalid = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 4 },
+    newName: '9bad',
+  });
+  check(
+    'a non-name is refused as a new name',
+    invalid.error?.message.includes('not a valid symbol name') === true,
+    JSON.stringify(invalid)
+  );
+
+  const collides = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 4 },
+    newName: 'w',
+  });
+  check(
+    'renaming z to a name already used in its scope is refused',
+    collides.error?.message.includes('already in use') === true,
+    JSON.stringify(collides)
+  );
+
+  const wildcard = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 4 },
+    newName: '_',
+  });
+  check(
+    'the discard wildcard is refused as a new name',
+    wildcard.error?.message.includes('discard wildcard') === true,
+    JSON.stringify(wildcard)
+  );
+
+  const unterminated = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 4 },
+    newName: '`bad',
+  });
+  check(
+    'an unterminated verbatim spelling is refused as a new name',
+    unterminated.error?.message.includes('not a valid symbol name') === true,
+    JSON.stringify(unterminated)
+  );
+
+  const glyphReserved = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 4 },
+    newName: '∞',
+  });
+  check(
+    'a glyph that cooks to a reserved literal is refused by its cooked name',
+    glyphReserved.error?.message.includes('reserved word') === true &&
+      glyphReserved.error.message.includes('Infinity'),
+    JSON.stringify(glyphReserved)
+  );
+
+  const renamed = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 4 },
+    newName: 'q',
+  });
+  check(
+    'a conflict-free rename of the same symbol succeeds',
+    renamed?.changes?.[URI]?.length === 2,
+    JSON.stringify(renamed)
+  );
+});
+
+await scenario('rename capture by the library and by labels', undefined, async (c) => {
+  await c.open(URI, 'k + 1');
+  const intoLibrary = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 0 },
+    newName: 'Pi',
+  });
+  check(
+    'a free name cannot be renamed INTO a library name',
+    intoLibrary.error?.message.includes('library name') === true,
+    JSON.stringify(intoLibrary)
+  );
+
+  await c.open(URI, 'g(a) = a + 1\ng(a: 2)');
+  const labeled = await c.requestRaw('textDocument/prepareRename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 2 },
+  });
+  check(
+    'a parameter passed by name at a call site refuses rename',
+    labeled.error?.message.includes('passes it by name') === true,
+    JSON.stringify(labeled)
+  );
+});
+
+await scenario('rename on a broken parse', undefined, async (c) => {
+  await c.open(URI, 'q = 2\nlet = 1');
+  const refused = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 0 },
+    newName: 'r',
+  });
+  check(
+    'rename is refused while the file has parse errors',
+    refused.error?.message.includes('parse errors') === true,
+    JSON.stringify(refused)
+  );
+  const prepared = await c.requestRaw('textDocument/prepareRename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 0 },
+  });
+  check(
+    'prepareRename agrees with rename on a broken parse',
+    prepared.error?.message.includes('parse errors') === true,
+    JSON.stringify(prepared)
+  );
+});
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);
