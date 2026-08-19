@@ -1,7 +1,10 @@
 # Questions for Tycho: the strict linear posture and cell replay
 
-**Date:** 2026-08-18 · **Status:** workstream 3 of the strict
-linear-posture investigation — awaiting Tycho's answers ·
+**Date:** 2026-08-18 · **Status:** ANSWERED same day by the Tycho
+architect (answers verified against Tycho source, recorded durably in
+`tycho/docs/scratch/2026-08-18-linear-posture-tycho-answers.md`; the
+summary of answers and resulting decisions is at the end of this
+document) — awaiting Arno's ratification of the three decisions ·
 **Companions:** `docs/plans/2026-08-18-linear-posture-audit.md` (what
 the engine would delete and what it must keep),
 `docs/plans/2026-08-18-checkpoint-restore-design.md` (the engine API
@@ -222,6 +225,94 @@ declaration statement currently pays the conformance re-settlement
 sweep twice per `type` statement even with no redefinition anywhere
 (~1.2 ms per statement in a modest engine); making the second
 registration a no-op is queued independently.
+
+## Answers (2026-08-18, Tycho architect — code-verified on their side)
+
+**Q1 — the commitment STANDS, structurally.** Every notebook recompute
+re-runs the whole section's two-pass in a freshly entered scope
+(partial in-place recompute is unsafe under their positional
+shadowing); graph documents pop/push a scope and fully re-register
+whenever the definition set changes; cortex (Epsil) cells are
+run-gated one-offs whose cached snapshots are re-BOUND (serialized
+MathJSON), never re-executed. Tycho never uses cross-program in-place
+redefinition as its edit gesture. Their framing: "scope pop + full
+re-run = complete reset" is exactly true for lexically-scoped bindings
+and exactly false for engine-global residue (type/protocol/sequence
+registries) — checkpoint/restore is the correct reset primitive for
+that residue.
+
+**Q2 — in budget.** Recompute is synchronous on the UI thread behind a
+300 ms typing debounce; practical budget ~50–100 ms per section pass;
+sections are a handful of cells. Heavy work (cortex scripts, Desmos
+collection binds) is already output-cached/run-gated client-side. One
+HARD PROPERTY they hold the design to: restore must rewrite records in
+place so pre-edit cells keep definition IDENTITY — CE's element memo
+validates dependencies by binding identity, and full re-registration
+once made every memo cold every pass (their D-203 / CE item 127).
+
+**Q3 — ship effects re-executing verbatim.** Fresh `Random()` draws are
+their existing deliberate semantics (seeding exists at expression level
+via `WithRandomSeed`); `Print`/`Input` are not Tycho surfaces.
+
+**Q4 — no reliance, no objection: keep completion legal.** They do not
+surface types/protocols at all today; they note an engine-global type
+declared inside a cortex script leaks across sibling sections
+(violating their isolation model) — one more reason checkpoint/restore
+is the right reset primitive.
+
+**Q5 — no single-cell in-place re-run exists or is planned.** Their
+strongest push-back, which ANSWERS the audit's §4.4 ruling 2: **the box
+route must keep replace/idempotent semantics.** Their gesture
+re-executes the SAME declarations against the SAME engine every 300 ms
+pass, relying on fresh scopes for isolation — box-route strictness
+would error on the second pass, i.e. typing anywhere in a section would
+break any cell whose declaration touches an engine-global registry.
+Two adjacent invariants they depend on: `ce.declare` duplicate-in-scope
+stays a catchable, side-effect-free throw, and the
+declare-placeholder → `DefineFunction` upgrade within one scope stays
+legal.
+
+**Q6 — epoch rule acceptable.** Notebook state is fully serialized
+already; graph documents hold live expressions but everything is
+revision-keyed and re-derived on definition changes. They hold the
+design to pre-edit-point expressions staying valid (identity
+preserved).
+
+**Q7 — (a)** engine-per-surface; **Tycho is a MULTI-ENGINE process as
+the NORMAL case** (notebook + plot elements + validator engines on one
+page), so the `BigDecimal.precision` process-global hazard must not be
+documented away as an edge case (now a ROADMAP item). **(b)** Cells
+always evaluate INSIDE a host-pushed scope; between passes engines sit
+at session base — so v1's session-base checkpoint restriction covers
+the correctness use ("checkpoint the initialized base once; restore
+before a pass when engine-global residue needs reset"), but per-cell
+checkpoints (their deferred D13/D18 optimization and the latency story)
+REQUIRE the v2 in-scope-checkpoint item, now a committed roadmap item
+rather than a "revisit if needed". **(c)** No branching need.
+
+**Ordering asks:** checkpoint API before any behavior flip (matches the
+design's §9); box-route strictness preferably never, at minimum not
+before their restore-before-pass migration; `executeEpsil`-route
+strictness may flip once restore-before-Run lands client-side (the only
+regressing surface would be a cortex script declaring types/protocols —
+unsupported-but-not-blocked on their side, and they prefer gating that
+client-side over keeping ~1,400 engine lines alive).
+
+### Resulting decisions (awaiting Arno's ratification)
+
+1. **Adopt the strict posture on the `executeEpsil` route only.** The
+   box route and host API keep today's semantics (replace / throw
+   respectively). Consequence for the audit: the route-marker machinery
+   (`_epsilDeclarationRoute`, ~90–150 LOC) is K, not dividend; the ~10
+   box-route test pins survive; the flip count stays ≈ 92.
+2. **Sequencing:** R1 (idempotent same-statement re-registration),
+   then checkpoint API v1 (session-base), then the `executeEpsil`
+   strictness flip gated on Tycho's restore-before-Run migration;
+   checkpoint v2 (in-scope checkpoints) is a committed follow-on, not
+   an option.
+3. **Cross-cell completion stays legal**; effects replay verbatim; the
+   multi-engine `BigDecimal.precision` hazard becomes a tracked ROADMAP
+   item rather than a documented-away edge case.
 
 ## Our overall recommendation, for calibration
 

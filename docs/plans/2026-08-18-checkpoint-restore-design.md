@@ -127,8 +127,16 @@ Client-side responsibilities that the engine does NOT take on:
 Restore must rewrite existing records **in place** and advance monotone
 counters — never swap registry or definition objects — because live
 boxed expressions capture record identity (audit §3, structural facts 1
-and 2; `index.ts:571-574`, `binders.ts:102-109`). Given that, each state
-family is covered one of three ways:
+and 2; `index.ts:571-574`, `binders.ts:102-109`). This is also a
+CONSUMER-FACING hard property, not just an internal constraint: Tycho
+(2026-08-18 answers, Q2c) holds the design to pre-edit cells keeping
+definition IDENTITY across a restore, because CE's collection element
+memo validates dependencies by binding identity and a
+full-re-registration gesture once made every memo cold on every pass at
+Desmos scale (their D-203 / CE item 127). Identity preservation is what
+makes restore-then-replay CHEAPER than their current full re-run, not
+merely equivalent to it. Given that, each state family is covered one
+of three ways:
 
 **(a) Eager snapshot at `checkpoint()`** — for families whose size is
 bounded and small at a cell boundary:
@@ -380,7 +388,13 @@ drops the references, and `_serial` stays monotone (identity hashes;
   configuration goes through the ordinary setter, which writes the
   process global (`engine-numeric-configuration.ts:53`) — so within a
   single-engine process, restore heals it. Multi-engine processes remain
-  exposed exactly as today (audit §3 hazard 1); out of scope.
+  exposed exactly as today (audit §3 hazard 1) — and Tycho has told us
+  (2026-08-18 answers, Q7a) that a multi-engine page is their NORMAL
+  case (notebook engine + plot-element engines + validator engines
+  simultaneously), so this is NOT an edge case to document away: it is
+  a pre-existing hazard now tracked as its own ROADMAP item
+  (engine-scoped precision), out of THIS design's scope but not out of
+  scope generally.
 - **`epsilBatchCounter`** (`execute-epsil.ts:116`): NEVER rewound —
   origin stamps hold its values, and a reused id would falsely merge two
   units. Monotone by design; nothing to do.
@@ -604,8 +618,17 @@ answer to those.
    getters), and its function branch installed a raw object literal
    instead of routing through `updateDef`.
 2. ~~LaTeX dictionary~~ RESOLVED as a host precondition (§5.5a).
-3. Whether `checkpoint()` at depth &gt; session-base (inside a pushed
-   host scope) should be supported. V1: no; revisit if Tycho's scope
-   layout needs it.
+3. ~~Whether `checkpoint()` at depth &gt; session-base should be
+   supported~~ RESOLVED 2026-08-18 by Tycho's answers (Q7b): their
+   cells ALWAYS evaluate inside a host-pushed scope, but between passes
+   their engines sit at session base — so v1's session-base restriction
+   covers their correctness use ("checkpoint the initialized base once;
+   restore before a pass when engine-global residue needs reset").
+   Per-cell checkpoints — their deferred incremental-recompute
+   optimization (their spec's D13/D18) and this design's latency story
+   — REQUIRE in-scope checkpoints. **In-scope checkpoints are therefore
+   a COMMITTED v2 item, not a revisit-if-needed**: v1 ships
+   session-base; v2 extends the quiescence/depth rules to a
+   host-declared checkpoint scope depth.
 4. Naming: `checkpoint`/`restore`/`discard` vs `mark`/`rewind`. Cosmetic;
    decide at implementation review.
