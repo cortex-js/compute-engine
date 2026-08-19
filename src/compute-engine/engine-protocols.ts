@@ -7,7 +7,10 @@ import type {
   TypeReference,
   TypeResolver,
 } from '../common/type/types.js';
-import { checkSameUnitRedefinition } from './declaration-origin.js';
+import {
+  checkSameUnitRedefinition,
+  isSameStatementReRegistration,
+} from './declaration-origin.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
 import {
@@ -196,6 +199,20 @@ export function declareProtocolImpl(
     // declaration is never replaced — it throws, like `ce.declareType()`.
     if (!fromStatement || !existing.declaredByStatement)
       throw Error(`The protocol "${name}" is already declared`);
+    // SAME-STATEMENT RE-REGISTRATION IS A NO-OP — the protocol twin of the
+    // check in `declareType` (see its comment for the mechanism: the
+    // canonical and evaluate handler of one statement run back-to-back, so
+    // the record already holds exactly what this registration would rebuild).
+    // It used to take the full replacement branch anyway: re-validating every
+    // member signature, revalidating every conformance edge, re-syncing the
+    // dispatchers and re-running the widening sweep. The stamp proves the
+    // earlier registration STOOD: it is written before the replacement
+    // branch's widening check, and a rejected replacement restores the
+    // previous stamp along with the rest of the record (the rollback thunk).
+    // A protocol record is complete from creation (members and stamp are set
+    // together on the fresh path), so no `def`-style completeness guard is
+    // needed here.
+    if (isSameStatementReRegistration(existing._declOrigin, origin)) return;
   }
 
   // Validate every member BEFORE touching the registry, so a malformed
@@ -847,7 +864,18 @@ export function declareConformance(
   targetSource: string,
   protocolNames: readonly string[],
   impl?: Record<string, Expression | JSImplementation>,
-  options?: { where?: string; block?: Expression }
+  options?: {
+    where?: string;
+    block?: Expression;
+    /** True when this registration is an Epsil conformance STATEMENT's own —
+     * read from the `_epsilDeclarationRoute` marker by the `DeclareConformance`
+     * handlers (`withStatementRoute` in `library/core.ts`). Required by the
+     * same-block no-op below: an ambient batch id alone cannot distinguish
+     * the statement route's canonical/evaluate pair from a re-entrant
+     * box-route `.evaluate()` of the same boxed statement, and only the
+     * former is proven redundant. */
+    fromStatementRoute?: boolean;
+  }
 ): Expression | null {
   if (protocolNames.length === 0)
     return ce.error([
@@ -955,6 +983,36 @@ export function declareConformance(
         'protocol-implementation-duplicate',
         `the type \`${targetKey}\` already has an implementation of the \`${records[0]!.name}\` protocol in this batch`,
       ]);
+    // SAME-BLOCK RE-REGISTRATION IS A NO-OP — the conformance twin of the
+    // same-statement check in `declareType` (see its comment for the
+    // mechanism). The identity that proves it is the {batch, block} stamp
+    // this very duplicate rule keys on: the canonical and evaluate handler of
+    // one statement pass the SAME block operand object, and nothing runs
+    // between the two, so grounding, validating and re-installing the
+    // identical block — and re-running the widening sweep behind it — would
+    // change nothing. The stamp proves the earlier install stood: a widening
+    // rejection restores the registry (stamp included) before returning.
+    // THREE guards keep the no-op exactly that narrow. `fromStatementRoute`
+    // (the `_epsilDeclarationRoute` marker, threaded by the handlers) is what
+    // an ambient batch id cannot supply: a re-entrant box-route `.evaluate()`
+    // of the same boxed statement also arrives with this batch and this block
+    // object, but arbitrary registry changes may separate it from the
+    // install, so it keeps taking the full replacement path — the box-route
+    // re-assertion pattern, like an install from outside any batch. The block
+    // must be a real operand (`!== undefined`) so two anchor-less
+    // registrations cannot alias each other, mirroring the duplicate rule's
+    // own caution. And the stamp was looked up by `targetKey`, so even if the
+    // boxer ever interned identical block literals across statements, only a
+    // second block for the SAME (target, protocol) pair could reach this
+    // comparison — a pair the duplicate rule above already polices.
+    if (
+      options?.fromStatementRoute === true &&
+      origin !== undefined &&
+      origin.batch === batch &&
+      options.block !== undefined &&
+      origin.block === options.block
+    )
+      return null;
   }
 
   // P12's `Self` substitution is applied to the block ONCE, here, before it is
@@ -1920,14 +1978,21 @@ function failedInheritanceSource(
  * existing implementation map when nothing about it changed;
  * `implementationProblem` is a pure verdict), so a sweep that finds nothing
  * costs a walk and changes no object identity. Type redefinition is a
- * notebook-scale event, not a hot path: measured on 2026-08-16, a `type`
- * statement re-declaring an unrelated type in an engine holding 8 protocols
- * with one authored conformance each costs about 1.2 ms more per batch
- * (~75 µs per authored edge, over the two `declareType` calls a plain `type`
- * statement makes — one in the static pre-pass, one in evaluation). A SUM type
- * makes N+1 `declareType` calls per pass, one per variant plus the union, so
- * `type S = A(…) | B(…)` re-declared in a later cell pays that per-edge cost
- * six times rather than twice.
+ * notebook-scale event, not a hot path: measured on 2026-08-16, the sweep
+ * costs ~75 µs per authored edge per `declareType` replacement (about 0.6 ms
+ * per replacement in an engine holding 8 protocols with one authored
+ * conformance each). A statement's registrations that would pay it: the
+ * static pre-pass canonicalization and the evaluation-loop canonicalization
+ * each replace once when the statement RE-declares a name from an earlier
+ * batch; the evaluate handler's third registration of the same statement is
+ * recognized as a no-op (`isSameStatementReRegistration` in `declareType`,
+ * linear-posture R1, 2026-08-18) and pays nothing — which also means a FRESH
+ * `type` statement, whose two canonicalization passes install rather than
+ * replace, never runs this sweep at all (measured: ~1.7 ms → ~0.2 ms per
+ * fresh-`type` batch in the 8-protocol engine). A SUM type makes N+1
+ * `declareType` calls per pass, one per variant plus the union, so a
+ * re-declared `type S = A(…) | B(…)` pays the per-edge cost that many times
+ * per replacing pass.
  *
  * A `config` state event and a conformance-version bump are emitted only when
  * something actually moved: the version keys memoized dispatcher effects, and

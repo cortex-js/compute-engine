@@ -7,7 +7,10 @@ import type {
   TypeReference,
   TypeString,
 } from '../common/type/types.js';
-import { checkSameUnitRedefinition } from './declaration-origin.js';
+import {
+  checkSameUnitRedefinition,
+  isSameStatementReRegistration,
+} from './declaration-origin.js';
 import { resettleTypeConformances } from './engine-protocols.js';
 import {
   functionResult,
@@ -822,6 +825,28 @@ export function declareType(
   if (existing !== undefined)
     checkSameUnitRedefinition('type', name, existing._declOrigin, origin);
 
+  // SAME-STATEMENT RE-REGISTRATION IS A NO-OP. One `DeclareType` statement
+  // reaches this function from both its canonical and its evaluate handler,
+  // and the Epsil evaluation loop runs the two back-to-back per statement
+  // (`ce.box(stmt).evaluate()` in `execute-epsil.ts`) with nothing in
+  // between — so when the record already carries THIS statement's own stamp
+  // and a completed definition, re-registering would rebuild, from the same
+  // source text against an unchanged registry, exactly the state the record
+  // already holds. It used to take the full replace path anyway, including
+  // the `resettleTypeConformances` sweep over every conformance edge (~1.2 ms
+  // per `type` statement, ×(N+1) for a sum) with zero redefinition anywhere.
+  // The `def` guard keeps an unfulfilled forward-reference promise (stamped
+  // or not, it has no `def`) on the fulfilment path below; an unstamped
+  // registration (the box route, a host `ce.declareType()`) never matches, so
+  // those routes keep their replace semantics.
+  // Provenance: `docs/plans/2026-08-18-linear-posture-audit.md` §2 (R1).
+  if (
+    existing !== undefined &&
+    existing.def !== undefined &&
+    isSameStatementReRegistration(existing._declOrigin, origin)
+  )
+    return;
+
   // An UNRESOLVED FORWARD REFERENCE is a promise to declare, not a conflict:
   // `type json_array` inside an earlier body made `resolver.forward()` install
   // an empty record, and every type mentioning the name captured THAT object.
@@ -1341,6 +1366,26 @@ export function declareSumType(
         registry[claimed]?._declOrigin,
         origin
       );
+
+  // SAME-STATEMENT RE-REGISTRATION IS A NO-OP — the sum-level twin of the
+  // check in `declareType` (see its comment for the mechanism: canonical and
+  // evaluate handler of one statement run back-to-back, and re-registering
+  // rebuilds state the records already hold). Checking the SUM name alone
+  // proves the whole statement completed: the sum's own record is written
+  // LAST (the union fulfilment, then `_sumVariants`), all N+1 names carry
+  // this one origin, and a failure anywhere rolls the whole statement back
+  // atomically — so a stamped, completed, variant-carrying sum record cannot
+  // coexist with a half-declared variant set. Without this, the evaluate pass
+  // re-ran N+1 `declareType` replacements, each with its
+  // `resettleTypeConformances` sweep.
+  const sumRecord = registry[name];
+  if (
+    sumRecord !== undefined &&
+    sumRecord.def !== undefined &&
+    sumRecord._sumVariants !== undefined &&
+    isSameStatementReRegistration(sumRecord._declOrigin, origin)
+  )
+    return;
 
   const globalScope = ce._evalContextStack[1]?.lexicalScope;
   // Builtins live in the SYSTEM scope — the parent of the global one.

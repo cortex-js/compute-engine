@@ -134,6 +134,45 @@ function sameStatement(a: DeclarationOrigin, b: DeclarationOrigin): boolean {
 }
 
 /**
+ * Is `incoming` the SAME statement of the SAME compilation unit that already
+ * left the `existing` stamp — i.e., a re-registration of a declaration that
+ * has already fully run?
+ *
+ * One statement registers its declarations up to three times per batch: the
+ * static pre-pass canonicalizes it (rolled back with the pre-pass's registry
+ * transaction), and the evaluation loop canonicalizes it and then evaluates it
+ * (`ce.box(stmt).evaluate()`, statement by statement — nothing runs between
+ * those two). A registration that finds its own statement's stamp on a
+ * COMPLETED record is therefore rebuilding, from the same source text against
+ * an unchanged registry, exactly the state the record already holds — the
+ * registries use this predicate to skip that rebuild (and its propagation
+ * sweeps: `resettleTypeConformances`, conformance revalidation, the widening
+ * checks) as a no-op.
+ *
+ * `undefined` on either side means the question does not arise: an unstamped
+ * record is not owned by any statement of the current unit, and an unstamped
+ * incoming registration (the box route, the host API) keeps its replace
+ * semantics — those routes rely on replacement being re-runnable
+ * (`protocols.test.ts`, box-route conformance re-assertion).
+ *
+ * The caller must separately establish that the stamped record is COMPLETE
+ * (e.g. a type record's `def` is set): a stamp on an unfulfilled placeholder
+ * would otherwise skip the registration that was about to fulfill it.
+ *
+ * Provenance: `docs/plans/2026-08-18-linear-posture-audit.md` §2, finding
+ * F2/R1 (~1.2 ms of `resettleTypeConformances` per `type` statement with zero
+ * redefinition anywhere).
+ */
+export function isSameStatementReRegistration(
+  existing: DeclarationOrigin | undefined,
+  incoming: DeclarationOrigin | undefined
+): boolean {
+  if (existing === undefined || incoming === undefined) return false;
+  if (existing.batch !== incoming.batch) return false;
+  return sameStatement(existing, incoming);
+}
+
+/**
  * Where the FIRST declaration of the name sits, for the runtime error message
  * — ` at characters 12-30` when the first declaring statement carried source
  * offsets, and ` earlier` when it did not.

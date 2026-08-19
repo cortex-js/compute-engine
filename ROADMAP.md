@@ -3719,7 +3719,9 @@ deletes until the last step):
    Now recognized as a no-op from the declaration-origin stamp
    (`isSameStatementReRegistration`, `declaration-origin.ts`) in
    `declareType`, `declareSumType`, `declareProtocolImpl` and — via the
-   P47 `{batch, block}` stamp — `declareConformance`. Unstamped routes
+   P47 `{batch, block}` stamp plus the statement-route marker, so a
+   re-entrant box-route re-evaluation under a live batch still replaces —
+   `declareConformance`. Unstamped routes
    (box route, host API) keep replace semantics untouched; the origin
    stamps themselves are kept (the audit's R1/R2 self-collision
    warning). Measured: a fresh `type` statement batch in an 8-protocol

@@ -1723,7 +1723,12 @@ function declareConformanceStatement(
   targetOp: Expression | undefined,
   protocolsOp: Expression | undefined,
   whereOrImplOp: Expression | undefined,
-  implOp: Expression | undefined
+  implOp: Expression | undefined,
+  /** See `declareTypeStatement`'s parameter of the same name. Threaded to
+   * `declareConformance`'s same-block no-op, which must not fire for a
+   * re-entrant box-route registration that merely runs while a batch is
+   * ambient. */
+  onStatementRoute: boolean
 ): Expression | null {
   const target = declarationName(targetOp);
   if (!target)
@@ -1816,6 +1821,7 @@ function declareConformanceStatement(
     return declareConformance(ce, target, names, impl, {
       where,
       block: implOp,
+      fromStatementRoute: onStatementRoute,
     });
   } catch (e) {
     return ce.error(
@@ -4442,19 +4448,23 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         '(target: string|symbol, protocols: any, whereClauseOrImplementation: any?, implementation: dictionary<any>?) scope -> nothing',
       invokes: false,
       canonical: (args, { engine: ce }) => {
-        const err = declareConformanceStatement(
-          ce,
-          args[0],
-          args[1],
-          args[2],
-          args[3]
+        const err = withStatementRoute(ce, (route) =>
+          declareConformanceStatement(
+            ce,
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            route
+          )
         );
         if (err) return err;
         return ce._fn('DeclareConformance', args);
       },
       evaluate: (ops, { engine: ce }) =>
-        declareConformanceStatement(ce, ops[0], ops[1], ops[2], ops[3]) ??
-        ce.Nothing,
+        withStatementRoute(ce, (route) =>
+          declareConformanceStatement(ce, ops[0], ops[1], ops[2], ops[3], route)
+        ) ?? ce.Nothing,
     },
 
     ProtocolMember: {

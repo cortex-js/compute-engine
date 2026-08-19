@@ -825,6 +825,15 @@ function declarationName(op: MathJsonExpression | null): string | undefined {
  * still accumulates (`fib(0) = 0; fib(1) = 1; fib(n) = …`), so raising the
  * marker here costs an ordinary multi-clause program nothing.
  *
+ * `DeclareConformance` is included for the same-statement no-op rather than
+ * for a stamp: a conformance statement leaves no `_declOrigin` (its
+ * within-batch duplicate rule keys on the `{batch, block}` implementation
+ * stamp instead, ruling P47), but its handlers read the marker to prove a
+ * re-registration is the statement route's own canonical/evaluate pair — an
+ * ambient batch id alone cannot tell that apart from a re-entrant box-route
+ * `.evaluate()` of the same boxed statement, which must keep taking the full
+ * replacement path (see `declareConformance`'s same-block no-op).
+ *
  * Exported for `execute-epsil.ts`, whose evaluation loop raises the same
  * marker around the statement it boxes and evaluates.
  */
@@ -834,6 +843,7 @@ export function isDeclarationStatement(statement: MathJsonExpression): boolean {
     head === 'DeclareType' ||
     head === 'DeclareSumType' ||
     head === 'DeclareProtocol' ||
+    head === 'DeclareConformance' ||
     head === 'DefineFunction'
   );
 }
