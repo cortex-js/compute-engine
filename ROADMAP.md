@@ -73,9 +73,9 @@ importer-side (tracked in tycho's `COMPUTE_ENGINE.md`), not engine items.
 serializer, `executeEpsil` interpreter — phases 0–5 of the revival) is published
 as an **experimental** entry point `@cortex-js/compute-engine/epsil`, joined to
 the code-splitting ESM build so `executeEpsil(ce, …)` shares engine-class
-identity with a host-created engine. Residual ship items (docs sync to
-cortexjs.io, highlight-mode validation) are release-protocol steps tracked in
-`roadmap/epsil/STATUS_REPORT.md`, not here.
+identity with a host-created engine. Residual language, tooling,
+documentation, and release-maintenance items are tracked in
+`docs/epsil/ROADMAP.md`, not here.
 
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
 status:** R1–R30 + R8 landed — chapters 1/2/3/5/6/7, 4.1/4.3/4.5, §8.8

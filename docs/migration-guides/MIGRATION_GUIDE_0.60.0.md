@@ -88,7 +88,7 @@ correct", unlikely to need code changes):
   (only for positive/unconstrained arguments). An unconstrained symbol is treated
   as a generic real; a symbol *declared* `complex` is excluded from these
   real-only rewrites. The authoritative statement of that policy is
-  [`docs/SIMPLIFY.md`](./SIMPLIFY.md#generic-real-simplification-policy).
+  [`docs/SIMPLIFY.md`](../SIMPLIFY.md#generic-real-simplification-policy).
 - `e^{iθ}` stays in exponential form for a symbolic angle under `evaluate()`.
   Convert on demand with the new `expr.simplify({ strategy: 'trig' })`.
 - `isFinite` is now known (`true`) for finite symbolic constants such as `√π`,

@@ -95,6 +95,20 @@ indexed by [`docs/README.md`](./README.md), while source/test references point
 to those models. `docs/plans/` was reduced to the active working set; detailed
 decision chronology remains available from Git history.
 
+### Epsil language revival and roadmap consolidation — complete
+
+The July 2026 Cortex-language revival shipped the hand-written parser,
+serializer, evaluator, declarations and control flow, diagnostics, CLI/REPL,
+MCP server, executable documentation, and the experimental package entry
+point. The language was subsequently renamed Epsil and its implementation and
+public documentation moved to `src/epsil/`.
+
+The former `roadmap/cortex/` held 2,022 lines of phase plans, audit snapshots,
+agent-evaluation notes, and completion logs. The phase work and most later
+findings had landed; durable behavior is covered by `LANGUAGE-MODEL.md` and the
+executable public docs. The small applicable residue was consolidated into
+`docs/epsil/ROADMAP.md`; detailed chronology remains in Git history.
+
 ### Type, protocol, object, and effect systems — active evolution
 
 Parameterized types, generic functions, protocols and compiled dispatch,

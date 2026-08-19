@@ -27,7 +27,8 @@ read the repository [`README.md`](../README.md).
 | Understand binding and scope invariants | [`SCOPING-MODEL.md`](./SCOPING-MODEL.md) |
 | Understand collection representation and execution | [`COLLECTIONS-MODEL.md`](./COLLECTIONS-MODEL.md) |
 | Understand compilation invariants | [`COMPILATION-MODEL.md`](./COMPILATION-MODEL.md) |
-| Understand Epsil/Cortex lowering semantics | [`LANGUAGE-MODEL.md`](./LANGUAGE-MODEL.md) |
+| Understand Epsil lowering semantics | [`LANGUAGE-MODEL.md`](./LANGUAGE-MODEL.md) |
+| Track active Epsil language and tooling work | [`epsil/ROADMAP.md`](./epsil/ROADMAP.md) |
 | Understand open type-system direction | [`TYPE_SYSTEM_ROADMAP.md`](./TYPE_SYSTEM_ROADMAP.md) |
 | Understand collection-element inference | [`INFERENCE_ROADMAP.md`](./INFERENCE_ROADMAP.md) |
 | Understand string and character invariants | [`STRING_ROADMAP.md`](./STRING_ROADMAP.md) |

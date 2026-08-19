@@ -78,7 +78,7 @@ src/
 ├── compile.ts               Compilation-targets entry
 ├── identities.ts            Fungrim identities plugin entry (loadIdentities)
 ├── integration-rules.ts     Rubi integration-rules plugin entry
-├── epsil.ts                Experimental Epsil language (not a published entry)
+├── epsil.ts                Experimental published Epsil language entry
 │
 ├── math-json/               MathJSON format: types + accessors/guards
 │   ├── types.ts             MathJsonExpression and its object forms
@@ -776,8 +776,8 @@ The **full** entry (`compute-engine.ts`) registers
 `ComputeEngine._latexSyntaxFactory` and a default-engine factory that injects
 `LatexSyntax`; the **core** entry registers a factory without it. This is the
 mechanism that lets `new ComputeEngine()` support LaTeX when imported from the
-full package while keeping LaTeX out of core bundles. (`src/epsil.ts` is an
-experimental Epsil-language entry and is not part of the published `exports`.)
+full package while keeping LaTeX out of core bundles. `src/epsil.ts` is the
+experimental `@cortex-js/compute-engine/epsil` published entry.
 
 ## Build, test, and docs tooling
 

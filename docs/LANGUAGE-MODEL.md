@@ -62,5 +62,5 @@ there is no hidden stronger method behind a weaker operator.
 ## Open language work
 
 Only approved and active implementation work belongs under `plans/`. Broader
-language ideas and deferred v2 items belong in `roadmap/cortex/` or
-`ROADMAP.md`, not in completed execution plans.
+Epsil language and tooling work belongs in `epsil/ROADMAP.md`; cross-cutting
+engine work belongs in `ROADMAP.md`, not in completed execution plans.

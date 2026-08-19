@@ -4,7 +4,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // Phase 4 "notebook integration" test (the DoD item in
-// `roadmap/epsil/phase-4-semantics.md`). Unlike the per-feature cases in
+// `docs/LANGUAGE-MODEL.md`). Unlike the per-feature cases in
 // `execute.test.ts`, this drives ONE multi-statement program — a realistic
 // notebook cell-chain — through `executeEpsil` against a real engine, then
 // (mirroring the notebook scope model: cells share the engine scope) inspects

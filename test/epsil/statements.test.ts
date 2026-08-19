@@ -7,7 +7,7 @@ import { validEpsil } from '../utils';
 // function definitions (math + block + anonymous), control flow (`if`/`else`,
 // `while`, `for … in`), and statement blocks are dispatched in statement
 // position and lowered to engine-aligned MathJSON. See
-// `roadmap/epsil/phase-4-semantics.md`.
+// `docs/LANGUAGE-MODEL.md`.
 //
 
 describe('EPSIL DECLARATIONS', () => {

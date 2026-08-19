@@ -676,9 +676,6 @@ _Inventory of gaps surfaced from `todo` comments in the test suite._
 - **Infinite Sets**: Support parsing and serializing set notation with ellipses (e.g., `\{1, 2, 3...\}`, `\{...-2, -1, 0\}`).
 - **Serialization**: Address remaining edge cases in LaTeX serialization noted in `serialize.test.ts`.
 
-### Cortex Language Features
-- **Indexed Access & Sets**: Implement support for indexed access (e.g., `a[i]`) and set membership validation in Cortex tests.
-
 ### Pattern Matching
 - **Wildcards**: Extend support for repeated wildcards in deeply nested contexts and repeated-match cases (base wildcard support is implemented — see `done/DONE.md` #3).
 - **Auto-wildcarding**: Regression check that `.replace()` no longer incorrectly auto-wildcards single-char symbols (fix recorded in `done/DONE.md` #23).
@@ -692,7 +689,6 @@ _Inventory of gaps surfaced from `todo` comments in the test suite._
 
 ### Ambiguous / Unclear (triaged — low value)
 - **`patterns.test.ts:625`**: the `//@todo` marks an unimplemented `matchPermutations`/`Replace` matching feature, not a missing test. Track under Pattern Matching if pursued; otherwise remove the stray comment.
-- **`cortex-parse.test.ts:234`, `test/playground.ts:66`**: an undecided Cortex-lexing quirk (experimental, non-published language) and a scratch file. Low value — close by decision.
 
 ---
 
