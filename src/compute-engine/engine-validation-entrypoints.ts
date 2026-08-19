@@ -90,9 +90,7 @@ function displayedExpectedType(expected: Type): string {
   if (typeof expected === 'object' && expected.kind === 'union') {
     const members = expected.types.map(displayedExpectedMember);
     if (members.some((m, i) => m !== expected.types[i]))
-      return typeToString(
-        reduceType({ ...expected, types: members } as Type)
-      );
+      return typeToString(reduceType({ ...expected, types: members } as Type));
   }
   return typeToString(expected);
 }

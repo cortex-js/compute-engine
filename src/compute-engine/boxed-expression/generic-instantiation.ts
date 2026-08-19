@@ -8,7 +8,10 @@ import {
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
 import { provablyDisjoint } from '../../common/type/subtype.js';
-import { functionResult, typeContainsMissing } from '../../common/type/utils.js';
+import {
+  functionResult,
+  typeContainsMissing,
+} from '../../common/type/utils.js';
 import type {
   FunctionSignature,
   Type,
@@ -332,7 +335,9 @@ export interface ContextualCallbackPlan {
  * (the planning pass) decline later for lack of domain variables, and the
  * ground-stamp fallback path keeps its own narrower filter.
  */
-export function contextualSlotSignature(t: Type): FunctionSignature | undefined {
+export function contextualSlotSignature(
+  t: Type
+): FunctionSignature | undefined {
   if (typeof t !== 'object') return undefined;
   if (t.kind === 'signature') return t;
   // A transparent alias IS its definition — §6b's claim that the

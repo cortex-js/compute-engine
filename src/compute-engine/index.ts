@@ -92,10 +92,7 @@ import {
   InferenceRollbackFrame,
   activeRollbackFrame,
 } from './inference-rollback.js';
-import {
-  CHECKPOINT_CANARY,
-  CheckpointWindow,
-} from './checkpoint-journal.js';
+import { CHECKPOINT_CANARY, CheckpointWindow } from './checkpoint-journal.js';
 import {
   _EngineCheckpoint,
   discardCheckpoint,

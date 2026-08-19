@@ -142,7 +142,10 @@ export function checkpointCanaryBypasses(
   if (tally === undefined) return [];
   const bypasses: string[] = [];
   for (const [event, hook] of CANARY_EVENT_HOOKS) {
-    if ((tally.events.get(event) ?? 0) > 0 && (tally.hooks.get(hook) ?? 0) === 0)
+    if (
+      (tally.events.get(event) ?? 0) > 0 &&
+      (tally.hooks.get(hook) ?? 0) === 0
+    )
       bypasses.push(event);
   }
   return bypasses;

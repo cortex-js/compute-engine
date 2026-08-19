@@ -165,7 +165,12 @@ function armIncompatibility(
     if (freeTypeVariables(p).size > 0 || freeTypeVariables(q).size > 0)
       continue;
     if (provablyDisjoint(p, q))
-      return { rule: 'disjoint-parameter', position: i, expected: p, actual: q };
+      return {
+        rule: 'disjoint-parameter',
+        position: i,
+        expected: p,
+        actual: q,
+      };
   }
 
   // Rule 4, with the OPERAND-side bottom carve-out only: a `never` operand

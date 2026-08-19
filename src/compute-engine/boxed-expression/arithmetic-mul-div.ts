@@ -573,11 +573,7 @@ export class Product {
         t.term.type.isDisjointFrom('broadcastable<number> | missing | nothing')
       );
       if (nonNumeric !== undefined)
-        return ce.typeError(
-          'number',
-          nonNumeric.term.type,
-          nonNumeric.term
-        );
+        return ce.typeError('number', nonNumeric.term.type, nonNumeric.term);
       return ce.Zero;
     }
 

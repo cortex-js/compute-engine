@@ -63,7 +63,6 @@ export class BoxedType {
     return this._typeResolver;
   }
 
-
   /** The resolver of the first boxed operand that has one, so a combined type
    * can still be compared against a user-declared type name. */
   private static _resolverOf(

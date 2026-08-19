@@ -11,10 +11,7 @@ import {
   codePointLength,
 } from './characters.js';
 import { isValidSymbol } from '../math-json/symbols.js';
-import {
-  checkDeadline,
-  type DeadlineFrame,
-} from '../common/interruptible.js';
+import { checkDeadline, type DeadlineFrame } from '../common/interruptible.js';
 
 /**
  * The canonical symbol a single-codepoint glyph aliases — the CAPITALIZED
@@ -144,10 +141,7 @@ export class Lexer {
 
   /** Honor an enclosing evaluation budget while scanning a long token. */
   private checkDeadlineStride(): void {
-    if (
-      this.deadline !== undefined &&
-      (++this.deadlineTick & 0x3ff) === 0
-    )
+    if (this.deadline !== undefined && (++this.deadlineTick & 0x3ff) === 0)
       checkDeadline(this.deadline);
   }
 

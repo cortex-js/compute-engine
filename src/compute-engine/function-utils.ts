@@ -682,8 +682,7 @@ export function canonicalFunctionLiteralArguments(
             'declare'
           );
           block.localScope!.bindings.set(name, shared);
-        }
-        else
+        } else
           ce.declare(
             name,
             { inferred: true, type: 'unknown' },

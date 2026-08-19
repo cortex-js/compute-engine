@@ -411,7 +411,8 @@ export function parseQuotientRingFraction(
 ): MathJsonExpression | null {
   const base = symbol(numer);
   if (base === null || !RING_CONSTANTS.has(base)) return null;
-  if (parser.resolveSymbol(base)?.type.matches('set<any>') !== true) return null;
+  if (parser.resolveSymbol(base)?.type.matches('set<any>') !== true)
+    return null;
 
   const h = operator(denom);
   if (
@@ -797,7 +798,8 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       // only while the ambient environment still reports them as sets (a
       // scope that shadows `Integers` with a non-set falls back to `Divide`).
       if (!RING_CONSTANTS.has(base)) return null;
-      if (parser.resolveSymbol(base)?.type.matches('set<any>') !== true) return null;
+      if (parser.resolveSymbol(base)?.type.matches('set<any>') !== true)
+        return null;
 
       const start = parser.index;
       const rhs = parser.parseExpression({ minPrec: DIVISION_PRECEDENCE });

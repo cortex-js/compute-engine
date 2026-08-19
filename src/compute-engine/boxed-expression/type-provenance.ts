@@ -30,7 +30,9 @@ import {
  * mistake the count cap for a size bound.
  */
 export function recordTypeProvenance(
-  ce: { _rollbackFrames: ReadonlyArray<InferenceRollbackFrame> } & CheckpointHost,
+  ce: {
+    _rollbackFrames: ReadonlyArray<InferenceRollbackFrame>;
+  } & CheckpointHost,
   target: { _typeProvenance: TypeProvenanceEntry[] | undefined },
   entry: TypeProvenanceEntry
 ): void {

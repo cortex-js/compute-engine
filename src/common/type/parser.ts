@@ -249,21 +249,6 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
  *
  */
 
-/**
- * True when `node` is an arrow signature, looking through redundant
- * parentheses (`((T) -> boolean)`).
- *
- * A `where`-constrained node answers `true` as well — not because it is
- * admissible, but because it already has a *better* rejection downstream (a
- * nested clause is an unsupported variable position), which this check must
- * not preempt.
- */
-function isFunctionSignatureNode(node: TypeNode): boolean {
-  let n: TypeNode = node;
-  while (n.kind === 'group') n = (n as GroupTypeNode).type;
-  return n.kind === 'function_signature' || n.kind === 'constrained';
-}
-
 export class Parser {
   private lexer: Lexer;
   private typeResolver: TypeResolver;

@@ -33,7 +33,10 @@ import {
   type WindowedParams,
 } from '../collection-utils.js';
 import type { CollectionHandlers } from '../types-definitions.js';
-import { callbackArityError, type CallbackSupply } from '../boxed-expression/callback-arity.js';
+import {
+  callbackArityError,
+  type CallbackSupply,
+} from '../boxed-expression/callback-arity.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
@@ -427,7 +430,9 @@ function hasIndexableMember(expr: Expression): boolean {
   const t = expr.type.type;
   if (typeof t === 'string' || t.kind !== 'union') return false;
   return t.types.some(
-    (m) => isSubtype(m, INDEXED_COLLECTION_SHAPE_TYPE) || isSubtype(m, DICTIONARY_SHAPE_TYPE)
+    (m) =>
+      isSubtype(m, INDEXED_COLLECTION_SHAPE_TYPE) ||
+      isSubtype(m, DICTIONARY_SHAPE_TYPE)
   );
 }
 
@@ -506,7 +511,9 @@ const peekMembershipPreserving = (
 const LENGTH_SIGNATURE = parseType('(any) -> integer');
 const COUNT_SIGNATURE = parseType('(collection<any>, any?) -> integer');
 const ISEMPTY_SIGNATURE = parseType('(collection<any>) -> boolean');
-const CONTAINS_SIGNATURE = parseType('(collection<any>, element: any) -> boolean');
+const CONTAINS_SIGNATURE = parseType(
+  '(collection<any>, element: any) -> boolean'
+);
 // Only the GENERIC arm of `Join`'s overload set, and deliberately so: this
 // type is used by the custom `canonical` handler to validate the operands,
 // and the string-preserving arm (`(T+) -> T where T: string`) admits a strict
@@ -758,7 +765,8 @@ function callbackCompatibilityError(
 ): Expression | undefined {
   const ce = fn.engine;
   const def = ce.lookupDefinition(arity.operator);
-  const sig = def && 'operator' in def ? def.operator.signature.type : undefined;
+  const sig =
+    def && 'operator' in def ? def.operator.signature.type : undefined;
   if (sig === undefined || typeof sig === 'string') return undefined;
   if (sig.kind !== 'signature') return undefined;
 
@@ -4199,8 +4207,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const applied = f([target]);
         // Mirror the iterator's verdicts on the predicate result, so a query
         // and a walk of the same `Filter` never disagree.
-        if (applied === undefined)
-          throw invalidPredicateError(expr.op2);
+        if (applied === undefined) throw invalidPredicateError(expr.op2);
         if (sym(applied) === 'True') return true;
         if (sym(applied) === 'False') return false;
         // An element-valued predicate failure (see `predicateErrorValue`)
@@ -5008,8 +5015,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `(T) -> collection<U> | U`: `S` describes the STAMP, never the operator's
     // tolerance, and the scalar-result singleton lift is the `type:` handler's
     // calculation below (§7 rule 2).
-    signature:
-      '(collection<T>, mapping: (T) any -> U) -> list where T, U',
+    signature: '(collection<T>, mapping: (T) any -> U) -> list where T, U',
     type: (ops) => {
       const resultType = callbackResultType(ops[1]);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
@@ -5157,7 +5163,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // ACCENT produces ONE character, not two. That is inherent to Unicode
     // grapheme segmentation, not a defect (`docs/STRING_ROADMAP.md`, design
     // constraint 3).
-    signature: '((T+) -> T where T: string) & ((collection<any>*) -> collection)',
+    signature:
+      '((T+) -> T where T: string) & ((collection<any>*) -> collection)',
     // Same-head flatten: `Join(Join(…inner), …outer)` → `Join(…inner, …outer)`
     // (Change 2 of `docs/COLLECTIONS-MODEL.md`).
     // Exact by construction — the head is unchanged, so every operand keeps
@@ -5899,8 +5906,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     elementCount: (expr) => {
       if (!isFunction(expr) || expr.nops !== 2) return undefined;
       const [xs, idx] = expr.ops;
-      if (!isSubtype(xs.type.type, INDEXED_COLLECTION_SHAPE_TYPE)) return undefined;
-      if (isString(idx) || !isSubtype(idx.type.type, INDEXED_COLLECTION_SHAPE_TYPE))
+      if (!isSubtype(xs.type.type, INDEXED_COLLECTION_SHAPE_TYPE))
+        return undefined;
+      if (
+        isString(idx) ||
+        !isSubtype(idx.type.type, INDEXED_COLLECTION_SHAPE_TYPE)
+      )
         return undefined;
       const elt = collectionElementType(idx.type.type);
       if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
@@ -6060,7 +6071,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const sourceType = ops[0].type.type;
       const isTupleSource =
         typeof sourceType !== 'string' && sourceType.kind === 'tuple';
-      if (!isSubtype(sourceType, INDEXED_COLLECTION_SHAPE_TYPE) || isTupleSource)
+      if (
+        !isSubtype(sourceType, INDEXED_COLLECTION_SHAPE_TYPE) ||
+        isTupleSource
+      )
         return scalarResultType();
 
       // Peel RAW through the intermediate steps; the absence marker is applied
@@ -7799,8 +7813,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `CountIf`). The declared result stays the widest `any`: the NOT-FOUND
     // answer is `Nothing`, so the precise `elementType | nothing` is the `type:`
     // handler's below, not something `T` alone could say (§7 rule 1).
-    signature:
-      '(collection<T>, predicate: (T) any -> boolean) -> any where T',
+    signature: '(collection<T>, predicate: (T) any -> boolean) -> any where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1, PER_ELEMENT_SUPPLY),
     // Returns a single element, or `Nothing` when no element matches: the
@@ -7922,7 +7935,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Ordering: {
     description: 'Return the indexes that would sort the collection.',
     complexity: 8200,
-    signature: '(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number))?) -> list<integer> where T',
+    signature:
+      '(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number))?) -> list<integer> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Ordering', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
@@ -8061,7 +8075,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
-    signature: '(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
+    signature:
+      '(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
     canonical: (ops, { engine }) => {
       // Optimization form `ArgMax(f, domain)` (Wolfram/Fungrim convention:
       // the locations maximizing f over a set). The engine does not evaluate
@@ -8106,7 +8121,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
-    signature: '(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
+    signature:
+      '(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
     canonical: (ops, { engine }) => {
       // Optimization form `ArgMin(f, domain)` — see the ArgMax note.
       const optForm = canonicalOptimumForm(engine, 'ArgMin', ops);
@@ -9000,7 +9016,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Partition the collection into a dictionary of lists based on the key returned by the function.',
     ],
     complexity: 8200,
-    signature: '(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T',
+    signature:
+      '(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'GroupBy', ops, 1, PER_ELEMENT_SUPPLY),
     // Provable declines only (finite, walkable source required); success also
@@ -11056,7 +11073,8 @@ function defaultCollectionEq(a: Expression, b: Expression) {
     const compatible =
       a.operator === 'Tuple'
         ? b.type.matches('tuple')
-        : b.type.matches('indexed_collection<any>') && !isTupleShapedType(b.type.type);
+        : b.type.matches('indexed_collection<any>') &&
+          !isTupleShapedType(b.type.type);
     return compatible ? undefined : false;
   }
   if (!isFunction(a) || !isFunction(b)) return false;

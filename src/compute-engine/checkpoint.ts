@@ -326,9 +326,7 @@ function snapshotAssumptions(
   }));
 }
 
-function restoreAssumptions(
-  snapshot: ReadonlyArray<ContextAssumptions>
-): void {
+function restoreAssumptions(snapshot: ReadonlyArray<ContextAssumptions>): void {
   for (const { context, entries, dirty, bindings } of snapshot) {
     // The MAP is mutated, never replaced: `assume`/`forget` and the scope
     // machinery hold it by identity.
@@ -481,7 +479,10 @@ export function takeCheckpoint(
  * longer satisfies §2 and the client needs to know to rebuild rather than
  * trust it.
  */
-export function restoreCheckpoint(ce: IComputeEngine, cp: EngineCheckpoint): void {
+export function restoreCheckpoint(
+  ce: IComputeEngine,
+  cp: EngineCheckpoint
+): void {
   // ── Phase 1: validate and collect. No live writes. ──
   assertQuiescent(ce, 'restore()');
   const target = assertOwned(ce, cp, 'restore()');
@@ -502,7 +503,6 @@ export function restoreCheckpoint(ce: IComputeEngine, cp: EngineCheckpoint): voi
 
   // ── Phase 2: mutate. Designed not to throw. ──
   let failure: { error: unknown } | undefined;
-  const previousWindow = ce._checkpointWindow;
   // Journaling is OFF for the duration: an undo writes raw slots and would
   // record nothing anyway, but a restore that journaled its own writes into
   // the window it is unwinding is the kind of thing that only works by
@@ -618,11 +618,6 @@ export function restoreCheckpoint(ce: IComputeEngine, cp: EngineCheckpoint): voi
     stack.push(target);
     ce._checkpointWindow = window;
   } catch (error) {
-    // NOT `previousWindow`: step 1 has already detached it from its (now
-    // dead) checkpoint, and every checkpoint call from here on refuses, so
-    // nothing could ever consume it again. Reattaching it would leave the
-    // engine journaling every later write into a window that grows without
-    // bound and pins the old field values its undo closures captured.
     ce._checkpointWindow = undefined;
     ce._checkpointPoisoned = true;
     throw new CheckpointError(

@@ -593,8 +593,8 @@ export class _BoxedValueDefinition
     this.neq = s.neq as typeof this.neq;
     this.cmp = s.cmp as typeof this.cmp;
     this.collection = s.collection as CollectionHandlers | undefined;
-    this.subscriptEvaluate = s.subscriptEvaluate as typeof this
-      .subscriptEvaluate;
+    this.subscriptEvaluate =
+      s.subscriptEvaluate as typeof this.subscriptEvaluate;
     this._revisionVersion = s._revisionVersion as number;
     this._writeVersion += 1;
   }

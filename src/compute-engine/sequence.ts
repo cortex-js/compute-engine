@@ -877,8 +877,16 @@ export function _restoreSequenceRegistrySnapshot(
   snapshot: unknown
 ): void {
   const s = snapshot as {
-    registry?: { name: string; meta: SequenceMetadata; fields: SequenceMetadata }[];
-    pending?: { name: string; entry: PendingSequence; fields: PendingSequence }[];
+    registry?: {
+      name: string;
+      meta: SequenceMetadata;
+      fields: SequenceMetadata;
+    }[];
+    pending?: {
+      name: string;
+      entry: PendingSequence;
+      fields: PendingSequence;
+    }[];
   };
 
   const registry = sequenceRegistry.get(ce);

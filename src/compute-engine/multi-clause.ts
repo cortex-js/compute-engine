@@ -906,7 +906,8 @@ export function defineFunctionClause(
     // is dead only for as long as that derivation agrees; see the ROADMAP
     // entry "Dead post-install `effectsDeclared` write in
     // `defineFunctionClause`".
-    if (retarget !== undefined) journalDefinitionRecord(ce, retarget, 'redefine');
+    if (retarget !== undefined)
+      journalDefinitionRecord(ce, retarget, 'redefine');
     try {
       if (shadowsDispatcher) declareShadowingFunction(ce, id, literal);
       else ce.assign(id, literal);

@@ -11,7 +11,11 @@ import {
   stringValue,
   symbol,
 } from '../math-json/utils.js';
-import type { FunctionSignature, Type, TypeString } from '../common/type/types.js';
+import type {
+  FunctionSignature,
+  Type,
+  TypeString,
+} from '../common/type/types.js';
 import { isWildcardFunctionType } from '../common/type/utils.js';
 import { isPolymorphicType } from '../common/type/instantiate.js';
 
@@ -348,8 +352,7 @@ function applyAssignmentTypeEffect(
     const last = rest[rest.length - 1];
     const attrs = isDictionary(last) ? last : undefined;
     const positional = attrs === undefined ? rest : rest.slice(0, -1);
-    const typeOp =
-      positional.find((op) => isString(op)) ?? attrs?.get('type');
+    const typeOp = positional.find((op) => isString(op)) ?? attrs?.get('type');
     if (typeOp !== undefined) {
       // An explicit annotation is a CONTRACT. `Declare` installs it at
       // EVALUATE time, which this pass never runs — and
@@ -466,8 +469,7 @@ function applyAssignmentTypeEffect(
       def._placeholderSkeleton,
       raw.type
     );
-    if (refined !== def.type.type)
-      def._setElementRefinement(ce.type(refined));
+    if (refined !== def.type.type) def._setElementRefinement(ce.type(refined));
   } else {
     sym._infer(inferTypeFromValue(ce, rhs).type, 'replace');
   }

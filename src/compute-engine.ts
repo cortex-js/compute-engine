@@ -38,8 +38,13 @@ export {
 // ── Wire up LatexSyntax so all ComputeEngine instances can lazily create one ──
 ComputeEngineImpl._latexSyntaxFactory = () => new LatexSyntax();
 
+import {
+  _setDefaultEngineFactory,
+  compile,
+} from './compute-engine/free-functions.js';
+
 // ── Wire up the default engine factory with LatexSyntax ─────────────
-import { _setDefaultEngineFactory } from './compute-engine/free-functions.js';
+
 _setDefaultEngineFactory(
   () => new ComputeEngineImpl({ latexSyntax: new LatexSyntax() })
 );
@@ -110,7 +115,6 @@ export type {
 // `import type` from this package) need the standalone wrapper, not just
 // `ce.compile()`, because the escalation retry, deprecation warnings and
 // alias normalization live in the wrapper.
-import { compile } from './compute-engine/free-functions.js';
 export {
   parse,
   expr,

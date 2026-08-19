@@ -301,10 +301,7 @@ export function documentBindings(
     if (marked.startsWith('___')) {
       const name = marked.slice(3);
       const nameSpan: [number, number] = [span[0] + 3, span[1]];
-      if (
-        text.slice(span[0], span[0] + 3) === '...' &&
-        spelled(name, nameSpan)
-      )
+      if (text.slice(span[0], span[0] + 3) === '...' && spelled(name, nameSpan))
         ensureBinding(
           scope,
           name,
@@ -539,11 +536,7 @@ export function documentBindings(
 
   /** Record the callee of a call node as a read, when the node's span begins
    * by spelling the operator's name — plainly or verbatim. */
-  function useHead(
-    node: MathJsonExpression,
-    name: string,
-    scope: Scope
-  ): void {
+  function useHead(node: MathJsonExpression, name: string, scope: Scope): void {
     if (name === '' || name === '_') return;
     const span = spanOf(node);
     if (span === undefined) return;
@@ -645,8 +638,7 @@ export function documentBindings(
     );
   }
   groups.sort(
-    (a, b) =>
-      (a.occurrences[0]?.start ?? 0) - (b.occurrences[0]?.start ?? 0)
+    (a, b) => (a.occurrences[0]?.start ?? 0) - (b.occurrences[0]?.start ?? 0)
   );
   return groups;
 }

@@ -69,8 +69,7 @@ export function settleTypeText(
   } catch (e) {
     const err = e as { rawMessage?: string };
     return {
-      error:
-        err.rawMessage ?? (e instanceof Error ? e.message : String(e)),
+      error: err.rawMessage ?? (e instanceof Error ? e.message : String(e)),
     };
   }
 }

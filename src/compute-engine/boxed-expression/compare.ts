@@ -532,7 +532,8 @@ function eqImpl(
     // Ordered comparison when both are indexed; membership otherwise.
     if (a.isCollection && b.isCollection) {
       // A set never equals a sequence, whatever the elements
-      if (a.type.matches('set<any>') !== b.type.matches('set<any>')) return false;
+      if (a.type.matches('set<any>') !== b.type.matches('set<any>'))
+        return false;
       // A STRING never equals a collection of another kind, whatever the
       // characters. A string is an indexed collection of its grapheme
       // clusters, so without this the element walk below compared `"ab"` with

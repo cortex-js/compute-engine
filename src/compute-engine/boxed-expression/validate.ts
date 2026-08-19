@@ -538,7 +538,6 @@ export function checkNumericArgs(
  * Converts the arguments to canonical
  */
 
-
 /**
  * PHASE 2 of `docs/INFERENCE_ROADMAP.md` (2026-08-18): distribute a
  * collection parameter's ELEMENT type onto the symbol elements of a
@@ -949,7 +948,6 @@ function arrowSlotAdmission(
   }
   return ce.typeError(displayParam ?? param, op.type, op);
 }
-
 
 export function checkTypes(
   ce: ComputeEngine,

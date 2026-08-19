@@ -1186,7 +1186,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         throw new Error(
           `Operator Definition "${this.name}": a collection handler is defined, but the signature "${this.signature}" is not a collection type`
         );
-      if (isSubtype(resultType, INDEXED_COLLECTION_SHAPE_TYPE) && !this.collection.at) {
+      if (
+        isSubtype(resultType, INDEXED_COLLECTION_SHAPE_TYPE) &&
+        !this.collection.at
+      ) {
         throw new Error(
           `Operator Definition "${this.name}" returns an indexed collection, but the 'at' handler is missing`
         );
