@@ -446,6 +446,68 @@ set precision(p: number | "auto" | "machine"): void
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~checkpoint()~~
+
+```ts
+checkpoint(label?): EngineCheckpoint
+```
+
+Take a checkpoint of the engine's state at a quiescent point — between
+statements, at any scope depth — so a later [restore](#restore) can rewind
+to it. Legal on a freshly constructed engine, which is how a client gets
+a `cp[0]` covering an edit of the first cell, and inside a host-pushed
+scope, which is how a notebook takes per-cell checkpoints within a pass.
+A checkpoint taken inside a scope dies when that scope pops. Throws a
+`CheckpointError` when the engine is mid-evaluation or mid-pre-pass;
+[restore](#restore) additionally requires the same scope stack the
+checkpoint was taken on.
+
+####### label?
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.~~restore()~~
+
+```ts
+restore(cp): void
+```
+
+Rewind to `cp`, invalidating every checkpoint taken after it; `cp` itself
+stays live and can be restored again. Expressions built BEFORE `cp` stay
+valid — their definitions are rewritten in place. Expressions built
+during the rewound window are not: cache cell outputs as serialized
+artifacts, never as live boxed nodes.
+
+####### cp
+
+[`EngineCheckpoint`](#enginecheckpoint)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.~~discard()~~
+
+```ts
+discard(cp): void
+```
+
+Release `cp`'s restore capability. Restoring past a discarded INTERIOR
+checkpoint stays possible through any earlier live one; discarding the
+OLDEST makes the state before the next-younger one unreachable.
+
+####### cp
+
+[`EngineCheckpoint`](#enginecheckpoint)
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~declareProtocol()~~
 
 ```ts
@@ -8730,6 +8792,40 @@ implementation detail, not part of the public surface).
 
 </MemberCard>
 
+### EngineCheckpoint
+
+A handle on a saved engine state, from [IComputeEngine.checkpoint](#checkpoint).
+Deliberately opaque: `id` is for logging and `live` is the only state a
+client can act on. Declared here rather than in `checkpoint.ts` because it
+is part of the engine's public type surface — and because importing it from
+the implementation would make this file depend on it, closing a cycle
+through the sequence registry.
+
+<MemberCard>
+
+##### EngineCheckpoint.id
+
+```ts
+readonly id: number;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### EngineCheckpoint.live
+
+```ts
+readonly live: boolean;
+```
+
+False once invalidated — by a restore to an EARLIER checkpoint, by
+`discard()`, or by popping a scope this checkpoint was taken inside
+(the pop disposes the scope's bindings, so there is no world left to
+restore). A dead checkpoint can never be restored again.
+
+</MemberCard>
+
 ### IComputeEngine
 
 #### Extended by
@@ -9120,6 +9216,68 @@ A list of the function calls to the current evaluation context
 get precision(): number
 set precision(p: number | "auto" | "machine"): void
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.checkpoint()
+
+```ts
+checkpoint(label?): EngineCheckpoint
+```
+
+Take a checkpoint of the engine's state at a quiescent point — between
+statements, at any scope depth — so a later [restore](#restore) can rewind
+to it. Legal on a freshly constructed engine, which is how a client gets
+a `cp[0]` covering an edit of the first cell, and inside a host-pushed
+scope, which is how a notebook takes per-cell checkpoints within a pass.
+A checkpoint taken inside a scope dies when that scope pops. Throws a
+`CheckpointError` when the engine is mid-evaluation or mid-pre-pass;
+[restore](#restore) additionally requires the same scope stack the
+checkpoint was taken on.
+
+####### label?
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.restore()
+
+```ts
+restore(cp): void
+```
+
+Rewind to `cp`, invalidating every checkpoint taken after it; `cp` itself
+stays live and can be restored again. Expressions built BEFORE `cp` stay
+valid — their definitions are rewritten in place. Expressions built
+during the rewound window are not: cache cell outputs as serialized
+artifacts, never as live boxed nodes.
+
+####### cp
+
+[`EngineCheckpoint`](#enginecheckpoint)
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.discard()
+
+```ts
+discard(cp): void
+```
+
+Release `cp`'s restore capability. Restoring past a discarded INTERIOR
+checkpoint stays possible through any earlier live one; discarding the
+OLDEST makes the state before the next-younger one unreachable.
+
+####### cp
+
+[`EngineCheckpoint`](#enginecheckpoint)
 
 </MemberCard>
 

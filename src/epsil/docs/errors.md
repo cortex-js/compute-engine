@@ -220,3 +220,17 @@ Only the last statement's value is a program's result, so an error produced by a
 This problem was detected before anything ran, when the program was canonicalized — the same analysis `epsil check` performs.
 
 A static diagnostic never suppresses evaluation: the program still runs exactly as written (errors are values — see `epsil doc runtime-error`), so the same mistake may be reported a second time by the run itself. The label distinguishes the tiers: "Type error"/"Static error" for the pre-run analysis, "Runtime error" for the run.
+
+## `unknown-protocol`
+
+A conformance test named a protocol that does not exist: `Conforms(x, "Hashble")` where no `protocol Hashble` was ever declared. A name that does not exist is a mistake to surface, so it is an error — never a quiet `False`, which would make a typo indistinguishable from a genuine non-conformance.
+
+This error comes from the `Conforms` operator, whose protocol names ride as strings and so are only checkable when it runs. The `is` spelling of the same test (`x is Hashable`) resolves the name when the program is parsed, so a typo there is reported earlier, as a parse-time diagnostic, and never reaches this error.
+
+## `polytype-comparison-unsupported`
+
+A type comparison was given a QUANTIFIED type — a generic signature with a `where` clause, such as the type of a built-in like `Sort` — and comparing those is not supported: `Subtype`, the dynamic test (`x is T`, `MatchesType`), and `Conforms` all reject a quantified operand rather than guess.
+
+Deciding whether one generic signature is a subtype of another engages existential matching — "is there an instantiation that works" — which is a different, harder question than the ground-type compatibility these operators answer. A quantified type is still a legal VALUE (`Type(Sort)` observes one, prints it, and round-trips through `TypeFrom`/`StringFrom`); only comparing it is rejected.
+
+To ask about a SPECIFIC use of a generic, compare the instantiated ground type instead — the type of an actual call's argument or result.
